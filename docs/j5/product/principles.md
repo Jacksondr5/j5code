@@ -141,15 +141,15 @@ Each principle states its rule, what it stands on (beliefs and lenses above), it
 
 **Cases:** a follow-up references an earlier Exchange with one field rather than a linking system ([agent-to-agent communication](./a2a/index.md)); Memos are a shaped store, not a generic agent database ([Memos](./features/memos.md)); Playbooks ship linear before any DAG ([Playbooks](./features/playbooks.md)); Crews archive as units instead of growing seat-replacement machinery ([Crews](./features/crews.md)); agent cron and database primitives wait for a named trigger ([Memos](./features/memos.md)).
 
-## After a restart, expect manual repair
+## Repair beats edge-case machinery
 
-**Rule:** the platform does not recover work that a server stop caught mid-operation; it fails visibly, and the person repairs it.
+**Rule:** for rare edge cases, the platform fails visibly and the person, or an agent with the right tool, repairs the result; it does not grow guards, retries, reconciliation sweeps, or recovery for them.
 
-**Stands on:** beliefs 3 and 5 — boot sweeps, reconciliation, and resume-mid-operation logic cover rare moments, and their bugs are harder to see than the half-finished state they repair. A person who restarts a server knows in-progress work may need attention.
+**Stands on:** beliefs 3 and 5 — machinery for rare moments costs more than it returns, and its own bugs are harder to see than the half-finished state it was meant to prevent. A visible failure is cheap to notice and cheap to fix.
 
-**Jurisdiction:** recovery machinery — anything that runs at startup, or retries, to finish or undo an operation a restart interrupted. Covering a short, visible window during normal operation is not recovery, and is judged by "never guess" instead.
+**Jurisdiction:** any guard, retry, startup sweep, or extra state whose only job is to cover a case that is rare or nearly impossible. A server restart that interrupts work mid-operation is the common example: the person who restarted knows in-progress work may need attention. Covering a short, visible window during normal operation is not edge-case machinery, and is judged by "never guess" instead.
 
-**Cases:** a Crew launch interrupted by a restart leaves its seats for the person and the Captain to sort out, and a proposal the server was processing when it stopped reopens instead of being finished at boot ([Crews](./features/crews.md)); a Crew restore cut short by a restart is repaired by hand ([Crews](./features/crews.md)); a seat that exists on a roster but has no thread for a few seconds during a normal launch still renders as unknown ([Fleet page](./features/fleet-page.md)).
+**Cases:** a Crew launch interrupted by a restart leaves its seats for the person and the Captain to sort out, and a proposal the server was processing when it stopped reopens instead of being finished at boot ([Crews](./features/crews.md)); a Crew restore cut short is repaired by archiving and unarchiving its Captain again, not by a startup sweep ([Crews](./features/crews.md)); a seat that exists on a roster but has no thread for a few seconds during a normal launch still renders as unknown ([Fleet page](./features/fleet-page.md)).
 
 ## Upstream owns its product
 

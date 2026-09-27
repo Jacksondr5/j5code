@@ -2,15 +2,13 @@
 
 J5 Code is a fork of [T3 Code](https://github.com/pingdotgg/t3code), a minimal GUI for coding agents. T3 Code's Node WebSocket server wraps provider CLIs and agents (Codex, Claude Code, Cursor, Grok, OpenCode, Antigravity) and serves web, desktop, and mobile clients. J5 builds on that base to run a **fleet**: many agents working at once, grouped into Squadrons, coordinating with each other, and reaching the person only when they need to.
 
-This file is J5's. It started as upstream's `AGENTS.md`, and much of what follows is upstream's guidance kept because it's good. Where this file and upstream's differ, this file is right for this repository.
-
 ## Know which zone you are in
 
 Every change lands in one of three zones. Work out which one before you start, because the rules differ.
 
 1. **J5's domain.** The features listed in the [J5 overview](docs/j5/product/overview.md) and the code under `apps/*/src/j5` and `packages/*/src/j5`. Build freely here, under the [J5 principles](docs/j5/product/principles.md) and the feature definitions in `docs/j5/product/`.
-2. **Where J5 touches upstream's code.** J5 code has to be reached from, or placed inside, a file upstream owns. This is a code question, and [`FORK.md`](FORK.md) answers it: put J5 code in J5-owned files, keep the edit to the upstream file as small as possible, and record it in FORK.md in the same PR.
-3. **Upstream's product.** Anything not in J5's domain is upstream's: provider adapters, orchestration, the sidebar, settings, the composer, persistence, and everything else T3 Code does. Changing, overriding, or extending **what upstream's product does** is not your call. Stop and ask the human, and say clearly:
+2. **Where J5 touches upstream's code.** J5 code has to be reached from, or placed inside, a file upstream owns. Put J5 code in J5-owned files, keep the edit to the upstream file as small as possible, and record it in [`FORK.md`](FORK.md) in the same PR.
+3. **Upstream's product.** Anything not in J5's domain is upstream's: provider adapters, orchestration, the sidebar, settings, the composer, persistence, and everything else T3 Code does. Changing, overriding, or extending **what upstream's product does** is not your call. Bring the human:
    - what upstream does today;
    - what the change would do instead;
    - the trade-offs, including the fork cost (every upstream edit is carried through every upstream sync);
@@ -18,43 +16,35 @@ Every change lands in one of three zones. Work out which one before you start, b
 
    The human may approve it. When they do, the decision is recorded in the [register of divergences](docs/j5/product/upstream.md), not just in FORK.md.
 
-Zone 3 is the one agents get wrong. A PR that makes a provider adapter do something new for a J5 feature, suppresses an upstream control, or reinterprets upstream's lifecycle is in zone 3, even when the code is small and FORK.md has a place to record it. A FORK.md case records a decision a human already made. It is not a way around needing one.
-
 ## What we can never compromise on
 
 These are upstream's values, and J5 keeps them.
 
 - **Open at the core.** J5 exists because T3 Code is open: it shares its code, its roadmap, and how it thinks, and welcomes forks. J5 works the same way. We share our code and our reasoning in the open, and offer fixes that belong upstream back to it.
-- **Performance without compromise.** Audit for regressions: too much data over websockets, CSS animations spiking the GPU, lists that are hard to render. No continuously repainting animations; they peg the GPU on high-refresh displays.
+- **Performance without compromise.** Audit for regressions: too much data over websockets, CSS animations spiking the GPU, lists that are hard to render.
 - **Remote ready.** The websocket layer (`npx t3`) lets clients connect over the local network, Tailscale, or a tunnel. New features must work in every connection mode.
 - **Multi-surface.** Web (hosted, and served locally by the server), desktop (Electron, which bundles the server and can host remote clients), and mobile (React Native, connecting to any server).
 
-## Taste
+## A note from Theo, T3 Code's creator
 
-Build simple systems and software that feels obvious. Don't keep complexity just because it exists, and don't add machinery because it looks architecturally impressive. Understand the real constraint, then fight for the smallest model that makes the correct behavior unsurprising. Channel both "measure twice, cut once" and "yagni", and honor the developer's intent in a minimal, realistic way.
+I like ambitious ideas, simple systems, and software that feels obvious. Do not preserve complexity just because it already exists. Do not introduce machinery because it looks architecturally impressive. Understand the real constraint, then fight for the smallest model that makes the correct behavior unsurprising.
 
-In practice, in this repository:
+Channel both "measure twice, cut once" and "yagni". Fight scope creep. Try to honor the dev's intent in both a minimal and realistic fashion.
+
+## How J5 applies it
 
 - **Error out instead of building machinery for rare cases.** Guards, retries, reconciliation sweeps, and extra states for edge cases that are rare or nearly impossible cost more than they return. Fail visibly and let the person fix it.
-- **After a server restart, expect manual repair.** Don't build recovery for work caught mid-operation.
 - **Prefer giving the person and agents a tool to repair a problem** over making the platform recover on its own.
 - **Follow upstream** for shared concepts: its names, its semantics (settle, archive, runtime modes), and its UI conventions. Measure an upstream surface before inventing a style.
-- Complexity belongs at the adapter boundary. Orchestration stays pure, UI stays dumb.
-- `apps/web/src/components/ui` exports own their look. Pick a `variant` or `size`; don't restyle one with `className`. If none fits and the look is a generic concept, add a variant to the component. A look that belongs to one feature stays in that feature's own component. Layout classes (width, flex, margin, position) belong on the parent. `shadcn/no-restyle` fails lint on violations.
-- Inferred types over annotations. `any` is the enemy.
-- Comments describe how a thing is used and move when the code moves. Use them mostly to describe functions, not to annotate every line.
-- Our users drive agents all day and notice a dropped frame, a lying spinner, and a stale label.
-- Security matters, but don't over-index on it, especially for dev mode and maintainer-only features.
-- If a rule here fights the task in front of you, say so loudly and get a human sign-off before breaking it.
 
-Treat these instructions as good defaults, not hard rules. The developer's preferences override anything here.
+The rest of this document is meant to help you navigate the codebase and make changes effectively. Think of these instructions less as "hard rules", more as "good defaults". The developer's preferences should be able to override anything here.
 
-Most contributions come from J5 Code itself, often controlled remotely, so you are probably running inside the instance the developer is using. Be careful with their data, their dev servers, and anything else that could damage that instance.
+Of note: Most J5 Code contributions will come from J5 Code itself, often controlled remotely. This means you should be careful about accessing data, killing dev servers, and other things that may damage the J5 Code instance that the contributor is using.
 
 ## A small glossary
 
 - **you** means the agent reading this file and changing J5 Code.
-- **we, us, and maintainers** mean Jackson and the people building J5 Code. These are who you are talking to now.
+- **we, us, and maintainers** mean the people building J5 Code. These are who you are talking to now.
 - **upstream** means T3 Code (`pingdotgg/t3code`) and the people who build it.
 - **user** means the person using J5 Code to direct coding agents.
 - **agent** means the coding agent a user runs inside J5 Code. Depending on context, that may also include you.
@@ -81,7 +71,7 @@ The most common defect in this repo is a change that works on the path you teste
 
 - **Entry points.** A behavior reachable from the chat view is usually also reachable from Settings, the command palette, and a keybinding. Fixing one is not fixing the feature.
 - **Clients.** Web, desktop (wraps web, adds Electron shell/IPC), and mobile (React Native, separate navigation). Shared logic lives in `packages/client-runtime`.
-- **Providers.** Codex, Claude, Cursor, Grok, OpenCode, and Antigravity each have an adapter. Provider-shaped features need a decision per adapter. For J5 features, the default is to support Codex and Claude and say "not supported here" for the rest. Making another adapter work is upstream's job (zone 3).
+- **Providers.** Codex, Claude, Cursor, Grok, OpenCode, and Antigravity each have an adapter. Provider-shaped features need a decision per adapter, even if the decision is "not supported here". For J5 features, Codex, Claude, and Cursor come first and the rest are a lower priority. Changing an adapter so a J5 feature works there is upstream's territory (zone 3).
 - **Contracts.** Anything crossing the wire is typed in `packages/contracts`. Change the schema and the server, web, mobile, and desktop all follow.
 - **Reverse states.** If you added a way in, add the way out and the way to see it. Snooze needs unsnooze. Close needs reopen. A one-way door is a bug.
 - **Connection modes.** Local, remote/relay, and tunnel behave differently. Multi-device and multi-environment cases are real.
@@ -126,7 +116,7 @@ An empty database is a bad test. Seed your worktree's `.j5code` with a copy of r
 - **Do not run repo-wide checks.** No `vp check`, no `vp run -r test`, no `vp run -r typecheck` unless asked. CI owns the full suite.
 - Backend behavior changes ship with focused tests for that behavior.
 - The server is event-sourced and its async flows emit typed receipts. Wait on receipts and worker drains, never on sleeps or polling. A test that needs a timeout to pass is wrong.
-- User-visible frontend changes get one integrated pass in a real client: `test-t3-app` for web, `test-t3-mobile` for mobile. The primary agent does this once after integrating. Ask permission before computer use or spinning up browsers, except to capture the screenshots a PR you were asked to open requires (see Pull requests).
+- Upon request, user-visible frontend changes should get one integrated pass in a real client: `test-t3-app` for web, `test-t3-mobile` for mobile. The primary agent does this once after integrating. Subagents do not launch their own dev servers. Ask permission before doing computer use or spinning up browsers.
 
 For authorized mobile verification, a missing or outdated native client is a build step, not a blocker. Run `node scripts/mobile-native-client.ts ensure <ios|android> <device-id>` on the simulator host before starting Metro. It checks the local Expo fingerprint and builds/installs when needed. See `test-t3-mobile` for the full workflow.
 
@@ -135,7 +125,8 @@ For authorized mobile verification, a missing or outdated native client is a bui
 - Never make a PR unless the developer explicitly asks you to do so.
 - PRs target `j5/main` on `Jacksondr5/j5code`. `gh` resolves bare issue and PR numbers to upstream, so always pass `-R Jacksondr5/j5code`.
 - Fill in the [PR template](.github/pull_request_template.md) and tick its checklist honestly. An unticked box with a reason is fine; a ticked box that isn't true is not.
-- **Every UI change needs before and after screenshots**, and motion or timing needs a short video. How to capture, host, and embed them is in [PR evidence](docs/j5/process/pull-requests.md#screenshots). Agents have gotten this wrong in specific ways; read it before your first UI PR.
+- UI changes need before/after images. Motion or timing needs a short video.
+- Upload PR evidence to GitHub. Never commit PR-only screenshots or assets such as `.github/pr-assets/`.
 - Conventional commit titles, plain language: `fix(web): new threads no longer spike CPU`.
 - Body: the problem in a sentence or two, then how you fixed it. End with the model and harness that did the work.
 - One concern per PR. If the description says "also", split it.
@@ -175,3 +166,17 @@ Upstream's glossary with file links: `docs/internals/glossary.md`
 - `packages/client-runtime` - client code shared by web and mobile.
 - `.repos/` - vendored read-only references. Prefer their patterns over invented ones. Never edit or import from them. Sync with `vpr sync:repos` when bumping the matching dependency.
 - `FORK.md` - every place J5 edits an upstream-owned file, and the runbook for advancing to a new upstream version.
+
+## Taste
+
+- Complexity belongs at the adapter boundary. Orchestration stays pure, UI stays dumb.
+- `apps/web/src/components/ui` exports own their look. Pick a `variant` or `size`; do not restyle one with `className`. If none fits and the look is a generic concept, add a variant to the component; a look that belongs to one feature stays in that feature's own component, not in `components/ui`. Layout classes (width, flex, margin, position) belong on the parent. `shadcn/no-restyle` fails lint on violations.
+- Inferred types over annotations. `any` is the enemy.
+- Comments describe how a thing is used, and move when the code moves. To be used mostly to describe functions, not to annotate every line of behavior.
+- Our users drive agents all day and notice a dropped frame, a lying spinner, and a stale label. No continuously repainting animations; they peg the GPU on high-refresh displays.
+- If a rule here fights the task in front of you, say so loudly and get a human sign-off before breaking it.
+
+## Additional tips
+
+- Don't verify with browsers or computer use unless the user explicitly agrees or requests it.
+- Security is important, but should not be over-indexed on, especially for dev mode/maintainer-only features.

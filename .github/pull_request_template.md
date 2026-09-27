@@ -8,10 +8,9 @@
 
 ## UI changes
 
-<!-- Required for any UI change: before and after screenshots, same data and viewport.
-     Motion or timing needs a short video. Host them on the j5/evidence branch and embed
-     raw.githubusercontent.com links. See docs/j5/process/pull-requests.md#screenshots.
-     Delete this section only if nothing visible changed. -->
+<!-- If this PR changes UI, include clear before/after screenshots.
+     If the change involves motion or interaction, include a short video.
+     Delete this section if not applicable. -->
 
 ## Upstream impact
 
@@ -24,7 +23,7 @@
 
 - [ ] One concern: the description has no "also"
 - [ ] Tests cover the changed behavior (backend changes ship with focused tests)
-- [ ] UI changes: before/after screenshots embedded above, and a video for motion or timing
+- [ ] UI changes: before/after screenshots above, and a video for motion or interaction
 - [ ] Upstream-owned files: each one is recorded in `FORK.md` (case text and file-table row) in this PR
 - [ ] Upstream product: any change to what upstream's product does has a human decision linked above and a register entry in `docs/j5/product/upstream.md`
 - [ ] Surfaces: entry points, clients, providers, contracts, reverse states, connection modes (see `AGENTS.md`)

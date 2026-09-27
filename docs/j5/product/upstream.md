@@ -19,7 +19,7 @@ The test for zone 3 is behavioral, not about code size. A one-line edit that mak
 
 ## Deciding a product overlap
 
-An agent that finds its work heading into zone 3 stops and brings the person:
+An agent whose work heads into zone 3 brings the person:
 
 - **what upstream does today**, and why, if upstream says;
 - **what J5 would do instead**;
@@ -34,53 +34,369 @@ When the person approves a divergence, it is recorded below and its code gets it
 
 Every place J5 knowingly makes upstream's product behave differently, with the person's decision behind it. FORK.md is the code-level ledger; this is the product-level one. An entry leaves the register when upstream makes it unnecessary or J5 stops needing it, and its History line says so.
 
-Each entry says what upstream does, what J5 does instead, who decided and when, what it costs, and where the code is recorded. Rulings with letter codes (SC2, QS1, AR2) are from the design-session records in `worklog/`; numbered 2026-09-24 decisions are from the V2 upstream advance.
+Each entry has an ID ("divergence D7"), which never changes and is never reused. Every entry answers the same questions, in the same order:
+
+- **Upstream:** what T3 Code does.
+- **J5:** what J5 does instead.
+- **Why:** the problem J5 had with upstream's behavior, and why this answer.
+- **Consequences:** what it costs, what to check at each upstream advance, and known gaps.
+- **Decided:** who decided, when, and where it's recorded.
+
+Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorded in `docs/j5/worklog/` or the [dogfood v0 plan](../plans/dogfood-v0.md). Numbered decisions dated 2026-09-24 were made during that day's upstream advance.
 
 ### Agents and orchestration
 
-- **Help is a Subagent, a Peer Agent, or a Crew.** Upstream steers agents to `delegate_task`, `t3_thread_launch`, and `create_threads`. J5 steers them to a provider-native Subagent, `spawn_agent`, or `propose_crew`, and routes a persona mention to `delegate_task`. Decided: Jackson, 2026-08-24 (ST5); the Crew shape 2026-09-17; the persona route 2026-09-14. Cost: upstream's launch and workspace guidance doesn't reach agents. FORK.md case 8.
-- **Agents see a fail-closed subset of upstream's MCP tools.** Upstream exposes send, interrupt, wait, launch, and `create_threads`. J5 omits them, re-declares the tools it keeps with J5 wording, and keeps any new upstream tool hidden until someone admits it. Decided: Jackson, 2026-08-29 (substrate session); `delegate_task` re-admitted 2026-09-14. Cost: upstream's toolkit stays compiled but unused, and new upstream tool descriptions need checking each advance. FORK.md cases 2, 4, 38.
-- **J5's tools are pre-approved on Codex and Claude only.** Upstream pre-approves only its read-only tools on Claude, and Codex refuses non-read-only MCP tools under approval policy `never`. J5 pre-approves its own verbs on those two harnesses. Other harnesses may show their own MCP prompt once before the roster card, and a read-only persona there can't propose a Crew. Decided: Jackson, 2026-09-14 (artifacts) and 2026-09-26 (Codex and Claude only). Cost: a general fix belongs upstream (#276). FORK.md, saved-agent mentions section.
-- **Agent deliveries queue; Astra peers can steer.** Upstream's thread-send steers or runs automatically. J5 queues agent-to-agent deliveries behind the active turn, except peer updates into a running Codex Astra turn, which arrive as steers. Decided: Jackson, 2026-09-03 (QS1), Astra exception 2026-09-04. Cost: changes when a message is admitted, not whether the model attends to it. FORK.md case 26.
-- **Held A2A deliveries stay pending.** Upstream holds queued runs after a restart. J5 keeps its deliveries pending with a backoff recheck, never reporting them delivered. Decided: Jackson, 2026-09-24 (#6). Cost: senders aren't told their message is held (#272). FORK.md case 26.
-- **A committed Stop wins.** Upstream can turn a steer accepted before Stop into a follow-up after it. J5 blocks that. Decided: Jackson, 2026-09-06. Cost: a temporary patch until upstream hardens interrupts. FORK.md, temporary patches.
-- **Native resume follows the not-found rule.** Upstream V2 starts a fresh conversation, primed with a digest, on any resume failure. J5 starts fresh only when the provider says the conversation is gone, and says so visibly; any other failure is a visible error. Decided: Jackson, 2026-09-24 (#8). Cost: upstream appears to intend the fresh start; offered back via #276. FORK.md, temporary patches.
+#### D1. Help is a Subagent, a Peer Agent, or a Crew
 
-### Squadrons, threads, and lifecycle
+**Upstream:** the instructions every agent receives point it to `delegate_task` for cross-provider help, and to `t3_thread_launch` or `create_threads` to start new threads.
 
-- **The Squadron replaces the project as the unit of choice.** Upstream's user picks a project or folder everywhere. In J5, every new-thread door picks a Squadron, Add Project opens Create Squadron, a draft without a Squadron can't send, and upstream's project filters and "Open project" shortcuts are removed. Decided: Jackson, 2026-08-24 (SC2, SC3), 2026-08-29 (SB3), 2026-08-31 (E7), 2026-09-12, 2026-09-25. Cost: one folder per Squadron for now, and many small seams in upstream UI. FORK.md cases 9, 13, 15b, 16–20, 34.
-- **Drafts name the Squadron.** Upstream's draft headline and placeholder name the project; J5's name the Squadron. Decided: Jackson, 2026-08-24 (SC3).
-- **First run creates a Squadron.** Upstream's first run lands in a draft. J5 requires a named Squadron first, with no default. Decided: Jackson, 2026-08-24 (SC2). FORK.md case 9.
-- **Unbound scheduled tasks can't create threads.** Upstream's unbound schedules create fresh threads; J5 refuses with a visible task failure, because a thread needs a Squadron. Decided: 2026-08-31 (DV5). Cost: scheduled creation waits on #273. FORK.md case 12.
-- **Multi-model send carries the Squadron.** Upstream fans a draft out to several models. J5 carries the Squadron to each thread and refuses it from a persona draft, since a persona pins one model. Decided: Jackson, 2026-09-24 (#7b).
-- **The sidebar is organized around Squadrons.** Upstream lists every thread, led by its folder. J5 hides agent-spawned Peer Agents unless pinned, leads cards with the Squadron, and adds seat and Captain chips and a spawned-children expander. Decided: Jackson, 2026-08-29 (SB5) and 2026-09-01 (#47). FORK.md case 23.
-- **Archive warns with measured facts.** Upstream shows a generic confirmation. J5's web archive dialog lists what archiving will change, shows "Couldn't check" when a read fails, and refuses to archive a Crew seat alone. Decided: Jackson, 2026-08-29 (AR2, AR3), and the Crew unit rule (2026-08-21). Cost: mobile archive doors don't warn yet (#40). FORK.md cases 21, 22, 37.
-- **A Crew follows its Captain.** Upstream's archive, unarchive, and settle each touch one thread. J5 moves a Captain's Crews with it through archive, delete, unarchive, settle, and unsettle. Settle keeps upstream's meaning and skips seats upstream wouldn't auto-settle. Decided: Jackson, 2026-09-26 (#312). FORK.md case 21.
-- **Archive Undo is withheld when Crews may retire.** Upstream offers Undo after every archive. J5 hides it when the archive may retire a Captain's Crews, because unarchiving didn't bring them back. Decided: Jackson, 2026-09-24 (#7). This entry leaves the register once unarchive restores a Captain's Crews. FORK.md case 21.
+**J5:** agents are told about three shapes of help: a Subagent their own provider runs, a Peer Agent started with `spawn_agent`, and a Crew proposed with `propose_crew`. `delegate_task` is kept for two narrow cases: running a saved persona as a subagent, and cross-provider work the person doesn't need to talk to directly.
+
+**Why:** upstream's delegated child is "a Peer Agent in a Subagent costume": the person can't talk to it, yet it outlives the agent that started it. That is the awkward middle J5's vocabulary exists to remove. The Crew shape was added after an agent asked to "spawn a crew" made subagents instead, because nothing it had been told mentioned a Crew. Personas later gave `delegate_task` a purpose again: a persona needs a way to run as a subagent.
+
+**Consequences:** upstream's launch and workspace guidance never reaches J5 agents. As a result, a Peer Agent shares its caller's branch and worktree (#274). The instructions file is also edited for playbooks and personas, so every upstream advance merges upstream's prompt changes by hand, and a test pins J5's wording.
+
+**Decided:** Jackson with Product, 2026-08-24 (ST1–ST5); the Crew shape on 2026-09-17; the persona route in Jackson's review of 2026-09-13, which partly reverses ST5. Recorded in FORK.md case 8 and the saved-agent mentions section.
+
+#### D2. Agents see a fail-closed subset of upstream's MCP tools
+
+**Upstream:** agents can send into another thread, interrupt it, wait on it, launch threads, and create threads in bulk.
+
+**J5:** those tools are hidden from agents. J5 keeps the upstream tools it has admitted, rewrites the descriptions that would mislead J5 agents, and hides any new upstream tool until someone reviews it.
+
+**Why:** a raw send between agents is communication the Squadron ledger can't see. A reply that never comes then stalls silently, and nothing shows why. Raw thread creation would skip the spawn verb and the Squadron home it records. Hiding new tools by default stops the agent surface from growing by accident with every upstream advance: each new power gets reviewed against J5's definitions first. The tools are hidden, not deleted, to keep the fork's edits small.
+
+**Consequences:** upstream's toolkit stays compiled but unused. Each advance checks the admitted tool list, which a test pins, and re-reads upstream's descriptions. Open gaps: `t3_worktree_handoff` still points agents at a tool they can't use. `t3_pending_request_respond` and `t3_thread_configure` act on other threads without J5's authority checks.
+
+**Decided:** Jackson, 2026-08-29 (substrate session). Omitting bulk creation was a Director disposition (an agent role), 2026-08-31. Withdrawing `t3_thread_wait` was Bryant's decision, 2026-09-14. `delegate_task` returned after Jackson's review of 2026-09-13. Recorded in FORK.md cases 2, 4 and 38.
+
+#### D3. J5's tools are pre-approved on Codex and Claude only
+
+**Upstream:** on Claude, upstream pre-approves all of T3's own MCP tools, except in a read-only sandbox, where only its read-only tools are allowed. Codex refuses every non-read-only MCP tool under approval policy `never`, which is the policy full-access mode sends.
+
+**J5:** on Codex, J5 approves its own coordination tools one at a time. On Claude, it adds them to the read-only allowance. On every other harness, the provider may show its own MCP prompt once before the Crew roster card, and a read-only persona there can't propose a Crew.
+
+**Why:** without the Codex approvals, `send_message`, `spawn_agent` and `propose_crew` all fail in full-access mode. The approvals are per tool, never server-wide, so worktree handoff, preview and scheduling keep Codex's own verdict. Making other harnesses skip their native prompt is adapter work, and adapters are upstream's. ACP has no trustworthy server identity in its permission request, and Cursor's SDK doesn't expose MCP approval at all. A read-only persona being blocked from proposing is acceptable, because proposing a Crew is enough of a write.
+
+**Consequences:** every advance must keep the Codex and Claude additions and their exact-list tests. A general fix belongs upstream (#276). Crews AC5 must say the roster card is the only human step on Codex and Claude, not on every harness.
+
+**Decided:** Bryant built the approvals, 2026-09-10 to 2026-09-15. Jackson's ruling of 2026-09-26 (#233) kept them and limited them to Codex and Claude. Recorded in FORK.md's saved-agent mentions section.
+
+#### D4. Agent deliveries queue behind a running turn; Astra peers can steer
+
+**Upstream:** a message sent to a busy thread steers the running turn when it can.
+
+**J5:** a message from one agent to another waits until the receiver's turn ends. The exception is peer updates to a running Codex Astra turn, which arrive as steers.
+
+**Why:** steering a turn is the controller's act, and in J5 the only controller of a turn is the human. On Claude, a steer aborts the turn and makes the agent report that "the user doesn't want to take this action", a refusal the human never gave. On Cursor, it destroys the turn. Astra is built to take messages during work. Without the exception, a 36-minute Astra run worked from stale guidance because its peers' updates waited for the end.
+
+**Consequences:** this changes when a message is admitted, not whether the model reads it. Queueing also removed an accidental way of freeing a stuck start, so a queued run's age became something the Fleet page shows. Each advance checks the outbox and follow-up behavior this depends on.
+
+**Decided:** Jackson with Product, 2026-09-03 (QS1); the Astra exception by Jackson, 2026-09-04. Recorded in FORK.md case 26.
+
+#### D5. A committed Stop wins over a racing steer
+
+**Upstream:** a steer the provider accepted before the person pressed Stop can come back as a follow-up turn after it. Upstream lists this as unfinished (`TODO(interrupt-hardening)`).
+
+**J5:** once a Stop is committed, a steer accepted before it doesn't start a new turn.
+
+**Why:** J5 agents message Astra peers as steers (D4). Without this, a peer's message right after the person pressed Stop can wake the agent they just stopped.
+
+**Consequences:** it's a temporary patch, to be removed once upstream proves equivalent behavior. A known gap remains: a steer that races Stop by milliseconds still starts a new turn (#293).
+
+**Decided:** it arrived with the 2026-09-17 upstream integration without a ruling. Jackson kept it on 2026-09-24 (#5), when he dropped an earlier restart-continuation guard. Recorded in FORK.md's temporary patches.
+
+#### D6. Native resume starts fresh only when the conversation is gone
+
+**Upstream:** when resuming a provider conversation fails for any reason, V2 starts a new one, primed with a summary.
+
+**J5:** a new conversation starts only when the provider reports the old one is gone, and the thread says so visibly. Any other resume failure is a visible error.
+
+**Why:** a provider's native history can't be rebuilt from the app's transcript. A silent fresh start hands the agent a stranger's memory without anyone noticing. That happened once, after a Codex schema change, and the transfer recorded no error.
+
+**Consequences:** each adapter has to report "conversation gone" for this to work: Codex and OpenCode do, Claude resumes lazily, and ACP and Pi never report it. Upstream appears to intend the fresh start, so the change offered back upstream (#276) has to argue for it. If upstream declines, the fallback position is a visible fresh start.
+
+**Decided:** Jackson, 2026-09-24 (#8), narrowing an earlier refuse-everything rule from 2026-09-04. Recorded in FORK.md's temporary patches.
+
+### Squadrons and the sidebar
+
+#### D7. The Squadron replaces the project as the unit of choice
+
+**Upstream:** the user picks a folder, which becomes a project, everywhere: new threads, Add Project, and sidebar filters.
+
+**J5:** every new-thread door asks for a Squadron, Add Project opens Create Squadron, and a draft without a Squadron can't send. The sidebar scopes by Squadron instead of filtering by project, and the clone notice's "Open project" action is gone.
+
+**Why:** upstream's model is one folder, one project. Work isn't shaped like that: many efforts touch one repository, and one effort touches several. The Squadron is what the person chooses between. Reusing the project flow with a new name would rebuild the one-to-one shape the Squadron exists to replace.
+
+**Consequences:** a Squadron has one folder for now. Many small seams in upstream UI must be re-checked at every advance, and each case lists its own check. Open gaps: the scheduling selector (#38), the legacy sidebar door (#39), mobile (#40, #128), and project nouns still left in some upstream copy.
+
+**Decided:** Jackson, 2026-08-24 (SC2, SC3), 2026-08-29 (SB3), 2026-08-31 (E7), 2026-09-12 (cross-environment drafts), 2026-09-24 (sidebar scope), and 2026-09-25 (clone notice). Recorded in FORK.md cases 9, 10, 13, 15b, 16–20 and 34.
+
+#### D8. Drafts name the Squadron
+
+**Upstream:** the new-thread headline and the composer placeholder name the project.
+
+**J5:** the headline reads "What should we build in ⟨Squadron⟩?", and the placeholder asks the person to choose a Squadron.
+
+**Why:** the headline sits where upstream put the folder name, and the choice above the draft is J5's Squadron picker.
+
+**Consequences:** J5 replaces upstream's whole headline component. A smaller J5-owned headline at the same mount would be cheaper to carry.
+
+**Decided:** Jackson, 2026-08-24 (SC3), for the headline. The placeholder followed from E7 (Jackson, 2026-08-31) during the 2026-09-24 advance. Recorded in FORK.md case 9.
+
+#### D9. First run creates a Squadron
+
+**Upstream:** a first run lands in a draft.
+
+**J5:** the person creates a named Squadron, with its folder, before the first thread. There is no automatic default Squadron.
+
+**Why:** an unnamed default becomes a junk drawer that defeats the concept. Agents need a home, and the gate says so.
+
+**Consequences:** because a folder is required, a Squadron with no repository isn't possible. That rules out a real future use: non-coding work such as a support rotation. A failed read offers only a retry, never a guessed home.
+
+**Decided:** Jackson, 2026-08-24 (SC2); the folder requirement from DV2 (2026-08-25) and the Squadron definition (2026-09-05). Recorded in FORK.md case 9.
+
+#### D10. Unbound scheduled tasks can't start threads
+
+**Upstream:** a scheduled task that isn't bound to a thread starts a fresh thread each time it fires.
+
+**J5:** it records a visible failure instead.
+
+**Why:** a new thread needs a Squadron, and a scheduled run carries nothing that says which one. Picking one would invent a Squadron home.
+
+**Consequences:** a schedule can still be created, and each fire fails visibly. Agents are told that unbound schedules are unavailable. Designing how a schedule binds to a Squadron is open (#273, #38).
+
+**Decided:** DV5, dated 2026-08-31 in the dogfood v0 overrides. The record doesn't name who ruled. Recorded in FORK.md case 12.
+
+#### D11. Multi-model send carries the Squadron
+
+**Upstream:** a draft can fan out to several models, each in its own thread.
+
+**J5:** each thread gets the draft's Squadron, and fanning out is refused from a persona draft.
+
+**Why:** J5 refuses a thread start that has no Squadron. A persona pins one model, so fanning it out would run every thread on that same model.
+
+**Consequences:** each advance checks that no fan-out path launches without a Squadron.
+
+**Decided:** 2026-09-24 (#7b), among the decisions of that day's advance. Recorded in FORK.md case 19.
+
+#### D12. Sidebar cards lead with the Squadron and show Crew structure
+
+**Upstream:** a thread card leads with its folder.
+
+**J5:** a card leads with its Squadron. A Captain carries an anchor mark, and its row expands to show the agents it spawned.
+
+**Why:** two Squadrons over one folder rendered as identical cards, and once a Squadron spans several folders, a folder name stops identifying the work. Once agents spawn agents, a flat list stops telling the truth about what is running, and the expander keeps that work one click away.
+
+**Consequences:** each advance checks that a thread with no Squadron still renders honestly, and that search and slim rows are unchanged. The sidebar only re-reads the rows a Crew involves, which keeps it fast.
+
+**Decided:** Jackson, 2026-09-01 (#47), and 2026-08-21 (R18) for Crew groups under their Captain. The anchor mark is from Jackson's review of 2026-09-17. Recorded in FORK.md case 23.
+
+### Archive and lifecycle
+
+#### D13. Archive warns with measured facts
+
+**Upstream:** archiving asks for confirmation only if the person turned that setting on, and the confirmation is generic.
+
+**J5:** when archiving would strand something, such as open asks, running work or Crews, the web dialog lists it, whatever that setting says. A failed read says "Couldn't check". A Crew seat can't be archived on its own from any door.
+
+**Why:** archiving is where obligations get stranded, and cleanup that happens silently is how a fleet loses track of itself. The platform's job is to put the facts in front of whoever decides. Crews archive as a unit: a member's failure is usually recoverable by messaging it again, and a member that can't be recovered has probably contaminated its crewmates.
+
+**Consequences:** mobile's archive doors don't warn yet (#40). The lone-seat refusal is on the server, so it covers every client, but it lets the archive through if the Crew store can't be read.
+
+**Decided:** Jackson, 2026-08-29 (AR2, AR3); the Crew unit rule, Jackson with Product, 2026-08-21 (R14); the server-side seat refusal from Jackson's review of 2026-09-17. Recorded in FORK.md cases 21, 22 and 37.
+
+#### D14. A Crew follows its Captain
+
+**Upstream:** archive, unarchive, settle and unsettle each touch one thread.
+
+**J5:** archiving or deleting a Captain retires its live Crews. Unarchiving it brings back the Crews that retired with it. Settling or unsettling it does the same to its seats, skipping any seat upstream's own auto-settle would leave alone because it's waiting on the person or still working.
+
+**Why:** a Crew without its Captain has no one to report to, and the interface would need a place to show it. Before archive cascaded, sidebar archives of Captains stranded sixteen seats. Settle keeps upstream's meaning: a finished run is not a settled seat, but a settled Captain carries its seats with it.
+
+**Consequences:** a Crew restore that stops partway is repaired by hand, by archiving and unarchiving the Captain again. Unarchiving doesn't bring back interrupted runs or dropped Exchanges. Snooze doesn't cascade.
+
+**Decided:** archive and delete follow the Crew unit rule (R14) and were built on 2026-09-15. Jackson ratified the rest on 2026-09-26 (#312). Recorded in FORK.md case 21.
+
+#### D15. Archive Undo is withheld when Crews may retire
+
+**Upstream:** every archive offers Undo.
+
+**J5:** Undo is hidden when the archive may retire a Captain's Crews, including when it can't tell.
+
+**Why:** Undo would bring the Captain back without its Crews, so a one-keystroke Undo would quietly break the Crew.
+
+**Consequences:** this entry retires once unarchive restores a Captain's Crews (D14). At that point upstream's Undo comes back unchanged.
+
+**Decided:** Jackson, 2026-09-24 (#7d). Recorded in FORK.md case 21.
 
 ### Timeline and composer
 
-- **Agent-to-agent traffic renders as cards.** Upstream renders these rows generically. J5 renders deliveries and outbound sends as cards, keeps agent messages out of the minimap, and labels queued rows with their sender. Decided: Jackson, 2026-08-29 and 2026-08-31 (TA, TA6, TA7). FORK.md cases 7, 14, 24.
-- **`@` offers saved personas first.** Upstream's `@` offers threads and files. J5 lists saved personas first, and a persona thread replaces the model controls with the persona's pinned route. Decided: Jackson, 2026-09-14.
+#### D16. Agent-to-agent messages render as cards
+
+**Upstream:** a message delivered from another agent appears as if the person had typed it, with only a raw envelope tag to tell it apart.
+
+**J5:** incoming and outgoing agent messages render as cards, as prominent as a user message, naming the sender and linking to its thread. They stay out of the conversation minimap, and queued rows name their sender.
+
+**Why:** the person is a first-class reader of every agent-to-agent message and should see it in the normal flow without hunting. A first, quieter design made the messages hard to spot, so they were made prominent. The minimap tracks the person's own prompts, and agent messages there were noise.
+
+**Consequences:** the seams in the timeline are small, but each advance checks the row and minimap hooks. Sent-message cards recognize only Codex and Claude tool records; other providers keep generic rendering. Mobile shows deliveries as text (#40).
+
+**Decided:** Jackson, 2026-08-29 (TA1–TA5) and 2026-08-31 (TA6–TA8, including cards for sent messages). The minimap rule is from Jackson's PR #168 (2026-09-16). Sender labels on queued rows came from Jackson's dogfood findings (#42, #62), fixed on 2026-09-04. Recorded in FORK.md cases 7, 14 and 24.
 
 ### Storage, install, and identity
 
-- **J5 never shares on-disk state with T3 Code.** Upstream uses `~/.t3`, `T3CODE_HOME`, and a `.t3` worktree directory. J5 uses `~/.j5code`, `J5CODE_HOME`, and `.j5code`, with no fallback to T3's, its own desktop profiles, and a migration bridge that refuses T3's databases. Decided: Jackson, 2026-08-30 (DQ5), 2026-09-02 (#68), 2026-09-24 (#1, #4). Cost: some Linux integrations still collide with an installed T3 Code (#138), and cosmetic `T3CODE_*` names remain. FORK.md cases 15, 25, 31.
-- **J5 installs from its own release archives.** Upstream installs from npm. J5 installs the `j5` command from `Jacksondr5/j5code` release archives, on darwin-arm64 and linux-x64 only, and runs as `j5code.service`. Decided: Jackson, 2026-09-24 (#3, #3a). Cost: other platforms have no release. FORK.md cases 40, 41.
+#### D17. J5 never shares on-disk state with T3 Code
+
+**Upstream:** T3 Code keeps its data in `~/.t3`, reads `T3CODE_HOME`, and uses a `.t3` folder in worktrees.
+
+**J5:** it uses `~/.j5code`, `J5CODE_HOME`, and `.j5code`, with no fallback to T3's. J5 has its own desktop profiles, and refuses to open T3's databases.
+
+**Why:** J5 and T3 Code must be able to run side by side on one machine without either reading or damaging the other's data.
+
+**Consequences:** some Linux integrations still collide with an installed T3 Code (#138), and cosmetic `T3CODE_*` names remain. One exception is kept deliberately: SSH transport still writes `~/.t3/ssh-launch` on remote hosts, because moving it would orphan a running npm-era remote server. Each advance checks for new upstream reads of `T3CODE_HOME` or `.t3` paths, and re-checks the database migration bridge.
+
+**Decided:** Jackson, 2026-08-30 (DQ5, recorded on #33), 2026-09-02 (#68), and 2026-09-24 (#1, #4). Recorded in FORK.md cases 15, 25 and 31.
+
+#### D18. J5 installs from its own release archives
+
+**Upstream:** V2 ships self-contained release archives from upstream's own repository.
+
+**J5:** J5 builds the same kind of archive from `Jacksondr5/j5code`, installs a `j5` command, and runs as `j5code.service` (`codes.jackson.j5code.service` on macOS). It hands over from the npm-era service only when that service is J5's.
+
+**Why:** J5 followed upstream from npm to archives rather than keep npm alone. It publishes from its own repository so it never installs or updates T3 Code, and it renames the service so both can be installed at once.
+
+**Consequences:** only darwin-arm64 and linux-x64 get releases, where upstream ships five platforms, and no reason for that is recorded. Other hosts build from source and get no `j5 update` or service. A real service handover, signing and notarization weren't verified when this shipped. Migration steps are in `docs/user/migrating-to-release-archives.md`.
+
+**Decided:** Jackson, 2026-09-24 (#3, #3a). Recorded in FORK.md cases 40 and 41.
 
 ### Awaiting a decision
 
-These already diverge on `j5/main`, but no human ruling is on record: each landed as an implementer's call inside a merged PR. Until the person rules, they are recorded here rather than treated as settled.
+These already diverge on `j5/main`, but no human ruling is on record. Each landed as an implementer's call inside a merged PR. The person rules on each one; an approved entry moves up into its section, and a rejected one becomes a fix.
 
-- **Squadron authorization on thread organize.** J5's organize tool requires Squadron authorization to archive another agent; upstream's needs only project access.
-- **Merge-back limited to one Squadron.** J5 refuses merge-back unless both threads share a Squadron home or both are native.
-- **A committed Stop also beats usage-limit auto-resume.** An extension of the committed-Stop patch, ported during the V2 advance without its own decision.
-- **Codex CLI version floor.** J5 refuses Codex CLIs older than 0.151.0 with a named error; upstream has no minimum. FORK.md case 28.
-- **Welcome wizard Squadron stage.** J5 adds a stage that gives imported conversations a Squadron home. FORK.md case 39.
-- **Pair discovery isolation.** In a linked worktree with no running server, J5's `pair` refuses to fall back to the default home.
-- **Behavioral branding identifiers.** App ID `codes.jackson.j5code`, URL scheme `j5code`, CLI `j5`, and J5 update URLs. Consistent with the on-disk separation ruling, but not ruled on directly.
-- **`plan.md` export.** Plans are stored as app artifacts and exported to `plan.md` when finalized. FORK.md case 33.
-- **Astra model aliases.** `astra`, `gpt-6`, and `6` resolve to `gpt-6-astra`. FORK.md case 32.
+#### D19. Agent-spawned threads are hidden from the sidebar
+
+**Upstream:** every thread except provider subagents appears in the sidebar.
+
+**J5:** every agent-spawned Peer Agent is hidden unless pinned. Crew seats and Peer Agents are both hidden.
+
+**Why:** once agents spawn agents, a flat list stops telling the truth about what is running (Bryant, #205).
+
+**Consequences:** this contradicts the Fleet page definition (AC3: nothing is hidden from the sidebar because of how it was created). Jackson set aside the original rule (SB5) on 2026-09-04, because he has the Director spawn most of the agents he talks to. The Crews definition hides only Crew members. A hidden peer can only be shown again by pinning it from its own thread.
+
+**Status:** reintroduced in PR #149 (Bryant), approved in review on 2026-09-21 without a ruling on this point.
+
+#### D20. `@` offers saved personas first, and persona threads pin their model
+
+**Upstream:** `@` offers threads and files, and every thread has model controls.
+
+**J5:** `@` lists saved personas, then threads, then files. A persona thread replaces the model controls with the persona's pinned route.
+
+**Why:** Jackson typed `@scout` expecting a persona and got files (2026-09-13); Bryant made the picker list saved personas (2026-09-14). A persona's route is fixed and enforced by the server, so a thread's model picker would only produce failed sends. No reason is recorded for listing personas ahead of threads.
+
+**Status:** the persona picker is Bryant's request (2026-09-08) and fix (2026-09-14). The persona model lock comes from Bryant's persona stack, whose scope was approved on 2026-09-08. The ordering against threads arrived in the 2026-09-24 advance (PR #262). Recorded in FORK.md's saved-agent mentions section and its PR #75–#86 table.
+
+#### D21. Squadron authorization on thread organize
+
+**Upstream:** an agent with project access can archive or unarchive any thread in the project.
+
+**J5:** archiving or unarchiving another agent that has a Squadron home also requires the caller to belong to that Squadron.
+
+**Why:** a reviewer found that any agent could archive work anywhere on the host, and read it as an oversight. The same reviewer suggested ruling it an accepted boundary instead, "written down". It was fixed rather than ruled.
+
+**Consequences:** this contradicts the Squadron definition, which says a Squadron carries no permission semantics.
+
+**Status:** introduced in the 2026-09-17 upstream integration (PR #178). Recorded in FORK.md's root-spawn section and case 38.
+
+#### D22. Merge-back only within one Squadron
+
+**Upstream:** merge-back is allowed between related threads.
+
+**J5:** it is refused unless both threads share a Squadron home, or both have none.
+
+**Why:** no reason is recorded. The error text suggests it protects each thread's home registration.
+
+**Consequences:** it covers every client, not only the agent tool. It hasn't been exercised live. The same tension with the Squadron definition as D21 applies.
+
+**Status:** introduced in PR #178 (2026-09-17). Recorded in FORK.md case 38.
+
+#### D23. A committed Stop also blocks usage-limit auto-resume
+
+**Upstream:** a run that fails on a usage limit resumes automatically when the limit resets.
+
+**J5:** a run the person stopped isn't resumed.
+
+**Why:** no reason is recorded. It follows from D5: nothing automatic revives a run the person stopped.
+
+**Status:** added during the 2026-09-24 advance (PR #262), without its own decision. Recorded in FORK.md's temporary patches.
+
+#### D24. Codex CLI version floor
+
+**Upstream:** no minimum Codex version.
+
+**J5:** Codex CLIs older than 0.151.0 are refused with a named error.
+
+**Why:** older CLIs omit fields the schema requires. Their responses fail to decode and degrade into silent fallbacks, such as a silent fresh start (D6).
+
+**Consequences:** the floor itself is unproven, because the test fixtures don't prove compatibility with a real 0.151.0. It is revalidated at every schema regeneration.
+
+**Status:** introduced in PR #92 (2026-09-04). The 2026-09-06 review left the floor open. Recorded in FORK.md case 28.
+
+#### D25. Welcome wizard assigns imported conversations a Squadron
+
+**Upstream:** the welcome wizard imports conversations into projects.
+
+**J5:** a fourth stage gives each imported folder's conversations a Squadron home.
+
+**Why:** no reason is recorded beyond the design. Imported threads otherwise have no home.
+
+**Consequences:** native desktop, mobile, and remote onboarding weren't exercised. An archive can race the assignment (#179).
+
+**Status:** introduced in PR #178 (2026-09-17). Jackson shaped the copy, but no ruling on the stage exists. Recorded in FORK.md case 39.
+
+#### D26. Pair discovery stays inside a worktree
+
+**Upstream:** `pair` falls back to the default home when no server is found.
+
+**J5:** in a linked worktree with no running server, `pair` refuses to fall back.
+
+**Why:** during a dogfood test, an agent ran `pair` in its worktree before its server was up, and the fallback minted a real pairing token against the live install (#70). The isolation work (D17) exists so an isolated environment can never reach shared state by accident. A short bounded retry covers a server that hasn't finished starting (#67).
+
+**Status:** introduced in PR #94 (2026-09-04). FORK.md's 2026-09-06 review records it for a carry-or-drop decision, which hasn't been made.
+
+#### D27. Behavioral branding identifiers
+
+**Upstream:** T3 Code's app ID, URL scheme, CLI command, and update URLs.
+
+**J5:** app ID `codes.jackson.j5code`, URL scheme `j5code`, CLI `j5`, and J5's own update URLs.
+
+**Why:** so J5 and T3 Code can be installed side by side without taking each other's deep links, updates or system registrations, and so nothing points at upstream's infrastructure. This follows from D17.
+
+**Status:** the app ID, URL scheme and update feeds were settled in the fork setup plan (2026-08-15), which doesn't record who decided. The `j5` command name has no recorded reason or ruling. A candidate to fold into D17. Recorded in `BRANDING.md` and FORK.md case 41.
+
+#### D28. Plans are stored as artifacts and exported to `plan.md`
+
+**Upstream:** a plan lives inline in the thread, with a download button.
+
+**J5:** finalized plans are stored as project artifacts, and the latest is exported to `artifacts/plan.md`.
+
+**Why:** plans were easy to lose in chat, couldn't be shared between agents, and a folder in the repository needed Git exclusions and could collide with tracked files.
+
+**Consequences:** each finalized plan overwrites the project's one `plan.md`. The path form is undecided, and mobile was deferred.
+
+**Status:** introduced in PR #109 (Tyler, 2026-09-05). Recorded in FORK.md case 33.
+
+#### D29. Astra model aliases
+
+**Upstream:** no short aliases for `gpt-6-astra`.
+
+**J5:** `astra`, `gpt-6` and `6` resolve to `gpt-6-astra`.
+
+**Why:** to mirror the Fable aliases that existed at the time, which upstream has since removed.
+
+**Consequences:** D4's Astra exception checks the resolved name, so removing the aliases needs checking against it.
+
+**Status:** introduced in PR #101 (2026-09-04), merged on the Director's authority. Recorded in FORK.md case 32.
 
 ## History
 
