@@ -12,7 +12,6 @@ import {
   buildCursorProviderSnapshot,
   buildInitialCursorProviderSnapshot,
   checkCursorProviderStatus,
-  getCursorFallbackModels,
 } from "./CursorProvider.ts";
 import { CursorSdkCatalogError, makeCursorSdkCatalogTestLayer } from "./CursorSdkCatalog.ts";
 
@@ -93,16 +92,6 @@ const sdkParameterizedModel = {
   ],
 } satisfies SDKModel;
 
-describe("getCursorFallbackModels", () => {
-  it("does not publish any built-in cursor models before SDK discovery", () => {
-    expect(
-      getCursorFallbackModels({
-        customModels: ["internal/cursor-model"],
-      }).map((model) => model.slug),
-    ).toEqual(["internal/cursor-model"]);
-  });
-});
-
 describe("buildInitialCursorProviderSnapshot", () => {
   it.effect("uses SDK-specific pending status copy", () =>
     Effect.gen(function* () {
@@ -133,6 +122,7 @@ describe("buildCursorProviderSnapshot", () => {
       status: "warning",
       message: "Cursor SDK model discovery returned no built-in models.",
       models: [],
+      supportsConversationRollback: false,
     });
   });
 });
@@ -255,7 +245,7 @@ describe("checkCursorProviderStatus", () => {
         installed: true,
         status: "error",
         auth: { status: "unauthenticated" },
-        message: "Cursor API key is required. Add CURSOR_API_KEY in provider settings.",
+        message: "Sign in with Cursor or add CURSOR_API_KEY in provider settings.",
       });
     }),
   );

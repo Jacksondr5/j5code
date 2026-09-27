@@ -39,7 +39,7 @@ const secondPerson: HumanParticipant = {
 };
 
 const makeTestLayer = (deliveries: Ref.Ref<ReadonlyArray<AgentDeliveryInput>>) => {
-  const database = NodeSqliteClient.layerMemory();
+  const database = NodeSqliteClient.layer({ filename: ":memory:" });
   const ledger = ledgerLayer.pipe(Layer.provide(database));
   const send = sendLayer.pipe(Layer.provide(ledger), Layer.provide(database));
   const inbox = humanInboxLayer.pipe(Layer.provide(ledger), Layer.provide(database));

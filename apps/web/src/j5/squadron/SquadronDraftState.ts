@@ -2,6 +2,10 @@ import type { ScopedSquadronRef } from "@t3tools/contracts/j5";
 import { useSyncExternalStore } from "react";
 
 import {
+  dropDraftStatesForDeletedSquadron,
+  resolveScopeAfterSquadronDelete,
+} from "./SquadronActions.logic";
+import {
   freezeSquadronForFirstSend,
   selectSquadronForDraft,
   type SquadronDraftState,
@@ -49,19 +53,21 @@ export const setAmbientSquadronScope = (scope: ScopedSquadronRef | null) => {
   notify();
 };
 
+/** A deleted Squadron leaves the ambient scope and every pre-send carrier that still named it. */
+export const forgetDeletedSquadron = (deleted: ScopedSquadronRef) => {
+  const ambientSquadronRef = resolveScopeAfterSquadronDelete(snapshot.ambientSquadronRef, deleted);
+  const draftStates = dropDraftStatesForDeletedSquadron(snapshot.draftStates, deleted);
+  if (ambientSquadronRef === snapshot.ambientSquadronRef && draftStates === snapshot.draftStates)
+    return;
+  snapshot = { ...snapshot, ambientSquadronRef, draftStates };
+  notify();
+};
+
 export const selectDraftSquadron = (draftKey: string, squadronId: string) => {
   const current = draftStateFor(draftKey);
   const next = selectSquadronForDraft(current, squadronId);
   if (next === current) return;
   snapshot = { ...snapshot, draftStates: { ...snapshot.draftStates, [draftKey]: next } };
-  notify();
-};
-
-/** Keep the explicit carrier when upstream retargets the same reserved draft to another environment. */
-export const copyDraftSquadronScope = (sourceKey: string, destinationKey: string) => {
-  const current = snapshot.draftStates[sourceKey];
-  if (current === undefined || current.squadronId === null || sourceKey === destinationKey) return;
-  snapshot = { ...snapshot, draftStates: { ...snapshot.draftStates, [destinationKey]: current } };
   notify();
 };
 

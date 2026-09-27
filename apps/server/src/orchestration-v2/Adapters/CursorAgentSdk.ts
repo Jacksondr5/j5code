@@ -1,11 +1,10 @@
-import {
-  Agent,
-  type AgentMessage,
-  type AgentOptions,
-  type InteractionUpdate,
-  type RunResult,
-  type SDKUserMessage,
-  type SendOptions,
+import type {
+  AgentMessage,
+  AgentOptions,
+  InteractionUpdate,
+  RunResult,
+  SDKUserMessage,
+  SendOptions,
 } from "@cursor/sdk";
 import {
   type OrchestrationV2ProviderSession,
@@ -17,13 +16,14 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 
+import { Agent } from "../../provider/cursorSdk.ts";
 import type { EventNdjsonLogger } from "../../provider/Layers/EventNdjsonLogger.ts";
 import { ProviderEventLoggers } from "../../provider/Layers/ProviderEventLoggers.ts";
 
 export const CURSOR_AGENT_SDK_PROTOCOL = "cursor-agent-sdk.local" as const;
 export const CURSOR_PROVIDER = ProviderDriverKind.make("cursor");
 
-export class CursorAgentSdkRunnerError extends Schema.TaggedErrorClass<CursorAgentSdkRunnerError>()(
+export class CursorAgentSdkRunnerError extends Schema.TaggedError<CursorAgentSdkRunnerError>()(
   "CursorAgentSdkRunnerError",
   {
     method: Schema.String,
@@ -271,7 +271,7 @@ export function loggedCursorSendOptions(
   };
 }
 
-export function makeCursorAgentSdkProtocolLogger(input: {
+function makeCursorAgentSdkProtocolLogger(input: {
   readonly nativeEventLogger: EventNdjsonLogger | undefined;
   readonly threadId: ThreadId;
   readonly providerSessionId: OrchestrationV2ProviderSession["id"];

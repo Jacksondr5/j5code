@@ -130,6 +130,9 @@ export type ScheduledTaskListResult = typeof ScheduledTaskListResult.Type;
 
 export const ScheduledTaskUpsertInput = Schema.Struct({
   id: Schema.optional(ScheduledTaskId),
+  requireExisting: Schema.optional(Schema.Boolean).annotate({
+    description: "Reject the save if the task no longer exists, for edits from a client form.",
+  }),
   commandId: Schema.optional(CommandId),
   title: TrimmedNonEmptyString,
   prompt: TrimmedNonEmptyString,
@@ -178,7 +181,7 @@ export const ScheduledTaskRunNowResult = Schema.Struct({
 });
 export type ScheduledTaskRunNowResult = typeof ScheduledTaskRunNowResult.Type;
 
-export class ScheduledTaskError extends Schema.TaggedErrorClass<ScheduledTaskError>()(
+export class ScheduledTaskError extends Schema.TaggedError<ScheduledTaskError>()(
   "ScheduledTaskError",
   {
     message: Schema.String,

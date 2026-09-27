@@ -13,7 +13,7 @@ import * as Schema from "effect/Schema";
 
 import * as ThreadManagement from "./ThreadManagementService.ts";
 
-export class ThreadLifecycleError extends Schema.TaggedErrorClass<ThreadLifecycleError>()(
+export class ThreadLifecycleError extends Schema.TaggedError<ThreadLifecycleError>()(
   "ThreadLifecycleError",
   {
     operation: Schema.Literals([
@@ -40,41 +40,41 @@ export class ThreadLifecycleService extends Context.Service<
     readonly archive: (input: {
       readonly commandId: CommandId;
       readonly threadId: ThreadId;
-    }) => Effect.Effect<OrchestrationV2ThreadProjection, ThreadLifecycleError>;
+    }) => Effect.Effect<Pick<OrchestrationV2ThreadProjection, "thread">, ThreadLifecycleError>;
     readonly unarchive: (input: {
       readonly commandId: CommandId;
       readonly threadId: ThreadId;
-    }) => Effect.Effect<OrchestrationV2ThreadProjection, ThreadLifecycleError>;
+    }) => Effect.Effect<Pick<OrchestrationV2ThreadProjection, "thread">, ThreadLifecycleError>;
     readonly delete: (input: {
       readonly commandId: CommandId;
       readonly threadId: ThreadId;
-    }) => Effect.Effect<OrchestrationV2ThreadProjection, ThreadLifecycleError>;
+    }) => Effect.Effect<Pick<OrchestrationV2ThreadProjection, "thread">, ThreadLifecycleError>;
     readonly updateMetadata: (input: {
       readonly commandId: CommandId;
       readonly threadId: ThreadId;
       readonly title?: string;
       readonly branch?: string | null;
       readonly worktreePath?: string | null;
-    }) => Effect.Effect<OrchestrationV2ThreadProjection, ThreadLifecycleError>;
+    }) => Effect.Effect<Pick<OrchestrationV2ThreadProjection, "thread">, ThreadLifecycleError>;
     readonly setRuntimeMode: (input: {
       readonly commandId: CommandId;
       readonly threadId: ThreadId;
       readonly runtimeMode: RuntimeMode;
-    }) => Effect.Effect<OrchestrationV2ThreadProjection, ThreadLifecycleError>;
+    }) => Effect.Effect<Pick<OrchestrationV2ThreadProjection, "thread">, ThreadLifecycleError>;
     readonly setInteractionMode: (input: {
       readonly commandId: CommandId;
       readonly threadId: ThreadId;
       readonly interactionMode: ProviderInteractionMode;
-    }) => Effect.Effect<OrchestrationV2ThreadProjection, ThreadLifecycleError>;
+    }) => Effect.Effect<Pick<OrchestrationV2ThreadProjection, "thread">, ThreadLifecycleError>;
     readonly setModelSelection: (input: {
       readonly commandId: CommandId;
       readonly threadId: ThreadId;
       readonly modelSelection: ModelSelection;
-    }) => Effect.Effect<OrchestrationV2ThreadProjection, ThreadLifecycleError>;
+    }) => Effect.Effect<Pick<OrchestrationV2ThreadProjection, "thread">, ThreadLifecycleError>;
   }
 >()("t3/orchestration-v2/ThreadLifecycleService") {}
 
-export const make = Effect.gen(function* () {
+const make = Effect.gen(function* () {
   const threads = yield* ThreadManagement.ThreadManagementService;
 
   const dispatch = <Operation extends ThreadLifecycleError["operation"]>(
@@ -83,7 +83,7 @@ export const make = Effect.gen(function* () {
     command: Parameters<ThreadManagement.ThreadManagementService["Service"]["dispatch"]>[0],
   ) =>
     threads.dispatch(command).pipe(
-      Effect.andThen(threads.getThreadProjection(threadId)),
+      Effect.andThen(threads.getThreadRecords(threadId, [])),
       Effect.mapError((cause) => new ThreadLifecycleError({ operation, threadId, cause })),
     );
 

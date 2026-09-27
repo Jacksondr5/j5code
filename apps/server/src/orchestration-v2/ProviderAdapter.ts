@@ -1,3 +1,4 @@
+import type { OrchestrationV2HistoricalMessage } from "@t3tools/contracts";
 import {
   ChatAttachment,
   CheckpointId,
@@ -60,6 +61,8 @@ export const ProviderAdapterV2TurnMessage = Schema.Struct({
   attachments: Schema.Array(ChatAttachment),
   createdBy: OrchestrationV2ConversationMessage.fields.createdBy,
   creationSource: OrchestrationV2ConversationMessage.fields.creationSource,
+  scheduledTaskId: OrchestrationV2ConversationMessage.fields.scheduledTaskId,
+  senderThreadId: OrchestrationV2ConversationMessage.fields.senderThreadId,
 });
 export type ProviderAdapterV2TurnMessage = typeof ProviderAdapterV2TurnMessage.Type;
 
@@ -152,7 +155,7 @@ export const ProviderAdapterV2Event = Schema.Union([
 ]);
 export type ProviderAdapterV2Event = typeof ProviderAdapterV2Event.Type;
 
-export class ProviderAdapterCapabilitiesError extends Schema.TaggedErrorClass<ProviderAdapterCapabilitiesError>()(
+export class ProviderAdapterCapabilitiesError extends Schema.TaggedError<ProviderAdapterCapabilitiesError>()(
   "ProviderAdapterCapabilitiesError",
   {
     driver: ProviderDriverKind,
@@ -164,7 +167,7 @@ export class ProviderAdapterCapabilitiesError extends Schema.TaggedErrorClass<Pr
   }
 }
 
-export class ProviderAdapterOpenSessionError extends Schema.TaggedErrorClass<ProviderAdapterOpenSessionError>()(
+export class ProviderAdapterOpenSessionError extends Schema.TaggedError<ProviderAdapterOpenSessionError>()(
   "ProviderAdapterOpenSessionError",
   {
     driver: ProviderDriverKind,
@@ -177,7 +180,7 @@ export class ProviderAdapterOpenSessionError extends Schema.TaggedErrorClass<Pro
   }
 }
 
-export class ProviderAdapterCloseSessionError extends Schema.TaggedErrorClass<ProviderAdapterCloseSessionError>()(
+export class ProviderAdapterCloseSessionError extends Schema.TaggedError<ProviderAdapterCloseSessionError>()(
   "ProviderAdapterCloseSessionError",
   {
     driver: ProviderDriverKind,
@@ -190,13 +193,15 @@ export class ProviderAdapterCloseSessionError extends Schema.TaggedErrorClass<Pr
   }
 }
 
-export class ProviderAdapterResumeThreadError extends Schema.TaggedErrorClass<ProviderAdapterResumeThreadError>()(
+export class ProviderAdapterResumeThreadError extends Schema.TaggedError<ProviderAdapterResumeThreadError>()(
   "ProviderAdapterResumeThreadError",
   {
     driver: ProviderDriverKind,
     providerSessionId: ProviderSessionId,
     providerThreadId: ProviderThreadId,
     cause: Schema.optional(Schema.Defect()),
+    /** The provider reported that the native conversation no longer exists. */
+    nativeThreadMissing: Schema.optional(Schema.Boolean),
   },
 ) {
   override get message(): string {
@@ -205,7 +210,7 @@ export class ProviderAdapterResumeThreadError extends Schema.TaggedErrorClass<Pr
 }
 
 /** Native provider history could not resume and must not be silently replaced. */
-export class ProviderResumeFailedError extends Schema.TaggedErrorClass<ProviderResumeFailedError>()(
+export class ProviderResumeFailedError extends Schema.TaggedError<ProviderResumeFailedError>()(
   "ProviderResumeFailedError",
   {
     driver: ProviderDriverKind,
@@ -218,7 +223,7 @@ export class ProviderResumeFailedError extends Schema.TaggedErrorClass<ProviderR
   }
 }
 
-export class ProviderAdapterEnsureThreadError extends Schema.TaggedErrorClass<ProviderAdapterEnsureThreadError>()(
+export class ProviderAdapterEnsureThreadError extends Schema.TaggedError<ProviderAdapterEnsureThreadError>()(
   "ProviderAdapterEnsureThreadError",
   {
     driver: ProviderDriverKind,
@@ -231,7 +236,7 @@ export class ProviderAdapterEnsureThreadError extends Schema.TaggedErrorClass<Pr
   }
 }
 
-export class ProviderAdapterReadThreadSnapshotError extends Schema.TaggedErrorClass<ProviderAdapterReadThreadSnapshotError>()(
+export class ProviderAdapterReadThreadSnapshotError extends Schema.TaggedError<ProviderAdapterReadThreadSnapshotError>()(
   "ProviderAdapterReadThreadSnapshotError",
   {
     driver: ProviderDriverKind,
@@ -244,7 +249,7 @@ export class ProviderAdapterReadThreadSnapshotError extends Schema.TaggedErrorCl
   }
 }
 
-export class ProviderAdapterRollbackThreadError extends Schema.TaggedErrorClass<ProviderAdapterRollbackThreadError>()(
+export class ProviderAdapterRollbackThreadError extends Schema.TaggedError<ProviderAdapterRollbackThreadError>()(
   "ProviderAdapterRollbackThreadError",
   {
     driver: ProviderDriverKind,
@@ -258,7 +263,7 @@ export class ProviderAdapterRollbackThreadError extends Schema.TaggedErrorClass<
   }
 }
 
-export class ProviderAdapterForkThreadError extends Schema.TaggedErrorClass<ProviderAdapterForkThreadError>()(
+export class ProviderAdapterForkThreadError extends Schema.TaggedError<ProviderAdapterForkThreadError>()(
   "ProviderAdapterForkThreadError",
   {
     driver: ProviderDriverKind,
@@ -271,7 +276,7 @@ export class ProviderAdapterForkThreadError extends Schema.TaggedErrorClass<Prov
   }
 }
 
-export class ProviderAdapterTurnStartError extends Schema.TaggedErrorClass<ProviderAdapterTurnStartError>()(
+export class ProviderAdapterTurnStartError extends Schema.TaggedError<ProviderAdapterTurnStartError>()(
   "ProviderAdapterTurnStartError",
   {
     driver: ProviderDriverKind,
@@ -286,7 +291,7 @@ export class ProviderAdapterTurnStartError extends Schema.TaggedErrorClass<Provi
   }
 }
 
-export class ProviderAdapterSteerRunUnsupportedError extends Schema.TaggedErrorClass<ProviderAdapterSteerRunUnsupportedError>()(
+export class ProviderAdapterSteerRunUnsupportedError extends Schema.TaggedError<ProviderAdapterSteerRunUnsupportedError>()(
   "ProviderAdapterSteerRunUnsupportedError",
   {
     driver: ProviderDriverKind,
@@ -298,7 +303,7 @@ export class ProviderAdapterSteerRunUnsupportedError extends Schema.TaggedErrorC
   }
 }
 
-export class ProviderAdapterSteerRunError extends Schema.TaggedErrorClass<ProviderAdapterSteerRunError>()(
+export class ProviderAdapterSteerRunError extends Schema.TaggedError<ProviderAdapterSteerRunError>()(
   "ProviderAdapterSteerRunError",
   {
     driver: ProviderDriverKind,
@@ -312,7 +317,7 @@ export class ProviderAdapterSteerRunError extends Schema.TaggedErrorClass<Provid
   }
 }
 
-export class ProviderAdapterInterruptError extends Schema.TaggedErrorClass<ProviderAdapterInterruptError>()(
+export class ProviderAdapterInterruptError extends Schema.TaggedError<ProviderAdapterInterruptError>()(
   "ProviderAdapterInterruptError",
   {
     driver: ProviderDriverKind,
@@ -326,7 +331,7 @@ export class ProviderAdapterInterruptError extends Schema.TaggedErrorClass<Provi
   }
 }
 
-export class ProviderAdapterRuntimeRequestResponseError extends Schema.TaggedErrorClass<ProviderAdapterRuntimeRequestResponseError>()(
+export class ProviderAdapterRuntimeRequestResponseError extends Schema.TaggedError<ProviderAdapterRuntimeRequestResponseError>()(
   "ProviderAdapterRuntimeRequestResponseError",
   {
     driver: ProviderDriverKind,
@@ -339,7 +344,7 @@ export class ProviderAdapterRuntimeRequestResponseError extends Schema.TaggedErr
   }
 }
 
-export class ProviderAdapterEventStreamError extends Schema.TaggedErrorClass<ProviderAdapterEventStreamError>()(
+export class ProviderAdapterEventStreamError extends Schema.TaggedError<ProviderAdapterEventStreamError>()(
   "ProviderAdapterEventStreamError",
   {
     driver: ProviderDriverKind,
@@ -352,11 +357,12 @@ export class ProviderAdapterEventStreamError extends Schema.TaggedErrorClass<Pro
   }
 }
 
-export class ProviderAdapterProtocolError extends Schema.TaggedErrorClass<ProviderAdapterProtocolError>()(
+export class ProviderAdapterProtocolError extends Schema.TaggedError<ProviderAdapterProtocolError>()(
   "ProviderAdapterProtocolError",
   {
     driver: ProviderDriverKind,
     detail: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
     payload: Schema.optional(Schema.Unknown),
   },
 ) {
@@ -391,6 +397,10 @@ export interface ProviderAdapterV2OpenSessionInput {
   readonly modelSelection: ModelSelection;
   readonly runtimePolicy: ProviderAdapterV2RuntimePolicy;
   readonly resumeFromSession?: OrchestrationV2ProviderSession;
+  /** Native thread to activate while an eager adapter opens its provider process. */
+  readonly initialNativeThreadId?: string;
+  /** Preserves provider item identity across eager activation of a persisted thread. */
+  readonly initialProviderItemIdentityVersion?: 2;
 }
 
 export interface ProviderAdapterV2EnsureThreadInput {
@@ -484,6 +494,11 @@ export interface ProviderAdapterV2EventSubscription {
   readonly close: Effect.Effect<void>;
 }
 
+export interface ProviderAdapterV2HistoricalContext {
+  readonly messages: ReadonlyArray<OrchestrationV2HistoricalMessage>;
+  readonly context: string;
+}
+
 export interface ProviderAdapterV2SessionRuntime {
   readonly instanceId: ProviderInstanceId;
   readonly driver: ProviderDriverKind;
@@ -511,6 +526,12 @@ export interface ProviderAdapterV2SessionRuntime {
   readonly hasPendingBackgroundWorkForThread?: (
     providerThread: OrchestrationV2ProviderThread,
   ) => Effect.Effect<boolean>;
+  /** Capacity for the requested model/options, independent of native thread usage. */
+  readonly getModelContextWindow?: (modelSelection: ModelSelection) => number | undefined;
+  /** Whether an option-only change preserves measured native usage and capacity.
+   * Compaction thresholds are still discarded. Unknown transitions invalidate usage.
+   */
+  readonly canReuseContextUsage?: (previous: ModelSelection, next: ModelSelection) => boolean;
   readonly ensureThread: (
     input: ProviderAdapterV2EnsureThreadInput,
   ) => Effect.Effect<OrchestrationV2ProviderThread, ProviderAdapterV2Error>;
@@ -520,6 +541,12 @@ export interface ProviderAdapterV2SessionRuntime {
     readonly modelSelection?: ModelSelection;
     readonly runtimePolicy?: ProviderAdapterV2RuntimePolicy;
   }) => Effect.Effect<OrchestrationV2ProviderThread, ProviderAdapterV2Error>;
+  /** False means the native protocol explicitly does not support history injection. */
+  readonly injectHistory?: (
+    input: ProviderAdapterV2HistoricalContext & {
+      readonly providerThread: OrchestrationV2ProviderThread;
+    },
+  ) => Effect.Effect<boolean, ProviderAdapterV2Error>;
   readonly startTurn: (
     input: ProviderAdapterV2TurnInput,
   ) => Effect.Effect<void, ProviderAdapterV2Error>;

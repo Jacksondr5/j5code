@@ -1,3 +1,4 @@
+import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import type { UsageProviderKind } from "@t3tools/contracts";
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 
@@ -54,7 +55,7 @@ function valueFor(
   return metric === "tokens" ? entry.totalTokens : entry.costUsd;
 }
 
-function buildPeriodColumns(
+export function buildPeriodColumns(
   periods: readonly string[],
   byPeriod: ReadonlyMap<string, DailyTotals | HourlyTotals>,
   metric: UsageChartMetric,
@@ -167,24 +168,6 @@ export function niceScale(peak: number, count: number): { max: number; ticks: re
   const ticks: number[] = [];
   for (let value = 0; value <= max + step * 1e-6; value += step) ticks.push(value);
   return { max, ticks };
-}
-
-/**
- * Turns the merged daily totals into one column per day.
- *
- * Values are absolute, not cumulative: each provider is drawn from the same
- * zero baseline so the chart never implies that one provider is always larger.
- *
- * The chart paths and the hover readout both consume this, so the number under
- * the cursor is by construction the number that was plotted rather than a
- * second derivation that can drift from it.
- */
-export function buildDayColumns(
-  days: readonly string[],
-  byDay: ReadonlyMap<string, DailyTotals>,
-  metric: UsageChartMetric,
-): readonly DayColumn[] {
-  return buildPeriodColumns(days, byDay, metric);
 }
 
 export function UsageProviderChart({
@@ -426,11 +409,15 @@ export function UsageProviderChart({
             >
               <div className="mb-1 text-muted-foreground">{formatTooltipPeriod(hoveredPeriod)}</div>
               {providers.map((provider) => {
-                const { label, mark: Mark } = PROVIDER_PRESENTATION[provider];
+                const { label, driverKind } = PROVIDER_PRESENTATION[provider];
                 return (
                   <div key={provider} className="flex items-center justify-between gap-3">
                     <span className="flex items-center gap-1.5 text-muted-foreground">
-                      <Mark className="size-3 shrink-0" aria-hidden />
+                      <ProviderInstanceIcon
+                        driverKind={driverKind}
+                        displayName={label}
+                        iconClassName="size-3"
+                      />
                       {label}
                     </span>
                     <span className="text-foreground tabular-nums">

@@ -32,17 +32,21 @@ import {
 } from "./contracts.ts";
 import { decideAppendCommEvent } from "./decider.ts";
 
-export class A2AStorageError extends Schema.TaggedErrorClass<A2AStorageError>()("A2AStorageError", {
+export class A2AStorageError extends Schema.TaggedError<A2AStorageError>()("A2AStorageError", {
   operation: Schema.String,
   cause: Schema.optional(Schema.Defect()),
 }) {}
 
-export class SquadronNotFoundError extends Schema.TaggedErrorClass<SquadronNotFoundError>()(
+export class SquadronNotFoundError extends Schema.TaggedError<SquadronNotFoundError>()(
   "SquadronNotFoundError",
   { squadronId: Schema.String },
-) {}
+) {
+  override get message(): string {
+    return `Squadron ${this.squadronId} does not exist.`;
+  }
+}
 
-export class CommCommandConflictError extends Schema.TaggedErrorClass<CommCommandConflictError>()(
+export class CommCommandConflictError extends Schema.TaggedError<CommCommandConflictError>()(
   "CommCommandConflictError",
   {
     commandId: Schema.String,
@@ -51,7 +55,7 @@ export class CommCommandConflictError extends Schema.TaggedErrorClass<CommComman
   },
 ) {}
 
-export class LedgerCursorError extends Schema.TaggedErrorClass<LedgerCursorError>()(
+export class LedgerCursorError extends Schema.TaggedError<LedgerCursorError>()(
   "LedgerCursorError",
   {
     squadronId: Schema.String,
@@ -60,7 +64,7 @@ export class LedgerCursorError extends Schema.TaggedErrorClass<LedgerCursorError
   },
 ) {}
 
-export class LedgerGapError extends Schema.TaggedErrorClass<LedgerGapError>()("LedgerGapError", {
+export class LedgerGapError extends Schema.TaggedError<LedgerGapError>()("LedgerGapError", {
   squadronId: Schema.String,
   expectedSeq: Schema.Number,
   actualSeq: Schema.NullOr(Schema.Number),
@@ -101,6 +105,12 @@ export interface A2ALedgerShape {
   ) => Effect.Effect<Squadron, A2ALedgerError>;
   readonly listSquadrons: () => Effect.Effect<ReadonlyArray<Squadron>, A2ALedgerError>;
   readonly readSquadron: (squadronId: SquadronId) => Effect.Effect<Squadron, A2ALedgerError>;
+  readonly renameSquadron: (input: {
+    readonly squadronId: SquadronId;
+    readonly name: string;
+  }) => Effect.Effect<Squadron, A2ALedgerError>;
+  /** Removes the Squadron row; foreign keys cascade or restrict per the migrations. */
+  readonly deleteSquadron: (squadronId: SquadronId) => Effect.Effect<void, A2ALedgerError>;
   readonly append: (command: AppendCommEventCommand) => Effect.Effect<AppendResult, A2ALedgerError>;
   readonly appendEvents: (
     command: AppendCommEventsCommand,
@@ -848,6 +858,25 @@ export const layer: Layer.Layer<
           if (row === undefined) return yield* new SquadronNotFoundError({ squadronId });
           return yield* squadronFromRow(row);
         }).pipe(Effect.mapError(preserveDomainError("read squadron"))),
+      renameSquadron: (input) =>
+        Effect.gen(function* () {
+          const row = (yield* sql<SquadronRow>`
+            UPDATE j5_a2a_squadron SET name = ${input.name}
+            WHERE id = ${input.squadronId}
+            RETURNING id, name, created_at
+          `)[0];
+          if (row === undefined) {
+            return yield* new SquadronNotFoundError({ squadronId: input.squadronId });
+          }
+          return yield* squadronFromRow(row);
+        }).pipe(Effect.mapError(preserveDomainError("rename squadron"))),
+      deleteSquadron: (squadronId) =>
+        Effect.gen(function* () {
+          const deleted = yield* sql<{ readonly id: string }>`
+            DELETE FROM j5_a2a_squadron WHERE id = ${squadronId} RETURNING id
+          `;
+          if (deleted.length === 0) return yield* new SquadronNotFoundError({ squadronId });
+        }).pipe(Effect.mapError(preserveDomainError("delete squadron"))),
       append: (command) =>
         appendPermit
           .withPermit(

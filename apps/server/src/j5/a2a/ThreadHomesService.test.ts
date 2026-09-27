@@ -14,7 +14,7 @@ import { CommCommandId, SquadronId } from "./contracts.ts";
 const createdAt = "2026-08-29T22:00:00.000Z";
 
 const makeTestLayer = () => {
-  const database = NodeSqliteClient.layerMemory();
+  const database = NodeSqliteClient.layer({ filename: ":memory:" });
   const ledger = ledgerLayer.pipe(Layer.provide(database));
   const registrar = homeRegistrarLayer.pipe(Layer.provide(ledger), Layer.provide(database));
   const threadHomes = threadHomesServiceLayer.pipe(Layer.provide(registrar));

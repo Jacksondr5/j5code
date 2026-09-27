@@ -23,6 +23,10 @@
  */
 import type {
   ProviderConsumeResetCreditOutcome,
+  AcpRegistryListSessionsResult,
+  AcpRegistryListProvidersResult,
+  AcpRegistryOperationError,
+  AcpRegistrySetProviderInput,
   ProviderDriverKind,
   ProviderInstanceEnvironment,
   ProviderInstanceId,
@@ -74,6 +78,8 @@ export interface ProviderInstance {
   readonly snapshot: ServerProviderShape;
   readonly snapshotForCwd?: (cwd: string) => Effect.Effect<ServerProvider, ProviderDriverError>;
   readonly refreshModels?: () => Effect.Effect<void, ProviderDriverError>;
+  /** Invalidate T3-owned discovery caches before an explicit provider refresh. */
+  readonly invalidateCaches?: Effect.Effect<void>;
   /**
    * Redeem one banked rate-limit reset credit on the signed-in account, then
    * re-probe so the snapshot reflects the cleared windows. Account-level,
@@ -86,6 +92,29 @@ export interface ProviderInstance {
   readonly orchestrationAdapter: ProviderAdapterV2Shape;
   readonly textGeneration: TextGeneration["Service"];
   readonly auth?: ProviderAuthController;
+  readonly acpSessionManagement?: {
+    readonly listSessions: (input: {
+      readonly cwd: string;
+      readonly cursor?: string;
+    }) => Effect.Effect<AcpRegistryListSessionsResult, AcpRegistryOperationError>;
+    readonly logout: (cwd: string) => Effect.Effect<void, AcpRegistryOperationError>;
+    readonly deleteSession: (input: {
+      readonly cwd: string;
+      readonly sessionId: string;
+    }) => Effect.Effect<void, AcpRegistryOperationError>;
+    readonly listProviders: (
+      cwd: string,
+    ) => Effect.Effect<AcpRegistryListProvidersResult, AcpRegistryOperationError>;
+    readonly setProvider: (
+      input: Omit<AcpRegistrySetProviderInput, "instanceId" | "projectId"> & {
+        readonly cwd: string;
+      },
+    ) => Effect.Effect<void, AcpRegistryOperationError>;
+    readonly disableProvider: (input: {
+      readonly cwd: string;
+      readonly providerId: string;
+    }) => Effect.Effect<void, AcpRegistryOperationError>;
+  };
 }
 
 export interface ProviderContinuationIdentity {

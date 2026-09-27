@@ -39,7 +39,7 @@ export interface RegisterMachineParticipantInput {
   readonly acceptedAt: string;
 }
 
-export class MachineParticipantInvalidNameError extends Schema.TaggedErrorClass<MachineParticipantInvalidNameError>()(
+export class MachineParticipantInvalidNameError extends Schema.TaggedError<MachineParticipantInvalidNameError>()(
   "MachineParticipantInvalidNameError",
   { name: Schema.String },
 ) {
@@ -48,7 +48,7 @@ export class MachineParticipantInvalidNameError extends Schema.TaggedErrorClass<
   }
 }
 
-export class MachineParticipantNameTakenError extends Schema.TaggedErrorClass<MachineParticipantNameTakenError>()(
+export class MachineParticipantNameTakenError extends Schema.TaggedError<MachineParticipantNameTakenError>()(
   "MachineParticipantNameTakenError",
   {
     participantId: Schema.String,
@@ -61,7 +61,7 @@ export class MachineParticipantNameTakenError extends Schema.TaggedErrorClass<Ma
   }
 }
 
-export class MachineParticipantNotFoundError extends Schema.TaggedErrorClass<MachineParticipantNotFoundError>()(
+export class MachineParticipantNotFoundError extends Schema.TaggedError<MachineParticipantNotFoundError>()(
   "MachineParticipantNotFoundError",
   { participantId: Schema.String },
 ) {

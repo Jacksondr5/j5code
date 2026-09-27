@@ -7,7 +7,7 @@ import {
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { DraftId, useComposerDraftStore } from "../../composerDraftStore";
 import type { Project } from "../../types";
-import { freezeDraftSquadronAtFirstSend } from "./SquadronDraftState";
+import { freezeDraftSquadronAtFirstSend, selectDraftSquadron } from "./SquadronDraftState";
 import { retargetSquadronDraft } from "./retargetSquadronDraft";
 
 const local = EnvironmentId.make("retarget-local");
@@ -46,6 +46,7 @@ describe("Squadron selection retargets the existing upstream draft", () => {
       threadId,
     });
     store.setPrompt(draftId, "Keep my typed work");
+    selectDraftSquadron(scopedThreadKey(scopeThreadRef(local, threadId)), "squadron:source");
     const chosenModel = { instanceId: ProviderInstanceId.make("codex"), model: "explicit-model" };
     if (explicitModel) store.setModelSelection(draftId, chosenModel, { explicit: true });
     retargetSquadronDraft({

@@ -50,6 +50,8 @@ export const refreshThreadHomes = (refs: ReadonlyArray<ScopedThreadRef>) => {
   refreshSpawnedChildren();
 };
 export const retryScopedThreadHomes = refreshThreadHomes;
+/** A renamed or deleted Squadron changes the home every visible row shows; re-read them all. */
+export const refreshRequestedThreadHomes = () => store.refreshRequested();
 export const shouldRequestThreadHome = (home: unknown, force: boolean) =>
   force || home === undefined;
 export const shouldForceThreadHomesForScope = (scope: ScopedSquadronRef | null) => scope !== null;

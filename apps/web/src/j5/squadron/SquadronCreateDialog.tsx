@@ -7,6 +7,7 @@ import {
   DialogTitle,
 } from "../../components/ui/dialog";
 import { SquadronCreateForm } from "./SquadronCreateForm";
+import { setSquadronCreateOpen, useSquadronCreateOpen } from "./SquadronCreateRequest";
 
 /** Subsequent creation reuses the same explicit name-and-folder form as first run. */
 export function SquadronCreateDialog({
@@ -32,4 +33,10 @@ export function SquadronCreateDialog({
       </DialogPopup>
     </Dialog>
   );
+}
+
+/** The app shell's single mount; doors open it through `openSquadronCreate`. */
+export function SquadronCreateDialogHost() {
+  const open = useSquadronCreateOpen();
+  return <SquadronCreateDialog open={open} onOpenChange={setSquadronCreateOpen} />;
 }

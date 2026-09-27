@@ -12,7 +12,7 @@ interface HumanPersonRow {
   readonly person_id: string;
 }
 
-export class A2ALocalOperatorNotFoundError extends Schema.TaggedErrorClass<A2ALocalOperatorNotFoundError>()(
+export class A2ALocalOperatorNotFoundError extends Schema.TaggedError<A2ALocalOperatorNotFoundError>()(
   "A2ALocalOperatorNotFoundError",
   {},
 ) {

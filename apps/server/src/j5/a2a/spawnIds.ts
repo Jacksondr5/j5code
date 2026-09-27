@@ -81,22 +81,30 @@ export interface CrewBriefContext {
 }
 
 /**
- * A dispatched brief minus its `<j5_crew_context>` block. The roster inside that block names
- * every seat's participant, so dropping or renaming one seat on a retry rewrites the briefs of
- * seats that already started; those are platform facts, and only the human-authored parts (the
- * Captain's brief, the seat's instructions) must match what a seat was already told.
+ * A dispatched brief minus its platform blocks: the `<j5_spawn_context>` identity facts and the
+ * `<j5_crew_context>` roster. The roster names every seat's participant, so dropping or renaming
+ * one seat on a retry rewrites the briefs of seats that already started, and the identity block
+ * can gain fields across a deploy. Only the human-authored parts (the Captain's brief, the seat's
+ * instructions) must match what a seat was already told.
  */
 export const spawnBriefWithoutCrewContext = (text: string) =>
-  text.replace(/<j5_crew_context>\n[\s\S]*?\n<\/j5_crew_context>\n\n/, "");
+  text
+    .replace(/^<j5_spawn_context>\n[\s\S]*?\n<\/j5_spawn_context>\n\n/, "")
+    .replace(/<j5_crew_context>\n[\s\S]*?\n<\/j5_crew_context>\n\n/, "");
 
+// The web timeline parses the identity block and the trailing brief
+// (apps/web/src/j5/a2a/SpawnBrief.tsx) to attribute the message to its spawner;
+// keep the two in step.
 export const spawnFirstTurnText = (input: {
   readonly brief: string;
   readonly participantId: string;
   readonly squadronId: string;
   readonly squadronName: string;
+  readonly spawnedByParticipantId: string;
+  readonly spawnerThreadId: string;
   readonly crew?: CrewBriefContext;
 }) => {
-  const identity = `<j5_spawn_context>\nPlatform-provided identity facts:\nparticipant_id: ${input.participantId}\nsquadron_id: ${input.squadronId}\nsquadron_name: ${input.squadronName}\n</j5_spawn_context>`;
+  const identity = `<j5_spawn_context>\nPlatform-provided identity facts:\nparticipant_id: ${input.participantId}\nsquadron_id: ${input.squadronId}\nsquadron_name: ${input.squadronName}\nspawned_by: ${input.spawnedByParticipantId}\nspawner_thread_id: ${input.spawnerThreadId}\n</j5_spawn_context>`;
   const brief = `<spawner_brief>\n${input.brief}\n</spawner_brief>`;
   if (input.crew === undefined) return `${identity}\n\n${brief}`;
   const crew = input.crew;

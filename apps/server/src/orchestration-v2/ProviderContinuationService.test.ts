@@ -6,6 +6,7 @@ import {
   RunId,
   ThreadId,
   type OrchestrationV2ThreadProjection,
+  type OrchestrationV2Notification,
 } from "@t3tools/contracts";
 import * as Deferred from "effect/Deferred";
 import * as DateTime from "effect/DateTime";
@@ -93,10 +94,10 @@ const makeGuard = Effect.fnUntraced(function* (completed?: Deferred.Deferred<voi
 
 function testLayer(input: {
   readonly dispatched: Queue.Queue<unknown>;
-  readonly getThreadProjection: () => Effect.Effect<OrchestrationV2ThreadProjection>;
+  readonly getThreadRecords: () => Effect.Effect<OrchestrationV2ThreadProjection>;
 }) {
   const threads = Layer.mock(ThreadManagementService)({
-    getThreadProjection: input.getThreadProjection,
+    getThreadRecords: input.getThreadRecords,
     dispatch: (command) => Queue.offer(input.dispatched, command).pipe(Effect.as({} as never)),
   });
   const worker = workerLive.pipe(
@@ -106,18 +107,75 @@ function testLayer(input: {
 }
 
 describe("ProviderContinuationService", () => {
+  it.effect("recovers an unaccepted persisted steer using the same delivery identity", () =>
+    Effect.gen(function* () {
+      const dispatched = yield* Queue.unbounded<unknown>();
+      const original = delegatedProjection();
+      const interruptedRunId = RunId.make("interrupted-mailbox-run");
+      const recovered = {
+        ...original,
+        runs: [
+          ...original.runs,
+          {
+            id: interruptedRunId,
+            status: "interrupted",
+            userMessageId: MessageId.make("original-user-input"),
+          },
+        ],
+        messages: [
+          {
+            id: delegatedMessageId,
+            runId: interruptedRunId,
+            delegatedCompletion: { parentRunId, generation: 1, taskIds: [] },
+          },
+        ],
+      } as unknown as OrchestrationV2ThreadProjection;
+      yield* Effect.gen(function* () {
+        const requests = yield* ProviderContinuationRequests;
+        yield* requests.offer({
+          threadId,
+          providerThreadId,
+          driver,
+          detail: null,
+          delivery: "message_text",
+          delegatedCompletion: { parentRunId, generation: 1, messageId: delegatedMessageId },
+        });
+        const command = (yield* Queue.take(dispatched)) as {
+          messageId: MessageId;
+          delegatedCompletion: { generation: number; taskIds: readonly string[] };
+        };
+        assert.equal(command.messageId, delegatedMessageId);
+        assert.equal(command.delegatedCompletion.generation, 1);
+        assert.equal(command.delegatedCompletion.taskIds.length, 2);
+      }).pipe(
+        Effect.provide(
+          testLayer({ dispatched, getThreadRecords: () => Effect.succeed(recovered) }),
+        ),
+        Effect.scoped,
+      );
+    }),
+  );
+
   it.effect("marks an adapter-buffered wake with the provider creation source", () => {
     return Effect.gen(function* () {
       const dispatched = yield* Queue.unbounded<unknown>();
       yield* Effect.gen(function* () {
         const requests = yield* ProviderContinuationRequests;
         yield* requests.offer(request());
-        const command = (yield* Queue.take(dispatched)) as { readonly creationSource: string };
+        const command = (yield* Queue.take(dispatched)) as {
+          readonly creationSource: string;
+          readonly notification: OrchestrationV2Notification;
+        };
         // ClaudeAdapterV2 keys on this to attach buffered CLI output.
         assert.equal(command.creationSource, "provider");
+        assert.deepEqual(command.notification, {
+          source: { kind: "background_task" },
+          outcome: "updated",
+          summary: "Background activity updated",
+        });
       }).pipe(
         Effect.provide(
-          testLayer({ dispatched, getThreadProjection: () => Effect.succeed(projection) }),
+          testLayer({ dispatched, getThreadRecords: () => Effect.succeed(projection) }),
         ),
         Effect.scoped,
       );
@@ -134,11 +192,17 @@ describe("ProviderContinuationService", () => {
           providerThreadId,
           driver,
           detail: "Delegated task completed.",
+          notification: {
+            source: { kind: "monitor" },
+            outcome: "updated",
+            summary: "Monitor updated",
+          },
           delivery: "message_text",
         });
         const command = (yield* Queue.take(dispatched)) as {
           readonly creationSource: string;
           readonly text: string;
+          readonly notification: OrchestrationV2Notification;
         };
         // An app-owned child buffers nothing in the adapter, so this text is
         // the whole wake. Marking it "provider" would make ClaudeAdapterV2
@@ -146,9 +210,14 @@ describe("ProviderContinuationService", () => {
         assert.notEqual(command.creationSource, "provider");
         assert.equal(command.creationSource, "server");
         assert.equal(command.text, "Delegated task completed.");
+        assert.deepEqual(command.notification, {
+          source: { kind: "monitor" },
+          outcome: "updated",
+          summary: "Monitor updated",
+        });
       }).pipe(
         Effect.provide(
-          testLayer({ dispatched, getThreadProjection: () => Effect.succeed(projection) }),
+          testLayer({ dispatched, getThreadRecords: () => Effect.succeed(projection) }),
         ),
         Effect.scoped,
       );
@@ -199,7 +268,7 @@ describe("ProviderContinuationService", () => {
         Effect.provide(
           testLayer({
             dispatched,
-            getThreadProjection: () => Effect.succeed(delegatedProjection()),
+            getThreadRecords: () => Effect.succeed(delegatedProjection()),
           }),
         ),
         Effect.scoped,
@@ -212,7 +281,7 @@ describe("ProviderContinuationService", () => {
       const attempts = yield* Ref.make(0);
       const dispatched = yield* Queue.unbounded<unknown>();
       const threads = Layer.mock(ThreadManagementService)({
-        getThreadProjection: () => Effect.succeed(delegatedProjection()),
+        getThreadRecords: () => Effect.succeed(delegatedProjection()),
         dispatch: (command) =>
           Ref.getAndUpdate(attempts, (count) => count + 1).pipe(
             Effect.flatMap((attempt) =>
@@ -259,7 +328,7 @@ describe("ProviderContinuationService", () => {
       const attempts = yield* Ref.make(0);
       const disposition = yield* Ref.make<"open" | "disposed">("open");
       const threads = Layer.mock(ThreadManagementService)({
-        getThreadProjection: () =>
+        getThreadRecords: () =>
           Ref.get(disposition).pipe(Effect.map((state) => delegatedProjection(state))),
         dispatch: () =>
           Ref.update(attempts, (count) => count + 1).pipe(
@@ -311,7 +380,7 @@ describe("ProviderContinuationService", () => {
         const blockedRequestDropped = yield* Deferred.make<void>();
         const state = yield* Ref.make<"open" | "blocked" | "disposed">("open");
         const threads = Layer.mock(ThreadManagementService)({
-          getThreadProjection: () =>
+          getThreadRecords: () =>
             Effect.gen(function* () {
               const currentState = yield* Ref.get(state);
               if (currentState === "blocked") {
@@ -387,7 +456,7 @@ describe("ProviderContinuationService", () => {
       const attempts = yield* Ref.make(0);
       const disposition = yield* Ref.make<"open" | "disposed">("open");
       const threads = Layer.mock(ThreadManagementService)({
-        getThreadProjection: () =>
+        getThreadRecords: () =>
           Ref.get(disposition).pipe(Effect.map((state) => delegatedProjection(state))),
         dispatch: () =>
           Ref.update(attempts, (count) => count + 1).pipe(
@@ -448,7 +517,7 @@ describe("ProviderContinuationService", () => {
         Effect.provide(
           testLayer({
             dispatched,
-            getThreadProjection: () => Effect.succeed(delegatedProjection()),
+            getThreadRecords: () => Effect.succeed(delegatedProjection()),
           }),
         ),
         Effect.scoped,
@@ -483,7 +552,7 @@ describe("ProviderContinuationService", () => {
             Effect.provide(
               testLayer({
                 dispatched,
-                getThreadProjection: () => Effect.succeed(delegatedProjection(disposition)),
+                getThreadRecords: () => Effect.succeed(delegatedProjection(disposition)),
               }),
             ),
             Effect.scoped,
@@ -517,7 +586,7 @@ describe("ProviderContinuationService", () => {
         Effect.provide(
           testLayer({
             dispatched,
-            getThreadProjection: () =>
+            getThreadRecords: () =>
               Effect.succeed({
                 ...delegatedProjection(),
                 messages: [{ id: delegatedMessageId }],
@@ -554,7 +623,7 @@ describe("ProviderContinuationService", () => {
           Effect.provide(
             testLayer({
               dispatched,
-              getThreadProjection: () =>
+              getThreadRecords: () =>
                 Effect.succeed({
                   ...delegatedProjection(),
                   thread: {
@@ -581,7 +650,7 @@ describe("ProviderContinuationService", () => {
         assert.isTrue(Option.isNone(yield* Queue.poll(dispatched)));
       }).pipe(
         Effect.provide(
-          testLayer({ dispatched, getThreadProjection: () => Effect.succeed(projection) }),
+          testLayer({ dispatched, getThreadRecords: () => Effect.succeed(projection) }),
         ),
         Effect.scoped,
       );
@@ -600,7 +669,7 @@ describe("ProviderContinuationService", () => {
         });
       }).pipe(
         Effect.provide(
-          testLayer({ dispatched, getThreadProjection: () => Effect.succeed(projection) }),
+          testLayer({ dispatched, getThreadRecords: () => Effect.succeed(projection) }),
         ),
         Effect.scoped,
       );
@@ -621,7 +690,7 @@ describe("ProviderContinuationService", () => {
         assert.isTrue(Option.isNone(yield* Queue.poll(dispatched)));
       }).pipe(
         Effect.provide(
-          testLayer({ dispatched, getThreadProjection: () => Effect.succeed(projection) }),
+          testLayer({ dispatched, getThreadRecords: () => Effect.succeed(projection) }),
         ),
         Effect.scoped,
       );
@@ -648,7 +717,7 @@ describe("ProviderContinuationService", () => {
         Effect.provide(
           testLayer({
             dispatched,
-            getThreadProjection: () =>
+            getThreadRecords: () =>
               Deferred.succeed(projectionEntered, undefined).pipe(
                 Effect.andThen(Deferred.await(releaseProjection)),
                 Effect.as(projection),
@@ -683,7 +752,7 @@ describe("ProviderContinuationService", () => {
         Effect.provide(
           testLayer({
             dispatched,
-            getThreadProjection: () => {
+            getThreadRecords: () => {
               projectionCalls += 1;
               return projectionCalls === 1
                 ? Deferred.succeed(firstProjectionEntered, undefined).pipe(
@@ -718,7 +787,7 @@ describe("ProviderContinuationService", () => {
         Effect.provide(
           testLayer({
             dispatched,
-            getThreadProjection: () =>
+            getThreadRecords: () =>
               Effect.succeed({
                 ...projection,
                 thread: {

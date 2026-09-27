@@ -79,6 +79,7 @@ export const OrchestrationEffectRequestV2 = Schema.Union([
   }),
   Schema.Struct({
     type: Schema.Literal("provider-thread.rollback"),
+    restoreFiles: Schema.optional(Schema.Boolean),
     providerThreadId: ProviderThreadId,
     checkpointId: CheckpointId,
     scopeId: CheckpointScopeId,
@@ -156,7 +157,7 @@ export interface PendingOrchestrationEffectV2 {
   readonly availableAt?: DateTime.Utc;
 }
 
-export class EffectOutboxError extends Schema.TaggedErrorClass<EffectOutboxError>()(
+export class EffectOutboxError extends Schema.TaggedError<EffectOutboxError>()(
   "EffectOutboxError",
   {
     operation: Schema.String,

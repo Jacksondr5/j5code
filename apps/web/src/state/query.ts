@@ -9,8 +9,11 @@ const EMPTY_ASYNC_RESULT_ATOM = Atom.make(AsyncResult.initial<never, never>(fals
 
 export interface EnvironmentQueryView<A> {
   readonly data: A | null;
+  readonly dataUpdatedAt: number;
   readonly error: string | null;
+  readonly failure?: unknown;
   readonly isPending: boolean;
+  readonly isSuccess: boolean;
   readonly refresh: () => void;
 }
 
@@ -29,8 +32,16 @@ export function useEnvironmentQuery<A, E>(
   const refresh = useAtomRefresh(selectedAtom);
   return {
     data: Option.getOrNull(AsyncResult.value(result)),
+    dataUpdatedAt:
+      result._tag === "Success"
+        ? result.timestamp
+        : result._tag === "Failure"
+          ? (Option.getOrNull(result.previousSuccess)?.timestamp ?? 0)
+          : 0,
     error: result._tag === "Failure" ? formatEnvironmentQueryError(result.cause) : null,
+    failure: result._tag === "Failure" ? Cause.squash(result.cause) : undefined,
     isPending: atom !== null && result.waiting,
+    isSuccess: result._tag === "Success",
     refresh,
   };
 }

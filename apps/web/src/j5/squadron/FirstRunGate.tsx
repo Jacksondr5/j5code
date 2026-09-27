@@ -37,14 +37,16 @@ export function SquadronFirstRunGate({
           };
 
   return (
-    <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
+    <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none">
       <Empty className="flex-1">
         <EmptyHeader className="max-w-md">
-          <EmptyTitle className="text-foreground text-xl">{content.title}</EmptyTitle>
-          <EmptyDescription className="mt-2 text-sm text-muted-foreground/78">
-            {content.description}
-          </EmptyDescription>
-          {state === "requires_creation" ? <SquadronCreateForm /> : null}
+          <EmptyTitle>{content.title}</EmptyTitle>
+          <EmptyDescription className="mt-2">{content.description}</EmptyDescription>
+          {state === "requires_creation" ? (
+            <div className="mt-5 w-full max-w-sm">
+              <SquadronCreateForm />
+            </div>
+          ) : null}
           {state === "unavailable" && onRetry !== undefined ? (
             <div className="mt-5 flex justify-center">
               <Button size="sm" onClick={onRetry}>

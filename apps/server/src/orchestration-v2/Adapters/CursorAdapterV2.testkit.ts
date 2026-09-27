@@ -1,4 +1,6 @@
-import { Agent, type InteractionUpdate, type RunResult } from "@cursor/sdk";
+import { DEFAULT_SIGNAL_EXPORT } from "@t3tools/shared/observability";
+import type { InteractionUpdate, RunResult } from "@cursor/sdk";
+import { Agent } from "../../provider/cursorSdk.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   ProviderReplayEntry,
@@ -55,7 +57,7 @@ const decodeCursorAgentSdkReplayTranscript = Schema.decodeUnknownEffect(
   CursorAgentSdkReplayTranscript,
 );
 
-export class CursorReplayTranscriptDecodeError extends Schema.TaggedErrorClass<CursorReplayTranscriptDecodeError>()(
+export class CursorReplayTranscriptDecodeError extends Schema.TaggedError<CursorReplayTranscriptDecodeError>()(
   "CursorReplayTranscriptDecodeError",
   {
     driver: Schema.optional(Schema.String),
@@ -69,7 +71,7 @@ export class CursorReplayTranscriptDecodeError extends Schema.TaggedErrorClass<C
   }
 }
 
-export class CursorReplayExhaustedError extends Schema.TaggedErrorClass<CursorReplayExhaustedError>()(
+export class CursorReplayExhaustedError extends Schema.TaggedError<CursorReplayExhaustedError>()(
   "CursorReplayExhaustedError",
   {
     scenario: Schema.String,
@@ -82,7 +84,7 @@ export class CursorReplayExhaustedError extends Schema.TaggedErrorClass<CursorRe
   }
 }
 
-export class CursorReplayFrameMismatchError extends Schema.TaggedErrorClass<CursorReplayFrameMismatchError>()(
+export class CursorReplayFrameMismatchError extends Schema.TaggedError<CursorReplayFrameMismatchError>()(
   "CursorReplayFrameMismatchError",
   {
     scenario: Schema.String,
@@ -96,7 +98,7 @@ export class CursorReplayFrameMismatchError extends Schema.TaggedErrorClass<Curs
   }
 }
 
-export class CursorReplayIncompleteError extends Schema.TaggedErrorClass<CursorReplayIncompleteError>()(
+export class CursorReplayIncompleteError extends Schema.TaggedError<CursorReplayIncompleteError>()(
   "CursorReplayIncompleteError",
   {
     scenario: Schema.String,
@@ -109,7 +111,7 @@ export class CursorReplayIncompleteError extends Schema.TaggedErrorClass<CursorR
   }
 }
 
-export class CursorReplayRuntimeError extends Schema.TaggedErrorClass<CursorReplayRuntimeError>()(
+export class CursorReplayRuntimeError extends Schema.TaggedError<CursorReplayRuntimeError>()(
   "CursorReplayRuntimeError",
   {
     scenario: Schema.String,
@@ -231,6 +233,7 @@ export function makeCursorAgentSdkReplayRunner(
 
   const recordFailure = <Error extends CursorAgentSdkReplayError>(error: Error): Error => {
     failure = error;
+    cursorAdvanced.resolve();
     return error;
   };
 
@@ -498,7 +501,7 @@ export function makeCursorAgentSdkReplayRunner(
   };
 }
 
-export function makeCursorAgentSdkReplayLayer(
+function makeCursorAgentSdkReplayLayer(
   transcript: CursorAgentSdkReplayTranscript,
   options?: {
     readonly runner?: CursorAgentSdkRunnerShape;
@@ -561,7 +564,10 @@ function makeReplayServerConfig(
       traceMaxFiles: 10,
       otlpTracesUrl: undefined,
       otlpMetricsUrl: undefined,
-      otlpExportIntervalMs: 10_000,
+      otlpLogsUrl: undefined,
+      otlpTracesExport: DEFAULT_SIGNAL_EXPORT,
+      otlpMetricsExport: DEFAULT_SIGNAL_EXPORT,
+      otlpLogsExport: DEFAULT_SIGNAL_EXPORT,
       otlpServiceName: "t3-server",
       mode: "web",
       port: 0,
@@ -585,6 +591,7 @@ function makeReplayServerConfig(
       providerStatusCacheDir,
       worktreesDir,
       attachmentsDir,
+      browserArtifactsDir: path.join(stateDir, "browser-artifacts"),
       environmentThemesDir,
       logsDir,
       serverLogPath: path.join(logsDir, "server.log"),

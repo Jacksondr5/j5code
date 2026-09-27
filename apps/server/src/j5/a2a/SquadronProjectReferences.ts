@@ -21,12 +21,12 @@ export interface ReplaceSquadronProjectReferencesInput {
   readonly createdAt: string;
 }
 
-export class SquadronProjectReferenceSquadronNotFoundError extends Schema.TaggedErrorClass<SquadronProjectReferenceSquadronNotFoundError>()(
+export class SquadronProjectReferenceSquadronNotFoundError extends Schema.TaggedError<SquadronProjectReferenceSquadronNotFoundError>()(
   "SquadronProjectReferenceSquadronNotFoundError",
   { squadronId: Schema.String },
 ) {}
 
-export class DuplicateSquadronProjectReferenceError extends Schema.TaggedErrorClass<DuplicateSquadronProjectReferenceError>()(
+export class DuplicateSquadronProjectReferenceError extends Schema.TaggedError<DuplicateSquadronProjectReferenceError>()(
   "DuplicateSquadronProjectReferenceError",
   { squadronId: Schema.String, projectId: Schema.String },
 ) {}

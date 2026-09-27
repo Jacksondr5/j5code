@@ -75,7 +75,7 @@ const snapshot = {
 } as unknown as OrchestrationV2ShellSnapshot;
 
 const makeTestLayer = () => {
-  const database = NodeSqliteClient.layerMemory();
+  const database = NodeSqliteClient.layer({ filename: ":memory:" });
   const ledger = ledgerLayer.pipe(Layer.provide(database));
   const orchestrator = Layer.mock(OrchestratorV2)({
     getShellSnapshot: () => Effect.succeed(snapshot),

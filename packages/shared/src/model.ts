@@ -14,6 +14,16 @@ import { copySorted } from "./Array.ts";
 
 const DEFAULT_PROVIDER_DRIVER_KIND = ProviderDriverKind.make("codex");
 
+/** Choose the command for a model change against the thread's current provider instance. */
+export function modelSelectionCommandType(
+  currentInstanceId: ProviderInstanceId,
+  selection: ModelSelection,
+) {
+  return currentInstanceId === selection.instanceId
+    ? ("thread.model-selection.set" as const)
+    : ("provider.switch" as const);
+}
+
 export interface SelectableModelOption {
   slug: string;
   name: string;
@@ -36,7 +46,7 @@ function getRawSelectionValueById(
   return selection?.value;
 }
 
-export function getProviderOptionSelectionValue(
+function getProviderOptionSelectionValue(
   selections: ReadonlyArray<ProviderOptionSelection> | null | undefined,
   id: string,
 ): string | boolean | undefined {
@@ -264,6 +274,31 @@ export function isClaudeUltrathinkPrompt(text: string | null | undefined): boole
   return typeof text === "string" && /\bultrathink\b/i.test(text);
 }
 
+/** Compare Codex model families without changing provider-owned dispatch identifiers. */
+export function codexModelFamily(slug: string): string {
+  return slug.startsWith("openai.gpt-") ? slug.slice("openai.".length) : slug;
+}
+
+export function formatCodexModelName(name: string): string {
+  return name.replace(/^gpt/i, "GPT").replace(/-([a-z])/g, (_, c) => "-" + c.toUpperCase());
+}
+
+export function formatModelSlugName(slug: string): string {
+  const separator = slug.lastIndexOf("/") + 1;
+  const prefix = slug.slice(0, separator);
+  const name = slug.slice(separator);
+  if (/^gpt-\d/i.test(name)) return prefix + formatCodexModelName(name);
+  if (!/^(claude-(opus|sonnet|haiku|fable)|gemini|grok|composer)-\d/i.test(name)) return slug;
+  return (
+    prefix +
+    name
+      .replace(/^(claude-[a-z]+-\d+)-(\d{1,2})(?=-|\[|$)/i, "$1.$2")
+      .split("-")
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(" ")
+  );
+}
+
 export function normalizeModelSlug(
   model: string | null | undefined,
   provider: ProviderDriverKind = DEFAULT_PROVIDER_DRIVER_KIND,
@@ -337,11 +372,6 @@ export function readCustomModelEntries(value: unknown): CustomModelDefinition[] 
   return entries;
 }
 
-/** Slugs of a `customModels` setting, in stored order. */
-export function readCustomModelSlugs(value: unknown): string[] {
-  return readCustomModelEntries(value).map((entry) => entry.slug);
-}
-
 /**
  * Write a definition back to the compact stored shape: a bare slug when it
  * carries nothing custom, otherwise an entry with only the set fields.
@@ -400,7 +430,7 @@ export function resolveSelectableModel(
 }
 
 /** Trim a string, returning null for empty/missing values. */
-export function trimOrNull<T extends string>(value: T | null | undefined): T | null {
+function trimOrNull<T extends string>(value: T | null | undefined): T | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim() as T;
   return trimmed || null;

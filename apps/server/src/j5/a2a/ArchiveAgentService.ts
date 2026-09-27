@@ -25,9 +25,14 @@ import {
   ThreadManagementService,
   latestActiveRun,
 } from "../../orchestration-v2/ThreadManagementService.ts";
-import { A2AArchiveFacts, type OpenExchangeArchiveFact } from "./ArchiveFactsService.ts";
+import {
+  A2AArchiveFacts,
+  type OpenExchangeArchiveFact,
+  type ThreadPreArchiveFacts,
+} from "./ArchiveFactsService.ts";
 import { A2ALedger } from "./LedgerService.ts";
 import { A2ALifecycleService } from "./LifecycleService.ts";
+import { getThreadProjectionIfPresent } from "./threadProjectionReads.ts";
 import {
   ExchangeDroppedPayload,
   ExchangeId,
@@ -77,7 +82,7 @@ export interface ArchiveAgentInput {
   readonly confirmationToken?: string;
   /**
    * The Crew archive path has already shown the unit's facts and holds a valid crew token, so
-   * per-member confirmation is satisfied; never set from the single-agent tool.
+   * per-member confirmation is satisfied; set only by the internal crew archive flow.
    */
   readonly confirmationSatisfied?: boolean;
   readonly archivedAt: string;
@@ -94,7 +99,7 @@ export class ArchiveAgentConfirmationRequiredError extends Data.TaggedError(
   readonly confirmationToken: string;
 }> {
   override get message(): string {
-    return "Archiving would end active work. Review the exact facts and retry archive_agent with the confirmation_token.";
+    return "Archiving would end active work. Review the exact facts and retry the archive operation with the confirmation_token.";
   }
 }
 
@@ -106,8 +111,8 @@ export class ArchiveAgentConfirmationStaleError extends Data.TaggedError(
 }> {
   override get message(): string {
     return this.confirmationToken === null
-      ? "The confirmation_token is stale because the target no longer has consequential work. Retry archive_agent without a token."
-      : "The confirmation_token is stale because the target facts changed. Review the current facts and retry archive_agent with the new confirmation_token.";
+      ? "The confirmation_token is stale because the target no longer has consequential work. Retry the archive operation without a token."
+      : "The confirmation_token is stale because the target facts changed. Review the current facts and retry the archive operation with the new confirmation_token.";
   }
 }
 
@@ -118,8 +123,8 @@ export class ArchiveAgentConfirmationTokenError extends Data.TaggedError(
 }> {
   override get message(): string {
     return this.reason === "unsupported-version"
-      ? "The confirmation_token uses an unsupported version. Call archive_agent without a token to receive a current refusal."
-      : "The confirmation_token is malformed or has an invalid signature. Call archive_agent without a token to receive a current refusal.";
+      ? "The confirmation_token uses an unsupported version. Retry the archive operation without a token to receive a current refusal."
+      : "The confirmation_token is malformed or has an invalid signature. Retry the archive operation without a token to receive a current refusal.";
   }
 }
 
@@ -130,7 +135,7 @@ export class ArchiveAgentTargetMismatchError extends Data.TaggedError(
   readonly observed: string;
 }> {
   override get message(): string {
-    return `archive_agent selected ${this.expected.squadronId}/${this.expected.participantId}/${this.expected.threadId}, but the durable target reads resolve ${this.observed}. No archive side effect was attempted.`;
+    return `The archive operation selected ${this.expected.squadronId}/${this.expected.participantId}/${this.expected.threadId}, but the durable target reads resolve ${this.observed}. No archive side effect was attempted.`;
   }
 }
 
@@ -139,7 +144,7 @@ export class ArchiveAgentOperationError extends Data.TaggedError("ArchiveAgentOp
   readonly cause: unknown;
 }> {
   override get message(): string {
-    return `archive_agent failed while ${this.phase}: ${this.cause instanceof Error ? this.cause.message : String(this.cause)}.`;
+    return `The archive operation failed while ${this.phase}: ${this.cause instanceof Error ? this.cause.message : String(this.cause)}.`;
   }
 }
 
@@ -160,12 +165,12 @@ export class ArchiveAgentPartialFailureError extends Data.TaggedError(
         ? "No active run is currently observed."
         : `Run ${this.runningTurn.runId} is still observed as ${this.runningTurn.status}; an interrupt may have been requested, but terminal state is not yet observed.`;
     return [
-      `archive_agent committed thread archive=${this.threadArchived}, participant archived=${this.participantArchived}, legacy retirement=${this.participantRetired}.`,
+      `The archive operation committed thread archive=${this.threadArchived}, participant archived=${this.participantArchived}, legacy retirement=${this.participantRetired}.`,
       this.pendingExchangeIds.length === 0
         ? "All observed lifecycle obligation events are committed."
         : `Lifecycle obligation events remain in flight for exchanges ${this.pendingExchangeIds.join(", ")}.`,
       runClaim,
-      "Retry archive_agent with the same client_request_id; recovery is forward-only and idempotent.",
+      "Retry the archive operation with the same client_request_id; recovery is forward-only and idempotent.",
       `Cause: ${this.cause instanceof Error ? this.cause.message : String(this.cause)}.`,
     ].join(" ");
   }
@@ -321,10 +326,17 @@ export interface ArchiveAgentServiceShape {
   readonly archive: (
     input: ArchiveAgentInput,
   ) => Effect.Effect<ArchiveAgentResult, ArchiveAgentError>;
-  /** Consequence facts without side effects, so a unit archive can warn about every member at once. */
+  /**
+   * Consequence facts without side effects, so a unit archive can warn about every member at once.
+   * Null when the target provably never came to exist: no home is registered for its thread and
+   * the projection store answers not-found for it. A Crew records every seat's row before the seat
+   * spawns, so a launch that failed partway leaves such rows behind, and the unit verbs pass them
+   * by. Every other failure propagates: absence is never inferred from a store that could not
+   * answer, and a home without a thread is a mismatch, not an absence.
+   */
   readonly readFacts: (
     target: ArchiveAgentTarget,
-  ) => Effect.Effect<ArchiveAgentTargetFacts, ArchiveAgentError>;
+  ) => Effect.Effect<ArchiveAgentTargetFacts | null, ArchiveAgentError>;
 }
 
 export class ArchiveAgentService extends Context.Service<
@@ -346,12 +358,15 @@ export const layer = Layer.effect(
       .getOrCreateRandom(TOKEN_SECRET_NAME, TOKEN_SECRET_BYTES)
       .pipe(Effect.mapError(operationError("loading the confirmation-token signing secret")));
 
-    const readState = Effect.fn("j5.a2a.archiveAgent.readState")(function* (
-      target: ArchiveAgentTarget,
-    ) {
-      const facts = yield* archiveFacts
+    const readArchiveFacts = (target: ArchiveAgentTarget) =>
+      archiveFacts
         .readForThread(target.threadId)
         .pipe(Effect.mapError(operationError("reading A2A archive facts")));
+
+    const readStateWith = Effect.fn("j5.a2a.archiveAgent.readState")(function* (
+      target: ArchiveAgentTarget,
+      facts: ThreadPreArchiveFacts,
+    ) {
       const projection = yield* threadManagement
         .getThreadProjection(target.threadId)
         .pipe(Effect.mapError(operationError("reading the target thread projection")));
@@ -379,6 +394,9 @@ export const layer = Layer.effect(
         },
       } satisfies ReadState;
     });
+
+    const readState = (target: ArchiveAgentTarget) =>
+      readArchiveFacts(target).pipe(Effect.flatMap((facts) => readStateWith(target, facts)));
 
     const issueToken = Effect.fn("j5.a2a.archiveAgent.issueToken")(function* (
       payload: TokenPayload,
@@ -588,7 +606,7 @@ export const layer = Layer.effect(
               commandId: input.interruptCommandId,
               threadId: input.target.threadId,
               runId: before.facts.runningTurn.runId,
-              reason: "Peer Agent archived by archive_agent",
+              reason: "Peer Agent archived as part of Crew retirement",
             })
             .pipe(Effect.mapError(operationError("requesting interruption of the active run")));
           interruptRequested = true;
@@ -633,13 +651,22 @@ export const layer = Layer.effect(
       });
 
     const readFacts: ArchiveAgentServiceShape["readFacts"] = (target) =>
-      readState(target).pipe(
-        Effect.map((state) => ({
+      Effect.gen(function* () {
+        const facts = yield* readArchiveFacts(target);
+        if (facts.state === "not-an-a2a-participant") {
+          const projection = yield* getThreadProjectionIfPresent(
+            threadManagement,
+            target.threadId,
+          ).pipe(Effect.mapError(operationError("reading the target thread projection")));
+          if (projection === null) return null;
+        }
+        const state = yield* readStateWith(target, facts);
+        return {
           facts: state.facts,
           threadArchived: state.projection.thread.archivedAt !== null,
           retired: state.retired,
-        })),
-      );
+        };
+      });
 
     return ArchiveAgentService.of({ archive, readFacts });
   }),

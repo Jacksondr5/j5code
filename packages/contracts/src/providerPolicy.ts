@@ -1,3 +1,8 @@
+import {
+  ChatImageAttachment,
+  ChatFileAttachment,
+  PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
+} from "./chatAttachment.ts";
 import * as Schema from "effect/Schema";
 
 import { TrimmedNonEmptyString } from "./baseSchemas.ts";
@@ -35,6 +40,7 @@ export const ProviderRequestKind = Schema.Literals([
   "file-read",
   "file-change",
   "mcp-elicitation",
+  "permission",
 ]);
 export type ProviderRequestKind = typeof ProviderRequestKind.Type;
 
@@ -60,3 +66,19 @@ export type ProviderApprovalOption = typeof ProviderApprovalOption.Type;
 
 export const ProviderUserInputAnswers = Schema.Record(Schema.String, Schema.Unknown);
 export type ProviderUserInputAnswers = typeof ProviderUserInputAnswers.Type;
+
+export const UserInputAttachments = Schema.Record(
+  Schema.String,
+  Schema.Array(Schema.Union([ChatImageAttachment, ChatFileAttachment])).pipe(
+    Schema.check(Schema.isMaxLength(PROVIDER_SEND_TURN_MAX_ATTACHMENTS)),
+  ),
+);
+export type UserInputAttachments = typeof UserInputAttachments.Type;
+
+export const UserInputAttachmentAnswerPayload = Schema.Struct({
+  requestId: TrimmedNonEmptyString,
+  questionTextById: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+  answers: ProviderUserInputAnswers,
+  attachmentsByQuestionId: UserInputAttachments,
+});
+export type UserInputAttachmentAnswerPayload = typeof UserInputAttachmentAnswerPayload.Type;

@@ -101,8 +101,11 @@ export interface CrewLaunchInput {
    * Runs once the Crew is recorded and before any seat spawns, so the caller can bind its own
    * record (the proposal) to the instance; a spawn or brief that fails afterwards then hands the
    * gate back to a proposal that already names its Crew, and a decline can retire what exists.
+   * A failure here aborts the launch with no seat spawned.
    */
-  readonly onRecorded?: (instance: AgentCrewInstance) => Effect.Effect<void>;
+  readonly onRecorded?: (
+    instance: AgentCrewInstance,
+  ) => Effect.Effect<void, CrewLaunchOperationError>;
 }
 
 export interface CrewAddSeatsInput {
@@ -472,7 +475,11 @@ export const layer = Layer.effect(
             placementCommandId: spawnPlacementCommandId(member.stableInput),
             squadronId: captain.squadronId,
             threadId: member.threadId,
-            spawnedByParticipantId: captain.participantId,
+            provenance: {
+              kind: "spawned-by",
+              spawnedByParticipantId: captain.participantId,
+              source: "j5_spawn",
+            },
             createdAt: DateTime.formatIso(child.thread.createdAt),
           })
           .pipe(
@@ -510,6 +517,8 @@ export const layer = Layer.effect(
           participantId: member.participantId,
           squadronId: captain.squadronId,
           squadronName: captain.squadronName,
+          spawnedByParticipantId: captain.participantId,
+          spawnerThreadId: captain.thread.id,
           crew: {
             displayName: instance.displayName,
             instanceId: instance.id,
@@ -697,8 +706,19 @@ export const layer = Layer.effect(
         yield* spawnSeats(input.captain, planned);
         yield* startBriefs(input.captain, instance, planned, input.brief);
         return instance;
-      });
+      }).pipe((launch) =>
+        // One unit step from the record through the briefs, so a unit archive waits for every
+        // seat to exist before it reads the roster.
+        crews.serialize(
+          spawnCrewInstanceId({
+            providerSessionId: input.providerSessionId,
+            requestKey: input.requestKey,
+          }),
+          launch,
+        ),
+      );
 
+    // One unit step from the reservation through the briefs, like a launch.
     const addSeats: CrewLaunchServiceShape["addSeats"] = (input) =>
       Effect.gen(function* () {
         const resolved = input.resolvedSeats ?? (yield* resolveSeats(input.captain, input.seats));
@@ -764,7 +784,7 @@ export const layer = Layer.effect(
           input.brief ?? reservation.instance.brief,
         );
         return reservation.instance;
-      });
+      }).pipe((addition) => crews.serialize(input.instance.id, addition));
 
     return CrewLaunchService.of({ launch, addSeats, resolveSeats });
   }),

@@ -20,7 +20,7 @@ export type ArchivePlacementSubtree =
       readonly participantIds: readonly [ParticipantId, ...Array<ParticipantId>];
     };
 
-export class A2AArchivePlacementFactsProviderError extends Schema.TaggedErrorClass<A2AArchivePlacementFactsProviderError>()(
+export class A2AArchivePlacementFactsProviderError extends Schema.TaggedError<A2AArchivePlacementFactsProviderError>()(
   "A2AArchivePlacementFactsProviderError",
   { operation: Schema.String, cause: Schema.Defect() },
 ) {}
@@ -40,7 +40,9 @@ export class A2AArchivePlacementFactsProvider extends Context.Service<
 /**
  * AR2's production placement reader. `listSubtree` includes the requested
  * participant, while the warning only names agents additionally affected by
- * archive, so the root is deliberately omitted here.
+ * archive, so the root is deliberately omitted here. It also walks archived
+ * membership rows; those agents are already retired and are dropped, while
+ * their live descendants stay.
  */
 export const placementFactsLayer = Layer.effect(
   A2AArchivePlacementFactsProvider,
@@ -51,8 +53,10 @@ export const placementFactsLayer = Layer.effect(
         placements.listSubtree(input).pipe(
           Effect.map((subtree) => {
             const descendantIds = subtree
-              .map((entry) => entry.participantId)
-              .filter((participantId) => participantId !== input.participantId);
+              .filter(
+                (entry) => entry.participantId !== input.participantId && entry.archivedAt === null,
+              )
+              .map((entry) => entry.participantId);
             return descendantIds.length === 0
               ? { state: "none" as const }
               : {
@@ -101,7 +105,7 @@ export type ThreadPreArchiveFacts =
       readonly placementSubtree: ArchivePlacementSubtree;
     };
 
-export class A2AArchiveFactsError extends Schema.TaggedErrorClass<A2AArchiveFactsError>()(
+export class A2AArchiveFactsError extends Schema.TaggedError<A2AArchiveFactsError>()(
   "A2AArchiveFactsError",
   { operation: Schema.String, cause: Schema.Defect() },
 ) {}

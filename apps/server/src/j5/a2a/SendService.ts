@@ -18,6 +18,7 @@ import {
   isHumanParticipantId,
   isMachineParticipantId,
   LedgerMessageId,
+  MessageSentPayload,
   Participant,
   type ParticipantDirectoryRow,
   ParticipantId,
@@ -30,7 +31,9 @@ import { resolveThreadHome } from "./HomeRegistrar.ts";
 import { isRegisteredHumanPerson, listRegisteredHumanPersonIds } from "./HumanPersonRegistry.ts";
 import { A2ALedgerTransactionWriter, A2ALedger, type A2ALedgerError } from "./LedgerService.ts";
 
-export class A2ASenderNotJoinedError extends Schema.TaggedErrorClass<A2ASenderNotJoinedError>()(
+const encodeSentPayload = Schema.encodeEffect(Schema.toCodecJson(MessageSentPayload));
+
+export class A2ASenderNotJoinedError extends Schema.TaggedError<A2ASenderNotJoinedError>()(
   "A2ASenderNotJoinedError",
   { threadId: Schema.String },
 ) {
@@ -39,7 +42,7 @@ export class A2ASenderNotJoinedError extends Schema.TaggedErrorClass<A2ASenderNo
   }
 }
 
-export class A2AHomeMembershipStateError extends Schema.TaggedErrorClass<A2AHomeMembershipStateError>()(
+export class A2AHomeMembershipStateError extends Schema.TaggedError<A2AHomeMembershipStateError>()(
   "A2AHomeMembershipStateError",
   {
     threadId: Schema.String,
@@ -54,7 +57,7 @@ export class A2AHomeMembershipStateError extends Schema.TaggedErrorClass<A2AHome
   }
 }
 
-export class A2ASenderRetiredError extends Schema.TaggedErrorClass<A2ASenderRetiredError>()(
+export class A2ASenderRetiredError extends Schema.TaggedError<A2ASenderRetiredError>()(
   "A2ASenderRetiredError",
   {
     threadId: Schema.String,
@@ -67,7 +70,7 @@ export class A2ASenderRetiredError extends Schema.TaggedErrorClass<A2ASenderReti
   }
 }
 
-export class A2AParticipantNotFoundError extends Schema.TaggedErrorClass<A2AParticipantNotFoundError>()(
+export class A2AParticipantNotFoundError extends Schema.TaggedError<A2AParticipantNotFoundError>()(
   "A2AParticipantNotFoundError",
   { participantId: Schema.String },
 ) {
@@ -76,7 +79,7 @@ export class A2AParticipantNotFoundError extends Schema.TaggedErrorClass<A2APart
   }
 }
 
-export class A2AAmbiguousParticipantError extends Schema.TaggedErrorClass<A2AAmbiguousParticipantError>()(
+export class A2AAmbiguousParticipantError extends Schema.TaggedError<A2AAmbiguousParticipantError>()(
   "A2AAmbiguousParticipantError",
   { participantId: Schema.String },
 ) {
@@ -85,7 +88,7 @@ export class A2AAmbiguousParticipantError extends Schema.TaggedErrorClass<A2AAmb
   }
 }
 
-export class A2AParticipantArchivedError extends Schema.TaggedErrorClass<A2AParticipantArchivedError>()(
+export class A2AParticipantArchivedError extends Schema.TaggedError<A2AParticipantArchivedError>()(
   "A2AParticipantArchivedError",
   {
     participantId: Schema.String,
@@ -97,7 +100,7 @@ export class A2AParticipantArchivedError extends Schema.TaggedErrorClass<A2APart
   }
 }
 
-export class A2AIntentRequiredError extends Schema.TaggedErrorClass<A2AIntentRequiredError>()(
+export class A2AIntentRequiredError extends Schema.TaggedError<A2AIntentRequiredError>()(
   "A2AIntentRequiredError",
   {},
 ) {
@@ -106,7 +109,7 @@ export class A2AIntentRequiredError extends Schema.TaggedErrorClass<A2AIntentReq
   }
 }
 
-export class A2AUrgencyRequiredError extends Schema.TaggedErrorClass<A2AUrgencyRequiredError>()(
+export class A2AUrgencyRequiredError extends Schema.TaggedError<A2AUrgencyRequiredError>()(
   "A2AUrgencyRequiredError",
   {},
 ) {
@@ -115,7 +118,7 @@ export class A2AUrgencyRequiredError extends Schema.TaggedErrorClass<A2AUrgencyR
   }
 }
 
-export class A2AUrgencyNotAcceptedError extends Schema.TaggedErrorClass<A2AUrgencyNotAcceptedError>()(
+export class A2AUrgencyNotAcceptedError extends Schema.TaggedError<A2AUrgencyNotAcceptedError>()(
   "A2AUrgencyNotAcceptedError",
   { participantId: Schema.String },
 ) {
@@ -124,7 +127,7 @@ export class A2AUrgencyNotAcceptedError extends Schema.TaggedErrorClass<A2AUrgen
   }
 }
 
-export class A2AUrgencyRequiresExchangeError extends Schema.TaggedErrorClass<A2AUrgencyRequiresExchangeError>()(
+export class A2AUrgencyRequiresExchangeError extends Schema.TaggedError<A2AUrgencyRequiresExchangeError>()(
   "A2AUrgencyRequiresExchangeError",
   {},
 ) {
@@ -133,7 +136,7 @@ export class A2AUrgencyRequiresExchangeError extends Schema.TaggedErrorClass<A2A
   }
 }
 
-export class A2AHumanAskOrReplyRequiredError extends Schema.TaggedErrorClass<A2AHumanAskOrReplyRequiredError>()(
+export class A2AHumanAskOrReplyRequiredError extends Schema.TaggedError<A2AHumanAskOrReplyRequiredError>()(
   "A2AHumanAskOrReplyRequiredError",
   { participantId: Schema.String },
 ) {
@@ -142,7 +145,7 @@ export class A2AHumanAskOrReplyRequiredError extends Schema.TaggedErrorClass<A2A
   }
 }
 
-export class A2AHumanFollowupNotAllowedError extends Schema.TaggedErrorClass<A2AHumanFollowupNotAllowedError>()(
+export class A2AHumanFollowupNotAllowedError extends Schema.TaggedError<A2AHumanFollowupNotAllowedError>()(
   "A2AHumanFollowupNotAllowedError",
   { participantId: Schema.String },
 ) {
@@ -151,7 +154,7 @@ export class A2AHumanFollowupNotAllowedError extends Schema.TaggedErrorClass<A2A
   }
 }
 
-export class A2AExchangeNotOpenError extends Schema.TaggedErrorClass<A2AExchangeNotOpenError>()(
+export class A2AExchangeNotOpenError extends Schema.TaggedError<A2AExchangeNotOpenError>()(
   "A2AExchangeNotOpenError",
   { exchangeId: Schema.String },
 ) {
@@ -160,7 +163,7 @@ export class A2AExchangeNotOpenError extends Schema.TaggedErrorClass<A2AExchange
   }
 }
 
-export class A2AExchangeParticipantMismatchError extends Schema.TaggedErrorClass<A2AExchangeParticipantMismatchError>()(
+export class A2AExchangeParticipantMismatchError extends Schema.TaggedError<A2AExchangeParticipantMismatchError>()(
   "A2AExchangeParticipantMismatchError",
   {
     exchangeId: Schema.String,
@@ -173,7 +176,7 @@ export class A2AExchangeParticipantMismatchError extends Schema.TaggedErrorClass
   }
 }
 
-export class A2AExchangeAlreadyAnsweredError extends Schema.TaggedErrorClass<A2AExchangeAlreadyAnsweredError>()(
+export class A2AExchangeAlreadyAnsweredError extends Schema.TaggedError<A2AExchangeAlreadyAnsweredError>()(
   "A2AExchangeAlreadyAnsweredError",
   { exchangeId: Schema.String },
 ) {
@@ -182,7 +185,7 @@ export class A2AExchangeAlreadyAnsweredError extends Schema.TaggedErrorClass<A2A
   }
 }
 
-export class A2ACrossSquadronReplyInvariantError extends Schema.TaggedErrorClass<A2ACrossSquadronReplyInvariantError>()(
+export class A2ACrossSquadronReplyInvariantError extends Schema.TaggedError<A2ACrossSquadronReplyInvariantError>()(
   "A2ACrossSquadronReplyInvariantError",
   {
     exchangeId: Schema.String,
@@ -199,7 +202,7 @@ export class A2ACrossSquadronReplyInvariantError extends Schema.TaggedErrorClass
   }
 }
 
-export class A2AClearOwnAskSenderMismatchError extends Schema.TaggedErrorClass<A2AClearOwnAskSenderMismatchError>()(
+export class A2AClearOwnAskSenderMismatchError extends Schema.TaggedError<A2AClearOwnAskSenderMismatchError>()(
   "A2AClearOwnAskSenderMismatchError",
   {
     exchangeId: Schema.String,
@@ -212,7 +215,7 @@ export class A2AClearOwnAskSenderMismatchError extends Schema.TaggedErrorClass<A
   }
 }
 
-export class A2AClearOwnAskAlreadyClosedError extends Schema.TaggedErrorClass<A2AClearOwnAskAlreadyClosedError>()(
+export class A2AClearOwnAskAlreadyClosedError extends Schema.TaggedError<A2AClearOwnAskAlreadyClosedError>()(
   "A2AClearOwnAskAlreadyClosedError",
   { exchangeId: Schema.String },
 ) {
@@ -221,7 +224,7 @@ export class A2AClearOwnAskAlreadyClosedError extends Schema.TaggedErrorClass<A2
   }
 }
 
-export class A2AClearOwnAskUnknownExchangeError extends Schema.TaggedErrorClass<A2AClearOwnAskUnknownExchangeError>()(
+export class A2AClearOwnAskUnknownExchangeError extends Schema.TaggedError<A2AClearOwnAskUnknownExchangeError>()(
   "A2AClearOwnAskUnknownExchangeError",
   { exchangeId: Schema.String },
 ) {
@@ -230,7 +233,7 @@ export class A2AClearOwnAskUnknownExchangeError extends Schema.TaggedErrorClass<
   }
 }
 
-export class A2AClearOwnAskCommandConflictError extends Schema.TaggedErrorClass<A2AClearOwnAskCommandConflictError>()(
+export class A2AClearOwnAskCommandConflictError extends Schema.TaggedError<A2AClearOwnAskCommandConflictError>()(
   "A2AClearOwnAskCommandConflictError",
   { commandId: Schema.String, exchangeId: Schema.String },
 ) {
@@ -239,7 +242,7 @@ export class A2AClearOwnAskCommandConflictError extends Schema.TaggedErrorClass<
   }
 }
 
-export class A2AMachineCannotReceiveError extends Schema.TaggedErrorClass<A2AMachineCannotReceiveError>()(
+export class A2AMachineCannotReceiveError extends Schema.TaggedError<A2AMachineCannotReceiveError>()(
   "A2AMachineCannotReceiveError",
   { participantId: Schema.String },
 ) {
@@ -248,7 +251,7 @@ export class A2AMachineCannotReceiveError extends Schema.TaggedErrorClass<A2AMac
   }
 }
 
-export class A2AMachineSenderNotRegisteredError extends Schema.TaggedErrorClass<A2AMachineSenderNotRegisteredError>()(
+export class A2AMachineSenderNotRegisteredError extends Schema.TaggedError<A2AMachineSenderNotRegisteredError>()(
   "A2AMachineSenderNotRegisteredError",
   { participantId: Schema.String },
 ) {
@@ -788,14 +791,15 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
               receiver: receiverId,
               exchangeId,
               correlationId,
-              payload: {
+              payload: yield* encodeSentPayload({
                 messageId,
                 text: input.message,
+                ...(input.attachments === undefined ? {} : { attachments: input.attachments }),
                 originSquadronId: sender.squadronId,
                 receiverSquadronId: receiver.squadronId,
                 exchangeRole,
                 envelopeChannel: "peer",
-              },
+              }),
               createdAt: input.acceptedAt,
             },
             ...(closeEvent === undefined ? [] : [closeEvent]),

@@ -25,6 +25,7 @@ import { CursorSdkCatalog } from "./CursorSdkCatalog.ts";
 
 const CURSOR_PRESENTATION = {
   displayName: "Cursor",
+  supportsConversationRollback: false,
   showInteractionModeToggle: true,
 } as const;
 const EMPTY_CAPABILITIES: ModelCapabilities = createModelCapabilities({
@@ -72,7 +73,7 @@ export function buildInitialCursorProviderSnapshot(
   });
 }
 
-export function getCursorFallbackModels(
+function getCursorFallbackModels(
   cursorSettings: Pick<CursorSettings, "customModels">,
 ): ReadonlyArray<ServerProviderModel> {
   return providerModelsFromSettings([], cursorSettings.customModels, EMPTY_CAPABILITIES);
@@ -183,13 +184,18 @@ export function buildCursorDiscoveredModelsFromSdk(
   });
 }
 
-function cursorSdkAuth(user: SDKUser): ServerProviderAuth {
+function cursorSdkAuth(user: SDKUser, type: "api-key" | "browser"): ServerProviderAuth {
   const email = user.userEmail?.trim();
   const apiKeyName = user.apiKeyName.trim();
   return {
     status: "authenticated",
-    type: "api-key",
-    label: apiKeyName ? `Cursor API key (${apiKeyName})` : "Cursor API key",
+    type,
+    label:
+      type === "browser"
+        ? "Cursor account"
+        : apiKeyName
+          ? `Cursor API key (${apiKeyName})`
+          : "Cursor API key",
     ...(email ? { email } : {}),
   };
 }
@@ -243,6 +249,7 @@ export function buildCursorProviderSnapshot(input: {
 export const checkCursorProviderStatus = Effect.fn("checkCursorProviderStatus")(function* (
   cursorSettings: CursorSettings,
   environment?: NodeJS.ProcessEnv,
+  authenticationType: "api-key" | "browser" = "api-key",
 ): Effect.fn.Return<ServerProviderDraft, never, CursorSdkCatalog> {
   const checkedAt = DateTime.formatIso(yield* DateTime.now);
   const fallbackModels = getCursorFallbackModels(cursorSettings);
@@ -275,7 +282,7 @@ export const checkCursorProviderStatus = Effect.fn("checkCursorProviderStatus")(
         version: null,
         status: "error",
         auth: { status: "unauthenticated" },
-        message: "Cursor API key is required. Add CURSOR_API_KEY in provider settings.",
+        message: "Sign in with Cursor or add CURSOR_API_KEY in provider settings.",
       },
     });
   }
@@ -301,7 +308,9 @@ export const checkCursorProviderStatus = Effect.fn("checkCursorProviderStatus")(
         status: "error",
         auth: { status: authenticationFailure ? "unauthenticated" : "unknown" },
         message: authenticationFailure
-          ? "Cursor SDK authentication failed. Check CURSOR_API_KEY."
+          ? authenticationType === "browser"
+            ? "Cursor sign-in expired or was rejected. Sign in again in provider settings."
+            : "Cursor SDK authentication failed. Check CURSOR_API_KEY."
           : "Cursor SDK catalog request failed. Check server logs for details.",
       },
     });
@@ -331,7 +340,7 @@ export const checkCursorProviderStatus = Effect.fn("checkCursorProviderStatus")(
     parsed: {
       version: null,
       status: "ready",
-      auth: cursorSdkAuth(snapshot.user),
+      auth: cursorSdkAuth(snapshot.user, authenticationType),
     },
     discoveredModels,
     ...(discoveredModels.length === 0

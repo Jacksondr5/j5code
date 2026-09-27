@@ -78,7 +78,7 @@ const make = Effect.gen(function* () {
         );
 
   const loadThread = (scope: McpInvocationScope) =>
-    threadManagement.getThreadProjection(scope.threadId).pipe(
+    threadManagement.getThreadRecords(scope.threadId, []).pipe(
       Effect.mapError((error) =>
         error._tag === "OrchestratorProjectionError"
           ? failure("thread_not_found", `Thread '${scope.threadId}' was not found.`)
@@ -391,6 +391,7 @@ const make = Effect.gen(function* () {
               projectCwd,
               worktreePath,
               project: {
+                id: project.id,
                 workspaceRoot: project.workspaceRoot,
                 scripts: project.scripts,
               },

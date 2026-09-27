@@ -21,6 +21,7 @@ import {
 } from "./AgentCrewProposalService.ts";
 import {
   CREW_SEAT_CAP,
+  CrewLaunchOperationError,
   CrewLaunchService,
   type CrewCaptain,
   type CrewLaunchError,
@@ -154,16 +155,32 @@ export const layer = Layer.effect(
     const operationError = (phase: string) => (cause: unknown) =>
       new CrewProposalOperationError({ phase, cause });
 
+    /** The one refusal for an addition past the cap, whether filed or approved. */
+    const crewFullError = (
+      displayName: string,
+      held: number,
+      adding: number,
+      kind: "request" | "approval",
+    ) =>
+      new CrewProposalRequestError({
+        detail:
+          kind === "request"
+            ? `Crew ${displayName} is full: it holds ${held} of ${CREW_SEAT_CAP} seats counting requests still open, and this request adds ${adding}.`
+            : `Crew ${displayName} is full: it holds ${held} of ${CREW_SEAT_CAP} seats, and this approval adds ${adding}.`,
+        nextStep:
+          "A member finishing frees no seat. Work with the seats this crew has, or propose a new crew for the extra hands.",
+      });
+
     /**
      * Persona seats must name known, enabled personas; the library is the source of truth, not the
      * Captain. A custom seat names none and is checked for shape only.
      */
     const validateSeats = Effect.fn("j5.a2a.crewProposal.validateSeats")(function* (
       seats: ReadonlyArray<CrewProposalSeat>,
-      existing: { readonly seatNames: ReadonlyArray<string>; readonly pendingSeats: number },
+      /** The live Crew's seat names for an addition; null for a new roster. */
+      existingSeatNames: ReadonlyArray<string> | null,
       humanReview = false,
     ) {
-      const existingSeatCount = existing.seatNames.length + existing.pendingSeats;
       if (seats.length === 0)
         return yield* new CrewProposalRequestError({
           detail: "A crew request needs at least one seat.",
@@ -194,16 +211,16 @@ export const layer = Layer.effect(
           detail: "Seat names must be unique within a crew.",
           nextStep: "Rename the duplicate seats and retry.",
         });
-      const taken = seats.find((seat) => existing.seatNames.includes(seat.seat));
+      const taken = seats.find((seat) => existingSeatNames?.includes(seat.seat));
       if (taken !== undefined)
         return yield* new CrewProposalRequestError({
           detail: `The crew already has a seat named ${taken.seat}.`,
           nextStep: "Choose a different seat name.",
         });
-      if (existingSeatCount + seats.length > CREW_SEAT_CAP)
+      if (existingSeatNames === null && seats.length > CREW_SEAT_CAP)
         return yield* new CrewProposalRequestError({
-          detail: `A crew may hold at most ${CREW_SEAT_CAP} seats; this request would reach ${existingSeatCount + seats.length}.`,
-          nextStep: "Request fewer seats, or let a member finish before asking for more.",
+          detail: `A crew may hold at most ${CREW_SEAT_CAP} seats; this roster names ${seats.length}.`,
+          nextStep: `Keep the roster to ${CREW_SEAT_CAP} seats; a second crew is how you get more hands.`,
         });
       const catalog = yield* agents
         .catalog()
@@ -230,9 +247,13 @@ export const layer = Layer.effect(
       proposal: CrewProposal,
     ) {
       const stable = { providerSessionId: PROPOSAL_SESSION, requestKey: proposal.id };
-      const captain = yield* threadManagement
-        .getThreadProjection(proposal.captainThreadId)
-        .pipe(Effect.mapError(operationError("reading the Captain thread")));
+      const captain = yield* getThreadProjectionIfPresent(
+        threadManagement,
+        proposal.captainThreadId,
+      ).pipe(Effect.mapError(operationError("reading the Captain thread")));
+      // A deleted Captain takes no messages; the decline still has to go through, or the gate
+      // it was refused at could never close.
+      if (captain === null || captain.thread.deletedAt != null) return;
       yield* threadManagement
         .dispatch({
           type: "message.dispatch",
@@ -254,9 +275,23 @@ export const layer = Layer.effect(
     const captainFor = Effect.fn("j5.a2a.crewProposal.captainFor")(function* (
       proposal: CrewProposal,
     ) {
-      const projection = yield* threadManagement
-        .getThreadProjection(proposal.captainThreadId)
-        .pipe(Effect.mapError(operationError("reading the Captain thread")));
+      const projection = yield* getThreadProjectionIfPresent(
+        threadManagement,
+        proposal.captainThreadId,
+      ).pipe(Effect.mapError(operationError("reading the Captain thread")));
+      // Checked when the person approves, not held: a Captain archived or deleted while its gate
+      // is open is refused here, since new seats would be briefed to report to a participant
+      // delivery no longer reaches. A Captain archived after this read is not caught.
+      if (projection === null || projection.thread.deletedAt != null)
+        return yield* new CrewProposalRequestError({
+          detail: `Captain ${projection?.thread.title ?? proposal.captainParticipantId} has been deleted, so this crew has no one to command it.`,
+          nextStep: "Decline this proposal.",
+        });
+      if (projection.thread.archivedAt !== null)
+        return yield* new CrewProposalRequestError({
+          detail: `Captain ${projection.thread.title} is archived, so this crew has no one to command it.`,
+          nextStep: "Unarchive the Captain to approve it, or decline this proposal.",
+        });
       const squadron = yield* ledger
         .readSquadron(proposal.squadronId)
         .pipe(Effect.mapError(operationError("reading the Squadron")));
@@ -292,8 +327,21 @@ export const layer = Layer.effect(
           seats: launchSeats,
           resolvedSeats,
           brief: proposal.brief,
+          // The proposal must name its Crew: declining a reopened proposal retires the Crew
+          // through this link, so a lost write fails the approval before any seat spawns.
           onRecorded: (instance) =>
-            proposals.attachInstance(proposal.id, instance.id).pipe(Effect.ignore),
+            proposals.attachInstance(proposal.id, instance.id).pipe(
+              Effect.asVoid,
+              Effect.mapError(
+                (cause) =>
+                  new CrewLaunchOperationError({
+                    phase: `linking proposal ${proposal.id} to crew ${instance.id}`,
+                    seatName: null,
+                    createdSeats: [],
+                    cause,
+                  }),
+              ),
+            ),
         });
       }
       const instance =
@@ -387,7 +435,7 @@ export const layer = Layer.effect(
 
     const propose: CrewProposalServiceShape["propose"] = (input) =>
       Effect.gen(function* () {
-        yield* validateSeats(input.seats, { seatNames: [], pendingSeats: 0 });
+        yield* validateSeats(input.seats, null);
         const proposal = yield* proposals
           .create({
             id: lifecycleId({
@@ -447,39 +495,54 @@ export const layer = Layer.effect(
                 ? "Propose a crew with propose_crew first."
                 : `Retry with crew_instance_id set to one of: ${commanded.map(({ id }) => id).join(", ")}.`,
           });
-        const pendingSeats = (yield* proposals
-          .listForCaptain(input.captain.participantId)
-          .pipe(Effect.mapError(operationError("reading open proposals"))))
-          .filter((open) => open.status === "open" && open.crewInstanceId === instance.id)
-          .reduce((count, open) => count + open.requestedSeats.length, 0);
-        yield* validateSeats([input.seat], {
-          seatNames: instance.members.map(({ seatName }) => seatName),
-          pendingSeats,
+        const proposalId = lifecycleId({
+          kind: "crew",
+          operation: "proposal",
+          providerSessionId: PROPOSAL_SESSION,
+          requestKey: input.requestKey,
         });
-        const proposal = yield* proposals
-          .create({
-            id: lifecycleId({
-              kind: "crew",
-              operation: "proposal",
-              providerSessionId: PROPOSAL_SESSION,
-              requestKey: input.requestKey,
-            }),
-            squadronId: input.captain.squadronId,
-            captainParticipantId: input.captain.participantId,
-            captainThreadId: input.captain.thread.id,
-            crewInstanceId: instance.id,
-            kind: "addition",
-            brief: input.brief ?? instance.brief,
-            displayName: instance.displayName,
-            requestedSeats: [input.seat],
-            createdAt: DateTime.formatIso(yield* DateTime.now),
-          })
-          .pipe(Effect.mapError(operationError("recording the proposal")));
-        if (proposal.status !== "open") {
+        // A replayed request finds its proposal before anything is checked or counted: once its
+        // seat has launched, the name clash and the cap would both refuse the retry otherwise.
+        const replayed = yield* proposals
+          .read(proposalId)
+          .pipe(Effect.mapError(operationError("reading the proposal")));
+        if (replayed !== null) {
           const current = yield* crews.read(instance.id).pipe(Effect.orDie);
-          return { proposal, instance: current };
+          return { proposal: replayed, instance: current };
         }
-        return { proposal, instance };
+        yield* validateSeats(
+          [input.seat],
+          instance.members.map(({ seatName }) => seatName),
+        );
+        const admitted = yield* proposals
+          .admit(
+            {
+              id: proposalId,
+              squadronId: input.captain.squadronId,
+              captainParticipantId: input.captain.participantId,
+              captainThreadId: input.captain.thread.id,
+              crewInstanceId: instance.id,
+              kind: "addition",
+              brief: input.brief ?? instance.brief,
+              displayName: instance.displayName,
+              requestedSeats: [input.seat],
+              createdAt: DateTime.formatIso(yield* DateTime.now),
+            },
+            { maxSeats: CREW_SEAT_CAP },
+          )
+          .pipe(Effect.mapError(operationError("recording the proposal")));
+        if (admitted.status === "cap-exceeded")
+          return yield* crewFullError(
+            instance.displayName,
+            admitted.held,
+            admitted.adding,
+            "request",
+          );
+        if (admitted.proposal.status !== "open") {
+          const current = yield* crews.read(instance.id).pipe(Effect.orDie);
+          return { proposal: admitted.proposal, instance: current };
+        }
+        return { proposal: admitted.proposal, instance };
       });
 
     const reservedByProposal = crewSeatReservedBy;
@@ -615,16 +678,22 @@ export const layer = Layer.effect(
       // deterministic ids; they are the reservation the retry converges on, not a clash
       // (Critic Q2, 2026-09-14).
       const reservedHere = reservedByProposal(proposal.id);
-      yield* validateSeats(
-        seats,
-        {
-          seatNames: existingMembers
-            .filter((member) => !reservedHere(member))
-            .map(({ seatName }) => seatName),
-          pendingSeats: 0,
-        },
-        true,
-      );
+      const otherSeats =
+        proposal.kind === "roster"
+          ? null
+          : existingMembers
+              .filter((member) => !reservedHere(member))
+              .map(({ seatName }) => seatName);
+      yield* validateSeats(seats, otherSeats, true);
+      // The request was counted against open requests when it was filed; the approval only has
+      // to fit the live rows, which the member store enforces again when it reserves them.
+      if (otherSeats !== null && otherSeats.length + seats.length > CREW_SEAT_CAP)
+        return yield* crewFullError(
+          proposal.displayName,
+          otherSeats.length,
+          seats.length,
+          "approval",
+        );
     });
 
     const preview: CrewProposalServiceShape["preview"] = Effect.fn("j5.a2a.crewProposal.preview")(

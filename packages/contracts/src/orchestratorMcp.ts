@@ -22,6 +22,7 @@ import {
   ScheduledTaskUpsertSchedule,
 } from "./scheduledTask.ts";
 import { ProviderInteractionMode, RuntimeMode } from "./providerPolicy.ts";
+import { ThreadLinkedPullRequest, ThreadTitleRegeneration } from "./orchestration.ts";
 import {
   OrchestrationV2Actor,
   OrchestrationV2CreationSource,
@@ -77,7 +78,7 @@ const OrchestratorMcpTargetOptionsFromRecord = Schema.Record(
 ).pipe(
   Schema.decodeTo(
     Schema.Array(ProviderOptionSelection),
-    SchemaTransformation.transformOrFail({
+    SchemaTransformation.transformEffect({
       decode: (record) =>
         Effect.succeed(Object.entries(record).map(([id, value]) => ({ id, value }))),
       encode: (selections: ReadonlyArray<ProviderOptionSelection>) =>
@@ -193,6 +194,7 @@ export const OrchestratorMcpDelegateTaskResult = Schema.Struct({
   childRunId: Schema.NullOr(RunId),
   childNodeId: NodeId,
   status: OrchestratorMcpDelegatedTaskStatus,
+  workState: Schema.Literals(["working", "waiting_for_children", "result_available"]),
   hasPendingChildRuns: Schema.Boolean,
   latestTerminalRunId: Schema.NullOr(RunId),
   latestTerminalStatus: Schema.NullOr(OrchestratorMcpTerminalDelegatedTaskStatus),
@@ -271,16 +273,6 @@ export const OrchestratorMcpCreateThreadsResult = Schema.Struct({
 });
 export type OrchestratorMcpCreateThreadsResult = typeof OrchestratorMcpCreateThreadsResult.Type;
 
-export const OrchestratorMcpThreadStartInput = Schema.Struct({
-  prompt: OrchestratorMcpPrompt,
-  title: Schema.optional(OrchestratorMcpTitle),
-  target: Schema.optional(OrchestratorMcpTarget),
-  clientRequestId: Schema.optional(OrchestratorMcpClientRequestId),
-  runtimeMode: Schema.optional(OrchestratorMcpRuntimeMode),
-  interactionMode: Schema.optional(OrchestratorMcpInteractionMode),
-});
-export type OrchestratorMcpThreadStartInput = typeof OrchestratorMcpThreadStartInput.Type;
-
 export const OrchestratorMcpThreadStatus = Schema.Union([
   Schema.Literal("idle"),
   OrchestrationV2RunStatus,
@@ -309,6 +301,7 @@ export const OrchestratorMcpThreadListItem = Schema.Struct({
   model: Schema.String,
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
+  linkedPullRequest: Schema.NullOr(ThreadLinkedPullRequest),
   parentThreadId: Schema.NullOr(ThreadId),
   relationshipToParent: Schema.NullOr(Schema.Literals(["fork", "subagent"])),
   itemCount: NonNegativeInt,
@@ -328,6 +321,8 @@ export type OrchestratorMcpThreadListResult = typeof OrchestratorMcpThreadListRe
 
 export const OrchestratorMcpThreadReadInput = Schema.Struct({
   threadId: ThreadId,
+  itemId: Schema.optional(TurnItemId),
+  textOffset: Schema.optional(NonNegativeInt),
   view: Schema.optional(Schema.Literals(["messages", "activity"])),
   afterPosition: Schema.optional(NonNegativeInt),
   limit: Schema.optional(PositiveInt.check(Schema.isLessThanOrEqualTo(100))),
@@ -349,6 +344,8 @@ export const OrchestratorMcpThreadDetail = Schema.Struct({
   model: Schema.String,
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
+  linkedPullRequest: Schema.NullOr(ThreadLinkedPullRequest),
+  titleRegeneration: Schema.NullOr(ThreadTitleRegeneration),
   branch: Schema.NullOr(Schema.String),
   worktreePath: Schema.NullOr(Schema.String),
   parentThreadId: Schema.NullOr(ThreadId),
@@ -388,6 +385,7 @@ export const OrchestratorMcpThreadTimelineItem = Schema.Struct({
   title: Schema.NullOr(Schema.String),
   text: Schema.NullOr(Schema.String),
   textTruncated: Schema.Boolean,
+  nextTextOffset: Schema.optional(Schema.NullOr(NonNegativeInt)),
   updatedAt: IsoDateTime,
 });
 export type OrchestratorMcpThreadTimelineItem = typeof OrchestratorMcpThreadTimelineItem.Type;
@@ -561,7 +559,7 @@ export const OrchestratorMcpDeleteScheduledTaskResult = Schema.Struct({
 export type OrchestratorMcpDeleteScheduledTaskResult =
   typeof OrchestratorMcpDeleteScheduledTaskResult.Type;
 
-export class OrchestratorMcpFailure extends Schema.TaggedErrorClass<OrchestratorMcpFailure>()(
+export class OrchestratorMcpFailure extends Schema.TaggedError<OrchestratorMcpFailure>()(
   "OrchestratorMcpFailure",
   {
     code: Schema.Literals([

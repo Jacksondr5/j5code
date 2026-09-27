@@ -6,6 +6,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import type { SqlError } from "effect/unstable/sql/SqlError";
 
 import * as ProjectService from "../../project/ProjectService.ts";
 import { randomUuidV4 } from "../../orchestration-v2/RandomUuid.ts";
@@ -26,7 +27,12 @@ export interface CreateSquadronInput {
   readonly projectId: ProjectId;
 }
 
-export class SquadronNameRequiredError extends Schema.TaggedErrorClass<SquadronNameRequiredError>()(
+export interface RenameSquadronInput {
+  readonly squadronId: SquadronId;
+  readonly name: string;
+}
+
+export class SquadronNameRequiredError extends Schema.TaggedError<SquadronNameRequiredError>()(
   "SquadronNameRequiredError",
   {},
 ) {
@@ -35,7 +41,7 @@ export class SquadronNameRequiredError extends Schema.TaggedErrorClass<SquadronN
   }
 }
 
-export class SquadronProjectNotFoundError extends Schema.TaggedErrorClass<SquadronProjectNotFoundError>()(
+export class SquadronProjectNotFoundError extends Schema.TaggedError<SquadronProjectNotFoundError>()(
   "SquadronProjectNotFoundError",
   { projectId: ProjectId },
 ) {
@@ -44,18 +50,75 @@ export class SquadronProjectNotFoundError extends Schema.TaggedErrorClass<Squadr
   }
 }
 
+/**
+ * Only live state keeps a Squadron alive: unarchived agent members and
+ * unarchived Crews. Stopping pauses work but keeps both, so archive is the
+ * gate. History never blocks, and a send-only machine credential is not
+ * running work, so both are purged with the Squadron.
+ */
+export const SquadronDeleteBlockerKind = Schema.Literals(["agents", "crews"]);
+export type SquadronDeleteBlockerKind = typeof SquadronDeleteBlockerKind.Type;
+
+const blockerLabel = (kind: SquadronDeleteBlockerKind, count: number): string => {
+  const plural = count === 1 ? "" : "s";
+  switch (kind) {
+    case "agents":
+      return `${count} active agent${plural}`;
+    case "crews":
+      return `${count} unarchived Crew${plural}`;
+  }
+};
+
+/**
+ * The foreign keys onto `j5_a2a_squadron` that are ON DELETE RESTRICT, in
+ * delete order. Every other referencing table (and its children) cascades
+ * from the Squadron row under the `foreign_keys` pragma the server always
+ * enables.
+ */
+export const SQUADRON_RESTRICT_TABLES = [
+  "j5_a2a_placement_event",
+  "j5_a2a_comm_command_receipt",
+  "j5_a2a_comm_event",
+] as const;
+
+const joinBlockers = (labels: ReadonlyArray<string>): string =>
+  labels.length <= 1
+    ? (labels[0] ?? "")
+    : `${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]}`;
+
+export class SquadronDeleteBlockedError extends Schema.TaggedError<SquadronDeleteBlockedError>()(
+  "SquadronDeleteBlockedError",
+  {
+    squadronId: SquadronId,
+    name: Schema.String,
+    blockers: Schema.Array(
+      Schema.Struct({ kind: SquadronDeleteBlockerKind, count: Schema.Number }),
+    ),
+  },
+) {
+  override get message(): string {
+    const labels = this.blockers.map((blocker) => blockerLabel(blocker.kind, blocker.count));
+    return `Squadron "${this.name}" cannot be deleted while it still has ${joinBlockers(labels)}.`;
+  }
+}
+
 export type SquadronManagementError =
   | A2ALedgerError
   | ProjectService.ProjectServiceError
   | SquadronProjectReferenceError
   | SquadronNameRequiredError
-  | SquadronProjectNotFoundError;
+  | SquadronProjectNotFoundError
+  | SquadronDeleteBlockedError;
 
 export interface SquadronManagementServiceShape {
   readonly list: () => Effect.Effect<ReadonlyArray<ManagedSquadron>, SquadronManagementError>;
   readonly create: (
     input: CreateSquadronInput,
   ) => Effect.Effect<ManagedSquadron, SquadronManagementError>;
+  readonly rename: (
+    input: RenameSquadronInput,
+  ) => Effect.Effect<ManagedSquadron, SquadronManagementError>;
+  readonly delete: (squadronId: SquadronId) => Effect.Effect<void, SquadronManagementError>;
 }
 
 /**
@@ -124,6 +187,64 @@ export const layer: Layer.Layer<
       );
     });
 
-    return SquadronManagementService.of({ list, create });
+    const rename = Effect.fn("j5.a2a.squadronManagement.rename")(function* (
+      input: RenameSquadronInput,
+    ) {
+      const name = input.name.trim();
+      if (name.length === 0) return yield* new SquadronNameRequiredError();
+      const squadron = yield* ledger.renameSquadron({ squadronId: input.squadronId, name });
+      const projectReferences = yield* references.listForSquadron(squadron.id);
+      return { squadron, projectIds: projectReferences.map((ref) => ref.projectId) };
+    });
+
+    const countBlockers = (squadronId: SquadronId) => {
+      const count = (query: Effect.Effect<ReadonlyArray<{ readonly count: number }>, SqlError>) =>
+        query.pipe(Effect.map((rows) => Number(rows[0]?.count ?? 0)));
+      return {
+        agents: count(
+          sql`SELECT COUNT(*) AS count FROM j5_a2a_squadron_membership WHERE squadron_id = ${squadronId} AND archived_at IS NULL`,
+        ),
+        crews: count(
+          sql`SELECT COUNT(*) AS count FROM j5_agent_crew_instance WHERE squadron_id = ${squadronId} AND archived_at IS NULL`,
+        ),
+      } satisfies Record<SquadronDeleteBlockerKind, unknown>;
+    };
+
+    const purgeRestrictedRows = (squadronId: SquadronId) =>
+      Effect.forEach(
+        SQUADRON_RESTRICT_TABLES,
+        (table) => sql.unsafe(`DELETE FROM ${table} WHERE squadron_id = ?`, [squadronId]),
+        { discard: true },
+      );
+
+    // Hard delete in one transaction. Live agents or unarchived Crews refuse
+    // with a named blocker; otherwise history and derived rows are purged and
+    // threads that were homed here read as unknown-home afterwards.
+    const remove = Effect.fn("j5.a2a.squadronManagement.delete")(function* (
+      squadronId: SquadronId,
+    ) {
+      yield* sql.withTransaction(
+        Effect.gen(function* () {
+          const squadron = yield* ledger.readSquadron(squadronId);
+          const counts = countBlockers(squadronId);
+          const blockers: Array<{ kind: SquadronDeleteBlockerKind; count: number }> = [];
+          for (const kind of SquadronDeleteBlockerKind.literals) {
+            const count = yield* counts[kind];
+            if (count > 0) blockers.push({ kind, count });
+          }
+          if (blockers.length > 0) {
+            return yield* new SquadronDeleteBlockedError({
+              squadronId,
+              name: squadron.name,
+              blockers,
+            });
+          }
+          yield* purgeRestrictedRows(squadronId);
+          yield* ledger.deleteSquadron(squadronId);
+        }),
+      );
+    });
+
+    return SquadronManagementService.of({ list, create, rename, delete: remove });
   }),
 );

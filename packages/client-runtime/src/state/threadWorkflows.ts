@@ -8,6 +8,7 @@ import { copySorted } from "@t3tools/shared/Array";
 
 type Projection = OrchestrationV2ThreadProjection;
 type Run = Projection["runs"][number];
+type Message = Projection["messages"][number];
 type ProviderSession = Projection["providerSessions"][number];
 
 const ACTIVE_RUN_STATUSES = new Set<Run["status"]>(["preparing", "starting", "running", "waiting"]);
@@ -22,16 +23,20 @@ export interface QueuedThreadRun {
   readonly run: Run;
   readonly text: string;
   readonly attachments: ReadonlyArray<ChatAttachment>;
+  /** Editing replaces this message's content, so its id and context travel with the row. */
+  readonly messageId: Message["id"];
+  readonly context?: Message["context"];
 }
 
 export interface ThreadQueueWorkflowState {
   readonly activeRun: Run | null;
   readonly queuedRuns: ReadonlyArray<QueuedThreadRun>;
+  readonly isHeld: boolean;
   readonly canReorder: boolean;
   readonly canPromoteToSteer: boolean;
 }
 
-export function resolveActiveThreadRun(projection: Projection): Run | null {
+export function resolveActiveThreadRun(projection: Pick<Projection, "runs">): Run | null {
   return projection.runs.findLast((run) => ACTIVE_RUN_STATUSES.has(run.status)) ?? null;
 }
 
@@ -58,7 +63,7 @@ export function resolveLatestMergeBackRun(projection: Projection): Run | null {
   return hasNewerActiveRun ? null : latestProviderFinishedRun;
 }
 
-export function resolveThreadProviderSession(projection: Projection): ProviderSession | null {
+function resolveThreadProviderSession(projection: Projection): ProviderSession | null {
   const activeRun = resolveActiveThreadRun(projection);
   const providerThreadId = activeRun?.providerThreadId ?? projection.thread.activeProviderThreadId;
   const activeProviderThread =
@@ -82,6 +87,35 @@ export function resolveThreadProviderSession(projection: Projection): ProviderSe
   );
 }
 
+export function threadSupportsProviderHandoff(projection: Projection | null | undefined): boolean {
+  if (projection == null) return false;
+  const session = resolveThreadProviderSession(projection);
+  if (session !== null) {
+    return session.capabilities.sessions.supportsProviderSwitchingViaHandoff;
+  }
+  return (
+    resolveActiveThreadRun(projection) === null &&
+    (projection.thread.historyOrigin === "v1_import" || projection.runs.length === 0)
+  );
+}
+
+/** Automatic completion/notification runs are not messages in the user's queue. */
+export function getUserQueuedThreadRuns(
+  projection: Pick<Projection, "runs" | "messages">,
+): ReadonlyArray<Run> {
+  const automaticCompletionMessageIds = new Set(
+    projection.messages
+      .filter(
+        (message) =>
+          message.delegatedCompletion !== undefined || message.notification !== undefined,
+      )
+      .map((message) => message.id),
+  );
+  return projection.runs.filter(
+    (run) => run.status === "queued" && !automaticCompletionMessageIds.has(run.userMessageId),
+  );
+}
+
 export function deriveThreadQueueWorkflowState(projection: Projection): ThreadQueueWorkflowState {
   const activeRun = resolveActiveThreadRun(projection);
   const session = resolveThreadProviderSession(projection);
@@ -92,15 +126,8 @@ export function deriveThreadQueueWorkflowState(projection: Projection): ThreadQu
     projection.providerTurns.some(
       (turn) => turn.runAttemptId === activeRun.activeAttemptId && turn.status === "running",
     );
-  const automaticCompletionMessageIds = new Set(
-    projection.messages
-      .filter((message) => message.delegatedCompletion !== undefined)
-      .map((message) => message.id),
-  );
   const queuedRuns = copySorted(
-    projection.runs.filter(
-      (run) => run.status === "queued" && !automaticCompletionMessageIds.has(run.userMessageId),
-    ),
+    getUserQueuedThreadRuns(projection),
     (left, right) =>
       (left.queuePosition ?? left.ordinal) - (right.queuePosition ?? right.ordinal) ||
       left.ordinal - right.ordinal,
@@ -110,12 +137,15 @@ export function deriveThreadQueueWorkflowState(projection: Projection): ThreadQu
       run,
       text: message?.text ?? "Queued message",
       attachments: message?.attachments ?? [],
+      messageId: run.userMessageId,
+      ...(message?.context ? { context: message.context } : {}),
     };
   });
 
   return {
     activeRun,
     queuedRuns,
+    isHeld: projection.runs.some((run) => run.status === "queued" && run.queueHeld === true),
     canReorder: capabilities?.supportsQueuedMessages === true,
     canPromoteToSteer:
       hasSteerableProviderTurn &&

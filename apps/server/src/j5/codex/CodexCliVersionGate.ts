@@ -9,7 +9,7 @@ import * as Schema from "effect/Schema";
  */
 export const MINIMUM_CODEX_CLI_VERSION = "0.151.0";
 
-export class CodexCliVersionUnsupportedError extends Schema.TaggedErrorClass<CodexCliVersionUnsupportedError>()(
+export class CodexCliVersionUnsupportedError extends Schema.TaggedError<CodexCliVersionUnsupportedError>()(
   "CodexCliVersionUnsupportedError",
   {
     minimumVersion: Schema.String,

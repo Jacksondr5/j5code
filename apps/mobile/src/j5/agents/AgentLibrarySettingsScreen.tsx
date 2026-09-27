@@ -39,6 +39,7 @@ import { agentPersonaEnvironment } from "./agentPersonaAtoms";
 import { useEnvironmentQuery } from "../../state/query";
 import { useRemoteConnectionStatus } from "../../state/use-remote-environment-registry";
 import { SettingsSection } from "../../features/settings/components/SettingsSection";
+import { PlaybookLibrarySettingsSection } from "../playbooks/PlaybookLibrarySettingsScreen";
 
 export function AgentLibrarySettingsScreen() {
   const navigation = useNavigation();
@@ -752,6 +753,9 @@ export function AgentLibrarySettingsScreen() {
             </View>
           </SettingsSection>
         ) : null}
+        <SettingsSection title="Playbooks">
+          <PlaybookLibrarySettingsSection />
+        </SettingsSection>
       </ScrollView>
       {notification ? (
         <AgentLibraryToast notification={notification} onDismiss={dismissNotification} />

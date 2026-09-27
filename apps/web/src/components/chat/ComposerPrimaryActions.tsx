@@ -1,8 +1,3 @@
-import {
-  notSteerableStateText,
-  steerActLabel,
-  type SteerState,
-} from "@t3tools/client-runtime/j5/steer-state";
 import { memo, type MouseEventHandler, type PointerEventHandler } from "react";
 import {
   CheckIcon,
@@ -20,6 +15,10 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Spinner } from "../ui/spinner";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { composerFloatingLayerProps } from "./composerEventScope";
+import {
+  alternateComposerDispatchAction,
+  resolveComposerDispatchMode,
+} from "@t3tools/client-runtime/state/composer-dispatch";
 
 interface PendingActionState {
   questionIndex: number;
@@ -33,7 +32,8 @@ interface ComposerPrimaryActionsProps {
   compact: boolean;
   pendingAction: PendingActionState | null;
   isRunning: boolean;
-  steerState?: SteerState;
+  followUpBehavior?: "queue" | "steer";
+  alternateShortcutLabel?: string | null;
   showPlanFollowUpPrompt: boolean;
   promptHasText: boolean;
   isSendBusy: boolean;
@@ -50,7 +50,7 @@ interface ComposerPrimaryActionsProps {
   onImplementPlanInNewThread: () => void;
 }
 
-export const formatPendingPrimaryActionLabel = (input: {
+const formatPendingPrimaryActionLabel = (input: {
   compact: boolean;
   isLastQuestion: boolean;
   isResponding: boolean;
@@ -68,6 +68,11 @@ export const formatPendingPrimaryActionLabel = (input: {
   return input.questionIndex > 0 ? "Submit answers" : "Submit answer";
 };
 
+// The composer's labeled primary actions (Submit, Refine, Implement) share the send button's
+// message-action pill, so they are composer-owned buttons rather than restyled Buttons.
+const messageActionPillClassName =
+  "inline-flex shrink-0 cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-full bg-message-action font-medium text-base text-message-action-foreground shadow-xs shadow-message-action/24 outline-none hover:bg-message-action-hover focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-64 disabled:shadow-none sm:text-sm";
+
 const preventPointerFocus: PointerEventHandler<HTMLElement> = (event) => {
   event.preventDefault();
 };
@@ -76,7 +81,8 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   compact,
   pendingAction,
   isRunning,
-  steerState,
+  followUpBehavior = "steer",
+  alternateShortcutLabel = null,
   showPlanFollowUpPrompt,
   promptHasText,
   isSendBusy,
@@ -98,9 +104,13 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   const environmentIdentificationMode = useEnvironmentIdentificationMode();
   const shortcutModifiers = useShortcutModifierState();
   const isQueuing =
-    isRunning &&
     !isEditingQueuedMessage &&
-    (shortcutModifiers.metaKey || shortcutModifiers.ctrlKey);
+    resolveComposerDispatchMode({
+      running: isRunning,
+      activeTurnDefault: followUpBehavior,
+      alternateModifier: shortcutModifiers.metaKey || shortcutModifiers.ctrlKey,
+    }) === "queue";
+  const alternateAction = alternateComposerDispatchAction(followUpBehavior);
   const isSendDisabled = sendDisabledReason !== null;
   const stageBackdropVariant = useSidebarStageBackdropVariant(
     environmentIdentificationMode === "artwork",
@@ -139,7 +149,6 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
             <Button
               size="icon-sm"
               variant="outline"
-              className="rounded-full"
               {...pointerFocusProps}
               onClick={onPreviousPendingQuestion}
               disabled={pendingAction.isResponding}
@@ -151,7 +160,6 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
             <Button
               size="sm"
               variant="outline"
-              className="rounded-full"
               {...pointerFocusProps}
               onClick={onPreviousPendingQuestion}
               disabled={pendingAction.isResponding}
@@ -160,13 +168,9 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
             </Button>
           )
         ) : null}
-        <Button
+        <button
           type="submit"
-          size="sm"
-          className={cn(
-            "rounded-full bg-message-action text-message-action-foreground hover:bg-message-action-hover",
-            compact ? "px-3" : "px-4",
-          )}
+          className={cn(messageActionPillClassName, "h-8 sm:h-7", compact ? "px-3" : "px-4")}
           {...pointerFocusProps}
           disabled={
             isEnvironmentUnavailable ||
@@ -180,7 +184,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
             isResponding: pendingAction.isResponding,
             questionIndex: pendingAction.questionIndex,
           })}
-        </Button>
+        </button>
       </div>
     );
   }
@@ -188,39 +192,36 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   if (showPlanFollowUpPrompt) {
     if (promptHasText) {
       return (
-        <Button
+        <button
           type="submit"
-          size="sm"
-          className={cn(
-            "rounded-full bg-message-action text-message-action-foreground hover:bg-message-action-hover",
-            compact ? "h-9 px-3 sm:h-8" : "h-9 px-4 sm:h-8",
-          )}
+          className={cn(messageActionPillClassName, "h-9 sm:h-8", compact ? "px-3" : "px-4")}
           {...pointerFocusProps}
           disabled={isSendBusy || isSendDisabled || isConnecting || isEnvironmentUnavailable}
         >
           {isConnecting || isSendBusy ? "Sending..." : "Refine"}
-        </Button>
+        </button>
       );
     }
 
     return (
       <div data-chat-composer-implement-actions="true" className="flex items-center justify-end">
-        <Button
+        <button
           type="submit"
-          size="sm"
-          className="h-9 rounded-l-full rounded-r-none bg-message-action px-4 text-message-action-foreground hover:bg-message-action-hover sm:h-8"
+          className={cn(messageActionPillClassName, "h-9 rounded-r-none px-4 sm:h-8")}
           {...pointerFocusProps}
           disabled={isSendBusy || isSendDisabled || isConnecting || isEnvironmentUnavailable}
         >
           {isConnecting || isSendBusy ? "Sending..." : "Implement"}
-        </Button>
+        </button>
         <Menu>
           <MenuTrigger
             render={
-              <Button
-                size="sm"
-                variant="default"
-                className="h-9 rounded-l-none rounded-r-full border-l-message-action-foreground/20 bg-message-action px-2 text-message-action-foreground hover:bg-message-action-hover sm:h-8"
+              <button
+                type="button"
+                className={cn(
+                  messageActionPillClassName,
+                  "h-9 rounded-l-none border-l border-message-action-foreground/20 px-2 sm:h-8",
+                )}
                 aria-label="Implementation actions"
                 {...pointerFocusProps}
                 disabled={isSendBusy || isSendDisabled || isConnecting || isEnvironmentUnavailable}
@@ -251,11 +252,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     : isQueuing
       ? "Queue message"
       : isRunning
-        ? steerState?.kind === "steerable"
-          ? steerActLabel(steerState.act)
-          : steerState?.kind === "not-steerable"
-            ? "Show steer options"
-            : "Steer message"
+        ? "Steer message"
         : "Submit message";
   const submitStatus = isEnvironmentUnavailable
     ? "Environment disconnected"
@@ -272,11 +269,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   const submitTooltip =
     submitStatus ??
     (isRunning && !isEditingQueuedMessage
-      ? steerState?.kind === "not-steerable"
-        ? `${notSteerableStateText(steerState.phase)}. Mod+Enter to queue`
-        : steerState?.kind === "steerable" && steerState.act === "interrupt-restart"
-          ? "Enter to interrupt and restart with this message, Mod+Enter to queue"
-          : "Enter to steer, Mod+Enter to queue"
+      ? `Click to ${followUpBehavior}, Ctrl/⌘-click${alternateShortcutLabel ? ` or ${alternateShortcutLabel}` : ""} to ${alternateAction}`
       : submitLabel);
 
   const sendButton = (
@@ -305,7 +298,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
         </span>
       ) : null}
       {isConnecting || isSendBusy ? (
-        <Spinner className="size-3.5" aria-hidden="true" />
+        <Spinner size="sm" aria-hidden="true" />
       ) : isEditingQueuedMessage ? (
         <CheckIcon className="size-4" aria-hidden="true" />
       ) : isQueuing ? (

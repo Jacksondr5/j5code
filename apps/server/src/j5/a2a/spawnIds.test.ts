@@ -34,6 +34,8 @@ const identity = {
   participantId: "agent:reviewer",
   squadronId: "squadron:review",
   squadronName: "Review",
+  spawnedByParticipantId: "agent:captain",
+  spawnerThreadId: "thread:captain",
 };
 const crew: CrewBriefContext = {
   displayName: "Change review",
@@ -78,6 +80,10 @@ it("retains declared persona output while allowing conversation before that outp
 it("keeps an ordinary Peer Agent brief free of crew instructions", () => {
   const text = spawnFirstTurnText(identity);
   assert.include(text, `<spawner_brief>\n${identity.brief}\n</spawner_brief>`);
+  assert.include(
+    text,
+    "spawned_by: agent:captain\nspawner_thread_id: thread:captain\n</j5_spawn_context>",
+  );
   assert.notInclude(text, "crew_collaboration");
   assert.notInclude(text, "Captain");
 });
@@ -102,4 +108,18 @@ it("compares dispatched briefs by their human-authored parts, not the roster", (
   );
   assert.notInclude(spawnBriefWithoutCrewContext(first), "j5_crew_context");
   assert.include(spawnBriefWithoutCrewContext(first), "<seat_instructions>");
+});
+
+it("ignores identity facts when comparing dispatched briefs, so a deploy cannot block a retry", () => {
+  const current = spawnFirstTurnText({ ...identity, crew });
+  const beforeSpawnerFacts = current.replace(
+    /\nspawned_by: [^\n]*\nspawner_thread_id: [^\n]*\n<\/j5_spawn_context>/,
+    "\n</j5_spawn_context>",
+  );
+  assert.notEqual(current, beforeSpawnerFacts);
+  assert.notInclude(spawnBriefWithoutCrewContext(current), "j5_spawn_context");
+  assert.equal(
+    spawnBriefWithoutCrewContext(current),
+    spawnBriefWithoutCrewContext(beforeSpawnerFacts),
+  );
 });

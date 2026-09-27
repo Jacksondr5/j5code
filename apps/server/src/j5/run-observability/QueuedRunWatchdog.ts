@@ -25,7 +25,7 @@ export const QUEUED_RUN_WATCHDOG_DELAY_MS = 5 * 60 * 1000;
 export const QUEUED_RUN_WATCHDOG_POLL_MS = 60 * 1000;
 export const QUEUED_RUN_WATCHDOG_MAX_CANDIDATES = 100;
 
-export class QueuedRunWatchdogError extends Schema.TaggedErrorClass<QueuedRunWatchdogError>()(
+export class QueuedRunWatchdogError extends Schema.TaggedError<QueuedRunWatchdogError>()(
   "QueuedRunWatchdogError",
   { cause: Schema.optional(Schema.Defect()) },
 ) {}
@@ -197,7 +197,12 @@ export const layer = Layer.effect(
         const projection = yield* projections.getThreadProjection(input.threadId);
         const run = projection.runs.find((candidate) => candidate.id === input.runId);
         if (run === undefined) return;
-        const failure = makeProviderFailure({ cause: vcsError, class: "unknown" });
+        // Upstream no longer copies arbitrary cause text; VCS errors format their own redacted message.
+        const failure = makeProviderFailure({
+          cause: vcsError,
+          message: vcsError.message,
+          class: "unknown",
+        });
         yield* writeFact({
           projection,
           run,

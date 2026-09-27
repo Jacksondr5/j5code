@@ -9,7 +9,10 @@ import { createSquadron } from "./squadronClient";
 import { refreshSquadronDirectory, useSquadronDirectory } from "./SquadronDirectory";
 import { setAmbientSquadronScope } from "./SquadronDraftState";
 
-/** Shared first-run and subsequent-create form: the caller supplies no default selection. */
+/**
+ * Shared first-run and subsequent-create form: the caller supplies no default selection.
+ * It fills its container's width; the caller owns outer spacing and any width cap.
+ */
 export function SquadronCreateForm({ onCreated }: { readonly onCreated?: () => void }) {
   const { sources } = useSquadronDirectory();
   const [name, setName] = useState("");
@@ -61,7 +64,7 @@ export function SquadronCreateForm({ onCreated }: { readonly onCreated?: () => v
 
   return (
     <form
-      className="mt-5 flex w-full max-w-sm flex-col gap-3 text-left"
+      className="flex w-full flex-col gap-3 text-left"
       onSubmit={(event) => {
         event.preventDefault();
         void create();

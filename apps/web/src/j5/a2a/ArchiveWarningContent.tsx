@@ -116,8 +116,8 @@ function ArchiveWarningRowView({ row }: { readonly row: ArchiveWarningRow }) {
   return (
     <li className="rounded-md border border-border/70 bg-muted/30 px-3 py-2">
       <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-        <Badge className="uppercase tracking-wide" size="sm" variant={urgency.variant}>
-          {urgency.label}
+        <Badge size="sm" variant={urgency.variant}>
+          <span className="uppercase tracking-wide">{urgency.label}</span>
         </Badge>
         <span className="inline-flex shrink-0 items-center gap-1">
           <DirectionIcon aria-hidden className="size-3" />
@@ -183,9 +183,10 @@ export function ArchiveWarningContent({ payload }: { readonly payload: ArchiveWa
       ) : null}
       {payload.placement.state === "known" ? (
         <p>
-          Also archives {payload.placement.participants.length} agent
+          {payload.placement.participants.length} agent
           {payload.placement.participants.length === 1 ? "" : "s"} placed under{" "}
-          {payload.threadTitle}:{" "}
+          {payload.threadTitle} keep{payload.placement.participants.length === 1 ? "s" : ""}{" "}
+          running:{" "}
           {payload.placement.participants.map((participant, index) => (
             <span key={`${participant.displayName}-${index}`}>
               {index > 0 ? ", " : null}

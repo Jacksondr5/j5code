@@ -1,3 +1,7 @@
+import {
+  latestRootProviderFailure,
+  threadErrorSummary,
+} from "@t3tools/shared/orchestrationV2ThreadError";
 import type { OrchestrationV2ThreadProjection } from "@t3tools/contracts";
 import { derivePendingBackgroundWork } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import * as DateTime from "effect/DateTime";
@@ -86,9 +90,16 @@ export function deriveThreadRuntime(
   return {
     status: hasPendingBackgroundTasks ? "idle" : (activityRun?.status ?? "idle"),
     activeRunId,
+    activityStartedAt:
+      activityRun !== null && ACTIVITY_RUN_STATUSES.has(activityRun.status)
+        ? (activityRun.startedAt ?? activityRun.requestedAt)
+        : null,
     providerInstanceId: projection.thread.providerInstanceId,
     providerName: providerSession?.driver ?? null,
-    lastError: providerSession?.lastError ?? null,
+    ...threadErrorSummary(
+      latestRootProviderFailure(latestRunProjection, projection.turnItems),
+      providerSession?.lastError ?? null,
+    ),
     updatedAt: DateTime.formatIso(projection.updatedAt),
   };
 }

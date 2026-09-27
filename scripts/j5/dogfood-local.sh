@@ -61,7 +61,7 @@ if [ "$FRESH" = 1 ] && [ -d "$STATE" ]; then
 fi
 
 if [ "$UPDATE" = 1 ]; then
-  if [ -f "$STATE/userdata/state.sqlite" ]; then
+  if [ -f "$STATE/userdata/statev2.sqlite" ] || [ -f "$STATE/userdata/state.sqlite" ]; then
     J5_DOGFOOD_BASE_DIR="$STATE" "$SRC/scripts/j5/dogfood-snapshot.sh" "pre-update-$HEAD_SHA"
   fi
   fnm install >/dev/null 2>&1 || true

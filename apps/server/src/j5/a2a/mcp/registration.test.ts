@@ -5,11 +5,11 @@ import * as Layer from "effect/Layer";
 import { McpServer } from "effect/unstable/ai";
 
 import { OrchestratorV2 } from "../../../orchestration-v2/Orchestrator.ts";
+import { ProviderAdapterRegistryV2 } from "../../../orchestration-v2/ProviderAdapterRegistry.ts";
 import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
 import { ProviderRegistry } from "../../../provider/Services/ProviderRegistry.ts";
 import { ScheduledTaskService } from "../../../scheduledTasks/ScheduledTaskService.ts";
 import { AgentCrewInstanceService } from "../AgentCrewInstanceService.ts";
-import { ArchiveAgentService } from "../ArchiveAgentService.ts";
 import { ArchiveCrewService } from "../ArchiveCrewService.ts";
 import { CrewStopService } from "../CrewStopService.ts";
 import { CrewProposalService } from "../CrewProposalService.ts";
@@ -31,6 +31,7 @@ const Dependencies = Layer.mergeAll(
   Layer.mock(ThreadManagementService)({}),
   Layer.mock(OrchestratorV2)({}),
   Layer.mock(ProviderRegistry)({}),
+  Layer.mock(ProviderAdapterRegistryV2)({}),
   Layer.mock(ScheduledTaskService)({}),
   Layer.mock(A2ADeliveryWorker)({}),
   Layer.mock(A2AHomeRegistrar)({}),
@@ -39,7 +40,6 @@ const Dependencies = Layer.mergeAll(
   Layer.mock(A2ASendService)({}),
   Layer.mock(SpawnCompositionService)({}),
   Layer.mock(AgentCrewInstanceService)({}),
-  Layer.mock(ArchiveAgentService)({}),
   Layer.mock(SquadronJoinService)({}),
   Layer.mock(SquadronProjectReferences)({}),
   Layer.mock(ArchiveCrewService)({}),
@@ -57,7 +57,6 @@ it.effect("registers the exact composed production J5 orchestration surface", ()
   Effect.gen(function* () {
     const server = yield* McpServer.McpServer;
     assert.deepStrictEqual(server.tools.map(({ tool }) => tool.name).toSorted(), [
-      "archive_agent",
       "archive_crew",
       "clear_own_ask",
       "delegate_task",
@@ -68,6 +67,14 @@ it.effect("registers the exact composed production J5 orchestration surface", ()
       "list_scheduled_tasks",
       "list_squadrons",
       "orchestrator_capabilities",
+      "playbook_back",
+      "playbook_cancel",
+      "playbook_complete",
+      "playbook_current",
+      "playbook_list",
+      "playbook_next",
+      "playbook_reselect",
+      "playbook_start",
       "propose_crew",
       "request_crew_member",
       "schedule_task",

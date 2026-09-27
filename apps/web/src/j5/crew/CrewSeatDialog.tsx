@@ -87,7 +87,15 @@ export function CrewSeatDialog(props: {
               Runtime settings are checked before you approve the crew.
             </DialogDescription>
           </DialogHeader>
-          <DialogPanel className="grid gap-4">
+          <DialogPanel>
+            {/* The Captain's reason is why this seat exists. It is read here, never edited: the
+                roster keeps the original reason when the member is saved (see saveSeat). */}
+            {props.seat?.reason ? (
+              <p className="text-xs text-muted-foreground">
+                <span className="font-medium text-foreground">Reason</span>{" "}
+                <span className="break-words">{props.seat.reason}</span>
+              </p>
+            ) : null}
             <CrewSeatEditor
               value={draft}
               environmentId={props.environmentId}

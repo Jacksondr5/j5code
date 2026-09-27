@@ -9,6 +9,28 @@ A driver kind identifies an integration; an instance identifies one configuratio
 lifecycle. Route work by instance, so two accounts using the same driver do not share mutable
 session or catalog state.
 
+## Playbook tool permissions
+
+Playbook tools only read live prompts and change the calling thread's run. They do not execute
+steps or grant workspace access, so their approval policy can differ from file and process tools.
+
+- Codex pre-approves the six Playbook mutations as coordination in interactive modes as well as
+  full access; discovery and current-step reads carry read-only annotations. The named allowlists
+  live in [codexToolApproval.ts](../../apps/server/src/j5/a2a/mcp/codexToolApproval.ts).
+- Claude includes all eight tools in its explicit MCP allowlist, including read-only threads;
+  see [claudeAllowedTools.ts](../../apps/server/src/j5/a2a/mcp/claudeAllowedTools.ts).
+- Cursor exposes the same tools through its thread-scoped MCP connection and retains the SDK's
+  native review and sandbox policy. Its adapter cannot resolve interactive approval requests;
+  no Playbook-specific approval bypass is added.
+- Grok and Antigravity use the ACP MCP connection and retain ACP permission handling: requests
+  can prompt in approval-required mode, and restricted sandboxes can deny mutation requests.
+  Playbooks do not widen those policies.
+- Managed OpenCode exposes the tools through its thread-scoped MCP registration and retains its
+  permission rules: supervised policies can ask and restricted policies can deny MCP calls.
+  External OpenCode connections do not receive T3's MCP registration or Playbook guidance.
+
+These are adapter policy decisions, not a claim that every provider runs Playbooks unattended.
+
 ## Process and account isolation
 
 T3-managed OpenCode chat uses one server per thread. Its MCP registrations are directory-scoped, while
@@ -22,10 +44,19 @@ OpenCode also stores persistent approval grants per directory. Automatic full-ac
 `once` so they cannot widen a supervised thread's permissions on a shared external server.
 See the [adapter](../../apps/server/src/orchestration-v2/Adapters/OpenCodeAdapterV2.ts).
 
+Pi runs the user's own `pi` install in RPC mode and owns native extension, package, and project
+trust discovery. T3 injects only its namespaced MCP bridge, so a Pi session behaves as it does in
+the Pi TUI. Pi session files back native resume, rollback, and same-instance thread forks.
+Forks use Pi's CLI in the destination directory because RPC session switching retains the source
+session's cwd. Provider switches still use portable handoff summaries.
+See the [adapter](../../apps/server/src/orchestration-v2/Adapters/PiAdapterV2.ts).
+
 Antigravity separates account profiles per instance while sharing installed executables across the
 environment. It forces file-based credential storage because the native macOS keychain entry would
 otherwise be shared across instances. The launch environment removes ambient Google credentials,
-so an instance cannot silently use another account or billing project.
+so an instance cannot silently use another account or billing project. The agent also resolves
+its user-global skill directories under that profile, so the profile links those two directories
+back to the user's real `~/.gemini`; MCP servers, hooks, and rules there stay out of the profile.
 See [profile isolation](../../apps/server/src/provider/antigravityAuthSupport.ts).
 
 The [Antigravity installer](../../apps/server/src/provider/AntigravityInstallation.ts) outlives

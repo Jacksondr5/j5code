@@ -136,6 +136,7 @@ function withFakeCodexEnv<A, E, R>(
   input: FakeCodexInput & {
     launchArgs?: string;
     environment?: NodeJS.ProcessEnv;
+    models?: ReadonlyArray<string>;
   },
   effectFn: (textGeneration: TextGeneration.TextGeneration["Service"]) => Effect.Effect<A, E, R>,
 ) {
@@ -144,12 +145,44 @@ function withFakeCodexEnv<A, E, R>(
     const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3code-codex-text-" });
     const codexPath = yield* makeFakeCodexBinary(tempDir, input);
     const config = decodeCodexSettings({ binaryPath: codexPath, launchArgs: input.launchArgs });
-    const textGeneration = yield* makeCodexTextGeneration(config, input.environment);
+    const textGeneration = yield* makeCodexTextGeneration(
+      config,
+      input.environment === undefined ? undefined : { ...process.env, ...input.environment },
+      Effect.succeed(
+        (input.models ?? []).map((slug) => ({
+          slug,
+          name: slug,
+          isCustom: false,
+          capabilities: null,
+        })),
+      ),
+    );
     return yield* effectFn(textGeneration);
   }).pipe(Effect.scoped);
 }
 
 it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
+  for (const selectedModel of ["gpt-5.6-luna", "openai.gpt-5.6-luna"]) {
+    it.effect(`dispatches the qualified live model for ${selectedModel}`, () =>
+      withFakeCodexEnv(
+        {
+          output: JSON.stringify({ title: "Bedrock title" }),
+          models: ["openai.gpt-5.6-luna"],
+          requireArg: "--model openai.gpt-5.6-luna",
+          forbidArg: "--model gpt-5.6-luna",
+        },
+        (textGeneration) =>
+          Effect.gen(function* () {
+            const result = yield* textGeneration.generateThreadTitle({
+              cwd: process.cwd(),
+              message: "Describe this change",
+              modelSelection: createModelSelection(ProviderInstanceId.make("codex"), selectedModel),
+            });
+            expect(result.title).toBe("Bedrock title");
+          }),
+      ),
+    );
+  }
   it.effect("generates and sanitizes commit messages without branch by default", () =>
     withFakeCodexEnv(
       {
@@ -235,10 +268,7 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
           body: "",
         }),
         launchArgs: "--enable settings-feature",
-        environment: {
-          PATH: process.env.PATH,
-          T3CODE_CODEX_LAUNCH_ARGS: " --strict-config --listen off ",
-        },
+        environment: { ...process.env, T3CODE_CODEX_LAUNCH_ARGS: " --strict-config --listen off " },
         requireArg: "--strict-config",
         forbidArg: "settings-feature",
       },
@@ -348,6 +378,50 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
     ),
   );
 
+  for (const example of [
+    {
+      mode: "static",
+      output: "Add Search",
+      expected: "team/add-search",
+      instruction: "without a prefix or namespace",
+    },
+    {
+      mode: "semantic",
+      output: "feat/add-search",
+      expected: "feat/add-search",
+      instruction: "semantic prefix",
+    },
+    {
+      mode: "custom",
+      output: "Julius/ABC-123.v2",
+      expected: "Julius/ABC-123.v2",
+      instruction: "Preserve the issue ID and capitalization.",
+    },
+  ] as const) {
+    it.effect(`generates a branch using ${example.mode} naming`, () =>
+      withFakeCodexEnv(
+        {
+          output: JSON.stringify({ branch: example.output }),
+          stdinMustContain: example.instruction,
+        },
+        (textGeneration) =>
+          Effect.gen(function* () {
+            const generated = yield* textGeneration.generateBranchName({
+              cwd: process.cwd(),
+              message: "Add search",
+              modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+              naming: {
+                mode: example.mode,
+                prefix: "team/",
+                instructions: "Preserve the issue ID and capitalization.",
+              },
+            });
+            expect(generated.branch).toBe(example.expected);
+          }),
+      ),
+    );
+  }
+
   it.effect("generates branch names even when the ambient scope is already closed", () =>
     withFakeCodexEnv(
       {
@@ -392,7 +466,25 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
             modelSelection: DEFAULT_TEST_MODEL_SELECTION,
           });
 
-          expect(generated.title).toBe("Investigate websocket reconnect regressions aft...");
+          expect(generated.title).toBe(
+            "Investigate websocket reconnect regressions after worktree restore",
+          );
+        }),
+    ),
+  );
+
+  it.effect("returns the refinement signal for an unresolved subject", () =>
+    withFakeCodexEnv(
+      { output: JSON.stringify({ title: "Investigate issue", needsRefinement: true }) },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          expect(
+            yield* textGeneration.generateThreadTitle({
+              cwd: process.cwd(),
+              message: "Fix this",
+              modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+            }),
+          ).toEqual({ title: "Investigate issue", needsRefinement: true });
         }),
     ),
   );

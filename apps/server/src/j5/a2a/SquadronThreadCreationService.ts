@@ -31,7 +31,7 @@ export interface SquadronThreadCreationInput {
 
 export type SquadronThreadCreationResult = RegisteredThreadHome;
 
-export class SquadronThreadCreationMissingSquadronError extends Schema.TaggedErrorClass<SquadronThreadCreationMissingSquadronError>()(
+export class SquadronThreadCreationMissingSquadronError extends Schema.TaggedError<SquadronThreadCreationMissingSquadronError>()(
   "SquadronThreadCreationMissingSquadronError",
   { commandId: Schema.String },
 ) {
@@ -40,7 +40,7 @@ export class SquadronThreadCreationMissingSquadronError extends Schema.TaggedErr
   }
 }
 
-export class SquadronThreadCreationProjectReferenceError extends Schema.TaggedErrorClass<SquadronThreadCreationProjectReferenceError>()(
+export class SquadronThreadCreationProjectReferenceError extends Schema.TaggedError<SquadronThreadCreationProjectReferenceError>()(
   "SquadronThreadCreationProjectReferenceError",
   {
     squadronId: Schema.String,

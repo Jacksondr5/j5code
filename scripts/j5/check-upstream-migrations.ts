@@ -1,15 +1,19 @@
 // @effect-diagnostics nodeBuiltinImport:off globalConsole:off - this synchronous Git audit is a standalone Node CLI that emits machine-readable JSON.
 import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
+import * as NodePath from "node:path";
 import * as NodeUtil from "node:util";
 
+import collapse from "../../apps/server/src/j5/persistence/reviewed-v2-collapse.v1.json" with { type: "json" };
 import reviewed from "../../apps/server/src/j5/persistence/legacy-upstream-migrations.v1.json" with { type: "json" };
+import renumber from "../../apps/server/src/j5/persistence/reviewed-v2-renumber.v1.json" with { type: "json" };
 
 export interface MigrationRecord {
   readonly id: number;
   readonly name: string;
   readonly path: string;
   readonly sha256: string;
+  readonly dependencies?: ReadonlyArray<{ readonly path: string; readonly sha256: string }>;
 }
 
 export interface MigrationChange {
@@ -53,7 +57,10 @@ export function inspectMigrationChanges(
     if (row.id !== next.id) {
       changes.push({ kind: "renumbered", name: row.name, oldId: row.id, newId: next.id });
     }
-    if (row.sha256 !== next.sha256) {
+    if (
+      row.sha256 !== next.sha256 ||
+      JSON.stringify(row.dependencies ?? []) !== JSON.stringify(next.dependencies ?? [])
+    ) {
       changes.push({
         kind: "implementation_changed",
         name: row.name,
@@ -70,12 +77,46 @@ export function inspectMigrationChanges(
   return changes;
 }
 
+const sameManifest = (
+  actual: ReadonlyArray<MigrationRecord>,
+  expected: ReadonlyArray<MigrationRecord>,
+) =>
+  actual.length === expected.length &&
+  actual.every((row, index) => {
+    const other = expected[index];
+    return (
+      other !== undefined &&
+      row.id === other.id &&
+      row.name === other.name &&
+      row.sha256 === other.sha256 &&
+      JSON.stringify(row.dependencies ?? []) === JSON.stringify(other.dependencies ?? [])
+    );
+  });
+
+/** Reviewed upstream targets, newest first. A candidate must contain one of these exact commits. */
+export const reviewedTargetRefs = [renumber.targetRef, collapse.targetRef, reviewed.targetRef];
+
 /** Allows only the recorded old manifest and exact reviewed upstream target. */
 export function matchesReviewedBridge(
   before: ReadonlyArray<MigrationRecord>,
   after: ReadonlyArray<MigrationRecord>,
   targetSha: string,
 ): boolean {
+  if (targetSha === renumber.targetRef) {
+    // Pin → U: V2 moves 51 → 54 after three inserted migrations; 050's backfill
+    // dependencies drifted, which is safe only because a recorded 050 never reruns.
+    return (
+      sameManifest(before, renumber.sourceMigrations) &&
+      sameManifest(after, renumber.targetMigrations)
+    );
+  }
+  if (targetSha === collapse.targetRef) {
+    return (
+      (sameManifest(before, reviewed.migrations) ||
+        sameManifest(before, collapse.sourceMigrations)) &&
+      sameManifest(after, collapse.targetMigrations)
+    );
+  }
   if (
     targetSha !== reviewed.targetRef ||
     before.length !== reviewed.migrations.length ||
@@ -116,6 +157,45 @@ const gitText = (cwd: string, ...args: ReadonlyArray<string>) =>
     maxBuffer: 8 * 1024 * 1024,
   });
 
+// Identified by manifest name: upstream renumbers these files (051 → 054 for V2).
+const composedName = "OrchestrationV2";
+const backfillName = "ProjectionThreadPullRequests";
+const auditedNames = new Set([composedName, backfillName]);
+
+/**
+ * Hash the reviewed V2 setup and the functions reached by the PR backfill.
+ * This is a bounded dependency list, not a module resolver: implementation changes
+ * require reviewing these dependencies again before allowing another bridge.
+ * A self-contained historical V2 migration (September's 048) has no dependencies.
+ */
+export function readMigrationDependencies(
+  cwd: string,
+  sha: string,
+  name: string,
+  implementation: string,
+): NonNullable<MigrationRecord["dependencies"]> {
+  if (!auditedNames.has(name)) return [];
+  const imports = [...implementation.matchAll(/from "([^"\n]+)"/g)].map((match) => match[1]!);
+  if (/\bimport\s*\(/.test(implementation))
+    throw new Error("Unreviewed dynamic migration dependency");
+  const expected = renumber.targetMigrations.find((row) => row.name === name)?.dependencies ?? [];
+  const direct = imports.filter((specifier) => !specifier.startsWith("effect/"));
+  if (name === composedName && direct.length === 0) return [];
+  const expectedDirect =
+    name === composedName
+      ? expected.map(({ path }) => `./OrchestrationV2/${NodePath.posix.basename(path)}`)
+      : ["@t3tools/shared/threadPullRequests"];
+  if (direct.toSorted().join("\n") !== expectedDirect.toSorted().join("\n")) {
+    throw new Error("Unreviewed migration composition; update its dependency audit first");
+  }
+  return expected.map(({ path }) => ({
+    path,
+    sha256: NodeCrypto.createHash("sha256")
+      .update(gitText(cwd, "show", `${sha}:${path}`))
+      .digest("hex"),
+  }));
+}
+
 /** Reads the repository's static manifest; unfamiliar syntax fails instead of producing an empty audit. */
 export function readMigrationManifest(cwd: string, sha: string): ReadonlyArray<MigrationRecord> {
   const source = gitText(cwd, "show", `${sha}:apps/server/src/persistence/Migrations.ts`);
@@ -140,6 +220,9 @@ export function readMigrationManifest(cwd: string, sha: string): ReadonlyArray<M
       name: match[2]!,
       path,
       sha256: NodeCrypto.createHash("sha256").update(implementation).digest("hex"),
+      ...(auditedNames.has(match[2]!)
+        ? { dependencies: readMigrationDependencies(cwd, sha, match[2]!, implementation) }
+        : {}),
     };
   });
 }
@@ -175,7 +258,21 @@ if (import.meta.main) {
   const before = readMigrationManifest(cwd, base);
   const after = readMigrationManifest(cwd, candidate);
   const changes = inspectMigrationChanges(before, after);
-  const bridge = values["allow-reviewed-bridge"] && matchesReviewedBridge(before, after, candidate);
+  // The candidate may be the reviewed upstream commit itself or a J5 commit built on it.
+  const containsTarget = (target: string) => {
+    if (target === candidate) return true;
+    try {
+      gitText(cwd, "merge-base", "--is-ancestor", target, candidate);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const bridge =
+    values["allow-reviewed-bridge"] &&
+    reviewedTargetRefs.some(
+      (target) => containsTarget(target) && matchesReviewedBridge(before, after, target),
+    );
   const status =
     changes.length === 0 ? "append_only" : bridge ? "reviewed_bridge_required" : "blocked";
   console.log(

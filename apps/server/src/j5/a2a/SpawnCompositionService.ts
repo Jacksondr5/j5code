@@ -12,15 +12,19 @@ import {
 } from "./HomeRegistrar.ts";
 import { A2ALedgerTransactionWriter } from "./LedgerService.ts";
 import { ParticipantPlacementTransactionWriter, type PlacementError } from "./PlacementService.ts";
-import type { CommCommandId, ParticipantId, SquadronId } from "./contracts.ts";
-import type { ParticipantPlacement, PlacementCommandId } from "./placementContracts.ts";
+import type { CommCommandId, SquadronId } from "./contracts.ts";
+import type {
+  ParticipantPlacement,
+  ParticipantProvenance,
+  PlacementCommandId,
+} from "./placementContracts.ts";
 
 export interface RecordSpawnFactsInput {
   readonly homeCommandId: CommCommandId;
   readonly placementCommandId: PlacementCommandId;
   readonly squadronId: SquadronId;
   readonly threadId: ThreadId;
-  readonly spawnedByParticipantId: ParticipantId;
+  readonly provenance: ParticipantProvenance;
   readonly createdAt: string;
 }
 
@@ -81,11 +85,7 @@ export const layer: Layer.Layer<
                   squadronId: input.squadronId,
                   participantId: registered.home.participantId,
                   actor: "agent",
-                  provenance: {
-                    kind: "spawned-by",
-                    spawnedByParticipantId: input.spawnedByParticipantId,
-                    source: "j5_spawn",
-                  },
+                  provenance: input.provenance,
                   createdAt: input.createdAt,
                 });
                 return {

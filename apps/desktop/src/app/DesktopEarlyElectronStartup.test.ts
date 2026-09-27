@@ -81,7 +81,9 @@ describe("DesktopEarlyElectronStartup", () => {
     });
 
     assert.deepEqual(options, {
+      isDevelopment: true,
       linuxWmClass: "j5code-dev",
+      linuxDesktopEntryName: "j5code-dev.desktop",
       passwordStore: "gnome-libsecret",
     });
   });

@@ -1,3 +1,6 @@
+import { PlaybookStore } from "../playbooks/PlaybookStore.ts";
+import { A2AHomeRegistrar } from "./HomeRegistrar.ts";
+import { SquadronJoinService } from "./SquadronJoinService.ts";
 import { AuthOrchestrationReadScope, AuthSessionId, ThreadId } from "@t3tools/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
@@ -82,60 +85,64 @@ it("wires the authenticated aggregate's thread-homes path without a parallel rou
       });
     },
   });
-  const routes = j5AuthenticatedRoutesLayer.pipe(
-    Layer.provide(homes),
-    Layer.provide(
-      Layer.mock(A2AArchiveFacts)({
-        readForThread: (threadId) =>
-          Effect.succeed({
-            state: "not-an-a2a-participant" as const,
-            threadId,
-            openExchanges: [],
-            placementSubtree: { state: "not-applicable" as const },
-          }),
-      }),
-    ),
-    Layer.provide(
-      Layer.mock(ClientReadsService)({
-        threadHomes: () => Effect.succeed([]),
-        participantIdentities: () => Effect.succeed({ entries: [] }),
-        openInboxCount: (personId) =>
-          Effect.succeed({
-            personId: personId ?? ParticipantId.make("human:thread-homes-http"),
-            count: 0,
-          }),
-      }),
-    ),
-    Layer.provide(Layer.mock(A2AHumanInbox)({})),
-    Layer.provide(Layer.mock(A2ADeliveryWorker)({})),
-    Layer.provide(Layer.mock(A2ASendService)({})),
-    Layer.provide(Layer.mock(MachineParticipantService)({})),
-    Layer.provide(Layer.mock(RosterService)({})),
-    Layer.provide(Layer.mock(A2ALedger)({})),
-    Layer.provide(Layer.mock(SquadronProjectReferences)({})),
-    Layer.provide(
-      Layer.mergeAll(
-        Layer.mock(AgentCrewInstanceService)({}),
-        Layer.mock(AgentCrewProposalService)({}),
-        Layer.mock(CrewProposalService)({}),
-        Layer.mock(CrewStopService)({}),
-        Layer.mock(ArchiveCrewService)({}),
-        Layer.mock(ParticipantPlacementService)({}),
+  const routes = j5AuthenticatedRoutesLayer
+    .pipe(Layer.provide(Layer.mock(PlaybookStore)({})))
+    .pipe(
+      Layer.provide(homes),
+      Layer.provide(
+        Layer.mock(A2AArchiveFacts)({
+          readForThread: (threadId) =>
+            Effect.succeed({
+              state: "not-an-a2a-participant" as const,
+              threadId,
+              openExchanges: [],
+              placementSubtree: { state: "not-applicable" as const },
+            }),
+        }),
       ),
-    ),
-    Layer.provide(Layer.mock(ProjectService.ProjectService)({})),
-    Layer.provide(Layer.mock(ThreadManagement.ThreadManagementService)({})),
-    Layer.provide(Layer.mock(VcsProcess.VcsProcess)({})),
-    Layer.provide(
-      ServerConfig.layerTest(process.cwd(), { prefix: "j5-thread-homes-http-" }).pipe(
-        Layer.provide(NodeServices.layer),
+      Layer.provide(
+        Layer.mock(ClientReadsService)({
+          threadHomes: () => Effect.succeed([]),
+          participantIdentities: () => Effect.succeed({ entries: [] }),
+          openInboxCount: (personId) =>
+            Effect.succeed({
+              personId: personId ?? ParticipantId.make("human:thread-homes-http"),
+              count: 0,
+            }),
+        }),
       ),
-    ),
-    Layer.provide(NodeSqliteClient.layerMemory()),
-    Layer.provide(agentHandoffRefreshesLayer),
-    Layer.provideMerge(auth),
-    Layer.provide(HttpServer.layerServices),
-  );
+      Layer.provide(Layer.mock(A2AHumanInbox)({})),
+      Layer.provide(Layer.mock(A2ADeliveryWorker)({})),
+      Layer.provide(Layer.mock(A2ASendService)({})),
+      Layer.provide(Layer.mock(MachineParticipantService)({})),
+      Layer.provide(Layer.mock(RosterService)({})),
+      Layer.provide(Layer.mock(A2ALedger)({})),
+      Layer.provide(Layer.mock(A2AHomeRegistrar)({})),
+      Layer.provide(Layer.mock(SquadronJoinService)({})),
+      Layer.provide(Layer.mock(SquadronProjectReferences)({})),
+      Layer.provide(
+        Layer.mergeAll(
+          Layer.mock(AgentCrewInstanceService)({}),
+          Layer.mock(AgentCrewProposalService)({}),
+          Layer.mock(CrewProposalService)({}),
+          Layer.mock(CrewStopService)({}),
+          Layer.mock(ArchiveCrewService)({}),
+          Layer.mock(ParticipantPlacementService)({}),
+        ),
+      ),
+      Layer.provide(Layer.mock(ProjectService.ProjectService)({})),
+      Layer.provide(Layer.mock(ThreadManagement.ThreadManagementService)({})),
+      Layer.provide(Layer.mock(VcsProcess.VcsProcess)({})),
+      Layer.provide(
+        ServerConfig.layerTest(process.cwd(), { prefix: "j5-thread-homes-http-" }).pipe(
+          Layer.provide(NodeServices.layer),
+        ),
+      ),
+      Layer.provide(NodeSqliteClient.layer({ filename: ":memory:" })),
+      Layer.provide(agentHandoffRefreshesLayer),
+      Layer.provideMerge(auth),
+    )
+    .pipe(Layer.provide(HttpServer.layerServices));
   const { dispose, handler } = HttpRouter.toWebHandler(routes, { disableLogger: true });
 
   try {

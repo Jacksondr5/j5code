@@ -1,6 +1,10 @@
+import * as ProjectCloneTracker from "../../project/ProjectCloneTracker.ts";
+import * as WorktreeSetupTracker from "../../project/WorktreeSetupTracker.ts";
+import * as TerminalManager from "../../terminal/Manager.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it, vi } from "@effect/vitest";
 import {
+  ChatAttachmentId,
   CommandId,
   MessageId,
   ProjectId,
@@ -13,9 +17,12 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import * as Path from "effect/Path";
 import { stringify as yamlStringify } from "yaml";
 
+import { createPendingAttachmentId } from "../../attachmentStore.ts";
+import * as ThreadMessageIntake from "../../orchestration-v2/ThreadMessageIntake.ts";
 import * as ServerConfig from "../../config.ts";
 import * as GitWorkflow from "../../git/GitWorkflowService.ts";
 import { CodexProviderCapabilitiesV2 } from "../../orchestration-v2/Adapters/CodexAdapterV2.ts";
@@ -113,6 +120,9 @@ function makeHarness(options: HarnessOptions = {}) {
     options.generateTitle ?? (() => Effect.succeed({ title: "Generated title" })),
   );
   const externalServices = Layer.mergeAll(
+    WorktreeSetupTracker.layer,
+    Layer.mock(ProjectCloneTracker.ProjectCloneTracker)({ get: () => Effect.succeed(null) }),
+    Layer.mock(TerminalManager.TerminalManager)({ close: () => Effect.void }),
     Layer.succeed(ProjectService.ProjectService, {
       create: () => Effect.die("unused"),
       bootstrap: () => Effect.die("unused"),
@@ -506,3 +516,44 @@ it.effect(
     );
   },
 );
+
+it.effect("releases claimed uploads when persona resolution refuses a launch", () => {
+  const harness = makeHarness({ providers: [] });
+  const environment = ServerConfig.layerTest("/repo", { prefix: "j5-persona-intake-" });
+  return Effect.gen(function* () {
+    const config = yield* ServerConfig.ServerConfig;
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const id = ChatAttachmentId.make(createPendingAttachmentId());
+    const pendingName = `${id}.png`;
+    yield* fs.writeFile(path.join(config.attachmentsDir, pendingName), new Uint8Array([1, 2, 3]));
+    const before = yield* fs.readDirectory(config.attachmentsDir);
+    const error = yield* ThreadMessageIntake.launchThread({
+      ...launchInput({ command: "command:blocked-upload", thread: "thread-blocked-upload" }),
+      agentPersona: { personaId: "scout" },
+      initialMessage: {
+        messageId: MessageId.make("blocked-upload-message"),
+        text: "Inspect this image",
+        attachments: [
+          { type: "image", id, name: "screen.png", mimeType: "image/png", sizeBytes: 3 },
+        ],
+      },
+    }).pipe(Effect.flip);
+    assert.instanceOf(error, ThreadLaunch.ThreadLaunchError);
+    if (!Schema.is(ThreadLaunch.ThreadLaunchError)(error)) return;
+    assert.equal(error.operation, "resolve-agent-persona");
+    assert.deepStrictEqual(
+      (yield* fs.readDirectory(config.attachmentsDir)).toSorted(),
+      before.toSorted(),
+    );
+    assert.deepStrictEqual(
+      yield* fs.readFile(path.join(config.attachmentsDir, pendingName)),
+      new Uint8Array([1, 2, 3]),
+    );
+  }).pipe(
+    Effect.provide(
+      harness.layer.pipe(Layer.provideMerge(environment), Layer.provideMerge(NodeServices.layer)),
+    ),
+    Effect.scoped,
+  );
+});

@@ -4,6 +4,8 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 vi.mock("../../components/ui/menu", () => ({
   Menu: ({ children }: { readonly children: ReactNode }) => <>{children}</>,
+  MenuGroup: ({ children }: { readonly children: ReactNode }) => <>{children}</>,
+  MenuGroupLabel: ({ children }: { readonly children: ReactNode }) => <>{children}</>,
   MenuItem: ({ children }: { readonly children: ReactNode }) => <>{children}</>,
   MenuPopup: ({ children }: { readonly children: ReactNode }) => <>{children}</>,
   MenuRadioGroup: ({ children }: { readonly children: ReactNode }) => <>{children}</>,

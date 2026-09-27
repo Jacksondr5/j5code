@@ -108,24 +108,19 @@ A plain spawn without `persona` is unchanged and inherits the parent's runtime m
 
 **Result:** exactly one of `interrupt_requested` (a running turn is being interrupted) or `already_idle` (no running turn; no side effect). An interrupt acknowledgement and an observed terminal run state are separate facts; the tool never claims a turn stopped merely because interruption was requested. Anything else is an error naming the caller's actual Squadron and the corrected retry.
 
-**Rules.** A caller's runtime policy never gates `stop_agent`, `archive_agent`, or `archive_crew`: a read-only persona may run them, because identity (the Captain, its own Crew) and the human's confirmation token are the gates, and the sandbox guards the workspace rather than the platform's verbs (Bryant, 2026-09-14). Stop and archive are single-target; the unit cascade belongs to Crews, which stop and archive as units through their own verbs when they exist. A stop is final across restarts: a committed stop wins even if the provider has not yet acknowledged it, so a stopped run is never resumed by upstream's restart continuation.
+**Rules.** A caller's runtime policy never gates `stop_agent`, `stop_crew`, or `archive_crew`: a read-only persona may run them, because identity (the Captain, its own Crew) and the human's confirmation token are the gates, and the sandbox guards the workspace rather than the platform's verbs (Bryant, 2026-09-14). Stop and archive are single-target; the unit cascade belongs to Crews, which stop and archive as units through their own verbs when they exist. A stop is final across restarts: a committed stop wins even if the provider has not yet acknowledged it, so a stopped run is never resumed by upstream's restart continuation.
 
-### `archive_agent`
+**Amendment (Jackson, 2026-08-29):** the A6 build cascaded over the placement subtree; that blast
+radius makes the tool less useful, so `stop_agent` and thread archive are single-target. The
+unit-cascade concept already has its home in the crew rulings (2026-08-21: crews spawn and archive
+as units) — `stop_crew`/`archive_crew` arrive with Crews, and the A6 `PlacementCascadeService`
+survives as their engine (a cascade of one is its degenerate case).
 
-**Description:** "Archive one Peer Agent reversibly. Unarchive restores the same identity, but does not reopen Exchanges or replay cancelled messages. A clean archive — no open exchanges, no running turn — completes immediately. Otherwise the call refuses and lists exactly what archiving ends — the asks that will close, the turn that will stop — along with a confirmation_token; call again with that token to proceed. The archived agent leaves the active roster; its ledger and conversation stay readable forever. Requires your current squadron_id. Reuse client_request_id to retry safely."
+## `t3_thread_organize` — archive and restore
 
-| Input                | Type          | Required                       |
-| -------------------- | ------------- | ------------------------------ |
-| `squadron_id`        | SquadronId    | yes — the caller's Squadron    |
-| `participant_id`     | ParticipantId | yes — the one agent to archive |
-| `confirmation_token` | string        | only when confirming a refusal |
-| `client_request_id`  | string        | no                             |
+Use `action: "archive"` with an agent's `threadId`, or omit it to archive the calling thread. The target must be in the calling project; archiving or restoring another registered agent additionally requires the same Squadron. The tool archives one thread, hides it from the active directory, and closes its open Exchanges through the shared lifecycle reactor. It does not interrupt an existing run. Use `stop_agent` when work must stop.
 
-**Result:** exactly one of `archived` or `already_archived` (no side effect). A consequential target yields a refusal — an error carrying the list of consequences and a `confirmation_token` — never a partial outcome.
-
-**Rules.** The quiet path archives immediately when nothing would be cut short. The loud path is a refusal listing the concrete consequences — the open Exchanges that will close as dropped, the running turn that will be interrupted — plus a token bound to that list: it proves the caller saw the consequences, so a preemptive flag on the first call cannot short-circuit the confirmation. If the target's state changed since the refusal, the stale token is rejected and a fresh refusal lists the current facts. A malformed or unknown token fails closed without disclosing the target's facts, and a token for one target never authorizes another. A partial failure across stores is forward-only: committed archive and ledger facts are re-read on retry, and `already_archived` requires both the archive fact and completion of every terminal notice. The caller cannot archive itself.
-
-Archiving is reversible and deletion is not. A person can unarchive an archived agent, which restores the same participant id, Squadron home, placement and provenance and makes it addressable again; the Exchanges that archiving closed stay closed, and deliveries that archiving cancelled are not replayed. Deleting an agent is a separate, permanent act that only a person performs; no agent verb deletes.
+Use `action: "unarchive"` to restore the same identity and Squadron home. Old Exchanges remain closed and cancelled messages do not replay. Historical permanently retired agents remain retired. The human UI retains its archive warning; this tool uses upstream archive semantics without a separate confirmation-token flow. `archive_agent` has been retired.
 
 **Errors**, each naming state and next command: not the caller's Squadron; unknown participant; consequential without a token (the refusal); stale or invalid token; self-target.
 
@@ -251,19 +246,19 @@ together under an optimistic version check, so two approvals landing at once can
 then spawns the seat under the Captain and posts the updated roster to the Captain. Seat ids are
 deterministic, so a retry after a failed spawn finds its reservation and converges.
 
-### Handoffs in Crews
+### Handoff artifacts in Crews
 
 There is no Crew-specific artifact verb. A seat whose definition declares an output artifact writes
-it with the project `write_artifact` tool to the same handoff file every persona writes
+it with the project `write_artifact` tool to the same handoff artifact every persona writes
 (`handoffs/<agent>/<Artifact>-<task>.md`, see the [persona contract](../agent-personas/index.md));
 its first turn carries `<seat_obligation>` naming that exact path. The handoff gate checks for the
 file when a run ends and reminds the seat once. When a seat finishes, the seat finish notifier posts
 one platform-composed `<j5_seat_finished>` notice per finished run into the Captain's thread: the seat,
-its participant and thread ids, the run status (completed, failed, or cancelled), and the handoff
-as `written`, `missing`, or `none declared` with its path; a written handoff up to 4,000
+its participant and thread ids, the run status (completed, failed, or cancelled), and the handoff artifact
+as `written`, `missing`, or `none declared` with its path; a written handoff artifact up to 4,000
 characters rides inline, longer ones name the path for the project `read_artifact` tool. Ids
 derive from the run, so a redelivered event cannot post twice. Read-only Codex and Claude personas have `write_artifact` pre-approved for this reason, and `delegate_task` with `task_status` and `task_cancel` beside it, because a Crew member refused `spawn_agent` is sent to provider-native Subagents and a verb the sandbox then rejects is no way out:
-handoffs live in application storage, never in the sandboxed workspace. (Withdrawn on 2026-09-14:
+handoff artifacts live in application storage, never in the sandboxed workspace. (Withdrawn on 2026-09-14:
 the 2026-09-10 `deliver_artifact` verb, its ledger table, and the crew-only `read_artifact` and
 `list_artifacts`, which collided with the project artifact toolkit's names.)
 
@@ -317,8 +312,7 @@ the current facts are a subset of the confirmed ones, so a retry after a partial
 the job; new work on any seat makes it stale and yields a fresh token. Partial failures name the
 seats retired so far and the seat that failed; retry with the same `client_request_id` and token.
 
-**Members are never archived one by one (R14):** `archive_agent` refuses a target that sits in a
-Crew and names the `archive_crew` call to make instead. A member that finishes with nothing owed is
+**Members are never archived one by one (R14):** `t3_thread_organize` refuses archiving an active Crew seat, just as client archive/delete does. Retire the unit through `archive_crew` or Archive crew on the Fleet page. Archiving its Captain retains the crew cascade. A member that finishes with nothing owed is
 reported to its Captain; the platform settles no seat, and settlement is not archive. `stop_agent` on a member is still allowed;
 stopping retires nothing.
 
@@ -340,8 +334,8 @@ stopping retires nothing.
 6. `list_participants` marks the caller's row `self`, reports a person's row as unable to receive a plain message and able to be asked, and omits threads without a Squadron home.
 7. `spawn_agent` refuses a call that omits provider, model, or reasoning, refuses a choice outside the Role's allowlist with an error naming the Role, and refuses a caller that sits in a Crew with an error naming escalation to its Captain.
 8. A spawned agent's first turn contains its own participant id and Squadron.
-9. `stop_agent` and `archive_agent` act on exactly one agent; neither cascades; a stopped run is never resumed after a server restart, even when restart continuation is enabled.
-10. `archive_agent` on a target with open Exchanges or a running turn refuses with the list of consequences and a token; the same call with that token archives; a stale token is refused with fresh facts.
+9. `stop_agent` and `t3_thread_organize` act on one target; neither cascades. A stopped run is never resumed after a server restart, even when restart continuation is enabled.
+10. `t3_thread_organize` archives and restores another registered agent only within the caller's Squadron and project. Archive closes Exchanges through the shared reactor without a confirmation-token exchange or interrupting an existing run; human archive warnings remain.
 11. `clear_own_ask` closes only an Exchange the caller opened and records the closure as sender-cleared.
 12. Every error from every verb names the actual state and the next command.
 13. `list_participants` omits archived agents unless `include_archived` is set, and then marks each one `archived` and unable to receive a message or an ask.
@@ -350,7 +344,7 @@ stopping retires nothing.
 16. `join_squadron` establishes a home only for a thread that has none, only in a Squadron that references the thread's project, leaves the thread and its running work untouched, returns the existing registration when the thread is already homed there, and refuses a thread homed elsewhere, an archived or deleted thread, and a retired identity.
 17. `list_personas` returns every persona with its availability and route; `propose_crew` and `request_crew_member` file a human gate and refuse unknown, disabled, duplicate, or over-cap seats before anything is recorded; both succeed under every sandbox and approval policy, including Codex approval policy `never`.
 18. Approving a proposal spawns exactly once; a second approval finds it claimed; a spawn that fails after reserving its seats reopens the gate, and the retry converges on those seats.
-19. `archive_crew` is Captain-only, refuses with per-seat facts and a token when any seat has an open Exchange or a running turn, and finishes a partial archive on retry; `archive_agent` refuses a Crew member and a Captain of a live Crew, naming the `archive_crew` call.
+19. `archive_crew` is Captain-only, refuses with per-seat facts and a token when any seat has an open Exchange or a running turn, and finishes a partial archive on retry; `t3_thread_organize` refuses an active Crew member, while Captain archive retains the unit cascade.
 20. `stop_crew` is Captain-only, interrupts every seat with a running turn and reports each seat as interrupted, already idle, or archived; it settles, retires, and closes nothing, and a non-Captain or an archived Crew is refused naming the next step. The person's Stop crew control does the same through the operate scope.
 
 ## History
@@ -375,3 +369,4 @@ stopping retires nothing.
 - 2026-09-14 — `delegate_task`, `task_status`, and `task_cancel` return to the J5 surface, with a saved-agent `agent` parameter on `delegate_task` replacing the J5-only `invoke_agent` ([review](https://github.com/Jacksondr5/j5code/pull/124#issuecomment-5663559782)).
 - 2026-09-15 — machine participants appear in `list_participants` as named senders that receive nothing (issue #74).
 - 2026-09-17 — personas, not agents: `list_agents` becomes `list_personas`, the `agent` parameter on `spawn_agent`, `delegate_task`, and crew seats becomes `persona` (no alias: pre-dogfood, no legacy-compatibility code), crew results carry `persona_id`, and the mention is `@persona:ID`; "agent" keeps meaning a running participant (Bryant; [record](../../worklog/2026-09-16-crew-command-decoupling.md)).
+- 2026-09-24 — the J5 document is named "handoff artifact" to distinguish it from upstream's context handoffs.

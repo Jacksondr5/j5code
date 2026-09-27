@@ -15,10 +15,10 @@ export interface SquadronDraftState<TContent = unknown> {
 }
 
 /** The sidebar can set ambient context, but it must never manufacture a choice. */
-export const resolveSquadronScope = (
-  choices: ReadonlyArray<SquadronChoice>,
+export const resolveSquadronScope = <T extends SquadronChoice>(
+  choices: ReadonlyArray<T>,
   selected: ScopedSquadronRef | null,
-) =>
+): T | null =>
   choices.find(
     (choice) =>
       choice.id === selected?.squadronId && choice.environmentId === selected.environmentId,
@@ -94,12 +94,15 @@ export interface DurableSquadronHome {
   readonly name: string;
 }
 
-/** A persisted Registrar home outranks mutable draft and ambient context. */
+/**
+ * The Squadron a draft or thread will launch with, for the composer chip and draft headline.
+ * It mirrors the first-send carrier: a persisted Registrar home, else the draft's explicit
+ * choice. Ambient sidebar scope never names a draft's Squadron, because send refuses it.
+ */
 export const resolveEffectiveSquadronId = (input: {
   readonly durableHome: DurableSquadronHome | null;
   readonly draftSquadronId: string | null;
-  readonly ambientSquadronId: string | null;
-}) => input.durableHome?.id ?? input.draftSquadronId ?? input.ambientSquadronId;
+}) => input.durableHome?.id ?? input.draftSquadronId;
 
 /** A Registrar home is the durable, immutable source for an existing thread. */
 export const resolveSquadronDraftChipState = (input: {

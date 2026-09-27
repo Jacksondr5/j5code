@@ -19,6 +19,7 @@
  */
 import * as DateTime from "effect/DateTime";
 import type { OrchestrationThreadActivity, OrchestrationV2Subagent } from "@t3tools/contracts";
+import { isOrchestrationV2WorkActive } from "@t3tools/contracts";
 
 export type RuntimeSubagentStatus =
   | "pending"
@@ -104,7 +105,7 @@ export function isTerminalSubagentStatus(status: RuntimeSubagentStatus): boolean
 /** Active = the user may still need to care while it runs. Idle is settled-ish
  * but resumable; waiting counts as active because it needs the user. */
 export function isActiveSubagentStatus(status: RuntimeSubagentStatus): boolean {
-  return status === "pending" || status === "running" || status === "waiting";
+  return isOrchestrationV2WorkActive(status);
 }
 
 const RECENT_ACTIVITY_LIMIT = 6;
@@ -119,7 +120,7 @@ const ROSTER_LIMIT = 100;
  * background by definition: they render in the ordinary work log, exactly
  * as they did before this feature existed.
  */
-export function isBackgroundTaskActivity(payload: Record<string, unknown>): boolean {
+function isBackgroundTaskActivity(payload: Record<string, unknown>): boolean {
   return payload.agentKind !== "agent";
 }
 
@@ -724,10 +725,6 @@ const EMPTY_PANEL_MODEL: AgentPanelModel = {
   liveCount: 0,
 };
 
-export function emptyAgentPanelModel(): AgentPanelModel {
-  return EMPTY_PANEL_MODEL;
-}
-
 /**
  * The v2 leg of the mapper swap (#5219 spec): project orchestration-v2
  * subagent entities into the same runtime shape the native fold produced.
@@ -922,61 +919,6 @@ export function deriveAgentPanelModel({
     hasAgents: true,
     liveCount: runningCount + waitingCount,
   };
-}
-
-/**
- * Members ordered by urgency for the capped inline workflow card: running and
- * failed first, then waiting, then most recently updated.
- */
-export function workflowCardMembers(
-  group: AgentPanelWorkflowGroup,
-  limit: number,
-): { readonly visible: ReadonlyArray<RuntimeSubagent>; readonly overflow: number } {
-  const all = [...group.phases.flatMap((phase) => phase.members), ...group.unphasedMembers];
-  const urgency = (agent: RuntimeSubagent): number => {
-    if (agent.status === "failed") return 0;
-    if (agent.status === "running") return 1;
-    if (agent.status === "waiting") return 2;
-    return 3;
-  };
-  const ordered = all
-    .slice()
-    .sort((a, b) => urgency(a) - urgency(b) || b.updatedAt.localeCompare(a.updatedAt));
-  return {
-    visible: ordered.slice(0, limit),
-    overflow: Math.max(0, ordered.length - limit),
-  };
-}
-
-/** Kinds the timeline should not render as generic rows (fold input only). */
-export function isSubagentActivityKind(kind: string): boolean {
-  return (
-    kind === "task.started" ||
-    kind === "task.progress" ||
-    kind === "task.updated" ||
-    kind === "task.completed" ||
-    kind === "tool.progress"
-  );
-}
-
-/**
- * Quiet-timeline guarantee: tool rows attributed to an owning agent belong in
- * the Agents surface, not the parent chat. Unattributed rows must stay.
- */
-export function isAgentAttributedToolActivity(activity: OrchestrationThreadActivity): boolean {
-  if (typeof activity.payload !== "object" || activity.payload === null) {
-    return false;
-  }
-  const payload = activity.payload as Record<string, unknown>;
-  return typeof payload.agentId === "string" && payload.agentId.trim().length > 0;
-}
-
-/** Timeline-bypassing synthesized rows (Codex children, workflow members). */
-export function isTimelineBypassActivity(activity: OrchestrationThreadActivity): boolean {
-  if (typeof activity.payload !== "object" || activity.payload === null) {
-    return false;
-  }
-  return (activity.payload as Record<string, unknown>).timelineBypass === true;
 }
 
 /**

@@ -5,14 +5,14 @@ import {
   ORCHESTRATION_PROTOCOL_VERSION_TEXT,
 } from "@t3tools/contracts";
 import * as Result from "effect/Result";
-import { FetchHttpClient, type HttpClient, type HttpMethod } from "effect/unstable/http";
+import { FetchHttpClient, type HttpMethod } from "effect/unstable/http";
 
 import type { RemoteEnvironmentAuthorization } from "../authorization/service.ts";
 import type { PreparedConnection, PreparedHttpAuthorization } from "../connection/model.ts";
 import type { ManagedRelayDpopSigner } from "../relay/managedRelay.ts";
 import {
   executeEnvironmentHttpRequest,
-  makeEnvironmentHttpApiClient,
+  makeEnvironmentHttpApiGroupClient,
   RemoteEnvironmentAuthFetchError,
   RemoteEnvironmentAuthTimeoutError,
   type RemoteEnvironmentRequestError,
@@ -42,7 +42,7 @@ export function withOrchestrationProtocolHeader(
  * per-request via `FetchHttpClient.RequestInit`, which the fetch client reads
  * from the fiber context at request time.
  */
-export const withEnvironmentCredentials = <A, E, R>(
+const withEnvironmentCredentials = <A, E, R>(
   authorization: PreparedHttpAuthorization | null,
   request: Effect.Effect<A, E, R>,
 ): Effect.Effect<A, E, R> =>
@@ -61,7 +61,7 @@ export const withEnvironmentCredentials = <A, E, R>(
  * for relay/DPoP connections, so bearer/primary connections work even when no
  * signer is available.
  */
-export const buildEnvironmentAuthHeaders = (
+const buildEnvironmentAuthHeaders = (
   authorization: PreparedHttpAuthorization | null,
   method: HttpMethod.HttpMethod,
   url: string,
@@ -99,8 +99,8 @@ export const buildEnvironmentAuthHeaders = (
  * A rejected credential gets one refresh and retry, with a new request-bound
  * proof. Cookie and bearer requests keep their existing authentication behavior.
  */
-export const executeAuthenticatedEnvironmentHttpRequest = Effect.fn(
-  "clientRuntime.state.executeAuthenticatedEnvironmentHttpRequest",
+export const executeAuthenticatedEnvironmentRawHttpRequest = Effect.fn(
+  "clientRuntime.state.executeAuthenticatedEnvironmentRawHttpRequest",
 )(function* <A, E, R>(input: {
   readonly prepared: PreparedConnection;
   readonly signer: Option.Option<ManagedRelayDpopSigner["Service"]>;
@@ -109,12 +109,12 @@ export const executeAuthenticatedEnvironmentHttpRequest = Effect.fn(
   readonly url: (httpBaseUrl: string) => string;
   readonly timeoutMs: number;
   readonly request: (input: {
-    readonly client: Effect.Success<ReturnType<typeof makeEnvironmentHttpApiClient>>;
+    readonly httpBaseUrl: string;
     readonly headers: EnvironmentHttpAuthHeaders;
   }) => Effect.Effect<A, E, R>;
   /** Some endpoints report rejected credentials in a successful response. */
   readonly isUnauthorizedResponse?: (response: NoInfer<A>) => boolean;
-}): Effect.fn.Return<A, RemoteEnvironmentRequestError, HttpClient.HttpClient | R> {
+}): Effect.fn.Return<A, RemoteEnvironmentRequestError, R> {
   let httpBaseUrl = input.prepared.httpBaseUrl;
   return yield* Effect.gen(function* () {
     let rejectedAccessToken: string | undefined;
@@ -147,7 +147,6 @@ export const executeAuthenticatedEnvironmentHttpRequest = Effect.fn(
       }
 
       const requestUrl = input.url(httpBaseUrl);
-      const client = yield* makeEnvironmentHttpApiClient(httpBaseUrl);
       const headers = yield* buildEnvironmentAuthHeaders(
         authorization,
         input.method,
@@ -157,7 +156,7 @@ export const executeAuthenticatedEnvironmentHttpRequest = Effect.fn(
       const result = yield* executeEnvironmentHttpRequest(
         requestUrl,
         input.timeoutMs,
-        withEnvironmentCredentials(authorization, input.request({ client, headers })),
+        withEnvironmentCredentials(authorization, input.request({ httpBaseUrl, headers })),
       ).pipe(Effect.result);
 
       if (Result.isFailure(result)) {
@@ -196,3 +195,41 @@ export const executeAuthenticatedEnvironmentHttpRequest = Effect.fn(
     }),
   );
 });
+
+/** Typed API groups share the credential and retry flow used by raw J5 routes. */
+export const executeAuthenticatedEnvironmentHttpRequest = <
+  Group extends Parameters<typeof makeEnvironmentHttpApiGroupClient>[1],
+  A,
+  E,
+  R,
+>(input: {
+  readonly prepared: PreparedConnection;
+  readonly signer: Option.Option<ManagedRelayDpopSigner["Service"]>;
+  readonly remoteAuthorization?: Option.Option<RemoteEnvironmentAuthorization["Service"]>;
+  readonly method: HttpMethod.HttpMethod;
+  readonly url: (httpBaseUrl: string) => string;
+  readonly timeoutMs: number;
+  readonly group: Group;
+  readonly request: (input: {
+    readonly client: Effect.Success<ReturnType<typeof makeEnvironmentHttpApiGroupClient<Group>>>;
+    readonly headers: EnvironmentHttpAuthHeaders;
+  }) => Effect.Effect<A, E, R>;
+  /** Some endpoints report rejected credentials in a successful response. */
+  readonly isUnauthorizedResponse?: (response: NoInfer<A>) => boolean;
+}): Effect.Effect<
+  A,
+  RemoteEnvironmentRequestError,
+  Effect.Services<ReturnType<typeof makeEnvironmentHttpApiGroupClient<Group>>> | R
+> => {
+  return executeAuthenticatedEnvironmentRawHttpRequest<
+    A,
+    E,
+    Effect.Services<ReturnType<typeof makeEnvironmentHttpApiGroupClient<Group>>> | R
+  >({
+    ...input,
+    request: ({ httpBaseUrl, headers }) =>
+      Effect.flatMap(makeEnvironmentHttpApiGroupClient(httpBaseUrl, input.group), (client) =>
+        input.request({ client, headers }),
+      ),
+  });
+};

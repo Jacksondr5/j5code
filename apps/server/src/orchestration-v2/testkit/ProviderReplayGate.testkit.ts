@@ -1,7 +1,7 @@
 export interface ProviderReplayGate {
   readonly beforeEmit: (label: string | undefined, signal?: AbortSignal) => Promise<void>;
+  readonly waitForReached: (label: string) => Promise<boolean>;
   readonly hasReached: (label: string) => boolean;
-  readonly waitUntilReached: (label: string) => Promise<boolean>;
   readonly release: (label: string) => boolean;
   readonly releaseAll: () => void;
 }
@@ -9,10 +9,10 @@ export interface ProviderReplayGate {
 interface GateState {
   reached: boolean;
   released: boolean;
+  readonly reachedPromise: Promise<void>;
+  readonly resolveReached: () => void;
   readonly promise: Promise<void>;
   readonly resolve: () => void;
-  readonly reachedPromise: Promise<boolean>;
-  readonly resolveReached: (reached: boolean) => void;
 }
 
 export function makeProviderReplayGate(labels: ReadonlyArray<string>): ProviderReplayGate {
@@ -25,14 +25,17 @@ export function makeProviderReplayGate(labels: ReadonlyArray<string>): ProviderR
     const promise = new Promise<void>((resume) => {
       resolve = resume;
     });
-    const reached = Promise.withResolvers<boolean>();
+    let resolveReached = () => {};
+    const reachedPromise = new Promise<void>((resume) => {
+      resolveReached = resume;
+    });
     states.set(label, {
       reached: false,
       released: false,
+      reachedPromise,
+      resolveReached,
       promise,
       resolve,
-      reachedPromise: reached.promise,
-      resolveReached: reached.resolve,
     });
   }
 
@@ -46,7 +49,7 @@ export function makeProviderReplayGate(labels: ReadonlyArray<string>): ProviderR
         return Promise.resolve();
       }
       state.reached = true;
-      state.resolveReached(true);
+      state.resolveReached();
       if (signal === undefined) {
         return state.promise;
       }
@@ -62,8 +65,11 @@ export function makeProviderReplayGate(labels: ReadonlyArray<string>): ProviderR
         });
       });
     },
+    waitForReached: (label) => {
+      const state = states.get(label);
+      return state === undefined ? Promise.resolve(false) : state.reachedPromise.then(() => true);
+    },
     hasReached: (label) => states.get(label)?.reached ?? false,
-    waitUntilReached: (label) => states.get(label)?.reachedPromise ?? Promise.resolve(false),
     release: (label) => {
       const state = states.get(label);
       if (state === undefined || state.released) {

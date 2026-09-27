@@ -1,24 +1,22 @@
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import {
   CommandId,
   MessageId,
   type OrchestrationV2Run,
-  type OrchestrationV2ThreadProjection,
   type RunId,
   type ThreadId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import type { ProjectionRuntimeRecoveryState } from "./ProjectionStore.ts";
 
 import { ServerSettingsService } from "../serverSettings.ts";
 import { ThreadManagementService } from "./ThreadManagementService.ts";
 
-function hasInterruptRequest(projection: OrchestrationV2ThreadProjection, runId: RunId): boolean {
-  return projection.turnItems.some(
-    (item) => item.runId === runId && item.type === "run_interrupt_request",
-  );
-}
-
 export function restartContinuationRun(
-  projection: OrchestrationV2ThreadProjection,
+  projection: Pick<
+    ProjectionRuntimeRecoveryState,
+    "thread" | "runs" | "providerThreads" | "providerSessions" | "providerTurns"
+  >,
 ): OrchestrationV2Run | undefined {
   if (projection.thread.archivedAt !== null || projection.thread.deletedAt !== null) return;
   const run = projection.runs.reduce<OrchestrationV2Run | undefined>(
@@ -26,8 +24,6 @@ export function restartContinuationRun(
     undefined,
   );
   if (!run) return;
-  // A committed stop wins even if the provider has not acknowledged it yet.
-  if (hasInterruptRequest(projection, run.id)) return;
   const preparedContinuation =
     run.status === "starting" && run.restartContinuationOfRunId !== undefined;
   if (run.status !== "running" && !preparedContinuation) return;
@@ -74,20 +70,23 @@ export function restartContinuationRun(
 export const continueRestartedRun = Effect.fn("RestartContinuation.continueRestartedRun")(
   function* (input: { readonly threadId: ThreadId; readonly sourceRunId: RunId }) {
     const settings = yield* ServerSettingsService;
-    const enabled = yield* settings.getSettings.pipe(
-      Effect.map((value) => value.continueThreadsAfterServerUpdate),
-      Effect.orElseSucceed(() => false),
-    );
+    const enabled = yield* settings.getSettings.pipe(Effect.orElseSucceed(() => null));
     if (!enabled) return;
     const threads = yield* ThreadManagementService;
-    const projection = yield* threads.getThreadProjection(input.threadId);
-    if (projection.thread.archivedAt !== null || projection.thread.deletedAt !== null) return;
     const messageId = MessageId.make(`message:restart-continuation:${input.sourceRunId}`);
+    const projection = yield* threads.getThreadRecords(input.threadId, ["messages", "runs"], {
+      messageIds: [messageId],
+    });
+    if (
+      !resolveProjectSettings(enabled, projection.thread.projectId).settings
+        .continueThreadsAfterServerUpdate
+    )
+      return;
+    if (projection.thread.archivedAt !== null || projection.thread.deletedAt !== null) return;
+
     if (projection.messages.some((message) => message.id === messageId)) return;
     const source = projection.runs.find((run) => run.id === input.sourceRunId);
     if (!source || source.status !== "cancelled") return;
-    // Shutdown may have recorded continuation intent before the stop request.
-    if (hasInterruptRequest(projection, source.id)) return;
     // A user submission after reconciliation takes precedence over an automatic prompt.
     if (projection.runs.some((run) => run.ordinal > source.ordinal)) return;
     if (projection.thread.providerInstanceId !== source.providerInstanceId) return;

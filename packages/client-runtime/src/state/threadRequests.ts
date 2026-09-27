@@ -33,6 +33,7 @@ export interface ThreadPendingUserInput {
   readonly questions: ReadonlyArray<ThreadUserInputQuestion>;
   readonly responseCapability: OrchestrationV2RuntimeRequest["responseCapability"]["type"];
   readonly responseMode?: "message";
+  readonly dismissible: boolean;
 }
 
 export interface PendingThreadRequests {
@@ -42,7 +43,7 @@ export interface PendingThreadRequests {
 
 /** Joins pending request entities to the request items that carry display data. */
 export function derivePendingThreadRequests(
-  projection: OrchestrationV2ThreadProjection,
+  projection: Pick<OrchestrationV2ThreadProjection, "runtimeRequests" | "turnItems">,
 ): PendingThreadRequests {
   const approvals: ThreadPendingApproval[] = [];
   const userInputs: ThreadPendingUserInput[] = [];
@@ -64,6 +65,7 @@ export function derivePendingThreadRequests(
           multiSelect: question.multiSelect ?? false,
         })),
         responseCapability,
+        dismissible: item.responseMode === "message" || responseCapability === "message",
         ...(item.responseMode === "message" || responseCapability === "message"
           ? { responseMode: "message" as const }
           : {}),
@@ -89,4 +91,62 @@ export function derivePendingThreadRequests(
   }
 
   return { approvals, userInputs };
+}
+
+/** Older V2 answers were saved on requests without updating their timeline items. */
+export function createQuestionHistoryProjector() {
+  type Rows = OrchestrationV2ThreadProjection["visibleTurnItems"];
+  type Requests = OrchestrationV2ThreadProjection["runtimeRequests"];
+  let previousRows: Rows | undefined;
+  let previousRequests: Requests | undefined;
+  let previousResult: Rows | undefined;
+  const cache = new WeakMap<Rows[number], { request: Requests[number]; row: Rows[number] }>();
+  return (
+    projection: Pick<OrchestrationV2ThreadProjection, "visibleTurnItems" | "runtimeRequests">,
+  ): Rows => {
+    const { visibleTurnItems: rows, runtimeRequests: requests } = projection;
+    if (rows === previousRows && requests === previousRequests && previousResult)
+      return previousResult;
+    const byId = new Map(requests.map((request) => [request.id, request]));
+    let result: Rows[number][] | undefined;
+    for (const [index, row] of rows.entries()) {
+      const item = row.item;
+      const request =
+        item.type === "user_input_request" && !item.questionAnswer
+          ? byId.get(item.requestId)
+          : undefined;
+      let next = row;
+      if (
+        item.type === "user_input_request" &&
+        request?.status === "resolved" &&
+        request.answers !== undefined
+      ) {
+        const cached = cache.get(row);
+        next =
+          cached?.request === request
+            ? cached.row
+            : {
+                ...row,
+                item: {
+                  ...item,
+                  questionAnswer: {
+                    requestId: request.id,
+                    answers: request.answers,
+                    attachmentsByQuestionId: {},
+                    questionTextById: Object.fromEntries(
+                      item.questions.map((question) => [question.id, question.question]),
+                    ),
+                  },
+                },
+              };
+        cache.set(row, { request, row: next });
+      }
+      if (next !== row) result ??= rows.slice(0, index);
+      result?.push(next);
+    }
+    previousRows = rows;
+    previousRequests = requests;
+    previousResult = result ?? rows;
+    return previousResult;
+  };
 }

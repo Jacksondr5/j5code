@@ -17,7 +17,7 @@ export interface CandidateQuery {
   readonly after?: CandidateCursor;
   readonly limit: number;
 }
-export class CandidateReadError extends Schema.TaggedErrorClass<CandidateReadError>()(
+export class CandidateReadError extends Schema.TaggedError<CandidateReadError>()(
   "CandidateReadError",
   { cause: Schema.Defect() },
 ) {}

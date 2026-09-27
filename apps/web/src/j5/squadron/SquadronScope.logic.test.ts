@@ -2,6 +2,8 @@ import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { describe, expect, it } from "vite-plus/test";
 
+import { resolveFirstSendSquadronCarrier } from "../../components/ChatView.logic";
+
 import {
   filterThreadsForSquadronScope,
   freezeSquadronForFirstSend,
@@ -119,14 +121,31 @@ describe("Squadron scope logic", () => {
     ).toEqual({ visible: true, frozen: true, squadronId: "squadron:alpha" });
   });
 
-  it("uses a durable Registrar home before draft or ambient context on a zero-message thread", () => {
+  it("uses a durable Registrar home before the draft choice on a zero-message thread", () => {
     expect(
       resolveEffectiveSquadronId({
         durableHome: { id: "squadron:alpha", name: "Alpha" },
         draftSquadronId: "squadron:bravo",
-        ambientSquadronId: "squadron:bravo",
       }),
     ).toBe("squadron:alpha");
+  });
+
+  it("names exactly the Squadron first send would carry, never the ambient scope", () => {
+    const durableHomes = [null, { id: "squadron:alpha", name: "Alpha" }] as const;
+    const draftIds = [null, "squadron:bravo"] as const;
+    for (const durableHome of durableHomes) {
+      for (const draftSquadronId of draftIds) {
+        // An ambient scope is set in every case; the add-folder draft that showed it was refused.
+        const carrier = resolveFirstSendSquadronCarrier({
+          durableSquadronId: durableHome?.id ?? null,
+          draftSquadronId,
+          ambientSquadronId: "squadron:homelab",
+        });
+        expect(resolveEffectiveSquadronId({ durableHome, draftSquadronId })).toBe(
+          carrier.kind === "missing-explicit-squadron" ? null : carrier.squadronId,
+        );
+      }
+    }
   });
 
   it("keeps unknown/native existing threads chip-free and preserves pre-send draft behavior", () => {

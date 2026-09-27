@@ -221,7 +221,7 @@ export const OrchestrationV2AgentPersonaCatalogEntry = Schema.Struct({
 export type OrchestrationV2AgentPersonaCatalogEntry =
   typeof OrchestrationV2AgentPersonaCatalogEntry.Type;
 
-export class AgentPersonaCatalogError extends Schema.TaggedErrorClass<AgentPersonaCatalogError>()(
+export class AgentPersonaCatalogError extends Schema.TaggedError<AgentPersonaCatalogError>()(
   "AgentPersonaCatalogError",
   { message: Schema.String },
 ) {}
@@ -242,7 +242,7 @@ export const AgentPersonaImportConflict = Schema.Struct({
   definitionDigest: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
 });
 export type AgentPersonaImportConflict = typeof AgentPersonaImportConflict.Type;
-export class AgentPersonaImportConflictError extends Schema.TaggedErrorClass<AgentPersonaImportConflictError>()(
+export class AgentPersonaImportConflictError extends Schema.TaggedError<AgentPersonaImportConflictError>()(
   "AgentPersonaImportConflictError",
   { message: Schema.String, conflicts: Schema.Array(AgentPersonaImportConflict) },
 ) {}

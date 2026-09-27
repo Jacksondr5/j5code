@@ -8,6 +8,8 @@ import {
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { SpawnExecutableResolution } from "@t3tools/shared/shell";
 import {
   ProviderReplayEntry,
   type ModelSelection,
@@ -24,9 +26,12 @@ import * as Stream from "effect/Stream";
 
 import { ServerConfig } from "../../config.ts";
 import {
+  isWindowsClaudeLauncherShimPath,
+  resolveClaudeSdkExecutablePath,
+} from "../../provider/Drivers/ClaudeExecutable.ts";
+import {
   CLAUDE_PROVIDER,
   CLAUDE_DEFAULT_INSTANCE_ID,
-  CLAUDE_DRIVER_KIND,
   ClaudeAdapterV2Driver,
   ClaudeAgentSdkQueryRunner,
   ClaudeAgentSdkQueryRunnerError,
@@ -60,7 +65,7 @@ const ClaudeAgentSdkReplayTranscript = Schema.Struct({
 });
 type ClaudeAgentSdkReplayTranscript = typeof ClaudeAgentSdkReplayTranscript.Type;
 
-export class ClaudeReplayTranscriptDecodeError extends Schema.TaggedErrorClass<ClaudeReplayTranscriptDecodeError>()(
+export class ClaudeReplayTranscriptDecodeError extends Schema.TaggedError<ClaudeReplayTranscriptDecodeError>()(
   "ClaudeReplayTranscriptDecodeError",
   {
     driver: Schema.optional(Schema.String),
@@ -74,7 +79,7 @@ export class ClaudeReplayTranscriptDecodeError extends Schema.TaggedErrorClass<C
   }
 }
 
-export class ClaudeReplayExhaustedError extends Schema.TaggedErrorClass<ClaudeReplayExhaustedError>()(
+export class ClaudeReplayExhaustedError extends Schema.TaggedError<ClaudeReplayExhaustedError>()(
   "ClaudeReplayExhaustedError",
   {
     scenario: Schema.String,
@@ -87,7 +92,7 @@ export class ClaudeReplayExhaustedError extends Schema.TaggedErrorClass<ClaudeRe
   }
 }
 
-export class ClaudeReplayUnexpectedOutboundError extends Schema.TaggedErrorClass<ClaudeReplayUnexpectedOutboundError>()(
+export class ClaudeReplayUnexpectedOutboundError extends Schema.TaggedError<ClaudeReplayUnexpectedOutboundError>()(
   "ClaudeReplayUnexpectedOutboundError",
   {
     scenario: Schema.String,
@@ -101,7 +106,7 @@ export class ClaudeReplayUnexpectedOutboundError extends Schema.TaggedErrorClass
   }
 }
 
-export class ClaudeReplayFrameMismatchError extends Schema.TaggedErrorClass<ClaudeReplayFrameMismatchError>()(
+export class ClaudeReplayFrameMismatchError extends Schema.TaggedError<ClaudeReplayFrameMismatchError>()(
   "ClaudeReplayFrameMismatchError",
   {
     scenario: Schema.String,
@@ -116,7 +121,7 @@ export class ClaudeReplayFrameMismatchError extends Schema.TaggedErrorClass<Clau
   }
 }
 
-export class ClaudeReplayRuntimeExitError extends Schema.TaggedErrorClass<ClaudeReplayRuntimeExitError>()(
+export class ClaudeReplayRuntimeExitError extends Schema.TaggedError<ClaudeReplayRuntimeExitError>()(
   "ClaudeReplayRuntimeExitError",
   {
     scenario: Schema.String,
@@ -130,7 +135,7 @@ export class ClaudeReplayRuntimeExitError extends Schema.TaggedErrorClass<Claude
   }
 }
 
-export class ClaudeReplayIncompleteError extends Schema.TaggedErrorClass<ClaudeReplayIncompleteError>()(
+export class ClaudeReplayIncompleteError extends Schema.TaggedError<ClaudeReplayIncompleteError>()(
   "ClaudeReplayIncompleteError",
   {
     scenario: Schema.String,
@@ -143,7 +148,7 @@ export class ClaudeReplayIncompleteError extends Schema.TaggedErrorClass<ClaudeR
   }
 }
 
-export class ClaudeReplayDriverError extends Schema.TaggedErrorClass<ClaudeReplayDriverError>()(
+export class ClaudeReplayDriverError extends Schema.TaggedError<ClaudeReplayDriverError>()(
   "ClaudeReplayDriverError",
   {
     scenario: Schema.String,
@@ -298,6 +303,7 @@ function isClaudeSdkReplayMessage(frame: unknown): frame is SDKMessage {
     type === "user" ||
     type === "result" ||
     type === "system" ||
+    type === "stream_event" ||
     type === "rate_limit_event"
   );
 }
@@ -820,7 +826,7 @@ const makeClaudeAgentSdkReplayQueryRunner = Effect.fn("ClaudeAgentSdkReplayQuery
   },
 );
 
-export function makeClaudeAgentSdkReplayQueryRunnerLayer(
+function makeClaudeAgentSdkReplayQueryRunnerLayer(
   transcript: ClaudeAgentSdkReplayTranscript,
   options: { readonly replayGate?: ProviderReplayGate } = {},
 ): Layer.Layer<ClaudeAgentSdkQueryRunner> {
@@ -830,7 +836,7 @@ export function makeClaudeAgentSdkReplayQueryRunnerLayer(
   );
 }
 
-export function makeClaudeAgentSdkReplayLayer(
+function makeClaudeAgentSdkReplayLayer(
   transcript: ClaudeAgentSdkReplayTranscript,
   options: { readonly replayGate?: ProviderReplayGate } = {},
 ): Layer.Layer<ClaudeAgentSdkQueryRunner> {
@@ -865,7 +871,7 @@ export function makeClaudeAgentSdkReplayLayer(
   );
 }
 
-export function makeClaudeProviderAdapterRegistryReplayLayer(
+function makeClaudeProviderAdapterRegistryReplayLayer(
   transcript: ClaudeAgentSdkReplayTranscript,
   options: { readonly replayGate?: ProviderReplayGate } = {},
 ) {
@@ -877,7 +883,7 @@ export function makeClaudeProviderAdapterRegistryReplayLayer(
     drivers: [ClaudeAdapterV2Driver],
     configMap: {
       [CLAUDE_DEFAULT_INSTANCE_ID]: {
-        driver: CLAUDE_DRIVER_KIND,
+        driver: CLAUDE_PROVIDER,
       },
     },
   }).pipe(
@@ -1268,6 +1274,39 @@ async function recordMessagesUntilFirstToolUse(input: {
   }
 }
 
+// The SDK package may not ship a Claude Code executable for this platform, so
+// recordings prefer the installed `claude` binary when it resolves on PATH to
+// something the SDK can spawn directly, and otherwise leave the SDK's own
+// executable discovery in place. A Windows launcher shim (`claude.cmd` and
+// friends) is not directly spawnable, so it only counts when
+// resolveClaudeSdkExecutablePath can follow it to a real package entry.
+export const resolveClaudeRecordingExecutablePath = Effect.fn(
+  "resolveClaudeRecordingExecutablePath",
+)(function* (environment: NodeJS.ProcessEnv) {
+  const resolveExecutable = yield* SpawnExecutableResolution;
+  const platform = yield* HostProcessPlatform;
+  const resolved = resolveExecutable("claude", platform, environment);
+  if (resolved === undefined) {
+    return undefined;
+  }
+  const executablePath = yield* resolveClaudeSdkExecutablePath(resolved, environment);
+  if (platform === "win32" && isWindowsClaudeLauncherShimPath(executablePath)) {
+    return undefined;
+  }
+  return executablePath;
+});
+
+async function openRecordingQuery(input: Parameters<typeof query>[0]) {
+  const executablePath = await Effect.runPromise(resolveClaudeRecordingExecutablePath(process.env));
+  return query({
+    ...input,
+    options: {
+      ...input.options,
+      ...(executablePath === undefined ? {} : { pathToClaudeCodeExecutable: executablePath }),
+    },
+  });
+}
+
 async function recordClaudeStreamingQuery(input: {
   readonly scenario: string;
   readonly prompts: ReadonlyArray<string>;
@@ -1339,7 +1378,7 @@ async function recordClaudeStreamingQuery(input: {
     label: "query.open",
     frame: makeClaudeQueryOpenFrame({ options }),
   });
-  const queryRuntime = query({
+  const queryRuntime = await openRecordingQuery({
     prompt: promptQueue,
     options,
   });
@@ -1477,7 +1516,7 @@ async function recordClaudeActiveSteeringQuery(input: {
     label: "query.open",
     frame: makeClaudeQueryOpenFrame({ options }),
   });
-  const queryRuntime = query({
+  const queryRuntime = await openRecordingQuery({
     prompt: promptQueue,
     options,
   });
@@ -1564,7 +1603,7 @@ async function recordClaudeRestartingQueries(input: {
     });
 
     try {
-      const queryRuntime = query({
+      const queryRuntime = await openRecordingQuery({
         prompt: promptQueue,
         options,
       });
@@ -1649,7 +1688,7 @@ async function recordClaudeResumeAtCursorQuery(input: {
     label: "query.open:source",
     frame: makeClaudeQueryOpenFrame({ options: sourceOptions }),
   });
-  const sourceRuntime = query({
+  const sourceRuntime = await openRecordingQuery({
     prompt: sourcePromptQueue,
     options: sourceOptions,
   });
@@ -1727,7 +1766,7 @@ async function recordClaudeResumeAtCursorQuery(input: {
       frame: makeClaudePromptOfferFrame(resumedMessage),
     });
 
-    const resumedRuntime = query({
+    const resumedRuntime = await openRecordingQuery({
       prompt: resumedPromptQueue,
       options: resumedOptions,
     });
@@ -1831,7 +1870,7 @@ async function recordClaudeForkSessionQuery(input: {
     label: "query.open:source",
     frame: makeClaudeQueryOpenFrame({ options: sourceOptions }),
   });
-  const sourceRuntime = query({
+  const sourceRuntime = await openRecordingQuery({
     prompt: sourcePromptQueue,
     options: sourceOptions,
   });
@@ -1939,7 +1978,7 @@ async function recordClaudeForkSessionQuery(input: {
         label: `query.open:fork${labelSuffix}`,
         frame: makeClaudeQueryOpenFrame({ options: targetOptions }),
       });
-      const targetRuntime = query({
+      const targetRuntime = await openRecordingQuery({
         prompt: targetPromptQueue,
         options: targetOptions,
       });
@@ -1997,7 +2036,7 @@ async function recordClaudeForkSessionQuery(input: {
         label: "query.open:source-continuation",
         frame: makeClaudeQueryOpenFrame({ options: continuationOptions }),
       });
-      const continuationRuntime = query({
+      const continuationRuntime = await openRecordingQuery({
         prompt: continuationPromptQueue,
         options: continuationOptions,
       });
@@ -2086,7 +2125,7 @@ export async function recordInterruptedClaudeQuery(input: {
     label: input.queryOpenLabel,
     frame: makeClaudeQueryOpenFrame({ options }),
   });
-  const runtime = query({
+  const runtime = await openRecordingQuery({
     prompt: promptQueue,
     options,
   });
@@ -2270,7 +2309,7 @@ async function recordClaudeInterruptRestartQuery(input: {
   });
 
   try {
-    const secondRuntime = query({
+    const secondRuntime = await openRecordingQuery({
       prompt: secondPromptQueue,
       options: secondOptions,
     });

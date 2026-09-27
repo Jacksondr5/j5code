@@ -1,4 +1,5 @@
 import { type ModelSelection } from "@t3tools/contracts";
+import { playbookHandlers } from "../../playbooks/mcp.ts";
 import * as Crypto from "effect/Crypto";
 import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
@@ -18,14 +19,7 @@ import { buildAgentPersonaCatalog } from "../../agents/agentPersonaRouting.ts";
 import { translateAgentPersonaProviderPolicy } from "../../agents/agentPersonaProviderPolicy.ts";
 import { prepareAgentPersonaPeerSpawn } from "../../agents/agentPersonaSpawn.ts";
 import { AgentCrewInstanceService } from "../AgentCrewInstanceService.ts";
-import {
-  ArchiveAgentConfirmationRequiredError,
-  ArchiveAgentConfirmationStaleError,
-  ArchiveAgentPartialFailureError,
-  ArchiveAgentService,
-  type ArchiveAgentConsequenceFacts,
-  type ArchiveAgentTarget,
-} from "../ArchiveAgentService.ts";
+import type { ArchiveAgentConsequenceFacts } from "../ArchiveAgentService.ts";
 import {
   ArchiveCrewConfirmationRequiredError,
   ArchiveCrewConfirmationStaleError,
@@ -33,7 +27,11 @@ import {
   ArchiveCrewService,
   type ArchiveCrewConsequenceFacts,
 } from "../ArchiveCrewService.ts";
-import { CrewProposalService, type CrewProposalOutcome } from "../CrewProposalService.ts";
+import {
+  CrewProposalService,
+  type CrewProposalError,
+  type CrewProposalOutcome,
+} from "../CrewProposalService.ts";
 import { CrewStopService } from "../CrewStopService.ts";
 import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
 import { A2AHomeRegistrar, participantIdForThread } from "../HomeRegistrar.ts";
@@ -56,21 +54,9 @@ import {
   stablePart,
 } from "../spawnIds.ts";
 import { PlacementCommandId } from "../placementContracts.ts";
-import {
-  CommCommandId,
-  type LedgerCursor,
-  type ParticipantDirectoryRow,
-  type ParticipantId,
-  type SquadronId,
-  type StoredCommEvent,
-} from "../contracts.ts";
+import { CommCommandId, type ParticipantDirectoryRow, type SquadronId } from "../contracts.ts";
 import type { ParticipantProvenanceView } from "../placementContracts.ts";
-import {
-  J5Toolkit,
-  type J5ArchiveAgentFailure,
-  type J5ArchiveCrewFailure,
-  type J5McpFailure,
-} from "./tools.ts";
+import { J5Toolkit, type J5ArchiveCrewFailure, type J5McpFailure } from "./tools.ts";
 
 class J5AgentToolStateError extends Data.TaggedError("J5AgentToolStateError")<{
   readonly state: string;
@@ -104,35 +90,6 @@ const projectArchiveFacts = (facts: ArchiveAgentConsequenceFacts) => ({
       ? null
       : { run_id: facts.runningTurn.runId, status: facts.runningTurn.status },
 });
-
-const archiveFailure = (error: unknown): J5ArchiveAgentFailure => {
-  const base = failure(error);
-  if (
-    error instanceof ArchiveAgentConfirmationRequiredError ||
-    error instanceof ArchiveAgentConfirmationStaleError
-  ) {
-    return {
-      ...base,
-      ...projectArchiveFacts(error.facts),
-      confirmation_token: error.confirmationToken,
-    };
-  }
-  if (error instanceof ArchiveAgentPartialFailureError) {
-    return {
-      ...base,
-      interrupt_requested: error.interruptRequested,
-      thread_archive_committed: error.threadArchived,
-      participant_retired: error.participantRetired,
-      participant_archived: error.participantArchived,
-      pending_exchange_ids: [...error.pendingExchangeIds],
-      running_turn:
-        error.runningTurn === null
-          ? null
-          : { run_id: error.runningTurn.runId, status: error.runningTurn.status },
-    };
-  }
-  return base;
-};
 
 const projectCrewArchiveFacts = (facts: ArchiveCrewConsequenceFacts) => ({
   members: facts.members.map((member) => ({
@@ -285,7 +242,7 @@ const preflightSpawnCaller = Effect.fn("j5.a2a.mcp.preflightSpawnCaller")(functi
 const requireCallerSquadron = Effect.fn("j5.a2a.mcp.requireCallerSquadron")(function* (
   scope: McpInvocationScope,
   squadronId: SquadronId,
-  command: "stop_agent" | "archive_agent" | "archive_crew" | "stop_crew",
+  command: "stop_agent" | "archive_crew" | "stop_crew",
 ) {
   const caller = yield* resolveCallerMembership(scope);
   if (caller.squadronId !== squadronId) {
@@ -295,72 +252,6 @@ const requireCallerSquadron = Effect.fn("j5.a2a.mcp.requireCallerSquadron")(func
     );
   }
   return caller;
-});
-
-const readSquadronEvents = Effect.fn("j5.a2a.mcp.readSquadronEvents")(function* (
-  squadronId: SquadronId,
-) {
-  const ledger = yield* A2ALedger;
-  const events: Array<StoredCommEvent> = [];
-  let cursor: LedgerCursor = { afterSeq: 0 };
-  while (true) {
-    const page = yield* ledger.readEvents({ squadronId, cursor, limit: 500 });
-    events.push(...page.events);
-    if (page.complete) return events;
-    cursor = page.nextCursor;
-  }
-});
-
-const resolveArchiveTarget = Effect.fn("j5.a2a.mcp.resolveArchiveTarget")(function* (
-  squadronId: SquadronId,
-  participantId: ParticipantId,
-) {
-  const placements = yield* ParticipantPlacementService;
-  const activeMatches = (yield* placements.listParticipants(squadronId)).filter(
-    (row) => row.participantId === participantId,
-  );
-  if (activeMatches.length > 1) {
-    return yield* stateError(
-      `Squadron ${squadronId} has ambiguous active participant ${participantId}.`,
-      "Call list_participants and retry archive_agent with exactly one listed agent participant_id.",
-    );
-  }
-  if (activeMatches.length === 1) {
-    const target = activeMatches[0]!;
-    if (target.participant.kind !== "agent" || target.threadId === null) {
-      return yield* stateError(
-        `Participant ${participantId} in Squadron ${squadronId} is not an agent with a thread and cannot be archived.`,
-        "Call list_participants and retry archive_agent with an agent participant_id.",
-      );
-    }
-    return {
-      squadronId,
-      participantId: target.participantId,
-      threadId: target.threadId,
-    } satisfies ArchiveAgentTarget;
-  }
-
-  // Retired participants are absent from the active membership projection. The
-  // append-only ledger is the consume-only fallback for an idempotent replay.
-  const historicalMatches = (yield* readSquadronEvents(squadronId)).flatMap((event) =>
-    event.kind === "participant.joined" &&
-    event.payload.participant.kind === "agent" &&
-    event.payload.participant.id === participantId
-      ? [event.payload.participant]
-      : [],
-  );
-  if (historicalMatches.length !== 1) {
-    return yield* stateError(
-      `Squadron ${squadronId} has ${historicalMatches.length === 0 ? "no" : "ambiguous"} historical participant.joined agent identity for ${participantId}.`,
-      "Call list_participants and retry archive_agent with exactly one active or historically joined agent participant_id.",
-    );
-  }
-  const participant = historicalMatches[0]!;
-  return {
-    squadronId,
-    participantId: participant.id,
-    threadId: participant.threadId,
-  } satisfies ArchiveAgentTarget;
 });
 
 const selectSpawnModel = Effect.fn("j5.a2a.mcp.selectSpawnModel")(function* (
@@ -510,9 +401,9 @@ const preflightCrewCaptain = Effect.fn("j5.a2a.mcp.preflightCrewCaptain")(functi
   };
 });
 
-const crewProposalNextStep = (error: { readonly _tag: string }) =>
+const crewProposalNextStep = (error: CrewProposalError) =>
   error._tag === "CrewProposalRequestError"
-    ? "Correct the request and retry."
+    ? error.nextStep
     : error._tag === "CrewLaunchSeatUnavailableError"
       ? "Choose a different persona from list_personas or ask the user to fix that persona, then retry."
       : error._tag === "CrewLaunchCapError"
@@ -534,6 +425,7 @@ const projectCrewProposal = (outcome: CrewProposalOutcome) => ({
 });
 
 const handlers = {
+  ...playbookHandlers,
   send_message: (input) =>
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext;
@@ -821,7 +713,11 @@ const handlers = {
           placementCommandId: spawnPlacementCommandId(stableInput),
           squadronId: caller.squadronId,
           threadId,
-          spawnedByParticipantId: caller.participantId,
+          provenance: {
+            kind: "spawned-by",
+            spawnedByParticipantId: caller.participantId,
+            source: "j5_spawn",
+          },
           createdAt: DateTime.formatIso(child.thread.createdAt),
         })
         .pipe(
@@ -855,6 +751,8 @@ const handlers = {
             participantId: facts.home.participantId,
             squadronId: facts.home.squadronId,
             squadronName: caller.squadron.name,
+            spawnedByParticipantId: caller.participantId,
+            spawnerThreadId: scope.threadId,
           }),
           attachments: [],
           modelSelection,
@@ -1030,79 +928,6 @@ const handlers = {
         ? ("interrupt_requested" as const)
         : ("already_idle" as const);
     }).pipe(Effect.mapError(failure)),
-  archive_agent: (input) =>
-    Effect.gen(function* () {
-      const scope = yield* McpInvocationContext;
-      const crypto = yield* Crypto.Crypto;
-      const caller = yield* requireCallerSquadron(scope, input.squadron_id, "archive_agent");
-      if (input.participant_id === caller.participantId) {
-        return yield* stateError(
-          `archive_agent cannot archive the caller ${caller.participantId}.`,
-          "The operation is refused.",
-        );
-      }
-      const target = yield* resolveArchiveTarget(input.squadron_id, input.participant_id);
-      const membership = yield* (yield* AgentCrewInstanceService)
-        .findMembership(target.participantId)
-        .pipe(
-          Effect.mapError((error) =>
-            stateError(
-              `Crew membership for ${target.participantId} cannot be read: ${error.message}.`,
-              "Retry archive_agent once crew records are readable.",
-            ),
-          ),
-        );
-      if (membership !== null) {
-        return yield* stateError(
-          `Participant ${target.participantId} is seat ${membership.seatName} of crew ${membership.crewInstanceId}; crew members are never archived one by one.`,
-          `Call archive_crew with crew_instance_id=${membership.crewInstanceId} to retire the whole Crew, or message the member instead.`,
-        );
-      }
-      // Only the Captain may retire its Crew, so archiving the Captain first would leave live
-      // seats nobody can ever archive (Critic Q12, 2026-09-14).
-      const commanded = yield* (yield* AgentCrewInstanceService)
-        .listForCaptain({
-          squadronId: input.squadron_id,
-          captainParticipantId: target.participantId,
-        })
-        .pipe(
-          Effect.mapError((error) =>
-            stateError(
-              `Crews commanded by ${target.participantId} cannot be read: ${error.message}.`,
-              "Retry archive_agent once crew records are readable.",
-            ),
-          ),
-        );
-      const live = commanded.filter((crew) => crew.archivedAt === null);
-      if (live.length > 0) {
-        return yield* stateError(
-          `Participant ${target.participantId} is the Captain of ${live.length === 1 ? "a live Crew" : `${live.length} live Crews`} (${live.map(({ id }) => id).join(", ")}); a Captain is never archived while its Crew runs.`,
-          `Call archive_crew with crew_instance_id=${live[0]!.id} first, then archive_agent.`,
-        );
-      }
-      const requestKey = input.client_request_id ?? (yield* crypto.randomUUIDv4);
-      const archivedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
-      return yield* (yield* ArchiveAgentService).archive({
-        providerSessionId: scope.providerSessionId,
-        callerParticipantId: caller.participantId,
-        target,
-        clientRequestKey: requestKey,
-        ...(input.confirmation_token === undefined
-          ? {}
-          : { confirmationToken: input.confirmation_token }),
-        archivedAt,
-        interruptCommandId: lifecycleCommandId({
-          providerSessionId: scope.providerSessionId,
-          requestKey,
-          operation: "archive-agent-interrupt",
-        }),
-        archiveCommandId: lifecycleCommandId({
-          providerSessionId: scope.providerSessionId,
-          requestKey,
-          operation: "archive-agent-thread",
-        }),
-      });
-    }).pipe(Effect.mapError(archiveFailure)),
   stop_crew: (input) =>
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext;

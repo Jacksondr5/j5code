@@ -8,7 +8,8 @@ import { isWorkspaceImagePreviewPath } from "@t3tools/shared/filePreview";
 import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
-import * as EffectAcpSchema from "effect-acp/schema";
+import type * as EffectAcpSchema from "effect-acp/compat";
+import * as AcpWireSchema from "effect-acp/schema-v1";
 
 import type { AcpToolCallState } from "./AcpRuntimeModel.ts";
 
@@ -36,7 +37,7 @@ const decodeNativeToolFields = Schema.decodeUnknownOption(NativeToolFields);
 const decodeSingleAnswer = Schema.decodeUnknownOption(
   Schema.Union([Schema.String, Schema.Tuple([Schema.String])]),
 );
-const decodeToolCallContent = Schema.decodeUnknownOption(EffectAcpSchema.ToolCallContent);
+const decodeToolCallContent = Schema.decodeUnknownOption(AcpWireSchema.ToolCallContent);
 
 /** Native questions share the permission method, but their choices are not approvals. */
 export function isAntigravityUserInputRequest(
@@ -72,9 +73,7 @@ const decodeSecurityWarning = Schema.decodeUnknownOption(
  * The agent marks "Allow Always" on shell and web tools with a prompt injection
  * warning in `_meta`. Surface it as option text so both clients can show it.
  */
-export function antigravitySecurityWarning(
-  option: EffectAcpSchema.PermissionOption,
-): string | undefined {
+function antigravitySecurityWarning(option: EffectAcpSchema.PermissionOption): string | undefined {
   const meta = option._meta;
   if (!Predicate.isObject(meta)) return undefined;
   const warning = Option.getOrUndefined(decodeSecurityWarning(meta[SECURITY_WARNING_META_KEY]));
@@ -264,7 +263,9 @@ export function normalizeAntigravitySessionUpdate(
         ? { rawOutput: sanitizeAntigravityToolPayload(update.rawOutput) }
         : {}),
       ...(update.content !== undefined ? { content: content ?? [] } : {}),
-      ...(update._meta !== undefined ? { _meta: Predicate.isObject(meta) ? meta : null } : {}),
+      ...(update._meta !== undefined
+        ? { _meta: Schema.is(Schema.Record(Schema.String, Schema.Json))(meta) ? meta : null }
+        : {}),
     },
   };
 }

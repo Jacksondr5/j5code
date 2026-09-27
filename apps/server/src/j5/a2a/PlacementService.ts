@@ -20,7 +20,7 @@ import {
   type RecordParticipantPlacementInput,
 } from "./placementContracts.ts";
 
-export class PlacementStorageError extends Schema.TaggedErrorClass<PlacementStorageError>()(
+export class PlacementStorageError extends Schema.TaggedError<PlacementStorageError>()(
   "PlacementStorageError",
   {
     operation: Schema.String,
@@ -28,7 +28,7 @@ export class PlacementStorageError extends Schema.TaggedErrorClass<PlacementStor
   },
 ) {}
 
-export class PlacementSquadronNotFoundError extends Schema.TaggedErrorClass<PlacementSquadronNotFoundError>()(
+export class PlacementSquadronNotFoundError extends Schema.TaggedError<PlacementSquadronNotFoundError>()(
   "PlacementSquadronNotFoundError",
   { squadronId: SquadronId },
 ) {
@@ -37,7 +37,7 @@ export class PlacementSquadronNotFoundError extends Schema.TaggedErrorClass<Plac
   }
 }
 
-export class PlacementParticipantNotFoundError extends Schema.TaggedErrorClass<PlacementParticipantNotFoundError>()(
+export class PlacementParticipantNotFoundError extends Schema.TaggedError<PlacementParticipantNotFoundError>()(
   "PlacementParticipantNotFoundError",
   { squadronId: SquadronId, participantId: ParticipantId },
 ) {
@@ -46,7 +46,7 @@ export class PlacementParticipantNotFoundError extends Schema.TaggedErrorClass<P
   }
 }
 
-export class PlacementParentNotFoundError extends Schema.TaggedErrorClass<PlacementParentNotFoundError>()(
+export class PlacementParentNotFoundError extends Schema.TaggedError<PlacementParentNotFoundError>()(
   "PlacementParentNotFoundError",
   { squadronId: SquadronId, parentParticipantId: ParticipantId },
 ) {
@@ -55,7 +55,7 @@ export class PlacementParentNotFoundError extends Schema.TaggedErrorClass<Placem
   }
 }
 
-export class PlacementParentIneligibleError extends Schema.TaggedErrorClass<PlacementParentIneligibleError>()(
+export class PlacementParentIneligibleError extends Schema.TaggedError<PlacementParentIneligibleError>()(
   "PlacementParentIneligibleError",
   { squadronId: SquadronId, parentParticipantId: ParticipantId },
 ) {
@@ -64,7 +64,7 @@ export class PlacementParentIneligibleError extends Schema.TaggedErrorClass<Plac
   }
 }
 
-export class PlacementAlreadyExistsError extends Schema.TaggedErrorClass<PlacementAlreadyExistsError>()(
+export class PlacementAlreadyExistsError extends Schema.TaggedError<PlacementAlreadyExistsError>()(
   "PlacementAlreadyExistsError",
   { squadronId: SquadronId, participantId: ParticipantId },
 ) {
@@ -73,7 +73,7 @@ export class PlacementAlreadyExistsError extends Schema.TaggedErrorClass<Placeme
   }
 }
 
-export class PlacementHumanTargetError extends Schema.TaggedErrorClass<PlacementHumanTargetError>()(
+export class PlacementHumanTargetError extends Schema.TaggedError<PlacementHumanTargetError>()(
   "PlacementHumanTargetError",
   {
     operation: Schema.Literal("record-creation"),
@@ -86,7 +86,7 @@ export class PlacementHumanTargetError extends Schema.TaggedErrorClass<Placement
   }
 }
 
-export class PlacementCycleError extends Schema.TaggedErrorClass<PlacementCycleError>()(
+export class PlacementCycleError extends Schema.TaggedError<PlacementCycleError>()(
   "PlacementCycleError",
   {
     participantId: ParticipantId,
@@ -99,7 +99,7 @@ export class PlacementCycleError extends Schema.TaggedErrorClass<PlacementCycleE
   }
 }
 
-export class PlacementGraphCorruptError extends Schema.TaggedErrorClass<PlacementGraphCorruptError>()(
+export class PlacementGraphCorruptError extends Schema.TaggedError<PlacementGraphCorruptError>()(
   "PlacementGraphCorruptError",
   { squadronId: SquadronId, path: Schema.Array(ParticipantId) },
 ) {
@@ -108,7 +108,7 @@ export class PlacementGraphCorruptError extends Schema.TaggedErrorClass<Placemen
   }
 }
 
-export class PlacementCommandConflictError extends Schema.TaggedErrorClass<PlacementCommandConflictError>()(
+export class PlacementCommandConflictError extends Schema.TaggedError<PlacementCommandConflictError>()(
   "PlacementCommandConflictError",
   { commandId: Schema.String, existingParticipantId: ParticipantId },
 ) {

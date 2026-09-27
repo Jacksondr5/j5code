@@ -1,3 +1,4 @@
+import { J5SquadronCreationLayer } from "../runtimeLayer.ts";
 import { AntigravityInstallation } from "../../../provider/AntigravityInstallation.ts";
 import * as ModelManifest from "../../../provider/ModelManifest.ts";
 import * as CodexResetCredit from "../../../provider/Layers/codexResetCredit.ts";
@@ -34,8 +35,10 @@ import { McpInvocationContext } from "../../../mcp/McpInvocationContext.ts";
 import * as OrchestratorMcpService from "../../../mcp/OrchestratorMcpService.ts";
 import { runDaemonWithOptions as runEffectWorkerDaemonWithOptions } from "../../../orchestration-v2/EffectWorker.ts";
 import { OrchestratorV2 } from "../../../orchestration-v2/Orchestrator.ts";
+import { layerFromProviderInstanceRegistry as providerAdapterRegistryFromInstances } from "../../../orchestration-v2/ProviderAdapterRegistry.ts";
+import { SourceControlProviderRegistry } from "../../../sourceControl/SourceControlProviderRegistry.ts";
 import { layer as threadLifecycleServiceLayer } from "../../../orchestration-v2/ThreadLifecycleService.ts";
-import { OrchestrationV2LayerLive } from "../../../orchestration-v2/runtimeLayer.ts";
+import { OrchestrationV2LayerLive as UpstreamOrchestrationV2LayerLive } from "../../../orchestration-v2/runtimeLayer.ts";
 import { ProviderInstanceRegistryHydrationLive } from "../../../provider/Layers/ProviderInstanceRegistryHydration.ts";
 import { ProviderRegistryLive } from "../../../provider/Layers/ProviderRegistry.ts";
 import {
@@ -64,6 +67,10 @@ import {
   J5StopAgentResult,
   J5Toolkit,
 } from "./tools.ts";
+
+const OrchestrationV2LayerLive = UpstreamOrchestrationV2LayerLive.pipe(
+  Layer.provideMerge(J5SquadronCreationLayer),
+);
 
 const codexInstanceId = ProviderInstanceId.make("codex");
 const lunaSelection = {
@@ -114,6 +121,10 @@ const providerInstanceRegistryLayer = ProviderInstanceRegistryHydrationLive.pipe
         Layer.provide(NodeServices.layer),
       ),
       ModelManifest.layerTest,
+      ServerSecretStore.layer.pipe(
+        Layer.provide(serverConfigLayer),
+        Layer.provide(NodeServices.layer),
+      ),
       CodexResetCredit.layer,
       OpenCodeRuntimeLive.pipe(Layer.provide(NodeServices.layer)),
       Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers),
@@ -132,7 +143,13 @@ const secretStoreLayer = ServerSecretStore.layer.pipe(
   Layer.provide(NodeServices.layer),
 );
 const orchestratorMcpLayer = OrchestratorMcpService.layer.pipe(
-  Layer.provide(Layer.mergeAll(orchestrationLayer, Layer.mock(ScheduledTaskService)({}))),
+  Layer.provide(
+    Layer.mergeAll(
+      orchestrationLayer,
+      Layer.mock(ScheduledTaskService)({}),
+      providerAdapterRegistryFromInstances,
+    ),
+  ),
 );
 const j5Layer = J5A2ARuntimeLayer.pipe(
   Layer.provideMerge(orchestrationLayer),
@@ -152,6 +169,11 @@ const liveLayer = Layer.mergeAll(
 ).pipe(
   Layer.provide(Layer.mock(GitWorkflow.GitWorkflowService)({})),
   Layer.provide(
+    Layer.mock(SourceControlProviderRegistry)({
+      resolveLink: () => Effect.die("unused title link"),
+    }),
+  ),
+  Layer.provide(
     Layer.mock(ProjectService.ProjectService)({
       getById: () => Effect.succeed(Option.none()),
     }),
@@ -164,6 +186,7 @@ const liveLayer = Layer.mergeAll(
   Layer.provideMerge(providerRegistryLayer),
   Layer.provide(providerInstanceRegistryLayer),
   Layer.provide(backgroundPolicyLayer),
+  Layer.provide(ModelManifest.layerTest),
   Layer.provide(NodeServices.layer),
 );
 const testLayer = Layer.mergeAll(liveLayer, NodeServices.layer);
@@ -342,7 +365,7 @@ describe.runIf(process.env.T3_J5_LUNA_LIVE_ORCHESTRATOR === "1")(
           assert.equal(projection.thread.modelSelection.model, lunaSelection.model);
           assert.equal(projection.thread.runtimeMode, "approval-required");
           assert.equal(projection.thread.worktreePath, isolatedWorkspace);
-          const firstTurnText = `<j5_spawn_context>\nPlatform-provided identity facts:\nparticipant_id: ${spawned.participant_id}\nsquadron_id: ${squadronId}\nsquadron_name: J5 Luna verb E2E\n</j5_spawn_context>\n\n<spawner_brief>\n${brief}\n</spawner_brief>`;
+          const firstTurnText = `<j5_spawn_context>\nPlatform-provided identity facts:\nparticipant_id: ${spawned.participant_id}\nsquadron_id: ${squadronId}\nsquadron_name: J5 Luna verb E2E\nspawned_by: ${parentHome.participantId}\nspawner_thread_id: ${parentThreadId}\n</j5_spawn_context>\n\n<spawner_brief>\n${brief}\n</spawner_brief>`;
           assert.equal(
             projection.messages.filter((message) => message.text === firstTurnText).length,
             1,

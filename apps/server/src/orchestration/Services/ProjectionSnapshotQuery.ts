@@ -6,9 +6,17 @@
  *
  * @module ProjectionSnapshotQuery
  */
-import type { ApprovalRequestId, CheckpointRef, ProjectId, ThreadId } from "@t3tools/contracts";
+import type {
+  AgentSessionImportSource,
+  ApprovalRequestId,
+  CheckpointRef,
+  MessageId,
+  ProjectId,
+  ThreadId,
+} from "@t3tools/contracts";
 import type {
   OrchestrationCheckpointSummary,
+  OrchestrationMessage,
   OrchestrationProject,
   OrchestrationProjectShell,
   OrchestrationReadModel,
@@ -78,6 +86,15 @@ export interface ProjectionSnapshotQueryShape {
   }) => Effect.Effect<Option.Option<OrchestrationThreadActivity>, ProjectionRepositoryError>;
 
   /**
+   * Read every activity of one kind across active (not deleted, not archived)
+   * threads, without hydrating the threads. Used at startup to find state a
+   * crashed process left behind.
+   */
+  readonly listActivitiesByKind: (
+    kind: string,
+  ) => Effect.Effect<ReadonlyArray<OrchestrationThreadActivity>, ProjectionRepositoryError>;
+
+  /**
    * Read the lightweight command snapshot used to bootstrap the in-memory
    * orchestration engine without hydrating message/activity/checkpoint bodies.
    */
@@ -124,6 +141,19 @@ export interface ProjectionSnapshotQueryShape {
    */
   readonly getArchivedShellSnapshot: () => Effect.Effect<
     OrchestrationShellSnapshot,
+    ProjectionRepositoryError
+  >;
+
+  /** Durable worktree ownership retained after thread deletion, including across restarts. */
+  readonly getDeletedWorktreeThreads: () => Effect.Effect<
+    ReadonlyArray<{
+      readonly id: ThreadId;
+      readonly projectId: ProjectId;
+      readonly branch: string;
+      readonly worktreePath: string;
+      readonly workspaceRoot: string;
+      readonly deletedAt: string;
+    }>,
     ProjectionRepositoryError
   >;
 
@@ -176,6 +206,9 @@ export interface ProjectionSnapshotQueryShape {
     ReadonlyArray<OrchestrationProjectShell>,
     ProjectionRepositoryError
   >;
+  readonly getProjectShells: (
+    projectIds?: ReadonlyArray<ProjectId>,
+  ) => Effect.Effect<ReadonlyArray<OrchestrationProjectShell>, ProjectionRepositoryError>;
 
   /**
    * Read the earliest active thread for a project.
@@ -183,6 +216,15 @@ export interface ProjectionSnapshotQueryShape {
   readonly getFirstActiveThreadIdByProjectId: (
     projectId: ProjectId,
   ) => Effect.Effect<Option.Option<ThreadId>, ProjectionRepositoryError>;
+
+  /** Read completed import sources without loading thread history. */
+  readonly getImportedAgentSessionSources: (projectId: ProjectId) => Effect.Effect<
+    ReadonlyArray<{
+      readonly threadId: ThreadId;
+      readonly source: AgentSessionImportSource;
+    }>,
+    ProjectionRepositoryError
+  >;
 
   /**
    * Read the checkpoint context needed to resolve a single thread diff.
@@ -211,7 +253,24 @@ export interface ProjectionSnapshotQueryShape {
   readonly getThreadRuntimeContext: (
     threadId: ThreadId,
   ) => Effect.Effect<
-    Option.Option<Pick<OrchestrationThreadShell, "id" | "title" | "session">>,
+    Option.Option<
+      Pick<OrchestrationThreadShell, "id" | "projectId" | "title" | "titleState" | "session">
+    >,
+    ProjectionRepositoryError
+  >;
+
+  /**
+   * Read one requested message and whether another non-compaction user message exists.
+   * Newer queued messages count too, preserving first-turn title eligibility.
+   */
+  readonly getTurnStartMessage: (input: {
+    readonly threadId: ThreadId;
+    readonly messageId: MessageId;
+  }) => Effect.Effect<
+    Option.Option<{
+      readonly message: OrchestrationMessage;
+      readonly hasOtherUserMessages: boolean;
+    }>,
     ProjectionRepositoryError
   >;
 

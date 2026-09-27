@@ -24,7 +24,6 @@ import {
   OrchestratorV2,
 } from "../../../orchestration-v2/Orchestrator.ts";
 import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
-import { ArchiveAgentService } from "../ArchiveAgentService.ts";
 import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
 import {
   A2AHomeRegistrar,
@@ -85,7 +84,7 @@ const projection = (threadId: ThreadId): OrchestrationV2ThreadProjection =>
     },
   }) as unknown as OrchestrationV2ThreadProjection;
 
-const database = NodeSqliteClient.layerMemory();
+const database = NodeSqliteClient.layer({ filename: ":memory:" });
 const ledger = ledgerLayer.pipe(Layer.provide(database));
 const homes = homeRegistrarLayer.pipe(Layer.provide(ledger), Layer.provide(database));
 const homeTransactions = homeRegistrationTransactionLayer.pipe(
@@ -123,7 +122,6 @@ const dependencies = Layer.mergeAll(
   }),
   Layer.mock(OrchestratorMcpService)({}),
   Layer.mock(SpawnCompositionService)({}),
-  Layer.mock(ArchiveAgentService)({}),
   Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
   NodeServices.layer,
 );

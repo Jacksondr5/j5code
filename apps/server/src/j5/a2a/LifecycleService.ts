@@ -29,7 +29,7 @@ import {
 import { resolveThreadHome } from "./HomeRegistrar.ts";
 import { A2ALedger, type A2ALedgerError } from "./LedgerService.ts";
 
-export class A2ALifecycleParticipantNotFoundError extends Schema.TaggedErrorClass<A2ALifecycleParticipantNotFoundError>()(
+export class A2ALifecycleParticipantNotFoundError extends Schema.TaggedError<A2ALifecycleParticipantNotFoundError>()(
   "A2ALifecycleParticipantNotFoundError",
   { participantId: Schema.String },
 ) {
@@ -38,7 +38,7 @@ export class A2ALifecycleParticipantNotFoundError extends Schema.TaggedErrorClas
   }
 }
 
-export class A2ALifecycleHumanArchiveNotAllowedError extends Schema.TaggedErrorClass<A2ALifecycleHumanArchiveNotAllowedError>()(
+export class A2ALifecycleHumanArchiveNotAllowedError extends Schema.TaggedError<A2ALifecycleHumanArchiveNotAllowedError>()(
   "A2ALifecycleHumanArchiveNotAllowedError",
   { participantId: Schema.String },
 ) {
@@ -47,7 +47,7 @@ export class A2ALifecycleHumanArchiveNotAllowedError extends Schema.TaggedErrorC
   }
 }
 
-export class A2ALifecycleCounterpartyStateError extends Schema.TaggedErrorClass<A2ALifecycleCounterpartyStateError>()(
+export class A2ALifecycleCounterpartyStateError extends Schema.TaggedError<A2ALifecycleCounterpartyStateError>()(
   "A2ALifecycleCounterpartyStateError",
   {
     participantId: Schema.String,
@@ -59,7 +59,7 @@ export class A2ALifecycleCounterpartyStateError extends Schema.TaggedErrorClass<
   }
 }
 
-export class A2ALifecycleParticipantHomeStateError extends Schema.TaggedErrorClass<A2ALifecycleParticipantHomeStateError>()(
+export class A2ALifecycleParticipantHomeStateError extends Schema.TaggedError<A2ALifecycleParticipantHomeStateError>()(
   "A2ALifecycleParticipantHomeStateError",
   {
     participantId: Schema.String,
@@ -71,7 +71,7 @@ export class A2ALifecycleParticipantHomeStateError extends Schema.TaggedErrorCla
   }
 }
 
-export class A2ALifecycleBridgeError extends Schema.TaggedErrorClass<A2ALifecycleBridgeError>()(
+export class A2ALifecycleBridgeError extends Schema.TaggedError<A2ALifecycleBridgeError>()(
   "A2ALifecycleBridgeError",
   { operation: Schema.String, cause: Schema.Defect() },
 ) {}

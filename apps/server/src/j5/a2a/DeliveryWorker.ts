@@ -14,7 +14,12 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import type * as Scope from "effect/Scope";
 
 import config from "./delivery-config.v1.json" with { type: "json" };
-import { A2ADeliveryTransport, type A2ADeliveryTransportError } from "./DeliveryTransport.ts";
+import {
+  type A2ADeliveryHeldError,
+  A2ADeliveryTransport,
+  A2ADeliveryTransportError,
+  isHeldError,
+} from "./DeliveryTransport.ts";
 import {
   CommCommandId,
   type CommEvent,
@@ -23,6 +28,7 @@ import {
   ExchangeId,
   isHumanParticipantId,
   LedgerMessageId,
+  MessageSentPayload,
   ParticipantId,
   type DeliveryAlarm,
   type DeliveryMilestone,
@@ -30,6 +36,8 @@ import {
 import { A2ALedgerTransactionWriter, A2ALedger, type A2ALedgerError } from "./LedgerService.ts";
 
 export const A2A_DELIVERY_CONFIG_VERSION = config.version;
+
+const decodeSentPayload = Schema.decodeUnknownEffect(Schema.fromJsonString(MessageSentPayload));
 
 interface DeliveryRow {
   readonly squadron_id: string;
@@ -67,12 +75,12 @@ export interface A2ADeliveryHooksShape {
   ) => Effect.Effect<void, A2ADeliveryHookError>;
 }
 
-export class A2ADeliveryHookError extends Schema.TaggedErrorClass<A2ADeliveryHookError>()(
+export class A2ADeliveryHookError extends Schema.TaggedError<A2ADeliveryHookError>()(
   "A2ADeliveryHookError",
   { cause: Schema.Defect() },
 ) {}
 
-export class A2ADeliveryWorkerError extends Schema.TaggedErrorClass<A2ADeliveryWorkerError>()(
+export class A2ADeliveryWorkerError extends Schema.TaggedError<A2ADeliveryWorkerError>()(
   "A2ADeliveryWorkerError",
   { operation: Schema.String, cause: Schema.Defect() },
 ) {}
@@ -104,6 +112,7 @@ export class A2ADeliveryWorker extends Context.Service<A2ADeliveryWorker, A2ADel
 type A2ADeliveryAttemptError =
   | A2ALedgerError
   | A2ADeliveryTransportError
+  | A2ADeliveryHeldError
   | A2ADeliveryHookError
   | SqlError;
 
@@ -112,6 +121,19 @@ const errorText = (cause: Cause.Cause<A2ADeliveryAttemptError>) =>
 
 const workerError = (operation: string) => (cause: unknown) =>
   new A2ADeliveryWorkerError({ operation, cause });
+
+/**
+ * A held receiver queue waits for a person; recheck it slowly and never alarm on it.
+ * Each recheck appends a ledger event, so the interval doubles from one minute to a
+ * fifteen-minute cap: a long hold costs about four events an hour, not sixty.
+ */
+export const heldQueueRecheckMs = (attempt: number) =>
+  Math.min(60_000 * 2 ** Math.max(0, attempt - 1), 15 * 60_000);
+
+const heldError = (cause: Cause.Cause<A2ADeliveryAttemptError>) => {
+  const error = Cause.findErrorOption(cause);
+  return error._tag === "Some" && isHeldError(error.value) ? error.value : undefined;
+};
 
 const backoffMs = (attempt: number) =>
   Math.min(config.initialBackoffMs * 2 ** Math.max(0, attempt - 1), config.maximumBackoffMs);
@@ -221,6 +243,23 @@ const makeLayer = (daemon: boolean) =>
             createdAt: row.created_at,
           });
         } else {
+          // Canonical references live in the immutable sent fact. Reading that
+          // indexed row avoids a second projection and a schema migration.
+          const sent = yield* sql<{ readonly kind: string; readonly payload: string }>`
+            SELECT kind, payload FROM j5_a2a_comm_event WHERE seq = ${row.sent_seq}
+          `;
+          const payload =
+            sent[0]?.kind === "message.sent"
+              ? yield* decodeSentPayload(sent[0].payload).pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new A2ADeliveryTransportError({
+                        operation: "read delivery attachments",
+                        cause,
+                      }),
+                  ),
+                )
+              : undefined;
           yield* transport.deliverAgent({
             originSquadronId,
             receiverSquadronId,
@@ -230,6 +269,7 @@ const makeLayer = (daemon: boolean) =>
             exchangeId,
             exchangeRole: row.exchange_role,
             message: row.message_text,
+            ...(payload?.attachments === undefined ? {} : { attachments: payload.attachments }),
             envelopeChannel: row.envelope_channel,
           });
         }
@@ -280,10 +320,16 @@ const makeLayer = (daemon: boolean) =>
       ) {
         const failedAtDate = yield* DateTime.now;
         const failedAt = DateTime.formatIso(failedAtDate);
-        const alarmed = attempt >= config.alarmAfterAttempts;
+        // A held queue is not a failed delivery: it stays retry_scheduled, never delivered or alarmed.
+        const held = heldError(cause);
+        const alarmed = held === undefined && attempt >= config.alarmAfterAttempts;
         const nextAttemptAt = alarmed
           ? null
-          : DateTime.formatIso(DateTime.add(failedAtDate, { milliseconds: backoffMs(attempt) }));
+          : DateTime.formatIso(
+              DateTime.add(failedAtDate, {
+                milliseconds: held !== undefined ? heldQueueRecheckMs(attempt) : backoffMs(attempt),
+              }),
+            );
         const messageId = LedgerMessageId.make(row.message_id);
         const outcome = yield* writer.withPermit(
           sql.withTransaction(
@@ -303,7 +349,7 @@ const makeLayer = (daemon: boolean) =>
                     payload: {
                       messageId,
                       attempt,
-                      error: errorText(cause),
+                      error: held?.message ?? errorText(cause),
                       nextAttemptAt,
                       alarmed,
                     },
