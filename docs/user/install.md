@@ -22,7 +22,7 @@ This puts `j5` in `~/.local/bin` and keeps downloaded versions and your data in
 `command not found` afterwards, that directory is not on your `PATH` yet; the
 installer prints the line to add. Set `T3CODE_VERSION` to pin an exact version.
 
-Upgrading a server that was installed from npm (`@jacksondr5/j5code` 0.0.42 or
+Upgrading a server that was installed from npm (`@jacksondr5/j5code` 0.0.43 or
 earlier)? Follow [Migrating to release archives](./migrating-to-release-archives.md)
 once; later updates use `j5 update`.
 
