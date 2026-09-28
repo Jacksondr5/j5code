@@ -1,10 +1,17 @@
 import { useAtomValue } from "@effect/atom-react";
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { ChevronRightIcon } from "lucide-react";
-import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
+import {
+  useCallback,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 
 import { resolveThreadStatusPill } from "../../components/Sidebar.logic";
 import { Badge } from "../../components/ui/badge";
@@ -47,6 +54,18 @@ const toggleExpansion = (expansionKey: string) => {
   expansionListeners.forEach((listener) => listener());
 };
 
+/** The parent row's thread actions, so a child row gets the same menu and inline rename. */
+export interface SpawnedChildActions {
+  readonly renamingThreadKey: string | null;
+  readonly onContextMenu: (threadRef: ScopedThreadRef, position: { x: number; y: number }) => void;
+  readonly onCommitRename: (
+    threadRef: ScopedThreadRef,
+    title: string,
+    originalTitle: string,
+  ) => void;
+  readonly onCancelRename: () => void;
+}
+
 /**
  * SB5 refinement: agent-spawned Peer Agents stay out of the flat list, but the row that spawned
  * them (a Captain or any spawner) can expand into its placed children so the work is one click
@@ -54,19 +73,23 @@ const toggleExpansion = (expansionKey: string) => {
  * spawned form one more; collapsed by default, with a measured "needs a human" fact on any child
  * shown on the collapsed header.
  */
-export function SpawnedChildren(props: { readonly thread: EnvironmentThreadShell }) {
+export function SpawnedChildren(
+  props: SpawnedChildActions & { readonly thread: EnvironmentThreadShell },
+) {
   // Every sidebar row mounts this; most rows have no children. Only the cheap children snapshot
   // is read here, so a row without children never subscribes to the shell list and the
   // SidebarThreadRow memo keeps its value on every shell change.
   const children = useSpawnedChildren(scopeThreadRef(props.thread.environmentId, props.thread.id));
   if (children.length === 0) return null;
-  return <SpawnedChildrenRows thread={props.thread} spawned={children} />;
+  return <SpawnedChildrenRows {...props} spawned={children} />;
 }
 
-function SpawnedChildrenRows(props: {
-  readonly thread: EnvironmentThreadShell;
-  readonly spawned: ReadonlyArray<SpawnedChild>;
-}) {
+function SpawnedChildrenRows(
+  props: SpawnedChildActions & {
+    readonly thread: EnvironmentThreadShell;
+    readonly spawned: ReadonlyArray<SpawnedChild>;
+  },
+) {
   const children = props.spawned;
   const threads = useThreadShells();
   const expandedSet = useSyncExternalStore(subscribeExpansion, getExpansion, getExpansion);
@@ -128,20 +151,29 @@ function SpawnedChildrenRows(props: {
             )
           }
           onOpen={open}
+          renamingThreadKey={props.renamingThreadKey}
+          onContextMenu={props.onContextMenu}
+          onCommitRename={props.onCommitRename}
+          onCancelRename={props.onCancelRename}
         />
       ))}
     </div>
   );
 }
 
-function SpawnedChildGroupRows(props: {
-  readonly environmentId: EnvironmentId;
-  readonly group: SpawnedChildGroup<EnvironmentThreadShell>;
-  readonly providerEntries: ReadonlyMap<string, ProviderInstanceEntry>;
-  readonly isOpen: boolean;
-  readonly onToggle: () => void;
-  readonly onOpen: (child: EnvironmentThreadShell) => void;
-}) {
+const childRowClassName =
+  "flex w-full min-w-0 flex-col gap-0.5 rounded-md px-1.5 py-1 text-left outline-hidden hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-ring";
+
+function SpawnedChildGroupRows(
+  props: SpawnedChildActions & {
+    readonly environmentId: EnvironmentId;
+    readonly group: SpawnedChildGroup<EnvironmentThreadShell>;
+    readonly providerEntries: ReadonlyMap<string, ProviderInstanceEntry>;
+    readonly isOpen: boolean;
+    readonly onToggle: () => void;
+    readonly onOpen: (child: EnvironmentThreadShell) => void;
+  },
+) {
   const { group, isOpen } = props;
   const stoppable = stoppableCrew(group);
   const [stopping, setStopping] = useState(false);
@@ -219,60 +251,121 @@ function SpawnedChildGroupRows(props: {
               ) ?? null;
             // A seat thread is titled by its seat, so the badge repeats it only once renamed.
             const showSeat = child.seat !== null && child.seat.seat !== thread.title;
+            const threadRef = scopeThreadRef(thread.environmentId, thread.id);
+            const isRenaming = props.renamingThreadKey === scopedThreadKey(threadRef);
+            const rowBody = (
+              <>
+                {/* Same anatomy as the parent card: time on the top line, provider on the bottom. */}
+                <span className="flex min-w-0 items-center gap-1.5 text-xs">
+                  {showSeat && child.seat !== null ? (
+                    <Badge variant="outline" size="sm" className="shrink-0">
+                      {child.seat.seat}
+                    </Badge>
+                  ) : null}
+                  {isRenaming ? (
+                    <SpawnedChildRenameInput
+                      title={thread.title}
+                      onCommit={(title) => props.onCommitRename(threadRef, title, thread.title)}
+                      onCancel={props.onCancelRename}
+                    />
+                  ) : (
+                    <span className="truncate text-foreground">{thread.title}</span>
+                  )}
+                  {elapsed ? (
+                    <span className="ms-auto shrink-0 text-[11px] text-muted-foreground tabular-nums">
+                      {elapsed}
+                    </span>
+                  ) : null}
+                </span>
+                <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                  {status === null ? (
+                    <span>Idle</span>
+                  ) : (
+                    <>
+                      <span aria-hidden className={cn("size-1.5 rounded-full", status.dotClass)} />
+                      <span className={status.colorClass}>{status.label}</span>
+                    </>
+                  )}
+                  {providerEntry === null ? null : (
+                    <span aria-hidden className="ms-auto inline-flex shrink-0 items-center">
+                      <ProviderInstanceIcon
+                        driverKind={providerEntry.driverKind}
+                        displayName={providerEntry.displayName}
+                        accentColor={providerEntry.accentColor}
+                        showBadge={false}
+                        iconClassName="size-3.5 opacity-60"
+                      />
+                    </span>
+                  )}
+                </span>
+              </>
+            );
             return (
               <li key={child.threadId}>
-                <button
-                  type="button"
-                  className="flex w-full min-w-0 flex-col gap-0.5 rounded-md px-1.5 py-1 text-left outline-hidden hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-ring"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    props.onOpen(thread);
-                  }}
-                >
-                  {/* Same anatomy as the parent card: time on the top line, provider on the bottom. */}
-                  <span className="flex min-w-0 items-center gap-1.5 text-xs">
-                    {showSeat && child.seat !== null ? (
-                      <Badge variant="outline" size="sm" className="shrink-0">
-                        {child.seat.seat}
-                      </Badge>
-                    ) : null}
-                    <span className="truncate text-foreground">{thread.title}</span>
-                    {elapsed ? (
-                      <span className="ms-auto shrink-0 text-[11px] text-muted-foreground tabular-nums">
-                        {elapsed}
-                      </span>
-                    ) : null}
-                  </span>
-                  <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                    {status === null ? (
-                      <span>Idle</span>
-                    ) : (
-                      <>
-                        <span
-                          aria-hidden
-                          className={cn("size-1.5 rounded-full", status.dotClass)}
-                        />
-                        <span className={status.colorClass}>{status.label}</span>
-                      </>
-                    )}
-                    {providerEntry === null ? null : (
-                      <span aria-hidden className="ms-auto inline-flex shrink-0 items-center">
-                        <ProviderInstanceIcon
-                          driverKind={providerEntry.driverKind}
-                          displayName={providerEntry.displayName}
-                          accentColor={providerEntry.accentColor}
-                          showBadge={false}
-                          iconClassName="size-3.5 opacity-60"
-                        />
-                      </span>
-                    )}
-                  </span>
-                </button>
+                {isRenaming ? (
+                  // An input cannot live inside a button, so the row is inert while renaming.
+                  <div className={childRowClassName}>{rowBody}</div>
+                ) : (
+                  <button
+                    type="button"
+                    className={childRowClassName}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      props.onOpen(thread);
+                    }}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      props.onContextMenu(threadRef, { x: event.clientX, y: event.clientY });
+                    }}
+                  >
+                    {rowBody}
+                  </button>
+                )}
               </li>
             );
           })}
         </ul>
       ) : null}
     </div>
+  );
+}
+
+/** Inline rename for a child row; the draft is local so typing re-renders only this input. */
+function SpawnedChildRenameInput(props: {
+  readonly title: string;
+  readonly onCommit: (title: string) => void;
+  readonly onCancel: () => void;
+}) {
+  const [draft, setDraft] = useState(props.title);
+  // Enter and Escape unmount the input; its blur must not commit a second time.
+  const settledRef = useRef(false);
+  const handleKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    event.stopPropagation();
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+    if (event.key === "Enter") {
+      event.preventDefault();
+      settledRef.current = true;
+      props.onCommit(draft);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      settledRef.current = true;
+      props.onCancel();
+    }
+  };
+  return (
+    <input
+      autoFocus
+      value={draft}
+      aria-label="Thread title"
+      onChange={(event) => setDraft(event.target.value)}
+      onFocus={(event) => event.currentTarget.select()}
+      onKeyDown={handleKeyDown}
+      onBlur={() => {
+        if (!settledRef.current) props.onCommit(draft);
+      }}
+      onClick={(event) => event.stopPropagation()}
+      className="min-w-0 flex-1 rounded-sm border border-input bg-card px-1 text-xs text-card-foreground outline-none focus:border-foreground"
+    />
   );
 }
