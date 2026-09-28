@@ -32,7 +32,7 @@ curl -fsSL https://github.com/Jacksondr5/j5code/releases/latest/download/install
 
 Then run `j5` to start the server and open the local web app. `j5 service install` keeps it running in the background, `j5 update` moves to a newer release, and `j5 --help` has the full reference. Data lives in `~/.j5code` (override with `J5CODE_HOME`).
 
-Upgrading a server installed from npm (`@jacksondr5/j5code` 0.0.42 or earlier)? Follow [Migrating to release archives](./docs/user/migrating-to-release-archives.md) once.
+Upgrading a server installed from npm (`@jacksondr5/j5code` 0.0.43 or earlier)? Follow [Migrating to release archives](./docs/user/migrating-to-release-archives.md) once.
 
 ### Desktop app
 

@@ -62,6 +62,9 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
   upstream's `h-[1cap]` sizing), and the assistant author heading in
   `components/chat/MessagesTimeline.tsx` `AssistantTimelineRow`, which reads `APP_BASE_NAME` from
   `branding.ts` instead of upstream's literal "T3 Code".
+- Shared client copy: `packages/client-runtime` has no branding import, so its user-visible
+  strings stay product-neutral instead of naming T3 Code: `connection/compatibility.ts` ("Update the
+  server on …") and `state/pullRequestDiffHttp.ts` ("quit and reopen the app").
 - New upstream files: the list above names only known sites. On every advance, also grep the files
   upstream added since the old pin for `t3code`, `T3 Code`, `.t3`, `T3CODE_HOME`, `pingdotgg`,
   `t3.codes/install`, and `npx t3`, then rebrand identity sites and leave deliberate internals and
