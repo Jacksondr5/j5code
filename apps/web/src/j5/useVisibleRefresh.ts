@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 
-function startVisibleRefresh(refresh: () => void, intervalMs: number | null) {
+/** Refreshes while the page is visible: on focus, on becoming visible, and every `intervalMs`. */
+export function startVisibleRefresh(refresh: () => void, intervalMs: number | null) {
   let timer: ReturnType<typeof setInterval> | undefined;
   let lastRefresh = Date.now();
   const refreshVisible = () => {
