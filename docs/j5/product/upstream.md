@@ -222,7 +222,7 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Why:** the person is a first-class reader of every agent-to-agent message and should see it in the normal flow without hunting. A first, quieter design made the messages hard to spot, so they were made prominent. The minimap tracks the person's own prompts, and agent messages there were noise.
 
-**Consequences:** the seams in the timeline are small, but each advance checks the row and minimap hooks. Sent-message cards recognize only Codex and Claude tool records; other providers keep generic rendering.
+**Consequences:** the seams in the timeline are small, but each advance checks the row and minimap hooks. Sent-message cards recognize only Codex and Claude tool records; other providers keep generic rendering. Upstream is still building out its own agent-to-agent features (see the [upstream convergence watchlist](../research/upstream-convergence.md)), so its treatment of these messages may change. Check this entry at every upstream advance, and prefer upstream's treatment if it now meets the need.
 
 **Decided:** Jackson, 2026-08-29 (TA1–TA5) and 2026-08-31 (TA6–TA8, including cards for sent messages). The minimap rule is from Jackson's PR #168 (2026-09-16). Sender labels on queued rows came from Jackson's dogfood findings (#42, #62), fixed on 2026-09-04. Recorded in FORK.md cases 7, 14 and 24.
 
@@ -236,7 +236,7 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Why:** J5 and T3 Code must be able to run side by side on one machine without either reading or damaging the other's data.
 
-**Consequences:** some Linux integrations still collide with an installed T3 Code (#138), and cosmetic `T3CODE_*` names remain. One exception is kept deliberately: SSH transport still writes `~/.t3/ssh-launch` on remote hosts, because moving it would orphan a running npm-era remote server. Each advance checks for new upstream reads of `T3CODE_HOME` or `.t3` paths, and re-checks the database migration bridge.
+**Consequences:** some Linux integrations still collide with an installed T3 Code (#138), and many `T3CODE_*` variable names remain. One exception remains, to be removed: SSH transport still writes `~/.t3/ssh-launch` on remote hosts, kept only for npm-era remote servers that no longer exist (#339). Whether to rename the remaining `T3CODE_*` variables is open (#340). Each advance checks for new upstream reads of `T3CODE_HOME` or `.t3` paths, and re-checks the database migration bridge.
 
 **Decided:** Jackson, 2026-08-30 (DQ5, recorded on #33), 2026-09-02 (#68), and 2026-09-24 (#1, #4). Recorded in FORK.md cases 15, 25 and 31.
 
@@ -248,7 +248,7 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Why:** J5 followed upstream from npm to archives rather than keep npm alone. It publishes from its own repository so it never installs or updates T3 Code, and it renames the service so both can be installed at once.
 
-**Consequences:** only darwin-arm64 and linux-x64 get releases, where upstream ships five platforms, and no reason for that is recorded. Other hosts build from source and get no `j5 update` or service. A real service handover, signing and notarization weren't verified when this shipped. Migration steps are in `docs/user/migrating-to-release-archives.md`.
+**Consequences:** only darwin-arm64 and linux-x64 get releases, where upstream ships five platforms, and no reason for that is recorded. Other hosts build from source and get no `j5 update` or service. A real service handover, signing and notarization weren't verified when this shipped. Migration steps are in `docs/user/migrating-to-release-archives.md`. Windows releases are wanted (#341).
 
 **Decided:** Jackson, 2026-09-24 (#3, #3a). Recorded in FORK.md cases 40 and 41.
 
