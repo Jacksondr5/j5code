@@ -56,7 +56,7 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Consequences:** upstream's launch and workspace guidance never reaches J5 agents. As a result, a Peer Agent shares its caller's branch and worktree (#274). The instructions file is also edited for playbooks and personas, so every upstream advance merges upstream's prompt changes by hand, and a test pins J5's wording.
 
-**Decided:** Jackson with Product, 2026-08-24 (ST1–ST5); the Crew shape on 2026-09-17; the persona route in Jackson's review of 2026-09-13, which partly reverses ST5. Recorded in FORK.md case 8 and the saved-agent mentions section.
+**Decided:** Jackson with Product, 2026-08-24 (ST1–ST5); the Crew shape on 2026-09-17; the persona route in Jackson's review of 2026-09-13, which partly reverses ST5. Whether `delegate_task` stays at all is under discussion (#336). Recorded in FORK.md case 8 and the saved-agent mentions section.
 
 #### D2. Agents see a fail-closed subset of upstream's MCP tools
 
@@ -64,13 +64,13 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **J5:** those tools are hidden from agents. J5 keeps the upstream tools it has admitted, rewrites the descriptions that would mislead J5 agents, and hides any new upstream tool until someone reviews it.
 
-**Why:** a raw send between agents is communication the Squadron ledger can't see. A reply that never comes then stalls silently, and nothing shows why. Raw thread creation would skip the spawn verb and the Squadron home it records. Hiding new tools by default stops the agent surface from growing by accident with every upstream advance: each new power gets reviewed against J5's definitions first. The tools are hidden, not deleted, to keep the fork's edits small.
+**Why:** J5 built its own versions of these tools, integrated with J5's model: `send_message` and Exchanges instead of raw send, `stop_agent` instead of interrupt, and `spawn_agent` and `propose_crew` instead of launch. Upstream's tools were more primitive and didn't meet J5's needs when this was decided. A raw send is communication the Squadron ledger can't see, so a reply that never comes stalls silently. Raw thread creation skips the Squadron home a spawn records. Hiding new upstream tools by default means each one is reviewed against J5's definitions before agents get it. The tools are hidden, not deleted, to keep the fork's edits small.
 
-**Consequences:** upstream's toolkit stays compiled but unused. Each advance checks the admitted tool list, which a test pins, and re-reads upstream's descriptions. Open gaps: `t3_worktree_handoff` still points agents at a tool they can't use. `t3_pending_request_respond` and `t3_thread_configure` act on other threads without J5's authority checks.
+**Consequences:** upstream's toolkit stays compiled but unused. Upstream's tools keep evolving, so J5 should periodically re-evaluate them and consider merging its tools with upstream's rather than carrying parallel versions. Each advance checks the admitted tool list, which a test pins, and re-reads upstream's descriptions. Open gaps: `t3_worktree_handoff` still points agents at a tool they can't use. `t3_pending_request_respond` and `t3_thread_configure` act on other threads without J5's authority checks.
 
 **Decided:** Jackson, 2026-08-29 (substrate session). Omitting bulk creation was a Director disposition (an agent role), 2026-08-31. Withdrawing `t3_thread_wait` was Bryant's decision, 2026-09-14. `delegate_task` returned after Jackson's review of 2026-09-13. Recorded in FORK.md cases 2, 4 and 38.
 
-#### D3. J5's tools are pre-approved on Codex and Claude only
+#### D3. J5's tools are pre-approved on Codex and Claude only \*
 
 **Upstream:** on Claude, upstream pre-approves all of T3's own MCP tools, except in a read-only sandbox, where only its read-only tools are allowed. Codex refuses every non-read-only MCP tool under approval policy `never`, which is the policy full-access mode sends.
 
@@ -80,7 +80,7 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Consequences:** every advance must keep the Codex and Claude additions and their exact-list tests. A general fix belongs upstream (#276). Crews AC5 must say the roster card is the only human step on Codex and Claude, not on every harness.
 
-**Decided:** Bryant built the approvals, 2026-09-10 to 2026-09-15. Jackson's ruling of 2026-09-26 (#233) kept them and limited them to Codex and Claude. Recorded in FORK.md's saved-agent mentions section.
+**Decided:** \* **Not settled.** Bryant built the approvals, 2026-09-10 to 2026-09-15. Jackson's ruling of 2026-09-26 (#233) keeps them and limits them to Codex and Claude, but Bryant hasn't agreed to that ruling yet, and it stays provisional until he does. Recorded in FORK.md's saved-agent mentions section.
 
 #### D4. Agent deliveries queue behind a running turn; Astra peers can steer
 
