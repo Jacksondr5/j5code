@@ -102,7 +102,7 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Why:** J5 agents message Astra peers as steers (D4). Without this, a peer's message right after the person pressed Stop can wake the agent they just stopped.
 
-**Consequences:** it's a temporary patch, to be removed once upstream proves equivalent behavior. A known gap remains: a steer that races Stop by milliseconds still starts a new turn (#293). Checked on 2026-09-28, it is still needed: upstream's `TODO(interrupt-hardening)` is unresolved, and a late steer still becomes a follow-up turn. Upstream's newer hold-queue-on-interrupt covers queued messages only. **J5 wants to drop this patch** once upstream resolves that TODO and honors a committed Stop for late steers and usage-limit resumes.
+**Consequences:** it's a temporary patch, to be removed once upstream proves equivalent behavior. A known gap remains: a steer that races Stop by milliseconds still starts a new turn (#293). Checked on 2026-09-28, it is still needed: upstream's `TODO(interrupt-hardening)` is unresolved, and a late steer still becomes a follow-up turn. Upstream's newer hold-queue-on-interrupt covers queued messages only. **J5 wants to drop this patch** once upstream resolves that TODO and honors a committed Stop for late steers.
 
 **Decided:** it arrived with the 2026-09-17 upstream integration without a ruling. Jackson kept it on 2026-09-24 (#5), when he dropped an earlier restart-continuation guard. Recorded in FORK.md's temporary patches.
 
@@ -146,9 +146,9 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 - Archiving or unarchiving another agent that has a Squadron home requires the caller to belong to that Squadron.
 - Merge-back is refused unless both threads share a Squadron home, or both have none.
 
-**Why:** upstream's model is one folder, one project. Work isn't shaped like that: many efforts touch one repository, and one effort touches several. The Squadron is what the person chooses between. Reusing the project flow with a new name would rebuild the one-to-one shape the Squadron exists to replace. On cards, two Squadrons over one folder looked identical, and once a Squadron spans several folders a folder name stops identifying the work. The organize check stops an agent from archiving work anywhere on the host, and the merge-back limit keeps each thread's Squadron home intact.
+**Why:** upstream's model is one folder, one project. Work isn't shaped like that: many efforts touch one repository, and one effort touches several. The Squadron is what the person chooses between. Reusing the project flow with a new name would rebuild the one-to-one shape the Squadron exists to replace. On cards, two Squadrons over one folder looked identical, and once a Squadron spans several folders a folder name stops identifying the work. Upstream scopes an agent's actions on other threads to its project; because the Squadron replaces the project, J5 scopes them to the Squadron. This doesn't limit communication: any agent can still message any other.
 
-**Consequences:** a Squadron has one folder for now. Many small seams in upstream UI must be re-checked at every advance, and each case lists its own check. J5 replaces upstream's whole headline component; a smaller J5-owned headline at the same mount would be cheaper to carry. The organize check gives a Squadron a permission meaning, which contradicts the Squadron definition ("no visibility or permission semantics"); one of the two needs rewriting. Merge-back hasn't been exercised live. Open gaps: the scheduling selector (#38), the legacy sidebar door (#39), and project nouns still left in some upstream copy.
+**Consequences:** a Squadron has one folder for now. Many small seams in upstream UI must be re-checked at every advance, and each case lists its own check. J5 replaces upstream's whole headline component; a smaller J5-owned headline at the same mount would be cheaper to carry. Merge-back hasn't been exercised live. Open gaps: the scheduling selector (#38), the legacy sidebar door (#39), and project nouns still left in some upstream copy.
 
 **Decided:** Jackson, 2026-08-24 (SC2, SC3), 2026-08-29 (SB3), 2026-08-31 (E7), 2026-09-01 (#47, cards), 2026-09-12 (cross-environment drafts), 2026-09-24 (sidebar scope), 2026-09-25 (clone notice), and 2026-09-28 (the organize check and merge-back limit, which arrived without a ruling in the 2026-09-17 integration). Recorded in FORK.md cases 9, 10, 13, 15b, 16–20, 23, 34 and 38, and its root-spawn section.
 
@@ -264,9 +264,19 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Decided:** Tyler, who owns it, in PR #109 (2026-09-05); Jackson approved it on 2026-09-28. Recorded in FORK.md case 33.
 
+#### D18. `@` offers saved personas first, and persona threads pin their model
+
+**Upstream:** typing `@` in the composer opens a picker for referencing context in the message: files in the workspace and, in V2, other threads. Below the text box, the composer has a row of controls for the thread: the model picker (for example "Claude Opus 5.5"), reasoning effort, access mode (for example "Supervised"), and plan mode.
+
+**J5:** `@` also lists saved personas, first, and picking one runs that persona. In a persona's thread, that whole row of controls is replaced by a chip naming the persona, because the persona fixes its own model, effort, and access, and the server rejects any change.
+
+**Why:** Jackson typed `@scout` expecting a persona and got files (2026-09-13); Bryant made the picker list saved personas (2026-09-14). A persona's route is fixed and enforced by the server, so a thread's model picker would only produce failed sends. No reason is recorded for listing personas ahead of threads.
+
+**Decided:** the persona picker is Bryant's request (2026-09-08) and fix (2026-09-14). The persona model lock comes from Bryant's persona stack, whose scope was approved on 2026-09-08. The ordering against threads arrived in the 2026-09-24 advance (PR #262). Jackson approved it on 2026-09-28. Recorded in FORK.md's saved-agent mentions section and its PR #75–#86 table.
+
 ### Storage, install, and identity
 
-#### D18. J5 never shares on-disk state with T3 Code
+#### D19. J5 never shares on-disk state with T3 Code
 
 **Upstream:** T3 Code keeps its data in `~/.t3`, reads `T3CODE_HOME`, and uses a `.t3` folder in worktrees.
 
@@ -278,7 +288,7 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Decided:** Jackson, 2026-08-30 (DQ5, recorded on #33), 2026-09-02 (#68), and 2026-09-24 (#1, #4). The identifiers were settled in the fork setup plan (2026-08-15) and confirmed by Jackson on 2026-09-28. Recorded in FORK.md cases 15, 25, 31 and 41, and in `BRANDING.md`.
 
-#### D19. J5 installs from its own release archives
+#### D20. J5 installs from its own release archives
 
 **Upstream:** V2 ships self-contained release archives from upstream's own repository.
 
@@ -290,13 +300,13 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Decided:** Jackson, 2026-09-24 (#3, #3a). Recorded in FORK.md cases 40 and 41.
 
-#### D20. Pair discovery stays inside a worktree
+#### D21. Pair discovery stays inside a worktree
 
 **Upstream:** `pair` is the CLI command that mints a one-time link for connecting a browser or the mobile app to a running server. When it finds no server in the current worktree, it falls back to the default install.
 
 **J5:** in a linked worktree with no running server, `pair` refuses to fall back.
 
-**Why:** during a dogfood test, an agent ran `pair` in its worktree before its server was up, and the fallback minted a real pairing token against the live install (#70). The isolation work (D18) exists so an isolated environment can never reach shared state by accident. A short bounded retry covers a server that hasn't finished starting (#67).
+**Why:** during a dogfood test, an agent ran `pair` in its worktree before its server was up, and the fallback minted a real pairing token against the live install (#70). The isolation work (D19) exists so an isolated environment can never reach shared state by accident. A short bounded retry covers a server that hasn't finished starting (#67).
 
 **Decided:** introduced in PR #94 (2026-09-04). Jackson approved it on 2026-09-28, closing the carry-or-drop question FORK.md's 2026-09-06 review left open.
 
@@ -304,7 +314,7 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 These already diverge on `j5/main`, but no human ruling is on record. Each landed as an implementer's call inside a merged PR. The person rules on each one; an approved entry moves up into its section, and a rejected one becomes a fix.
 
-#### D21. Agent-spawned threads are hidden from the sidebar
+#### D22. Agent-spawned threads are hidden from the sidebar
 
 **Upstream:** every thread except provider subagents appears in the sidebar.
 
@@ -316,15 +326,9 @@ These already diverge on `j5/main`, but no human ruling is on record. Each lande
 
 **Status:** reintroduced in PR #149 (Bryant), approved in review on 2026-09-21 without a ruling on this point. Depends on the human-contact spectrum discussion (#336): which agents belong in the sidebar follows from where they sit on that spectrum.
 
-#### D22. `@` offers saved personas first, and persona threads pin their model
+### To be removed
 
-**Upstream:** typing `@` in the composer opens a picker for referencing context in the message: files in the workspace and, in V2, other threads. Below the text box, the composer has a row of controls for the thread: the model picker (for example "Claude Opus 5.5"), reasoning effort, access mode (for example "Supervised"), and plan mode.
-
-**J5:** `@` also lists saved personas, first, and picking one runs that persona. In a persona's thread, that whole row of controls is replaced by a chip naming the persona, because the persona fixes its own model, effort, and access, and the server rejects any change.
-
-**Why:** Jackson typed `@scout` expecting a persona and got files (2026-09-13); Bryant made the picker list saved personas (2026-09-14). A persona's route is fixed and enforced by the server, so a thread's model picker would only produce failed sends. No reason is recorded for listing personas ahead of threads.
-
-**Status:** the persona picker is Bryant's request (2026-09-08) and fix (2026-09-14). The persona model lock comes from Bryant's persona stack, whose scope was approved on 2026-09-08. The ordering against threads arrived in the 2026-09-24 advance (PR #262). Recorded in FORK.md's saved-agent mentions section and its PR #75–#86 table.
+The person ruled against these. They still diverge on `j5/main` until their fix lands, and then leave the register.
 
 #### D23. A committed Stop also blocks usage-limit auto-resume
 
@@ -334,7 +338,7 @@ These already diverge on `j5/main`, but no human ruling is on record. Each lande
 
 **Why:** it extends D5: a Stop the person committed wins over anything automatic that would revive the run. No separate reason is recorded.
 
-**Status:** added during the 2026-09-24 advance (PR #262), without its own decision. Recorded in FORK.md's temporary patches.
+**Status:** added during the 2026-09-24 advance (PR #262), without its own decision. Jackson, 2026-09-28: an edge case J5 doesn't design for, so follow upstream. To be removed (#343).
 
 #### D24. Astra model aliases
 
