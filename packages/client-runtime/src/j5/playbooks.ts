@@ -275,7 +275,7 @@ export function presentPlaybook(run: PlaybookProgress) {
 
 /** Prioritize active runs with issues within a fetched page without mutating the query's runs. */
 export function sortPlaybookRuns(runs: ReadonlyArray<PlaybookProgress>) {
-  return runs.toSorted(
+  return [...runs].sort(
     (a, b) =>
       Number(b.status === "active" && !!b.issue) - Number(a.status === "active" && !!a.issue) ||
       Number(b.status === "active") - Number(a.status === "active") ||

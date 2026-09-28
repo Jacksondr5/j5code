@@ -30,6 +30,8 @@ import { newMessageId, newThreadId, randomUUID } from "../../lib/utils";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { useServerConfigs } from "../../state/entities";
 import { useEnvironments } from "../../state/environments";
+import { useOptionalSettingsScope } from "../../components/settings/SettingsScopeContext";
+import { isProjectInSettingsScope } from "../settingsScopeEnvironment.logic";
 import { environmentProjects, projectEnvironment } from "../../state/projects";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -57,12 +59,25 @@ const playbookWorkspaceInputsAtom = Atom.withEquality(
 export function PlaybookLibrarySettings() {
   const { environments } = useEnvironments();
   const workspaceInputs = useAtomValue(playbookWorkspaceInputsAtom);
+  // The settings scope sentence narrows the workspaces and, when it names no
+  // environment, the representative environment's workspace comes first.
+  const settings = useOptionalSettingsScope();
+  const settingsScope = settings?.scope;
+  const representativeEnvironmentId = settings?.environment?.environmentId;
   const workspaces = useMemo(
-    () => playbookWorkspaces(workspaceInputs.projects, workspaceInputs.threads),
-    [workspaceInputs],
+    () =>
+      playbookWorkspaces(workspaceInputs.projects, workspaceInputs.threads).filter(
+        (entry) =>
+          settingsScope === undefined ||
+          isProjectInSettingsScope(settingsScope, entry.environmentId, entry.projectId),
+      ),
+    [settingsScope, workspaceInputs],
   );
   const [workspaceKey, setWorkspaceKey] = useState("");
-  const workspace = workspaces.find((entry) => entry.key === workspaceKey) ?? workspaces[0];
+  const workspace =
+    workspaces.find((entry) => entry.key === workspaceKey) ??
+    workspaces.find((entry) => entry.environmentId === representativeEnvironmentId) ??
+    workspaces[0];
   const workspaceItems = workspaces.map((entry) => ({
     value: entry.key,
     label:

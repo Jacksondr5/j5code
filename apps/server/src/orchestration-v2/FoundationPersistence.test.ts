@@ -550,6 +550,101 @@ it.layer(TestLayer)("orchestration V2 foundation persistence", (it) => {
       ),
   );
 
+  it.effect("filters worker replay and live queues without losing matching events", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const sink = yield* EventSinkV2;
+        const sql = yield* SqlClient.SqlClient;
+        const now = yield* DateTime.now;
+        const thread = makeThread(ThreadId.make("thread:filtered-worker"), now);
+        const other = makeThread(ThreadId.make("thread:filtered-worker-other"), now);
+        const run: OrchestrationV2Run = {
+          id: RunId.make("run:filtered-worker"),
+          threadId: thread.id,
+          ordinal: 1,
+          providerInstanceId,
+          modelSelection,
+          providerThreadId: null,
+          userMessageId: MessageId.make("message:filtered-worker"),
+          rootNodeId: null,
+          activeAttemptId: null,
+          status: "completed",
+          queuePosition: null,
+          requestedAt: now,
+          startedAt: now,
+          completedAt: now,
+          checkpointId: null,
+          contextHandoffId: null,
+        };
+        const runEvent = (id: string, payload: OrchestrationV2Run): OrchestrationV2DomainEvent => ({
+          id: EventId.make(id),
+          type: "run.updated",
+          threadId: payload.threadId,
+          runId: payload.id,
+          occurredAt: now,
+          payload,
+        });
+        const history = yield* sink.write({
+          events: [
+            threadCreatedEvent({ id: "event:filtered-worker:created", thread, now }),
+            threadCreatedEvent({ id: "event:filtered-worker:other", thread: other, now }),
+            runEvent("event:filtered-worker:history", run),
+            runEvent("event:filtered-worker:other-history", {
+              ...run,
+              id: RunId.make("run:filtered-worker-other"),
+              threadId: other.id,
+            }),
+          ],
+        });
+        // Unrelated payloads must be skipped in SQL, before decoding or
+        // allocating their bodies, even when a retained row is unreadable.
+        const original = yield* sql<{ readonly payload_json: string }>`
+          SELECT payload_json FROM orchestration_events
+          WHERE sequence = ${history[0]!.sequence}
+        `;
+        yield* Effect.acquireRelease(
+          sql`
+            UPDATE orchestration_events SET payload_json = 'unreadable unrelated payload'
+            WHERE sequence = ${history[0]!.sequence}
+          `,
+          () =>
+            sql`
+              UPDATE orchestration_events SET payload_json = ${original[0]!.payload_json}
+              WHERE sequence = ${history[0]!.sequence}
+            `.pipe(Effect.orDie),
+        );
+        const pull = yield* Stream.toPull(
+          sink.stream({ threadId: thread.id, eventType: "run.updated" }),
+        );
+        assert.deepEqual(
+          (yield* pull).map((stored) => stored.sequence),
+          [history[2]!.sequence],
+        );
+        // The worker is occupied with the previous batch while the thread
+        // publishes output. Its live queue must receive just run updates.
+        yield* sink.write({
+          events: Array.from({ length: LIVE_STREAM_MAX_ITEMS + 1 }, (_, index) => ({
+            id: EventId.make(`event:filtered-worker:output:${index}`),
+            type: "thread.metadata-updated" as const,
+            threadId: thread.id,
+            occurredAt: now,
+            payload: { ...thread, title: `Output ${index}` },
+          })),
+        });
+        const live = yield* sink.write({
+          events: [
+            runEvent("event:filtered-worker:live:1", { ...run, status: "interrupted" }),
+            runEvent("event:filtered-worker:live:2", { ...run, status: "failed" }),
+          ],
+        });
+        assert.deepEqual(
+          (yield* pull).map((stored) => stored.sequence),
+          live.map((stored) => stored.sequence),
+        );
+      }),
+    ),
+  );
+
   it.effect("paginates catch-up beyond the event-store read limit", () =>
     Effect.gen(function* () {
       const eventSink = yield* EventSinkV2;
@@ -1147,6 +1242,166 @@ it.layer(TestLayer)("orchestration V2 foundation persistence", (it) => {
       `;
         assert.equal(checkpointRows[0]?.count, 0);
       }),
+  );
+
+  it.effect("replays every command event across bounded persistence pages", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const eventStore = yield* EventStoreV2;
+      const eventSink = yield* EventSinkV2;
+      const now = yield* DateTime.now;
+      const occurredAt = DateTime.formatIso(now);
+      const commandId = CommandId.make("command:paged-command-replay");
+      const exactPageCommandId = CommandId.make("command:paged-command-replay:exact");
+      const emptyCommandId = CommandId.make("command:paged-command-replay:empty");
+      const threadId = "thread:paged-command-replay";
+
+      const eventRow = (
+        ordinal: number,
+        input: {
+          readonly commandId?: string | null;
+          readonly aggregateKind?: "project" | "thread";
+          readonly streamId?: string;
+          readonly version?: number;
+        } = {},
+      ) => ({
+        event_id: `event:paged-command-replay:${ordinal}`,
+        aggregate_kind: input.aggregateKind ?? "thread",
+        stream_id: input.streamId ?? threadId,
+        stream_version: ordinal,
+        event_type: "provider-session.detached",
+        occurred_at: occurredAt,
+        command_id: input.commandId ?? null,
+        causation_event_id: null,
+        correlation_id: null,
+        actor_kind: "server",
+        payload_json: JSON.stringify({
+          providerSessionId: `session:paged-command-replay:${ordinal}`,
+          detachedAt: occurredAt,
+        }),
+        metadata_json: "{}",
+        application_event_version: input.version ?? 2,
+      });
+
+      const matchingCount = 1_001;
+      const rows: Array<ReturnType<typeof eventRow>> = [];
+      let ordinal = 0;
+      for (let index = 0; index < matchingCount; index += 1) {
+        rows.push(eventRow(++ordinal, { commandId }));
+        if (index % 2 === 0) {
+          rows.push(eventRow(++ordinal, { commandId: "command:unrelated" }));
+        }
+        if (index % 5 === 0) {
+          rows.push(eventRow(++ordinal));
+          rows.push(eventRow(++ordinal, { commandId, version: 1 }));
+          rows.push(
+            eventRow(++ordinal, {
+              commandId,
+              aggregateKind: "project",
+              streamId: `project:paged-command-replay:${index}`,
+            }),
+          );
+        }
+      }
+      for (let index = 0; index < 500; index += 1) {
+        rows.push(eventRow(++ordinal, { commandId: exactPageCommandId }));
+      }
+      const inserted = yield* Effect.forEach(
+        Array.from({ length: Math.ceil(rows.length / 400) }, (_, chunk) =>
+          rows.slice(chunk * 400, (chunk + 1) * 400),
+        ),
+        (chunk) =>
+          sql<{
+            readonly sequence: number;
+            readonly command_id: string | null;
+            readonly aggregate_kind: string;
+            readonly application_event_version: number;
+          }>`
+            INSERT INTO orchestration_events ${sql.insert(chunk)}
+            RETURNING sequence, command_id, aggregate_kind, application_event_version
+          `,
+        { concurrency: 1 },
+      ).pipe(Effect.map((chunks) => chunks.flat()));
+      const expectedSequences = inserted
+        .filter(
+          (row) =>
+            row.command_id === commandId &&
+            row.aggregate_kind === "thread" &&
+            row.application_event_version === 2,
+        )
+        .map((row) => row.sequence);
+      assert.lengthOf(expectedSequences, matchingCount);
+
+      yield* sql`
+        INSERT INTO orchestration_command_receipts (
+          command_id, aggregate_kind, aggregate_id, accepted_at, result_sequence, status, command_type
+        )
+        VALUES (
+          ${commandId}, 'thread', ${threadId}, ${occurredAt},
+          ${expectedSequences.at(-1)!}, 'accepted', 'thread.create'
+        )
+      `;
+
+      const pageLimits: Array<number> = [];
+      const recordReads: Statement.Transformer = (statement) => {
+        const [query, params] = statement.compile();
+        if (query.includes("FROM orchestration_events") && query.includes("command_id")) {
+          const limit = params.at(-1);
+          if (typeof limit === "number") {
+            pageLimits.push(limit);
+          }
+        }
+        return Effect.succeed(statement);
+      };
+      const collectByCommandId = (id: CommandId) =>
+        eventStore.readByCommandId({ commandId: id }).pipe(
+          Stream.provideService(Statement.CurrentTransformer, recordReads),
+          Stream.runCollect,
+          Effect.map((events) => Array.from(events)),
+        );
+
+      const replayed = yield* collectByCommandId(commandId);
+      assert.deepEqual(
+        replayed.map((stored) => stored.sequence),
+        expectedSequences,
+      );
+      assert.deepEqual(pageLimits, [500, 500, 500]);
+
+      pageLimits.length = 0;
+      const exactPage = yield* collectByCommandId(exactPageCommandId);
+      assert.lengthOf(exactPage, 500);
+      assert.deepEqual(pageLimits, [500, 500]);
+
+      pageLimits.length = 0;
+      const empty = yield* collectByCommandId(emptyCommandId);
+      assert.lengthOf(empty, 0);
+      assert.deepEqual(pageLimits, [500]);
+
+      pageLimits.length = 0;
+      const retried = yield* eventSink
+        .commitCommand({
+          commandId,
+          threadId: ThreadId.make(threadId),
+          commandType: "thread.create",
+          acceptedAt: now,
+          events: [
+            threadCreatedEvent({
+              id: "event:paged-command-replay:retry",
+              thread: makeThread(ThreadId.make(threadId), now),
+              now,
+            }),
+          ],
+          effects: [],
+        })
+        .pipe(Effect.provideService(Statement.CurrentTransformer, recordReads));
+      assert.isFalse(retried.committed);
+      assert.equal(retried.receipt.resultSequence, expectedSequences.at(-1));
+      assert.deepEqual(
+        retried.storedEvents.map((stored) => stored.sequence),
+        expectedSequences,
+      );
+      assert.deepEqual(pageLimits, [500, 500, 500]);
+    }),
   );
 
   it.effect("keeps one durable effect across command retries and executes it after recovery", () =>
@@ -2284,7 +2539,6 @@ it.layer(TestLayer)("orchestration V2 foundation persistence", (it) => {
         const attemptId = RunAttemptId.make("attempt:shutdown-prepare");
         const projection = {
           thread: makeThread(threadId, now),
-          turnItems: [],
           runs: [
             {
               id: runId,

@@ -36,6 +36,12 @@ import {
 export const STOPPED_NOTICE_INSTRUCTION =
   "Do not retry this work or replace the agent automatically; wait for operator direction." as const;
 
+// The ledger stores JSON; an absent reset time is an absent key, never `undefined`.
+const SilenceFailureDetail = Schema.Struct({
+  ...OrchestrationV2ProviderFailure.fields,
+  resetAt: Schema.optionalKey(Schema.NullOr(Schema.String)),
+});
+
 const noticeBase = {
   subjectId: ParticipantId,
   deliveryMessageId: LedgerMessageId,
@@ -53,7 +59,7 @@ export const SilenceNoticePayload = Schema.Union([
     ...noticeBase,
     state: Schema.Literal("errored"),
     runId: RunId,
-    detail: OrchestrationV2ProviderFailure,
+    detail: SilenceFailureDetail,
   }),
   Schema.Struct({
     ...noticeBase,
@@ -240,14 +246,16 @@ const makeLayer = (daemon: boolean) =>
             candidate.type === "error" &&
             candidate.status === "failed",
         );
-        return item?.type === "error"
-          ? item.failure
-          : {
-              class: "unknown" as const,
-              message: "The provider run failed without a persisted error detail.",
-              code: null,
-              retryable: null,
-            };
+        if (item?.type === "error") {
+          const { resetAt, ...failure } = item.failure;
+          return resetAt === undefined ? failure : { ...failure, resetAt };
+        }
+        return {
+          class: "unknown" as const,
+          message: "The provider run failed without a persisted error detail.",
+          code: null,
+          retryable: null,
+        };
       });
 
       const dependencyNotice = Effect.fn("j5.a2a.silence.dependencyNotice")(function* (

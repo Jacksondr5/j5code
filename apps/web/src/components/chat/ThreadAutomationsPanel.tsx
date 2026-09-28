@@ -1,5 +1,6 @@
+import { ThreadDetailsControl } from "./ThreadDetailsControl";
 import { useNavigate } from "@tanstack/react-router";
-import { CalendarClockIcon, PlayIcon, Settings2Icon } from "lucide-react";
+import { CalendarClockIcon, PencilIcon, PlayIcon, Settings2Icon } from "lucide-react";
 import { useState } from "react";
 import type { EnvironmentId, ScheduledTask, ThreadId } from "@t3tools/contracts";
 import {
@@ -7,19 +8,17 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 
+import { ThreadDetailsSection } from "./ThreadDetailsSection";
 import { cn } from "../../lib/utils";
 import { relativeLabel, scheduleLabel } from "../settings/ScheduledTasksSettings";
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { Button } from "../ui/button";
+
 import { Switch } from "../ui/switch";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import {
-  THREAD_DETAILS_PANEL_ICON_ACTION_CLASS,
-  THREAD_DETAILS_PANEL_ICON_CLASS,
-} from "./threadDetailsPanelStyles";
+import { THREAD_DETAILS_PANEL_ICON_CLASS } from "./threadDetailsPanelStyles";
 
 const STATUS_DOT_CLASS: Record<ScheduledTask["lastRunStatus"], string> = {
   never: "bg-muted-foreground/40",
@@ -97,36 +96,34 @@ export function ThreadAutomationsPanel(props: {
   };
 
   return (
-    <section
-      aria-labelledby="thread-details-automations-heading"
-      className="border-t border-border/65 px-2 pb-2.5 pt-2"
+    <ThreadDetailsSection
+      headingId="thread-details-automations-heading"
+      title="Automations"
       data-thread-automations-panel
-    >
-      <div className="mb-1 flex min-h-8 items-center justify-between gap-2 px-2">
-        <h3
-          id="thread-details-automations-heading"
-          className="text-[11px] font-medium text-muted-foreground"
-        >
-          Automations
-        </h3>
+      actions={
         <Tooltip>
           <TooltipTrigger
             render={
-              <Button
+              <ThreadDetailsControl
                 size="icon-xs"
                 variant="ghost"
-                className={THREAD_DETAILS_PANEL_ICON_ACTION_CLASS}
-                aria-label="Manage schedule tasks"
-                onClick={() => void navigate({ to: "/settings/scheduled-tasks" })}
+                part="icon"
+                aria-label="Manage scheduled tasks"
+                onClick={() =>
+                  void navigate({
+                    to: "/settings/scheduled-tasks",
+                    search: { environmentId: props.environmentId },
+                  })
+                }
               >
                 <Settings2Icon className="size-3.5" />
-              </Button>
+              </ThreadDetailsControl>
             }
           />
-          <TooltipPopup>Manage schedule tasks</TooltipPopup>
+          <TooltipPopup>Manage scheduled tasks</TooltipPopup>
         </Tooltip>
-      </div>
-
+      }
+    >
       {tasksQuery.error !== null ? (
         <p className="px-2.5 py-1.5 text-[11px] text-destructive">
           Could not load automations: {tasksQuery.error}
@@ -162,16 +159,37 @@ export function ThreadAutomationsPanel(props: {
             <Tooltip>
               <TooltipTrigger
                 render={
-                  <Button
+                  <ThreadDetailsControl
                     size="icon-xs"
                     variant="ghost"
-                    className={THREAD_DETAILS_PANEL_ICON_ACTION_CLASS}
+                    part="icon"
+                    aria-label={`Edit ${task.title}`}
+                    onClick={() =>
+                      void navigate({
+                        to: "/settings/scheduled-tasks",
+                        search: { environmentId: props.environmentId, taskId: task.id },
+                      })
+                    }
+                  >
+                    <PencilIcon className="size-3.5" />
+                  </ThreadDetailsControl>
+                }
+              />
+              <TooltipPopup>Edit automation</TooltipPopup>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <ThreadDetailsControl
+                    size="icon-xs"
+                    variant="ghost"
+                    part="icon"
                     aria-label={`Run ${task.title} now`}
                     disabled={busyTaskId !== null || task.lastRunStatus === "running"}
                     onClick={() => void runNow(task)}
                   >
                     <PlayIcon className="size-3.5" />
-                  </Button>
+                  </ThreadDetailsControl>
                 }
               />
               <TooltipPopup>Run now</TooltipPopup>
@@ -185,6 +203,6 @@ export function ThreadAutomationsPanel(props: {
           </li>
         ))}
       </ul>
-    </section>
+    </ThreadDetailsSection>
   );
 }

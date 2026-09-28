@@ -10,7 +10,7 @@ import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import { ParticipantId, SquadronId } from "./contracts.ts";
 
-const database = NodeSqliteClient.layerMemory();
+const database = NodeSqliteClient.layer({ filename: ":memory:" });
 const testLayer = Layer.mergeAll(
   database,
   ledgerLayer.pipe(Layer.provide(database)),

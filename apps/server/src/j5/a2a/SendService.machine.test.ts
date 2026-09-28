@@ -31,7 +31,7 @@ const watchdog: MachineParticipant = {
 };
 
 const makeTestLayer = () => {
-  const database = NodeSqliteClient.layerMemory();
+  const database = NodeSqliteClient.layer({ filename: ":memory:" });
   const ledger = ledgerLayer.pipe(Layer.provide(database));
   const send = sendLayer.pipe(Layer.provide(ledger), Layer.provide(database));
   return Layer.mergeAll(database, ledger, send);

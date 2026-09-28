@@ -14,7 +14,12 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import type * as Scope from "effect/Scope";
 
 import config from "./delivery-config.v1.json" with { type: "json" };
-import { A2ADeliveryTransport, A2ADeliveryTransportError } from "./DeliveryTransport.ts";
+import {
+  type A2ADeliveryHeldError,
+  A2ADeliveryTransport,
+  A2ADeliveryTransportError,
+  isHeldError,
+} from "./DeliveryTransport.ts";
 import {
   CommCommandId,
   type CommEvent,
@@ -22,6 +27,7 @@ import {
   SquadronId,
   ExchangeId,
   isHumanParticipantId,
+  isMachineParticipantId,
   LedgerMessageId,
   MessageSentPayload,
   ParticipantId,
@@ -107,6 +113,7 @@ export class A2ADeliveryWorker extends Context.Service<A2ADeliveryWorker, A2ADel
 type A2ADeliveryAttemptError =
   | A2ALedgerError
   | A2ADeliveryTransportError
+  | A2ADeliveryHeldError
   | A2ADeliveryHookError
   | SqlError;
 
@@ -115,6 +122,19 @@ const errorText = (cause: Cause.Cause<A2ADeliveryAttemptError>) =>
 
 const workerError = (operation: string) => (cause: unknown) =>
   new A2ADeliveryWorkerError({ operation, cause });
+
+/**
+ * A held receiver queue waits for a person; recheck it slowly and never alarm on it.
+ * Each recheck appends a ledger event, so the interval doubles from one minute to a
+ * fifteen-minute cap: a long hold costs about four events an hour, not sixty.
+ */
+export const heldQueueRecheckMs = (attempt: number) =>
+  Math.min(60_000 * 2 ** Math.max(0, attempt - 1), 15 * 60_000);
+
+const heldError = (cause: Cause.Cause<A2ADeliveryAttemptError>) => {
+  const error = Cause.findErrorOption(cause);
+  return error._tag === "Some" && isHeldError(error.value) ? error.value : undefined;
+};
 
 const backoffMs = (attempt: number) =>
   Math.min(config.initialBackoffMs * 2 ** Math.max(0, attempt - 1), config.maximumBackoffMs);
@@ -301,10 +321,16 @@ const makeLayer = (daemon: boolean) =>
       ) {
         const failedAtDate = yield* DateTime.now;
         const failedAt = DateTime.formatIso(failedAtDate);
-        const alarmed = attempt >= config.alarmAfterAttempts;
+        // A held queue is not a failed delivery: it stays retry_scheduled, never delivered or alarmed.
+        const held = heldError(cause);
+        const alarmed = held === undefined && attempt >= config.alarmAfterAttempts;
         const nextAttemptAt = alarmed
           ? null
-          : DateTime.formatIso(DateTime.add(failedAtDate, { milliseconds: backoffMs(attempt) }));
+          : DateTime.formatIso(
+              DateTime.add(failedAtDate, {
+                milliseconds: held !== undefined ? heldQueueRecheckMs(attempt) : backoffMs(attempt),
+              }),
+            );
         const messageId = LedgerMessageId.make(row.message_id);
         const outcome = yield* writer.withPermit(
           sql.withTransaction(
@@ -324,7 +350,7 @@ const makeLayer = (daemon: boolean) =>
                     payload: {
                       messageId,
                       attempt,
-                      error: errorText(cause),
+                      error: held?.message ?? errorText(cause),
                       nextAttemptAt,
                       alarmed,
                     },
@@ -355,7 +381,12 @@ const makeLayer = (daemon: boolean) =>
         const ids =
           row.envelope_channel === "peer" ? [row.sender_id, row.receiver_id] : [row.receiver_id];
         for (const id of ids) {
-          if (isHumanParticipantId(ParticipantId.make(id))) continue;
+          // Humans and machines never hold agent membership, and a registered
+          // machine is never retired, so only agents can become unavailable.
+          const participantId = ParticipantId.make(id);
+          if (isHumanParticipantId(participantId) || isMachineParticipantId(participantId)) {
+            continue;
+          }
           const membership =
             yield* sql`SELECT 1 FROM j5_a2a_squadron_membership WHERE participant_id = ${id} AND archived_at IS NULL`;
           if (membership.length !== 1) return true;

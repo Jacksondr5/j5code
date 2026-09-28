@@ -3,7 +3,6 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import type { ProviderReplayTranscript } from "@t3tools/contracts";
 import * as CodexReplay from "effect-codex-app-server/replay";
 import * as Effect from "effect/Effect";
-import * as FileSystem from "effect/FileSystem";
 import * as Schema from "effect/Schema";
 
 import { ORCHESTRATOR_REPLAY_FIXTURES } from "./fixtures/index.ts";
@@ -19,7 +18,7 @@ import {
   THREAD_MERGE_BACK_SIBLINGS_SOURCE_MARKER,
   THREAD_MERGE_BACK_SOURCE_MARKER,
 } from "./fixtures/shared.ts";
-import { decodeProviderReplayNdjson } from "./ReplayTranscriptNdjson.ts";
+import { readProviderReplayTranscript } from "./ReplayTranscriptNdjson.ts";
 
 const PROVIDER_THREAD_RESUME_FIRST_FINAL = "provider thread resume fixture first turn complete";
 const PROVIDER_THREAD_RESUME_SECOND_FINAL = "provider thread resume fixture second turn complete";
@@ -273,7 +272,14 @@ const scenarioExpectations = {
     approvalRequestCount: 0,
   },
   thread_rollback: {
-    outgoing: ["initialize", "initialized", "thread/start", "turn/start", "thread/rollback"],
+    outgoing: [
+      "initialize",
+      "initialized",
+      "thread/start",
+      "turn/start",
+      "thread/read",
+      "thread/rollback",
+    ],
     incoming: ["turn/started", "turn/completed", "item/agentMessage/delta"],
     turnStartCount: 3,
     turnCompletedCount: 3,
@@ -327,9 +333,7 @@ const decodeCodexTranscript = Schema.decodeUnknownEffect(
   CodexReplay.CodexAppServerReplayTranscript,
 );
 const readTranscript = Effect.fn("readCodexReplayFixture")(function* (file: URL) {
-  const fs = yield* FileSystem.FileSystem;
-  const text = yield* fs.readFileString(decodeURIComponent(file.pathname));
-  return yield* decodeProviderReplayNdjson(text);
+  return yield* readProviderReplayTranscript(file);
 }, Effect.provide(NodeServices.layer));
 
 function labels(

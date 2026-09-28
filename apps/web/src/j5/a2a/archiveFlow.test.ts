@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
+  archiveMayRetireCrews,
   archiveWithPreflight,
   formatArchiveWarning,
   needsArchiveWarning,
@@ -123,6 +124,34 @@ describe("archive flow", () => {
       }),
     ).resolves.toBe("archived");
     expect(archive).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers Undo only when the archive cannot have retired Crews", async () => {
+    expect(archiveMayRetireCrews(registered())).toBe(false);
+    expect(archiveMayRetireCrews(registered({ liveCrews: [reviewPair] }))).toBe(true);
+    expect(archiveMayRetireCrews(registered({ liveCrews: null }))).toBe(true);
+    expect(archiveMayRetireCrews({ facts: null, participantLabels: new Map() })).toBe(true);
+
+    const archive = vi.fn(async (_outcome: { readonly undoable: boolean }) => "archived");
+    vi.spyOn(client, "readArchivePreflight").mockResolvedValueOnce(
+      registered({ liveCrews: [reviewPair] }),
+    );
+    await archiveWithPreflight({
+      threadRef: archiveThreadRef,
+      threadTitle: "Captain",
+      confirm: async () => true,
+      archive,
+    });
+    expect(archive).toHaveBeenLastCalledWith({ undoable: false });
+
+    vi.spyOn(client, "readArchivePreflight").mockResolvedValueOnce(registered());
+    await archiveWithPreflight({
+      threadRef: archiveThreadRef,
+      threadTitle: "Clean",
+      confirm: async () => true,
+      archive,
+    });
+    expect(archive).toHaveBeenLastCalledWith({ undoable: true });
   });
 
   it("names the agents beneath that keep running, leaving the Crew's seats to the Crew", () => {

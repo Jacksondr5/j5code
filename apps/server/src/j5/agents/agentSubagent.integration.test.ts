@@ -74,9 +74,10 @@ const adapter = {
   openSession: () => Effect.die("live provider execution is disabled in this test"),
 } as ProviderAdapterV2Shape;
 const database = SqlitePersistenceMemory;
+const adapters = makeLayer([adapter]);
 const orchestration = makeOrchestratorV2ReplayLayerWithRegistry(
   { name: "j5-agent-subagent" },
-  makeLayer([adapter]),
+  adapters,
   { databaseLayer: database, runEffectWorker: false },
 );
 const threads = Threads.layer.pipe(Layer.provide(orchestration));
@@ -84,6 +85,7 @@ const registry = Layer.mock(ProviderRegistry)({ getProviders: Effect.succeed([pr
 const mcp = Mcp.layer.pipe(
   Layer.provide(threads),
   Layer.provide(registry),
+  Layer.provide(adapters),
   Layer.provide(Layer.mock(ScheduledTaskService)({})),
   Layer.provide(NodeServices.layer),
 );

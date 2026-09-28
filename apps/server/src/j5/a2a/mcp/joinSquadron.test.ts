@@ -84,7 +84,7 @@ const projection = (threadId: ThreadId): OrchestrationV2ThreadProjection =>
     },
   }) as unknown as OrchestrationV2ThreadProjection;
 
-const database = NodeSqliteClient.layerMemory();
+const database = NodeSqliteClient.layer({ filename: ":memory:" });
 const ledger = ledgerLayer.pipe(Layer.provide(database));
 const homes = homeRegistrarLayer.pipe(Layer.provide(ledger), Layer.provide(database));
 const homeTransactions = homeRegistrationTransactionLayer.pipe(

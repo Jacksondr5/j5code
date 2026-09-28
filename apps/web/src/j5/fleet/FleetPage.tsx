@@ -139,7 +139,7 @@ export function FleetPage() {
   const tableProps = { showEnvironment, threadsByKey, onOpenThread: openThread };
 
   return (
-    <SidebarInset className="h-dvh min-h-0 overflow-hidden bg-background text-foreground">
+    <SidebarInset className="h-dvh min-h-0 overflow-hidden">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <header
           className={cn(
@@ -611,7 +611,7 @@ function FleetRowItem(
             </span>
           )}
           {props.badge ? (
-            <Badge variant="outline" className="shrink-0 px-1.5 py-0 text-[10px]">
+            <Badge variant="outline" size="sm" className="shrink-0">
               {props.badge}
             </Badge>
           ) : null}

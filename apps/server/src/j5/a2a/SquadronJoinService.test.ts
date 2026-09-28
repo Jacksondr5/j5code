@@ -28,7 +28,7 @@ const joinedAt = "2026-09-12T10:05:00.000Z";
 const projectId = ProjectId.make("project:join:primary");
 const otherProjectId = ProjectId.make("project:join:other");
 
-const database = NodeSqliteClient.layerMemory();
+const database = NodeSqliteClient.layer({ filename: ":memory:" });
 const ledger = ledgerLayer.pipe(Layer.provide(database));
 const homes = homeRegistrarLayer.pipe(Layer.provide(ledger), Layer.provide(database));
 const homeTransactions = homeRegistrationTransactionLayer.pipe(

@@ -36,6 +36,7 @@ import { EnvironmentRegistry } from "../connection/registry.ts";
 import { EnvironmentSupervisor } from "../connection/supervisor.ts";
 import { safeErrorLogAttributes } from "../errors/safeLog.ts";
 import { EnvironmentCacheStore } from "../platform/persistence.ts";
+import { runCachePersistence } from "./cachePersistence.ts";
 import {
   isRpcClientError,
   request,
@@ -96,7 +97,7 @@ export class ServerUpdateResumeTimeoutError extends Schema.TaggedError<ServerUpd
   },
 ) {
   override get message(): string {
-    return `The server did not resume on @jacksondr5/j5code@${this.targetVersion}.`;
+    return `The server did not resume on j5@${this.targetVersion}.`;
   }
 }
 
@@ -107,7 +108,7 @@ export class ServerUpdateProgressIncompleteError extends Schema.TaggedError<Serv
   },
 ) {
   override get message(): string {
-    return `The @jacksondr5/j5code@${this.targetVersion} update ended before the server accepted the restart.`;
+    return `The j5@${this.targetVersion} update ended before the server accepted the restart.`;
   }
 }
 
@@ -120,7 +121,7 @@ export class ServerUpdateTerminalError extends Schema.TaggedError<ServerUpdateTe
   },
 ) {
   override get message(): string {
-    return this.reason ?? `The @jacksondr5/j5code@${this.targetVersion} update ${this.status}.`;
+    return this.reason ?? `The j5@${this.targetVersion} update ${this.status}.`;
   }
 }
 
@@ -418,11 +419,18 @@ export const makeEnvironmentServerConfigState = Effect.fn("EnvironmentServerConf
       );
     });
 
-    yield* Stream.fromQueue(persistence).pipe(
-      Stream.debounce("500 millis"),
-      Stream.runForEach(persistPending),
-      Effect.forkScoped,
+    yield* Effect.addFinalizer(() =>
+      Ref.get(pendingPersistence).pipe(
+        Effect.flatMap(
+          Option.match({
+            onNone: () => Effect.void,
+            onSome: (config) => persist(config).pipe(Effect.asVoid),
+          }),
+        ),
+      ),
     );
+
+    yield* runCachePersistence(persistence, persistPending).pipe(Effect.forkScoped);
 
     yield* subscribe(WS_METHODS.subscribeServerConfig, {
       ...(subscription.environmentThemes === true ? { environmentThemes: true } : {}),
@@ -441,17 +449,6 @@ export const makeEnvironmentServerConfigState = Effect.fn("EnvironmentServerConf
         }),
       ),
       Effect.forkScoped,
-    );
-
-    yield* Effect.addFinalizer(() =>
-      Ref.get(pendingPersistence).pipe(
-        Effect.flatMap(
-          Option.match({
-            onNone: () => Effect.void,
-            onSome: (config) => persist(config).pipe(Effect.asVoid),
-          }),
-        ),
-      ),
     );
 
     return state;
@@ -983,6 +980,10 @@ export function createServerEnvironmentAtoms<R, E>(
         mode: "singleFlight",
         key: ({ environmentId, input }) => JSON.stringify([environmentId, input]),
       },
+    }),
+    respondProviderAuth: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:provider:auth-respond",
+      tag: WS_METHODS.providerAuthRespond,
     }),
     completeProviderAuth: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:provider:auth-complete",

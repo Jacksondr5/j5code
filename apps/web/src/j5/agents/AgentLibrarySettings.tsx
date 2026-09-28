@@ -37,6 +37,7 @@ import { useMemo, useRef, useState } from "react";
 import { useOpenInPreferredEditor } from "../../editorPreferences";
 import { useServerConfigs } from "../../state/entities";
 import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
+import { useSettingsScopeEnvironments } from "../settingsScopeEnvironment";
 import { agentPersonaEnvironment } from "./agentPersonaAtoms";
 import { PlaybookLibrarySettings } from "../playbooks/PlaybookLibrarySettings";
 import { useEnvironmentQuery } from "../../state/query";
@@ -80,14 +81,19 @@ export function AgentLibrarySettings() {
       }),
     [environments, primaryEnvironmentId],
   );
+  const {
+    candidates: pickerEnvironments,
+    pinnedEnvironmentId,
+    initialEnvironmentId,
+  } = useSettingsScopeEnvironments(orderedEnvironments, primaryEnvironmentId);
   const [selectedEnvironmentId, setSelectedEnvironmentId] = useState<EnvironmentId | null>(
-    primaryEnvironmentId,
+    initialEnvironmentId,
   );
-  const effectiveEnvironmentId = orderedEnvironments.some(
-    (environment) => environment.environmentId === selectedEnvironmentId,
-  )
-    ? selectedEnvironmentId
-    : (orderedEnvironments[0]?.environmentId ?? null);
+  const effectiveEnvironmentId =
+    pinnedEnvironmentId ??
+    (pickerEnvironments.some((environment) => environment.environmentId === selectedEnvironmentId)
+      ? selectedEnvironmentId
+      : (pickerEnvironments[0]?.environmentId ?? null));
   const selectedEnvironment = orderedEnvironments.find(
     (environment) => environment.environmentId === effectiveEnvironmentId,
   );
@@ -392,7 +398,7 @@ export function AgentLibrarySettings() {
           title="Persona library"
           description="In a Codex or Claude conversation, type @persona:id, or @ and the start of a persona’s name, to run a persona as a subagent. Edit imported personas here."
         />
-        {orderedEnvironments.length > 1 ? (
+        {pinnedEnvironmentId === null && pickerEnvironments.length > 1 ? (
           <SettingsRow
             title="Environment"
             description="Availability and model routing are resolved by the selected environment."
@@ -401,7 +407,7 @@ export function AgentLibrarySettings() {
                 disabled={busy}
                 value={effectiveEnvironmentId ?? undefined}
                 onValueChange={(value) => {
-                  const environment = orderedEnvironments.find(
+                  const environment = pickerEnvironments.find(
                     (candidate) => candidate.environmentId === value,
                   );
                   if (environment) setSelectedEnvironmentId(environment.environmentId);
@@ -411,7 +417,7 @@ export function AgentLibrarySettings() {
                   <SelectValue>{selectedEnvironment?.label}</SelectValue>
                 </SelectTrigger>
                 <SelectPopup align="end" alignItemWithTrigger={false}>
-                  {orderedEnvironments.map((environment) => (
+                  {pickerEnvironments.map((environment) => (
                     <SelectItem key={environment.environmentId} value={environment.environmentId}>
                       {environment.label}
                     </SelectItem>
@@ -449,7 +455,7 @@ export function AgentLibrarySettings() {
       </SettingsSection>
 
       <SettingsSection
-        title="Scoped personas"
+        title="Library"
         headerAction={
           <div className="flex flex-wrap items-center gap-2">
             <Button
@@ -531,7 +537,7 @@ export function AgentLibrarySettings() {
                         <TooltipTrigger
                           render={<Badge variant="outline">{persona.originLabel}</Badge>}
                         />
-                        <TooltipPopup className="font-mono">{persona.origin.path}</TooltipPopup>
+                        <TooltipPopup variant="code">{persona.origin.path}</TooltipPopup>
                       </Tooltip>
                     ) : (
                       <Badge variant="outline">{persona.originLabel}</Badge>

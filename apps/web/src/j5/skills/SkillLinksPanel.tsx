@@ -276,94 +276,99 @@ export function LinkSkillDialog(
             entire skill folder. Edits are shared.
           </DialogDescription>
         </DialogHeader>
-        <DialogPanel className="grid gap-3">
-          <label className="grid gap-2 text-sm">
-            Destination provider
-            <Select
-              value={targetId ?? ""}
-              disabled={busy}
-              onValueChange={(id) =>
-                setTargetId(destinations.find((provider) => provider.instanceId === id)?.instanceId)
-              }
-            >
-              <SelectTrigger aria-label="Link destination provider">
-                <SelectValue>
-                  {destinations.find((provider) => provider.instanceId === targetId)?.displayName ??
-                    targetId ??
-                    "No Codex or Claude instances"}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectPopup>
-                {destinations.map((provider) => (
-                  <SelectItem key={provider.instanceId} value={provider.instanceId}>
-                    {provider.displayName ?? provider.instanceId} ({provider.instanceId})
+        <DialogPanel>
+          <div className="grid gap-3">
+            <label className="grid gap-2 text-sm">
+              Destination provider
+              <Select
+                value={targetId ?? ""}
+                disabled={busy}
+                onValueChange={(id) =>
+                  setTargetId(
+                    destinations.find((provider) => provider.instanceId === id)?.instanceId,
+                  )
+                }
+              >
+                <SelectTrigger aria-label="Link destination provider">
+                  <SelectValue>
+                    {destinations.find((provider) => provider.instanceId === targetId)
+                      ?.displayName ??
+                      targetId ??
+                      "No Codex or Claude instances"}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectPopup>
+                  {destinations.map((provider) => (
+                    <SelectItem key={provider.instanceId} value={provider.instanceId}>
+                      {provider.displayName ?? provider.instanceId} ({provider.instanceId})
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+            </label>
+            <label className="grid gap-2 text-sm">
+              Scope
+              <Select
+                value={scope}
+                disabled={busy}
+                onValueChange={(value) => {
+                  if (value === "user" || value === "project") setScope(value);
+                }}
+              >
+                <SelectTrigger aria-label="Link scope">
+                  <SelectValue>
+                    {scope === "user" ? "User" : `Project: ${props.projectTitle}`}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectPopup>
+                  <SelectItem value="user">User</SelectItem>
+                  <SelectItem value="project" disabled={!props.projectId}>
+                    Project: {props.projectTitle ?? "Select a project first"}
                   </SelectItem>
+                </SelectPopup>
+              </Select>
+            </label>
+            {checked ? (
+              <div className="space-y-2 text-xs break-words">
+                <p>
+                  <strong>Source folder:</strong> {checked.sourcePath}
+                </p>
+                <p>
+                  <strong>Destination:</strong> {checked.destinationPath}
+                </p>
+                {checked.sharedWith.length > 1 ? (
+                  <p>
+                    This destination is shared by{" "}
+                    {checked.sharedWith
+                      .map((entry) => `${entry.label} (${entry.instanceId})`)
+                      .join(", ")}
+                    . Linking or unlinking here affects all of them.
+                  </p>
+                ) : null}
+                {checked.warnings.map((warning) => (
+                  <p key={warning} className="text-muted-foreground">
+                    {warning}
+                  </p>
                 ))}
-              </SelectPopup>
-            </Select>
-          </label>
-          <label className="grid gap-2 text-sm">
-            Scope
-            <Select
-              value={scope}
-              disabled={busy}
-              onValueChange={(value) => {
-                if (value === "user" || value === "project") setScope(value);
-              }}
-            >
-              <SelectTrigger aria-label="Link scope">
-                <SelectValue>
-                  {scope === "user" ? "User" : `Project: ${props.projectTitle}`}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectPopup>
-                <SelectItem value="user">User</SelectItem>
-                <SelectItem value="project" disabled={!props.projectId}>
-                  Project: {props.projectTitle ?? "Select a project first"}
-                </SelectItem>
-              </SelectPopup>
-            </Select>
-          </label>
-          {checked ? (
-            <div className="space-y-2 text-xs break-words">
-              <p>
-                <strong>Source folder:</strong> {checked.sourcePath}
+                {checked.conflict ? <p role="alert">{checked.conflict}</p> : null}
+                {checked.status === "already-linked" ? (
+                  <p>
+                    The same source is already linked. Continuing leaves it unchanged; existing
+                    links created elsewhere remain unmanaged.
+                  </p>
+                ) : null}
+              </div>
+            ) : !error ? (
+              <p className="text-sm">
+                {props.connected ? "Preparing preview…" : "Environment disconnected."}
               </p>
-              <p>
-                <strong>Destination:</strong> {checked.destinationPath}
+            ) : null}
+            {error ? (
+              <p role="alert" className="text-sm text-destructive-foreground">
+                {error}
               </p>
-              {checked.sharedWith.length > 1 ? (
-                <p>
-                  This destination is shared by{" "}
-                  {checked.sharedWith
-                    .map((entry) => `${entry.label} (${entry.instanceId})`)
-                    .join(", ")}
-                  . Linking or unlinking here affects all of them.
-                </p>
-              ) : null}
-              {checked.warnings.map((warning) => (
-                <p key={warning} className="text-muted-foreground">
-                  {warning}
-                </p>
-              ))}
-              {checked.conflict ? <p role="alert">{checked.conflict}</p> : null}
-              {checked.status === "already-linked" ? (
-                <p>
-                  The same source is already linked. Continuing leaves it unchanged; existing links
-                  created elsewhere remain unmanaged.
-                </p>
-              ) : null}
-            </div>
-          ) : !error ? (
-            <p className="text-sm">
-              {props.connected ? "Preparing preview…" : "Environment disconnected."}
-            </p>
-          ) : null}
-          {error ? (
-            <p role="alert" className="text-sm text-destructive-foreground">
-              {error}
-            </p>
-          ) : null}
+            ) : null}
+          </div>
         </DialogPanel>
         <DialogFooter>
           <Button variant="outline" disabled={busy} onClick={props.onClose}>
@@ -538,71 +543,74 @@ function UnlinkSkillDialog(
               : "Remove a provider link or all links shown here, including links created elsewhere. Source files stay in place. Providers sharing a destination are unlinked together."}
           </DialogDescription>
         </DialogHeader>
-        <DialogPanel className="grid gap-3">
-          {checkedDeletion ? (
-            <>
-              <p role="alert" className="text-sm text-destructive-foreground">
-                This permanently deletes this skill folder and every file inside it from this
-                environment’s machine. This cannot be undone. Other providers linking to this folder
-                will lose access.
-              </p>
-              <p className="break-all font-mono text-xs">{checkedDeletion.expectedPath}</p>
-            </>
-          ) : (
-            <>
-              {options?.map((option) => (
-                <div
-                  key={option.request.expectedDestinationPath}
-                  className="flex items-start justify-between gap-3 text-sm"
-                >
-                  <div className="min-w-0 break-words">
-                    <p className="font-medium">{option.label}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {option.request.expectedDestinationPath}
-                    </p>
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={busy || !props.connected}
-                    aria-label={`Unlink ${option.label}`}
-                    onClick={() => void remove([option])}
+        <DialogPanel>
+          <div className="grid gap-3">
+            {checkedDeletion ? (
+              <>
+                <p role="alert" className="text-sm text-destructive-foreground">
+                  This permanently deletes this skill folder and every file inside it from this
+                  environment’s machine. This cannot be undone. Other providers linking to this
+                  folder will lose access.
+                </p>
+                <p className="break-all font-mono text-xs">{checkedDeletion.expectedPath}</p>
+              </>
+            ) : (
+              <>
+                {options?.map((option) => (
+                  <div
+                    key={option.request.expectedDestinationPath}
+                    className="flex items-start justify-between gap-3 text-sm"
                   >
-                    Unlink
-                  </Button>
-                </div>
-              ))}
-              {!props.connected ? (
-                <p>Environment disconnected.</p>
-              ) : options === null && errors.length === 0 ? (
-                <p>Checking existing links…</p>
-              ) : options?.length === 0 ? (
-                <div className="grid gap-2">
-                  <p>No removable links found.</p>
-                  {props.selection.origin === "Personal" || props.selection.origin === "Project" ? (
-                    <>
-                      <p className="text-sm text-muted-foreground">
-                        An original skill folder must be deleted to remove it from the provider.
+                    <div className="min-w-0 break-words">
+                      <p className="font-medium">{option.label}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {option.request.expectedDestinationPath}
                       </p>
-                      <Button
-                        variant="destructive"
-                        disabled={busy || !props.connected}
-                        onClick={() => void prepareDeletion()}
-                      >
-                        {busy ? "Checking…" : "Delete skill…"}
-                      </Button>
-                    </>
-                  ) : null}
-                </div>
-              ) : null}
-              {message ? <p role="status">{message}</p> : null}
-            </>
-          )}
-          {errors.map((error) => (
-            <p key={error} role="alert" className="text-sm text-destructive-foreground">
-              {error}
-            </p>
-          ))}
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={busy || !props.connected}
+                      aria-label={`Unlink ${option.label}`}
+                      onClick={() => void remove([option])}
+                    >
+                      Unlink
+                    </Button>
+                  </div>
+                ))}
+                {!props.connected ? (
+                  <p>Environment disconnected.</p>
+                ) : options === null && errors.length === 0 ? (
+                  <p>Checking existing links…</p>
+                ) : options?.length === 0 ? (
+                  <div className="grid gap-2">
+                    <p>No removable links found.</p>
+                    {props.selection.origin === "Personal" ||
+                    props.selection.origin === "Project" ? (
+                      <>
+                        <p className="text-sm text-muted-foreground">
+                          An original skill folder must be deleted to remove it from the provider.
+                        </p>
+                        <Button
+                          variant="destructive"
+                          disabled={busy || !props.connected}
+                          onClick={() => void prepareDeletion()}
+                        >
+                          {busy ? "Checking…" : "Delete skill…"}
+                        </Button>
+                      </>
+                    ) : null}
+                  </div>
+                ) : null}
+                {message ? <p role="status">{message}</p> : null}
+              </>
+            )}
+            {errors.map((error) => (
+              <p key={error} role="alert" className="text-sm text-destructive-foreground">
+                {error}
+              </p>
+            ))}
+          </div>
         </DialogPanel>
         <DialogFooter>
           <Button

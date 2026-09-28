@@ -61,6 +61,7 @@ function fixture() {
   } as unknown as OrchestrationV2ThreadProjection;
   const projections = Layer.mock(ProjectionStore.ProjectionStoreV2)({
     getThreadProjection: () => Effect.succeed(projection),
+    getCheckpointContext: () => Effect.succeed(projection as never),
   });
   const events = Layer.mock(EventSink.EventSinkV2)({
     write: (write) =>
@@ -121,7 +122,7 @@ for (const phase of ["checkpoint", "refresh"] as const) {
                 execute: () => (isCaptureError(wrapped) ? Effect.fail(wrapped) : Effect.void),
               }),
               Layer.succeed(RunFinalization.RunFinalizationObserver, {
-                refreshAfterTurn: Effect.void,
+                refreshAfterTurn: () => Effect.void,
                 refresh: () => (isRefreshError(wrapped) ? Effect.fail(wrapped) : Effect.void),
               }),
             ),

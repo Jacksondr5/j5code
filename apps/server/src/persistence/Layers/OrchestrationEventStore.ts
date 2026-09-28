@@ -8,6 +8,7 @@ import {
   OrchestrationV2DomainEventJson,
   OrchestrationV2StoredEvent,
   ProjectId,
+  ProjectIconOverride,
   ThreadId,
   type OrchestrationV2DomainEvent,
 } from "@t3tools/contracts";
@@ -39,6 +40,7 @@ import {
   type OrchestrationEventStoreShape,
 } from "../Services/OrchestrationEventStore.ts";
 
+const encodeProjectIcon = Schema.encodeSync(ProjectIconOverride);
 const decodeEvent = Schema.decodeUnknownEffect(OrchestrationEvent);
 const decodeProjectEvent = Schema.decodeUnknownEffect(ApplicationProjectEvent);
 const UnknownFromJsonString = Schema.fromJsonString(Schema.Unknown);
@@ -301,7 +303,10 @@ const makeEventStore = Effect.gen(function* () {
       actorKind: inferActorKind(event),
       occurredAt: event.occurredAt,
       commandId: event.commandId,
-      payloadJson: event.payload,
+      payloadJson:
+        "projectIcon" in event.payload && event.payload.projectIcon
+          ? { ...event.payload, projectIcon: encodeProjectIcon(event.payload.projectIcon) }
+          : event.payload,
       metadataJson: event.metadata,
       applicationEventVersion: event.aggregateKind === "project" ? 2 : 1,
     }).pipe(
@@ -367,6 +372,7 @@ const makeEventStore = Effect.gen(function* () {
     readonly throughSequence?: number;
     readonly threadId?: ThreadId;
     readonly commandId?: CommandId;
+    readonly eventType?: OrchestrationV2DomainEvent["type"];
     readonly onlyAgentEvents?: boolean;
     readonly limit: number;
   }) =>
@@ -403,6 +409,7 @@ const makeEventStore = Effect.gen(function* () {
         AND ${sql.and([
           ...(input.threadId === undefined ? [] : [sql`stream_id = ${input.threadId}`]),
           ...(input.commandId === undefined ? [] : [sql`command_id = ${input.commandId}`]),
+          ...(input.eventType === undefined ? [] : [sql`event_type = ${input.eventType}`]),
         ])}
       ORDER BY sequence ASC
       LIMIT ${input.limit}
@@ -470,20 +477,44 @@ const makeEventStore = Effect.gen(function* () {
       ),
     );
 
-  const readAgentEvents: OrchestrationEventStoreShape["readAgentEvents"] = (input) =>
-    Stream.fromEffect(
-      readApplicationRows({
-        afterSequence: input?.afterSequence ?? 0,
-        ...(input?.throughSequence === undefined ? {} : { throughSequence: input.throughSequence }),
-        ...(input?.threadId === undefined ? {} : { threadId: input.threadId }),
-        ...(input?.commandId === undefined ? {} : { commandId: input.commandId }),
-        onlyAgentEvents: true,
-        limit: input?.limit ?? DEFAULT_READ_FROM_SEQUENCE_LIMIT,
-      }).pipe(
-        Effect.mapError(toPersistenceSqlError("OrchestrationEventStore.readAgentEvents:query")),
-      ),
+  const readAgentEvents: OrchestrationEventStoreShape["readAgentEvents"] = (input) => {
+    const totalLimit =
+      input?.limit === undefined ? Number.MAX_SAFE_INTEGER : Math.max(0, Math.floor(input.limit));
+    if (totalLimit === 0) {
+      return Stream.empty;
+    }
+    return Stream.paginate(
+      { cursor: input?.afterSequence ?? 0, remaining: totalLimit },
+      ({ cursor, remaining }) => {
+        const pageLimit = Math.min(remaining, READ_PAGE_SIZE);
+        return readApplicationRows({
+          afterSequence: cursor,
+          ...(input?.throughSequence === undefined
+            ? {}
+            : { throughSequence: input.throughSequence }),
+          ...(input?.threadId === undefined ? {} : { threadId: input.threadId }),
+          ...(input?.commandId === undefined ? {} : { commandId: input.commandId }),
+          ...(input?.eventType === undefined ? {} : { eventType: input.eventType }),
+          onlyAgentEvents: true,
+          limit: pageLimit,
+        }).pipe(
+          Effect.mapError(toPersistenceSqlError("OrchestrationEventStore.readAgentEvents:query")),
+          Effect.map((rows) => {
+            const last = rows.at(-1);
+            const nextRemaining = remaining - rows.length;
+            return [
+              rows,
+              last === undefined ||
+              rows.length < pageLimit ||
+              nextRemaining <= 0 ||
+              (input?.throughSequence !== undefined && last.sequence >= input.throughSequence)
+                ? Option.none()
+                : Option.some({ cursor: last.sequence, remaining: nextRemaining }),
+            ] as const;
+          }),
+        );
+      },
     ).pipe(
-      Stream.flatMap(Stream.fromIterable),
       Stream.mapEffect((row) =>
         rowToV2StoredEvent(row).pipe(
           Effect.mapError(
@@ -492,6 +523,7 @@ const makeEventStore = Effect.gen(function* () {
         ),
       ),
     );
+  };
 
   const getAgentReplayStats: OrchestrationEventStoreShape["getAgentReplayStats"] = (input) =>
     sql<{

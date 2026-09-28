@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Terminal from "effect/Terminal";
 import { Command, Flag, GlobalFlag, Prompt } from "effect/unstable/cli";
+import { FetchHttpClient } from "effect/unstable/http";
 
 import packageJson from "../../package.json" with { type: "json" };
 import * as BootService from "../cloud/bootService.ts";
@@ -17,7 +18,11 @@ export const bootServiceLayer = (config: ServerConfig.ServerConfig["Service"]) =
     baseDir: config.baseDir,
     logsDir: config.logsDir,
     cliVersion: packageJson.version,
-  }).pipe(Layer.provide(ProcessRunner.layer));
+  }).pipe(
+    Layer.provide(ProcessRunner.layer),
+    // Archive-distributed versions download the release archive here.
+    Layer.provide(FetchHttpClient.layer),
+  );
 
 export type ServiceReconcileResult =
   | {
@@ -33,6 +38,7 @@ export type ServiceReconcileResult =
 /** Install, update, or repair the service using the CLI version running this command. */
 export const reconcileService = Effect.fn("cli.service.reconcile")(function* (options?: {
   readonly allowDowngrade?: boolean;
+  readonly start?: boolean;
 }) {
   const service = yield* BootService.BootService;
   const status = yield* service.status;
@@ -65,7 +71,14 @@ export function formatServiceStatus(
     return "J5 Code service\n  Status: unavailable on this machine\n  Supported on: Linux with systemd, macOS with launchd";
   }
   if (!status.installed) {
-    return "J5 Code service\n  Status: not installed\n  Next: Run `j5 service install`.";
+    return [
+      "J5 Code service",
+      "  Status: not installed",
+      ...(status.problems ?? []).map(
+        (problem) => `  [${problem}] ${BootService.formatBootServiceProblem(problem)}`,
+      ),
+      "  Next: Run `j5 service install`.",
+    ].join("\n");
   }
   const installedVersion = status.installedVersion ?? cliVersion;
   const problems = (status.problems ?? []).map(
@@ -78,22 +91,20 @@ export function formatServiceStatus(
   ) {
     return [
       "J5 Code service",
-      `  Status: installed · @jacksondr5/j5code@${installedVersion} (newer than this @jacksondr5/j5code@${cliVersion} CLI)`,
+      `  Status: installed · j5@${installedVersion} (newer than this j5@${cliVersion} CLI)`,
       `  Unit: ${status.unitPath}`,
       `  Logs: ${status.logPath}`,
       ...problems,
-      `  Next: Use \`npx @jacksondr5/j5code@${installedVersion} service update\` to repair it, or pass \`--allow-downgrade\` explicitly.`,
+      `  Next: Run \`j5 update ${installedVersion}\` to match it, or pass \`--allow-downgrade\` to \`j5 service install\` explicitly.`,
     ].join("\n");
   }
   return [
     "J5 Code service",
-    `  Status: ${status.current ? `installed · @jacksondr5/j5code@${installedVersion}` : "needs an update or repair"}`,
+    `  Status: ${status.current ? `installed · j5@${installedVersion}` : "needs an update or repair"}`,
     `  Unit: ${status.unitPath}`,
     `  Logs: ${status.logPath}`,
     ...problems,
-    ...(status.current
-      ? []
-      : [`  Next: Run \`npx @jacksondr5/j5code@${cliVersion} service update\`.`]),
+    ...(status.current ? [] : ["  Next: Run `j5 service install` to repair it."]),
   ].join("\n");
 }
 
@@ -108,7 +119,7 @@ const runServiceCommand = Effect.fn("cli.service.run")(function* <A, E>(
 
 const serviceReconcileFlags = {
   ...projectLocationFlags,
-  allowDowngrade: Flag.boolean("allow-downgrade").pipe(
+  allowDowngrade: Flag.Boolean("allow-downgrade").pipe(
     Flag.withDescription("Allow replacing a newer installed service with this older CLI version."),
     Flag.withDefault(false),
   ),
@@ -123,35 +134,58 @@ const serviceInstallCommand = Command.make("install", serviceReconcileFlags).pip
         const result = yield* reconcileService({ allowDowngrade: flags.allowDowngrade });
         if (!result.changed) {
           yield* Console.log(
-            `J5 Code service is already installed with @jacksondr5/j5code@${packageJson.version}.`,
+            `J5 Code service is already installed with j5@${packageJson.version}.`,
           );
           return;
         }
         yield* Console.log(
-          `${result.previouslyInstalled ? "Updated" : "Installed"} J5 Code service with @jacksondr5/j5code@${packageJson.version}.\nLogs: ${result.plan.logPath}`,
+          `${result.previouslyInstalled ? "Updated" : "Installed"} J5 Code service with j5@${packageJson.version}.\nLogs: ${result.plan.logPath}`,
         );
       }),
     ),
   ),
 );
 
+// Kept one release for muscle memory and old docs. It did what `j5 service
+// install` does; the way to move to a newer release is `j5 update`.
 const serviceUpdateCommand = Command.make("update", serviceReconcileFlags).pipe(
+  Command.withDescription("Deprecated. Run `j5 update` to move to a newer release."),
+  Command.unlisted,
+  Command.withHandler((flags) =>
+    runServiceCommand(
+      flags,
+      Effect.gen(function* () {
+        yield* Console.log(
+          "`j5 service update` is deprecated: run `j5 update` to move to a newer release, or `j5 service install` to repair the service. Repairing now.",
+        );
+        const result = yield* reconcileService({ allowDowngrade: flags.allowDowngrade });
+        if (!result.changed) {
+          yield* Console.log(`J5 Code service is already using j5@${packageJson.version}.`);
+          return;
+        }
+        yield* Console.log(
+          `${result.previouslyInstalled ? "Updated" : "Installed"} J5 Code service with j5@${packageJson.version}.\nLogs: ${result.plan.logPath}`,
+        );
+      }),
+    ),
+  ),
+);
+
+const serviceRestartCommand = Command.make("restart", projectLocationFlags).pipe(
   Command.withDescription(
-    "Update or repair the background service using this CLI version. Use `npx @jacksondr5/j5code@latest service update` for the latest release.",
+    "Restart the background service. Picks up a version installed by `j5 update` that was not restarted at the time.",
   ),
   Command.withHandler((flags) =>
     runServiceCommand(
       flags,
       Effect.gen(function* () {
-        const result = yield* reconcileService({ allowDowngrade: flags.allowDowngrade });
-        if (!result.changed) {
-          yield* Console.log(
-            `J5 Code service is already using @jacksondr5/j5code@${packageJson.version}.`,
-          );
-          return;
-        }
+        const service = yield* BootService.BootService;
+        const status = yield* service.status;
+        const restarted = yield* service.restart;
         yield* Console.log(
-          `${result.previouslyInstalled ? "Updated" : "Installed"} J5 Code service with @jacksondr5/j5code@${packageJson.version}.\nLogs: ${result.plan.logPath}`,
+          restarted
+            ? `Restarted the J5 Code service${status.installedVersion === undefined ? "" : ` on j5@${status.installedVersion}`}.`
+            : "J5 Code service is not installed.",
         );
       }),
     ),
@@ -207,7 +241,7 @@ export const offerServiceDuringOnboarding = Effect.gen(function* () {
     compareExactServiceVersions(status.installedVersion, packageJson.version) > 0
   ) {
     yield* Console.log(
-      `A newer @jacksondr5/j5code@${status.installedVersion} background service is installed. Leaving it unchanged.`,
+      `A newer j5@${status.installedVersion} background service is installed. Leaving it unchanged.`,
     );
     // This CLI cannot verify the newer service. Keep the manual fallback available.
     return false;
@@ -216,7 +250,7 @@ export const offerServiceDuringOnboarding = Effect.gen(function* () {
   // enable-linger equivalent on macOS. Do not promise more than that.
   const platform = yield* HostProcessPlatform;
   const wanted = yield* Prompt.run(
-    Prompt.confirm({
+    Prompt.Confirm({
       message: installed
         ? "The installed J5 Code service needs an update or repair. Update it now?"
         : platform === "darwin"
@@ -264,8 +298,9 @@ export const serviceCommand = Command.make("service").pipe(
   Command.withDescription("Manage the J5 Code background service."),
   Command.withSubcommands([
     serviceInstallCommand,
+    serviceRestartCommand,
     serviceUninstallCommand,
-    serviceUpdateCommand,
     serviceStatusCommand,
+    serviceUpdateCommand,
   ]),
 );

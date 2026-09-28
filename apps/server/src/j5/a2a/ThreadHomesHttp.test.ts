@@ -138,7 +138,7 @@ it("wires the authenticated aggregate's thread-homes path without a parallel rou
           Layer.provide(NodeServices.layer),
         ),
       ),
-      Layer.provide(NodeSqliteClient.layerMemory()),
+      Layer.provide(NodeSqliteClient.layer({ filename: ":memory:" })),
       Layer.provide(agentHandoffRefreshesLayer),
       Layer.provideMerge(auth),
     )

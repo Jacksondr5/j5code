@@ -137,6 +137,9 @@ export function resolveMessageDispatchIntent(
   if (deliveryIntent === "restart") {
     return { type: "restart_active", targetRunId: activeRun.id };
   }
+  if (activeRun.status === "preparing" || activeRun.status === "starting") {
+    return { type: "queue_after_active" };
+  }
 
   const providerThread = projection.providerThreads.find(
     (candidate) => candidate.id === activeRun.providerThreadId,
@@ -254,8 +257,12 @@ const decideSteeringExecution: CommandPolicyV2Shape["decideSteeringExecution"] =
   return Effect.fail(
     unsupported(
       input,
-      input.capabilities.turns.supportsInterrupt ? "interrupt_restart_steering" : "active_steering",
-      "providerInstanceId cannot steer active turns directly or by interrupt-and-restart",
+      input.forceRestart || input.capabilities.turns.supportsInterrupt
+        ? "interrupt_restart_steering"
+        : "active_steering",
+      input.forceRestart
+        ? "providerInstanceId cannot satisfy a required interrupt-and-restart"
+        : "providerInstanceId cannot steer active turns directly or by interrupt-and-restart",
     ),
   );
 };

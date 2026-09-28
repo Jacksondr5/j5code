@@ -13,6 +13,7 @@ import { HttpBody, HttpClient, HttpRouter } from "effect/unstable/http";
 import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
 import * as ServerConfig from "../../../config.ts";
 import * as GitWorkflowService from "../../../git/GitWorkflowService.ts";
+import { ProviderAdapterRegistryV2 } from "../../../orchestration-v2/ProviderAdapterRegistry.ts";
 import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
 import { OrchestratorV2 } from "../../../orchestration-v2/Orchestrator.ts";
 import { A2ASendService } from "../../../j5/a2a/SendService.ts";
@@ -47,6 +48,7 @@ const StubServicesLive = Layer.mergeAll(
   Layer.mock(A2ASendService)({ listParticipants: () => Effect.succeed([]) }),
   Layer.mock(ParticipantPlacementService)({ listParticipants: () => Effect.succeed([]) }),
   Layer.mock(ProviderRegistry)({}),
+  Layer.mock(ProviderAdapterRegistryV2)({}),
   Layer.mock(ScheduledTaskService)({}),
   Layer.mock(ProjectService.ProjectService)({}),
   ServerSettings.layerTest({}),

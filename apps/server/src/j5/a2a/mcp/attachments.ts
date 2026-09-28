@@ -75,7 +75,7 @@ const isSendRefusal = Schema.is(
 export const J5AttachmentSendHandlersLive = J5AttachmentSendToolkit.toLayer({
   t3_thread_send_attachments: (input) =>
     Effect.gen(function* () {
-      const { scope, caller, projection } = yield* readWritableThread(input.threadId);
+      const { scope, caller, projection } = yield* readWritableThread(input.threadId, ["messages"]);
       if (input.threadId === caller.id)
         return yield* new OrchestratorMcpFailure({
           code: "invalid_request",

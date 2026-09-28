@@ -66,25 +66,25 @@ interface Outcome {
   readonly text: string;
 }
 
-const originFlag = Flag.string("origin").pipe(
+const originFlag = Flag.String("origin").pipe(
   Flag.withDescription(
     "Server origin such as http://127.0.0.1:3773. Default: J5_ORIGIN, then the running local server under the base directory.",
   ),
   Flag.optional,
 );
-const tokenFlag = Flag.string("token").pipe(
+const tokenFlag = Flag.String("token").pipe(
   Flag.withDescription("Bearer token from `j5 a2a token issue`. Default: J5_TOKEN."),
   Flag.optional,
 );
-const tokenFileFlag = Flag.string("token-file").pipe(
+const tokenFileFlag = Flag.String("token-file").pipe(
   Flag.withDescription("File holding the bearer token. Default: J5_TOKEN_FILE."),
   Flag.optional,
 );
-const timeoutFlag = Flag.integer("timeout-ms").pipe(
+const timeoutFlag = Flag.Int("timeout-ms").pipe(
   Flag.withDescription("Fail with exit 6 when the server does not answer in time."),
   Flag.withDefault(2000),
 );
-const jsonFlag = Flag.boolean("json").pipe(
+const jsonFlag = Flag.Boolean("json").pipe(
   Flag.withDescription("Emit one JSON object instead of human-readable output."),
   Flag.withDefault(false),
 );
@@ -106,7 +106,7 @@ interface ConnectionFlags extends CliAuthLocationFlags {
   readonly json: boolean;
 }
 
-const envOption = (name: string) => Config.string(name).pipe(Config.option);
+const envOption = (name: string) => Config.String(name).pipe(Config.option);
 
 const usage = (message: string) =>
   new A2ACliFailure({ exitCode: A2A_EXIT_CODES.usage, error: "usage", message });
@@ -318,15 +318,15 @@ const runOutcome = <E, R>(json: boolean, body: Effect.Effect<Outcome, E | A2ACli
 
 const sendCommand = Command.make("send", {
   ...connectionFlags,
-  to: Flag.string("to").pipe(
+  to: Flag.String("to").pipe(
     Flag.withDescription("Recipient: participant id, thread id, or an agent's exact display name."),
     Flag.optional,
   ),
-  message: Flag.string("message").pipe(
+  message: Flag.String("message").pipe(
     Flag.withDescription("Message text, `@path` to read a file, or `-` to read stdin."),
     Flag.optional,
   ),
-  clientRequestId: Flag.string("client-request-id").pipe(
+  clientRequestId: Flag.String("client-request-id").pipe(
     Flag.withDescription(
       "Idempotency key: retrying with the same id returns the original receipt.",
     ),
@@ -451,11 +451,11 @@ const withLocalEnvironmentAuth = <A, E, R>(
 
 const participantCreateCommand = Command.make("create", {
   ...connectionFlags,
-  squadron: Flag.string("squadron").pipe(
+  squadron: Flag.String("squadron").pipe(
     Flag.withDescription("The Squadron id that becomes the machine's immutable home."),
     Flag.optional,
   ),
-  name: Flag.string("name").pipe(
+  name: Flag.String("name").pipe(
     Flag.withDescription(
       "Server-unique name, 1-64 lowercase letters, digits, or hyphens; the id becomes machine:<name>.",
     ),
@@ -523,22 +523,22 @@ const normalizeMachineName = (value: string) =>
 
 const tokenIssueCommand = Command.make("issue", {
   ...authLocationFlags,
-  participant: Flag.string("participant").pipe(
+  participant: Flag.String("participant").pipe(
     Flag.withDescription("The machine participant name (or machine:<name>) the token is bound to."),
     Flag.optional,
   ),
-  ttl: Flag.string("ttl").pipe(
+  ttl: Flag.String("ttl").pipe(
     Flag.withSchema(DurationFromString),
     Flag.withDescription(
       "TTL such as `30d` or `1h`. Default: the auth control plane's session default.",
     ),
     Flag.optional,
   ),
-  label: Flag.string("label").pipe(
+  label: Flag.String("label").pipe(
     Flag.withDescription("Label shown in Settings → Connections. Default: the participant id."),
     Flag.optional,
   ),
-  tokenOnly: Flag.boolean("token-only").pipe(
+  tokenOnly: Flag.Boolean("token-only").pipe(
     Flag.withDescription("Print only the bearer token."),
     Flag.withDefault(false),
   ),

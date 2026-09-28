@@ -1,3 +1,5 @@
+import * as UsageLimitRecoveryWorker from "./UsageLimitRecoveryWorker.ts";
+import * as Scheduler from "../scheduling/Scheduler.ts";
 import { layer as j5ThreadLineageLayer } from "../j5/a2a/ThreadLineage.ts";
 import * as Layer from "effect/Layer";
 import {
@@ -82,7 +84,7 @@ const queuedRunWatchdogProvided = queuedRunWatchdogLayer.pipe(
 );
 const projectionMaintenanceProvided = projectionMaintenanceLayer.pipe(Layer.provide(storesLayer));
 const legacyV1ThreadImporterProvided = legacyV1ThreadImporterLayer.pipe(
-  Layer.provide(Layer.mergeAll(eventSinkProvided, eventStoreProvided)),
+  Layer.provide(eventSinkProvided),
 );
 
 export const ProjectServiceLayerLive = projectServiceLayer.pipe(
@@ -318,7 +320,10 @@ export const OrchestrationV2ProductionLayerLive = Layer.mergeAll(
   threadLaunchProvided,
   threadLifecycleProvided,
   scheduledTaskProvided,
+  UsageLimitRecoveryWorker.workerLive.pipe(
+    Layer.provide(Layer.mergeAll(projectionStoreLayer, threadManagementProvided)),
+  ),
   providerContinuationWorkerProvided,
   queuedRunWatchdogWorkerProvided,
   agentSessionImporterProvided,
-).pipe(Layer.provideMerge(OrchestrationLayerLive));
+).pipe(Layer.provide(Scheduler.layer), Layer.provideMerge(OrchestrationLayerLive));

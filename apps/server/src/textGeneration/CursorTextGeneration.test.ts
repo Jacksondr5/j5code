@@ -1,4 +1,5 @@
-import { CursorSettings, ProviderInstanceId } from "@t3tools/contracts";
+import type { RunResult } from "@cursor/sdk";
+import { CursorSettings, ProviderInstanceId, TextGenerationError } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -15,15 +16,15 @@ const cursorSdkMock = vi.hoisted(() => ({
   send: vi.fn<(prompt: string) => Promise<unknown>>(),
   close: vi.fn(),
   cancel: vi.fn(async () => {}),
-  prompt: vi.fn(async (_prompt: string, _options: unknown) => ({
+  prompt: vi.fn<(prompt: string, options: unknown) => Promise<RunResult>>(async () => ({
     id: "run-cursor-text-generation-test",
-    status: "finished" as const,
+    status: "finished",
     result:
       '{"subject":"Add generated commit message","body":"- verify cursor sdk text generation"}',
   })),
 }));
 
-vi.mock("@cursor/sdk", () => ({ Agent: { create: cursorSdkMock.create } }));
+vi.mock("../provider/cursorSdk.ts", () => ({ Agent: { create: cursorSdkMock.create } }));
 
 let hasCustomPolicy = false;
 const fsLayer = FileSystem.layerNoop({
@@ -64,6 +65,33 @@ beforeEach(() => {
 });
 
 describe("CursorTextGeneration", () => {
+  it.effect("resolves the browser credential for every request after an account change", () =>
+    Effect.gen(function* () {
+      let apiKey = "first-browser-key";
+      const generation = yield* makeCursorTextGeneration(
+        cursorSettings,
+        {},
+        Effect.sync(() => apiKey),
+      );
+      const input = {
+        cwd: process.cwd(),
+        branch: "feature/cursor",
+        stagedSummary: "M file.ts",
+        stagedPatch: "diff",
+        modelSelection: createModelSelection(ProviderInstanceId.make("cursor"), "auto"),
+      };
+      yield* generation.generateCommitMessage(input);
+      expect(cursorSdkMock.create).toHaveBeenLastCalledWith(
+        expect.objectContaining({ apiKey: "first-browser-key" }),
+      );
+      apiKey = "second-browser-key";
+      yield* generation.generateCommitMessage(input);
+      expect(cursorSdkMock.create).toHaveBeenLastCalledWith(
+        expect.objectContaining({ apiKey: "second-browser-key" }),
+      );
+    }).pipe(Effect.provide(fsLayer)),
+  );
+
   it.effect("uses the Cursor SDK prompt API with model parameters and API key", () =>
     Effect.gen(function* () {
       const textGeneration = yield* makeCursorTextGeneration(cursorSettings, {
@@ -164,6 +192,40 @@ describe("CursorTextGeneration", () => {
       expect(generated.title).toBe("Trim reconnect spinner status after resume.");
     }).pipe(Effect.provide(fsLayer)),
   );
+
+  for (const status of ["error", "cancelled"] as const) {
+    it.effect(`rejects a ${status} Cursor SDK run that includes valid title JSON`, () =>
+      Effect.gen(function* () {
+        const promptResult = {
+          id: "run-cursor-partial-title-test",
+          status,
+          result: '{"title":"Partial title from a failed run."}',
+        } satisfies RunResult;
+        cursorSdkMock.prompt.mockResolvedValueOnce(promptResult);
+        const generation = yield* makeCursorTextGeneration(cursorSettings, {
+          CURSOR_API_KEY: "test-cursor-key",
+        });
+        const failure = yield* Effect.flip(
+          generation.generateThreadTitle({
+            cwd: process.cwd(),
+            message: "Fix the reconnect spinner after a resumed session.",
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("cursor"),
+              model: "composer-2",
+            },
+          }),
+        );
+        expect(failure).toBeInstanceOf(TextGenerationError);
+        expect(failure.operation).toBe("generateThreadTitle");
+        expect(failure.detail).toBe(
+          status === "cancelled"
+            ? "Cursor SDK request was cancelled."
+            : "Cursor SDK request finished with an error.",
+        );
+        expect(cursorSdkMock.close).toHaveBeenCalledOnce();
+      }).pipe(Effect.provide(fsLayer)),
+    );
+  }
 
   it.effect("fails closed when ambient sandbox policy can expand write access", () =>
     Effect.gen(function* () {
@@ -286,9 +348,7 @@ describe("CursorTextGeneration", () => {
         }),
       );
 
-      expect(error.detail).toBe(
-        "Cursor API key is required. Add CURSOR_API_KEY in provider settings.",
-      );
+      expect(error.detail).toBe("Sign in with Cursor or add CURSOR_API_KEY in provider settings.");
       expect(cursorSdkMock.prompt).not.toHaveBeenCalled();
     }).pipe(Effect.provide(fsLayer)),
   );

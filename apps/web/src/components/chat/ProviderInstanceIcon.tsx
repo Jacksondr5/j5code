@@ -1,14 +1,49 @@
 import { type CSSProperties, memo } from "react";
-import { type ProviderDriverKind } from "@t3tools/contracts";
+
 import { providerInstanceInitials } from "@t3tools/client-runtime/state/provider-instance-display";
 
-import { PROVIDER_ICON_BY_PROVIDER } from "./providerIconUtils";
+import { ProviderDriverKind } from "@t3tools/contracts";
+import {
+  AntigravityIcon,
+  ClaudeAI,
+  CursorIcon,
+  GrokIcon,
+  Icon,
+  OpenAI,
+  OpenCodeIcon,
+  PiAgentIcon,
+} from "../Icons";
+
 import { cn } from "~/lib/utils";
 import {
   AcpRegistryAgentIcon,
   officialAcpRegistryIconUrlForAgentId,
   resolveOfficialAcpRegistryIconUrl,
 } from "../settings/AcpRegistryIcon";
+
+const PROVIDER_ICON_BY_PROVIDER: Partial<Record<ProviderDriverKind, Icon>> = {
+  [ProviderDriverKind.make("codex")]: OpenAI,
+  [ProviderDriverKind.make("claudeAgent")]: ClaudeAI,
+  [ProviderDriverKind.make("opencode")]: OpenCodeIcon,
+  [ProviderDriverKind.make("cursor")]: CursorIcon,
+  [ProviderDriverKind.make("grok")]: GrokIcon,
+  [ProviderDriverKind.make("antigravity")]: AntigravityIcon,
+  [ProviderDriverKind.make("pi")]: PiAgentIcon,
+};
+
+const PROVIDER_TEXT_COLOR_BY_PROVIDER: Partial<Record<ProviderDriverKind, string>> = {
+  [ProviderDriverKind.make("codex")]: "text-black dark:text-white",
+  [ProviderDriverKind.make("claudeAgent")]: "text-[#d97757]",
+  [ProviderDriverKind.make("cursor")]: "text-[#26251E] dark:text-[#EDECEC]",
+  [ProviderDriverKind.make("grok")]: "text-[#0F0F0F] dark:text-[#F5F5F5]",
+  [ProviderDriverKind.make("pi")]: "text-[#0F0F0F] dark:text-[#F5F5F5]",
+  [ProviderDriverKind.make("opencode")]: "text-[#211E1E] dark:text-[#F1ECEC]",
+  [ProviderDriverKind.make("antigravity")]: "text-[#5b87bf]",
+};
+
+export function providerTextColorClassName(driverKind: ProviderDriverKind): string | undefined {
+  return PROVIDER_TEXT_COLOR_BY_PROVIDER[driverKind];
+}
 
 export function resolveProviderInstanceAcpRegistryIconUrl(input: {
   readonly driverKind: ProviderDriverKind;
@@ -21,8 +56,6 @@ export function resolveProviderInstanceAcpRegistryIconUrl(input: {
     officialAcpRegistryIconUrlForAgentId(input.agentId?.trim() || null)
   );
 }
-
-export { providerInstanceInitials };
 
 export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
   driverKind: ProviderDriverKind;
@@ -54,7 +87,7 @@ export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
   return (
     <span
       className={cn(
-        "relative isolate inline-flex shrink-0 items-center justify-center overflow-visible",
+        "relative isolate z-30 inline-flex shrink-0 items-center justify-center overflow-visible",
         props.className,
       )}
       style={accentStyle}

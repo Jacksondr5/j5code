@@ -169,7 +169,10 @@ const fixture = Effect.gen(function* () {
       );
   return { call, fs, path, worktree, projectRoot };
 });
-const TestLayer = Layer.mergeAll(NodeSqliteClient.layerMemory(), NodeServices.layer);
+const TestLayer = Layer.mergeAll(
+  NodeSqliteClient.layer({ filename: ":memory:" }),
+  NodeServices.layer,
+);
 
 it.effect("runs a scripted three-step sample through the real J5Toolkit handlers", () =>
   Effect.gen(function* () {

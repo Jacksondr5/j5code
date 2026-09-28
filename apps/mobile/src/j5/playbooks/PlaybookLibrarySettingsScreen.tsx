@@ -59,7 +59,7 @@ export const PlaybookLibrarySettingsSection = memo(function PlaybookLibrarySetti
     squadronId: string;
   } | null>(null);
   const authorSquadron =
-    authorScope?.workspaceKey === workspace?.key
+    authorScope !== null && authorScope.workspaceKey === workspace?.key
       ? authorSquadrons.find(({ squadron }) => squadron.id === authorScope.squadronId)
       : authorSquadrons.length === 1
         ? authorSquadrons[0]

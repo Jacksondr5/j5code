@@ -1,3 +1,4 @@
+import * as Stream from "effect/Stream";
 import {
   ProjectId,
   ProviderInstanceId,
@@ -215,6 +216,7 @@ const makeHarness = Effect.fn("makePullRequestSyncHarness")(function* (options: 
           })),
         ),
       dispatch,
+      streamDomainEvents: Stream.empty,
     }),
     Layer.succeed(ServerActivation, Deferred.await(activation)),
     Layer.succeed(Crypto.Crypto, testCrypto),
@@ -416,6 +418,31 @@ describe("PullRequestSyncReactor", () => {
               [ThreadId.make("two"), "Owner/Repository"],
             ],
           );
+        }).pipe(Effect.provide(fixture.layer));
+      }),
+    ),
+  );
+
+  it.effect("recovers the HTTP port when syncing an older Forgejo link", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeHarness({
+          snapshot: makeSnapshot([
+            makeThread("one", {
+              pullRequests: [
+                makeLink(42, null, {
+                  host: "forge.example",
+                  url: "http://forge.example:3000/owner/repository/pulls/42",
+                }),
+              ],
+            }),
+          ]),
+          summary: (input) => Effect.succeed(makeSummary(input)),
+        });
+        yield* Effect.gen(function* () {
+          yield* startAndSweep(fixture);
+          assert.strictEqual((yield* Ref.get(fixture.summaryCalls))[0]?.host, "forge.example:3000");
+          assert.strictEqual((yield* Ref.get(fixture.syncCommands))[0]?.host, "forge.example:3000");
         }).pipe(Effect.provide(fixture.layer));
       }),
     ),

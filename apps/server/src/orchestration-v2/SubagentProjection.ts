@@ -17,6 +17,7 @@ import type {
   TurnItemId,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
+import { isOrchestrationV2WorkActive } from "@t3tools/contracts";
 
 function trimmed(value: string | null | undefined): string | undefined {
   const result = value?.trim();
@@ -83,6 +84,7 @@ export function makeSubagentChildThread(input: {
 
 export function makeSubagentConversationArtifacts(input: {
   readonly messageId: MessageId;
+  readonly senderThreadId?: ThreadId;
   readonly turnItemId: TurnItemId;
   readonly threadId: ThreadId;
   readonly rootNodeId: NodeId;
@@ -105,6 +107,9 @@ export function makeSubagentConversationArtifacts(input: {
     runId: null,
     nodeId: input.rootNodeId,
     role: input.role,
+    ...(input.role === "user" && input.senderThreadId !== undefined
+      ? { senderThreadId: input.senderThreadId }
+      : {}),
     text: input.text,
     attachments: [],
     streaming: false,
@@ -136,6 +141,7 @@ export function makeSubagentConversationArtifacts(input: {
           createdBy: "agent",
           creationSource: "provider",
           type: "user_message",
+          ...(input.senderThreadId === undefined ? {} : { senderThreadId: input.senderThreadId }),
           inputIntent: "turn_start",
           attachments: [],
         }
@@ -148,7 +154,7 @@ export function makeSubagentConversationArtifacts(input: {
 }
 
 export function subagentResultForRun(
-  projection: OrchestrationV2ThreadProjection,
+  projection: Pick<OrchestrationV2ThreadProjection, "messages" | "turnItems">,
   run: OrchestrationV2Run,
 ): {
   readonly text: string;
@@ -225,7 +231,7 @@ export function delegatedTaskProgress(projection: {
   const children =
     projection.subagents.some(
       (task) =>
-        !terminal(task.status) ||
+        isOrchestrationV2WorkActive(task.status) ||
         // Publishing a child's result precedes scheduling its parent's wake.
         // The parent still owes that follow-up even between those transactions.
         task.completionDelivery?.state === "pending" ||

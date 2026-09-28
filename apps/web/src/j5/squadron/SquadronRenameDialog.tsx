@@ -106,20 +106,22 @@ function SquadronRenameForm({
         void submit();
       }}
     >
-      <DialogPanel className="flex flex-col gap-3">
-        <label className="flex flex-col gap-1.5 text-sm font-medium text-foreground">
-          Squadron name
-          <Input
-            nativeInput
-            autoFocus
-            value={name}
-            onChange={(event) => setName(event.currentTarget.value)}
-          />
-        </label>
-        {renameState.kind === "missing-name" ? (
-          <p className="text-sm text-destructive">{renameState.message}</p>
-        ) : null}
-        {error !== null ? <p className="text-sm text-destructive">{error}</p> : null}
+      <DialogPanel>
+        <div className="flex flex-col gap-3">
+          <label className="flex flex-col gap-1.5 text-sm font-medium text-foreground">
+            Squadron name
+            <Input
+              nativeInput
+              autoFocus
+              value={name}
+              onChange={(event) => setName(event.currentTarget.value)}
+            />
+          </label>
+          {renameState.kind === "missing-name" ? (
+            <p className="text-sm text-destructive">{renameState.message}</p>
+          ) : null}
+          {error !== null ? <p className="text-sm text-destructive">{error}</p> : null}
+        </div>
       </DialogPanel>
       <DialogFooter>
         <DialogClose disabled={submitting} render={<Button variant="outline" />}>

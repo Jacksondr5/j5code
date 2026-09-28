@@ -126,6 +126,9 @@ export function deriveProviderInstanceEntries(
       driverKind,
       displayName: resolveProviderInstanceDisplayName(snapshot),
       accentColor: normalizeProviderAccentColor(snapshot.accentColor),
+      ...(driverKind === "acpRegistry" && snapshot.iconUrl
+        ? { acpRegistryIconUrl: snapshot.iconUrl }
+        : {}),
       continuationGroupKey: snapshot.continuation?.groupKey,
       enabled: snapshot.enabled,
       installed: snapshot.installed,
@@ -341,22 +344,4 @@ export function resolveDefaultProviderModelSelection(
   if (selection?.instanceId === instanceId) return selection;
   const model = getDefaultProviderInstanceModel(providers, instanceId);
   return model ? { instanceId, model } : null;
-}
-
-/**
- * Resolve an open model-selection routing key back to a driver kind.
- * Custom instance ids such as `claude_openrouter` are not themselves
- * driver-kind slugs, but the composer still needs the owning driver kind
- * for capabilities, options, icons, and turn dispatch metadata.
- */
-export function resolveProviderDriverKindForInstanceSelection(
-  entries: ReadonlyArray<ProviderInstanceEntry>,
-  providers: ReadonlyArray<ServerProvider>,
-  selection: ProviderInstanceId | ProviderDriverKind | null | undefined,
-): ProviderDriverKind | undefined {
-  const matchedEntry = entries.find((entry) => entry.instanceId === selection);
-  if (matchedEntry) {
-    return matchedEntry.driverKind;
-  }
-  return undefined;
 }

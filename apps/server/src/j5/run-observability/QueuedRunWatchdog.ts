@@ -197,7 +197,12 @@ export const layer = Layer.effect(
         const projection = yield* projections.getThreadProjection(input.threadId);
         const run = projection.runs.find((candidate) => candidate.id === input.runId);
         if (run === undefined) return;
-        const failure = makeProviderFailure({ cause: vcsError, class: "unknown" });
+        // Upstream no longer copies arbitrary cause text; VCS errors format their own redacted message.
+        const failure = makeProviderFailure({
+          cause: vcsError,
+          message: vcsError.message,
+          class: "unknown",
+        });
         yield* writeFact({
           projection,
           run,

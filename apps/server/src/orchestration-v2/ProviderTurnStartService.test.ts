@@ -18,6 +18,7 @@ import {
   type OrchestrationV2ThreadProjection,
   OrchestrationV2DomainEvent,
 } from "@t3tools/contracts";
+import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -117,16 +118,25 @@ it("does not commit running state when inherited background routing cannot be re
             ),
         }),
         Layer.mock(ProjectionStore.ProjectionStoreV2)({
-          getThreadProjection: () => {
+          getTurnStartContext: () => {
             projectionReadCount += 1;
-            return projectionReadCount === 1
-              ? Effect.succeed(projection)
-              : Effect.fail(
-                  new ProjectionStore.ProjectionStoreReadError({
-                    threadId,
-                    cause: "simulated inherited-background projection failure",
-                  }),
-                );
+            return Effect.succeed({
+              ...projection,
+              hasConversation: projection.messages.some(
+                (m) =>
+                  m.role === "user" &&
+                  (m.text.trim().toLowerCase() !== "/compact" || m.attachments.length > 0),
+              ),
+            });
+          },
+          getRuntimeRecoveryProjection: () => {
+            projectionReadCount += 1;
+            return Effect.fail(
+              new ProjectionStore.ProjectionStoreReadError({
+                threadId,
+                cause: "simulated inherited-background projection failure",
+              }),
+            );
           },
         }),
         Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({}),
@@ -160,6 +170,10 @@ function makeLocalCommandHarness(input: {
   readonly previousNativeSession?: boolean;
   readonly previousMessages?: ReadonlyArray<string>;
   readonly logoutFailure?: string;
+  readonly openFailure?: unknown;
+  readonly interruptOpen?: boolean;
+  readonly interruptRunBeforeOpenFailure?: boolean;
+  readonly writeFailure?: unknown;
 }) {
   const now = DateTime.makeUnsafe("2026-09-04T12:00:00Z");
   const threadId = ThreadId.make("thread-native-account-command");
@@ -332,7 +346,34 @@ function makeLocalCommandHarness(input: {
     updatedAt: now,
   };
   const events: Array<OrchestrationV2DomainEvent> = [];
-  const open = vi.fn(() => Effect.die("A local command must not open a native session."));
+  const open = vi.fn(() =>
+    input.interruptOpen === true
+      ? Effect.interrupt
+      : "openFailure" in input
+        ? Effect.sync(() => {
+            if (input.interruptRunBeforeOpenFailure === true) {
+              projection = {
+                ...projection,
+                runs: projection.runs.map((candidate) =>
+                  candidate.id === runId
+                    ? { ...candidate, status: "interrupted", completedAt: now }
+                    : candidate,
+                ),
+              };
+            }
+          }).pipe(
+            Effect.andThen(
+              Effect.fail(
+                new ProviderSessionManager.ProviderSessionOpenError({
+                  instanceId: newInstanceId,
+                  providerSessionId,
+                  cause: input.openFailure,
+                }),
+              ),
+            ),
+          )
+        : Effect.die("A local command must not open a native session."),
+  );
   const startRootRun = vi.fn(() => Effect.die("A local command must not start a native turn."));
   const tryHandlePromptCommand = vi.fn(() =>
     input.logoutFailure === undefined
@@ -345,53 +386,195 @@ function makeLocalCommandHarness(input: {
           }),
         ),
   );
+  const writeIfRunCurrent = vi.fn(({ events: incoming, activeAttemptId, expectedStatus }) =>
+    "writeFailure" in input
+      ? Effect.fail(
+          new EventSink.EventSinkWriteError({
+            eventCount: incoming.length,
+            cause: input.writeFailure,
+          }),
+        )
+      : Effect.sync(() => {
+          const current = projection.runs.find((candidate) => candidate.id === runId);
+          const committed =
+            current !== undefined &&
+            current.activeAttemptId === activeAttemptId &&
+            current.status === expectedStatus;
+          if (committed) {
+            for (const event of incoming) {
+              expect(isDomainEvent(event)).toBe(true);
+              events.push(event);
+              projection = ProjectionStore.applyToProjection(projection, event);
+            }
+          }
+          return { committed, storedEvents: [] };
+        }),
+  );
   const layer = ProviderTurnStart.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
         Layer.mock(ContextHandoffService.ContextHandoffServiceV2)({}),
-        Layer.mock(EventSink.EventSinkV2)({
-          writeIfRunCurrent: ({ events: incoming, activeAttemptId, expectedStatus }) =>
-            Effect.sync(() => {
-              const current = projection.runs.find((candidate) => candidate.id === runId);
-              const committed =
-                current?.activeAttemptId === activeAttemptId && current.status === expectedStatus;
-              if (committed) {
-                for (const event of incoming) {
-                  expect(isDomainEvent(event)).toBe(true);
-                  events.push(event);
-                  projection = ProjectionStore.applyToProjection(projection, event);
-                }
-              }
-              return { committed, storedEvents: [] };
-            }),
-        }),
+        Layer.mock(EventSink.EventSinkV2)({ writeIfRunCurrent }),
         IdAllocator.layer,
         FileSystem.layerNoop({}),
         Layer.mock(GitWorkflow.GitWorkflowService)({}),
         Layer.mock(ProjectService.ProjectService)({}),
         Layer.mock(ProjectionStore.ProjectionStoreV2)({
-          getThreadProjection: () => Effect.succeed(projection),
+          getTurnStartContext: () =>
+            Effect.succeed({
+              ...projection,
+              hasConversation: projection.messages.some(
+                (m) =>
+                  m.role === "user" &&
+                  (m.text.trim().toLowerCase() !== "/compact" || m.attachments.length > 0),
+              ),
+            }),
+          getRuntimeRecoveryProjection: () =>
+            Effect.succeed({
+              ...projection,
+              hasConversation: projection.messages.some(
+                (m) =>
+                  m.role === "user" &&
+                  (m.text.trim().toLowerCase() !== "/compact" || m.attachments.length > 0),
+              ),
+            }),
         }),
         Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({ open }),
         Layer.mock(ProviderAuthService)({ tryHandlePromptCommand }),
         Layer.mock(RunExecutionService.RunExecutionServiceV2)({ startRootRun }),
-        Layer.mock(RuntimePolicy.RuntimePolicyV2)({}),
+        Layer.mock(RuntimePolicy.RuntimePolicyV2)({
+          resolve: () => Effect.succeed({} as never),
+        }),
       ),
     ),
   );
   return {
     open,
+    writeIfRunCurrent,
     startRootRun,
     tryHandlePromptCommand,
     events,
     oldInstanceId,
     newInstanceId,
+    attemptId,
     projection: () => projection,
     start: Effect.gen(function* () {
       yield* (yield* ProviderTurnStart.ProviderTurnStartServiceV2).start({ threadId, runId });
     }).pipe(Effect.provide(layer)),
+    startWithRetry: Effect.gen(function* () {
+      yield* (yield* ProviderTurnStart.ProviderTurnStartServiceV2).start({
+        threadId,
+        runId,
+        willRetry: true,
+      });
+    }).pipe(Effect.provide(layer)),
   };
 }
+
+effectIt.effect("terminalizes a starting run when its provider session cannot open", () =>
+  Effect.gen(function* () {
+    const harness = makeLocalCommandHarness({
+      text: "Continue",
+      openFailure: new Error("DESCRIPTION is not valid ACP JSON"),
+    });
+
+    yield* harness.start;
+
+    expect(harness.open).toHaveBeenCalledOnce();
+    expect(harness.startRootRun).not.toHaveBeenCalled();
+    expect(harness.writeIfRunCurrent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        activeAttemptId: harness.attemptId,
+        expectedStatus: "starting",
+      }),
+    );
+    const projection = harness.projection();
+    expect(projection.runs.at(-1)).toMatchObject({ status: "failed", startedAt: null });
+    expect(projection.attempts[0]).toMatchObject({ status: "failed", startedAt: null });
+    expect(projection.nodes[0]).toMatchObject({ status: "failed", startedAt: null });
+    expect(projection.turnItems).toMatchObject([
+      {
+        type: "error",
+        status: "failed",
+        failure: {
+          class: "provider_error",
+          message: "DESCRIPTION is not valid ACP JSON",
+        },
+      },
+    ]);
+  }),
+);
+
+effectIt.effect("leaves the run starting when a session-open failure will be retried", () =>
+  Effect.gen(function* () {
+    const harness = makeLocalCommandHarness({
+      text: "Continue",
+      openFailure: new Error("provider session rejected"),
+    });
+
+    const error = yield* harness.startWithRetry.pipe(Effect.flip);
+
+    expect(error._tag).toBe("ProviderTurnStartError");
+    expect(harness.writeIfRunCurrent).not.toHaveBeenCalled();
+    expect(harness.projection().runs.at(-1)?.status).toBe("starting");
+  }),
+);
+
+effectIt.effect("keeps a session-open failure retryable when terminal persistence fails", () =>
+  Effect.gen(function* () {
+    const harness = makeLocalCommandHarness({
+      text: "Continue",
+      openFailure: new Error("provider session rejected"),
+      writeFailure: new Error("database unavailable"),
+    });
+
+    const error = yield* harness.start.pipe(Effect.flip);
+
+    expect(error._tag).toBe("ProviderTurnStartError");
+    expect(harness.writeIfRunCurrent).toHaveBeenCalledOnce();
+    expect(harness.startRootRun).not.toHaveBeenCalled();
+    expect(harness.projection().runs.at(-1)?.status).toBe("starting");
+    expect(harness.events).toEqual([]);
+  }),
+);
+
+effectIt.effect("does not terminalize a provider-session open interruption", () =>
+  Effect.gen(function* () {
+    const harness = makeLocalCommandHarness({ text: "Continue", interruptOpen: true });
+
+    const exit = yield* Effect.exit(harness.start);
+
+    expect(exit._tag).toBe("Failure");
+    if (exit._tag === "Failure") {
+      expect(Cause.hasInterruptsOnly(exit.cause)).toBe(true);
+    }
+    expect(harness.writeIfRunCurrent).not.toHaveBeenCalled();
+    expect(harness.startRootRun).not.toHaveBeenCalled();
+    expect(harness.projection().runs.at(-1)?.status).toBe("starting");
+    expect(harness.events).toEqual([]);
+  }),
+);
+
+effectIt.effect("does not overwrite a run interrupted while its provider session opens", () =>
+  Effect.gen(function* () {
+    const harness = makeLocalCommandHarness({
+      text: "Continue",
+      openFailure: new Error("provider session rejected"),
+      interruptRunBeforeOpenFailure: true,
+    });
+
+    yield* harness.start;
+
+    expect(harness.writeIfRunCurrent).toHaveBeenCalledOnce();
+    expect(harness.startRootRun).not.toHaveBeenCalled();
+    const projection = harness.projection();
+    expect(projection.runs.at(-1)?.status).toBe("interrupted");
+    expect(projection.attempts[0]?.status).toBe("pending");
+    expect(projection.nodes[0]?.status).toBe("pending");
+    expect(projection.turnItems).toEqual([]);
+    expect(harness.events).toEqual([]);
+  }),
+);
 
 effectIt.effect(
   "signs out the existing native provider before opening the newly selected provider",
@@ -486,6 +669,27 @@ const resumeStartDependencies = Layer.mergeAll(
 
 const CODEX_DRIVER = ProviderDriverKind.make("codex");
 
+/** Serves the turn-start reads from one mutable projection. */
+function startProjectionStore(current: () => OrchestrationV2ThreadProjection) {
+  const withConversation = () =>
+    Effect.sync(() => {
+      const projection = current();
+      return {
+        ...projection,
+        hasConversation: projection.messages.some(
+          (m) =>
+            m.role === "user" &&
+            (m.text.trim().toLowerCase() !== "/compact" || m.attachments.length > 0),
+        ),
+      };
+    });
+  return Layer.mock(ProjectionStore.ProjectionStoreV2)({
+    getTurnStartContext: withConversation,
+    getRuntimeRecoveryProjection: withConversation,
+    getTurnStartHistory: () => Effect.succeed([]),
+  });
+}
+
 /** Builds the resume failure the Codex adapter raises when a thread/resume response fails schema decode. */
 const makeCodexResumeSchemaFailure = Effect.fn("makeCodexResumeSchemaFailure")(function* (input: {
   readonly providerSessionId: ProviderSessionId;
@@ -520,10 +724,7 @@ const makeCodexResumeSchemaFailure = Effect.fn("makeCodexResumeSchemaFailure")(f
   });
 });
 
-function makeResumeFallbackFixture(input: {
-  readonly suffix: string;
-  readonly requestedFallbackTransferId?: ContextTransferId;
-}) {
+function makeResumeFallbackFixture(input: { readonly suffix: string }) {
   const threadId = ThreadId.make(`thread_resume_fallback_${input.suffix}`);
   const runId = RunId.make(`run_resume_fallback_${input.suffix}`);
   const attemptId = RunAttemptId.make(`attempt_resume_fallback_${input.suffix}`);
@@ -575,32 +776,12 @@ function makeResumeFallbackFixture(input: {
     attempts: [{ id: attemptId }],
     providerThreads: [providerThread],
     providerSessions: [],
-    messages: [{ id: messageId, text: "continue", attachments: [] }],
+    providerTurns: [],
+    subagents: [],
+    messages: [{ id: messageId, role: "user", text: "continue", attachments: [] }],
     checkpointScopes: [{ id: checkpointScopeId }],
     contextHandoffs: [],
-    contextTransfers:
-      input.requestedFallbackTransferId === undefined
-        ? []
-        : [
-            {
-              id: input.requestedFallbackTransferId,
-              type: "provider_handoff",
-              sourceThreadId: threadId,
-              targetThreadId: threadId,
-              sourcePoint: { threadId },
-              basePoint: null,
-              sourceProviderInstanceId: providerInstanceId,
-              targetProviderInstanceId: providerInstanceId,
-              targetRunId: runId,
-              status: "pending",
-              resolution: null,
-              createdBy: "user",
-              error: null,
-              createdAt,
-              updatedAt: createdAt,
-              consumedAt: null,
-            },
-          ],
+    contextTransfers: [],
     turnItems: [],
   } as unknown as OrchestrationV2ThreadProjection;
   return {
@@ -627,247 +808,67 @@ function makeLogCapture() {
   return { records, layer: Logger.layer([logger], { mergeWithExisting: false }) };
 }
 
-it.each(["none", "resolved", "other-run", "other-thread"])(
-  "fails a native-resume run without a pending self-handoff (%s)",
-  async (marker) => {
-    const fixture = makeResumeFallbackFixture({
-      suffix: "recorded",
-      ...(marker === "none"
-        ? {}
-        : {
-            requestedFallbackTransferId: ContextTransferId.make(
-              "transfer-not-an-explicit-fallback",
-            ),
-          }),
-    });
-    fixture.projection = {
-      ...fixture.projection,
-      contextTransfers: fixture.projection.contextTransfers.map((transfer) =>
-        marker === "resolved"
-          ? {
-              ...transfer,
-              status: "resolved_portable" as const,
-              resolution: {
-                strategy: "portable_context" as const,
-                contextHandoffId: ContextHandoffId.make("old-resolved-handoff"),
-              },
-            }
-          : marker === "other-run"
-            ? { ...transfer, targetRunId: RunId.make("other-run") }
-            : { ...transfer, sourceThreadId: ThreadId.make("other-thread") },
-      ),
-    };
-    const written: Array<ReadonlyArray<OrchestrationV2DomainEvent>> = [];
-    const write = vi.fn((input: { readonly events: ReadonlyArray<OrchestrationV2DomainEvent> }) => {
-      written.push(input.events);
-      return Effect.succeed([] as never);
-    });
-    const logCapture = makeLogCapture();
-    let startedSession: ProviderAdapterV2SessionRuntime | undefined;
-    const startRootRun = vi.fn((input: { readonly session: ProviderAdapterV2SessionRuntime }) => {
-      startedSession = input.session;
-      return Effect.void;
-    });
-    const layer = ProviderTurnStart.layer.pipe(
-      Layer.provide(
-        Layer.mergeAll(
-          resumeStartDependencies,
-          Layer.mock(ContextHandoffService.ContextHandoffServiceV2)({
-            prepareProviderHandoff: (input) =>
-              Effect.succeed({
-                id: ContextHandoffId.make("handoff_resume_fallback_recorded"),
-                transferId: input.transferId,
-                threadId: input.threadId,
-                targetRunId: input.targetRunId,
-                fromProviderThreadIds: input.fromProviderThreadIds,
-                toProviderThreadId: input.toProviderThreadId,
-                coveredRunOrdinals: input.coveredRunOrdinals,
-                strategy: input.strategy,
-                status: "ready",
-                summaryMessageId: null,
-                summaryText: "summary",
-                createdByProviderInstanceId: input.toProviderInstanceId,
-                createdAt: input.createdAt,
-              } as never),
-          }),
-          Layer.mock(EventSink.EventSinkV2)({
-            write,
-            writeIfRunCurrent: () => Effect.succeed({ committed: true, storedEvents: [] }),
-          }),
-          IdAllocator.layer,
-          Layer.mock(ProjectionStore.ProjectionStoreV2)({
-            getThreadProjection: () =>
-              Effect.succeed({
-                ...fixture.projection,
-                providerTurns: [],
-                subagents: [],
-              } as unknown as OrchestrationV2ThreadProjection),
-          }),
-          Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({
-            open: () =>
-              Effect.succeed({
-                driver: CODEX_DRIVER,
-                providerSession: { id: fixture.providerSessionId },
-                resumeThread: () =>
-                  makeCodexResumeSchemaFailure({
-                    providerSessionId: fixture.providerSessionId,
-                    providerThreadId: fixture.providerThreadId,
-                  }).pipe(Effect.flatMap(Effect.fail)),
-                ensureThread: () =>
-                  Effect.succeed({
-                    ...fixture.providerThread,
-                    nativeThreadRef: {
-                      driver: CODEX_DRIVER,
-                      nativeId: "codex:native-thread-replacement",
-                      strength: "strong",
-                    },
-                  }),
-              } as never),
-          }),
-          Layer.mock(RunExecutionService.RunExecutionServiceV2)({ startRootRun }),
-          Layer.mock(RuntimePolicy.RuntimePolicyV2)({
-            resolve: () => Effect.succeed({} as never),
-          }),
-        ),
-      ),
-    );
-
-    await Effect.flatMap(ProviderTurnStart.ProviderTurnStartServiceV2, (service) =>
-      service.start({ threadId: fixture.threadId, runId: fixture.runId }),
-    ).pipe(Effect.provide(Layer.merge(layer, logCapture.layer)), Effect.runPromise);
-
-    expect(write).not.toHaveBeenCalled();
-    expect(
-      written.flat().find((event) => event.type === "context-transfer.updated"),
-    ).toBeUndefined();
-    expect(startRootRun).toHaveBeenCalledTimes(1);
-    expect(startedSession).toBeDefined();
-    const startFailure = await startedSession!
-      .startTurn({} as never)
-      .pipe(Effect.flip, Effect.runPromise);
-    expect(startFailure._tag).toBe("ProviderResumeFailedError");
-    expect(startFailure.message).toContain(
-      "Native codex provider resume failed for provider_thread_resume_fallback_recorded",
-    );
-    expect(startFailure.message).toContain(
-      "ProviderAdapterResumeThreadError: Failed to resume codex provider thread",
-    );
-    expect(startFailure.message).toContain(
-      "[cause]: CodexAppServerRequestError: Invalid payload for method 'thread/resume' during 'decode-payload'",
-    );
-    expect(startFailure.message).toContain("[cause]: SchemaError: Expected");
-    expect(logCapture.records.filter((record) => "nativeThreadId" in record)).toHaveLength(0);
-  },
-);
-
-it("takes the digest path only for an explicit fallback request and warns", async () => {
-  const requestedTransferId = ContextTransferId.make("transfer_resume_fallback_requested");
-  const fixture = makeResumeFallbackFixture({
-    suffix: "requested",
-    requestedFallbackTransferId: requestedTransferId,
-  });
-  const written: Array<ReadonlyArray<OrchestrationV2DomainEvent>> = [];
-  const write = vi.fn((input: { readonly events: ReadonlyArray<OrchestrationV2DomainEvent> }) => {
-    written.push(input.events);
+/** Starts one run against a mocked provider session and records what it wrote. */
+async function startWithResume(input: {
+  readonly fixture: ReturnType<typeof makeResumeFallbackFixture>;
+  readonly projection?: OrchestrationV2ThreadProjection;
+  readonly resumeThread: () => Effect.Effect<never, unknown>;
+  readonly ensureThread?: () => Effect.Effect<unknown, unknown>;
+}) {
+  const { fixture } = input;
+  const projection = input.projection ?? fixture.projection;
+  const written: Array<OrchestrationV2DomainEvent> = [];
+  const write = vi.fn((write: { readonly events: ReadonlyArray<OrchestrationV2DomainEvent> }) => {
+    written.push(...write.events);
     return Effect.succeed([] as never);
   });
   const logCapture = makeLogCapture();
+  let startedSession: ProviderAdapterV2SessionRuntime | undefined;
+  const startRootRun = vi.fn((run: { readonly session: ProviderAdapterV2SessionRuntime }) => {
+    startedSession = run.session;
+    return Effect.void;
+  });
+  const resumeThread = vi.fn(input.resumeThread);
+  const ensureThread = vi.fn(
+    input.ensureThread ??
+      (() =>
+        Effect.succeed({
+          ...fixture.providerThread,
+          nativeThreadRef: {
+            driver: CODEX_DRIVER,
+            nativeId: "codex:native-thread-replacement",
+            strength: "strong",
+          },
+        })),
+  );
   const layer = ProviderTurnStart.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
         resumeStartDependencies,
         Layer.mock(ContextHandoffService.ContextHandoffServiceV2)({
-          prepareProviderHandoff: (input) =>
+          prepareProviderHandoff: (handoff) =>
             Effect.succeed({
-              id: ContextHandoffId.make("handoff_resume_fallback_requested"),
-              transferId: input.transferId,
-              threadId: input.threadId,
-              targetRunId: input.targetRunId,
-              fromProviderThreadIds: input.fromProviderThreadIds,
-              toProviderThreadId: input.toProviderThreadId,
-              coveredRunOrdinals: input.coveredRunOrdinals,
-              strategy: input.strategy,
+              id: ContextHandoffId.make(`handoff_resume_fallback_${fixture.runId}`),
+              transferId: handoff.transferId,
+              threadId: handoff.threadId,
+              targetRunId: handoff.targetRunId,
+              fromProviderThreadIds: handoff.fromProviderThreadIds,
+              toProviderThreadId: handoff.toProviderThreadId,
+              coveredRunOrdinals: handoff.coveredRunOrdinals,
+              strategy: handoff.strategy,
               status: "ready",
               summaryMessageId: null,
               summaryText: "summary",
-              createdByProviderInstanceId: input.toProviderInstanceId,
-              createdAt: input.createdAt,
+              createdByProviderInstanceId: handoff.toProviderInstanceId,
+              createdAt: handoff.createdAt,
             } as never),
         }),
         Layer.mock(EventSink.EventSinkV2)({
           write,
-          writeIfRunCurrent: () => Effect.succeed({ committed: false, storedEvents: [] }),
-        }),
-        IdAllocator.layer,
-        Layer.mock(ProjectionStore.ProjectionStoreV2)({
-          getThreadProjection: () => Effect.succeed(fixture.projection),
-        }),
-        Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({
-          open: () =>
-            Effect.succeed({
-              driver: CODEX_DRIVER,
-              providerSession: { id: fixture.providerSessionId },
-              resumeThread: () =>
-                makeCodexResumeSchemaFailure({
-                  providerSessionId: fixture.providerSessionId,
-                  providerThreadId: fixture.providerThreadId,
-                }).pipe(Effect.flatMap(Effect.fail)),
-              ensureThread: () => Effect.succeed(fixture.providerThread),
-            } as never),
-        }),
-        Layer.mock(RunExecutionService.RunExecutionServiceV2)({ startRootRun: () => Effect.void }),
-        Layer.mock(RuntimePolicy.RuntimePolicyV2)({
-          resolve: () => Effect.succeed({} as never),
-        }),
-      ),
-    ),
-  );
-
-  await Effect.flatMap(ProviderTurnStart.ProviderTurnStartServiceV2, (service) =>
-    service.start({ threadId: fixture.threadId, runId: fixture.runId }),
-  ).pipe(Effect.provide(Layer.merge(layer, logCapture.layer)), Effect.runPromise);
-
-  expect(write).toHaveBeenCalledTimes(1);
-  const transferEvent = written.flat().find((event) => event.type === "context-transfer.updated");
-  expect(transferEvent?.type).toBe("context-transfer.updated");
-  if (transferEvent?.type !== "context-transfer.updated") return;
-  expect(transferEvent.payload.id).toBe(requestedTransferId);
-  expect(transferEvent.payload.status).toBe("resolved_portable");
-  expect(transferEvent.payload.resolution?.strategy).toBe("portable_context");
-  const warning = logCapture.records.find((record) => "nativeThreadId" in record);
-  expect(warning).toMatchObject({
-    threadId: fixture.threadId,
-    providerThreadId: fixture.providerThreadId,
-    nativeThreadId: fixture.nativeThreadId,
-    runId: fixture.runId,
-  });
-  expect(typeof warning?.error).toBe("string");
-});
-
-it("keeps the no-native-ref fresh-start path unchanged", async () => {
-  const fixture = makeResumeFallbackFixture({ suffix: "no_native_ref" });
-  const providerThread = { ...fixture.providerThread, nativeThreadRef: null };
-  const projection = {
-    ...fixture.projection,
-    providerThreads: [providerThread],
-    providerTurns: [],
-    subagents: [],
-  } as unknown as OrchestrationV2ThreadProjection;
-  const resumeThread = vi.fn(() => Effect.die("resumeThread must not run without a native ref"));
-  const ensureThread = vi.fn(() => Effect.succeed(providerThread));
-  const startRootRun = vi.fn(() => Effect.void);
-  const layer = ProviderTurnStart.layer.pipe(
-    Layer.provide(
-      Layer.mergeAll(
-        resumeStartDependencies,
-        Layer.mock(ContextHandoffService.ContextHandoffServiceV2)({}),
-        Layer.mock(EventSink.EventSinkV2)({
           writeIfRunCurrent: () => Effect.succeed({ committed: true, storedEvents: [] }),
         }),
         IdAllocator.layer,
-        Layer.mock(ProjectionStore.ProjectionStoreV2)({
-          getThreadProjection: () => Effect.succeed(projection),
-        }),
+        startProjectionStore(() => projection),
         Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({
           open: () =>
             Effect.succeed({
@@ -877,144 +878,6 @@ it("keeps the no-native-ref fresh-start path unchanged", async () => {
               ensureThread,
             } as never),
         }),
-        Layer.mock(RunExecutionService.RunExecutionServiceV2)({ startRootRun }),
-        Layer.mock(RuntimePolicy.RuntimePolicyV2)({
-          resolve: () => Effect.succeed({} as never),
-        }),
-      ),
-    ),
-  );
-
-  await Effect.flatMap(ProviderTurnStart.ProviderTurnStartServiceV2, (service) =>
-    service.start({ threadId: fixture.threadId, runId: fixture.runId }),
-  ).pipe(Effect.provide(layer), Effect.runPromise);
-
-  expect(resumeThread).not.toHaveBeenCalled();
-  expect(ensureThread).toHaveBeenCalledTimes(1);
-  expect(startRootRun).toHaveBeenCalledTimes(1);
-});
-
-it("fails a fresh provider thread through run execution when the Codex CLI is unsupported", async () => {
-  const fixture = makeResumeFallbackFixture({ suffix: "fresh_unsupported_cli" });
-  const providerThread = { ...fixture.providerThread, nativeThreadRef: null };
-  const projection = {
-    ...fixture.projection,
-    providerThreads: [providerThread],
-    providerTurns: [],
-    subagents: [],
-  } as unknown as OrchestrationV2ThreadProjection;
-  const resumeThread = vi.fn(() => Effect.die("resumeThread must not run without a native ref"));
-  let startedSession: ProviderAdapterV2SessionRuntime | undefined;
-  const startRootRun = vi.fn((input: { readonly session: ProviderAdapterV2SessionRuntime }) => {
-    startedSession = input.session;
-    return Effect.void;
-  });
-  const layer = ProviderTurnStart.layer.pipe(
-    Layer.provide(
-      Layer.mergeAll(
-        resumeStartDependencies,
-        Layer.mock(ContextHandoffService.ContextHandoffServiceV2)({}),
-        Layer.mock(EventSink.EventSinkV2)({
-          writeIfRunCurrent: () => Effect.succeed({ committed: true, storedEvents: [] }),
-        }),
-        IdAllocator.layer,
-        Layer.mock(ProjectionStore.ProjectionStoreV2)({
-          getThreadProjection: () => Effect.succeed(projection),
-        }),
-        Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({
-          open: () =>
-            Effect.succeed({
-              driver: CODEX_DRIVER,
-              providerSession: { id: fixture.providerSessionId },
-              resumeThread,
-              ensureThread: () =>
-                assertSupportedCodexCliVersion(
-                  "t3code_desktop/0.120.0 (Mac OS 26.4.1; arm64)",
-                ).pipe(
-                  Effect.mapError(
-                    (cause) =>
-                      new ProviderAdapterEnsureThreadError({
-                        driver: CODEX_DRIVER,
-                        threadId: fixture.threadId,
-                        cause,
-                      }),
-                  ),
-                ),
-            } as never),
-        }),
-        Layer.mock(RunExecutionService.RunExecutionServiceV2)({
-          startRootRun: startRootRun as never,
-        }),
-        Layer.mock(RuntimePolicy.RuntimePolicyV2)({
-          resolve: () => Effect.succeed({} as never),
-        }),
-      ),
-    ),
-  );
-
-  await Effect.flatMap(ProviderTurnStart.ProviderTurnStartServiceV2, (service) =>
-    service.start({ threadId: fixture.threadId, runId: fixture.runId }),
-  ).pipe(Effect.provide(layer), Effect.runPromise);
-
-  expect(resumeThread).not.toHaveBeenCalled();
-  expect(startRootRun).toHaveBeenCalledTimes(1);
-  expect(startedSession).toBeDefined();
-  const startFailure = await startedSession!
-    .startTurn({} as never)
-    .pipe(Effect.flip, Effect.runPromise);
-  expect(startFailure._tag).toBe("ProviderAdapterProtocolError");
-  expect(startFailure.message).toContain("J5 requires Codex CLI ≥ 0.151.0; found 0.120.0");
-});
-
-it("fails the run through run execution instead of falling back when the Codex CLI is unsupported", async () => {
-  const fixture = makeResumeFallbackFixture({ suffix: "unsupported_cli" });
-  const write = vi.fn(() => Effect.succeed([] as never));
-  const logCapture = makeLogCapture();
-  let startedSession: ProviderAdapterV2SessionRuntime | undefined;
-  const startRootRun = vi.fn((input: { readonly session: ProviderAdapterV2SessionRuntime }) => {
-    startedSession = input.session;
-    return Effect.void;
-  });
-  const layer = ProviderTurnStart.layer.pipe(
-    Layer.provide(
-      Layer.mergeAll(
-        resumeStartDependencies,
-        Layer.mock(ContextHandoffService.ContextHandoffServiceV2)({}),
-        Layer.mock(EventSink.EventSinkV2)({
-          write,
-          writeIfRunCurrent: () => Effect.succeed({ committed: true, storedEvents: [] }),
-        }),
-        IdAllocator.layer,
-        Layer.mock(ProjectionStore.ProjectionStoreV2)({
-          getThreadProjection: () =>
-            Effect.succeed({
-              ...fixture.projection,
-              providerTurns: [],
-              subagents: [],
-            } as unknown as OrchestrationV2ThreadProjection),
-        }),
-        Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({
-          open: () =>
-            Effect.succeed({
-              driver: CODEX_DRIVER,
-              providerSession: { id: fixture.providerSessionId },
-              resumeThread: () =>
-                assertSupportedCodexCliVersion(
-                  "t3code_desktop/0.120.0 (Mac OS 26.4.1; arm64)",
-                ).pipe(
-                  Effect.mapError(
-                    (cause) =>
-                      new ProviderAdapterResumeThreadError({
-                        driver: CODEX_DRIVER,
-                        providerSessionId: fixture.providerSessionId,
-                        providerThreadId: fixture.providerThreadId,
-                        cause,
-                      }),
-                  ),
-                ),
-              ensureThread: () => Effect.die("ensureThread must not run for an unsupported CLI"),
-            } as never),
-        }),
         Layer.mock(RunExecutionService.RunExecutionServiceV2)({
           startRootRun: startRootRun as never,
         }),
@@ -1029,13 +892,243 @@ it("fails the run through run execution instead of falling back when the Codex C
     service.start({ threadId: fixture.threadId, runId: fixture.runId }),
   ).pipe(Effect.provide(Layer.merge(layer, logCapture.layer)), Effect.runPromise);
 
-  expect(write).not.toHaveBeenCalled();
-  expect(logCapture.records.filter((record) => "nativeThreadId" in record)).toHaveLength(0);
   expect(startRootRun).toHaveBeenCalledTimes(1);
-  expect(startedSession).toBeDefined();
-  const startFailure = await startedSession!
-    .startTurn({} as never)
-    .pipe(Effect.flip, Effect.runPromise);
+  return {
+    written,
+    logs: logCapture.records,
+    resumeThread,
+    ensureThread,
+    session: startedSession!,
+    startFailure: () => startedSession!.startTurn({} as never).pipe(Effect.flip, Effect.runPromise),
+  };
+}
+
+const freshStartWarning = (written: ReadonlyArray<OrchestrationV2DomainEvent>) =>
+  written.flatMap((event) =>
+    event.type === "turn-item.updated" && event.payload.type === "system_notice"
+      ? [event.payload]
+      : [],
+  );
+
+it.each([
+  {
+    name: "a schema decode failure",
+    failure: makeCodexResumeSchemaFailure,
+    detail: [
+      "ProviderAdapterResumeThreadError: Failed to resume codex provider thread",
+      "[cause]: CodexAppServerRequestError: Invalid payload for method 'thread/resume' during 'decode-payload'",
+      "[cause]: SchemaError: Expected",
+    ],
+  },
+  {
+    name: "a provider error that is not a missing conversation",
+    failure: (input: {
+      readonly providerSessionId: ProviderSessionId;
+      readonly providerThreadId: ProviderThreadId;
+    }) =>
+      Effect.succeed(
+        new ProviderAdapterResumeThreadError({
+          driver: CODEX_DRIVER,
+          providerSessionId: input.providerSessionId,
+          providerThreadId: input.providerThreadId,
+          cause: new Error("rollout file is locked by another process"),
+          nativeThreadMissing: false,
+        }),
+      ),
+    detail: ["[cause]: Error: rollout file is locked by another process"],
+  },
+])("fails visibly and keeps native history after $name", async ({ failure, detail }) => {
+  const fixture = makeResumeFallbackFixture({ suffix: "terminal" });
+  const result = await startWithResume({
+    fixture,
+    resumeThread: () =>
+      failure({
+        providerSessionId: fixture.providerSessionId,
+        providerThreadId: fixture.providerThreadId,
+      }).pipe(Effect.flatMap(Effect.fail)),
+  });
+
+  expect(result.ensureThread).not.toHaveBeenCalled();
+  expect(result.written).toEqual([]);
+  const startFailure = await result.startFailure();
+  expect(startFailure._tag).toBe("ProviderResumeFailedError");
+  expect(startFailure.message).toContain(
+    "Native codex provider resume failed for provider_thread_resume_fallback_terminal",
+  );
+  for (const line of detail) expect(startFailure.message).toContain(line);
+  // Schema paths stay; stack frames do not.
+  expect(startFailure.message).not.toMatch(/^\s+at (?!\[)/mu);
+});
+
+it("starts a new conversation with a visible warning when the provider no longer has it", async () => {
+  const fixture = makeResumeFallbackFixture({ suffix: "missing" });
+  const result = await startWithResume({
+    fixture,
+    resumeThread: () =>
+      Effect.fail(
+        new ProviderAdapterResumeThreadError({
+          driver: CODEX_DRIVER,
+          providerSessionId: fixture.providerSessionId,
+          providerThreadId: fixture.providerThreadId,
+          cause: new Error("thread not found: codex:native-thread-missing"),
+          nativeThreadMissing: true,
+        }),
+      ),
+  });
+
+  expect(result.ensureThread).toHaveBeenCalledWith(
+    expect.objectContaining({
+      existingProviderThread: expect.objectContaining({ nativeThreadRef: null }),
+    }),
+  );
+  const transfer = result.written.find((event) => event.type === "context-transfer.updated");
+  expect(transfer?.type === "context-transfer.updated" && transfer.payload).toMatchObject({
+    type: "provider_handoff",
+    targetRunId: fixture.runId,
+    status: "resolved_portable",
+    resolution: { strategy: "portable_context" },
+    error: expect.stringContaining("thread not found: codex:native-thread-missing"),
+  });
+  expect(freshStartWarning(result.written)).toEqual([
+    expect.objectContaining({
+      runId: fixture.runId,
+      status: "completed",
+      message: expect.stringContaining("no longer has this conversation"),
+    }),
+  ]);
+  expect(result.logs).toContainEqual(
+    expect.objectContaining({ runId: fixture.runId, reason: "native_thread_missing" }),
+  );
+  expect(result.session.startTurn).not.toBe(undefined);
+});
+
+it("starts a new conversation when an earlier history delivery is uncertain", async () => {
+  const fixture = makeResumeFallbackFixture({ suffix: "uncertain" });
+  const projection = {
+    ...fixture.projection,
+    contextHandoffs: [
+      {
+        id: ContextHandoffId.make("handoff_uncertain_delivery"),
+        toProviderThreadId: fixture.providerThreadId,
+        targetRunId: RunId.make("run_earlier"),
+        status: "consumed",
+        delivery: { nativeThreadId: fixture.nativeThreadId, status: "pending" },
+      },
+    ],
+  } as unknown as OrchestrationV2ThreadProjection;
+  const result = await startWithResume({
+    fixture,
+    projection,
+    resumeThread: () => Effect.die("An uncertain delivery must not resume native history"),
+  });
+
+  expect(result.resumeThread).not.toHaveBeenCalled();
+  expect(result.ensureThread).toHaveBeenCalledTimes(1);
+  expect(freshStartWarning(result.written)).toEqual([
+    expect.objectContaining({ message: expect.stringContaining("earlier history handoff") }),
+  ]);
+  expect(result.logs).toContainEqual(
+    expect.objectContaining({ reason: "uncertain_history_delivery" }),
+  );
+});
+
+it("delivers no history after a terminal resume failure", async () => {
+  const fixture = makeResumeFallbackFixture({ suffix: "no_delivery" });
+  const projection = {
+    ...fixture.projection,
+    contextHandoffs: [
+      {
+        id: ContextHandoffId.make("handoff_ready_for_run"),
+        toProviderThreadId: fixture.providerThreadId,
+        targetRunId: fixture.runId,
+        status: "ready",
+      },
+    ],
+  } as unknown as OrchestrationV2ThreadProjection;
+  const result = await startWithResume({
+    fixture,
+    projection,
+    resumeThread: () =>
+      makeCodexResumeSchemaFailure({
+        providerSessionId: fixture.providerSessionId,
+        providerThreadId: fixture.providerThreadId,
+      }).pipe(Effect.flatMap(Effect.fail)),
+  });
+
+  // A delivery attempt would persist a pending marker that later forces a new conversation.
+  expect((await result.startFailure())._tag).toBe("ProviderResumeFailedError");
+  expect(result.written).toEqual([]);
+});
+
+it("keeps the no-native-ref fresh-start path unchanged", async () => {
+  const fixture = makeResumeFallbackFixture({ suffix: "no_native_ref" });
+  const providerThread = { ...fixture.providerThread, nativeThreadRef: null };
+  const result = await startWithResume({
+    fixture,
+    projection: {
+      ...fixture.projection,
+      providerThreads: [providerThread],
+    } as unknown as OrchestrationV2ThreadProjection,
+    resumeThread: () => Effect.die("resumeThread must not run without a native ref"),
+    ensureThread: () => Effect.succeed(providerThread),
+  });
+
+  expect(result.resumeThread).not.toHaveBeenCalled();
+  expect(result.ensureThread).toHaveBeenCalledTimes(1);
+  expect(freshStartWarning(result.written)).toEqual([]);
+});
+
+it("fails a fresh provider thread through run execution when the Codex CLI is unsupported", async () => {
+  const fixture = makeResumeFallbackFixture({ suffix: "fresh_unsupported_cli" });
+  const providerThread = { ...fixture.providerThread, nativeThreadRef: null };
+  const result = await startWithResume({
+    fixture,
+    projection: {
+      ...fixture.projection,
+      providerThreads: [providerThread],
+    } as unknown as OrchestrationV2ThreadProjection,
+    resumeThread: () => Effect.die("resumeThread must not run without a native ref"),
+    ensureThread: () =>
+      assertSupportedCodexCliVersion("t3code_desktop/0.120.0 (Mac OS 26.4.1; arm64)").pipe(
+        Effect.mapError(
+          (cause) =>
+            new ProviderAdapterEnsureThreadError({
+              driver: CODEX_DRIVER,
+              threadId: fixture.threadId,
+              cause,
+            }),
+        ),
+      ),
+  });
+
+  expect(result.resumeThread).not.toHaveBeenCalled();
+  const startFailure = await result.startFailure();
+  expect(startFailure._tag).toBe("ProviderAdapterProtocolError");
+  expect(startFailure.message).toContain("J5 requires Codex CLI ≥ 0.151.0; found 0.120.0");
+});
+
+it("fails the run through run execution instead of falling back when the Codex CLI is unsupported", async () => {
+  const fixture = makeResumeFallbackFixture({ suffix: "unsupported_cli" });
+  const result = await startWithResume({
+    fixture,
+    resumeThread: () =>
+      assertSupportedCodexCliVersion("t3code_desktop/0.120.0 (Mac OS 26.4.1; arm64)").pipe(
+        Effect.mapError(
+          (cause) =>
+            new ProviderAdapterResumeThreadError({
+              driver: CODEX_DRIVER,
+              providerSessionId: fixture.providerSessionId,
+              providerThreadId: fixture.providerThreadId,
+              cause,
+            }),
+        ),
+        Effect.andThen(Effect.die("unreachable")),
+      ),
+    ensureThread: () => Effect.die("ensureThread must not run for an unsupported CLI"),
+  });
+
+  expect(result.written).toEqual([]);
+  const startFailure = await result.startFailure();
   expect(startFailure._tag).toBe("ProviderResumeFailedError");
   expect(startFailure.message).toContain("J5 requires Codex CLI ≥ 0.151.0; found 0.120.0");
 });
@@ -1127,9 +1220,7 @@ for (const text of ["Continue", "/compact"]) {
               return [];
             }),
         }),
-        Layer.mock(ProjectionStore.ProjectionStoreV2)({
-          getThreadProjection: () => Effect.sync(() => projection),
-        }),
+        startProjectionStore(() => projection),
         Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({
           open: () => Effect.succeed(runtime),
         }),

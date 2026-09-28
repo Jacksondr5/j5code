@@ -35,6 +35,8 @@ import { McpInvocationContext } from "../../../mcp/McpInvocationContext.ts";
 import * as OrchestratorMcpService from "../../../mcp/OrchestratorMcpService.ts";
 import { runDaemonWithOptions as runEffectWorkerDaemonWithOptions } from "../../../orchestration-v2/EffectWorker.ts";
 import { OrchestratorV2 } from "../../../orchestration-v2/Orchestrator.ts";
+import { layerFromProviderInstanceRegistry as providerAdapterRegistryFromInstances } from "../../../orchestration-v2/ProviderAdapterRegistry.ts";
+import { SourceControlProviderRegistry } from "../../../sourceControl/SourceControlProviderRegistry.ts";
 import { layer as threadLifecycleServiceLayer } from "../../../orchestration-v2/ThreadLifecycleService.ts";
 import { OrchestrationV2LayerLive as UpstreamOrchestrationV2LayerLive } from "../../../orchestration-v2/runtimeLayer.ts";
 import { ProviderInstanceRegistryHydrationLive } from "../../../provider/Layers/ProviderInstanceRegistryHydration.ts";
@@ -119,6 +121,10 @@ const providerInstanceRegistryLayer = ProviderInstanceRegistryHydrationLive.pipe
         Layer.provide(NodeServices.layer),
       ),
       ModelManifest.layerTest,
+      ServerSecretStore.layer.pipe(
+        Layer.provide(serverConfigLayer),
+        Layer.provide(NodeServices.layer),
+      ),
       CodexResetCredit.layer,
       OpenCodeRuntimeLive.pipe(Layer.provide(NodeServices.layer)),
       Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers),
@@ -137,7 +143,13 @@ const secretStoreLayer = ServerSecretStore.layer.pipe(
   Layer.provide(NodeServices.layer),
 );
 const orchestratorMcpLayer = OrchestratorMcpService.layer.pipe(
-  Layer.provide(Layer.mergeAll(orchestrationLayer, Layer.mock(ScheduledTaskService)({}))),
+  Layer.provide(
+    Layer.mergeAll(
+      orchestrationLayer,
+      Layer.mock(ScheduledTaskService)({}),
+      providerAdapterRegistryFromInstances,
+    ),
+  ),
 );
 const j5Layer = J5A2ARuntimeLayer.pipe(
   Layer.provideMerge(orchestrationLayer),
@@ -157,6 +169,11 @@ const liveLayer = Layer.mergeAll(
 ).pipe(
   Layer.provide(Layer.mock(GitWorkflow.GitWorkflowService)({})),
   Layer.provide(
+    Layer.mock(SourceControlProviderRegistry)({
+      resolveLink: () => Effect.die("unused title link"),
+    }),
+  ),
+  Layer.provide(
     Layer.mock(ProjectService.ProjectService)({
       getById: () => Effect.succeed(Option.none()),
     }),
@@ -169,6 +186,7 @@ const liveLayer = Layer.mergeAll(
   Layer.provideMerge(providerRegistryLayer),
   Layer.provide(providerInstanceRegistryLayer),
   Layer.provide(backgroundPolicyLayer),
+  Layer.provide(ModelManifest.layerTest),
   Layer.provide(NodeServices.layer),
 );
 const testLayer = Layer.mergeAll(liveLayer, NodeServices.layer);

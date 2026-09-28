@@ -7,6 +7,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import collapse from "../../apps/server/src/j5/persistence/reviewed-v2-collapse.v1.json" with { type: "json" };
 import reviewed from "../../apps/server/src/j5/persistence/legacy-upstream-migrations.v1.json" with { type: "json" };
+import renumber from "../../apps/server/src/j5/persistence/reviewed-v2-renumber.v1.json" with { type: "json" };
 import {
   inspectMigrationChanges,
   readMigrationDependencies,
@@ -96,6 +97,49 @@ describe("upstream migration compatibility audit", () => {
   });
 });
 
+describe("reviewed pin → upstream V2 renumbering", () => {
+  it("accepts only the pin manifest and the exact reviewed upstream target", () => {
+    expect(
+      matchesReviewedBridge(
+        renumber.sourceMigrations,
+        renumber.targetMigrations,
+        renumber.targetRef,
+      ),
+    ).toBe(true);
+    expect(
+      matchesReviewedBridge(renumber.sourceMigrations, renumber.targetMigrations, "other"),
+    ).toBe(false);
+    for (const source of [reviewed.migrations, collapse.sourceMigrations]) {
+      expect(matchesReviewedBridge(source, renumber.targetMigrations, renumber.targetRef)).toBe(
+        false,
+      );
+    }
+    expect(
+      matchesReviewedBridge(
+        renumber.sourceMigrations,
+        [...renumber.targetMigrations, record(56, "Unreviewed")],
+        renumber.targetRef,
+      ),
+    ).toBe(false);
+  });
+  it("records the renumbering, the 050 dependency drift and the inserted migrations", () => {
+    expect(inspectMigrationChanges(renumber.sourceMigrations, renumber.targetMigrations)).toEqual([
+      {
+        kind: "implementation_changed",
+        name: "ProjectionThreadPullRequests",
+        oldId: 50,
+        newId: 50,
+      },
+      { kind: "renumbered", name: "OrchestrationV2", oldId: 51, newId: 54 },
+      { kind: "inserted_below_high_water", name: "ProjectionThreadMessageContext", newId: 51 },
+    ]);
+  });
+  it("keeps the pin source equal to the previously reviewed composed target", () => {
+    expect(renumber.sourceRef).toBe(collapse.targetRef);
+    expect(renumber.sourceMigrations).toEqual(collapse.targetMigrations);
+  });
+});
+
 describe("reviewed V2 composition", () => {
   it("accepts only the recorded August/September sources and exact composed target", () => {
     for (const source of [reviewed.migrations, collapse.sourceMigrations]) {
@@ -134,13 +178,24 @@ describe("reviewed V2 composition", () => {
     }
   });
   it("refuses unfamiliar static or dynamic migration composition", () => {
-    const path = "apps/server/src/persistence/Migrations/051_OrchestrationV2.ts";
-    expect(() =>
-      readMigrationDependencies("unused", "unused", path, 'import NewStep from "./new.ts";'),
-    ).toThrow(/Unreviewed migration composition/);
-    expect(() =>
-      readMigrationDependencies("unused", "unused", path, 'await import("./new.ts")'),
-    ).toThrow(/dynamic migration dependency/);
+    for (const name of ["OrchestrationV2", "ProjectionThreadPullRequests"]) {
+      expect(() =>
+        readMigrationDependencies("unused", "unused", name, 'import NewStep from "./new.ts";'),
+      ).toThrow(/Unreviewed migration composition/);
+      expect(() =>
+        readMigrationDependencies("unused", "unused", name, 'await import("./new.ts")'),
+      ).toThrow(/dynamic migration dependency/);
+    }
+  });
+  it("treats September's self-contained V2 migration as having no helper dependencies", () => {
+    expect(
+      readMigrationDependencies(
+        "unused",
+        "unused",
+        "OrchestrationV2",
+        'import * as Effect from "effect/Effect";',
+      ),
+    ).toEqual([]);
   });
 });
 
@@ -168,7 +223,7 @@ it("reads helper and backfill dependency changes from Git even with unchanged en
               )
               .join("\n")
           : 'import { legacyThreadPullRequestKey } from "@t3tools/shared/threadPullRequests";';
-      const original = readMigrationDependencies(directory, before, migration.path, implementation);
+      const original = readMigrationDependencies(directory, before, migration.name, implementation);
       for (const dependency of dependencies) {
         NodeFS.writeFileSync(
           NodePath.join(directory, dependency.path),
@@ -178,7 +233,7 @@ it("reads helper and backfill dependency changes from Git even with unchanged en
         const after = readMigrationDependencies(
           directory,
           git("write-tree"),
-          migration.path,
+          migration.name,
           implementation,
         );
         expect(after.find(({ path }) => path === dependency.path)?.sha256).not.toBe(

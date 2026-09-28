@@ -247,6 +247,11 @@ export interface ProviderOrchestratorReplayVariant {
   readonly transcriptEntriesThroughLabel?: string;
   readonly modelSelection: ModelSelection;
   readonly runtimePolicyOverride?: RuntimePolicyV2Override;
+  /**
+   * Workspace-relative paths that must not exist once the scenario finishes,
+   * e.g. the target of a tool call the run was configured to deny.
+   */
+  readonly expectedAbsentWorkspacePaths?: ReadonlyArray<string>;
   readonly assertOutput: (
     result: OrchestratorV2ScenarioResult,
     transcript: ProviderReplayTranscript,
@@ -755,6 +760,7 @@ export function materializeFixtureInput(input: {
             });
             pushDispatch({
               type: "checkpoint.rollback",
+              restoreFiles: false,
               commandId: yield* idAllocator.allocate.command({
                 fixtureName: input.scenario,
                 commandName: `rollback-${step.checkpointSuffix}`,

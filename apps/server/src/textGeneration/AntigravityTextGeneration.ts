@@ -3,7 +3,7 @@ import {
   type ProviderSetupError,
   TextGenerationError,
 } from "@t3tools/contracts";
-import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@t3tools/shared/git";
+import { formatGeneratedBranchName, sanitizeFeatureBranchName } from "@t3tools/shared/git";
 import { extractJsonObject } from "@t3tools/shared/schemaJson";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -381,10 +381,14 @@ export const makeAntigravityTextGeneration = Effect.fn("makeAntigravityTextGener
     Effect.fn("AntigravityTextGeneration.generateBranchName")(function* (input) {
       const generated = yield* runAntigravityJson({
         operation: "generateBranchName",
-        ...buildBranchNamePrompt({ message: input.message, attachments: input.attachments }),
+        ...buildBranchNamePrompt({
+          message: input.message,
+          attachments: input.attachments,
+          naming: input.naming,
+        }),
         modelSelection: input.modelSelection,
       });
-      return { branch: sanitizeBranchFragment(generated.branch) };
+      return { branch: formatGeneratedBranchName(generated.branch, input.naming) };
     });
 
   const generateThreadTitle: TextGeneration.TextGeneration["Service"]["generateThreadTitle"] =
@@ -394,11 +398,15 @@ export const makeAntigravityTextGeneration = Effect.fn("makeAntigravityTextGener
         ...buildThreadTitlePrompt({
           message: input.message,
           previousTitle: input.previousTitle,
+          linkedContext: input.linkedContext,
           attachments: input.attachments,
         }),
         modelSelection: input.modelSelection,
       });
-      return { title: sanitizeThreadTitle(generated.title) };
+      return {
+        title: sanitizeThreadTitle(generated.title),
+        ...(generated.needsRefinement ? { needsRefinement: true } : {}),
+      };
     });
 
   return {

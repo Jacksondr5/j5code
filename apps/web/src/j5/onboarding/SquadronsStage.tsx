@@ -113,10 +113,7 @@ export function SquadronsStage({
         Squadrons are groups of agents that work on a big initiative. We'll import your previous
         conversations into a squadron to start off, you can create more afterwards.
       </p>
-      <ScrollArea
-        scrollFade
-        className="mt-5 h-auto max-h-80 [&_[data-slot=scroll-area-scrollbar]]:opacity-100"
-      >
+      <ScrollArea scrollFade className="mt-5 h-auto max-h-80">
         <ul className="space-y-2 pr-3">
           {folders.map((folder) => {
             const home = homes.get(folder.key);

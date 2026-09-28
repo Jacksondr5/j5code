@@ -1,10 +1,10 @@
 import { MessageId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { deriveDisplayedUserMessageState } from "~/lib/terminalContext";
+import { resolveUserMessageContext } from "~/lib/composerContextRecords";
 import type { ChatMessage } from "~/types";
 import {
-  displayedSpawnBriefState,
+  resolvedSpawnBriefContext,
   isSpawnBriefMessage,
   participantIdsForSpawnBrief,
   presentSpawnBrief,
@@ -149,25 +149,24 @@ describe("presentSpawnBrief", () => {
   });
 });
 
-describe("displayedSpawnBriefState", () => {
+describe("resolvedSpawnBriefContext", () => {
   it("shows a brief that quotes composer context tags verbatim", () => {
     const quoting = [
       "Review the terminal capture format. A user message ends like this:",
       "",
       "<terminal_context>",
-      "- zsh:",
+      "- Build line 7:",
       "  npm test",
       "</terminal_context>",
     ].join("\n");
 
-    // The generic user-row derivation would strip the quoted block.
-    expect(deriveDisplayedUserMessageState(quoting).visibleText).not.toBe(quoting);
+    // The generic user-row derivation upgrades the quoted block into a context record.
+    expect(resolveUserMessageContext({ text: quoting }).text).not.toBe(quoting);
 
-    const state = displayedSpawnBriefState(quoting);
-    expect(state.visibleText).toBe(quoting);
-    expect(state.copyText).toBe(quoting);
-    expect(state.contexts).toEqual([]);
-    expect(state.elementContexts).toEqual([]);
+    const state = resolvedSpawnBriefContext(quoting);
+    expect(state.text).toBe(quoting);
+    expect(state.records).toEqual([]);
+    expect(state.recordsById.size).toBe(0);
   });
 });
 

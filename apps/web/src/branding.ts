@@ -27,5 +27,5 @@ export const APP_DISPLAY_NAME =
   injectedDesktopAppBranding?.displayName ??
   formatAppDisplayName({ baseName: APP_BASE_NAME, stageLabel: APP_STAGE_LABEL });
 export const APP_VERSION = import.meta.env.APP_VERSION || "0.0.0";
-/** How people run the server from a terminal; the wizard and pairing copy build subcommands on it. */
-export const CLI_COMMAND = `npx ${J5_BRANDING.cli.packageName}`;
+/** The PATH command release archives install (`install.sh` / `j5 update`); the wizard and pairing copy build subcommands on it. */
+export const CLI_COMMAND = J5_BRANDING.cli.command;

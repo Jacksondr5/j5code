@@ -3,8 +3,8 @@ import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import type { Atom } from "effect/unstable/reactivity";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { makeThreadShellFixture } from "../test-fixtures";
 import { createPendingThreadOrder } from "../features/threads/threadOrder";
+import { makeThreadShellFixture } from "../test-fixtures";
 import { appAtomRegistry } from "./atom-registry";
 import {
   beginPendingThreadOrder,
@@ -37,14 +37,13 @@ const shellsAtom = environmentThreadShells.threadShellsAtom as Atom.Writable<
 >;
 
 function fixture() {
+  // The shared section helper also reads lineage/settled/snooze fields, so
+  // partial casts break when it grows — build complete shells instead.
   const rows = ["a", "b"].map((id, index) =>
     makeThreadShellFixture({
       id: ThreadId.make(id),
       environmentId: EnvironmentId.make("env"),
       createdAt: `2026-06-01T0${2 - index}:00:00.000Z`,
-      archivedAt: null,
-      pinnedAt: null,
-      activeOrderKey: null,
     }),
   );
   appAtomRegistry.set(shellsAtom, rows);

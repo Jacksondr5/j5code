@@ -52,7 +52,7 @@ it("treats stable installs as direct invocations", () => {
   }
 });
 
-it("re-suggests the nightly channel only for nightly builds", () => {
+it("re-suggests the prerelease channel only for prerelease builds", () => {
   for (const [version, expected] of [
     ["0.0.31-nightly.20260729", "npx @jacksondr5/j5code@nightly serve"],
     ["0.0.31", "npx @jacksondr5/j5code serve"],

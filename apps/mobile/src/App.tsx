@@ -1,8 +1,7 @@
-import { BlurTargetView } from "expo-blur";
 import * as Linking from "expo-linking";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect } from "react";
-import { StatusBar } from "react-native";
+import { StatusBar, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -22,8 +21,9 @@ import {
 import { RootStack } from "./Stack";
 import { appAtomRegistry } from "./state/atom-registry";
 import { OverlayPortalHost } from "./components/OverlayPortal";
-import { appBlurTargetRef } from "./lib/appBlurTarget";
+import { shouldHandleAppLink } from "./lib/appLinking";
 import { useMobileNavigationTheme } from "./lib/useMobileNavigationTheme";
+import { SubscriptionUsageCoordinator } from "./widgets/SubscriptionUsageCoordinator";
 
 import "../global.css";
 
@@ -42,14 +42,9 @@ const appLinking = {
     `${J5_BRANDING.mobile.development.scheme}://`,
     `${J5_BRANDING.mobile.preview.scheme}://`,
   ],
-  // The Expo dev client launches the app via
-  // <scheme>://expo-development-client/?url=<packager> — that URL addresses
-  // the launcher, not app navigation. Without this filter it falls through
-  // to the NotFound wildcard route on every dev launch.
-  // expo-sharing uses a private lifecycle URL only to wake the app. The
-  // persisted share inbox below owns navigation once the payload is durable.
-  filter: (url: string) =>
-    !url.includes("expo-development-client") && !url.includes("://expo-sharing"),
+  // Keep the compact thread list available beneath a directly opened thread.
+  config: { initialRouteName: "Home" },
+  filter: shouldHandleAppLink,
 };
 
 const Navigation = createStaticNavigation(RootStack);
@@ -83,6 +78,7 @@ function AppContent() {
   return (
     <>
       <SplashScreenCoordinator />
+      <SubscriptionUsageCoordinator />
       <GestureHandlerRootView className="flex-1">
         <KeyboardProvider statusBarTranslucent>
           <SafeAreaProvider>
@@ -95,14 +91,13 @@ function AppContent() {
                 this, React Navigation defaults to its light theme and every native
                 header (glass buttons, title, materials) is forced light even when
                 the system is in dark mode. */}
-            {/* Blur target for Android dropdown backdrops — see appBlurTarget.ts. */}
-            <BlurTargetView ref={appBlurTargetRef} style={{ flex: 1 }}>
+            <View style={{ flex: 1 }}>
               <IncomingShareProvider>
                 <Navigation linking={appLinking} theme={navigationTheme} />
               </IncomingShareProvider>
               <ConfirmDialogHost />
               <ThreadArrangementHost />
-            </BlurTargetView>
+            </View>
             {/* Anchored-menu overlays render here — in-window, so the
                 keyboard stays up while a dropdown is open. */}
             <OverlayPortalHost />
