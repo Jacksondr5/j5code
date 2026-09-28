@@ -58,6 +58,11 @@ it("gives custom seats direct result and concern reporting without a mandatory a
     "use send_message to coordinate directly with your Captain and other members",
   );
   assert.include(text, "final result, supporting evidence, and any remaining blockers");
+  assert.include(
+    text,
+    "ask your Captain with send_message and expect_reply=true, never the person",
+  );
+  assert.include(text, "Do not use a native question tool.");
   assert.include(text, "request_crew_member through the user's inbox");
   assert.include(text, "Continue already-approved work and coordination");
   assert.include(text, "A direct result is sufficient");
@@ -107,6 +112,12 @@ it("compares dispatched briefs by their human-authored parts, not the roster", (
     spawnBriefWithoutCrewContext(spawnFirstTurnText({ ...identity, brief: "Edited", crew })),
   );
   assert.notInclude(spawnBriefWithoutCrewContext(first), "j5_crew_context");
+  // Platform guidance can change across a deploy without blocking a retry of a started seat.
+  assert.notInclude(spawnBriefWithoutCrewContext(first), "crew_collaboration");
+  assert.equal(
+    spawnBriefWithoutCrewContext(first),
+    spawnBriefWithoutCrewContext(first.replace("never the person", "never the user")),
+  );
   assert.include(spawnBriefWithoutCrewContext(first), "<seat_instructions>");
 });
 

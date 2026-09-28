@@ -81,16 +81,18 @@ export interface CrewBriefContext {
 }
 
 /**
- * A dispatched brief minus its platform blocks: the `<j5_spawn_context>` identity facts and the
- * `<j5_crew_context>` roster. The roster names every seat's participant, so dropping or renaming
- * one seat on a retry rewrites the briefs of seats that already started, and the identity block
- * can gain fields across a deploy. Only the human-authored parts (the Captain's brief, the seat's
- * instructions) must match what a seat was already told.
+ * A dispatched brief minus its platform blocks: the `<j5_spawn_context>` identity facts, the
+ * `<j5_crew_context>` roster, and the `<crew_collaboration>` guidance. The roster names every
+ * seat's participant, so dropping or renaming one seat on a retry rewrites the briefs of seats
+ * that already started, and the identity block and guidance can change across a deploy. Only the
+ * human-authored parts (the Captain's brief, the seat's instructions) must match what a seat was
+ * already told.
  */
 export const spawnBriefWithoutCrewContext = (text: string) =>
   text
     .replace(/^<j5_spawn_context>\n[\s\S]*?\n<\/j5_spawn_context>\n\n/, "")
-    .replace(/<j5_crew_context>\n[\s\S]*?\n<\/j5_crew_context>\n\n/, "");
+    .replace(/<j5_crew_context>\n[\s\S]*?\n<\/j5_crew_context>\n\n/, "")
+    .replace(/<crew_collaboration>\n[\s\S]*?\n<\/crew_collaboration>\n\n/, "");
 
 // The web timeline parses the identity block and the trailing brief
 // (apps/web/src/j5/a2a/SpawnBrief.tsx) to attribute the message to its spawner;
@@ -120,7 +122,7 @@ export const spawnFirstTurnText = (input: {
     crew.seatInstructions === undefined
       ? []
       : [`<seat_instructions>\n${crew.seatInstructions}\n</seat_instructions>`];
-  const collaboration = `<crew_collaboration>\nResolve current participants with list_participants and use send_message to coordinate directly with your Captain and other members. Share useful findings, evidence, questions, and blockers immediately; do not wait for an artifact or coordination approval. Send your Captain your final result, supporting evidence, and any remaining blockers before finishing. If the roster lacks expertise needed to address a concern, tell your Captain what is missing and why so they can request_crew_member through the user's inbox. Continue already-approved work and coordination while an addition is pending. A direct result is sufficient unless the user or your persona explicitly requires an artifact.\n</crew_collaboration>`;
+  const collaboration = `<crew_collaboration>\nResolve current participants with list_participants and use send_message to coordinate directly with your Captain and other members. Share useful findings, evidence, questions, and blockers immediately; do not wait for an artifact or coordination approval. When you need a decision, a clarification, or an approval, ask your Captain with send_message and expect_reply=true, never the person: your Captain answers or asks the person. Do not use a native question tool. Send your Captain your final result, supporting evidence, and any remaining blockers before finishing. If the roster lacks expertise needed to address a concern, tell your Captain what is missing and why so they can request_crew_member through the user's inbox. Continue already-approved work and coordination while an addition is pending. A direct result is sufficient unless the user or your persona explicitly requires an artifact.\n</crew_collaboration>`;
   // A persona's declared deliverable supplements the conversation; it never gates coordination.
   const obligation =
     crew.obligation === undefined
