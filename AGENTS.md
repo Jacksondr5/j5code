@@ -22,7 +22,7 @@ These are upstream's values, and J5 keeps them.
 
 - **Open at the core.** J5 exists because T3 Code is open: it shares its code, its roadmap, and how it thinks, and welcomes forks. J5 works the same way. We share our code and our reasoning in the open, and offer fixes that belong upstream back to it.
 - **Performance without compromise.** Audit for regressions: too much data over websockets, CSS animations spiking the GPU, lists that are hard to render.
-- **Remote ready.** The websocket layer (`npx t3`) lets clients connect over the local network, Tailscale, or a tunnel. New features must work in every connection mode.
+- **Remote ready.** The server's websocket layer lets clients connect over the local network, Tailscale, or a tunnel. New features must work in every connection mode.
 - **Multi-surface.** Web (hosted, and served locally by the server), desktop (Electron, which bundles the server and can host remote clients), and mobile (React Native, connecting to any server).
 
 ## A note from Theo, T3 Code's creator
@@ -62,7 +62,7 @@ J5's own product vocabulary (Squadron, Crew, Captain, Exchange, and so on) is in
 
 1. **Killing by pattern.** Never `pkill -f`, `pgrep | kill`, or `kill` a PID you found by matching a name, path, or worktree string. Your own agent process has this worktree's path in its argv, and this machine runs several other dev servers at once. Kill only a PID you captured at spawn, or the owner of your port from `ss -H -ltnp` after confirming `/proc/<pid>/cwd` is your worktree.
 2. **Writing to the live install.** `~/.j5code/userdata` is the developer's real J5 Code database, in use while you work. Reading it and copying from it are fine, and a good way to get real test data (see Test data). Never start a server against it, never open it read-write, never clean it up.
-3. **Inheriting the live server's port.** An agent running inside J5 Code usually inherits `T3CODE_PORT`, `T3CODE_HOST`, and `J5CODE_HOME` from the live server, and the dev runner honors them, so your dev server would take the live one's port. Start dev servers with those variables unset: `env -u T3CODE_PORT -u T3CODE_HOST -u J5CODE_HOME vp run dev`.
+3. **Inheriting the live server's port.** An agent running inside J5 Code usually inherits `T3CODE_PORT`, `T3CODE_HOST`, and `J5CODE_HOME` from the live server. The dev runner's `--port` falls back to `T3CODE_PORT`, so your dev server would take the live one's port. (`J5CODE_HOME` only matters outside a worktree, since a worktree's `.j5code` outranks it.) Start dev servers with those variables unset: `env -u T3CODE_PORT -u T3CODE_HOST -u J5CODE_HOME vp run dev`.
 4. **Baking in origins.** Never set `VITE_HTTP_URL` or `VITE_WS_URL` for dev. Dev is single-origin and Vite proxies `/api`, `/ws`, `/oauth`, and `/.well-known`. Setting them bakes localhost into the bundle and silently breaks every remote browser.
 
 ## Hit every surface
@@ -71,7 +71,7 @@ The most common defect in this repo is a change that works on the path you teste
 
 - **Entry points.** A behavior reachable from the chat view is usually also reachable from Settings, the command palette, and a keybinding. Fixing one is not fixing the feature.
 - **Clients.** Web, desktop (wraps web, adds Electron shell/IPC), and mobile (React Native, separate navigation). Shared logic lives in `packages/client-runtime`.
-- **Providers.** Codex, Claude, Cursor, Grok, OpenCode, and Antigravity each have an adapter. Provider-shaped features need a decision per adapter, even if the decision is "not supported here". For J5 features, Codex, Claude, and Cursor come first and the rest are a lower priority. Changing an adapter so a J5 feature works there is upstream's territory (zone 3).
+- **Providers.** Codex, Claude, Cursor, Grok, OpenCode, and Antigravity each have an adapter. Provider-shaped features need a decision per adapter, even if the decision is "not supported here". For J5 features, Codex, Claude, and Cursor are the priority: support and test them first, and the rest are a lower priority. Priority isn't parity: where an adapter can't support a feature without changing upstream's adapter (zone 3), record "not supported here" for it.
 - **Contracts.** Anything crossing the wire is typed in `packages/contracts`. Change the schema and the server, web, mobile, and desktop all follow.
 - **Reverse states.** If you added a way in, add the way out and the way to see it. Snooze needs unsnooze. Close needs reopen. A one-way door is a bug.
 - **Connection modes.** Local, remote/relay, and tunnel behave differently. Multi-device and multi-environment cases are real.
@@ -82,7 +82,7 @@ The most common defect in this repo is a change that works on the path you teste
 - `vp i` installs. Worktrees get this from the t3.json setup script; if module resolution looks broken, it probably did not run.
 - `vp run dev` starts server and web (with the variables from rule 3 unset). In a worktree, state defaults to that worktree's gitignored `.j5code`, which deliberately outranks an ambient `J5CODE_HOME` so you cannot land on shared state by accident. An explicit `--home-dir` still wins.
 - Ports derive from the worktree path and are stable across restarts, but read the real ones from the `[dev-runner]` line since occupied ports shift. Confirm its `baseDir=` points inside your worktree.
-- Sharing over the tailnet is three steps: run `vp run dev --share` in the background, wait for the `pairingUrl:` line in its output, then give that full URL to an unpaired browser. Do not wire up `tailscale serve` by hand, open the URL yourself, or consume the user's pairing link. A browser with the reusable dev cookie can use the bare origin. If a normal one-time token was consumed, mint a fresh one with `node apps/server/src/bin.ts pair`. It carries standard scopes, while the startup URL carries admin scopes needed for Connections settings.
+- Sharing over the tailnet is three steps: run `env -u T3CODE_PORT -u T3CODE_HOST -u J5CODE_HOME vp run dev --share` in the background, wait for the `pairingUrl:` line in its output, then give that full URL to an unpaired browser. Do not wire up `tailscale serve` by hand, open the URL yourself, or consume the user's pairing link. A browser with the reusable dev cookie can use the bare origin. If a normal one-time token was consumed, mint a fresh one with `node apps/server/src/bin.ts pair`. It carries standard scopes, while the startup URL carries admin scopes needed for Connections settings.
 - To reuse web dev auth across worktrees, configure one fixed `T3CODE_DEV_AUTH_TOKEN` in the main checkout's gitignored `.env`. The `t3.json` setup links that file into worktrees. Never commit or publish the token or a startup URL. See [Reusable dev credential](docs/operations/development.md#reusable-dev-credential).
 - Stop what you started, by the PID you tracked. See rule 1.
 
@@ -138,16 +138,16 @@ Most code changes do not need a documentation change. Agents can read the code.
 
 - **J5's docs live under `docs/j5/`.** [How the J5 docs are organized](docs/j5/process/docs.md) says what goes where. Feature definitions in `docs/j5/product/` are rewritten, never appended to.
 - **User docs** (`docs/user/`) help users accomplish tasks. Give each major feature a concise section explaining what it does, how to start, and anything unintuitive. A settings path is useful; descriptions of visible buttons, icons, layouts, animations, or every UI state are not. Keep them in the shipped product's voice, without implementation details or contributor tooling.
-- **Upstream's internal docs** (`docs/internals/`, `docs/operations/`) are upstream's. J5 doesn't edit them; J5's equivalents go under `docs/j5/`.
+- **Upstream's internal docs** (`docs/internals/`, `docs/operations/`) are upstream's. J5's own go under `docs/j5/`; J5 edits upstream's docs only as a recorded FORK.md case, like any other upstream-owned file.
 - Do not document every feature, enumerate fields or methods, narrate control flow, maintain file catalogs, or append PR summaries. Types, tests, and code already record the implementation.
 - Keep a local implementation explanation in a nearby code comment. Link to the relevant source instead of copying it.
 - When a documented decision or constraint changes, rewrite or remove the affected text. Do not append another account of the new behavior.
 
 ## Plans and work artifacts
 
-- Do not commit implementation plans, research notes, or agent scratch files. Keep temporary working material outside the worktree. `.plans/` is gitignored only as a safety net for legacy tooling.
+- Do not commit per-task implementation plans, research notes, or agent scratch files. Keep temporary working material outside the worktree. `.plans/` is gitignored only as a safety net for legacy tooling. The exception is J5's own planning and research record: `docs/j5/plans/` and `docs/j5/research/` are committed, and follow [how the J5 docs are organized](docs/j5/process/docs.md).
 - Track active work in the GitHub issue that owns it, on `Jacksondr5/j5code`.
-- A merged PR is the implementation record. Close or update its tracking item when the work lands; do not preserve a second checklist in the repository.
+- A merged PR is the implementation record. Close or update its tracking item when the work lands; do not keep a second checklist in the repository. A plan under `docs/j5/plans/` states build status against a definition's criteria; that is its job, not a second checklist.
 
 ## How it works
 

@@ -14,7 +14,8 @@
 
 ## Upstream impact
 
-<!-- Delete if the PR only touches J5-owned paths (apps/*/src/j5, packages/*/src/j5, docs/j5).
+<!-- Delete if the PR only touches J5-owned paths (apps/*/src/j5, packages/*/src/j5, docs/j5,
+     and the J5-owned files listed in FORK.md, such as AGENTS.md).
      Otherwise list each upstream-owned file you edited and its FORK.md case.
      If the PR changes what upstream's product does, link the human decision
      and the register entry in docs/j5/product/upstream.md. -->

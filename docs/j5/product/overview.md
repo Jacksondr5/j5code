@@ -5,7 +5,7 @@ kind: definition
 
 # J5 overview
 
-J5 Code is T3 Code with a fleet layer on top. T3 Code gives a person a fast, multi-surface GUI for driving coding agents one conversation at a time. J5 lets many agents work at once: grouped into Squadrons, talking to each other directly, organized into Crews under a Captain, and reaching the person only when something needs them. The person's attention is the scarce resource, and J5 exists to spend less of it per unit of work ([problems and goals](problems.md), [fleet vision](fleet-vision.md)).
+J5 Code is T3 Code with a fleet layer on top. T3 Code gives a person a fast, multi-surface GUI for driving coding agents one conversation at a time. J5 lets many agents work at once: grouped into Squadrons, talking to each other directly, and organized into Crews under a Captain. Some agents the person talks to directly all day; others work in the background and reach the person only when something needs them. The person's attention is the scarce resource, and J5 exists to spend less of it per unit of work ([problems and goals](problems.md), [fleet vision](fleet-vision.md)).
 
 This page is the map. Read it before changing anything, to know whether you're in J5's domain or upstream's.
 
@@ -31,7 +31,7 @@ These areas are J5's. Their definitions are the source of truth; build within th
 
 ## Everything else is upstream's
 
-Anything not in the table is T3 Code's product: providers and their adapters, orchestration (threads, turns, runs, runtime requests, checkpoints), the sidebar and composer, settle / snooze / archive of a thread (J5 follows upstream's archive and adds warnings and Crew rules around it), the pull request view, settings, authentication and pairing, remote access and tunnels, the desktop and mobile shells, and persistence.
+Anything not in the table is T3 Code's product: providers and their adapters, orchestration (threads, turns, runs, runtime requests, checkpoints), the sidebar and composer, settle / snooze / archive of a thread (J5 follows upstream's archive and adds warnings and Crew rules around it), the pull request view (a J5 PR pane is defined in [features/pr-pane.md](features/pr-pane.md) but not built; until it is, pull request work is upstream's zone), settings, authentication and pairing, remote access and tunnels, the desktop and mobile shells, and persistence.
 
 J5 depends on all of it, and sometimes has to reach into it. How to tell a code integration from a change to upstream's product, and who decides each, is in [J5 and upstream](upstream.md). The short version: integrating J5 code is a matter of process ([`FORK.md`](../../../FORK.md)); changing what upstream's product does is the person's decision, made explicitly and recorded.
 

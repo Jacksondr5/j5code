@@ -23,7 +23,7 @@ One line each, with the why.
 - **Pre-dogfood, no legacy-compatibility code, ever** (Jackson, 2026-09-01). Accommodations for
   data or states that cannot exist yet (no users, no legacy drafts) are YAGNI and get deleted;
   invariants stay and fail closed, loudly.
-- **J5 content lives only under `docs/j5/` and the `j5/` code paths; upstream-owned files are edited
+- **J5 content lives only under `docs/j5/`, the `j5/` code paths, and the J5-owned files FORK.md lists (such as `AGENTS.md`); upstream-owned files are edited
   only as the integration cases enumerated in [`FORK.md`](../../../FORK.md)** ("Add, don't modify").
   Every edit to an upstream-owned file is a permanent rebase-conflict tax against upstream; the
   fork's discipline is add-beside, and the sanctioned exceptions are listed there, not improvised.

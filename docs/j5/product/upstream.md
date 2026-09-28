@@ -32,7 +32,7 @@ When the person approves a divergence, it is recorded below and its code gets it
 
 ## The register of divergences
 
-Every place J5 knowingly makes upstream's product behave differently, with the person's decision behind it. FORK.md is the code-level ledger; this is the product-level one. An entry leaves the register when upstream makes it unnecessary or J5 stops needing it, and its History line says so. Gaps in J5's mobile app aren't divergences: mobile is catching up to web as its own effort, and what it lacks is recorded there, not here.
+Every place J5 knowingly makes upstream's product behave differently, with the person's decision behind it. FORK.md is the code-level ledger; this is the product-level one. When upstream makes an entry unnecessary or J5 stops needing it, the entry moves to **Retired** at the end, keeping its ID and heading, with a line saying when and why, so references to it keep working. Gaps in J5's mobile app aren't divergences: mobile is catching up to web as its own effort, and what it lacks is recorded there, not here.
 
 Each entry has an ID ("divergence D7"), which never changes and is never reused. Every entry answers the same questions, in the same order:
 
@@ -66,7 +66,7 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Why:** J5 built its own versions of these tools, integrated with J5's model: `send_message` and Exchanges instead of raw send, `stop_agent` instead of interrupt, and `spawn_agent` and `propose_crew` instead of launch. Upstream's tools were more primitive and didn't meet J5's needs when this was decided. A raw send is communication the Squadron ledger can't see, so a reply that never comes stalls silently. Raw thread creation skips the Squadron home a spawn records. Hiding new upstream tools by default means each one is reviewed against J5's definitions before agents get it. The tools are hidden, not deleted, to keep the fork's edits small.
 
-**Consequences:** upstream's toolkit stays compiled but unused. Upstream's tools keep evolving, so J5 should periodically re-evaluate them and consider merging its tools with upstream's rather than carrying parallel versions. Each advance checks the admitted tool list, which a test pins, and re-reads upstream's descriptions. Open gaps: `t3_worktree_handoff` still points agents at a tool they can't use. `t3_pending_request_respond` and `t3_thread_configure` act on other threads without J5's authority checks.
+**Consequences:** upstream's toolkit stays compiled but unused. Upstream's tools keep evolving, so J5 should periodically re-evaluate them and consider merging its tools with upstream's rather than carrying parallel versions. Each advance checks the admitted tool list, which a test pins, and re-reads upstream's descriptions. Open gaps: `t3_worktree_handoff` still points agents at a tool they can't use. `t3_pending_request_respond` answers another thread's pending approval or question without J5's authority checks (#345).
 
 **Decided:** Jackson, 2026-08-29 (substrate session). Omitting bulk creation was a Director disposition (an agent role), 2026-08-31. Withdrawing `t3_thread_wait` was Bryant's decision, 2026-09-14. `delegate_task` returned after Jackson's review of 2026-09-13. Recorded in FORK.md cases 2, 4 and 38.
 
@@ -100,7 +100,7 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **J5:** once a Stop is committed, a steer accepted before it doesn't start a new turn.
 
-**Why:** J5 agents message Astra peers as steers (D4). Without this, a peer's message right after the person pressed Stop can wake the agent they just stopped.
+**Why:** J5 agents message Astra peers as steers (D4). Without this, a peer's message right after the person pressed Stop can wake the agent they just stopped. This is ordinary fleet work, not an edge case: stopping an agent while its peers are still messaging it happens routinely, and every such message would restart it.
 
 **Consequences:** it's a temporary patch, to be removed once upstream proves equivalent behavior. A known gap remains: a steer that races Stop by milliseconds still starts a new turn (#293). Checked on 2026-09-28, it is still needed: upstream's `TODO(interrupt-hardening)` is unresolved, and a late steer still becomes a follow-up turn. Upstream's newer hold-queue-on-interrupt covers queued messages only. **J5 wants to drop this patch** once upstream resolves that TODO and honors a committed Stop for late steers.
 
@@ -110,7 +110,7 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Upstream:** when resuming a provider conversation fails for any reason, V2 starts a new one, primed with a summary.
 
-**J5:** a new conversation starts only when the provider reports the old one is gone, and the thread says so visibly. Any other resume failure is a visible error.
+**J5:** a new conversation starts only when the provider reports the old one is gone, and the thread says so visibly. Any other resume failure is a visible error. The one other fresh start is deliberate: when an earlier history delivery to the provider is uncertain, J5 skips resume and starts fresh rather than risk a duplicated or half-applied history.
 
 **Why:** a provider's native history can't be rebuilt from the app's transcript. A silent fresh start hands the agent a stranger's memory without anyone noticing. That happened once, after a Codex schema change, and the transfer recorded no error.
 
@@ -272,6 +272,8 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Why:** Jackson typed `@scout` expecting a persona and got files (2026-09-13); Bryant made the picker list saved personas (2026-09-14). A persona's route is fixed and enforced by the server, so a thread's model picker would only produce failed sends. No reason is recorded for listing personas ahead of threads.
 
+**Consequences:** the `@` menu and the controls row are edits to upstream's composer, one small addition per client. Each advance checks upstream's mention ordering and its composer controls, and personas route only to Codex and Claude.
+
 **Decided:** the persona picker is Bryant's request (2026-09-08) and fix (2026-09-14). The persona model lock comes from Bryant's persona stack, whose scope was approved on 2026-09-08. The ordering against threads arrived in the 2026-09-24 advance (PR #262). Jackson approved it on 2026-09-28. Recorded in FORK.md's saved-agent mentions section and its PR #75–#86 table.
 
 ### Storage, install, and identity
@@ -308,27 +310,29 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Why:** during a dogfood test, an agent ran `pair` in its worktree before its server was up, and the fallback minted a real pairing token against the live install (#70). The isolation work (D19) exists so an isolated environment can never reach shared state by accident. A short bounded retry covers a server that hasn't finished starting (#67).
 
-**Decided:** introduced in PR #94 (2026-09-04). Jackson approved it on 2026-09-28, closing the carry-or-drop question FORK.md's 2026-09-06 review left open.
+**Consequences:** the retry can be dropped if upstream gives the CLI a way to tell a server that is starting from one that isn't there. Each advance checks `pair`'s home resolution.
+
+**Decided:** introduced in PR #94 (2026-09-04). Jackson approved it on 2026-09-28, closing the carry-or-drop question FORK.md's 2026-09-06 review left open. Recorded in FORK.md's final upstream-file review ("Pair discovery isolation and activation retry") and its `pair.ts` rows.
 
 ### Awaiting a decision
 
 These already diverge on `j5/main`, but no human ruling is on record. Each landed as an implementer's call inside a merged PR. The person rules on each one; an approved entry moves up into its section, and a rejected one becomes a fix.
 
-#### D22. Agent-spawned threads are hidden from the sidebar
+#### D22. Agent-spawned threads move under their spawner in the sidebar
 
 **Upstream:** every thread except provider subagents appears in the sidebar.
 
-**J5:** every agent-spawned Peer Agent is hidden unless pinned. Crew seats and Peer Agents are both hidden.
+**J5:** an agent-spawned Peer Agent, Crew seats included, leaves the top level of the sidebar unless pinned, and appears in the expander under the agent that spawned it.
 
 **Why:** once agents spawn agents, a flat list stops telling the truth about what is running (Bryant, #205).
 
-**Consequences:** this contradicts the Fleet page definition (AC3: nothing is hidden from the sidebar because of how it was created). Jackson set aside the original rule (SB5) on 2026-09-04, because he has the Director spawn most of the agents he talks to. The Crews definition hides only Crew members. A hidden peer can only be shown again by pinning it from its own thread.
+**Consequences:** this differs from the Fleet page definition (AC3: nothing is hidden from the sidebar because of how it was created), though the agent stays one click away in the expander rather than hidden. Jackson set aside the original rule (SB5) on 2026-09-04, because he has the Director spawn most of the agents he talks to. The Crews definition hides only Crew members. Pinning a spawned agent from its own thread brings it back to the top level.
 
 **Status:** reintroduced in PR #149 (Bryant), approved in review on 2026-09-21 without a ruling on this point. Depends on the human-contact spectrum discussion (#336): which agents belong in the sidebar follows from where they sit on that spectrum.
 
 ### To be removed
 
-The person ruled against these. They still diverge on `j5/main` until their fix lands, and then leave the register.
+The person ruled against these. They still diverge on `j5/main` until their fix lands, and then move to Retired.
 
 #### D23. A committed Stop also blocks usage-limit auto-resume
 
@@ -351,6 +355,10 @@ The person ruled against these. They still diverge on `j5/main` until their fix 
 **Consequences:** D4's Astra exception checks the resolved name, so removing the aliases needs checking against it.
 
 **Status:** introduced in PR #101 (2026-09-04), merged on the Director's authority. To be removed in favor of upstream (#342). Recorded in FORK.md case 32.
+
+### Retired
+
+None yet.
 
 ## History
 
