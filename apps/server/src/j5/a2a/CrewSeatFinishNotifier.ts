@@ -23,7 +23,7 @@ import {
   agentHandoffLogicalPath,
 } from "../agents/agentPersonaArtifacts.ts";
 import { makeAgentPersonaLibrary } from "../agents/agentPersonaLibrary.ts";
-import { ArtifactWorkspace } from "../artifacts/ArtifactWorkspace.ts";
+import { ArtifactWorkspace, type ArtifactWorkspaceError } from "../artifacts/ArtifactWorkspace.ts";
 import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewInstanceService.ts";
 import { CrewLaunchReporter } from "./CrewLaunchReporter.ts";
 import { CrewCaptainArchiveCascade } from "./CrewCaptainArchiveCascade.ts";
@@ -157,8 +157,17 @@ export type SeatHandoffFact =
       readonly kind: string;
       readonly path: string;
       readonly body: string | null;
+      /** Over the artifact read limit: it exists and is read by path, never inlined. */
+      readonly tooLarge?: true;
     }
   | { readonly status: "missing"; readonly kind: string; readonly path: string }
+  /** Something is at the path but it can never be a handoff; the reason says why. */
+  | {
+      readonly status: "unavailable";
+      readonly kind: string;
+      readonly path: string;
+      readonly reason: string;
+    }
   | { readonly status: "none declared" };
 
 /**
@@ -183,7 +192,9 @@ export const seatFinishedNoticeText = (input: {
       ? "handoff: none declared"
       : input.handoff.status === "missing"
         ? `handoff: missing (${input.handoff.kind})\nartifact: ${agentHandoffLogicalPath(input.handoff.path)}`
-        : `handoff: written (${input.handoff.kind})\nartifact: ${agentHandoffLogicalPath(input.handoff.path)}\nhandoff_chars: ${input.handoff.body?.length ?? 0}\nhandoff_digest: ${input.handoff.body === null ? "binary" : handoffDigest(input.handoff.body)}`;
+        : input.handoff.status === "unavailable"
+          ? `handoff: unavailable (${input.handoff.kind})\nartifact: ${agentHandoffLogicalPath(input.handoff.path)}\nhandoff_reason: ${input.handoff.reason}`
+          : `handoff: written (${input.handoff.kind})\nartifact: ${agentHandoffLogicalPath(input.handoff.path)}${input.handoff.tooLarge === true ? "\nhandoff_size: over the read limit" : `\nhandoff_chars: ${input.handoff.body?.length ?? 0}\nhandoff_digest: ${input.handoff.body === null ? "binary" : handoffDigest(input.handoff.body)}`}`;
   // The outcome first: a seat that died read as "finished, forgot its handoff" when the failure
   // was one line among the handoff lines (Jackson's dogfood, 2026-09-17).
   const failureLine =
@@ -218,11 +229,17 @@ const makeLayer = (daemon: boolean) =>
         return Number(rows[0]?.count ?? 0);
       });
 
-      /** Where the seat's declared handoff stands: the file itself is the fact, not the store. */
+      /**
+       * Where the seat's declared handoff stands: the file itself is the fact, not the store. A
+       * read that found no file is "missing"; one too large to inline is still "written", read by
+       * path; a directory or a link out of the artifacts directory is "unavailable" with why.
+       * Those are facts that never change on retry, so the finish notice always goes out. Only a
+       * real I/O failure fails the notice, for the next finish or the boot sweep to retry.
+       */
       const handoffFact = Effect.fn("j5.a2a.crewSeatFinish.handoffFact")(function* (
         projection: OrchestrationV2ThreadProjection,
         kind: string | null,
-      ): Effect.fn.Return<SeatHandoffFact, never, never> {
+      ): Effect.fn.Return<SeatHandoffFact, ArtifactWorkspaceError, never> {
         const assignment = projection.thread.agentPersonaAssignment;
         if (kind === null || assignment === undefined) return { status: "none declared" } as const;
         const path = agentHandoffArtifactPath({
@@ -235,13 +252,23 @@ const makeLayer = (daemon: boolean) =>
         // known path is a full directory walk on every seat finish.
         const content = yield* Effect.result(workspace.read({ projectId, relativePath: path }));
         if (Result.isFailure(content)) {
-          if (content.failure.reason !== "not_found") {
-            yield* Effect.logWarning("J5 crew seat notifier could not read a seat handoff", {
-              path,
-              cause: content.failure,
-            });
+          switch (content.failure.reason) {
+            case "not_found":
+              return { status: "missing", kind, path };
+            case "too_large":
+              return { status: "written", kind, path, body: null, tooLarge: true };
+            case "not_a_file":
+              return { status: "unavailable", kind, path, reason: "not a regular file" };
+            case "outside_root":
+              return {
+                status: "unavailable",
+                kind,
+                path,
+                reason: "link leaves the artifacts directory",
+              };
+            default:
+              return yield* content.failure;
           }
-          return { status: "missing", kind, path };
         }
         return {
           status: "written",
@@ -340,8 +367,8 @@ const makeLayer = (daemon: boolean) =>
             ? null
             : ((yield* agents.readSnapshot(assignment)).outputArtifact ?? null);
         const handoff = yield* handoffFact(projection, owedKind);
-        // A failed dispatch is logged. Retry is passive: a later finish or the boot sweep;
-        // there is no guarantee of prompt delivery while the seat stays idle.
+        // A failed dispatch or an unreadable handoff is logged. Retry is passive: a later finish
+        // or the boot sweep; there is no guarantee of prompt delivery while the seat stays idle.
         yield* notifyCaptain(instance, membership.seatName, projection, run, handoff);
         return threadId;
       });

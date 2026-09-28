@@ -20,6 +20,7 @@ import Migration0016 from "./migrations/016_CrewProposalClaims.ts";
 import Migration0017 from "./migrations/017_EnsureCustomCrewSeats.ts";
 import Migration0018 from "./migrations/018_AgentLedPlaybooks.ts";
 import Migration0019 from "./migrations/019_PlaybookRunMaintenance.ts";
+import Migration0020 from "./migrations/020_CrewAlertExchanges.ts";
 
 export const J5_A2A_MIGRATIONS_TABLE = "j5_a2a_migrations";
 
@@ -49,6 +50,7 @@ export const migrationEntries = [
   [17, "EnsureCustomCrewSeats", Migration0017],
   [18, "AgentLedPlaybooks", Migration0018],
   [19, "PlaybookRunMaintenance", Migration0019],
+  [20, "CrewAlertExchanges", Migration0020],
 ] as const;
 
 const makeMigrationLoader = (throughId?: number) =>

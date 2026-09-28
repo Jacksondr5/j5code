@@ -32,12 +32,14 @@ export interface SeatStartFailure {
 export type SeatHandoff =
   | { readonly status: "none declared" }
   | {
-      readonly status: "written" | "missing";
+      readonly status: "written" | "missing" | "unavailable";
       readonly kind: string;
       /** The logical path the notice names, `artifacts/handoffs/...`. */
       readonly artifactPath: string | null;
       /** The handoff text when the notice carried it inline. */
       readonly body: string | null;
+      /** Why an unavailable handoff can never be read, as the notice words it. */
+      readonly reason: string | null;
     };
 
 export interface FinishedSeat {
@@ -167,7 +169,7 @@ const parseGate = (text: string): CrewNoticePresentation | null => {
 const SEAT_OPEN = "<j5_seat_finished>";
 const SEAT_BLOCK = /^<j5_seat_finished>\n([\s\S]*?)\n<\/j5_seat_finished>([\s\S]*)$/;
 const HANDOFF_BODY = /<handoff_body>\n([\s\S]*?)\n<\/handoff_body>/;
-const HANDOFF_FIELD = /^(written|missing) \((.+)\)$/;
+const HANDOFF_FIELD = /^(written|missing|unavailable) \((.+)\)$/;
 
 const parseSeatSection = (section: string): FinishedSeat | null => {
   const match = SEAT_BLOCK.exec(section);
@@ -188,9 +190,10 @@ const parseSeatSection = (section: string): FinishedSeat | null => {
     if (parsed === null) return null;
     const bodyMatch = HANDOFF_BODY.exec(match[2]!);
     handoff = {
-      status: parsed[1] as "written" | "missing",
+      status: parsed[1] as "written" | "missing" | "unavailable",
       kind: parsed[2]!,
       artifactPath: field(block, "artifact"),
+      reason: field(block, "handoff_reason"),
       body:
         bodyMatch === null
           ? null
