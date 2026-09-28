@@ -306,7 +306,7 @@ export const J5StopCrewResult = Schema.Struct({
     Schema.Struct({
       seat: NonEmptyString,
       participant_id: ParticipantId,
-      result: Schema.Literals(["interrupt_requested", "already_idle", "archived"]),
+      result: Schema.Literals(["interrupt_requested", "already_idle", "archived", "never_created"]),
     }),
   ),
 });
@@ -346,7 +346,8 @@ export const J5ArchiveCrewResult = Schema.Struct({
     Schema.Struct({
       seat: NonEmptyString,
       participant_id: ParticipantId,
-      result: J5ArchiveResult,
+      // never_created: the seat's thread never came to exist, so the unit retired past it.
+      result: Schema.Literals(["archived", "already_archived", "never_created"]),
     }),
   ),
 });

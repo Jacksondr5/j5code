@@ -51,6 +51,26 @@ describe("Squadron directory across environments", () => {
     ]);
   });
 
+  it("sorts Squadrons by name across environments", () => {
+    const named = (id: string, name: string): ManagedSquadron => ({
+      squadron: { id, name, createdAt: "2026-08-30T00:00:00Z" },
+      projectIds: [],
+    });
+    const result = mergeSquadronSources({
+      isReady: true,
+      sources: [
+        source("primary", [named("s:tm", "Tokenmaxxer"), named("s:j5", "J5 Code")]),
+        source("remote", [named("s:oo", "one offs"), named("s:tm2", "Tokenmaxxer")]),
+      ],
+    });
+    expect(result.squadrons.map((entry) => [entry.squadron.name, entry.environmentId])).toEqual([
+      ["J5 Code", "primary"],
+      ["one offs", "remote"],
+      ["Tokenmaxxer", "primary"],
+      ["Tokenmaxxer", "remote"],
+    ]);
+  });
+
   it("does not declare the only loaded Squadron to be the only Squadron while a source is pending", () => {
     const result = mergeSquadronSources({
       isReady: true,

@@ -303,8 +303,9 @@ const findForegroundServer = Effect.fn("cli.update.find_foreground_server")(func
 
 /**
  * J5: whether a process's `/proc/<pid>/cgroup` places it in J5's service unit,
- * or in the pre-0.0.43 J5 unit (`t3code.service`). Only called for the pid
- * recorded in the J5 home, so the old name cannot be an installed T3 Code.
+ * or in the npm-era (0.0.43 and earlier) J5 unit (`t3code.service`). Only
+ * called for the pid recorded in the J5 home, so the old name cannot be an
+ * installed T3 Code.
  */
 export function isBootServiceCgroup(cgroup: string): boolean {
   return /\/(j5code|t3code)\.service(\/|$)/m.test(cgroup);
@@ -420,7 +421,7 @@ const runUpdate = Effect.fn("cli.update.run")(function* (input: {
     status.installedBaseDir !== undefined &&
     path.resolve(status.installedBaseDir) === path.resolve(input.baseDir);
   const serviceInstalled = status.supported && status.installed && servesThisHome;
-  // J5: the pre-0.0.43 J5 unit supervises its server too; it is not "started by hand".
+  // J5: the npm-era (0.0.43 and earlier) J5 unit supervises its server too; it is not "started by hand".
   const legacyServicePresent = status.problems?.includes("legacy-service-present") === true;
   const foreground = yield* findForegroundServer({
     serverRuntimeStatePath: input.serverRuntimeStatePath,

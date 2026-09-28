@@ -11,12 +11,18 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
 
+import { OrchestratorProjectionError } from "../../orchestration-v2/Orchestrator.ts";
+import {
+  ProjectionStoreReadError,
+  ProjectionStoreThreadNotFoundError,
+} from "../../orchestration-v2/ProjectionStore.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import {
   AgentCrewInstanceService,
   layer as crewInstanceLayer,
 } from "./AgentCrewInstanceService.ts";
+import { A2AArchiveFacts } from "./ArchiveFactsService.ts";
 import { CrewStopService, layer as crewStopLayer } from "./CrewStopService.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
@@ -103,6 +109,8 @@ it.effect("interrupts only running seats, for the Captain or a person, and nobod
             ),
         }),
       ),
+      // Every seat here has a thread, so no home is read.
+      Layer.provideMerge(Layer.mock(A2AArchiveFacts)({})),
       Layer.provideMerge(Layer.succeedContext(context)),
     );
     yield* Effect.gen(function* () {
@@ -170,5 +178,129 @@ it.effect("interrupts only running seats, for the Captain or a person, and nobod
         .pipe(Effect.flip);
       assert.equal(missing._tag, "CrewStopNotFoundError");
     }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
+/**
+ * A Crew whose first seat's row was recorded but whose thread never came to exist, ahead of a
+ * seat with a running turn. `ghost` reads as the test says: missing (not-found with no home),
+ * unreadable (the store fails), or homed (a home with no thread behind it).
+ */
+const ghostFixture = (ghost: "missing" | "unreadable" | "homed") =>
+  Effect.gen(function* () {
+    const ghostThread = ThreadId.make("thread:ghost");
+    const context = yield* Layer.build(
+      Layer.mergeAll(ledgerLayer, crewInstanceLayer).pipe(
+        Layer.provideMerge(NodeSqliteClient.layer({ filename: ":memory:" })),
+      ),
+    );
+    yield* runJ5A2AMigrations().pipe(Effect.provide(context));
+    yield* Context.get(context, A2ALedger).createSquadron({
+      squadron: { id: squadronId, name: "Stop", createdAt: DateTime.formatIso(createdAt) },
+    });
+    yield* Context.get(context, AgentCrewInstanceService).record({
+      id: "crew:ghost",
+      squadronId,
+      captainParticipantId: participantIdForThread(captainThread),
+      captainThreadId: captainThread,
+      displayName: "Ghost Crew",
+      brief: "Work.",
+      createdAt: DateTime.formatIso(createdAt),
+      members: [ghostThread, builderThread].map((threadId) => ({
+        seatName: threadId === ghostThread ? "ghost" : "builder",
+        agentId: "builder",
+        participantId: participantIdForThread(threadId),
+        threadId,
+        reason: null,
+      })),
+    });
+    const interrupts = yield* Ref.make<ReadonlyArray<ThreadId>>([]);
+    const layer = crewStopLayer.pipe(
+      Layer.provideMerge(
+        Layer.mock(ThreadManagementService)({
+          getThreadProjection: (threadId) =>
+            threadId !== ghostThread
+              ? Effect.succeed(projection(threadId))
+              : Effect.fail(
+                  new OrchestratorProjectionError({
+                    threadId,
+                    cause:
+                      ghost === "unreadable"
+                        ? new ProjectionStoreReadError({ threadId })
+                        : new ProjectionStoreThreadNotFoundError({ threadId }),
+                  }),
+                ),
+          interruptThread: (input) =>
+            Ref.update(interrupts, (items) => [...items, input.threadId]).pipe(
+              Effect.as({ type: "interrupt_requested" } as never),
+            ),
+        }),
+      ),
+      Layer.provideMerge(
+        Layer.mock(A2AArchiveFacts)({
+          readForThread: (threadId) =>
+            Effect.succeed(
+              ghost === "homed"
+                ? {
+                    state: "registered",
+                    threadId,
+                    squadronId,
+                    participantId: participantIdForThread(threadId),
+                    retired: false,
+                    archived: false,
+                    openExchanges: [],
+                    placementSubtree: { state: "none" },
+                  }
+                : {
+                    state: "not-an-a2a-participant",
+                    threadId,
+                    openExchanges: [],
+                    placementSubtree: { state: "not-applicable" },
+                  },
+            ),
+        }),
+      ),
+      Layer.provideMerge(Layer.succeedContext(context)),
+    );
+    const stop = CrewStopService.pipe(
+      Effect.flatMap((service) =>
+        service.stop({
+          callerParticipantId: null,
+          squadronId: null,
+          crewInstanceId: "crew:ghost",
+          commandIds: (seatName) => ({ interruptCommandId: CommandId.make(`stop:${seatName}`) }),
+        }),
+      ),
+      Effect.provide(layer),
+    );
+    return { stop, interrupts };
+  });
+
+it.effect(
+  "a seat that was never created ahead of a running seat still lets the stop reach it",
+  () =>
+    Effect.gen(function* () {
+      const { stop, interrupts } = yield* ghostFixture("missing");
+      const stopped = yield* stop;
+      assert.deepStrictEqual(
+        stopped.members.map(({ seatName, result }) => [seatName, result]),
+        [
+          ["ghost", "never_created"],
+          ["builder", "interrupt_requested"],
+        ],
+      );
+      assert.deepStrictEqual(yield* Ref.get(interrupts), [builderThread]);
+    }).pipe(Effect.scoped),
+);
+
+it.effect("a seat the store cannot read, or a home with no thread, fails the stop loudly", () =>
+  Effect.gen(function* () {
+    for (const ghost of ["unreadable", "homed"] as const) {
+      const { stop, interrupts } = yield* ghostFixture(ghost);
+      const failure = yield* stop.pipe(Effect.flip);
+      assert.equal(failure._tag, "CrewStopOperationError", ghost);
+      assert.include(failure.message, "seat ghost", ghost);
+      assert.lengthOf(yield* Ref.get(interrupts), 0, ghost);
+    }
   }).pipe(Effect.scoped),
 );

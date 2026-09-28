@@ -241,6 +241,9 @@ const fixture = Effect.gen(function* () {
   // Seat threads that never came to exist (a not-found), and ones whose read the store cannot answer.
   const missingThreads = yield* Ref.make<ReadonlySet<string>>(new Set());
   const unreadableThreads = yield* Ref.make<ReadonlySet<string>>(new Set());
+  // Threads the person archived, and ones they deleted (the store keeps the row, stamped).
+  const archivedThreads = yield* Ref.make<ReadonlySet<string>>(new Set());
+  const deletedThreads = yield* Ref.make<ReadonlySet<string>>(new Set());
   // An approval is told to the Captain by the launch report, once its seats have started; here the
   // reporter records which proposals it was handed.
   const watched = yield* Ref.make<ReadonlyArray<string>>([]);
@@ -293,6 +296,8 @@ const fixture = Effect.gen(function* () {
             return {
               thread: {
                 ...thread(threadId),
+                archivedAt: (yield* Ref.get(archivedThreads)).has(threadId) ? createdAt : null,
+                deletedAt: (yield* Ref.get(deletedThreads)).has(threadId) ? createdAt : null,
                 modelSelection: {
                   ...thread(threadId).modelSelection,
                   model: yield* Ref.get(captainModel),
@@ -329,6 +334,8 @@ const fixture = Effect.gen(function* () {
     archiveFailures,
     missingThreads,
     unreadableThreads,
+    archivedThreads,
+    deletedThreads,
     noticeFailure,
     completeFailure,
     attachFailure,
@@ -1383,6 +1390,94 @@ it.effect(
         assert.notEqual(after.status, "approved");
         assert.isNull(after.crewInstanceId);
         assert.deepStrictEqual(yield* Ref.get(watched), []);
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
+);
+
+it.effect("a roster left open while its Captain was archived is refused, and still declines", () =>
+  Effect.gen(function* () {
+    const { layer, archivedThreads, watched } = yield* fixture;
+    yield* Effect.gen(function* () {
+      const gate = yield* CrewProposalService;
+      const crews = yield* AgentCrewInstanceService;
+      const opened = yield* gate.propose({
+        requestKey: "archived-captain",
+        captain,
+        displayName: "Late Crew",
+        brief: "Pick up after the Captain.",
+        seats: [{ seat: "builder", agentId: "builder", reason: "Builds" }],
+      });
+      yield* Ref.set(archivedThreads, new Set([captainThread]));
+
+      // The card's preview and its approval both meet the refusal, naming the Captain.
+      const previewed = yield* gate.preview({ proposalId: opened.proposal.id }).pipe(Effect.flip);
+      assert.equal(previewed._tag, "CrewProposalRequestError");
+      assert.include(previewed.message, `Captain Thread ${captainThread} is archived`);
+      const refused = yield* gate
+        .resolve({ proposalId: opened.proposal.id, decision: "approve", approvalToken: "stale" })
+        .pipe(Effect.flip);
+      assert.equal(refused._tag, "CrewProposalRequestError");
+      assert.include(refused.message, "Unarchive the Captain");
+      assert.isNull(yield* crews.read(`crew:archived-captain`));
+      assert.lengthOf(yield* Ref.get(watched), 0);
+
+      const declined = yield* gate.resolve({ proposalId: opened.proposal.id, decision: "decline" });
+      assert.equal(declined.proposal.status, "declined");
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "a roster or addition left open while its Captain was deleted is refused, and declines untold",
+  () =>
+    Effect.gen(function* () {
+      const { layer, deletedThreads, missingThreads, notices } = yield* fixture;
+      yield* Effect.gen(function* () {
+        const gate = withPreview(yield* CrewProposalService);
+        const crews = yield* AgentCrewInstanceService;
+        const instance = yield* seedCrew(gate, "deleted-captain-crew", 1);
+        const roster = yield* gate.propose({
+          requestKey: "deleted-captain",
+          captain,
+          displayName: "Orphan Crew",
+          brief: "Nobody commands this.",
+          seats: [{ seat: "builder", agentId: "builder", reason: "Builds" }],
+        });
+        const addition = yield* gate.requestMember({
+          requestKey: "deleted-captain-add",
+          captain,
+          crewInstanceId: instance.id,
+          seat: { seat: "critic", agentId: "critic", reason: "Reviews" },
+          brief: null,
+        });
+        yield* Ref.set(deletedThreads, new Set([captainThread]));
+        const toldBefore = (yield* Ref.get(notices)).length;
+
+        for (const proposalId of [roster.proposal.id, addition.proposal.id]) {
+          const refused = yield* gate
+            .resolve({ proposalId, decision: "approve" })
+            .pipe(Effect.flip);
+          assert.equal(refused._tag, "CrewProposalRequestError");
+          assert.include(refused.message, `Captain Thread ${captainThread} has been deleted`);
+        }
+        assert.isNull(yield* crews.read(`crew:deleted-captain`));
+        assert.deepStrictEqual(
+          (yield* crews.read(instance.id))!.members.map((member) => member.seatName),
+          ["s0"],
+        );
+
+        // A Captain the store no longer holds at all reads the same way.
+        yield* Ref.set(missingThreads, new Set([captainThread]));
+        const gone = yield* gate
+          .resolve({ proposalId: roster.proposal.id, decision: "approve" })
+          .pipe(Effect.flip);
+        assert.include(gone.message, `Captain ${captainId} has been deleted`);
+
+        for (const proposalId of [roster.proposal.id, addition.proposal.id]) {
+          const declined = yield* gate.resolve({ proposalId, decision: "decline" });
+          assert.equal(declined.proposal.status, "declined");
+        }
+        assert.lengthOf(yield* Ref.get(notices), toldBefore);
       }).pipe(Effect.provide(layer));
     }).pipe(Effect.scoped),
 );
