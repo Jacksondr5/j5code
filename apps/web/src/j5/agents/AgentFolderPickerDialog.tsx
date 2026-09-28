@@ -30,7 +30,7 @@ function browsePlatform(os: string | null | undefined): string {
 }
 
 /**
- * Pick a folder, or a persona YAML file in `file` mode, on the environment's machine, not the
+ * Pick a folder, or a YAML file in `file` mode, on the environment's machine, not the
  * browser's, by walking the same server directory listing the add-project flow uses. The chosen
  * path is resolved and absolute, so `~` never reaches the library configuration or an import.
  */
@@ -92,7 +92,7 @@ export function AgentFolderPickerDialog(props: {
           <DialogTitle>{props.title}</DialogTitle>
           <DialogDescription>
             {pickFile
-              ? `Files on ${props.environmentLabel}. Open folders to browse, then choose a YAML persona file.`
+              ? `Files on ${props.environmentLabel}. Open folders to browse, then choose a YAML file.`
               : `Folders on ${props.environmentLabel}. Open a folder to browse into it, then choose it.`}
           </DialogDescription>
         </DialogHeader>
