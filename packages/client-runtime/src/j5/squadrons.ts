@@ -14,17 +14,26 @@ export interface SquadronDirectoryState {
   readonly sources: J5ReadSources<ReadonlyArray<ManagedSquadron>>["sources"];
 }
 
+/** Squadrons read as one alphabetical list; the server only breaks ties between same-named Squadrons. */
 export function mergeSquadronSources(
   input: J5ReadSources<ReadonlyArray<ManagedSquadron>>,
 ): SquadronDirectoryState {
-  const squadrons = input.sources.flatMap((source) =>
-    (source.data ?? []).map((squadron) => ({
-      ...squadron,
-      environmentId: source.environmentId,
-      environmentLabel: source.environmentLabel,
-      available: source.status === "ready" && source.canOperate,
-    })),
-  );
+  const squadrons = input.sources
+    .flatMap((source) =>
+      (source.data ?? []).map((squadron) => ({
+        ...squadron,
+        environmentId: source.environmentId,
+        environmentLabel: source.environmentLabel,
+        available: source.status === "ready" && source.canOperate,
+      })),
+    )
+    .sort(
+      (left, right) =>
+        left.squadron.name.localeCompare(right.squadron.name, undefined, {
+          sensitivity: "base",
+          numeric: true,
+        }) || left.environmentLabel.localeCompare(right.environmentLabel),
+    );
   const complete =
     input.isReady &&
     input.sources.every((source) => source.status === "ready" || source.status === "unsupported");

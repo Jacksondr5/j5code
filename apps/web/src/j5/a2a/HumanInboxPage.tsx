@@ -25,12 +25,15 @@ import { Button } from "../../components/ui/button";
 import { ScrollArea } from "../../components/ui/scroll-area";
 import { SidebarInset } from "../../components/ui/sidebar";
 import { Textarea } from "../../components/ui/textarea";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip";
 import { isElectron } from "../../env";
 import { cn } from "../../lib/utils";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { formatElapsedDurationLabel } from "../../timestampFormat";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "../../workspaceTitlebar";
 import { answerHumanExchange } from "./humanInboxClient";
+import { useScopedParticipantLabels } from "./ParticipantIdentitiesClient";
+import { presentParticipantIdentity } from "./ParticipantIdentity";
 import { CrewProposalCard } from "../crew/CrewProposalCard";
 import { inboxCrewRequests } from "../crew/crewProposals.logic";
 import {
@@ -58,6 +61,32 @@ interface HumanInboxAnswerAttempt {
 }
 
 type HumanInboxAnswers = Readonly<Record<string, string>>;
+type SenderLabels = ReadonlyMap<EnvironmentId, ReadonlyMap<string, string>>;
+
+const noLabels: ReadonlyMap<string, string> = new Map();
+
+function SenderName({
+  item,
+  senderLabels,
+  className,
+}: {
+  readonly item: HumanInboxItem;
+  readonly senderLabels: SenderLabels;
+  readonly className?: string;
+}) {
+  const sender = presentParticipantIdentity({
+    participantId: item.senderId,
+    participantLabels: senderLabels.get(item.environmentId) ?? noLabels,
+  });
+  if (sender.tooltipParticipantId === null)
+    return <span className={className}>{sender.label}</span>;
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<span className={className} />}>{sender.label}</TooltipTrigger>
+      <TooltipPopup>{sender.tooltipParticipantId}</TooltipPopup>
+    </Tooltip>
+  );
+}
 
 const urgencyPresentation = {
   blocking: { label: "Blocking", variant: "destructive" as const },
@@ -175,10 +204,12 @@ function OpenInboxItem({
   pendingExchangeId,
   setAnswers,
   onOpenThread,
+  senderLabels,
   showEnvironment,
 }: {
   readonly item: HumanInboxItem;
   readonly answer: (item: HumanInboxItem) => void;
+  readonly senderLabels: SenderLabels;
   readonly answerText: string;
   readonly pendingExchangeId: string | null;
   readonly showEnvironment: boolean;
@@ -196,9 +227,11 @@ function OpenInboxItem({
           </Badge>
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-              <span className="max-w-full truncate font-medium text-foreground/80">
-                {item.senderId}
-              </span>
+              <SenderName
+                className="max-w-full truncate font-medium text-foreground/80"
+                item={item}
+                senderLabels={senderLabels}
+              />
               <span aria-hidden>·</span>
               <span className="truncate">{item.squadronName}</span>
               {showEnvironment || !item.connected ? (
@@ -271,10 +304,12 @@ function OpenInboxItem({
 function AnsweredShelf({
   items,
   onOpenThread,
+  senderLabels,
   showEnvironment,
 }: {
   readonly items: ReadonlyArray<HumanInboxItem>;
   readonly onOpenThread: (item: HumanInboxItem) => void;
+  readonly senderLabels: SenderLabels;
   readonly showEnvironment: boolean;
 }) {
   if (items.length === 0) return null;
@@ -299,7 +334,7 @@ function AnsweredShelf({
               <div className="min-w-0 flex-1">
                 <p className="break-words text-sm font-medium text-foreground/80">{item.intent}</p>
                 <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                  {item.senderId} · {item.squadronName}
+                  <SenderName item={item} senderLabels={senderLabels} /> · {item.squadronName}
                   {showEnvironment ? ` · ${item.environmentLabel}` : ""}
                   {` · ${formatAnsweredAgeLabel(answeredDuration)}`}
                 </p>
@@ -338,6 +373,13 @@ export function HumanInboxPage() {
   const items = useMemo(() => mergeHumanInboxSources(openSources), [openSources]);
   const answeredItems = useMemo(() => mergeHumanInboxSources(answeredSources), [answeredSources]);
   const showEnvironment = spansMultipleEnvironments([...items, ...answeredItems]);
+  const senderLabels = useScopedParticipantLabels(
+    [...items, ...answeredItems].map((item) => ({
+      environmentId: item.environmentId,
+      participantId: item.senderId,
+      connected: item.connected,
+    })),
+  );
   const [answers, setAnswers] = useState<HumanInboxAnswers>({});
   const [pendingExchangeId, setPendingExchangeId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -604,6 +646,7 @@ export function HumanInboxPage() {
                     key={scopedInboxItemKey(item)}
                     onOpenThread={openThread}
                     pendingExchangeId={pendingExchangeId}
+                    senderLabels={senderLabels}
                     setAnswers={setAnswers}
                     showEnvironment={showEnvironment}
                   />
@@ -614,6 +657,7 @@ export function HumanInboxPage() {
             <AnsweredShelf
               items={answeredItems}
               onOpenThread={openThread}
+              senderLabels={senderLabels}
               showEnvironment={showEnvironment}
             />
           </main>
