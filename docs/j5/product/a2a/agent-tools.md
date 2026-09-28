@@ -268,8 +268,11 @@ its first turn carries `<seat_obligation>` naming that exact path. The handoff g
 file when a run ends and reminds the seat once. When a seat finishes, the seat finish notifier posts
 one platform-composed `<j5_seat_finished>` notice per finished run into the Captain's thread: the seat,
 its participant and thread ids, the run status (completed, failed, or cancelled), and the handoff artifact
-as `written`, `missing`, or `none declared` with its path; a written handoff artifact up to 4,000
-characters rides inline, longer ones name the path for the project `read_artifact` tool. Ids
+as `written`, `missing`, `unavailable`, or `none declared` with its path; a written handoff artifact up to 4,000
+characters rides inline, longer ones name the path for the project `read_artifact` tool, and one over
+the artifact read limit is still `written`, named by path. `unavailable` means something is at the
+path that can never be a handoff (a directory, or a link out of the artifacts directory) and carries
+the reason; only a real read failure holds the notice back for a retry. Ids
 derive from the run, so a redelivered event cannot post twice. Read-only Codex and Claude personas have `write_artifact` pre-approved for this reason, and `delegate_task` with `task_status` and `task_cancel` beside it, because a Crew member refused `spawn_agent` is sent to provider-native Subagents and a verb the sandbox then rejects is no way out:
 handoff artifacts live in application storage, never in the sandboxed workspace. (Withdrawn on 2026-09-14:
 the 2026-09-10 `deliver_artifact` verb, its ledger table, and the crew-only `read_artifact` and

@@ -27,8 +27,15 @@ export class ArtifactWorkspaceError extends Schema.TaggedError<ArtifactWorkspace
   {
     operation: Schema.String,
     detail: Schema.String,
-    /** Set when the failure is the caller's target, not the workspace: routes map it to 404. */
-    reason: Schema.optional(Schema.Literal("not_found")),
+    /**
+     * Set when the failure is the caller's target, not the workspace: routes map `not_found` to
+     * 404. The others are deterministic facts about the target a reader can report as such: a
+     * file over `MAX_ARTIFACT_BYTES`, a path that is not a regular file, or a link that leaves
+     * the artifacts directory.
+     */
+    reason: Schema.optional(
+      Schema.Literals(["not_found", "too_large", "not_a_file", "outside_root"]),
+    ),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
@@ -458,6 +465,7 @@ export const layer = Layer.effect(
           return yield* new ArtifactWorkspaceError({
             operation: "read-artifact",
             detail: "Artifact links cannot leave the artifacts directory.",
+            reason: "outside_root",
           });
         }
         const info = yield* fileSystem
@@ -471,12 +479,14 @@ export const layer = Layer.effect(
           return yield* new ArtifactWorkspaceError({
             operation: "read-artifact",
             detail: "Only artifact files can be opened.",
+            reason: "not_a_file",
           });
         }
         if (Number(info.size) > MAX_ARTIFACT_BYTES) {
           return yield* new ArtifactWorkspaceError({
             operation: "read-artifact",
             detail: `This artifact is larger than the ${MAX_ARTIFACT_BYTES / 1024 / 1024} MB preview limit.`,
+            reason: "too_large",
           });
         }
         const bytes = yield* fileSystem

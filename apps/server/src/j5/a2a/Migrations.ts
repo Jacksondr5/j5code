@@ -20,6 +20,7 @@ import Migration0016 from "./migrations/016_CrewProposalClaims.ts";
 import Migration0017 from "./migrations/017_EnsureCustomCrewSeats.ts";
 import Migration0018 from "./migrations/018_AgentLedPlaybooks.ts";
 import Migration0019 from "./migrations/019_PlaybookRunMaintenance.ts";
+import Migration0020 from "./migrations/020_CrewAlertExchanges.ts";
 import Migration0021 from "./migrations/021_CrewProposalsResolveOnce.ts";
 import Migration0022 from "./migrations/022_CrewRetiredWithCaptain.ts";
 
@@ -51,8 +52,7 @@ export const migrationEntries = [
   [17, "EnsureCustomCrewSeats", Migration0017],
   [18, "AgentLedPlaybooks", Migration0018],
   [19, "PlaybookRunMaintenance", Migration0019],
-  // 20 is taken by the Crew alert exchanges change on another branch (#292); keep these in id
-  // order when both land, since the migrator skips every id at or below the latest applied.
+  [20, "CrewAlertExchanges", Migration0020],
   [21, "CrewProposalsResolveOnce", Migration0021],
   [22, "CrewRetiredWithCaptain", Migration0022],
 ] as const;
