@@ -377,6 +377,7 @@ export function HumanInboxPage() {
     [...items, ...answeredItems].map((item) => ({
       environmentId: item.environmentId,
       participantId: item.senderId,
+      connected: item.connected,
     })),
   );
   const [answers, setAnswers] = useState<HumanInboxAnswers>({});

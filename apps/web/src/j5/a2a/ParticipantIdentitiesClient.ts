@@ -30,15 +30,21 @@ export function useParticipantLabels(
 export interface ScopedParticipantRef {
   readonly environmentId: EnvironmentId;
   readonly participantId: string;
+  readonly connected: boolean;
 }
 
 /**
  * Labels for participants spread across environments, such as a merged inbox. Each environment
- * resolves its own participants. The previous labels stay visible while a changed set reloads.
+ * resolves its own participants once it is connected, so saved items shown while offline pick up
+ * names on reconnect. Previous labels stay visible while a changed set reloads.
  */
 export function useScopedParticipantLabels(refs: ReadonlyArray<ScopedParticipantRef>) {
   const key = Array.from(
-    new Set(refs.map((ref) => JSON.stringify([ref.environmentId, ref.participantId]))),
+    new Set(
+      refs
+        .filter((ref) => ref.connected)
+        .map((ref) => JSON.stringify([ref.environmentId, ref.participantId])),
+    ),
   )
     .sort()
     .join("\n");
@@ -62,7 +68,7 @@ export function useScopedParticipantLabels(refs: ReadonlyArray<ScopedParticipant
           [environmentId, await readParticipantLabels(environmentId, ids)] as const,
       ),
     ).then((entries) => {
-      if (active) setLabels(new Map(entries));
+      if (active) setLabels((current) => new Map([...current, ...entries]));
     });
     return () => {
       active = false;
