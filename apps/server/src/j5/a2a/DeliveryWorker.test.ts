@@ -47,6 +47,7 @@ import {
   SquadronId,
   ParticipantId,
   type AgentParticipant,
+  type MachineParticipant,
 } from "./contracts.ts";
 
 const timestamp = "2026-08-16T12:00:00.000Z";
@@ -59,6 +60,11 @@ const receiver: AgentParticipant = {
   kind: "agent",
   id: ParticipantId.make("agent:delivery-receiver"),
   threadId: ThreadId.make("thread:delivery-receiver"),
+};
+const watchdog: MachineParticipant = {
+  kind: "machine",
+  id: ParticipantId.make("machine:delivery-watchdog"),
+  name: "delivery-watchdog",
 };
 const person = {
   kind: "human" as const,
@@ -86,7 +92,7 @@ const makeTestLayer = (
 
 const join = Effect.fn("test.j5.a2a.delivery.join")(function* (
   squadronId: SquadronId,
-  participant: AgentParticipant,
+  participant: AgentParticipant | MachineParticipant,
   index: string,
 ) {
   yield* (yield* A2ALedger).append({
@@ -577,6 +583,41 @@ it.effect("keeps a message queued behind a held receiver queue undelivered until
       assert.lengthOf(new Set(inputs.map((input) => input.commandId)), 1);
       assert.equal(inputs[0]?.senderThreadId, sender.threadId);
     }).pipe(Effect.provide(Layer.mergeAll(database, ledger, send, transport, worker)));
+  }),
+);
+
+it.effect("delivers a machine's send to its agent receiver instead of withdrawing it", () =>
+  Effect.gen(function* () {
+    const delivered = yield* Ref.make<ReadonlyArray<ParticipantId>>([]);
+    const transport: A2ADeliveryTransportShape = {
+      deliverAgent: (input) => Ref.update(delivered, (senders) => [...senders, input.senderId]),
+      cancelAgent: () => Effect.succeed("cancelled" as const),
+      deliverHuman: () => Effect.void,
+    };
+    yield* Effect.gen(function* () {
+      yield* runJ5A2AMigrations();
+      const squadronId = SquadronId.make("squadron:delivery:machine");
+      yield* (yield* A2ALedger).createSquadron({
+        squadron: { id: squadronId, name: "Machine delivery", createdAt: timestamp },
+      });
+      yield* join(squadronId, receiver, "machine-receiver");
+      yield* join(squadronId, watchdog, "machine-sender");
+      const sent = yield* (yield* A2ASendService).sendAsMachine({
+        commandId: CommCommandId.make("command:delivery:machine"),
+        senderParticipantId: watchdog.id,
+        to: receiver.id,
+        message: "67 new signals",
+        acceptedAt: timestamp,
+      });
+
+      const delivery = yield* (yield* A2ADeliveryWorker).runOnce;
+      assert.equal(delivery?.state, "delivered");
+      assert.deepStrictEqual(yield* Ref.get(delivered), [watchdog.id]);
+      const state = yield* (yield* SqlClient.SqlClient)<{ readonly status: string }>`
+        SELECT status FROM j5_a2a_delivery WHERE message_id = ${sent.messageId}
+      `;
+      assert.deepStrictEqual(state, [{ status: "delivered" }]);
+    }).pipe(Effect.provide(makeTestLayer(transport)));
   }),
 );
 

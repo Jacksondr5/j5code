@@ -5,7 +5,7 @@ import type { ProcessRunOutput } from "../../processRunner.ts";
 import type { BootServiceStep } from "../bootService.ts";
 
 /**
- * J5 releases up to 0.0.42 installed their background service under
+ * J5 releases up to 0.0.43 (npm era) installed their background service under
  * upstream's names (`t3code.service`, `com.t3tools.t3code.service`), which
  * collide with an installed T3 Code for the same OS user. J5 now installs
  * `j5code.service` / `codes.jackson.j5code.service`, and `j5 service install`

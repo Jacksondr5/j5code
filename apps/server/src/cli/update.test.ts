@@ -19,7 +19,8 @@ import {
 } from "./update.ts";
 
 // J5: `j5 update` must recognise the server its service supervises, under the
-// current unit name and the pre-0.0.43 J5 one, and never a hand-started server.
+// current unit name and the npm-era (0.0.43 and earlier) J5 one, and never a
+// hand-started server.
 it("recognises the J5 service's own server by cgroup or launcher", () => {
   assert.isTrue(
     isBootServiceCgroup(
