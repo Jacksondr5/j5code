@@ -6,10 +6,8 @@ import {
   ProviderApprovalDecision,
   ProviderApprovalOption,
   ProviderRequestKind,
-  ProviderUserInputAnswers,
   RuntimeMode,
 } from "./providerPolicy.ts";
-import { OrchestrationV2UserInputQuestion } from "./orchestrationV2.ts";
 import { EnvironmentId, ProjectId, RuntimeRequestId, ThreadId } from "./baseSchemas.ts";
 
 export const ScopedSquadronRef = Schema.Struct({
@@ -478,11 +476,11 @@ export const J5_MACHINE_API_PATHS = {
 } as const;
 
 /**
- * A provider approval or question waiting on a live Crew's Captain or seat thread. Crew threads run
- * while the person is elsewhere, so these reach the Inbox instead of waiting unseen in the thread's
- * composer (Crews AC9). Read live from the thread's projection; `seat` is null on the Captain's
- * own thread. `responseCapability` is the provider's: a `not_resumable` request cannot be answered
- * from anywhere and is listed so a stalled thread is still visible.
+ * A provider approval waiting on a live Crew seat's thread. Seats run while the person watches
+ * the Captain, so their approvals reach the Inbox instead of waiting unseen in the seat's composer
+ * (Crews AC9); the Captain's own requests stay inline in its thread. Read live from the thread's
+ * projection, and only while the provider can still take the answer. The approval fields match
+ * the composer's `ThreadPendingApproval`, so the composer's approval UI renders it.
  */
 export const CrewRuntimeRequestItem = Schema.Struct({
   threadId: ThreadId,
@@ -490,24 +488,14 @@ export const CrewRuntimeRequestItem = Schema.Struct({
   crewInstanceId: Schema.String,
   crewName: Schema.String,
   squadronId: Schema.String,
-  seat: Schema.NullOr(Schema.String),
+  seat: Schema.String,
   threadTitle: Schema.String,
   createdAt: Schema.String,
-  responseCapability: Schema.Literals(["live", "message", "not_resumable"]),
-  request: Schema.Union([
-    Schema.Struct({
-      kind: Schema.Literal("approval"),
-      requestKind: ProviderRequestKind,
-      detail: Schema.NullOr(Schema.String),
-      appName: Schema.NullOr(Schema.String),
-      /** The provider's advertised choices; null means the default accept and decline. */
-      options: Schema.NullOr(Schema.Array(ProviderApprovalOption)),
-    }),
-    Schema.Struct({
-      kind: Schema.Literal("user_input"),
-      questions: Schema.Array(OrchestrationV2UserInputQuestion),
-    }),
-  ]),
+  requestKind: ProviderRequestKind,
+  detail: Schema.optionalKey(Schema.String),
+  appName: Schema.optionalKey(Schema.String),
+  /** The provider's advertised choices; absent means the composer's defaults. */
+  options: Schema.optionalKey(Schema.Array(ProviderApprovalOption)),
 });
 export type CrewRuntimeRequestItem = typeof CrewRuntimeRequestItem.Type;
 export const CrewRuntimeRequestsResponse = Schema.Struct({
@@ -515,12 +503,11 @@ export const CrewRuntimeRequestsResponse = Schema.Struct({
 });
 export type CrewRuntimeRequestsResponse = typeof CrewRuntimeRequestsResponse.Type;
 
-/** An answer from the Inbox: a decision for an approval, answers for a question. */
+/** A decision on a seat's approval, sent from the Inbox. */
 export const CrewRuntimeRequestRespondRequest = Schema.Struct({
   threadId: ThreadId,
   requestId: RuntimeRequestId,
-  decision: Schema.optional(ProviderApprovalDecision),
-  answers: Schema.optional(ProviderUserInputAnswers),
+  decision: ProviderApprovalDecision,
 });
 export type CrewRuntimeRequestRespondRequest = typeof CrewRuntimeRequestRespondRequest.Type;
 export const CrewRuntimeRequestRespondResponse = Schema.Struct({

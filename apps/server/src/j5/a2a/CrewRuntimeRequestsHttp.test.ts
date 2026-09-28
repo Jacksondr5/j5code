@@ -34,7 +34,7 @@ const authWith = (scopes: ReadonlyArray<string>) =>
       }),
   });
 
-it("lists for readers, answers for operators, and maps refusals to 404 and 409", async () => {
+it("lists for readers, answers approvals for operators, and maps refusals to 404 and 409", async () => {
   const answers: Array<RespondToCrewRuntimeRequestInput> = [];
   const service = Layer.mock(CrewRuntimeRequestService)({
     list: Effect.succeed([
@@ -47,14 +47,8 @@ it("lists for readers, answers for operators, and maps refusals to 404 and 409",
         seat: "builder",
         threadTitle: "builder",
         createdAt: "2026-09-24T12:00:00.000Z",
-        responseCapability: "live" as const,
-        request: {
-          kind: "approval" as const,
-          requestKind: "command" as const,
-          detail: "Run the tests?",
-          appName: null,
-          options: null,
-        },
+        requestKind: "command" as const,
+        detail: "Run the tests?",
       },
     ]),
     respond: (input) => {
@@ -107,6 +101,17 @@ it("lists for readers, answers for operators, and maps refusals to 404 and 409",
       404,
     );
     assert.equal((await post(operator, paths.respond, { threadId })).status, 400);
+    // Approvals only: an answer without a decision is malformed and never reaches the service.
+    assert.equal(
+      (
+        await post(operator, paths.respond, {
+          threadId,
+          requestId: "req:1",
+          answers: { q1: "main" },
+        })
+      ).status,
+      400,
+    );
     // Each answer carries its own command id, so a repeat is refused rather than deduplicated.
     assert.lengthOf(answers, 3);
     assert.notEqual(answers[0]!.commandId, answers[1]!.commandId);
