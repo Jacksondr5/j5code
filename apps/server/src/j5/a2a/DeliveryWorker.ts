@@ -27,6 +27,7 @@ import {
   SquadronId,
   ExchangeId,
   isHumanParticipantId,
+  isMachineParticipantId,
   LedgerMessageId,
   MessageSentPayload,
   ParticipantId,
@@ -380,7 +381,12 @@ const makeLayer = (daemon: boolean) =>
         const ids =
           row.envelope_channel === "peer" ? [row.sender_id, row.receiver_id] : [row.receiver_id];
         for (const id of ids) {
-          if (isHumanParticipantId(ParticipantId.make(id))) continue;
+          // Humans and machines never hold agent membership, and a registered
+          // machine is never retired, so only agents can become unavailable.
+          const participantId = ParticipantId.make(id);
+          if (isHumanParticipantId(participantId) || isMachineParticipantId(participantId)) {
+            continue;
+          }
           const membership =
             yield* sql`SELECT 1 FROM j5_a2a_squadron_membership WHERE participant_id = ${id} AND archived_at IS NULL`;
           if (membership.length !== 1) return true;
