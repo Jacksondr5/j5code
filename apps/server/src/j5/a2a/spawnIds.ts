@@ -80,18 +80,6 @@ export interface CrewBriefContext {
   }>;
 }
 
-/**
- * A dispatched brief minus its platform blocks: the `<j5_spawn_context>` identity facts and the
- * `<j5_crew_context>` roster. The roster names every seat's participant, so dropping or renaming
- * one seat on a retry rewrites the briefs of seats that already started, and the identity block
- * can gain fields across a deploy. Only the human-authored parts (the Captain's brief, the seat's
- * instructions) must match what a seat was already told.
- */
-export const spawnBriefWithoutCrewContext = (text: string) =>
-  text
-    .replace(/^<j5_spawn_context>\n[\s\S]*?\n<\/j5_spawn_context>\n\n/, "")
-    .replace(/<j5_crew_context>\n[\s\S]*?\n<\/j5_crew_context>\n\n/, "");
-
 // The web timeline parses the identity block and the trailing brief
 // (apps/web/src/j5/a2a/SpawnBrief.tsx) to attribute the message to its spawner;
 // keep the two in step.
