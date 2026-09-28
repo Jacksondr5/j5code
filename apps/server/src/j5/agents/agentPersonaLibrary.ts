@@ -138,6 +138,62 @@ export function createAgentPersonaLibrary(storage?: {
     return files;
   });
 
+  /** YAML files directly inside a folder, listed for the import picker. Unreadable entries are skipped. */
+  const listImportFiles = Effect.fn("AgentPersonaLibrary.listImportFiles")(function* (
+    directory: string,
+  ) {
+    if (storage === undefined) return [];
+    const { fs, path } = storage;
+    const files: Array<{ name: string; fullPath: string }> = [];
+    for (const name of [...(yield* fs.readDirectory(directory))].sort()) {
+      if (!isAgentPersonaDefinitionFile(name)) continue;
+      const fullPath = path.join(directory, name);
+      const stat = yield* fs.stat(fullPath).pipe(Effect.option);
+      if (Option.isSome(stat) && stat.value.type === "File") files.push({ name, fullPath });
+    }
+    return files;
+  });
+
+  /**
+   * One YAML file, or every YAML file under a folder (walked like a source folder), read
+   * from this machine for import. Names keep the chosen folder's name as their first
+   * segment, the way a browser folder selection reports them.
+   */
+  const readImportFiles = Effect.fn("AgentPersonaLibrary.readImportFiles")(function* (
+    target: string,
+  ) {
+    if (storage === undefined)
+      return yield* new AgentPersonaLibraryError({
+        message: "This environment cannot read persona files.",
+      });
+    const { fs, path } = storage;
+    if (!path.isAbsolute(target))
+      return yield* new AgentPersonaLibraryError({ message: `Choose an absolute path: ${target}` });
+    const stat = yield* fs.stat(target);
+    if (stat.type === "File" && !isAgentPersonaDefinitionFile(target))
+      return yield* new AgentPersonaLibraryError({
+        message: `Unsupported persona file: ${path.basename(target)}`,
+      });
+    const paths =
+      stat.type === "Directory" ? ((yield* listDefinitionFiles(target)) ?? []) : [target];
+    if (paths.length === 0)
+      return yield* new AgentPersonaLibraryError({
+        message: "No YAML persona definitions found in the selection.",
+      });
+    if (paths.length > AGENT_PERSONA_IMPORT_MAX_FILES)
+      return yield* new AgentPersonaLibraryError({
+        message: `Select at most ${AGENT_PERSONA_IMPORT_MAX_FILES} persona definitions at a time.`,
+      });
+    const files: Array<{ name: string; content: string }> = [];
+    for (const file of paths) {
+      const name = path.relative(path.dirname(target), file);
+      if (Number((yield* fs.stat(file)).size) > AGENT_PERSONA_IMPORT_MAX_BYTES)
+        return yield* new AgentPersonaLibraryError({ message: `${name} exceeds 64 KiB.` });
+      files.push({ name, content: yield* fs.readFileString(file) });
+    }
+    return files;
+  });
+
   const loadSources = Effect.fn("AgentPersonaLibrary.loadSources")(function* () {
     const bundled = { definitions: listBuiltInAgentPersonas(), paths: new Map<string, string>() };
     if (storage === undefined) return bundled;
@@ -702,6 +758,8 @@ export function createAgentPersonaLibrary(storage?: {
     sources,
     setFolders,
     importFiles,
+    listImportFiles,
+    readImportFiles,
     createPersona,
     read,
     editImported,

@@ -224,6 +224,36 @@ describe("imported persona library", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("reads an import file or folder from the environment's filesystem", () =>
+    Effect.gen(function* () {
+      const { library, fs, path, stateDir } = yield* fixture;
+      const team = path.join(stateDir, "team");
+      yield* fs.makeDirectory(path.join(team, "nested", ".git"), { recursive: true });
+      yield* fs.writeFileString(path.join(team, "lead.yaml"), yaml(custom));
+      yield* fs.writeFileString(path.join(team, "notes.md"), "not a persona");
+      yield* fs.writeFileString(path.join(team, "nested", "second.yml"), yaml(custom));
+      yield* fs.writeFileString(path.join(team, "nested", ".git", "hidden.yaml"), yaml(custom));
+
+      assert.deepEqual(yield* library.listImportFiles(team), [
+        { name: "lead.yaml", fullPath: path.join(team, "lead.yaml") },
+      ]);
+      assert.deepEqual(
+        (yield* library.readImportFiles(team)).map(({ name }) => name),
+        [path.join("team", "lead.yaml"), path.join("team", "nested", "second.yml")],
+      );
+      const single = yield* library.readImportFiles(path.join(team, "lead.yaml"));
+      assert.deepEqual(single, [{ name: "lead.yaml", content: yaml(custom) }]);
+
+      for (const target of [path.join(team, "notes.md"), path.join(team, "missing"), "team"])
+        yield* library.readImportFiles(target).pipe(Effect.flip);
+      yield* fs.writeFileString(path.join(team, "large.yaml"), "a".repeat(65537));
+      assert.include(
+        String(yield* library.readImportFiles(team).pipe(Effect.flip)),
+        "exceeds 64 KiB",
+      );
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("rejects a mixed valid/invalid batch without importing any of it", () =>
     Effect.gen(function* () {
       const { library } = yield* fixture;
