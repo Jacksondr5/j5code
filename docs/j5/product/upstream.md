@@ -290,11 +290,21 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Decided:** Jackson, 2026-09-24 (#3, #3a). Recorded in FORK.md cases 40 and 41.
 
+#### D20. Pair discovery stays inside a worktree
+
+**Upstream:** `pair` is the CLI command that mints a one-time link for connecting a browser or the mobile app to a running server. When it finds no server in the current worktree, it falls back to the default install.
+
+**J5:** in a linked worktree with no running server, `pair` refuses to fall back.
+
+**Why:** during a dogfood test, an agent ran `pair` in its worktree before its server was up, and the fallback minted a real pairing token against the live install (#70). The isolation work (D18) exists so an isolated environment can never reach shared state by accident. A short bounded retry covers a server that hasn't finished starting (#67).
+
+**Decided:** introduced in PR #94 (2026-09-04). Jackson approved it on 2026-09-28, closing the carry-or-drop question FORK.md's 2026-09-06 review left open.
+
 ### Awaiting a decision
 
 These already diverge on `j5/main`, but no human ruling is on record. Each landed as an implementer's call inside a merged PR. The person rules on each one; an approved entry moves up into its section, and a rejected one becomes a fix.
 
-#### D20. Agent-spawned threads are hidden from the sidebar
+#### D21. Agent-spawned threads are hidden from the sidebar
 
 **Upstream:** every thread except provider subagents appears in the sidebar.
 
@@ -306,35 +316,25 @@ These already diverge on `j5/main`, but no human ruling is on record. Each lande
 
 **Status:** reintroduced in PR #149 (Bryant), approved in review on 2026-09-21 without a ruling on this point. Depends on the human-contact spectrum discussion (#336): which agents belong in the sidebar follows from where they sit on that spectrum.
 
-#### D21. `@` offers saved personas first, and persona threads pin their model
+#### D22. `@` offers saved personas first, and persona threads pin their model
 
-**Upstream:** typing `@` in the composer opens a picker for referencing context in the message: files in the workspace and, in V2, other threads. The composer also has per-thread controls for provider, model, reasoning effort, and access mode.
+**Upstream:** typing `@` in the composer opens a picker for referencing context in the message: files in the workspace and, in V2, other threads. Below the text box, the composer has a row of controls for the thread: the model picker (for example "Claude Opus 5.5"), reasoning effort, access mode (for example "Supervised"), and plan mode.
 
-**J5:** `@` also lists saved personas, first, and picking one runs that persona. A persona's thread hides the model controls, because its model is fixed.
+**J5:** `@` also lists saved personas, first, and picking one runs that persona. In a persona's thread, that whole row of controls is replaced by a chip naming the persona, because the persona fixes its own model, effort, and access, and the server rejects any change.
 
 **Why:** Jackson typed `@scout` expecting a persona and got files (2026-09-13); Bryant made the picker list saved personas (2026-09-14). A persona's route is fixed and enforced by the server, so a thread's model picker would only produce failed sends. No reason is recorded for listing personas ahead of threads.
 
 **Status:** the persona picker is Bryant's request (2026-09-08) and fix (2026-09-14). The persona model lock comes from Bryant's persona stack, whose scope was approved on 2026-09-08. The ordering against threads arrived in the 2026-09-24 advance (PR #262). Recorded in FORK.md's saved-agent mentions section and its PR #75–#86 table.
 
-#### D22. A committed Stop also blocks usage-limit auto-resume
+#### D23. A committed Stop also blocks usage-limit auto-resume
 
-**Upstream:** when a run fails because the provider's usage limit was hit, upstream resumes it automatically once the limit resets.
+**Upstream:** when a run fails because the provider's usage limit was hit, it resumes automatically once the limit resets. Upstream checks only that the run failed on a usage limit.
 
-**J5:** if the person had already pressed Stop on that run, it isn't resumed.
+**J5:** it also checks whether the person pressed Stop on that run first. The case this covers: the person presses Stop, but before the provider acknowledges it, the provider hits its usage limit, so the run ends as "failed: usage limit" rather than "stopped". Upstream would then resume the run hours later, restarting an agent the person deliberately stopped. J5 doesn't resume it.
 
 **Why:** it extends D5: a Stop the person committed wins over anything automatic that would revive the run. No separate reason is recorded.
 
 **Status:** added during the 2026-09-24 advance (PR #262), without its own decision. Recorded in FORK.md's temporary patches.
-
-#### D23. Pair discovery stays inside a worktree
-
-**Upstream:** `pair` is the CLI command that mints a one-time link for connecting a browser or the mobile app to a running server. When it finds no server in the current worktree, it falls back to the default install.
-
-**J5:** in a linked worktree with no running server, `pair` refuses to fall back.
-
-**Why:** during a dogfood test, an agent ran `pair` in its worktree before its server was up, and the fallback minted a real pairing token against the live install (#70). The isolation work (D18) exists so an isolated environment can never reach shared state by accident. A short bounded retry covers a server that hasn't finished starting (#67).
-
-**Status:** introduced in PR #94 (2026-09-04). FORK.md's 2026-09-06 review records it for a carry-or-drop decision, which hasn't been made.
 
 #### D24. Astra model aliases
 
