@@ -32,16 +32,16 @@ const byLabel = (left: FleetAgent, right: FleetAgent) =>
 /**
  * Placement tree grouped per Squadron: roots are agents whose parent is null or not in the
  * Squadron; Crew members are pulled out of the plain child list and grouped under their
- * Captain by Crew. Agents that sit in a Crew but whose Captain is gone still render at the root.
+ * Captain by Crew. A seat on the roster that is not placed yet (or never created: the read
+ * carries it with no thread) still hangs under its Captain, so a Crew's group always counts
+ * every seat. Agents that sit in a Crew but whose Captain is gone still render at the root.
  */
 export function buildFleetTree(squadron: FleetSquadron): ReadonlyArray<FleetNode> {
   const byId = new Map(squadron.agents.map((agent) => [agent.participantId, agent]));
   const children = new Map<string | null, Array<FleetAgent>>();
   for (const agent of squadron.agents) {
-    const parent =
-      agent.placementParentId !== null && byId.has(agent.placementParentId)
-        ? agent.placementParentId
-        : null;
+    const placed = agent.placementParentId ?? agent.crew?.captainParticipantId ?? null;
+    const parent = placed !== null && byId.has(placed) ? placed : null;
     const siblings = children.get(parent) ?? [];
     siblings.push(agent);
     children.set(parent, siblings);

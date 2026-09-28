@@ -78,3 +78,61 @@ it("groups placed children under each visible thread and marks live crew seats",
     },
   ]);
 });
+
+it("a Captain's row carries every live roster seat, placed or not, and no retired one", () => {
+  const seat = (seatName: string) => {
+    const threadId = ThreadId.make(`thread:${seatName}`);
+    return {
+      seatName,
+      agentId: null,
+      participantId: participantIdForThread(threadId),
+      threadId,
+      addedVersion: 1,
+      reason: null,
+    };
+  };
+  const reserved = seat("reserved");
+  const unplaced = seat("unplaced");
+  const archived = seat("archived");
+  const elsewhere = seat("elsewhere");
+  const projected = projectSpawnedChildren(
+    [captainThread],
+    [{ participant_id: builder, placement_parent_id: captain }],
+    [{ ...crew, members: [...crew.members, reserved, unplaced, archived, elsewhere] }],
+    new Map([
+      [unplaced.participantId, { archived: false, placementParentId: null }],
+      [archived.participantId, { archived: true, placementParentId: captain }],
+      [elsewhere.participantId, { archived: false, placementParentId: helper }],
+    ]),
+  );
+  assert.deepStrictEqual(
+    projected.entries[0]?.children.map((child) => [child.threadId, child.seat?.seat ?? null]),
+    [
+      [builderThread, "builder"],
+      [reserved.threadId, "reserved"],
+      [unplaced.threadId, "unplaced"],
+    ],
+  );
+});
+
+it("a Crew whose launch placed no seat still gives its Captain a row per seat", () => {
+  const projected = projectSpawnedChildren([captainThread], [], [crew]);
+  assert.deepStrictEqual(projected.entries, [
+    {
+      threadId: captainThread,
+      children: [
+        {
+          threadId: builderThread,
+          participantId: builder,
+          seat: { crewInstanceId: "crew:1", crewName: "Review Pair", seat: "builder" },
+        },
+      ],
+    },
+  ]);
+  // A retired Crew gives nothing.
+  assert.deepStrictEqual(
+    projectSpawnedChildren([captainThread], [], [{ ...crew, archivedAt: "2026-09-09T18:00Z" }])
+      .entries,
+    [],
+  );
+});

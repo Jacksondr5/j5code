@@ -2,7 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { EnvironmentId } from "@t3tools/contracts";
 
-import type { CrewSeatThread } from "../crew/crewState";
+import { formatCrewStateSummary, summarizeCrewState, type CrewSeatThread } from "../crew/crewState";
 import {
   buildFleetTree,
   countFleetAlerts,
@@ -271,5 +271,70 @@ describe("fleet sections", () => {
     );
     expect(roots(sections.active)).toEqual(["Alpha/a-busy", "Beta/b-busy"]);
     expect(roots(sections.settled)).toEqual(["Alpha/a-done", "Beta/b-done"]);
+  });
+});
+
+describe("roster seats without thread facts", () => {
+  const environmentId = EnvironmentId.make("env:a");
+  // The read carries a never-created seat with no thread, and a recorded seat may not be placed yet.
+  const squadron: FleetSquadron = {
+    id: "squadron:roster",
+    name: "Roster",
+    crews: [],
+    agents: [
+      agent("captain"),
+      agent("builder", { placementParentId: "captain", crew: seat("builder", "captain") }),
+      agent("critic", { threadId: null, origin: "agent", crew: seat("critic", "captain") }),
+      agent("scout", { crew: seat("scout", "captain") }),
+    ],
+  };
+  const settledShell: CrewSeatThread = {
+    runtime: null,
+    hasPendingApprovals: false,
+    hasPendingUserInput: false,
+    archivedAt: null,
+    settledOverride: "settled",
+    updatedAt: "2026-09-09T10:00:00Z",
+  };
+
+  it("hangs every roster seat under its Captain, placed or not, and counts the unknown ones", () => {
+    const [captain, ...rest] = buildFleetTree(squadron);
+    expect(rest).toEqual([]);
+    const members = captain!.crews[0]!.members.map((node) => node.row.agent);
+    expect(members.map((member) => member.participantId)).toEqual(["builder", "critic", "scout"]);
+    const shells = new Map([["thread:builder", settledShell]]);
+    const summary = summarizeCrewState(
+      members.map((member) => (member.threadId === null ? undefined : shells.get(member.threadId))),
+    );
+    expect(formatCrewStateSummary(summary)).toBe("1 settled · 2 unknown");
+    expect(summary.total).toBe(3);
+  });
+
+  it("keeps a Crew with no placed seat as a named group with its count", () => {
+    const [captain] = buildFleetTree({
+      ...squadron,
+      agents: [
+        agent("captain"),
+        agent("critic", { threadId: null, origin: "agent", crew: seat("critic", "captain") }),
+      ],
+    });
+    expect(captain!.crews.map((crew) => [crew.crewName, crew.members.length])).toEqual([
+      ["Review Pair", 1],
+    ]);
+  });
+
+  it("reads each environment's shells for its own rows when thread ids collide", () => {
+    const other = EnvironmentId.make("env:b");
+    const solo = { id: "squadron:solo", name: "Solo", crews: [], agents: [agent("x")] };
+    const sections = partitionFleet(
+      [
+        { ...solo, environmentId },
+        { ...solo, environmentId: other },
+      ],
+      (env, threadId) =>
+        env === environmentId && threadId === "thread:x" ? settledShell : undefined,
+    );
+    expect(sections.settled.map((row) => row.squadron.environmentId)).toEqual([environmentId]);
+    expect(sections.active.map((row) => row.squadron.environmentId)).toEqual([other]);
   });
 });

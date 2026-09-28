@@ -48,11 +48,7 @@ export function CrewProposalCard(props: {
   readonly onOpenCaptain?: (() => void) | undefined;
 }) {
   const { proposal } = props;
-  // A gate handed back after a failed launch reopens with the seats the person approved, so a
-  // seat they removed stays removed and a retry sends what they last saw.
-  const [seats, setSeats] = useState<ReadonlyArray<CrewProposalSeat>>(
-    proposal.approvedSeats ?? proposal.requestedSeats,
-  );
+  const [seats, setSeats] = useState<ReadonlyArray<CrewProposalSeat>>(proposal.requestedSeats);
   const [editor, setEditor] = useState<{
     readonly seat: CrewProposalSeat | null;
     readonly runtime?: CrewProposalSeatRuntime | undefined;
