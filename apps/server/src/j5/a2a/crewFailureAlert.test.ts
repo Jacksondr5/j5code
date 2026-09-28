@@ -3,6 +3,7 @@ import { ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
+import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
@@ -10,7 +11,11 @@ import { EffectOutboxV2 } from "../../orchestration-v2/EffectOutbox.ts";
 import { OrchestratorV2 } from "../../orchestration-v2/Orchestrator.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { makeCrewFailureAlert, needsHumanForCrewFailure } from "./crewFailureAlert.ts";
-import { A2ADeliveryWorker, manualLayer as deliveryWorkerLayer } from "./DeliveryWorker.ts";
+import {
+  A2ADeliveryWorker,
+  layer as daemonDeliveryWorkerLayer,
+  manualLayer as deliveryWorkerLayer,
+} from "./DeliveryWorker.ts";
 import {
   A2ADeliveryTransport,
   live as deliveryTransportLive,
@@ -37,7 +42,10 @@ const captain: AgentParticipant = {
   threadId: ThreadId.make("thread:captain"),
 };
 
-const makeTestLayer = (deliveries: Ref.Ref<ReadonlyArray<AgentDeliveryInput>>) => {
+const makeTestLayer = (
+  deliveries: Ref.Ref<ReadonlyArray<AgentDeliveryInput>>,
+  options: { readonly daemon?: boolean } = {},
+) => {
   const database = NodeSqliteClient.layer({ filename: ":memory:" });
   const ledger = ledgerLayer.pipe(Layer.provide(database));
   const send = sendLayer.pipe(Layer.provide(ledger), Layer.provide(database));
@@ -59,7 +67,7 @@ const makeTestLayer = (deliveries: Ref.Ref<ReadonlyArray<AgentDeliveryInput>>) =
       });
     }),
   ).pipe(Layer.provide(liveTransport));
-  const worker = deliveryWorkerLayer.pipe(
+  const worker = (options.daemon === true ? daemonDeliveryWorkerLayer : deliveryWorkerLayer).pipe(
     Layer.provide(ledger),
     Layer.provide(database),
     Layer.provide(transport),
@@ -221,4 +229,57 @@ it.effect(
         assert.notEqual(second.exchangeId, next[0]!.exchangeId);
       }).pipe(Effect.provide(makeTestLayer(deliveries)));
     }).pipe(Effect.scoped),
+);
+
+it.effect("the alert reaches the Inbox on its own, with the worker running as its daemon", () =>
+  Effect.gen(function* () {
+    const deliveries = yield* Ref.make<ReadonlyArray<AgentDeliveryInput>>([]);
+    yield* Effect.gen(function* () {
+      yield* seed;
+      const inbox = yield* A2AHumanInbox;
+      const worker = yield* A2ADeliveryWorker;
+      const send = yield* A2ASendService;
+      const alert = yield* makeCrewFailureAlert;
+      // Settle the daemon first: deliver one ask and wait for it, so the worker is idle and
+      // waiting to be woken before the alert commits. Nothing below calls drain.
+      const first = yield* worker.subscribeMilestones;
+      yield* send.send({
+        commandId: CommCommandId.make("ask:daemon"),
+        senderThreadId: captain.threadId,
+        to: person.id,
+        message: "Choose the release date",
+        expectReply: true,
+        intent: "Release date",
+        urgency: "blocking",
+        acceptedAt: at,
+      });
+      yield* worker.notify;
+      yield* Stream.runHead(first);
+      // The alert has to wake the worker itself, or this waits until the test times out.
+      const next = yield* worker.subscribeMilestones;
+      yield* alert({ instance: reviewCrew, seatName: "critic", runId: "run:daemon", failure });
+      yield* Stream.runHead(next);
+      const items = yield* inbox.list(person.id);
+      assert.isTrue(items.some((item) => item.message.includes('Crew "Review"')));
+    }).pipe(Effect.provide(makeTestLayer(deliveries, { daemon: true })));
+  }).pipe(Effect.scoped),
+);
+
+it.effect("an alert wakes the delivery worker once it commits, and a replay wakes nothing", () =>
+  Effect.gen(function* () {
+    const wakes = yield* Ref.make(0);
+    const database = NodeSqliteClient.layer({ filename: ":memory:" });
+    const ledger = ledgerLayer.pipe(Layer.provide(database));
+    // The ledger PubSub never wakes the worker, so the alert must: count the wakes it sends.
+    const worker = Layer.mock(A2ADeliveryWorker)({ notify: Ref.update(wakes, (n) => n + 1) });
+    yield* Effect.gen(function* () {
+      yield* seed;
+      const alert = yield* makeCrewFailureAlert;
+      const critic = { instance: reviewCrew, seatName: "critic", runId: "run:wake", failure };
+      yield* alert(critic);
+      assert.equal(yield* Ref.get(wakes), 1);
+      yield* alert(critic);
+      assert.equal(yield* Ref.get(wakes), 1);
+    }).pipe(Effect.provide(Layer.mergeAll(database, ledger, worker)));
+  }),
 );

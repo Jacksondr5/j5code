@@ -22,6 +22,7 @@ import * as Ref from "effect/Ref";
 import * as TestClock from "effect/testing/TestClock";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 
+import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { CrewCaptainArchiveCascade } from "./CrewCaptainArchiveCascade.ts";
 import { ServerConfig } from "../../config.ts";
 import { ArtifactWorkspace } from "../artifacts/ArtifactWorkspace.ts";
@@ -191,6 +192,7 @@ const fixture = Effect.gen(function* () {
     ),
     Layer.provideMerge(Layer.succeedContext(context)),
     Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(Layer.mock(A2ADeliveryWorker)({ notify: Effect.void })),
   );
   const proposals = Context.get(context, AgentCrewProposalService);
   const crews = Context.get(context, AgentCrewInstanceService);
@@ -581,6 +583,7 @@ it.effect(
         Layer.provideMerge(Layer.mock(ArtifactWorkspace)({})),
         Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-launch-notice-" })),
         Layer.provideMerge(NodeServices.layer),
+        Layer.provideMerge(Layer.mock(A2ADeliveryWorker)({ notify: Effect.void })),
       );
       yield* Effect.gen(function* () {
         const reporter = yield* CrewLaunchReporter;

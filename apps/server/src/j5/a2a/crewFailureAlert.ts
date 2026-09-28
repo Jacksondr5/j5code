@@ -3,6 +3,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { AgentCrewInstance } from "./AgentCrewInstanceService.ts";
+import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { getLocalOperatorHumanPersonId } from "./HumanPersonRegistry.ts";
 import { A2ALedgerTransactionWriter } from "./LedgerService.ts";
 import {
@@ -43,6 +44,7 @@ const alertExchangePrefix = (crewInstanceId: string) =>
 export const makeCrewFailureAlert = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const writer = yield* A2ALedgerTransactionWriter;
+  const worker = yield* A2ADeliveryWorker;
   return Effect.fn("j5.a2a.crewFailureAlert")(function* (input: {
     readonly instance: Pick<
       AgentCrewInstance,
@@ -118,6 +120,10 @@ export const makeCrewFailureAlert = Effect.gen(function* () {
         }),
       ),
     );
-    if (outcome?.committed) yield* writer.publishCommitted(outcome.events);
+    if (!outcome?.committed) return;
+    yield* writer.publishCommitted(outcome.events);
+    // The ledger PubSub does not wake the delivery worker; every producer that commits a
+    // delivery wakes it itself, or the alert waits for some unrelated send.
+    yield* worker.notify;
   });
 });

@@ -96,9 +96,11 @@ export const makeJ5A2AAuxiliaryLayer = (
   const crewLaunchProvided = crewLaunchLayer.pipe(Layer.provideMerge(agentCrewInstanceLayer));
   // The report watches the seats an approval launched and tells the Captain how they started; the
   // finish notifier's stream feeds it, so one stream serves every Crew reaction.
+  // Both Crew reactions raise failure alerts, which wake the one delivery worker after committing.
   const crewLaunchReporterProvided = crewLaunchReporterLayer.pipe(
     Layer.provideMerge(agentCrewProposalLayer),
     Layer.provideMerge(agentCrewInstanceLayer),
+    Layer.provideMerge(deliveryWorkerProvided),
   );
   const crewStopProvided = crewStopLayer.pipe(Layer.provideMerge(agentCrewInstanceLayer));
   const crewProposalProvided = crewProposalLayer.pipe(
