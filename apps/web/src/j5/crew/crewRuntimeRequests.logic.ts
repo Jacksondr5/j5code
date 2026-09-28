@@ -1,12 +1,15 @@
 import type { J5ReadSources } from "@t3tools/client-runtime/j5/readSources";
+import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 import type { EnvironmentId } from "@t3tools/contracts";
 import type { CrewRuntimeRequestItem } from "@t3tools/contracts/j5";
+
+import type { PendingApproval } from "../../session-logic";
 
 export type ScopedCrewRuntimeRequest = CrewRuntimeRequestItem & {
   readonly environmentId: EnvironmentId;
 };
 
-/** Every environment's Crew requests, each tagged with the environment that must answer it. */
+/** Every environment's seat approvals, each tagged with the environment that must answer it. */
 export const mergeCrewRuntimeRequestSources = (
   sources: J5ReadSources<ReadonlyArray<CrewRuntimeRequestItem>>,
 ): ReadonlyArray<ScopedCrewRuntimeRequest> =>
@@ -14,54 +17,50 @@ export const mergeCrewRuntimeRequestSources = (
     (source.data ?? []).map((request) => ({ ...request, environmentId: source.environmentId })),
   );
 
-/**
- * The request ids the Inbox can answer for one thread on one environment. A request answered by
- * message, or one that is no longer resumable, stays in the composer too, since the Inbox only
- * points to the thread for those.
- */
-export const inboxRequestIdsForThread = (
-  requests: ReadonlyArray<ScopedCrewRuntimeRequest>,
-  environmentId: EnvironmentId | undefined,
-  threadId: string | null | undefined,
-): ReadonlySet<string> =>
-  new Set(
-    environmentId === undefined || threadId == null
-      ? []
-      : requests
-          .filter(
-            (request) =>
-              request.environmentId === environmentId &&
-              request.threadId === threadId &&
-              request.responseCapability === "live",
-          )
-          .map((request) => request.requestId),
-  );
+/** The composer's approval shape; the server lists only approvals the provider can still take. */
+export const toPendingApproval = (request: CrewRuntimeRequestItem): PendingApproval => ({
+  requestId: request.requestId,
+  requestKind: request.requestKind,
+  createdAt: request.createdAt,
+  ...(request.detail === undefined ? {} : { detail: request.detail }),
+  ...(request.appName === undefined ? {} : { appName: request.appName }),
+  ...(request.options === undefined ? {} : { options: request.options }),
+  responseCapability: "live",
+});
+
+export interface CrewApprovalPollPlan {
+  /** Changes whenever a thread's pending approval appears or clears; empty when none is pending. */
+  readonly key: string;
+  /** The environments worth reading: only those with a thread waiting on an approval. */
+  readonly environmentIds: ReadonlyArray<EnvironmentId>;
+}
 
 /**
- * A Crew thread hands the composer only what the Inbox does not hold. The filter is by request id,
- * so a request the Inbox has not read yet (or cannot read, on a server without the route) stays
- * inline: a prompt is never hidden from both places.
+ * Which environments the Inbox reads for seat approvals. A seat approval always raises its
+ * thread's `hasPendingApprovals`, so an environment with no such thread has nothing to list and
+ * costs no request.
  */
-export const withoutInboxRequests = <
-  T extends {
-    readonly approvals: ReadonlyArray<{ readonly requestId: string }>;
-    readonly userInputs: ReadonlyArray<{ readonly requestId: string }>;
-  },
->(
-  pending: T,
-  inboxIds: ReadonlySet<string>,
-): T =>
-  inboxIds.size === 0
-    ? pending
-    : {
-        ...pending,
-        approvals: pending.approvals.filter((request) => !inboxIds.has(request.requestId)),
-        userInputs: pending.userInputs.filter((request) => !inboxIds.has(request.requestId)),
-      };
+export const crewApprovalPollPlan = (
+  shells: ReadonlyArray<
+    Pick<EnvironmentThreadShell, "environmentId" | "id" | "hasPendingApprovals" | "archivedAt">
+  >,
+): CrewApprovalPollPlan => {
+  const pending = shells
+    .filter((shell) => shell.hasPendingApprovals && shell.archivedAt === null)
+    .map((shell) => ({
+      environmentId: shell.environmentId,
+      entry: `${shell.environmentId}/${shell.id}`,
+    }))
+    .toSorted((left, right) => left.entry.localeCompare(right.entry));
+  return {
+    key: pending.map((shell) => shell.entry).join("\n"),
+    environmentIds: [...new Set(pending.map((shell) => shell.environmentId))],
+  };
+};
 
 /**
- * The bell: open asks, mid-run seat requests, and Crew threads' provider requests. An unknown ask
- * count still shows the Crew items, since those were read.
+ * The bell: open asks, mid-run seat requests, and seat approvals. An unknown ask count still shows
+ * the Crew items, since those were read.
  */
 export const inboxBadgeCount = (
   openAsks: number | null,

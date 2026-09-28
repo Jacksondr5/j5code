@@ -377,7 +377,7 @@ export const stopCrew = Effect.fn("j5.http.stopCrew")(function* (
   return yield* HttpClientResponse.schemaBodyJson(CrewStopResponse)(response);
 });
 
-/** Provider approvals and questions waiting on this environment's live Crew threads. */
+/** Provider approvals waiting on this environment's live Crew seats that the Inbox can answer. */
 export const listCrewRuntimeRequests = Effect.fn("j5.http.listCrewRuntimeRequests")(function* (
   prepared: PreparedConnection,
 ) {

@@ -157,7 +157,7 @@ export function createJ5EnvironmentAtoms<R, E>(
       execute: (input: CrewArchiveRequest) =>
         preparedConnection.pipe(Effect.flatMap((prepared) => J5Http.archiveCrew(prepared, input))),
     }),
-    // Crew threads' provider approvals and questions answered from the Inbox; same cadence as gates.
+    // Crew seats' provider approvals answered from the Inbox; same cadence as gates.
     crewRuntimeRequests: createEnvironmentQueryAtomFamily(runtime, {
       label: "j5:crew-runtime-requests",
       staleTimeMs: 7_500,

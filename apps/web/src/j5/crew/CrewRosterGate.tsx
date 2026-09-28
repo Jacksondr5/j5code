@@ -1,6 +1,4 @@
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
-import { Link } from "@tanstack/react-router";
-import { InboxIcon } from "lucide-react";
 import { useCallback, useState } from "react";
 
 import { useEnvironmentQuery } from "../../state/query";
@@ -8,8 +6,6 @@ import { notifyHumanInboxChanged } from "../a2a/humanInboxRefresh";
 import { crewProposalsQueryAtom } from "../state";
 import { CrewProposalCard } from "./CrewProposalCard";
 import { rosterGatesForThread } from "./crewProposals.logic";
-import { inboxRequestIdsForThread } from "./crewRuntimeRequests.logic";
-import { useCrewRuntimeRequests } from "./crewRuntimeRequestsClient";
 import {
   refreshCrewProposals,
   resolveCrewProposal,
@@ -66,38 +62,12 @@ export function CrewRosterGate(props: {
   );
 
   const gates = rosterGatesForThread(query.data ?? [], threadId);
-  // A Captain's or seat's provider approvals and questions wait in the Inbox, not in this composer.
-  const inboxWaiting = inboxRequestIdsForThread(
-    useCrewRuntimeRequests(),
-    environmentId,
-    threadId,
-  ).size;
-  if (environmentId === undefined) return null;
-  const note =
-    inboxWaiting === 0 ? null : (
-      <p
-        className="mb-2 flex items-center gap-2 px-4 text-sm text-muted-foreground"
-        data-testid="crew-inbox-request-note"
-      >
-        <InboxIcon aria-hidden className="size-4 shrink-0" />
-        <span>
-          {inboxWaiting === 1
-            ? "A request from this agent is waiting in your "
-            : `${inboxWaiting} requests from this agent are waiting in your `}
-          <Link to="/inbox" className="text-foreground underline underline-offset-2">
-            Inbox
-          </Link>
-          .
-        </span>
-      </p>
-    );
-  if (gates.length === 0) return note;
+  if (gates.length === 0 || environmentId === undefined) return null;
   return (
     <div
       className="mb-3 max-h-[60dvh] min-h-0 shrink overflow-y-auto overscroll-contain"
       data-testid="crew-roster-gate"
     >
-      {note}
       {error ? (
         <p className="mb-2 text-sm text-destructive" role="alert">
           {error}
