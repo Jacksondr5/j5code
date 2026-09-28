@@ -33,7 +33,7 @@ const authFailures = {
 } as const;
 
 /**
- * The Inbox's Crew provider-request source: reading needs read scope like every Inbox read, and
+ * The Inbox's source of Crew seat approvals: reading needs read scope like every Inbox read, and
  * answering needs operate scope like answering an ask. Answers are refused with 409 once the
  * request resolved, including after an inline answer on another device, and change nothing.
  */
@@ -74,9 +74,7 @@ export const makeCrewRuntimeRequestsHttpRouteLayer = (paths: {
           if (Result.isFailure(body)) return invalidRequest("The request body must be JSON.");
           const decoded = yield* Effect.result(decodeRespond(body.success));
           if (Result.isFailure(decoded))
-            return invalidRequest(
-              "threadId and requestId are required, with a decision or answers.",
-            );
+            return invalidRequest("threadId, requestId, and decision are required.");
           const answer = decoded.success;
           const commandId = CommandId.make(`j5-crew-runtime-request:${yield* crypto.randomUUIDv4}`);
           const outcome = yield* Effect.result(
@@ -85,8 +83,7 @@ export const makeCrewRuntimeRequestsHttpRouteLayer = (paths: {
                 threadId: answer.threadId,
                 requestId: answer.requestId,
                 commandId,
-                ...(answer.decision === undefined ? {} : { decision: answer.decision }),
-                ...(answer.answers === undefined ? {} : { answers: answer.answers }),
+                decision: answer.decision,
               })
               .pipe(
                 Effect.flatMap(() =>
@@ -101,9 +98,7 @@ export const makeCrewRuntimeRequestsHttpRouteLayer = (paths: {
               ? 404
               : failure._tag === "CrewRuntimeRequestConflictError"
                 ? 409
-                : failure._tag === "CrewRuntimeRequestInvalidError"
-                  ? 400
-                  : 500;
+                : 500;
           if (status === 500)
             yield* Effect.logError("J5 crew runtime request answer failed", { cause: failure });
           return HttpServerResponse.jsonUnsafe(

@@ -1,7 +1,6 @@
 import {
   type CommandId,
   type ProviderApprovalDecision,
-  type ProviderUserInputAnswers,
   type RuntimeRequestId,
   type ThreadId,
 } from "@t3tools/contracts";
@@ -12,41 +11,32 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 
-import { pendingCrewThreadRequests } from "@t3tools/shared/j5/crewRuntimeRequests";
+import { inboxAnswerableApprovals } from "@t3tools/shared/j5/crewRuntimeRequests";
 import type { OrchestratorV2Error } from "../../orchestration-v2/Orchestrator.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewInstanceService.ts";
 import { getThreadProjectionIfPresent } from "./threadProjectionReads.ts";
 
-/** The thread a request lives on, and where it sits in its Crew. */
-interface CrewThread {
+/** A seat's thread, and the Crew that holds the seat. */
+interface CrewSeatThread {
   readonly threadId: ThreadId;
   readonly crew: AgentCrewInstance;
-  /** Null for the Captain's own thread. */
-  readonly seat: string | null;
+  readonly seat: string;
 }
 
-export { pendingCrewThreadRequests } from "@t3tools/shared/j5/crewRuntimeRequests";
+export { inboxAnswerableApprovals } from "@t3tools/shared/j5/crewRuntimeRequests";
 
 export class CrewRuntimeRequestNotFoundError extends Data.TaggedError(
   "CrewRuntimeRequestNotFoundError",
 )<{ readonly threadId: ThreadId; readonly requestId: RuntimeRequestId }> {
   override get message() {
-    return `No pending request ${this.requestId} on a live Crew thread ${this.threadId}.`;
+    return `No pending approval ${this.requestId} on a live Crew seat's thread ${this.threadId}.`;
   }
 }
 
 /** The request exists but can no longer take this answer: answered, expired, or not resumable. */
 export class CrewRuntimeRequestConflictError extends Data.TaggedError(
   "CrewRuntimeRequestConflictError",
-)<{ readonly detail: string }> {
-  override get message() {
-    return this.detail;
-  }
-}
-
-export class CrewRuntimeRequestInvalidError extends Data.TaggedError(
-  "CrewRuntimeRequestInvalidError",
 )<{ readonly detail: string }> {
   override get message() {
     return this.detail;
@@ -68,14 +58,13 @@ type CrewRuntimeRequestReadError = SqlError | OrchestratorV2Error;
 export interface RespondToCrewRuntimeRequestInput {
   readonly threadId: ThreadId;
   readonly requestId: RuntimeRequestId;
-  readonly decision?: ProviderApprovalDecision;
-  readonly answers?: ProviderUserInputAnswers;
+  readonly decision: ProviderApprovalDecision;
   /** Fresh per answer, so a second answer is refused by the request's state, not deduplicated. */
   readonly commandId: CommandId;
 }
 
 export interface CrewRuntimeRequestServiceShape {
-  /** Every pending approval and question on a live Crew's Captain and seat threads. */
+  /** Every approval the Inbox can answer on a live Crew's seat threads, oldest first. */
   readonly list: Effect.Effect<ReadonlyArray<CrewRuntimeRequestItem>, CrewRuntimeRequestReadError>;
   readonly respond: (
     input: RespondToCrewRuntimeRequestInput,
@@ -83,7 +72,6 @@ export interface CrewRuntimeRequestServiceShape {
     void,
     | CrewRuntimeRequestNotFoundError
     | CrewRuntimeRequestConflictError
-    | CrewRuntimeRequestInvalidError
     | CrewRuntimeRequestDispatchError
     | CrewRuntimeRequestReadError
   >;
@@ -95,11 +83,12 @@ export class CrewRuntimeRequestService extends Context.Service<
 >()("t3/j5/a2a/CrewRuntimeRequestService") {}
 
 /**
- * Anything a Crew's Captain or seat needs from the person reaches the Inbox (Crews AC9), so
- * provider approvals and questions on those threads are read here and answered through the same
- * `runtime-request.respond` command the composer sends. The initial roster card is not a provider
- * request and stays inline. Only live Crews count: a retired Crew's threads leave the list, and a
- * thread outside every live Crew is never listed or answered here.
+ * The Captain is the thread the person watches, so its approvals and questions stay inline there;
+ * a seat runs out of view, so its provider approvals reach the Inbox (Crews AC9) and are answered
+ * through the same `runtime-request.respond` command the composer sends. Only what the Inbox can
+ * answer is listed: approvals the provider can still take. Questions and approvals that stopped
+ * being answerable stay in the seat's thread. Only live Crews count: a retired Crew's seats leave
+ * the list, and a thread in no live Crew, or a Captain's, is never listed or answered here.
  */
 export const layer = Layer.effect(
   CrewRuntimeRequestService,
@@ -107,17 +96,24 @@ export const layer = Layer.effect(
     const crews = yield* AgentCrewInstanceService;
     const threads = yield* ThreadManagementService;
 
-    const liveCrewThreads = crews.listLive().pipe(
-      Effect.map((live) =>
-        live.flatMap((crew): Array<CrewThread> => [
-          { threadId: crew.captainThreadId, crew, seat: null },
-          ...crew.members.map((member) => ({
-            threadId: member.threadId,
-            crew,
-            seat: member.seatName,
-          })),
-        ]),
-      ),
+    /**
+     * One entry per seat thread, even when more than one Crew record names it. A thread that
+     * captains any live Crew is left out: the person answers it in place.
+     */
+    const liveSeatThreads = crews.listLive().pipe(
+      Effect.map((live) => {
+        const captains = new Set(live.map((crew) => crew.captainThreadId));
+        const seats = new Map<ThreadId, CrewSeatThread>();
+        for (const crew of live)
+          for (const member of crew.members)
+            if (!captains.has(member.threadId) && !seats.has(member.threadId))
+              seats.set(member.threadId, {
+                threadId: member.threadId,
+                crew,
+                seat: member.seatName,
+              });
+        return seats;
+      }),
     );
 
     /**
@@ -132,17 +128,17 @@ export const layer = Layer.effect(
       );
 
     const list: CrewRuntimeRequestServiceShape["list"] = Effect.gen(function* () {
-      const entries = yield* liveCrewThreads;
+      const seats = yield* liveSeatThreads;
       // Independent reads, so a Crew's threads are read side by side rather than one by one.
       const perThread = yield* Effect.forEach(
-        entries,
+        seats.values(),
         (entry) =>
           liveProjection(entry.threadId).pipe(
             Effect.map((projection): Array<CrewRuntimeRequestItem> =>
               projection === null
                 ? []
-                : pendingCrewThreadRequests(projection).map((pending) => ({
-                    ...pending,
+                : inboxAnswerableApprovals(projection).map((approval) => ({
+                    ...approval,
                     threadId: entry.threadId,
                     crewInstanceId: entry.crew.id,
                     crewName: entry.crew.displayName,
@@ -165,15 +161,14 @@ export const layer = Layer.effect(
           threadId: input.threadId,
           requestId: input.requestId,
         });
-        const onCrew = (yield* liveCrewThreads).some((entry) => entry.threadId === input.threadId);
-        if (!onCrew) return yield* notFound;
+        if (!(yield* liveSeatThreads).has(input.threadId)) return yield* notFound;
         const projection = yield* liveProjection(input.threadId);
         if (projection === null) return yield* notFound;
         // The same selection `list` shows, so a request the Inbox never listed is never answered.
-        const pending = pendingCrewThreadRequests(projection).find(
+        const listed = inboxAnswerableApprovals(projection).some(
           (entry) => entry.requestId === input.requestId,
         );
-        if (pending === undefined) {
+        if (!listed) {
           const resolved = projection.runtimeRequests.find(
             (entry) => entry.id === input.requestId && entry.status !== "pending",
           );
@@ -182,27 +177,13 @@ export const layer = Layer.effect(
             detail: `This request is already ${resolved.status}; it may have been answered on another device.`,
           });
         }
-        if (pending.responseCapability !== "live")
-          return yield* new CrewRuntimeRequestConflictError({
-            detail:
-              pending.responseCapability === "message"
-                ? "This question is answered by sending a message; answer it in its thread."
-                : "This request can no longer be answered; open its thread to see where it stopped.",
-          });
-        const isQuestion = pending.request.kind === "user_input";
-        if (isQuestion ? input.answers === undefined : input.decision === undefined)
-          return yield* new CrewRuntimeRequestInvalidError({
-            detail: isQuestion
-              ? "Answering a question requires answers."
-              : "Answering an approval requires a decision.",
-          });
         yield* threads
           .dispatch({
             type: "runtime-request.respond",
             commandId: input.commandId,
             threadId: input.threadId,
             requestId: input.requestId,
-            ...(isQuestion ? { answers: input.answers } : { decision: input.decision }),
+            decision: input.decision,
           })
           .pipe(
             // The decider refuses with its reason as a string ("... is resolved", "Provider session
