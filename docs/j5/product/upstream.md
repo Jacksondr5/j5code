@@ -32,7 +32,7 @@ When the person approves a divergence, it is recorded below and its code gets it
 
 ## The register of divergences
 
-Every place J5 knowingly makes upstream's product behave differently, with the person's decision behind it. FORK.md is the code-level ledger; this is the product-level one. An entry leaves the register when upstream makes it unnecessary or J5 stops needing it, and its History line says so.
+Every place J5 knowingly makes upstream's product behave differently, with the person's decision behind it. FORK.md is the code-level ledger; this is the product-level one. An entry leaves the register when upstream makes it unnecessary or J5 stops needing it, and its History line says so. Gaps in J5's mobile app aren't divergences: mobile is catching up to web as its own effort, and what it lacks is recorded there, not here.
 
 Each entry has an ID ("divergence D7"), which never changes and is never reused. Every entry answers the same questions, in the same order:
 
@@ -134,7 +134,7 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Why:** upstream's model is one folder, one project. Work isn't shaped like that: many efforts touch one repository, and one effort touches several. The Squadron is what the person chooses between. Reusing the project flow with a new name would rebuild the one-to-one shape the Squadron exists to replace. On cards, two Squadrons over one folder looked identical, and once a Squadron spans several folders a folder name stops identifying the work.
 
-**Consequences:** a Squadron has one folder for now. Many small seams in upstream UI must be re-checked at every advance, and each case lists its own check. J5 replaces upstream's whole headline component; a smaller J5-owned headline at the same mount would be cheaper to carry. Open gaps: the scheduling selector (#38), the legacy sidebar door (#39), mobile (#40, #128), and project nouns still left in some upstream copy.
+**Consequences:** a Squadron has one folder for now. Many small seams in upstream UI must be re-checked at every advance, and each case lists its own check. J5 replaces upstream's whole headline component; a smaller J5-owned headline at the same mount would be cheaper to carry. Open gaps: the scheduling selector (#38), the legacy sidebar door (#39), and project nouns still left in some upstream copy.
 
 **Decided:** Jackson, 2026-08-24 (SC2, SC3), 2026-08-29 (SB3), 2026-08-31 (E7), 2026-09-01 (#47, cards), 2026-09-12 (cross-environment drafts), 2026-09-24 (sidebar scope), and 2026-09-25 (clone notice). Recorded in FORK.md cases 9, 10, 13, 15b, 16–20, 23 and 34.
 
@@ -184,7 +184,7 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Why:** archiving is where obligations get stranded, and cleanup that happens silently is how a fleet loses track of itself. The platform's job is to put the facts in front of whoever decides. Crews archive as a unit: a member's failure is usually recoverable by messaging it again, and a member that can't be recovered has probably contaminated its crewmates.
 
-**Consequences:** mobile's archive doors don't warn yet (#40). The lone-seat refusal is on the server, so it covers every client, but it lets the archive through if the Crew store can't be read.
+**Consequences:** the lone-seat refusal is on the server, so it covers every client, but it lets the archive through if the Crew store can't be read.
 
 **Decided:** Jackson, 2026-08-29 (AR2, AR3); the Crew unit rule, Jackson with Product, 2026-08-21 (R14); the server-side seat refusal from Jackson's review of 2026-09-17. Recorded in FORK.md cases 21, 22 and 37.
 
@@ -208,7 +208,7 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Why:** Undo would bring the Captain back without its Crews, so a one-keystroke Undo would quietly break the Crew.
 
-**Consequences:** this entry retires once unarchive restores a Captain's Crews (D12). At that point upstream's Undo comes back unchanged.
+**Consequences:** this retires when unarchiving a Captain restores its Crews (D12). That code exists on the Crews stack (#315): with it, Undo, which unarchives the Captain, brings the Crews back too, and #315 removes this suppression so upstream's Undo returns unchanged. It depends on #315's fix for re-archiving after an Undo, which otherwise reuses the first archive's command IDs and leaves the Crew live.
 
 **Decided:** Jackson, 2026-09-24 (#7d). Recorded in FORK.md case 21.
 
@@ -222,7 +222,7 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Why:** the person is a first-class reader of every agent-to-agent message and should see it in the normal flow without hunting. A first, quieter design made the messages hard to spot, so they were made prominent. The minimap tracks the person's own prompts, and agent messages there were noise.
 
-**Consequences:** the seams in the timeline are small, but each advance checks the row and minimap hooks. Sent-message cards recognize only Codex and Claude tool records; other providers keep generic rendering. Mobile shows deliveries as text (#40).
+**Consequences:** the seams in the timeline are small, but each advance checks the row and minimap hooks. Sent-message cards recognize only Codex and Claude tool records; other providers keep generic rendering.
 
 **Decided:** Jackson, 2026-08-29 (TA1–TA5) and 2026-08-31 (TA6–TA8, including cards for sent messages). The minimap rule is from Jackson's PR #168 (2026-09-16). Sender labels on queued rows came from Jackson's dogfood findings (#42, #62), fixed on 2026-09-04. Recorded in FORK.md cases 7, 14 and 24.
 
@@ -332,7 +332,7 @@ These already diverge on `j5/main`, but no human ruling is on record. Each lande
 
 **Why:** no reason is recorded beyond the design. Imported threads otherwise have no home.
 
-**Consequences:** native desktop, mobile, and remote onboarding weren't exercised. An archive can race the assignment (#179).
+**Consequences:** native desktop and remote onboarding weren't exercised. An archive can race the assignment (#179).
 
 **Status:** introduced in PR #178 (2026-09-17). Jackson shaped the copy, but no ruling on the stage exists. Recorded in FORK.md case 39.
 
@@ -364,7 +364,7 @@ These already diverge on `j5/main`, but no human ruling is on record. Each lande
 
 **Why:** plans were easy to lose in chat, couldn't be shared between agents, and a folder in the repository needed Git exclusions and could collide with tracked files.
 
-**Consequences:** each finalized plan overwrites the project's one `plan.md`. The path form is undecided, and mobile was deferred.
+**Consequences:** each finalized plan overwrites the project's one `plan.md`. The path form is undecided.
 
 **Status:** introduced in PR #109 (Tyler, 2026-09-05). Recorded in FORK.md case 33.
 
