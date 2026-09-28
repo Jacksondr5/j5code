@@ -812,7 +812,8 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     return gating;
   });
 
-  // J5: the pre-0.0.43 J5 unit this machine may still run (./j5/legacyBootService.ts).
+  // J5: the npm-era (0.0.43 and earlier) J5 unit this machine may still run
+  // (./j5/legacyBootService.ts).
   const legacyService =
     detectedManager === undefined
       ? undefined
@@ -1129,7 +1130,8 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
 
   const uninstall: BootService["Service"]["uninstall"] = Effect.gen(function* () {
     const manager = yield* requireManager;
-    // J5: a leftover pre-0.0.43 J5 unit goes too; a T3 Code unit never matches.
+    // J5: a leftover npm-era (0.0.43 and earlier) J5 unit goes too; a T3 Code
+    // unit never matches.
     const removedLegacy = yield* Effect.gen(function* () {
       if (legacyService === undefined || !(yield* legacyUnitPresent)) return false;
       yield* runSteps(legacyService.deactivate);
