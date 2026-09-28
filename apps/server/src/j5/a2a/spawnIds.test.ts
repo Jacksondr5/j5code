@@ -23,11 +23,7 @@ describe("spawn thread ids", () => {
 
 import { assert } from "@effect/vitest";
 
-import {
-  spawnBriefWithoutCrewContext,
-  spawnFirstTurnText,
-  type CrewBriefContext,
-} from "./spawnIds.ts";
+import { spawnFirstTurnText, type CrewBriefContext } from "./spawnIds.ts";
 
 const identity = {
   brief: "Review the proposed change.",
@@ -86,40 +82,4 @@ it("keeps an ordinary Peer Agent brief free of crew instructions", () => {
   );
   assert.notInclude(text, "crew_collaboration");
   assert.notInclude(text, "Captain");
-});
-
-it("compares dispatched briefs by their human-authored parts, not the roster", () => {
-  const first = spawnFirstTurnText({ ...identity, crew });
-  const smallerRoster = spawnFirstTurnText({
-    ...identity,
-    crew: { ...crew, roster: crew.roster.slice(0, 1) },
-  });
-  assert.notEqual(first, smallerRoster);
-  assert.equal(spawnBriefWithoutCrewContext(first), spawnBriefWithoutCrewContext(smallerRoster));
-  assert.notEqual(
-    spawnBriefWithoutCrewContext(first),
-    spawnBriefWithoutCrewContext(
-      spawnFirstTurnText({ ...identity, crew: { ...crew, seatInstructions: "Edited" } }),
-    ),
-  );
-  assert.notEqual(
-    spawnBriefWithoutCrewContext(first),
-    spawnBriefWithoutCrewContext(spawnFirstTurnText({ ...identity, brief: "Edited", crew })),
-  );
-  assert.notInclude(spawnBriefWithoutCrewContext(first), "j5_crew_context");
-  assert.include(spawnBriefWithoutCrewContext(first), "<seat_instructions>");
-});
-
-it("ignores identity facts when comparing dispatched briefs, so a deploy cannot block a retry", () => {
-  const current = spawnFirstTurnText({ ...identity, crew });
-  const beforeSpawnerFacts = current.replace(
-    /\nspawned_by: [^\n]*\nspawner_thread_id: [^\n]*\n<\/j5_spawn_context>/,
-    "\n</j5_spawn_context>",
-  );
-  assert.notEqual(current, beforeSpawnerFacts);
-  assert.notInclude(spawnBriefWithoutCrewContext(current), "j5_spawn_context");
-  assert.equal(
-    spawnBriefWithoutCrewContext(current),
-    spawnBriefWithoutCrewContext(beforeSpawnerFacts),
-  );
 });

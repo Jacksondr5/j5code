@@ -2,8 +2,13 @@ import * as Schema from "effect/Schema";
 export * from "./j5/playbook.ts";
 
 import { ModelSelection } from "./modelSelection.ts";
-import { RuntimeMode } from "./providerPolicy.ts";
-import { EnvironmentId, ProjectId, ThreadId } from "./baseSchemas.ts";
+import {
+  ProviderApprovalDecision,
+  ProviderApprovalOption,
+  ProviderRequestKind,
+  RuntimeMode,
+} from "./providerPolicy.ts";
+import { EnvironmentId, ProjectId, RuntimeRequestId, ThreadId } from "./baseSchemas.ts";
 
 export const ScopedSquadronRef = Schema.Struct({
   environmentId: EnvironmentId,
@@ -141,7 +146,7 @@ export const CrewProposal = Schema.Struct({
   captainThreadId: Schema.String,
   crewInstanceId: Schema.NullOr(Schema.String),
   kind: Schema.Literals(["roster", "addition"]),
-  status: Schema.Literals(["open", "approving", "declining", "approved", "declined"]),
+  status: Schema.Literals(["open", "approved", "declined"]),
   displayName: Schema.String,
   brief: Schema.String,
   requestedSeats: Schema.Array(CrewProposalSeat),
@@ -362,6 +367,8 @@ export const J5_API_PATHS = {
   crewProposalResolve: "/api/j5/a2a/crews/proposals/resolve",
   crewStop: "/api/j5/a2a/crews/stop",
   crewArchive: "/api/j5/a2a/crews/archive",
+  crewRuntimeRequests: "/api/j5/a2a/crews/runtime-requests",
+  crewRuntimeRequestRespond: "/api/j5/a2a/crews/runtime-requests/respond",
   fleet: "/api/j5/a2a/client-reads/fleet",
   crewMemberships: "/api/j5/a2a/client-reads/crew-memberships",
   spawnedChildren: "/api/j5/a2a/client-reads/spawned-children",
@@ -467,3 +474,44 @@ export const J5_MACHINE_API_PATHS = {
   roster: "/api/j5/a2a/roster",
   whoami: "/api/j5/a2a/whoami",
 } as const;
+
+/**
+ * A provider approval waiting on a live Crew seat's thread. Seats run while the person watches
+ * the Captain, so their approvals reach the Inbox instead of waiting unseen in the seat's composer
+ * (Crews AC9); the Captain's own requests stay inline in its thread. Read live from the thread's
+ * projection, and only while the provider can still take the answer. The approval fields match
+ * the composer's `ThreadPendingApproval`, so the composer's approval UI renders it.
+ */
+export const CrewRuntimeRequestItem = Schema.Struct({
+  threadId: ThreadId,
+  requestId: RuntimeRequestId,
+  crewInstanceId: Schema.String,
+  crewName: Schema.String,
+  squadronId: Schema.String,
+  seat: Schema.String,
+  threadTitle: Schema.String,
+  createdAt: Schema.String,
+  requestKind: ProviderRequestKind,
+  detail: Schema.optionalKey(Schema.String),
+  appName: Schema.optionalKey(Schema.String),
+  /** The provider's advertised choices; absent means the composer's defaults. */
+  options: Schema.optionalKey(Schema.Array(ProviderApprovalOption)),
+});
+export type CrewRuntimeRequestItem = typeof CrewRuntimeRequestItem.Type;
+export const CrewRuntimeRequestsResponse = Schema.Struct({
+  requests: Schema.Array(CrewRuntimeRequestItem),
+});
+export type CrewRuntimeRequestsResponse = typeof CrewRuntimeRequestsResponse.Type;
+
+/** A decision on a seat's approval, sent from the Inbox. */
+export const CrewRuntimeRequestRespondRequest = Schema.Struct({
+  threadId: ThreadId,
+  requestId: RuntimeRequestId,
+  decision: ProviderApprovalDecision,
+});
+export type CrewRuntimeRequestRespondRequest = typeof CrewRuntimeRequestRespondRequest.Type;
+export const CrewRuntimeRequestRespondResponse = Schema.Struct({
+  threadId: ThreadId,
+  requestId: RuntimeRequestId,
+});
+export type CrewRuntimeRequestRespondResponse = typeof CrewRuntimeRequestRespondResponse.Type;

@@ -9,13 +9,11 @@ import { layer as archiveCrewLayer } from "./ArchiveCrewService.ts";
 import { layer as agentCrewProposalLayer } from "./AgentCrewProposalService.ts";
 import { manualLayer as crewLaunchReporterLayer } from "./CrewLaunchReporter.ts";
 import { layer as crewLaunchLayer } from "./CrewLaunchService.ts";
-import {
-  bootSweepLayer as crewProposalBootSweepLayer,
-  layer as crewProposalLayer,
-} from "./CrewProposalService.ts";
+import { layer as crewProposalLayer } from "./CrewProposalService.ts";
 import { layer as crewSeatFinishNotifierLayer } from "./CrewSeatFinishNotifier.ts";
 import { layer as captainArchiveCascadeLayer } from "./CrewCaptainArchiveCascade.ts";
 import { layer as crewStopLayer } from "./CrewStopService.ts";
+import { layer as crewRuntimeRequestLayer } from "./CrewRuntimeRequestService.ts";
 import { layer as deliveryWorkerLayer } from "./DeliveryWorker.ts";
 import { live as deliveryTransportLayer } from "./DeliveryTransport.ts";
 import {
@@ -96,21 +94,23 @@ export const makeJ5A2AAuxiliaryLayer = (
   const crewLaunchProvided = crewLaunchLayer.pipe(Layer.provideMerge(agentCrewInstanceLayer));
   // The report watches the seats an approval launched and tells the Captain how they started; the
   // finish notifier's stream feeds it, so one stream serves every Crew reaction.
+  // Both Crew reactions raise failure alerts, which wake the one delivery worker after committing.
   const crewLaunchReporterProvided = crewLaunchReporterLayer.pipe(
     Layer.provideMerge(agentCrewProposalLayer),
     Layer.provideMerge(agentCrewInstanceLayer),
+    Layer.provideMerge(deliveryWorkerProvided),
   );
   const crewStopProvided = crewStopLayer.pipe(
     Layer.provideMerge(agentCrewInstanceLayer),
     Layer.provideMerge(archiveFactsProvided),
   );
+  // Provider approvals and questions on live Crew threads, read and answered from the Inbox.
+  const crewRuntimeRequestProvided = crewRuntimeRequestLayer.pipe(
+    Layer.provideMerge(agentCrewInstanceLayer),
+  );
   const crewProposalProvided = crewProposalLayer.pipe(
     Layer.provideMerge(crewLaunchProvided),
     Layer.provideMerge(crewLaunchReporterProvided),
-  );
-  // Same layer object, so the sweep runs against the one gate instance the routes use.
-  const crewProposalBootSweepProvided = crewProposalBootSweepLayer.pipe(
-    Layer.provide(crewProposalProvided),
   );
   // A person's archive of a Captain retires its Crews from the same event stream the notifier reads.
   const captainArchiveCascadeProvided = captainArchiveCascadeLayer.pipe(
@@ -144,8 +144,8 @@ export const makeJ5A2AAuxiliaryLayer = (
     agentCrewInstanceLayer,
     archiveCrewProvided,
     crewProposalProvided,
-    crewProposalBootSweepProvided,
     crewStopProvided,
+    crewRuntimeRequestProvided,
     crewSeatFinishNotifierProvided,
   );
   return clientReadsLayer.pipe(Layer.provideMerge(runtimeWithoutClientReads));

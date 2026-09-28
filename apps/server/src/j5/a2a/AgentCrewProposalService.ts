@@ -7,7 +7,6 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 
 import { CREW_NAME_MAX_CHARS, CREW_REASON_MAX_CHARS, CREW_TEXT_MAX_CHARS } from "./crewLimits.ts";
-import { crewSeatReservedBy } from "./crewSeatIds.ts";
 import { ParticipantId, SquadronId } from "./contracts.ts";
 
 // The same bounds as the MCP verbs: the human's card edits arrive over HTTP and must not be the
@@ -32,23 +31,16 @@ const encodeSeats = Schema.encodeSync(Schema.fromJsonString(Seats));
 
 export type CrewProposalKind = "roster" | "addition";
 /**
- * A resolution passes through a claimed state: `approving` while the seats launch, `declining`
- * while a failed launch is cleaned up. The claim is what makes two devices resolving one reopened
- * gate safe: the second finds the row claimed and is refused, so a decline can never retire the
- * Crew an approval is launching. A claim the server lost mid-way is finished or handed back at
- * boot (`reconcile` on CrewProposalService).
+ * A proposal resolves once, open to approved or declined, and never goes back: an approval is
+ * recorded before any seat spawns, and whatever fails at launch is reported rather than retried.
  */
-export type CrewProposalStatus = "open" | "approving" | "declining" | "approved" | "declined";
+export type CrewProposalStatus = "open" | "approved" | "declined";
 export type CrewProposalDecision = "approve" | "decline";
 export const CREW_PROPOSAL_STATUSES: ReadonlyArray<CrewProposalStatus> = [
   "open",
-  "approving",
-  "declining",
   "approved",
   "declined",
 ];
-const claimedStatus = (decision: CrewProposalDecision) =>
-  decision === "approve" ? ("approving" as const) : ("declining" as const);
 const finalStatus = (decision: CrewProposalDecision) =>
   decision === "approve" ? ("approved" as const) : ("declined" as const);
 
@@ -109,34 +101,20 @@ export interface AgentCrewProposalServiceShape {
     captainParticipantId: ParticipantId,
   ) => Effect.Effect<ReadonlyArray<CrewProposal>, SqlError>;
   /**
-   * Claims the open proposal for one resolution, compare-and-set from `open`. Returns the proposal
-   * when this call won the claim and null when another resolver already holds or finished it, so
-   * two approvals can never both spawn and a decline cannot undo a concurrent approval. An
-   * approval records the seats the person approved; a decline leaves them as they were.
+   * Resolves an open proposal once, compare-and-set from `open`. Returns the resolved proposal,
+   * or null when it was no longer open, so a second resolution can never follow the first. An
+   * approval records the seats the person approved; a decline drops them.
    */
-  readonly claim: (input: {
+  readonly resolve: (input: {
     readonly id: string;
     readonly decision: CrewProposalDecision;
     readonly approvedSeats: ReadonlyArray<CrewProposalSeat> | null;
-  }) => Effect.Effect<CrewProposal | null, SqlError>;
-  /**
-   * Writes the final status of a claimed proposal, compare-and-set from its claimed state. Null
-   * when the row was not in that state, which means the claim was lost.
-   */
-  readonly complete: (input: {
-    readonly id: string;
-    readonly decision: CrewProposalDecision;
-    readonly crewInstanceId: string | null;
     readonly resolvedAt: string;
   }) => Effect.Effect<CrewProposal | null, SqlError>;
-  /** Hands a claimed proposal back to the gate after its spawn or cleanup failed. */
-  readonly reopen: (id: string) => Effect.Effect<CrewProposal | null, SqlError>;
-  /** Proposals still claimed: what a crash mid-resolution leaves for the boot sweep. */
-  readonly listClaimed: () => Effect.Effect<ReadonlyArray<CrewProposal>, SqlError>;
   /** Approved proposals whose launch report has not reached the Captain yet. */
   readonly listUnreported: () => Effect.Effect<ReadonlyArray<CrewProposal>, SqlError>;
   readonly markReported: (id: string, reportedAt: string) => Effect.Effect<void, SqlError>;
-  /** Records the crew a claimed roster proposal produced. */
+  /** Records the crew a roster proposal produces, before the approval that launches it. */
   readonly attachInstance: (
     id: string,
     crewInstanceId: string,
@@ -213,30 +191,23 @@ export const layer: Layer.Layer<AgentCrewProposalService, never, SqlClient.SqlCl
         return (yield* read(input.id))!;
       });
 
-      // A failed addition launch reopens its proposal with the member rows it reserved still in
-      // place; those rows are counted as members, not again as the proposal's pending seats.
-      // Delete the subtraction when the launch-once change removes reopen.
+      // An addition's rows are reserved only once it is approved, so an open request is counted by
+      // the seats it asks for and a reserved row only as a member.
       const countHeldSeats = Effect.fn("j5.a2a.agentCrewProposals.countHeldSeats")(function* (
         crewInstanceId: string,
       ) {
-        const members = yield* sql<{ readonly participant_id: string; readonly seat_name: string }>`
-          SELECT participant_id, seat_name FROM j5_agent_crew_member
+        const members = yield* sql<{ readonly count: number }>`
+          SELECT COUNT(*) AS count FROM j5_agent_crew_member
           WHERE crew_instance_id = ${crewInstanceId}
         `;
         const open = (yield* sql<Row>`
           SELECT * FROM j5_agent_crew_proposal
           WHERE crew_instance_id = ${crewInstanceId} AND status = 'open'
         `).map(fromRow);
-        return open.reduce((held, proposal) => {
-          const reserved = members.filter((row) =>
-            crewSeatReservedBy(proposal.id)({
-              participantId: row.participant_id,
-              seatName: row.seat_name,
-            }),
-          ).length;
-          const seats = (proposal.approvedSeats ?? proposal.requestedSeats).length;
-          return held + Math.max(0, seats - reserved);
-        }, members.length);
+        return open.reduce(
+          (held, proposal) => held + proposal.requestedSeats.length,
+          Number(members[0]?.count ?? 0),
+        );
       });
 
       const admit = Effect.fn("j5.a2a.agentCrewProposals.admit")(function* (
@@ -276,50 +247,25 @@ export const layer: Layer.Layer<AgentCrewProposalService, never, SqlClient.SqlCl
         return rows.map(fromRow);
       });
 
-      const claim = Effect.fn("j5.a2a.agentCrewProposals.claim")(function* (input: {
+      const resolve = Effect.fn("j5.a2a.agentCrewProposals.resolve")(function* (input: {
         readonly id: string;
         readonly decision: CrewProposalDecision;
         readonly approvedSeats: ReadonlyArray<CrewProposalSeat> | null;
+        readonly resolvedAt: string;
       }) {
-        const claimed = yield* sql<{ readonly id: string }>`
+        const approvedSeats =
+          input.decision === "approve" && input.approvedSeats !== null
+            ? encodeSeats(input.approvedSeats)
+            : null;
+        const resolved = yield* sql<{ readonly id: string }>`
           UPDATE j5_agent_crew_proposal
-          SET status = ${claimedStatus(input.decision)},
-              approved_seats = COALESCE(${input.approvedSeats === null ? null : encodeSeats(input.approvedSeats)}, approved_seats)
+          SET status = ${finalStatus(input.decision)},
+              approved_seats = ${approvedSeats},
+              resolved_at = ${input.resolvedAt}
           WHERE id = ${input.id} AND status = 'open'
           RETURNING id
         `;
-        return claimed.length === 0 ? null : yield* read(input.id);
-      });
-
-      // A declined proposal keeps its Crew id (the retired record stays readable) and drops the
-      // approved seats, which belonged to the approval that never was.
-      const complete = Effect.fn("j5.a2a.agentCrewProposals.complete")(function* (input: {
-        readonly id: string;
-        readonly decision: CrewProposalDecision;
-        readonly crewInstanceId: string | null;
-        readonly resolvedAt: string;
-      }) {
-        const done = yield* sql<{ readonly id: string }>`
-          UPDATE j5_agent_crew_proposal
-          SET status = ${finalStatus(input.decision)},
-              approved_seats = CASE WHEN ${input.decision === "approve" ? 1 : 0} = 1 THEN approved_seats ELSE NULL END,
-              crew_instance_id = COALESCE(${input.crewInstanceId}, crew_instance_id),
-              resolved_at = ${input.resolvedAt}
-          WHERE id = ${input.id} AND status = ${claimedStatus(input.decision)}
-          RETURNING id
-        `;
-        return done.length === 0 ? null : yield* read(input.id);
-      });
-
-      // The approved seats stay: they are the roster the human edited, and the card reseeds
-      // from them so a failed launch does not cost the person their edits.
-      const reopen = Effect.fn("j5.a2a.agentCrewProposals.reopen")(function* (id: string) {
-        yield* sql`
-          UPDATE j5_agent_crew_proposal
-          SET status = 'open', resolved_at = NULL
-          WHERE id = ${id} AND status IN ('approving', 'declining')
-        `;
-        return yield* read(id);
+        return resolved.length === 0 ? null : yield* read(input.id);
       });
 
       const listUnreported = Effect.fn("j5.a2a.agentCrewProposals.listUnreported")(function* () {
@@ -341,15 +287,6 @@ export const layer: Layer.Layer<AgentCrewProposalService, never, SqlClient.SqlCl
         `;
       });
 
-      const listClaimed = Effect.fn("j5.a2a.agentCrewProposals.listClaimed")(function* () {
-        const rows = yield* sql<Row>`
-          SELECT * FROM j5_agent_crew_proposal
-          WHERE status IN ('approving', 'declining')
-          ORDER BY created_at, id
-        `;
-        return rows.map(fromRow);
-      });
-
       const attachInstance = Effect.fn("j5.a2a.agentCrewProposals.attachInstance")(function* (
         id: string,
         crewInstanceId: string,
@@ -366,10 +303,7 @@ export const layer: Layer.Layer<AgentCrewProposalService, never, SqlClient.SqlCl
         read,
         listOpen,
         listForCaptain,
-        claim,
-        complete,
-        reopen,
-        listClaimed,
+        resolve,
         listUnreported,
         markReported,
         attachInstance,

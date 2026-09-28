@@ -25,6 +25,7 @@ import { ThreadManagementService } from "../../orchestration-v2/ThreadManagement
 import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewInstanceService.ts";
 import { AgentCrewProposalService, type CrewProposal } from "./AgentCrewProposalService.ts";
 import { crewLaunchReportText, type SeatStartVerdict } from "./crewGateNotice.ts";
+import type { CrewSeatLaunchOutcome } from "./CrewLaunchService.ts";
 import {
   CREW_PROPOSAL_SESSION,
   crewSeatBriefMessageId,
@@ -51,9 +52,15 @@ export interface CrewLaunchReporterShape {
   /**
    * Watch an approved proposal's seats. Takes a verdict for each seat from what its thread already
    * shows, then waits on the stored-event stream for the rest; posts the report and stamps the
-   * proposal reported. Idempotent per proposal while a watch is pending.
+   * proposal reported. Idempotent per proposal while a watch is pending. `outcomes` are the
+   * launch's own per-seat results: a seat that was never created, or whose home or brief did not
+   * go through, is decided from them. Without them (the boot sweep), a seat is measured from its
+   * thread, and one with no thread reads as not created.
    */
-  readonly watch: (proposalId: string) => Effect.Effect<void>;
+  readonly watch: (
+    proposalId: string,
+    outcomes?: ReadonlyArray<CrewSeatLaunchOutcome>,
+  ) => Effect.Effect<void>;
   /** Returns the proposal id whose report this event completed, or null. */
   readonly handleStoredEvent: (stored: OrchestrationV2StoredEvent) => Effect.Effect<string | null>;
   /**
@@ -84,8 +91,12 @@ interface PendingLaunch {
   readonly instance: AgentCrewInstance;
   readonly seats: ReadonlyArray<WatchedSeat>;
   readonly verdicts: Map<string, SeatStartVerdict>;
+  /** Verdicts the launch decided (a failed home or brief); a thread read never overrides them. */
+  readonly decided: ReadonlyMap<string, SeatStartVerdict>;
   timer: Fiber.Fiber<void> | null;
 }
+
+const NOT_CREATED_DETAIL = "its thread was never created";
 
 const isFirstTurnRun = (seat: WatchedSeat, run: OrchestrationV2Run) =>
   run.threadId === seat.threadId && run.userMessageId === seat.briefMessageId;
@@ -209,9 +220,21 @@ const makeLayer = (daemon: boolean) =>
         launch: PendingLaunch,
         seat: WatchedSeat,
       ) {
+        const decided = launch.decided.get(seat.seatName);
+        if (decided !== undefined) {
+          launch.verdicts.set(seat.seatName, decided);
+          return;
+        }
         const projection = yield* getThreadProjectionIfPresent(threads, seat.threadId);
-        const run = projection?.runs.find((candidate) => isFirstTurnRun(seat, candidate));
-        launch.verdicts.set(seat.seatName, verdictFor(run, projection));
+        launch.verdicts.set(
+          seat.seatName,
+          projection === null
+            ? { kind: "not_created", detail: NOT_CREATED_DETAIL }
+            : verdictFor(
+                projection.runs.find((candidate) => isFirstTurnRun(seat, candidate)),
+                projection,
+              ),
+        );
       });
 
       // Called only with the permit held. The window fiber must not interrupt itself.
@@ -234,7 +257,7 @@ const makeLayer = (daemon: boolean) =>
       const allDecided = (launch: PendingLaunch) =>
         launch.seats.every((seat) => launch.verdicts.get(seat.seatName)?.kind !== "pending");
 
-      const watch: CrewLaunchReporterShape["watch"] = (proposalId) =>
+      const watch: CrewLaunchReporterShape["watch"] = (proposalId, outcomes = []) =>
         gate
           .withPermit(
             Effect.gen(function* () {
@@ -258,11 +281,34 @@ const makeLayer = (daemon: boolean) =>
                 threadId: member.threadId,
                 briefMessageId: crewSeatBriefMessageId(proposal.id, member.seatName),
               }));
+              const decided = new Map<string, SeatStartVerdict>(
+                outcomes.flatMap((outcome) =>
+                  outcome.kind === "created"
+                    ? []
+                    : [[outcome.seatName, { kind: outcome.kind, detail: outcome.detail }] as const],
+                ),
+              );
+              const verdicts = new Map<string, SeatStartVerdict>(
+                seats.map((seat) => [seat.seatName, { kind: "pending" }]),
+              );
+              // An approved seat with no row was never created: the launch dropped it, so it is
+              // decided now and reported by name, though it is not on the roster.
+              const onRoster = new Set(seats.map((seat) => seat.seatName));
+              for (const approved of proposal.approvedSeats ?? proposal.requestedSeats)
+                if (!onRoster.has(approved.seat))
+                  verdicts.set(
+                    approved.seat,
+                    decided.get(approved.seat) ?? {
+                      kind: "not_created",
+                      detail: NOT_CREATED_DETAIL,
+                    },
+                  );
               const launch: PendingLaunch = {
                 proposal,
                 instance,
                 seats,
-                verdicts: new Map(seats.map((seat) => [seat.seatName, { kind: "pending" }])),
+                verdicts,
+                decided,
                 timer: null,
               };
               // Snapshot reads and stream handling share the permit. An update arriving during a
@@ -326,7 +372,7 @@ const makeLayer = (daemon: boolean) =>
           const proposal = candidates.find(
             (candidate) =>
               candidate.crewInstanceId === instance.id &&
-              (candidate.status === "approving" || candidate.status === "approved") &&
+              candidate.status === "approved" &&
               crewSeatReservedBy(candidate.id)({
                 participantId: participantIdForThread(threadId),
                 seatName: membership.seatName,
@@ -340,9 +386,9 @@ const makeLayer = (daemon: boolean) =>
           );
           if (report !== undefined)
             return report.text.split("\n").includes(`failed_run: ${run.id}`);
-          // The claim/instance are durable before any brief starts. Cover early failures even
-          // before watch(), and after restart while the report is still owed. Once posted, only
-          // the exact failed runs in that durable message are suppressed; later failures speak.
+          // The approval and instance are durable before any brief starts. Cover early failures
+          // even before watch(), and after restart while the report is still owed. Once posted,
+          // only the exact failed runs in that durable message are suppressed; later failures speak.
           return proposal.reportedAt === null;
         });
 
