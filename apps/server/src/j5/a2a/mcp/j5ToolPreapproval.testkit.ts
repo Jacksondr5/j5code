@@ -1,8 +1,9 @@
 import type { J5RuntimePolicy } from "./j5ToolPreapproval.ts";
 
 /**
- * Every runtime policy shape an adapter append must handle, with whether it resolves to approval
- * policy `never` (and so gets the full J5 set). Each harness's test walks this matrix.
+ * Every runtime policy shape the Codex and Claude appends must handle, with whether it resolves to
+ * approval policy `never` (and so gets the full J5 set). The Codex test and this module's own test
+ * walk this matrix.
  */
 export const J5_APPROVAL_POLICY_MATRIX: ReadonlyArray<{
   readonly label: string;

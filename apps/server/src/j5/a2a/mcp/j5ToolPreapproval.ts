@@ -7,7 +7,7 @@ export interface J5RuntimePolicy {
 }
 
 /**
- * The t3-code tools every harness pre-approves so the roster gate stays the only human step.
+ * The t3-code tools Codex and Claude pre-approve so the roster gate stays the only human step there.
  * Harnesses gate every MCP tool that is not annotated read-only behind an approval prompt, and a
  * turn whose approval policy is `never` (Codex 0.153+: "MCP tool call requires approval, but
  * approval policy is never") rejects the call outright. Full-access mode and every saved-agent
