@@ -117,9 +117,9 @@ export interface AgentCrewInstanceServiceShape {
     archivedAt: string,
     options?: { readonly withCaptain?: boolean },
   ) => Effect.Effect<void, SqlError>;
-  /** Retired Crews that retired with their Captain, optionally for one Captain thread. */
+  /** The retired Crews that retired with the Captain on this thread. */
   readonly listRetiredWithCaptain: (
-    captainThreadId?: ThreadId,
+    captainThreadId: ThreadId,
   ) => Effect.Effect<ReadonlyArray<AgentCrewInstance>, SqlError>;
   /** Makes a Crew that retired with its Captain live again; false when it was not one. */
   readonly restoreWithCaptain: (id: string) => Effect.Effect<boolean, SqlError>;
@@ -404,20 +404,13 @@ export const layer: Layer.Layer<AgentCrewInstanceService, never, SqlClient.SqlCl
       });
 
       const listRetiredWithCaptain = Effect.fn("j5.a2a.agentCrewInstances.listRetiredWithCaptain")(
-        function* (captainThreadId?: ThreadId) {
-          const rows =
-            captainThreadId === undefined
-              ? yield* sql<InstanceRow>`
-                  SELECT * FROM j5_agent_crew_instance
-                  WHERE archived_at IS NOT NULL AND retired_with_captain = 1
-                  ORDER BY created_at, id
-                `
-              : yield* sql<InstanceRow>`
-                  SELECT * FROM j5_agent_crew_instance
-                  WHERE archived_at IS NOT NULL AND retired_with_captain = 1
-                    AND captain_thread_id = ${captainThreadId}
-                  ORDER BY created_at, id
-                `;
+        function* (captainThreadId: ThreadId) {
+          const rows = yield* sql<InstanceRow>`
+            SELECT * FROM j5_agent_crew_instance
+            WHERE archived_at IS NOT NULL AND retired_with_captain = 1
+              AND captain_thread_id = ${captainThreadId}
+            ORDER BY created_at, id
+          `;
           return yield* readMany(rows);
         },
       );

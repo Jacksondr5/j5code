@@ -245,6 +245,6 @@ it.effect("brings back only a Crew that retired with its Captain", () =>
     // Restoring twice is a no-op, and a later archive on its own does not come back.
     assert.isFalse(yield* service.restoreWithCaptain("crew:with-captain"));
     yield* service.markArchived("crew:with-captain", "2026-09-09T18:00:00.000Z");
-    assert.deepStrictEqual(yield* service.listRetiredWithCaptain(), []);
+    assert.deepStrictEqual(yield* service.listRetiredWithCaptain(captainThreadId), []);
   }).pipe(Effect.provide(testLayer)),
 );

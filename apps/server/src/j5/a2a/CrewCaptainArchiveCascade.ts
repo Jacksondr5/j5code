@@ -10,11 +10,13 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
 
+import { threadShellFromProjection } from "../../orchestration-v2/ProjectionStore.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewInstanceService.ts";
 import { ArchiveCrewService } from "./ArchiveCrewService.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
 import { crewSeatRequestKey, lifecycleCommandId } from "./spawnIds.ts";
+import { getThreadProjectionIfPresent } from "./threadProjectionReads.ts";
 
 const CASCADE_SESSION = "j5-captain-archive-cascade";
 
@@ -29,11 +31,8 @@ export interface CrewCaptainArchiveCascadeShape {
     stored: OrchestrationV2StoredEvent,
   ) => Effect.Effect<ReadonlyArray<string> | null>;
   /**
-   * The boot sweep, for events the stream missed while the server was down or a cascade that
-   * exhausted its attempts: retire live Crews whose Captain is archived or gone, bring back Crews
-   * that retired with a Captain that is live again, and settle the seats of a settled Captain.
-   * Unsettle is event-only, since a settled seat under an unsettled Captain does not say which
-   * came first. Returns the ids of the Crews it acted on.
+   * The boot sweep, for an archive or delete the stream missed while the server was down: retire
+   * live Crews whose Captain is archived or gone. Returns the ids of the Crews it retired.
    */
   readonly reconcile: Effect.Effect<ReadonlyArray<string>>;
 }
@@ -44,6 +43,21 @@ export class CrewCaptainArchiveCascade extends Context.Service<
 >()("t3/j5/a2a/CrewCaptainArchiveCascade") {}
 
 /**
+ * A seat busy the way upstream's auto-settle refuses to settle: blocked on a pending runtime
+ * request, a live run, or post-settlement background work. Mirrors those three checks of
+ * `isAutoSettlementCandidate` in `orchestration-v2/ThreadSettlementService.ts`, read through the
+ * same shell derivation the settlement sweep's candidates come from.
+ */
+const seatIsBusy = (projection: OrchestrationV2ThreadProjection) => {
+  const shell = threadShellFromProjection(projection);
+  return (
+    shell.pendingRuntimeRequest !== null ||
+    shell.activityRunStatus != null ||
+    (shell.pendingBackgroundTasks?.length ?? 0) > 0
+  );
+};
+
+/**
  * A Crew never outlives its Captain (Crews AC17): whatever happens to the Captain happens to its
  * Crews. A person's archive, settle, or unarchive cannot be refused or amended after the fact,
  * because upstream's command has already committed by the time J5 sees it, from the web sidebar,
@@ -51,8 +65,10 @@ export class CrewCaptainArchiveCascade extends Context.Service<
  * Crews along: an archive retires them as units through the same service the Captain and the
  * Fleet page use, with the person's act as the confirmation, and records that they retired with
  * the Captain so its unarchive brings them back; settle and unsettle are sent to each seat.
- * Command ids derive from the Captain, the Crew, the seat, and the event, so a replayed event
- * converges on the same commands and an already retired Crew replays as already archived.
+ * Command ids derive from the Captain, the Crew, the seat, and the occurrence (the event, or the
+ * Captain's archive time on the sweep), so a replayed event converges on the same commands while
+ * an archive after an unarchive gets commands of its own. Each Crew's step runs once; a failure is
+ * logged and the cascade moves on to the next Crew.
  */
 export const layer = Layer.effect(
   CrewCaptainArchiveCascade,
@@ -64,8 +80,9 @@ export const layer = Layer.effect(
     const retire = Effect.fn("j5.a2a.captainArchiveCascade.retire")(function* (
       captainThreadId: ThreadId,
       instance: AgentCrewInstance,
+      occurrence: string,
     ) {
-      const requestKey = `${captainThreadId}:${instance.id}`;
+      const requestKey = `${captainThreadId}:${instance.id}:${occurrence}`;
       const archivedAt = DateTime.formatIso(yield* DateTime.now);
       const outcome = yield* archives.archive({
         providerSessionId: CASCADE_SESSION,
@@ -96,34 +113,21 @@ export const layer = Layer.effect(
       });
     });
 
-    // Retry transient failures in this session with the same command identities. Keep the
-    // bound small so a broken Crew cannot prevent other Captains' events from being handled.
-    const retireWithRetry = Effect.fn("j5.a2a.captainArchiveCascade.retireWithRetry")(function* (
+    /** Run one Crew's step once; a failure is logged and reads as not acted on. */
+    const once = <E>(
       captainThreadId: ThreadId,
       instance: AgentCrewInstance,
-    ) {
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        const done = yield* retire(captainThreadId, instance).pipe(
-          Effect.as(true),
-          Effect.catchCause((cause) =>
-            Effect.logWarning("J5 Captain archive attempt failed", {
-              captainThreadId,
-              crewInstanceId: instance.id,
-              attempt,
-              cause,
-            }).pipe(Effect.as(false)),
-          ),
-        );
-        if (done) return true;
-      }
-      return false;
-    });
-
-    /** A thread's projection, or null when it cannot be read (never created, or a store fault). */
-    const readThread = (threadId: ThreadId) =>
-      threads.getThreadProjection(threadId).pipe(
-        Effect.map((projection): OrchestrationV2ThreadProjection | null => projection),
-        Effect.catchCause(() => Effect.succeed(null)),
+      step: Effect.Effect<void, E>,
+    ) =>
+      step.pipe(
+        Effect.as(true),
+        Effect.catchCause((cause) =>
+          Effect.logWarning("J5 Captain lifecycle cascade failed for a Crew", {
+            captainThreadId,
+            crewInstanceId: instance.id,
+            cause,
+          }).pipe(Effect.as(false)),
+        ),
       );
 
     const seatCommandId = (
@@ -140,9 +144,10 @@ export const layer = Layer.effect(
       });
 
     /**
-     * Settle or unsettle every seat of one live Crew that is not already there. Unsettle only
-     * reaches seats that are settled, so a seat that never settled keeps upstream's automatic
-     * settlement. A seat with no thread, or an archived one, is left alone.
+     * Settle or unsettle every seat of one live Crew that is not already there. Settle skips a
+     * seat that is still working or waiting on the person, as upstream's auto-settle does. Unsettle
+     * only reaches seats that are settled, so a seat that never settled keeps upstream's automatic
+     * settlement. A seat whose thread was never created, or an archived one, is left alone.
      */
     const moveSeats = Effect.fn("j5.a2a.captainArchiveCascade.moveSeats")(function* (
       captainThreadId: ThreadId,
@@ -152,10 +157,10 @@ export const layer = Layer.effect(
     ) {
       let moved = false;
       for (const member of instance.members) {
-        const seat = yield* readThread(member.threadId);
+        const seat = yield* getThreadProjectionIfPresent(threads, member.threadId);
         if (seat === null || seat.thread.archivedAt !== null) continue;
         const settled = seat.thread.settledOverride === "settled";
-        if (to === "settle" ? settled : !settled) continue;
+        if (to === "settle" ? settled || seatIsBusy(seat) : !settled) continue;
         const commandId = seatCommandId(
           captainThreadId,
           instance,
@@ -180,7 +185,9 @@ export const layer = Layer.effect(
     /**
      * Bring back a Crew that retired with its Captain: every archived seat thread is unarchived
      * (the lifecycle reactor restores each seat's agent from that event), then the Crew is live
-     * again. The Crew's stamp is cleared last, so a restore cut short is finished by the sweep.
+     * again. The Crew's stamp is cleared last, so a restore cut short leaves the Crew retired with
+     * its Captain; archiving and unarchiving the Captain again re-runs it, skipping seats already
+     * back.
      */
     const restore = Effect.fn("j5.a2a.captainArchiveCascade.restore")(function* (
       captainThreadId: ThreadId,
@@ -191,7 +198,7 @@ export const layer = Layer.effect(
         instance.id,
         Effect.gen(function* () {
           for (const member of instance.members) {
-            const seat = yield* readThread(member.threadId);
+            const seat = yield* getThreadProjectionIfPresent(threads, member.threadId);
             if (seat === null || seat.thread.archivedAt === null) continue;
             yield* threads.dispatch({
               type: "thread.unarchive",
@@ -212,29 +219,6 @@ export const layer = Layer.effect(
         captainThreadId,
         crewInstanceId: instance.id,
       });
-    });
-
-    /** One Crew step with the same bounded in-session retry as a retirement. */
-    const attempt = Effect.fn("j5.a2a.captainArchiveCascade.attempt")(function* <E>(
-      captainThreadId: ThreadId,
-      instance: AgentCrewInstance,
-      step: Effect.Effect<void, E>,
-    ) {
-      for (let tries = 1; tries <= 3; tries++) {
-        const done = yield* step.pipe(
-          Effect.as(true),
-          Effect.catchCause((cause) =>
-            Effect.logWarning("J5 Captain lifecycle cascade attempt failed", {
-              captainThreadId,
-              crewInstanceId: instance.id,
-              attempt: tries,
-              cause,
-            }).pipe(Effect.as(false)),
-          ),
-        );
-        if (done) return true;
-      }
-      return false;
     });
 
     const commandedBy = Effect.fn("j5.a2a.captainArchiveCascade.commandedBy")(function* (
@@ -263,14 +247,15 @@ export const layer = Layer.effect(
             );
             if (live.length === 0) return null;
             for (const instance of live)
-              if (yield* retireWithRetry(threadId, instance)) acted.push(instance.id);
+              if (yield* once(threadId, instance, retire(threadId, instance, occurrence)))
+                acted.push(instance.id);
             return acted;
           }
           case "thread.unarchived": {
             const retired = yield* crews.listRetiredWithCaptain(threadId);
             if (retired.length === 0) return null;
             for (const instance of retired)
-              if (yield* attempt(threadId, instance, restore(threadId, instance, occurrence)))
+              if (yield* once(threadId, instance, restore(threadId, instance, occurrence)))
                 acted.push(instance.id);
             return acted;
           }
@@ -282,7 +267,7 @@ export const layer = Layer.effect(
             if (live.length === 0) return null;
             const to = event.type === "thread.settled" ? "settle" : "unsettle";
             for (const instance of live)
-              if (yield* attempt(threadId, instance, moveSeats(threadId, instance, to, occurrence)))
+              if (yield* once(threadId, instance, moveSeats(threadId, instance, to, occurrence)))
                 acted.push(instance.id);
             return acted;
           }
@@ -298,79 +283,55 @@ export const layer = Layer.effect(
       );
 
     /**
-     * What the Captain's thread says now: gone (archived or deleted), settled, or live and
-     * unsettled. A deleted thread keeps its projection with `deletedAt` set, so both read as
-     * facts; a projection that cannot be read is the store's problem, and the sweep leaves that
-     * Captain's Crews alone this pass.
+     * When the Captain's thread was archived or deleted, as an ISO timestamp; null while it is
+     * live. A deleted thread keeps its projection with `deletedAt` set, so both read as facts; a
+     * projection that cannot be read is the store's problem, and the sweep leaves that Captain's
+     * Crews alone this pass.
      */
-    const captainState = Effect.fn("j5.a2a.captainArchiveCascade.captainState")(function* (
-      captainThreadId: ThreadId,
+    const captainGoneAt = Effect.fn("j5.a2a.captainArchiveCascade.captainGoneAt")(function* (
+      instance: AgentCrewInstance,
     ) {
-      const read = yield* Effect.result(threads.getThreadProjection(captainThreadId));
+      const read = yield* Effect.result(threads.getThreadProjection(instance.captainThreadId));
       if (Result.isFailure(read)) {
-        yield* Effect.logWarning("J5 Captain lifecycle sweep could not read a Captain thread", {
-          captainThreadId,
+        yield* Effect.logWarning("J5 Captain archive sweep could not read a Captain thread", {
+          captainThreadId: instance.captainThreadId,
+          crewInstanceId: instance.id,
           cause: read.failure,
         });
         return null;
       }
-      const thread = read.success.thread;
-      if (thread.archivedAt !== null || thread.deletedAt !== null) return "gone" as const;
-      return thread.settledOverride === "settled"
-        ? {
-            state: "settled" as const,
-            settledAt: thread.settledAt === null ? "" : DateTime.formatIso(thread.settledAt),
-          }
-        : ("live" as const);
+      const goneAt = read.success.thread.deletedAt ?? read.success.thread.archivedAt;
+      return goneAt === null ? null : DateTime.formatIso(goneAt);
     });
 
     const reconcile: CrewCaptainArchiveCascadeShape["reconcile"] = Effect.gen(function* () {
-      const acted: Array<string> = [];
-      // A defect while reading one Captain skips that Crew, not the sweep; one Crew's failed
-      // step is logged and left for the next boot, and the sweep still reaches every other Crew.
-      const stateOf = (instance: AgentCrewInstance) =>
-        captainState(instance.captainThreadId).pipe(
+      const retired: Array<string> = [];
+      for (const instance of yield* crews.listLive()) {
+        // A defect while reading one Captain skips that Crew, not the sweep.
+        const goneAt = yield* captainGoneAt(instance).pipe(
           Effect.catchCause((cause) =>
-            Effect.logWarning("J5 Captain lifecycle sweep could not read a Captain thread", {
+            Effect.logWarning("J5 Captain archive sweep could not read a Captain thread", {
               captainThreadId: instance.captainThreadId,
               crewInstanceId: instance.id,
               cause,
             }).pipe(Effect.as(null)),
           ),
         );
-      for (const instance of yield* crews.listLive()) {
-        const state = yield* stateOf(instance);
-        if (state === null || state === "live") continue;
-        const done =
-          state === "gone"
-            ? yield* retireWithRetry(instance.captainThreadId, instance)
-            : yield* attempt(
-                instance.captainThreadId,
-                instance,
-                moveSeats(instance.captainThreadId, instance, "settle", `sweep:${state.settledAt}`),
-              );
-        if (done) acted.push(instance.id);
+        if (goneAt === null) continue;
+        // The Captain's archive time names this occurrence, so a Captain archived again after an
+        // unarchive gets fresh command ids. One Crew's failed retirement is logged and left for
+        // the next boot; the sweep still reaches every other orphaned Crew.
+        const occurrence = `sweep:${goneAt}`;
+        const captain = instance.captainThreadId;
+        if (yield* once(captain, instance, retire(captain, instance, occurrence)))
+          retired.push(instance.id);
       }
-      for (const instance of yield* crews.listRetiredWithCaptain()) {
-        const state = yield* stateOf(instance);
-        if (state === null || state === "gone") continue;
-        if (
-          yield* attempt(
-            instance.captainThreadId,
-            instance,
-            restore(instance.captainThreadId, instance, `sweep:${instance.archivedAt}`),
-          )
-        )
-          acted.push(instance.id);
-      }
-      if (acted.length > 0)
-        yield* Effect.logInfo("J5 Captain lifecycle sweep moved Crews with their Captains", {
-          acted,
-        });
-      return acted;
+      if (retired.length > 0)
+        yield* Effect.logInfo("J5 Captain archive sweep retired orphaned Crews", { retired });
+      return retired;
     }).pipe(
       Effect.catchCause((cause) =>
-        Effect.logError("J5 Captain lifecycle sweep failed", { cause }).pipe(Effect.as([])),
+        Effect.logError("J5 Captain archive sweep failed", { cause }).pipe(Effect.as([])),
       ),
     );
 
