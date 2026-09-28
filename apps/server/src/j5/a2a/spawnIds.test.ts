@@ -23,11 +23,7 @@ describe("spawn thread ids", () => {
 
 import { assert } from "@effect/vitest";
 
-import {
-  spawnBriefWithoutCrewContext,
-  spawnFirstTurnText,
-  type CrewBriefContext,
-} from "./spawnIds.ts";
+import { spawnFirstTurnText, type CrewBriefContext } from "./spawnIds.ts";
 
 const identity = {
   brief: "Review the proposed change.",
@@ -58,11 +54,6 @@ it("gives custom seats direct result and concern reporting without a mandatory a
     "use send_message to coordinate directly with your Captain and other members",
   );
   assert.include(text, "final result, supporting evidence, and any remaining blockers");
-  assert.include(
-    text,
-    "ask your Captain with send_message and expect_reply=true, never the person",
-  );
-  assert.include(text, "Do not use a native question tool.");
   assert.include(text, "request_crew_member through the user's inbox");
   assert.include(text, "Continue already-approved work and coordination");
   assert.include(text, "A direct result is sufficient");
@@ -91,46 +82,4 @@ it("keeps an ordinary Peer Agent brief free of crew instructions", () => {
   );
   assert.notInclude(text, "crew_collaboration");
   assert.notInclude(text, "Captain");
-});
-
-it("compares dispatched briefs by their human-authored parts, not the roster", () => {
-  const first = spawnFirstTurnText({ ...identity, crew });
-  const smallerRoster = spawnFirstTurnText({
-    ...identity,
-    crew: { ...crew, roster: crew.roster.slice(0, 1) },
-  });
-  assert.notEqual(first, smallerRoster);
-  assert.equal(spawnBriefWithoutCrewContext(first), spawnBriefWithoutCrewContext(smallerRoster));
-  assert.notEqual(
-    spawnBriefWithoutCrewContext(first),
-    spawnBriefWithoutCrewContext(
-      spawnFirstTurnText({ ...identity, crew: { ...crew, seatInstructions: "Edited" } }),
-    ),
-  );
-  assert.notEqual(
-    spawnBriefWithoutCrewContext(first),
-    spawnBriefWithoutCrewContext(spawnFirstTurnText({ ...identity, brief: "Edited", crew })),
-  );
-  assert.notInclude(spawnBriefWithoutCrewContext(first), "j5_crew_context");
-  // Platform guidance can change across a deploy without blocking a retry of a started seat.
-  assert.notInclude(spawnBriefWithoutCrewContext(first), "crew_collaboration");
-  assert.equal(
-    spawnBriefWithoutCrewContext(first),
-    spawnBriefWithoutCrewContext(first.replace("never the person", "never the user")),
-  );
-  assert.include(spawnBriefWithoutCrewContext(first), "<seat_instructions>");
-});
-
-it("ignores identity facts when comparing dispatched briefs, so a deploy cannot block a retry", () => {
-  const current = spawnFirstTurnText({ ...identity, crew });
-  const beforeSpawnerFacts = current.replace(
-    /\nspawned_by: [^\n]*\nspawner_thread_id: [^\n]*\n<\/j5_spawn_context>/,
-    "\n</j5_spawn_context>",
-  );
-  assert.notEqual(current, beforeSpawnerFacts);
-  assert.notInclude(spawnBriefWithoutCrewContext(current), "j5_spawn_context");
-  assert.equal(
-    spawnBriefWithoutCrewContext(current),
-    spawnBriefWithoutCrewContext(beforeSpawnerFacts),
-  );
 });

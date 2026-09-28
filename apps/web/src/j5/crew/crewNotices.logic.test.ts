@@ -60,6 +60,7 @@ describe("crew notices in the Captain's thread", () => {
       changes: null,
       failures: [],
       pendingSeats: [],
+      notCreated: [],
     });
     expect(participantIdsForCrewNotice(message)).toEqual(["agent:j5:a2a:b", "agent:j5:a2a:c"]);
     if (notice?.kind === "gate") expect(crewGateTitle(notice)).toBe("Crew launched");
@@ -119,6 +120,36 @@ describe("crew notices in the Captain's thread", () => {
       expect(crewGateTitle(notice)).toBe("Crew launched, 1 seat failed");
       expect(crewGateFooter(notice)).toBe(
         "1 seat failed; the Captain has each reason. 1 seat has no confirmed provider activity after a minute.",
+      );
+    }
+  });
+
+  it("presents approved seats whose thread was never created, off the roster", () => {
+    const report = [
+      "<j5_crew_gate>",
+      "proposal_id: crew:j5:a2a:mcp:s:proposal:r3",
+      "kind: roster",
+      "decision: approved",
+      "crew_name: Comedy",
+      "crew_instance_id: crew:3",
+      "crew_version: 1",
+      "changes: none",
+      "launch: 1 started, 0 failed, 1 not created, 0 start unconfirmed after 60s",
+      "seat_not_created: punchline | thread.create refused&#10;quota | retry later",
+      "roster:",
+      "- setup: participant_id=agent:j5:a2a:s persona=scout thread_id=thread:s start=started",
+      "</j5_crew_gate>",
+    ].join("\n");
+    const notice = presentCrewNotice({ role: "user", createdBy: "system", text: report });
+    expect(notice).toMatchObject({
+      kind: "gate",
+      notCreated: [{ seat: "punchline", detail: "thread.create refused\nquota | retry later" }],
+    });
+    expect(notice?.kind === "gate" && notice.roster.map((seat) => seat.seat)).toEqual(["setup"]);
+    if (notice?.kind === "gate") {
+      expect(crewGateTitle(notice)).toBe("Crew launched, 1 seat failed");
+      expect(crewGateFooter(notice)).toBe(
+        "1 seat was never created; the Captain can ask for it again.",
       );
     }
   });

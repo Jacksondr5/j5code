@@ -170,7 +170,10 @@ describe("crew launch report", () => {
     });
     assert.include(text, "decision: approved");
     assert.include(text, "changes: added prosecutor");
-    assert.include(text, "launch: 1 started, 1 failed, 1 start unconfirmed after 60s");
+    assert.include(
+      text,
+      "launch: 1 started, 1 failed, 0 not created, 1 start unconfirmed after 60s",
+    );
     assert.include(
       text,
       "seat_failed: punchline | failed | provider_error — API Error: Can't reach the API server",
@@ -184,6 +187,29 @@ describe("crew launch report", () => {
     assert.include(text, "thread_id=thread:prosecutor start=pending");
     assert.include(text, "1 of 3 seats failed");
     assert.include(text, "1 seat has no confirmed provider activity after 60s");
+    assert.notInclude(text, "Your crew is running");
+  });
+
+  it("names seats that never got a thread or never got their brief", () => {
+    const text = crewLaunchReportText({
+      proposal,
+      instance: { ...instance, members: instance.members.slice(0, 2) } as AgentCrewInstance,
+      verdicts: new Map([
+        ["setup", { kind: "started" }],
+        ["punchline", { kind: "not_started", detail: "brief failed\nretry later" }],
+        ["prosecutor", { kind: "not_created", detail: "its thread was never created" }],
+      ]),
+      windowMs: 60_000,
+    });
+    assert.include(
+      text,
+      "launch: 1 started, 1 failed, 1 not created, 0 start unconfirmed after 60s",
+    );
+    assert.include(text, "seat_failed: punchline | not_started | brief failed&#10;retry later");
+    assert.include(text, "thread_id=thread:punchline start=failed");
+    assert.include(text, "seat_not_created: prosecutor | its thread was never created");
+    assert.notInclude(text, "thread_id=thread:prosecutor");
+    assert.include(text, "request_crew_member");
     assert.notInclude(text, "Your crew is running");
   });
 
@@ -226,7 +252,10 @@ describe("crew launch report", () => {
       windowMs: 60_000,
     });
     assert.include(text, "changes: none");
-    assert.include(text, "launch: 2 started, 0 failed, 0 start unconfirmed after 60s");
+    assert.include(
+      text,
+      "launch: 2 started, 0 failed, 0 not created, 0 start unconfirmed after 60s",
+    );
     assert.include(text, "Your crew is running.");
     assert.notInclude(text, "seat_failed");
   });
