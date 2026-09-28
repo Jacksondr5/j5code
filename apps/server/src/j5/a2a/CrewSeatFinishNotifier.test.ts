@@ -29,6 +29,7 @@ import {
   AgentCrewInstanceService,
   layer as crewInstanceLayer,
 } from "./AgentCrewInstanceService.ts";
+import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import {
   CrewSeatFinishNotifier,
   manualLayer as notifierLayer,
@@ -273,6 +274,7 @@ it.effect("tells the Captain how each finished seat ended, and settles nothing",
       Layer.provideMerge(Layer.succeedContext(context)),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-finish-" })),
       Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(Layer.mock(A2ADeliveryWorker)({ notify: Effect.void })),
     );
     yield* Effect.gen(function* () {
       const notifier = yield* CrewSeatFinishNotifier;
@@ -492,6 +494,7 @@ it.effect(
         Layer.provideMerge(Layer.succeedContext(context)),
         Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-fold-" })),
         Layer.provideMerge(NodeServices.layer),
+        Layer.provideMerge(Layer.mock(A2ADeliveryWorker)({ notify: Effect.void })),
       );
       yield* Effect.gen(function* () {
         const notifier = yield* CrewSeatFinishNotifier;
@@ -626,6 +629,7 @@ it.effect(
         Layer.provideMerge(Layer.succeedContext(context)),
         Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-retry-" })),
         Layer.provideMerge(NodeServices.layer),
+        Layer.provideMerge(Layer.mock(A2ADeliveryWorker)({ notify: Effect.void })),
       );
       yield* Effect.gen(function* () {
         const notifier = yield* CrewSeatFinishNotifier;
@@ -741,6 +745,7 @@ it.effect(
           ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-unreadable-" }),
         ),
         Layer.provideMerge(NodeServices.layer),
+        Layer.provideMerge(Layer.mock(A2ADeliveryWorker)({ notify: Effect.void })),
       );
       yield* Effect.gen(function* () {
         const notifier = yield* CrewSeatFinishNotifier;
@@ -884,6 +889,7 @@ it.effect("the boot sweep tells the Captain about a finished seat nothing report
       Layer.provideMerge(Layer.succeedContext(context)),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-sweep-" })),
       Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(Layer.mock(A2ADeliveryWorker)({ notify: Effect.void })),
     );
     yield* Effect.gen(function* () {
       const notifier = yield* CrewSeatFinishNotifier;
@@ -905,4 +911,116 @@ it.effect("the boot sweep tells the Captain about a finished seat nothing report
       }
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "a handoff that can never be read still lets the finish reach the Captain, saying why",
+  () =>
+    Effect.gen(function* () {
+      const database = NodeSqliteClient.layer({ filename: ":memory:" });
+      const storage = Layer.mergeAll(ledgerLayer, crewInstanceLayer).pipe(
+        Layer.provideMerge(database),
+      );
+      const context = yield* Layer.build(storage);
+      yield* runJ5A2AMigrations().pipe(Effect.provide(context));
+      yield* Context.get(context, A2ALedger).createSquadron({
+        squadron: { id: squadronId, name: "Oversized", createdAt: DateTime.formatIso(createdAt) },
+      });
+      yield* Context.get(context, AgentCrewInstanceService).record({
+        id: "crew:oversized",
+        squadronId,
+        captainParticipantId: participantIdForThread(captainThread),
+        captainThreadId: captainThread,
+        displayName: "Oversized Crew",
+        brief: "Finish the work.",
+        createdAt: DateTime.formatIso(createdAt),
+        members: [
+          {
+            seatName: "critic",
+            agentId: "critic",
+            participantId: participantIdForThread(criticThread),
+            threadId: criticThread,
+            reason: null,
+          },
+        ],
+      });
+      const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]);
+      // What sits at the handoff path: facts that never change on a retry.
+      const failure = yield* Ref.make<"too_large" | "not_a_file" | "outside_root">("too_large");
+      const workspace = Layer.effect(
+        ArtifactWorkspace,
+        Effect.gen(function* () {
+          const real = yield* ArtifactWorkspace;
+          return ArtifactWorkspace.of({
+            ...real,
+            read: () =>
+              Ref.get(failure).pipe(
+                Effect.flatMap((reason) =>
+                  Effect.fail(
+                    new ArtifactWorkspaceError({ operation: "read", detail: reason, reason }),
+                  ),
+                ),
+              ),
+          });
+        }),
+      ).pipe(Layer.provide(artifactWorkspaceLayer));
+      const layer = notifierLayer.pipe(
+        Layer.provideMerge(
+          Layer.mock(CrewLaunchReporter)({ coversFailure: () => Effect.succeed(false) }),
+        ),
+        Layer.provideMerge(
+          Layer.mock(ThreadManagementService)({
+            getThreadProjection: (threadId) => Effect.succeed(projection(threadId)),
+            dispatch: (command) =>
+              Ref.update(dispatched, (items) => [...items, command]).pipe(
+                Effect.as({ events: [], effects: [] } as never),
+              ),
+          }),
+        ),
+        Layer.provideMerge(Layer.mock(CrewCaptainArchiveCascade)({})),
+        Layer.provideMerge(workspace),
+        Layer.provideMerge(Layer.succeedContext(context)),
+        Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-oversized-" })),
+        Layer.provideMerge(NodeServices.layer),
+        Layer.provideMerge(Layer.mock(A2ADeliveryWorker)({ notify: Effect.void })),
+      );
+      yield* Effect.gen(function* () {
+        const notifier = yield* CrewSeatFinishNotifier;
+        const lastNotice = Ref.get(dispatched).pipe(
+          Effect.map((commands) => {
+            const last = commands.at(-1);
+            return last?.type === "message.dispatch" ? last.text : "";
+          }),
+        );
+        // Over the read limit: the file exists, so it is written, named by path, never inlined.
+        assert.equal(
+          yield* notifier.handleStoredEvent(terminalRunEvent(criticThread, "run:big")),
+          criticThread,
+        );
+        const big = yield* lastNotice;
+        assert.include(big, "handoff: written (ReviewHandoff)");
+        assert.include(big, "handoff_size: over the read limit");
+        assert.notInclude(big, "<handoff_body>");
+        assert.include(big, "Read it with read_artifact");
+
+        // A directory at the path is not a handoff, and the notice says so.
+        yield* Ref.set(failure, "not_a_file");
+        assert.equal(
+          yield* notifier.handleStoredEvent(terminalRunEvent(criticThread, "run:dir")),
+          criticThread,
+        );
+        const dir = yield* lastNotice;
+        assert.include(dir, "handoff: unavailable (ReviewHandoff)");
+        assert.include(dir, "handoff_reason: not a regular file");
+        assert.notInclude(dir, "handoff: written");
+
+        yield* Ref.set(failure, "outside_root");
+        assert.equal(
+          yield* notifier.handleStoredEvent(terminalRunEvent(criticThread, "run:link")),
+          criticThread,
+        );
+        assert.include(yield* lastNotice, "handoff_reason: link leaves the artifacts directory");
+        assert.lengthOf(yield* Ref.get(dispatched), 3);
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
 );
