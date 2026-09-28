@@ -17,7 +17,6 @@ import * as Layer from "effect/Layer";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { OrchestratorV2Error } from "../../orchestration-v2/Orchestrator.ts";
 
@@ -25,6 +24,7 @@ import { ThreadManagementService } from "../../orchestration-v2/ThreadManagement
 import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewInstanceService.ts";
 import { AgentCrewProposalService, type CrewProposal } from "./AgentCrewProposalService.ts";
 import { crewLaunchReportText, type SeatStartVerdict } from "./crewGateNotice.ts";
+import { readEventStoreHighWater } from "./eventStoreHighWater.ts";
 import {
   CREW_PROPOSAL_SESSION,
   crewSeatBriefMessageId,
@@ -156,7 +156,6 @@ const makeLayer = (daemon: boolean) =>
       const alertHumanOfCrewFailure = yield* makeCrewFailureAlert;
       const proposals = yield* AgentCrewProposalService;
       const crews = yield* AgentCrewInstanceService;
-      const sql = yield* SqlClient.SqlClient;
       const timers = yield* Scope.make("sequential");
       yield* Effect.addFinalizer(() => Scope.close(timers, Exit.void));
       const pending = new Map<string, PendingLaunch>();
@@ -361,13 +360,10 @@ const makeLayer = (daemon: boolean) =>
       );
 
       if (daemon) {
-        // From the current high-water mark, so a launch approved while the server was down is
-        // reported by the sweep and everything after by the stream.
+        // From the event store's current high-water mark, so a launch approved while the server
+        // was down is reported by the sweep and everything after by the stream.
         const runDaemon = Effect.gen(function* () {
-          const rows = yield* sql<{ readonly sequence: number }>`
-            SELECT COALESCE(MAX(sequence), 0) AS sequence FROM orchestration_v2_events
-          `;
-          let afterSequence = rows[0]?.sequence ?? 0;
+          let afterSequence = yield* readEventStoreHighWater("J5 crew launch reporter");
           yield* reconcile;
           return yield* Effect.forever(
             Stream.suspend(() => threads.streamStoredEventsFrom({ afterSequence })).pipe(
