@@ -30,6 +30,7 @@ import { CrewCaptainArchiveCascade } from "./CrewCaptainArchiveCascade.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
 import { formatRunFailureField, runFailureDetail } from "./runFailures.ts";
 import { lifecycleCommandId, lifecycleId } from "./spawnIds.ts";
+import { latestStoredEventSequence } from "./storedEventHighWater.ts";
 
 /**
  * A seat tells its Captain when it finishes: when a member's run ends and it owes no reply to
@@ -432,10 +433,7 @@ const makeLayer = (daemon: boolean) =>
         // the server was down, and every reaction that failed before it, is caught up by one
         // sweep first: orphaned Crews retire, finished seats tell their Captains.
         const runDaemon = Effect.gen(function* () {
-          const rows = yield* sql<{ readonly sequence: number }>`
-            SELECT COALESCE(MAX(sequence), 0) AS sequence FROM orchestration_v2_events
-          `;
-          let afterSequence = rows[0]?.sequence ?? 0;
+          let afterSequence = yield* latestStoredEventSequence;
           // Launches the server lost mid-report are reported first, so a first turn that failed
           // while it was down is a launch outcome rather than a finish.
           yield* reporter.reconcile;

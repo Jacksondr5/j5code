@@ -20,6 +20,7 @@ import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { deliveryMessageId } from "./DeliveryTransport.ts";
 import { formatSilenceNoticeEnvelope } from "./EnvelopeFormatter.ts";
 import { A2ALedger } from "./LedgerService.ts";
+import { latestStoredEventSequence } from "./storedEventHighWater.ts";
 import {
   CommCommandId,
   CorrelationId,
@@ -630,11 +631,7 @@ const makeLayer = (daemon: boolean) =>
       const initializeCursor = Effect.fn("j5.a2a.silence.initializeCursor")(function* () {
         const existing = yield* readCursor();
         if (existing !== null) return existing;
-        const highWaterRows = yield* sql<{ readonly sequence: number }>`
-          SELECT COALESCE(MAX(sequence), 0) AS sequence
-          FROM orchestration_v2_events
-        `;
-        const highWater = highWaterRows[0]?.sequence ?? 0;
+        const highWater = yield* latestStoredEventSequence;
         yield* reconcileOpenExchangesRaw();
         yield* writeCursor(highWater);
         return highWater;

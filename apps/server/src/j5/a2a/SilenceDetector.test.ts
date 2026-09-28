@@ -142,30 +142,30 @@ const makeDaemonTestLayer = (
     Layer.tap((context) => {
       const sql = Context.get(context, SqlClient.SqlClient);
       return sql`
-        INSERT OR IGNORE INTO orchestration_v2_events (
+        INSERT OR IGNORE INTO orchestration_events (
             sequence,
             event_id,
-            command_id,
-            thread_id,
-            run_id,
-            node_id,
-            provider,
-            raw_event_id,
+            aggregate_kind,
+            stream_id,
+            stream_version,
             event_type,
             occurred_at,
-            payload_json
+            actor_kind,
+            payload_json,
+            metadata_json,
+            application_event_version
           ) VALUES (
             ${initialHighWater},
             'event:silence:cursor-high-water',
-            NULL,
+            'thread',
             'thread:silence:cursor-high-water',
-            NULL,
-            NULL,
-            NULL,
-            NULL,
+            1,
             'thread.created',
             ${iso(0)},
-            '{}'
+            'server',
+            '{}',
+            '{}',
+            2
           )
         `;
     }),
