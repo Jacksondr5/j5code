@@ -126,8 +126,8 @@ export function describeCrewSeatRuntime(
         : mode === "auto"
           ? "Auto"
           : mode === "auto-accept-edits"
-            ? "Accept edits"
-            : "Approval required";
+            ? "Auto-accept edits"
+            : "Supervised";
   return {
     seat,
     provider: providerName(provider, model?.subProvider),
