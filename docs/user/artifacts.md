@@ -35,4 +35,4 @@ not synced between machines or treated as shared Squadron documents.
 
 Handoff artifacts from personas, including crew members, land here too, under `handoffs/`,
 one file per agent task. A rewritten handoff artifact adds its new version at the top of the same
-file, and the earlier versions stay below it. See **Handoffartifacts** in [Personas](personas.md).
+file, and the earlier versions stay below it. See **Handoff artifacts** in [Personas](personas.md).
