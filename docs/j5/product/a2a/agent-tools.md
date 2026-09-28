@@ -371,3 +371,4 @@ stopping retires nothing.
 - 2026-09-15 — machine participants appear in `list_participants` as named senders that receive nothing (issue #74).
 - 2026-09-17 — personas, not agents: `list_agents` becomes `list_personas`, the `agent` parameter on `spawn_agent`, `delegate_task`, and crew seats becomes `persona` (no alias: pre-dogfood, no legacy-compatibility code), crew results carry `persona_id`, and the mention is `@persona:ID`; "agent" keeps meaning a running participant (Bryant; [record](../../worklog/2026-09-16-crew-command-decoupling.md)).
 - 2026-09-24 — the J5 document is named "handoff artifact" to distinguish it from upstream's context handoffs.
+- 2026-09-25 — a proposal resolves once (`open`, `approved`, `declined`); a seat that fails to spawn is reported in the launch report, not retried (Bryant; [#311](https://github.com/Jacksondr5/j5code/issues/311)).
