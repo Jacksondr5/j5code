@@ -90,7 +90,7 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Why:** steering a turn is the controller's act, and in J5 the only controller of a turn is the human. On Claude, a steer aborts the turn and makes the agent report that "the user doesn't want to take this action", a refusal the human never gave. On Cursor, it destroys the turn. Astra is built to take messages during work. Without the exception, a 36-minute Astra run worked from stale guidance because its peers' updates waited for the end.
 
-**Consequences:** this changes when a message is admitted, not whether the model reads it. Queueing also removed an accidental way of freeing a stuck start, so a queued run's age became something the Fleet page shows. Each advance checks the outbox and follow-up behavior this depends on.
+**Consequences:** this changes when a message is admitted, not whether the model reads it. Queueing also removed an accidental way of freeing a stuck start, so a queued run's age became something the Fleet page shows. Each advance checks the outbox and follow-up behavior this depends on. Checked on 2026-09-28 against upstream's V2 branch, it is still needed: upstream still steers whenever it can (Claude with `priority: "now"`, which cancels sibling tool calls), and has no Astra-specific or asynchronous delivery.
 
 **Decided:** Jackson with Product, 2026-09-03 (QS1); the Astra exception by Jackson, 2026-09-04. Recorded in FORK.md case 26.
 
@@ -102,7 +102,7 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Why:** J5 agents message Astra peers as steers (D4). Without this, a peer's message right after the person pressed Stop can wake the agent they just stopped.
 
-**Consequences:** it's a temporary patch, to be removed once upstream proves equivalent behavior. A known gap remains: a steer that races Stop by milliseconds still starts a new turn (#293).
+**Consequences:** it's a temporary patch, to be removed once upstream proves equivalent behavior. A known gap remains: a steer that races Stop by milliseconds still starts a new turn (#293). Checked on 2026-09-28, it is still needed: upstream's `TODO(interrupt-hardening)` is unresolved, and a late steer still becomes a follow-up turn. Upstream's newer hold-queue-on-interrupt covers queued messages only.
 
 **Decided:** it arrived with the 2026-09-17 upstream integration without a ruling. Jackson kept it on 2026-09-24 (#5), when he dropped an earlier restart-continuation guard. Recorded in FORK.md's temporary patches.
 
@@ -114,7 +114,7 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Why:** a provider's native history can't be rebuilt from the app's transcript. A silent fresh start hands the agent a stranger's memory without anyone noticing. That happened once, after a Codex schema change, and the transfer recorded no error.
 
-**Consequences:** each adapter has to report "conversation gone" for this to work: Codex and OpenCode do, Claude resumes lazily, and ACP and Pi never report it. Upstream appears to intend the fresh start, so the change offered back upstream (#276) has to argue for it. If upstream declines, the fallback position is a visible fresh start.
+**Consequences:** each adapter has to report "conversation gone" for this to work: Codex and OpenCode do, Claude resumes lazily, and ACP and Pi never report it. Upstream appears to intend the fresh start, so the change offered back upstream (#276) has to argue for it. If upstream declines, the fallback position is a visible fresh start. Checked on 2026-09-28, it is still needed: V2 still starts fresh on any resume failure without telling the person, and upstream's recent changes reinforce that behavior.
 
 **Decided:** Jackson, 2026-09-24 (#8), narrowing an earlier refuse-everything rule from 2026-09-04. Recorded in FORK.md's temporary patches.
 
