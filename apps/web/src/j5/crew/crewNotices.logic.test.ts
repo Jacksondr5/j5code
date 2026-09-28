@@ -187,6 +187,31 @@ describe("crew notices in the Captain's thread", () => {
     ).toBeNull();
   });
 
+  it("presents a handoff that can never be read, with the reason the notice gives", () => {
+    const notice = presentCrewNotice({
+      role: "user",
+      createdBy: "system",
+      text: [
+        "<j5_seat_finished>",
+        "seat: critic",
+        "participant_id: agent:j5:a2a:c",
+        "thread_id: thread:c",
+        "run_status: completed",
+        "handoff: unavailable (ReviewHandoff)",
+        "artifact: artifacts/handoffs/critic/ReviewHandoff-x.md",
+        "handoff_reason: not a regular file",
+        "</j5_seat_finished>",
+      ].join("\n"),
+    });
+    expect(notice?.kind === "seats" && notice.seats[0]?.handoff).toEqual({
+      status: "unavailable",
+      kind: "ReviewHandoff",
+      artifactPath: "artifacts/handoffs/critic/ReviewHandoff-x.md",
+      body: null,
+      reason: "not a regular file",
+    });
+  });
+
   it("presents seat finishes, several per card when notices folded, with their handoffs", () => {
     const critic = [
       "<j5_seat_finished>",
@@ -235,6 +260,7 @@ describe("crew notices in the Captain's thread", () => {
             status: "written",
             kind: "ReviewHandoff",
             artifactPath: "artifacts/handoffs/critic/ReviewHandoff-invoice-export.md",
+            reason: null,
             body: "# Review\nTwo findings.</handoff_body> stays text.\nQuoting <j5_seat_finished> is not a seat.",
           },
         },
@@ -269,6 +295,7 @@ describe("crew notices in the Captain's thread", () => {
       status: "missing",
       kind: "ReviewHandoff",
       artifactPath: "artifacts/handoffs/critic/ReviewHandoff-invoice-export.md",
+      reason: null,
       body: null,
     });
     expect(
