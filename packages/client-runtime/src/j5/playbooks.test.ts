@@ -347,6 +347,7 @@ describe("playbook composer expansion", () => {
     ["  /playbook release.yaml  ", "Start playbook release"],
     ["/playbook Release-Review.", "Start playbook release-review"],
     ["/playbook", "List available playbooks and help me choose one to start."],
+    ["/playbook ", "List available playbooks and help me choose one to start."],
     ["/playbook release, then make a crew", "Start playbook release.\n\nthen make a crew"],
     ["/playbook release\nDo something else", "Start playbook release.\n\nDo something else"],
     [

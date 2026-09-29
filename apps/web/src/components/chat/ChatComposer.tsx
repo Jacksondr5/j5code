@@ -4101,9 +4101,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       const nextIndex =
         (normalizedIndex + offset + composerMenuItems.length) % composerMenuItems.length;
       const nextItem = composerMenuItems[nextIndex];
-      setComposerHighlightedItemId(nextItem?.id ?? null);
+      onComposerMenuItemHighlighted(nextItem?.id ?? null);
     },
-    [composerHighlightedItemId, composerMenuItems],
+    [composerHighlightedItemId, composerMenuItems, onComposerMenuItemHighlighted],
   );
 
   const blurMobileComposerAfterSend = useCallback(() => {
@@ -4408,7 +4408,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       const currentItems = composerMenuItemsRef.current;
       const selectedItem =
         activeComposerMenuItemRef.current ??
-        (trigger?.kind === "slash-playbook" && !trigger.query ? undefined : currentItems[0]);
+        (key === "Tab" || trigger?.kind !== "slash-playbook" || trigger.query
+          ? currentItems[0]
+          : undefined);
       if (key === "ArrowDown" && currentItems.length > 0) {
         nudgeComposerMenuHighlight("ArrowDown");
         return true;
