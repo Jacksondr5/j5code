@@ -1,4 +1,5 @@
 import * as Layer from "effect/Layer";
+import { OrchestrationV2EventSinkLayerLive } from "../../orchestration-v2/runtimeLayer.ts";
 import { playbookStoreLayer } from "../playbooks/PlaybookStore.ts";
 
 import { layer as artifactWorkspaceLayer } from "../artifacts/ArtifactWorkspace.ts";
@@ -165,6 +166,14 @@ export const makeJ5A2ARuntimeLayer = (
   ).pipe(Layer.provideMerge(squadronCreationProvided));
 };
 
-/** Production J5 A2A services; SQL and V2 thread management stay shared dependencies. */
-export const J5A2ARuntimeLayer = makeJ5A2ARuntimeLayer();
-export const J5A2AAuxiliaryLayer = makeJ5A2AAuxiliaryLayer();
+/**
+ * Production J5 A2A services; SQL and V2 thread management stay shared dependencies. The event
+ * sink is the orchestration runtime's own layer object, so Effect memoizes one instance; the
+ * stream daemons read its latest sequence as their start point.
+ */
+export const J5A2ARuntimeLayer = makeJ5A2ARuntimeLayer().pipe(
+  Layer.provide(OrchestrationV2EventSinkLayerLive),
+);
+export const J5A2AAuxiliaryLayer = makeJ5A2AAuxiliaryLayer().pipe(
+  Layer.provide(OrchestrationV2EventSinkLayerLive),
+);

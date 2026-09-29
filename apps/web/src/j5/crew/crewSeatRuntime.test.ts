@@ -116,7 +116,7 @@ describe("crew member edits", () => {
   });
 
   it.each(["auto", "auto-accept-edits"] as const)(
-    "switches unsupported ACP %s access to explicit Approval required",
+    "switches unsupported ACP %s access to explicit Supervised",
     (runtimeMode) => {
       const draft = { ...crewSeatDraft(seat), runtimeMode };
       const acp = {

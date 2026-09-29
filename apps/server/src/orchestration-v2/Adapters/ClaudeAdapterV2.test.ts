@@ -90,6 +90,7 @@ import {
   type ClaudeAgentSdkQueryOpenInput,
 } from "./ClaudeAdapterV2.ts";
 import { J5_CLAUDE_MCP_ALLOWED_TOOLS } from "../../j5/a2a/mcp/claudeAllowedTools.ts";
+import { J5_CLAUDE_CREW_SEAT_DISALLOWED_TOOLS } from "../../j5/a2a/crewSeatQuestions.ts";
 import { layer as idAllocatorLayer, IdAllocatorV2 } from "../IdAllocator.ts";
 
 const DEFAULT_CLAUDE_SETTINGS = Schema.decodeSync(ClaudeSettings)({});
@@ -2131,6 +2132,30 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       );
     }
   }
+
+  // J5: a Crew seat asks its Captain instead of the person (j5/a2a/crewSeatQuestions.ts).
+  it.effect.each([false, true])(
+    "withholds AskUserQuestion only from a Crew seat (seat=%s)",
+    (seat) =>
+      Effect.gen(function* () {
+        const harness = yield* makeWakeHarness;
+        yield* harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make(`attempt-crew-seat-${seat}`),
+            text: "Review the change.",
+            attachments: [],
+            runtimePolicy: { ...CLAUDE_TEST_RUNTIME_POLICY, ...(seat ? { crewSeat: true } : {}) },
+          }),
+        );
+        assert.deepEqual(
+          harness.getOpenedOptions()?.disallowedTools,
+          seat ? [...J5_CLAUDE_CREW_SEAT_DISALLOWED_TOOLS] : undefined,
+        );
+      }).pipe(Effect.provide(Layer.merge(idAllocatorLayer, NodeServices.layer))),
+  );
 
   it.effect("announces usage-limit pauses once per window and again on a new turn", () =>
     Effect.gen(function* () {

@@ -52,6 +52,8 @@ export const ProviderAdapterV2RuntimePolicy = Schema.Struct({
   sandboxPolicy: Schema.optional(Schema.Unknown),
   reasoningEffort: Schema.optional(Schema.String),
   agentPersonaInstructions: Schema.optional(Schema.String),
+  // J5: set only for a live Crew seat, which asks its Captain instead of the person (j5/a2a/crewSeatQuestions.ts).
+  crewSeat: Schema.optional(Schema.Boolean),
 });
 export type ProviderAdapterV2RuntimePolicy = typeof ProviderAdapterV2RuntimePolicy.Type;
 

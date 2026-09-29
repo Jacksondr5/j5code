@@ -21,13 +21,13 @@ export interface CrewSeatDraft {
 export const CREW_ACCESS_OPTIONS = [
   {
     value: "approval-required",
-    label: "Approval required",
+    label: "Supervised",
     description: "Ask before commands and file changes.",
   },
   {
     value: "auto-accept-edits",
-    label: "Accept edits",
-    description: "Approve edits; ask before other actions.",
+    label: "Auto-accept edits",
+    description: "Auto-approve edits, ask before other actions.",
   },
   {
     value: "auto",
@@ -95,7 +95,7 @@ export const crewModelSelection = (
   return { instanceId: provider.instanceId, model: model.slug, ...(options ? { options } : {}) };
 };
 
-/** ACP cannot enforce Auto or Accept edits; a harness switch visibly chooses its supervised mode. */
+/** ACP cannot enforce Auto or Auto-accept edits; a harness switch visibly chooses its supervised mode. */
 export const chooseCrewHarness = (
   draft: CrewSeatDraft,
   provider: Pick<ServerProvider, "instanceId" | "driver">,
