@@ -21,7 +21,7 @@ To create a personal persona without writing a file, use **Create persona** besi
 To import definitions written as files:
 
 1. Open **Settings → Personas** and select the destination environment.
-2. Use **Import** beside **Library**. Choose **Folder** to include all YAML definitions (`.yaml` or `.yml`) in that folder and its subfolders, or **Import → Persona file** to select one YAML file. On web and desktop the picker browses the selected environment's filesystem, the same picker **Add folder** uses; on mobile it opens your device's file picker. Other files are ignored. Each file must contain one persona definition with its own unique ID.
+2. Use **Import** beside **Library**. Choose **Folder** to include all YAML definitions (`.yaml` or `.yml`) in that folder and its subfolders (hidden folders and `node_modules` are skipped), or **Import → Persona file** to select one YAML file. On web and desktop the picker browses the selected environment's filesystem, the same picker **Add folder** uses; on mobile it opens your device's file picker. Other files are ignored. Each file must contain one persona definition with its own unique ID.
 3. The library refreshes after a successful import. Import and removal results appear as temporary toast notifications. A selection can contain up to 50 definitions, each at most 64 KiB. If any definition is invalid, none of the selection is imported; the error identifies the file.
 
 Definitions are YAML files. Use `instructions: |` followed by indented text for multiline instructions. Keep one definition per file; JSON files are not imported.

@@ -49,6 +49,13 @@ export function AgentFolderPickerDialog(props: {
   const [pathInput, setPathInput] = useState(() =>
     getAddProjectInitialQuery(serverConfig?.settings.addProjectBaseDirectory),
   );
+  // The dialog opens on the add-project base folder, often a whole projects tree; folder mode
+  // chooses nothing until the person browses or types, so one click cannot import all of it.
+  const [browsed, setBrowsed] = useState(false);
+  const browseTo = (path: string) => {
+    setBrowsed(true);
+    setPathInput(path);
+  };
   const browsePath = useMemo(
     () => getFilesystemBrowsePath(pathInput, platform),
     [pathInput, platform],
@@ -82,7 +89,9 @@ export function AgentFolderPickerDialog(props: {
   // directory; file mode needs a file.
   const selection = pickFile
     ? (files.exactEntry?.fullPath ?? null)
-    : (exactEntry?.fullPath ?? listedDirectory);
+    : browsed
+      ? (exactEntry?.fullPath ?? listedDirectory)
+      : null;
   const error = browseState.error ?? (pickFile ? fileState.error : null);
 
   return (
@@ -103,7 +112,7 @@ export function AgentFolderPickerDialog(props: {
             font="mono"
             autoComplete="off"
             spellCheck={false}
-            onChange={(event) => setPathInput(event.target.value)}
+            onChange={(event) => browseTo(event.target.value)}
           />
           <div
             role="listbox"
@@ -114,7 +123,7 @@ export function AgentFolderPickerDialog(props: {
               <button
                 type="button"
                 className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent"
-                onClick={() => setPathInput(browsePath.parentPath!)}
+                onClick={() => browseTo(browsePath.parentPath!)}
               >
                 <CornerLeftUpIcon aria-hidden="true" className="size-4 text-muted-foreground" />
                 ..
@@ -139,7 +148,7 @@ export function AgentFolderPickerDialog(props: {
                     aria-selected={entry.fullPath === selection}
                     className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent aria-selected:bg-accent/60"
                     onClick={() =>
-                      setPathInput(appendBrowsePathSegment(browsePath.directoryPath, entry.name))
+                      browseTo(appendBrowsePathSegment(browsePath.directoryPath, entry.name))
                     }
                   >
                     <FolderIcon aria-hidden="true" className="size-4 text-muted-foreground" />
@@ -153,7 +162,7 @@ export function AgentFolderPickerDialog(props: {
                     role="option"
                     aria-selected={entry.fullPath === selection}
                     className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent aria-selected:bg-accent/60"
-                    onClick={() => setPathInput(`${browsePath.directoryPath}${entry.name}`)}
+                    onClick={() => browseTo(`${browsePath.directoryPath}${entry.name}`)}
                   >
                     <FileTextIcon aria-hidden="true" className="size-4 text-muted-foreground" />
                     <span className="truncate">{entry.name}</span>
@@ -163,7 +172,7 @@ export function AgentFolderPickerDialog(props: {
             )}
           </div>
           <p className="break-all font-mono text-xs text-muted-foreground">
-            {selection ?? (pickFile ? "Choose a YAML file." : "Enter a folder path to browse.")}
+            {selection ?? (pickFile ? "Choose a YAML file." : "Open a folder or enter its path.")}
           </p>
         </DialogPanel>
         <DialogFooter>

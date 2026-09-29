@@ -1,3 +1,6 @@
+// @effect-diagnostics nodeBuiltinImport:off - FileSystem cannot create a FIFO.
+import * as NodeChildProcess from "node:child_process";
+
 import { assert, describe, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
@@ -7,6 +10,7 @@ import {
   ProviderInstanceId,
   type OrchestrationV2AgentPersonaAssignment,
 } from "@t3tools/contracts";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -252,6 +256,44 @@ describe("imported persona library", () => {
         "exceeds 64 KiB",
       );
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("walks past a dangling link and skips node_modules when importing a folder", () =>
+    Effect.gen(function* () {
+      const { library, fs, path, stateDir } = yield* fixture;
+      const team = path.join(stateDir, "team");
+      yield* fs.makeDirectory(path.join(team, "node_modules", "pkg"), { recursive: true });
+      yield* fs.writeFileString(path.join(team, "lead.yaml"), yaml(custom));
+      yield* fs.writeFileString(path.join(team, "node_modules", "pkg", "dep.yaml"), yaml(custom));
+      yield* fs.symlink(path.join(stateDir, "gone"), path.join(team, "broken"));
+
+      assert.deepEqual(
+        (yield* library.readImportFiles(team)).map(({ name }) => name),
+        [path.join("team", "lead.yaml")],
+      );
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  // Needs mkfifo; Windows has no FIFOs to reject.
+  it.effect.skipIf(HostProcessPlatform.defaultValue() === "win32")(
+    "refuses to import a target that is not a regular file or folder",
+    () =>
+      Effect.gen(function* () {
+        const { library, path, stateDir } = yield* fixture;
+        const fifo = path.join(stateDir, "pipe");
+        yield* Effect.promise(
+          () =>
+            new Promise<void>((resolve, reject) =>
+              NodeChildProcess.execFile("mkfifo", [fifo], (error) =>
+                error ? reject(error) : resolve(),
+              ),
+            ),
+        );
+        assert.include(
+          String(yield* library.readImportFiles(fifo).pipe(Effect.flip)),
+          "Unsupported persona file: pipe",
+        );
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
   it.effect("rejects a mixed valid/invalid batch without importing any of it", () =>
