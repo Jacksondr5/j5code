@@ -528,23 +528,22 @@ export function AgentLibrarySettings() {
                       </>
                     ) : null}
                     {usageSummary ? (
-                      <>
-                        <span aria-hidden="true">·</span>
-                        {usageSummary.routes.length === 0 ? (
-                          <span>{usageSummary.line}</span>
-                        ) : (
-                          <Tooltip>
-                            <TooltipTrigger render={<span>{usageSummary.line}</span>} />
-                            <TooltipPopup>
-                              {usageSummary.routes.map((route) => (
-                                <span key={route} className="block">
-                                  {route}
-                                </span>
-                              ))}
-                            </TooltipPopup>
-                          </Tooltip>
-                        )}
-                      </>
+                      usageSummary.routes.length === 0 ? (
+                        <span className="basis-full">{usageSummary.line}</span>
+                      ) : (
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={<span className="basis-full">{usageSummary.line}</span>}
+                          />
+                          <TooltipPopup>
+                            {usageSummary.routes.map((route) => (
+                              <span key={route} className="block">
+                                {route}
+                              </span>
+                            ))}
+                          </TooltipPopup>
+                        </Tooltip>
+                      )
                     ) : null}
                     {persona.edit === null && !persona.removed ? (
                       <span className="basis-full">Duplicate this persona to edit a copy</span>
