@@ -199,6 +199,20 @@ const deviceHostEnvironment = (
     : environment;
 };
 
+/**
+ * True when an agent-device daemon answers `/health` at `baseUrl` within two
+ * seconds. Any failure (refused, timeout, non-200) counts as dead.
+ */
+const agentDeviceDaemonAlive = (httpClient: HttpClient.HttpClient, baseUrl: string) =>
+  HttpClient.withScope(httpClient)
+    .get(`${baseUrl}/health`)
+    .pipe(
+      Effect.timeout(Duration.seconds(2)),
+      Effect.flatMap((response) => response.arrayBuffer.pipe(Effect.as(response.status === 200))),
+      Effect.scoped,
+      Effect.orElseSucceed(() => false),
+    );
+
 export const make = Effect.fn("LocalDeviceHost.make")(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const config = yield* ServerConfig.ServerConfig;
@@ -496,16 +510,10 @@ export const make = Effect.fn("LocalDeviceHost.make")(function* () {
       entryPath: agentTool.entryPath,
     });
     if (existing._tag === "Some") {
-      const alive = yield* HttpClient.withScope(httpClient)
-        .get(`http://127.0.0.1:${existing.value.httpPort}/health`)
-        .pipe(
-          Effect.timeout(Duration.seconds(2)),
-          Effect.flatMap((response) =>
-            response.arrayBuffer.pipe(Effect.as(response.status === 200)),
-          ),
-          Effect.scoped,
-          Effect.orElseSucceed(() => false),
-        );
+      const alive = yield* agentDeviceDaemonAlive(
+        httpClient,
+        `http://127.0.0.1:${existing.value.httpPort}`,
+      );
       if (alive) return toEndpoint(existing.value);
       yield* fs.remove(daemonFilePath(), { force: true }).pipe(Effect.ignore);
     }
@@ -633,7 +641,19 @@ export const make = Effect.fn("LocalDeviceHost.make")(function* () {
         DeviceHost.DeviceHostAgentReady
       > {
         const running = yield* ensureHubReady(onPhase);
-        if (running.agentDevice) return { ...toReady(running), agentDevice: running.agentDevice };
+        if (running.agentDevice) {
+          // The daemon can exit while the hub stays up. Reusing its cached
+          // endpoint would hand agents a config that fails every command, so
+          // probe it and start a fresh daemon when it no longer answers.
+          if (yield* agentDeviceDaemonAlive(httpClient, running.agentDevice.baseUrl)) {
+            return { ...toReady(running), agentDevice: running.agentDevice };
+          }
+          yield* Effect.logWarning("agent-device daemon stopped answering; restarting", {
+            baseUrl: running.agentDevice.baseUrl,
+          });
+          yield* stopAgentDeviceDaemon(agentToolRef);
+          yield* Ref.set(runningRef, { ...running, agentDevice: null });
+        }
         const installed = yield* isAgentDeviceInstalled(config.baseDir).pipe(
           Effect.provideService(FileSystem.FileSystem, fs),
           Effect.provideService(Path.Path, path),
@@ -763,6 +783,7 @@ export const layer = Layer.effect(DeviceHost.DeviceHost, make());
 /** Exposed for tests. */
 export const __testing = {
   AgentDeviceDaemonFile,
+  agentDeviceDaemonAlive,
   androidSdk,
   platformReason,
   deviceHostEnvironment,

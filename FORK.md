@@ -120,6 +120,8 @@ These are direct edits to upstream-owned files that exist only because upstream 
 
 - **CI test fixtures reflect runtime contracts**. `apps/server/src/entrypoint.test.ts` expects canonical filesystem paths, including macOS `/private/var`. `apps/mobile/src/features/review/shikiReviewHighlighter.test.ts` fixes the clock during its cold-init comparison so Shiki's 500 ms tokenization budget cannot make runner load change token boundaries; the assertion and runtime budget remain intact. Watch signal: upstream supplies these portable fixtures and deterministic timing. Exit: remove each matching test delta when that correction lands. The Claude composed-prompt assertion remains the separate case 8 contract.
 
+- **Dead agent-device daemon reused by the device hub** (issue #364). `apps/server/src/device/LocalDeviceHost.ts` `ensureAgentReady` probes the cached agent-device endpoint with the same `/health` check daemon startup already used (now the shared `agentDeviceDaemonAlive`), and when it no longer answers, stops the daemon by state dir and starts a fresh one. Upstream returns the cached endpoint unconditionally, so after the daemon exits every `device_open` hands agents a `--config` that fails with "Remote daemon is unavailable" until agent access is toggled off and on. `LocalDeviceHost.test.ts` covers the probe. Watch signal: upstream re-validates or restarts the agent daemon before reuse. Exit: remove this hunk and the helper at that rebase. Upstream path: offered through the give-back backlog, [Jacksondr5/j5code#276](https://github.com/Jacksondr5/j5code/issues/276).
+
 ### A2 root-spawn and single-target stop composition
 
 The post-A6 A2 verb slice was rebased after the merged creation and Thread Homes work onto

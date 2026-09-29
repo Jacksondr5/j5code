@@ -13,7 +13,8 @@ import * as FileSystem from "effect/FileSystem";
 import * as LocalDeviceHost from "./LocalDeviceHost.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
-import { HttpClient } from "effect/unstable/http";
+import { HttpClient, HttpClientResponse } from "effect/unstable/http";
+import * as HttpClientError from "effect/unstable/http/HttpClientError";
 import * as NetService from "@t3tools/shared/Net";
 import * as ServerConfig from "../config.ts";
 import * as ProcessRunner from "../processRunner.ts";
@@ -170,3 +171,35 @@ it.effect(
       expect(yield* fs.exists(`${baseDir}/tools`)).toBe(false);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
+
+describe("agent-device daemon liveness", () => {
+  const clientAnswering = (status: number) =>
+    HttpClient.make((request) =>
+      Effect.succeed(HttpClientResponse.fromWeb(request, new Response("ok", { status }))),
+    );
+
+  it.effect("reuses a daemon only while it answers /health", () =>
+    Effect.gen(function* () {
+      const alive = LocalDeviceHost.__testing.agentDeviceDaemonAlive;
+      expect(yield* alive(clientAnswering(200), "http://127.0.0.1:50639")).toBe(true);
+      expect(yield* alive(clientAnswering(503), "http://127.0.0.1:50639")).toBe(false);
+    }),
+  );
+
+  it.effect("treats a refused connection as a dead daemon", () =>
+    Effect.gen(function* () {
+      const refused = HttpClient.make((request) =>
+        Effect.fail(
+          new HttpClientError.HttpClientError({
+            reason: new HttpClientError.TransportError({
+              request,
+              description: "connect ECONNREFUSED 127.0.0.1:50639",
+            }),
+          }),
+        ),
+      );
+      const alive = LocalDeviceHost.__testing.agentDeviceDaemonAlive;
+      expect(yield* alive(refused, "http://127.0.0.1:50639")).toBe(false);
+    }),
+  );
+});
