@@ -21,6 +21,7 @@ import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
+import { SqlError, UnknownError } from "effect/unstable/sql/SqlError";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
@@ -123,11 +124,21 @@ const runEvent = (threadId: ThreadId, facts: RunFacts): OrchestrationV2StoredEve
 
 const seat = (name: string, agentId: string) => ({ seat: name, agentId, reason: `${name} works` });
 
-/** With `daemon`, the production layer runs its sweep and stream against these reads. */
-const makeFixture = Effect.fn("test.j5.crewLaunchReporter.fixture")(function* (daemon?: {
-  readonly latestSequence: EventSinkV2["Service"]["latestSequence"];
-  readonly streamStoredEventsFrom: ThreadManagementService["Service"]["streamStoredEventsFrom"];
-}) {
+/**
+ * With `daemon`, the production layer runs its sweep and stream against these reads. With
+ * `wrapCrews`, the reporter sees the wrapped Crew store; the fixture's own `crews` stays the real one.
+ */
+const makeFixture = Effect.fn("test.j5.crewLaunchReporter.fixture")(function* (
+  daemon?: {
+    readonly latestSequence: EventSinkV2["Service"]["latestSequence"];
+    readonly streamStoredEventsFrom: ThreadManagementService["Service"]["streamStoredEventsFrom"];
+  },
+  options?: {
+    readonly wrapCrews?: (
+      crews: AgentCrewInstanceService["Service"],
+    ) => AgentCrewInstanceService["Service"];
+  },
+) {
   const database = NodeSqliteClient.layer({ filename: ":memory:" });
   const storage = Layer.mergeAll(crewInstanceLayer, proposalStoreLayer, ledgerLayer).pipe(
     Layer.provideMerge(database),
@@ -151,6 +162,8 @@ const makeFixture = Effect.fn("test.j5.crewLaunchReporter.fixture")(function* (d
   // Each dispatch is also a receipt, so a test waits on the report rather than on the clock.
   const receipts = yield* Queue.unbounded<OrchestrationV2Command>();
   let onRead: ((threadId: ThreadId) => Effect.Effect<void>) | undefined;
+  const proposals = Context.get(context, AgentCrewProposalService);
+  const crews = Context.get(context, AgentCrewInstanceService);
   const layer = (daemon === undefined ? reporterLayer : daemonReporterLayer).pipe(
     Layer.provideMerge(
       Layer.mock(ThreadManagementService)({
@@ -203,12 +216,13 @@ const makeFixture = Effect.fn("test.j5.crewLaunchReporter.fixture")(function* (d
         daemon === undefined ? {} : { latestSequence: daemon.latestSequence },
       ),
     ),
+    Layer.provideMerge(
+      Layer.succeed(AgentCrewInstanceService, options?.wrapCrews?.(crews) ?? crews),
+    ),
     Layer.provideMerge(Layer.succeedContext(context)),
     Layer.provideMerge(NodeServices.layer),
     Layer.provideMerge(Layer.mock(A2ADeliveryWorker)({ notify: Effect.void })),
   );
-  const proposals = Context.get(context, AgentCrewProposalService);
-  const crews = Context.get(context, AgentCrewInstanceService);
 
   /** An approved proposal with its Crew recorded, the way the gate leaves them before the report. */
   const approvedLaunch = (input: {
@@ -268,6 +282,53 @@ const makeFixture = Effect.fn("test.j5.crewLaunchReporter.fixture")(function* (d
       });
       return crewId;
     });
+  /** An approved addition whose seats joined the Crew and whose threads exist with no run yet. */
+  const approvedAddition = (input: {
+    readonly id: string;
+    readonly crewId: string;
+    readonly added: ReadonlyArray<ReturnType<typeof seat>>;
+  }) =>
+    Effect.gen(function* () {
+      yield* proposals.create({
+        id: input.id,
+        squadronId,
+        captainParticipantId: captainId,
+        captainThreadId: captainThread,
+        crewInstanceId: input.crewId,
+        kind: "addition",
+        brief: "Add a seat.",
+        displayName: "Comedy",
+        requestedSeats: input.added,
+        createdAt: at,
+      });
+      yield* crews.addMembers(
+        input.crewId,
+        input.added.map((entry) => {
+          const threadId = crewSeatThreadId(input.id, entry.seat);
+          return {
+            seatName: entry.seat,
+            agentId: entry.agentId,
+            participantId: participantIdForThread(threadId),
+            threadId,
+            reason: entry.reason,
+          };
+        }),
+      );
+      yield* Ref.update(threads, (map) => {
+        const next = new Map(map);
+        for (const entry of input.added) {
+          const threadId = crewSeatThreadId(input.id, entry.seat);
+          next.set(threadId, projection(threadId, []));
+        }
+        return next;
+      });
+      yield* proposals.resolve({
+        id: input.id,
+        decision: "approve",
+        approvedSeats: input.added,
+        resolvedAt: at,
+      });
+    });
   const setSeat = (proposalId: string, seatName: string, runs: ReadonlyArray<RunFacts>) =>
     Ref.update(threads, (map) => {
       const threadId = crewSeatThreadId(proposalId, seatName);
@@ -295,6 +356,7 @@ const makeFixture = Effect.fn("test.j5.crewLaunchReporter.fixture")(function* (d
     proposals,
     crews,
     approvedLaunch,
+    approvedAddition,
     setSeat,
     dropThread,
     reports,
@@ -347,25 +409,160 @@ it.effect(
     }).pipe(Effect.scoped),
 );
 
-it.effect("after a restart mid-launch, a seat row with no thread is reported as not created", () =>
+/** The same seat under a participant id no proposal minted, as a later addition would bring it. */
+const reseated = (name: string) => {
+  const threadId = ThreadId.make(`thread:reseated:${name}`);
+  return {
+    seatName: name,
+    agentId: "scout",
+    participantId: participantIdForThread(threadId),
+    threadId,
+    reason: `${name} returns`,
+  };
+};
+
+it.effect("a never-created seat whose drop failed in the launch is dropped by the report", () =>
   Effect.gen(function* () {
-    const { layer, approvedLaunch, setSeat, dropThread, reports } = yield* fixture;
-    const id = "proposal:restart";
+    const { layer, crews, approvedLaunch, setSeat, dropThread, reports } = yield* fixture;
+    const id = "proposal:undropped";
+    const roster = [seat("first", "scout"), seat("second", "critic"), seat("third", "sentry")];
+    const crewId = yield* approvedLaunch({ id, requested: roster, approved: roster });
+    // The launch could not delete second's row; third's thread read failed, so it was never
+    // measured as missing, and its row stays.
+    yield* dropThread(id, "second");
+    yield* dropThread(id, "third");
+    yield* setSeat(id, "first", [
+      { status: "running", activity: true, userMessageId: crewSeatBriefMessageId(id, "first") },
+    ]);
+    yield* Effect.gen(function* () {
+      const reporter = yield* CrewLaunchReporter;
+      yield* reporter.watch(id, [
+        { seatName: "first", kind: "created" },
+        { seatName: "second", kind: "not_created", detail: "thread.create was refused" },
+        {
+          seatName: "third",
+          kind: "not_started",
+          detail: "reading the seat thread failed: database is locked",
+        },
+      ]);
+      const [report] = yield* reports();
+      assert.isDefined(report);
+      assert.deepStrictEqual(
+        (yield* crews.read(crewId))!.members.map((member) => member.seatName),
+        ["first", "third"],
+      );
+      assert.include(report!, "seat_not_created: second | thread.create was refused");
+      assert.include(report!, "seat_failed: third | not_started");
+      assert.notInclude(report!, "- second:");
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "after a restart mid-launch, a seat row with no thread leaves the roster and is reported as not created",
+  () =>
+    Effect.gen(function* () {
+      const { layer, crews, approvedLaunch, setSeat, dropThread, reports } = yield* fixture;
+      const id = "proposal:restart";
+      const roster = [seat("first", "scout"), seat("second", "critic")];
+      const crewId = yield* approvedLaunch({ id, requested: roster, approved: roster });
+      yield* dropThread(id, "second");
+      yield* setSeat(id, "first", [
+        { status: "completed", userMessageId: crewSeatBriefMessageId(id, "first") },
+      ]);
+      yield* Effect.gen(function* () {
+        const reporter = yield* CrewLaunchReporter;
+        // The boot sweep has no launch outcomes; it measures each seat from its thread.
+        yield* reporter.reconcile;
+        const [report] = yield* reports();
+        assert.isDefined(report);
+        assert.include(report!, "launch: 1 started, 0 failed, 1 not created");
+        assert.include(report!, "seat_not_created: second | its thread was never created");
+        assert.notInclude(report!, "- second:");
+        assert.lengthOf(yield* reports(), 1);
+        assert.deepStrictEqual(
+          (yield* crews.read(crewId))!.members.map((member) => member.seatName),
+          ["first"],
+        );
+        // The name is free again: a later seat can take it.
+        assert.equal((yield* crews.addMembers(crewId, [reseated("second")])).status, "added");
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "an addition's seat with no thread after a restart leaves the roster and frees its name",
+  () =>
+    Effect.gen(function* () {
+      const { layer, proposals, crews, approvedLaunch, approvedAddition, dropThread, reports } =
+        yield* fixture;
+      const rosterId = "proposal:before-addition";
+      const crewId = yield* approvedLaunch({
+        id: rosterId,
+        requested: [seat("first", "scout")],
+        approved: [seat("first", "scout")],
+      });
+      yield* proposals.markReported(rosterId, at);
+      const id = "proposal:addition-restart";
+      yield* approvedAddition({ id, crewId, added: [seat("extra", "critic")] });
+      yield* dropThread(id, "extra");
+      // The roster's seat has no thread either, but this report owns only the addition's rows.
+      yield* dropThread(rosterId, "first");
+      yield* Effect.gen(function* () {
+        yield* (yield* CrewLaunchReporter).reconcile;
+        const [report] = yield* reports();
+        assert.isDefined(report);
+        assert.include(report!, `proposal_id: ${id}`);
+        assert.include(report!, "seat_not_created: extra | its thread was never created");
+        assert.deepStrictEqual(
+          (yield* crews.read(crewId))!.members.map((member) => member.seatName),
+          ["first"],
+        );
+        assert.equal((yield* crews.addMembers(crewId, [reseated("extra")])).status, "added");
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
+);
+
+it.effect("a cleanup that fails leaves the launch unreported, and the next sweep converges", () =>
+  Effect.gen(function* () {
+    let failNext = true;
+    const { layer, proposals, crews, approvedLaunch, setSeat, dropThread, reports } =
+      yield* makeFixture(undefined, {
+        wrapCrews: (store) => ({
+          ...store,
+          removeMembers: (crewInstanceId, seatNames) =>
+            Effect.suspend(() => {
+              if (!failNext) return store.removeMembers(crewInstanceId, seatNames);
+              failNext = false;
+              return Effect.fail(
+                new SqlError({ reason: new UnknownError({ cause: new Error("disk I/O error") }) }),
+              );
+            }),
+        }),
+      });
+    const id = "proposal:cleanup-failed";
     const roster = [seat("first", "scout"), seat("second", "critic")];
-    yield* approvedLaunch({ id, requested: roster, approved: roster });
+    const crewId = yield* approvedLaunch({ id, requested: roster, approved: roster });
     yield* dropThread(id, "second");
     yield* setSeat(id, "first", [
       { status: "completed", userMessageId: crewSeatBriefMessageId(id, "first") },
     ]);
+    const seatNames = () =>
+      crews.read(crewId).pipe(Effect.map((crew) => crew!.members.map((member) => member.seatName)));
     yield* Effect.gen(function* () {
       const reporter = yield* CrewLaunchReporter;
-      // The boot sweep has no launch outcomes; it measures each seat from its thread.
+      // The drop fails: nothing reaches the Captain, and the launch is still owed a report.
       yield* reporter.reconcile;
-      const [report] = yield* reports();
-      assert.isDefined(report);
-      assert.include(report!, "launch: 1 started, 0 failed, 1 not created");
-      assert.include(report!, "seat_not_created: second | its thread was never created");
-      assert.lengthOf(yield* reports(), 1);
+      assert.isFalse(failNext);
+      assert.deepStrictEqual(yield* reports(), []);
+      assert.isNull((yield* proposals.read(id))!.reportedAt);
+      assert.deepStrictEqual(yield* seatNames(), ["first", "second"]);
+      // The next sweep drops the row and reports once.
+      yield* reporter.reconcile;
+      assert.deepStrictEqual(yield* seatNames(), ["first"]);
+      const texts = yield* reports();
+      assert.lengthOf(texts, 1);
+      assert.include(texts[0]!, "seat_not_created: second");
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.scoped),
 );

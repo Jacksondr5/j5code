@@ -594,8 +594,8 @@ export const layer = Layer.effect(
       const notCreated = spawned.outcomes.flatMap((outcome) =>
         outcome.kind === "not_created" ? [outcome.seatName] : [],
       );
-      // A dropped row the store refused to delete is left for the report to measure: a seat whose
-      // thread does not exist reads as not created there too.
+      // A row the store refused to delete is dropped by the launch report, which removes every
+      // row this proposal minted whose thread does not exist before it measures the seats.
       if (notCreated.length > 0)
         yield* crews.removeMembers(instance.id, notCreated).pipe(
           Effect.catchCause((cause) =>
