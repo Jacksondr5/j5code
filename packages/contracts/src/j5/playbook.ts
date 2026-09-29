@@ -5,7 +5,20 @@ import { ProjectId, ThreadId } from "../baseSchemas.ts";
 
 export const PLAYBOOK_MAX_BYTES = 262144;
 export const PLAYBOOK_MAX_STEPS = 100;
-export const PLAYBOOK_NAME_PATTERN = /^[^/\\\p{Cc}]+$/u;
+/** A playbook's name is its file stem: lowercase words joined by hyphens, like persona ids. */
+export const PLAYBOOK_NAME_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
+
+/** The valid playbook name closest to a file stem such as "Release Plan", or null if none. */
+export function suggestPlaybookName(text: string): string | null {
+  const slug = text
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  if (!slug) return null;
+  return /^[a-z]/.test(slug) ? slug : `playbook-${slug}`;
+}
 
 export const J5_PLAYBOOK_WS_METHODS = {
   subscribeChanges: "j5.playbooks.subscribeChanges",

@@ -490,7 +490,7 @@ it.effect(
         duplicate: stringify(definition(["research", "research"])),
         empty: stringify(definition([])),
         malformed: "title: [broken",
-        missing_prompt:
+        "missing-prompt":
           "title: Missing prompt\ndescription: Invalid\nsteps:\n  - id: first\n    title: First\n",
       };
       for (const [name, content] of Object.entries(invalidFiles)) {
@@ -499,7 +499,7 @@ it.effect(
       const discovered = yield* store.discover(workspaceRoot);
       assert.deepStrictEqual(
         discovered.playbooks.map(({ name }) => name),
-        ["demo", "duplicate", "empty", "malformed", "missing_prompt"],
+        ["demo", "duplicate", "empty", "malformed", "missing-prompt"],
       );
       assert.equal(discovered.playbooks[0]?.stepCount, 3);
       assert.isNull(discovered.playbooks[0]?.issue);
@@ -521,6 +521,27 @@ it.effect(
         (yield* Effect.flip(store.start(owner, workspaceRoot, "../demo", "outside"))).code,
         "invalid_name",
       );
+    }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
+);
+
+it.effect(
+  "lists a misnamed file with a rename hint, refuses to start it, and still deletes it",
+  () =>
+    Effect.gen(function* () {
+      const { store, workspaceRoot, fs, filename, write } = yield* makeFixture;
+      yield* write("Release Plan");
+      const entry = (yield* store.discover(workspaceRoot)).playbooks.find(
+        ({ name }) => name === "Release Plan",
+      );
+      assert.equal(entry?.title, "Test playbook");
+      assert.equal(entry?.issue?.code, "invalid_name");
+      assert.include(entry?.issue?.message, "release-plan.yaml");
+      assert.equal(
+        (yield* Effect.flip(store.start(owner, workspaceRoot, "Release Plan", "misnamed"))).code,
+        "invalid_name",
+      );
+      yield* store.removeDefinition(workspaceRoot, "Release Plan");
+      assert.isFalse(yield* fs.exists(filename("Release Plan")));
     }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
 );
 
