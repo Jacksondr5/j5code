@@ -144,7 +144,8 @@ jobs:
         run: pnpm exec expo prebuild --clean --platform ios
 
       # Build what prebuild generated, so a rename (like T3CodeDev → J5CodeDev)
-      # is exercised rather than assumed.
+      # is exercised rather than assumed. The vendored GhosttyKit framework has
+      # only an arm64 simulator slice, so the build targets arm64 alone.
       - name: Build for the iOS simulator
         working-directory: apps/mobile/ios
         run: |
@@ -160,5 +161,7 @@ jobs:
             -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath "$RUNNER_TEMP/derived-data" \
             -quiet \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=YES \
             CODE_SIGNING_ALLOWED=NO \
             build
