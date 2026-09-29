@@ -702,7 +702,7 @@ it.effect(
         assert.equal(resolved.runtimeMode, "approval-required");
         assert.equal(resolved.runtime.harness, "Claude Code");
         assert.equal(resolved.runtime.reasoning, "low");
-        assert.equal(resolved.runtime.access, "Approval required");
+        assert.equal(resolved.runtime.access, "Supervised");
         assert.deepStrictEqual(resolved.runtime.modelSelection, custom.modelSelection);
         assert.equal(resolved.runtime.runtimeMode, custom.runtimeMode);
         const { instance } = yield* launcher.launch({
@@ -769,7 +769,7 @@ it.effect(
           ])
           .pipe(Effect.flip);
         assert.equal(invalidAccess._tag, "CrewLaunchSeatUnavailableError");
-        assert.include(invalidAccess.message, "Choose Approval required or Full access");
+        assert.include(invalidAccess.message, "Choose Supervised or Full access");
         // Neither configured provider advertises Critic's saved model: the human override
         // still launches, preserving its snapshot and behavior on the selected harness.
         const personaSeat = {
