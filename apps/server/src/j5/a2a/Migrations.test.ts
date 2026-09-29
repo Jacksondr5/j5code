@@ -1474,9 +1474,12 @@ it.effect(
       }
       const before = yield* sql`SELECT * FROM j5_playbook_run ORDER BY run_id`;
       yield* runJ5A2AMigrations();
-      // Later migrations add the nullable Crew link; existing runs stay thread runs.
+      // Later migrations add the nullable Crew link; existing runs stay thread runs. The columns
+      // are named because the SQLite client caches statements by SQL text, and on Node 24.14 a
+      // `SELECT *` prepared before the ALTER keeps its old column list.
       assert.deepStrictEqual(
-        yield* sql`SELECT * FROM j5_playbook_run ORDER BY run_id`,
+        yield* sql`SELECT run_id, owner_thread_id, definition_path, current_step_id, status,
+          created_at, updated_at, crew_instance_id FROM j5_playbook_run ORDER BY run_id`,
         before.map((row) => ({ ...row, crew_instance_id: null })),
       );
       assert.equal(
