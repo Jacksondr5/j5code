@@ -1,6 +1,7 @@
 import { DeviceService } from "../../device/DeviceService.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { EffectOutboxV2 } from "../../orchestration-v2/EffectOutbox.ts";
+import { EventSinkV2 } from "../../orchestration-v2/EventSink.ts";
 import { OrchestratorV2 } from "../../orchestration-v2/Orchestrator.ts";
 import { assert, it } from "@effect/vitest";
 import * as Context from "effect/Context";
@@ -55,6 +56,9 @@ const archiveDependencies = Layer.mergeAll(
   }),
 );
 
+// The Crew and silence daemons read their start point from the event store; this one is empty.
+const emptyEventStore = Layer.mock(EventSinkV2)({ latestSequence: () => Effect.succeed(0) });
+
 const measureNestedRuntimeBuilds = (nested: "http" | "mcp") =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -85,6 +89,7 @@ const measureNestedRuntimeBuilds = (nested: "http" | "mcp") =>
         ).pipe(
           Layer.provide(runtime),
           Layer.provide(threadManagement),
+          Layer.provide(emptyEventStore),
           Layer.provide(Layer.mock(ProviderRegistry)({})),
           Layer.provide(Layer.mock(OrchestratorV2)({})),
           Layer.provide(Layer.mock(EffectOutboxV2)({ listByCommandId: () => Effect.succeed([]) })),
@@ -162,6 +167,7 @@ it.effect("shares one runtime and outbox across the production HTTP and MCP regi
           ).pipe(
             Layer.provideMerge(runtime),
             Layer.provide(countedThreadManagement),
+            Layer.provide(emptyEventStore),
             Layer.provide(Layer.mock(DeviceService)({})),
             Layer.provide(Layer.mock(ProjectionSnapshotQuery)({})),
             Layer.provide(Layer.mock(OrchestratorV2)({})),

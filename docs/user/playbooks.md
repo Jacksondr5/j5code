@@ -12,8 +12,10 @@ steps, writes the YAML, and checks the definition without starting a run. You ca
 customize the persona in Settings → Personas. Invalid definitions remain visible
 with their errors.
 
-On web and desktop, you can import `.yaml` or `.yml` definitions into the selected workspace. Importing
-a file with an existing name asks before replacing it. Changes also apply to runs
+On web and desktop, **Import YAML** copies a `.yaml` or `.yml` definition into the selected workspace.
+The picker browses the workspace environment's filesystem, one file at a time. The file is
+saved under a valid playbook name, so `Release Plan.yaml` becomes `release-plan.yaml`.
+Importing a file with an existing name asks before replacing it. Changes also apply to runs
 using that definition. An active run must be completed or cancelled before its
 definition can be deleted; completed run history remains.
 
@@ -24,7 +26,10 @@ its thread, or choose **All** to include completed and cancelled runs.
 Unavailable environments keep their last received progress marked as stale.
 
 Ask your agent to create a playbook, or save a YAML file in your thread's workspace
-under `.j5/playbooks/`. For example, `.j5/playbooks/review.yaml`:
+under `.j5/playbooks/`. The file name is the playbook's name: lowercase letters, digits,
+and hyphens, such as `release-review`. The `title` is what you see in the app. A file
+with any other name is listed as invalid with a suggested rename. For example,
+`.j5/playbooks/review.yaml`:
 
 ```yaml
 title: Review a change
@@ -42,7 +47,9 @@ steps:
 ```
 
 Type `/playbook ` to choose a registered playbook, then send the command to start it.
-Send `/playbook` to ask what is available. You can also ask directly: “Start
+Send `/playbook review` to start directly, or `/playbook` to ask what is available.
+Text after the name stays part of your message, as in
+`/playbook review, then summarize the risks`. You can also ask directly: “Start
 playbook review.” One playbook can be active per thread;
 finishing or cancelling it leaves the agent ready for other work or another playbook.
 

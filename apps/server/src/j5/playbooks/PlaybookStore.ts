@@ -5,6 +5,7 @@ import {
   PLAYBOOK_RUNS_PAGE_SIZE,
   PLAYBOOK_MAX_BYTES,
   PLAYBOOK_NAME_PATTERN,
+  suggestPlaybookName,
   type PlaybookRun,
   type PlaybookRunsRequest,
   type PlaybookStepResponse,
@@ -23,6 +24,18 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { parseDocument } from "yaml";
 
 const isPlaybookError = Schema.is(PlaybookError);
+// Any file stem that stays inside the playbook directory; such files are listed and deletable
+// even when their name is invalid, so a misnamed file never disappears without a way out.
+const PLAYBOOK_FILE_STEM = /^[^/\\\p{Cc}]+$/u;
+const invalidNameIssue = (file: string) => {
+  const suggestion = suggestPlaybookName(file.slice(0, -5));
+  return playbookError(
+    "invalid_name",
+    suggestion
+      ? `Rename ${file} to ${suggestion}.yaml. Playbook names use lowercase letters, digits, and hyphens.`
+      : `Rename ${file} using lowercase letters, digits, and hyphens.`,
+  );
+};
 const decodeDefinition = Schema.decodeUnknownEffect(PlaybookDefinition);
 
 export const playbookError = (
@@ -233,7 +246,7 @@ export const makePlaybookStore = Effect.gen(function* () {
     const directory = path.join(workspaceRoot, ".j5/playbooks");
     if (!(yield* fs.exists(directory))) return { playbooks: [] };
     const names = (yield* fs.readDirectory(directory))
-      .filter((name) => name.endsWith(".yaml") && PLAYBOOK_NAME_PATTERN.test(name.slice(0, -5)))
+      .filter((name) => name.endsWith(".yaml") && PLAYBOOK_FILE_STEM.test(name.slice(0, -5)))
       .sort();
     const playbooks = yield* Effect.forEach(names, (file) =>
       readDefinition(path.join(directory, file)).pipe(
@@ -243,7 +256,9 @@ export const makePlaybookStore = Effect.gen(function* () {
           description: definition.description,
           stepCount: definition.steps.length,
           steps: definition.steps.map(({ id, title }) => ({ id, title })),
-          issue: null as PlaybookError | null,
+          issue: PLAYBOOK_NAME_PATTERN.test(file.slice(0, -5))
+            ? (null as PlaybookError | null)
+            : invalidNameIssue(file),
         })),
         Effect.catch((issue) =>
           Effect.succeed({
@@ -264,7 +279,7 @@ export const makePlaybookStore = Effect.gen(function* () {
     workspaceRoot: string,
     name: string,
   ) {
-    if (!PLAYBOOK_NAME_PATTERN.test(name))
+    if (!PLAYBOOK_FILE_STEM.test(name))
       return yield* playbookError("invalid_name", "Choose a playbook in this workspace.");
     const directory = path.resolve(workspaceRoot, ".j5/playbooks");
     const filename = path.join(directory, `${name}.yaml`);
@@ -323,7 +338,7 @@ export const makePlaybookStore = Effect.gen(function* () {
     if (!PLAYBOOK_NAME_PATTERN.test(stem))
       return yield* playbookError(
         "invalid_name",
-        "Pass the name of a .yaml file inside .j5/playbooks, without directories.",
+        "Pass a playbook name from playbook_list: lowercase letters, digits, and hyphens, without directories or spaces.",
       );
     const definitionPath = path.resolve(workspaceRoot, ".j5/playbooks", `${stem}.yaml`);
     const request = encodeRequest(["start", definitionPath]);

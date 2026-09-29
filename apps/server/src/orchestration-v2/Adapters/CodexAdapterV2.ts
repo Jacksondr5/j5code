@@ -146,6 +146,7 @@ import {
 } from "../SubagentProjection.ts";
 import { withAgentPersonaInstructions } from "../../j5/agents/agentPersonaPrompts.ts";
 import { j5CodexT3McpServerConfig } from "../../j5/a2a/mcp/codexToolApproval.ts";
+import { j5CodexCrewSeatConfig } from "../../j5/a2a/crewSeatQuestions.ts";
 
 const CODEX_PROVIDER = ProviderDriverKind.make("codex");
 export const CODEX_DRIVER_KIND = CODEX_PROVIDER;
@@ -1172,6 +1173,8 @@ export function codexThreadRuntimeParams(input: {
                 ...j5CodexT3McpServerConfig(input.runtimePolicy),
               },
             },
+            // J5: a Crew seat asks its Captain, not the person (crewSeatQuestions.ts).
+            ...j5CodexCrewSeatConfig(input.runtimePolicy),
           },
         }),
   };

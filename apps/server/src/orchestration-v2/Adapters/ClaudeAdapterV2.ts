@@ -151,6 +151,7 @@ import {
 } from "../SubagentProjection.ts";
 import { agentPersonaPromptSuffix } from "../../j5/agents/agentPersonaPrompts.ts";
 import { J5_CLAUDE_MCP_ALLOWED_TOOLS } from "../../j5/a2a/mcp/claudeAllowedTools.ts";
+import { j5ClaudeCrewSeatQueryOverrides } from "../../j5/a2a/crewSeatQuestions.ts";
 
 export const CLAUDE_PROVIDER = ProviderDriverKind.make("claudeAgent");
 export const CLAUDE_AGENT_SDK_QUERY_PROTOCOL = "claude-agent-sdk.query" as const;
@@ -5621,6 +5622,8 @@ export function makeClaudeAdapterV2(
                 environment: adapterOptions.environment,
                 tools: queryPolicy.tools ?? CLAUDE_CODE_PRESET_TOOLS,
                 ...mcpOverrides,
+                // J5: a Crew seat asks its Captain, not the person (crewSeatQuestions.ts).
+                ...j5ClaudeCrewSeatQueryOverrides(turnInput.runtimePolicy),
                 permissionMode: queryPolicy.permissionMode,
                 ...(queryPolicy.allowDangerouslySkipPermissions === undefined
                   ? {}

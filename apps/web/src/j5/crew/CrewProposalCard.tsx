@@ -11,6 +11,7 @@ import { agentPersonaEnvironment } from "../agents/agentPersonaAtoms";
 import type { CrewProposal, CrewProposalSeat } from "./crewProposalsClient";
 import { addSeat, describeSeatAgent, removeSeat, saveSeat } from "./crewProposalDraft";
 import { CrewSeatDialog } from "./CrewSeatDialog";
+import { crewSeatStopsForApprovals } from "./crewSeatRuntime";
 import type { CrewProposalSeatRuntime } from "@t3tools/contracts/j5";
 import { useParticipantLabels } from "../a2a/ParticipantIdentitiesClient";
 import { useCrewProposalPreview } from "./useCrewProposalPreview";
@@ -48,11 +49,7 @@ export function CrewProposalCard(props: {
   readonly onOpenCaptain?: (() => void) | undefined;
 }) {
   const { proposal } = props;
-  // A gate handed back after a failed launch reopens with the seats the person approved, so a
-  // seat they removed stays removed and a retry sends what they last saw.
-  const [seats, setSeats] = useState<ReadonlyArray<CrewProposalSeat>>(
-    proposal.approvedSeats ?? proposal.requestedSeats,
-  );
+  const [seats, setSeats] = useState<ReadonlyArray<CrewProposalSeat>>(proposal.requestedSeats);
   const [editor, setEditor] = useState<{
     readonly seat: CrewProposalSeat | null;
     readonly runtime?: CrewProposalSeatRuntime | undefined;
@@ -71,6 +68,9 @@ export function CrewProposalCard(props: {
   );
   const agents = useMemo(() => rows.filter((agent) => agent.availability === "available"), [rows]);
   const preview = useCrewProposalPreview(props.environmentId, proposal.id, seats, props.busy);
+  const runtimeFor = (seat: CrewProposalSeat) =>
+    preview.runtimeSeats?.find((row) => row.seat === seat.seat);
+  const stopping = seats.filter((seat) => crewSeatStopsForApprovals(seat, runtimeFor(seat))).length;
 
   return (
     <li
@@ -119,7 +119,7 @@ export function CrewProposalCard(props: {
       </details>
       <ul className="mt-3 space-y-2">
         {seats.map((seat) => {
-          const runtime = preview.runtimeSeats?.find((row) => row.seat === seat.seat);
+          const runtime = runtimeFor(seat);
           return (
             <li
               key={seat.seat}
@@ -134,6 +134,11 @@ export function CrewProposalCard(props: {
                         ? "Custom crew member"
                         : describeSeatAgent(rows, seat.agentId)}
                     </span>
+                    {crewSeatStopsForApprovals(seat, runtime) ? (
+                      <Badge variant="warning" size="sm">
+                        Stops for approvals
+                      </Badge>
+                    ) : null}
                   </div>
                   {runtime ? (
                     <p className="break-words">
@@ -232,6 +237,13 @@ export function CrewProposalCard(props: {
             Refresh runtime
           </Button>
         </div>
+      ) : null}
+      {stopping > 0 ? (
+        <p className="mt-3 text-xs text-muted-foreground">
+          {stopping === 1
+            ? "1 seat will stop for approvals in its own thread."
+            : `${stopping} seats will stop for approvals in their own threads.`}
+        </p>
       ) : null}
       <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
         <Button

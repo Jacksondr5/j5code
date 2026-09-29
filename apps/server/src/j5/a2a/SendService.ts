@@ -27,6 +27,7 @@ import {
   type SendMessageResult,
   participantId,
 } from "./contracts.ts";
+import { CREW_ALERT_EXCHANGE_PREFIX } from "./crewFailureAlert.ts";
 import { resolveThreadHome } from "./HomeRegistrar.ts";
 import { isRegisteredHumanPerson, listRegisteredHumanPersonIds } from "./HumanPersonRegistry.ts";
 import { A2ALedgerTransactionWriter, A2ALedger, type A2ALedgerError } from "./LedgerService.ts";
@@ -740,6 +741,7 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
                 AND sender_id = ${sender.participantId}
                 AND receiver_id = ${receiverId}
                 AND status = 'open'
+                AND substr(exchange_id, 1, ${CREW_ALERT_EXCHANGE_PREFIX.length}) <> ${CREW_ALERT_EXCHANGE_PREFIX}
               LIMIT 1
             `;
           if (existing[0] !== undefined) {

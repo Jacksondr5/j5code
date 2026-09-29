@@ -94,8 +94,8 @@ export function detectComposerTrigger(
       };
     }
 
-    const playbookMatch = /^\/playbook[ \t]+([^\r\n]*[^ \t\r\n])?$/i.exec(linePrefix);
-    if (playbookMatch && !text.slice(0, lineStart).trim() && !text.slice(cursor).trim()) {
+    const playbookMatch = /^\/playbook[ \t]+([a-z][a-z0-9-]*)?$/i.exec(linePrefix);
+    if (playbookMatch && !text.slice(0, lineStart).trim() && /^(?:$|\s)/.test(text.slice(cursor))) {
       return {
         kind: "slash-playbook",
         query: playbookMatch[1] ?? "",

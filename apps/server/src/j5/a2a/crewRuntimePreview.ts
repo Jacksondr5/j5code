@@ -1,9 +1,7 @@
 import * as NodeCrypto from "node:crypto";
-import * as NodeUtil from "node:util";
 import type {
   ModelSelection,
   OrchestrationV2AgentPersonaAssignment,
-  OrchestrationV2AppThread,
   RuntimeMode,
   ServerProvider,
 } from "@t3tools/contracts";
@@ -126,8 +124,8 @@ export function describeCrewSeatRuntime(
         : mode === "auto"
           ? "Auto"
           : mode === "auto-accept-edits"
-            ? "Accept edits"
-            : "Approval required";
+            ? "Auto-accept edits"
+            : "Supervised";
   return {
     seat,
     provider: providerName(provider, model?.subProvider),
@@ -160,16 +158,4 @@ export function crewApprovalToken(
       }),
     )
     .digest("hex");
-}
-
-/** A deterministic retry must reuse the configuration already written to the seat's thread. */
-export function sameCrewRuntime(
-  thread: OrchestrationV2AppThread,
-  seat: ResolvedCrewLaunchSeat,
-): boolean {
-  return (
-    thread.runtimeMode === seat.runtimeMode &&
-    NodeUtil.isDeepStrictEqual(thread.modelSelection, seat.modelSelection) &&
-    NodeUtil.isDeepStrictEqual(thread.agentPersonaAssignment ?? null, seat.assignment)
-  );
 }

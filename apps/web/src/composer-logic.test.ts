@@ -32,10 +32,10 @@ import { formatTerminalContextReference } from "./lib/terminalContext";
 describe("shouldCompleteComposerMenuSelection", () => {
   it.each([
     ["Enter", "foreground", "review", "review", false],
-    ["Enter", "foreground", "code review", "code review", false],
+    ["Enter", "foreground", "code-review", "code-review", false],
     ["Enter", "foreground", "rev", "review", true],
     ["Enter", "foreground", "review", "review-all", true],
-    ["Enter", "foreground", "REVIEW", "review", true],
+    ["Enter", "foreground", "REVIEW", "review", false],
     ["Enter", "foreground", "", "review", true],
     ["Tab", "foreground", "review", "review", true],
     ["Enter", null, "review", "review", true],
@@ -328,13 +328,23 @@ describe("detectComposerTrigger", () => {
       rangeStart: 0,
       rangeEnd: text.length,
     });
-    expect(detectComposerTrigger("/playbook code r", 16)).toMatchObject({ query: "code r" });
+    expect(detectComposerTrigger("/playbook code r", 16)).toBeNull();
+    expect(detectComposerTrigger("/playbook code-r", 16)).toMatchObject({ query: "code-r" });
     expect(detectComposerTrigger("/playbook ", 10)).toMatchObject({ query: "" });
     expect(detectComposerTrigger("/playbook debugging ", 20)).toBeNull();
     expect(detectComposerTrigger("Earlier text\n/playbook deb", 26)?.kind).not.toBe(
       "slash-playbook",
     );
-    expect(detectComposerTrigger("/playbook deb\nMore text", 13)?.kind).not.toBe("slash-playbook");
+    expect(detectComposerTrigger("/playbook deb\nMore text", 13)).toMatchObject({
+      query: "deb",
+      rangeEnd: 13,
+    });
+    expect(detectComposerTrigger("/playbook deb then summarize", 13)).toMatchObject({
+      query: "deb",
+      rangeEnd: 13,
+    });
+    expect(detectComposerTrigger("/playbook debug", 13)).toBeNull();
+    expect(detectComposerTrigger("/playbook review, then summarize", 31)).toBeNull();
   });
 
   it("keeps slash command detection active for provider commands", () => {
