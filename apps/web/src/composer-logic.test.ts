@@ -24,9 +24,36 @@ import {
   isCollapsedCursorAdjacentToInlineToken,
   parseStandaloneComposerSlashCommand,
   replaceTextRange,
+  shouldCompleteComposerMenuSelection,
 } from "./composer-logic";
 import { carryDisplacedCustomAnswerIntoPrompt } from "./pendingUserInput";
 import { formatTerminalContextReference } from "./lib/terminalContext";
+
+describe("shouldCompleteComposerMenuSelection", () => {
+  it.each([
+    ["Enter", "foreground", "review", "review", false],
+    ["Enter", "foreground", "code review", "code review", false],
+    ["Enter", "foreground", "rev", "review", true],
+    ["Enter", "foreground", "review", "review-all", true],
+    ["Enter", "foreground", "REVIEW", "review", true],
+    ["Enter", "foreground", "", "review", true],
+    ["Tab", "foreground", "review", "review", true],
+    ["Enter", null, "review", "review", true],
+  ] as const)(
+    "%s with %s intent and query %j selecting %j completes: %s",
+    (key, intent, query, name, expected) => {
+      const prompt = `/playbook ${query}`;
+      expect(
+        shouldCompleteComposerMenuSelection(
+          key,
+          intent,
+          detectComposerTrigger(prompt, prompt.length),
+          { type: "playbook", name },
+        ),
+      ).toBe(expected);
+    },
+  );
+});
 
 const terminalReference = formatTerminalContextReference({
   id: "ctx-1",

@@ -84,6 +84,7 @@ import {
   detectComposerTrigger,
   expandCollapsedComposerCursor,
   formatAssistantCitationForComposer,
+  shouldCompleteComposerMenuSelection,
   replaceTextRange,
 } from "../../composer-logic";
 import { DISCONNECTED_COMPOSER_PLACEHOLDER } from "../../composerPlaceholder";
@@ -4416,7 +4417,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         nudgeComposerMenuHighlight("ArrowUp");
         return true;
       }
-      if ((key === "Enter" || key === "Tab") && selectedItem) {
+      if (
+        selectedItem &&
+        shouldCompleteComposerMenuSelection(key, submissionIntent, trigger, selectedItem)
+      ) {
         onSelectComposerItem(selectedItem);
         return true;
       }

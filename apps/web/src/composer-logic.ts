@@ -29,6 +29,23 @@ export interface ComposerTrigger {
   rangeEnd: number;
 }
 
+/** Let the send shortcut submit an already-complete playbook command. */
+export function shouldCompleteComposerMenuSelection(
+  key: string,
+  submissionIntent: ComposerSubmissionIntent | null,
+  trigger: ComposerTrigger | null,
+  item: { type: string; name?: string },
+) {
+  if (key === "Tab") return true;
+  if (key !== "Enter") return false;
+  return !(
+    submissionIntent &&
+    trigger?.kind === "slash-playbook" &&
+    item.type === "playbook" &&
+    trigger.query.trim() === item.name
+  );
+}
+
 export function formatAssistantCitationForComposer(citation: AssistantCitation, comment = "") {
   return `${serializeAssistantCitation(withAssistantCitationComment(citation, comment))} `;
 }
