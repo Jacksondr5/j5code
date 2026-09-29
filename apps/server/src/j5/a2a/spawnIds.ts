@@ -135,7 +135,7 @@ export const spawnFirstTurnText = (input: {
             crew.playbook.steps.length === 0
               ? " none"
               : crew.playbook.steps
-                  .map((step) => `\n- ${step.id}: ${briefLine(step.title)}`)
+                  .map((step) => `\n- ${briefLine(step.id)}: ${briefLine(step.title)}`)
                   .join("")
           }\n</seat_playbook>\nThe Captain runs this playbook and hands you each of your steps when the run reaches it. Wait for that hand-off before starting a step, and report back with send_message when it's done.`,
         ];

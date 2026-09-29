@@ -23,9 +23,14 @@ export const CrewProposalSeat = Schema.Struct({
   instructions: Schema.optional(bounded(CREW_TEXT_MAX_CHARS)),
   modelSelection: Schema.optional(ModelSelection),
   runtimeMode: Schema.optional(RuntimeMode),
-  /** Ids of the playbook steps the seat owns, checked against the live definition. */
+  /**
+   * Ids of the playbook steps the seat owns, checked against the live definition. Ids follow the
+   * playbook's own rule (non-empty, no length cap); only the count is bounded.
+   */
   steps: Schema.optionalKey(
-    Schema.Array(bounded(CREW_NAME_MAX_CHARS)).check(Schema.isMaxLength(PLAYBOOK_MAX_STEPS)),
+    Schema.Array(Schema.String.check(Schema.isMinLength(1))).check(
+      Schema.isMaxLength(PLAYBOOK_MAX_STEPS),
+    ),
   ),
   /** Recomputed by the server whenever the seats are validated; never taken from a client. */
   personaSwaps: Schema.optionalKey(Schema.Array(CrewPersonaSwap)),

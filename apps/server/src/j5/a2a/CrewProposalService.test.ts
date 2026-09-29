@@ -1734,3 +1734,32 @@ it.effect("records a persona swap in the stored seats and returns it on the prev
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.scoped),
 );
+
+it.effect("stores and reads back a step id longer than a seat name", () =>
+  Effect.gen(function* () {
+    const { layer, workspaceRoot, writePlaybook } = yield* playbookFixture;
+    const longId = `s${"x".repeat(120)}`;
+    yield* writePlaybook(
+      "long",
+      stringify({
+        title: "Long ids",
+        description: "Step ids are not seat names.",
+        steps: [{ id: longId, title: "Long", prompt: "Do it." }],
+      }),
+    );
+    yield* Effect.gen(function* () {
+      const gate = yield* CrewProposalService;
+      const opened = yield* gate.propose({
+        requestKey: "long-id",
+        captain,
+        displayName: "Long Crew",
+        brief: "Own the long step.",
+        playbook: { name: "long", workspaceRoot },
+        seats: [custom("owner", [longId])],
+      });
+      const stored = yield* (yield* AgentCrewProposalService).read(opened.proposal.id);
+      assert.deepStrictEqual(stored?.requestedSeats[0]?.steps, [longId]);
+      assert.deepStrictEqual(opened.playbook?.unownedSteps, []);
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
