@@ -5,15 +5,14 @@ import {
   PlaybookStepResponse,
 } from "@t3tools/contracts/j5";
 import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { Tool } from "effect/unstable/ai";
 import { McpInvocationContext } from "../../mcp/McpInvocationContext.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { ProjectService } from "../../project/ProjectService.ts";
 import { PlaybookStore, playbookError, type PlaybookMutation } from "./PlaybookStore.ts";
+import { playbookWorkspaceRoot } from "./workspace.ts";
 
-const isPlaybookError = Schema.is(PlaybookError);
 const Text = Schema.String.check(Schema.isNonEmpty());
 const Mutation = Schema.Struct({ runId: Text, client_request_id: Text });
 const Movement = Schema.Struct({ ...Mutation.fields, expectedStepId: Text });
@@ -112,20 +111,8 @@ const ownerScope = Effect.gen(function* () {
 });
 const workspace = Effect.gen(function* () {
   const scope = yield* ownerScope;
-  const threads = yield* ThreadManagementService;
-  const projects = yield* ProjectService;
-  const { thread } = yield* threads.getThreadProjection(scope.threadId);
-  if (thread.deletedAt !== null)
-    return yield* playbookError("thread_not_found", "The owner thread was deleted.");
-  const project = yield* projects.getById(thread.projectId);
-  if (Option.isNone(project))
-    return yield* playbookError("project_not_found", "The thread's project was not found.");
-  return { owner: scope.threadId, root: thread.worktreePath ?? project.value.workspaceRoot };
-}).pipe(
-  Effect.mapError((error) =>
-    isPlaybookError(error) ? error : playbookError("workspace_unavailable", error.message),
-  ),
-);
+  return { owner: scope.threadId, root: yield* playbookWorkspaceRoot(scope.threadId) };
+});
 
 const mutate = Effect.fn("PlaybookMcp.mutate")(function* (input: PlaybookMutation) {
   const scope = yield* ownerScope;

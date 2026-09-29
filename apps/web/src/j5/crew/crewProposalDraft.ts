@@ -50,7 +50,12 @@ export const saveSeat = (
   if (!current) return { seats, error: "This seat is no longer in the roster." };
   const validated = addSeat(removeSeat(seats, seatName), { ...draft, seat: seatName });
   if (validated.error !== null) return { seats, error: validated.error };
-  const updated = { ...validated.seats[validated.seats.length - 1]!, reason: current.reason };
+  // The card cannot reassign playbook steps, so an edited seat keeps the ones it owns.
+  const updated = {
+    ...validated.seats[validated.seats.length - 1]!,
+    reason: current.reason,
+    ...(current.steps === undefined ? {} : { steps: current.steps }),
+  };
   return {
     seats: seats.map((seat) => (seat.seat === seatName ? updated : seat)),
     error: null,

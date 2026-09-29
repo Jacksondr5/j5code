@@ -1469,3 +1469,79 @@ it.effect(
       }).pipe(Effect.provide(unit.layer));
     }).pipe(Effect.scoped),
 );
+
+it.effect("records a playbook Crew's step owners and surfaces a taken step unwrapped", () =>
+  Effect.gen(function* () {
+    const { context, commands, captain } = yield* fixture;
+    const codex = provider("codex", "codex", [{ slug: "gpt-5.6-sol", options: ["high"] }]);
+    const layer = crewLaunchLayer.pipe(
+      Layer.provideMerge(dependencies(commands, [codex])),
+      Layer.provideMerge(Layer.succeedContext(context)),
+      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-steps-" })),
+      Layer.provideMerge(NodeServices.layer),
+    );
+    yield* Effect.gen(function* () {
+      const launcher = yield* CrewLaunchService;
+      const crews = yield* AgentCrewInstanceService;
+      const playbook = {
+        name: "release",
+        definitionPath: "/repo/.j5/playbooks/release.yaml",
+        title: "Release",
+        steps: [
+          { id: "plan", title: "Plan the release" },
+          { id: "review", title: "Review" },
+        ],
+      };
+      const custom = (name: string, steps?: ReadonlyArray<string>) => ({
+        name,
+        agentId: null,
+        reason: `Seat ${name}`,
+        instructions: `Do the ${name} work.`,
+        ...(steps === undefined ? {} : { steps }),
+      });
+      const { instance } = yield* launcher.launch({
+        providerSessionId: "session",
+        requestKey: "playbook-crew",
+        captain,
+        displayName: "Release Crew",
+        seats: [custom("planner", ["plan"]), custom("helper")],
+        brief: "Ship it.",
+        playbook,
+      });
+      assert.deepStrictEqual(instance.playbook, {
+        name: "release",
+        definitionPath: playbook.definitionPath,
+      });
+      assert.deepStrictEqual(
+        instance.members.map(({ seatName, playbookStepIds }) => [seatName, playbookStepIds]),
+        [
+          ["planner", ["plan"]],
+          ["helper", []],
+        ],
+      );
+      const briefs = (yield* Ref.get(commands)).flatMap((command) =>
+        command.type === "message.dispatch" ? [command.text] : [],
+      );
+      assert.include(briefs[0], "your_steps:\n- plan: Plan the release\n</seat_playbook>");
+      assert.include(briefs[1], "your_steps: none\n</seat_playbook>");
+
+      const sent = (yield* Ref.get(commands)).length;
+      const refused = yield* launcher
+        .addSeats({
+          providerSessionId: "session",
+          requestKey: "rival",
+          captain,
+          instance,
+          seats: [custom("rival", ["plan"])],
+          playbook,
+        })
+        .pipe(Effect.flip);
+      assert.equal(refused._tag, "CrewStepAlreadyOwnedError");
+      assert.lengthOf(yield* Ref.get(commands), sent);
+      assert.deepStrictEqual(
+        (yield* crews.read(instance.id))?.members.map(({ seatName }) => seatName),
+        ["planner", "helper"],
+      );
+    }).pipe(Effect.provide(layer));
+  }),
+);

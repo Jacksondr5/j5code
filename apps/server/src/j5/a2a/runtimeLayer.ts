@@ -109,9 +109,11 @@ export const makeJ5A2AAuxiliaryLayer = (
   const crewRuntimeRequestProvided = crewRuntimeRequestLayer.pipe(
     Layer.provideMerge(agentCrewInstanceLayer),
   );
+  // A playbook Crew is validated against the live YAML through the same store the tools use.
   const crewProposalProvided = crewProposalLayer.pipe(
     Layer.provideMerge(crewLaunchProvided),
     Layer.provideMerge(crewLaunchReporterProvided),
+    Layer.provideMerge(playbookStoreLayer),
   );
   // A Captain's lifecycle carries its Crews, read from the same event stream the notifier reads.
   const captainArchiveCascadeProvided = captainArchiveCascadeLayer.pipe(

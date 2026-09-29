@@ -78,7 +78,18 @@ export interface CrewBriefContext {
     readonly participantId: string;
     readonly agentDisplayName: string;
   }>;
+  /** The playbook the Crew follows and the steps this seat owns, with live titles. */
+  readonly playbook?:
+    | {
+        readonly name: string;
+        readonly title: string;
+        readonly steps: ReadonlyArray<{ readonly id: string; readonly title: string }>;
+      }
+    | undefined;
 }
+
+/** A title on one line that cannot close the block it is written into. */
+const briefLine = (text: string) => text.replace(/\s+/g, " ").trim().replace(/<\//g, "<\\/");
 
 // The web timeline parses the identity block and the trailing brief
 // (apps/web/src/j5/a2a/SpawnBrief.tsx) to attribute the message to its spawner;
@@ -116,7 +127,26 @@ export const spawnFirstTurnText = (input: {
       : [
           `<seat_obligation>\nYour agent definition returns a ${crew.obligation.kind}. Before you finish, write it with write_artifact to exactly \`${crew.obligation.path}\` as Markdown (your instructions list the required contents); this is in addition to direct messages and must not delay sharing intermediate findings or results. Your Captain is told when the file appears; rewrite the same path to revise it.\n</seat_obligation>`,
         ];
-  return [identity, crewContext, collaboration, ...seatInstructions, ...obligation, brief].join(
-    "\n\n",
-  );
+  const playbook =
+    crew.playbook === undefined
+      ? []
+      : [
+          `<seat_playbook>\nplaybook: ${crew.playbook.name} (${briefLine(crew.playbook.title)})\nyour_steps:${
+            crew.playbook.steps.length === 0
+              ? " none"
+              : crew.playbook.steps
+                  .map((step) => `\n- ${step.id}: ${briefLine(step.title)}`)
+                  .join("")
+          }\n</seat_playbook>\nThe Captain runs this playbook and hands you each of your steps when the run reaches it. Wait for that hand-off before starting a step, and report back with send_message when it's done.`,
+        ];
+  // The web parser needs the crew context first and the brief last, so the playbook sits between.
+  return [
+    identity,
+    crewContext,
+    ...playbook,
+    collaboration,
+    ...seatInstructions,
+    ...obligation,
+    brief,
+  ].join("\n\n");
 };

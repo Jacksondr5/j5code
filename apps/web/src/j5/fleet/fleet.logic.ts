@@ -15,6 +15,9 @@ export interface FleetRow {
 export interface FleetCrewGroup {
   readonly crewInstanceId: string;
   readonly crewName: string;
+  /** The playbook the Crew follows, and the step ids each seat owns. */
+  readonly playbookName: string | null;
+  readonly stepsBySeat: ReadonlyMap<string, ReadonlyArray<string>>;
   /** Seats are nodes too: a helper an agent places under a seat renders beneath that seat. */
   readonly members: ReadonlyArray<FleetNode>;
 }
@@ -38,6 +41,7 @@ const byLabel = (left: FleetAgent, right: FleetAgent) =>
  */
 export function buildFleetTree(squadron: FleetSquadron): ReadonlyArray<FleetNode> {
   const byId = new Map(squadron.agents.map((agent) => [agent.participantId, agent]));
+  const crewById = new Map(squadron.crews.map((crew) => [crew.crewInstanceId, crew]));
   const children = new Map<string | null, Array<FleetAgent>>();
   for (const agent of squadron.agents) {
     const placed = agent.placementParentId ?? agent.crew?.captainParticipantId ?? null;
@@ -73,11 +77,20 @@ export function buildFleetTree(squadron: FleetSquadron): ReadonlyArray<FleetNode
     return {
       row: { agent, depth, crewInstanceId: null },
       children: plain,
-      crews: [...crewGroups.entries()].map(([crewInstanceId, group]) => ({
-        crewInstanceId,
-        crewName: group.name,
-        members: group.members,
-      })),
+      crews: [...crewGroups.entries()].map(([crewInstanceId, group]) => {
+        const crew = crewById.get(crewInstanceId);
+        return {
+          crewInstanceId,
+          crewName: group.name,
+          playbookName: crew?.playbook?.name ?? null,
+          stepsBySeat: new Map(
+            (crew?.roster ?? []).flatMap((seat) =>
+              seat.steps === undefined ? [] : [[seat.seat, seat.steps] as const],
+            ),
+          ),
+          members: group.members,
+        };
+      }),
     };
   };
   const roots = (children.get(null) ?? [])

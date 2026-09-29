@@ -1,4 +1,5 @@
 import { ModelSelection, RuntimeMode, ThreadId } from "@t3tools/contracts";
+import { CrewPersonaSwap, PLAYBOOK_MAX_STEPS } from "@t3tools/contracts/j5";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -22,8 +23,20 @@ export const CrewProposalSeat = Schema.Struct({
   instructions: Schema.optional(bounded(CREW_TEXT_MAX_CHARS)),
   modelSelection: Schema.optional(ModelSelection),
   runtimeMode: Schema.optional(RuntimeMode),
+  /** Ids of the playbook steps the seat owns, checked against the live definition. */
+  steps: Schema.optionalKey(
+    Schema.Array(bounded(CREW_NAME_MAX_CHARS)).check(Schema.isMaxLength(PLAYBOOK_MAX_STEPS)),
+  ),
+  /** Recomputed by the server whenever the seats are validated; never taken from a client. */
+  personaSwaps: Schema.optionalKey(Schema.Array(CrewPersonaSwap)),
 });
 export type CrewProposalSeat = typeof CrewProposalSeat.Type;
+
+/** The playbook a Crew follows. The definition path is its identity; the name is for display. */
+export interface CrewPlaybookRef {
+  readonly name: string;
+  readonly definitionPath: string;
+}
 
 const Seats = Schema.Array(CrewProposalSeat);
 const decodeSeats = Schema.decodeUnknownSync(Schema.fromJsonString(Seats));
@@ -60,6 +73,8 @@ export interface CrewProposal {
   readonly resolvedAt: string | null;
   /** When the Captain received the launch report for an approval; null until it posts. */
   readonly reportedAt: string | null;
+  /** The store always sets it; null when the proposal follows no playbook. */
+  readonly playbook?: CrewPlaybookRef | null | undefined;
 }
 
 export interface CreateCrewProposalInput {
@@ -73,6 +88,7 @@ export interface CreateCrewProposalInput {
   readonly displayName: string;
   readonly requestedSeats: ReadonlyArray<CrewProposalSeat>;
   readonly createdAt: string;
+  readonly playbook?: CrewPlaybookRef | null | undefined;
 }
 
 export type AdmitCrewProposalOutcome =
@@ -141,6 +157,8 @@ interface Row {
   readonly created_at: string;
   readonly resolved_at: string | null;
   readonly reported_at: string | null;
+  readonly playbook_name: string | null;
+  readonly playbook_definition_path: string | null;
 }
 
 const fromRow = (row: Row): CrewProposal => ({
@@ -158,6 +176,10 @@ const fromRow = (row: Row): CrewProposal => ({
   createdAt: row.created_at,
   resolvedAt: row.resolved_at,
   reportedAt: row.reported_at,
+  playbook:
+    row.playbook_name === null || row.playbook_definition_path === null
+      ? null
+      : { name: row.playbook_name, definitionPath: row.playbook_definition_path },
 });
 
 export const layer: Layer.Layer<AgentCrewProposalService, never, SqlClient.SqlClient> =
@@ -180,12 +202,13 @@ export const layer: Layer.Layer<AgentCrewProposalService, never, SqlClient.SqlCl
           INSERT OR IGNORE INTO j5_agent_crew_proposal (
             id, squadron_id, captain_participant_id, captain_thread_id, crew_instance_id, kind,
             status, brief, display_name, requested_seats, approved_seats, created_at, resolved_at,
-            reported_at
+            reported_at, playbook_name, playbook_definition_path
           ) VALUES (
             ${input.id}, ${input.squadronId}, ${input.captainParticipantId},
             ${input.captainThreadId}, ${input.crewInstanceId}, ${input.kind}, 'open',
             ${input.brief}, ${input.displayName}, ${encodeSeats(input.requestedSeats)}, NULL,
-            ${input.createdAt}, NULL, NULL
+            ${input.createdAt}, NULL, NULL, ${input.playbook?.name ?? null},
+            ${input.playbook?.definitionPath ?? null}
           )
         `;
         return (yield* read(input.id))!;

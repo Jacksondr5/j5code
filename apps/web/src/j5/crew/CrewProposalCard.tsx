@@ -10,6 +10,7 @@ import { useEnvironmentQuery } from "../../state/query";
 import { agentPersonaEnvironment } from "../agents/agentPersonaAtoms";
 import type { CrewProposal, CrewProposalSeat } from "./crewProposalsClient";
 import { addSeat, describeSeatAgent, removeSeat, saveSeat } from "./crewProposalDraft";
+import { describePersonaSwap, removedSeatSteps, stepTitle, unownedSteps } from "./crewPlaybookPlan";
 import { CrewSeatDialog } from "./CrewSeatDialog";
 import { crewSeatStopsForApprovals } from "./crewSeatRuntime";
 import type { CrewProposalSeatRuntime } from "@t3tools/contracts/j5";
@@ -71,6 +72,14 @@ export function CrewProposalCard(props: {
   const runtimeFor = (seat: CrewProposalSeat) =>
     preview.runtimeSeats?.find((row) => row.seat === seat.seat);
   const stopping = seats.filter((seat) => crewSeatStopsForApprovals(seat, runtimeFor(seat))).length;
+  // The preview carries the plan the approval token binds; the list's copy is only a first paint.
+  const playbook = preview.data?.playbook ?? proposal.playbook ?? null;
+  const unowned =
+    preview.data?.unownedSteps ??
+    // An addition's other steps belong to live members only the server knows about.
+    (proposal.kind === "roster" ? unownedSteps(playbook, seats) : []);
+  const titles = (ids: ReadonlyArray<string>) =>
+    ids.map((id) => stepTitle(playbook, id)).join(", ");
 
   return (
     <li
@@ -117,6 +126,18 @@ export function CrewProposalCard(props: {
         </summary>
         <p className="mt-1 whitespace-pre-wrap break-words text-foreground/90">{proposal.brief}</p>
       </details>
+      {playbook === null ? null : (
+        <div className="mt-2 text-xs text-muted-foreground">
+          <p>
+            Follows playbook: <span className="text-foreground">{playbook.title}</span>
+          </p>
+          {playbook.issue === null ? null : (
+            <p className="text-destructive" role="alert">
+              {playbook.issue}
+            </p>
+          )}
+        </div>
+      )}
       <ul className="mt-3 space-y-2">
         {seats.map((seat) => {
           const runtime = runtimeFor(seat);
@@ -160,6 +181,17 @@ export function CrewProposalCard(props: {
                       </p>
                     </details>
                   ) : null}
+                  {seat.steps !== undefined && seat.steps.length > 0 ? (
+                    <p className="break-words">Steps: {titles(seat.steps)}</p>
+                  ) : null}
+                  {(runtime === undefined
+                    ? (seat.personaSwaps ?? [])
+                    : (runtime.personaSwaps ?? [])
+                  ).map((swap) => (
+                    <p key={swap.stepId} className="break-words text-warning">
+                      {stepTitle(playbook, swap.stepId)} {describePersonaSwap(swap, seat.seat)}
+                    </p>
+                  ))}
                 </div>
                 <div className="flex items-center justify-self-end gap-1">
                   <Button
@@ -190,6 +222,18 @@ export function CrewProposalCard(props: {
           );
         })}
       </ul>
+      {playbook === null ? null : (
+        <div className="mt-3 space-y-0.5 text-xs text-muted-foreground">
+          {removedSeatSteps(proposal.requestedSeats, seats).map(({ seat, steps }) => (
+            <p key={seat} role="status">
+              Removing {seat} leaves {titles(steps)} unowned.
+            </p>
+          ))}
+          {unowned.length === 0 ? null : (
+            <p className="break-words">Unowned steps, done by the Captain: {titles(unowned)}</p>
+          )}
+        </div>
+      )}
       <Button
         className="mt-3"
         aria-label="Add crew member"

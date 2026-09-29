@@ -60,6 +60,8 @@ import {
   type ParticipantDirectoryRow,
   type SendMessageInput,
 } from "../contracts.ts";
+import { PlaybookStore } from "../../playbooks/PlaybookStore.ts";
+import { ProjectService } from "../../../project/ProjectService.ts";
 import { J5ToolkitHandlersLive } from "./handlers.ts";
 import {
   J5ListParticipantsResult,
@@ -1706,6 +1708,8 @@ it.effect("routes crew proposals through a captain that is not itself a crew mem
 
       Layer.mock(ArchiveCrewService)({}),
       Layer.mock(CrewStopService)({}),
+      Layer.mock(PlaybookStore)({}),
+      Layer.mock(ProjectService)({}),
       NodeServices.layer,
     );
     const layer = J5ToolkitHandlersLive.pipe(Layer.provideMerge(dependencies));
