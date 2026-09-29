@@ -12,7 +12,8 @@ steps, writes the YAML, and checks the definition without starting a run. You ca
 customize the persona in Settings → Personas. Invalid definitions remain visible
 with their errors.
 
-On web and desktop, you can import `.yaml` or `.yml` definitions into the selected workspace. Importing
+On web and desktop, **Import YAML** copies a `.yaml` or `.yml` definition into the selected workspace.
+The picker browses the workspace environment's filesystem, one file at a time. Importing
 a file with an existing name asks before replacing it. Changes also apply to runs
 using that definition. An active run must be completed or cancelled before its
 definition can be deleted; completed run history remains.

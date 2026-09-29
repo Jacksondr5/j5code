@@ -3,6 +3,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { AgentCrewInstance } from "./AgentCrewInstanceService.ts";
+import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { getLocalOperatorHumanPersonId } from "./HumanPersonRegistry.ts";
 import { A2ALedgerTransactionWriter } from "./LedgerService.ts";
 import {
@@ -23,18 +24,31 @@ export const needsHumanForCrewFailure = (failure: OrchestrationV2ProviderFailure
     ));
 
 /**
+ * Every alert exchange id starts with this. The ledger's one-open-exchange-per-pair rule and the
+ * Captain's ask lookup both skip these ids (migration 020), so an alert sits beside the Captain's
+ * own ask instead of joining it.
+ */
+export const CREW_ALERT_EXCHANGE_PREFIX = "exchange:j5-crew-human-alert:";
+
+/** Alert exchanges carry their Crew in the id, so a lookup can never land on another Crew's. */
+const alertExchangePrefix = (crewInstanceId: string) =>
+  `${CREW_ALERT_EXCHANGE_PREFIX}${encodeURIComponent(crewInstanceId)}/`;
+
+/**
  * A platform-authored ask in the Captain's inbox conversation. Replies return to the Captain.
- * Reuse an existing ask without losing its text; a receipt per failed run prevents replay from
- * appending twice or reopening an ask the person already answered. This internal producer does
- * not grant agents the ability to append follow-ups to human asks.
+ * One open alert per Crew: failures in the same Crew fold into it without losing its text, and
+ * the Captain's own asks are never touched. A receipt per failed run prevents replay from
+ * appending twice or reopening an alert the person already answered. This internal producer
+ * does not grant agents the ability to append follow-ups to human asks.
  */
 export const makeCrewFailureAlert = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const writer = yield* A2ALedgerTransactionWriter;
+  const worker = yield* A2ADeliveryWorker;
   return Effect.fn("j5.a2a.crewFailureAlert")(function* (input: {
     readonly instance: Pick<
       AgentCrewInstance,
-      "squadronId" | "captainParticipantId" | "displayName"
+      "id" | "squadronId" | "captainParticipantId" | "displayName"
     >;
     readonly seatName: string;
     readonly runId: string;
@@ -50,11 +64,15 @@ export const makeCrewFailureAlert = Effect.gen(function* () {
           if (replay.length > 0) return null;
           const personId = yield* getLocalOperatorHumanPersonId(sql);
           const { squadronId, captainParticipantId } = input.instance;
+          const prefix = alertExchangePrefix(input.instance.id);
           const existing = (yield* sql<{ readonly exchange_id: string }>`
       SELECT exchange_id FROM j5_a2a_exchange WHERE squadron_id = ${squadronId}
         AND sender_id = ${captainParticipantId} AND receiver_id = ${personId} AND status = 'open'
+        AND substr(exchange_id, 1, ${prefix.length}) = ${prefix}
     `)[0];
-          const exchangeId = ExchangeId.make(existing?.exchange_id ?? `exchange:${commandId}`);
+          const exchangeId = ExchangeId.make(
+            existing?.exchange_id ?? `${prefix}${encodeURIComponent(input.runId)}`,
+          );
           const previous =
             existing === undefined
               ? undefined
@@ -102,6 +120,10 @@ export const makeCrewFailureAlert = Effect.gen(function* () {
         }),
       ),
     );
-    if (outcome?.committed) yield* writer.publishCommitted(outcome.events);
+    if (!outcome?.committed) return;
+    yield* writer.publishCommitted(outcome.events);
+    // The ledger PubSub does not wake the delivery worker; every producer that commits a
+    // delivery wakes it itself, or the alert waits for some unrelated send.
+    yield* worker.notify;
   });
 });

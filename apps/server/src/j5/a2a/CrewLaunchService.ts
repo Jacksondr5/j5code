@@ -2,7 +2,6 @@ import {
   describeCrewSeatRuntime,
   materializeCrewModelSelection,
   crewModelSelectionProblem,
-  sameCrewRuntime,
 } from "./crewRuntimePreview.ts";
 import type { CrewProposalSeatRuntime } from "@t3tools/contracts/j5";
 import { isProviderAvailable } from "@t3tools/contracts";
@@ -17,6 +16,7 @@ import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Result from "effect/Result";
 
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
@@ -28,11 +28,7 @@ import {
   providerCanEnforceAgentPersonaAuthority,
   translateAgentPersonaProviderPolicy,
 } from "../agents/agentPersonaProviderPolicy.ts";
-import {
-  AgentCrewInstanceService,
-  type AgentCrewInstance,
-  type NewAgentCrewMember,
-} from "./AgentCrewInstanceService.ts";
+import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewInstanceService.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
 import { SpawnCompositionService } from "./SpawnCompositionService.ts";
 import { getThreadProjectionIfPresent } from "./threadProjectionReads.ts";
@@ -42,7 +38,6 @@ import {
   crewSeatRequestKey,
   lifecycleCommandId,
   spawnCrewInstanceId,
-  spawnBriefWithoutCrewContext,
   spawnFirstTurnText,
   spawnHomeCommandId,
   spawnMessageId,
@@ -99,9 +94,8 @@ export interface CrewLaunchInput {
   readonly brief: string;
   /**
    * Runs once the Crew is recorded and before any seat spawns, so the caller can bind its own
-   * record (the proposal) to the instance; a spawn or brief that fails afterwards then hands the
-   * gate back to a proposal that already names its Crew, and a decline can retire what exists.
-   * A failure here aborts the launch with no seat spawned.
+   * record (the proposal) to the instance and resolve it. A failure here aborts the launch with
+   * no seat spawned; recording is idempotent, so the same approval can be made again.
    */
   readonly onRecorded?: (
     instance: AgentCrewInstance,
@@ -117,6 +111,29 @@ export interface CrewAddSeatsInput {
   readonly resolvedSeats?: ReadonlyArray<ResolvedCrewLaunchSeat>;
   /** The brief the new seats start on; defaults to the Crew's original brief. */
   readonly brief?: string | undefined;
+  /**
+   * Runs once the seats are reserved and before any spawns, like `onRecorded` on a launch. A
+   * failure releases the reservation, so the request can be approved again.
+   */
+  readonly onReserved?: (
+    instance: AgentCrewInstance,
+  ) => Effect.Effect<void, CrewLaunchOperationError>;
+}
+
+/**
+ * How one approved seat's launch went: `created` when its thread, home, and brief all went out;
+ * `not_created` when its thread was never created, so its row is dropped and nothing can message
+ * it; `not_started` when the thread exists but its home or its brief did not go through.
+ */
+export type CrewSeatLaunchOutcome =
+  | { readonly seatName: string; readonly kind: "created" }
+  | { readonly seatName: string; readonly kind: "not_created"; readonly detail: string }
+  | { readonly seatName: string; readonly kind: "not_started"; readonly detail: string };
+
+export interface CrewLaunchResult {
+  /** The Crew as launched: seats that were never created are no longer on it. */
+  readonly instance: AgentCrewInstance;
+  readonly seats: ReadonlyArray<CrewSeatLaunchOutcome>;
 }
 
 export class CrewLaunchSeatUnavailableError extends Data.TaggedError(
@@ -158,7 +175,7 @@ export class CrewLaunchOperationError extends Data.TaggedError("CrewLaunchOperat
   override get message(): string {
     const cause = this.cause instanceof Error ? this.cause.message : String(this.cause);
     const seat = this.seatName === null ? "" : ` seat ${this.seatName}`;
-    return `Crew launch failed while ${this.phase}${seat}: ${cause} Seats created so far: ${this.createdSeats.join(", ") || "none"}. Retry with the same request key; created seats replay and the rest continue.`;
+    return `Crew launch failed while ${this.phase}${seat}: ${cause} Seats created so far: ${this.createdSeats.join(", ") || "none"}.`;
   }
 }
 
@@ -174,16 +191,14 @@ export interface CrewLaunchServiceShape {
     seats: ReadonlyArray<CrewLaunchSeat>,
   ) => Effect.Effect<ReadonlyArray<ResolvedCrewLaunchSeat>, CrewLaunchError>;
   /**
-   * Launch an approved roster as persona-backed Peer Agents under the Captain, whole or not at
-   * all: seats resolve first, the instance is recorded with every planned seat, the seats spawn
-   * in order, then briefs start. Recording first means a spawn that fails partway leaves seats a
-   * Crew record knows about, so a decline can retire them and a retry converges on them.
+   * Launch an approved roster once: seats resolve, the instance is recorded with every planned
+   * seat, `onRecorded` runs, then every seat is attempted and briefed. A seat that fails does not
+   * stop the next one; each seat's outcome is returned, and a seat whose thread was never created
+   * is dropped from the record so the roster matches what exists.
    */
-  readonly launch: (input: CrewLaunchInput) => Effect.Effect<AgentCrewInstance, CrewLaunchError>;
-  /** Spawn approved additional seats under the Captain of an existing Crew and bump its version. */
-  readonly addSeats: (
-    input: CrewAddSeatsInput,
-  ) => Effect.Effect<AgentCrewInstance, CrewLaunchError>;
+  readonly launch: (input: CrewLaunchInput) => Effect.Effect<CrewLaunchResult, CrewLaunchError>;
+  /** Spawn approved additional seats under the Captain of an existing Crew, the same way. */
+  readonly addSeats: (input: CrewAddSeatsInput) => Effect.Effect<CrewLaunchResult, CrewLaunchError>;
 }
 
 export class CrewLaunchService extends Context.Service<CrewLaunchService, CrewLaunchServiceShape>()(
@@ -432,22 +447,23 @@ export const layer = Layer.effect(
       });
     type Planned = ReturnType<typeof plan>[number];
 
-    /** Create threads and commit home/placement facts; briefs are started separately. */
+    const detailOf = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
+
+    /**
+     * Create each seat's thread and commit its home and placement, carrying on past a seat that
+     * fails. A failed create is checked against the store: only a thread that never came to exist
+     * is `not_created`; one that exists without its home is `not_started`.
+     */
     const spawnSeats = Effect.fn("j5.a2a.crewLaunch.spawnSeats")(function* (
       captain: CrewCaptain,
       planned: ReadonlyArray<Planned>,
     ) {
-      const members: Array<NewAgentCrewMember> = [];
-      const operationError = (phase: string, seatName: string | null) => (cause: unknown) =>
-        new CrewLaunchOperationError({
-          phase,
-          seatName,
-          createdSeats: members.map(({ seatName: name }) => name),
-          cause,
-        });
+      const outcomes: Array<CrewSeatLaunchOutcome> = [];
+      const created: Array<Planned> = [];
       for (const member of planned) {
-        yield* threadManagement
-          .dispatch({
+        const seatName = member.seat.name;
+        const create = yield* Effect.result(
+          threadManagement.dispatch({
             type: "thread.create",
             createdBy: "agent",
             creationSource: "mcp",
@@ -455,22 +471,38 @@ export const layer = Layer.effect(
             threadId: member.threadId,
             projectId: captain.thread.projectId,
             // The seat's name alone: the sidebar group and the Crew chip already say which Crew.
-            title: spawnTitle(member.seat.name, undefined),
+            title: spawnTitle(seatName, undefined),
             modelSelection: member.modelSelection,
             runtimeMode: member.runtimeMode,
             interactionMode: captain.thread.interactionMode,
             ...(member.assignment === null ? {} : { agentPersonaAssignment: member.assignment }),
             branch: captain.thread.branch,
             worktreePath: captain.thread.worktreePath,
-          })
-          .pipe(Effect.mapError(operationError("creating the seat thread", member.seat.name)));
-        const child = yield* threadManagement
-          .getThreadProjection(member.threadId)
-          .pipe(
-            Effect.mapError(operationError("reading the created seat thread", member.seat.name)),
-          );
-        const facts = yield* composition
-          .recordFacts({
+          }),
+        );
+        const child = yield* Effect.result(
+          getThreadProjectionIfPresent(threadManagement, member.threadId),
+        );
+        if (Result.isFailure(child)) {
+          outcomes.push({
+            seatName,
+            kind: "not_started",
+            detail: `reading the seat thread failed: ${detailOf(child.failure)}`,
+          });
+          continue;
+        }
+        if (child.success === null) {
+          outcomes.push({
+            seatName,
+            kind: "not_created",
+            detail: Result.isFailure(create)
+              ? detailOf(create.failure)
+              : "the thread did not appear after it was created",
+          });
+          continue;
+        }
+        const facts = yield* Effect.result(
+          composition.recordFacts({
             homeCommandId: spawnHomeCommandId(member.stableInput),
             placementCommandId: spawnPlacementCommandId(member.stableInput),
             squadronId: captain.squadronId,
@@ -480,22 +512,24 @@ export const layer = Layer.effect(
               spawnedByParticipantId: captain.participantId,
               source: "j5_spawn",
             },
-            createdAt: DateTime.formatIso(child.thread.createdAt),
-          })
-          .pipe(
-            Effect.mapError(operationError("recording home and placement for", member.seat.name)),
-          );
-        members.push({
-          seatName: member.seat.name,
-          agentId: member.seat.agentId,
-          participantId: facts.home.participantId,
-          threadId: member.threadId,
-          reason: member.seat.reason,
-        });
+            createdAt: DateTime.formatIso(child.success.thread.createdAt),
+          }),
+        );
+        if (Result.isFailure(facts)) {
+          outcomes.push({
+            seatName,
+            kind: "not_started",
+            detail: `recording its home and placement failed: ${detailOf(facts.failure)}`,
+          });
+          continue;
+        }
+        outcomes.push({ seatName, kind: "created" });
+        created.push(member);
       }
-      return members;
+      return { outcomes, created };
     });
 
+    /** Brief every created seat, carrying on past one whose brief did not go out. */
     const startBriefs = Effect.fn("j5.a2a.crewLaunch.startBriefs")(function* (
       captain: CrewCaptain,
       instance: AgentCrewInstance,
@@ -510,9 +544,9 @@ export const layer = Layer.effect(
           member.agentId ??
           "custom",
       }));
-      const briefs = planned.map((member) => ({
-        member,
-        text: spawnFirstTurnText({
+      const failed = new Map<string, string>();
+      for (const member of planned) {
+        const text = spawnFirstTurnText({
           brief,
           participantId: member.participantId,
           squadronId: captain.squadronId,
@@ -538,38 +572,9 @@ export const layer = Layer.effect(
                   },
             roster,
           },
-        }),
-      }));
-      for (const { member, text } of briefs) {
-        const projection = yield* threadManagement.getThreadProjection(member.threadId).pipe(
-          Effect.mapError(
-            (cause) =>
-              new CrewLaunchOperationError({
-                phase: "checking the previously dispatched brief for",
-                seatName: member.seat.name,
-                createdSeats: planned.map((entry) => entry.seat.name),
-                cause,
-              }),
-          ),
-        );
-        const previous = projection.messages.find(
-          (message) => message.id === spawnMessageId(member.stableInput),
-        );
-        if (
-          previous !== undefined &&
-          spawnBriefWithoutCrewContext(previous.text) !== spawnBriefWithoutCrewContext(text)
-        )
-          return yield* new CrewLaunchOperationError({
-            phase: "checking the previously dispatched brief for",
-            seatName: member.seat.name,
-            createdSeats: planned.map((entry) => entry.seat.name),
-            cause:
-              "An earlier attempt already dispatched a different brief for this seat. Restore the approved instructions and roster, rename the seat, or decline and create a fresh proposal.",
-          });
-      }
-      for (const { member, text } of briefs) {
-        yield* threadManagement
-          .dispatch({
+        });
+        const dispatched = yield* Effect.result(
+          threadManagement.dispatch({
             type: "message.dispatch",
             createdBy: "agent",
             creationSource: "mcp",
@@ -580,100 +585,76 @@ export const layer = Layer.effect(
             attachments: [],
             modelSelection: member.modelSelection,
             dispatchMode: { type: "start_immediately" },
-          })
-          .pipe(
-            Effect.mapError(
-              (cause) =>
-                new CrewLaunchOperationError({
-                  phase: "starting the brief for",
-                  seatName: member.seat.name,
-                  createdSeats: planned.map((entry) => entry.seat.name),
-                  cause,
-                }),
-            ),
+          }),
+        );
+        if (Result.isFailure(dispatched))
+          failed.set(
+            member.seat.name,
+            `starting its brief failed: ${detailOf(dispatched.failure)}`,
           );
       }
+      return failed;
     });
 
-    const assertReusableSeats = Effect.fn("j5.a2a.crewLaunch.assertReusableSeats")(function* (
+    /**
+     * Spawn and brief the reserved seats, then drop the rows of seats that were never created.
+     * Every seat is attempted; the outcomes say what became of each.
+     */
+    const spawnAndBrief = Effect.fn("j5.a2a.crewLaunch.spawnAndBrief")(function* (
+      captain: CrewCaptain,
+      instance: AgentCrewInstance,
       planned: ReadonlyArray<Planned>,
-      approved: boolean,
+      brief: string,
     ) {
-      for (const member of planned) {
-        const existing = yield* getThreadProjectionIfPresent(
-          threadManagement,
-          member.threadId,
-        ).pipe(
-          Effect.mapError(
-            (cause) =>
-              new CrewLaunchOperationError({
-                phase: "checking an earlier seat identity",
-                seatName: member.seat.name,
-                createdSeats: [],
-                cause,
-              }),
+      const spawned = yield* spawnSeats(captain, planned);
+      const notCreated = spawned.outcomes.flatMap((outcome) =>
+        outcome.kind === "not_created" ? [outcome.seatName] : [],
+      );
+      // A dropped row the store refused to delete is left for the report to measure: a seat whose
+      // thread does not exist reads as not created there too.
+      if (notCreated.length > 0)
+        yield* crews.removeMembers(instance.id, notCreated).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("J5 crew launch could not drop seats that were never created", {
+              crewInstanceId: instance.id,
+              seats: notCreated,
+              cause,
+            }),
           ),
         );
-        if (approved && existing !== null && !sameCrewRuntime(existing.thread, member))
-          return yield* new CrewLaunchSeatUnavailableError({
-            seatName: member.seat.name,
-            agentId: member.seat.agentId ?? "custom seat",
-            detail:
-              "An earlier attempt created this seat with different runtime settings. Restore those settings, rename the seat, or decline and create a fresh proposal.",
-          });
-        if (
-          existing !== null &&
-          (existing.thread.archivedAt !== null || existing.thread.deletedAt != null)
-        )
-          return yield* new CrewLaunchOperationError({
-            phase: "reusing a retired seat",
-            seatName: member.seat.name,
-            createdSeats: [],
-            cause: `Seat ${member.seat.name} was retired by an earlier attempt. Use a new seat name or decline and create a fresh proposal.`,
-          });
-      }
+      const current = (yield* crews.read(instance.id).pipe(Effect.orElseSucceed(() => null))) ?? {
+        ...instance,
+        members: instance.members.filter((member) => !notCreated.includes(member.seatName)),
+      };
+      const briefFailures = yield* startBriefs(captain, current, spawned.created, brief);
+      const seats = spawned.outcomes.map((outcome): CrewSeatLaunchOutcome => {
+        const briefFailure = briefFailures.get(outcome.seatName);
+        return outcome.kind === "created" && briefFailure !== undefined
+          ? { seatName: outcome.seatName, kind: "not_started", detail: briefFailure }
+          : outcome;
+      });
+      return { instance: current, seats } satisfies CrewLaunchResult;
     });
 
     const launch: CrewLaunchServiceShape["launch"] = (input) =>
       Effect.gen(function* () {
         const resolved = input.resolvedSeats ?? (yield* resolveSeats(input.captain, input.seats));
         const planned = plan(input.providerSessionId, input.requestKey, resolved);
-        yield* assertReusableSeats(planned, input.resolvedSeats !== undefined);
         const recordError = (phase: string) => (cause: unknown) =>
           new CrewLaunchOperationError({ phase, seatName: null, createdSeats: [], cause });
         const crewInstanceId = spawnCrewInstanceId({
           providerSessionId: input.providerSessionId,
           requestKey: input.requestKey,
         });
-        // A retry after the person renamed a seat on the card finds the earlier name still on the
-        // record, possibly with a thread the failed launch created. Retire it before recording the
-        // roster that launches: archive the thread if one exists and drop the row, so no member
-        // lingers with a thread and no brief, and the record never holds more seats than the cap.
+        // An approval whose link or resolution failed recorded the Crew and spawned nothing. If
+        // the person renamed seats before approving again, the earlier names are still on the
+        // record with no thread behind them; drop them so the record holds only this roster.
         const earlier = yield* crews
           .read(crewInstanceId)
-          .pipe(Effect.mapError(recordError("reading the earlier attempt")));
+          .pipe(Effect.mapError(recordError("reading the earlier record")));
         const stale = (earlier?.members ?? []).filter(
           (member) => !planned.some((entry) => entry.seat.name === member.seatName),
         );
-        for (const member of stale) {
-          // Only a thread that never came to exist is skipped; a store that cannot answer fails
-          // the retry, or the row below would be dropped from under a live seat thread.
-          const seat = yield* getThreadProjectionIfPresent(threadManagement, member.threadId).pipe(
-            Effect.mapError(recordError(`reading the earlier seat ${member.seatName}`)),
-          );
-          if (seat !== null && seat.thread.archivedAt === null)
-            yield* threadManagement
-              .dispatch({
-                type: "thread.archive",
-                commandId: lifecycleCommandId({
-                  providerSessionId: input.providerSessionId,
-                  requestKey: crewSeatRequestKey(input.requestKey, member.seatName),
-                  operation: "retry-archive",
-                }),
-                threadId: member.threadId,
-              })
-              .pipe(Effect.mapError(recordError(`retiring renamed seat ${member.seatName}`)));
-        }
         if (stale.length > 0)
           yield* crews
             .removeMembers(
@@ -682,8 +663,7 @@ export const layer = Layer.effect(
             )
             .pipe(Effect.mapError(recordError("releasing renamed seats")));
         // Record the unit before any seat exists: every planned seat is named under its
-        // deterministic ids, so a spawn that fails partway leaves nothing a Crew record does not
-        // know, and a member's own crew request is refused from its first turn.
+        // deterministic ids, and a member's own crew request is refused from its first turn.
         const instance = yield* crews
           .record({
             id: crewInstanceId,
@@ -703,9 +683,7 @@ export const layer = Layer.effect(
           })
           .pipe(Effect.mapError(recordError("recording the crew")));
         if (input.onRecorded !== undefined) yield* input.onRecorded(instance);
-        yield* spawnSeats(input.captain, planned);
-        yield* startBriefs(input.captain, instance, planned, input.brief);
-        return instance;
+        return yield* spawnAndBrief(input.captain, instance, planned, input.brief);
       }).pipe((launch) =>
         // One unit step from the record through the briefs, so a unit archive waits for every
         // seat to exist before it reads the roster.
@@ -723,10 +701,8 @@ export const layer = Layer.effect(
       Effect.gen(function* () {
         const resolved = input.resolvedSeats ?? (yield* resolveSeats(input.captain, input.seats));
         const planned = plan(input.providerSessionId, input.requestKey, resolved);
-        yield* assertReusableSeats(planned, input.resolvedSeats !== undefined);
         // Reserve the seats before anything spawns: the store decides the cap and the version in
-        // one transaction, so two approvals landing together cannot both pass. Seat ids are
-        // deterministic, so a retry after a failed spawn finds its reservation and converges.
+        // one transaction, so two approvals landing together cannot both pass.
         const reservation = yield* crews
           .addMembers(
             input.instance.id,
@@ -776,14 +752,25 @@ export const layer = Layer.effect(
             adding: planned.length,
             cap: CREW_SEAT_CAP,
           });
-        yield* spawnSeats(input.captain, planned);
-        yield* startBriefs(
+        const reserved = reservation.instance;
+        if (input.onReserved !== undefined)
+          yield* input.onReserved(reserved).pipe(
+            // Nothing spawned: release the rows so the same request can be approved again.
+            Effect.tapError(() =>
+              crews
+                .removeMembers(
+                  reserved.id,
+                  planned.map((member) => member.seat.name),
+                )
+                .pipe(Effect.ignore),
+            ),
+          );
+        return yield* spawnAndBrief(
           input.captain,
-          reservation.instance,
+          reserved,
           planned,
-          input.brief ?? reservation.instance.brief,
+          input.brief ?? reserved.brief,
         );
-        return reservation.instance;
       }).pipe((addition) => crews.serialize(input.instance.id, addition));
 
     return CrewLaunchService.of({ launch, addSeats, resolveSeats });

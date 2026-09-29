@@ -140,24 +140,13 @@ export function formatArchiveWarning(input: {
 }
 
 /**
- * Whether committing this archive may retire Crews: the Captain's live Crews are retired by the
- * server cascade, which `thread.unarchived` does not reverse. Unknown Crew facts count as "may",
- * so no archive door offers a one-keystroke Undo that would bring a Captain back without its Crews.
- */
-export function archiveMayRetireCrews(preflight: ArchivePreflight): boolean {
-  const { facts } = preflight;
-  if (facts === null) return true;
-  if (facts.state !== "registered") return false;
-  return facts.liveCrews == null || facts.liveCrews.length > 0;
-}
-
-/**
  * The action menu owns archive mutation; this J5 delegate owns preflight and the one warning.
  * Two Crew rules ride on it. A seat is never archived one by one (Crews AC16): the seat's archive
  * is refused here with the way out, as `archive_agent` refuses it for agents. A Captain is never
  * archived alone (AC17): the dialog shows the live Crews it commands, and once the archive
  * commits the server's lifecycle cascade retires them as units, whichever door the archive came
- * through, so nothing here has to run after the confirmation.
+ * through, so nothing here has to run after the confirmation. Upstream's Undo stays on every
+ * door: the Captain's unarchive brings back the Crews that retired with it (#312).
  */
 export async function archiveWithPreflight<Result>(input: {
   readonly threadRef: ScopedThreadRef;
@@ -165,8 +154,7 @@ export async function archiveWithPreflight<Result>(input: {
   readonly confirm: (confirmation: ArchiveWarningConfirmation) => Promise<boolean>;
   /** Preserves the existing plain archive preference when no J5 warning is warranted. */
   readonly confirmCleanArchive?: () => Promise<boolean>;
-  /** `undoable` is false when the archive may retire Crews (see `archiveMayRetireCrews`). */
-  readonly archive: (outcome: { readonly undoable: boolean }) => Promise<Result>;
+  readonly archive: () => Promise<Result>;
 }): Promise<Result | undefined> {
   let preflight: ArchivePreflight;
   try {
@@ -192,5 +180,5 @@ export async function archiveWithPreflight<Result>(input: {
   } else if (input.confirmCleanArchive && !(await input.confirmCleanArchive())) {
     return undefined;
   }
-  return input.archive({ undoable: !archiveMayRetireCrews(preflight) });
+  return input.archive();
 }

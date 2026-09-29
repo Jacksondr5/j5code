@@ -277,9 +277,8 @@ export function useThreadActionMenu(input: {
                     },
                   }
                 : {}),
-              archive: ({ undoable }) =>
+              archive: () =>
                 archiveThread(threadRef, {
-                  undoable,
                   onArchived: () => {
                     didArchive = true;
                   },

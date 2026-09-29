@@ -444,9 +444,9 @@ function FleetNodeRows(
 /**
  * Retired Crews of every Squadron as one-line rows, each naming its Squadron, that open to the
  * brief and the approved roster with each seat's approval version and reason, so a successor can
- * be proposed from what was decided rather than from memory (Crews AC20). A retired Crew can
- * never be reactivated, so its row offers no action beyond naming its Captain, whose thread holds
- * the ledger; handoffs live on the Artifacts page.
+ * be proposed from what was decided rather than from memory (Crews AC20). A retired Crew comes
+ * back only with its Captain (AC17), so its row offers no action beyond naming its Captain, whose
+ * thread holds the ledger; handoffs live on the Artifacts page.
  */
 function RetiredCrews(
   props: FleetRowsProps & {

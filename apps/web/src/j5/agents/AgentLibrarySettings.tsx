@@ -21,7 +21,6 @@ import {
   agentPersonaFolderNudges,
   agentPersonaFolderStatusLabel,
   agentPersonaUsageById,
-  prepareAgentPersonaImport,
   importAgentPersonasWithConfirmation,
   presentAgentPersonaCatalog,
   presentAgentPersonaUsage,
@@ -32,7 +31,7 @@ import type {
   AgentPersonaImportConflictError,
   EnvironmentId,
 } from "@t3tools/contracts";
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 
 import { useOpenInPreferredEditor } from "../../editorPreferences";
 import { useServerConfigs } from "../../state/entities";
@@ -125,12 +124,13 @@ export function AgentLibrarySettings() {
   const setLibraryFolders = useAtomCommand(agentPersonaEnvironment.setLibraryFolders, {
     reportFailure: false,
   });
-  const [pickingFolder, setPickingFolder] = useState(false);
+  /** Which question the environment path picker is answering, if it is open. */
+  const [picking, setPicking] = useState<"library-folder" | "import-file" | "import-folder" | null>(
+    null,
+  );
   const otherEnvironments = orderedEnvironments.filter(
     (environment) => environment.environmentId !== effectiveEnvironmentId,
   );
-  const folderInput = useRef<HTMLInputElement>(null);
-  const fileInput = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [creating, setCreating] = useState<{ initial?: AgentPersonaCreateDraft } | null>(null);
   const [editing, setEditing] = useState<{
@@ -138,6 +138,9 @@ export function AgentLibrarySettings() {
     initial: Omit<AgentPersonaEditInput, "instructions">;
   } | null>(null);
   const importAgents = useAtomCommand(agentPersonaEnvironment.importAgentPersonas, {
+    reportFailure: false,
+  });
+  const readImportFiles = useAtomCommand(agentPersonaEnvironment.readImportFiles, {
     reportFailure: false,
   });
   const removeAgent = useAtomCommand(agentPersonaEnvironment.removeAgentPersona, {
@@ -240,20 +243,16 @@ export function AgentLibrarySettings() {
         description: "Sign in to an editor on this environment, or open the path shown above.",
       });
   }
-  async function importSelection(files: File[]) {
+  /** Imports a YAML file, or every YAML file under a folder, from the environment's machine. */
+  async function importFromPath(path: string) {
     if (effectiveEnvironmentId === null || busy) return;
     const environmentId = effectiveEnvironmentId;
     setBusy(true);
     try {
-      const definitions = await prepareAgentPersonaImport(
-        files.map((file) => ({
-          name: file.webkitRelativePath || file.name,
-          size: file.size,
-          text: () => file.text(),
-        })),
-      );
+      const read = await readImportFiles({ environmentId, input: { path } });
+      if (read._tag === "Failure") throw squashAtomCommandFailure(read);
       const result = await importAgentPersonasWithConfirmation(
-        definitions,
+        read.value.files,
         async (input) => {
           const response = await importAgents({ environmentId, input });
           if (response._tag === "Failure") throw squashAtomCommandFailure(response);
@@ -427,31 +426,6 @@ export function AgentLibrarySettings() {
             }
           />
         ) : null}
-        <input
-          ref={folderInput}
-          type="file"
-          hidden
-          multiple
-          {...{ webkitdirectory: "" }}
-          aria-label="Choose persona folder"
-          onChange={(event) => {
-            const files = Array.from(event.currentTarget.files ?? []);
-            event.currentTarget.value = "";
-            void importSelection(files);
-          }}
-        />
-        <input
-          ref={fileInput}
-          type="file"
-          hidden
-          accept=".yaml,.yml,application/yaml,text/yaml"
-          aria-label="Choose persona YAML file"
-          onChange={(event) => {
-            const files = Array.from(event.currentTarget.files ?? []);
-            event.currentTarget.value = "";
-            void importSelection(files);
-          }}
-        />
       </SettingsSection>
 
       <SettingsSection
@@ -477,13 +451,13 @@ export function AgentLibrarySettings() {
               <MenuPopup align="end">
                 <MenuItem
                   disabled={busy || effectiveEnvironmentId === null}
-                  onClick={() => fileInput.current?.click()}
+                  onClick={() => setPicking("import-file")}
                 >
                   Persona file
                 </MenuItem>
                 <MenuItem
                   disabled={busy || effectiveEnvironmentId === null}
-                  onClick={() => folderInput.current?.click()}
+                  onClick={() => setPicking("import-folder")}
                 >
                   Folder
                 </MenuItem>
@@ -763,7 +737,11 @@ export function AgentLibrarySettings() {
                     : "Bundled examples appear until a folder is configured or the default folder exists. Adding a folder writes agent-personas.json."
                 }
                 control={
-                  <Button variant="outline" disabled={busy} onClick={() => setPickingFolder(true)}>
+                  <Button
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() => setPicking("library-folder")}
+                  >
                     <PlusIcon aria-hidden="true" className="size-4" />
                     Add folder
                   </Button>
@@ -773,13 +751,24 @@ export function AgentLibrarySettings() {
           ) : null}
         </SettingsSection>
       ) : null}
-      {pickingFolder && effectiveEnvironmentId ? (
+      {picking && effectiveEnvironmentId ? (
         <AgentFolderPickerDialog
+          key={picking}
           environmentId={effectiveEnvironmentId}
           environmentLabel={selectedEnvironment?.label ?? "this environment"}
-          onClose={() => setPickingFolder(false)}
+          mode={picking === "import-file" ? "file" : "folder"}
+          title={
+            picking === "library-folder"
+              ? "Choose a library folder"
+              : picking === "import-file"
+                ? "Import a persona file"
+                : "Import a persona folder"
+          }
+          confirmLabel={picking === "library-folder" ? "Choose folder" : "Import"}
+          onClose={() => setPicking(null)}
           onSelect={(path) => {
-            setPickingFolder(false);
+            setPicking(null);
+            if (picking !== "library-folder") return void importFromPath(path);
             void saveFolders([
               ...(librarySources.data?.folders ?? []).map(({ configuredPath }) => configuredPath),
               path,

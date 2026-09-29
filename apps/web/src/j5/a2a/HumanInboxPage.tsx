@@ -35,6 +35,9 @@ import { answerHumanExchange } from "./humanInboxClient";
 import { useScopedParticipantLabels } from "./ParticipantIdentitiesClient";
 import { presentParticipantIdentity } from "./ParticipantIdentity";
 import { CrewProposalCard } from "../crew/CrewProposalCard";
+import { CrewRuntimeRequestsSection } from "../crew/CrewRuntimeRequestsSection";
+import type { ScopedCrewRuntimeRequest } from "../crew/crewRuntimeRequests.logic";
+import { useCrewRuntimeRequests } from "../crew/crewRuntimeRequestsClient";
 import { inboxCrewRequests } from "../crew/crewProposals.logic";
 import {
   mergeCrewProposalSources,
@@ -392,6 +395,7 @@ export function HumanInboxPage() {
   );
   const [resolvingProposalId, setResolvingProposalId] = useState<string | null>(null);
   useCrewProposalsRefresh();
+  const runtimeRequests = useCrewRuntimeRequests();
   const previousOpenItems = useRef(new Map<EnvironmentId, ReadonlySet<string>>());
   useEffect(() => {
     const next = new Map<EnvironmentId, ReadonlySet<string>>();
@@ -520,6 +524,16 @@ export function HumanInboxPage() {
     [navigate],
   );
 
+  const openCrewThread = useCallback(
+    (request: ScopedCrewRuntimeRequest) => {
+      void navigate({
+        to: "/$environmentId/$threadId",
+        params: buildThreadRouteParams(scopeThreadRef(request.environmentId, request.threadId)),
+      });
+    },
+    [navigate],
+  );
+
   const openThread = useCallback(
     (item: HumanInboxItem) => {
       if (!item.connected || item.senderThreadId === null) return;
@@ -548,7 +562,7 @@ export function HumanInboxPage() {
           </WorkspaceBreadcrumb>
         </header>
         <ScrollArea className="min-h-0 flex-1">
-          <main className="mx-auto w-full max-w-4xl px-4 py-8 sm:px-8 sm:py-10">
+          <main className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-8 sm:py-10">
             <div className="flex flex-wrap items-end justify-between gap-4 border-b border-border pb-5">
               <div>
                 <h1 className="text-balance text-2xl font-semibold tracking-tight">Inbox</h1>
@@ -559,6 +573,10 @@ export function HumanInboxPage() {
                         proposals.length === 0
                           ? ""
                           : ` · ${proposals.length} crew ${proposals.length === 1 ? "request" : "requests"}`
+                      }${
+                        runtimeRequests.length === 0
+                          ? ""
+                          : ` · ${runtimeRequests.length} crew agent ${runtimeRequests.length === 1 ? "request" : "requests"}`
                       }`}
                 </p>
               </div>
@@ -622,11 +640,14 @@ export function HumanInboxPage() {
               </section>
             ) : null}
 
+            <CrewRuntimeRequestsSection requests={runtimeRequests} onOpenThread={openCrewThread} />
+
             {complete &&
             !loading &&
             error === null &&
             items.length === 0 &&
-            proposals.length === 0 ? (
+            proposals.length === 0 &&
+            runtimeRequests.length === 0 ? (
               <div className="flex min-h-56 flex-col items-center justify-center px-6 py-12 text-center">
                 <span className="flex size-10 items-center justify-center rounded-full bg-success/10 text-success">
                   <InboxIcon aria-hidden className="size-5" />

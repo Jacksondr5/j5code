@@ -247,13 +247,17 @@ export class AgentPersonaImportConflictError extends Schema.TaggedError<AgentPer
   { message: Schema.String, conflicts: Schema.Array(AgentPersonaImportConflict) },
 ) {}
 
+export const AgentPersonaImportFile = Schema.Struct({
+  name: TrimmedNonEmptyString.check(Schema.isMaxLength(1024)),
+  content: Schema.String.check(Schema.isMaxLength(AGENT_PERSONA_IMPORT_MAX_BYTES)),
+});
+export type AgentPersonaImportFile = typeof AgentPersonaImportFile.Type;
+
 export const AgentPersonaImportInput = Schema.Struct({
-  files: Schema.Array(
-    Schema.Struct({
-      name: TrimmedNonEmptyString.check(Schema.isMaxLength(1024)),
-      content: Schema.String.check(Schema.isMaxLength(AGENT_PERSONA_IMPORT_MAX_BYTES)),
-    }),
-  ).check(Schema.isMinLength(1), Schema.isMaxLength(AGENT_PERSONA_IMPORT_MAX_FILES)),
+  files: Schema.Array(AgentPersonaImportFile).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(AGENT_PERSONA_IMPORT_MAX_FILES),
+  ),
   replaceExisting: Schema.Boolean,
   skippedPersonaIds: Schema.optional(
     Schema.Array(AgentPersonaId).check(Schema.isMaxLength(AGENT_PERSONA_IMPORT_MAX_FILES)),
@@ -357,6 +361,8 @@ export type AgentHandoff = typeof AgentHandoff.Type;
 export const J5_AGENT_PERSONA_WS_METHODS = {
   getAgentPersonaCatalog: "j5.agentPersonas.getCatalog",
   importAgentPersonas: "j5.agentPersonas.import",
+  listAgentPersonaImportFiles: "j5.agentPersonas.listImportFiles",
+  readAgentPersonaImportFiles: "j5.agentPersonas.readImportFiles",
   editImportedAgentPersona: "j5.agentPersonas.editImported",
   setImportedAgentPersonaEnabled: "j5.agentPersonas.setImportedEnabled",
   removeImportedAgentPersona: "j5.agentPersonas.removeImported",
@@ -381,6 +387,28 @@ export const J5AgentPersonaRpcSchemas = {
   importAgentPersonas: {
     input: AgentPersonaImportInput,
     output: Schema.Struct({ importedIds: Schema.Array(AgentPersonaId) }),
+  },
+  /** YAML files directly inside a folder on the environment's machine, for the import picker. */
+  listAgentPersonaImportFiles: {
+    input: Schema.Struct({ directory: TrimmedNonEmptyString.check(Schema.isMaxLength(4096)) }),
+    output: Schema.Struct({
+      files: Schema.Array(
+        Schema.Struct({ name: TrimmedNonEmptyString, fullPath: TrimmedNonEmptyString }),
+      ),
+    }),
+  },
+  /**
+   * Reads one YAML file, or every YAML file under a folder, from the environment's machine so
+   * the result can go through `importAgentPersonas` and its conflict confirmation unchanged.
+   */
+  readAgentPersonaImportFiles: {
+    input: Schema.Struct({ path: TrimmedNonEmptyString.check(Schema.isMaxLength(4096)) }),
+    output: Schema.Struct({
+      files: Schema.Array(AgentPersonaImportFile).check(
+        Schema.isMinLength(1),
+        Schema.isMaxLength(AGENT_PERSONA_IMPORT_MAX_FILES),
+      ),
+    }),
   },
   editImportedAgentPersona: {
     input: AgentPersonaEditInput,
@@ -468,6 +496,22 @@ export const WsJ5ImportAgentPersonasRpc = Rpc.make(
       AgentPersonaCatalogError,
       AgentPersonaImportConflictError,
     ]),
+  },
+);
+export const WsJ5ListAgentPersonaImportFilesRpc = Rpc.make(
+  J5_AGENT_PERSONA_WS_METHODS.listAgentPersonaImportFiles,
+  {
+    payload: J5AgentPersonaRpcSchemas.listAgentPersonaImportFiles.input,
+    success: J5AgentPersonaRpcSchemas.listAgentPersonaImportFiles.output,
+    error: catalogErrors,
+  },
+);
+export const WsJ5ReadAgentPersonaImportFilesRpc = Rpc.make(
+  J5_AGENT_PERSONA_WS_METHODS.readAgentPersonaImportFiles,
+  {
+    payload: J5AgentPersonaRpcSchemas.readAgentPersonaImportFiles.input,
+    success: J5AgentPersonaRpcSchemas.readAgentPersonaImportFiles.output,
+    error: catalogErrors,
   },
 );
 export const WsJ5EditImportedAgentPersonaRpc = Rpc.make(
@@ -584,6 +628,8 @@ export const WsJ5SubscribeAgentHandoffRefreshesRpc = Rpc.make(
 export const J5AgentPersonaRpcGroup = RpcGroup.make(
   WsJ5GetAgentPersonaCatalogRpc,
   WsJ5ImportAgentPersonasRpc,
+  WsJ5ListAgentPersonaImportFilesRpc,
+  WsJ5ReadAgentPersonaImportFilesRpc,
   WsJ5EditImportedAgentPersonaRpc,
   WsJ5SetImportedAgentPersonaEnabledRpc,
   WsJ5RemoveImportedAgentPersonaRpc,

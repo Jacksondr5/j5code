@@ -212,7 +212,7 @@ nothing spawns until a human approves it.
 Bounds: `name` and `seat` up to 100 characters, `reason` up to 500, `brief` and `instructions` up
 to 8,000.
 
-Result: `proposal_id`, `status` (`open`, `approving`, `declining`, `approved`, `declined`),
+Result: `proposal_id`, `status` (`open`, `approved`, `declined`),
 `crew_instance_id`, and `members` (seat, persona_id, participant_id, thread_id) once spawned.
 Semantics: the caller must have a usable home and must not sit in a Crew (R20). Seats are validated
 against the library before anything is recorded: unknown or disabled personas, duplicate seat names,
@@ -220,7 +220,7 @@ or more than twelve seats refuse with the next step. An open roster proposal wai
 gate inline above the Captain's composer (additions wait in the Inbox); approval spawns the approved roster (the human may have edited it) as Peer Agents under the
 caller, persona-backed where a seat names one, records the Crew snapshot with each member's reason
 (the person approves every seat), and posts
-a `<j5_crew_gate>` launch report into the caller's thread once every seat has started or failed to start (or a minute has passed): the roster, what the user changed against the proposal, and per seat `start=started|failed|pending`, with a `seat_failed` line carrying the run's error. Declines post the decline at once.
+a `<j5_crew_gate>` launch report into the caller's thread once every seat has started or failed to start (or a minute has passed): the roster, what the user changed against the proposal, and per seat `start=started|failed|pending`, with a `seat_failed` line carrying the run's error (`not_started` when the seat's thread exists but its brief never went out) and a `seat_not_created` line for an approved seat whose thread was never created, which is left off the roster. A proposal resolves once: a seat that fails does not stop the others or reopen the gate. Declines post the decline at once.
 Human approval is the authority (Bryant, 2026-09-10): seats run with the runtime the person
 approved, their persona's policy when no override was chosen, so a read-only Captain may command
 writing seats once a person approved them; a seat's permissions never come from its Captain's.
@@ -255,8 +255,9 @@ Result: as `propose_crew`. Semantics: the caller must command the Crew; the seat
 the cap counts current members plus seats in other open requests for the same Crew. Approval
 reserves the seat inside one store transaction (count, cap, version bump, and ordinal decided
 together under an optimistic version check, so two approvals landing at once cannot both pass),
-then spawns the seat under the Captain and posts the updated roster to the Captain. Seat ids are
-deterministic, so a retry after a failed spawn finds its reservation and converges.
+then spawns the seat under the Captain and posts the updated roster to the Captain. If the approval
+cannot be recorded, the reservation is released and the request stays open; once the seat starts
+spawning the request is approved, and a seat that was never created is reported, not retried.
 
 ### Handoff artifacts in Crews
 
@@ -267,11 +268,13 @@ its first turn carries `<seat_obligation>` naming that exact path. The handoff g
 file when a run ends and reminds the seat once. When a seat's run fails, or completes while the seat owes
 no reply, the seat finish notifier posts one platform-composed `<j5_seat_finished>` notice into the
 Captain's thread: the run status (completed or failed, with the run's error when it failed), the
-seat, its Crew, its participant and thread ids, and the handoff artifact as `written`, `missing`, or `none
-declared` with its path. `missing` means the file was checked and is not there; a handoff artifact that
-cannot be read sends nothing, and the next finish or the boot sweep retries. A written handoff artifact up
+seat, its Crew, its participant and thread ids, and the handoff artifact as `written`, `missing`, `unavailable`, or `none
+declared` with its path. `missing` means the file was checked and is not there; `unavailable` means
+something is at the path that can never be a handoff (a directory, or a link out of the artifacts
+directory) and carries the reason. Only a real read failure sends nothing, and the next finish or the
+boot sweep retries. A written handoff artifact up
 to 4,000 characters rides inline with its size and digest; longer ones name the path for the
-project `read_artifact` tool. A notice posts the first time a seat finishes and again only when
+project `read_artifact` tool, and one over the artifact read limit is still `written`, named by path. A notice posts the first time a seat finishes and again only when
 its facts changed, and a notice that arrives while the Captain's turn runs folds into the one
 queued behind it. Interrupted and cancelled runs are not finishes: `stop_crew` interrupts seats so
 they can be briefed again, and nothing is reported then. Ids
@@ -331,7 +334,7 @@ the job; new work on any seat makes it stale and yields a fresh token. Partial f
 seats retired so far and the seat that failed; retry with the same `client_request_id` and token.
 
 **Members are never archived one by one (R14):** `t3_thread_organize` refuses archiving an active Crew seat, just as client archive/delete does. Retire the unit through `archive_crew` or Archive crew on the Fleet page. Archiving its Captain retains the crew cascade. A member that finishes with nothing owed is
-reported to its Captain; the platform settles no seat, and settlement is not archive. `stop_agent` on a member is still allowed;
+reported to its Captain; the platform never settles a seat because its run finished, and settlement is not archive. `stop_agent` on a member is still allowed;
 stopping retires nothing.
 
 ### Kept upstream tools
@@ -361,7 +364,7 @@ stopping retires nothing.
 15. `list_squadrons` can be called by a thread with no Squadron home and returns every Squadron with its project ids and the caller's own project id.
 16. `join_squadron` establishes a home only for a thread that has none, only in a Squadron that references the thread's project, leaves the thread and its running work untouched, returns the existing registration when the thread is already homed there, and refuses a thread homed elsewhere, an archived or deleted thread, and a retired identity.
 17. `list_personas` returns every persona with its availability and route; `propose_crew` and `request_crew_member` file a human gate and refuse unknown, disabled, duplicate, or over-cap seats before anything is recorded; both succeed under every sandbox and approval policy, including Codex approval policy `never`.
-18. Approving a proposal spawns exactly once; a second approval finds it claimed; a spawn that fails after reserving its seats reopens the gate, and the retry converges on those seats.
+18. Approving a proposal spawns exactly once; a second approval finds it resolved; a seat that fails to spawn is reported by name in the launch report and the other seats still start.
 19. `archive_crew` is Captain-only, refuses with per-seat facts and a token when any seat has an open Exchange or a running turn, and finishes a partial archive on retry; `t3_thread_organize` refuses an active Crew member, while Captain archive retains the unit cascade.
 20. `stop_crew` is Captain-only, interrupts every seat with a running turn and reports each seat as interrupted, already idle, or archived; it settles, retires, and closes nothing, and a non-Captain or an archived Crew is refused naming the next step. The person's Stop crew control does the same through the operate scope.
 
@@ -389,3 +392,4 @@ stopping retires nothing.
 - 2026-09-17 — personas, not agents: `list_agents` becomes `list_personas`, the `agent` parameter on `spawn_agent`, `delegate_task`, and crew seats becomes `persona` (no alias: pre-dogfood, no legacy-compatibility code), crew results carry `persona_id`, and the mention is `@persona:ID`; "agent" keeps meaning a running participant (Bryant; [record](../../worklog/2026-09-16-crew-command-decoupling.md)).
 - 2026-09-24 — the `propose_crew` and `request_crew_member` contract strings match the shipped descriptions (custom-seat `model_selection` and `runtime_mode`, direct coordination); the snapshot keeps each member's reason, since the person approves every seat; seat finish notices post on change for completed and failed runs, and `missing` means the file was checked and is not there ([#229](https://github.com/Jacksondr5/j5code/issues/229), [#234](https://github.com/Jacksondr5/j5code/issues/234)).
 - 2026-09-24 — the J5 document is named "handoff artifact" to distinguish it from upstream's context handoffs.
+- 2026-09-25 — a proposal resolves once (`open`, `approved`, `declined`); a seat that fails to spawn is reported in the launch report, not retried (Bryant; [#311](https://github.com/Jacksondr5/j5code/issues/311)).
