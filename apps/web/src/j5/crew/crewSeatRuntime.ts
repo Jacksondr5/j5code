@@ -41,6 +41,19 @@ export const CREW_ACCESS_OPTIONS = [
   },
 ] as const;
 
+/**
+ * Whether a seat will pause for the person's approval in its own thread: any resolved access short
+ * of Full access. A saved persona on its own default policy is the exception; its sandbox refuses
+ * what it may not do instead of asking. A seat whose runtime has not resolved yet is not counted.
+ */
+export const crewSeatStopsForApprovals = (
+  seat: Pick<CrewProposalSeat, "agentId" | "runtimeMode">,
+  runtime: Pick<CrewProposalSeatRuntime, "runtimeMode"> | undefined,
+): boolean =>
+  runtime !== undefined &&
+  runtime.runtimeMode !== "full-access" &&
+  (seat.agentId === null || seat.runtimeMode !== undefined);
+
 export const crewSeatDraft = (seat: CrewProposalSeat): CrewSeatDraft => ({
   seat: seat.seat,
   agentId: seat.agentId ?? CUSTOM_AGENT,
