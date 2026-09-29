@@ -90,21 +90,9 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Why:** a peer owns nothing about another agent's turn, and upstream's steering was actively harmful. On Claude, a steer aborts the turn and makes the agent report that "the user doesn't want to take this action", a refusal the human never gave. On Cursor, it destroys the turn. The ruling expected this to fold back into upstream: J5 only changed the default value of upstream's own delivery setting, so that it would collapse if upstream shipped a queue option. Astra is built to take messages during work. Without the exception, a 36-minute Astra run worked from stale guidance because its peers' updates waited for the end.
 
-**Consequences:** this changes when a message is admitted, not whether the model reads it. Queueing also removed an accidental way of freeing a stuck start, so a queued run's age became something the Fleet page shows. Each advance checks the outbox and follow-up behavior this depends on. Checked on 2026-09-28 against upstream's V2 branch, it is still needed: upstream still steers whenever it can (Claude with `priority: "now"`, which cancels sibling tool calls), and has no Astra-specific or asynchronous delivery. **J5 wants to drop this divergence** and follow upstream's delivery once upstream can deliver a message to a running turn without aborting it (Claude) or restarting it (Cursor), and supports Astra's in-work messaging.
+**Consequences:** this changes when a message is admitted, not whether the model reads it. Queueing also removed an accidental way of freeing a stuck start, so a queued run's age became something the Fleet page shows. Each advance checks the outbox and follow-up behavior this depends on. Checked on 2026-09-28 against upstream's V2 branch, it is still needed: upstream still steers whenever it can (Claude with `priority: "now"`, which cancels sibling tool calls), and has no Astra-specific or asynchronous delivery. **J5 wants to drop this divergence** and follow upstream's delivery once upstream can deliver a message to a running turn without aborting it (Claude) or restarting it (Cursor), and supports Astra's in-work messaging. Once the committed-Stop patch is removed (D5), a stopped Astra agent can occasionally be woken by a peer steer that was already in flight; the person stops it again.
 
 **Decided:** Jackson with Product, 2026-09-03 (QS1); the Astra exception by Jackson, 2026-09-04. Recorded in FORK.md case 26.
-
-#### D5. A committed Stop wins over a racing steer
-
-**Upstream:** a steer the provider accepted before the person pressed Stop can come back as a follow-up turn after it. Upstream lists this as unfinished (`TODO(interrupt-hardening)`).
-
-**J5:** once a Stop is committed, a steer accepted before it doesn't start a new turn.
-
-**Why:** J5 agents message Astra peers as steers (D4). Without this, a peer's message right after the person pressed Stop can wake the agent they just stopped. This is ordinary fleet work, not an edge case: stopping an agent while its peers are still messaging it happens routinely, and every such message would restart it.
-
-**Consequences:** it's a temporary patch, to be removed once upstream proves equivalent behavior. A known gap remains: a steer that races Stop by milliseconds still starts a new turn (#293). Checked on 2026-09-28, it is still needed: upstream's `TODO(interrupt-hardening)` is unresolved, and a late steer still becomes a follow-up turn. Upstream's newer hold-queue-on-interrupt covers queued messages only. **J5 wants to drop this patch** once upstream resolves that TODO and honors a committed Stop for late steers.
-
-**Decided:** it arrived with the 2026-09-17 upstream integration without a ruling. Jackson kept it on 2026-09-24 (#5), when he dropped an earlier restart-continuation guard. Recorded in FORK.md's temporary patches.
 
 #### D6. Native resume starts fresh only when the conversation is gone
 
@@ -333,6 +321,18 @@ These already diverge on `j5/main`, but no human ruling is on record. Each lande
 ### To be removed
 
 The person ruled against these. They still diverge on `j5/main` until their fix lands, and then move to Retired.
+
+#### D5. A committed Stop wins over a racing steer
+
+**Upstream:** a steer the provider accepted before the person pressed Stop can come back as a follow-up turn after it. Upstream lists this as unfinished (`TODO(interrupt-hardening)`).
+
+**J5:** once a Stop is committed, a steer accepted before it doesn't start a new turn.
+
+**Why:** J5 agents message Astra peers as steers (D4), so a peer's steer that the provider accepted just before the person pressed Stop can wake the agent they stopped. Other agent messages queue rather than steer, and upstream's Stop-holds-the-queue change covers those.
+
+**Consequences:** only an Astra peer's steer still in flight at the moment of Stop is affected; if a stopped agent wakes, the person stops it again. Upstream tracks the underlying gap as `TODO(interrupt-hardening)`.
+
+**Status:** it arrived with the 2026-09-17 upstream integration without a ruling, and Jackson kept it on 2026-09-24 (#5). Jackson, 2026-09-28: controlling a thread's turns is upstream's area and this is a race J5 doesn't design for, so follow upstream's implementation. To be removed (#343). Recorded in FORK.md's temporary patches.
 
 #### D23. A committed Stop also blocks usage-limit auto-resume
 
