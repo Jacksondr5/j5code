@@ -151,6 +151,7 @@ export interface ThreadComposerProps {
    */
   readonly threadSyncPhase?: "loading" | "syncing" | null;
   readonly selectedThread: EnvironmentThreadShell;
+  readonly hasServerThread: boolean;
   readonly hasCompactableConversation: boolean;
   readonly serverConfig: T3ServerConfig | null;
   readonly queueCount: number;
@@ -484,7 +485,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     ownerKey: composerOwnerKey,
     environmentId: props.environmentId,
     projectId: props.selectedThread.projectId,
-    threadId: props.selectedThread.id,
+    threadId: props.hasServerThread ? props.selectedThread.id : null,
     threadShells: useThreadShells(),
     currentThreadId: props.selectedThread.id,
     projectCwd: props.projectCwd,
@@ -765,7 +766,9 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
       >
         {!voiceInput.isBusy &&
         composerMenu.trigger &&
-        (composerMenu.items.length > 0 || composerMenu.trigger.kind === "pull-request") ? (
+        (composerMenu.items.length > 0 ||
+          composerMenu.trigger.kind === "pull-request" ||
+          composerMenu.trigger.kind === "slash-playbook") ? (
           <View className="absolute inset-x-0 bottom-full z-10 mb-2">
             <ComposerCommandPopover
               items={composerMenu.items}

@@ -302,6 +302,10 @@ describe("detectComposerTrigger", () => {
       rangeEnd: text.length,
     });
     expect(detectComposerTrigger("/playbook debugging ", 20)).toBeNull();
+    expect(detectComposerTrigger("Earlier text\n/playbook deb", 26)?.kind).not.toBe(
+      "slash-playbook",
+    );
+    expect(detectComposerTrigger("/playbook deb\nMore text", 13)?.kind).not.toBe("slash-playbook");
   });
 
   it("keeps slash command detection active for provider commands", () => {

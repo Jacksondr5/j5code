@@ -679,7 +679,9 @@ export function useComposerCommandMenu({
         ? pullRequestProjectId === null || pullRequestRepository === null
           ? "Pull requests are unavailable for this project."
           : pullRequestSearch.error
-        : null,
+        : trigger?.kind === "slash-playbook"
+          ? playbookQuery.error
+          : null,
     onSelect,
   };
 }

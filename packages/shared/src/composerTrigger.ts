@@ -95,7 +95,7 @@ export function detectComposerTrigger(
     }
 
     const playbookMatch = /^\/playbook[ \t]+([^ \t\r\n]*)$/i.exec(linePrefix);
-    if (playbookMatch) {
+    if (playbookMatch && !text.slice(0, lineStart).trim() && !text.slice(cursor).trim()) {
       return {
         kind: "slash-playbook",
         query: playbookMatch[1] ?? "",

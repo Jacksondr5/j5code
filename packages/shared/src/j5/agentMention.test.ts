@@ -30,6 +30,10 @@ describe("agent mention syntax", () => {
       rangeEnd: text.length,
     });
     expect(detectComposerTrigger("/playbook debugging ", 20)).toBeNull();
+    expect(detectComposerTrigger("Earlier text\n/playbook deb", 26)?.kind).not.toBe(
+      "slash-playbook",
+    );
+    expect(detectComposerTrigger("/playbook deb\nMore text", 13)?.kind).not.toBe("slash-playbook");
   });
   it("keeps agent references editable text without mistaking them for files", () => {
     expect(collectComposerInlineTokens("@persona:researcher @./src/index.ts ")).toEqual([
