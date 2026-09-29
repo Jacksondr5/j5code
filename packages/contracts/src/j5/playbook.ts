@@ -2,6 +2,7 @@ import * as Schema from "effect/Schema";
 import { Rpc, RpcGroup } from "effect/unstable/rpc";
 import { EnvironmentAuthorizationError } from "../auth.ts";
 import { ProjectId, ThreadId } from "../baseSchemas.ts";
+import { AgentPersonaId } from "./agentPersona.ts";
 
 export const PLAYBOOK_MAX_BYTES = 262144;
 export const PLAYBOOK_MAX_STEPS = 100;
@@ -34,7 +35,14 @@ export const J5PlaybookRpcGroup = RpcGroup.make(
 );
 
 const Text = Schema.String.check(Schema.isPattern(/\S/));
-export const PlaybookStep = Schema.Struct({ id: Text, title: Text, prompt: Text });
+/** `persona` names the library persona a step wants; a missing or disabled one is a warning. */
+export const PlaybookStep = Schema.Struct({
+  id: Text,
+  title: Text,
+  prompt: Text,
+  persona: Schema.optionalKey(AgentPersonaId),
+});
+export type PlaybookStep = typeof PlaybookStep.Type;
 export const PlaybookDefinition = Schema.Struct({
   title: Text,
   description: Text,
@@ -44,6 +52,15 @@ export const PlaybookDefinition = Schema.Struct({
   ),
 });
 export type PlaybookDefinition = typeof PlaybookDefinition.Type;
+
+/** Advisory findings about a valid definition; unlike `issue`, they never block starting. */
+export const PlaybookWarning = Schema.Struct({
+  code: Schema.Literals(["persona_missing", "persona_disabled", "persona_unverified"]),
+  stepId: Text,
+  persona: AgentPersonaId,
+  message: Schema.String,
+});
+export type PlaybookWarning = typeof PlaybookWarning.Type;
 
 export class PlaybookError extends Schema.TaggedError<PlaybookError>()("PlaybookError", {
   code: Schema.String,
@@ -86,11 +103,24 @@ export const PlaybookDiscovery = Schema.Struct({
       title: Schema.String,
       description: Schema.String,
       stepCount: Schema.Int,
-      steps: Schema.Array(Schema.Struct({ id: Text, title: Text })),
+      steps: Schema.Array(
+        Schema.Struct({ id: Text, title: Text, persona: Schema.optionalKey(AgentPersonaId) }),
+      ),
       issue: Schema.NullOr(PlaybookError),
+      // Optional so a newer client still reads an older server; this server always sends it.
+      warnings: Schema.optionalKey(Schema.Array(PlaybookWarning)),
     }),
   ),
 });
+/** One playbook's live definition, read without starting or moving a run. */
+export const PlaybookReadResponse = Schema.Struct({
+  name: Text,
+  title: Text,
+  description: Text,
+  steps: Schema.Array(PlaybookStep),
+  warnings: Schema.Array(PlaybookWarning),
+});
+export type PlaybookReadResponse = typeof PlaybookReadResponse.Type;
 export const ThreadPlaybooksRequest = Schema.Struct({ threadId: ThreadId });
 export const ThreadPlaybooksResponse = Schema.Struct({ runs: Schema.Array(PlaybookProgress) });
 export const PLAYBOOK_PROGRESS_PATH = "/api/j5/playbooks/thread";

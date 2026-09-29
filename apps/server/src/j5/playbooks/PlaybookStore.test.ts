@@ -1,4 +1,4 @@
-import { seedPlaybookOwners } from "./testFixtures.ts";
+import { seedPersonas, seedPlaybookOwners } from "./testFixtures.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import { AuthOrchestrationReadScope, ThreadId } from "@t3tools/contracts";
@@ -22,6 +22,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as Stream from "effect/Stream";
 import { stringify } from "yaml";
 
+import { ServerConfig } from "../../config.ts";
 import { runJ5A2AMigrations } from "../a2a/Migrations.ts";
 import { makePlaybookStore, type PlaybookMutation } from "./PlaybookStore.ts";
 import { makePlaybookRpcHandlers, PLAYBOOK_RPC_SCOPES } from "./playbookRpc.ts";
@@ -1011,5 +1012,156 @@ it.effect("enforces the shared byte and step limits at their boundaries", () =>
       (yield* Effect.flip(store.start(owner, workspaceRoot, "demo", "bytes"))).code,
       "invalid_definition",
     );
+  }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
+);
+
+// A real environment catalog on a temp state directory, as the running server reads it.
+const CatalogLayer = ServerConfig.layerTest(process.cwd(), {
+  prefix: "j5-playbook-personas-",
+}).pipe(Layer.provideMerge(MemoryLayer));
+const staffed = (): PlaybookDefinition => ({
+  ...definition(),
+  steps: [
+    { id: "research", title: "Research", prompt: "Follow research.", persona: "planner" },
+    { id: "implement", title: "Implement", prompt: "Follow implement.", persona: "builder-bot" },
+    { id: "review", title: "Review", prompt: "Follow review." },
+  ],
+});
+
+it.effect("reads a definition without personas exactly as before, with no warnings", () =>
+  Effect.gen(function* () {
+    const { store, workspaceRoot } = yield* makeFixture;
+    const [entry] = (yield* store.discover(workspaceRoot)).playbooks;
+    assert.deepStrictEqual(entry?.warnings, []);
+    assert.deepStrictEqual(entry?.steps, [
+      { id: "research", title: "Step research" },
+      { id: "implement", title: "Step implement" },
+      { id: "review", title: "Step review" },
+    ]);
+    const read = yield* store.read(workspaceRoot, "demo.yaml");
+    assert.deepStrictEqual(read, { name: "demo", ...definition(), warnings: [] });
+    assert.isFalse(read.steps.some((step) => "persona" in step));
+  }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
+);
+
+it.effect("returns step personas from discover, read, and every step tool", () =>
+  Effect.gen(function* () {
+    const { store, workspaceRoot, write } = yield* makeFixture;
+    yield* seedPersonas([
+      { id: "planner", enabled: true },
+      { id: "builder-bot", enabled: true },
+    ]);
+    yield* write("demo", staffed());
+    const [entry] = (yield* store.discover(workspaceRoot)).playbooks;
+    assert.deepStrictEqual(entry?.steps, [
+      { id: "research", title: "Research", persona: "planner" },
+      { id: "implement", title: "Implement", persona: "builder-bot" },
+      { id: "review", title: "Review" },
+    ]);
+    assert.deepStrictEqual(entry?.warnings, []);
+    assert.deepStrictEqual((yield* store.read(workspaceRoot, "demo")).steps, staffed().steps);
+
+    const run = yield* store.start(owner, workspaceRoot, "demo", "start");
+    assert.equal(run.currentStep?.persona, "planner");
+    assert.equal((yield* store.current(owner)).currentStep?.persona, "planner");
+    const next = yield* store.mutate(owner, {
+      operation: "next",
+      runId: run.runId,
+      expectedStepId: "research",
+      client_request_id: "next",
+    });
+    assert.equal(next.currentStep?.persona, "builder-bot");
+    const back = yield* store.mutate(owner, {
+      operation: "back",
+      runId: run.runId,
+      expectedStepId: "implement",
+      client_request_id: "back",
+    });
+    assert.equal(back.currentStep?.persona, "planner");
+    const reselected = yield* store.mutate(owner, {
+      operation: "reselect",
+      runId: run.runId,
+      expectedStepId: "research",
+      stepId: "implement",
+      client_request_id: "reselect",
+    });
+    assert.equal(reselected.currentStep?.persona, "builder-bot");
+    // Progress on the board stays titles only.
+    assert.deepStrictEqual(reselected.steps[0], { id: "research", title: "Research" });
+  }).pipe(Effect.scoped, Effect.provide(CatalogLayer)),
+);
+
+it.effect("warns about a disabled or missing persona without invalidating the definition", () =>
+  Effect.gen(function* () {
+    const { store, workspaceRoot, write } = yield* makeFixture;
+    yield* seedPersonas([{ id: "planner", enabled: false }]);
+    yield* write("demo", staffed());
+    const expected = [
+      {
+        code: "persona_disabled",
+        stepId: "research",
+        persona: "planner",
+        message: `Step "research" names persona "planner", which is turned off.`,
+      },
+      {
+        code: "persona_missing",
+        stepId: "implement",
+        persona: "builder-bot",
+        message: `Step "implement" names persona "builder-bot", which is not in this environment's library.`,
+      },
+    ];
+    const [entry] = (yield* store.discover(workspaceRoot)).playbooks;
+    assert.isNull(entry?.issue);
+    assert.deepStrictEqual(entry?.warnings, expected);
+    const read = yield* store.read(workspaceRoot, "demo");
+    assert.deepStrictEqual(read.warnings, expected);
+    assert.equal((yield* store.start(owner, workspaceRoot, "demo", "start")).status, "active");
+  }).pipe(Effect.scoped, Effect.provide(CatalogLayer)),
+);
+
+it.effect("reports personas as unverified when the catalog cannot be read", () =>
+  Effect.gen(function* () {
+    const { store, workspaceRoot, write, fs, path } = yield* makeFixture;
+    const { stateDir } = yield* ServerConfig;
+    // An invalid file in the default persona folder fails every catalog read.
+    yield* fs.makeDirectory(path.join(stateDir, "personas"));
+    yield* fs.writeFileString(path.join(stateDir, "personas/broken.yaml"), "id: [");
+    yield* write("demo", staffed());
+    const [entry] = (yield* store.discover(workspaceRoot)).playbooks;
+    assert.isNull(entry?.issue);
+    assert.deepStrictEqual(
+      entry?.warnings?.map(({ code, stepId }) => [code, stepId]),
+      [
+        ["persona_unverified", "research"],
+        ["persona_unverified", "implement"],
+      ],
+    );
+    assert.include(entry?.warnings?.[0]?.message, "could not be checked");
+    assert.lengthOf((yield* store.read(workspaceRoot, "demo")).warnings, 2);
+  }).pipe(Effect.scoped, Effect.provide(CatalogLayer)),
+);
+
+it.effect("reads a playbook without creating a run or moving an active one", () =>
+  Effect.gen(function* () {
+    const { store, workspaceRoot } = yield* makeFixture;
+    const run = yield* store.start(owner, workspaceRoot, "demo", "start");
+    yield* store.mutate(owner, {
+      operation: "next",
+      runId: run.runId,
+      expectedStepId: "research",
+      client_request_id: "next",
+    });
+    const revision = yield* Stream.runHead(store.changes);
+    const runs = (yield* store.listForThread(owner)).runs.length;
+    const read = yield* store.read(workspaceRoot, "demo");
+    assert.deepStrictEqual(
+      read.steps.map(({ prompt }) => prompt),
+      ["Follow research.", "Follow implement.", "Follow review."],
+    );
+    assert.equal((yield* store.current(owner)).currentStepId, "implement");
+    assert.lengthOf((yield* store.listForThread(owner)).runs, runs);
+    assert.deepStrictEqual(yield* Stream.runHead(store.changes), revision);
+    assert.equal((yield* Effect.flip(store.read(workspaceRoot, "absent"))).code, "not_found");
+    assert.equal((yield* Effect.flip(store.read(workspaceRoot, "../demo"))).code, "invalid_name");
   }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
 );

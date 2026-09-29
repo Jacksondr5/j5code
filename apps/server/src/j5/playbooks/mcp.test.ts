@@ -1,4 +1,4 @@
-import { seedPlaybookOwners } from "./testFixtures.ts";
+import { seedPersonas, seedPlaybookOwners } from "./testFixtures.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
@@ -8,7 +8,12 @@ import {
   ProviderInstanceId,
   ThreadId,
 } from "@t3tools/contracts";
-import { PlaybookDiscovery, PlaybookError, PlaybookStepResponse } from "@t3tools/contracts/j5";
+import {
+  PlaybookDiscovery,
+  PlaybookError,
+  PlaybookReadResponse,
+  PlaybookStepResponse,
+} from "@t3tools/contracts/j5";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -22,6 +27,7 @@ import * as Stream from "effect/Stream";
 import type { Tool } from "effect/unstable/ai";
 import { stringify } from "yaml";
 
+import { ServerConfig } from "../../config.ts";
 import { McpInvocationContext, type McpInvocationScope } from "../../mcp/McpInvocationContext.ts";
 import { OrchestratorMcpService } from "../../mcp/OrchestratorMcpService.ts";
 import { OrchestratorV2 } from "../../orchestration-v2/Orchestrator.ts";
@@ -49,6 +55,8 @@ const projectId = ProjectId.make("project:playbook-mcp");
 const createdAt = "2026-09-21T09:00:00.000Z";
 const decodeStep = Schema.decodeUnknownEffect(PlaybookStepResponse);
 const decodeFailure = Schema.decodeUnknownEffect(PlaybookError);
+const decodeListed = Schema.decodeUnknownEffect(PlaybookDiscovery);
+const decodeRead = Schema.decodeUnknownEffect(PlaybookReadResponse);
 type PlaybookToolName = (typeof playbookTools)[number]["name"];
 const scopeFor = (threadId = owner, providerSessionId = "session:first"): McpInvocationScope => ({
   environmentId: EnvironmentId.make("environment:playbook-mcp"),
@@ -344,4 +352,58 @@ it.effect("returns actionable live-file errors and recovers or cancels through t
     assert.isFalse(after.isFailure);
     assert.equal((yield* decodeStep(after.result)).status, "cancelled");
   }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+);
+
+it.effect("reads step personas and warnings through the toolkit and still starts the run", () =>
+  Effect.gen(function* () {
+    const { call, fs, path, worktree } = yield* fixture;
+    yield* seedPersonas([{ id: "planner", enabled: false }]);
+    const staffed = sample("Staffed playbook");
+    yield* fs.writeFileString(
+      path.join(worktree, ".j5/playbooks/demo.yaml"),
+      stringify({
+        ...staffed,
+        steps: staffed.steps.map((step, index) =>
+          index === 0 ? { ...step, persona: "planner" } : step,
+        ),
+      }),
+    );
+    const warning = {
+      code: "persona_disabled" as const,
+      stepId: "research",
+      persona: "planner",
+      message: `Step "research" names persona "planner", which is turned off.`,
+    };
+    const listed = yield* decodeListed((yield* call("playbook_list", {})).result);
+    assert.isNull(listed.playbooks[0]?.issue);
+    assert.deepStrictEqual(listed.playbooks[0]?.warnings, [warning]);
+    assert.equal(listed.playbooks[0]?.steps[0]?.persona, "planner");
+
+    const read = yield* call("playbook_read", { name: "demo" });
+    assert.isFalse(read.isFailure);
+    const definition = yield* decodeRead(read.result);
+    assert.deepStrictEqual(definition.warnings, [warning]);
+    assert.equal(definition.steps[0]?.persona, "planner");
+    assert.equal(definition.steps[1]?.prompt, "Append BETA to your notes.");
+    const absent = yield* call("playbook_read", { name: "absent" });
+    assert.isTrue(absent.isFailure);
+    assert.equal((yield* decodeFailure(absent.result)).code, "not_found");
+    const denied = yield* call(
+      "playbook_read",
+      { name: "demo" },
+      { ...scopeFor(), capabilities: new Set<never>() },
+    );
+    assert.equal((yield* decodeFailure(denied.result)).code, "capability_denied");
+
+    const started = yield* call("playbook_start", { name: "demo", client_request_id: "start" });
+    assert.isFalse(started.isFailure);
+    assert.equal((yield* decodeStep(started.result)).currentStep?.persona, "planner");
+  }).pipe(
+    Effect.scoped,
+    Effect.provide(
+      ServerConfig.layerTest(process.cwd(), { prefix: "j5-playbook-mcp-personas-" }).pipe(
+        Layer.provideMerge(TestLayer),
+      ),
+    ),
+  ),
 );

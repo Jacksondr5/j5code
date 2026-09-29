@@ -242,6 +242,7 @@ it.effect("production mcp layer lists worktree tools over http", () =>
         "playbook_current",
         "playbook_list",
         "playbook_next",
+        "playbook_read",
         "playbook_reselect",
         "playbook_start",
         "preview_click",

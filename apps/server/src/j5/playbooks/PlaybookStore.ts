@@ -6,9 +6,12 @@ import {
   PLAYBOOK_MAX_BYTES,
   PLAYBOOK_NAME_PATTERN,
   suggestPlaybookName,
+  type PlaybookReadResponse,
   type PlaybookRun,
   type PlaybookRunsRequest,
+  type PlaybookStep,
   type PlaybookStepResponse,
+  type PlaybookWarning,
 } from "@t3tools/contracts/j5";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -22,6 +25,8 @@ import * as Semaphore from "effect/Semaphore";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { parseDocument } from "yaml";
+
+import { makeAgentPersonaLibrary, personaCatalogProblem } from "../agents/agentPersonaLibrary.ts";
 
 const isPlaybookError = Schema.is(PlaybookError);
 // Any file stem that stays inside the playbook directory; such files are listed and deletable
@@ -50,6 +55,33 @@ const storageError = (error: unknown) =>
 const encodeRequest = Schema.encodeSync(
   Schema.fromJsonString(Schema.Array(Schema.NullOr(Schema.String))),
 );
+type NamedStep = PlaybookStep & { readonly persona: string };
+const namedSteps = (steps: ReadonlyArray<PlaybookStep>) =>
+  steps.filter((step): step is NamedStep => step.persona !== undefined);
+const stepSummary = ({ id, title, persona }: PlaybookStep) =>
+  persona === undefined ? { id, title } : { id, title, persona };
+
+/** Warnings for steps whose persona the catalog lacks or has turned off, in step order. */
+export const stepPersonaWarnings = (
+  steps: ReadonlyArray<PlaybookStep>,
+  catalog: Parameters<typeof personaCatalogProblem>[0],
+): Array<PlaybookWarning> =>
+  namedSteps(steps).flatMap((step): Array<PlaybookWarning> => {
+    const problem = personaCatalogProblem(catalog, step.persona);
+    if (problem === null) return [];
+    return [
+      {
+        code: problem === "missing" ? "persona_missing" : "persona_disabled",
+        stepId: step.id,
+        persona: step.persona,
+        message:
+          problem === "missing"
+            ? `Step "${step.id}" names persona "${step.persona}", which is not in this environment's library.`
+            : `Step "${step.id}" names persona "${step.persona}", which is turned off.`,
+      },
+    ];
+  });
+
 type RunRow = {
   run_id: string;
   owner_thread_id: string;
@@ -82,6 +114,7 @@ export const makePlaybookStore = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const crypto = yield* Crypto.Crypto;
+  const personas = yield* makeAgentPersonaLibrary;
   const revision = yield* SubscriptionRef.make(0);
   const notifyChange = (result: PlaybookStepResponse) =>
     result.replayed ? Effect.void : SubscriptionRef.update(revision, (value) => value + 1);
@@ -242,24 +275,56 @@ export const makePlaybookStore = Effect.gen(function* () {
     sql`INSERT INTO j5_playbook_request (owner_thread_id, request_id, request_json, run_id)
       VALUES (${owner}, ${key}, ${request}, ${runId})`;
 
+  /**
+   * Warnings never fail a read: the catalog is read only when a step names a persona, and an
+   * unreadable catalog turns into persona_unverified warnings.
+   */
+  const personaWarnings = (
+    steps: ReadonlyArray<PlaybookStep>,
+    catalog: ReturnType<typeof personas.catalog>,
+  ): Effect.Effect<Array<PlaybookWarning>> => {
+    const named = namedSteps(steps);
+    if (named.length === 0) return Effect.succeed([]);
+    return catalog.pipe(
+      Effect.map((catalog) => stepPersonaWarnings(named, catalog)),
+      Effect.catch((error) =>
+        Effect.succeed(
+          named.map((step): PlaybookWarning => ({
+            code: "persona_unverified",
+            stepId: step.id,
+            persona: step.persona,
+            message: `Step "${step.id}" names persona "${step.persona}", which could not be checked: ${error instanceof Error ? error.message : String(error)}`,
+          })),
+        ),
+      ),
+    );
+  };
+
   const discover = Effect.fn("PlaybookStore.discover")(function* (workspaceRoot: string) {
     const directory = path.join(workspaceRoot, ".j5/playbooks");
     if (!(yield* fs.exists(directory))) return { playbooks: [] };
     const names = (yield* fs.readDirectory(directory))
       .filter((name) => name.endsWith(".yaml") && PLAYBOOK_FILE_STEM.test(name.slice(0, -5)))
       .sort();
+    // One catalog read per listing, shared by every file that names a persona.
+    const catalog = yield* Effect.cached(personas.catalog());
     const playbooks = yield* Effect.forEach(names, (file) =>
       readDefinition(path.join(directory, file)).pipe(
-        Effect.map((definition) => ({
-          name: file.slice(0, -5),
-          title: definition.title,
-          description: definition.description,
-          stepCount: definition.steps.length,
-          steps: definition.steps.map(({ id, title }) => ({ id, title })),
-          issue: PLAYBOOK_NAME_PATTERN.test(file.slice(0, -5))
-            ? (null as PlaybookError | null)
-            : invalidNameIssue(file),
-        })),
+        Effect.flatMap((definition) =>
+          personaWarnings(definition.steps, catalog).pipe(
+            Effect.map((warnings) => ({
+              name: file.slice(0, -5),
+              title: definition.title,
+              description: definition.description,
+              stepCount: definition.steps.length,
+              steps: definition.steps.map(stepSummary),
+              issue: PLAYBOOK_NAME_PATTERN.test(file.slice(0, -5))
+                ? (null as PlaybookError | null)
+                : invalidNameIssue(file),
+              warnings,
+            })),
+          ),
+        ),
         Effect.catch((issue) =>
           Effect.succeed({
             name: file.slice(0, -5),
@@ -268,11 +333,44 @@ export const makePlaybookStore = Effect.gen(function* () {
             stepCount: 0,
             steps: [],
             issue,
+            warnings: [],
           }),
         ),
       ),
     );
     return { playbooks };
+  }, Effect.mapError(storageError));
+
+  /** The definition file for a name as playbook_start accepts it; a trailing .yaml is allowed. */
+  const definitionPathFor = Effect.fn("PlaybookStore.definitionPathFor")(function* (
+    workspaceRoot: string,
+    name: string,
+  ) {
+    const stem = name.endsWith(".yaml") ? name.slice(0, -5) : name;
+    if (!PLAYBOOK_NAME_PATTERN.test(stem))
+      return yield* playbookError(
+        "invalid_name",
+        "Pass a playbook name from playbook_list: lowercase letters, digits, and hyphens, without directories or spaces.",
+      );
+    return { stem, definitionPath: path.resolve(workspaceRoot, ".j5/playbooks", `${stem}.yaml`) };
+  });
+
+  /** Reads a live definition without touching run state: no permit, no SQL, no revision bump. */
+  const read = Effect.fn("PlaybookStore.read")(function* (workspaceRoot: string, name: string) {
+    const { stem, definitionPath } = yield* definitionPathFor(workspaceRoot, name);
+    if (!(yield* fs.exists(definitionPath)))
+      return yield* playbookError(
+        "not_found",
+        `No playbook named ${stem} in this workspace. Use playbook_list.`,
+      );
+    const definition = yield* readDefinition(definitionPath);
+    return {
+      name: stem,
+      title: definition.title,
+      description: definition.description,
+      steps: definition.steps,
+      warnings: yield* personaWarnings(definition.steps, personas.catalog()),
+    } satisfies PlaybookReadResponse;
   }, Effect.mapError(storageError));
 
   const removeDefinition = Effect.fn("PlaybookStore.removeDefinition")(function* (
@@ -334,13 +432,7 @@ export const makePlaybookStore = Effect.gen(function* () {
     name: string,
     key: string,
   ) {
-    const stem = name.endsWith(".yaml") ? name.slice(0, -5) : name;
-    if (!PLAYBOOK_NAME_PATTERN.test(stem))
-      return yield* playbookError(
-        "invalid_name",
-        "Pass a playbook name from playbook_list: lowercase letters, digits, and hyphens, without directories or spaces.",
-      );
-    const definitionPath = path.resolve(workspaceRoot, ".j5/playbooks", `${stem}.yaml`);
+    const { definitionPath } = yield* definitionPathFor(workspaceRoot, name);
     const request = encodeRequest(["start", definitionPath]);
     return yield* Effect.gen(function* () {
       yield* cancelOrphans();
@@ -510,6 +602,7 @@ export const makePlaybookStore = Effect.gen(function* () {
     // Include the current revision so subscribing after a mutation still refreshes the view.
     changes: SubscriptionRef.changes(revision),
     discover,
+    read,
     removeDefinition,
     renameDefinition,
     start,

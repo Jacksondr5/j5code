@@ -43,6 +43,7 @@ export const J5_PREAPPROVED_TOOLS: ReadonlyArray<string> = [
   "archive_crew",
   "clear_own_ask",
   "playbook_list",
+  "playbook_read",
   "playbook_start",
   "playbook_current",
   "playbook_next",

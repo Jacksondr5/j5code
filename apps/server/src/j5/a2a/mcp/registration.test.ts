@@ -73,6 +73,7 @@ it.effect("registers the exact composed production J5 orchestration surface", ()
       "playbook_current",
       "playbook_list",
       "playbook_next",
+      "playbook_read",
       "playbook_reselect",
       "playbook_start",
       "propose_crew",
