@@ -1,12 +1,11 @@
 ---
 title: "Upstream convergence watchlist"
-kind: research
-as_of: 2026-09-23
+kind: definition
 ---
 
 # Upstream convergence watchlist
 
-Where upstream T3 Code is building toward the areas J5 owns. Each entry says what upstream has, where J5 stands, and what would make us adopt upstream's version or change our own. Rewrite this file at every upstream advance (see [Merging upstream](../process/upstream-merge.md)); `as_of` is the upstream SHA date it was checked against.
+Where upstream T3 Code is building toward the areas J5 owns. Each entry says what upstream has, where J5 stands, and what would make us adopt upstream's version or change our own. Rewrite this file at every upstream advance (see [Merging upstream](../process/upstream-merge.md)); the line below names the upstream SHA it was last checked against.
 
 Checked against `t3code/codex-turn-mapping` @ `67a2be0fdb` (V2, pingdotgg/t3code#2829).
 

@@ -7,7 +7,7 @@ kind: definition
 
 This is the library behind the use-cases lens in [the principles](principles.md): run every feature through each use case here. A design that only serves one of them is suspect — the platform builds primitives, and a primitive proves itself by serving fleets that look nothing alike. These are the use cases of record today; more will be added as they become real.
 
-Both use cases are live prior art, not aspirations: rough versions of each already run (see [fleet-vision](fleet-vision.md) and the [prior-art studies](../research/jackson-prior-art/index.md)), which is what makes them useful stress tests — they come with observed failure modes, not imagined ones.
+Both use cases are live prior art, not aspirations: rough versions of each already run (see [fleet-vision](fleet-vision.md)), which is what makes them useful stress tests — they come with observed failure modes, not imagined ones.
 
 ## 1. Agentic software development
 
