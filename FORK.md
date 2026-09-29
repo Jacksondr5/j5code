@@ -520,7 +520,6 @@ indicate approval. The deleted hook remains explicitly marked.
 | `apps/web/src/components/settings/settingsSearch.ts`                                                       | N       | 42–44                                     |
 | `apps/web/src/components/settings/SettingsSidebarNav.tsx`                                                  | N       | 42                                        |
 | `apps/web/src/state/query.ts`                                                                              | N       | 42                                        |
-| `docs/internals/providers.md`                                                                              | N       | 45                                        |
 | `docs/README.md`                                                                                           | N       | 42, 45                                    |
 | `packages/client-runtime/src/state/runtime.test.ts`                                                        | N       | 42                                        |
 | `packages/contracts/src/auth.ts`                                                                           | N       | 35                                        |
