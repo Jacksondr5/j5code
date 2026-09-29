@@ -109,11 +109,15 @@ export function createAgentPersonaLibrary(storage?: {
 
   /**
    * Every definition file under a folder, walking subfolders in sorted order like the
-   * import picker does. Dot-directories such as .git are skipped; depth is capped so a
-   * symlink cycle cannot spin forever. Returns null when the root does not exist.
+   * import picker does. Dot-directories such as .git and `node_modules` are skipped, and so is
+   * an entry that vanished or is a dangling link; depth is capped so a symlink cycle cannot spin
+   * forever. With a `limit`, the walk stops once it has found more files than that, so a caller
+   * refusing an oversized selection need not scan the rest of the tree. Returns null when the
+   * root does not exist.
    */
   const listDefinitionFiles = Effect.fn("AgentPersonaLibrary.listDefinitionFiles")(function* (
     root: string,
+    limit = Number.POSITIVE_INFINITY,
   ) {
     if (storage === undefined) return null;
     const { fs, path } = storage;
@@ -123,11 +127,19 @@ export function createAgentPersonaLibrary(storage?: {
     )(function* (folder, depth) {
       const names = yield* fs.readDirectory(folder);
       for (const name of [...names].sort()) {
+        if (files.length > limit) return;
         const entry = path.join(folder, name);
-        const stat = yield* fs.stat(entry);
-        if (stat.type === "Directory") {
-          if (!name.startsWith(".") && depth < MAX_FOLDER_DEPTH) yield* walk(entry, depth + 1);
-        } else if (stat.type === "File" && isAgentPersonaDefinitionFile(name)) {
+        const stat = yield* fs.stat(entry).pipe(
+          Effect.map(Option.some),
+          Effect.catch((error) =>
+            error.reason._tag === "NotFound" ? Effect.succeed(Option.none()) : Effect.fail(error),
+          ),
+        );
+        if (Option.isNone(stat)) continue;
+        if (stat.value.type === "Directory") {
+          if (!name.startsWith(".") && name !== "node_modules" && depth < MAX_FOLDER_DEPTH)
+            yield* walk(entry, depth + 1);
+        } else if (stat.value.type === "File" && isAgentPersonaDefinitionFile(name)) {
           files.push(entry);
         }
       }
@@ -135,6 +147,69 @@ export function createAgentPersonaLibrary(storage?: {
     const exists = yield* fs.exists(root);
     if (!exists) return null;
     yield* walk(root, 0);
+    return files;
+  });
+
+  /** YAML files directly inside a folder, listed for the import picker. Unreadable entries are skipped. */
+  const listImportFiles = Effect.fn("AgentPersonaLibrary.listImportFiles")(function* (
+    directory: string,
+  ) {
+    if (storage === undefined) return [];
+    const { fs, path } = storage;
+    const files: Array<{ name: string; fullPath: string }> = [];
+    for (const name of [...(yield* fs.readDirectory(directory))].sort()) {
+      if (!isAgentPersonaDefinitionFile(name)) continue;
+      const fullPath = path.join(directory, name);
+      const stat = yield* fs.stat(fullPath).pipe(Effect.option);
+      if (Option.isSome(stat) && stat.value.type === "File") files.push({ name, fullPath });
+    }
+    return files;
+  });
+
+  /**
+   * One YAML file, or every YAML file under a folder (walked like a source folder), read
+   * from this machine for import. Names keep the chosen folder's name as their first
+   * segment, the way a browser folder selection reports them.
+   */
+  const readImportFiles = Effect.fn("AgentPersonaLibrary.readImportFiles")(function* (
+    target: string,
+  ) {
+    if (storage === undefined)
+      return yield* new AgentPersonaLibraryError({
+        message: "This environment cannot read persona files.",
+      });
+    const { fs, path } = storage;
+    if (!path.isAbsolute(target))
+      return yield* new AgentPersonaLibraryError({ message: `Choose an absolute path: ${target}` });
+    const stat = yield* fs.stat(target);
+    // Only regular files and folders: a FIFO would block the read, and a device can report a
+    // size of 0 and slip past the size check.
+    if (
+      (stat.type !== "File" && stat.type !== "Directory") ||
+      (stat.type === "File" && !isAgentPersonaDefinitionFile(target))
+    )
+      return yield* new AgentPersonaLibraryError({
+        message: `Unsupported persona file: ${path.basename(target)}`,
+      });
+    const paths =
+      stat.type === "Directory"
+        ? ((yield* listDefinitionFiles(target, AGENT_PERSONA_IMPORT_MAX_FILES)) ?? [])
+        : [target];
+    if (paths.length === 0)
+      return yield* new AgentPersonaLibraryError({
+        message: "No YAML persona definitions found in the selection.",
+      });
+    if (paths.length > AGENT_PERSONA_IMPORT_MAX_FILES)
+      return yield* new AgentPersonaLibraryError({
+        message: `Select at most ${AGENT_PERSONA_IMPORT_MAX_FILES} persona definitions at a time.`,
+      });
+    const files: Array<{ name: string; content: string }> = [];
+    for (const file of paths) {
+      const name = path.relative(path.dirname(target), file);
+      if (Number((yield* fs.stat(file)).size) > AGENT_PERSONA_IMPORT_MAX_BYTES)
+        return yield* new AgentPersonaLibraryError({ message: `${name} exceeds 64 KiB.` });
+      files.push({ name, content: yield* fs.readFileString(file) });
+    }
     return files;
   });
 
@@ -702,6 +777,8 @@ export function createAgentPersonaLibrary(storage?: {
     sources,
     setFolders,
     importFiles,
+    listImportFiles,
+    readImportFiles,
     createPersona,
     read,
     editImported,

@@ -39,6 +39,7 @@ import { useAtomQueryRunner } from "../../state/use-atom-query-runner";
 import { environmentThreadShells, threadEnvironment } from "../../state/threads";
 import { waitForAtomValue } from "../../state/waitForAtomValue";
 import { buildThreadRouteParams } from "../../threadRoutes";
+import { AgentFolderPickerDialog } from "../agents/AgentFolderPickerDialog";
 import { agentPersonaEnvironment } from "../agents/agentPersonaAtoms";
 import { useSquadronDirectory } from "../squadron/SquadronDirectory";
 import { j5Environment } from "../state";
@@ -139,7 +140,11 @@ export function PlaybookLibrarySettings() {
     workspaceKey: string;
     target: Parameters<typeof startTurn>[0];
   } | null>(null);
-  const fileInput = useRef<HTMLInputElement>(null);
+  const [picking, setPicking] = useState(false);
+  const readFile = useAtomQueryRunner(projectEnvironment.readFile, {
+    reportFailure: false,
+    refresh: true,
+  });
   const writeFile = useAtomCommand(projectEnvironment.writeFile, { reportFailure: false });
   const deletePlaybook = useAtomCommand(j5Environment.deletePlaybook, { reportFailure: false });
   const renamePlaybook = useAtomCommand(j5Environment.renamePlaybook, { reportFailure: false });
@@ -213,26 +218,32 @@ export function PlaybookLibrarySettings() {
       setBusy(false);
     }
   }
-  async function importFiles(files: File[]) {
-    if (!workspace || !query.data || busy || files.length === 0) return;
+  /** Copies a YAML file from the environment's machine into the workspace's playbook library. */
+  async function importFile(path: string) {
+    if (!workspace || !query.data || busy) return;
     setBusy(true);
     setError(null);
-    const names = new Set(query.data.playbooks.map((playbook) => playbook.name));
+    const { environmentId } = workspace;
+    const cwd = query.data.workspaceRoot;
     try {
-      for (const file of files) {
-        const name = playbookImportName(file.webkitRelativePath || file.name, file.size);
-        if (names.has(name) && !window.confirm(`Replace ${name}.yaml?`)) continue;
-        const result = await writeFile({
-          environmentId: workspace.environmentId,
-          input: {
-            cwd: query.data.workspaceRoot,
-            relativePath: `.j5/playbooks/${name}.yaml`,
-            contents: await file.text(),
-          },
-        });
-        if (result._tag === "Failure") throw squashAtomCommandFailure(result);
-        names.add(name);
-      }
+      // An absolute path reads the host file wherever it lives.
+      const read = await readFile({ environmentId, input: { cwd, relativePath: path } });
+      if (read._tag === "Failure") throw squashAtomCommandFailure(read);
+      const name = playbookImportName(path, read.value.byteLength);
+      if (
+        query.data.playbooks.some((playbook) => playbook.name === name) &&
+        !window.confirm(`Replace ${name}.yaml?`)
+      )
+        return;
+      const result = await writeFile({
+        environmentId,
+        input: {
+          cwd,
+          relativePath: `.j5/playbooks/${name}.yaml`,
+          contents: read.value.contents,
+        },
+      });
+      if (result._tag === "Failure") throw squashAtomCommandFailure(result);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not import playbook YAML files.");
     } finally {
@@ -311,19 +322,23 @@ export function PlaybookLibrarySettings() {
   }
   return (
     <>
-      <input
-        ref={fileInput}
-        type="file"
-        hidden
-        multiple
-        accept=".yaml,.yml,application/yaml,text/yaml"
-        aria-label="Choose playbook YAML files"
-        onChange={(event) => {
-          const files = Array.from(event.currentTarget.files ?? []);
-          event.currentTarget.value = "";
-          void importFiles(files);
-        }}
-      />
+      {picking && workspace ? (
+        <AgentFolderPickerDialog
+          environmentId={workspace.environmentId}
+          environmentLabel={
+            environments.find((env) => env.environmentId === workspace.environmentId)?.label ??
+            "this environment"
+          }
+          mode="file"
+          title="Import a playbook file"
+          confirmLabel="Import"
+          onClose={() => setPicking(false)}
+          onSelect={(path) => {
+            setPicking(false);
+            void importFile(path);
+          }}
+        />
+      ) : null}
       <SettingsSection
         title="Playbooks"
         id="playbooks"
@@ -342,7 +357,7 @@ export function PlaybookLibrarySettings() {
             <Button
               variant="outline"
               disabled={!workspace || busy || !query.data || !!query.error}
-              onClick={() => fileInput.current?.click()}
+              onClick={() => setPicking(true)}
             >
               Import YAML
             </Button>

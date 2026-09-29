@@ -28,6 +28,14 @@ export function createAgentPersonaEnvironmentAtoms<R, E>(
       label: "environment-data:j5-agent-personas:import",
       tag: J5_AGENT_PERSONA_WS_METHODS.importAgentPersonas,
     }),
+    listImportFiles: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:j5-agent-personas:list-import-files",
+      tag: J5_AGENT_PERSONA_WS_METHODS.listAgentPersonaImportFiles,
+    }),
+    readImportFiles: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:j5-agent-personas:read-import-files",
+      tag: J5_AGENT_PERSONA_WS_METHODS.readAgentPersonaImportFiles,
+    }),
     editImportedAgentPersona: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:j5-agent-personas:edit-imported",
       tag: J5_AGENT_PERSONA_WS_METHODS.editImportedAgentPersona,
