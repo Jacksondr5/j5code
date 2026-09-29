@@ -644,7 +644,8 @@ export const layer = Layer.effect(
           const resolved = yield* resolveRuntime(captain, seats);
           if (input.approvalToken !== crewApprovalToken(proposal, captain, resolved))
             return yield* new CrewProposalRequestError({
-              detail: "The crew runtime preview is missing or has changed since it was shown.",
+              detail:
+                "The crew runtime preview is missing or has changed since it was shown: the roster, a seat's runtime, or the Captain's branch or worktree may have changed.",
               nextStep: "Refresh the preview and review the current settings before approving.",
             });
           const launched = yield* fulfil(proposal, captain, seats, resolved);

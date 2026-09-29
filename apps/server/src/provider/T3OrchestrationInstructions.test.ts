@@ -56,7 +56,7 @@ describe("T3 orchestration provider instructions", () => {
     assert.notInclude(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "`list_agents`");
     assert.include(
       T3_CODE_ORCHESTRATION_INSTRUCTIONS,
-      "Custom seats inherit your configuration by default",
+      "Custom seats inherit your harness, model, and reasoning by default and run with full access",
     );
     assert.include(
       T3_CODE_ORCHESTRATION_INSTRUCTIONS,

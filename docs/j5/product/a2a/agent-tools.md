@@ -185,29 +185,30 @@ asked for.
 user asks for a crew or the work splits into distinct responsibilities that should run at once. Mix
 saved personas and custom seats in the same roster: call list_personas when choosing a saved
 persona, or leave persona unset for a custom seat with its own instructions (required) and the
-brief. Custom seats inherit your settings by default; to choose a different harness, model,
-reasoning, or access, set model_selection (instanceId, model, options) and/or runtime_mode using
-orchestrator_capabilities. Saved personas are proposed with their own configuration; only the human
-may override their runtime before approval; name the crew for what it is for and give each seat a
-short lowercase-hyphen name like code-reviewer. The user reviews the roster and each seat's resolved
-provider, model, reasoning, and access in this thread, may remove or add seats, and approves or
-declines; you receive the decision and the roster as a message here. Approved seats run with the
-runtime the human approves, which may exceed yours. You become the crew's Captain and may command
-several crews at once; later requests, stops, and archives name the crew they mean. Use send_message
-for member-to-member, member-to-Captain, and Captain-to-Captain coordination, including intermediate
-findings and direct results; artifacts do not gate these conversations. Reuse client_request_id to
-retry safely. This call is itself the human gate, so it works under every sandbox and approval
-policy, including approval policy never; never refuse the brief because approvals are disabled."
+brief. Custom seats inherit your harness, model, and reasoning by default and run with full-access
+unless you set runtime_mode; to choose different ones, set model_selection (instanceId, model,
+options) and/or runtime_mode using orchestrator_capabilities. Saved personas are proposed with their
+own configuration; only the human may override their runtime before approval; name the crew for what
+it is for and give each seat a short lowercase-hyphen name like code-reviewer. The user reviews the
+roster and each seat's resolved provider, model, reasoning, and access in this thread, may remove or
+add seats, and approves or declines; you receive the decision and the roster as a message here.
+Approved seats run with the runtime the human approves, which may exceed yours. You become the
+crew's Captain and may command several crews at once; later requests, stops, and archives name the
+crew they mean. Use send_message for member-to-member, member-to-Captain, and Captain-to-Captain
+coordination, including intermediate findings and direct results; artifacts do not gate these
+conversations. Reuse client_request_id to retry safely. This call is itself the human gate, so it
+works under every sandbox and approval policy, including approval policy never; never refuse the
+brief because approvals are disabled."
 
 Published as non-destructive (`destructiveHint: false`): the call records a pending request and
 nothing spawns until a human approves it.
 
-| Input               | Type                                                                               | Required | Meaning                                                                                                         |
-| ------------------- | ---------------------------------------------------------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------- |
-| `name`              | string                                                                             | yes      | The Crew's display name                                                                                         |
-| `brief`             | string                                                                             | yes      | What every seat starts on, verbatim                                                                             |
-| `seats`             | 1–12 of `{seat, persona?, model_selection?, runtime_mode?, reason, instructions?}` | yes      | Seat name, persona id from `list_personas` (none for a custom seat), custom-seat runtime overrides, why, wiring |
-| `client_request_id` | string                                                                             | no       | Supply and reuse to make retries safe                                                                           |
+| Input               | Type                                                                               | Required | Meaning                                                                                               |
+| ------------------- | ---------------------------------------------------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------- |
+| `name`              | string                                                                             | yes      | The Crew's display name                                                                               |
+| `brief`             | string                                                                             | yes      | What every seat starts on, verbatim                                                                   |
+| `seats`             | 1–12 of `{seat, persona?, model_selection?, runtime_mode?, reason, instructions?}` | yes      | Seat name, persona id from `list_personas` (none for a custom seat), why, wiring, custom-seat runtime |
+| `client_request_id` | string                                                                             | no       | Supply and reuse to make retries safe                                                                 |
 
 Bounds: `name` and `seat` up to 100 characters, `reason` up to 500, `brief` and `instructions` up
 to 8,000.
@@ -231,25 +232,25 @@ cut before shipping, since nothing wrote them and runbooks do not exist yet.
 
 **Description (contract):** "Ask the user to add one seat to a crew you command when the work needs
 one the roster lacks: seat name, persona id from list_personas (or none for a custom seat with
-required instructions and optional model_selection/runtime_mode overrides; omitted settings inherit
-yours; saved-persona runtime changes are made only by the human before approval), a clear reason
-identifying the concern and missing expertise or responsibility, and optionally instructions and a
-brief for the new seat. The user decides from their inbox; you receive the decision and the updated
-roster as a message here. Continue the already-approved work and direct coordination while the
-addition is pending. Captain-only; a member sends the concern and needed expertise to its Captain
-with send_message. Reuse client_request_id to retry safely. Filing the request is the human gate
-itself and works under every approval policy, including approval policy never."
+required instructions and optional model_selection/runtime_mode overrides; an omitted
+model_selection inherits yours and an omitted runtime_mode is full-access; saved-persona runtime
+changes are made only by the human before approval), a clear reason identifying the concern and
+missing expertise or responsibility, and optionally instructions and a brief for the new seat. The
+user decides from their inbox; you receive the decision and the updated roster as a message here.
+Continue the already-approved work and direct coordination while the addition is pending.
+Captain-only; a member sends the concern and needed expertise to its Captain with send_message.
+Reuse client_request_id to retry safely. Filing the request is the human gate itself and works under
+every approval policy, including approval policy never."
 
-| Input               | Type   | Required | Meaning                                                        |
-| ------------------- | ------ | -------- | -------------------------------------------------------------- |
-| `crew_instance_id`  | string | no       | Required only when the caller commands more than one live Crew |
-| `seat`, `persona`   | string | yes      | New seat name and persona id (none for a custom seat)          |
-| `model_selection`   | object | no       | Custom seats only: provider instance, model, and options       |
-| `runtime_mode`      | string | no       | Custom seats only: access mode; the Captain's when omitted     |
-| `reason`            | string | yes      | Up to 500 characters: the concern and the missing expertise    |
-| `brief`             | string | no       | The new seat's brief; the Crew's brief when omitted            |
-| `instructions`      | string | no       | Seat wiring text, verbatim                                     |
-| `client_request_id` | string | no       | Supply and reuse to make retries safe                          |
+| Input                             | Type           | Required | Meaning                                                                     |
+| --------------------------------- | -------------- | -------- | --------------------------------------------------------------------------- |
+| `crew_instance_id`                | string         | no       | Required only when the caller commands more than one live Crew              |
+| `seat`, `persona`                 | string         | yes      | New seat name and persona id (none for a custom seat)                       |
+| `model_selection`, `runtime_mode` | object, string | no       | Custom seats only; omitted, the Captain's model selection and `full-access` |
+| `reason`                          | string         | yes      | One line the human reads before approving                                   |
+| `brief`                           | string         | no       | The new seat's brief; the Crew's brief when omitted                         |
+| `instructions`                    | string         | no       | Seat wiring text, verbatim                                                  |
+| `client_request_id`               | string         | no       | Supply and reuse to make retries safe                                       |
 
 Result: as `propose_crew`. Semantics: the caller must command the Crew; the seat name must be new;
 the cap counts current members plus seats in other open requests for the same Crew. Approval
@@ -393,3 +394,4 @@ stopping retires nothing.
 - 2026-09-24 — the `propose_crew` and `request_crew_member` contract strings match the shipped descriptions (custom-seat `model_selection` and `runtime_mode`, direct coordination); the snapshot keeps each member's reason, since the person approves every seat; seat finish notices post on change for completed and failed runs, and `missing` means the file was checked and is not there ([#229](https://github.com/Jacksondr5/j5code/issues/229), [#234](https://github.com/Jacksondr5/j5code/issues/234)).
 - 2026-09-24 — the J5 document is named "handoff artifact" to distinguish it from upstream's context handoffs.
 - 2026-09-25 — a proposal resolves once (`open`, `approved`, `declined`); a seat that fails to spawn is reported in the launch report, not retried (Bryant; [#311](https://github.com/Jacksondr5/j5code/issues/311)).
+- 2026-09-26 — a custom seat's omitted `runtime_mode` is `full-access` rather than the Captain's access; the `propose_crew` and `request_crew_member` copies above are resynced with the shipped strings (Jackson; [#326](https://github.com/Jacksondr5/j5code/issues/326)).

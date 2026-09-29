@@ -21,7 +21,6 @@ import * as Result from "effect/Result";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
 import { prepareAgentPersonaLaunch } from "../agents/agentPersonaLaunch.ts";
-import { resolveAgentPersonaRuntime } from "../agents/agentPersonaRuntime.ts";
 import { agentHandoffArtifactPath } from "../agents/agentPersonaArtifacts.ts";
 import { makeAgentPersonaLibrary } from "../agents/agentPersonaLibrary.ts";
 import {
@@ -48,7 +47,8 @@ import {
 
 /**
  * One approved seat: who fills it, why, and any wiring text its brief carries verbatim. A null
- * agent is a custom seat: the human can override its runtime; omitted settings inherit the Captain.
+ * agent is a custom seat: the human can override its runtime; an omitted model selection inherits
+ * the Captain's, and omitted access is Full access.
  */
 export interface CrewLaunchSeat {
   readonly name: string;
@@ -221,24 +221,6 @@ export const layer = Layer.effect(
     ) {
       const providers = yield* registry.getProviders;
       const resolved: Array<ResolvedCrewLaunchSeat> = [];
-      // What the Captain actually runs with. A persona Captain's stored mode is whatever the
-      // person picked at launch; its effective access comes from the persona policy, so a custom
-      // seat that "runs as the Captain" takes that, not the stored mode.
-      const captainAccess = seats.some(
-        (seat) => seat.agentId === null && seat.runtimeMode === undefined,
-      )
-        ? yield* resolveAgentPersonaRuntime(captain.thread, agents).pipe(
-            Effect.mapError(
-              (cause) =>
-                new CrewLaunchOperationError({
-                  phase: "resolving the Captain's access for a custom seat",
-                  seatName: null,
-                  createdSeats: [],
-                  cause,
-                }),
-            ),
-          )
-        : null;
       const resolveSelection = Effect.fn("j5.a2a.crewLaunch.resolveSelection")(function* (
         seat: CrewLaunchSeat,
         selection: ModelSelection,
@@ -286,8 +268,10 @@ export const layer = Layer.effect(
         if (agentId === null) {
           const selection = seat.modelSelection ?? captain.thread.modelSelection;
           const { modelSelection, provider } = yield* resolveSelection(seat, selection);
-          const runtimeMode =
-            seat.runtimeMode ?? captainAccess?.runtimeMode ?? captain.thread.runtimeMode;
+          // Access is the one setting a custom seat does not take from its Captain: a seat nobody
+          // configured runs in Full access, so it never stops for approvals in a thread the person
+          // is not watching (#326). The person sees and can change it on the roster card.
+          const runtimeMode = seat.runtimeMode ?? "full-access";
           if (
             provider!.driver === "acpRegistry" &&
             (runtimeMode === "auto" || runtimeMode === "auto-accept-edits")
@@ -296,7 +280,7 @@ export const layer = Layer.effect(
               seatName: seat.name,
               agentId: "custom seat",
               detail:
-                "This ACP harness cannot enforce the selected access mode. Choose Approval required or Full access.",
+                "This ACP harness cannot enforce the selected access mode. Choose Supervised or Full access.",
             });
           // Custom seats carry the selected access mode, without a persona sandbox assignment.
           resolved.push({
@@ -392,7 +376,7 @@ export const layer = Layer.effect(
             seatName: seat.name,
             agentId,
             detail:
-              "This ACP harness cannot enforce the selected access mode. Choose Approval required or Full access.",
+              "This ACP harness cannot enforce the selected access mode. Choose Supervised or Full access.",
           });
         // The obligation is read from the same immutable snapshot the seat will run on, so a
         // later library edit cannot change what a running seat owes.
