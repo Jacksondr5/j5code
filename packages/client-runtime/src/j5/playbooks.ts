@@ -1,6 +1,7 @@
 import {
   PLAYBOOK_MAX_BYTES,
   PLAYBOOK_MAX_STEPS,
+  PLAYBOOK_NAME_PATTERN,
   type PlaybookProgress,
 } from "@t3tools/contracts/j5";
 import type {
@@ -22,7 +23,7 @@ export const PLAYBOOK_AUTHOR_INSTRUCTIONS = `You are Playbook Author. Help the u
 
 1. Start by asking what the playbook should accomplish. Clarify the desired result, inputs, constraints, and evidence of success one focused question at a time. Use details already provided instead of asking again.
 2. Inspect existing .j5/playbooks definitions and relevant workspace guidance. Propose the smallest useful sequence of steps, then write or refine the definition once the user's intent is clear. Ask before replacing an unrelated existing definition; preserve stable step IDs when editing.
-3. Save .j5/playbooks/<name>.yaml relative to this thread's workspace. Use YAML 1.2 with title, description, and steps. Each step has a unique stable id, a title, and a non-empty prompt. Use 1–${PLAYBOOK_MAX_STEPS} steps, no YAML aliases, and at most ${PLAYBOOK_MAX_BYTES / 1024} KiB. For example:
+3. Save .j5/playbooks/<name>.yaml relative to this thread's workspace. The name must be lowercase letters, digits, and hyphens, starting with a letter, such as release-review; put the human-readable name in title. Use YAML 1.2 with title, description, and steps. Each step has a unique stable id, a title, and a non-empty prompt. Use 1–${PLAYBOOK_MAX_STEPS} steps, no YAML aliases, and at most ${PLAYBOOK_MAX_BYTES / 1024} KiB. For example:
 
 title: Review a change
 description: Inspect a change and report evidence.
@@ -222,15 +223,28 @@ export function samePlaybookWorkspaceInputs(
   );
 }
 
-/** A composer text expansion. The ordinary agent-message path performs the work. */
+/**
+ * A composer text expansion for a message that starts with `/playbook`. The name is the next
+ * word, lowercased, without trailing punctuation or `.yaml`, so "/playbook release, then make a
+ * crew" names `release`; any text after it is kept as a separate paragraph. A word that isn't a
+ * valid playbook name leaves the message unchanged. The ordinary agent-message path performs
+ * the work.
+ */
 export function expandPlaybookPrompt(text: string): string {
-  return text.replace(
-    /^\s*\/playbook(?:[ \t]+([^\r\n]+))?\s*$/i,
-    (_match, name: string | undefined) =>
-      name?.trim()
-        ? `Start playbook ${name.trim()}`
-        : "List available playbooks and help me choose one to start.",
-  );
+  const command = /^\s*\/playbook(?!\S)[ \t]*/i.exec(text)?.[0];
+  if (command === undefined) return text;
+  const args = text.slice(command.length);
+  const word = /^\S*/.exec(args)?.[0] ?? "";
+  const name = word
+    .replace(/[,.;:!?)]+$/, "")
+    .replace(/\.ya?ml$/i, "")
+    .toLowerCase();
+  if (word && !PLAYBOOK_NAME_PATTERN.test(name)) return text;
+  const request = word
+    ? `Start playbook ${name}`
+    : "List available playbooks and help me choose one to start.";
+  const rest = args.slice(word.length).trim();
+  return rest ? `${request.replace(/\.?$/, ".")}\n\n${rest}` : request;
 }
 
 export function presentPlaybook(run: PlaybookProgress) {

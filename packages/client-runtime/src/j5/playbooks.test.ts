@@ -343,14 +343,22 @@ it("keeps workspace inputs stable for thread activity and updates them for workt
 describe("playbook composer expansion", () => {
   it.each([
     ["/playbook release", "Start playbook release"],
-    ["  /playbook release.yaml  ", "Start playbook release.yaml"],
+    ["  /playbook release.yaml  ", "Start playbook release"],
+    ["/playbook Release-Review.", "Start playbook release-review"],
     ["/playbook", "List available playbooks and help me choose one to start."],
+    ["/playbook release, then make a crew", "Start playbook release.\n\nthen make a crew"],
+    ["/playbook release\nDo something else", "Start playbook release.\n\nDo something else"],
+    [
+      "/playbook\nWhich one fits this bug?",
+      "List available playbooks and help me choose one to start.\n\nWhich one fits this bug?",
+    ],
+    ['/playbook "Release Plan"', '/playbook "Release Plan"'],
+    ["/playbook release_notes", "/playbook release_notes"],
     ["Explain /playbook release", "Explain /playbook release"],
-    ["/playbook release\nDo something else", "/playbook release\nDo something else"],
     ["/playbooks release", "/playbooks release"],
     ["/plan", "/plan"],
     ["", ""],
-  ])("expands only a standalone playbook request: %s", (text, expected) => {
+  ])("expands a message that starts with /playbook: %s", (text, expected) => {
     expect(expandPlaybookPrompt(text)).toBe(expected);
   });
 });
