@@ -11,11 +11,12 @@ import {
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { CommandId } from "@t3tools/contracts";
 import { Atom } from "effect/unstable/reactivity";
-import { PencilIcon, PlusIcon, RefreshCwIcon, Trash2Icon } from "lucide-react";
+import { MoreHorizontalIcon, PencilIcon, PlusIcon, RefreshCwIcon, Trash2Icon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { SettingsRow, SettingsSection } from "../../components/settings/settingsLayout";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
+import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../../components/ui/menu";
 import {
   Select,
   SelectItem,
@@ -90,11 +91,7 @@ export function PlaybookLibrarySettings() {
   const { squadrons, status: squadronStatus } = useSquadronDirectory();
   const authorSquadrons = workspace ? playbookAuthorSquadrons(workspace, squadrons) : [];
   const authorSquadronPlaceholder =
-    squadronStatus === "loading"
-      ? "Loading Squadrons…"
-      : authorSquadrons.length === 0
-        ? "No Squadron available for this workspace"
-        : "Choose a Squadron";
+    authorSquadrons.length === 0 ? "No Squadron available for this workspace" : "Choose a Squadron";
   const [authorScope, setAuthorScope] = useState<{
     workspaceKey: string;
     squadronId: string;
@@ -343,19 +340,21 @@ export function PlaybookLibrarySettings() {
         title="Playbooks"
         id="playbooks"
         headerAction={
-          <div className="flex flex-wrap items-center justify-end gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-1">
             <Button
-              variant="outline"
+              size="xs"
+              variant="ghost-muted"
               disabled={
                 !workspace || !authorSquadron?.available || busy || !query.data || !!query.error
               }
               onClick={() => void createPlaybook()}
             >
-              <PlusIcon aria-hidden="true" className="size-4" />
+              <PlusIcon aria-hidden="true" className="size-3" />
               Create playbook
             </Button>
             <Button
-              variant="outline"
+              size="xs"
+              variant="ghost-muted"
               disabled={!workspace || busy || !query.data || !!query.error}
               onClick={() => setPicking(true)}
             >
@@ -365,13 +364,13 @@ export function PlaybookLibrarySettings() {
               <TooltipTrigger
                 render={
                   <Button
-                    size="icon"
-                    variant="ghost"
+                    size="icon-xs"
+                    variant="ghost-muted"
                     aria-label="Refresh playbooks"
                     disabled={!workspace || busy || query.isPending}
                     onClick={refresh}
                   >
-                    <RefreshCwIcon aria-hidden="true" className="size-4" />
+                    <RefreshCwIcon aria-hidden="true" className="size-3.5" />
                   </Button>
                 }
               />
@@ -380,10 +379,6 @@ export function PlaybookLibrarySettings() {
           </div>
         }
       >
-        <SettingsRow
-          title="Playbook library"
-          description="Reusable prompts that guide an agent through ordered steps. Create and refine them in a conversation."
-        />
         <SettingsRow
           title="Workspace"
           description={
@@ -415,7 +410,7 @@ export function PlaybookLibrarySettings() {
                 setError(null);
               }}
             >
-              <SelectTrigger className="w-full sm:w-56" aria-label="Playbook workspace">
+              <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Playbook workspace">
                 <SelectValue placeholder="No projects available" />
               </SelectTrigger>
               <SelectPopup align="end" alignItemWithTrigger={false}>
@@ -428,42 +423,50 @@ export function PlaybookLibrarySettings() {
             </Select>
           }
         />
-        <SettingsRow
-          title="Authoring Squadron"
-          description="Where the Playbook Author chat starts."
-          control={
-            <Select
-              value={authorSquadron?.squadron.id ?? ""}
-              disabled={!workspace || busy}
-              onValueChange={(value) => {
-                if (value === null) return;
-                if (workspace) setAuthorScope({ workspaceKey: workspace.key, squadronId: value });
-                setError(null);
-              }}
-            >
-              <SelectTrigger className="w-full sm:w-56" aria-label="Playbook author Squadron">
-                <SelectValue>
-                  {authorSquadron
-                    ? `${authorSquadron.squadron.name}${authorSquadron.available ? "" : " (unavailable)"}`
-                    : authorSquadronPlaceholder}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                <SelectItem value="">{authorSquadronPlaceholder}</SelectItem>
-                {authorSquadrons.map((entry) => (
-                  <SelectItem
-                    key={entry.squadron.id}
-                    value={entry.squadron.id}
-                    disabled={!entry.available}
-                  >
-                    {entry.squadron.name}
-                    {entry.available ? "" : " (unavailable)"}
-                  </SelectItem>
-                ))}
-              </SelectPopup>
-            </Select>
-          }
-        />
+        {/* A sole available Squadron needs no choice; zero or a blocked one still explains why. */}
+        {squadronStatus === "loading" ||
+        (authorSquadrons.length === 1 && authorSquadron?.available) ? null : (
+          <SettingsRow
+            title="Authoring Squadron"
+            description="Where the Playbook Author chat starts."
+            control={
+              <Select
+                value={authorSquadron?.squadron.id ?? ""}
+                disabled={!workspace || busy}
+                onValueChange={(value) => {
+                  if (value === null) return;
+                  if (workspace) setAuthorScope({ workspaceKey: workspace.key, squadronId: value });
+                  setError(null);
+                }}
+              >
+                <SelectTrigger
+                  size="sm"
+                  className="w-full sm:w-56"
+                  aria-label="Playbook author Squadron"
+                >
+                  <SelectValue>
+                    {authorSquadron
+                      ? `${authorSquadron.squadron.name}${authorSquadron.available ? "" : " (unavailable)"}`
+                      : authorSquadronPlaceholder}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  <SelectItem value="">{authorSquadronPlaceholder}</SelectItem>
+                  {authorSquadrons.map((entry) => (
+                    <SelectItem
+                      key={entry.squadron.id}
+                      value={entry.squadron.id}
+                      disabled={!entry.available}
+                    >
+                      {entry.squadron.name}
+                      {entry.available ? "" : " (unavailable)"}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+            }
+          />
+        )}
         {(error || query.error) && !renameTarget && (
           <SettingsRow
             title={query.error ? "Playbooks unavailable" : "Playbook action failed"}
@@ -484,59 +487,79 @@ export function PlaybookLibrarySettings() {
         {query.data?.playbooks.length === 0 && (
           <SettingsRow
             title="No playbooks in this workspace yet"
-            description="Import a YAML file or create one with your agent."
+            description="Playbooks guide an agent through ordered steps. Import a YAML file or create one with your agent."
           />
         )}
         {query.data?.playbooks.map((playbook) => (
           <SettingsRow
             key={playbook.name}
             title={playbook.title}
-            description={
-              <>
-                {playbook.description}
-                <span className="mt-1 block text-xs">
-                  {playbook.name}.yaml · {playbook.stepCount} steps
-                </span>
-              </>
+            description={playbook.description}
+            status={
+              <div className="space-y-1">
+                <span className="block">{playbook.name}.yaml</span>
+                {playbook.issue ? (
+                  <p role="status" className="text-destructive">
+                    {playbook.issue.message}
+                  </p>
+                ) : (
+                  <ol
+                    className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground"
+                    aria-label={`${playbook.title} steps`}
+                  >
+                    {playbook.steps.map((step, index) => (
+                      <li key={step.id} className="min-w-0 break-words">
+                        {index + 1}. {step.title}
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </div>
             }
             control={
-              <div className="flex flex-wrap items-center gap-2">
+              <>
                 <Button
                   size="sm"
                   variant="outline"
                   disabled={busy || !!query.error || !!playbook.issue}
                   onClick={() => void openDraft(`Start playbook ${playbook.name}`)}
                 >
-                  Prepare playbook chat
+                  Prepare chat
                 </Button>
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  aria-label={`Rename ${playbook.title}`}
-                  title={`Rename ${playbook.title}`}
-                  disabled={busy || !!query.error || !!playbook.issue}
-                  onClick={() => {
-                    setError(null);
-                    setRenameTarget({ name: playbook.name, title: playbook.title });
-                  }}
-                >
-                  <PencilIcon aria-hidden="true" className="size-4" />
-                </Button>
-                <Button
-                  size="icon-sm"
-                  variant="destructive-outline"
-                  aria-label={`Delete ${playbook.title}`}
-                  title={`Delete ${playbook.title}`}
-                  disabled={busy || !!query.error}
-                  onClick={() => void removePlaybook(playbook.name)}
-                >
-                  <Trash2Icon aria-hidden="true" className="size-4" />
-                </Button>
-              </div>
+                <Menu>
+                  <MenuTrigger
+                    disabled={busy || !!query.error}
+                    aria-label={`More actions for ${playbook.title}`}
+                    render={<Button variant="ghost" size="icon-sm" />}
+                  >
+                    <MoreHorizontalIcon className="size-4" />
+                  </MenuTrigger>
+                  <MenuPopup align="end">
+                    <MenuItem
+                      disabled={!!playbook.issue}
+                      onClick={() => {
+                        setError(null);
+                        setRenameTarget({ name: playbook.name, title: playbook.title });
+                      }}
+                    >
+                      <PencilIcon />
+                      Rename
+                    </MenuItem>
+                    <MenuSeparator />
+                    <MenuItem
+                      variant="destructive"
+                      onClick={() => void removePlaybook(playbook.name)}
+                    >
+                      <Trash2Icon />
+                      Delete
+                    </MenuItem>
+                  </MenuPopup>
+                </Menu>
+              </>
             }
           >
-            <div className="space-y-3 py-2">
-              {renameTarget?.name === playbook.name && (
+            {renameTarget?.name === playbook.name ? (
+              <div className="space-y-3 py-2">
                 <form
                   className="flex max-w-xl flex-wrap items-center gap-2"
                   onSubmit={(event) => {
@@ -572,29 +595,13 @@ export function PlaybookLibrarySettings() {
                     Cancel
                   </Button>
                 </form>
-              )}
-              {renameTarget?.name === playbook.name && (error || query.error) ? (
-                <p role="alert" className="text-sm text-destructive">
-                  {error ?? query.error}
-                </p>
-              ) : null}
-              {playbook.issue ? (
-                <p role="status" className="text-sm text-destructive">
-                  {playbook.issue.message}
-                </p>
-              ) : (
-                <ol
-                  className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground"
-                  aria-label={`${playbook.title} steps`}
-                >
-                  {playbook.steps.map((step, index) => (
-                    <li key={step.id} className="min-w-0 break-words">
-                      {index + 1}. {step.title}
-                    </li>
-                  ))}
-                </ol>
-              )}
-            </div>
+                {error || query.error ? (
+                  <p role="alert" className="text-sm text-destructive">
+                    {error ?? query.error}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
           </SettingsRow>
         ))}
       </SettingsSection>
