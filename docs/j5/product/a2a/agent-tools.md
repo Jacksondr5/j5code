@@ -317,7 +317,7 @@ the job; new work on any seat makes it stale and yields a fresh token. Partial f
 seats retired so far and the seat that failed; retry with the same `client_request_id` and token.
 
 **Members are never archived one by one (R14):** `t3_thread_organize` refuses archiving an active Crew seat, just as client archive/delete does. Retire the unit through `archive_crew` or Archive crew on the Fleet page. Archiving its Captain retains the crew cascade. A member that finishes with nothing owed is
-reported to its Captain; the platform settles no seat, and settlement is not archive. `stop_agent` on a member is still allowed;
+reported to its Captain; the platform never settles a seat because its run finished, and settlement is not archive. `stop_agent` on a member is still allowed;
 stopping retires nothing.
 
 ### Kept upstream tools
