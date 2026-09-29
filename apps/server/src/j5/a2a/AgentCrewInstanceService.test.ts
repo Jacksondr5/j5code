@@ -303,6 +303,16 @@ it.effect(
       );
       // A replay of the same seats is not a second owner.
       assert.deepStrictEqual(yield* service.record(input), recorded);
+      // A changed replay keeps the stored row for a seat already recorded, so its stored step
+      // stays owned: a new seat claiming it is refused, and nothing is written.
+      const changed = yield* Effect.flip(
+        service.record({
+          ...input,
+          members: [member("planner"), member("helper"), member("latecomer", ["plan"])],
+        }),
+      );
+      assert.equal(changed._tag, "CrewStepAlreadyOwnedError");
+      assert.deepStrictEqual(yield* service.read(input.id), recorded);
 
       const refused = yield* Effect.flip(service.addMembers(input.id, [member("rival", ["plan"])]));
       assert.instanceOf(refused, CrewStepAlreadyOwnedError);

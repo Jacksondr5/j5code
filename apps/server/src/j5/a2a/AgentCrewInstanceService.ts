@@ -198,8 +198,9 @@ const decodeStepIds = Schema.decodeUnknownSync(StepIds);
 const encodeStepIds = Schema.encodeSync(StepIds);
 
 /**
- * The first step a new seat claims that another seat already owns. A new seat whose name is
- * already on the roster is that same seat replayed, so its own row is not an owner.
+ * The first step a new seat claims that another seat already owns. Ownership is what the rows
+ * store: a seat whose name is already on the roster keeps its stored row (a replay inserts nothing
+ * for it), so its stored steps stay owned and its incoming steps are not a claim.
  */
 const stepOwnershipConflict = (
   crewInstanceId: string,
@@ -207,11 +208,10 @@ const stepOwnershipConflict = (
   incoming: ReadonlyArray<NewAgentCrewMember>,
 ) => {
   const owners = new Map<string, string>();
-  for (const member of existing) {
-    if (incoming.some((seat) => seat.seatName === member.seatName)) continue;
+  for (const member of existing)
     for (const stepId of member.playbookStepIds ?? []) owners.set(stepId, member.seatName);
-  }
-  for (const seat of incoming)
+  for (const seat of incoming) {
+    if (existing.some((member) => member.seatName === seat.seatName)) continue;
     for (const stepId of seat.playbookStepIds ?? []) {
       const ownerSeat = owners.get(stepId);
       if (ownerSeat !== undefined && ownerSeat !== seat.seatName)
@@ -223,6 +223,7 @@ const stepOwnershipConflict = (
         });
       owners.set(stepId, seat.seatName);
     }
+  }
   return null;
 };
 
