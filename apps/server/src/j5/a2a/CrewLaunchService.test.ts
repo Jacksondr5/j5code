@@ -1545,3 +1545,64 @@ it.effect("records a playbook Crew's step owners and surfaces a taken step unwra
     }).pipe(Effect.provide(layer));
   }),
 );
+
+it.effect("a relaunch after a failed link stores the re-approved seat's steps", () =>
+  Effect.gen(function* () {
+    const { context, commands, captain } = yield* fixture;
+    const codex = provider("codex", "codex", [{ slug: "gpt-5.6-sol", options: ["high"] }]);
+    const layer = crewLaunchLayer.pipe(
+      Layer.provideMerge(dependencies(commands, [codex])),
+      Layer.provideMerge(Layer.succeedContext(context)),
+      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-relaunch-" })),
+      Layer.provideMerge(NodeServices.layer),
+    );
+    yield* Effect.gen(function* () {
+      const launcher = yield* CrewLaunchService;
+      const crews = yield* AgentCrewInstanceService;
+      const input = {
+        providerSessionId: "session",
+        requestKey: "relaunch",
+        captain,
+        displayName: "Release Crew",
+        brief: "Ship it.",
+        playbook: {
+          name: "release",
+          definitionPath: "/repo/.j5/playbooks/release.yaml",
+          title: "Release",
+          steps: [{ id: "plan", title: "Plan" }],
+        },
+      };
+      const seat = (steps?: ReadonlyArray<string>) => ({
+        name: "planner",
+        agentId: null,
+        reason: "Plans",
+        instructions: "Plan it.",
+        ...(steps === undefined ? {} : { steps }),
+      });
+      const failed = yield* launcher
+        .launch({
+          ...input,
+          seats: [seat(["plan"])],
+          onRecorded: () =>
+            Effect.fail(
+              new CrewLaunchOperationError({
+                phase: "linking the proposal",
+                seatName: null,
+                createdSeats: [],
+                cause: "disk I/O error",
+              }),
+            ),
+        })
+        .pipe(Effect.flip);
+      assert.equal(failed._tag, "CrewLaunchOperationError");
+      const { instance } = yield* launcher.launch({ ...input, seats: [seat()] });
+      assert.deepStrictEqual(
+        (yield* crews.read(instance.id))?.members.map(({ seatName, playbookStepIds }) => [
+          seatName,
+          playbookStepIds,
+        ]),
+        [["planner", []]],
+      );
+    }).pipe(Effect.provide(layer));
+  }),
+);

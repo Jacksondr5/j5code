@@ -198,20 +198,21 @@ const decodeStepIds = Schema.decodeUnknownSync(StepIds);
 const encodeStepIds = Schema.encodeSync(StepIds);
 
 /**
- * The first step a new seat claims that another seat already owns. Ownership is what the rows
- * store: a seat whose name is already on the roster keeps its stored row (a replay inserts nothing
- * for it), so its stored steps stay owned and its incoming steps are not a claim.
+ * The first step two seats would both own once the write lands. The roster after the write is the
+ * rows no incoming seat replaces plus every incoming seat with its incoming steps, because the
+ * write stores an incoming seat's steps even over its existing row: ownership is always the plan
+ * the person approved last.
  */
 const stepOwnershipConflict = (
   crewInstanceId: string,
   existing: ReadonlyArray<AgentCrewMember>,
   incoming: ReadonlyArray<NewAgentCrewMember>,
 ) => {
+  const kept = existing.filter(
+    (member) => !incoming.some((seat) => seat.seatName === member.seatName),
+  );
   const owners = new Map<string, string>();
-  for (const member of existing)
-    for (const stepId of member.playbookStepIds ?? []) owners.set(stepId, member.seatName);
-  for (const seat of incoming) {
-    if (existing.some((member) => member.seatName === seat.seatName)) continue;
+  for (const seat of [...kept, ...incoming])
     for (const stepId of seat.playbookStepIds ?? []) {
       const ownerSeat = owners.get(stepId);
       if (ownerSeat !== undefined && ownerSeat !== seat.seatName)
@@ -223,7 +224,6 @@ const stepOwnershipConflict = (
         });
       owners.set(stepId, seat.seatName);
     }
-  }
   return null;
 };
 
@@ -304,6 +304,8 @@ export const layer: Layer.Layer<AgentCrewInstanceService, never, SqlClient.SqlCl
                   : encodeStepIds(member.playbookStepIds)
               }
             )
+            ON CONFLICT (crew_instance_id, seat_name)
+            DO UPDATE SET playbook_step_ids = excluded.playbook_step_ids
           `;
         }
       });
@@ -313,7 +315,8 @@ export const layer: Layer.Layer<AgentCrewInstanceService, never, SqlClient.SqlCl
       ) {
         yield* sql.withTransaction(
           Effect.gen(function* () {
-            // A replay's rows are the same seats; checked before anything is written.
+            // A re-approval keeps a same-named seat's row but takes its newly approved steps;
+            // checked over the roster as it will stand, before anything is written.
             const conflict = stepOwnershipConflict(
               input.id,
               (yield* read(input.id))?.members ?? [],
