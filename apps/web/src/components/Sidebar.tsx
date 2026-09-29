@@ -4247,9 +4247,8 @@ export default function Sidebar() {
                     },
                   }
                 : {}),
-              archive: ({ undoable }) =>
+              archive: () =>
                 archiveThread(threadRef, {
-                  undoable,
                   onArchived: () => {
                     didArchive = true;
                   },

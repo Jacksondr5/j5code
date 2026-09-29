@@ -255,7 +255,9 @@ it.effect("the alert reaches the Inbox on its own, with the worker running as it
       });
       yield* worker.notify;
       yield* Stream.runHead(first);
-      // The alert has to wake the worker itself, or this waits until the test times out.
+      // An end-to-end smoke check, not the regression test: the worker's wake queue can hold a
+      // spare wake, so this passes even if the alert never wakes the worker. The wake-count test
+      // below ("an alert wakes the delivery worker once it commits") is the regression test.
       const next = yield* worker.subscribeMilestones;
       yield* alert({ instance: reviewCrew, seatName: "critic", runId: "run:daemon", failure });
       yield* Stream.runHead(next);

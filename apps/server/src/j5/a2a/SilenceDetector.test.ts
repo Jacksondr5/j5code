@@ -11,7 +11,6 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
-import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -26,6 +25,11 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
+import {
+  EventSinkStreamError,
+  EventSinkV2,
+  type EventSinkV2Shape,
+} from "../../orchestration-v2/EventSink.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import {
   AgentCrewInstanceService,
@@ -125,6 +129,7 @@ const makeTestLayer = () => {
     Layer.provide(ledger),
     Layer.provide(database),
     Layer.provide(threads),
+    Layer.provide(Layer.mock(EventSinkV2)({})),
     Layer.provideMerge(crewInstanceLayer.pipe(Layer.provide(database))),
     Layer.provideMerge(worker),
   );
@@ -136,40 +141,9 @@ const makeDaemonTestLayer = (
     readonly afterSequence?: number;
   }) => Stream.Stream<OrchestrationV2StoredEvent>,
   runs: ReadonlyArray<OrchestrationV2Run>,
-  initialHighWater: number,
+  latestSequence: EventSinkV2Shape["latestSequence"],
 ) => {
-  const database = SqlitePersistenceMemory.pipe(
-    Layer.tap((context) => {
-      const sql = Context.get(context, SqlClient.SqlClient);
-      return sql`
-        INSERT OR IGNORE INTO orchestration_v2_events (
-            sequence,
-            event_id,
-            command_id,
-            thread_id,
-            run_id,
-            node_id,
-            provider,
-            raw_event_id,
-            event_type,
-            occurred_at,
-            payload_json
-          ) VALUES (
-            ${initialHighWater},
-            'event:silence:cursor-high-water',
-            NULL,
-            'thread:silence:cursor-high-water',
-            NULL,
-            NULL,
-            NULL,
-            NULL,
-            'thread.created',
-            ${iso(0)},
-            '{}'
-          )
-        `;
-    }),
-  );
+  const database = SqlitePersistenceMemory;
   const ledger = ledgerLayer.pipe(Layer.provide(database));
   const send = sendLayer.pipe(Layer.provide(ledger), Layer.provide(database));
   const threads = Layer.mock(ThreadManagementService)({
@@ -194,6 +168,7 @@ const makeDaemonTestLayer = (
     Layer.provide(ledger),
     Layer.provide(database),
     Layer.provide(threads),
+    Layer.provide(Layer.mock(EventSinkV2)({ latestSequence })),
     Layer.provideMerge(crewInstanceLayer.pipe(Layer.provide(database))),
     Layer.provideMerge(worker),
   );
@@ -662,7 +637,7 @@ it.effect("daemon retries its stored-event stream and advances the durable curso
         return Stream.fromEffect(Deferred.await(gate).pipe(Effect.as(stored)));
       },
       [run],
-      75,
+      () => Effect.succeed(75),
     );
 
     return yield* Effect.scoped(
@@ -697,6 +672,53 @@ it.effect("daemon retries its stored-event stream and advances the durable curso
   return gateEffect;
 });
 
+it.effect(
+  "a new cursor starts at the event store's latest sequence, retrying a failed read rather than 0",
+  () =>
+    Effect.gen(function* () {
+      const firstReadFailed = yield* Deferred.make<void>();
+      const streamStarted = yield* Deferred.make<number>();
+      let reads = 0;
+      let streamCalls = 0;
+      const daemonLayer = makeDaemonTestLayer(
+        (input) => {
+          streamCalls += 1;
+          return Stream.fromEffect(Deferred.succeed(streamStarted, input?.afterSequence ?? 0)).pipe(
+            Stream.drain,
+            Stream.concat(Stream.never),
+          );
+        },
+        [],
+        () =>
+          Effect.suspend(() => {
+            reads += 1;
+            return reads === 1
+              ? Deferred.succeed(firstReadFailed, undefined).pipe(
+                  Effect.andThen(Effect.fail(new EventSinkStreamError({}))),
+                )
+              : Effect.succeed(4200);
+          }),
+      );
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          yield* Deferred.await(firstReadFailed);
+          assert.equal(streamCalls, 0);
+          yield* TestClock.adjust(Duration.millis(250));
+          assert.equal(yield* Deferred.await(streamStarted), 4200);
+          const cursor = yield* (yield* SqlClient.SqlClient)<{
+            readonly after_sequence: number | null;
+          }>`
+            SELECT after_sequence
+            FROM j5_a2a_silence_detector_cursor
+            WHERE singleton = 1
+          `;
+          assert.deepStrictEqual(cursor, [{ after_sequence: 4200 }]);
+        }).pipe(Effect.provide(daemonLayer)),
+      );
+    }),
+);
+
 it.effect("backs off exponentially across consecutive lifecycle stream failures", () =>
   Effect.gen(function* () {
     const failures = yield* Queue.unbounded<number>();
@@ -717,7 +739,7 @@ it.effect("backs off exponentially across consecutive lifecycle stream failures"
         );
       },
       [],
-      75,
+      () => Effect.succeed(75),
     );
 
     yield* Effect.scoped(

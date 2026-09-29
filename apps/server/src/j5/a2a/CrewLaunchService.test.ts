@@ -334,7 +334,7 @@ it.effect("launches an approved roster whole, records it, briefs each seat, then
 );
 
 it.effect(
-  "a custom seat runs on the Captain's model and access with no saved agent behind it",
+  "a custom seat runs on the Captain's model in Full access with no saved agent behind it",
   () =>
     Effect.gen(function* () {
       const { context, commands, captain } = yield* fixture;
@@ -379,10 +379,10 @@ it.effect(
         );
         assert.equal(created?.type, "thread.create");
         if (created?.type === "thread.create") {
-          // No definition to run as: the Captain's own route and access, and no persona assignment.
+          // No definition to run as: the Captain's own route, Full access, and no persona assignment.
           assert.isUndefined(created.agentPersonaAssignment);
           assert.deepStrictEqual(created.modelSelection, captain.thread.modelSelection);
-          assert.equal(created.runtimeMode, captain.thread.runtimeMode);
+          assert.equal(created.runtimeMode, "full-access");
         }
         const brief = captured.find(
           (command) =>
@@ -395,12 +395,13 @@ it.effect(
           assert.include(brief.text, "persona=custom");
         }
 
-        // A persona Captain stores the mode the person picked at launch (full-access here) but runs
-        // under its persona's policy; its custom seat takes that effective access, not the stored mode.
+        // A persona Captain runs under its persona's policy (workspace write, auto-accept-edits here)
+        // and has the person supervising it; its custom seat still defaults to Full access.
         const personaCaptain = {
           ...captain,
           thread: {
             ...captain.thread,
+            runtimeMode: "approval-required",
             agentPersonaAssignment: {
               personaId: "builder",
               definitionVersion: 1,
@@ -424,8 +425,8 @@ it.effect(
         );
         assert.equal(underPersona?.type, "thread.create");
         if (underPersona?.type === "thread.create") {
-          assert.equal(captain.thread.runtimeMode, "full-access");
-          assert.equal(underPersona.runtimeMode, "auto-accept-edits");
+          assert.equal(underPersona.runtimeMode, "full-access");
+          assert.isUndefined(underPersona.agentPersonaAssignment);
         }
       }).pipe(Effect.provide(layer));
     }).pipe(Effect.scoped),
@@ -702,7 +703,7 @@ it.effect(
         assert.equal(resolved.runtimeMode, "approval-required");
         assert.equal(resolved.runtime.harness, "Claude Code");
         assert.equal(resolved.runtime.reasoning, "low");
-        assert.equal(resolved.runtime.access, "Approval required");
+        assert.equal(resolved.runtime.access, "Supervised");
         assert.deepStrictEqual(resolved.runtime.modelSelection, custom.modelSelection);
         assert.equal(resolved.runtime.runtimeMode, custom.runtimeMode);
         const { instance } = yield* launcher.launch({
@@ -769,7 +770,7 @@ it.effect(
           ])
           .pipe(Effect.flip);
         assert.equal(invalidAccess._tag, "CrewLaunchSeatUnavailableError");
-        assert.include(invalidAccess.message, "Choose Approval required or Full access");
+        assert.include(invalidAccess.message, "Choose Supervised or Full access");
         // Neither configured provider advertises Critic's saved model: the human override
         // still launches, preserving its snapshot and behavior on the selected harness.
         const personaSeat = {
@@ -896,36 +897,70 @@ it("runtime previews show advertised variant and boolean thinking choices", () =
   );
 });
 
-it.effect("rejects inherited ACP access that the harness cannot enforce", () =>
-  Effect.gen(function* () {
-    const { context, commands, captain } = yield* fixture;
-    const layer = crewLaunchLayer.pipe(
-      Layer.provideMerge(
-        dependencies(commands, [provider("acp", "acpRegistry", [{ slug: "model", options: [] }])]),
-      ),
-      Layer.provideMerge(Layer.succeedContext(context)),
-      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-inherited-acp-" })),
-      Layer.provideMerge(NodeServices.layer),
-    );
-    yield* Effect.gen(function* () {
-      const launcher = yield* CrewLaunchService;
-      for (const runtimeMode of ["auto", "auto-accept-edits"] as const) {
-        const failure = yield* launcher
-          .resolveSeats({ ...captain, thread: { ...captain.thread, runtimeMode } }, [
-            {
-              name: "reviewer",
-              agentId: null,
-              reason: "Review",
-              instructions: "Review",
-              modelSelection: { instanceId: ProviderInstanceId.make("acp"), model: "model" },
-            },
-          ])
-          .pipe(Effect.flip);
-        assert.equal(failure._tag, "CrewLaunchSeatUnavailableError");
-      }
-      assert.lengthOf(yield* Ref.get(commands), 0);
-    }).pipe(Effect.provide(layer));
-  }).pipe(Effect.scoped),
+it.effect(
+  "an unset custom seat resolves to Full access whatever the Captain runs; a persona seat keeps its policy and an explicit mode wins",
+  () =>
+    Effect.gen(function* () {
+      const { context, commands, captain } = yield* fixture;
+      const layer = crewLaunchLayer.pipe(
+        Layer.provideMerge(
+          dependencies(commands, [
+            provider("codex", "codex", [{ slug: "gpt-5.6-sol", options: ["high"] }]),
+            provider("acp", "acpRegistry", [{ slug: "model", options: [] }]),
+          ]),
+        ),
+        Layer.provideMerge(Layer.succeedContext(context)),
+        Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-custom-access-" })),
+        Layer.provideMerge(NodeServices.layer),
+      );
+      yield* Effect.gen(function* () {
+        const launcher = yield* CrewLaunchService;
+        const custom = {
+          name: "reviewer",
+          agentId: null,
+          reason: "Review",
+          instructions: "Review",
+        };
+        const acp = {
+          ...custom,
+          name: "acp-reviewer",
+          modelSelection: { instanceId: ProviderInstanceId.make("acp"), model: "model" },
+        };
+        for (const runtimeMode of ["approval-required", "auto", "auto-accept-edits"] as const) {
+          // Before #326 an ACP seat inherited Auto or Accept edits here and was refused; the
+          // Full access default is one the harness enforces, so it now launches.
+          const resolved = yield* launcher.resolveSeats(
+            { ...captain, thread: { ...captain.thread, runtimeMode } },
+            [custom, acp, { name: "builder", agentId: "builder", reason: "Build" }],
+          );
+          assert.deepStrictEqual(
+            resolved.map((seat) => [seat.seat.name, seat.runtimeMode, seat.runtime.access]),
+            [
+              ["reviewer", "full-access", "Full access"],
+              ["acp-reviewer", "full-access", "Full access"],
+              ["builder", "auto-accept-edits", "Repository write"],
+            ],
+          );
+        }
+        const explicit = yield* launcher.resolveSeats(captain, [
+          { ...custom, runtimeMode: "approval-required" },
+          { ...acp, runtimeMode: "approval-required" },
+        ]);
+        assert.deepStrictEqual(
+          explicit.map((seat) => seat.runtimeMode),
+          ["approval-required", "approval-required"],
+        );
+        // An explicit mode the ACP harness cannot enforce is still refused.
+        for (const runtimeMode of ["auto", "auto-accept-edits"] as const) {
+          const failure = yield* launcher
+            .resolveSeats(captain, [{ ...acp, runtimeMode }])
+            .pipe(Effect.flip);
+          assert.equal(failure._tag, "CrewLaunchSeatUnavailableError");
+          assert.include(failure.message, "cannot enforce the selected access mode");
+        }
+        assert.lengthOf(yield* Ref.get(commands), 0);
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
 );
 
 it.effect("refuses persona seats whose effective ACP access the harness cannot enforce", () =>

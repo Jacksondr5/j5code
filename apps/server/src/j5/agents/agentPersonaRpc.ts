@@ -27,6 +27,8 @@ const METHODS = J5_AGENT_PERSONA_WS_METHODS;
 export const AGENT_PERSONA_RPC_SCOPES = {
   [METHODS.getAgentPersonaCatalog]: AuthOrchestrationReadScope,
   [METHODS.importAgentPersonas]: AuthOrchestrationOperateScope,
+  [METHODS.listAgentPersonaImportFiles]: AuthOrchestrationOperateScope,
+  [METHODS.readAgentPersonaImportFiles]: AuthOrchestrationOperateScope,
   [METHODS.editImportedAgentPersona]: AuthOrchestrationOperateScope,
   [METHODS.setImportedAgentPersonaEnabled]: AuthOrchestrationOperateScope,
   [METHODS.removeImportedAgentPersona]: AuthOrchestrationOperateScope,
@@ -151,6 +153,24 @@ export const makeAgentPersonaRpcHandlers = Effect.fn("j5.makeAgentPersonaRpcHand
             .pipe(
               Effect.mapError((cause) => (isImportConflict(cause) ? cause : catalogError(cause))),
             ),
+          TRACE,
+        ),
+      [METHODS.listAgentPersonaImportFiles]: (input: Input<"listAgentPersonaImportFiles">) =>
+        observe(
+          METHODS.listAgentPersonaImportFiles,
+          library.listImportFiles(input.directory).pipe(
+            Effect.map((files) => ({ files })),
+            Effect.mapError(catalogError),
+          ),
+          TRACE,
+        ),
+      [METHODS.readAgentPersonaImportFiles]: (input: Input<"readAgentPersonaImportFiles">) =>
+        observe(
+          METHODS.readAgentPersonaImportFiles,
+          library.readImportFiles(input.path).pipe(
+            Effect.map((files) => ({ files })),
+            Effect.mapError(catalogError),
+          ),
           TRACE,
         ),
       [METHODS.editImportedAgentPersona]: (input: Input<"editImportedAgentPersona">) =>

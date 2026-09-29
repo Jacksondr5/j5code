@@ -19,12 +19,14 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
+import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { CrewCaptainArchiveCascade } from "./CrewCaptainArchiveCascade.ts";
 import { ServerConfig } from "../../config.ts";
+import { EventSinkV2 } from "../../orchestration-v2/EventSink.ts";
 import { ArtifactWorkspace } from "../artifacts/ArtifactWorkspace.ts";
 import { CrewSeatFinishNotifier, manualLayer as notifierLayer } from "./CrewSeatFinishNotifier.ts";
 import { OrchestratorProjectionError } from "../../orchestration-v2/Orchestrator.ts";
@@ -41,6 +43,7 @@ import {
 import {
   CREW_LAUNCH_REPORT_WINDOW_MS,
   CrewLaunchReporter,
+  layer as daemonReporterLayer,
   manualLayer as reporterLayer,
 } from "./CrewLaunchReporter.ts";
 import { crewSeatBriefMessageId, crewSeatThreadId } from "./crewSeatIds.ts";
@@ -120,7 +123,11 @@ const runEvent = (threadId: ThreadId, facts: RunFacts): OrchestrationV2StoredEve
 
 const seat = (name: string, agentId: string) => ({ seat: name, agentId, reason: `${name} works` });
 
-const fixture = Effect.gen(function* () {
+/** With `daemon`, the production layer runs its sweep and stream against these reads. */
+const makeFixture = Effect.fn("test.j5.crewLaunchReporter.fixture")(function* (daemon?: {
+  readonly latestSequence: EventSinkV2["Service"]["latestSequence"];
+  readonly streamStoredEventsFrom: ThreadManagementService["Service"]["streamStoredEventsFrom"];
+}) {
   const database = NodeSqliteClient.layer({ filename: ":memory:" });
   const storage = Layer.mergeAll(crewInstanceLayer, proposalStoreLayer, ledgerLayer).pipe(
     Layer.provideMerge(database),
@@ -144,9 +151,10 @@ const fixture = Effect.gen(function* () {
   // Each dispatch is also a receipt, so a test waits on the report rather than on the clock.
   const receipts = yield* Queue.unbounded<OrchestrationV2Command>();
   let onRead: ((threadId: ThreadId) => Effect.Effect<void>) | undefined;
-  const layer = reporterLayer.pipe(
+  const layer = (daemon === undefined ? reporterLayer : daemonReporterLayer).pipe(
     Layer.provideMerge(
       Layer.mock(ThreadManagementService)({
+        ...(daemon === undefined ? {} : { streamStoredEventsFrom: daemon.streamStoredEventsFrom }),
         getThreadProjection: (threadId) =>
           Effect.gen(function* () {
             const found = (yield* Ref.get(threads)).get(threadId);
@@ -189,6 +197,11 @@ const fixture = Effect.gen(function* () {
             return { events: [], effects: [] } as never;
           }),
       }),
+    ),
+    Layer.provideMerge(
+      Layer.mock(EventSinkV2)(
+        daemon === undefined ? {} : { latestSequence: daemon.latestSequence },
+      ),
     ),
     Layer.provideMerge(Layer.succeedContext(context)),
     Layer.provideMerge(NodeServices.layer),
@@ -292,6 +305,7 @@ const fixture = Effect.gen(function* () {
   };
 });
 
+const fixture = makeFixture();
 it.effect(
   "a launch that dropped a never-created seat and failed another's brief reports both by name",
   () =>
@@ -693,5 +707,25 @@ it.effect(
         yield* (yield* CrewSeatFinishNotifier).handleStoredEvent(event);
         assert.lengthOf(yield* reports(), 1);
       }).pipe(Effect.provide(integrated));
+    }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "the daemon's stream starts after the event store's latest sequence, not from the beginning",
+  () =>
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<number>();
+      const { layer } = yield* makeFixture({
+        latestSequence: () => Effect.succeed(4200),
+        streamStoredEventsFrom: (input) =>
+          Stream.fromEffect(Deferred.succeed(started, input?.afterSequence ?? 0)).pipe(
+            Stream.drain,
+            Stream.concat(Stream.never),
+          ),
+      });
+      yield* Effect.gen(function* () {
+        yield* CrewLaunchReporter;
+        assert.equal(yield* Deferred.await(started), 4200);
+      }).pipe(Effect.provide(layer));
     }).pipe(Effect.scoped),
 );

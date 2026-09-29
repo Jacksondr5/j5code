@@ -562,7 +562,7 @@ export function HumanInboxPage() {
           </WorkspaceBreadcrumb>
         </header>
         <ScrollArea className="min-h-0 flex-1">
-          <main className="mx-auto w-full max-w-4xl px-4 py-8 sm:px-8 sm:py-10">
+          <main className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-8 sm:py-10">
             <div className="flex flex-wrap items-end justify-between gap-4 border-b border-border pb-5">
               <div>
                 <h1 className="text-balance text-2xl font-semibold tracking-tight">Inbox</h1>

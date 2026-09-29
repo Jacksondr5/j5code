@@ -306,11 +306,7 @@ export function useThreadActions() {
   );
 
   const archiveThread = useCallback(
-    async (
-      target: ScopedThreadRef,
-      // J5 (decision 7d): `undoable: false` when the archive may retire a Captain's Crews.
-      opts: { onArchived?: () => void; undoable?: boolean } = {},
-    ) => {
+    async (target: ScopedThreadRef, opts: { onArchived?: () => void } = {}) => {
       const resolved = resolveThreadTarget(target);
       if (!resolved) return AsyncResult.success(undefined);
       const { thread, threadRef } = resolved;
@@ -344,17 +340,13 @@ export function useThreadActions() {
       }
       refreshArchivedThreadsForEnvironment(threadRef.environmentId);
       opts.onArchived?.();
-      if (opts.undoable === false) {
-        action.finish();
-      } else {
-        showThreadUndoNotice({
-          action: "Archived",
-          claim: action,
-          // Undo also brings the reader back when archiving moved them to a draft.
-          undo: () => unarchiveThread(threadRef, { navigate: shouldNavigateToDraft }),
-          failureTitle: "Failed to undo archive",
-        });
-      }
+      showThreadUndoNotice({
+        action: "Archived",
+        claim: action,
+        // Undo also brings the reader back when archiving moved them to a draft.
+        undo: () => unarchiveThread(threadRef, { navigate: shouldNavigateToDraft }),
+        failureTitle: "Failed to undo archive",
+      });
 
       if (shouldNavigateToDraft) {
         const navigationResult = await settlePromise(() =>
