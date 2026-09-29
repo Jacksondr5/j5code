@@ -506,6 +506,8 @@ it.effect(
       const id = "proposal:addition-restart";
       yield* approvedAddition({ id, crewId, added: [seat("extra", "critic")] });
       yield* dropThread(id, "extra");
+      // The roster's seat has no thread either, but this report owns only the addition's rows.
+      yield* dropThread(rosterId, "first");
       yield* Effect.gen(function* () {
         yield* (yield* CrewLaunchReporter).reconcile;
         const [report] = yield* reports();
