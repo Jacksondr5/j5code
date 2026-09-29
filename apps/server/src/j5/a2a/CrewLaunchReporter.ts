@@ -56,6 +56,12 @@ export interface CrewLaunchReporterShape {
    * launch's own per-seat results: a seat that was never created, or whose home or brief did not
    * go through, is decided from them. Without them (the boot sweep), a seat is measured from its
    * thread, and one with no thread reads as not created.
+   *
+   * Before measuring, a row this proposal minted whose thread does not exist is dropped, so the
+   * roster matches what the launch made; a seat the launch reported created or not started keeps
+   * its row. A failed drop fails the report, which stays owed for the next boot sweep. That a
+   * missing thread is final rests on every production writer of member rows holding
+   * `crews.serialize` for the Crew; never call this while holding it for the same Crew.
    */
   readonly watch: (
     proposalId: string,
@@ -256,85 +262,134 @@ const makeLayer = (daemon: boolean) =>
       const allDecided = (launch: PendingLaunch) =>
         launch.seats.every((seat) => launch.verdicts.get(seat.seatName)?.kind !== "pending");
 
-      const watch: CrewLaunchReporterShape["watch"] = (proposalId, outcomes = []) =>
-        gate
-          .withPermit(
-            Effect.gen(function* () {
-              if (pending.has(proposalId)) return;
-              const proposal = yield* proposals.read(proposalId);
-              if (
-                proposal === null ||
-                proposal.status !== "approved" ||
-                proposal.crewInstanceId === null ||
-                proposal.reportedAt !== null
-              )
-                return;
-              const instance = yield* crews.read(proposal.crewInstanceId);
-              if (instance === null) return;
-              const members =
-                proposal.kind === "roster"
-                  ? instance.members
-                  : instance.members.filter(crewSeatReservedBy(proposal.id));
-              const seats = members.map((member) => ({
-                seatName: member.seatName,
-                threadId: member.threadId,
-                briefMessageId: crewSeatBriefMessageId(proposal.id, member.seatName),
-              }));
-              const decided = new Map<string, SeatStartVerdict>(
-                outcomes.flatMap((outcome) =>
-                  outcome.kind === "created"
-                    ? []
-                    : [[outcome.seatName, { kind: outcome.kind, detail: outcome.detail }] as const],
-                ),
-              );
-              const verdicts = new Map<string, SeatStartVerdict>(
-                seats.map((seat) => [seat.seatName, { kind: "pending" }]),
-              );
-              // An approved seat with no row was never created: the launch dropped it, so it is
-              // decided now and reported by name, though it is not on the roster.
-              const onRoster = new Set(seats.map((seat) => seat.seatName));
-              for (const approved of proposal.approvedSeats ?? proposal.requestedSeats)
-                if (!onRoster.has(approved.seat))
-                  verdicts.set(
-                    approved.seat,
-                    decided.get(approved.seat) ?? {
-                      kind: "not_created",
-                      detail: NOT_CREATED_DETAIL,
-                    },
-                  );
-              const launch: PendingLaunch = {
-                proposal,
-                instance,
-                seats,
-                verdicts,
-                decided,
-                timer: null,
-              };
-              // Snapshot reads and stream handling share the permit. An update arriving during a
-              // read waits for registration, then refreshes the seat; it cannot fall between them.
-              for (const seat of seats) yield* refreshSeat(launch, seat);
-              pending.set(proposalId, launch);
-              launch.timer = yield* Effect.sleep(
-                Duration.millis(CREW_LAUNCH_REPORT_WINDOW_MS),
-              ).pipe(
-                Effect.andThen(gate.withPermit(settle(proposalId, "window"))),
-                Effect.asVoid,
-                Effect.catchCause((cause) =>
-                  Effect.logWarning("J5 crew launch report window failed", { proposalId, cause }),
-                ),
-                Effect.forkIn(timers, { startImmediately: true }),
-              );
-              if (allDecided(launch)) yield* settle(proposalId, "verdicts");
-            }),
+      /**
+       * Drops the rows this proposal minted whose threads were never created. Under the Crew's
+       * lock the launch that reserved them has finished or died with the process, and nothing
+       * recreates a seat for a resolved proposal, so a missing thread is final. Taken before the
+       * gate: the reporter never waits on a Crew lock while holding its gate.
+       */
+      const dropSeatsNeverCreated = Effect.fn("j5.a2a.crewLaunchReporter.dropSeatsNeverCreated")(
+        function* (proposalId: string, outcomes: ReadonlyArray<CrewSeatLaunchOutcome>) {
+          const proposal = yield* proposals.read(proposalId);
+          if (
+            proposal === null ||
+            proposal.status !== "approved" ||
+            proposal.crewInstanceId === null ||
+            proposal.reportedAt !== null
           )
-          .pipe(
-            Effect.catchCause((cause) =>
-              Effect.logWarning("J5 crew launch report could not start watching", {
-                proposalId,
-                cause,
-              }),
+            return;
+          const crewInstanceId = proposal.crewInstanceId;
+          // A seat the launch created, or whose thread it could not read, is not known missing.
+          const kept = new Set(
+            outcomes.flatMap((outcome) =>
+              outcome.kind === "not_created" ? [] : [outcome.seatName],
             ),
           );
+          yield* crews.serialize(
+            crewInstanceId,
+            Effect.gen(function* () {
+              const instance = yield* crews.read(crewInstanceId);
+              if (instance === null) return;
+              const missing: Array<string> = [];
+              for (const member of instance.members.filter(crewSeatReservedBy(proposal.id))) {
+                if (kept.has(member.seatName)) continue;
+                if ((yield* getThreadProjectionIfPresent(threads, member.threadId)) === null)
+                  missing.push(member.seatName);
+              }
+              yield* crews.removeMembers(instance.id, missing);
+            }),
+          );
+        },
+      );
+
+      const watch: CrewLaunchReporterShape["watch"] = (proposalId, outcomes = []) =>
+        dropSeatsNeverCreated(proposalId, outcomes).pipe(
+          Effect.andThen(
+            gate.withPermit(
+              Effect.gen(function* () {
+                if (pending.has(proposalId)) return;
+                const proposal = yield* proposals.read(proposalId);
+                if (
+                  proposal === null ||
+                  proposal.status !== "approved" ||
+                  proposal.crewInstanceId === null ||
+                  proposal.reportedAt !== null
+                )
+                  return;
+                const instance = yield* crews.read(proposal.crewInstanceId);
+                if (instance === null) return;
+                const members =
+                  proposal.kind === "roster"
+                    ? instance.members
+                    : instance.members.filter(crewSeatReservedBy(proposal.id));
+                const seats = members.map((member) => ({
+                  seatName: member.seatName,
+                  threadId: member.threadId,
+                  briefMessageId: crewSeatBriefMessageId(proposal.id, member.seatName),
+                }));
+                const decided = new Map<string, SeatStartVerdict>(
+                  outcomes.flatMap((outcome) =>
+                    outcome.kind === "created"
+                      ? []
+                      : [
+                          [
+                            outcome.seatName,
+                            { kind: outcome.kind, detail: outcome.detail },
+                          ] as const,
+                        ],
+                  ),
+                );
+                const verdicts = new Map<string, SeatStartVerdict>(
+                  seats.map((seat) => [seat.seatName, { kind: "pending" }]),
+                );
+                // An approved seat with no row was never created: the launch dropped it, so it is
+                // decided now and reported by name, though it is not on the roster.
+                const onRoster = new Set(seats.map((seat) => seat.seatName));
+                for (const approved of proposal.approvedSeats ?? proposal.requestedSeats)
+                  if (!onRoster.has(approved.seat))
+                    verdicts.set(
+                      approved.seat,
+                      decided.get(approved.seat) ?? {
+                        kind: "not_created",
+                        detail: NOT_CREATED_DETAIL,
+                      },
+                    );
+                const launch: PendingLaunch = {
+                  proposal,
+                  instance,
+                  seats,
+                  verdicts,
+                  decided,
+                  timer: null,
+                };
+                // Snapshot reads and stream handling share the permit. An update arriving during a
+                // read waits for registration, then refreshes the seat; it cannot fall between them.
+                for (const seat of seats) yield* refreshSeat(launch, seat);
+                pending.set(proposalId, launch);
+                launch.timer = yield* Effect.sleep(
+                  Duration.millis(CREW_LAUNCH_REPORT_WINDOW_MS),
+                ).pipe(
+                  Effect.andThen(gate.withPermit(settle(proposalId, "window"))),
+                  Effect.asVoid,
+                  Effect.catchCause((cause) =>
+                    Effect.logWarning("J5 crew launch report window failed", {
+                      proposalId,
+                      cause,
+                    }),
+                  ),
+                  Effect.forkIn(timers, { startImmediately: true }),
+                );
+                if (allDecided(launch)) yield* settle(proposalId, "verdicts");
+              }),
+            ),
+          ),
+          Effect.catchCause((cause) =>
+            Effect.logWarning("J5 crew launch report could not start watching", {
+              proposalId,
+              cause,
+            }),
+          ),
+        );
 
       const handleStoredEvent: CrewLaunchReporterShape["handleStoredEvent"] = (stored) =>
         gate
