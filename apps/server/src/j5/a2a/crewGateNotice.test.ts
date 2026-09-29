@@ -127,6 +127,28 @@ describe("crew launch report", () => {
     ],
   } as unknown as AgentCrewInstance;
 
+  it("names the playbook before the roster and tells the Captain how to start it", () => {
+    const text = crewLaunchReportText({
+      proposal,
+      instance,
+      verdicts: new Map(),
+      windowMs: 60_000,
+      playbook: { name: "review", title: "Review <a> change" },
+    });
+    assert.include(text, "playbook: review | Review &#60;a&#62; change\nroster:\n");
+    assert.include(
+      text,
+      `Start it with playbook_start(name: "review", client_request_id, crew_instance_id: "${instance.id}").`,
+    );
+    const plain = crewLaunchReportText({
+      proposal,
+      instance,
+      verdicts: new Map(),
+      windowMs: 60_000,
+    });
+    assert.notInclude(plain, "playbook");
+  });
+
   it("distinguishes a custom seat from a saved agent named custom", () => {
     const text = crewLaunchReportText({
       proposal,

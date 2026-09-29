@@ -90,6 +90,7 @@ type RunRow = {
   status: PlaybookRun["status"];
   created_at: string;
   updated_at: string;
+  crew_instance_id: string | null;
 };
 const fromRow = (row: RunRow): PlaybookRun => ({
   runId: row.run_id,
@@ -99,6 +100,40 @@ const fromRow = (row: RunRow): PlaybookRun => ({
   status: row.status,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
+  ...(row.crew_instance_id === null ? {} : { crewInstanceId: row.crew_instance_id }),
+});
+
+/** One step landing of a Crew-linked run and how its hand-off resolved. */
+export type PlaybookLanding = {
+  readonly runId: string;
+  readonly requestId: string;
+  readonly stepId: string;
+  readonly landedAt: string;
+  /** Set once, at first resolution; null with a target thread means the Captain. */
+  readonly targetSeat: string | null;
+  readonly targetThreadId: string | null;
+  readonly outcome: "delivered" | "captain" | "skipped" | null;
+  readonly resolvedAt: string | null;
+};
+type LandingRow = {
+  run_id: string;
+  request_id: string;
+  step_id: string;
+  landed_at: string;
+  target_seat: string | null;
+  target_thread_id: string | null;
+  outcome: PlaybookLanding["outcome"];
+  resolved_at: string | null;
+};
+const landingFromRow = (row: LandingRow): PlaybookLanding => ({
+  runId: row.run_id,
+  requestId: row.request_id,
+  stepId: row.step_id,
+  landedAt: row.landed_at,
+  targetSeat: row.target_seat,
+  targetThreadId: row.target_thread_id,
+  outcome: row.outcome,
+  resolvedAt: row.resolved_at,
 });
 export type PlaybookMutation = {
   readonly runId: string;
@@ -274,6 +309,13 @@ export const makePlaybookStore = Effect.gen(function* () {
   const remember = (owner: ThreadId, key: string, request: string, runId: string) =>
     sql`INSERT INTO j5_playbook_request (owner_thread_id, request_id, request_json, run_id)
       VALUES (${owner}, ${key}, ${request}, ${runId})`;
+  // Keyed by the request that caused the landing; a retried request is replayed before this runs.
+  const land = (runId: string, requestId: string, stepId: string, landedAt: string) =>
+    sql`INSERT INTO j5_playbook_step_delivery (run_id, request_id, step_id, landed_at)
+      VALUES (${runId}, ${requestId}, ${stepId}, ${landedAt})`;
+  const skipPending = (runId: string, resolvedAt: string) =>
+    sql`UPDATE j5_playbook_step_delivery SET outcome = 'skipped', resolved_at = ${resolvedAt}
+      WHERE run_id = ${runId} AND resolved_at IS NULL`;
 
   /**
    * Warnings never fail a read: the catalog is read only when a step names a persona, and an
@@ -445,9 +487,16 @@ export const makePlaybookStore = Effect.gen(function* () {
     workspaceRoot: string,
     name: string,
     key: string,
+    options: { readonly crewInstanceId?: string } = {},
   ) {
     const { definitionPath } = yield* definitionPathFor(workspaceRoot, name);
-    const request = encodeRequest(["start", definitionPath]);
+    const crewInstanceId = options.crewInstanceId ?? null;
+    // A thread run keeps the original request shape, so receipts stored before Crew links replay.
+    const request = encodeRequest(
+      crewInstanceId === null
+        ? ["start", definitionPath]
+        : ["start", definitionPath, crewInstanceId],
+    );
     return yield* Effect.gen(function* () {
       yield* cancelOrphans();
       const previous = yield* replay(owner, key, request);
@@ -475,9 +524,11 @@ export const makePlaybookStore = Effect.gen(function* () {
             status: "active",
             createdAt: timestamp,
             updatedAt: timestamp,
+            ...(crewInstanceId === null ? {} : { crewInstanceId }),
           };
-          yield* sql`INSERT INTO j5_playbook_run (run_id, owner_thread_id, definition_path, current_step_id, status, created_at, updated_at)
-          VALUES (${run.runId}, ${owner}, ${definitionPath}, ${run.currentStepId}, ${run.status}, ${timestamp}, ${timestamp})`;
+          yield* sql`INSERT INTO j5_playbook_run (run_id, owner_thread_id, definition_path, current_step_id, status, created_at, updated_at, crew_instance_id)
+          VALUES (${run.runId}, ${owner}, ${definitionPath}, ${run.currentStepId}, ${run.status}, ${timestamp}, ${timestamp}, ${crewInstanceId})`;
+          if (crewInstanceId !== null) yield* land(run.runId, key, run.currentStepId, timestamp);
           yield* remember(owner, key, request, run.runId);
           return { run, replayed: false };
         }),
@@ -552,6 +603,12 @@ export const makePlaybookStore = Effect.gen(function* () {
           const updatedAt = yield* now;
           yield* sql`UPDATE j5_playbook_run SET current_step_id = ${currentStepId}, status = ${status}, updated_at = ${updatedAt}
           WHERE run_id = ${run.runId} AND owner_thread_id = ${owner}`;
+          if (run.crewInstanceId !== undefined && run.crewInstanceId !== null) {
+            // Every landing is handed to its owner exactly once; a finished run hands off nothing.
+            if (status === "active")
+              yield* land(run.runId, input.client_request_id, currentStepId, updatedAt);
+            else yield* skipPending(run.runId, updatedAt);
+          }
           yield* remember(owner, input.client_request_id, request, run.runId);
           return { run: { ...run, currentStepId, status, updatedAt }, replayed: false };
         }),
@@ -612,6 +669,106 @@ export const makePlaybookStore = Effect.gen(function* () {
     const runs = yield* progressRows(rows);
     return { runs, total: counts[0]?.total ?? 0 };
   }, Effect.mapError(storageError));
+  /** A run by id, without the owner check the agent tools apply; null when none. */
+  const runById = Effect.fn("PlaybookStore.runById")(function* (runId: string) {
+    const rows = yield* sql<RunRow>`SELECT * FROM j5_playbook_run WHERE run_id = ${runId}`;
+    return rows[0] ? fromRow(rows[0]) : null;
+  }, Effect.mapError(storageError));
+  /** The live step a landing hands off, with its playbook; fails when the YAML can't be read. */
+  const liveStep = Effect.fn("PlaybookStore.liveStep")(function* (
+    run: PlaybookRun,
+    stepId: string,
+  ) {
+    const definition = yield* readDefinition(run.definitionPath);
+    const index = definition.steps.findIndex((step) => step.id === stepId);
+    return {
+      name: path.basename(run.definitionPath, ".yaml"),
+      title: definition.title,
+      step: definition.steps[index] ?? null,
+      position: index + 1,
+      total: definition.steps.length,
+    };
+  }, Effect.mapError(storageError));
+  const landing = Effect.fn("PlaybookStore.landing")(function* (runId: string, requestId: string) {
+    const rows = yield* sql<LandingRow>`SELECT * FROM j5_playbook_step_delivery
+      WHERE run_id = ${runId} AND request_id = ${requestId}`;
+    return rows[0] ? landingFromRow(rows[0]) : null;
+  }, Effect.mapError(storageError));
+  /** The newest landing of a run, optionally only those on one step. */
+  const latestLanding = Effect.fn("PlaybookStore.latestLanding")(function* (
+    runId: string,
+    stepId?: string,
+  ) {
+    const rows = yield* sql<LandingRow>`SELECT * FROM j5_playbook_step_delivery
+      WHERE run_id = ${runId} AND ${stepId === undefined ? sql`1 = 1` : sql`step_id = ${stepId}`}
+      ORDER BY landed_at DESC, rowid DESC LIMIT 1`;
+    return rows[0] ? landingFromRow(rows[0]) : null;
+  }, Effect.mapError(storageError));
+  /** Unresolved landings, oldest first; every run's when no run is named. */
+  const pendingLandings = Effect.fn("PlaybookStore.pendingLandings")(function* (
+    runId: string | null,
+  ) {
+    const rows = yield* sql<LandingRow>`SELECT * FROM j5_playbook_step_delivery
+      WHERE resolved_at IS NULL AND ${runId === null ? sql`1 = 1` : sql`run_id = ${runId}`}
+      ORDER BY landed_at, rowid`;
+    return rows.map(landingFromRow);
+  }, Effect.mapError(storageError));
+  /** Persists a landing's target once; a later call keeps the first target. */
+  const targetLanding = Effect.fn("PlaybookStore.targetLanding")(function* (
+    runId: string,
+    requestId: string,
+    target: { readonly seat: string | null; readonly threadId: string },
+  ) {
+    yield* sql`UPDATE j5_playbook_step_delivery
+      SET target_seat = ${target.seat}, target_thread_id = ${target.threadId}
+      WHERE run_id = ${runId} AND request_id = ${requestId} AND target_thread_id IS NULL`;
+    return (yield* landing(runId, requestId))!;
+  }, Effect.mapError(storageError));
+  const resolveLanding = Effect.fn("PlaybookStore.resolveLanding")(function* (
+    runId: string,
+    requestId: string,
+    outcome: NonNullable<PlaybookLanding["outcome"]>,
+  ) {
+    const resolvedAt = yield* now;
+    const rows = yield* sql<{ run_id: string }>`UPDATE j5_playbook_step_delivery
+      SET outcome = ${outcome}, resolved_at = ${resolvedAt}
+      WHERE run_id = ${runId} AND request_id = ${requestId} AND resolved_at IS NULL
+      RETURNING run_id`;
+    // Fleet shows who holds the step, so a resolved hand-off refreshes it.
+    if (rows.length > 0) yield* SubscriptionRef.update(revision, (value) => value + 1);
+    return (yield* landing(runId, requestId))!;
+  }, Effect.mapError(storageError));
+  /** Archiving a Crew cancels its active run; idempotent, so an archive retry repairs a crash. */
+  const cancelForCrew = Effect.fn("PlaybookStore.cancelForCrew")(function* (
+    crewInstanceId: string,
+  ) {
+    return yield* sql
+      .withTransaction(
+        Effect.gen(function* () {
+          const timestamp = yield* now;
+          const rows = yield* sql<{ run_id: string }>`UPDATE j5_playbook_run
+            SET status = 'cancelled', updated_at = ${timestamp}
+            WHERE crew_instance_id = ${crewInstanceId} AND status = 'active'
+            RETURNING run_id`;
+          for (const { run_id } of rows) yield* skipPending(run_id, timestamp);
+          return rows.map(({ run_id }) => run_id);
+        }),
+      )
+      .pipe(
+        Effect.tap((runIds) =>
+          runIds.length > 0 ? SubscriptionRef.update(revision, (value) => value + 1) : Effect.void,
+        ),
+        permit.withPermits(1),
+      );
+  }, Effect.mapError(storageError));
+  /** A Crew's active run with its live progress, or null. */
+  const activeRunForCrew = Effect.fn("PlaybookStore.activeRunForCrew")(function* (
+    crewInstanceId: string,
+  ) {
+    const rows = yield* sql<RunRow>`SELECT * FROM j5_playbook_run
+      WHERE crew_instance_id = ${crewInstanceId} AND status = 'active' LIMIT 1`;
+    return rows[0] ? yield* view(fromRow(rows[0])) : null;
+  }, Effect.mapError(storageError));
   return {
     // Include the current revision so subscribing after a mutation still refreshes the view.
     changes: SubscriptionRef.changes(revision),
@@ -627,6 +784,15 @@ export const makePlaybookStore = Effect.gen(function* () {
     mutate,
     listForThread,
     listAll,
+    runById,
+    liveStep,
+    landing,
+    latestLanding,
+    pendingLandings,
+    targetLanding,
+    resolveLanding,
+    cancelForCrew,
+    activeRunForCrew,
   };
 });
 

@@ -21,6 +21,7 @@ import {
   layer as archiveCrewLayer,
   type ArchiveCrewInput,
 } from "./ArchiveCrewService.ts";
+import { PlaybookStore } from "../playbooks/PlaybookStore.ts";
 import { ExchangeId, ParticipantId, SquadronId } from "./contracts.ts";
 
 const squadronId = SquadronId.make("squadron:j5:archive-crew");
@@ -86,6 +87,8 @@ const fixture = Effect.gen(function* () {
   const unreadableSeat = yield* Ref.make<ParticipantId | null>(null);
   const marked = yield* Ref.make<ReadonlyArray<string>>([]);
   const crewArchivedAt = yield* Ref.make<string | null>(null);
+  // The order of cancels and retired stamps, so a test can see the run ends before the stamp.
+  const lifecycle = yield* Ref.make<ReadonlyArray<string>>([]);
   const layer = archiveCrewLayer.pipe(
     Layer.provide(
       Layer.mergeAll(
@@ -130,7 +133,11 @@ const fixture = Effect.gen(function* () {
             ),
           markArchived: (id, archivedAt) =>
             Effect.all(
-              [Ref.update(marked, (items) => [...items, id]), Ref.set(crewArchivedAt, archivedAt)],
+              [
+                Ref.update(marked, (items) => [...items, id]),
+                Ref.update(lifecycle, (items) => [...items, `marked:${id}`]),
+                Ref.set(crewArchivedAt, archivedAt),
+              ],
               { discard: true },
             ),
           listForCaptain: (query) =>
@@ -139,6 +146,10 @@ const fixture = Effect.gen(function* () {
                 query.captainParticipantId === captain ? [{ ...instance, archivedAt }] : [],
               ),
             ),
+        }),
+        Layer.mock(PlaybookStore)({
+          cancelForCrew: (id) =>
+            Ref.update(lifecycle, (items) => [...items, `cancelled:${id}`]).pipe(Effect.as([])),
         }),
         Layer.mock(ServerSecretStore)({
           getOrCreateRandom: () => Effect.succeed(new Uint8Array(32).fill(7)),
@@ -159,7 +170,17 @@ const fixture = Effect.gen(function* () {
     }),
     ...overrides,
   });
-  return { layer, input, archived, failSeat, unreadableSeat, marked, facts };
+  return {
+    layer,
+    input,
+    archived,
+    failSeat,
+    unreadableSeat,
+    marked,
+    facts,
+    lifecycle,
+    crewArchivedAt,
+  };
 });
 
 it.effect("refuses until the captain confirms every member's facts, then retires the unit", () =>
@@ -224,6 +245,43 @@ it.effect("refuses until the captain confirms every member's facts, then retires
       );
       assert.equal(replay.status, "already_archived");
       assert.lengthOf(yield* Ref.get(archived), 2);
+    }).pipe(Effect.provide(layer));
+  }),
+);
+
+it.effect("cancels the Crew's playbook run before the retired stamp, and again on a retry", () =>
+  Effect.gen(function* () {
+    const { layer, input, lifecycle } = yield* fixture;
+    yield* Effect.gen(function* () {
+      const service = yield* ArchiveCrewService;
+      yield* service.archive(input({ confirmationSatisfied: true }));
+      assert.deepStrictEqual(yield* Ref.get(lifecycle), [
+        `cancelled:${instance.id}`,
+        `marked:${instance.id}`,
+      ]);
+      // A crash after the stamp but before a cancel landed is repaired by the retry.
+      const replay = yield* service.archive(input({ confirmationSatisfied: true }));
+      assert.equal(replay.status, "already_archived");
+      assert.deepStrictEqual(yield* Ref.get(lifecycle), [
+        `cancelled:${instance.id}`,
+        `marked:${instance.id}`,
+        `cancelled:${instance.id}`,
+      ]);
+    }).pipe(Effect.provide(layer));
+  }),
+);
+
+it.effect("the Captain cascade's archive cancels the Crew's playbook run too", () =>
+  Effect.gen(function* () {
+    const { layer, input, lifecycle } = yield* fixture;
+    yield* Effect.gen(function* () {
+      const service = yield* ArchiveCrewService;
+      // CrewCaptainArchiveCascade.retire archives each Crew through this door with withCaptain.
+      yield* service.archive(input({ confirmationSatisfied: true, withCaptain: true }));
+      assert.deepStrictEqual(yield* Ref.get(lifecycle), [
+        `cancelled:${instance.id}`,
+        `marked:${instance.id}`,
+      ]);
     }).pipe(Effect.provide(layer));
   }),
 );

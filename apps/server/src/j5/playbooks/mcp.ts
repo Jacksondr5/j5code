@@ -10,6 +10,7 @@ import { Tool } from "effect/unstable/ai";
 import { McpInvocationContext } from "../../mcp/McpInvocationContext.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { ProjectService } from "../../project/ProjectService.ts";
+import { PlaybookCrewRelay } from "./PlaybookCrewRelay.ts";
 import { PlaybookStore, playbookError, type PlaybookMutation } from "./PlaybookStore.ts";
 import { playbookWorkspaceRoot } from "./workspace.ts";
 
@@ -17,10 +18,14 @@ const Text = Schema.String.check(Schema.isNonEmpty());
 const Mutation = Schema.Struct({ runId: Text, client_request_id: Text });
 const Movement = Schema.Struct({ ...Mutation.fields, expectedStepId: Text });
 const Reselection = Schema.Struct({ ...Movement.fields, stepId: Text });
-const Start = Schema.Struct({ name: Text, client_request_id: Text });
+const Start = Schema.Struct({
+  name: Text,
+  client_request_id: Text,
+  crew_instance_id: Schema.optional(Text),
+});
 const Current = Schema.Struct({ runId: Schema.optional(Text) });
 const Read = Schema.Struct({ name: Text });
-const dependencies = [McpInvocationContext, PlaybookStore];
+const dependencies = [McpInvocationContext, PlaybookStore, PlaybookCrewRelay];
 const workspaceDependencies = [...dependencies, ThreadManagementService, ProjectService];
 const common = {
   success: PlaybookStepResponse,
@@ -54,7 +59,7 @@ export const playbookTools = [
     dependencies: workspaceDependencies,
     parameters: Start,
     description:
-      "Start a named playbook in your own thread and retrieve its first live prompt. Only one run may be active. You perform the work and control advancement; the playbook never spawns or stops agents." +
+      "Start a named playbook in your own thread and retrieve its first live prompt. Only one run may be active. You perform the work and control advancement; the playbook never spawns or stops agents. As a Captain, pass crew_instance_id to run the playbook your Crew follows: each step then goes to the seat that owns it, and delivery says who holds it." +
       mutationDescription,
   }),
   Tool.make("playbook_current", {
@@ -116,7 +121,7 @@ const workspace = Effect.gen(function* () {
 
 const mutate = Effect.fn("PlaybookMcp.mutate")(function* (input: PlaybookMutation) {
   const scope = yield* ownerScope;
-  return yield* (yield* PlaybookStore).mutate(scope.threadId, input);
+  return yield* (yield* PlaybookCrewRelay).mutate(scope.threadId, input);
 });
 export const playbookHandlers = {
   playbook_list: () =>
@@ -132,12 +137,25 @@ export const playbookHandlers = {
   playbook_start: (input: typeof Start.Type) =>
     Effect.gen(function* () {
       const { owner, root } = yield* workspace;
-      return yield* (yield* PlaybookStore).start(owner, root, input.name, input.client_request_id);
+      if (input.crew_instance_id === undefined)
+        return yield* (yield* PlaybookStore).start(
+          owner,
+          root,
+          input.name,
+          input.client_request_id,
+        );
+      return yield* (yield* PlaybookCrewRelay).start({
+        owner,
+        root,
+        name: input.name,
+        key: input.client_request_id,
+        crewInstanceId: input.crew_instance_id,
+      });
     }),
   playbook_current: (input: typeof Current.Type) =>
     Effect.gen(function* () {
       const scope = yield* ownerScope;
-      return yield* (yield* PlaybookStore).current(scope.threadId, input.runId);
+      return yield* (yield* PlaybookCrewRelay).current(scope.threadId, input.runId);
     }),
   playbook_next: (input: typeof Movement.Type) => mutate({ ...input, operation: "next" }),
   playbook_back: (input: typeof Movement.Type) => mutate({ ...input, operation: "back" }),

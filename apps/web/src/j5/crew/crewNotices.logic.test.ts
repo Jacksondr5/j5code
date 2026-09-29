@@ -77,6 +77,13 @@ describe("crew notices in the Captain's thread", () => {
     ).toBeNull();
   });
 
+  it("still presents a launch notice that names the playbook its Crew follows", () => {
+    const text = approvedGate.replace("roster:", "playbook: review | Review a change\nroster:");
+    expect(presentCrewNotice({ role: "user", createdBy: "system", text })).toEqual(
+      presentCrewNotice({ role: "user", createdBy: "system", text: approvedGate }),
+    );
+  });
+
   it("presents a launch report: what the person changed and how each seat's first turn went", () => {
     const report = [
       "<j5_crew_gate>",

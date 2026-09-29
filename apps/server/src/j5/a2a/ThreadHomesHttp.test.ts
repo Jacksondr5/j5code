@@ -36,6 +36,7 @@ import { SquadronProjectReferences } from "./SquadronProjectReferences.ts";
 import { THREAD_HOMES_PATH } from "./ThreadHomesHttp.ts";
 import { ThreadHomesService } from "./ThreadHomesService.ts";
 import { ParticipantId, SquadronId } from "./contracts.ts";
+import { PlaybookCrewRelay } from "../playbooks/PlaybookCrewRelay.ts";
 
 it("wires the authenticated aggregate's thread-homes path without a parallel router", async () => {
   const knownThread = ThreadId.make("thread:thread-homes-http:known");
@@ -129,6 +130,7 @@ it("wires the authenticated aggregate's thread-homes path without a parallel rou
           Layer.mock(CrewStopService)({}),
           Layer.mock(CrewRuntimeRequestService)({}),
           Layer.mock(ArchiveCrewService)({}),
+          Layer.mock(PlaybookCrewRelay)({}),
           Layer.mock(ParticipantPlacementService)({}),
         ),
       ),

@@ -42,6 +42,7 @@ import {
   type AgentCrewInstance,
 } from "./AgentCrewInstanceService.ts";
 import { ArchiveAgentService } from "./ArchiveAgentService.ts";
+import { playbookStoreLayer } from "../playbooks/PlaybookStore.ts";
 import { ArchiveCrewService, layer as archiveCrewLayer } from "./ArchiveCrewService.ts";
 import { describeCrewSeatRuntime } from "./crewRuntimePreview.ts";
 import {
@@ -1101,6 +1102,7 @@ const unitFixture = Effect.gen(function* () {
     crewLaunchLayer,
     archiveCrewLayer.pipe(
       Layer.provide(archiveAgent),
+      Layer.provide(playbookStoreLayer),
       Layer.provide(
         Layer.mock(ServerSecretStore)({
           getOrCreateRandom: () => Effect.succeed(new Uint8Array(32).fill(7)),

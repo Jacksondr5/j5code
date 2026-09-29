@@ -21,6 +21,7 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { OrchestratorV2Error } from "../../orchestration-v2/Orchestrator.ts";
 
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
+import { PlaybookStore } from "../playbooks/PlaybookStore.ts";
 import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewInstanceService.ts";
 import { AgentCrewProposalService, type CrewProposal } from "./AgentCrewProposalService.ts";
 import { crewLaunchReportText, type SeatStartVerdict } from "./crewGateNotice.ts";
@@ -172,6 +173,7 @@ const makeLayer = (daemon: boolean) =>
       const threads = yield* ThreadManagementService;
       const alertHumanOfCrewFailure = yield* makeCrewFailureAlert;
       const proposals = yield* AgentCrewProposalService;
+      const playbooks = yield* PlaybookStore;
       const crews = yield* AgentCrewInstanceService;
       const timers = yield* Scope.make("sequential");
       yield* Effect.addFinalizer(() => Scope.close(timers, Exit.void));
@@ -199,6 +201,18 @@ const makeLayer = (daemon: boolean) =>
           yield* proposals.markReported(proposal.id, DateTime.formatIso(yield* DateTime.now));
           return;
         }
+        // The playbook's title is read live; the name stands in when the file can't be read.
+        const followed = launch.instance.playbook ?? null;
+        const playbook =
+          followed === null
+            ? null
+            : {
+                name: followed.name,
+                title: yield* playbooks.readPath(followed.definitionPath).pipe(
+                  Effect.map((definition) => definition.title),
+                  Effect.orElseSucceed(() => followed.name),
+                ),
+              };
         yield* threads.dispatch({
           type: "message.dispatch",
           createdBy: "system",
@@ -213,6 +227,7 @@ const makeLayer = (daemon: boolean) =>
             instance: launch.instance,
             verdicts: launch.verdicts,
             windowMs: CREW_LAUNCH_REPORT_WINDOW_MS,
+            playbook,
           }),
           attachments: [],
           modelSelection: captain.thread.modelSelection,

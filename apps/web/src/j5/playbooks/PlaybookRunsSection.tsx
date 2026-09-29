@@ -4,7 +4,7 @@ import { presentPlaybook, sortPlaybookRuns } from "@t3tools/client-runtime/j5/pl
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 import { PLAYBOOK_RUNS_PAGE_SIZE, type PlaybookProgress } from "@t3tools/contracts/j5";
 import { Link } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { resolveThreadStatusPill } from "../../components/Sidebar.logic";
 import { Badge } from "../../components/ui/badge";
@@ -20,6 +20,16 @@ import { formatElapsedDurationLabel } from "../../timestampFormat";
 import { j5Environment } from "../state";
 import { useVisibleRefresh } from "../useVisibleRefresh";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip";
+import { fleetCrewAnchorId } from "../fleet/fleet.logic";
+
+/** The Fleet page's Crews, so a Crew-linked run can name its Crew and jump to its group. */
+interface PlaybookRunCrewLinks {
+  /** Crew names by `fleetCrewAnchorId`. */
+  readonly crewNames?: ReadonlyMap<string, string>;
+  readonly onShowCrew?: (anchorId: string) => void;
+  /** Called when an environment's playbooks change, so the Crews' step headers refresh too. */
+  readonly onPlaybookChange?: () => void;
+}
 
 function PlaybookRunCard({
   run,
@@ -28,6 +38,8 @@ function PlaybookRunCard({
   live,
   provider,
   nowMs,
+  crewNames,
+  onShowCrew,
 }: {
   run: PlaybookProgress;
   thread: EnvironmentThreadShell | undefined;
@@ -35,7 +47,11 @@ function PlaybookRunCard({
   live: boolean;
   provider: ProviderInstanceEntry | undefined;
   nowMs: number;
-}) {
+} & PlaybookRunCrewLinks) {
+  const crewAnchorId = run.crewInstanceId
+    ? fleetCrewAnchorId(environment.environmentId, run.crewInstanceId)
+    : null;
+  const crewName = crewAnchorId === null ? undefined : crewNames?.get(crewAnchorId);
   const display = presentPlaybook(run);
   const owner = thread?.deletedAt === null ? thread : undefined;
   const activity =
@@ -109,6 +125,13 @@ function PlaybookRunCard({
       <p className="mt-3 break-words text-sm">
         {owner ? owner.title : `Owner unavailable · ${run.ownerThreadId}`}
       </p>
+      {crewAnchorId !== null && crewName !== undefined && (
+        <p className="relative z-10 mt-1 text-xs">
+          <Button size="xs" variant="link" onClick={() => onShowCrew?.(crewAnchorId)}>
+            Crew · {crewName}
+          </Button>
+        </p>
+      )}
       {owner && (
         <p className="mt-1 break-words text-xs text-muted-foreground">
           {provider?.displayName ?? owner.runtime?.providerName ?? owner.modelSelection.instanceId}
@@ -133,12 +156,15 @@ function EnvironmentRuns({
   status,
   threads,
   showEnvironmentLabel,
+  crewNames,
+  onShowCrew,
+  onPlaybookChange,
 }: {
   environment: EnvironmentPresentation;
   status: "active" | "all";
   threads: ReadonlyMap<string, EnvironmentThreadShell>;
   showEnvironmentLabel: boolean;
-}) {
+} & PlaybookRunCrewLinks) {
   const [offset, setOffset] = useState(0);
   const query = useEnvironmentQuery(
     j5Environment.playbookRuns({
@@ -168,6 +194,14 @@ function EnvironmentRuns({
       ]),
     ]),
   );
+  // The first revision is the one the page loaded with; only later changes refresh Fleet.
+  const seenRevision = useRef<unknown>(undefined);
+  useEffect(() => {
+    if (changes.data === undefined || changes.data === null) return;
+    if (seenRevision.current !== undefined && seenRevision.current !== changes.data)
+      onPlaybookChange?.();
+    seenRevision.current = changes.data;
+  }, [changes.data, onPlaybookChange]);
   const runs = useMemo(() => sortPlaybookRuns(data?.runs ?? []), [data?.runs]);
   const providerEntries = useMemo(
     () =>
@@ -234,6 +268,8 @@ function EnvironmentRuns({
             live={connected && shell.data?.status === "live"}
             provider={thread ? providerEntries.get(thread.modelSelection.instanceId) : undefined}
             nowMs={nowMs}
+            {...(crewNames === undefined ? {} : { crewNames })}
+            {...(onShowCrew === undefined ? {} : { onShowCrew })}
           />
         );
       })}
@@ -273,7 +309,7 @@ function EnvironmentRuns({
   );
 }
 
-export function PlaybookRunsSection() {
+export function PlaybookRunsSection(props: PlaybookRunCrewLinks = {}) {
   const { environments, isReady } = useEnvironments();
   const threads = useThreadShells();
   const [status, setStatus] = useState<"active" | "all">("active");
@@ -319,6 +355,7 @@ export function PlaybookRunsSection() {
           status={status}
           threads={threadsByEnvironment.get(environment.environmentId) ?? new Map()}
           showEnvironmentLabel={environments.length > 1}
+          {...props}
         />
       ))}
     </section>

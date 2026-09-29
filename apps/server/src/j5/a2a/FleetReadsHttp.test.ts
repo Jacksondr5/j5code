@@ -232,3 +232,32 @@ it("carries a Crew's playbook and each seat's steps on the Fleet roster", () => 
   assert.isNull(projected.crews[1]?.playbook);
   assert.notProperty(projected.crews[1]?.roster[0], "steps");
 });
+
+it("carries each live Crew's playbook run, and null for a Crew without one", () => {
+  const playbookRun = {
+    runId: "run:1",
+    position: 2,
+    total: 3,
+    stepId: "review",
+    stepTitle: "Review",
+    state: "pending" as const,
+    seat: "builder",
+  };
+  const projected = projectFleetSquadron({
+    squadron: { id: squadronId, name: "Fleet" },
+    participants: [],
+    crews: [crew, { ...crew, id: "crew:idle" }],
+    openAsks: new Map(),
+    playbookRuns: new Map([
+      ["crew:1", playbookRun],
+      ["crew:idle", null],
+    ]),
+  });
+  assert.deepStrictEqual(
+    projected.crews.map((entry) => [entry.crewInstanceId, entry.playbookRun]),
+    [
+      ["crew:1", playbookRun],
+      ["crew:idle", null],
+    ],
+  );
+});
