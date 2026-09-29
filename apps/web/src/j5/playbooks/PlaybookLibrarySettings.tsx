@@ -91,7 +91,11 @@ export function PlaybookLibrarySettings() {
   const { squadrons, status: squadronStatus } = useSquadronDirectory();
   const authorSquadrons = workspace ? playbookAuthorSquadrons(workspace, squadrons) : [];
   const authorSquadronPlaceholder =
-    authorSquadrons.length === 0 ? "No Squadron available for this workspace" : "Choose a Squadron";
+    squadronStatus === "loading"
+      ? "Loading Squadrons…"
+      : authorSquadrons.length === 0
+        ? "No Squadron available for this workspace"
+        : "Choose a Squadron";
   const [authorScope, setAuthorScope] = useState<{
     workspaceKey: string;
     squadronId: string;
@@ -423,9 +427,8 @@ export function PlaybookLibrarySettings() {
             </Select>
           }
         />
-        {/* A sole available Squadron needs no choice; zero or a blocked one still explains why. */}
-        {squadronStatus === "loading" ||
-        (authorSquadrons.length === 1 && authorSquadron?.available) ? null : (
+        {/* A sole available Squadron needs no choice; loading, zero, or a blocked one still explains why. */}
+        {authorSquadrons.length === 1 && authorSquadron?.available ? null : (
           <SettingsRow
             title="Authoring Squadron"
             description="Where the Playbook Author chat starts."

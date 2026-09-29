@@ -628,6 +628,7 @@ export function AgentLibrarySettings() {
                             <MenuSeparator />
                             <MenuItem
                               variant="destructive"
+                              disabled={busy}
                               onClick={() => void removePersona(persona.personaId)}
                             >
                               <Trash2Icon />
@@ -732,6 +733,7 @@ export function AgentLibrarySettings() {
                           ) : null}
                           <MenuItem
                             variant="destructive"
+                            disabled={busy}
                             onClick={() =>
                               void saveFolders(
                                 (librarySources.data?.folders ?? [])
