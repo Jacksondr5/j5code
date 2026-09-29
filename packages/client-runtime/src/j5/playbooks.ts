@@ -13,6 +13,10 @@ import type {
   ServerProvider,
   ThreadId,
 } from "@t3tools/contracts";
+import {
+  PLAYBOOK_MENTION_PREFIX,
+  playbookMentionReplacement,
+} from "@t3tools/shared/j5/agentMention";
 import { defaultAgentPersonaModelRoute } from "./agentPersonas.ts";
 import type { ScopedManagedSquadron } from "./squadrons.ts";
 import type { StartThreadTurnInput } from "../operations/commands.ts";
@@ -249,7 +253,7 @@ export function expandPlaybookPrompt(text: string): string {
 
 /** `/playbook <query>` suggestions: exact name, then name prefix, then name or title substring. */
 export function matchPlaybookSuggestions(
-  playbooks: ReadonlyArray<{ name: string; title: string; issue: unknown }>,
+  playbooks: ReadonlyArray<PlaybookSuggestionInput>,
   query: string,
 ) {
   const needle = query.trim().toLowerCase();
@@ -273,6 +277,51 @@ export function matchPlaybookSuggestions(
       description: playbook.title,
     }));
 }
+
+type PlaybookSuggestionInput = { name: string; title: string; issue: { message: string } | null };
+type PlaybookTriggerRange = { rangeStart: number; rangeEnd: number };
+
+/** `@playbook:` and `/playbook` share one trigger kind; the text at `rangeStart` tells them apart. */
+export const isPlaybookMention = (text: string, trigger: PlaybookTriggerRange) =>
+  text.startsWith(PLAYBOOK_MENTION_PREFIX, trigger.rangeStart);
+
+/**
+ * Picker rows for the shared playbook trigger. `/playbook` lists only valid playbooks. The
+ * `@playbook:` form also lists invalid ones after the valid ones, with the error as description.
+ */
+export function playbookMenuItems(
+  playbooks: ReadonlyArray<PlaybookSuggestionInput>,
+  trigger: PlaybookTriggerRange & { query: string },
+  text: string,
+) {
+  if (!isPlaybookMention(text, trigger)) return matchPlaybookSuggestions(playbooks, trigger.query);
+  // Rank invalid entries the same way by matching them as if valid, then show their error.
+  const errors = new Map(
+    playbooks.flatMap(({ name, issue }) => (issue ? [[name, issue.message] as const] : [])),
+  );
+  const invalid = matchPlaybookSuggestions(
+    playbooks.flatMap((playbook) => (playbook.issue ? [{ ...playbook, issue: null }] : [])),
+    trigger.query,
+  ).map((item) => ({ ...item, description: errors.get(item.name) ?? "" }));
+  return [...matchPlaybookSuggestions(playbooks, trigger.query), ...invalid];
+}
+
+/**
+ * The text that replaces the trigger range when a playbook row is picked. A mention of a playbook
+ * whose file name isn't a valid name can't be inserted, so the typed range stays as it was.
+ */
+export function playbookSelectionText(text: string, trigger: PlaybookTriggerRange, name: string) {
+  if (!isPlaybookMention(text, trigger)) return `/playbook ${name} `;
+  return PLAYBOOK_NAME_PATTERN.test(name)
+    ? playbookMentionReplacement(name)
+    : text.slice(trigger.rangeStart, trigger.rangeEnd);
+}
+
+/** A bare `/playbook ` sends its list request on Enter; a bare `@playbook:` does not. */
+export const isBarePlaybookCommand = (
+  trigger: (PlaybookTriggerRange & { kind: string; query: string }) | null | undefined,
+  text: string,
+) => trigger?.kind === "slash-playbook" && !trigger.query && !isPlaybookMention(text, trigger);
 
 export function presentPlaybook(run: PlaybookProgress) {
   const current = run.steps.find((step) => step.id === run.currentStepId);

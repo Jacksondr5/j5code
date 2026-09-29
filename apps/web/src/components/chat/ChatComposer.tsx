@@ -56,7 +56,11 @@ import {
 } from "@t3tools/client-runtime/text-paste";
 import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
 import { j5Environment } from "../../j5/state";
-import { matchPlaybookSuggestions } from "@t3tools/client-runtime/j5/playbooks";
+import {
+  isBarePlaybookCommand,
+  playbookMenuItems,
+  playbookSelectionText,
+} from "@t3tools/client-runtime/j5/playbooks";
 import { folderDropTarget, resolveDroppedFolderPath } from "./folderDrop";
 import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
 import { USAGE_LIMITS_COMMAND } from "@t3tools/shared/usageLimits";
@@ -2581,7 +2585,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     if (!composerTrigger) return [];
     if (composerTrigger.kind === "agent") return agentPicker.items;
     if (composerTrigger.kind === "slash-playbook")
-      return matchPlaybookSuggestions(playbookQuery.data?.playbooks ?? [], composerTrigger.query);
+      return playbookMenuItems(playbookQuery.data?.playbooks ?? [], composerTrigger, prompt);
     if (composerTrigger.kind === "path") {
       // Order (J5 decision): saved agents, then threads, then files. Personas whose id or name
       // starts with the typed text lead; threads only surface for a typed query so `@` alone
@@ -2744,6 +2748,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeThreadId,
     agentPicker.items,
     playbookQuery.data,
+    prompt,
     compactSlashCommandAvailable,
     composerTrigger,
     environmentId,
@@ -2767,9 +2772,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     ? `${composerTrigger.kind}:${composerTrigger.query.trim().toLowerCase()}`
     : null;
   // A bare `/playbook ` sends the list request on Enter unless the user picks a name.
-  const composerMenuAutoHighlight = !(
-    composerTrigger?.kind === "slash-playbook" && !composerTrigger.query
-  );
+  const composerMenuAutoHighlight = !isBarePlaybookCommand(composerTrigger, prompt);
   const activeComposerMenuItem = useMemo(() => {
     const activeItemId = resolveComposerMenuActiveItemId({
       items: composerMenuItems,
@@ -3908,9 +3911,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       const { snapshot, trigger } = resolveActiveComposerTrigger();
       if (!trigger) return;
       if (item.type === "playbook") {
-        applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, `/playbook ${item.name} `, {
-          expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
-        });
+        applyPromptReplacement(
+          trigger.rangeStart,
+          trigger.rangeEnd,
+          playbookSelectionText(snapshot.value, trigger, item.name),
+          { expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd) },
+        );
         setComposerHighlightedItemId(null);
         return;
       }
@@ -4408,7 +4414,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       const currentItems = composerMenuItemsRef.current;
       const selectedItem =
         activeComposerMenuItemRef.current ??
-        (trigger?.kind === "slash-playbook" && !trigger.query ? undefined : currentItems[0]);
+        (isBarePlaybookCommand(trigger, promptRef.current) ? undefined : currentItems[0]);
       if (key === "ArrowDown" && currentItems.length > 0) {
         nudgeComposerMenuHighlight("ArrowDown");
         return true;
