@@ -19,6 +19,8 @@ import {
   playbookAuthorLaunch,
   playbookAuthorSquadrons,
   expandPlaybookPrompt,
+  formatPlaybookName,
+  readPlaybookName,
   presentPlaybook,
   sortPlaybookRuns,
   playbookWorkspaces,
@@ -344,14 +346,42 @@ describe("playbook composer expansion", () => {
   it.each([
     ["/playbook release", "Start playbook release"],
     ["  /playbook release.yaml  ", "Start playbook release.yaml"],
+    ["/playbook release.", "Start playbook release"],
     ["/playbook", "List available playbooks and help me choose one to start."],
+    ["/playbook release, then make a crew", "Start playbook release.\n\nthen make a crew"],
+    ["/playbook release\nDo something else", "Start playbook release.\n\nDo something else"],
+    ['/playbook "Release Plan"', 'Start playbook "Release Plan"'],
+    [
+      '/playbook "Release Plan" and report back',
+      'Start playbook "Release Plan".\n\nand report back',
+    ],
+    [
+      "/playbook\nWhich one fits this bug?",
+      "List available playbooks and help me choose one to start.\n\nWhich one fits this bug?",
+    ],
+    ['/playbook "Release Plan', '/playbook "Release Plan'],
     ["Explain /playbook release", "Explain /playbook release"],
-    ["/playbook release\nDo something else", "/playbook release\nDo something else"],
     ["/playbooks release", "/playbooks release"],
     ["/plan", "/plan"],
     ["", ""],
-  ])("expands only a standalone playbook request: %s", (text, expected) => {
+  ])("expands a message that starts with /playbook: %s", (text, expected) => {
     expect(expandPlaybookPrompt(text)).toBe(expected);
+  });
+
+  it.each(["release", "release.yaml", "Release Plan", 'say "hi"', "wip.", "notes (draft)"])(
+    "reads back a formatted name: %s",
+    (name) => {
+      expect(readPlaybookName(`${formatPlaybookName(name)}, then more`)).toEqual({
+        name,
+        rest: ", then more",
+      });
+    },
+  );
+
+  it("writes names bare only when they read back unchanged", () => {
+    expect(formatPlaybookName("release-review")).toBe("release-review");
+    expect(formatPlaybookName("Release Plan")).toBe('"Release Plan"');
+    expect(formatPlaybookName("wip.")).toBe('"wip."');
   });
 });
 

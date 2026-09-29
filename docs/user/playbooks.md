@@ -42,8 +42,10 @@ steps:
     prompt: Summarize confirmed findings and remaining uncertainty.
 ```
 
-Send `/playbook review` to start, or `/playbook` to ask what is available. You can
-also ask directly: “Start playbook review.” One playbook can be active per thread;
+Send `/playbook review` to start, or `/playbook` to ask what is available. Text after
+the name stays part of your message, as in `/playbook review, then summarize the risks`.
+Quote a name that contains spaces: `/playbook "Release plan"`. You can also ask
+directly: “Start playbook review.” One playbook can be active per thread;
 finishing or cancelling it leaves the agent ready for other work or another playbook.
 
 You can edit prompts and reorder steps while the run is active. The next retrieval
