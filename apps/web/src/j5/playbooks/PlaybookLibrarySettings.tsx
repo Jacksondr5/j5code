@@ -249,7 +249,7 @@ export function PlaybookLibrarySettings() {
     }
   }
   async function removePlaybook(name: string) {
-    if (!workspace || !query.data || busy) return;
+    if (!workspace || !query.data || query.error || busy) return;
     if (!window.confirm(`Delete ${name}.yaml from ${workspace.title}?`)) return;
     setBusy(true);
     setError(null);
@@ -536,7 +536,7 @@ export function PlaybookLibrarySettings() {
                   </MenuTrigger>
                   <MenuPopup align="end">
                     <MenuItem
-                      disabled={!!playbook.issue}
+                      disabled={busy || !!query.error || !!playbook.issue}
                       onClick={() => {
                         setError(null);
                         setRenameTarget({ name: playbook.name, title: playbook.title });
@@ -548,6 +548,7 @@ export function PlaybookLibrarySettings() {
                     <MenuSeparator />
                     <MenuItem
                       variant="destructive"
+                      disabled={busy || !!query.error}
                       onClick={() => void removePlaybook(playbook.name)}
                     >
                       <Trash2Icon />

@@ -583,7 +583,7 @@ export function AgentLibrarySettings() {
                       <MenuPopup align="end">
                         {persona.removed ? null : (
                           <MenuItem
-                            disabled={persona.edit === null}
+                            disabled={busy || persona.edit === null}
                             onClick={() => {
                               if (persona.edit && effectiveEnvironmentId)
                                 setEditing({
@@ -721,7 +721,10 @@ export function AgentLibrarySettings() {
                         <MenuPopup align="end">
                           {canOpen ? (
                             <>
-                              <MenuItem onClick={() => void openFolder(folder.path)}>
+                              <MenuItem
+                                disabled={busy}
+                                onClick={() => void openFolder(folder.path)}
+                              >
                                 <ExternalLinkIcon />
                                 Open in editor
                               </MenuItem>
