@@ -35,16 +35,22 @@ if [[ -z "$pairing_url" ]]; then
   exit 1
 fi
 
-deep_link="$(PAIRING_URL="$pairing_url" node - <<'NODE'
+# The app id and link scheme come from J5's branding module, so the helper
+# always opens the development client this checkout builds.
+launch="$(PAIRING_URL="$pairing_url" node --input-type=module - <<'NODE'
+import { J5_BRANDING } from "./scripts/lib/j5-branding.ts";
+const { appId, scheme } = J5_BRANDING.mobile.development;
 const query = new URLSearchParams({
   pairingUrl: process.env.PAIRING_URL,
   autoConnect: "1",
 });
-process.stdout.write(`t3code-dev://connections/new?${query}`);
+process.stdout.write(`${appId}\t${scheme}://connections/new?${query}`);
 NODE
 )"
+app_id="${launch%%$'\t'*}"
+deep_link="${launch#*$'\t'}"
 
-if ! "$agent_device_command" open com.t3tools.t3code.dev "$deep_link" "$@" \
+if ! "$agent_device_command" open "$app_id" "$deep_link" "$@" \
   >/dev/null 2>&1; then
   echo "AgentDevice could not open the pairing route. Check the Device panel and retry with a fresh credential." >&2
   exit 1
