@@ -48,6 +48,7 @@ import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useEnvironmentQuery } from "../../state/query";
 import { j5Environment } from "../../j5/state";
+import { matchPlaybookSuggestions } from "@t3tools/client-runtime/j5/playbooks";
 import { useComposerPathSearch, useComposerPullRequestSearch } from "../../state/queries";
 import type { ComposerCommandItem } from "./ComposerCommandPopover";
 import { matchesSlashSkillQuery } from "./composerSlashSkillSearch";
@@ -352,23 +353,8 @@ export function useComposerCommandMenu({
   const items = useMemo<ComposerCommandItem[]>(() => {
     if (!trigger) return [];
     if (trigger.kind === "agent") return agentPicker.items;
-    if (trigger.kind === "slash-playbook") {
-      const query = trigger.query.trim().toLowerCase();
-      return (playbookQuery.data?.playbooks ?? [])
-        .filter(
-          (playbook) =>
-            !playbook.issue &&
-            (playbook.name.toLowerCase().includes(query) ||
-              playbook.title.toLowerCase().includes(query)),
-        )
-        .map((playbook) => ({
-          id: `playbook:${playbook.name}`,
-          type: "playbook" as const,
-          name: playbook.name,
-          label: playbook.name,
-          description: playbook.title,
-        }));
-    }
+    if (trigger.kind === "slash-playbook")
+      return matchPlaybookSuggestions(playbookQuery.data?.playbooks ?? [], trigger.query);
 
     if (trigger.kind === "pull-request") {
       return pullRequestSearch.entries.map((entry) => ({
@@ -680,7 +666,9 @@ export function useComposerCommandMenu({
           ? "Pull requests are unavailable for this project."
           : pullRequestSearch.error
         : trigger?.kind === "slash-playbook"
-          ? playbookQuery.error
+          ? environmentId && projectId
+            ? playbookQuery.error
+            : "Choose a project to see its playbooks."
           : null,
     onSelect,
   };

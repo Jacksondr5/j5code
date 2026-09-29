@@ -29,6 +29,8 @@ describe("agent mention syntax", () => {
       rangeStart: 0,
       rangeEnd: text.length,
     });
+    expect(detectComposerTrigger("/playbook code r", 16)).toMatchObject({ query: "code r" });
+    expect(detectComposerTrigger("/playbook ", 10)).toMatchObject({ query: "" });
     expect(detectComposerTrigger("/playbook debugging ", 20)).toBeNull();
     expect(detectComposerTrigger("Earlier text\n/playbook deb", 26)?.kind).not.toBe(
       "slash-playbook",

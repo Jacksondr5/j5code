@@ -56,6 +56,7 @@ import {
 } from "@t3tools/client-runtime/text-paste";
 import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
 import { j5Environment } from "../../j5/state";
+import { matchPlaybookSuggestions } from "@t3tools/client-runtime/j5/playbooks";
 import { folderDropTarget, resolveDroppedFolderPath } from "./folderDrop";
 import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
 import { USAGE_LIMITS_COMMAND } from "@t3tools/shared/usageLimits";
@@ -2578,23 +2579,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const composerMenuItems = useMemo<ComposerCommandItem[]>(() => {
     if (!composerTrigger) return [];
     if (composerTrigger.kind === "agent") return agentPicker.items;
-    if (composerTrigger.kind === "slash-playbook") {
-      const query = composerTrigger.query.trim().toLowerCase();
-      return (playbookQuery.data?.playbooks ?? [])
-        .filter(
-          (playbook) =>
-            !playbook.issue &&
-            (playbook.name.toLowerCase().includes(query) ||
-              playbook.title.toLowerCase().includes(query)),
-        )
-        .map((playbook) => ({
-          id: `playbook:${playbook.name}`,
-          type: "playbook" as const,
-          name: playbook.name,
-          label: playbook.name,
-          description: playbook.title,
-        }));
-    }
+    if (composerTrigger.kind === "slash-playbook")
+      return matchPlaybookSuggestions(playbookQuery.data?.playbooks ?? [], composerTrigger.query);
     if (composerTrigger.kind === "path") {
       // Order (J5 decision): saved agents, then threads, then files. Personas whose id or name
       // starts with the typed text lead; threads only surface for a typed query so `@` alone
@@ -2779,17 +2765,23 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const composerMenuSearchKey = composerTrigger
     ? `${composerTrigger.kind}:${composerTrigger.query.trim().toLowerCase()}`
     : null;
+  // A bare `/playbook ` sends the list request on Enter unless the user picks a name.
+  const composerMenuAutoHighlight = !(
+    composerTrigger?.kind === "slash-playbook" && !composerTrigger.query
+  );
   const activeComposerMenuItem = useMemo(() => {
     const activeItemId = resolveComposerMenuActiveItemId({
       items: composerMenuItems,
       highlightedItemId: composerHighlightedItemId,
       currentSearchKey: composerMenuSearchKey,
       highlightedSearchKey: composerHighlightedSearchKey,
+      autoHighlight: composerMenuAutoHighlight,
     });
     return composerMenuItems.find((item) => item.id === activeItemId) ?? null;
   }, [
     composerHighlightedItemId,
     composerHighlightedSearchKey,
+    composerMenuAutoHighlight,
     composerMenuItems,
     composerMenuSearchKey,
   ]);
@@ -2855,7 +2847,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         exactPullRequestLookup.isPending));
   const composerMenuEmptyState = useMemo(() => {
     if (composerTriggerKind === "slash-playbook")
-      return playbookQuery.error ?? "No matching playbooks.";
+      return projectId
+        ? (playbookQuery.error ?? "No matching playbooks.")
+        : "Choose a project to see its playbooks.";
     if (composerTriggerKind === "agent") return agentPicker.error ?? "No available personas found.";
     if (composerTriggerKind === "skill") {
       return "No skills found. Try / to browse provider commands.";
@@ -2882,6 +2876,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     composerTrigger,
     composerTriggerKind,
     playbookQuery.error,
+    projectId,
     pullRequestLookup.data?.errors,
     pullRequestLookup.error,
     pullRequestProjectId,
@@ -3405,6 +3400,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       highlightedItemId: composerHighlightedItemId,
       currentSearchKey: composerMenuSearchKey,
       highlightedSearchKey: composerHighlightedSearchKey,
+      autoHighlight: composerMenuAutoHighlight,
     });
     setComposerHighlightedItemId((existing) =>
       existing === nextActiveItemId ? existing : nextActiveItemId,
@@ -3415,6 +3411,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   }, [
     composerHighlightedItemId,
     composerHighlightedSearchKey,
+    composerMenuAutoHighlight,
     composerMenuItems,
     composerMenuOpen,
     composerMenuSearchKey,
@@ -4408,7 +4405,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }
     if (menuIsActive && (submissionIntent === null || submissionIntent === "foreground")) {
       const currentItems = composerMenuItemsRef.current;
-      const selectedItem = activeComposerMenuItemRef.current ?? currentItems[0];
+      const selectedItem =
+        activeComposerMenuItemRef.current ??
+        (trigger?.kind === "slash-playbook" && !trigger.query ? undefined : currentItems[0]);
       if (key === "ArrowDown" && currentItems.length > 0) {
         nudgeComposerMenuHighlight("ArrowDown");
         return true;

@@ -263,7 +263,7 @@ export function detectComposerTrigger(text: string, cursorInput: number): Compos
         rangeEnd: cursor,
       };
     }
-    const playbookMatch = /^\/playbook[ \t]+([^ \t\r\n]*)$/i.exec(linePrefix);
+    const playbookMatch = /^\/playbook[ \t]+([^\r\n]*[^ \t\r\n])?$/i.exec(linePrefix);
     if (playbookMatch && !text.slice(0, lineStart).trim() && !text.slice(cursor).trim()) {
       return {
         kind: "slash-playbook",

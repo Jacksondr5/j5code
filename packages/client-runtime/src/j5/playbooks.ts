@@ -233,6 +233,33 @@ export function expandPlaybookPrompt(text: string): string {
   );
 }
 
+/** `/playbook <query>` suggestions: exact name, then name prefix, then name or title substring. */
+export function matchPlaybookSuggestions(
+  playbooks: ReadonlyArray<{ name: string; title: string; issue: unknown }>,
+  query: string,
+) {
+  const needle = query.trim().toLowerCase();
+  const rank = ({ name, title }: { name: string; title: string }) => {
+    const lower = name.toLowerCase();
+    if (lower === needle) return 0;
+    if (lower.startsWith(needle)) return 1;
+    return lower.includes(needle) || title.toLowerCase().includes(needle) ? 2 : null;
+  };
+  return playbooks
+    .flatMap((playbook) => {
+      const order = playbook.issue ? null : rank(playbook);
+      return order === null ? [] : [{ playbook, order }];
+    })
+    .sort((a, b) => a.order - b.order)
+    .map(({ playbook }) => ({
+      id: `playbook:${playbook.name}`,
+      type: "playbook" as const,
+      name: playbook.name,
+      label: playbook.name,
+      description: playbook.title,
+    }));
+}
+
 export function presentPlaybook(run: PlaybookProgress) {
   const current = run.steps.find((step) => step.id === run.currentStepId);
   return {

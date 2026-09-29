@@ -19,6 +19,7 @@ import {
   playbookAuthorLaunch,
   playbookAuthorSquadrons,
   expandPlaybookPrompt,
+  matchPlaybookSuggestions,
   presentPlaybook,
   sortPlaybookRuns,
   playbookWorkspaces,
@@ -467,4 +468,31 @@ it("prioritizes active issues, then active runs and recency, without changing th
   ]);
   expect(runs).toEqual(original);
   expect(sortPlaybookRuns([])).toEqual([]);
+});
+
+it("ranks playbook suggestions by exact name, then prefix, then name or title match", () => {
+  const issue = new PlaybookError({
+    code: "step_missing",
+    message: "Broken",
+    availableStepIds: [],
+  });
+  const playbooks = [
+    { name: "code-review", title: "Code review", issue: null },
+    { name: "triage", title: "Review inbox", issue: null },
+    { name: "review-plan", title: "Plan", issue: null },
+    { name: "review", title: "Review", issue: null },
+    { name: "review-broken", title: "Broken", issue },
+  ];
+  expect(matchPlaybookSuggestions(playbooks, " Review ").map(({ name }) => name)).toEqual([
+    "review",
+    "review-plan",
+    "code-review",
+    "triage",
+  ]);
+  expect(matchPlaybookSuggestions(playbooks, "").map(({ name }) => name)).toEqual([
+    "code-review",
+    "triage",
+    "review-plan",
+    "review",
+  ]);
 });
