@@ -37,10 +37,28 @@ mkdir -p "$out_dir"
 out_dir="$(cd "$out_dir" && pwd)"
 
 device() { "$agent_device" "$@" "${target_args[@]}"; }
+scheme="$(node --input-type=module -e 'import { J5_BRANDING } from "./scripts/lib/j5-branding.ts"; process.stdout.write(J5_BRANDING.mobile.development.scheme)')"
+app_id="$(node --input-type=module -e 'import { J5_BRANDING } from "./scripts/lib/j5-branding.ts"; process.stdout.write(J5_BRANDING.mobile.development.appId)')"
 
 base_dir="$(mktemp -d "${TMPDIR:-/tmp}/j5-mobile-scenes-XXXXXX")"
 server_pid=""
+port=""
+paired=0
+# Best effort: remove this run's connection so dead scene environments do not
+# pile up in the app. Each step taps the control the snapshot names.
+remove_connection() {
+  local ref step
+  device open "$app_id" "$scheme://connections" >/dev/null || return 0
+  sleep 3
+  for step in ":$port/" '"trash"' '[button] "Remove"'; do
+    ref="$(device snapshot -i 2>/dev/null | grep -F "$step" | grep -o '^@e[0-9]*' | head -n 1)" || true
+    [[ -n "$ref" ]] || { echo "Remove the scene connection on port $port by hand." >&2; return 0; }
+    device click "$ref" >/dev/null || return 0
+    sleep 1
+  done
+}
 cleanup() {
+  [[ "$paired" -eq 1 ]] && remove_connection
   if [[ -n "$server_pid" ]] && kill -0 "$server_pid" 2>/dev/null; then
     kill "$server_pid" 2>/dev/null || true
     wait "$server_pid" 2>/dev/null || true
@@ -66,6 +84,7 @@ environment_id="$(cat "$base_dir/userdata/environment-id")"
 
 .agents/skills/test-t3-mobile/scripts/pair-client.sh \
   "$port" "$base_dir" "http://127.0.0.1:$port" "$agent_device" "${target_args[@]}"
+paired=1
 sleep 5
 
 # Hide the Expo dev-client floating button so it does not cover the header.
@@ -83,9 +102,6 @@ hide_dev_button() {
   device open "$app_id" --relaunch >/dev/null
   sleep 8
 }
-
-scheme="$(node --input-type=module -e 'import { J5_BRANDING } from "./scripts/lib/j5-branding.ts"; process.stdout.write(J5_BRANDING.mobile.development.scheme)')"
-app_id="$(node --input-type=module -e 'import { J5_BRANDING } from "./scripts/lib/j5-branding.ts"; process.stdout.write(J5_BRANDING.mobile.development.appId)')"
 
 hide_dev_button
 
