@@ -11,12 +11,17 @@ import {
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
+import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { ServerConfig } from "../../config.ts";
+import { EventSinkStreamError, EventSinkV2 } from "../../orchestration-v2/EventSink.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import { agentHandoffArtifactPath } from "../agents/agentPersonaArtifacts.ts";
@@ -32,6 +37,7 @@ import {
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import {
   CrewSeatFinishNotifier,
+  layer as daemonNotifierLayer,
   manualLayer as notifierLayer,
   seatNoticeSections,
   seatFinishedNoticeText,
@@ -270,6 +276,7 @@ it.effect("tells the Captain how each finished seat ended, and settles nothing",
         }),
       ),
       Layer.provideMerge(Layer.mock(CrewCaptainArchiveCascade)({})),
+      Layer.provideMerge(Layer.mock(EventSinkV2)({})),
       Layer.provideMerge(artifactWorkspaceLayer),
       Layer.provideMerge(Layer.succeedContext(context)),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-finish-" })),
@@ -490,6 +497,7 @@ it.effect(
           }),
         ),
         Layer.provideMerge(Layer.mock(CrewCaptainArchiveCascade)({})),
+        Layer.provideMerge(Layer.mock(EventSinkV2)({})),
         Layer.provideMerge(artifactWorkspaceLayer),
         Layer.provideMerge(Layer.succeedContext(context)),
         Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-fold-" })),
@@ -625,6 +633,7 @@ it.effect(
           }),
         ),
         Layer.provideMerge(Layer.mock(CrewCaptainArchiveCascade)({})),
+        Layer.provideMerge(Layer.mock(EventSinkV2)({})),
         Layer.provideMerge(artifactWorkspaceLayer),
         Layer.provideMerge(Layer.succeedContext(context)),
         Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-retry-" })),
@@ -739,6 +748,7 @@ it.effect(
           }),
         ),
         Layer.provideMerge(Layer.mock(CrewCaptainArchiveCascade)({})),
+        Layer.provideMerge(Layer.mock(EventSinkV2)({})),
         Layer.provideMerge(flakyWorkspace),
         Layer.provideMerge(Layer.succeedContext(context)),
         Layer.provideMerge(
@@ -885,6 +895,7 @@ it.effect("the boot sweep tells the Captain about a finished seat nothing report
         }),
       ),
       Layer.provideMerge(Layer.mock(CrewCaptainArchiveCascade)({})),
+      Layer.provideMerge(Layer.mock(EventSinkV2)({})),
       Layer.provideMerge(artifactWorkspaceLayer),
       Layer.provideMerge(Layer.succeedContext(context)),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-sweep-" })),
@@ -978,6 +989,7 @@ it.effect(
           }),
         ),
         Layer.provideMerge(Layer.mock(CrewCaptainArchiveCascade)({})),
+        Layer.provideMerge(Layer.mock(EventSinkV2)({})),
         Layer.provideMerge(workspace),
         Layer.provideMerge(Layer.succeedContext(context)),
         Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-oversized-" })),
@@ -1023,4 +1035,89 @@ it.effect(
         assert.lengthOf(yield* Ref.get(dispatched), 3);
       }).pipe(Effect.provide(layer));
     }).pipe(Effect.scoped),
+);
+
+/**
+ * The notifier's daemon over an empty Crew store: `started` resolves with the sequence its
+ * stored-event stream was opened after.
+ */
+const daemonHarness = (latestSequence: EventSinkV2["Service"]["latestSequence"]) =>
+  Effect.gen(function* () {
+    const database = NodeSqliteClient.layer({ filename: ":memory:" });
+    const storage = Layer.mergeAll(ledgerLayer, crewInstanceLayer).pipe(
+      Layer.provideMerge(database),
+    );
+    const context = yield* Layer.build(storage);
+    yield* runJ5A2AMigrations().pipe(Effect.provide(context));
+    const started = yield* Deferred.make<number>();
+    let streamCalls = 0;
+    const layer = daemonNotifierLayer.pipe(
+      Layer.provideMerge(
+        Layer.mock(CrewLaunchReporter)({
+          reconcile: Effect.succeed([]),
+        }),
+      ),
+      Layer.provideMerge(
+        Layer.mock(ThreadManagementService)({
+          streamStoredEventsFrom: (input) => {
+            streamCalls += 1;
+            return Stream.fromEffect(Deferred.succeed(started, input?.afterSequence ?? 0)).pipe(
+              Stream.drain,
+              Stream.concat(Stream.never),
+            );
+          },
+        }),
+      ),
+      Layer.provideMerge(
+        Layer.mock(CrewCaptainArchiveCascade)({
+          reconcile: Effect.succeed([]),
+        }),
+      ),
+      Layer.provideMerge(Layer.mock(EventSinkV2)({ latestSequence })),
+      Layer.provideMerge(artifactWorkspaceLayer),
+      Layer.provideMerge(Layer.succeedContext(context)),
+      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-daemon-" })),
+      Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(Layer.mock(A2ADeliveryWorker)({ notify: Effect.void })),
+    );
+    return { layer, started, streamCalls: () => streamCalls };
+  });
+
+it.effect(
+  "the daemon's stream starts after the event store's latest sequence, not from the beginning",
+  () =>
+    Effect.gen(function* () {
+      const harness = yield* daemonHarness(() => Effect.succeed(4200));
+      yield* Effect.gen(function* () {
+        yield* CrewSeatFinishNotifier;
+        // Replaying from 0 re-fires old reactions, such as an old Captain archive retiring
+        // live Crews on every restart (#349).
+        assert.equal(yield* Deferred.await(harness.started), 4200);
+      }).pipe(Effect.provide(harness.layer));
+    }).pipe(Effect.scoped),
+);
+
+it.effect("a failed high-water read retries instead of streaming from the beginning", () =>
+  Effect.gen(function* () {
+    const firstReadFailed = yield* Deferred.make<void>();
+    let reads = 0;
+    const harness = yield* daemonHarness(() =>
+      Effect.suspend(() => {
+        reads += 1;
+        return reads === 1
+          ? Deferred.succeed(firstReadFailed, undefined).pipe(
+              Effect.andThen(Effect.fail(new EventSinkStreamError({}))),
+            )
+          : Effect.succeed(4200);
+      }),
+    );
+    yield* Effect.gen(function* () {
+      yield* CrewSeatFinishNotifier;
+      yield* Deferred.await(firstReadFailed);
+      assert.equal(harness.streamCalls(), 0);
+      yield* TestClock.adjust(Duration.millis(250));
+      assert.equal(yield* Deferred.await(harness.started), 4200);
+      assert.equal(reads, 2);
+    }).pipe(Effect.provide(harness.layer));
+  }).pipe(Effect.scoped),
 );

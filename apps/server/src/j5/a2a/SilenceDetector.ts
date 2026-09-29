@@ -14,6 +14,7 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
+import { EventSinkV2 } from "../../orchestration-v2/EventSink.ts";
 import * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
 import { AgentCrewInstanceService } from "./AgentCrewInstanceService.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
@@ -214,6 +215,7 @@ const makeLayer = (daemon: boolean) =>
       const ledger = yield* A2ALedger;
       const deliveryWorker = yield* A2ADeliveryWorker;
       const threads = yield* ThreadManagement.ThreadManagementService;
+      const events = yield* EventSinkV2;
       const crews = yield* AgentCrewInstanceService;
       const sql = yield* SqlClient.SqlClient;
 
@@ -630,11 +632,9 @@ const makeLayer = (daemon: boolean) =>
       const initializeCursor = Effect.fn("j5.a2a.silence.initializeCursor")(function* () {
         const existing = yield* readCursor();
         if (existing !== null) return existing;
-        const highWaterRows = yield* sql<{ readonly sequence: number }>`
-          SELECT COALESCE(MAX(sequence), 0) AS sequence
-          FROM orchestration_v2_events
-        `;
-        const highWater = highWaterRows[0]?.sequence ?? 0;
+        // A failed read fails the init, which the lifecycle daemon retries with backoff; the
+        // cursor is never seeded at 0, which would replay the whole event history (#349).
+        const highWater = yield* events.latestSequence();
         yield* reconcileOpenExchangesRaw();
         yield* writeCursor(highWater);
         return highWater;
