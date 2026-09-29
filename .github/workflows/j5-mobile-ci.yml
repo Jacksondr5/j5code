@@ -1,0 +1,164 @@
+name: J5 Mobile CI
+
+# Native mobile checks upstream's ci.yml runs only in pingdotgg/t3code. Both
+# jobs are advisory: they are not part of the required "Format, lint,
+# typecheck, and unit tests" check, and each runs only when its inputs change.
+
+on:
+  push:
+    branches:
+      - "j5/**"
+  pull_request:
+    branches:
+      - "j5/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: j5-mobile-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: Mobile native changes
+    if: github.repository == 'Jacksondr5/j5code'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      lint: ${{ steps.detect.outputs.lint }}
+      build: ${{ steps.detect.outputs.build }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Detect native inputs
+        id: detect
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -uo pipefail
+          # An unknown base (new branch, force push) runs both jobs rather than
+          # silently skipping them.
+          if [[ -z "$BASE_SHA" || "$BASE_SHA" =~ ^0+$ ]] || ! paths=$(git diff --name-only "$BASE_SHA"...HEAD); then
+            echo "Could not resolve the changed files; running every mobile native check."
+            echo "lint=true" >> "$GITHUB_OUTPUT"
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          report() {
+            if grep -qE "$2" <<< "$paths"; then
+              echo "$1 inputs changed:"
+              grep -E "$2" <<< "$paths"
+              echo "$1=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "$1=false" >> "$GITHUB_OUTPUT"
+            fi
+          }
+
+          # Sources and configuration scripts/mobile-native-static-check.ts lints.
+          report lint '^apps/mobile/.*\.(swift|kt|kts)$|^apps/mobile/(\.swiftlint\.yml|detekt\.yml|\.editorconfig|Brewfile)$|^scripts/mobile-native-static-check\.ts$|^\.github/workflows/j5-mobile-ci\.yml$'
+          # Inputs to the native iOS project. A Debug simulator build does not
+          # bundle JavaScript, so screen and state changes cannot break it.
+          report build '^apps/mobile/(app\.config\.ts|eas\.json|package\.json|plugins/|modules/|assets/)|^pnpm-lock\.yaml$|^scripts/lib/(j5-branding|brand-assets|public-config)\.ts$|^\.github/workflows/j5-mobile-ci\.yml$'
+
+  native_lint:
+    name: Mobile native static analysis
+    needs: changes
+    # Skip only on an explicit "no"; a failed detection job still runs the check.
+    if: ${{ !cancelled() && needs.changes.outputs.lint != 'false' }}
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.10.0
+          run_install: false
+
+      - name: Install Node from .nvmrc
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install native lint tools
+        run: brew bundle install --file apps/mobile/Brewfile
+
+      - name: Lint mobile native sources
+        run: pnpm exec vp run lint:mobile
+
+  ios_build:
+    name: iOS simulator build
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.build != 'false' }}
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      APP_VARIANT: development
+      EXPO_NO_GIT_STATUS: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.10.0
+          run_install: false
+
+      - name: Install Node from .nvmrc
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate the iOS project
+        working-directory: apps/mobile
+        run: pnpm exec expo prebuild --clean --platform ios
+
+      # Build what prebuild generated, so a rename (like T3CodeDev → J5CodeDev)
+      # is exercised rather than assumed.
+      - name: Build for the iOS simulator
+        working-directory: apps/mobile/ios
+        run: |
+          set -euo pipefail
+          workspace=$(find . -maxdepth 1 -name '*.xcworkspace' ! -name 'Pods.xcworkspace' | head -n 1)
+          scheme=$(basename "$workspace" .xcworkspace)
+          echo "Building $scheme"
+          xcodebuild \
+            -workspace "$workspace" \
+            -scheme "$scheme" \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/derived-data" \
+            -quiet \
+            CODE_SIGNING_ALLOWED=NO \
+            build
