@@ -68,6 +68,10 @@ import { A2AHumanInbox, layer as humanInboxLayer } from "../HumanInboxService.ts
 import { ensureLocalOperatorHumanPerson } from "../HumanPersonRegistry.ts";
 import { A2ALedger, layer as ledgerLayer } from "../LedgerService.ts";
 import { A2ASendService, layer as sendServiceLayer } from "../SendService.ts";
+import {
+  MachineParticipantService,
+  layer as machineParticipantLayer,
+} from "../MachineParticipantService.ts";
 import { layer as agentCrewInstanceLayer } from "../AgentCrewInstanceService.ts";
 import { A2ASilenceDetector, manualLayer as silenceDetectorLayer } from "../SilenceDetector.ts";
 import {
@@ -121,6 +125,12 @@ export interface DevDeliverySeedReceipt {
       readonly sourceDeliveryMessageId: MessageId;
       readonly noticeLedgerMessageId: LedgerMessageId;
       readonly noticeDeliveryMessageId: MessageId;
+      readonly targetThreadId: ThreadId;
+    };
+    readonly machineMessage: {
+      readonly senderParticipantId: ParticipantId;
+      readonly ledgerMessageId: LedgerMessageId;
+      readonly deliveryMessageId: MessageId;
       readonly targetThreadId: ThreadId;
     };
     readonly rawFutureEnvelope: {
@@ -339,6 +349,7 @@ const makeRuntimeLayer = (databasePath: string, baseDir: string) => {
     deliveryWorker,
     silenceDetector,
     humanInboxLayer,
+    machineParticipantLayer,
   ).pipe(Layer.provideMerge(ledgerLayer), Layer.provide(orchestration));
   // Reuse the same outbox layer reference as the V2 event sink so the receipt
   // can prove each provider-start effect is cancelled before this process exits.
@@ -504,6 +515,7 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
       const deliveries = yield* A2ADeliveryWorker;
       const silence = yield* A2ASilenceDetector;
       const inbox = yield* A2AHumanInbox;
+      const machines = yield* MachineParticipantService;
       const outbox = yield* EffectOutboxV2;
 
       yield* assertTargetServerStopped({
@@ -716,6 +728,37 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
         }),
       );
 
+      const machineMessage = yield* atomicScenario(
+        "machine-message",
+        Effect.gen(function* () {
+          const { participant } = yield* machines.register({
+            commandId: CommCommandId.make(seededId(runId, "machine:register")),
+            squadronId,
+            name: "seed-watchdog",
+            acceptedAt: now,
+          });
+          const result = yield* sender.sendAsMachine({
+            commandId: CommCommandId.make(seededId(runId, "machine:send")),
+            senderParticipantId: participant.participantId,
+            to: receiverId,
+            message: "Machine delivery seed: the nightly check passed. No reply is possible.",
+            acceptedAt: now,
+          });
+          yield* deliveries.drain;
+          yield* interruptActiveSeedRun({
+            projectId,
+            threadId: receiverThreadId,
+            commandId: CommandId.make(seededId(runId, "machine:cancel-provider-start")),
+          });
+          return {
+            senderParticipantId: participant.participantId,
+            ledgerMessageId: result.messageId,
+            deliveryMessageId: deliveryMessageId(result.messageId),
+            targetThreadId: receiverThreadId,
+          };
+        }),
+      );
+
       const rawFutureEnvelope = yield* atomicScenario(
         "raw-future-envelope",
         Effect.gen(function* () {
@@ -800,6 +843,7 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
         deliveryCommandId(ta2.replyLedgerMessageId),
         deliveryCommandId(ta3.sourceLedgerMessageId),
         deliveryCommandId(ta3.noticeLedgerMessageId),
+        deliveryCommandId(machineMessage.ledgerMessageId),
         deliveryCommandId(rawFutureEnvelope.ledgerMessageId),
         CommandId.make(seededId(runId, "normal:mcp-send")),
       ];
@@ -833,6 +877,7 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
           ta1PeerExchange: ta1,
           ta2HumanAnswer: ta2,
           ta3Silence: ta3,
+          machineMessage,
           rawFutureEnvelope,
           normalNonA2AContrast,
         },
