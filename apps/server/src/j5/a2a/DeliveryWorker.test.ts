@@ -1083,3 +1083,77 @@ for (const outcome of ["cancelled", "delivered"] as const) {
     }),
   );
 }
+
+it.effect(
+  "records a peer-accepted delivery as delivered even if the sender retired during the call",
+  () =>
+    Effect.gen(function* () {
+      const database = NodeSqliteClient.layerMemory();
+      const ledger = ledgerLayer.pipe(Layer.provide(database));
+      const transportLayer = Layer.succeed(
+        A2ADeliveryTransport,
+        A2ADeliveryTransport.of({
+          deliverAgent: () => Effect.die("local delivery is not under test"),
+          cancelAgent: () => Effect.succeed("cancelled" as const),
+          deliverPeer: () => Effect.void,
+          deliverHuman: () => Effect.void,
+        }),
+      );
+      // The peer has answered 2xx; before this ledger records it, the sender is archived here.
+      const hooks = Layer.effect(
+        A2ADeliveryHooks,
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          return A2ADeliveryHooks.of({
+            afterTransportSuccess: () =>
+              sql`UPDATE j5_a2a_squadron_membership SET archived_at = ${timestamp}
+                WHERE participant_id = ${sender.id}`.pipe(Effect.orDie),
+          });
+        }),
+      ).pipe(Layer.provide(database));
+      const worker = deliveryWorkerLayerWithHooks(false).pipe(
+        Layer.provide(ledger),
+        Layer.provide(database),
+        Layer.provide(transportLayer),
+        Layer.provide(hooks),
+      );
+      yield* Effect.gen(function* () {
+        yield* runJ5A2AMigrations();
+        const squadronId = SquadronId.make("squadron:delivery:peer-race");
+        yield* (yield* A2ALedger).createSquadron({
+          squadron: { id: squadronId, name: "Peer race", createdAt: timestamp },
+        });
+        yield* join(squadronId, sender, "peer-race");
+        yield* (yield* A2ALedger).append({
+          commandId: CommCommandId.make("command:delivery:peer-race:send"),
+          squadronId,
+          acceptedAt: timestamp,
+          event: {
+            kind: "message.sent",
+            sender: sender.id,
+            receiver: receiver.id,
+            exchangeId: null,
+            correlationId: CorrelationId.make("correlation:delivery:peer-race"),
+            payload: {
+              messageId: LedgerMessageId.make("message:delivery:peer-race"),
+              text: "hello over there",
+              originSquadronId: squadronId,
+              receiverSquadronId: SquadronId.make("squadron:home"),
+              receiverEnvironmentId: "environment-home",
+              exchangeRole: "none",
+              envelopeChannel: "peer",
+            },
+            createdAt: timestamp,
+          },
+        });
+        const milestone = yield* (yield* A2ADeliveryWorker).runOnce;
+        assert.equal(milestone?.state, "delivered");
+        const sql = yield* SqlClient.SqlClient;
+        const recorded = yield* sql<{ readonly kind: string }>`
+          SELECT kind FROM j5_a2a_comm_event
+          WHERE squadron_id = ${squadronId} AND kind IN ('message.delivered', 'message.cancelled')
+        `;
+        assert.deepStrictEqual(recorded, [{ kind: "message.delivered" }]);
+      }).pipe(Effect.provide(Layer.mergeAll(database, ledger, transportLayer, worker)));
+    }),
+);

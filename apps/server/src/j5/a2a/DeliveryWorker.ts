@@ -302,7 +302,10 @@ const makeLayer = (daemon: boolean) =>
         const outcome = yield* writer.withPermit(
           sql.withTransaction(
             Effect.gen(function* () {
-              if (yield* deliveryUnavailable(row)) return null;
+              // A peer that answered 2xx holds the message; a sender retired during
+              // the call cannot take it back, so only a prior cancellation counts.
+              if (yield* deliveryUnavailable(row, row.receiver_environment_id !== null))
+                return null;
 
               const deliveredAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
               return yield* writer.appendEventsInTransaction({
@@ -397,11 +400,14 @@ const makeLayer = (daemon: boolean) =>
 
       const deliveryUnavailable = Effect.fn("j5.a2a.delivery.unavailable")(function* (
         row: DeliveryRow,
+        /** The receiver's server has already accepted the message; parties no longer matter. */
+        accepted = false,
       ) {
         const state = yield* sql<{ readonly status: string }>`SELECT status FROM j5_a2a_delivery
           WHERE squadron_id = ${row.squadron_id} AND message_id = ${row.message_id}`;
         if (state[0]?.status === "cancelled") return true;
         if (state[0]?.status === "delivered") return false;
+        if (accepted) return false;
         // A participant on a peer server has no membership here; only local parties are checked.
         const ids = [
           ...(row.envelope_channel === "peer" && row.origin_environment_id == null
