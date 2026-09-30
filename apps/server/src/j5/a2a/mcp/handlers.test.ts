@@ -46,6 +46,7 @@ import {
   participantIdForThread,
 } from "../HomeRegistrar.ts";
 import { A2ALedger } from "../LedgerService.ts";
+import { PeerDirectory, noneLayer as peerDirectoryNoneLayer } from "../PeerDirectory.ts";
 import { ParticipantPlacementService, PlacementStorageError } from "../PlacementService.ts";
 import { A2AHomeMembershipStateError, A2ASendService } from "../SendService.ts";
 import { SpawnCompositionService } from "../SpawnCompositionService.ts";
@@ -125,7 +126,16 @@ const unusedLifecycleDependencies = Layer.mergeAll(
   Layer.mock(A2AHomeRegistrar)({
     getHomeForThread: (threadId) => Effect.fail(new A2AHomeNotFoundError({ threadId })),
   }),
-  Layer.mock(A2ALedger)({}),
+  Layer.mock(A2ALedger)({
+    listSquadrons: () =>
+      Effect.succeed([
+        {
+          id: SquadronId.make("squadron:j5:mcp-directory"),
+          name: "Directory Squadron",
+          createdAt: DateTime.formatIso(createdAt),
+        },
+      ]),
+  }),
   Layer.mock(SpawnCompositionService)({}),
   Layer.mock(ThreadManagementService)({}),
   Layer.mock(OrchestratorMcpService)({}),
@@ -136,7 +146,7 @@ const unusedLifecycleDependencies = Layer.mergeAll(
   Layer.mock(ArchiveCrewService)({}),
   Layer.mock(CrewStopService)({}),
   Layer.mock(CrewProposalService)({}),
-
+  peerDirectoryNoneLayer,
   Layer.mock(SquadronJoinService)({}),
   Layer.mock(SquadronProjectReferences)({}),
 );
@@ -199,6 +209,7 @@ it.effect("namespaces mutating-tool idempotency and sender identity from authent
               exchangeId: input.exchangeId,
               closureKind: "sender-cleared" as const,
               closedAt: input.acceptedAt,
+              withdrawalQueued: false,
             }),
           ),
         listParticipants: () =>
@@ -589,6 +600,7 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
     assert.deepStrictEqual(directory.participants, [
       {
         squadron_id: squadronId,
+        squadron_name: "Directory Squadron",
         participant_id: activeParticipantId,
         participant: { kind: "agent", id: activeParticipantId, thread_id: activeThreadId },
         self: false,
@@ -603,6 +615,7 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
       },
       {
         squadron_id: squadronId,
+        squadron_name: "Directory Squadron",
         participant_id: archivedParticipantId,
         participant: { kind: "agent", id: archivedParticipantId, thread_id: archivedThreadId },
         self: false,
@@ -617,6 +630,7 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
       },
       {
         squadron_id: squadronId,
+        squadron_name: "Directory Squadron",
         participant_id: missingParticipantId,
         participant: { kind: "agent", id: missingParticipantId, thread_id: missingThreadId },
         self: false,
@@ -631,6 +645,7 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
       },
       {
         squadron_id: squadronId,
+        squadron_name: "Directory Squadron",
         participant_id: humanParticipantId,
         participant: { kind: "human", id: humanParticipantId },
         self: false,
@@ -1059,6 +1074,7 @@ it.effect("refuses spawn before thread creation when the caller has no home", ()
       Layer.mock(SpawnCompositionService)({}),
       Layer.mock(ParticipantPlacementService)({}),
       Layer.mock(OrchestratorMcpService)({}),
+      peerDirectoryNoneLayer,
       Layer.mock(ThreadManagementService)({
         dispatch: () => Ref.update(dispatches, (count) => count + 1).pipe(Effect.as({} as never)),
       }),
@@ -1922,6 +1938,7 @@ it.effect("stops exactly one placed agent without consulting or touching descend
       Layer.mock(A2ALedger)({}),
       Layer.mock(SpawnCompositionService)({}),
       Layer.mock(OrchestratorMcpService)({}),
+      peerDirectoryNoneLayer,
       Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
       Layer.mock(AgentCrewInstanceService)({
         findMembership: () => Effect.succeed(null),
@@ -1989,4 +2006,139 @@ it.effect("stops exactly one placed agent without consulting or touching descend
       );
     }).pipe(Effect.provide(layer));
   }),
+);
+
+it.effect(
+  "lists agents homed on peer servers beside local ones and reports the peers it could not read",
+  () =>
+    Effect.gen(function* () {
+      const squadronId = SquadronId.make("squadron:j5:mcp-peer-list");
+      const callerParticipantId = ParticipantId.make("agent:j5:mcp-peer-caller");
+      const remoteParticipantId = ParticipantId.make("agent:j5:a2a:thread:support");
+      const archivedRemoteId = ParticipantId.make("agent:j5:a2a:thread:retired");
+      const callerRow = {
+        squadronId,
+        participantId: callerParticipantId,
+        participant: {
+          kind: "agent" as const,
+          id: callerParticipantId,
+          threadId: invocation.threadId,
+        },
+        archived: false,
+        canReceiveMessage: true,
+        canOpenExchange: true,
+        acceptsUrgency: false,
+      } satisfies ParticipantDirectoryRow;
+      const remoteAgent = {
+        environmentId: "environment-home",
+        environmentLabel: "Home",
+        squadronId: SquadronId.make("squadron:home-support"),
+        squadronName: "L2 Support Rotation",
+        participantId: remoteParticipantId,
+        threadId: ThreadId.make("thread:support"),
+        displayName: "Support triage",
+        archived: false,
+        canReceiveMessage: true,
+      };
+      const dependencies = Layer.mergeAll(
+        Layer.succeed(
+          A2ASendService,
+          A2ASendService.of({
+            send: () => Effect.die("unused"),
+            clearOwnAsk: () => Effect.die("unused"),
+            sendAsMachine: () => Effect.die("unused"),
+            listParticipants: () => Effect.succeed([callerRow]),
+          }),
+        ),
+        Layer.mock(ParticipantPlacementService)({ listParticipants: () => Effect.succeed([]) }),
+        Layer.succeed(
+          PeerDirectory,
+          PeerDirectory.of({
+            listAgents: () =>
+              Effect.succeed({
+                agents: [
+                  remoteAgent,
+                  {
+                    ...remoteAgent,
+                    participantId: archivedRemoteId,
+                    threadId: ThreadId.make("thread:retired"),
+                    displayName: "Retired",
+                    archived: true,
+                    canReceiveMessage: false,
+                  },
+                ],
+                unreadPeers: [
+                  { environmentId: "environment-mac", label: "Mac", reason: "ECONNREFUSED" },
+                ],
+              }),
+            resolveAgent: () => Effect.die("unused"),
+          }),
+        ),
+        Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
+        Layer.mock(OrchestratorV2)({
+          getShellSnapshot: () =>
+            Effect.fail(new OrchestratorProjectionError({ threadId: invocation.threadId })),
+        }),
+        Layer.mock(A2AHomeRegistrar)({}),
+        Layer.mock(A2ALedger)({ listSquadrons: () => Effect.succeed([]) }),
+        Layer.mock(SpawnCompositionService)({}),
+        Layer.mock(ThreadManagementService)({}),
+        Layer.mock(OrchestratorMcpService)({}),
+        Layer.mock(AgentCrewInstanceService)({
+          findMembership: () => Effect.succeed(null),
+          listForCaptain: () => Effect.succeed([]),
+        }),
+        Layer.mock(ArchiveCrewService)({}),
+        Layer.mock(CrewStopService)({}),
+        Layer.mock(CrewProposalService)({}),
+        Layer.mock(SquadronJoinService)({}),
+        Layer.mock(SquadronProjectReferences)({}),
+        NodeServices.layer,
+      );
+      const layer = J5ToolkitHandlersLive.pipe(Layer.provideMerge(dependencies));
+
+      yield* Effect.gen(function* () {
+        const toolkit = yield* J5Toolkit;
+        const callList = (include_archived: boolean) =>
+          toolkit.handle("list_participants", { include_archived }).pipe(
+            Stream.unwrap,
+            Stream.run(Sink.last()),
+            Effect.flatMap(Effect.fromOption),
+            Effect.provideService(McpInvocationContext, invocation),
+            Effect.flatMap((response) => decodeJ5ListParticipantsResult(response.encodedResult)),
+          );
+        const listed = yield* callList(false);
+        assert.deepStrictEqual(
+          listed.participants.map((row) => [row.participant_id, row.squadron_id]),
+          [
+            [callerParticipantId, squadronId],
+            [remoteParticipantId, "squadron:home-support"],
+          ],
+          "an archived remote agent is hidden until asked for, like a local one",
+        );
+        const remoteRow = listed.participants[1]!;
+        assert.equal(remoteRow.display_name, "Support triage");
+        assert.equal(remoteRow.squadron_name, "L2 Support Rotation");
+        assert.equal(listed.participants[0]!.squadron_name, null);
+        assert.equal(remoteRow.can_receive_message, true);
+        assert.equal(remoteRow.can_open_exchange, true);
+        assert.equal(remoteRow.self, false);
+        assert.equal(remoteRow.thread_id, "thread:support");
+        assert.deepStrictEqual(remoteRow.provenance, { kind: "unrecorded" });
+        assert.isFalse(hasKey(remoteRow, "environment_id"), "no verb reveals a server");
+        assert.equal(listed.unread_peer_count, 1, "an unread peer is counted, never named");
+        assert.isFalse(hasKey(listed, "unread_peers"));
+
+        const withArchived = yield* callList(true);
+        assert.deepStrictEqual(
+          withArchived.participants.map((row) => [row.participant_id, row.archived]),
+          [
+            [callerParticipantId, false],
+            [remoteParticipantId, false],
+            [archivedRemoteId, true],
+          ],
+        );
+        assert.equal(withArchived.participants[2]!.can_receive_message, false);
+      }).pipe(Effect.provide(layer));
+    }),
 );

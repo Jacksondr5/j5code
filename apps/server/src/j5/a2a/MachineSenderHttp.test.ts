@@ -1,4 +1,5 @@
 import {
+  AuthA2APeerScope,
   AuthA2ASendScope,
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
@@ -265,6 +266,7 @@ it("answers whoami and the roster for a machine token, and the roster for a read
   const machine = makeHandler({ subject: watchdog.participantId, scopes: [AuthA2ASendScope] });
   const reader = makeHandler({ subject: "browser", scopes: [AuthOrchestrationReadScope] });
   const stranger = makeHandler({ subject: "browser", scopes: [] });
+  const peer = makeHandler({ subject: "peer:environment-home", scopes: [AuthA2APeerScope] });
   try {
     const whoami = await machine.handler(get(J5_MACHINE_API_PATHS.whoami));
     assert.equal(whoami.status, 200);
@@ -279,8 +281,14 @@ it("answers whoami and the roster for a machine token, and the roster for a read
     assert.equal((await machine.handler(get(J5_MACHINE_API_PATHS.roster))).status, 200);
     assert.equal((await reader.handler(get(J5_MACHINE_API_PATHS.roster))).status, 200);
     assert.equal((await stranger.handler(get(J5_MACHINE_API_PATHS.roster))).status, 403);
+    assert.equal(
+      (await peer.handler(get(J5_MACHINE_API_PATHS.roster))).status,
+      403,
+      "a peer credential reads the peer roster route, never the shared roster",
+    );
     assert.equal((await reader.handler(get(J5_MACHINE_API_PATHS.whoami))).status, 403);
   } finally {
+    await peer.dispose();
     await machine.dispose();
     await reader.dispose();
     await stranger.dispose();

@@ -88,6 +88,8 @@ export const AuthRelayReadScope = "relay:read" as const;
 export const AuthRelayWriteScope = "relay:write" as const;
 /** J5: lets a registered machine participant send A2A messages; never part of a client bundle. */
 export const AuthA2ASendScope = "a2a:send" as const;
+/** J5: lets a peer server deliver A2A messages and read the address book; never part of a client bundle. */
+export const AuthA2APeerScope = "a2a:peer" as const;
 export const AuthEnvironmentScope = Schema.Literals([
   AuthOrchestrationReadScope,
   AuthOrchestrationOperateScope,
@@ -98,6 +100,7 @@ export const AuthEnvironmentScope = Schema.Literals([
   AuthRelayReadScope,
   AuthRelayWriteScope,
   AuthA2ASendScope,
+  AuthA2APeerScope,
 ]);
 export type AuthEnvironmentScope = typeof AuthEnvironmentScope.Type;
 export const AuthEnvironmentScopes = Schema.Array(AuthEnvironmentScope);

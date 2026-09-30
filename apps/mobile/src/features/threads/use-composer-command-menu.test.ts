@@ -32,6 +32,17 @@ import {
 } from "./use-composer-command-menu";
 
 describe("mobile slash commands", () => {
+  it("hides playbooks after earlier text while retaining local commands", () => {
+    const items = buildComposerSlashCommandItems({
+      query: "",
+      atMessageStart: false,
+      hasThread: true,
+      allowInteractionMode: true,
+      selectedProviderStatus: null,
+    });
+    expect(items.map((item) => item.label)).toEqual(["/model", "/plan", "/default"]);
+  });
+
   it("inserts the registered playbook name", () => {
     expect(
       resolveComposerCommandSelection({

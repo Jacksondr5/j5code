@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
+import { FetchHttpClient } from "effect/unstable/http";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
@@ -23,6 +24,8 @@ import {
 } from "./DeliveryTransport.ts";
 import { A2AHumanInbox, layer as humanInboxLayer } from "./HumanInboxService.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
+import { noneLayer as peerDirectoryNoneLayer } from "./PeerDirectory.ts";
+import { PeerRegistryService } from "./PeerRegistryService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import { A2ASendService, layer as sendLayer } from "./SendService.ts";
 import {
@@ -48,10 +51,16 @@ const makeTestLayer = (
 ) => {
   const database = NodeSqliteClient.layer({ filename: ":memory:" });
   const ledger = ledgerLayer.pipe(Layer.provide(database));
-  const send = sendLayer.pipe(Layer.provide(ledger), Layer.provide(database));
+  const send = sendLayer.pipe(
+    Layer.provide(peerDirectoryNoneLayer),
+    Layer.provide(ledger),
+    Layer.provide(database),
+  );
   const inbox = humanInboxLayer.pipe(Layer.provide(ledger), Layer.provide(database));
   const liveTransport = deliveryTransportLive.pipe(
     Layer.provide(database),
+    Layer.provide(FetchHttpClient.layer),
+    Layer.provide(Layer.mock(PeerRegistryService)({})),
     Layer.provide(Layer.mock(ThreadManagementService)({})),
     Layer.provide(Layer.mock(OrchestratorV2)({})),
     Layer.provide(Layer.mock(EffectOutboxV2)({ listByCommandId: () => Effect.succeed([]) })),
@@ -63,6 +72,7 @@ const makeTestLayer = (
       return A2ADeliveryTransport.of({
         deliverAgent: (input) => Ref.update(deliveries, (current) => [...current, input]),
         cancelAgent: production.cancelAgent,
+        deliverPeer: production.deliverPeer,
         deliverHuman: production.deliverHuman,
       });
     }),

@@ -28,7 +28,7 @@ const SEAMS: ReadonlyArray<Seam> = [
   },
   {
     file: "features/threads/use-composer-command-menu.ts",
-    record: "case 48: composer playbook picker",
+    record: "case 49: composer playbook picker",
     from: "@t3tools/client-runtime/j5/playbooks",
     reaches: [
       "playbookMenuItems(playbookQuery.data?.playbooks ?? [], trigger, draftMessage)",
