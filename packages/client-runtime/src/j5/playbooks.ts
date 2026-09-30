@@ -336,12 +336,6 @@ export function playbookSelectionText(text: string, trigger: PlaybookTriggerRang
   return isPlaybookMention(text, trigger) ? playbookMentionReplacement(name) : `/playbook ${name} `;
 }
 
-/** A bare `/playbook ` sends its list request on Enter; a bare `@playbook:` does not. */
-export const isBarePlaybookCommand = (
-  trigger: (PlaybookTriggerRange & { kind: string; query: string }) | null | undefined,
-  text: string,
-) => trigger?.kind === "slash-playbook" && !trigger.query && !isPlaybookMention(text, trigger);
-
 export function presentPlaybook(run: PlaybookProgress) {
   const current = run.steps.find((step) => step.id === run.currentStepId);
   return {

@@ -16,24 +16,6 @@ describe("resolveComposerMenuActiveItemId", () => {
     ).toBe("top");
   });
 
-  it("leaves nothing active without a highlight when auto-highlight is off", () => {
-    const input = { items, currentSearchKey: "slash-playbook:", autoHighlight: false };
-    expect(
-      resolveComposerMenuActiveItemId({
-        ...input,
-        highlightedItemId: null,
-        highlightedSearchKey: null,
-      }),
-    ).toBeNull();
-    expect(
-      resolveComposerMenuActiveItemId({
-        ...input,
-        highlightedItemId: "second",
-        highlightedSearchKey: "slash-playbook:",
-      }),
-    ).toBe("second");
-  });
-
   it("preserves the highlighted item within the same query", () => {
     expect(
       resolveComposerMenuActiveItemId({

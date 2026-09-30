@@ -19,7 +19,6 @@ import {
   playbookAuthorLaunch,
   playbookAuthorSquadrons,
   expandPlaybookPrompt,
-  isBarePlaybookCommand,
   isPlaybookSlashCommandVisible,
   matchPlaybookSuggestions,
   playbookMenuItems,
@@ -581,14 +580,13 @@ describe("playbook mention picker", () => {
     expect(playbookSelectionText(text, mention(text), "release")).toBe("@playbook:release ");
   });
 
-  it("sends a bare /playbook on Enter but not a bare @playbook:", () => {
-    expect(
-      isBarePlaybookCommand(
-        { kind: "slash-playbook", query: "", rangeStart: 0, rangeEnd: 10 },
-        "/playbook ",
-      ),
-    ).toBe(true);
-    expect(isBarePlaybookCommand(mention("@playbook:"), "@playbook:")).toBe(false);
+  it("gives a bare @playbook: rows to complete, so Enter picks one instead of sending", () => {
+    const text = "Use @playbook:";
+    const rows = playbookMenuItems(playbooks, mention(text), text);
+    expect(rows.map(({ name }) => name)).toEqual(["code-release", "release", "release-broken"]);
+    expect(playbookSelectionText(text, mention(text), rows[0]!.name)).toBe(
+      "@playbook:code-release ",
+    );
   });
 });
 

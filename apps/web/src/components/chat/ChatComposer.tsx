@@ -57,7 +57,6 @@ import {
 import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
 import { j5Environment } from "../../j5/state";
 import {
-  isBarePlaybookCommand,
   isPlaybookSlashCommandVisible,
   playbookMenuItems,
   playbookSelectionText,
@@ -2778,21 +2777,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const composerMenuSearchKey = composerTrigger
     ? `${composerTrigger.kind}:${composerTrigger.query.trim().toLowerCase()}`
     : null;
-  // A bare `/playbook ` sends the list request on Enter unless the user picks a name.
-  const composerMenuAutoHighlight = !isBarePlaybookCommand(composerTrigger, prompt);
   const activeComposerMenuItem = useMemo(() => {
     const activeItemId = resolveComposerMenuActiveItemId({
       items: composerMenuItems,
       highlightedItemId: composerHighlightedItemId,
       currentSearchKey: composerMenuSearchKey,
       highlightedSearchKey: composerHighlightedSearchKey,
-      autoHighlight: composerMenuAutoHighlight,
     });
     return composerMenuItems.find((item) => item.id === activeItemId) ?? null;
   }, [
     composerHighlightedItemId,
     composerHighlightedSearchKey,
-    composerMenuAutoHighlight,
     composerMenuItems,
     composerMenuSearchKey,
   ]);
@@ -3411,7 +3406,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       highlightedItemId: composerHighlightedItemId,
       currentSearchKey: composerMenuSearchKey,
       highlightedSearchKey: composerHighlightedSearchKey,
-      autoHighlight: composerMenuAutoHighlight,
     });
     setComposerHighlightedItemId((existing) =>
       existing === nextActiveItemId ? existing : nextActiveItemId,
@@ -3422,7 +3416,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   }, [
     composerHighlightedItemId,
     composerHighlightedSearchKey,
-    composerMenuAutoHighlight,
     composerMenuItems,
     composerMenuOpen,
     composerMenuSearchKey,
@@ -4419,11 +4412,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }
     if (menuIsActive && (submissionIntent === null || submissionIntent === "foreground")) {
       const currentItems = composerMenuItemsRef.current;
-      const selectedItem =
-        activeComposerMenuItemRef.current ??
-        (key !== "Tab" && isBarePlaybookCommand(trigger, promptRef.current)
-          ? undefined
-          : currentItems[0]);
+      const selectedItem = activeComposerMenuItemRef.current ?? currentItems[0];
       if (key === "ArrowDown" && currentItems.length > 0) {
         nudgeComposerMenuHighlight("ArrowDown");
         return true;
