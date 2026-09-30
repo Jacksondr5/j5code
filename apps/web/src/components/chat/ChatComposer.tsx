@@ -60,6 +60,7 @@ import {
   isBarePlaybookCommand,
   playbookMenuItems,
   playbookSelectionText,
+  shouldCompleteComposerMenuSelection,
 } from "@t3tools/client-runtime/j5/playbooks";
 import { folderDropTarget, resolveDroppedFolderPath } from "./folderDrop";
 import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
@@ -88,7 +89,6 @@ import {
   detectComposerTrigger,
   expandCollapsedComposerCursor,
   formatAssistantCitationForComposer,
-  shouldCompleteComposerMenuSelection,
   replaceTextRange,
 } from "../../composer-logic";
 import { DISCONNECTED_COMPOSER_PLACEHOLDER } from "../../composerPlaceholder";
@@ -4107,9 +4107,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       const nextIndex =
         (normalizedIndex + offset + composerMenuItems.length) % composerMenuItems.length;
       const nextItem = composerMenuItems[nextIndex];
-      setComposerHighlightedItemId(nextItem?.id ?? null);
+      onComposerMenuItemHighlighted(nextItem?.id ?? null);
     },
-    [composerHighlightedItemId, composerMenuItems],
+    [composerHighlightedItemId, composerMenuItems, onComposerMenuItemHighlighted],
   );
 
   const blurMobileComposerAfterSend = useCallback(() => {
@@ -4414,7 +4414,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       const currentItems = composerMenuItemsRef.current;
       const selectedItem =
         activeComposerMenuItemRef.current ??
-        (isBarePlaybookCommand(trigger, promptRef.current) ? undefined : currentItems[0]);
+        (key !== "Tab" && isBarePlaybookCommand(trigger, promptRef.current)
+          ? undefined
+          : currentItems[0]);
       if (key === "ArrowDown" && currentItems.length > 0) {
         nudgeComposerMenuHighlight("ArrowDown");
         return true;

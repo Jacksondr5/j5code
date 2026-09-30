@@ -23,6 +23,7 @@ import {
   matchPlaybookSuggestions,
   playbookMenuItems,
   playbookSelectionText,
+  shouldCompleteComposerMenuSelection,
   presentPlaybook,
   sortPlaybookRuns,
   playbookWorkspaces,
@@ -350,6 +351,7 @@ describe("playbook composer expansion", () => {
     ["  /playbook release.yaml  ", "Start playbook release"],
     ["/playbook Release-Review.", "Start playbook release-review"],
     ["/playbook", "List available playbooks and help me choose one to start."],
+    ["/playbook ", "List available playbooks and help me choose one to start."],
     ["/playbook release, then make a crew", "Start playbook release.\n\nthen make a crew"],
     ["/playbook release\nDo something else", "Start playbook release.\n\nDo something else"],
     [
@@ -577,4 +579,29 @@ describe("playbook mention picker", () => {
     ).toBe(true);
     expect(isBarePlaybookCommand(mention("@playbook:"), "@playbook:")).toBe(false);
   });
+});
+
+describe("shouldCompleteComposerMenuSelection", () => {
+  it.each([
+    ["Enter", "foreground", "review", "review", false],
+    ["Enter", "foreground", "code-review", "code-review", false],
+    ["Enter", "foreground", "rev", "review", true],
+    ["Enter", "foreground", "review", "review-all", true],
+    ["Enter", "foreground", "REVIEW", "review", false],
+    ["Enter", "foreground", "", "review", true],
+    ["Tab", "foreground", "review", "review", true],
+    ["Enter", null, "review", "review", true],
+  ] as const)(
+    "%s with %s intent and query %j selecting %j completes: %s",
+    (key, intent, query, name, expected) => {
+      expect(
+        shouldCompleteComposerMenuSelection(
+          key,
+          intent,
+          { kind: "slash-playbook", query },
+          { type: "playbook", name },
+        ),
+      ).toBe(expected);
+    },
+  );
 });

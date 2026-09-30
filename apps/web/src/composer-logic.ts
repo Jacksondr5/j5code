@@ -1,3 +1,4 @@
+import { detectPlaybookTrigger } from "@t3tools/shared/j5/playbookTrigger";
 import type { ClientSettings } from "@t3tools/contracts/settings";
 import { detectAgentMention } from "@t3tools/shared/j5/agentMention";
 import type { AssistantCitation, ResolvedKeybindingsConfig } from "@t3tools/contracts";
@@ -27,23 +28,6 @@ export interface ComposerTrigger {
   query: string;
   rangeStart: number;
   rangeEnd: number;
-}
-
-/** Let the send shortcut submit an already-complete playbook command. */
-export function shouldCompleteComposerMenuSelection(
-  key: string,
-  submissionIntent: ComposerSubmissionIntent | null,
-  trigger: ComposerTrigger | null,
-  item: { type: string; name?: string },
-) {
-  if (key === "Tab") return true;
-  if (key !== "Enter") return false;
-  return !(
-    submissionIntent &&
-    trigger?.kind === "slash-playbook" &&
-    item.type === "playbook" &&
-    trigger.query.trim().toLowerCase() === item.name
-  );
 }
 
 export function formatAssistantCitationForComposer(citation: AssistantCitation, comment = "") {
@@ -280,15 +264,12 @@ export function detectComposerTrigger(text: string, cursorInput: number): Compos
         rangeEnd: cursor,
       };
     }
-    const playbookMatch = /^\/playbook[ \t]+([a-z][a-z0-9-]*)?$/i.exec(linePrefix);
-    if (playbookMatch && !text.slice(0, lineStart).trim() && /^(?:$|\s)/.test(text.slice(cursor))) {
-      return {
-        kind: "slash-playbook",
-        query: playbookMatch[1] ?? "",
-        rangeStart: lineStart,
-        rangeEnd: cursor,
-      };
-    }
+    const playbookTrigger = detectPlaybookTrigger(
+      linePrefix,
+      text.slice(0, lineStart),
+      text.slice(cursor),
+    );
+    if (playbookTrigger) return playbookTrigger;
   }
 
   const tokenStart = tokenStartForCursor(text, cursor);
