@@ -56,7 +56,10 @@ import {
 } from "@t3tools/client-runtime/text-paste";
 import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
 import { j5Environment } from "../../j5/state";
-import { matchPlaybookSuggestions } from "@t3tools/client-runtime/j5/playbooks";
+import {
+  matchPlaybookSuggestions,
+  shouldCompleteComposerMenuSelection,
+} from "@t3tools/client-runtime/j5/playbooks";
 import { folderDropTarget, resolveDroppedFolderPath } from "./folderDrop";
 import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
 import { USAGE_LIMITS_COMMAND } from "@t3tools/shared/usageLimits";
@@ -84,7 +87,6 @@ import {
   detectComposerTrigger,
   expandCollapsedComposerCursor,
   formatAssistantCitationForComposer,
-  shouldCompleteComposerMenuSelection,
   replaceTextRange,
 } from "../../composer-logic";
 import { DISCONNECTED_COMPOSER_PLACEHOLDER } from "../../composerPlaceholder";

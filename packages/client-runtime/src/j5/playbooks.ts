@@ -247,6 +247,23 @@ export function expandPlaybookPrompt(text: string): string {
   return rest ? `${request.replace(/\.?$/, ".")}\n\n${rest}` : request;
 }
 
+/** Let the send shortcut submit an already-complete playbook command. */
+export function shouldCompleteComposerMenuSelection(
+  key: string,
+  submissionIntent: "foreground" | "background" | "alternate" | null,
+  trigger: { kind: string; query: string } | null,
+  item: { type: string; name?: string },
+) {
+  if (key === "Tab") return true;
+  if (key !== "Enter") return false;
+  return !(
+    submissionIntent &&
+    trigger?.kind === "slash-playbook" &&
+    item.type === "playbook" &&
+    trigger.query.trim().toLowerCase() === item.name
+  );
+}
+
 /** `/playbook <query>` suggestions: exact name, then name prefix, then name or title substring. */
 export function matchPlaybookSuggestions(
   playbooks: ReadonlyArray<{ name: string; title: string; issue: unknown }>,
