@@ -48,6 +48,18 @@ describe("T3 orchestration provider instructions", () => {
   });
 
   it("creates mixed crews from chat and keeps coordination independent of approvals and artifacts", () => {
+    assert.include(
+      T3_CODE_ORCHESTRATION_INSTRUCTIONS,
+      "A request to create, start, or assemble a crew must go through `propose_crew` on the `t3-code` MCP server",
+    );
+    assert.include(
+      T3_CODE_ORCHESTRATION_INSTRUCTIONS,
+      "Never substitute provider-native Subagents, `delegate_task`, or individual `spawn_agent` calls for a requested crew",
+    );
+    assert.include(
+      T3_CODE_ORCHESTRATION_INSTRUCTIONS,
+      "report that blocker instead of launching replacement agents",
+    );
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "asks for a crew in ordinary chat");
     assert.include(
       T3_CODE_ORCHESTRATION_INSTRUCTIONS,
