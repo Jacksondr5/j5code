@@ -532,7 +532,7 @@ describe("playbook mention picker", () => {
     rangeEnd: text.length,
   });
 
-  it("lists valid playbooks first, then invalid ones with their error", () => {
+  it("lists valid playbooks first, then invalid ones with their error, but no misnamed file", () => {
     const text = "Use @playbook:rel";
     expect(
       playbookMenuItems(playbooks, mention(text), text).map(({ name, description }) => ({
@@ -543,7 +543,6 @@ describe("playbook mention picker", () => {
       { name: "release", description: "Release" },
       { name: "code-release", description: "Code release" },
       { name: "release-broken", description: "Step report is missing a prompt." },
-      { name: "Release Plan", description: "Rename Release Plan.yaml to release-plan.yaml." },
     ]);
   });
 
@@ -555,14 +554,13 @@ describe("playbook mention picker", () => {
     );
   });
 
-  it("inserts the form that was typed and leaves an invalid file name as typed", () => {
+  it("inserts the form that was typed", () => {
     const command = "/playbook rel";
     expect(playbookSelectionText(command, { rangeStart: 0, rangeEnd: 13 }, "release")).toBe(
       "/playbook release ",
     );
     const text = "Use @playbook:rel";
     expect(playbookSelectionText(text, mention(text), "release")).toBe("@playbook:release ");
-    expect(playbookSelectionText(text, mention(text), "Release Plan")).toBe("@playbook:rel");
   });
 
   it("sends a bare /playbook on Enter but not a bare @playbook:", () => {

@@ -287,7 +287,8 @@ export const isPlaybookMention = (text: string, trigger: PlaybookTriggerRange) =
 
 /**
  * Picker rows for the shared playbook trigger. `/playbook` lists only valid playbooks. The
- * `@playbook:` form also lists invalid ones after the valid ones, with the error as description.
+ * `@playbook:` form also lists invalid ones after the valid ones, with the error as description,
+ * except a file whose name isn't a valid playbook name.
  */
 export function playbookMenuItems(
   playbooks: ReadonlyArray<PlaybookSuggestionInput>,
@@ -295,26 +296,22 @@ export function playbookMenuItems(
   text: string,
 ) {
   if (!isPlaybookMention(text, trigger)) return matchPlaybookSuggestions(playbooks, trigger.query);
+  // A file whose name isn't a valid playbook name can't be mentioned, so it isn't offered.
+  const mentionable = playbooks.filter(({ name }) => PLAYBOOK_NAME_PATTERN.test(name));
   // Rank invalid entries the same way by matching them as if valid, then show their error.
   const errors = new Map(
-    playbooks.flatMap(({ name, issue }) => (issue ? [[name, issue.message] as const] : [])),
+    mentionable.flatMap(({ name, issue }) => (issue ? [[name, issue.message] as const] : [])),
   );
   const invalid = matchPlaybookSuggestions(
-    playbooks.flatMap((playbook) => (playbook.issue ? [{ ...playbook, issue: null }] : [])),
+    mentionable.flatMap((playbook) => (playbook.issue ? [{ ...playbook, issue: null }] : [])),
     trigger.query,
   ).map((item) => ({ ...item, description: errors.get(item.name) ?? "" }));
-  return [...matchPlaybookSuggestions(playbooks, trigger.query), ...invalid];
+  return [...matchPlaybookSuggestions(mentionable, trigger.query), ...invalid];
 }
 
-/**
- * The text that replaces the trigger range when a playbook row is picked. A mention of a playbook
- * whose file name isn't a valid name can't be inserted, so the typed range stays as it was.
- */
+/** The text that replaces the trigger range when a playbook row is picked. */
 export function playbookSelectionText(text: string, trigger: PlaybookTriggerRange, name: string) {
-  if (!isPlaybookMention(text, trigger)) return `/playbook ${name} `;
-  return PLAYBOOK_NAME_PATTERN.test(name)
-    ? playbookMentionReplacement(name)
-    : text.slice(trigger.rangeStart, trigger.rangeEnd);
+  return isPlaybookMention(text, trigger) ? playbookMentionReplacement(name) : `/playbook ${name} `;
 }
 
 /** A bare `/playbook ` sends its list request on Enter; a bare `@playbook:` does not. */
