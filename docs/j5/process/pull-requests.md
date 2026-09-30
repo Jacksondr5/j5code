@@ -9,7 +9,7 @@ Every PR uses the [PR template](../../../.github/pull_request_template.md). This
 
 ## The checklist, explained
 
-- **One concern.** If the description needs the word "also", it's two PRs. Stacked PRs are fine when each one is a single concern and its description states the merge order. A stack is split only to make it easier to review, and it merges together, so review it as the code that lands: don't flag an issue in one PR that a later PR in the same stack fixes.
+- **One concern.** If the description needs the word "also", it's two PRs. Stacked PRs are fine when each one is a single concern and its description states the merge order. A stack is split only to make it easier to review, and it merges together, so judge its behavior as the code that lands: don't flag a behavior issue in one PR that a later PR in the same stack fixes. Requirements on each PR still apply to that PR, including recording its own upstream edits in FORK.md.
 - **Tests cover the changed behavior.** A test that only mirrors the implementation, or renders a component to static markup, isn't coverage. Say plainly what isn't tested.
 - **Screenshots for UI changes.** Before and after, for every UI change, with a short video for motion or interaction. There are no exceptions for "small" UI changes; small visual changes are the easiest to get subtly wrong.
 - **Upstream-owned files are recorded in FORK.md in the same PR.** Every edit to a file outside the J5-owned paths gets its case text and file-table row in [`FORK.md`](../../../FORK.md), in the PR that makes the edit. Review panels regularly find missing rows and stale case text; a follow-up PR to fix FORK.md is too late, because the next PR in a stack builds on the wrong record.

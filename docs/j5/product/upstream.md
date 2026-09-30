@@ -131,10 +131,10 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 - The new-thread headline reads "What should we build in ⟨Squadron⟩?", and the placeholder asks the person to choose a Squadron.
 - Sidebar cards lead with the Squadron instead of the folder, and the sidebar scopes by Squadron instead of filtering by project.
 - The clone notice's "Open project" action is gone.
-- Archiving or unarchiving another agent that has a Squadron home requires the caller to belong to that Squadron.
+- Archiving or unarchiving another agent that has a Squadron home also requires the caller to belong to that Squadron, on top of upstream's same-project rule.
 - Merge-back is refused unless both threads share a Squadron home, or both have none.
 
-**Why:** upstream's model is one folder, one project. Work isn't shaped like that: many efforts touch one repository, and one effort touches several. The Squadron is what the person chooses between. Reusing the project flow with a new name would rebuild the one-to-one shape the Squadron exists to replace. On cards, two Squadrons over one folder looked identical, and once a Squadron spans several folders a folder name stops identifying the work. Upstream scopes an agent's actions on other threads to its project; because the Squadron replaces the project, J5 scopes them to the Squadron. This doesn't limit communication: any agent can still message any other.
+**Why:** upstream's model is one folder, one project. Work isn't shaped like that: many efforts touch one repository, and one effort touches several. The Squadron is what the person chooses between. Reusing the project flow with a new name would rebuild the one-to-one shape the Squadron exists to replace. On cards, two Squadrons over one folder looked identical, and once a Squadron spans several folders a folder name stops identifying the work. Upstream scopes an agent's actions on other threads to its project; J5 keeps that and adds a Squadron check on top, so a shared Squadron never reaches across projects. This doesn't limit communication: any agent can still message any other.
 
 **Consequences:** a Squadron has one folder for now. Many small seams in upstream UI must be re-checked at every advance, and each case lists its own check. J5 replaces upstream's whole headline component; a smaller J5-owned headline at the same mount would be cheaper to carry. Merge-back hasn't been exercised live. Open gaps: the scheduling selector (#38), the legacy sidebar door (#39), and project nouns still left in some upstream copy.
 
@@ -206,7 +206,7 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Upstream:** archive, unarchive, settle and unsettle each touch one thread.
 
-**J5:** archiving or deleting a Captain retires its live Crews. Unarchiving it brings back the Crews that retired with it. Settling or unsettling it does the same to its seats, skipping any seat upstream's own auto-settle would leave alone because it's waiting on the person or still working.
+**J5:** archiving or deleting a Captain retires its live Crews. Unarchiving it brings back the Crews that retired with it. Settling it settles its seats, except those upstream's own auto-settle would leave alone because they're still working or waiting on the person. Unsettling it unsettles the seats that were settled.
 
 **Why:** a Crew without its Captain has no one to report to, and the interface would need a place to show it. Before archive cascaded, sidebar archives of Captains stranded sixteen seats. Settle keeps upstream's meaning: a finished run is not a settled seat, but a settled Captain carries its seats with it.
 
