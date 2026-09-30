@@ -1,11 +1,24 @@
-import { ThreadId } from "@t3tools/contracts";
+import {
+  EventId,
+  MessageId,
+  type OrchestrationV2StoredEvent,
+  type OrchestrationV2ThreadProjection,
+  ProviderInstanceId,
+  RunId,
+  ThreadId,
+} from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
+import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
+import { EventSinkV2 } from "../../orchestration-v2/EventSink.ts";
+import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
+import { layer as crewInstanceLayer } from "./AgentCrewInstanceService.ts";
 import {
   A2ADeliveryHooks,
   A2ADeliveryWorker,
@@ -18,6 +31,7 @@ import {
   type PeerDeliveryInput,
 } from "./DeliveryTransport.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
+import { A2ALifecycleService, manualLayer as lifecycleLayer } from "./LifecycleService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import { PeerDirectory, type RemoteAgent } from "./PeerDirectory.ts";
 import {
@@ -26,6 +40,7 @@ import {
   type PeerInboundServiceShape,
 } from "./PeerInboundService.ts";
 import { A2ASendService, layer as sendLayer } from "./SendService.ts";
+import { A2ASilenceDetector, manualLayer as silenceDetectorLayer } from "./SilenceDetector.ts";
 import {
   CommCommandId,
   ExchangeId,
@@ -126,19 +141,23 @@ const makeServer = (
             });
           }
           yield* Ref.update(crossed, (rows) => [...rows, input]);
-          const intent = input.exchangeRole === "ask" ? { intent: "incident status" } : {};
+          // The same fields the live transport puts on the wire, taken from what the worker hands it.
           yield* door
             .receive({
               messageId: input.messageId,
               senderId: input.senderId,
               receiverId: input.receiverId,
               exchangeId: input.exchangeId,
-              correlationId: `correlation:${input.messageId}`,
+              correlationId: input.correlationId,
               exchangeRole: input.exchangeRole,
               envelopeChannel: input.envelopeChannel,
               text: input.message,
               originSquadronId: input.originSquadronId,
-              ...intent,
+              ...(input.intent === undefined ? {} : { intent: input.intent }),
+              ...(input.terminal === undefined ? {} : { terminal: input.terminal }),
+              ...(input.regardingExchangeId === undefined
+                ? {}
+                : { regardingExchangeId: input.regardingExchangeId }),
               createdAt: input.createdAt,
               originEnvironmentId: self.environmentId,
             })
@@ -161,7 +180,63 @@ const makeServer = (
       ),
     ),
   );
-  return Layer.mergeAll(database, ledger, send, inbound, worker);
+  // Archiving and silence run the real lifecycle service and silence detector;
+  // the scenarios hand them thread events directly, so the stream stays empty.
+  const threads = Layer.mock(ThreadManagementService)({
+    streamStoredEventsFrom: () => Stream.never,
+    getThreadProjection: () =>
+      Effect.succeed({ runs: [], turnItems: [] } as unknown as OrchestrationV2ThreadProjection),
+  });
+  const lifecycle = lifecycleLayer.pipe(
+    Layer.provide(ledger),
+    Layer.provide(worker),
+    Layer.provide(database),
+    Layer.provide(threads),
+  );
+  const silence = silenceDetectorLayer.pipe(
+    Layer.provide(ledger),
+    Layer.provide(database),
+    Layer.provide(threads),
+    Layer.provide(Layer.mock(EventSinkV2)({})),
+    Layer.provide(crewInstanceLayer.pipe(Layer.provide(database))),
+    Layer.provide(worker),
+  );
+  return Layer.mergeAll(database, ledger, send, inbound, worker, lifecycle, silence);
+};
+
+/** The stored event for a run that ended on `thread`, as the silence detector reads it. */
+const runEnded = (thread: ThreadId, status: "completed" | "failed"): OrchestrationV2StoredEvent => {
+  const runId = RunId.make(`run:roundtrip:${thread}`);
+  const at = DateTime.makeUnsafe("2026-09-16T12:00:03.000Z");
+  return {
+    sequence: 100,
+    commandId: null,
+    event: {
+      id: EventId.make(`event:roundtrip:${thread}:${status}`),
+      type: "run.updated",
+      threadId: thread,
+      runId,
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      occurredAt: at,
+      payload: {
+        id: runId,
+        threadId: thread,
+        ordinal: 1,
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "test-model" },
+        providerThreadId: null,
+        userMessageId: MessageId.make(`message:roundtrip:${thread}`),
+        rootNodeId: null,
+        activeAttemptId: null,
+        status,
+        requestedAt: DateTime.makeUnsafe("2026-09-16T12:00:00.000Z"),
+        startedAt: DateTime.makeUnsafe("2026-09-16T12:00:01.000Z"),
+        completedAt: at,
+        checkpointId: null,
+        contextHandoffId: null,
+      },
+    },
+  } as OrchestrationV2StoredEvent;
 };
 
 const seed = Effect.fn("test.j5.a2a.peer.roundtrip.seed")(function* (self: Server, name: string) {
@@ -188,7 +263,50 @@ const seed = Effect.fn("test.j5.a2a.peer.roundtrip.seed")(function* (self: Serve
     send: yield* A2ASendService,
     inbound: yield* PeerInboundService,
     worker: yield* A2ADeliveryWorker,
+    lifecycle: yield* A2ALifecycleService,
+    silence: yield* A2ASilenceDetector,
     sql: yield* SqlClient.SqlClient,
+  };
+});
+
+/** Both servers up and introduced, with Work's agent holding an open ask to Home's agent that has crossed. */
+const pairWithOpenAsk = Effect.fn("test.j5.a2a.peer.roundtrip.pairWithOpenAsk")(function* (
+  commandId: string,
+) {
+  const workDoor = yield* Ref.make<PeerInboundServiceShape | null>(null);
+  const homeDoor = yield* Ref.make<PeerInboundServiceShape | null>(null);
+  const workDelivered = yield* Ref.make<Array<AgentDeliveryInput>>([]);
+  const homeDelivered = yield* Ref.make<Array<AgentDeliveryInput>>([]);
+  const crossed = yield* Ref.make<Array<PeerDeliveryInput>>([]);
+  const workContext = yield* Layer.build(
+    makeServer(work, home, "Home", homeDoor, workDelivered, crossed),
+  );
+  const homeContext = yield* Layer.build(
+    makeServer(home, work, "Work", workDoor, homeDelivered, crossed),
+  );
+  const workServer = yield* seed(work, "Billing Migration").pipe(Effect.provide(workContext));
+  const homeServer = yield* seed(home, "L2 Support Rotation").pipe(Effect.provide(homeContext));
+  yield* Ref.set(workDoor, workServer.inbound);
+  yield* Ref.set(homeDoor, homeServer.inbound);
+  const asked = yield* workServer.send.send({
+    commandId: CommCommandId.make(commandId),
+    senderThreadId: work.agent.threadId,
+    to: home.agent.id,
+    message: "What is the incident status?",
+    expectReply: true,
+    intent: "incident status",
+    acceptedAt: timestamp,
+  });
+  assert.equal((yield* workServer.worker.runOnce)?.state, "delivered");
+  assert.equal((yield* homeServer.worker.runOnce)?.state, "delivered");
+  assert.equal((yield* Ref.get(homeDelivered)).length, 1, "the ask reached Home's agent");
+  return {
+    workServer,
+    homeServer,
+    workDelivered,
+    homeDelivered,
+    crossed,
+    exchangeId: ExchangeId.make(asked.exchangeId!),
   };
 });
 
@@ -326,6 +444,146 @@ it.effect(
         assert.equal(state[0]?.status, "retry_scheduled");
         assert.include(state[0]?.last_error ?? "", "peer is unreachable");
         assert.deepStrictEqual(yield* Ref.get(delivered), []);
+      }),
+    ),
+);
+
+it.effect(
+  "carries a withdrawal across: the answerer's Exchange closes and its thread is never woken",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const pair = yield* pairWithOpenAsk("command:roundtrip:withdraw:ask");
+        const { workServer, homeServer, exchangeId } = pair;
+
+        const cleared = yield* workServer.send.clearOwnAsk({
+          commandId: CommCommandId.make("command:roundtrip:withdraw:clear"),
+          senderThreadId: work.agent.threadId,
+          exchangeId,
+          acceptedAt: timestamp,
+        });
+        assert.isTrue(cleared.withdrawalQueued);
+        assert.deepStrictEqual(yield* exchangeStatus(workServer.sql, exchangeId), [
+          { status: "closed", sender_id: work.agent.id },
+        ]);
+
+        // The withdrawal crosses as a platform notice carrying the fact it was written with.
+        assert.equal((yield* workServer.worker.runOnce)?.state, "delivered");
+        const notice = (yield* Ref.get(pair.crossed)).at(-1)!;
+        assert.equal(notice.exchangeRole, "terminal_notice");
+        assert.deepStrictEqual(notice.terminal, { kind: "sender-cleared" });
+
+        const closure = yield* homeServer.sql<{
+          readonly status: string;
+          readonly closure: string;
+        }>`
+          SELECT e.status, json_extract(c.payload, '$.closureKind') AS closure
+          FROM j5_a2a_exchange e
+          JOIN j5_a2a_comm_event c ON c.exchange_id = e.exchange_id AND c.kind = 'exchange.closed'
+          WHERE e.exchange_id = ${exchangeId}
+        `;
+        assert.deepStrictEqual(closure, [{ status: "closed", closure: "sender-cleared" }]);
+        // Nothing is queued for Home's agent: a withdrawal wakes nobody, as it does locally.
+        assert.isNull(yield* homeServer.worker.runOnce);
+        assert.equal((yield* Ref.get(pair.homeDelivered)).length, 1, "only the ask was injected");
+        // And the debt is gone: Home's agent can no longer answer it.
+        const late = yield* Effect.flip(
+          homeServer.send.send({
+            commandId: CommCommandId.make("command:roundtrip:withdraw:late-reply"),
+            senderThreadId: home.agent.threadId,
+            to: work.agent.id,
+            message: "Resolved.",
+            exchangeId,
+            acceptedAt: timestamp,
+          }),
+        );
+        assert.equal(late._tag, "A2AExchangeNotOpenError");
+      }),
+    ),
+);
+
+it.effect(
+  "carries a drop across when the asker is archived: the answerer's side judges the disposition and is told",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const pair = yield* pairWithOpenAsk("command:roundtrip:archive:ask");
+        const { workServer, homeServer, exchangeId } = pair;
+
+        const archived = yield* workServer.lifecycle.archiveParticipant({
+          participantId: work.agent.id,
+          archivedAt: timestamp,
+        });
+        assert.deepStrictEqual(archived.droppedExchangeIds, [exchangeId]);
+
+        // The drop notice goes to the answerer, on Home, with the retirement but no disposition.
+        assert.equal((yield* workServer.worker.runOnce)?.state, "delivered");
+        const notice = (yield* Ref.get(pair.crossed)).at(-1)!;
+        assert.equal(notice.receiverId, home.agent.id);
+        assert.deepStrictEqual(notice.terminal, {
+          kind: "dropped",
+          cause: {
+            kind: "participant-archived",
+            participantId: work.agent.id,
+            squadronId: work.squadronId,
+          },
+        });
+
+        const dropped = yield* homeServer.sql<{
+          readonly status: string;
+          readonly disposition: string;
+        }>`
+          SELECT e.status, json_extract(c.payload, '$.disposition') AS disposition
+          FROM j5_a2a_exchange e
+          JOIN j5_a2a_comm_event c ON c.exchange_id = e.exchange_id AND c.kind = 'exchange.dropped'
+          WHERE e.exchange_id = ${exchangeId}
+        `;
+        assert.deepStrictEqual(dropped, [{ status: "dropped", disposition: "sender-retired" }]);
+        // Unlike a withdrawal, a drop is news: Home's agent is told its asker is gone.
+        assert.equal((yield* homeServer.worker.runOnce)?.state, "delivered");
+        const told = (yield* Ref.get(pair.homeDelivered)).at(-1)!;
+        assert.equal(told.envelopeChannel, "lifecycle_notice");
+        assert.equal(told.exchangeRole, "terminal_notice");
+        assert.isNull(yield* homeServer.worker.runOnce);
+      }),
+    ),
+);
+
+it.effect(
+  "tells the asker on the other server when the answerer ends its turn without replying",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const pair = yield* pairWithOpenAsk("command:roundtrip:silence:ask");
+        const { workServer, homeServer, exchangeId } = pair;
+
+        // Home's answerer finishes a run owing the reply; Home's detector measures it.
+        const measured = yield* homeServer.silence.handleStoredEvent(
+          runEnded(home.agent.threadId, "completed"),
+        );
+        assert.equal(measured.length, 1);
+        const crossing = yield* homeServer.worker.runOnce;
+        const why = yield* homeServer.sql<{ readonly last_error: string | null }>`
+          SELECT last_error FROM j5_a2a_delivery WHERE envelope_channel = 'silence_notice'
+        `;
+        assert.equal(crossing?.state, "delivered", why[0]?.last_error ?? "");
+        const notice = (yield* Ref.get(pair.crossed)).at(-1)!;
+        assert.equal(notice.envelopeChannel, "silence_notice");
+        assert.equal(notice.receiverId, work.agent.id);
+        assert.equal(notice.regardingExchangeId, exchangeId, "the notice names its Exchange");
+
+        // Work accepts it for the Exchange it holds with Home and tells its waiting agent.
+        assert.equal((yield* workServer.worker.runOnce)?.state, "delivered");
+        const told = (yield* Ref.get(pair.workDelivered)).at(-1)!;
+        assert.equal(told.envelopeChannel, "silence_notice");
+        assert.equal(told.receiverId, work.agent.id);
+        // Silence is news, not an ending: the debt stands on both sides.
+        assert.deepStrictEqual(yield* exchangeStatus(workServer.sql, exchangeId), [
+          { status: "open", sender_id: work.agent.id },
+        ]);
+        assert.deepStrictEqual(yield* exchangeStatus(homeServer.sql, exchangeId), [
+          { status: "open", sender_id: work.agent.id },
+        ]);
       }),
     ),
 );
