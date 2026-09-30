@@ -40,7 +40,7 @@ Treat these upstream areas as off-limits except for those explicit appended case
 
 ### Mobile seams
 
-Upstream changes `apps/mobile` faster than any other client: 275 of the 1,163 commits in the `62aef8587c..67a2be0fdb` advance touched it. Mobile follows the same add-beside rule with a fixed seam set, decided on 2026-09-28 ([#337](https://github.com/Jacksondr5/j5code/issues/337), [#365](https://github.com/Jacksondr5/j5code/issues/365)).
+Mobile follows the same add-beside rule with a fixed seam set, decided on 2026-09-28 ([#337](https://github.com/Jacksondr5/j5code/issues/337), [#365](https://github.com/Jacksondr5/j5code/issues/365)).
 
 - J5 mobile code lives under `apps/mobile/src/j5/`. Presentation and state that web also needs (A2A envelope parsing, notice and Crew formatting, Inbox ordering, Squadron selection) live once under `packages/client-runtime/src/j5/`; neither client keeps its own copy.
 - Upstream mobile files are edited only at these seams, each an import plus one call into J5 code. A seam becomes a numbered case below when it lands.
@@ -56,7 +56,7 @@ Upstream changes `apps/mobile` faster than any other client: 275 of the 1,163 co
 
 - Any other edit to an upstream mobile file needs its own case, as on web. Existing J5 mobile edits keep their recorded cases (personas, playbooks, draft-as-agent, handoff artifacts, branding).
 - Every seam has an integration test that fails when the upstream file stops reaching the J5 code, so a rebase that drops a seam fails CI instead of silently removing J5 behavior.
-- Native inputs are their own class: `app.config.ts`, `eas.json`, native modules, and icon or splash assets change the Expo fingerprint and need a native rebuild. Batch them and keep them out of feature PRs.
+- Native changes are their own class: platform native code (the Swift and Kotlin under `apps/mobile/modules`) and anything that shapes the generated iOS and Android projects (`app.config.ts`, config plugins, native dependencies, and icon or splash assets). They change the Expo fingerprint, so the app only gets them through a new native build. Batch them and keep them out of feature PRs.
 
 ### Sanctioned appended integration cases
 
