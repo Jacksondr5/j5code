@@ -56,7 +56,7 @@ Mobile follows the same add-beside rule with a fixed seam set, decided on 2026-0
 
 - Any other edit to an upstream mobile file needs its own case, as on web. Existing J5 mobile edits keep their recorded cases (personas, playbooks, draft-as-agent, handoff artifacts, branding).
 - Every seam has an integration test that fails when the upstream file stops reaching the J5 code, so a rebase that drops a seam fails CI instead of silently removing J5 behavior.
-- Native changes are their own class: platform native code (the Swift and Kotlin under `apps/mobile/modules`) and anything that shapes the generated iOS and Android projects (`app.config.ts`, config plugins, native dependencies, and icon or splash assets). They change the Expo fingerprint, so the app only gets them through a new native build. Batch them and keep them out of feature PRs.
+- J5 adds no platform native code (Swift, Kotlin, or native modules); that is upstream's territory. The only native-side J5 edits are identity values listed in `BRANDING.md` and asset swaps such as icons. Those change the Expo fingerprint, so the app only gets them through a new native build; batch them and keep them out of feature PRs. A J5 feature that seems to need native code needs a ruling first, and the change should be offered upstream.
 
 ### Sanctioned appended integration cases
 
