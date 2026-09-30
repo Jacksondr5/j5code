@@ -1,3 +1,4 @@
+import { detectPlaybookTrigger } from "./j5/playbookTrigger.ts";
 import { detectAgentMention } from "./j5/agentMention.ts";
 export type ComposerTriggerKind =
   | "agent"
@@ -5,6 +6,7 @@ export type ComposerTriggerKind =
   | "pull-request"
   | "slash-command"
   | "slash-model"
+  | "slash-playbook"
   | "skill";
 export type ComposerSlashCommand = "model" | "plan" | "default";
 
@@ -92,6 +94,13 @@ export function detectComposerTrigger(
         rangeEnd: cursor,
       };
     }
+
+    const playbookTrigger = detectPlaybookTrigger(
+      linePrefix,
+      text.slice(0, lineStart),
+      text.slice(cursor),
+    );
+    if (playbookTrigger) return playbookTrigger;
   }
 
   const wsCheck = isWhitespaceChar ?? isWhitespace;
