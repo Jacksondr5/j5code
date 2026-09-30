@@ -54,8 +54,8 @@ playbook review.” One playbook can be active per thread;
 finishing or cancelling it leaves the agent ready for other work or another playbook.
 
 Type `@playbook:` anywhere in a message to pick a playbook by name. On its own, the
-mention asks the agent to start that playbook in the thread; in a message that asks for a
-crew, the Crew follows it instead. Invalid playbooks appear in the list with their error.
+mention asks the agent to start that playbook in the thread. Invalid playbooks appear in the
+list with their error.
 One with an invalid file name must be renamed before you can mention it.
 
 You can edit prompts and reorder steps while the run is active. The next retrieval
