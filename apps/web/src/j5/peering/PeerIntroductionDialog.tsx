@@ -146,7 +146,15 @@ export function PeerIntroductionDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      // Escape, the backdrop and the close button wait like Cancel does: a run in
+      // flight reports into this dialog, and closing it would lose that report.
+      onOpenChange={(next) => {
+        if (busy && !next) return;
+        onOpenChange(next);
+      }}
+    >
       <DialogPopup className="sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>Peer with another server</DialogTitle>
