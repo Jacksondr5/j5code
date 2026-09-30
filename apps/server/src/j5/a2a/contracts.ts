@@ -48,6 +48,7 @@ export const isDurableHumanParticipantId = (id: ParticipantId): boolean =>
 export const MACHINE_PARTICIPANT_ID_PREFIX = "machine:";
 export const isMachineParticipantId = (id: ParticipantId): boolean =>
   id.startsWith(MACHINE_PARTICIPANT_ID_PREFIX) && id.length > MACHINE_PARTICIPANT_ID_PREFIX.length;
+export const isPlatformParticipantId = (id: string): boolean => id.startsWith("platform:");
 export const machineParticipantIdForName = (name: string) =>
   ParticipantId.make(`${MACHINE_PARTICIPANT_ID_PREFIX}${name}`);
 
@@ -142,14 +143,26 @@ const NonMembershipCommEvent = Schema.Struct({
   payload: Schema.Json,
 });
 
+/**
+ * The receiver Squadron's own row for a message another Squadron sent. When the
+ * origin is a peer server, `originEnvironmentId` names it and the row is also
+ * the fact this server delivers from, since no `message.sent` exists here.
+ */
+export const MessageReceivedPayload = Schema.Struct({
+  originSquadronId: SquadronId,
+  originEnvironmentId: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
+  /** The id and clock the origin used; this ledger keys and stamps the message itself. */
+  originMessageId: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
+  originCreatedAt: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
+  message: Schema.Json,
+});
+export type MessageReceivedPayload = typeof MessageReceivedPayload.Type;
+
 const MessageReceivedCommEvent = Schema.Struct({
   ...eventAddressFields,
   kind: Schema.Literal("message.received"),
   correlationId: CorrelationId,
-  payload: Schema.Struct({
-    originSquadronId: SquadronId,
-    message: Schema.Json,
-  }),
+  payload: MessageReceivedPayload,
 });
 
 const ParticipantJoinedCommEvent = Schema.Struct({
