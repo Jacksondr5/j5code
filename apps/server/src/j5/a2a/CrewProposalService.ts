@@ -184,18 +184,25 @@ const planDigest = (playbook: CrewPlaybookRef | null | undefined, plan: PlannedP
         unownedSteps: plan.unownedSteps,
       });
 
+/**
+ * The playbook a launch records and briefs. Without a readable definition (possible only when no
+ * seat claims a step) the Crew still records it, and each brief says the seat owns no steps.
+ */
 const launchPlaybook = (
   playbook: CrewPlaybookRef | null | undefined,
   definition: PlaybookReadResponse | null,
 ): CrewLaunchPlaybook | null =>
-  playbook == null || definition === null
+  playbook == null
     ? null
     : {
         name: playbook.name,
         definitionPath: playbook.definitionPath,
-        title: definition.title,
-        steps: definition.steps.map(({ id, title }) => ({ id, title })),
+        title: definition?.title ?? playbook.name,
+        steps: (definition?.steps ?? []).map(({ id, title }) => ({ id, title })),
       };
+
+const claimsSteps = (seats: ReadonlyArray<CrewProposalSeat>) =>
+  seats.some((seat) => (seat.steps?.length ?? 0) > 0);
 
 const memberSteps = (instance: AgentCrewInstance | null) =>
   (instance?.members ?? []).map((member) => ({
@@ -237,31 +244,60 @@ export const layer = Layer.effect(
           "A member finishing frees no seat. Work with the seats this crew has, or propose a new crew for the extra hands.",
       });
 
-    /** A playbook the Crew cannot follow, told to whoever is at the door. */
+    /**
+     * A playbook the Crew cannot follow, told to whoever is at the door: the Captain naming one
+     * to propose, the Captain adding a seat to a Crew that follows one, or the person approving.
+     */
     const playbookRefusal =
-      (name: string, door: "captain" | "approval") => (error: PlaybookError) =>
+      (name: string, door: "propose" | "crew" | "approval") => (error: PlaybookError) =>
         door === "approval"
           ? new CrewProposalRequestError({
-              detail: `Playbook ${name} can no longer be read: ${error.message}`,
+              detail:
+                error.code === "not_found"
+                  ? `Playbook ${name} can no longer be read: its file is gone from the Captain's workspace.`
+                  : `Playbook ${name} can no longer be read: ${error.message}`,
               nextStep:
                 "Ask the Captain to fix the playbook and propose again, or decline this proposal.",
             })
-          : error.code === "not_found" || error.code === "invalid_name"
+          : door === "crew"
             ? new CrewProposalRequestError({
-                detail: `No playbook named ${name} in your workspace.`,
-                nextStep: "Call playbook_list and pass a name it returns.",
+                detail:
+                  error.code === "not_found"
+                    ? `Playbook ${name}, which this crew follows, can no longer be read: its file is gone from the Captain's workspace.`
+                    : `Playbook ${name}, which this crew follows, can no longer be read: ${error.message}`,
+                nextStep: "Restore or fix the playbook file, or request the seat without steps.",
               })
-            : new CrewProposalRequestError({
-                detail: `Playbook ${name} cannot be followed: ${error.message}`,
-                nextStep:
-                  "Fix the definition until playbook_list lists it without an issue, then retry.",
-              });
+            : error.code === "not_found" || error.code === "invalid_name"
+              ? new CrewProposalRequestError({
+                  detail: `No playbook named ${name} in your workspace.`,
+                  nextStep: "Call playbook_list and pass a name it returns.",
+                })
+              : new CrewProposalRequestError({
+                  detail: `Playbook ${name} cannot be followed: ${error.message}`,
+                  nextStep:
+                    "Fix the definition until playbook_list lists it without an issue, then retry.",
+                });
 
     /** The live definition; a Crew's plan is always checked against the YAML as it is now. */
-    const readPlaybook = (playbook: CrewPlaybookRef, door: "captain" | "approval") =>
+    const readPlaybook = (playbook: CrewPlaybookRef, door: "propose" | "crew" | "approval") =>
       playbooks
         .readPath(playbook.definitionPath)
         .pipe(Effect.mapError(playbookRefusal(playbook.name, door)));
+
+    /**
+     * A followed Crew's definition for seats joining it. Only a seat claiming steps needs it, so
+     * a missing or broken file refuses only those; other seats go ahead without live titles.
+     */
+    const readFollowed = (
+      playbook: CrewPlaybookRef | null | undefined,
+      seats: ReadonlyArray<CrewProposalSeat>,
+      door: "crew" | "approval",
+    ) =>
+      playbook == null
+        ? Effect.succeed(null)
+        : claimsSteps(seats)
+          ? readPlaybook(playbook, door)
+          : playbooks.readPath(playbook.definitionPath).pipe(Effect.orElseSucceed(() => null));
 
     /**
      * Persona seats must name known, enabled personas; the library is the source of truth, not the
@@ -512,22 +548,12 @@ export const layer = Layer.effect(
       Effect.gen(function* () {
         let playbook: { ref: CrewPlaybookRef; definition: PlaybookReadResponse } | null = null;
         if (input.playbook !== undefined) {
-          // One playbook run per thread: a Crew following a second one could never start it.
-          const active = yield* playbooks
-            .activeRunFor(input.captain.thread.id)
-            .pipe(Effect.mapError(operationError("reading your playbook runs")));
-          if (active !== null)
-            return yield* new CrewProposalRequestError({
-              detail: `Your thread is running playbook ${active.name} (run ${active.runId}), and a thread runs one playbook at a time.`,
-              nextStep:
-                "Finish it with playbook_complete or cancel it with playbook_cancel, then propose again.",
-            });
           const { definitionPath } = yield* playbooks
             .definitionPathFor(input.playbook.workspaceRoot, input.playbook.name)
-            .pipe(Effect.mapError(playbookRefusal(input.playbook.name, "captain")));
+            .pipe(Effect.mapError(playbookRefusal(input.playbook.name, "propose")));
           const definition = yield* readPlaybook(
             { name: input.playbook.name, definitionPath },
-            "captain",
+            "propose",
           );
           playbook = { ref: { name: definition.name, definitionPath }, definition };
         }
@@ -612,8 +638,7 @@ export const layer = Layer.effect(
           const current = yield* crews.read(instance.id).pipe(Effect.orDie);
           return { proposal: replayed, instance: current };
         }
-        const definition =
-          instance.playbook == null ? null : yield* readPlaybook(instance.playbook, "captain");
+        const definition = yield* readFollowed(instance.playbook, [input.seat], "crew");
         const plan = yield* validateSeats(
           [input.seat],
           instance.members.map(({ seatName }) => seatName),
@@ -712,9 +737,8 @@ export const layer = Layer.effect(
           ? null
           : (existingCrew?.members ?? []).map(({ seatName }) => seatName);
       // Read again at every preview and approval: a step removed or a file broken since the
-      // Captain proposed refuses here, and the card shows why.
-      const definition =
-        proposal.playbook == null ? null : yield* readPlaybook(proposal.playbook, "approval");
+      // Captain proposed refuses a seat claiming steps here, and the card shows why.
+      const definition = yield* readFollowed(proposal.playbook, seats, "approval");
       const plan = yield* validateSeats(
         seats,
         otherSeats,

@@ -226,8 +226,8 @@ Semantics: the caller must have a usable home and must not sit in a Crew (R20). 
 against the library before anything is recorded: unknown or disabled personas, duplicate seat names,
 or more than twelve seats refuse with the next step. With `playbook`, the live definition is read
 and each claimed step must exist and have one owner; an unknown or invalid playbook, an unknown step,
-a doubly claimed step, or `steps` without a playbook refuse the same way, and so does a playbook
-proposal while the Captain's thread has an active playbook run (the refusal names the run). The
+a doubly claimed step, or `steps` without a playbook refuse the same way. A seat that claims no
+steps needs no readable definition, so a Crew whose playbook file is gone can still add one. The
 proposal records the playbook's definition path, and the Crew keeps it from approval on; each
 member records the step ids it owns, and each seat's first turn lists its steps by live title in a
 `<seat_playbook>` block. An open roster proposal waits for the human
