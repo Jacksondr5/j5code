@@ -32,6 +32,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
+          persist-credentials: false
           fetch-depth: 0
           sparse-checkout: |
             /*
@@ -42,11 +43,16 @@ jobs:
         id: detect
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -uo pipefail
           # An unknown base (new branch, force push) runs both jobs rather than
           # silently skipping them.
-          if [[ -z "$BASE_SHA" || "$BASE_SHA" =~ ^0+$ ]] || ! paths=$(git diff --name-only "$BASE_SHA"...HEAD); then
+          # A pull request compares against its merge base; a push compares the
+          # two push tips, so a force push that drops native changes still counts.
+          range=("$BASE_SHA" HEAD)
+          [[ "$EVENT_NAME" == "pull_request" ]] && range=("$BASE_SHA...HEAD")
+          if [[ -z "$BASE_SHA" || "$BASE_SHA" =~ ^0+$ ]] || ! paths=$(git diff --name-only "${range[@]}"); then
             echo "Could not resolve the changed files; running every mobile native check."
             echo "lint=true" >> "$GITHUB_OUTPUT"
             echo "build=true" >> "$GITHUB_OUTPUT"
@@ -65,9 +71,10 @@ jobs:
 
           # Sources and configuration scripts/mobile-native-static-check.ts lints.
           report lint '^apps/mobile/.*\.(swift|kt|kts)$|^apps/mobile/(\.swiftlint\.yml|detekt\.yml|\.editorconfig|Brewfile)$|^scripts/mobile-native-static-check\.ts$|^\.github/workflows/j5-mobile-ci\.yml$'
-          # Inputs to the native iOS project. A Debug simulator build does not
+          # Inputs to the native iOS project, including the root icons app.config
+          # resolves through brand-assets. A Debug simulator build does not
           # bundle JavaScript, so screen and state changes cannot break it.
-          report build '^apps/mobile/(app\.config\.ts|eas\.json|package\.json|plugins/|modules/|assets/)|^pnpm-lock\.yaml$|^scripts/lib/(j5-branding|brand-assets|public-config)\.ts$|^\.github/workflows/j5-mobile-ci\.yml$'
+          report build '^apps/mobile/(app\.config\.ts|eas\.json|package\.json|plugins/|modules/|assets/)|^assets/|^pnpm-lock\.yaml$|^scripts/lib/(j5-branding|brand-assets|public-config)\.ts$|^\.github/workflows/j5-mobile-ci\.yml$'
 
   native_lint:
     name: Mobile native static analysis
@@ -80,6 +87,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
+          persist-credentials: false
           sparse-checkout: |
             /*
             !/.repos/
@@ -119,6 +127,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
+          persist-credentials: false
           sparse-checkout: |
             /*
             !/.repos/
