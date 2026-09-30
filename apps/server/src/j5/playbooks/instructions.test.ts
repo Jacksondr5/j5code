@@ -19,7 +19,7 @@ it("runs only on an explicit mention outside quotes and code", () => {
   assert.include(PLAYBOOK_CREW_INSTRUCTIONS, "even if it names a playbook in prose");
 });
 
-it("names the tools in the order the Captain calls them, and the inbox ask on a failed read", () => {
+it("names the tools in the order the Captain calls them, and the reply on a failed read", () => {
   const positions = [
     "playbook_read",
     "list_personas",
@@ -32,7 +32,12 @@ it("names the tools in the order the Captain calls them, and the inbox ask on a 
     positions,
     positions.toSorted((a, b) => a - b),
   );
-  assert.include(PLAYBOOK_CREW_INSTRUCTIONS, "send_message (expect_reply)");
+  // A failed read is reported in the Captain's own reply, the thread the person watches.
+  assert.include(
+    PLAYBOOK_CREW_INSTRUCTIONS,
+    "say so in your reply, naming the playbook and the error",
+  );
+  assert.notInclude(PLAYBOOK_CREW_INSTRUCTIONS, "expect_reply");
   // Bryant's ruling: a blocked persona gets a stand-in seat like a missing or disabled one.
   assert.include(PLAYBOOK_CREW_INSTRUCTIONS, "missing, disabled, or blocked");
   // Short enough that neither provider skims past a step.
