@@ -1,8 +1,11 @@
 import type {
+  CrewPersonaSwap,
   CrewProposalPreviewRequest,
   CrewProposalPreviewResponse,
+  PlaybookError,
+  PlaybookReadResponse,
 } from "@t3tools/contracts/j5";
-import { crewApprovalToken } from "./crewRuntimePreview.ts";
+import { crewApprovalToken, crewPlaybookPlanDigest } from "./crewRuntimePreview.ts";
 import { MessageId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
@@ -13,9 +16,11 @@ import * as Layer from "effect/Layer";
 import { makeKeyedSerialExecutor } from "../../orchestration-v2/KeyedSerialExecutor.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { makeAgentPersonaLibrary, personaCatalogProblem } from "../agents/agentPersonaLibrary.ts";
+import { PlaybookStore } from "../playbooks/PlaybookStore.ts";
 import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewInstanceService.ts";
 import {
   AgentCrewProposalService,
+  type CrewPlaybookRef,
   type CrewProposal,
   type CrewProposalSeat,
 } from "./AgentCrewProposalService.ts";
@@ -25,8 +30,10 @@ import {
   CrewLaunchService,
   type CrewCaptain,
   type CrewLaunchError,
+  type CrewLaunchPlaybook,
   type ResolvedCrewLaunchSeat,
 } from "./CrewLaunchService.ts";
+import { planCrewPlaybook, withPersonaSwaps, type CrewPlaybookPlan } from "./crewPlaybookPlan.ts";
 import { crewDeclinedNoticeText } from "./crewGateNotice.ts";
 import { CrewLaunchReporter } from "./CrewLaunchReporter.ts";
 import { crewSeatShapeProblem } from "./crewLimits.ts";
@@ -88,6 +95,8 @@ export interface ProposeCrewInput {
   readonly displayName: string;
   readonly brief: string;
   readonly seats: ReadonlyArray<CrewProposalSeat>;
+  /** The playbook the Crew follows, by name in the Captain's workspace. */
+  readonly playbook?: { readonly name: string; readonly workspaceRoot: string } | undefined;
 }
 
 export interface RequestCrewMemberInput {
@@ -107,9 +116,19 @@ export interface ResolveCrewProposalInput {
   readonly seats?: ReadonlyArray<CrewProposalSeat> | undefined;
 }
 
+/** What the Captain is told about a playbook proposal it just filed. */
+export interface CrewProposalPlaybookOutcome {
+  readonly name: string;
+  readonly title: string;
+  readonly unownedSteps: ReadonlyArray<string>;
+  readonly swaps: ReadonlyArray<{ readonly seat: string; readonly swap: CrewPersonaSwap }>;
+}
+
 export interface CrewProposalOutcome {
   readonly proposal: CrewProposal;
   readonly instance: AgentCrewInstance | null;
+  /** Present when this call validated a proposal that follows a playbook. */
+  readonly playbook?: CrewProposalPlaybookOutcome | null | undefined;
 }
 
 export interface CrewProposalServiceShape {
@@ -140,6 +159,57 @@ export class CrewProposalService extends Context.Service<
 const seatNamesUnique = (seats: ReadonlyArray<CrewProposalSeat>) =>
   new Set(seats.map(({ seat }) => seat)).size === seats.length;
 
+type PlannedPlaybook = Extract<CrewPlaybookPlan, { readonly problem: null }>;
+
+const playbookOutcome = (plan: PlannedPlaybook): CrewProposalPlaybookOutcome | null =>
+  plan.summary === null
+    ? null
+    : {
+        name: plan.summary.name,
+        title: plan.summary.title,
+        unownedSteps: plan.unownedSteps,
+        swaps: [...plan.swapsBySeat].flatMap(([seat, swaps]) =>
+          swaps.map((swap) => ({ seat, swap })),
+        ),
+      };
+
+/** The token binds this digest, so a live edit the card has not shown refuses the approval. */
+const planDigest = (playbook: CrewPlaybookRef | null | undefined, plan: PlannedPlaybook) =>
+  playbook == null || plan.summary === null
+    ? undefined
+    : crewPlaybookPlanDigest({
+        definitionPath: playbook.definitionPath,
+        summary: plan.summary,
+        swapsBySeat: plan.swapsBySeat,
+        unownedSteps: plan.unownedSteps,
+      });
+
+/**
+ * The playbook a launch records and briefs. Without a readable definition (possible only when no
+ * seat claims a step) the Crew still records it, and each brief says the seat owns no steps.
+ */
+const launchPlaybook = (
+  playbook: CrewPlaybookRef | null | undefined,
+  definition: PlaybookReadResponse | null,
+): CrewLaunchPlaybook | null =>
+  playbook == null
+    ? null
+    : {
+        name: playbook.name,
+        definitionPath: playbook.definitionPath,
+        title: definition?.title ?? playbook.name,
+        steps: (definition?.steps ?? []).map(({ id, title }) => ({ id, title })),
+      };
+
+const claimsSteps = (seats: ReadonlyArray<CrewProposalSeat>) =>
+  seats.some((seat) => (seat.steps?.length ?? 0) > 0);
+
+const memberSteps = (instance: AgentCrewInstance | null) =>
+  (instance?.members ?? []).map((member) => ({
+    seatName: member.seatName,
+    playbookStepIds: member.playbookStepIds ?? [],
+  }));
+
 export const layer = Layer.effect(
   CrewProposalService,
   Effect.gen(function* () {
@@ -150,6 +220,7 @@ export const layer = Layer.effect(
     const threadManagement = yield* ThreadManagementService;
     const ledger = yield* A2ALedger;
     const agents = yield* makeAgentPersonaLibrary;
+    const playbooks = yield* PlaybookStore;
     // One resolution of a proposal at a time on this server, so an approval and a decline from
     // two devices cannot interleave; the store's compare-and-set from open decides the winner.
     const gates = yield* makeKeyedSerialExecutor<string>();
@@ -174,14 +245,74 @@ export const layer = Layer.effect(
       });
 
     /**
+     * A playbook the Crew cannot follow, told to whoever is at the door: the Captain naming one
+     * to propose, the Captain adding a seat to a Crew that follows one, or the person approving.
+     */
+    const playbookRefusal =
+      (name: string, door: "propose" | "crew" | "approval") => (error: PlaybookError) =>
+        door === "approval"
+          ? new CrewProposalRequestError({
+              detail:
+                error.code === "not_found"
+                  ? `Playbook ${name} can no longer be read: its file is gone from the Captain's workspace.`
+                  : `Playbook ${name} can no longer be read: ${error.message}`,
+              nextStep:
+                "Ask the Captain to fix the playbook and propose again, or decline this proposal.",
+            })
+          : door === "crew"
+            ? new CrewProposalRequestError({
+                detail:
+                  error.code === "not_found"
+                    ? `Playbook ${name}, which this crew follows, can no longer be read: its file is gone from the Captain's workspace.`
+                    : `Playbook ${name}, which this crew follows, can no longer be read: ${error.message}`,
+                nextStep: "Restore or fix the playbook file, or request the seat without steps.",
+              })
+            : error.code === "not_found" || error.code === "invalid_name"
+              ? new CrewProposalRequestError({
+                  detail: `No playbook named ${name} in your workspace.`,
+                  nextStep: "Call playbook_list and pass a name it returns.",
+                })
+              : new CrewProposalRequestError({
+                  detail: `Playbook ${name} cannot be followed: ${error.message}`,
+                  nextStep:
+                    "Fix the definition until playbook_list lists it without an issue, then retry.",
+                });
+
+    /** The live definition; a Crew's plan is always checked against the YAML as it is now. */
+    const readPlaybook = (playbook: CrewPlaybookRef, door: "propose" | "crew" | "approval") =>
+      playbooks
+        .readPath(playbook.definitionPath)
+        .pipe(Effect.mapError(playbookRefusal(playbook.name, door)));
+
+    /**
+     * A followed Crew's definition for seats joining it. Only a seat claiming steps needs it, so
+     * a missing or broken file refuses only those; other seats go ahead without live titles.
+     */
+    const readFollowed = (
+      playbook: CrewPlaybookRef | null | undefined,
+      seats: ReadonlyArray<CrewProposalSeat>,
+      door: "crew" | "approval",
+    ) =>
+      playbook == null
+        ? Effect.succeed(null)
+        : claimsSteps(seats)
+          ? readPlaybook(playbook, door)
+          : playbooks.readPath(playbook.definitionPath).pipe(Effect.orElseSucceed(() => null));
+
+    /**
      * Persona seats must name known, enabled personas; the library is the source of truth, not the
-     * Captain. A custom seat names none and is checked for shape only.
+     * Captain. A custom seat names none and is checked for shape only. A playbook Crew's seats
+     * must claim existing steps, one owner each.
      */
     const validateSeats = Effect.fn("j5.a2a.crewProposal.validateSeats")(function* (
       seats: ReadonlyArray<CrewProposalSeat>,
       /** The live Crew's seat names for an addition; null for a new roster. */
       existingSeatNames: ReadonlyArray<string> | null,
       humanReview = false,
+      playbook: {
+        readonly definition: PlaybookReadResponse;
+        readonly existingMembers: ReturnType<typeof memberSteps>;
+      } | null = null,
     ) {
       if (seats.length === 0)
         return yield* new CrewProposalRequestError({
@@ -241,6 +372,14 @@ export const layer = Layer.effect(
             nextStep: "Pick an enabled persona from list_personas, or ask the user to turn it on.",
           });
       }
+      const plan = planCrewPlaybook({
+        definition: playbook?.definition ?? null,
+        seats,
+        existingMembers: playbook?.existingMembers ?? [],
+        catalog,
+      });
+      if (plan.problem !== null) return yield* new CrewProposalRequestError(plan.problem);
+      return plan;
     });
 
     /** The decline is told at once; an approval is told by the launch report, once the seats are up. */
@@ -343,6 +482,7 @@ export const layer = Layer.effect(
       captain: CrewCaptain,
       seats: ReadonlyArray<CrewProposalSeat>,
       resolvedSeats: ReadonlyArray<ResolvedCrewLaunchSeat>,
+      playbook: CrewLaunchPlaybook | null,
     ) {
       const launchSeats = seats.map((seat) => ({
         name: seat.seat,
@@ -351,6 +491,7 @@ export const layer = Layer.effect(
         instructions: seat.instructions,
         modelSelection: seat.modelSelection,
         runtimeMode: seat.runtimeMode,
+        steps: seat.steps,
       }));
       if (proposal.kind === "roster") {
         return yield* launcher.launch({
@@ -361,6 +502,7 @@ export const layer = Layer.effect(
           seats: launchSeats,
           resolvedSeats,
           brief: proposal.brief,
+          playbook,
           // The launch report finds its Crew through this link, so a lost write fails the
           // approval before any seat spawns; recording is idempotent, so approving again is safe.
           onRecorded: (instance) =>
@@ -397,13 +539,30 @@ export const layer = Layer.effect(
         seats: launchSeats,
         resolvedSeats,
         brief: proposal.brief,
+        playbook,
         onReserved: () => recordApproval(proposal, seats),
       });
     });
 
     const propose: CrewProposalServiceShape["propose"] = (input) =>
       Effect.gen(function* () {
-        yield* validateSeats(input.seats, null);
+        let playbook: { ref: CrewPlaybookRef; definition: PlaybookReadResponse } | null = null;
+        if (input.playbook !== undefined) {
+          const { definitionPath } = yield* playbooks
+            .definitionPathFor(input.playbook.workspaceRoot, input.playbook.name)
+            .pipe(Effect.mapError(playbookRefusal(input.playbook.name, "propose")));
+          const definition = yield* readPlaybook(
+            { name: input.playbook.name, definitionPath },
+            "propose",
+          );
+          playbook = { ref: { name: definition.name, definitionPath }, definition };
+        }
+        const plan = yield* validateSeats(
+          input.seats,
+          null,
+          false,
+          playbook === null ? null : { definition: playbook.definition, existingMembers: [] },
+        );
         const proposal = yield* proposals
           .create({
             id: lifecycleId({
@@ -419,8 +578,9 @@ export const layer = Layer.effect(
             kind: "roster",
             brief: input.brief,
             displayName: input.displayName,
-            requestedSeats: input.seats,
+            requestedSeats: withPersonaSwaps(input.seats, plan.swapsBySeat),
             createdAt: DateTime.formatIso(yield* DateTime.now),
+            playbook: playbook?.ref ?? null,
           })
           .pipe(Effect.mapError(operationError("recording the proposal")));
         if (proposal.status !== "open") {
@@ -428,9 +588,9 @@ export const layer = Layer.effect(
             proposal.crewInstanceId === null
               ? null
               : yield* crews.read(proposal.crewInstanceId).pipe(Effect.orDie);
-          return { proposal, instance };
+          return { proposal, instance, playbook: playbookOutcome(plan) };
         }
-        return { proposal, instance: null };
+        return { proposal, instance: null, playbook: playbookOutcome(plan) };
       });
 
     const requestMember: CrewProposalServiceShape["requestMember"] = (input) =>
@@ -478,9 +638,12 @@ export const layer = Layer.effect(
           const current = yield* crews.read(instance.id).pipe(Effect.orDie);
           return { proposal: replayed, instance: current };
         }
-        yield* validateSeats(
+        const definition = yield* readFollowed(instance.playbook, [input.seat], "crew");
+        const plan = yield* validateSeats(
           [input.seat],
           instance.members.map(({ seatName }) => seatName),
+          false,
+          definition === null ? null : { definition, existingMembers: memberSteps(instance) },
         );
         const admitted = yield* proposals
           .admit(
@@ -493,8 +656,9 @@ export const layer = Layer.effect(
               kind: "addition",
               brief: input.brief ?? instance.brief,
               displayName: instance.displayName,
-              requestedSeats: [input.seat],
+              requestedSeats: withPersonaSwaps([input.seat], plan.swapsBySeat),
               createdAt: DateTime.formatIso(yield* DateTime.now),
+              playbook: instance.playbook ?? null,
             },
             { maxSeats: CREW_SEAT_CAP },
           )
@@ -508,9 +672,13 @@ export const layer = Layer.effect(
           );
         if (admitted.proposal.status !== "open") {
           const current = yield* crews.read(instance.id).pipe(Effect.orDie);
-          return { proposal: admitted.proposal, instance: current };
+          return {
+            proposal: admitted.proposal,
+            instance: current,
+            playbook: playbookOutcome(plan),
+          };
         }
-        return { proposal: admitted.proposal, instance };
+        return { proposal: admitted.proposal, instance, playbook: playbookOutcome(plan) };
       });
 
     /**
@@ -541,10 +709,11 @@ export const layer = Layer.effect(
           instructions: seat.instructions,
           modelSelection: seat.modelSelection,
           runtimeMode: seat.runtimeMode,
+          steps: seat.steps,
         })),
       );
 
-    /** Preview and approval consult the same live roster. */
+    /** Preview and approval consult the same live roster and the same live playbook. */
     const validateProposalSeats = Effect.fn("j5.a2a.crewProposal.validateProposalSeats")(function* (
       proposal: CrewProposal,
       seats: ReadonlyArray<CrewProposalSeat>,
@@ -567,7 +736,15 @@ export const layer = Layer.effect(
         proposal.kind === "roster"
           ? null
           : (existingCrew?.members ?? []).map(({ seatName }) => seatName);
-      yield* validateSeats(seats, otherSeats, true);
+      // Read again at every preview and approval: a step removed or a file broken since the
+      // Captain proposed refuses a seat claiming steps here, and the card shows why.
+      const definition = yield* readFollowed(proposal.playbook, seats, "approval");
+      const plan = yield* validateSeats(
+        seats,
+        otherSeats,
+        true,
+        definition === null ? null : { definition, existingMembers: memberSteps(existingCrew) },
+      );
       // The request was counted against open requests when it was filed; the approval only has
       // to fit the live rows, which the member store enforces again when it reserves them.
       if (otherSeats !== null && otherSeats.length + seats.length > CREW_SEAT_CAP)
@@ -577,6 +754,7 @@ export const layer = Layer.effect(
           seats.length,
           "approval",
         );
+      return { plan, definition };
     });
 
     const preview: CrewProposalServiceShape["preview"] = Effect.fn("j5.a2a.crewProposal.preview")(
@@ -592,13 +770,24 @@ export const layer = Layer.effect(
             status: proposal.status,
           });
         const seats = input.seats ?? proposal.requestedSeats;
-        yield* validateProposalSeats(proposal, seats);
+        const { plan } = yield* validateProposalSeats(proposal, seats);
         const captain = yield* captainFor(proposal);
         const resolved = yield* resolveRuntime(captain, seats);
         return {
           proposalId: proposal.id,
-          approvalToken: crewApprovalToken(proposal, captain, resolved),
-          seats: resolved.map((entry) => entry.runtime),
+          approvalToken: crewApprovalToken(
+            proposal,
+            captain,
+            resolved,
+            planDigest(proposal.playbook, plan),
+          ),
+          seats: resolved.map((entry) => {
+            const swaps = plan.swapsBySeat.get(entry.runtime.seat);
+            return swaps === undefined ? entry.runtime : { ...entry.runtime, personaSwaps: swaps };
+          }),
+          ...(plan.summary === null
+            ? {}
+            : { playbook: plan.summary, unownedSteps: plan.unownedSteps }),
         };
       },
     );
@@ -638,16 +827,36 @@ export const layer = Layer.effect(
             return { proposal: declined, instance: null } satisfies CrewProposalOutcome;
           }
           const seats = input.seats ?? proposal.requestedSeats;
-          yield* validateProposalSeats(proposal, seats);
+          const { plan, definition } = yield* validateProposalSeats(proposal, seats);
           const captain = yield* captainFor(proposal);
           const resolved = yield* resolveRuntime(captain, seats);
-          if (input.approvalToken !== crewApprovalToken(proposal, captain, resolved))
+          if (
+            input.approvalToken !==
+            crewApprovalToken(proposal, captain, resolved, planDigest(proposal.playbook, plan))
+          )
             return yield* new CrewProposalRequestError({
               detail:
-                "The crew runtime preview is missing or has changed since it was shown: the roster, a seat's runtime, or the Captain's branch or worktree may have changed.",
+                "The crew runtime preview is missing or has changed since it was shown: the roster, a seat's runtime, the playbook plan, or the Captain's branch or worktree may have changed.",
               nextStep: "Refresh the preview and review the current settings before approving.",
             });
-          const launched = yield* fulfil(proposal, captain, seats, resolved);
+          const launched = yield* fulfil(
+            proposal,
+            captain,
+            withPersonaSwaps(seats, plan.swapsBySeat),
+            resolved,
+            launchPlaybook(proposal.playbook, definition),
+          ).pipe(
+            // The member store is the last word on ownership: two additions that both passed
+            // preview race to it, and the second is refused with nothing written and left open.
+            Effect.catchTag("CrewStepAlreadyOwnedError", (error) =>
+              Effect.fail(
+                new CrewProposalRequestError({
+                  detail: `Step ${error.stepId} is already owned by seat ${error.ownerSeat}.`,
+                  nextStep: "Ask the Captain to request the seat again with only unowned steps.",
+                }),
+              ),
+            ),
+          );
           const final = yield* proposals
             .read(proposal.id)
             .pipe(Effect.mapError(operationError("reading the approved proposal")));

@@ -9,6 +9,7 @@ import {
   RuntimeMode,
 } from "./providerPolicy.ts";
 import { EnvironmentId, ProjectId, RuntimeRequestId, ThreadId } from "./baseSchemas.ts";
+import { AgentPersonaId } from "./j5/agentPersona.ts";
 
 export const ScopedSquadronRef = Schema.Struct({
   environmentId: EnvironmentId,
@@ -124,6 +125,18 @@ export const OpenInboxCountResponse = Schema.Struct({
 export const CREW_SEAT_CAP = 12;
 
 /**
+ * A step whose persona differs from the persona of the seat that owns it. `seatPersona` is null
+ * for a custom seat; `wantedProblem` says why the wanted persona could not staff the step itself.
+ */
+export const CrewPersonaSwap = Schema.Struct({
+  stepId: Schema.String,
+  wanted: AgentPersonaId,
+  seatPersona: Schema.NullOr(AgentPersonaId),
+  wantedProblem: Schema.NullOr(Schema.Literals(["missing", "disabled"])),
+});
+export type CrewPersonaSwap = typeof CrewPersonaSwap.Type;
+
+/**
  * One requested or approved Crew seat, as the Captain proposed it or the human edited it. A null
  * agent is a custom seat. Human runtime edits apply to every seat; omitted fields use the persona
  * defaults or, for a custom seat, inherit the Captain.
@@ -135,8 +148,27 @@ export const CrewProposalSeat = Schema.Struct({
   instructions: Schema.optional(Schema.String),
   modelSelection: Schema.optional(ModelSelection),
   runtimeMode: Schema.optional(RuntimeMode),
+  /** Ids of the playbook steps this seat owns; only on a Crew that follows a playbook. */
+  steps: Schema.optionalKey(Schema.Array(Schema.String)),
+  /** Computed by the server at propose and approve; a client's value is ignored. */
+  personaSwaps: Schema.optionalKey(Schema.Array(CrewPersonaSwap)),
 });
 export type CrewProposalSeat = typeof CrewProposalSeat.Type;
+
+/** The playbook a proposal follows, read live from its YAML; `issue` says why it cannot be read. */
+export const CrewProposalPlaybook = Schema.Struct({
+  name: Schema.String,
+  title: Schema.String,
+  steps: Schema.Array(
+    Schema.Struct({
+      id: Schema.String,
+      title: Schema.String,
+      persona: Schema.optionalKey(AgentPersonaId),
+    }),
+  ),
+  issue: Schema.NullOr(Schema.String),
+});
+export type CrewProposalPlaybook = typeof CrewProposalPlaybook.Type;
 
 /** The human gate for one Crew request: a roster to launch or a seat to add to a live Crew. */
 export const CrewProposal = Schema.Struct({
@@ -153,6 +185,7 @@ export const CrewProposal = Schema.Struct({
   approvedSeats: Schema.NullOr(Schema.Array(CrewProposalSeat)),
   createdAt: Schema.String,
   resolvedAt: Schema.NullOr(Schema.String),
+  playbook: Schema.optionalKey(Schema.NullOr(CrewProposalPlaybook)),
 });
 export type CrewProposal = typeof CrewProposal.Type;
 export type ScopedCrewProposal = CrewProposal & { readonly environmentId: EnvironmentId };
@@ -168,6 +201,8 @@ export const CrewProposalSeatRuntime = Schema.Struct({
   access: Schema.String,
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
+  /** The seat's persona swaps as the edited roster would record them. */
+  personaSwaps: Schema.optionalKey(Schema.Array(CrewPersonaSwap)),
 });
 export type CrewProposalSeatRuntime = typeof CrewProposalSeatRuntime.Type;
 export const CrewProposalPreviewRequest = Schema.Struct({
@@ -179,6 +214,9 @@ export const CrewProposalPreviewResponse = Schema.Struct({
   proposalId: Schema.String,
   approvalToken: Schema.String,
   seats: Schema.Array(CrewProposalSeatRuntime),
+  /** The plan the approval token binds: the live playbook and the steps no seat owns. */
+  playbook: Schema.optionalKey(Schema.NullOr(CrewProposalPlaybook)),
+  unownedSteps: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 export type CrewProposalPreviewResponse = typeof CrewProposalPreviewResponse.Type;
 
@@ -254,6 +292,8 @@ export const FleetCrew = Schema.Struct({
   version: Schema.Number,
   createdAt: Schema.String,
   archivedAt: Schema.NullOr(Schema.String),
+  /** The playbook the Crew follows, fixed at approval. */
+  playbook: Schema.optionalKey(Schema.NullOr(Schema.Struct({ name: Schema.String }))),
   /** Every seat was approved by the person; the record keeps the version it joined at and why. */
   roster: Schema.Array(
     Schema.Struct({
@@ -262,6 +302,8 @@ export const FleetCrew = Schema.Struct({
       participantId: Schema.String,
       addedVersion: Schema.Number,
       reason: Schema.NullOr(Schema.String),
+      /** Ids of the playbook steps this seat owns. */
+      steps: Schema.optionalKey(Schema.Array(Schema.String)),
     }),
   ),
 });

@@ -107,4 +107,23 @@ describe("crew member modal saves", () => {
     expect(result.seats[1]).toBe(seats[1]);
     expect(original.instructions).toBe("Review the patch");
   });
+
+  it("keeps the steps a seat owns when the person edits it", () => {
+    const owning = [
+      { seat: "lead", agentId: null, reason: "Plans", instructions: "Plan.", steps: ["plan"] },
+    ];
+    const edited = saveSeat(owning, "lead", {
+      seat: "lead",
+      agentId: CUSTOM_AGENT,
+      instructions: "Plan carefully.",
+    });
+    expect(edited.error).toBeNull();
+    expect(edited.seats[0]).toEqual({
+      seat: "lead",
+      agentId: null,
+      reason: "Plans",
+      instructions: "Plan carefully.",
+      steps: ["plan"],
+    });
+  });
 });

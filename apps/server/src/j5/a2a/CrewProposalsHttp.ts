@@ -7,13 +7,15 @@ import { HttpRouter, HttpServerRespondable, HttpServerResponse } from "effect/un
 import { annotateEnvironmentRequest } from "../../auth/http.ts";
 import * as J5Contracts from "@t3tools/contracts/j5";
 
-import { AgentCrewProposalService } from "./AgentCrewProposalService.ts";
+import { PlaybookStore } from "../playbooks/PlaybookStore.ts";
+import { AgentCrewProposalService, type CrewProposal } from "./AgentCrewProposalService.ts";
 import {
   authenticateClientRead,
   authenticateOperate,
   invalidRequest,
   jsonBody,
 } from "./ClientReadsHttp.ts";
+import { crewPlaybookSummary } from "./crewPlaybookPlan.ts";
 import { CrewProposalService } from "./CrewProposalService.ts";
 
 export const CREW_PROPOSALS_PATH = "/api/j5/a2a/crews/proposals";
@@ -44,7 +46,8 @@ const failureResponse = (cause: unknown) => {
         ? 409
         : tag === "CrewLaunchSeatUnavailableError" ||
             tag === "CrewLaunchCapError" ||
-            tag === "CrewLaunchSeatConflictError"
+            tag === "CrewLaunchSeatConflictError" ||
+            tag === "CrewStepAlreadyOwnedError"
           ? 409
           : 500;
   const message =
@@ -71,6 +74,47 @@ export const makeCrewProposalsHttpRouteLayer = (paths: {
     Effect.gen(function* () {
       const store = yield* AgentCrewProposalService;
       const gate = yield* CrewProposalService;
+      const playbooks = yield* PlaybookStore;
+      /**
+       * A proposal as the card reads it: its playbook projected from the live YAML. A definition
+       * that cannot be read, or has lost a step a seat claims, becomes the playbook's issue rather
+       * than a failed list.
+       */
+      const projectProposal = ({
+        playbook,
+        ...proposal
+      }: CrewProposal): Effect.Effect<J5Contracts.CrewProposal> =>
+        playbook == null
+          ? Effect.succeed({ ...proposal, playbook: null })
+          : playbooks.readPath(playbook.definitionPath).pipe(
+              Effect.map((definition) => {
+                const ids = new Set(definition.steps.map(({ id }) => id));
+                const lost = proposal.requestedSeats
+                  .flatMap((seat) => seat.steps ?? [])
+                  .find((id) => !ids.has(id));
+                return {
+                  ...proposal,
+                  playbook: crewPlaybookSummary(
+                    playbook.name,
+                    definition,
+                    lost === undefined
+                      ? null
+                      : `Step ${lost} is no longer in the playbook; approving is refused until the Captain proposes again.`,
+                  ),
+                };
+              }),
+              Effect.catch((error) =>
+                Effect.succeed({
+                  ...proposal,
+                  playbook: {
+                    name: playbook.name,
+                    title: playbook.name,
+                    steps: [],
+                    issue: error.message,
+                  },
+                }),
+              ),
+            );
       const listRoute = HttpRouter.add(
         "POST",
         paths.list,
@@ -78,7 +122,10 @@ export const makeCrewProposalsHttpRouteLayer = (paths: {
           yield* annotateEnvironmentRequest("j5.a2a.crews.proposals.list");
           yield* authenticateClientRead;
           const read = yield* Effect.result(
-            store.listOpen().pipe(Effect.flatMap((proposals) => encodeList({ proposals }))),
+            store.listOpen().pipe(
+              Effect.flatMap((open) => Effect.forEach(open, projectProposal)),
+              Effect.flatMap((proposals) => encodeList({ proposals })),
+            ),
           );
           return Result.isSuccess(read)
             ? HttpServerResponse.jsonUnsafe(read.success)
@@ -130,14 +177,17 @@ export const makeCrewProposalsHttpRouteLayer = (paths: {
               "A valid proposalId and decision are required; approval also requires a runtime preview token.",
             );
           const outcome = yield* Effect.result(
-            gate.resolve(decoded.success).pipe(
-              Effect.flatMap((result) =>
-                encodeResolve({
-                  proposal: result.proposal,
-                  crewInstanceId: result.instance?.id ?? null,
-                }),
+            gate
+              .resolve(decoded.success)
+              .pipe(
+                Effect.flatMap((result) =>
+                  projectProposal(result.proposal).pipe(
+                    Effect.flatMap((proposal) =>
+                      encodeResolve({ proposal, crewInstanceId: result.instance?.id ?? null }),
+                    ),
+                  ),
+                ),
               ),
-            ),
           );
           return Result.isSuccess(outcome)
             ? HttpServerResponse.jsonUnsafe(outcome.success)

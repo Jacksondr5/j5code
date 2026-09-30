@@ -108,13 +108,18 @@ export const projectFleetSquadron = (input: {
       version: crew.version,
       createdAt: crew.createdAt,
       archivedAt: crew.archivedAt,
-      roster: crew.members.map((member) => ({
-        seat: member.seatName,
-        agentId: member.agentId,
-        participantId: member.participantId,
-        addedVersion: member.addedVersion,
-        reason: member.reason,
-      })),
+      playbook: crew.playbook == null ? null : { name: crew.playbook.name },
+      roster: crew.members.map((member) => {
+        const steps = member.playbookStepIds ?? [];
+        return {
+          seat: member.seatName,
+          agentId: member.agentId,
+          participantId: member.participantId,
+          addedVersion: member.addedVersion,
+          reason: member.reason,
+          ...(steps.length === 0 ? {} : { steps }),
+        };
+      }),
     })),
   };
 };

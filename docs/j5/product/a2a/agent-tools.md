@@ -188,8 +188,11 @@ persona, or leave persona unset for a custom seat with its own instructions (req
 brief. Custom seats inherit your harness, model, and reasoning by default and run with full-access
 unless you set runtime_mode; to choose different ones, set model_selection (instanceId, model,
 options) and/or runtime_mode using orchestrator_capabilities. Saved personas are proposed with their
-own configuration; only the human may override their runtime before approval; name the crew for what
-it is for and give each seat a short lowercase-hyphen name like code-reviewer. The user reviews the
+own configuration; only the human may override their runtime before approval. To have the crew
+follow a playbook, set playbook to a name from playbook_list and give seats the step ids they own
+(steps, from playbook_read); a step has one owner, steps no seat owns are yours as Captain, and the
+result reports unowned steps and any step whose persona differs from its seat's. Name the crew for
+what it is for and give each seat a short lowercase-hyphen name like code-reviewer. The user reviews the
 roster and each seat's resolved provider, model, reasoning, and access in this thread, may remove or
 add seats, and approves or declines; you receive the decision and the roster as a message here.
 Approved seats run with the runtime the human approves, which may exceed yours. You become the
@@ -203,21 +206,31 @@ brief because approvals are disabled."
 Published as non-destructive (`destructiveHint: false`): the call records a pending request and
 nothing spawns until a human approves it.
 
-| Input               | Type                                                                               | Required | Meaning                                                                                               |
-| ------------------- | ---------------------------------------------------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------- |
-| `name`              | string                                                                             | yes      | The Crew's display name                                                                               |
-| `brief`             | string                                                                             | yes      | What every seat starts on, verbatim                                                                   |
-| `seats`             | 1–12 of `{seat, persona?, model_selection?, runtime_mode?, reason, instructions?}` | yes      | Seat name, persona id from `list_personas` (none for a custom seat), why, wiring, custom-seat runtime |
-| `client_request_id` | string                                                                             | no       | Supply and reuse to make retries safe                                                                 |
+| Input               | Type                                                                                       | Required | Meaning                                                                                                                                        |
+| ------------------- | ------------------------------------------------------------------------------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`              | string                                                                                     | yes      | The Crew's display name                                                                                                                        |
+| `brief`             | string                                                                                     | yes      | What every seat starts on, verbatim                                                                                                            |
+| `seats`             | 1–12 of `{seat, persona?, model_selection?, runtime_mode?, reason, instructions?, steps?}` | yes      | Seat name, persona id from `list_personas` (none for a custom seat), why, wiring, custom-seat runtime, and the playbook step ids the seat owns |
+| `playbook`          | string                                                                                     | no       | A playbook name from `playbook_list` in the Captain's workspace; the Crew follows it                                                           |
+| `client_request_id` | string                                                                                     | no       | Supply and reuse to make retries safe                                                                                                          |
 
 Bounds: `name` and `seat` up to 100 characters, `reason` up to 500, `brief` and `instructions` up
 to 8,000.
 
 Result: `proposal_id`, `status` (`open`, `approved`, `declined`),
-`crew_instance_id`, and `members` (seat, persona_id, participant_id, thread_id) once spawned.
+`crew_instance_id`, and `members` (seat, persona_id, participant_id, thread_id) once spawned. A
+proposal that follows a playbook adds `playbook`: `name`, `title`, `unowned_steps` (the Captain's),
+and `persona_swaps` (seat, step_id, wanted_persona, seat_persona, and wanted_problem `missing` or
+`disabled` when the wanted persona could not staff the step itself).
 Semantics: the caller must have a usable home and must not sit in a Crew (R20). Seats are validated
 against the library before anything is recorded: unknown or disabled personas, duplicate seat names,
-or more than twelve seats refuse with the next step. An open roster proposal waits for the human
+or more than twelve seats refuse with the next step. With `playbook`, the live definition is read
+and each claimed step must exist and have one owner; an unknown or invalid playbook, an unknown step,
+a doubly claimed step, or `steps` without a playbook refuse the same way. A seat that claims no
+steps needs no readable definition, so a Crew whose playbook file is gone can still add one. The
+proposal records the playbook's definition path, and the Crew keeps it from approval on; each
+member records the step ids it owns, and each seat's first turn lists its steps by live title in a
+`<seat_playbook>` block. An open roster proposal waits for the human
 gate inline above the Captain's composer (additions wait in the Inbox); approval spawns the approved roster (the human may have edited it) as Peer Agents under the
 caller, persona-backed where a seat names one, records the Crew snapshot with each member's reason
 (the person approves every seat), and posts
@@ -235,7 +248,8 @@ one the roster lacks: seat name, persona id from list_personas (or none for a cu
 required instructions and optional model_selection/runtime_mode overrides; an omitted
 model_selection inherits yours and an omitted runtime_mode is full-access; saved-persona runtime
 changes are made only by the human before approval), a clear reason identifying the concern and
-missing expertise or responsibility, and optionally instructions and a brief for the new seat. The
+missing expertise or responsibility, and optionally instructions and a brief for the new seat. On a
+crew that follows a playbook, steps may claim step ids from playbook_read that no seat owns yet. The
 user decides from their inbox; you receive the decision and the updated roster as a message here.
 Continue the already-approved work and direct coordination while the addition is pending.
 Captain-only; a member sends the concern and needed expertise to its Captain with send_message.
@@ -250,12 +264,14 @@ every approval policy, including approval policy never."
 | `reason`                          | string         | yes      | One line the human reads before approving                                   |
 | `brief`                           | string         | no       | The new seat's brief; the Crew's brief when omitted                         |
 | `instructions`                    | string         | no       | Seat wiring text, verbatim                                                  |
+| `steps`                           | string[]       | no       | Playbook step ids no seat owns yet; only on a Crew that follows a playbook  |
 | `client_request_id`               | string         | no       | Supply and reuse to make retries safe                                       |
 
 Result: as `propose_crew`. Semantics: the caller must command the Crew; the seat name must be new;
 the cap counts current members plus seats in other open requests for the same Crew. Approval
-reserves the seat inside one store transaction (count, cap, version bump, and ordinal decided
-together under an optimistic version check, so two approvals landing at once cannot both pass),
+reserves the seat inside one store transaction (count, cap, step ownership, version bump, and
+ordinal decided together under an optimistic version check, so two approvals landing at once cannot
+both pass; the second one claiming a taken step is refused and stays open),
 then spawns the seat under the Captain and posts the updated roster to the Captain. If the approval
 cannot be recorded, the reservation is released and the request stays open; once the seat starts
 spawning the request is approved, and a seat that was never created is reported, not retried.

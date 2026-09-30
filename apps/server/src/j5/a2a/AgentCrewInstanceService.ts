@@ -1,11 +1,14 @@
 import { ThreadId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
+import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 
 import { makeKeyedSerialExecutor } from "../../orchestration-v2/KeyedSerialExecutor.ts";
+import type { CrewPlaybookRef } from "./AgentCrewProposalService.ts";
 import { ParticipantId, type SquadronId } from "./contracts.ts";
 
 export interface AgentCrewMember {
@@ -17,9 +20,23 @@ export interface AgentCrewMember {
   /** The instance version this seat joined at; 1 for the approved roster. */
   readonly addedVersion: number;
   readonly reason: string | null;
+  /** Ids of the playbook steps the seat owns; the store always sets it, [] when none. */
+  readonly playbookStepIds?: ReadonlyArray<string> | undefined;
 }
 
 export type NewAgentCrewMember = Omit<AgentCrewMember, "addedVersion">;
+
+/** Wrote nothing: a new seat claims a playbook step another seat of the Crew already owns. */
+export class CrewStepAlreadyOwnedError extends Data.TaggedError("CrewStepAlreadyOwnedError")<{
+  readonly crewInstanceId: string;
+  readonly stepId: string;
+  readonly ownerSeat: string;
+  readonly seat: string;
+}> {
+  override get message(): string {
+    return `Step ${this.stepId} is already owned by seat ${this.ownerSeat}, so seat ${this.seat} cannot own it.`;
+  }
+}
 
 export interface AgentCrewInstance {
   readonly id: string;
@@ -31,6 +48,8 @@ export interface AgentCrewInstance {
   readonly version: number;
   readonly createdAt: string;
   readonly archivedAt: string | null;
+  /** Set at approval and never changed afterwards; the store always sets it, null when none. */
+  readonly playbook?: CrewPlaybookRef | null | undefined;
   readonly members: ReadonlyArray<AgentCrewMember>;
 }
 
@@ -42,6 +61,7 @@ export interface RecordAgentCrewInput {
   readonly displayName: string;
   readonly brief: string;
   readonly createdAt: string;
+  readonly playbook?: CrewPlaybookRef | null | undefined;
   readonly members: ReadonlyArray<NewAgentCrewMember>;
 }
 
@@ -65,20 +85,25 @@ export type AddMembersOutcome =
   | { readonly status: "missing"; readonly instance: null };
 
 export interface AgentCrewInstanceServiceShape {
-  /** Idempotent by instance id: a launch retry with the same request key records nothing new. */
-  readonly record: (input: RecordAgentCrewInput) => Effect.Effect<AgentCrewInstance, SqlError>;
+  /**
+   * Idempotent by instance id: a launch retry with the same request key records nothing new. A
+   * roster that gives one playbook step to two seats is refused and nothing is written.
+   */
+  readonly record: (
+    input: RecordAgentCrewInput,
+  ) => Effect.Effect<AgentCrewInstance, SqlError | CrewStepAlreadyOwnedError>;
   /**
    * Append approved seats and bump the version; idempotent per seat identity, so a replay of the
    * same seats reports `added` and writes nothing. The count, the cap, a same-name clash with a
    * different participant, the retired stamp, the version bump, and the ordinal base are all
    * decided inside one transaction with an optimistic version check, so two additions approved
-   * at once cannot both slip under the cap or both take one name.
+   * at once cannot both slip under the cap, both take one name, or both own one playbook step.
    */
   readonly addMembers: (
     id: string,
     members: ReadonlyArray<NewAgentCrewMember>,
     options?: { readonly maxSeats?: number | undefined },
-  ) => Effect.Effect<AddMembersOutcome, SqlError>;
+  ) => Effect.Effect<AddMembersOutcome, SqlError | CrewStepAlreadyOwnedError>;
   readonly read: (id: string) => Effect.Effect<AgentCrewInstance | null, SqlError>;
   /**
    * Drop seats from the roster by name, whether or not a thread was ever created for them. The
@@ -152,6 +177,8 @@ interface InstanceRow {
   readonly version: number;
   readonly created_at: string;
   readonly archived_at: string | null;
+  readonly playbook_name: string | null;
+  readonly playbook_definition_path: string | null;
 }
 
 interface MemberRow {
@@ -163,7 +190,42 @@ interface MemberRow {
   readonly ordinal: number;
   readonly added_version: number;
   readonly reason: string | null;
+  readonly playbook_step_ids: string | null;
 }
+
+const StepIds = Schema.fromJsonString(Schema.Array(Schema.String));
+const decodeStepIds = Schema.decodeUnknownSync(StepIds);
+const encodeStepIds = Schema.encodeSync(StepIds);
+
+/**
+ * The first step two seats would both own once the write lands. The roster after the write is the
+ * rows no incoming seat replaces plus every incoming seat with its incoming steps, because the
+ * write stores an incoming seat's steps even over its existing row: ownership is always the plan
+ * the person approved last.
+ */
+const stepOwnershipConflict = (
+  crewInstanceId: string,
+  existing: ReadonlyArray<AgentCrewMember>,
+  incoming: ReadonlyArray<NewAgentCrewMember>,
+) => {
+  const kept = existing.filter(
+    (member) => !incoming.some((seat) => seat.seatName === member.seatName),
+  );
+  const owners = new Map<string, string>();
+  for (const seat of [...kept, ...incoming])
+    for (const stepId of seat.playbookStepIds ?? []) {
+      const ownerSeat = owners.get(stepId);
+      if (ownerSeat !== undefined && ownerSeat !== seat.seatName)
+        return new CrewStepAlreadyOwnedError({
+          crewInstanceId,
+          stepId,
+          ownerSeat,
+          seat: seat.seatName,
+        });
+      owners.set(stepId, seat.seatName);
+    }
+  return null;
+};
 
 const memberFromRow = (row: MemberRow): AgentCrewMember => ({
   seatName: row.seat_name,
@@ -172,6 +234,7 @@ const memberFromRow = (row: MemberRow): AgentCrewMember => ({
   threadId: ThreadId.make(row.thread_id),
   addedVersion: row.added_version,
   reason: row.reason,
+  playbookStepIds: row.playbook_step_ids === null ? [] : decodeStepIds(row.playbook_step_ids),
 });
 
 const instanceFromRows = (
@@ -187,6 +250,10 @@ const instanceFromRows = (
   version: row.version,
   createdAt: row.created_at,
   archivedAt: row.archived_at,
+  playbook:
+    row.playbook_name === null || row.playbook_definition_path === null
+      ? null
+      : { name: row.playbook_name, definitionPath: row.playbook_definition_path },
   members: members
     .filter((member) => member.crew_instance_id === row.id)
     .toSorted((left, right) => left.ordinal - right.ordinal)
@@ -227,11 +294,18 @@ export const layer: Layer.Layer<AgentCrewInstanceService, never, SqlClient.SqlCl
           yield* sql`
             INSERT OR IGNORE INTO j5_agent_crew_member (
               crew_instance_id, seat_name, agent_id, participant_id, thread_id, ordinal,
-              added_version, reason
+              added_version, reason, playbook_step_ids
             ) VALUES (
               ${id}, ${member.seatName}, ${member.agentId}, ${member.participantId},
-              ${member.threadId}, ${firstOrdinal + index}, ${version}, ${member.reason}
+              ${member.threadId}, ${firstOrdinal + index}, ${version}, ${member.reason},
+              ${
+                member.playbookStepIds === undefined || member.playbookStepIds.length === 0
+                  ? null
+                  : encodeStepIds(member.playbookStepIds)
+              }
             )
+            ON CONFLICT (crew_instance_id, seat_name)
+            DO UPDATE SET playbook_step_ids = excluded.playbook_step_ids
           `;
         }
       });
@@ -241,14 +315,23 @@ export const layer: Layer.Layer<AgentCrewInstanceService, never, SqlClient.SqlCl
       ) {
         yield* sql.withTransaction(
           Effect.gen(function* () {
+            // A re-approval keeps a same-named seat's row but takes its newly approved steps;
+            // checked over the roster as it will stand, before anything is written.
+            const conflict = stepOwnershipConflict(
+              input.id,
+              (yield* read(input.id))?.members ?? [],
+              input.members,
+            );
+            if (conflict !== null) return yield* conflict;
             yield* sql`
               INSERT OR IGNORE INTO j5_agent_crew_instance (
                 id, squadron_id, captain_participant_id, captain_thread_id, display_name, brief,
-                version, created_at, archived_at
+                version, created_at, archived_at, playbook_name, playbook_definition_path
               ) VALUES (
                 ${input.id}, ${input.squadronId}, ${input.captainParticipantId},
                 ${input.captainThreadId}, ${input.displayName}, ${input.brief}, 1,
-                ${input.createdAt}, NULL
+                ${input.createdAt}, NULL, ${input.playbook?.name ?? null},
+                ${input.playbook?.definitionPath ?? null}
               )
             `;
             yield* insertMembers(input.id, input.members, 1, 0);
@@ -286,6 +369,10 @@ export const layer: Layer.Layer<AgentCrewInstanceService, never, SqlClient.SqlCl
                 !current.members.some((existing) => existing.seatName === member.seatName),
             );
             if (fresh.length === 0) return { status: "added", instance: current } as const;
+            // The live members' steps decide it here, under the Crew's serialized reservation,
+            // so two additions that both passed their preview cannot both own one step.
+            const owned = stepOwnershipConflict(id, current.members, fresh);
+            if (owned !== null) return yield* owned;
             if (
               options.maxSeats !== undefined &&
               current.members.length + fresh.length > options.maxSeats

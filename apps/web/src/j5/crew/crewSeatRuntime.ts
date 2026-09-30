@@ -138,4 +138,5 @@ export const applyCrewSeatDraft = (
   ...(draft.instructions ? { instructions: draft.instructions } : {}),
   ...(draft.modelSelection ? { modelSelection: draft.modelSelection } : {}),
   ...(draft.runtimeMode ? { runtimeMode: draft.runtimeMode } : {}),
+  ...(seat.steps === undefined ? {} : { steps: seat.steps }),
 });

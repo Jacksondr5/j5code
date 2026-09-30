@@ -27,7 +27,11 @@ import {
   providerCanEnforceAgentPersonaAuthority,
   translateAgentPersonaProviderPolicy,
 } from "../agents/agentPersonaProviderPolicy.ts";
-import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewInstanceService.ts";
+import {
+  AgentCrewInstanceService,
+  CrewStepAlreadyOwnedError,
+  type AgentCrewInstance,
+} from "./AgentCrewInstanceService.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
 import { SpawnCompositionService } from "./SpawnCompositionService.ts";
 import { getThreadProjectionIfPresent } from "./threadProjectionReads.ts";
@@ -57,6 +61,19 @@ export interface CrewLaunchSeat {
   readonly instructions?: string | undefined;
   readonly modelSelection?: ModelSelection | undefined;
   readonly runtimeMode?: RuntimeMode | undefined;
+  /** Ids of the playbook steps the seat owns; recorded on its member row. */
+  readonly steps?: ReadonlyArray<string> | undefined;
+}
+
+/**
+ * The playbook a Crew follows as its seats are briefed: its identity for the record, and the live
+ * step titles each seat's first turn lists.
+ */
+export interface CrewLaunchPlaybook {
+  readonly name: string;
+  readonly definitionPath: string;
+  readonly title: string;
+  readonly steps: ReadonlyArray<{ readonly id: string; readonly title: string }>;
 }
 
 /**
@@ -92,6 +109,7 @@ export interface CrewLaunchInput {
   readonly seats: ReadonlyArray<CrewLaunchSeat>;
   readonly resolvedSeats?: ReadonlyArray<ResolvedCrewLaunchSeat>;
   readonly brief: string;
+  readonly playbook?: CrewLaunchPlaybook | null | undefined;
   /**
    * Runs once the Crew is recorded and before any seat spawns, so the caller can bind its own
    * record (the proposal) to the instance and resolve it. A failure here aborts the launch with
@@ -111,6 +129,8 @@ export interface CrewAddSeatsInput {
   readonly resolvedSeats?: ReadonlyArray<ResolvedCrewLaunchSeat>;
   /** The brief the new seats start on; defaults to the Crew's original brief. */
   readonly brief?: string | undefined;
+  /** The Crew's playbook with live titles, for the new seats' briefs. */
+  readonly playbook?: CrewLaunchPlaybook | null | undefined;
   /**
    * Runs once the seats are reserved and before any spawns, like `onRecorded` on a launch. A
    * failure releases the reservation, so the request can be approved again.
@@ -183,7 +203,15 @@ export type CrewLaunchError =
   | CrewLaunchSeatUnavailableError
   | CrewLaunchCapError
   | CrewLaunchSeatConflictError
-  | CrewLaunchOperationError;
+  | CrewLaunchOperationError
+  // Passed through every wrapper so the gate can refuse the approval with its own words.
+  | CrewStepAlreadyOwnedError;
+
+/** Wraps a store failure for the launch, except a step-ownership refusal, which stays typed. */
+const unlessStepOwned =
+  (wrap: (cause: unknown) => CrewLaunchOperationError) =>
+  <E>(cause: E): CrewLaunchOperationError | CrewStepAlreadyOwnedError =>
+    cause instanceof CrewStepAlreadyOwnedError ? cause : wrap(cause);
 
 export interface CrewLaunchServiceShape {
   readonly resolveSeats: (
@@ -519,6 +547,7 @@ export const layer = Layer.effect(
       instance: AgentCrewInstance,
       planned: ReadonlyArray<Planned>,
       brief: string,
+      playbook: CrewLaunchPlaybook | null,
     ) {
       const roster = instance.members.map((member) => ({
         seat: member.seatName,
@@ -555,6 +584,14 @@ export const layer = Layer.effect(
                     }),
                   },
             roster,
+            playbook:
+              playbook === null
+                ? undefined
+                : {
+                    name: playbook.name,
+                    title: playbook.title,
+                    steps: playbook.steps.filter((step) => member.seat.steps?.includes(step.id)),
+                  },
           },
         });
         const dispatched = yield* Effect.result(
@@ -589,6 +626,7 @@ export const layer = Layer.effect(
       instance: AgentCrewInstance,
       planned: ReadonlyArray<Planned>,
       brief: string,
+      playbook: CrewLaunchPlaybook | null,
     ) {
       const spawned = yield* spawnSeats(captain, planned);
       const notCreated = spawned.outcomes.flatMap((outcome) =>
@@ -610,7 +648,7 @@ export const layer = Layer.effect(
         ...instance,
         members: instance.members.filter((member) => !notCreated.includes(member.seatName)),
       };
-      const briefFailures = yield* startBriefs(captain, current, spawned.created, brief);
+      const briefFailures = yield* startBriefs(captain, current, spawned.created, brief, playbook);
       const seats = spawned.outcomes.map((outcome): CrewSeatLaunchOutcome => {
         const briefFailure = briefFailures.get(outcome.seatName);
         return outcome.kind === "created" && briefFailure !== undefined
@@ -657,17 +695,28 @@ export const layer = Layer.effect(
             displayName: input.displayName,
             brief: input.brief,
             createdAt: DateTime.formatIso(yield* DateTime.now),
+            playbook:
+              input.playbook == null
+                ? null
+                : { name: input.playbook.name, definitionPath: input.playbook.definitionPath },
             members: planned.map((member) => ({
               seatName: member.seat.name,
               agentId: member.seat.agentId,
               participantId: member.participantId,
               threadId: member.threadId,
               reason: member.seat.reason,
+              playbookStepIds: member.seat.steps,
             })),
           })
-          .pipe(Effect.mapError(recordError("recording the crew")));
+          .pipe(Effect.mapError(unlessStepOwned(recordError("recording the crew"))));
         if (input.onRecorded !== undefined) yield* input.onRecorded(instance);
-        return yield* spawnAndBrief(input.captain, instance, planned, input.brief);
+        return yield* spawnAndBrief(
+          input.captain,
+          instance,
+          planned,
+          input.brief,
+          input.playbook ?? null,
+        );
       }).pipe((launch) =>
         // One unit step from the record through the briefs, so a unit archive waits for every
         // seat to exist before it reads the roster.
@@ -696,18 +745,21 @@ export const layer = Layer.effect(
               participantId: member.participantId,
               threadId: member.threadId,
               reason: member.seat.reason,
+              playbookStepIds: member.seat.steps,
             })),
             { maxSeats: CREW_SEAT_CAP },
           )
           .pipe(
             Effect.mapError(
-              (cause) =>
-                new CrewLaunchOperationError({
-                  phase: "reserving the added seats",
-                  seatName: null,
-                  createdSeats: [],
-                  cause,
-                }),
+              unlessStepOwned(
+                (cause) =>
+                  new CrewLaunchOperationError({
+                    phase: "reserving the added seats",
+                    seatName: null,
+                    createdSeats: [],
+                    cause,
+                  }),
+              ),
             ),
           );
         if (reservation.status === "missing" || reservation.instance === null)
@@ -754,6 +806,7 @@ export const layer = Layer.effect(
           reserved,
           planned,
           input.brief ?? reserved.brief,
+          input.playbook ?? null,
         );
       }).pipe((addition) => crews.serialize(input.instance.id, addition));
 

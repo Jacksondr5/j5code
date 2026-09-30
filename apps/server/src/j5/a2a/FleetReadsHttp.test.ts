@@ -207,3 +207,28 @@ it("keeps every live roster seat: one with no ledger row rides under its Captain
     openAsks: 0,
   });
 });
+
+it("carries a Crew's playbook and each seat's steps on the Fleet roster", () => {
+  const projected = projectFleetSquadron({
+    squadron: { id: squadronId, name: "Fleet" },
+    participants: [agentRow(captain, captainThread, { kind: "unrecorded" }, null)],
+    crews: [
+      {
+        ...crew,
+        playbook: { name: "release", definitionPath: "/repo/.j5/playbooks/release.yaml" },
+        members: [{ ...crew.members[0]!, playbookStepIds: ["plan", "build"] }],
+      },
+      {
+        ...crew,
+        id: "crew:plain",
+        playbook: null,
+        members: [{ ...crew.members[0]!, playbookStepIds: [] }],
+      },
+    ],
+    openAsks: new Map(),
+  });
+  assert.deepStrictEqual(projected.crews[0]?.playbook, { name: "release" });
+  assert.deepStrictEqual(projected.crews[0]?.roster[0]?.steps, ["plan", "build"]);
+  assert.isNull(projected.crews[1]?.playbook);
+  assert.notProperty(projected.crews[1]?.roster[0], "steps");
+});

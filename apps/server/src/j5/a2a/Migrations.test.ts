@@ -1,5 +1,6 @@
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as Migrator from "effect/unstable/sql/Migrator";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
@@ -9,6 +10,14 @@ import {
   migrationManifest as upstreamMigrationManifest,
   runMigrations,
 } from "../../persistence/Migrations.ts";
+import {
+  AgentCrewInstanceService,
+  layer as crewInstanceLayer,
+} from "./AgentCrewInstanceService.ts";
+import {
+  AgentCrewProposalService,
+  layer as proposalStoreLayer,
+} from "./AgentCrewProposalService.ts";
 import { J5_A2A_MIGRATIONS_TABLE, migrationEntries, runJ5A2AMigrations } from "./Migrations.ts";
 import Migration0005 from "./migrations/005_ImmutableThreadHome.ts";
 import Migration0008 from "./migrations/008_LifecycleClosure.ts";
@@ -68,6 +77,7 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
       { migration_id: 25, name: "PeerDeliveryReceiver" },
       { migration_id: 26, name: "PeerRouteIndexes" },
       { migration_id: 27, name: "PeerSenderLabelRecency" },
+      { migration_id: 28, name: "CrewPlaybooks" },
     ]);
     assert.deepStrictEqual(
       migrationEntries.map(([id, name]) => [id, name]),
@@ -99,6 +109,7 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
         [25, "PeerDeliveryReceiver"],
         [26, "PeerRouteIndexes"],
         [27, "PeerSenderLabelRecency"],
+        [28, "CrewPlaybooks"],
       ],
     );
   }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
@@ -120,6 +131,55 @@ it.effect("adds playbooks after an environment has applied the Crew migrations",
     );
     yield* runJ5A2AMigrations();
   }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+);
+
+const crewStores = Layer.mergeAll(crewInstanceLayer, proposalStoreLayer).pipe(
+  Layer.provideMerge(NodeSqliteClient.layer({ filename: ":memory:" })),
+);
+
+it.effect("reads Crews recorded before playbooks as following none and owning no steps", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* runJ5A2AMigrations({ toMigrationInclusive: 27 });
+    yield* sql`
+      INSERT INTO j5_a2a_squadron (id, name, created_at)
+      VALUES ('squadron', 'Crew', '2026-09-25T00:00:00.000Z')
+    `;
+    yield* sql`
+      INSERT INTO j5_agent_crew_proposal (
+        id, squadron_id, captain_participant_id, captain_thread_id, crew_instance_id, kind,
+        status, brief, display_name, requested_seats, approved_seats, created_at, resolved_at
+      ) VALUES (
+        'p-old', 'squadron', 'agent:captain', 'thread:captain', 'crew-old', 'roster', 'approved',
+        'brief', 'Crew', '[{"seat":"helper","agentId":null,"reason":"Helps"}]', '[]',
+        '2026-09-25T00:00:00.000Z', '2026-09-25T00:01:00.000Z'
+      )
+    `;
+    yield* sql`
+      INSERT INTO j5_agent_crew_instance (
+        id, squadron_id, captain_participant_id, captain_thread_id, display_name, brief, version,
+        created_at, archived_at
+      ) VALUES (
+        'crew-old', 'squadron', 'agent:captain', 'thread:captain', 'Crew', 'brief', 1,
+        '2026-09-25T00:00:00.000Z', NULL
+      )
+    `;
+    yield* sql`
+      INSERT INTO j5_agent_crew_member (
+        crew_instance_id, seat_name, agent_id, participant_id, thread_id, ordinal, added_version,
+        reason
+      ) VALUES ('crew-old', 'helper', NULL, 'agent:helper', 'thread:helper', 0, 1, 'Helps')
+    `;
+    yield* runJ5A2AMigrations();
+    const proposal = yield* (yield* AgentCrewProposalService).read("p-old");
+    assert.isNull(proposal?.playbook);
+    assert.deepStrictEqual(proposal?.requestedSeats, [
+      { seat: "helper", agentId: null, reason: "Helps" },
+    ]);
+    const instance = yield* (yield* AgentCrewInstanceService).read("crew-old");
+    assert.isNull(instance?.playbook);
+    assert.deepStrictEqual(instance?.members[0]?.playbookStepIds, []);
+  }).pipe(Effect.provide(crewStores)),
 );
 
 it.effect("reopens crew proposals a claimed launch left mid-flight and keeps resolved ones", () =>
@@ -1266,7 +1326,7 @@ it.effect("recreates earlier-shaped crews tables when 14 runs over them", () =>
     `;
     assert.deepStrictEqual(
       applied.map((row) => row.migration_id),
-      [13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27],
+      [13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28],
     );
     const memberColumns = yield* sql<{ readonly name: string }>`
       SELECT name FROM pragma_table_info('j5_agent_crew_member') ORDER BY cid

@@ -71,6 +71,15 @@ const threadFor = (
 
 const squadronKey = (squadron: ScopedFleetSquadron) => `${squadron.environmentId}:${squadron.id}`;
 
+/** A seat's badge, with the playbook step ids it owns when its Crew follows one. */
+const seatBadgeWithSteps = (
+  seat: string | null,
+  stepsBySeat: ReadonlyMap<string, ReadonlyArray<string>>,
+): string | null => {
+  const steps = seat === null ? undefined : stepsBySeat.get(seat);
+  return seat === null || steps === undefined ? seat : `${seat} · ${steps.join(", ")}`;
+};
+
 /**
  * The Roster (SB6): every agent in every Squadron on every connected environment in three
  * sections. Active holds one table of everything still in motion, indented by placement with
@@ -377,6 +386,9 @@ function FleetNodeRows(
                 className="size-3.5 transition-transform duration-150 group-open/crew:rotate-90"
               />
               <span>Crew · {crew.crewName}</span>
+              {crew.playbookName === null ? null : (
+                <span className="text-muted-foreground/70">Playbook: {crew.playbookName}</span>
+              )}
               {(() => {
                 const seats = crew.members.map((member) => member.row);
                 const state = crewState(seats);
@@ -426,7 +438,10 @@ function FleetNodeRows(
                 <FleetNodeRows
                   key={member.row.agent.participantId}
                   node={member}
-                  seatBadge={member.row.agent.crew?.seat ?? null}
+                  seatBadge={seatBadgeWithSteps(
+                    member.row.agent.crew?.seat ?? null,
+                    crew.stepsBySeat,
+                  )}
                   {...rows}
                 />
               ))}
@@ -498,6 +513,9 @@ function RetiredCrewItem(props: FleetRowsProps & FleetSquadronCrew<ScopedFleetSq
         <div className="border-t border-border/40 px-3 py-2 ps-[2.125rem] text-xs">
           <RetiredCrewCaptain {...props} environmentId={squadron.environmentId} />
           <p className="mt-2 whitespace-pre-wrap break-words text-muted-foreground">{crew.brief}</p>
+          {crew.playbook == null ? null : (
+            <p className="mt-1 text-muted-foreground">Playbook: {crew.playbook.name}</p>
+          )}
           {crew.roster.length === 0 ? (
             <p className="mt-2 text-muted-foreground">No seats were approved.</p>
           ) : (
@@ -512,6 +530,9 @@ function RetiredCrewItem(props: FleetRowsProps & FleetSquadronCrew<ScopedFleetSq
                     approved at v{member.addedVersion}
                     {member.reason === null ? "" : ` · ${member.reason}`}
                   </span>
+                  {member.steps === undefined ? null : (
+                    <span className="text-muted-foreground">steps {member.steps.join(", ")}</span>
+                  )}
                 </li>
               ))}
             </ul>

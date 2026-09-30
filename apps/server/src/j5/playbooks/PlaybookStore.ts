@@ -356,8 +356,8 @@ export const makePlaybookStore = Effect.gen(function* () {
   });
 
   /** Reads a live definition without touching run state: no permit, no SQL, no revision bump. */
-  const read = Effect.fn("PlaybookStore.read")(function* (workspaceRoot: string, name: string) {
-    const { stem, definitionPath } = yield* definitionPathFor(workspaceRoot, name);
+  const readPath = Effect.fn("PlaybookStore.readPath")(function* (definitionPath: string) {
+    const stem = path.basename(definitionPath, ".yaml");
     if (!(yield* fs.exists(definitionPath)))
       return yield* playbookError(
         "not_found",
@@ -371,6 +371,9 @@ export const makePlaybookStore = Effect.gen(function* () {
       steps: definition.steps,
       warnings: yield* personaWarnings(definition.steps, personas.catalog()),
     } satisfies PlaybookReadResponse;
+  }, Effect.mapError(storageError));
+  const read = Effect.fn("PlaybookStore.read")(function* (workspaceRoot: string, name: string) {
+    return yield* readPath((yield* definitionPathFor(workspaceRoot, name)).definitionPath);
   }, Effect.mapError(storageError));
 
   const removeDefinition = Effect.fn("PlaybookStore.removeDefinition")(function* (
@@ -602,7 +605,9 @@ export const makePlaybookStore = Effect.gen(function* () {
     // Include the current revision so subscribing after a mutation still refreshes the view.
     changes: SubscriptionRef.changes(revision),
     discover,
+    definitionPathFor,
     read,
+    readPath,
     removeDefinition,
     renameDefinition,
     start,

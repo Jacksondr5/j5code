@@ -1,5 +1,6 @@
 import { type ModelSelection } from "@t3tools/contracts";
 import { playbookHandlers } from "../../playbooks/mcp.ts";
+import { playbookWorkspaceRoot } from "../../playbooks/workspace.ts";
 import * as Crypto from "effect/Crypto";
 import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
@@ -411,7 +412,9 @@ const crewProposalNextStep = (error: CrewProposalError) =>
         ? "The crew is full. Work with the seats it has, or propose a new crew for the extra work."
         : error._tag === "CrewLaunchSeatConflictError"
           ? "Choose a seat name the crew does not already use, then retry."
-          : "Retry with the same client_request_id; recovery is forward-only.";
+          : error._tag === "CrewStepAlreadyOwnedError"
+            ? "Claim only steps no seat owns yet, then retry."
+            : "Retry with the same client_request_id; recovery is forward-only.";
 
 const projectCrewProposal = (outcome: CrewProposalOutcome) => ({
   proposal_id: outcome.proposal.id,
@@ -423,6 +426,22 @@ const projectCrewProposal = (outcome: CrewProposalOutcome) => ({
     participant_id: member.participantId,
     thread_id: member.threadId,
   })),
+  ...(outcome.playbook == null
+    ? {}
+    : {
+        playbook: {
+          name: outcome.playbook.name,
+          title: outcome.playbook.title,
+          unowned_steps: outcome.playbook.unownedSteps,
+          persona_swaps: outcome.playbook.swaps.map(({ seat, swap }) => ({
+            seat,
+            step_id: swap.stepId,
+            wanted_persona: swap.wanted,
+            seat_persona: swap.seatPersona,
+            wanted_problem: swap.wantedProblem,
+          })),
+        },
+      }),
 });
 
 const handlers = {
@@ -825,12 +844,28 @@ const handlers = {
       const crypto = yield* Crypto.Crypto;
       const captain = yield* preflightCrewCaptain(scope, "propose_crew");
       const requestKey = input.client_request_id ?? (yield* crypto.randomUUIDv4);
+      // The Captain's playbooks are the ones its own playbook_list shows.
+      const playbook =
+        input.playbook === undefined
+          ? undefined
+          : {
+              name: input.playbook,
+              workspaceRoot: yield* playbookWorkspaceRoot(captain.thread.id).pipe(
+                Effect.mapError((error) =>
+                  stateError(
+                    `Your playbook workspace could not be read: ${error.message}`,
+                    "Retry, or propose the crew without a playbook.",
+                  ),
+                ),
+              ),
+            };
       const outcome = yield* (yield* CrewProposalService)
         .propose({
           requestKey: `${scope.providerSessionId}:${requestKey}`,
           captain,
           displayName: input.name,
           brief: input.brief,
+          ...(playbook === undefined ? {} : { playbook }),
           seats: input.seats.map((seat) => ({
             seat: seat.seat,
             agentId: seat.persona ?? null,
@@ -838,6 +873,7 @@ const handlers = {
             ...(seat.instructions === undefined ? {} : { instructions: seat.instructions }),
             ...(seat.model_selection === undefined ? {} : { modelSelection: seat.model_selection }),
             ...(seat.runtime_mode === undefined ? {} : { runtimeMode: seat.runtime_mode }),
+            ...(seat.steps === undefined ? {} : { steps: seat.steps }),
           })),
         })
         .pipe(Effect.mapError((error) => stateError(error.message, crewProposalNextStep(error))));
@@ -863,6 +899,7 @@ const handlers = {
               ? {}
               : { modelSelection: input.model_selection }),
             ...(input.runtime_mode === undefined ? {} : { runtimeMode: input.runtime_mode }),
+            ...(input.steps === undefined ? {} : { steps: input.steps }),
           },
           brief: input.brief ?? null,
         })
