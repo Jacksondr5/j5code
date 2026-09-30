@@ -39,16 +39,17 @@ Every feature definition has the same sections, in this order:
 
 Scenarios use one shared example fleet so a reader recognizes it from doc to doc, and never a real project: Squadrons **Billing Migration**, **Website Redesign**, and **L2 Support Rotation** (a non-development Squadron); repositories **the app repository** and **the infrastructure repository**; the person is simply **the user**.
 
-Core definitions (`principles.md`, `problems.md`, `glossary.md`, `use-cases.md`, `fleet-vision.md`, `cross-device.md`) keep their own shapes but follow the same rule: rewritten, never appended; cited by name.
+Core definitions (`overview.md`, `upstream.md`, `principles.md`, `problems.md`, `glossary.md`, `use-cases.md`, `fleet-vision.md`, `cross-device.md`) keep their own shapes but follow the same rule: rewritten, never appended; cited by name.
 
 **Who edits definitions.** Anyone may propose a change — in a record, an issue, or a PR — but a definition is changed only through a reviewed docs PR that Product has checked against the other definitions and the principles. This is what keeps definitions from contradicting each other: a decision written down in a session is a proposal until the definition carries it.
 
 ## Identifiers
 
-There are two kinds of identifier, and both carry the name of the thing they belong to, so a human can read them without a lookup table:
+There are three kinds of identifier, and all carry the name of the thing they belong to, so a human can read them without a lookup table:
 
 - **An acceptance criterion, numbered within its feature** — written as the feature name plus the number: "Fleet page AC3", "Squadron AC1". It always links to the criterion. Numbers are never reused within a feature; a retired criterion keeps its number and is marked retired in History.
 - **A milestone, numbered within its plan** — written as the plan or feature name plus the number: "Fleet observability M1", "Crews M2". It always links to the milestone in its plan. A milestone's lifetime is the plan's: once executed, the identifier is history and nothing current may depend on it.
+- **A divergence, numbered within the [register of divergences](../product/upstream.md)** — written "divergence D7". A divergence carries a number, unlike principles, because each one is a standing decision that FORK.md, issues, and reviews refer to for years, often long after anyone remembers its title. Numbers are never reused; a retired divergence keeps its number and says so.
 
 Nothing else is numbered:
 

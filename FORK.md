@@ -37,6 +37,17 @@ Treat these upstream areas as off-limits except for those explicit appended case
 - existing provider adapters and shared runtime modules
 - vendored references under `.repos`
 
+A case records how J5 code is wired into upstream code. It is not permission to change what upstream's product does. If an edit changes upstream behavior a user or agent would notice, such as making a provider adapter do something new, suppressing an upstream control, or giving an upstream concept a different meaning, the person decides first, and the decision is recorded in the [register of divergences](docs/j5/product/upstream.md). Only then does the edit get a case here. Every edit to an upstream-owned file is recorded here in the same PR that makes it: case text and file-table row.
+
+### J5-owned files that upstream also ships
+
+These files exist upstream, but J5 owns its copy outright and they are not integration cases. On an upstream advance, keep J5's version, then read upstream's changes to the file and port whatever applies.
+
+- `AGENTS.md`: the instructions every agent harness loads. It started as upstream's and keeps much of upstream's guidance, rewritten for J5 (Jackson, 2026-09-26).
+- `.github/pull_request_template.md`: J5's PR checklist (Jackson, 2026-09-26).
+
+`CLAUDE.md` stays upstream's (`@AGENTS.md`), and imports J5's `AGENTS.md` through it.
+
 ### Sanctioned appended integration cases
 
 Against candidate upstream pin `67a2be0fdbee7afb64b691f147ed286a108c706b`, the inventory has 48 cases: 1–47 plus 15b. Existing numbers remain stable. Line coordinates and landing SHAs below describe historical integrations; use named symbols and tests after upstream movement. Branding has its own inventory in `BRANDING.md`; temporary defect patches are listed separately below.
@@ -513,7 +524,6 @@ indicate approval. The deleted hook remains explicitly marked.
 | `apps/web/src/components/settings/settingsSearch.ts`                                                       | N       | 42–44                                     |
 | `apps/web/src/components/settings/SettingsSidebarNav.tsx`                                                  | N       | 42                                        |
 | `apps/web/src/state/query.ts`                                                                              | N       | 42                                        |
-| `docs/internals/providers.md`                                                                              | N       | 45                                        |
 | `docs/README.md`                                                                                           | N       | 42, 45                                    |
 | `packages/client-runtime/src/state/runtime.test.ts`                                                        | N       | 42                                        |
 | `packages/contracts/src/auth.ts`                                                                           | N       | 35                                        |
