@@ -1,5 +1,6 @@
 import { assert, it } from "@effect/vitest";
 import { ThreadId } from "@t3tools/contracts";
+import { A2A_MESSAGE_TEXT_MAX_CHARS } from "@t3tools/contracts/j5";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -7,6 +8,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
+import { noneLayer as peerDirectoryNoneLayer } from "./PeerDirectory.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import { A2ASendService, layer as sendLayer } from "./SendService.ts";
 import {
@@ -21,7 +23,11 @@ const timestamp = "2026-08-16T12:00:00.000Z";
 
 const database = NodeSqliteClient.layer({ filename: ":memory:" });
 const ledger = ledgerLayer.pipe(Layer.provide(database));
-const send = sendLayer.pipe(Layer.provide(ledger), Layer.provide(database));
+const send = sendLayer.pipe(
+  Layer.provide(peerDirectoryNoneLayer),
+  Layer.provide(ledger),
+  Layer.provide(database),
+);
 const testLayer = Layer.mergeAll(database, ledger, send);
 const encodeAgentParticipantPayload = Schema.encodeEffect(
   Schema.fromJsonString(Schema.Struct({ participant: AgentParticipant })),
@@ -399,6 +405,17 @@ it.effect("validates intent and human-only urgency at exchange open", () =>
       }),
     );
     assert.equal(missingIntent._tag, "A2AIntentRequiredError");
+
+    const tooLong = yield* Effect.flip(
+      service.send({
+        commandId: CommCommandId.make("command:too-long"),
+        senderThreadId: sender.threadId,
+        to: receiver.id,
+        message: "x".repeat(A2A_MESSAGE_TEXT_MAX_CHARS + 1),
+        acceptedAt: timestamp,
+      }),
+    );
+    assert.equal(tooLong._tag, "A2AMessageTooLongError", "nothing a peer would refuse is recorded");
 
     const missingUrgency = yield* Effect.flip(
       service.send({
