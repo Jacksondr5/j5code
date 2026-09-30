@@ -13,6 +13,7 @@ import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
+import { FetchHttpClient } from "effect/unstable/http";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
@@ -37,7 +38,9 @@ import {
 } from "./DeliveryTransport.ts";
 import { A2AHumanInbox, layer as humanInboxLayer } from "./HumanInboxService.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
+import { noneLayer as peerDirectoryNoneLayer } from "./PeerDirectory.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
+import { PeerRegistryService } from "./PeerRegistryService.ts";
 import { A2ASendService, layer as sendLayer } from "./SendService.ts";
 import {
   CommCommandId,
@@ -79,7 +82,11 @@ const makeTestLayer = (
 ) => {
   const database = NodeSqliteClient.layer({ filename: ":memory:" });
   const ledger = ledgerLayer.pipe(Layer.provide(database));
-  const send = sendLayer.pipe(Layer.provide(ledger), Layer.provide(database));
+  const send = sendLayer.pipe(
+    Layer.provide(peerDirectoryNoneLayer),
+    Layer.provide(ledger),
+    Layer.provide(database),
+  );
   const transportLayer = Layer.succeed(A2ADeliveryTransport, A2ADeliveryTransport.of(transport));
   const worker = deliveryWorkerLayerWithHooks(false).pipe(
     Layer.provide(ledger),
@@ -165,6 +172,7 @@ const crashWindowScenario = (poisonIds: boolean, crossSquadron: boolean) =>
           ),
         ),
       cancelAgent: () => Effect.succeed("cancelled" as const),
+      deliverPeer: () => Effect.die("peer delivery is not under test"),
       deliverHuman: () => Effect.void,
     };
     const hooks = A2ADeliveryHooks.of({
@@ -265,6 +273,7 @@ it.effect("serializes manual runOnce calls against a concurrent drain", () =>
           ),
         ),
       cancelAgent: () => Effect.succeed("cancelled" as const),
+      deliverPeer: () => Effect.die("peer delivery is not under test"),
       deliverHuman: () => Effect.void,
     };
 
@@ -300,6 +309,7 @@ it.effect("refuses a cross-squadron reply before delivery or closure", () =>
     const transport: A2ADeliveryTransportShape = {
       deliverAgent: () => Ref.update(injections, (count) => count + 1),
       cancelAgent: () => Effect.succeed("cancelled" as const),
+      deliverPeer: () => Effect.die("peer delivery is not under test"),
       deliverHuman: () => Effect.void,
     };
     yield* Effect.gen(function* () {
@@ -397,7 +407,11 @@ it.effect("startup reconciliation drains a persisted cross-squadron half-write a
       const filename = path.join(directory, "state.sqlite");
       const firstDatabase = NodeSqliteClient.layer({ filename });
       const firstLedger = ledgerLayer.pipe(Layer.provide(firstDatabase));
-      const firstSend = sendLayer.pipe(Layer.provide(firstLedger), Layer.provide(firstDatabase));
+      const firstSend = sendLayer.pipe(
+        Layer.provide(peerDirectoryNoneLayer),
+        Layer.provide(firstLedger),
+        Layer.provide(firstDatabase),
+      );
       const firstLayer = Layer.mergeAll(firstDatabase, firstLedger, firstSend);
       const persisted = yield* Effect.scoped(
         Effect.gen(function* () {
@@ -419,6 +433,7 @@ it.effect("startup reconciliation drains a persisted cross-squadron half-write a
       const transport: A2ADeliveryTransportShape = {
         deliverAgent: () => Ref.update(injectionCount, (count) => count + 1),
         cancelAgent: () => Effect.succeed("cancelled" as const),
+        deliverPeer: () => Effect.die("peer delivery is not under test"),
         deliverHuman: () => Effect.void,
       };
       const secondDatabase = NodeSqliteClient.layer({ filename });
@@ -485,6 +500,7 @@ it.effect("forces repeated delivery failure into a visible alarm", () =>
     const transport: A2ADeliveryTransportShape = {
       deliverAgent: () => Effect.fail(failure),
       cancelAgent: () => Effect.succeed("cancelled" as const),
+      deliverPeer: () => Effect.die("peer delivery is not under test"),
       deliverHuman: () => Effect.fail(failure),
     };
     yield* Effect.gen(function* () {
@@ -511,7 +527,11 @@ it.effect("keeps a message queued behind a held receiver queue undelivered until
     const sends = yield* Ref.make<ReadonlyArray<ThreadManagementSendInput>>([]);
     const database = NodeSqliteClient.layer({ filename: ":memory:" });
     const ledger = ledgerLayer.pipe(Layer.provide(database));
-    const send = sendLayer.pipe(Layer.provide(ledger), Layer.provide(database));
+    const send = sendLayer.pipe(
+      Layer.provide(peerDirectoryNoneLayer),
+      Layer.provide(ledger),
+      Layer.provide(database),
+    );
     const threadManagement = Layer.mock(ThreadManagementService)({
       getThreadProjection: () =>
         Effect.succeed({
@@ -533,6 +553,8 @@ it.effect("keeps a message queued behind a held receiver queue undelivered until
     });
     const transport = deliveryTransportLive.pipe(
       Layer.provide(database),
+      Layer.provide(FetchHttpClient.layer),
+      Layer.provide(Layer.mock(PeerRegistryService)({})),
       Layer.provide(threadManagement),
       Layer.provide(Layer.mock(OrchestratorV2)({})),
       Layer.provide(Layer.mock(EffectOutboxV2)({ listByCommandId: () => Effect.succeed([]) })),
@@ -592,6 +614,7 @@ it.effect("delivers a machine's send to its agent receiver instead of withdrawin
     const transport: A2ADeliveryTransportShape = {
       deliverAgent: (input) => Ref.update(delivered, (senders) => [...senders, input.senderId]),
       cancelAgent: () => Effect.succeed("cancelled" as const),
+      deliverPeer: () => Effect.die("peer delivery is not under test"),
       deliverHuman: () => Effect.void,
     };
     yield* Effect.gen(function* () {
@@ -625,9 +648,15 @@ it.effect("delivers to the human through the idempotent inbox-data transport", (
   Effect.gen(function* () {
     const database = NodeSqliteClient.layer({ filename: ":memory:" });
     const ledger = ledgerLayer.pipe(Layer.provide(database));
-    const send = sendLayer.pipe(Layer.provide(ledger), Layer.provide(database));
+    const send = sendLayer.pipe(
+      Layer.provide(peerDirectoryNoneLayer),
+      Layer.provide(ledger),
+      Layer.provide(database),
+    );
     const threadManagement = Layer.mock(ThreadManagementService)({});
     const transport = deliveryTransportLive.pipe(
+      Layer.provide(FetchHttpClient.layer),
+      Layer.provide(Layer.mock(PeerRegistryService)({})),
       Layer.provide(database),
       Layer.provide(threadManagement),
       Layer.provide(Layer.mock(OrchestratorV2)({})),
@@ -716,9 +745,15 @@ it.effect(
     Effect.gen(function* () {
       const database = NodeSqliteClient.layer({ filename: ":memory:" });
       const ledger = ledgerLayer.pipe(Layer.provide(database));
-      const send = sendLayer.pipe(Layer.provide(ledger), Layer.provide(database));
+      const send = sendLayer.pipe(
+        Layer.provide(peerDirectoryNoneLayer),
+        Layer.provide(ledger),
+        Layer.provide(database),
+      );
       const inbox = humanInboxLayer.pipe(Layer.provide(ledger), Layer.provide(database));
       const transport = deliveryTransportLive.pipe(
+        Layer.provide(FetchHttpClient.layer),
+        Layer.provide(Layer.mock(PeerRegistryService)({})),
         Layer.provide(database),
         Layer.provide(Layer.mock(ThreadManagementService)({})),
         Layer.provide(Layer.mock(OrchestratorV2)({})),
@@ -823,8 +858,14 @@ for (const deliveredBeforeClosure of [true, false]) {
       Effect.gen(function* () {
         const database = NodeSqliteClient.layer({ filename: ":memory:" });
         const ledger = ledgerLayer.pipe(Layer.provide(database));
-        const send = sendLayer.pipe(Layer.provide(ledger), Layer.provide(database));
+        const send = sendLayer.pipe(
+          Layer.provide(peerDirectoryNoneLayer),
+          Layer.provide(ledger),
+          Layer.provide(database),
+        );
         const transport = deliveryTransportLive.pipe(
+          Layer.provide(FetchHttpClient.layer),
+          Layer.provide(Layer.mock(PeerRegistryService)({})),
           Layer.provide(database),
           Layer.provide(Layer.mock(ThreadManagementService)({})),
           Layer.provide(Layer.mock(OrchestratorV2)({})),
@@ -1036,6 +1077,7 @@ for (const outcome of ["cancelled", "delivered"] as const) {
             {
               deliverAgent: () => Effect.void,
               cancelAgent: () => Effect.succeed(outcome),
+              deliverPeer: () => Effect.die("peer delivery is not under test"),
               deliverHuman: () => Effect.void,
             },
             {
@@ -1048,3 +1090,77 @@ for (const outcome of ["cancelled", "delivered"] as const) {
     }),
   );
 }
+
+it.effect(
+  "records a peer-accepted delivery as delivered even if the sender retired during the call",
+  () =>
+    Effect.gen(function* () {
+      const database = NodeSqliteClient.layer({ filename: ":memory:" });
+      const ledger = ledgerLayer.pipe(Layer.provide(database));
+      const transportLayer = Layer.succeed(
+        A2ADeliveryTransport,
+        A2ADeliveryTransport.of({
+          deliverAgent: () => Effect.die("local delivery is not under test"),
+          cancelAgent: () => Effect.succeed("cancelled" as const),
+          deliverPeer: () => Effect.void,
+          deliverHuman: () => Effect.void,
+        }),
+      );
+      // The peer has answered 2xx; before this ledger records it, the sender is archived here.
+      const hooks = Layer.effect(
+        A2ADeliveryHooks,
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          return A2ADeliveryHooks.of({
+            afterTransportSuccess: () =>
+              sql`UPDATE j5_a2a_squadron_membership SET archived_at = ${timestamp}
+                WHERE participant_id = ${sender.id}`.pipe(Effect.orDie),
+          });
+        }),
+      ).pipe(Layer.provide(database));
+      const worker = deliveryWorkerLayerWithHooks(false).pipe(
+        Layer.provide(ledger),
+        Layer.provide(database),
+        Layer.provide(transportLayer),
+        Layer.provide(hooks),
+      );
+      yield* Effect.gen(function* () {
+        yield* runJ5A2AMigrations();
+        const squadronId = SquadronId.make("squadron:delivery:peer-race");
+        yield* (yield* A2ALedger).createSquadron({
+          squadron: { id: squadronId, name: "Peer race", createdAt: timestamp },
+        });
+        yield* join(squadronId, sender, "peer-race");
+        yield* (yield* A2ALedger).append({
+          commandId: CommCommandId.make("command:delivery:peer-race:send"),
+          squadronId,
+          acceptedAt: timestamp,
+          event: {
+            kind: "message.sent",
+            sender: sender.id,
+            receiver: receiver.id,
+            exchangeId: null,
+            correlationId: CorrelationId.make("correlation:delivery:peer-race"),
+            payload: {
+              messageId: LedgerMessageId.make("message:delivery:peer-race"),
+              text: "hello over there",
+              originSquadronId: squadronId,
+              receiverSquadronId: SquadronId.make("squadron:home"),
+              receiverEnvironmentId: "environment-home",
+              exchangeRole: "none",
+              envelopeChannel: "peer",
+            },
+            createdAt: timestamp,
+          },
+        });
+        const milestone = yield* (yield* A2ADeliveryWorker).runOnce;
+        assert.equal(milestone?.state, "delivered");
+        const sql = yield* SqlClient.SqlClient;
+        const recorded = yield* sql<{ readonly kind: string }>`
+          SELECT kind FROM j5_a2a_comm_event
+          WHERE squadron_id = ${squadronId} AND kind IN ('message.delivered', 'message.cancelled')
+        `;
+        assert.deepStrictEqual(recorded, [{ kind: "message.delivered" }]);
+      }).pipe(Effect.provide(Layer.mergeAll(database, ledger, transportLayer, worker)));
+    }),
+);

@@ -345,3 +345,51 @@ it.effect(
       ),
     ),
 );
+
+it.effect(
+  "hands the transport every recorded peer with its session status, never dropping a revoked one",
+  () =>
+    Effect.gen(function* () {
+      const add = Effect.gen(function* () {
+        yield* runJ5A2AMigrations();
+        const registry = yield* PeerRegistryService;
+        yield* registry.add({
+          origin: homeOrigin,
+          credential: "home-issued-token",
+          label: "Home",
+          replaceOrigin: false,
+          acceptedAt: timestamp,
+        });
+        return registry;
+      });
+      yield* Effect.gen(function* () {
+        const registry = yield* add;
+        const revoked = yield* registry.connections();
+        assert.equal(
+          revoked.length,
+          1,
+          "revoked in Settings: still listed, so a caller can say why",
+        );
+        assert.equal(revoked[0]!.inboundSession, "missing");
+        assert.equal((yield* registry.connection(home))?.inboundSession, "missing");
+      }).pipe(
+        Effect.provide(
+          makeTestLayer({ replies: { [homeOrigin]: homeHello(`peer:${work}`) }, liveSubjects: [] }),
+        ),
+      );
+      yield* Effect.gen(function* () {
+        const registry = yield* add;
+        const live = yield* registry.connection(home);
+        assert.equal(live?.inboundSession, "active");
+        assert.equal(live?.credential, "home-issued-token");
+        assert.isNull(yield* registry.connection("environment-unknown"));
+      }).pipe(
+        Effect.provide(
+          makeTestLayer({
+            replies: { [homeOrigin]: homeHello(`peer:${work}`) },
+            liveSubjects: [`peer:${home}`],
+          }),
+        ),
+      );
+    }),
+);
