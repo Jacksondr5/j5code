@@ -23,7 +23,6 @@ import {
   matchPlaybookSuggestions,
   playbookMenuItems,
   playbookSelectionText,
-  shouldCompleteComposerMenuSelection,
   presentPlaybook,
   sortPlaybookRuns,
   playbookWorkspaces,
@@ -588,29 +587,4 @@ describe("playbook mention picker", () => {
       "@playbook:code-release ",
     );
   });
-});
-
-describe("shouldCompleteComposerMenuSelection", () => {
-  it.each([
-    ["Enter", "foreground", "review", "review", false],
-    ["Enter", "foreground", "code-review", "code-review", false],
-    ["Enter", "foreground", "rev", "review", true],
-    ["Enter", "foreground", "review", "review-all", true],
-    ["Enter", "foreground", "REVIEW", "review", false],
-    ["Enter", "foreground", "", "review", true],
-    ["Tab", "foreground", "review", "review", true],
-    ["Enter", null, "review", "review", true],
-  ] as const)(
-    "%s with %s intent and query %j selecting %j completes: %s",
-    (key, intent, query, name, expected) => {
-      expect(
-        shouldCompleteComposerMenuSelection(
-          key,
-          intent,
-          { kind: "slash-playbook", query },
-          { type: "playbook", name },
-        ),
-      ).toBe(expected);
-    },
-  );
 });

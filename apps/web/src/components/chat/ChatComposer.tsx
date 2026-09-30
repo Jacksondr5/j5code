@@ -60,7 +60,6 @@ import {
   isPlaybookSlashCommandVisible,
   playbookMenuItems,
   playbookSelectionText,
-  shouldCompleteComposerMenuSelection,
 } from "@t3tools/client-runtime/j5/playbooks";
 import { folderDropTarget, resolveDroppedFolderPath } from "./folderDrop";
 import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
@@ -4421,10 +4420,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         nudgeComposerMenuHighlight("ArrowUp");
         return true;
       }
-      if (
-        selectedItem &&
-        shouldCompleteComposerMenuSelection(key, submissionIntent, trigger, selectedItem)
-      ) {
+      if ((key === "Enter" || key === "Tab") && selectedItem) {
         onSelectComposerItem(selectedItem);
         return true;
       }
