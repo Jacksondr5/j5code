@@ -140,7 +140,7 @@ const harnesses = [
             </div>
             {fork && (
               <div class="sync-row">
-                <dt>Latest upstream commit</dt>
+                <dt>Pinned upstream commit</dt>
                 <dd>
                   <code>{fork.pin}</code>
                   {fork.pinSelectedOn && <span class="sync-dim"> · as of {fork.pinSelectedOn}</span>}
@@ -309,7 +309,7 @@ const harnesses = [
 
       <div class="horizon-grid">
         <article class="horizon-col">
-          <Pennant status="charted" />
+          <Pennant status="horizon" />
           <h3>Cross-server A2A</h3>
           <p>Let agents message other agents, no matter where they are.</p>
           <ul>

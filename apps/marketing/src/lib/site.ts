@@ -30,5 +30,5 @@ export const STATUS_LABEL: Record<ShipStatus, string> = {
 export const STATUS_HELP: Record<ShipStatus, string> = {
   underway: "Ready to use",
   charted: "In dry dock, being built",
-  horizon: "On our roadmap, coming soon",
+  horizon: "On our roadmap",
 };
