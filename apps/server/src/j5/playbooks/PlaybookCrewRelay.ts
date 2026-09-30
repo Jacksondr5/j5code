@@ -113,7 +113,7 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
    * Hands one landing to its owner. The caller holds the Crew's lock. A resolved landing returns
    * its stored delivery. Only a finished run, a retired Crew, or a live definition that no longer
    * has the step skips a landing; anything that can't be read or sent right now leaves it pending
-   * for a retry or the boot sweep, with the reason.
+   * for the Captain's retry or next move, with the reason.
    */
   const handOff = Effect.fn("PlaybookCrewRelay.handOff")(function* (
     runId: string,
@@ -338,8 +338,21 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
   /** Where a Crew's active run is and who holds its step, as Fleet shows it; null when none. */
   const fleetRun = Effect.fn("PlaybookCrewRelay.fleetRun")(function* (crewInstanceId: string) {
     const run = yield* store.activeRunForCrew(crewInstanceId);
-    if (run === null || run.position === null) return null;
+    if (run === null) return null;
     const delivery = yield* currentDelivery(run.runId, run.currentStepId);
+    // The live YAML can't be read, or no longer has the recorded step: Fleet still shows the run
+    // at that step, marked as needing attention.
+    if (run.position === null)
+      return {
+        runId: run.runId,
+        position: 0,
+        total: run.total,
+        stepId: run.currentStepId,
+        stepTitle: run.currentStepId,
+        state: delivery?.state ?? "pending",
+        seat: delivery?.seat ?? null,
+        issue: run.issue?.message ?? "The playbook's current step can't be read.",
+      } satisfies NonNullable<FleetCrew["playbookRun"]>;
     if (delivery === null) return null;
     return {
       runId: run.runId,
@@ -352,24 +365,7 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
     } satisfies NonNullable<FleetCrew["playbookRun"]>;
   });
 
-  /** Boot sweep: hand off every pending landing a crash or a transient failure left behind. */
-  const reconcile = Effect.gen(function* () {
-    const pending = yield* store.pendingLandings(null);
-    const runIds = [...new Set(pending.map(({ runId }) => runId))];
-    for (const runId of runIds)
-      yield* drainRun(runId).pipe(
-        Effect.catch((error) =>
-          Effect.logWarning("J5 playbook hand-off sweep left a landing pending", { runId, error }),
-        ),
-      );
-    return runIds;
-  }).pipe(
-    Effect.catchCause((cause) =>
-      Effect.logError("J5 playbook hand-off sweep failed", { cause }).pipe(Effect.as([])),
-    ),
-  );
-
-  return { start, mutate, current, deliver, drainRun, currentDelivery, fleetRun, reconcile };
+  return { start, mutate, current, deliver, drainRun, currentDelivery, fleetRun };
 });
 
 export class PlaybookCrewRelay extends Context.Service<
@@ -377,17 +373,8 @@ export class PlaybookCrewRelay extends Context.Service<
   Effect.Success<typeof makePlaybookCrewRelay>
 >()("t3/j5/playbooks/PlaybookCrewRelay") {}
 
-const makeLayer = (daemon: boolean) =>
-  Layer.effect(
-    PlaybookCrewRelay,
-    Effect.gen(function* () {
-      const relay = yield* makePlaybookCrewRelay;
-      if (daemon) yield* Effect.forkScoped(relay.reconcile);
-      return relay;
-    }),
-  );
-
-/** Production: the boot sweep runs once the layer is built. */
-export const layer = makeLayer(true);
-/** For tests, which run `reconcile` themselves. */
-export const manualLayer = makeLayer(false);
+/**
+ * Nothing sweeps pending hand-offs in the background: the Captain's next step call, or a retry
+ * of the same one, finishes them before the run moves.
+ */
+export const layer = Layer.effect(PlaybookCrewRelay, makePlaybookCrewRelay);

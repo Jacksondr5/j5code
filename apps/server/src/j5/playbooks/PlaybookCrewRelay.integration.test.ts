@@ -255,7 +255,7 @@ it.layer(TestLayer)("Crew playbook hand-off through the real orchestrator", (it)
       assert.lengthOf(yield* seatNotices, 1);
       assert.isNull((yield* real.landing(started.runId, "start-1"))?.resolvedAt);
 
-      // The prompt changes before the sweep. The receipt replays the committed command without
+      // The prompt changes before the retry. The receipt replays the committed command without
       // comparing payloads, so the seat keeps the notice it already has: no second copy, no error.
       yield* fs.writeFileString(
         definitionPath,
@@ -268,31 +268,23 @@ it.layer(TestLayer)("Crew playbook hand-off through the real orchestrator", (it)
           ],
         }),
       );
-      // The boot sweep re-dispatches the same command id; the receipt replays it.
-      assert.deepStrictEqual(yield* relay.reconcile, [started.runId]);
-      yield* worker.drain();
-      const notices = yield* seatNotices;
-      assert.lengthOf(notices, 1);
-      assert.include(notices[0]?.id, "playbook-step");
-      assert.include(notices[0]?.text, "Read the change.");
-      assert.notInclude(notices[0]?.text, "edited");
-      assert.equal((yield* real.landing(started.runId, "start-1"))?.outcome, "delivered");
-      assert.deepStrictEqual((yield* relay.current(captainThread)).delivery, {
-        state: "delivered",
-        seat: "reviewer",
-        threadId: seatThread,
-      });
-
-      // Nothing moves on its own: the Captain advances, and the unowned step is the Captain's.
+      // Nothing retries on its own. The Captain's next move first finishes the pending landing,
+      // re-dispatching the same command id, which the receipt replays; then it moves, and the
+      // unowned step is the Captain's.
       const next = yield* relay.mutate(captainThread, {
         runId: started.runId,
         operation: "next",
         expectedStepId: "inspect",
         client_request_id: "next-1",
       });
-      assert.equal(next.delivery?.state, "captain");
       yield* worker.drain();
-      assert.lengthOf(yield* seatNotices, 1);
+      assert.equal(next.delivery?.state, "captain");
+      const notices = yield* seatNotices;
+      assert.lengthOf(notices, 1);
+      assert.include(notices[0]?.id, "playbook-step");
+      assert.include(notices[0]?.text, "Read the change.");
+      assert.notInclude(notices[0]?.text, "edited");
+      assert.equal((yield* real.landing(started.runId, "start-1"))?.outcome, "delivered");
     }).pipe(Effect.scoped),
   );
 });

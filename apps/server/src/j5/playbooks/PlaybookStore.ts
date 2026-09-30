@@ -418,17 +418,6 @@ export const makePlaybookStore = Effect.gen(function* () {
     return yield* readPath((yield* definitionPathFor(workspaceRoot, name)).definitionPath);
   }, Effect.mapError(storageError));
 
-  /** The owner thread's active run and the playbook it follows, or null when it has none. */
-  const activeRunFor = Effect.fn("PlaybookStore.activeRunFor")(function* (owner: ThreadId) {
-    const rows = yield* sql<{ run_id: string; definition_path: string }>`SELECT run_id,
-      definition_path FROM j5_playbook_run WHERE owner_thread_id = ${owner} AND status = 'active'
-      LIMIT 1`;
-    const row = rows[0];
-    return row === undefined
-      ? null
-      : { runId: row.run_id, name: path.basename(row.definition_path, ".yaml") };
-  }, Effect.mapError(storageError));
-
   const removeDefinition = Effect.fn("PlaybookStore.removeDefinition")(function* (
     workspaceRoot: string,
     name: string,
@@ -776,7 +765,6 @@ export const makePlaybookStore = Effect.gen(function* () {
     definitionPathFor,
     read,
     readPath,
-    activeRunFor,
     removeDefinition,
     renameDefinition,
     start,

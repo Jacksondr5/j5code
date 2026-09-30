@@ -261,3 +261,24 @@ it("carries each live Crew's playbook run, and null for a Crew without one", () 
     ],
   );
 });
+
+it("carries a run whose playbook can't be read, with its issue, for the header to flag", () => {
+  const playbookRun = {
+    runId: "run:1",
+    position: 0,
+    total: 0,
+    stepId: "review",
+    stepTitle: "review",
+    state: "delivered" as const,
+    seat: "builder",
+    issue: "Cannot read the live playbook.",
+  };
+  const projected = projectFleetSquadron({
+    squadron: { id: squadronId, name: "Fleet" },
+    participants: [],
+    crews: [crew],
+    openAsks: new Map(),
+    playbookRuns: new Map([["crew:1", playbookRun]]),
+  });
+  assert.deepStrictEqual(projected.crews[0]?.playbookRun, playbookRun);
+});

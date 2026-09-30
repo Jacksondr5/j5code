@@ -335,7 +335,7 @@ it.effect("a retried playbook_next hands its step off once and replays the same 
 
 it.effect("the run doesn't move past a hand-off that hasn't finished", () =>
   Effect.gen(function* () {
-    const { start, move, notices, dispatchFault, relay, store } = yield* fixture;
+    const { start, move, notices, dispatchFault, store } = yield* fixture;
     yield* Ref.set(dispatchFault, "transient");
     const run = yield* start("start-1");
     assert.deepStrictEqual(run.delivery, { state: "pending", seat: "a", threadId: seatAThread });
@@ -352,12 +352,16 @@ it.effect("the run doesn't move past a hand-off that hasn't finished", () =>
       [seatAThread, seatBThread],
     );
 
-    // The boot sweep also finishes a pending hand-off before anything else moves.
+    // Nothing retries on its own: after a restart, the Captain's next move finishes a pending
+    // hand-off before it moves.
     yield* Ref.set(dispatchFault, "transient");
     yield* move(run.runId, "back", "review", "back-1");
     yield* Ref.set(dispatchFault, null);
-    assert.deepStrictEqual(yield* relay.reconcile, [run.runId]);
-    assert.lengthOf(yield* notices, 3);
+    yield* move(run.runId, "next", "inspect", "next-2");
+    assert.deepStrictEqual(
+      (yield* notices).map(({ threadId }) => threadId),
+      [seatAThread, seatBThread, seatAThread, seatBThread],
+    );
     assert.lengthOf(yield* store.pendingLandings(null), 0);
   }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );
@@ -396,7 +400,7 @@ it.effect("cancelling with a hand-off still pending cancels and skips it", () =>
     assert.isNull(cancelled.delivery);
     assert.equal((yield* store.landing(run.runId, "start-1"))?.outcome, "skipped");
     yield* Ref.set(dispatchFault, null);
-    assert.deepStrictEqual(yield* relay.reconcile, []);
+    assert.lengthOf(yield* store.pendingLandings(null), 0);
     assert.lengthOf(yield* notices, 0);
   }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );
@@ -471,9 +475,11 @@ it.effect("a hand-off that hasn't finished reads as pending, never as the Captai
     assert.deepStrictEqual((yield* relay.current(captainThread)).delivery, next.delivery);
     assert.lengthOf(yield* notices, 1);
 
-    // No target yet: the owner's thread can't be read, so nothing is persisted.
+    // Retrying the same call once the orchestrator recovers delivers it.
     yield* Ref.set(dispatchFault, null);
-    yield* relay.reconcile;
+    const retried = yield* move(run.runId, "next", "inspect", "next-1");
+    assert.equal(retried.delivery?.state, "delivered");
+    // No target yet: the owner's thread can't be read, so nothing is persisted.
     yield* Ref.set(projectionFault, seatAThread);
     const back = yield* move(run.runId, "back", "review", "back-1");
     const unresolved = { state: "pending", seat: null, threadId: null } as const;
@@ -553,11 +559,25 @@ it.effect("an unreadable playbook keeps a hand-off pending until the YAML is rep
     const path = yield* Path.Path;
     yield* fs.writeFileString(path.join(root, ".j5/playbooks/review.yaml"), "title: [unclosed");
     yield* Ref.set(dispatchFault, null);
-    yield* relay.reconcile;
-    assert.isNull((yield* store.landing(run.runId, "start-1"))?.resolvedAt);
     const blocked = yield* move(run.runId, "next", "inspect", "next-1").pipe(Effect.flip);
     assert.equal(failureCode(blocked), "delivery_pending");
     assert.include(blocked.message, "can't be read");
+    assert.isNull((yield* store.landing(run.runId, "start-1"))?.resolvedAt);
+    // Fleet still shows the run at its recorded step, marked as needing attention.
+    const flagged = yield* relay.fleetRun(crewId);
+    assert.deepStrictEqual(
+      flagged === null ? null : { ...flagged, issue: flagged.issue?.slice(0, 29) },
+      {
+        runId: run.runId,
+        position: 0,
+        total: 0,
+        stepId: "inspect",
+        stepTitle: "inspect",
+        state: "pending",
+        seat: "a",
+        issue: "Cannot read the live playbook",
+      },
+    );
     assert.equal((yield* store.runById(run.runId))?.currentStepId, "inspect");
     assert.lengthOf(yield* notices, 0);
 

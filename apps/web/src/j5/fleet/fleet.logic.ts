@@ -43,9 +43,14 @@ export const playbookRunOwnerLabel = (run: Pick<FleetPlaybookRun, "state" | "sea
 export const fleetCrewAnchorId = (environmentId: string, crewInstanceId: string) =>
   `fleet-crew:${environmentId}:${crewInstanceId}`;
 
-/** "Step N of M: <title> · <who holds it>" for a Crew's header. */
+/**
+ * "Step N of M: <title> · <who holds it>" for a Crew's header, or "Step <id> · needs attention"
+ * when the live playbook can't place the recorded step.
+ */
 export const playbookRunHeader = (run: FleetPlaybookRun) =>
-  `Step ${run.position} of ${run.total}: ${run.stepTitle} · ${playbookRunOwnerLabel(run)}`;
+  run.issue === undefined
+    ? `Step ${run.position} of ${run.total}: ${run.stepTitle} · ${playbookRunOwnerLabel(run)}`
+    : `Step ${run.stepId} · needs attention`;
 
 /** A tree node: an agent, its non-Crew children, and the Crews it commands as collapsible groups. */
 export interface FleetNode {

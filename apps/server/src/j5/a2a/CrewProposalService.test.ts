@@ -1694,22 +1694,16 @@ it.effect(
 );
 
 it.effect(
-  "refuses a playbook Crew while the Captain runs a playbook, and still takes one without",
+  "takes a playbook Crew while the Captain runs a playbook; playbook_start keeps one run per thread",
   () =>
     Effect.gen(function* () {
       const { layer, workspaceRoot } = yield* playbookFixture;
       yield* Effect.gen(function* () {
         const gate = yield* CrewProposalService;
-        const run = yield* (yield* PlaybookStore).start(
-          captainThread,
-          workspaceRoot,
-          "release",
-          "run-1",
-        );
-        const refused = yield* proposeRelease(gate, workspaceRoot).pipe(Effect.flip);
-        assert.equal(refused._tag, "CrewProposalRequestError");
-        assert.include(refused.message, `run ${run.runId}`);
-        assert.include(refused.message, "playbook_complete");
+        yield* (yield* PlaybookStore).start(captainThread, workspaceRoot, "release", "run-1");
+        const opened = yield* proposeRelease(gate, workspaceRoot);
+        assert.equal(opened.proposal.status, "open");
+        assert.equal(opened.playbook?.name, "release");
         const plain = yield* gate.propose({
           requestKey: "plain",
           captain,
@@ -1722,6 +1716,65 @@ it.effect(
         assert.isNull((yield* (yield* AgentCrewProposalService).read(plain.proposal.id))!.playbook);
       }).pipe(Effect.provide(layer));
     }).pipe(Effect.scoped),
+);
+
+it.effect("a Crew whose playbook file is gone still takes a seat that claims no steps", () =>
+  Effect.gen(function* () {
+    const { layer, workspaceRoot, commands } = yield* playbookFixture;
+    yield* Effect.gen(function* () {
+      const gate = withPreview(yield* CrewProposalService);
+      const crews = yield* AgentCrewInstanceService;
+      const opened = yield* proposeRelease(gate, workspaceRoot);
+      const crewId = (yield* gate.resolve({ proposalId: opened.proposal.id, decision: "approve" }))
+        .instance!.id;
+      yield* (yield* FileSystem.FileSystem).remove(
+        (yield* Path.Path).join(workspaceRoot, ".j5/playbooks/release.yaml"),
+      );
+
+      const claiming = yield* gate
+        .requestMember({
+          requestKey: "claims-review",
+          captain,
+          crewInstanceId: crewId,
+          seat: custom("reviewer", ["review"]),
+          brief: null,
+        })
+        .pipe(Effect.flip);
+      assert.equal(claiming._tag, "CrewProposalRequestError");
+      assert.include(
+        claiming.message,
+        "Playbook release, which this crew follows, can no longer be read",
+      );
+      assert.include(claiming.message, "request the seat without steps");
+      assert.notInclude(claiming.message, "No playbook named");
+
+      const filed = yield* gate.requestMember({
+        requestKey: "stepless",
+        captain,
+        crewInstanceId: crewId,
+        seat: custom("helper"),
+        brief: null,
+      });
+      const approved = yield* gate.resolve({ proposalId: filed.proposal.id, decision: "approve" });
+      assert.equal(approved.proposal.status, "approved");
+      const members = (yield* crews.read(crewId))!.members;
+      assert.deepStrictEqual(
+        members.map(({ seatName, playbookStepIds }) => [seatName, playbookStepIds]),
+        [
+          ["planner", ["plan"]],
+          ["builder", ["build"]],
+          ["helper", []],
+        ],
+      );
+      const brief = (yield* Ref.get(commands)).findLast(
+        (command) => command.type === "message.dispatch",
+      );
+      assert.include(
+        brief?.type === "message.dispatch" ? brief.text : "",
+        "<seat_playbook>\nplaybook: release (release)\nyour_steps: none\n</seat_playbook>",
+      );
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
 );
 
 it.effect("records a persona swap in the stored seats and returns it on the preview", () =>
