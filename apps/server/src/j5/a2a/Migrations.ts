@@ -23,11 +23,12 @@ import Migration0019 from "./migrations/019_PlaybookRunMaintenance.ts";
 import Migration0020 from "./migrations/020_CrewAlertExchanges.ts";
 import Migration0021 from "./migrations/021_CrewProposalsResolveOnce.ts";
 import Migration0022 from "./migrations/022_CrewRetiredWithCaptain.ts";
+import Migration0023 from "./migrations/023_Peers.ts";
 
 export const J5_A2A_MIGRATIONS_TABLE = "j5_a2a_migrations";
 
-// Entries 1 through 13 are persisted migration history. Keep their file and manifest names unchanged;
-// applied migrations are skipped by id and never rerun.
+// Every entry already in this list is persisted migration history: keep its id, file, and
+// manifest name unchanged. Applied migrations are skipped by id and never rerun.
 export const migrationEntries = [
   [1, "EpicCommunicationLedger", Migration0001],
   [2, "SendDeliverReply", Migration0002],
@@ -55,6 +56,7 @@ export const migrationEntries = [
   [20, "CrewAlertExchanges", Migration0020],
   [21, "CrewProposalsResolveOnce", Migration0021],
   [22, "CrewRetiredWithCaptain", Migration0022],
+  [23, "Peers", Migration0023],
 ] as const;
 
 const makeMigrationLoader = (throughId?: number) =>
