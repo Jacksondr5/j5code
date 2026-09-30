@@ -734,7 +734,9 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
           const { participant } = yield* machines.register({
             commandId: CommCommandId.make(seededId(runId, "machine:register")),
             squadronId,
-            name: "seed-watchdog",
+            // Machine names are unique across Squadrons, and every run makes a
+            // new Squadron, so a reused home needs a per-run name.
+            name: `seed-watchdog-${runId.slice(-12)}`,
             acceptedAt: now,
           });
           const result = yield* sender.sendAsMachine({

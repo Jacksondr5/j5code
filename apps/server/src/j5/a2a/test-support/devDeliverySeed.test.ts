@@ -84,7 +84,10 @@ it.effect("requires an explicit isolated base and emits a provider-safe receipt"
       assert.isTrue(
         receipt.scenarios.ta3Silence.noticeDeliveryMessageId.startsWith("message:j5:a2a:delivery:"),
       );
-      assert.match(receipt.scenarios.machineMessage.senderParticipantId, /^machine:seed-watchdog$/);
+      assert.match(
+        receipt.scenarios.machineMessage.senderParticipantId,
+        /^machine:seed-watchdog-[0-9a-f]{12}$/,
+      );
       assert.isTrue(
         receipt.scenarios.machineMessage.deliveryMessageId.startsWith("message:j5:a2a:delivery:"),
       );
@@ -124,6 +127,14 @@ it.effect("requires an explicit isolated base and emits a provider-safe receipt"
         lock.exec("ROLLBACK");
         lock.close();
       }
+      // A reused home seeds again: each run registers its own machine sender.
+      const rerun = yield* runDevDeliverySeed(baseDir).pipe(
+        Effect.provide(Logger.layer([], { mergeWithExisting: false })),
+      );
+      assert.notEqual(
+        rerun.scenarios.machineMessage.senderParticipantId,
+        receipt.scenarios.machineMessage.senderParticipantId,
+      );
     } finally {
       yield* fileSystem.remove(baseDir, { recursive: true, force: true }).pipe(Effect.ignore);
     }
