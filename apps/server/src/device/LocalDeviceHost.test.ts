@@ -5,7 +5,10 @@ import {
   HostProcessPlatform,
   HostProcessIsExecutable,
 } from "@t3tools/shared/hostProcess";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
+import * as TestClock from "effect/testing/TestClock";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as FileSystem from "effect/FileSystem";
@@ -183,6 +186,25 @@ describe("agent-device daemon liveness", () => {
       const alive = LocalDeviceHost.__testing.agentDeviceDaemonAlive;
       expect(yield* alive(clientAnswering(200), "http://127.0.0.1:50639")).toBe(true);
       expect(yield* alive(clientAnswering(503), "http://127.0.0.1:50639")).toBe(false);
+    }),
+  );
+
+  it.effect("treats a daemon that stalls mid-response as dead", () =>
+    Effect.gen(function* () {
+      // Headers arrive, but the body never finishes.
+      const stalled = HttpClient.make((request) =>
+        Effect.succeed(
+          HttpClientResponse.fromWeb(
+            request,
+            new Response(new ReadableStream({ start: () => undefined }), { status: 200 }),
+          ),
+        ),
+      );
+      const probe = yield* Effect.forkChild(
+        LocalDeviceHost.__testing.agentDeviceDaemonAlive(stalled, "http://127.0.0.1:50639"),
+      );
+      yield* TestClock.adjust(Duration.seconds(2));
+      expect(yield* Fiber.join(probe)).toBe(false);
     }),
   );
 

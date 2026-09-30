@@ -207,9 +207,11 @@ const agentDeviceDaemonAlive = (httpClient: HttpClient.HttpClient, baseUrl: stri
   HttpClient.withScope(httpClient)
     .get(`${baseUrl}/health`)
     .pipe(
-      Effect.timeout(Duration.seconds(2)),
       Effect.flatMap((response) => response.arrayBuffer.pipe(Effect.as(response.status === 200))),
       Effect.scoped,
+      // The limit covers the body too: a daemon that sends headers and then
+      // stalls must still count as dead.
+      Effect.timeout(Duration.seconds(2)),
       Effect.orElseSucceed(() => false),
     );
 
