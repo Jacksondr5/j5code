@@ -552,7 +552,7 @@ it.effect("a retry after later moves reports who holds the step it shows, and se
 
 it.effect("an unreadable playbook keeps a hand-off pending until the YAML is repaired", () =>
   Effect.gen(function* () {
-    const { start, move, relay, store, write, root, notices, dispatchFault } = yield* fixture;
+    const { start, move, store, write, root, notices, dispatchFault } = yield* fixture;
     yield* Ref.set(dispatchFault, "transient");
     const run = yield* start("start-1");
     const fs = yield* FileSystem.FileSystem;
