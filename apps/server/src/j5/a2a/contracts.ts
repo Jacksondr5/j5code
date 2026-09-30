@@ -1,4 +1,5 @@
 import { ChatAttachment, ThreadId } from "@t3tools/contracts";
+import { PeerTerminalFact } from "@t3tools/contracts/j5";
 import * as Schema from "effect/Schema";
 
 const Identifier = Schema.String.check(Schema.isNonEmpty());
@@ -154,6 +155,8 @@ export const MessageReceivedPayload = Schema.Struct({
   /** The id and clock the origin used; this ledger keys and stamps the message itself. */
   originMessageId: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
   originCreatedAt: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
+  /** "none": the row records a fact (a withdrawal) and injects nothing into the receiver's thread. */
+  injection: Schema.optional(Schema.Literal("none")),
   message: Schema.Json,
 });
 export type MessageReceivedPayload = typeof MessageReceivedPayload.Type;
@@ -241,6 +244,8 @@ export type ExchangeOpenedPayload = typeof ExchangeOpenedPayload.Type;
 
 export const MessageSentPayload = Schema.Struct({
   attachments: Schema.optional(Schema.Array(ChatAttachment)),
+  /** Present on a terminal notice headed to a peer server: the fact it carries, fixed when the notice is written. */
+  terminal: Schema.optional(PeerTerminalFact),
   messageId: LedgerMessageId,
   text: Schema.String.check(Schema.isNonEmpty()),
   originSquadronId: SquadronId,

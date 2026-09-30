@@ -224,6 +224,58 @@ const makeLayer = (daemon: boolean) =>
         });
       });
 
+      /**
+       * What the peer needs beyond the row: an ask carries its intent so the
+       * peer opens the Exchange, and a terminal notice carries the fact the
+       * notice was written with, read back from the sent row, never from
+       * whatever the Exchange says by the time the row is delivered. A silence
+       * notice is not part of its Exchange, so it names the Exchange it concerns
+       * from the silence.notice event its own command recorded.
+       */
+      const peerBodyFacts = Effect.fn("j5.a2a.delivery.peerBodyFacts")(function* (
+        row: DeliveryRow,
+      ) {
+        if (row.envelope_channel === "silence_notice") {
+          const regarding = yield* sql<{ readonly exchange_id: string | null }>`
+            SELECT notice.exchange_id
+            FROM j5_a2a_comm_event AS sent
+            JOIN j5_a2a_comm_event AS notice
+              ON notice.squadron_id = sent.squadron_id
+             AND notice.command_id = sent.command_id
+             AND notice.kind = 'silence.notice'
+            WHERE sent.squadron_id = ${row.squadron_id} AND sent.seq = ${row.sent_seq}
+            LIMIT 1
+          `;
+          const exchangeId = regarding[0]?.exchange_id;
+          return exchangeId == null ? {} : { regardingExchangeId: exchangeId };
+        }
+        if (row.exchange_id === null) return {};
+        if (row.exchange_role === "ask") {
+          const intent = yield* sql<{ readonly intent: string }>`
+            SELECT intent FROM j5_a2a_exchange
+            WHERE squadron_id = ${row.squadron_id} AND exchange_id = ${row.exchange_id}
+            LIMIT 1
+          `;
+          return intent[0] === undefined ? {} : { intent: intent[0].intent };
+        }
+        if (row.exchange_role === "terminal_notice") {
+          const sent = yield* sql<{ readonly payload: string }>`
+            SELECT payload FROM j5_a2a_comm_event
+            WHERE squadron_id = ${row.squadron_id} AND seq = ${row.sent_seq}
+            LIMIT 1
+          `;
+          if (sent[0] === undefined) return {};
+          const payload = yield* decodeSentPayload(sent[0].payload).pipe(
+            Effect.mapError(
+              (cause) =>
+                new A2ADeliveryTransportError({ operation: "read terminal notice", cause }),
+            ),
+          );
+          return payload.terminal === undefined ? {} : { terminal: payload.terminal };
+        }
+        return {};
+      });
+
       const attemptDelivery = Effect.fn("j5.a2a.delivery.attempt")(function* (
         row: DeliveryRow,
         attempt: number,
@@ -251,6 +303,7 @@ const makeLayer = (daemon: boolean) =>
             message: row.message_text,
             envelopeChannel: row.envelope_channel,
             createdAt: row.created_at,
+            ...(yield* peerBodyFacts(row)),
           });
         } else if (isHumanParticipantId(receiverId)) {
           yield* appendReceiverEntry(row);

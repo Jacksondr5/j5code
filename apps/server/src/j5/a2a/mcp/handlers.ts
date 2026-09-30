@@ -472,7 +472,7 @@ const handlers = {
       const scope = yield* McpInvocationContext;
       const service = yield* A2ASendService;
       const acceptedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
-      return yield* service.clearOwnAsk({
+      const cleared = yield* service.clearOwnAsk({
         commandId: commandIdForRequest({
           toolName: "clear_own_ask",
           providerSessionId: scope.providerSessionId,
@@ -482,6 +482,10 @@ const handlers = {
         exchangeId: input.exchange_id,
         acceptedAt,
       });
+      // A withdrawal addressed to a peer is a pending delivery; wake the worker as a send does.
+      const { withdrawalQueued, ...result } = cleared;
+      if (withdrawalQueued) yield* (yield* A2ADeliveryWorker).notify;
+      return result;
     }).pipe(Effect.mapError(failure)),
   list_participants: (input) =>
     Effect.gen(function* () {

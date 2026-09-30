@@ -29,6 +29,7 @@ import {
   CommCommandId,
   CorrelationId,
   ExchangeId,
+  LedgerMessageId,
   ParticipantId,
   SquadronId,
   type AgentParticipant,
@@ -223,30 +224,68 @@ it.effect("lets the local agent reply to a peer's ask as an ordinary same-Squadr
   }),
 );
 
+/** Triage asked the remote agent on Home: the Exchange and the outbound ask that recorded Home as its route. */
+const recordLocalAsk = Effect.fn("test.j5.a2a.peer.inbound.recordLocalAsk")(function* () {
+  yield* (yield* A2ALedger).appendEvents({
+    commandId: CommCommandId.make("command:peer-inbound:local-ask"),
+    squadronId: localSquadron,
+    acceptedAt: timestamp,
+    events: [
+      {
+        kind: "exchange.opened",
+        sender: triage.id,
+        receiver: remoteAsker,
+        exchangeId: ExchangeId.make("exchange:j5:a2a:local-ask"),
+        correlationId: CorrelationId.make("correlation:j5:a2a:local-ask"),
+        payload: { intent: "schema target", urgency: null },
+        createdAt: timestamp,
+      },
+      {
+        kind: "message.sent",
+        sender: triage.id,
+        receiver: remoteAsker,
+        exchangeId: ExchangeId.make("exchange:j5:a2a:local-ask"),
+        correlationId: CorrelationId.make("correlation:j5:a2a:local-ask"),
+        payload: {
+          messageId: LedgerMessageId.make("message:j5:a2a:local-ask"),
+          text: "Which schema version do we target?",
+          originSquadronId: localSquadron,
+          receiverSquadronId: homeSquadron,
+          receiverEnvironmentId: homeEnvironment,
+          exchangeRole: "ask",
+          envelopeChannel: "peer",
+        },
+        createdAt: timestamp,
+      },
+      // Already delivered, so the worker under test has only the inbound rows left.
+      {
+        kind: "message.delivered",
+        sender: triage.id,
+        receiver: remoteAsker,
+        exchangeId: ExchangeId.make("exchange:j5:a2a:local-ask"),
+        correlationId: CorrelationId.make("correlation:j5:a2a:local-ask"),
+        payload: {
+          messageId: LedgerMessageId.make("message:j5:a2a:local-ask"),
+          attempt: 1,
+          channel: "agent",
+        },
+        createdAt: timestamp,
+      },
+    ],
+  });
+});
+
 it.effect("closes the local agent's open ask when the peer's reply arrives", () =>
   Effect.gen(function* () {
     const delivered = yield* Ref.make<Array<AgentDeliveryInput>>([]);
     yield* Effect.gen(function* () {
       yield* setup();
       const inbound = yield* PeerInboundService;
-      const ledger = yield* A2ALedger;
       const worker = yield* A2ADeliveryWorker;
       const sql = yield* SqlClient.SqlClient;
-      // The local agent asked the remote one earlier; only the Exchange fact matters here.
-      yield* ledger.append({
-        commandId: CommCommandId.make("command:peer-inbound:local-ask"),
-        squadronId: localSquadron,
-        acceptedAt: timestamp,
-        event: {
-          kind: "exchange.opened",
-          sender: triage.id,
-          receiver: remoteAsker,
-          exchangeId: ExchangeId.make("exchange:j5:a2a:local-ask"),
-          correlationId: CorrelationId.make("correlation:j5:a2a:local-ask"),
-          payload: { intent: "schema target", urgency: null },
-          createdAt: timestamp,
-        },
-      });
+      // The local agent asked the remote one earlier: the Exchange plus the
+      // delivery row that records which peer the ask went to.
+      yield* recordLocalAsk();
 
       yield* inbound.receive({
         ...askWithoutIntent,
@@ -360,14 +399,50 @@ it.effect(
         const cases: ReadonlyArray<[Partial<PeerInboundInput>, string]> = [
           [{ senderId: "human:someone", exchangeRole: "reply", exchangeId: "exchange:x" }, "human"],
           [{ senderId: "machine:watchdog" }, "machine"],
+          // The platform speaks only as the two ids that end Exchanges, each on its own channel, carrying the fact.
+          [{ senderId: "platform:someone-else", envelopeChannel: "lifecycle_notice" }, "platform"],
           [
             {
               senderId: "platform:silence-detector",
-              envelopeChannel: "silence_notice",
+              envelopeChannel: "lifecycle_notice",
+              exchangeRole: "terminal_notice",
+              exchangeId: "exchange:x",
+              terminal: { kind: "sender-cleared" },
+            },
+            "platform",
+          ],
+          [
+            {
+              senderId: "platform:lifecycle",
+              envelopeChannel: "lifecycle_notice",
               exchangeRole: "terminal_notice",
               exchangeId: "exchange:x",
             },
             "platform",
+          ],
+          // Well-formed, but about an Exchange this peer is no party to.
+          [
+            {
+              senderId: "platform:lifecycle",
+              envelopeChannel: "lifecycle_notice",
+              exchangeRole: "terminal_notice",
+              exchangeId: "exchange:x",
+              terminal: { kind: "sender-cleared" },
+            },
+            "exchange",
+          ],
+          // The silence detector's notice: not part of an Exchange, naming the one it concerns.
+          [
+            { senderId: "platform:silence-detector", envelopeChannel: "silence_notice" },
+            "platform",
+          ],
+          [
+            {
+              senderId: "platform:silence-detector",
+              envelopeChannel: "silence_notice",
+              regardingExchangeId: "exchange:x",
+            },
+            "exchange",
           ],
           [{ envelopeChannel: "lifecycle_notice" }, "channel"],
           [{ exchangeRole: "terminal_notice", exchangeId: "exchange:x" }, "role"],
@@ -421,6 +496,202 @@ it.effect("keys the received message by origin and stamps it with this server's 
       );
       assert.equal((yield* worker.runOnce)?.state, "delivered");
       assert.equal((yield* Ref.get(delivered))[0]!.messageId, rows[0]!.message_id);
+    }).pipe(Effect.provide(makeTestLayer(delivered)));
+  }),
+);
+
+it.effect(
+  "drops the local Exchange the same way the origin did when a terminal notice arrives",
+  () =>
+    Effect.gen(function* () {
+      const delivered = yield* Ref.make<Array<AgentDeliveryInput>>([]);
+      yield* Effect.gen(function* () {
+        yield* setup();
+        const inbound = yield* PeerInboundService;
+        const worker = yield* A2ADeliveryWorker;
+        const sql = yield* SqlClient.SqlClient;
+        // The remote agent asked triage; the remote agent is then archived over there.
+        yield* inbound.receive(ask);
+        yield* inbound.receive({
+          ...askWithoutIntent,
+          messageId: "message:j5:a2a:lifecycle:drop:remote",
+          senderId: "platform:lifecycle",
+          correlationId: "correlation:j5:a2a:lifecycle:drop:remote",
+          exchangeRole: "terminal_notice",
+          envelopeChannel: "lifecycle_notice",
+          text: "[Cross-agent messaging system notice: exchange dropped]",
+          terminal: {
+            kind: "dropped",
+            cause: {
+              kind: "participant-archived",
+              participantId: remoteAsker,
+              squadronId: homeSquadron,
+            },
+          },
+        });
+        const exchange = yield* sql<{ readonly status: string }>`
+        SELECT status FROM j5_a2a_exchange WHERE exchange_id = ${ask.exchangeId}
+      `;
+        assert.deepStrictEqual(exchange, [{ status: "dropped" }]);
+        const dropped = yield* sql<{ readonly disposition: string; readonly notice: string }>`
+        SELECT json_extract(payload, '$.disposition') AS disposition,
+               json_extract(payload, '$.noticeMessageId') AS notice
+        FROM j5_a2a_comm_event WHERE kind = 'exchange.dropped' AND exchange_id = ${ask.exchangeId}
+      `;
+        // The notice is keyed the way every peer row is: by origin, under this ledger's namespace.
+        assert.deepStrictEqual(dropped, [
+          {
+            disposition: "sender-retired",
+            notice: localMessageId("message:j5:a2a:lifecycle:drop:remote"),
+          },
+        ]);
+        // Both the ask and the notice still reach the agent's thread.
+        assert.equal((yield* worker.runOnce)?.state, "delivered");
+        assert.equal((yield* worker.runOnce)?.state, "delivered");
+        assert.deepStrictEqual(
+          (yield* Ref.get(delivered)).map((row) => row.envelopeChannel),
+          ["peer", "lifecycle_notice"],
+        );
+      }).pipe(Effect.provide(makeTestLayer(delivered)));
+    }),
+);
+
+it.effect("lets a peer speak only for agents it owns, and end only Exchanges it is party to", () =>
+  Effect.gen(function* () {
+    const delivered = yield* Ref.make<Array<AgentDeliveryInput>>([]);
+    yield* Effect.gen(function* () {
+      yield* setup();
+      const inbound = yield* PeerInboundService;
+      const sql = yield* SqlClient.SqlClient;
+      yield* recordLocalAsk();
+
+      // A different peer claims to be the agent Home owns: refused outright.
+      const impostor = yield* Effect.flip(
+        inbound.receive({
+          ...askWithoutIntent,
+          originEnvironmentId: "environment-stranger",
+          messageId: "message:j5:a2a:impostor-reply",
+          exchangeId: "exchange:j5:a2a:local-ask",
+          correlationId: "correlation:j5:a2a:impostor-reply",
+          exchangeRole: "reply",
+          text: "v99.",
+        }),
+      );
+      assert.equal(impostor._tag, "A2APeerSenderNotOwnedError");
+      // A peer claiming one of our own agents as its sender: refused too.
+      const localClaim = yield* Effect.flip(
+        inbound.receive({
+          ...askWithoutIntent,
+          senderId: triage.id,
+          messageId: "message:j5:a2a:local-claim",
+          correlationId: "correlation:j5:a2a:local-claim",
+          exchangeRole: "none",
+          exchangeId: null,
+        }),
+      );
+      assert.equal(localClaim._tag, "A2APeerSenderNotOwnedError");
+      const stillOpen = yield* sql<{ readonly status: string }>`
+        SELECT status FROM j5_a2a_exchange WHERE exchange_id = 'exchange:j5:a2a:local-ask'
+      `;
+      assert.deepStrictEqual(stillOpen, [{ status: "open" }]);
+
+      // A terminal notice naming a retired party that is not the Exchange's other party drops nothing.
+      yield* inbound.receive({
+        ...askWithoutIntent,
+        senderId: "platform:lifecycle",
+        messageId: "message:j5:a2a:wrong-terminal",
+        exchangeId: "exchange:j5:a2a:local-ask",
+        correlationId: "correlation:j5:a2a:wrong-terminal",
+        exchangeRole: "terminal_notice",
+        envelopeChannel: "lifecycle_notice",
+        text: "notice",
+        terminal: {
+          kind: "dropped",
+          cause: {
+            kind: "participant-archived",
+            participantId: "agent:j5:a2a:thread:somebody-else",
+            squadronId: homeSquadron,
+          },
+        },
+      });
+      const afterWrongNotice = yield* sql<{ readonly status: string }>`
+        SELECT status FROM j5_a2a_exchange WHERE exchange_id = 'exchange:j5:a2a:local-ask'
+      `;
+      assert.deepStrictEqual(afterWrongNotice, [{ status: "open" }]);
+    }).pipe(Effect.provide(makeTestLayer(delivered)));
+  }),
+);
+
+it.effect("closes the local Exchange as sender-cleared when the remote asker withdraws", () =>
+  Effect.gen(function* () {
+    const delivered = yield* Ref.make<Array<AgentDeliveryInput>>([]);
+    yield* Effect.gen(function* () {
+      yield* setup();
+      const inbound = yield* PeerInboundService;
+      const sql = yield* SqlClient.SqlClient;
+      yield* inbound.receive(ask);
+      yield* inbound.receive({
+        ...askWithoutIntent,
+        senderId: "platform:lifecycle",
+        messageId: "message:j5:a2a:withdraw:remote",
+        correlationId: "correlation:j5:a2a:withdraw:remote",
+        exchangeRole: "terminal_notice",
+        envelopeChannel: "lifecycle_notice",
+        text: "[Cross-agent messaging system notice: exchange withdrawn]",
+        terminal: { kind: "sender-cleared" },
+      });
+      const closed = yield* sql<{ readonly status: string; readonly closure: string | null }>`
+        SELECT e.status, json_extract(c.payload, '$.closureKind') AS closure
+        FROM j5_a2a_exchange e
+        LEFT JOIN j5_a2a_comm_event c ON c.exchange_id = e.exchange_id AND c.kind = 'exchange.closed'
+        WHERE e.exchange_id = ${ask.exchangeId}
+      `;
+      assert.deepStrictEqual(closed, [{ status: "closed", closure: "sender-cleared" }]);
+      // The fact is recorded, the ask is still delivered, and no notice is injected into the agent's thread.
+      const pending = yield* sql<{ readonly envelope_channel: string }>`
+        SELECT envelope_channel FROM j5_a2a_delivery ORDER BY sent_seq
+      `;
+      assert.deepStrictEqual(pending, [{ envelope_channel: "peer" }]);
+      const facts = yield* sql<{ readonly injection: string | null }>`
+        SELECT json_extract(payload, '$.injection') AS injection
+        FROM j5_a2a_comm_event WHERE kind = 'message.received' ORDER BY seq
+      `;
+      assert.deepStrictEqual(facts, [{ injection: null }, { injection: "none" }]);
+    }).pipe(Effect.provide(makeTestLayer(delivered)));
+  }),
+);
+
+it.effect("delivers a silence notice about an Exchange this peer holds with the local asker", () =>
+  Effect.gen(function* () {
+    const delivered = yield* Ref.make<Array<AgentDeliveryInput>>([]);
+    yield* Effect.gen(function* () {
+      yield* setup();
+      const inbound = yield* PeerInboundService;
+      const worker = yield* A2ADeliveryWorker;
+      // Triage asked Home's agent; Home's detector says the answerer went quiet.
+      yield* recordLocalAsk();
+      const silence = {
+        ...askWithoutIntent,
+        senderId: "platform:silence-detector",
+        receiverId: triage.id,
+        messageId: "message:j5:a2a:silence:remote",
+        correlationId: "correlation:j5:a2a:silence:remote",
+        exchangeId: null,
+        exchangeRole: "none" as const,
+        envelopeChannel: "silence_notice" as const,
+        text: "[Cross-agent messaging system notice: turn ended without a reply]",
+        regardingExchangeId: "exchange:j5:a2a:local-ask",
+      };
+      // Another server may not speak about Home's Exchange.
+      const stranger = yield* Effect.flip(
+        inbound.receive({ ...silence, originEnvironmentId: "environment-stranger" }),
+      );
+      assert.equal((stranger as { readonly reason?: string }).reason, "exchange");
+      yield* inbound.receive(silence);
+      assert.equal((yield* worker.runOnce)?.state, "delivered");
+      const told = (yield* Ref.get(delivered)).at(-1)!;
+      assert.equal(told.envelopeChannel, "silence_notice");
+      assert.equal(told.receiverId, triage.id);
     }).pipe(Effect.provide(makeTestLayer(delivered)));
   }),
 );

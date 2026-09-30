@@ -99,6 +99,12 @@ export interface PeerDeliveryInput extends AgentDeliveryInput {
   /** The delivery row's correlation id; the worker already holds it, so the transport never re-reads it. */
   readonly correlationId: string;
   readonly createdAt: string;
+  /** An ask's intent, so the peer can open the Exchange on its side. */
+  readonly intent?: string;
+  /** A terminal notice's closing fact, as written on the notice itself. */
+  readonly terminal?: PeerDeliveryRequest["terminal"];
+  /** A silence notice's Exchange, as recorded beside the notice. */
+  readonly regardingExchangeId?: string;
 }
 
 const PEER_DELIVERY_TIMEOUT = Duration.seconds(15);
@@ -153,7 +159,6 @@ interface HumanExchangeRow {
 }
 
 const decodeParticipant = Schema.decodeUnknownEffect(Schema.fromJsonString(Participant));
-
 const assertNever = (channel: never): never => {
   throw new Error(`Unsupported A2A delivery envelope channel: ${String(channel)}`);
 };
@@ -452,15 +457,6 @@ export const live: Layer.Layer<
               state: `peer ${input.receiverEnvironmentId} is no longer recorded on this server`,
             });
           }
-          // An ask carries its intent so the peer can open the Exchange on its side.
-          const intentRows =
-            input.exchangeRole === "ask" && input.exchangeId !== null
-              ? yield* sql<{ readonly intent: string }>`
-                  SELECT intent FROM j5_a2a_exchange
-                  WHERE squadron_id = ${input.originSquadronId} AND exchange_id = ${input.exchangeId}
-                  LIMIT 1
-                `
-              : [];
           const body = {
             messageId: input.messageId,
             senderId: input.senderId,
@@ -471,7 +467,11 @@ export const live: Layer.Layer<
             envelopeChannel: input.envelopeChannel,
             text: input.message,
             originSquadronId: input.originSquadronId,
-            ...(intentRows[0] === undefined ? {} : { intent: intentRows[0].intent }),
+            ...(input.intent === undefined ? {} : { intent: input.intent }),
+            ...(input.terminal === undefined ? {} : { terminal: input.terminal }),
+            ...(input.regardingExchangeId === undefined
+              ? {}
+              : { regardingExchangeId: input.regardingExchangeId }),
             createdAt: input.createdAt,
           } satisfies PeerDeliveryRequest;
           const request = yield* HttpClientRequest.bodyJson(

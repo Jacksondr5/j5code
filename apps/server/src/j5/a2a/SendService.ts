@@ -19,6 +19,7 @@ import {
   isMachineParticipantId,
   LedgerMessageId,
   MessageSentPayload,
+  LIFECYCLE_PARTICIPANT_ID,
   Participant,
   type ParticipantDirectoryRow,
   ParticipantId,
@@ -32,6 +33,7 @@ import { resolveThreadHome } from "./HomeRegistrar.ts";
 import { isRegisteredHumanPerson, listRegisteredHumanPersonIds } from "./HumanPersonRegistry.ts";
 import { A2ALedgerTransactionWriter, A2ALedger, type A2ALedgerError } from "./LedgerService.ts";
 import { PeerDirectory, type PeerDirectoryError } from "./PeerDirectory.ts";
+import { findPeerCounterparty, findPeerRoute } from "./peerCounterparty.ts";
 
 const encodeSentPayload = Schema.encodeEffect(Schema.toCodecJson(MessageSentPayload));
 
@@ -351,6 +353,21 @@ const exchangeIdFor = (commandId: CommCommandId) =>
 const correlationIdFor = (commandId: CommCommandId) =>
   CorrelationId.make(`correlation:j5:a2a:${encodeURIComponent(commandId)}`);
 
+const withdrawalMessageIdFor = (commandId: CommCommandId) =>
+  LedgerMessageId.make(`message:j5:a2a:withdraw:${encodeURIComponent(commandId)}`);
+
+/** Platform-authored, like the retirement notice: the asker cleared its own ask, nothing is owed. */
+export const formatWithdrawalNotice = (input: {
+  readonly exchangeId: ExchangeId;
+  readonly askerId: ParticipantId;
+}): string =>
+  [
+    "[Cross-agent messaging system notice: exchange withdrawn]",
+    `Exchange ${input.exchangeId} was withdrawn by ${input.askerId}, who no longer needs an answer.`,
+    "Your reply obligation has ended; do not reply to this Exchange.",
+    "This is a platform-authored terminal notice, not a peer reply.",
+  ].join("\n\n");
+
 interface ResolvedSender {
   readonly squadronId: SquadronId;
   readonly participantId: ParticipantId;
@@ -364,9 +381,9 @@ interface ResolvedReceiver {
   readonly environmentId: string | null;
 }
 
-interface RecordedRouteRow {
-  readonly environment_id: string;
-  readonly squadron_id: string;
+/** What the tool reports, plus whether a withdrawal now waits for the delivery worker. Agents never see the flag. */
+export interface ClearOwnAskOutcome extends ClearOwnAskResult {
+  readonly withdrawalQueued: boolean;
 }
 
 /** The send body once the sender is resolved; agents and machines share it. */
@@ -378,7 +395,9 @@ export interface A2ASendServiceShape {
   readonly sendAsMachine: (
     input: SendAsMachineInput,
   ) => Effect.Effect<SendMessageResult, A2ASendError>;
-  readonly clearOwnAsk: (input: ClearOwnAskInput) => Effect.Effect<ClearOwnAskResult, A2ASendError>;
+  readonly clearOwnAsk: (
+    input: ClearOwnAskInput,
+  ) => Effect.Effect<ClearOwnAskOutcome, A2ASendError>;
   readonly listParticipants: (
     senderThreadId: ThreadId,
     includeArchived?: boolean,
@@ -516,36 +535,8 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
       const recordedRoute = Effect.fn("j5.a2a.send.recordedRoute")(function* (
         id: ParticipantId,
       ): Effect.fn.Return<ResolvedReceiver | null, SqlError> {
-        const outbound = yield* sql<RecordedRouteRow>`
-          SELECT receiver_environment_id AS environment_id, receiver_squadron_id AS squadron_id
-          FROM j5_a2a_delivery
-          WHERE receiver_id = ${id} AND receiver_environment_id IS NOT NULL
-          ORDER BY sent_seq DESC
-          LIMIT 1
-        `;
-        const inbound =
-          outbound[0] !== undefined
-            ? []
-            : yield* sql<RecordedRouteRow>`
-                SELECT
-                  json_extract(payload, '$.originEnvironmentId') AS environment_id,
-                  json_extract(payload, '$.originSquadronId') AS squadron_id
-                FROM j5_a2a_comm_event
-                WHERE kind = 'message.received'
-                  AND sender = ${id}
-                  AND json_extract(payload, '$.originEnvironmentId') IS NOT NULL
-                ORDER BY seq DESC
-                LIMIT 1
-              `;
-        const row = outbound[0] ?? inbound[0];
-        return row === undefined
-          ? null
-          : {
-              squadronId: SquadronId.make(row.squadron_id),
-              participantId: id,
-              kind: "agent",
-              environmentId: row.environment_id,
-            };
+        const route = yield* findPeerRoute(sql, id);
+        return route === null ? null : { participantId: id, kind: "agent", ...route };
       });
 
       /**
@@ -1052,7 +1043,8 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
               exchangeId: input.exchangeId,
               closureKind: "sender-cleared",
               closedAt: replay[0]!.created_at,
-            } satisfies ClearOwnAskResult;
+              withdrawalQueued: false,
+            } satisfies ClearOwnAskOutcome;
           }
 
           const rows = yield* sql<ExchangeRow>`
@@ -1080,41 +1072,82 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
             });
           }
 
-          const result = yield* ledger.append({
-            commandId: input.commandId,
-            squadronId: SquadronId.make(exchange.squadron_id),
-            acceptedAt: input.acceptedAt,
-            event: {
-              kind: "exchange.closed",
-              sender: sender.participantId,
-              receiver: ParticipantId.make(exchange.receiver_id),
-              exchangeId: input.exchangeId,
-              correlationId: correlationIdFor(input.commandId),
-              payload: { closureKind: "sender-cleared" },
-              createdAt: input.acceptedAt,
-            },
-          });
-          const eventMatchesClear =
-            result.event.kind === "exchange.closed" &&
-            result.event.exchangeId === input.exchangeId &&
-            result.event.sender === sender.participantId &&
-            typeof result.event.payload === "object" &&
-            result.event.payload !== null &&
-            "closureKind" in result.event.payload &&
-            result.event.payload.closureKind === "sender-cleared";
-          const clearResult = {
+          const receiverId = ParticipantId.make(exchange.receiver_id);
+          const squadronId = SquadronId.make(exchange.squadron_id);
+          const correlationId = correlationIdFor(input.commandId);
+          // A receiver on a peer server holds its own copy of this Exchange and
+          // would keep owing a reply; a terminal notice travels the peer path to
+          // close it there too.
+          const remote = yield* findPeerCounterparty(sql, {
+            squadronId,
             exchangeId: input.exchangeId,
-            closureKind: "sender-cleared" as const,
-            closedAt: result.event.createdAt,
-          } satisfies ClearOwnAskResult;
-          if (!result.committed && eventMatchesClear) return clearResult;
-          if (!result.committed || !eventMatchesClear) {
+            participantId: receiverId,
+          });
+          const withdrawal: ReadonlyArray<CommEvent> =
+            remote === null
+              ? []
+              : [
+                  {
+                    kind: "message.sent",
+                    sender: LIFECYCLE_PARTICIPANT_ID,
+                    receiver: receiverId,
+                    exchangeId: input.exchangeId,
+                    correlationId,
+                    payload: {
+                      messageId: withdrawalMessageIdFor(input.commandId),
+                      text: formatWithdrawalNotice({
+                        exchangeId: input.exchangeId,
+                        askerId: sender.participantId,
+                      }),
+                      originSquadronId: squadronId,
+                      receiverSquadronId: remote.squadronId,
+                      receiverEnvironmentId: remote.environmentId,
+                      exchangeRole: "terminal_notice",
+                      envelopeChannel: "lifecycle_notice",
+                      terminal: { kind: "sender-cleared" },
+                    },
+                    createdAt: input.acceptedAt,
+                  },
+                ];
+          const result = yield* ledger.appendEvents({
+            commandId: input.commandId,
+            squadronId,
+            acceptedAt: input.acceptedAt,
+            events: [
+              {
+                kind: "exchange.closed",
+                sender: sender.participantId,
+                receiver: receiverId,
+                exchangeId: input.exchangeId,
+                correlationId,
+                payload: { closureKind: "sender-cleared" },
+                createdAt: input.acceptedAt,
+              },
+              ...withdrawal,
+            ],
+          });
+          const closedEvent = result.events[0];
+          const eventMatchesClear =
+            closedEvent !== undefined &&
+            closedEvent.kind === "exchange.closed" &&
+            closedEvent.exchangeId === input.exchangeId &&
+            closedEvent.sender === sender.participantId &&
+            typeof closedEvent.payload === "object" &&
+            closedEvent.payload !== null &&
+            "closureKind" in closedEvent.payload &&
+            closedEvent.payload.closureKind === "sender-cleared";
+          if (!eventMatchesClear) {
             return yield* new A2AClearOwnAskCommandConflictError({
               commandId: input.commandId,
               exchangeId: input.exchangeId,
             });
           }
-          return clearResult;
+          return {
+            exchangeId: input.exchangeId,
+            closureKind: "sender-cleared" as const,
+            closedAt: closedEvent.createdAt,
+            withdrawalQueued: result.committed && withdrawal.length > 0,
+          } satisfies ClearOwnAskOutcome;
         });
 
       return A2ASendService.of({ send, sendAsMachine, clearOwnAsk, listParticipants });
