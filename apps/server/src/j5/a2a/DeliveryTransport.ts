@@ -6,7 +6,11 @@ import {
   type OrchestrationV2ThreadProjection,
   ThreadId,
 } from "@t3tools/contracts";
-import { J5_PEER_API_PATHS, type PeerDeliveryRequest } from "@t3tools/contracts/j5";
+import {
+  J5_PEER_API_PATHS,
+  PEER_SENDER_LABEL_MAX_CHARS,
+  type PeerDeliveryRequest,
+} from "@t3tools/contracts/j5";
 import { normalizeModelSlug } from "@t3tools/shared/model";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
@@ -25,6 +29,7 @@ import {
   formatMachineEnvelope,
   formatPeerEnvelope,
 } from "./EnvelopeFormatter.ts";
+import { participantIdentityRows } from "./ClientReadsService.ts";
 import { PeerRegistryService } from "./PeerRegistryService.ts";
 import {
   type DeliveryEnvelopeChannel,
@@ -457,6 +462,17 @@ export const live: Layer.Layer<
               state: `peer ${input.receiverEnvironmentId} is no longer recorded on this server`,
             });
           }
+          // The sender's name travels with the message for the peer's people, so
+          // its timeline names a remote sender as it names a local one. Read by
+          // the statement the client identity read uses, so both servers agree
+          // on the name. Best-effort: a name this server cannot read never holds
+          // a delivery.
+          const labelRows = yield* Effect.orElseSucceed(
+            participantIdentityRows(sql, [input.senderId]),
+            () => [],
+          );
+          const senderLabel =
+            labelRows[0]?.display_name?.trim().slice(0, PEER_SENDER_LABEL_MAX_CHARS) ?? "";
           const body = {
             messageId: input.messageId,
             senderId: input.senderId,
@@ -472,6 +488,7 @@ export const live: Layer.Layer<
             ...(input.regardingExchangeId === undefined
               ? {}
               : { regardingExchangeId: input.regardingExchangeId }),
+            ...(senderLabel.length === 0 ? {} : { senderLabel }),
             createdAt: input.createdAt,
           } satisfies PeerDeliveryRequest;
           const request = yield* HttpClientRequest.bodyJson(

@@ -1,5 +1,6 @@
 import { assert, it } from "@effect/vitest";
 import { ThreadId } from "@t3tools/contracts";
+import { A2A_MESSAGE_TEXT_MAX_CHARS } from "@t3tools/contracts/j5";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -404,6 +405,17 @@ it.effect("validates intent and human-only urgency at exchange open", () =>
       }),
     );
     assert.equal(missingIntent._tag, "A2AIntentRequiredError");
+
+    const tooLong = yield* Effect.flip(
+      service.send({
+        commandId: CommCommandId.make("command:too-long"),
+        senderThreadId: sender.threadId,
+        to: receiver.id,
+        message: "x".repeat(A2A_MESSAGE_TEXT_MAX_CHARS + 1),
+        acceptedAt: timestamp,
+      }),
+    );
+    assert.equal(tooLong._tag, "A2AMessageTooLongError", "nothing a peer would refuse is recorded");
 
     const missingUrgency = yield* Effect.flip(
       service.send({

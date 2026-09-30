@@ -1,5 +1,6 @@
 import type { StoredCommEvent } from "./contracts.ts";
 import type { ThreadId } from "@t3tools/contracts";
+import { A2A_MESSAGE_TEXT_MAX_CHARS } from "@t3tools/contracts/j5";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -111,6 +112,15 @@ export class A2AParticipantArchivedError extends Schema.TaggedError<A2AParticipa
 ) {
   override get message(): string {
     return `Participant ${this.participantId} is archived or permanently retired from home ${this.squadronId} and cannot send or receive messages. Choose an active participant. Unarchive restores only reversibly archived identities.`;
+  }
+}
+
+export class A2AMessageTooLongError extends Schema.TaggedError<A2AMessageTooLongError>()(
+  "A2AMessageTooLongError",
+  { length: Schema.Number, max: Schema.Number },
+) {
+  override get message(): string {
+    return `The message is ${String(this.length)} characters; the most a message may carry is ${String(this.max)}. Shorten it or hand the rest over as a file.`;
   }
 }
 
@@ -288,6 +298,7 @@ export type A2ASendError =
   | A2AAmbiguousParticipantError
   | A2APeersUnreadError
   | A2AParticipantArchivedError
+  | A2AMessageTooLongError
   | A2AIntentRequiredError
   | A2AUrgencyRequiredError
   | A2AUrgencyNotAcceptedError
@@ -804,6 +815,14 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
         const messageId = messageIdFor(input.commandId);
         const replay = yield* replayedSend(messageId, sender.participantId);
         if (replay !== null) return replay;
+        // The same bound the peer route enforces, applied before anything is
+        // recorded, so no ledger holds a message its receiver would refuse.
+        if (input.message.length > A2A_MESSAGE_TEXT_MAX_CHARS) {
+          return yield* new A2AMessageTooLongError({
+            length: input.message.length,
+            max: A2A_MESSAGE_TEXT_MAX_CHARS,
+          });
+        }
 
         const receiver = yield* participantMembership(input.to, sender.squadronId, remote);
         const receiverId = receiver.participantId;

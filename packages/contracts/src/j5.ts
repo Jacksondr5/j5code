@@ -637,6 +637,15 @@ export const PeerTerminalFact = Schema.Union([
 ]);
 export type PeerTerminalFact = typeof PeerTerminalFact.Type;
 
+/** Peer-supplied strings are bounded: a peer names a sender, it does not get to fill the ledger. */
+export const PEER_SENDER_LABEL_MAX_CHARS = 200;
+/** One cap for a message's text, enforced at send so nothing is recorded that a peer would refuse. */
+export const A2A_MESSAGE_TEXT_MAX_CHARS = 256_000;
+export const PeerSenderLabel = Schema.String.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(PEER_SENDER_LABEL_MAX_CHARS),
+);
+
 export const PeerDeliveryRequest = Schema.Struct({
   messageId: Schema.String.check(Schema.isNonEmpty()),
   senderId: Schema.String.check(Schema.isNonEmpty()),
@@ -645,8 +654,14 @@ export const PeerDeliveryRequest = Schema.Struct({
   correlationId: Schema.String.check(Schema.isNonEmpty()),
   exchangeRole: Schema.Literals(["none", "ask", "followup", "reply", "terminal_notice"]),
   envelopeChannel: Schema.Literals(["peer", "silence_notice", "lifecycle_notice"]),
-  text: Schema.String.check(Schema.isNonEmpty()),
+  text: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(A2A_MESSAGE_TEXT_MAX_CHARS)),
   originSquadronId: Schema.String.check(Schema.isNonEmpty()),
+  /**
+   * The sender's display name (its thread title) for the receiving side's
+   * people, so a timeline names a remote sender as it names a local one.
+   * Agents keep addressing by id.
+   */
+  senderLabel: Schema.optional(PeerSenderLabel),
   /** Required when `exchangeRole` is `ask`: the Exchange the receiver now owes a reply to. */
   intent: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
   /**

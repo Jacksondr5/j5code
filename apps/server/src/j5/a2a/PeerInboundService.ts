@@ -355,6 +355,7 @@ export const layer: Layer.Layer<PeerInboundService, never, A2ALedger | SqlClient
               originCreatedAt: input.createdAt,
               // A withdrawal closes the debt here as it does at the origin: silently.
               ...(input.terminal?.kind === "sender-cleared" ? { injection: "none" as const } : {}),
+              ...(input.senderLabel === undefined ? {} : { senderLabel: input.senderLabel }),
               message: {
                 messageId,
                 text: input.text,
