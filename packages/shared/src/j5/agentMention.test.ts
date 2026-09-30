@@ -21,6 +21,32 @@ describe("agent mention syntax", () => {
     expect(detectComposerTrigger("$review", 7)?.kind).toBe("skill");
     expect(detectComposerTrigger("me@example.com", 14)).toBeNull();
   });
+  it("searches playbook names after /playbook", () => {
+    const text = "/playbook debug";
+    expect(detectComposerTrigger(text, text.length)).toEqual({
+      kind: "slash-playbook",
+      query: "debug",
+      rangeStart: 0,
+      rangeEnd: text.length,
+    });
+    expect(detectComposerTrigger("/playbook code r", 16)).toBeNull();
+    expect(detectComposerTrigger("/playbook code-r", 16)).toMatchObject({ query: "code-r" });
+    expect(detectComposerTrigger("/playbook ", 10)).toMatchObject({ query: "" });
+    expect(detectComposerTrigger("/playbook debugging ", 20)).toBeNull();
+    expect(detectComposerTrigger("Earlier text\n/playbook deb", 26)?.kind).not.toBe(
+      "slash-playbook",
+    );
+    expect(detectComposerTrigger("/playbook deb\nMore text", 13)).toMatchObject({
+      query: "deb",
+      rangeEnd: 13,
+    });
+    expect(detectComposerTrigger("/playbook deb then summarize", 13)).toMatchObject({
+      query: "deb",
+      rangeEnd: 13,
+    });
+    expect(detectComposerTrigger("/playbook debug", 13)).toBeNull();
+    expect(detectComposerTrigger("/playbook review, then summarize", 31)).toBeNull();
+  });
   it("keeps agent references editable text without mistaking them for files", () => {
     expect(collectComposerInlineTokens("@persona:researcher @./src/index.ts ")).toEqual([
       expect.objectContaining({ type: "mention", value: "./src/index.ts" }),
