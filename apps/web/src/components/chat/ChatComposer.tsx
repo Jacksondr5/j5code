@@ -55,6 +55,12 @@ import {
   wouldTextPasteExceedLimit,
 } from "@t3tools/client-runtime/text-paste";
 import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
+import { j5Environment } from "../../j5/state";
+import {
+  isPlaybookSlashCommandVisible,
+  matchPlaybookSuggestions,
+  shouldCompleteComposerMenuSelection,
+} from "@t3tools/client-runtime/j5/playbooks";
 import { folderDropTarget, resolveDroppedFolderPath } from "./folderDrop";
 import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
 import { USAGE_LIMITS_COMMAND } from "@t3tools/shared/usageLimits";
@@ -1492,6 +1498,7 @@ export interface ChatComposerHandle {
 export interface ChatComposerProps {
   composerDraftTarget: ScopedThreadRef | DraftId;
   environmentId: EnvironmentId;
+  projectId: ProjectId | null;
   attachmentUploadsCapabilityKnown: boolean;
   supportsAttachmentUploads: boolean;
   supportsQuestionAttachments: boolean;
@@ -1674,6 +1681,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const {
     composerDraftTarget,
     environmentId,
+    projectId,
     attachmentUploadsCapabilityKnown,
     supportsAttachmentUploads,
     supportsQuestionAttachments,
@@ -1688,7 +1696,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeThreadEnvironmentId: _activeThreadEnvironmentId,
     activeThread,
     promptHistoryMessages,
-    isServerThread: _isServerThread,
+    isServerThread,
     isLocalDraftThread: _isLocalDraftThread,
     forceExpandedOnMobile,
     projectSelectionRequired,
@@ -2481,6 +2489,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     cwd: isPathTrigger ? gitCwd : null,
     query: isPathTrigger ? pathTriggerQuery : null,
   });
+  const playbookQuery = useEnvironmentQuery(
+    composerTriggerKind === "slash-playbook" && projectId
+      ? j5Environment.playbookLibrary({
+          environmentId,
+          input: {
+            projectId,
+            ...(isServerThread && activeThreadId ? { threadId: activeThreadId } : {}),
+          },
+        })
+      : null,
+  );
   const compactSlashCommandAvailable =
     composerTrigger?.kind === "slash-command" &&
     prompt.slice(0, composerTrigger.rangeStart).trim() === "" &&
@@ -2564,6 +2583,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const composerMenuItems = useMemo<ComposerCommandItem[]>(() => {
     if (!composerTrigger) return [];
     if (composerTrigger.kind === "agent") return agentPicker.items;
+    if (composerTrigger.kind === "slash-playbook")
+      return matchPlaybookSuggestions(playbookQuery.data?.playbooks ?? [], composerTrigger.query);
     if (composerTrigger.kind === "path") {
       // Order (J5 decision): saved agents, then threads, then files. Personas whose id or name
       // starts with the typed text lead; threads only surface for a typed query so `@` alone
@@ -2652,7 +2673,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         (item) => item.command.name !== "compact" || compactSlashCommandAvailable,
       );
       const slashCommandItems = slashCommandItemsForPromptPosition(
-        [...builtInSlashCommandItems, ...visibleProviderSlashCommandItems, ...skillItems],
+        [
+          ...builtInSlashCommandItems.filter((item) =>
+            isPlaybookSlashCommandVisible(item.command, composerTrigger.rangeStart === 0),
+          ),
+          ...visibleProviderSlashCommandItems,
+          ...skillItems,
+        ],
         composerTrigger.rangeStart === 0,
       );
       return searchSlashCommandItems(slashCommandItems, query);
@@ -2725,6 +2752,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   }, [
     activeThreadId,
     agentPicker.items,
+    playbookQuery.data,
     compactSlashCommandAvailable,
     composerTrigger,
     environmentId,
@@ -2747,17 +2775,23 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const composerMenuSearchKey = composerTrigger
     ? `${composerTrigger.kind}:${composerTrigger.query.trim().toLowerCase()}`
     : null;
+  // A bare `/playbook ` sends the list request on Enter unless the user picks a name.
+  const composerMenuAutoHighlight = !(
+    composerTrigger?.kind === "slash-playbook" && !composerTrigger.query
+  );
   const activeComposerMenuItem = useMemo(() => {
     const activeItemId = resolveComposerMenuActiveItemId({
       items: composerMenuItems,
       highlightedItemId: composerHighlightedItemId,
       currentSearchKey: composerMenuSearchKey,
       highlightedSearchKey: composerHighlightedSearchKey,
+      autoHighlight: composerMenuAutoHighlight,
     });
     return composerMenuItems.find((item) => item.id === activeItemId) ?? null;
   }, [
     composerHighlightedItemId,
     composerHighlightedSearchKey,
+    composerMenuAutoHighlight,
     composerMenuItems,
     composerMenuSearchKey,
   ]);
@@ -2812,6 +2846,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   const isComposerMenuLoading =
     (composerTriggerKind === "agent" && agentPicker.isPending) ||
+    (composerTriggerKind === "slash-playbook" && playbookQuery.isPending) ||
     (composerTriggerKind === "path" && pathTriggerQuery.length > 0 && workspaceEntries.isPending) ||
     (composerTriggerKind === "pull-request" &&
       pullRequestProjectId !== null &&
@@ -2821,6 +2856,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         pullRequestTriggerNumber !== debouncedPullRequestNumber ||
         exactPullRequestLookup.isPending));
   const composerMenuEmptyState = useMemo(() => {
+    if (composerTriggerKind === "slash-playbook")
+      return projectId
+        ? (playbookQuery.error ?? "No matching playbooks.")
+        : "Choose a project to see its playbooks.";
     if (composerTriggerKind === "agent") return agentPicker.error ?? "No available personas found.";
     if (composerTriggerKind === "skill") {
       return "No skills found. Try / to browse provider commands.";
@@ -2846,6 +2885,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     agentPicker.error,
     composerTrigger,
     composerTriggerKind,
+    playbookQuery.error,
+    projectId,
     pullRequestLookup.data?.errors,
     pullRequestLookup.error,
     pullRequestProjectId,
@@ -3369,6 +3410,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       highlightedItemId: composerHighlightedItemId,
       currentSearchKey: composerMenuSearchKey,
       highlightedSearchKey: composerHighlightedSearchKey,
+      autoHighlight: composerMenuAutoHighlight,
     });
     setComposerHighlightedItemId((existing) =>
       existing === nextActiveItemId ? existing : nextActiveItemId,
@@ -3379,6 +3421,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   }, [
     composerHighlightedItemId,
     composerHighlightedSearchKey,
+    composerMenuAutoHighlight,
     composerMenuItems,
     composerMenuOpen,
     composerMenuSearchKey,
@@ -3873,6 +3916,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       });
       const { snapshot, trigger } = resolveActiveComposerTrigger();
       if (!trigger) return;
+      if (item.type === "playbook") {
+        applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, `/playbook ${item.name} `, {
+          expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
+        });
+        setComposerHighlightedItemId(null);
+        return;
+      }
       if (item.type === "agent") {
         if (applyAgentMentionSelection(item, trigger, snapshot.value, applyPromptReplacement))
           setComposerHighlightedItemId(null);
@@ -3898,7 +3948,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       }
       if (item.type === "slash-command") {
         if (item.command === "playbook") {
-          applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "Start playbook ", {
+          applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "/playbook ", {
             expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
           });
           setComposerHighlightedItemId(null);
@@ -4060,9 +4110,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       const nextIndex =
         (normalizedIndex + offset + composerMenuItems.length) % composerMenuItems.length;
       const nextItem = composerMenuItems[nextIndex];
-      setComposerHighlightedItemId(nextItem?.id ?? null);
+      onComposerMenuItemHighlighted(nextItem?.id ?? null);
     },
-    [composerHighlightedItemId, composerMenuItems],
+    [composerHighlightedItemId, composerMenuItems, onComposerMenuItemHighlighted],
   );
 
   const blurMobileComposerAfterSend = useCallback(() => {
@@ -4365,7 +4415,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }
     if (menuIsActive && (submissionIntent === null || submissionIntent === "foreground")) {
       const currentItems = composerMenuItemsRef.current;
-      const selectedItem = activeComposerMenuItemRef.current ?? currentItems[0];
+      const selectedItem =
+        activeComposerMenuItemRef.current ??
+        (key === "Tab" || trigger?.kind !== "slash-playbook" || trigger.query
+          ? currentItems[0]
+          : undefined);
       if (key === "ArrowDown" && currentItems.length > 0) {
         nudgeComposerMenuHighlight("ArrowDown");
         return true;
@@ -4374,7 +4428,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         nudgeComposerMenuHighlight("ArrowUp");
         return true;
       }
-      if ((key === "Enter" || key === "Tab") && selectedItem) {
+      if (
+        selectedItem &&
+        shouldCompleteComposerMenuSelection(key, submissionIntent, trigger, selectedItem)
+      ) {
         onSelectComposerItem(selectedItem);
         return true;
       }
