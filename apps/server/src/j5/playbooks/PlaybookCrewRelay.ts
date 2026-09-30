@@ -338,8 +338,21 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
   /** Where a Crew's active run is and who holds its step, as Fleet shows it; null when none. */
   const fleetRun = Effect.fn("PlaybookCrewRelay.fleetRun")(function* (crewInstanceId: string) {
     const run = yield* store.activeRunForCrew(crewInstanceId);
-    if (run === null || run.position === null) return null;
+    if (run === null) return null;
     const delivery = yield* currentDelivery(run.runId, run.currentStepId);
+    // The live YAML can't be read, or no longer has the recorded step: Fleet still shows the run
+    // at that step, marked as needing attention.
+    if (run.position === null)
+      return {
+        runId: run.runId,
+        position: 0,
+        total: run.total,
+        stepId: run.currentStepId,
+        stepTitle: run.currentStepId,
+        state: delivery?.state ?? "pending",
+        seat: delivery?.seat ?? null,
+        issue: run.issue?.message ?? "The playbook's current step can't be read.",
+      } satisfies NonNullable<FleetCrew["playbookRun"]>;
     if (delivery === null) return null;
     return {
       runId: run.runId,

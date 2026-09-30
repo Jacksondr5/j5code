@@ -143,6 +143,16 @@ describe("a Crew's playbook run", () => {
     );
     expect(playbookRunOwnerLabel({ state: "pending", seat: null })).toBe("handing off");
     expect(playbookRunHeader(run)).toBe("Step 2 of 3: Review · critic");
+    // An unreadable playbook: the recorded step id, flagged, never a made-up position.
+    expect(
+      playbookRunHeader({
+        ...run,
+        position: 0,
+        total: 0,
+        stepTitle: "review",
+        issue: "Cannot read the live playbook.",
+      }),
+    ).toBe("Step review · needs attention");
   });
 
   it("rides onto the Captain's Crew group", () => {

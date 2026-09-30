@@ -552,7 +552,7 @@ it.effect("a retry after later moves reports who holds the step it shows, and se
 
 it.effect("an unreadable playbook keeps a hand-off pending until the YAML is repaired", () =>
   Effect.gen(function* () {
-    const { start, move, store, write, root, notices, dispatchFault } = yield* fixture;
+    const { start, move, relay, store, write, root, notices, dispatchFault } = yield* fixture;
     yield* Ref.set(dispatchFault, "transient");
     const run = yield* start("start-1");
     const fs = yield* FileSystem.FileSystem;
@@ -563,6 +563,21 @@ it.effect("an unreadable playbook keeps a hand-off pending until the YAML is rep
     assert.equal(failureCode(blocked), "delivery_pending");
     assert.include(blocked.message, "can't be read");
     assert.isNull((yield* store.landing(run.runId, "start-1"))?.resolvedAt);
+    // Fleet still shows the run at its recorded step, marked as needing attention.
+    const flagged = yield* relay.fleetRun(crewId);
+    assert.deepStrictEqual(
+      flagged === null ? null : { ...flagged, issue: flagged.issue?.slice(0, 29) },
+      {
+        runId: run.runId,
+        position: 0,
+        total: 0,
+        stepId: "inspect",
+        stepTitle: "inspect",
+        state: "pending",
+        seat: "a",
+        issue: "Cannot read the live playbook",
+      },
+    );
     assert.equal((yield* store.runById(run.runId))?.currentStepId, "inspect");
     assert.lengthOf(yield* notices, 0);
 

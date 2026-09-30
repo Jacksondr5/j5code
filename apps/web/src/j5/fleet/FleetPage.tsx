@@ -435,7 +435,7 @@ function FleetNodeRows(
                       {summary === null ? "" : ` · ${summary}`}
                     </span>
                     {crew.playbookRun === null ? null : (
-                      <span className="truncate text-foreground/80">
+                      <span className="truncate text-foreground/80" title={crew.playbookRun.issue}>
                         {playbookRunHeader(crew.playbookRun)}
                       </span>
                     )}

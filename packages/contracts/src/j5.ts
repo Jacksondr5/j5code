@@ -320,6 +320,8 @@ export const FleetCrew = Schema.Struct({
         stepTitle: Schema.String,
         state: Schema.Literals(["delivered", "captain", "pending"]),
         seat: Schema.NullOr(Schema.String),
+        /** Set when the live playbook can't be read or lacks the step; position is then 0. */
+        issue: Schema.optionalKey(Schema.String),
       }),
     ),
   ),
