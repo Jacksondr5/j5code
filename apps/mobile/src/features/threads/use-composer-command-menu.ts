@@ -46,6 +46,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ComposerEditorSelection } from "../../components/ComposerEditor";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { useEnvironmentQuery } from "../../state/query";
+import { j5Environment } from "../../j5/state";
+import {
+  isPlaybookSlashCommandVisible,
+  matchPlaybookSuggestions,
+} from "@t3tools/client-runtime/j5/playbooks";
 import { useComposerPathSearch, useComposerPullRequestSearch } from "../../state/queries";
 import type { ComposerCommandItem } from "./ComposerCommandPopover";
 import { matchesSlashSkillQuery } from "./composerSlashSkillSearch";
@@ -105,6 +111,7 @@ export function buildComposerSlashCommandItems(input: {
   const items: ComposerCommandItem[] = builtIn.filter(
     (item) =>
       item.command.includes(query) &&
+      isPlaybookSlashCommandVisible(item.command, input.atMessageStart) &&
       (item.command === "model" || item.command === "playbook" || allowInteractionMode),
   );
 
@@ -167,7 +174,9 @@ export function resolveComposerCommandSelection(input: {
   } else if (item.type === "skill") {
     replacement = `$${item.skill.name} `;
   } else if (item.type === "slash-command") {
-    replacement = item.command === "playbook" ? "Start playbook " : `/${item.command} `;
+    replacement = `/${item.command} `;
+  } else if (item.type === "playbook") {
+    replacement = `/playbook ${item.name} `;
   } else if (item.type === "provider-slash-command") {
     replacement = `/${item.command.name} `;
   }
@@ -182,6 +191,8 @@ export function useComposerCommandMenu({
   draftMessage,
   ownerKey,
   environmentId,
+  projectId,
+  threadId,
   threadShells = EMPTY_THREAD_SHELLS,
   currentThreadId = null,
   projectCwd,
@@ -199,6 +210,8 @@ export function useComposerCommandMenu({
   readonly draftMessage: string;
   readonly ownerKey: string | null;
   readonly environmentId: EnvironmentId | null;
+  readonly projectId: ProjectId | null;
+  readonly threadId?: ThreadId | null;
   /** Candidates for `@` thread suggestions; the caller reads them from the entity store. */
   readonly threadShells?: ReadonlyArray<EnvironmentThreadShell>;
   /** Left out of `@` thread suggestions: a thread is never context for itself. */
@@ -325,6 +338,14 @@ export function useComposerCommandMenu({
     cwd: trigger?.kind === "path" ? projectCwd : null,
     query: trigger?.kind === "path" ? trigger.query : null,
   });
+  const playbookQuery = useEnvironmentQuery(
+    trigger?.kind === "slash-playbook" && environmentId && projectId
+      ? j5Environment.playbookLibrary({
+          environmentId,
+          input: { projectId, ...(threadId ? { threadId } : {}) },
+        })
+      : null,
+  );
   const pullRequestSearch = useComposerPullRequestSearch({
     environmentId,
     projectId: pullRequestProjectId,
@@ -336,6 +357,8 @@ export function useComposerCommandMenu({
   const items = useMemo<ComposerCommandItem[]>(() => {
     if (!trigger) return [];
     if (trigger.kind === "agent") return agentPicker.items;
+    if (trigger.kind === "slash-playbook")
+      return matchPlaybookSuggestions(playbookQuery.data?.playbooks ?? [], trigger.query);
 
     if (trigger.kind === "pull-request") {
       return pullRequestSearch.entries.map((entry) => ({
@@ -502,6 +525,7 @@ export function useComposerCommandMenu({
     return [];
   }, [
     agentPicker.items,
+    playbookQuery.data,
     currentThreadId,
     environmentId,
     threadShells,
@@ -637,13 +661,19 @@ export function useComposerCommandMenu({
     isLoading:
       trigger?.kind === "pull-request"
         ? pullRequestSearch.isPending
-        : pathSearch.isPending || (trigger?.kind === "agent" && agentPicker.isPending),
+        : pathSearch.isPending ||
+          (trigger?.kind === "slash-playbook" && playbookQuery.isPending) ||
+          (trigger?.kind === "agent" && agentPicker.isPending),
     error:
       trigger?.kind === "pull-request"
         ? pullRequestProjectId === null || pullRequestRepository === null
           ? "Pull requests are unavailable for this project."
           : pullRequestSearch.error
-        : null,
+        : trigger?.kind === "slash-playbook"
+          ? environmentId && projectId
+            ? playbookQuery.error
+            : "Choose a project to see its playbooks."
+          : null,
     onSelect,
   };
 }

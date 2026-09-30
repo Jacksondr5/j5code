@@ -1,3 +1,4 @@
+import { detectPlaybookTrigger } from "@t3tools/shared/j5/playbookTrigger";
 import type { ClientSettings } from "@t3tools/contracts/settings";
 import { detectAgentMention } from "@t3tools/shared/j5/agentMention";
 import type { AssistantCitation, ResolvedKeybindingsConfig } from "@t3tools/contracts";
@@ -12,7 +13,13 @@ import {
 
 import { resolveShortcutCommand, type ShortcutEventLike } from "./keybindings";
 
-export type ComposerTriggerKind = "agent" | "path" | "pull-request" | "slash-command" | "skill";
+export type ComposerTriggerKind =
+  | "agent"
+  | "path"
+  | "pull-request"
+  | "slash-command"
+  | "slash-playbook"
+  | "skill";
 export type ComposerSlashCommand = "model" | "plan" | "default" | "playbook";
 export type ComposerSubmissionIntent = "foreground" | "background" | "alternate";
 
@@ -257,6 +264,12 @@ export function detectComposerTrigger(text: string, cursorInput: number): Compos
         rangeEnd: cursor,
       };
     }
+    const playbookTrigger = detectPlaybookTrigger(
+      linePrefix,
+      text.slice(0, lineStart),
+      text.slice(cursor),
+    );
+    if (playbookTrigger) return playbookTrigger;
   }
 
   const tokenStart = tokenStartForCursor(text, cursor);

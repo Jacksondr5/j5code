@@ -19,6 +19,9 @@ import {
   playbookAuthorLaunch,
   playbookAuthorSquadrons,
   expandPlaybookPrompt,
+  isPlaybookSlashCommandVisible,
+  matchPlaybookSuggestions,
+  shouldCompleteComposerMenuSelection,
   presentPlaybook,
   sortPlaybookRuns,
   playbookWorkspaces,
@@ -340,12 +343,23 @@ it("keeps workspace inputs stable for thread activity and updates them for workt
   }
 });
 
+it.each([
+  ["playbook", true, true],
+  ["playbook", false, false],
+  ["model", false, true],
+  ["plan", false, true],
+  ["default", false, true],
+])("offers /%s at message start=%s: %s", (command, atMessageStart, expected) => {
+  expect(isPlaybookSlashCommandVisible(command, atMessageStart)).toBe(expected);
+});
+
 describe("playbook composer expansion", () => {
   it.each([
     ["/playbook release", "Start playbook release"],
     ["  /playbook release.yaml  ", "Start playbook release"],
     ["/playbook Release-Review.", "Start playbook release-review"],
     ["/playbook", "List available playbooks and help me choose one to start."],
+    ["/playbook ", "List available playbooks and help me choose one to start."],
     ["/playbook release, then make a crew", "Start playbook release.\n\nthen make a crew"],
     ["/playbook release\nDo something else", "Start playbook release.\n\nDo something else"],
     [
@@ -475,4 +489,56 @@ it("prioritizes active issues, then active runs and recency, without changing th
   ]);
   expect(runs).toEqual(original);
   expect(sortPlaybookRuns([])).toEqual([]);
+});
+
+it("ranks playbook suggestions by exact name, then prefix, then name or title match", () => {
+  const issue = new PlaybookError({
+    code: "step_missing",
+    message: "Broken",
+    availableStepIds: [],
+  });
+  const playbooks = [
+    { name: "code-review", title: "Code review", issue: null },
+    { name: "triage", title: "Review inbox", issue: null },
+    { name: "review-plan", title: "Plan", issue: null },
+    { name: "review", title: "Review", issue: null },
+    { name: "review-broken", title: "Broken", issue },
+  ];
+  expect(matchPlaybookSuggestions(playbooks, " Review ").map(({ name }) => name)).toEqual([
+    "review",
+    "review-plan",
+    "code-review",
+    "triage",
+  ]);
+  expect(matchPlaybookSuggestions(playbooks, "").map(({ name }) => name)).toEqual([
+    "code-review",
+    "triage",
+    "review-plan",
+    "review",
+  ]);
+});
+
+describe("shouldCompleteComposerMenuSelection", () => {
+  it.each([
+    ["Enter", "foreground", "review", "review", false],
+    ["Enter", "foreground", "code-review", "code-review", false],
+    ["Enter", "foreground", "rev", "review", true],
+    ["Enter", "foreground", "review", "review-all", true],
+    ["Enter", "foreground", "REVIEW", "review", false],
+    ["Enter", "foreground", "", "review", true],
+    ["Tab", "foreground", "review", "review", true],
+    ["Enter", null, "review", "review", true],
+  ] as const)(
+    "%s with %s intent and query %j selecting %j completes: %s",
+    (key, intent, query, name, expected) => {
+      expect(
+        shouldCompleteComposerMenuSelection(
+          key,
+          intent,
+          { kind: "slash-playbook", query },
+          { type: "playbook", name },
+        ),
+      ).toBe(expected);
+    },
+  );
 });

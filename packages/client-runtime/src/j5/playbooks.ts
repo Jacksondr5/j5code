@@ -247,6 +247,55 @@ export function expandPlaybookPrompt(text: string): string {
   return rest ? `${request.replace(/\.?$/, ".")}\n\n${rest}` : request;
 }
 
+/** Offer the playbook command only where its name picker can open. */
+export function isPlaybookSlashCommandVisible(command: string, atMessageStart: boolean) {
+  return command !== "playbook" || atMessageStart;
+}
+
+/** Let the send shortcut submit an already-complete playbook command. */
+export function shouldCompleteComposerMenuSelection(
+  key: string,
+  submissionIntent: "foreground" | "background" | "alternate" | null,
+  trigger: { kind: string; query: string } | null,
+  item: { type: string; name?: string },
+) {
+  if (key === "Tab") return true;
+  if (key !== "Enter") return false;
+  return !(
+    submissionIntent &&
+    trigger?.kind === "slash-playbook" &&
+    item.type === "playbook" &&
+    trigger.query.trim().toLowerCase() === item.name
+  );
+}
+
+/** `/playbook <query>` suggestions: exact name, then name prefix, then name or title substring. */
+export function matchPlaybookSuggestions(
+  playbooks: ReadonlyArray<{ name: string; title: string; issue: unknown }>,
+  query: string,
+) {
+  const needle = query.trim().toLowerCase();
+  const rank = ({ name, title }: { name: string; title: string }) => {
+    const lower = name.toLowerCase();
+    if (lower === needle) return 0;
+    if (lower.startsWith(needle)) return 1;
+    return lower.includes(needle) || title.toLowerCase().includes(needle) ? 2 : null;
+  };
+  return playbooks
+    .flatMap((playbook) => {
+      const order = playbook.issue ? null : rank(playbook);
+      return order === null ? [] : [{ playbook, order }];
+    })
+    .sort((a, b) => a.order - b.order)
+    .map(({ playbook }) => ({
+      id: `playbook:${playbook.name}`,
+      type: "playbook" as const,
+      name: playbook.name,
+      label: playbook.name,
+      description: playbook.title,
+    }));
+}
+
 export function presentPlaybook(run: PlaybookProgress) {
   const current = run.steps.find((step) => step.id === run.currentStepId);
   return {
