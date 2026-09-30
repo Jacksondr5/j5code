@@ -1,4 +1,9 @@
-import { PlaybookDiscovery, PlaybookError, PlaybookStepResponse } from "@t3tools/contracts/j5";
+import {
+  PlaybookDiscovery,
+  PlaybookError,
+  PlaybookReadResponse,
+  PlaybookStepResponse,
+} from "@t3tools/contracts/j5";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -15,6 +20,7 @@ const Movement = Schema.Struct({ ...Mutation.fields, expectedStepId: Text });
 const Reselection = Schema.Struct({ ...Movement.fields, stepId: Text });
 const Start = Schema.Struct({ name: Text, client_request_id: Text });
 const Current = Schema.Struct({ runId: Schema.optional(Text) });
+const Read = Schema.Struct({ name: Text });
 const dependencies = [McpInvocationContext, PlaybookStore];
 const workspaceDependencies = [...dependencies, ThreadManagementService, ProjectService];
 const common = {
@@ -29,8 +35,17 @@ const mutationDescription =
 export const playbookTools = [
   Tool.make("playbook_list", {
     description:
-      "Discover live YAML playbooks in your thread workspace's .j5/playbooks directory. Invalid files include actionable errors.",
+      "Discover live YAML playbooks in your thread workspace's .j5/playbooks directory, with each step's persona. Invalid files include actionable errors; non-blocking warnings name steps whose persona is missing or turned off.",
     success: PlaybookDiscovery,
+    failure: PlaybookError,
+    failureMode: "return",
+    dependencies: workspaceDependencies,
+  }).annotate(Tool.Readonly, true),
+  Tool.make("playbook_read", {
+    description:
+      "Read a playbook's live definition, with every step's prompt and persona, without starting a run. Pass the same name as playbook_start. warnings name steps whose persona is missing or turned off; they never block starting.",
+    parameters: Read,
+    success: PlaybookReadResponse,
     failure: PlaybookError,
     failureMode: "return",
     dependencies: workspaceDependencies,
@@ -121,6 +136,11 @@ export const playbookHandlers = {
     Effect.gen(function* () {
       const { root } = yield* workspace;
       return yield* (yield* PlaybookStore).discover(root);
+    }),
+  playbook_read: (input: typeof Read.Type) =>
+    Effect.gen(function* () {
+      const { root } = yield* workspace;
+      return yield* (yield* PlaybookStore).read(root, input.name);
     }),
   playbook_start: (input: typeof Start.Type) =>
     Effect.gen(function* () {

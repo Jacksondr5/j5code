@@ -43,8 +43,14 @@ steps:
     prompt: Check correctness and run focused checks where useful.
   - id: report
     title: Report
+    persona: reviewer
     prompt: Summarize confirmed findings and remaining uncertainty.
 ```
+
+A step can name the persona that should do it with `persona:`, using a persona id
+from Settings → Personas. A step without one is done by whoever runs the playbook.
+A persona that is missing or turned off shows as a warning in Settings and does not
+stop the playbook from starting.
 
 Type `/playbook ` to choose a registered playbook, then send the command to start it.
 Send `/playbook review` to start directly, or `/playbook` to ask what is available.

@@ -5,6 +5,7 @@ import {
   ensurePlaybookAuthor,
   playbookAuthorLaunch,
   playbookAuthorSquadrons,
+  playbookStepLabel,
   playbookWorkspaces,
   samePlaybookWorkspaceInputs,
 } from "@t3tools/client-runtime/j5/playbooks";
@@ -506,16 +507,27 @@ export function PlaybookLibrarySettings() {
                     {playbook.issue.message}
                   </p>
                 ) : (
-                  <ol
-                    className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground"
-                    aria-label={`${playbook.title} steps`}
-                  >
-                    {playbook.steps.map((step, index) => (
-                      <li key={step.id} className="min-w-0 break-words">
-                        {index + 1}. {step.title}
-                      </li>
+                  <>
+                    <ol
+                      className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground"
+                      aria-label={`${playbook.title} steps`}
+                    >
+                      {playbook.steps.map((step, index) => (
+                        <li key={step.id} className="min-w-0 break-words">
+                          {playbookStepLabel(step, index)}
+                        </li>
+                      ))}
+                    </ol>
+                    {(playbook.warnings ?? []).map((warning) => (
+                      <p
+                        key={`${warning.stepId}:${warning.code}`}
+                        role="status"
+                        className="text-xs text-warning"
+                      >
+                        {warning.message}
+                      </p>
                     ))}
-                  </ol>
+                  </>
                 )}
               </div>
             }

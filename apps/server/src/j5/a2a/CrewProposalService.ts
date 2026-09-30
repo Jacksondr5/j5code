@@ -12,7 +12,7 @@ import * as Layer from "effect/Layer";
 
 import { makeKeyedSerialExecutor } from "../../orchestration-v2/KeyedSerialExecutor.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
-import { makeAgentPersonaLibrary } from "../agents/agentPersonaLibrary.ts";
+import { makeAgentPersonaLibrary, personaCatalogProblem } from "../agents/agentPersonaLibrary.ts";
 import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewInstanceService.ts";
 import {
   AgentCrewProposalService,
@@ -227,16 +227,15 @@ export const layer = Layer.effect(
       const catalog = yield* agents
         .catalog()
         .pipe(Effect.mapError(operationError("reading the agent library")));
-      const disabled = new Set(catalog.disabledIds);
       for (const seat of seats) {
         if (seat.agentId === null) continue;
-        const definition = catalog.definitions.find(({ id }) => id === seat.agentId);
-        if (definition === undefined)
+        const problem = personaCatalogProblem(catalog, seat.agentId);
+        if (problem === "missing")
           return yield* new CrewProposalRequestError({
             detail: `Seat ${seat.seat} names persona "${seat.agentId}", which is not in this environment's library.`,
             nextStep: "Call list_personas and pick a persona id it returns.",
           });
-        if (disabled.has(seat.agentId))
+        if (problem === "disabled")
           return yield* new CrewProposalRequestError({
             detail: `Seat ${seat.seat} names persona "${seat.agentId}", which is turned off.`,
             nextStep: "Pick an enabled persona from list_personas, or ask the user to turn it on.",

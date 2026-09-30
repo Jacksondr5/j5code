@@ -166,6 +166,7 @@ it.effect("namespaces mutating-tool idempotency and sender identity from authent
       "playbook_current",
       "playbook_list",
       "playbook_next",
+      "playbook_read",
       "playbook_reselect",
       "playbook_start",
       "propose_crew",

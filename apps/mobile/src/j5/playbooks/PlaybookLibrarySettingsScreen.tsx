@@ -2,6 +2,7 @@ import {
   ensurePlaybookAuthor,
   playbookAuthorLaunch,
   playbookAuthorSquadrons,
+  playbookStepLabel,
   playbookWorkspaces,
 } from "@t3tools/client-runtime/j5/playbooks";
 import { useAtomValue } from "@effect/atom-react";
@@ -377,11 +378,21 @@ export const PlaybookLibrarySettingsSection = memo(function PlaybookLibrarySetti
               {playbook.issue.message}
             </Text>
           ) : (
-            playbook.steps.map((step, index) => (
-              <Text key={step.id} className="text-sm text-foreground">
-                {index + 1}. {step.title}
-              </Text>
-            ))
+            <>
+              {playbook.steps.map((step, index) => (
+                <Text key={step.id} className="text-sm text-foreground">
+                  {playbookStepLabel(step, index)}
+                </Text>
+              ))}
+              {(playbook.warnings ?? []).map((warning) => (
+                <Text
+                  key={`${warning.stepId}:${warning.code}`}
+                  className="text-sm text-warning-foreground"
+                >
+                  {warning.message}
+                </Text>
+              ))}
+            </>
           )}
           <Pressable
             accessibilityRole="button"

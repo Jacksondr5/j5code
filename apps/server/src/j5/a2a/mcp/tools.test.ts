@@ -64,6 +64,7 @@ it("publishes the ratified single-target lifecycle contracts fail-closed", () =>
     "playbook_current",
     "playbook_list",
     "playbook_next",
+    "playbook_read",
     "playbook_reselect",
     "playbook_start",
     "send_message",
