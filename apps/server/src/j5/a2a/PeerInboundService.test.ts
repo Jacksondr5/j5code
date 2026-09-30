@@ -45,7 +45,7 @@ const triage: AgentParticipant = {
 const remoteAsker = ParticipantId.make("agent:j5:a2a:thread:remote-asker");
 
 const makeTestLayer = (delivered: Ref.Ref<Array<AgentDeliveryInput>>) => {
-  const database = NodeSqliteClient.layerMemory();
+  const database = NodeSqliteClient.layer({ filename: ":memory:" });
   const ledger = ledgerLayer.pipe(Layer.provide(database));
   const send = sendLayer.pipe(Layer.provide(ledger), Layer.provide(database));
   const inbound = peerInboundLayer.pipe(Layer.provide(ledger), Layer.provide(database));
