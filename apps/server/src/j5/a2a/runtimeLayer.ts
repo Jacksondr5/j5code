@@ -1,6 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Layer from "effect/Layer";
 import { OrchestrationV2EventSinkLayerLive } from "../../orchestration-v2/runtimeLayer.ts";
+import { layer as playbookCrewRelayLayer } from "../playbooks/PlaybookCrewRelay.ts";
 import { playbookStoreLayer } from "../playbooks/PlaybookStore.ts";
 import { FetchHttpClient } from "effect/unstable/http";
 
@@ -122,15 +123,25 @@ export const makeJ5A2AAuxiliaryLayer = (
     Layer.provideMerge(lifecycleServiceProvided),
     Layer.provideMerge(archiveFactsProvided),
   );
+  // Archiving a Crew cancels its playbook run through the one store object, so the store's
+  // permit and revision are never duplicated.
   const archiveCrewProvided = archiveCrewLayer.pipe(
     Layer.provideMerge(archiveAgentProvided),
     Layer.provideMerge(agentCrewInstanceLayer),
+    Layer.provideMerge(playbookStoreLayer),
+  );
+  // Hands each landing of a Crew-linked run to the seat that owns it, inside the Captain's step
+  // calls; a pending hand-off is finished by the Captain's next or retried call.
+  const playbookCrewRelayProvided = playbookCrewRelayLayer.pipe(
+    Layer.provideMerge(agentCrewInstanceLayer),
+    Layer.provideMerge(playbookStoreLayer),
   );
   const crewLaunchProvided = crewLaunchLayer.pipe(Layer.provideMerge(agentCrewInstanceLayer));
   // The report watches the seats an approval launched and tells the Captain how they started; the
   // finish notifier's stream feeds it, so one stream serves every Crew reaction.
   // Both Crew reactions raise failure alerts, which wake the one delivery worker after committing.
   const crewLaunchReporterProvided = crewLaunchReporterLayer.pipe(
+    Layer.provideMerge(playbookStoreLayer),
     Layer.provideMerge(agentCrewProposalLayer),
     Layer.provideMerge(agentCrewInstanceLayer),
     Layer.provideMerge(deliveryWorkerProvided),
@@ -163,6 +174,7 @@ export const makeJ5A2AAuxiliaryLayer = (
   );
   const runtimeWithoutClientReads = Layer.mergeAll(
     playbookStoreLayer,
+    playbookCrewRelayProvided,
     agentHandoffNudgeWorkerProvided,
     // Exported to the routes so the J5 WebSocket handler streams the same revision counter the
     // observer bumps (server.ts provides this layer object to the observer; Effect memoizes it).

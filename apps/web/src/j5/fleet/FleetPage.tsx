@@ -35,8 +35,10 @@ import {
 } from "../crew/crewState";
 import { stopCrew } from "../crew/crewStopClient";
 import {
+  fleetCrewAnchorId,
   originLabel,
   partitionFleet,
+  playbookRunHeader,
   retiredCrews,
   type FleetNode,
   type FleetRow,
@@ -134,6 +136,32 @@ export function FleetPage() {
     [squadrons, threadsByKey],
   );
   const retired = useMemo(() => retiredCrews(squadrons), [squadrons]);
+  // Playbook runs name the Crew they follow from this read, and jump to its group.
+  const crewNames = useMemo(
+    () =>
+      new Map(
+        squadrons.flatMap((squadron) =>
+          squadron.crews.map(
+            (crew) =>
+              [
+                fleetCrewAnchorId(squadron.environmentId, crew.crewInstanceId),
+                crew.crewName,
+              ] as const,
+          ),
+        ),
+      ),
+    [squadrons],
+  );
+  // A Crew can sit inside the collapsed Settled or Retired sections, so every enclosing
+  // expander opens before the group scrolls into view.
+  const showCrew = useCallback((anchorId: string) => {
+    const group = document.getElementById(anchorId);
+    if (!(group instanceof HTMLDetailsElement)) return;
+    for (let node: Element | null = group; node !== null; node = node.parentElement)
+      if (node instanceof HTMLDetailsElement) node.open = true;
+    group.scrollIntoView({ block: "center" });
+    group.querySelector("summary")?.focus();
+  }, []);
   const openThread = useCallback(
     (environmentId: EnvironmentId, threadId: string) => {
       void navigate({
@@ -215,7 +243,11 @@ export function FleetPage() {
                 <RetiredCrews retired={retired} {...tableProps} />
               </div>
             ) : null}
-            <PlaybookRunsSection />
+            <PlaybookRunsSection
+              crewNames={crewNames}
+              onShowCrew={showCrew}
+              onPlaybookChange={refreshFleet}
+            />
           </main>
         </ScrollArea>
       </div>
@@ -376,7 +408,10 @@ function FleetNodeRows(
       />
       {node.crews.map((crew) => (
         <li key={crew.crewInstanceId} className="bg-muted/20">
-          <details className="group/crew">
+          <details
+            className="group/crew"
+            id={fleetCrewAnchorId(environmentId, crew.crewInstanceId)}
+          >
             <summary
               className="flex cursor-pointer list-none items-center gap-2 px-3 py-1.5 text-xs font-medium text-muted-foreground outline-hidden marker:hidden hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden"
               style={{ paddingInlineStart: `${0.75 + (node.row.depth + 1) * 1.25}rem` }}
@@ -399,6 +434,11 @@ function FleetNodeRows(
                       {crew.members.length} {crew.members.length === 1 ? "seat" : "seats"}
                       {summary === null ? "" : ` · ${summary}`}
                     </span>
+                    {crew.playbookRun === null ? null : (
+                      <span className="truncate text-foreground/80">
+                        {playbookRunHeader(crew.playbookRun)}
+                      </span>
+                    )}
                     <span className="ms-auto flex items-center gap-1.5">
                       {crewHasRunningSeat(state) ? (
                         <Button
@@ -491,7 +531,10 @@ function RetiredCrewItem(props: FleetRowsProps & FleetSquadronCrew<ScopedFleetSq
   const seatCount = crew.roster.length;
   return (
     <li>
-      <details className="group/retired-crew">
+      <details
+        className="group/retired-crew"
+        id={fleetCrewAnchorId(squadron.environmentId, crew.crewInstanceId)}
+      >
         <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-1.5 text-sm outline-hidden marker:hidden hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
           <ChevronRightIcon
             aria-hidden

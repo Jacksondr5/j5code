@@ -76,8 +76,21 @@ export const PlaybookRun = Schema.Struct({
   status: Schema.Literals(["active", "completed", "cancelled"]),
   createdAt: Text,
   updatedAt: Text,
+  /** The Crew whose seats receive this run's steps; absent or null for an ordinary thread run. */
+  crewInstanceId: Schema.optionalKey(Schema.NullOr(Schema.String)),
 });
 export type PlaybookRun = typeof PlaybookRun.Type;
+
+/**
+ * Who holds a Crew-linked run's current step. Only `state: "captain"` means the Captain does it;
+ * `pending` means the hand-off hasn't finished and nobody should start the step yet.
+ */
+export const PlaybookStepDelivery = Schema.Struct({
+  state: Schema.Literals(["delivered", "captain", "pending"]),
+  seat: Schema.NullOr(Schema.String),
+  threadId: Schema.NullOr(Schema.String),
+});
+export type PlaybookStepDelivery = typeof PlaybookStepDelivery.Type;
 
 /** The board receives titles, never the other steps' prompt bodies. */
 export const PlaybookProgress = Schema.Struct({
@@ -94,6 +107,8 @@ export const PlaybookStepResponse = Schema.Struct({
   ...PlaybookProgress.fields,
   currentStep: Schema.NullOr(PlaybookStep),
   replayed: Schema.Boolean,
+  /** Set for Crew-linked runs' step tools; null on complete and cancel; absent for thread runs. */
+  delivery: Schema.optionalKey(Schema.NullOr(PlaybookStepDelivery)),
 });
 export type PlaybookStepResponse = typeof PlaybookStepResponse.Type;
 export const PlaybookDiscovery = Schema.Struct({

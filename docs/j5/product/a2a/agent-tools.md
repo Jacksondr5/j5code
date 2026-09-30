@@ -354,6 +354,26 @@ seats retired so far and the seat that failed; retry with the same `client_reque
 reported to its Captain; the platform never settles a seat because its run finished, and settlement is not archive. `stop_agent` on a member is still allowed;
 stopping retires nothing.
 
+### Crew playbook runs
+
+A Captain runs the playbook its Crew follows with `playbook_start(name, client_request_id,
+crew_instance_id)`. The call is refused with `crew_not_linkable` unless the Crew is the caller's,
+is live, and follows that playbook. Each landing (start, next, back, reselect) hands the step's live
+prompt to the seat that owns it, once per landing, as a `<j5_playbook_step>` notice in the seat's
+thread. A step no live seat owns is the Captain's, and no notice is sent for it.
+
+Every step tool on a Crew-linked run returns `delivery`: `{ state, seat, thread_id }`, where `state`
+is `delivered` (the seat has the step), `captain` (the Captain does it from `currentStep.prompt`),
+or `pending` (the hand-off hasn't finished; nobody should start the step). Only `captain` means
+the Captain does it. `playbook_current` reports the same `delivery` without handing off again.
+While an earlier hand-off is still pending, `playbook_next`, `playbook_back`, `playbook_reselect`,
+and `playbook_complete` refuse with `delivery_pending` and don't move; retry the same call. Nothing
+retries a pending hand-off in the background, including after a restart: the Captain's next step
+call, or a retry of the same one, finishes it.
+`playbook_cancel` always works. The platform never advances on its own: the Captain calls
+`playbook_next` after the seat reports back. Archiving the Crew or its Captain cancels its active
+run; `stop_crew` doesn't, and unarchiving doesn't restart it.
+
 ### Kept upstream tools
 
 - `orchestrator_capabilities` — providers and models (ids, labels, option descriptors) for spawn targeting, plus runtime and interaction-mode facts. It deliberately stays silent about delegation even though `delegate_task` is back on the surface: that tool's own description carries its persona use, and J5 verbs are advertised by their own descriptions.

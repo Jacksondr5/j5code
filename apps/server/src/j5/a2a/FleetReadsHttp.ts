@@ -7,6 +7,7 @@ import { HttpRouter, HttpServerRespondable, HttpServerResponse } from "effect/un
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { annotateEnvironmentRequest } from "../../auth/http.ts";
+import { PlaybookCrewRelay } from "../playbooks/PlaybookCrewRelay.ts";
 import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewInstanceService.ts";
 import { authenticateClientRead, jsonBody } from "./ClientReadsHttp.ts";
 import { A2ALedger } from "./LedgerService.ts";
@@ -33,6 +34,8 @@ export const projectFleetSquadron = (input: {
   readonly participants: ReadonlyArray<ParticipantPlacementView>;
   readonly crews: ReadonlyArray<AgentCrewInstance>;
   readonly openAsks: ReadonlyMap<string, number>;
+  /** Each live Crew's active playbook run, by Crew id. */
+  readonly playbookRuns?: ReadonlyMap<string, J5Contracts.FleetCrew["playbookRun"]>;
 }): FleetResponse["squadrons"][number] => {
   const seatByParticipant = new Map<string, FleetAgent["crew"]>();
   for (const crew of input.crews) {
@@ -120,6 +123,7 @@ export const projectFleetSquadron = (input: {
           ...(steps.length === 0 ? {} : { steps }),
         };
       }),
+      playbookRun: input.playbookRuns?.get(crew.id) ?? null,
     })),
   };
 };
@@ -135,6 +139,7 @@ export const makeFleetReadsHttpRouteLayer = (path: HttpRouter.PathInput) =>
       const ledger = yield* A2ALedger;
       const placements = yield* ParticipantPlacementService;
       const crews = yield* AgentCrewInstanceService;
+      const relay = yield* PlaybookCrewRelay;
       const sql = yield* SqlClient.SqlClient;
       const readFleet = (includeRetired: boolean) =>
         Effect.gen(function* () {
@@ -154,15 +159,22 @@ export const makeFleetReadsHttpRouteLayer = (path: HttpRouter.PathInput) =>
             `;
               for (const row of rows) openAsks.set(row.receiver_id, Number(row.count));
             }
+            // Retired Crews carry rosters and briefs; only the page that shows them pays for them.
+            const squadronCrews = (yield* crews.listForSquadron(squadron.id)).filter(
+              (crew) => includeRetired || crew.archivedAt === null,
+            );
+            // Archiving a Crew cancels its run, so only live Crews can have one.
+            const playbookRuns = new Map<string, J5Contracts.FleetCrew["playbookRun"]>();
+            for (const crew of squadronCrews)
+              if (crew.archivedAt === null)
+                playbookRuns.set(crew.id, yield* relay.fleetRun(crew.id));
             result.push(
               projectFleetSquadron({
                 squadron,
                 participants,
-                // Retired Crews carry rosters and briefs; only the page that shows them pays for them.
-                crews: (yield* crews.listForSquadron(squadron.id)).filter(
-                  (crew) => includeRetired || crew.archivedAt === null,
-                ),
+                crews: squadronCrews,
                 openAsks,
+                playbookRuns,
               }),
             );
           }

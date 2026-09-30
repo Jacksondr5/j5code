@@ -45,6 +45,7 @@ import { A2AParticipantNotFoundError } from "./SendService.ts";
 import { SquadronProjectReferences } from "./SquadronProjectReferences.ts";
 import { ThreadHomesService } from "./ThreadHomesService.ts";
 import { ParticipantId, SquadronId } from "./contracts.ts";
+import { PlaybookCrewRelay } from "../playbooks/PlaybookCrewRelay.ts";
 
 const paths = {
   participantHome: "/raw-client-reads/home",
@@ -358,6 +359,7 @@ it("registers B6 client reads through the authenticated aggregate", async () => 
           Layer.mock(CrewStopService)({}),
           Layer.mock(CrewRuntimeRequestService)({}),
           Layer.mock(ArchiveCrewService)({}),
+          Layer.mock(PlaybookCrewRelay)({}),
           Layer.mock(ParticipantPlacementService)({}),
           Layer.mock(PeerRegistryService)({}),
           Layer.mock(PeerInboundService)({}),

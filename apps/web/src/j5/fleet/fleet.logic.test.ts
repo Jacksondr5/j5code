@@ -9,6 +9,8 @@ import {
   fleetInvolvedThreadRefs,
   originLabel,
   partitionFleet,
+  playbookRunHeader,
+  playbookRunOwnerLabel,
   retiredCrews,
 } from "./fleet.logic";
 import type { FleetAgent, FleetCrew, FleetSquadron } from "./fleetClient";
@@ -119,6 +121,51 @@ describe("fleet involvement", () => {
       ["env:a", "thread:critic"],
       ["env:a", "thread:spawner"],
     ]);
+  });
+});
+
+describe("a Crew's playbook run", () => {
+  const run = {
+    runId: "run:1",
+    position: 2,
+    total: 3,
+    stepId: "review",
+    stepTitle: "Review",
+    state: "delivered" as const,
+    seat: "critic",
+  };
+
+  it("names who holds the step, and never the Captain for a hand-off in progress", () => {
+    expect(playbookRunOwnerLabel(run)).toBe("critic");
+    expect(playbookRunOwnerLabel({ state: "captain", seat: null })).toBe("Captain");
+    expect(playbookRunOwnerLabel({ state: "pending", seat: "critic" })).toBe(
+      "handing off to critic",
+    );
+    expect(playbookRunOwnerLabel({ state: "pending", seat: null })).toBe("handing off");
+    expect(playbookRunHeader(run)).toBe("Step 2 of 3: Review · critic");
+    // An unreadable playbook: the recorded step id, flagged, never a made-up position.
+    expect(
+      playbookRunHeader({
+        ...run,
+        position: 0,
+        total: 0,
+        stepTitle: "review",
+        issue: "Cannot read the live playbook.",
+      }),
+    ).toBe("Step review · needs attention");
+  });
+
+  it("rides onto the Captain's Crew group", () => {
+    const [captain] = buildFleetTree({
+      id: "squadron:alpha",
+      name: "Alpha",
+      crews: [{ ...crew("crew:1", null), playbookRun: run }],
+      agents: [
+        agent("captain"),
+        agent("critic", { placementParentId: "captain", crew: seat("critic", "captain") }),
+      ],
+    });
+    expect(captain?.crews[0]?.playbookRun).toEqual(run);
   });
 });
 

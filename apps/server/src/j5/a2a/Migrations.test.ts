@@ -78,6 +78,7 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
       { migration_id: 26, name: "PeerRouteIndexes" },
       { migration_id: 27, name: "PeerSenderLabelRecency" },
       { migration_id: 28, name: "CrewPlaybooks" },
+      { migration_id: 29, name: "CrewPlaybookRuns" },
     ]);
     assert.deepStrictEqual(
       migrationEntries.map(([id, name]) => [id, name]),
@@ -110,6 +111,7 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
         [26, "PeerRouteIndexes"],
         [27, "PeerSenderLabelRecency"],
         [28, "CrewPlaybooks"],
+        [29, "CrewPlaybookRuns"],
       ],
     );
   }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
@@ -127,7 +129,11 @@ it.effect("adds playbooks after an environment has applied the Crew migrations",
     );
     assert.deepStrictEqual(
       yield* sql`SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'j5_playbook_%' ORDER BY name`,
-      [{ name: "j5_playbook_request" }, { name: "j5_playbook_run" }],
+      [
+        { name: "j5_playbook_request" },
+        { name: "j5_playbook_run" },
+        { name: "j5_playbook_step_delivery" },
+      ],
     );
     yield* runJ5A2AMigrations();
   }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
@@ -180,6 +186,26 @@ it.effect("reads Crews recorded before playbooks as following none and owning no
     assert.isNull(instance?.playbook);
     assert.deepStrictEqual(instance?.members[0]?.playbookStepIds, []);
   }).pipe(Effect.provide(crewStores)),
+);
+
+it.effect("keeps existing playbook runs as thread runs when Crew links arrive", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* runJ5A2AMigrations({ toMigrationInclusive: 28 });
+    yield* sql`
+      INSERT INTO j5_playbook_run (
+        run_id, owner_thread_id, definition_path, current_step_id, status, created_at, updated_at
+      ) VALUES (
+        'run-1', 'thread:owner', '/w/.j5/playbooks/review.yaml', 'inspect', 'active',
+        '2026-09-29T00:00:00.000Z', '2026-09-29T00:00:00.000Z'
+      )
+    `;
+    yield* runJ5A2AMigrations();
+    assert.deepStrictEqual(yield* sql`SELECT run_id, crew_instance_id FROM j5_playbook_run`, [
+      { run_id: "run-1", crew_instance_id: null },
+    ]);
+    assert.deepStrictEqual(yield* sql`SELECT * FROM j5_playbook_step_delivery`, []);
+  }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );
 
 it.effect("reopens crew proposals a claimed launch left mid-flight and keeps resolved ones", () =>
@@ -1326,7 +1352,7 @@ it.effect("recreates earlier-shaped crews tables when 14 runs over them", () =>
     `;
     assert.deepStrictEqual(
       applied.map((row) => row.migration_id),
-      [13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28],
+      [13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29],
     );
     const memberColumns = yield* sql<{ readonly name: string }>`
       SELECT name FROM pragma_table_info('j5_agent_crew_member') ORDER BY cid
@@ -1458,7 +1484,14 @@ it.effect(
       }
       const before = yield* sql`SELECT * FROM j5_playbook_run ORDER BY run_id`;
       yield* runJ5A2AMigrations();
-      assert.deepStrictEqual(yield* sql`SELECT * FROM j5_playbook_run ORDER BY run_id`, before);
+      // Later migrations add the nullable Crew link; existing runs stay thread runs. The columns
+      // are named because the SQLite client caches statements by SQL text, and on Node 24.14 a
+      // `SELECT *` prepared before the ALTER keeps its old column list.
+      assert.deepStrictEqual(
+        yield* sql`SELECT run_id, owner_thread_id, definition_path, current_step_id, status,
+          created_at, updated_at, crew_instance_id FROM j5_playbook_run ORDER BY run_id`,
+        before.map((row) => ({ ...row, crew_instance_id: null })),
+      );
       assert.equal(
         (yield* sql`SELECT * FROM j5_playbook_request WHERE run_id = 'active'`).length,
         4,

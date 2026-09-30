@@ -122,8 +122,11 @@ export const crewLaunchReportText = (input: {
   readonly instance: AgentCrewInstance;
   readonly verdicts: ReadonlyMap<string, SeatStartVerdict>;
   readonly windowMs: number;
+  /** The playbook the Crew follows, with its live title (its name when the file can't be read). */
+  readonly playbook?: { readonly name: string; readonly title: string } | null;
 }) => {
   const { proposal, instance, verdicts } = input;
+  const playbook = input.playbook ?? null;
   const changes = crewRosterChanges(
     proposal.requestedSeats,
     proposal.approvedSeats ?? proposal.requestedSeats,
@@ -172,6 +175,9 @@ export const crewLaunchReportText = (input: {
     ),
     ...notCreatedLines,
     ...pendingLines,
+    ...(playbook === null
+      ? []
+      : [`playbook: ${reportField(playbook.name)} | ${reportField(playbook.title)}`]),
     `roster:\n${roster}`,
     "</j5_crew_gate>",
   ].join("\n");
@@ -191,6 +197,10 @@ export const crewLaunchReportText = (input: {
   if (failed.length === 0 && notCreated.length === 0 && pending.length === 0)
     prose.push(
       "Your crew is running. Each seat has your brief and this roster; coordinate with send_message, and ask the user through the inbox for decisions you cannot make from the brief.",
+    );
+  if (playbook !== null && proposal.kind === "roster")
+    prose.push(
+      `This Crew follows playbook ${playbook.name}. Start it with playbook_start(name: "${playbook.name}", client_request_id, crew_instance_id: "${instance.id}"). The platform hands each step to the seat that owns it; unowned steps are yours.`,
     );
   prose.push(
     "Seats are told to message you with their results; do not ask for the same results again. End your turn and read them as they arrive.",

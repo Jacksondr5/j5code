@@ -46,6 +46,8 @@ import { SquadronJoinService } from "../a2a/SquadronJoinService.ts";
 import { SquadronProjectReferences } from "../a2a/SquadronProjectReferences.ts";
 import { J5ToolkitHandlersLive } from "../a2a/mcp/handlers.ts";
 import { J5Toolkit } from "../a2a/mcp/tools.ts";
+import { layer as agentCrewInstanceLayer } from "../a2a/AgentCrewInstanceService.ts";
+import { layer as playbookCrewRelayLayer } from "./PlaybookCrewRelay.ts";
 import { makePlaybookStore, PlaybookStore } from "./PlaybookStore.ts";
 import type { playbookTools } from "./mcp.ts";
 
@@ -92,7 +94,7 @@ const fixture = Effect.gen(function* () {
   yield* runJ5A2AMigrations();
   yield* seedPlaybookOwners([owner, rootOwner]);
   const store = yield* makePlaybookStore;
-  const dependencies = Layer.mergeAll(
+  const services = Layer.mergeAll(
     Layer.succeed(PlaybookStore, store),
     Layer.mock(ThreadManagementService)({
       getThreadProjection: (threadId) =>
@@ -157,6 +159,10 @@ const fixture = Effect.gen(function* () {
     Layer.mock(SquadronJoinService)({}),
     Layer.mock(SquadronProjectReferences)({}),
     NodeServices.layer,
+  );
+  const dependencies = playbookCrewRelayLayer.pipe(
+    Layer.provideMerge(agentCrewInstanceLayer),
+    Layer.provideMerge(services),
   );
   const toolkit = yield* J5Toolkit.pipe(
     Effect.provide(J5ToolkitHandlersLive.pipe(Layer.provide(dependencies))),

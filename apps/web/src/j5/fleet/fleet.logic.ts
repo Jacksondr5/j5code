@@ -20,7 +20,37 @@ export interface FleetCrewGroup {
   readonly stepsBySeat: ReadonlyMap<string, ReadonlyArray<string>>;
   /** Seats are nodes too: a helper an agent places under a seat renders beneath that seat. */
   readonly members: ReadonlyArray<FleetNode>;
+  /** The Crew's active playbook run, when it follows one. */
+  readonly playbookRun: FleetPlaybookRun | null;
 }
+
+export type FleetPlaybookRun = NonNullable<FleetCrew["playbookRun"]>;
+
+/**
+ * Who holds a Crew's current step. Only `captain` is the Captain; a hand-off still in progress
+ * never reads as the Captain's, even when it has no seat yet.
+ */
+export const playbookRunOwnerLabel = (run: Pick<FleetPlaybookRun, "state" | "seat">) =>
+  run.state === "delivered"
+    ? (run.seat ?? "Seat")
+    : run.state === "captain"
+      ? "Captain"
+      : run.seat === null
+        ? "handing off"
+        : `handing off to ${run.seat}`;
+
+/** The DOM id of a live Crew's group on the Fleet page, unique across environments. */
+export const fleetCrewAnchorId = (environmentId: string, crewInstanceId: string) =>
+  `fleet-crew:${environmentId}:${crewInstanceId}`;
+
+/**
+ * "Step N of M: <title> · <who holds it>" for a Crew's header, or "Step <id> · needs attention"
+ * when the live playbook can't place the recorded step.
+ */
+export const playbookRunHeader = (run: FleetPlaybookRun) =>
+  run.issue === undefined
+    ? `Step ${run.position} of ${run.total}: ${run.stepTitle} · ${playbookRunOwnerLabel(run)}`
+    : `Step ${run.stepId} · needs attention`;
 
 /** A tree node: an agent, its non-Crew children, and the Crews it commands as collapsible groups. */
 export interface FleetNode {
@@ -89,6 +119,7 @@ export function buildFleetTree(squadron: FleetSquadron): ReadonlyArray<FleetNode
             ),
           ),
           members: group.members,
+          playbookRun: crew?.playbookRun ?? null,
         };
       }),
     };

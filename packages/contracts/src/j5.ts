@@ -306,6 +306,25 @@ export const FleetCrew = Schema.Struct({
       steps: Schema.optionalKey(Schema.Array(Schema.String)),
     }),
   ),
+  /**
+   * The Crew's active playbook run: where it is and who holds the current step. `state` has the
+   * meaning of `PlaybookStepDelivery.state`; only `"captain"` means the Captain does the step.
+   */
+  playbookRun: Schema.optionalKey(
+    Schema.NullOr(
+      Schema.Struct({
+        runId: Schema.String,
+        position: Schema.Number,
+        total: Schema.Number,
+        stepId: Schema.String,
+        stepTitle: Schema.String,
+        state: Schema.Literals(["delivered", "captain", "pending"]),
+        seat: Schema.NullOr(Schema.String),
+        /** Set when the live playbook can't be read or lacks the step; position is then 0. */
+        issue: Schema.optionalKey(Schema.String),
+      }),
+    ),
+  ),
 });
 export type FleetCrew = typeof FleetCrew.Type;
 

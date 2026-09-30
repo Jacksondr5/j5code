@@ -75,3 +75,12 @@ provider restarts. Select an earlier run in the thread to inspect its status.
 Each run belongs to one thread. Deleting that thread cancels its active run, so
 you can remove the playbook file. Archiving a thread leaves its run available when
 you return to it.
+
+## With a Crew
+
+A Crew can follow a playbook. Its Captain starts the playbook in its own thread, and
+each step goes to the seat that owns it. The Captain moves to the next step after that
+seat reports back. Steps no seat owns are the Captain's. Going back or reselecting a
+step hands it to its owner again. Fleet shows each Crew's current step and who has it,
+or "handing off" while a step is on its way to a seat. Archiving the Crew or its
+Captain cancels the run; stopping the Crew doesn't.

@@ -232,3 +232,53 @@ it("carries a Crew's playbook and each seat's steps on the Fleet roster", () => 
   assert.isNull(projected.crews[1]?.playbook);
   assert.notProperty(projected.crews[1]?.roster[0], "steps");
 });
+
+it("carries each live Crew's playbook run, and null for a Crew without one", () => {
+  const playbookRun = {
+    runId: "run:1",
+    position: 2,
+    total: 3,
+    stepId: "review",
+    stepTitle: "Review",
+    state: "pending" as const,
+    seat: "builder",
+  };
+  const projected = projectFleetSquadron({
+    squadron: { id: squadronId, name: "Fleet" },
+    participants: [],
+    crews: [crew, { ...crew, id: "crew:idle" }],
+    openAsks: new Map(),
+    playbookRuns: new Map([
+      ["crew:1", playbookRun],
+      ["crew:idle", null],
+    ]),
+  });
+  assert.deepStrictEqual(
+    projected.crews.map((entry) => [entry.crewInstanceId, entry.playbookRun]),
+    [
+      ["crew:1", playbookRun],
+      ["crew:idle", null],
+    ],
+  );
+});
+
+it("carries a run whose playbook can't be read, with its issue, for the header to flag", () => {
+  const playbookRun = {
+    runId: "run:1",
+    position: 0,
+    total: 0,
+    stepId: "review",
+    stepTitle: "review",
+    state: "delivered" as const,
+    seat: "builder",
+    issue: "Cannot read the live playbook.",
+  };
+  const projected = projectFleetSquadron({
+    squadron: { id: squadronId, name: "Fleet" },
+    participants: [],
+    crews: [crew],
+    openAsks: new Map(),
+    playbookRuns: new Map([["crew:1", playbookRun]]),
+  });
+  assert.deepStrictEqual(projected.crews[0]?.playbookRun, playbookRun);
+});
