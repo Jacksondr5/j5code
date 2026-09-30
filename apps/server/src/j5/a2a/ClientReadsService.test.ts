@@ -384,13 +384,18 @@ it.effect("names a sender homed on a peer by the label its server sent, after an
       ],
     });
     const plan = yield* explainPeerSenderLabelStatement(sql, [remoteSender]);
+    const ledgerReads = plan.filter((row) =>
+      /\b(?:SCAN|SEARCH) (?:event|newer)\b/.test(row.detail),
+    );
+    const rendered = plan.map((row) => row.detail).join(" | ");
+    assert.equal(ledgerReads.length, 2, `the outer and the "nothing newer" read: ${rendered}`);
     assert.isTrue(
-      plan.every(
-        (row) =>
-          !row.detail.includes("j5_a2a_comm_event") ||
-          row.detail.includes("j5_a2a_comm_event_received_sender_idx"),
+      ledgerReads.every((row) =>
+        /^SEARCH (?:event|newer) USING INDEX j5_a2a_comm_event_received_sender_idx\b/.test(
+          row.detail,
+        ),
       ),
-      `every touch of the ledger should go through the peer route index: ${plan.map((row) => row.detail).join(" | ")}`,
+      `every touch of the ledger should be an index search, never a scan: ${rendered}`,
     );
   }).pipe(Effect.provide(makeTestLayer())),
 );

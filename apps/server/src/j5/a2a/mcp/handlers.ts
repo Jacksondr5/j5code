@@ -495,9 +495,10 @@ const handlers = {
       const includeArchived = input.include_archived ?? false;
       const directory = yield* service.listParticipants(scope.threadId, includeArchived);
       // A Squadron's name beside its id is how an agent tells its own home from
-      // a peer's without any server being named.
+      // a peer's without any server being named. Names are enrichment: a read
+      // that fails leaves them null rather than taking the address book with it.
       const squadronNames = new Map(
-        (yield* (yield* A2ALedger).listSquadrons()).map(
+        (yield* (yield* A2ALedger).listSquadrons().pipe(Effect.orElseSucceed(() => []))).map(
           (squadron) => [squadron.id, squadron.name] as const,
         ),
       );

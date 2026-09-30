@@ -639,7 +639,8 @@ export type PeerTerminalFact = typeof PeerTerminalFact.Type;
 
 /** Peer-supplied strings are bounded: a peer names a sender, it does not get to fill the ledger. */
 export const PEER_SENDER_LABEL_MAX_CHARS = 200;
-export const PEER_MESSAGE_TEXT_MAX_CHARS = 256_000;
+/** One cap for a message's text, enforced at send so nothing is recorded that a peer would refuse. */
+export const A2A_MESSAGE_TEXT_MAX_CHARS = 256_000;
 export const PeerSenderLabel = Schema.String.check(
   Schema.isNonEmpty(),
   Schema.isMaxLength(PEER_SENDER_LABEL_MAX_CHARS),
@@ -653,7 +654,7 @@ export const PeerDeliveryRequest = Schema.Struct({
   correlationId: Schema.String.check(Schema.isNonEmpty()),
   exchangeRole: Schema.Literals(["none", "ask", "followup", "reply", "terminal_notice"]),
   envelopeChannel: Schema.Literals(["peer", "silence_notice", "lifecycle_notice"]),
-  text: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(PEER_MESSAGE_TEXT_MAX_CHARS)),
+  text: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(A2A_MESSAGE_TEXT_MAX_CHARS)),
   originSquadronId: Schema.String.check(Schema.isNonEmpty()),
   /**
    * The sender's display name (its thread title) for the receiving side's
