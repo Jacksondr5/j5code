@@ -478,7 +478,7 @@ indicate approval. The deleted hook remains explicitly marked.
 | `apps/desktop/src/wsl/DesktopWslServerTree.test.ts`                                                        | R       | B                                         |
 | `apps/mobile/app.config.ts`                                                                                | A       | B                                         |
 | `apps/mobile/package.json`                                                                                 | A       | B, 45                                     |
-| `apps/mobile/src/features/threads/ComposerCommandPopover.tsx`                                              | N       | 48                                        |
+| `apps/mobile/src/features/threads/ComposerCommandPopover.tsx`                                              | A       | 48, Saved-agent mentions                  |
 | `apps/mobile/src/features/threads/NewTaskDraftScreen.tsx`                                                  | A       | 45, 48                                    |
 | `apps/mobile/src/features/threads/ThreadComposer.tsx`                                                      | N       | 48                                        |
 | `apps/mobile/src/features/threads/ThreadDetailScreen.tsx`                                                  | A       | 45, 48                                    |
@@ -623,7 +623,7 @@ indicate approval. The deleted hook remains explicitly marked.
 | `apps/web/src/components/Sidebar.tsx`                                                                      | A       | 9, 16, 19, 21–23, 34                      |
 | `apps/web/src/components/chat/ChatComposer.tsx`                                                            | A       | 9, 45, 48, Saved-agent mentions, PR 75–86 |
 | `apps/web/src/components/chat/ChatHeader.tsx`                                                              | A       | 19                                        |
-| `apps/web/src/components/chat/ComposerCommandMenu.tsx`                                                     | N       | 48                                        |
+| `apps/web/src/components/chat/ComposerCommandMenu.tsx`                                                     | A       | 48, Saved-agent mentions                  |
 | `apps/web/src/components/chat/composerMenuHighlight.test.ts`                                               | N       | 48                                        |
 | `apps/web/src/components/chat/composerMenuHighlight.ts`                                                    | N       | 48                                        |
 | `apps/web/src/components/chat/DraftHeroHeadline.tsx`                                                       | A       | 9                                         |
@@ -663,8 +663,8 @@ indicate approval. The deleted hook remains explicitly marked.
 | `packages/effect-codex-app-server/src/schema.test.ts`                                                      | N       | G                                         |
 | `packages/effect-codex-app-server/test/fixtures/codex-app-server-mock-peer.ts`                             | R       | G                                         |
 | `packages/shared/package.json`                                                                             | N       | 43, 46                                    |
-| `packages/shared/src/composerInlineTokens.ts`                                                              | N       | 48                                        |
-| `packages/shared/src/composerTrigger.ts`                                                                   | N       | 48                                        |
+| `packages/shared/src/composerInlineTokens.ts`                                                              | A       | 48, Saved-agent mentions                  |
+| `packages/shared/src/composerTrigger.ts`                                                                   | A       | 48, Saved-agent mentions                  |
 | `packages/shared/src/devHome.test.ts`                                                                      | R       | H                                         |
 | `packages/shared/src/devHome.ts`                                                                           | R       | H                                         |
 | `packages/shared/src/model.test.ts`                                                                        | A       | 32                                        |
