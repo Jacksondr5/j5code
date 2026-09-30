@@ -1,12 +1,11 @@
 ---
 title: "Upstream convergence watchlist"
-kind: research
-as_of: 2026-09-23
+kind: definition
 ---
 
 # Upstream convergence watchlist
 
-Where upstream T3 Code is building toward the areas J5 owns. Each entry says what upstream has, where J5 stands, and what would make us adopt upstream's version or change our own. Rewrite this file at every upstream advance (see [Merging upstream](../process/upstream-merge.md)); `as_of` is the upstream SHA date it was checked against.
+Where upstream T3 Code is building toward the areas J5 owns. Each entry says what upstream has, where J5 stands, and what would make us adopt upstream's version or change our own. Rewrite this file at every upstream advance (see [Merging upstream](../process/upstream-merge.md)); the line below names the upstream SHA it was last checked against.
 
 Checked against `t3code/codex-turn-mapping` @ `67a2be0fdb` (V2, pingdotgg/t3code#2829).
 
@@ -61,3 +60,8 @@ Two different things share the word "handoff". J5 docs call upstream's history t
 ## Give-back
 
 Fixes J5 carries that belong upstream are tracked in #276. Offer them once V2 merges upstream.
+
+## History
+
+- 2026-09-23 — started as a research watchlist, rewritten at every upstream advance ([Merging upstream](../process/upstream-merge.md)).
+- 2026-09-29 — moved from `research/` to `product/`: it is kept current at every advance, so it is a maintained document rather than a dated study (Jackson, [#354](https://github.com/Jacksondr5/j5code/pull/354)).

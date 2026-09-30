@@ -31,7 +31,7 @@ These areas are J5's. Their definitions are the source of truth; build within th
 
 ## Everything else is upstream's
 
-Anything not in the table is T3 Code's product: providers and their adapters, orchestration (threads, turns, runs, runtime requests, checkpoints), the sidebar and composer, settle / snooze / archive of a thread (J5 follows upstream's archive and adds warnings and Crew rules around it), the pull request view (a J5 PR pane is defined in [features/pr-pane.md](features/pr-pane.md) but not built; until it is, pull request work is upstream's zone), settings, authentication and pairing, remote access and tunnels, the desktop and mobile shells, and persistence.
+Anything not in the table is T3 Code's product: providers and their adapters, orchestration (threads, turns, runs, runtime requests, checkpoints), the sidebar and composer, settle / snooze / archive of a thread (J5 follows upstream's archive and adds warnings and Crew rules around it), the pull request view, settings, authentication and pairing, remote access and tunnels, the desktop and mobile shells, and persistence.
 
 J5 depends on all of it, and sometimes has to reach into it. How to tell a code integration from a change to upstream's product, and who decides each, is in [J5 and upstream](upstream.md). The short version: integrating J5 code is a matter of process ([`FORK.md`](../../../FORK.md)); changing what upstream's product does is the person's decision, made explicitly and recorded.
 

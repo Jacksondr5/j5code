@@ -284,7 +284,7 @@ Current candidate pin: `67a2be0fdbee7afb64b691f147ed286a108c706b`, from `t3code/
 
 The upstream PR branch is moving history and has already been force-rewritten. Do not assume a future branch tip descends from this commit.
 
-Every advance follows [Merging upstream](docs/j5/process/upstream-merge.md) and rewrites the [upstream convergence watchlist](docs/j5/research/upstream-convergence.md).
+Every advance follows [Merging upstream](docs/j5/process/upstream-merge.md) and rewrites the [upstream convergence watchlist](docs/j5/product/upstream-convergence.md).
 
 ### Pin log
 

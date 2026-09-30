@@ -109,7 +109,7 @@ Each principle states its rule, what it stands on (beliefs and lenses above), it
 
 **Jurisdiction:** what the human must do to learn the fleet's state.
 
-**Cases:** the Fleet page and the PR pane exist so "how's it going" is a read ([Fleet page](./features/fleet-page.md), [PR pane](./features/pr-pane.md)); cost rolls up per Squadron on a surface, nothing between ([Fleet page](./features/fleet-page.md)); chattiness is a measured metric, not a vibe.
+**Cases:** the Fleet page exists so "how's it going" is a read ([Fleet page](./features/fleet-page.md)); cost rolls up per Squadron on a surface, nothing between ([Fleet page](./features/fleet-page.md)); chattiness is a measured metric, not a vibe.
 
 ## Never guess — a plausible fake is worse than a visible gap
 
@@ -119,7 +119,7 @@ Each principle states its rule, what it stands on (beliefs and lenses above), it
 
 **Jurisdiction:** how unknowns, staleness, and degraded measurement render, on every surface.
 
-**Cases:** an unknown mergeability renders as "?", never as mergeable; a broken poller goes quiet with a staleness clock, never loud-wrong; PR-to-agent association is conservative — ambiguity shows unassociated rather than guessed ([PR pane](./features/pr-pane.md)).
+**Cases:** a fact the platform couldn't measure renders as "?" with its reason, never as a plausible value ([Fleet page](./features/fleet-page.md)); a Crew seat with no thread facts reads as unknown, never as idle or settled ([Crews](./features/crews.md)).
 
 ## State changes are loud; nothing vanishes silently
 

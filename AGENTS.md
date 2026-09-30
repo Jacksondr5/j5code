@@ -145,9 +145,9 @@ Most code changes do not need a documentation change. Agents can read the code.
 
 ## Plans and work artifacts
 
-- Do not commit per-task implementation plans, research notes, or agent scratch files. Keep temporary working material outside the worktree. `.plans/` is gitignored only as a safety net for legacy tooling. The exception is J5's own planning and research record: `docs/j5/plans/` and `docs/j5/research/` are committed, and follow [how the J5 docs are organized](docs/j5/process/docs.md).
+- Do not commit implementation plans, research notes, or agent scratch files. Keep temporary working material outside the worktree. `.plans/` is gitignored only as a safety net for legacy tooling.
 - Track active work in the GitHub issue that owns it, on `Jacksondr5/j5code`.
-- A merged PR is the implementation record. Close or update its tracking item when the work lands; do not keep a second checklist in the repository. A plan under `docs/j5/plans/` states build status against a definition's criteria; that is its job, not a second checklist.
+- A merged PR is the implementation record. Close or update its tracking item when the work lands; do not preserve a second checklist in the repository.
 
 ## How it works
 
