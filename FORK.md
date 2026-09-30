@@ -36,6 +36,42 @@ Treat these upstream areas as off-limits except for those explicit appended case
 - `apps/web` existing application components and render paths
 - existing provider adapters and shared runtime modules
 - vendored references under `.repos`
+- `apps/mobile` screens, navigation, thread timeline and state (see [Mobile seams](#mobile-seams))
+
+### Mobile seams
+
+Mobile follows the same add-beside rule with a fixed seam set, decided on 2026-09-28 ([#337](https://github.com/Jacksondr5/j5code/issues/337), [#365](https://github.com/Jacksondr5/j5code/issues/365)).
+
+- J5 mobile code lives under `apps/mobile/src/j5/`. Presentation and state that web also needs (A2A envelope parsing, notice and Crew formatting, Inbox ordering, Squadron selection) live once under `packages/client-runtime/src/j5/`; neither client keeps its own copy.
+- Upstream mobile files are edited only at these seams, each an import plus one call into J5 code. A seam becomes a numbered case below when it lands.
+
+| Seam                | Upstream site                                                                                           | J5 behavior behind it                                                                 |
+| ------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Timeline delegate   | `features/threads/ThreadFeed.tsx` message rows                                                          | A2A delivery, notice, spawn-brief and outbound `send_message` cards (web cases 7, 14) |
+| Queue-row formatter | `features/threads/ThreadQueueControl.tsx`                                                               | `From <sender> — <first line>` for queued deliveries (web case 24)                    |
+| New-thread context  | the new-task sheet (`NewTaskDraftScreen`, `new-task-flow-provider`) and `lib/projectThreadStartTurn.ts` | One resolver picks the Squadron for every new-thread door; the launch carries it      |
+| Thread-row identity | `features/threads/thread-list-v2-items.tsx`                                                             | Squadron label and Crew membership (web case 23)                                      |
+| Route registration  | `Stack.tsx` and the settings row targets                                                                | J5 screens such as Inbox, Fleet and Artifacts                                         |
+| Link resolver       | the thread feed's markdown link handler                                                                 | `artifacts/…` links open the artifact instead of a workspace file                     |
+
+- Any other edit to an upstream mobile file needs its own case, as on web. Existing J5 mobile edits keep their recorded cases (personas, playbooks, draft-as-agent, handoff artifacts, branding).
+- Every seam has an integration test that fails when the upstream file stops reaching the J5 code, so a rebase that drops a seam fails CI instead of silently removing J5 behavior.
+- J5 adds no platform native code (Swift, Kotlin, or native modules); that is upstream's territory. The only native-side J5 edits are identity values listed in `BRANDING.md` and asset swaps such as icons. Those change the Expo fingerprint, so the app only gets them through a new native build; batch them and keep them out of feature PRs. A J5 feature that seems to need native code needs a ruling first, and the change should be offered upstream.
+
+A case records how J5 code is wired into upstream code. It is not permission to change what upstream's product does. If an edit changes upstream behavior a user or agent would notice, such as making a provider adapter do something new, suppressing an upstream control, or giving an upstream concept a different meaning, the person decides first, and the decision is recorded in the [register of divergences](docs/j5/product/upstream.md). Only then does the edit get a case here. Every edit to an upstream-owned file is recorded here in the same PR that makes it: case text and file-table row.
+
+### J5-owned files that upstream also ships
+
+These files exist upstream, but J5 owns its copy outright and they are not integration cases. On an upstream advance, keep J5's version, then read upstream's changes to the file and port whatever applies.
+
+- `AGENTS.md`: the instructions every agent harness loads. It started as upstream's and keeps much of upstream's guidance, rewritten for J5 (Jackson, 2026-09-26).
+- `.github/pull_request_template.md`: J5's PR checklist (Jackson, 2026-09-26).
+
+`CLAUDE.md` stays upstream's (`@AGENTS.md`), and imports J5's `AGENTS.md` through it.
+
+### Replaced wholesale
+
+`apps/marketing` is the one directory where the rule above is deliberately broken. Upstream's T3 Code marketing site carries nothing the fork wants, so J5 replaced its contents with the j5.codes site (Astro, same package name and root scripts, upstream's fonts and harness marks kept). On a pin advance take ours for the whole directory; do not merge upstream's marketing changes in. The site reads the current pin from this file at build time (`apps/marketing/src/lib/forkFacts.ts`): the first line starting `Current pin:` or `Current candidate pin:` followed by a backticked SHA, with an optional `selected`/`frozen` date on the same line. Keep that line in one of those shapes or update the parser with it; the site omits the row rather than failing when it cannot parse.
 
 ### Sanctioned appended integration cases
 
@@ -281,7 +317,7 @@ Current candidate pin: `67a2be0fdbee7afb64b691f147ed286a108c706b`, from `t3code/
 
 The upstream PR branch is moving history and has already been force-rewritten. Do not assume a future branch tip descends from this commit.
 
-Every advance follows [Merging upstream](docs/j5/process/upstream-merge.md) and rewrites the [upstream convergence watchlist](docs/j5/research/upstream-convergence.md).
+Every advance follows [Merging upstream](docs/j5/process/upstream-merge.md) and rewrites the [upstream convergence watchlist](docs/j5/product/upstream-convergence.md).
 
 ### Pin log
 
@@ -330,7 +366,7 @@ On every advance, grep the files upstream added since the old pin, not only `BRA
 
 Fork-owned workflows use the Node version in `.nvmrc`, pnpm `11.10.0`, the frozen pnpm lockfile, and
 the repo-local Vite Plus binary. `J5 CI` is the push/PR gate for `j5/**`; `J5 Weekly Full Build` is the
-scheduled and manually dispatchable pre-rebase suite plus Apple Silicon desktop build. `J5 Release` publishes CLI archives (darwin-arm64, linux-x64), SHA256SUMS, install.sh and the signed desktop build to GitHub Releases (case 40); npm publishing is retired. The CLI archive job switches the host to Node 26.8.2 only around `build-exe` (Node single-executables need `--build-sea`), runs every repo script through `pnpm exec` so the repo-local `vp` is on PATH, and applies production web icons before packing.
+scheduled and manually dispatchable pre-rebase suite plus Apple Silicon desktop build. `J5 Mobile CI` runs upstream's mobile native static analysis and an iOS simulator Debug build on macOS, each only when its native inputs change; both are advisory and outside the required check. `J5 Release` publishes CLI archives (darwin-arm64, linux-x64), SHA256SUMS, install.sh and the signed desktop build to GitHub Releases (case 40); npm publishing is retired. The CLI archive job switches the host to Node 26.8.2 only around `build-exe` (Node single-executables need `--build-sea`), runs every repo script through `pnpm exec` so the repo-local `vp` is on PATH, and applies production web icons before packing.
 
 See [`docs/j5/runbooks/macos-packaging.md`](docs/j5/runbooks/macos-packaging.md) for the local build, signature
 verification, install, Gatekeeper approval, and workflow runbook.
@@ -478,9 +514,7 @@ indicate approval. The deleted hook remains explicitly marked.
 | `apps/desktop/src/wsl/DesktopWslServerTree.test.ts`                                                        | R       | B                                         |
 | `apps/mobile/app.config.ts`                                                                                | A       | B                                         |
 | `apps/mobile/package.json`                                                                                 | A       | B, 45                                     |
-| `apps/mobile/src/features/threads/ComposerCommandPopover.tsx`                                              | A       | 48, Saved-agent mentions                  |
 | `apps/mobile/src/features/threads/NewTaskDraftScreen.tsx`                                                  | A       | 45, 48                                    |
-| `apps/mobile/src/features/threads/ThreadComposer.tsx`                                                      | A       | 48, PR 75–86                              |
 | `apps/mobile/src/features/threads/ThreadDetailScreen.tsx`                                                  | A       | 45, 48                                    |
 | `apps/mobile/src/features/threads/new-task-flow-provider.tsx`                                              | A       | 45                                        |
 | `apps/mobile/src/features/threads/use-composer-command-menu.ts`                                            | A       | 45, 48                                    |
@@ -523,7 +557,6 @@ indicate approval. The deleted hook remains explicitly marked.
 | `apps/web/src/components/settings/settingsSearch.ts`                                                       | N       | 42–44                                     |
 | `apps/web/src/components/settings/SettingsSidebarNav.tsx`                                                  | N       | 42                                        |
 | `apps/web/src/state/query.ts`                                                                              | N       | 42                                        |
-| `docs/internals/providers.md`                                                                              | N       | 45                                        |
 | `docs/README.md`                                                                                           | N       | 42, 45                                    |
 | `packages/client-runtime/src/state/runtime.test.ts`                                                        | N       | 42                                        |
 | `packages/contracts/src/auth.ts`                                                                           | N       | 35                                        |
@@ -606,7 +639,6 @@ indicate approval. The deleted hook remains explicitly marked.
 | `packages/contracts/src/index.ts`                                                                          | N       | 42, 44                                    |
 | `packages/contracts/src/rpc.ts`                                                                            | A       | 42, 44, 45                                |
 | `packages/client-runtime/src/rpc/client.ts`                                                                | A       | 45                                        |
-| `apps/web/src/composer-logic.test.ts`                                                                      | N       | 48                                        |
 | `apps/web/src/composer-logic.ts`                                                                           | A       | 45, 48                                    |
 | `apps/server/src/auth/RpcAuthorization.ts`                                                                 | A       | 42, 44, 45                                |
 | `apps/web/src/components/AppSidebarLayout.tsx`                                                             | N       | 19                                        |
@@ -623,9 +655,6 @@ indicate approval. The deleted hook remains explicitly marked.
 | `apps/web/src/components/Sidebar.tsx`                                                                      | A       | 9, 16, 19, 21–23, 34                      |
 | `apps/web/src/components/chat/ChatComposer.tsx`                                                            | A       | 9, 45, 48, Saved-agent mentions, PR 75–86 |
 | `apps/web/src/components/chat/ChatHeader.tsx`                                                              | A       | 19                                        |
-| `apps/web/src/components/chat/ComposerCommandMenu.tsx`                                                     | A       | 48, Saved-agent mentions                  |
-| `apps/web/src/components/chat/composerMenuHighlight.test.ts`                                               | N       | 48                                        |
-| `apps/web/src/components/chat/composerMenuHighlight.ts`                                                    | N       | 48                                        |
 | `apps/web/src/components/chat/DraftHeroHeadline.tsx`                                                       | A       | 9                                         |
 | `apps/web/src/components/chat/MessagesTimeline.test.tsx`                                                   | N       | 7, 14, 24                                 |
 | `apps/web/src/components/chat/timelineMinimapItems.ts`                                                     | A       | 24                                        |
@@ -663,8 +692,6 @@ indicate approval. The deleted hook remains explicitly marked.
 | `packages/effect-codex-app-server/src/schema.test.ts`                                                      | N       | G                                         |
 | `packages/effect-codex-app-server/test/fixtures/codex-app-server-mock-peer.ts`                             | R       | G                                         |
 | `packages/shared/package.json`                                                                             | N       | 43, 46, 48                                |
-| `packages/shared/src/composerInlineTokens.ts`                                                              | A       | 48, Saved-agent mentions                  |
-| `packages/shared/src/composerTrigger.ts`                                                                   | A       | 48, Saved-agent mentions                  |
 | `packages/shared/src/devHome.test.ts`                                                                      | R       | H                                         |
 | `packages/shared/src/devHome.ts`                                                                           | R       | H                                         |
 | `packages/shared/src/model.test.ts`                                                                        | A       | 32                                        |
@@ -677,6 +704,14 @@ indicate approval. The deleted hook remains explicitly marked.
 | `scripts/dev-runner.test.ts`                                                                               | R       | H                                         |
 | `scripts/dev-runner.ts`                                                                                    | R       | H                                         |
 | `vite.config.ts`                                                                                           | R       | H                                         |
+| `apps/web/src/composer-logic.test.ts`                                                                      | N       | 48                                        |
+| `apps/web/src/components/chat/ComposerCommandMenu.tsx`                                                     | A       | 48, Saved-agent mentions                  |
+| `apps/web/src/components/chat/composerMenuHighlight.ts`                                                    | N       | 48                                        |
+| `apps/web/src/components/chat/composerMenuHighlight.test.ts`                                               | N       | 48                                        |
+| `packages/shared/src/composerTrigger.ts`                                                                   | A       | 48, Saved-agent mentions                  |
+| `packages/shared/src/composerInlineTokens.ts`                                                              | A       | 48, Saved-agent mentions                  |
+| `apps/mobile/src/features/threads/ComposerCommandPopover.tsx`                                              | A       | 48, Saved-agent mentions                  |
+| `apps/mobile/src/features/threads/ThreadComposer.tsx`                                                      | A       | 48, PR 75–86                              |
 
 The 2026-09-08 import correction adds bounded file-content schemas and shared selection preparation in `packages/client-runtime/src/state/agentPersonas.ts`, plus import/removal commands in the existing orchestration atom module. Clients send selected JSON contents to the chosen environment, never local paths as server destinations. J5 library code validates and atomically persists imports under a process-wide mutation permit, overlays them on source definitions, and preserves launch snapshots on replacement/removal. The Settings registrations remain thin mounts. Focused tests cover nested file selections, single-file selection, atomic rejection, conflicts, persisted imports, concurrent sessions, restoration, snapshots, and RPC scopes. Native picker/browser interaction still requires an authorized client pass.
 
