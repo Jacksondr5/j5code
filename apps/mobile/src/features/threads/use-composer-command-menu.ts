@@ -50,7 +50,8 @@ import { useEnvironmentQuery } from "../../state/query";
 import { j5Environment } from "../../j5/state";
 import {
   isPlaybookSlashCommandVisible,
-  matchPlaybookSuggestions,
+  playbookMenuItems,
+  playbookSelectionText,
 } from "@t3tools/client-runtime/j5/playbooks";
 import { useComposerPathSearch, useComposerPullRequestSearch } from "../../state/queries";
 import type { ComposerCommandItem } from "./ComposerCommandPopover";
@@ -176,7 +177,7 @@ export function resolveComposerCommandSelection(input: {
   } else if (item.type === "slash-command") {
     replacement = `/${item.command} `;
   } else if (item.type === "playbook") {
-    replacement = `/playbook ${item.name} `;
+    replacement = playbookSelectionText(draftMessage, trigger, item.name);
   } else if (item.type === "provider-slash-command") {
     replacement = `/${item.command.name} `;
   }
@@ -358,7 +359,7 @@ export function useComposerCommandMenu({
     if (!trigger) return [];
     if (trigger.kind === "agent") return agentPicker.items;
     if (trigger.kind === "slash-playbook")
-      return matchPlaybookSuggestions(playbookQuery.data?.playbooks ?? [], trigger.query);
+      return playbookMenuItems(playbookQuery.data?.playbooks ?? [], trigger, draftMessage);
 
     if (trigger.kind === "pull-request") {
       return pullRequestSearch.entries.map((entry) => ({
@@ -526,6 +527,7 @@ export function useComposerCommandMenu({
   }, [
     agentPicker.items,
     playbookQuery.data,
+    draftMessage,
     currentThreadId,
     environmentId,
     threadShells,
