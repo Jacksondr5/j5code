@@ -89,7 +89,7 @@ Each principle states its rule, what it stands on (beliefs and lenses above), it
 
 **Jurisdiction:** a tool's ambition — what any feature is allowed to promise.
 
-**Cases:** Memos are a tool plus visibility (badges, archive warnings, the backlog pane), not forced context injection ([Memos](./features/memos.md)); Exchange semantics are envelope-taught, not schema-coerced ([agent-to-agent communication](./a2a/index.md)); recovery is cheap by design — respawn a Crew from its definition ([Crews](./features/crews.md)), open a new Exchange about an earlier one ([agent-to-agent communication](./a2a/index.md)), nudge from a pane.
+**Cases:** Memos are a tool plus visibility (badges, archive warnings, the backlog pane), not forced context injection ([Memos](./features/memos.md)); Exchange semantics are envelope-taught, not schema-coerced ([agent-to-agent communication](./a2a/index.md)); recovery is cheap by design — respawn a Crew from its definition ([Crews](./features/crews.md)), open a new Exchange about an earlier one ([agent-to-agent communication](./a2a/index.md)), nudge from a pane; when something breaks in an edge case, the person and agents get a tool to repair it rather than the platform recovering on its own — a Crew restore that stopped partway is repaired by archiving and unarchiving its Captain again ([Crews](./features/crews.md)).
 
 ## The platform delivers facts, never judgment
 
@@ -109,7 +109,7 @@ Each principle states its rule, what it stands on (beliefs and lenses above), it
 
 **Jurisdiction:** what the human must do to learn the fleet's state.
 
-**Cases:** the Fleet page and the PR pane exist so "how's it going" is a read ([Fleet page](./features/fleet-page.md), [PR pane](./features/pr-pane.md)); cost rolls up per Squadron on a surface, nothing between ([Fleet page](./features/fleet-page.md)); chattiness is a measured metric, not a vibe.
+**Cases:** the Fleet page exists so "how's it going" is a read ([Fleet page](./features/fleet-page.md)); cost rolls up per Squadron on a surface, nothing between ([Fleet page](./features/fleet-page.md)); chattiness is a measured metric, not a vibe.
 
 ## Never guess — a plausible fake is worse than a visible gap
 
@@ -119,7 +119,7 @@ Each principle states its rule, what it stands on (beliefs and lenses above), it
 
 **Jurisdiction:** how unknowns, staleness, and degraded measurement render, on every surface.
 
-**Cases:** an unknown mergeability renders as "?", never as mergeable; a broken poller goes quiet with a staleness clock, never loud-wrong; PR-to-agent association is conservative — ambiguity shows unassociated rather than guessed ([PR pane](./features/pr-pane.md)).
+**Cases:** a fact the platform couldn't measure renders as "?" with its reason, never as a plausible value ([Fleet page](./features/fleet-page.md)); a Crew seat with no thread facts reads as unknown, never as idle or settled ([Crews](./features/crews.md)).
 
 ## State changes are loud; nothing vanishes silently
 
@@ -141,6 +141,26 @@ Each principle states its rule, what it stands on (beliefs and lenses above), it
 
 **Cases:** a follow-up references an earlier Exchange with one field rather than a linking system ([agent-to-agent communication](./a2a/index.md)); Memos are a shaped store, not a generic agent database ([Memos](./features/memos.md)); Playbooks ship linear before any DAG ([Playbooks](./features/playbooks.md)); Crews archive as units instead of growing seat-replacement machinery ([Crews](./features/crews.md)); agent cron and database primitives wait for a named trigger ([Memos](./features/memos.md)).
 
+## Repair beats edge-case machinery
+
+**Rule:** for rare edge cases, the platform fails visibly and the person, or an agent with the right tool, repairs the result; it does not grow guards, retries, reconciliation sweeps, or recovery for them.
+
+**Stands on:** beliefs 3 and 5 — machinery for rare moments costs more than it returns, and its own bugs are harder to see than the half-finished state it was meant to prevent. A visible failure is cheap to notice and cheap to fix.
+
+**Jurisdiction:** any guard, retry, startup sweep, or extra state whose only job is to cover a case that is rare or nearly impossible. A server restart that interrupts work mid-operation is the common example: the person who restarted knows in-progress work may need attention. Covering a short, visible window during normal operation is not edge-case machinery, and is judged by "never guess" instead.
+
+**Cases:** a Crew launch interrupted by a restart leaves its seats for the person and the Captain to sort out, and a proposal the server was processing when it stopped reopens instead of being finished at boot ([Crews](./features/crews.md)); a Crew restore cut short is repaired by archiving and unarchiving its Captain again, not by a startup sweep ([Crews](./features/crews.md)); a seat that exists on a roster but has no thread for a few seconds during a normal launch still renders as unknown ([Fleet page](./features/fleet-page.md)).
+
+## Upstream owns its product
+
+**Rule:** J5 builds its own features and follows T3 Code everywhere else; changing what upstream's product does is an explicit decision by the person, made with its trade-offs in view, and recorded.
+
+**Stands on:** belief 5, and the fork's cost structure — every change to upstream's behavior is carried through every upstream sync, and J5's users are T3 Code's users first. Where upstream's product is less capable than J5 wants, that is usually upstream's to fix, and a general fix is offered back upstream.
+
+**Jurisdiction:** any change to, override of, or extension of upstream's product: provider adapters, orchestration semantics, upstream controls, upstream names. [J5 and upstream](./upstream.md) defines the zones and holds the register of every divergence the person has approved.
+
+**Cases:** J5 pre-approves its tools on Codex and Claude only; other harnesses keep their own MCP prompt before the roster card rather than J5 extending their adapters ([Crews](./features/crews.md), [J5 and upstream](./upstream.md)); settle and runtime modes keep upstream's meaning and names, and a Captain's settle carries its seats rather than J5 inventing its own settle ([Crews](./features/crews.md)).
+
 ## Scoped principles
 
-Principles with narrower jurisdiction live with their stories, not here. Currently two: **authority never replicates — messages cross, read-models merge**, which governs all distributed-state design and lives in [the cross-device position paper](./cross-device.md); and **steering is a controller's act, and in J5 the only controller of a turn is the human** — agent deliveries queue by default, with the September 4 Astra exception for peer messages into an already-running Codex turn, delivered as ordinary envelopes. The person's own send follows upstream's default; J5 adds that the person is always told what a steer does on that provider and is refused truthfully when nothing can be steered — which governs mid-turn message dispatch and lives in [the queue-vs-steer ruling record](../worklog/2026-09-03-queue-vs-steer-ruling.md).
+Principles with narrower jurisdiction live with their stories, not here. Currently one: **authority never replicates — messages cross, read-models merge**, which governs all distributed-state design and lives in [the cross-device position paper](./cross-device.md).
