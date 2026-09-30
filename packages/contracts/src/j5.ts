@@ -654,6 +654,12 @@ export const PeerDeliveryRequest = Schema.Struct({
    * peer ends its own copy of the Exchange the same way.
    */
   terminal: Schema.optional(PeerTerminalFact),
+  /**
+   * Present on a silence notice: the open Exchange whose answerer went quiet.
+   * The notice is not part of that Exchange; the receiver accepts it only when
+   * the Exchange is open here with this peer as its other party.
+   */
+  regardingExchangeId: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
   /** The origin's clock, kept for display; the receiving server stamps its own time on what it records. */
   createdAt: Schema.String.check(
     Schema.makeFilter(

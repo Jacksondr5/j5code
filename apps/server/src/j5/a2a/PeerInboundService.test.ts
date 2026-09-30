@@ -431,6 +431,19 @@ it.effect(
             },
             "exchange",
           ],
+          // The silence detector's notice: not part of an Exchange, naming the one it concerns.
+          [
+            { senderId: "platform:silence-detector", envelopeChannel: "silence_notice" },
+            "platform",
+          ],
+          [
+            {
+              senderId: "platform:silence-detector",
+              envelopeChannel: "silence_notice",
+              regardingExchangeId: "exchange:x",
+            },
+            "exchange",
+          ],
           [{ envelopeChannel: "lifecycle_notice" }, "channel"],
           [{ exchangeRole: "terminal_notice", exchangeId: "exchange:x" }, "role"],
         ];
@@ -644,6 +657,41 @@ it.effect("closes the local Exchange as sender-cleared when the remote asker wit
         FROM j5_a2a_comm_event WHERE kind = 'message.received' ORDER BY seq
       `;
       assert.deepStrictEqual(facts, [{ injection: null }, { injection: "none" }]);
+    }).pipe(Effect.provide(makeTestLayer(delivered)));
+  }),
+);
+
+it.effect("delivers a silence notice about an Exchange this peer holds with the local asker", () =>
+  Effect.gen(function* () {
+    const delivered = yield* Ref.make<Array<AgentDeliveryInput>>([]);
+    yield* Effect.gen(function* () {
+      yield* setup();
+      const inbound = yield* PeerInboundService;
+      const worker = yield* A2ADeliveryWorker;
+      // Triage asked Home's agent; Home's detector says the answerer went quiet.
+      yield* recordLocalAsk();
+      const silence = {
+        ...askWithoutIntent,
+        senderId: "platform:silence-detector",
+        receiverId: triage.id,
+        messageId: "message:j5:a2a:silence:remote",
+        correlationId: "correlation:j5:a2a:silence:remote",
+        exchangeId: null,
+        exchangeRole: "none" as const,
+        envelopeChannel: "silence_notice" as const,
+        text: "[Cross-agent messaging system notice: turn ended without a reply]",
+        regardingExchangeId: "exchange:j5:a2a:local-ask",
+      };
+      // Another server may not speak about Home's Exchange.
+      const stranger = yield* Effect.flip(
+        inbound.receive({ ...silence, originEnvironmentId: "environment-stranger" }),
+      );
+      assert.equal((stranger as { readonly reason?: string }).reason, "exchange");
+      yield* inbound.receive(silence);
+      assert.equal((yield* worker.runOnce)?.state, "delivered");
+      const told = (yield* Ref.get(delivered)).at(-1)!;
+      assert.equal(told.envelopeChannel, "silence_notice");
+      assert.equal(told.receiverId, triage.id);
     }).pipe(Effect.provide(makeTestLayer(delivered)));
   }),
 );

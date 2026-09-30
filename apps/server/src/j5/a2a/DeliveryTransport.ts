@@ -103,6 +103,8 @@ export interface PeerDeliveryInput extends AgentDeliveryInput {
   readonly intent?: string;
   /** A terminal notice's closing fact, as written on the notice itself. */
   readonly terminal?: PeerDeliveryRequest["terminal"];
+  /** A silence notice's Exchange, as recorded beside the notice. */
+  readonly regardingExchangeId?: string;
 }
 
 const PEER_DELIVERY_TIMEOUT = Duration.seconds(15);
@@ -467,6 +469,9 @@ export const live: Layer.Layer<
             originSquadronId: input.originSquadronId,
             ...(input.intent === undefined ? {} : { intent: input.intent }),
             ...(input.terminal === undefined ? {} : { terminal: input.terminal }),
+            ...(input.regardingExchangeId === undefined
+              ? {}
+              : { regardingExchangeId: input.regardingExchangeId }),
             createdAt: input.createdAt,
           } satisfies PeerDeliveryRequest;
           const request = yield* HttpClientRequest.bodyJson(

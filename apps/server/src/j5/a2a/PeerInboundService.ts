@@ -109,7 +109,7 @@ export class A2APeerSenderNotAllowedError extends Schema.TaggedError<A2APeerSend
       case "machine":
         return `${this.senderId} is a machine participant; a peer server may not deliver as one.`;
       case "platform":
-        return `${this.senderId} is not a platform notice a peer may carry: only the lifecycle or silence detector, on its notice channel, ending an Exchange.`;
+        return `${this.senderId} is not a platform notice a peer may carry: only the lifecycle's terminal notice or the silence detector's notice, each on its own channel and in its own shape.`;
       case "channel":
         return `${this.senderId} must deliver on the peer envelope channel.`;
       case "role":
@@ -164,9 +164,11 @@ const localMessageIdFor = (input: {
 /** Refuse the sender kinds, channels and roles a peer may not use, before anything is read. */
 /**
  * Who a peer may speak as. Its agents, on the peer channel, never a terminal
- * notice. Or the platform itself, but only the two platform ids that ever end
- * an Exchange, each on its own notice channel, carrying the fact it ends with;
- * the receive path then checks the Exchange is one this peer is party to.
+ * notice. Or the platform itself, as exactly one of two notices, each in the
+ * shape its producer writes: the lifecycle's terminal notice (the fact that
+ * ends an Exchange) or the silence detector's notice (not part of any
+ * Exchange, naming the one whose answerer went quiet). The receive path then
+ * checks the Exchange is one this peer is party to.
  */
 const assertSenderShape = (input: PeerInboundInput) => {
   const senderId = ParticipantId.make(input.senderId);
@@ -175,25 +177,26 @@ const assertSenderShape = (input: PeerInboundInput) => {
   if (isHumanParticipantId(senderId)) return refuse("human");
   if (isMachineParticipantId(senderId)) return refuse("machine");
   if (isPlatformParticipantId(senderId)) {
-    const channelOf = {
-      [LIFECYCLE_PARTICIPANT_ID]: "lifecycle_notice",
-      [SILENCE_DETECTOR_PARTICIPANT_ID]: "silence_notice",
-    } as const;
-    const expectedChannel =
-      senderId in channelOf ? channelOf[senderId as keyof typeof channelOf] : undefined;
-    const wellFormed =
-      expectedChannel !== undefined &&
-      input.envelopeChannel === expectedChannel &&
+    const terminalNotice =
+      senderId === LIFECYCLE_PARTICIPANT_ID &&
+      input.envelopeChannel === "lifecycle_notice" &&
       input.exchangeRole === "terminal_notice" &&
       input.exchangeId !== null &&
       input.terminal !== undefined;
-    return wellFormed
-      ? Effect.succeed({ senderId, platformNotice: true as const })
-      : refuse("platform");
+    if (terminalNotice) return Effect.succeed({ senderId, platform: "terminal" as const });
+    const silenceNotice =
+      senderId === SILENCE_DETECTOR_PARTICIPANT_ID &&
+      input.envelopeChannel === "silence_notice" &&
+      input.exchangeRole === "none" &&
+      input.exchangeId === null &&
+      input.terminal === undefined &&
+      input.regardingExchangeId !== undefined;
+    if (silenceNotice) return Effect.succeed({ senderId, platform: "silence" as const });
+    return refuse("platform");
   }
   if (input.envelopeChannel !== "peer") return refuse("channel");
   if (input.exchangeRole === "terminal_notice") return refuse("role");
-  return Effect.succeed({ senderId, platformNotice: false as const });
+  return Effect.succeed({ senderId, platform: null });
 };
 
 interface MembershipRow {
@@ -302,8 +305,8 @@ export const layer: Layer.Layer<PeerInboundService, never, A2ALedger | SqlClient
           });
           const replayed = yield* priorReceipt(commandId);
           if (replayed !== null) return replayed;
-          const { senderId, platformNotice } = yield* assertSenderShape(input);
-          if (!platformNotice)
+          const { senderId, platform } = yield* assertSenderShape(input);
+          if (platform === null)
             yield* assertSenderOwnedByOrigin(senderId, input.originEnvironmentId);
           const receiverId = ParticipantId.make(input.receiverId);
           const receiver = yield* localReceiver(receiverId);
@@ -415,7 +418,19 @@ export const layer: Layer.Layer<PeerInboundService, never, A2ALedger | SqlClient
             }
           }
 
-          if (platformNotice && input.terminal !== undefined && exchangeId !== null) {
+          if (platform === "silence" && input.regardingExchangeId !== undefined) {
+            // The waiter here asked; the answerer on the calling peer went quiet.
+            const party = yield* exchangeWithPeer(ExchangeId.make(input.regardingExchangeId));
+            if (
+              party === null ||
+              party.row.status !== "open" ||
+              party.row.sender_id !== receiverId
+            ) {
+              return yield* new A2APeerSenderNotAllowedError({ senderId, reason: "exchange" });
+            }
+          }
+
+          if (platform === "terminal" && input.terminal !== undefined && exchangeId !== null) {
             // The origin ended the Exchange; this side holds the same Exchange and
             // ends it the same way. Which side retired is this ledger's to say.
             const party = yield* exchangeWithPeer(exchangeId);
