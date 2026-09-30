@@ -59,6 +59,23 @@ describe("mobile slash commands", () => {
       }),
     ).toEqual({ text: "/playbook debugging ", cursor: 20, interactionMode: null });
   });
+  it("inserts a mentioned playbook name mid-message", () => {
+    const draftMessage = "Please run @playbook:deb";
+    expect(
+      resolveComposerCommandSelection({
+        draftMessage,
+        trigger: { rangeStart: 11, rangeEnd: 24 },
+        item: {
+          id: "playbook:debugging",
+          type: "playbook",
+          name: "debugging",
+          label: "debugging",
+          description: "",
+        },
+        allowInteractionMode: false,
+      }),
+    ).toEqual({ text: "Please run @playbook:debugging ", cursor: 31, interactionMode: null });
+  });
   it("keeps the playbook command active to search names", () => {
     const item = buildComposerSlashCommandItems({
       query: "playbook",

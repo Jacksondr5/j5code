@@ -238,6 +238,16 @@ describe("composerSubmissionIntentForKey", () => {
 });
 
 describe("detectComposerTrigger", () => {
+  it("detects an @playbook: mention with the shared playbook trigger", () => {
+    const text = "Use @playbook:rev";
+    expect(detectComposerTrigger(text, text.length)).toEqual({
+      kind: "slash-playbook",
+      query: "rev",
+      rangeStart: 4,
+      rangeEnd: text.length,
+    });
+  });
+
   it("detects @path trigger at cursor", () => {
     const text = "Please check @src/com";
     const trigger = detectComposerTrigger(text, text.length);
