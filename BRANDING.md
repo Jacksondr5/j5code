@@ -55,9 +55,10 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
   `j5code://` because Kotlin cannot read `j5-branding.ts`).
 - Mobile developer tooling: `scripts/mobile-native-client.ts` (development bundle id and the
   prebuilt iOS project/scheme/app name), `scripts/mobile-showcase.ts` (production app id, scheme
-  and iOS project name), and `.agents/skills/test-t3-mobile/` (`scripts/pair-client.sh` app id and
-  link scheme, plus the skill's app name and state paths). Each reads `J5_BRANDING.mobile`, and
-  `mobileNativeProjectName` mirrors Expo's prebuild naming (`J5 Code Dev` → `J5CodeDev`).
+  and iOS project name), and `.agents/skills/test-t3-mobile/scripts/pair-client.sh` (app id and
+  link scheme) read `J5_BRANDING.mobile`; `mobileNativeProjectName` mirrors Expo's prebuild
+  naming (`J5 Code Dev` → `J5CodeDev`). The skill's `SKILL.md` documents the same app name and
+  state paths as prose, so update it by hand when they change.
 - Web fallback identity: `apps/web/src/branding.ts` (including `CLI_COMMAND = "j5"`, the
   release-archive PATH command), `versionSkew.ts` `manualServerUpdateCommand` (`j5 update <version>`),
   the `components/ServerUpdateAction.tsx` success copy, the `components/desktopUpdate.logic.ts`
