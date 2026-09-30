@@ -42,7 +42,7 @@ const makeTestLayer = (input: {
   /** Subjects that currently hold a live session on this server. */
   readonly liveSubjects?: ReadonlyArray<string>;
 }) => {
-  const database = NodeSqliteClient.layerMemory();
+  const database = NodeSqliteClient.layer({ filename: ":memory:" });
   const http = Layer.succeed(
     HttpClient.HttpClient,
     HttpClient.make((request) =>

@@ -607,17 +607,17 @@ const formatPeerLine = (peer: PeerRecord) =>
 
 const peerCredentialCommand = Command.make("credential", {
   ...connectionFlags,
-  for: Flag.string("for").pipe(
+  for: Flag.String("for").pipe(
     Flag.withDescription("The environment id of the server that will hold this credential."),
     Flag.optional,
   ),
-  label: Flag.string("label").pipe(
+  label: Flag.String("label").pipe(
     Flag.withDescription(
       "Shown in Settings → Connections as `Peer: <label>`. Default: the environment id.",
     ),
     Flag.optional,
   ),
-  credentialOnly: Flag.boolean("credential-only").pipe(
+  credentialOnly: Flag.Boolean("credential-only").pipe(
     Flag.withDescription("Print only the credential."),
     Flag.withDefault(false),
   ),
@@ -666,27 +666,27 @@ const peerCredentialCommand = Command.make("credential", {
 
 const peerAddCommand = Command.make("add", {
   ...connectionFlags,
-  peerOrigin: Flag.string("peer-origin").pipe(
+  peerOrigin: Flag.String("peer-origin").pipe(
     Flag.withDescription(
       "The origin this server reaches the peer at, such as https://home.example:3773. It may differ from the one your client uses.",
     ),
     Flag.optional,
   ),
-  credential: Flag.string("credential").pipe(
+  credential: Flag.String("credential").pipe(
     Flag.withDescription(
       "The credential the peer issued for this environment (`j5 a2a peer credential` there).",
     ),
     Flag.optional,
   ),
-  credentialFile: Flag.string("credential-file").pipe(
+  credentialFile: Flag.String("credential-file").pipe(
     Flag.withDescription("File holding that credential."),
     Flag.optional,
   ),
-  label: Flag.string("label").pipe(
+  label: Flag.String("label").pipe(
     Flag.withDescription("A name for the peer. Default: its environment id."),
     Flag.optional,
   ),
-  replaceOrigin: Flag.boolean("replace-origin").pipe(
+  replaceOrigin: Flag.Boolean("replace-origin").pipe(
     Flag.withDescription(
       "Move a known peer to a new origin. Without it, re-adding a peer at a different origin is refused, because hello proves reachability, not identity.",
     ),
@@ -785,7 +785,7 @@ const peerListCommand = Command.make("list", connectionFlags).pipe(
 
 const peerRemoveCommand = Command.make("remove", {
   ...connectionFlags,
-  environment: Flag.string("environment").pipe(
+  environment: Flag.String("environment").pipe(
     Flag.withDescription("The peer's environment id, from `j5 a2a peer list`."),
     Flag.optional,
   ),
