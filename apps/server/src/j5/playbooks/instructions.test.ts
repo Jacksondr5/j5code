@@ -33,6 +33,8 @@ it("names the tools in the order the Captain calls them, and the inbox ask on a 
     positions.toSorted((a, b) => a - b),
   );
   assert.include(PLAYBOOK_CREW_INSTRUCTIONS, "send_message (expect_reply)");
+  // Bryant's ruling: a blocked persona gets a stand-in seat like a missing or disabled one.
+  assert.include(PLAYBOOK_CREW_INSTRUCTIONS, "missing, disabled, or blocked");
   // Short enough that neither provider skims past a step.
   assert.isAtMost(PLAYBOOK_CREW_INSTRUCTIONS.length, 1250);
 });
