@@ -19,6 +19,7 @@ import {
   playbookAuthorLaunch,
   playbookAuthorSquadrons,
   expandPlaybookPrompt,
+  isPlaybookSlashCommandVisible,
   matchPlaybookSuggestions,
   shouldCompleteComposerMenuSelection,
   presentPlaybook,
@@ -340,6 +341,16 @@ it("keeps workspace inputs stable for thread activity and updates them for workt
     dispose();
     registry.dispose();
   }
+});
+
+it.each([
+  ["playbook", true, true],
+  ["playbook", false, false],
+  ["model", false, true],
+  ["plan", false, true],
+  ["default", false, true],
+])("offers /%s at message start=%s: %s", (command, atMessageStart, expected) => {
+  expect(isPlaybookSlashCommandVisible(command, atMessageStart)).toBe(expected);
 });
 
 describe("playbook composer expansion", () => {

@@ -48,7 +48,10 @@ import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useEnvironmentQuery } from "../../state/query";
 import { j5Environment } from "../../j5/state";
-import { matchPlaybookSuggestions } from "@t3tools/client-runtime/j5/playbooks";
+import {
+  isPlaybookSlashCommandVisible,
+  matchPlaybookSuggestions,
+} from "@t3tools/client-runtime/j5/playbooks";
 import { useComposerPathSearch, useComposerPullRequestSearch } from "../../state/queries";
 import type { ComposerCommandItem } from "./ComposerCommandPopover";
 import { matchesSlashSkillQuery } from "./composerSlashSkillSearch";
@@ -108,6 +111,7 @@ export function buildComposerSlashCommandItems(input: {
   const items: ComposerCommandItem[] = builtIn.filter(
     (item) =>
       item.command.includes(query) &&
+      isPlaybookSlashCommandVisible(item.command, input.atMessageStart) &&
       (item.command === "model" || item.command === "playbook" || allowInteractionMode),
   );
 

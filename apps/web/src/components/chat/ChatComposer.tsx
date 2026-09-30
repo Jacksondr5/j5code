@@ -57,6 +57,7 @@ import {
 import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
 import { j5Environment } from "../../j5/state";
 import {
+  isPlaybookSlashCommandVisible,
   matchPlaybookSuggestions,
   shouldCompleteComposerMenuSelection,
 } from "@t3tools/client-runtime/j5/playbooks";
@@ -2672,7 +2673,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         (item) => item.command.name !== "compact" || compactSlashCommandAvailable,
       );
       const slashCommandItems = slashCommandItemsForPromptPosition(
-        [...builtInSlashCommandItems, ...visibleProviderSlashCommandItems, ...skillItems],
+        [
+          ...builtInSlashCommandItems.filter((item) =>
+            isPlaybookSlashCommandVisible(item.command, composerTrigger.rangeStart === 0),
+          ),
+          ...visibleProviderSlashCommandItems,
+          ...skillItems,
+        ],
         composerTrigger.rangeStart === 0,
       );
       return searchSlashCommandItems(slashCommandItems, query);

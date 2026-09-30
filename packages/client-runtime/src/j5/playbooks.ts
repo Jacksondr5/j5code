@@ -247,6 +247,11 @@ export function expandPlaybookPrompt(text: string): string {
   return rest ? `${request.replace(/\.?$/, ".")}\n\n${rest}` : request;
 }
 
+/** Offer the playbook command only where its name picker can open. */
+export function isPlaybookSlashCommandVisible(command: string, atMessageStart: boolean) {
+  return command !== "playbook" || atMessageStart;
+}
+
 /** Let the send shortcut submit an already-complete playbook command. */
 export function shouldCompleteComposerMenuSelection(
   key: string,
