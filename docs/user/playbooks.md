@@ -53,6 +53,10 @@ Text after the name stays part of your message, as in
 playbook review.” One playbook can be active per thread;
 finishing or cancelling it leaves the agent ready for other work or another playbook.
 
+Type `@playbook:` anywhere in a message to pick a playbook by name. On its own, the
+mention asks the agent to start that playbook in the thread. Invalid playbooks appear in the
+list with their error.
+
 You can edit prompts and reorder steps while the run is active. The next retrieval
 uses the latest file. Keep step IDs stable: if you remove the current step, ask the
 agent to select an available step explicitly. A missing or invalid file leaves
