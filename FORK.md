@@ -75,7 +75,7 @@ These files exist upstream, but J5 owns its copy outright and they are not integ
 
 ### Sanctioned appended integration cases
 
-Against candidate upstream pin `67a2be0fdbee7afb64b691f147ed286a108c706b`, the inventory has 48 cases: 1–47 plus 15b. Existing numbers remain stable. Line coordinates and landing SHAs below describe historical integrations; use named symbols and tests after upstream movement. Branding has its own inventory in `BRANDING.md`; temporary defect patches are listed separately below.
+Against candidate upstream pin `67a2be0fdbee7afb64b691f147ed286a108c706b`, the inventory has 50 cases: 1–49 plus 15b. Existing numbers remain stable. Line coordinates and landing SHAs below describe historical integrations; use named symbols and tests after upstream movement. Branding has its own inventory in `BRANDING.md`; temporary defect patches are listed separately below.
 
 1. A1's independent Squadron communication-ledger migration lane: `apps/server/src/persistence/Layers/Sqlite.ts` runs `runJ5CompatibleUpstreamMigrations` before `runJ5A2AMigrations`, inside upstream's `layerConfig` after `initializeV2Database` has copied `state.sqlite` to `statev2.sqlite`; both run only against `statev2.sqlite`. J5 adopts that copy-on-first-start unchanged (Jackson's 2026-09-24 decision #2): an existing `statev2.sqlite` wins and `state.sqlite` is never recopied or written again, so the cutover is one-way: writes after the first V2 boot are invisible to an older binary. Snapshot before the upgrade, and roll back across it by stopping writers and moving `statev2.sqlite` aside (`docs/j5/runbooks/dogfood-runtime.md`); never run old and new binaries against the two files. J5 tooling (`fleet-load.ts`, `devDeliverySeed.ts`, `dogfood-snapshot.sh`, `dogfood-local.sh`) targets `statev2.sqlite`; `apps/server/src/j5/persistence/StateV2Cutover.test.ts` covers the copy, no-recopy and failed-first-boot retry. Case 31 defines the compatibility wrapper; J5's own migration IDs remain in separate tracking tables and run after upstream migration completion.
 2. The authenticated J5 MCP registration seam: `apps/server/src/mcp/McpHttpServer.ts:31-34` imports `J5McpIntegrationLive` and `J5OrchestratorSurfaceRegistrationLive`; `:246-252` selects the J5-owned orchestration allowlist and appends the J5 communication toolkit. The complete upstream `OrchestratorToolkitRegistrationLive` remains compiled at `:229-232` but is intentionally absent from the production merge. Registration stays in `apps/server/src/j5/a2a/mcp/registration.ts`; the combined HTTP/MCP runtime is provided once at case 5's server graph. `t3_thread_read` is intentionally re-declared in J5-owned code with factual thread-state prose because the upstream Tool description contains excluded app-owned/delegation semantics; never replace it with the upstream Tool constant during a rebase. J5 likewise re-declares `orchestrator_capabilities`, so upstream's pointer to `t3_thread_launch` in its description does not reach J5 agents. Open follow-up: upstream's `t3_worktree_handoff` Tool object is still exposed as-is, and its description now tells agents to use `t3_thread_launch` with `workspaceStrategy`, a tool J5 does not expose; re-declare it in J5-owned code like `t3_thread_read`. Upstream removed `t3_thread_start`; it stays in the exclusion assertions as a regression guard. `t3_thread_wait` is deliberately absent from the J5 surface since 2026-09-14 (a turn that blocks on another thread cannot receive the platform notices that queue behind it; see `orchestratorSurface.ts` and the registration tests that assert its absence); never re-add it. `list_participants` exposes every result field in snake_case at every depth, including nested agent `thread_id`, provenance `spawned_by_participant_id` / `source_participant_id`, `placement_parent_id`, and `display_name`; never restore any upstream camelCase directory or provenance field during a rebase. Later J5 verbs extend the fork-owned toolkit without another protected-file registration or runtime provider.
@@ -298,13 +298,15 @@ migrations after upstream migrations.
 
 44. Skills linking extends the J5 contract/RPC exports and the authorization/handler spreads from case 42 with `j5.skills.links.*`. The Settings inventory mounts J5's link preview, inspected unlink batch, confirmed original-folder deletion, and managed-record panel; search continues to use the single Skills route. The shared J5 inventory helpers classify linkable origins and discovery state; catalog and standalone linking reuse J5 root resolution, filesystem operations, and affected-provider refresh. On rebase, preserve fresh preview validation, canonical project containment, the Git exposure warning, ownership identity and forget-only recovery, stale unlink/deletion preview rejection, and release the mutation permit before refreshing providers. Catalog remains user-scoped; standalone links can target an explicitly selected project.
 
-45. Agent-led playbooks: `apps/server/src/provider/T3OrchestrationInstructions.ts` appends J5-owned retrieval and advancement guidance. All state, YAML reading, MCP operations, and authenticated reads remain under J5-owned modules; advancement never creates turns or controls provider lifecycle. Web `ChatView.tsx` mounts the J5 step board and expands submitted `/playbook` text; `ChatComposer.tsx` and `composer-logic.ts` append an ordinary built-in command. `packages/client-runtime/package.json` exports the shared J5 presentation and expansion helper. `docs/user/playbooks.md` describes that text expansion; upstream's `docs/user/composer.md` is untouched. The runs overview is a section of the existing J5-owned Fleet page. A J5-owned read-scoped revision stream notifies visible clients of committed playbook mutations. The RPC group, authorization scope map, handlers, and subscription tag are appended through existing J5 integration seams; the WebSocket handlers share the server-lifetime PlaybookStore. The J5-owned Settings library mounts within the existing Personas page. Creation uses Playbook Author with explicit Squadron ownership and preserves invested drafts; library reads resolve project/thread identities within the selected environment. Mobile `ThreadDetailScreen.tsx` mounts the native board, `use-composer-command-menu.ts` appends the same text expansion, and `use-thread-composer-state.ts`, `NewTaskDraftScreen.tsx`, and `new-task-flow-provider.tsx` apply it on existing/new-thread submission. The J5-owned mobile library mounts within the existing Personas screen (in upstream's Automations section of mobile Settings) and uses the same Playbook Author launch with an explicit Squadron. Its start-chat action preserves invested drafts. The native board shares the environment revision subscription and only refreshes while focused and foregrounded.
+45. Agent-led playbooks: `apps/server/src/provider/T3OrchestrationInstructions.ts` appends J5-owned retrieval and advancement guidance. All state, YAML reading, MCP operations, and authenticated reads remain under J5-owned modules; advancement never creates turns or controls provider lifecycle. Web `ChatView.tsx` mounts the J5 step board and expands submitted `/playbook` text; `ChatComposer.tsx` and `composer-logic.ts` expose `/playbook` through the suggestion seam in case 49. `packages/client-runtime/package.json` exports the shared J5 presentation and expansion helper. `docs/user/playbooks.md` describes that text expansion; upstream's `docs/user/composer.md` is untouched. The runs overview is a section of the existing J5-owned Fleet page. A J5-owned read-scoped revision stream notifies visible clients of committed playbook mutations. The RPC group, authorization scope map, handlers, and subscription tag are appended through existing J5 integration seams; the WebSocket handlers share the server-lifetime PlaybookStore. The J5-owned Settings library mounts within the existing Personas page. Creation uses Playbook Author with explicit Squadron ownership and preserves invested drafts; library reads resolve project/thread identities within the selected environment. Mobile `ThreadDetailScreen.tsx` mounts the native board, `use-composer-command-menu.ts` exposes the same command and suggestion seam (case 49), and `use-thread-composer-state.ts`, `NewTaskDraftScreen.tsx`, and `new-task-flow-provider.tsx` apply it on existing/new-thread submission. The J5-owned mobile library mounts within the existing Personas screen (in upstream's Automations section of mobile Settings) and uses the same Playbook Author launch with an explicit Squadron. Its start-chat action preserves invested drafts. The native board shares the environment revision subscription and only refreshes while focused and foregrounded.
 
 46. Crew seat approvals in the Inbox (#264): `packages/shared/package.json` appends the `./j5/crewRuntimeRequests` subpath export, so the server reads the J5-owned selector for the approvals the Inbox answers (`packages/shared/src/j5/crewRuntimeRequests.ts` `inboxAnswerableApprovals`) without importing client-runtime. J5-owned `packages/client-runtime/src/j5/crewRuntimeRequests.test.ts` holds that selector to the live approvals of upstream's `derivePendingThreadRequests` (`packages/client-runtime/src/state/threadRequests.ts`); when an upstream advance changes which approvals the composer shows or how it describes them, that test fails and the J5 selector follows.
 
 47. Crew seats ask their Captain, not the person (#325, Jackson's 2026-09-26 decision). `apps/server/src/orchestration-v2/ProviderAdapter.ts` appends an optional `crewSeat` to `ProviderAdapterV2RuntimePolicy` beside `agentPersonaInstructions`. J5-owned `makeAgentPersonaRuntimePolicyResolver` (`j5/agents/agentPersonaRuntime.ts`), already the only resolver behind upstream `RuntimePolicy.ts`, asks J5-owned `makeCrewSeatLookup` (`j5/a2a/crewSeatRuntime.ts`) whether an `agent`/`mcp` thread holds a seat in a live Crew, through the Crew store built over the ambient SQL client (`RuntimePolicy.ts` is untouched and its layers gain no requirement; without a SQL client nothing is a seat, and an unreadable store logs and answers no). A seat's policy gets `crewSeat: true` and the ask-your-Captain rule appended to `agentPersonaInstructions`, so it lands after Codex's Default-mode "ask the user directly" text and Claude's system prompt without editing `CodexDeveloperInstructions.ts`. Two adapter appends consume the flag through J5-owned leaf `j5/a2a/crewSeatQuestions.ts`: `makeClaudeAdapterV2`'s `openQuery` spreads `j5ClaudeCrewSeatQueryOverrides(turnInput.runtimePolicy)` into `makeClaudeQueryOptions` (`disallowedTools: ["AskUserQuestion"]`, the SDK option that already existed but was never set), and `codexThreadRuntimeParams` spreads `j5CodexCrewSeatConfig(input.runtimePolicy)` into the thread `config` beside `mcp_servers` (dotted session overrides `features.default_mode_request_user_input = false` and `tools.experimental_request_user_input.enabled = false`, sent on thread start, resume, and fork only when the t3-code MCP session is attached). Cursor, Grok, OpenCode, Pi, ACP registry agents, and Antigravity are not supported on seats yet: they get only the seat brief's instruction (`spawnFirstTurnText` in `j5/a2a/spawnIds.ts`). Captains and every other thread keep their native question tools. Tests: `j5/a2a/crewSeatRuntime.test.ts` (seat, Captain, person thread, persona seat, archived Crew, no SQL client), `j5/a2a/crewSeatQuestions.test.ts` (Codex config and developer-text order), and one `ClaudeAdapterV2.test.ts` case, "withholds AskUserQuestion only from a Crew seat", on the existing wake harness. On every rebase, verify both spreads survive and that upstream has not renamed the Codex switches or added another native question tool.
 
 48. Cross-server peering's scope (Jackson's 2026-09-16 ruling: the squadron id encapsulates the server; agents never see an environment). `packages/contracts/src/auth.ts` appends the `a2a:peer` literal as `AuthA2APeerScope` to `AuthEnvironmentScope`, outside both `AuthStandardClientScopes` and `AuthAdministrativeScopes`, exactly as case 35 did for `a2a:send`: no pairing link and no administrative session carries it. Only the J5 peer credential route (`apps/server/src/j5/a2a/PeerHttp.ts`, behind `access:write`) mints it, bound by the session subject to one `peer:<environment id>`, and the peer routes authorize on that scope plus a registered peer. Everything else is add-beside: migrations 23–27 (26 indexes the peer route probes; 27 indexes received sender labels by receipt time for the client identity read), `PeerRegistryService.ts`, `PeerInboundService.ts`, `PeerDirectory.ts`, `PeerHttp.ts` entering through the case 9 aggregate (the J5 route files share `httpSupport.ts` for authentication and error shapes), the `peer` group in J5-owned `apps/server/src/j5/cli/a2a.ts`, and the wire contracts in `packages/contracts/src/j5.ts`. The peer layers are wired once in J5-owned `runtimeLayer.ts`, which gives them their own `FetchHttpClient` and `ServerEnvironment.identityLayer` and takes `EnvironmentAuth` from the server context, so the shared A2A runtime's requirements grow by that one upstream service. One upstream-adjacent test moves with it: `apps/server/src/mcp/toolkits/worktree/registration.test.ts` (already J5-modified for `list_participants`) provides the empty `PeerDirectory` and a ledger stub for Squadron names, and expects `unread_peer_count` and `squadron_name`. The web side is one mount: `apps/web/src/components/settings/ConnectionsSettings.tsx` renders the J5-owned `PeerServersSettings` (from `apps/web/src/j5/peering/`) after the remote-environments section, gated by the page's existing `access:write` check, and imports nothing else from J5; the client helpers live in `packages/client-runtime/src/j5/http.ts`, `state.ts`, and the new `peering.ts` subpath export, which adds one `./j5/peering` entry to that package's exports map beside the existing J5 subpaths. On every rebase, verify the literal is still outside both bundles, `PAIRING_SCOPE_OPTIONS` in `ConnectionsSettings.tsx` still omits it, `runtimeLayer.ts` still provides the peer layers to the aggregate and the send service, and the single `PeerServersSettings` mount survives. Development databases that ran an earlier cut of this stack, where these migrations carried ids 14–16 and later 18–21, are disposable test state with no upgrade path: recreate them with `pr-env.sh --fresh`.
+
+49. Playbook slash-command suggestions (#314): web `composer-logic.ts` and shared `composerTrigger.ts` append the `slash-playbook` kind and delegate detection to J5-owned `packages/shared/src/j5/playbookTrigger.ts`, exported through `packages/shared/package.json`. The detector searches the kebab-case name at the start of the message and stops before following text. J5-owned `packages/client-runtime/src/j5/playbooks.ts` ranks exact names, prefixes, then name/title substrings, hides the built-in playbook command after earlier message text on both clients, and decides whether the send shortcut submits an exact name or completes a partial name. Web `ChatView.tsx` passes project context to `ChatComposer.tsx`, which reads the project/thread library through the existing J5 environment query, calls those helpers, and inserts selected names while preserving following text. `ComposerCommandMenu.tsx` appends the playbook item and loading/empty/error presentation; `composerMenuHighlight.ts` allows the bare command to remain unselected. Enter sends a bare list request or an exact name; Tab and explicit selection complete a name. Mobile `use-composer-command-menu.ts` shares matching and queries in the selected project/thread; `ComposerCommandPopover.tsx` presents the item and lookup states. `ThreadComposer.tsx`, `ThreadDetailScreen.tsx`, and `NewTaskDraftScreen.tsx` pass context and keep the picker visible during loading or empty results, including a request to choose a project when none is selected. Desktop uses the web composer. These are client-side discovery and text insertion seams; execution follows case 45's ordinary message expansion. Focused detector, matching, keyboard, highlight, and mobile selection tests cover the seam.
 
 ## Pin and upstream advance runbook
 
@@ -472,233 +474,240 @@ only the obsolete hunks when upstream supplies one of them. `R` means retained e
 `A` adapted prior edit, and `N` newly touched upstream path. These history letters do not
 indicate approval. The deleted hook remains explicitly marked.
 
-| Upstream-owned path                                                                                        | History | Contract                                  |
-| ---------------------------------------------------------------------------------------------------------- | ------- | ----------------------------------------- |
-| `.github/workflows/ci.yml`                                                                                 | A       | C                                         |
-| `.github/workflows/mobile-fingerprint-check.yml`                                                           | R       | C                                         |
-| `.gitignore`                                                                                               | R       | H                                         |
-| `apps/desktop/package.json`                                                                                | R       | B                                         |
-| `apps/desktop/resources/dmg/dmg-background-latest.svg`                                                     | R       | B                                         |
-| `apps/desktop/resources/dmg/dmg-background-nightly.svg`                                                    | R       | B                                         |
-| `apps/desktop/scripts/electron-launcher.mjs`                                                               | R       | B, H                                      |
-| `apps/desktop/scripts/electron-launcher.test.mjs`                                                          | R       | B, H                                      |
-| `apps/desktop/src/app/DesktopAppIdentity.test.ts`                                                          | R       | B                                         |
-| `apps/desktop/src/app/DesktopClerk.test.ts`                                                                | R       | B                                         |
-| `apps/desktop/src/app/DesktopConfig.ts`                                                                    | R       | B, H                                      |
-| `apps/desktop/src/app/DesktopConnectionCatalogStore.test.ts`                                               | R       | B                                         |
-| `apps/desktop/src/app/DesktopPreReadyPlatform.test.ts`                                                     | N       | B                                         |
-| `apps/desktop/src/app/DesktopEarlyElectronStartup.test.ts`                                                 | R       | B, H                                      |
-| `apps/desktop/src/app/DesktopEarlyElectronStartup.ts`                                                      | R       | B, H                                      |
-| `apps/desktop/src/app/DesktopEnvironment.test.ts`                                                          | R       | B, H                                      |
-| `apps/desktop/src/app/DesktopEnvironment.ts`                                                               | R       | B, H                                      |
-| `apps/desktop/src/app/DesktopLinuxUrlHandler.test.ts`                                                      | R       | B                                         |
-| `apps/desktop/src/app/DesktopLinuxUrlHandler.ts`                                                           | R       | B                                         |
-| `apps/desktop/src/app/DesktopObservability.test.ts`                                                        | R       | B, H                                      |
-| `apps/desktop/src/app/DesktopStatePaths.ts`                                                                | R       | B, H                                      |
-| `apps/desktop/src/backend/DesktopBackendConfiguration.test.ts`                                             | R       | B, H                                      |
-| `apps/desktop/src/backend/DesktopBackendConfiguration.ts`                                                  | R       | B, H                                      |
-| `apps/desktop/src/backend/DesktopBackendManager.ts`                                                        | R       | B, H                                      |
-| `apps/desktop/src/backend/DesktopServerExposure.test.ts`                                                   | R       | B                                         |
-| `apps/desktop/src/electron/ElectronProtocol.ts`                                                            | R       | B                                         |
-| `apps/desktop/src/settings/DesktopAppSettings.test.ts`                                                     | R       | B, H                                      |
-| `apps/desktop/src/settings/DesktopClientSettings.diagnostics.test.ts`                                      | R       | B, H                                      |
-| `apps/desktop/src/settings/DesktopClientSettings.test.ts`                                                  | R       | B, H                                      |
-| `apps/desktop/src/settings/DesktopSavedEnvironments.test.ts`                                               | R       | B, H                                      |
-| `apps/desktop/src/updates/updatesTestHarness.ts`                                                           | N       | B, H                                      |
-| `apps/desktop/src/window/DesktopWindow.test.ts`                                                            | R       | B, H                                      |
-| `apps/desktop/src/wsl/DesktopWslServerTree.test.ts`                                                        | R       | B                                         |
-| `apps/mobile/app.config.ts`                                                                                | A       | B                                         |
-| `apps/mobile/package.json`                                                                                 | A       | B, 45                                     |
-| `apps/mobile/src/features/threads/NewTaskDraftScreen.tsx`                                                  | A       | 45                                        |
-| `apps/mobile/src/features/threads/ThreadDetailScreen.tsx`                                                  | A       | 45                                        |
-| `apps/mobile/src/features/threads/new-task-flow-provider.tsx`                                              | A       | 45                                        |
-| `apps/mobile/src/features/threads/use-composer-command-menu.ts`                                            | A       | 45                                        |
-| `apps/mobile/src/features/threads/use-composer-command-menu.test.ts`                                       | A       | 45                                        |
-| `apps/mobile/src/state/use-thread-composer-state.ts`                                                       | A       | 45                                        |
-| `apps/mobile/src/App.tsx`                                                                                  | R       | B                                         |
-| `apps/mobile/src/features/connection/pairing.test.ts`                                                      | R       | B                                         |
-| `apps/mobile/src/features/connection/pairing.ts`                                                           | R       | B                                         |
-| `apps/mobile/src/features/review/shikiReviewHighlighter.test.ts`                                           | N       | T                                         |
-| `apps/mobile/src/widgets/AgentActivity.test.ts`                                                            | R       | B                                         |
-| `apps/mobile/src/widgets/AgentActivity.tsx`                                                                | R       | B                                         |
-| `apps/server/scripts/migrate-dev-db.test.ts`                                                               | R       | H                                         |
-| `apps/server/scripts/migrate-dev-db.ts`                                                                    | A       | H                                         |
-| `apps/server/scripts/t3-sqlite-state.test.ts`                                                              | R       | H                                         |
-| `apps/server/scripts/t3-sqlite-state.ts`                                                                   | A       | H                                         |
-| `apps/server/src/binCli.ts`                                                                                | N       | 35                                        |
-| `apps/server/src/cli/app.test.ts`                                                                          | N       | H                                         |
-| `apps/server/src/cli/app.ts`                                                                               | N       | H                                         |
-| `apps/server/src/cli/config.test.ts`                                                                       | A       | H                                         |
-| `apps/server/src/cli/config.ts`                                                                            | R       | H                                         |
-| `apps/server/src/cli/pair.test.ts`                                                                         | R       | H, P                                      |
-| `apps/server/src/cli/pair.ts`                                                                              | R       | H, P                                      |
-| `apps/server/src/cli/theme.test.ts`                                                                        | N       | H                                         |
-| `apps/server/src/cli/theme.ts`                                                                             | N       | H                                         |
-| `apps/server/src/cli/triage.ts`                                                                            | N       | H                                         |
-| `apps/server/src/provider/Drivers/ClaudeDriver.ts`                                                         | N       | 43                                        |
-| `apps/server/src/provider/Drivers/ClaudeSkills.test.ts`                                                    | N       | 43                                        |
-| `apps/server/src/provider/Drivers/ClaudeSkills.ts`                                                         | N       | 42–44                                     |
-| `apps/server/src/provider/Layers/ClaudeCapabilitiesProbe.test.ts`                                          | N       | 43                                        |
-| `apps/server/src/provider/Layers/ClaudeProvider.ts`                                                        | N       | 43                                        |
-| `apps/server/src/provider/Layers/CodexProvider.ts`                                                         | N       | 43                                        |
-| `apps/server/src/provider/Layers/ProviderRegistry.test.ts`                                                 | N       | 42, 43                                    |
-| `apps/server/src/provider/Layers/ProviderRegistry.ts`                                                      | N       | 42, 43                                    |
-| `apps/server/src/provider/providerMaintenanceRunner.test.ts`                                               | N       | 42                                        |
-| `apps/server/src/provider/Services/ProviderRegistry.ts`                                                    | N       | 42                                        |
-| `apps/server/src/provider/testUtils/providerRegistryMock.ts`                                               | N       | 42                                        |
-| `apps/server/src/serverSettings.test.ts`                                                                   | N       | 42                                        |
-| `apps/server/src/serverSettings.ts`                                                                        | N       | 42                                        |
-| `apps/web/src/components/settings/settingsSearch.test.ts`                                                  | N       | 43                                        |
-| `apps/web/src/components/settings/settingsSearch.ts`                                                       | N       | 42–44                                     |
-| `apps/web/src/components/settings/SettingsSidebarNav.tsx`                                                  | N       | 42                                        |
-| `apps/web/src/state/query.ts`                                                                              | N       | 42                                        |
-| `docs/README.md`                                                                                           | N       | 42, 45                                    |
-| `packages/client-runtime/src/state/runtime.test.ts`                                                        | N       | 42                                        |
-| `packages/contracts/src/auth.ts`                                                                           | N       | 35                                        |
-| `apps/server/src/cloud/bootService.test.ts`                                                                | A       | H                                         |
-| `apps/server/src/cloud/bootService.ts`                                                                     | A       | H                                         |
-| `apps/server/src/entrypoint.test.ts`                                                                       | N       | T                                         |
-| `apps/server/src/environment/ServerEnvironment.test.ts`                                                    | N       | 34                                        |
-| `apps/server/src/environment/ServerEnvironment.ts`                                                         | N       | 34                                        |
-| `apps/server/src/http.ts`                                                                                  | R       | B                                         |
-| `apps/server/src/mcp/McpHttpServer.ts`                                                                     | R       | 2                                         |
-| `apps/server/src/mcp/toolkits/worktree/registration.test.ts`                                               | A       | 4, 45                                     |
-| `apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts`                                        | A       | 8, 47, Saved-agent mentions               |
-| `apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts`                                             | N       | 47, Saved-agent mentions                  |
-| `apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.test.ts`                                         | A       | 8, 28, G, Saved-agent mentions            |
-| `apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts`                                              | A       | 28, 47, G, Saved-agent mentions           |
-| `apps/server/src/orchestration-v2/EffectOutbox.ts`                                                         | R       | 26                                        |
-| `apps/server/src/orchestration-v2/FoundationPersistence.test.ts`                                           | N       | T                                         |
-| `apps/server/src/orchestration-v2/ProviderAdapter.ts`                                                      | R       | 47, N                                     |
-| `apps/server/src/orchestration-v2/ProviderTurnControlService.ts`                                           | R       | 26                                        |
-| `apps/server/src/orchestration-v2/ProviderTurnStartService.test.ts`                                        | A       | 28, N                                     |
-| `apps/server/src/orchestration-v2/ProviderTurnStartService.ts`                                             | A       | 28, 30, N                                 |
-| `apps/server/src/orchestration-v2/RunExecutionService.test.ts`                                             | A       | N                                         |
-| `apps/server/src/orchestration-v2/RunFinalizationService.ts`                                               | R       | 30                                        |
-| `apps/server/src/orchestration-v2/ThreadLaunchService.test.ts`                                             | R       | 10, 11                                    |
-| `apps/server/src/orchestration-v2/ThreadLaunchService.ts`                                                  | R       | 10, 11                                    |
-| `apps/server/src/orchestration-v2/runtimeLayer.test.ts`                                                    | R       | 3                                         |
-| `apps/server/src/orchestration-v2/runtimeLayer.ts`                                                         | R       | 5, 21, 26, 30, 38                         |
-| `apps/server/src/orchestration-v2/testkit/OrchestratorScenario.ts`                                         | N       | T                                         |
-| `apps/server/src/orchestration-v2/testkit/ProviderReplayGate.testkit.test.ts`                              | N       | T                                         |
-| `apps/server/src/orchestration-v2/testkit/ProviderReplayGate.testkit.ts`                                   | N       | T                                         |
-| `apps/server/src/orchestration-v2/testkit/fixtures/delegated_task_status/codex_transcript.ndjson`          | N       | G                                         |
-| `apps/server/src/orchestration-v2/testkit/fixtures/message_steering/codex_transcript.ndjson`               | A       | G                                         |
-| `apps/server/src/orchestration-v2/testkit/fixtures/multi_turn/codex_transcript.ndjson`                     | A       | G                                         |
-| `apps/server/src/orchestration-v2/testkit/fixtures/plan_questions/codex_transcript.ndjson`                 | A       | G                                         |
-| `apps/server/src/orchestration-v2/testkit/fixtures/proposed_plan/codex_transcript.ndjson`                  | A       | G                                         |
-| `apps/server/src/orchestration-v2/testkit/fixtures/provider_thread_resume/codex_transcript.ndjson`         | A       | G                                         |
-| `apps/server/src/orchestration-v2/testkit/fixtures/queued_turn/codex_transcript.ndjson`                    | A       | G                                         |
-| `apps/server/src/orchestration-v2/testkit/fixtures/simple/codex_transcript.ndjson`                         | A       | G                                         |
-| `apps/server/src/orchestration-v2/testkit/fixtures/subagent/codex_transcript.ndjson`                       | A       | G                                         |
-| `apps/server/src/orchestration-v2/testkit/fixtures/subagent_continue/codex_transcript.ndjson`              | A       | G                                         |
-| `apps/server/src/orchestration-v2/testkit/fixtures/subagent_v2/codex_transcript.ndjson`                    | R       | G                                         |
-| `apps/server/src/orchestration-v2/testkit/fixtures/subagent_v2_nested/codex_transcript.ndjson`             | R       | G                                         |
-| `apps/server/src/orchestration-v2/testkit/fixtures/thread_fork_native/codex_transcript.ndjson`             | A       | G                                         |
-| `apps/server/src/orchestration-v2/testkit/fixtures/thread_fork_native_continue/codex_transcript.ndjson`    | A       | G                                         |
-| `apps/server/src/orchestration-v2/testkit/fixtures/thread_fork_native_prior_turn/codex_transcript.ndjson`  | A       | G                                         |
-| `apps/server/src/orchestration-v2/testkit/fixtures/thread_fork_native_siblings/codex_transcript.ndjson`    | A       | G                                         |
-| `apps/server/src/orchestration-v2/testkit/fixtures/thread_merge_back_continue/codex_transcript.ndjson`     | A       | G                                         |
-| `apps/server/src/orchestration-v2/testkit/fixtures/thread_merge_back_siblings/codex_transcript.ndjson`     | A       | G                                         |
-| `apps/server/src/orchestration-v2/testkit/fixtures/thread_rollback/codex_transcript.ndjson`                | A       | G                                         |
-| `apps/server/src/orchestration-v2/testkit/fixtures/todo_list/codex_transcript.ndjson`                      | A       | G                                         |
-| `apps/server/src/orchestration-v2/testkit/fixtures/tool_call_read_only_on_request/codex_transcript.ndjson` | A       | G                                         |
-| `apps/server/src/orchestration-v2/testkit/fixtures/tool_call_restricted_granular/codex_transcript.ndjson`  | A       | G                                         |
-| `apps/server/src/orchestration-v2/testkit/fixtures/tool_call_workspace_never/codex_transcript.ndjson`      | A       | G                                         |
-| `apps/server/src/orchestration-v2/testkit/fixtures/turn_interrupt/codex_transcript.ndjson`                 | A       | G                                         |
-| `apps/server/src/orchestration-v2/testkit/fixtures/turn_interrupt_mid_tool/codex_transcript.ndjson`        | A       | G                                         |
-| `apps/server/src/orchestration-v2/testkit/fixtures/web_search/codex_transcript.ndjson`                     | A       | G                                         |
-| `apps/server/src/os-jank.ts`                                                                               | R       | H                                         |
-| `apps/server/src/persistence/Layers/Sqlite.ts`                                                             | A       | 1, 31                                     |
-| `apps/server/src/provider/AntigravityInstallation.test.ts`                                                 | N       | T                                         |
-| `apps/server/src/provider/Layers/CodexSessionRuntime.test.ts`                                              | A       | G                                         |
-| `apps/server/src/provider/Layers/EventNdjsonLogger.test.ts`                                                | N       | 36                                        |
-| `apps/server/src/provider/Layers/EventNdjsonLogger.ts`                                                     | N       | 36                                        |
-| `apps/server/src/provider/Layers/CodexSessionRuntime.ts`                                                   | N       | G                                         |
-| `apps/server/src/provider/T3OrchestrationInstructions.test.ts`                                             | R       | 8                                         |
-| `apps/server/src/provider/T3OrchestrationInstructions.ts`                                                  | R       | 8, 45                                     |
-| `apps/server/src/provider/testFixtures/codexCollabMockPeer.mjs`                                            | R       | G                                         |
-| `apps/server/src/provider/testFixtures/codexMultiAgentWire.json`                                           | R       | G                                         |
-| `apps/server/src/scheduledTasks/ScheduledTaskService.ts`                                                   | R       | 12                                        |
-| `apps/server/src/server.ts`                                                                                | A       | 5, 9, MCP idle connection patch           |
-| `apps/server/src/serviceLauncher.ts`                                                                       | R       | H                                         |
-| `apps/server/src/telemetry/Identify.ts`                                                                    | R       | H                                         |
-| `apps/server/src/textGeneration/CodexTextGeneration.test.ts`                                               | N       | T                                         |
-| `apps/server/src/ws.ts`                                                                                    | A       | 10, 11, 37, 42, 44, 45                    |
-| `apps/web/index.html`                                                                                      | R       | B                                         |
-| `apps/web/src/branding.test.ts`                                                                            | R       | B                                         |
-| `apps/web/src/branding.ts`                                                                                 | R       | B                                         |
-| `apps/web/src/commandPaletteBus.ts`                                                                        | R       | 13, 42                                    |
-| `apps/web/src/components/ChatView.logic.test.ts`                                                           | R       | 9, 19                                     |
-| `apps/web/src/components/ChatView.logic.ts`                                                                | A       | 9, 19                                     |
-| `packages/contracts/src/index.ts`                                                                          | N       | 42, 44                                    |
-| `packages/contracts/src/rpc.ts`                                                                            | A       | 42, 44, 45                                |
-| `packages/client-runtime/src/rpc/client.ts`                                                                | A       | 45                                        |
-| `apps/web/src/composer-logic.ts`                                                                           | A       | 45                                        |
-| `apps/server/src/auth/RpcAuthorization.ts`                                                                 | A       | 42, 44, 45                                |
-| `apps/web/src/components/AppSidebarLayout.tsx`                                                             | N       | 19                                        |
-| `apps/web/src/components/ChatView.tsx`                                                                     | A       | 9–11, 19, 24, 34, 45                      |
-| `apps/web/src/components/CommandPalette.logic.test.ts`                                                     | R       | 15b, 34                                   |
-| `apps/web/src/components/CommandPalette.logic.ts`                                                          | R       | 15b, 34                                   |
-| `apps/web/src/components/CommandPalette.tsx`                                                               | A       | 13, 15b, 19, 20, 34, 42                   |
-| `apps/web/src/components/CommandPaletteResults.tsx`                                                        | R       | 17                                        |
-| `apps/web/src/components/ConfirmDialogHost.tsx`                                                            | R       | 22                                        |
-| `apps/web/src/components/LegacySidebar.tsx`                                                                | R       | 21, 22                                    |
-| `apps/web/src/components/Sidebar.logic.test.ts`                                                            | R       | 16, 19, 21                                |
-| `apps/web/src/components/Sidebar.logic.ts`                                                                 | R       | 16, 19, 21, 34                            |
-| `apps/web/src/components/ProjectCloneToastCoordinator.tsx`                                                 | N       | 19                                        |
-| `apps/web/src/components/Sidebar.tsx`                                                                      | A       | 9, 16, 19, 21–23, 34                      |
-| `apps/web/src/components/chat/ChatComposer.tsx`                                                            | A       | 9, Saved-agent mentions, Role library, 45 |
-| `apps/web/src/components/chat/ChatHeader.tsx`                                                              | A       | 19                                        |
-| `apps/web/src/components/chat/DraftHeroHeadline.tsx`                                                       | A       | 9                                         |
-| `apps/web/src/components/chat/MessagesTimeline.test.tsx`                                                   | N       | 7, 14, 24                                 |
-| `apps/web/src/components/chat/timelineMinimapItems.ts`                                                     | A       | 24                                        |
-| `apps/web/src/components/chat/MessagesTimeline.tsx`                                                        | A       | B, 7, 14, 24                              |
-| `apps/web/src/components/chat/QueuedRunsControl.tsx`                                                       | A       | 24                                        |
-| `apps/web/src/components/pullRequest/PullRequestListEmptyState.test.tsx`                                   | R       | 19                                        |
-| `apps/web/src/components/pullRequest/PullRequestListEmptyState.tsx`                                        | R       | 19                                        |
-| `apps/web/src/components/sidebar/SidebarChrome.tsx`                                                        | A       | 6, B                                      |
-| `apps/web/src/confirmDialog.test.ts`                                                                       | R       | 22                                        |
-| `apps/web/src/confirmDialog.ts`                                                                            | R       | 22                                        |
-| `apps/web/src/hooks/useThreadActionMenu.ts`                                                                | A       | 21                                        |
-| `apps/web/src/routeTree.gen.ts`                                                                            | R       | generated route registrations for 6/9     |
-| `apps/web/src/components/onboarding/WelcomeWizard.tsx`                                                     | R       | 39, B                                     |
-| `apps/web/src/routes/welcome.tsx`                                                                          | R       | 39                                        |
-| `apps/web/src/routes/_chat.index.tsx`                                                                      | R       | 9, 19, 34                                 |
-| `apps/web/src/routes/_chat.tsx`                                                                            | R       | 19, 34                                    |
-| `apps/web/tsconfig.json`                                                                                   | R       | B                                         |
-| `packages/client-runtime/package.json`                                                                     | R       | 34, 45                                    |
-| `packages/client-runtime/src/operations/commands.test.ts`                                                  | R       | 10, 11                                    |
-| `packages/client-runtime/src/operations/commands.ts`                                                       | R       | 10, 11                                    |
-| `packages/contracts/package.json`                                                                          | N       | 34                                        |
-| `packages/contracts/src/environment.ts`                                                                    | N       | 34                                        |
-| `packages/contracts/src/model.ts`                                                                          | A       | 32                                        |
-| `packages/contracts/src/orchestrationV2.ts`                                                                | R       | 10, 11                                    |
-| `packages/contracts/src/server.test.ts`                                                                    | N       | 43                                        |
-| `packages/contracts/src/server.ts`                                                                         | N       | 42, 43                                    |
-| `packages/contracts/src/settings.test.ts`                                                                  | N       | 42                                        |
-| `packages/contracts/src/settings.ts`                                                                       | N       | 42                                        |
-| `packages/effect-codex-app-server/scripts/generate.ts`                                                     | A       | G                                         |
-| `packages/effect-codex-app-server/src/_generated/meta.gen.ts`                                              | R       | G                                         |
-| `packages/effect-codex-app-server/src/_generated/namespaces.gen.ts`                                        | R       | G                                         |
-| `packages/effect-codex-app-server/src/_generated/schema.gen.ts`                                            | A       | G                                         |
-| `packages/effect-codex-app-server/src/client.test.ts`                                                      | R       | G                                         |
-| `packages/effect-codex-app-server/src/protocol.test.ts`                                                    | A       | G                                         |
-| `packages/effect-codex-app-server/src/schema.test.ts`                                                      | N       | G                                         |
-| `packages/effect-codex-app-server/test/fixtures/codex-app-server-mock-peer.ts`                             | R       | G                                         |
-| `packages/shared/package.json`                                                                             | N       | 43, 46                                    |
-| `packages/shared/src/devHome.test.ts`                                                                      | R       | H                                         |
-| `packages/shared/src/devHome.ts`                                                                           | R       | H                                         |
-| `packages/shared/src/model.test.ts`                                                                        | A       | 32                                        |
-| `packages/ssh/src/runnerProcess.test.ts`                                                                   | N       | B, H                                      |
-| `packages/ssh/src/tunnel.test.ts`                                                                          | R       | H                                         |
-| `packages/ssh/src/tunnel.ts`                                                                               | R       | H                                         |
-| `pnpm-lock.yaml`                                                                                           | N       | 45                                        |
-| `scripts/build-desktop-artifact.test.ts`                                                                   | A       | B, S                                      |
-| `scripts/build-desktop-artifact.ts`                                                                        | R       | B, S                                      |
-| `scripts/dev-runner.test.ts`                                                                               | R       | H                                         |
-| `scripts/dev-runner.ts`                                                                                    | R       | H                                         |
-| `vite.config.ts`                                                                                           | R       | H                                         |
+| Upstream-owned path                                                                                        | History | Contract                                      |
+| ---------------------------------------------------------------------------------------------------------- | ------- | --------------------------------------------- |
+| `.github/workflows/ci.yml`                                                                                 | A       | C                                             |
+| `.github/workflows/mobile-fingerprint-check.yml`                                                           | R       | C                                             |
+| `.gitignore`                                                                                               | R       | H                                             |
+| `apps/desktop/package.json`                                                                                | R       | B                                             |
+| `apps/desktop/resources/dmg/dmg-background-latest.svg`                                                     | R       | B                                             |
+| `apps/desktop/resources/dmg/dmg-background-nightly.svg`                                                    | R       | B                                             |
+| `apps/desktop/scripts/electron-launcher.mjs`                                                               | R       | B, H                                          |
+| `apps/desktop/scripts/electron-launcher.test.mjs`                                                          | R       | B, H                                          |
+| `apps/desktop/src/app/DesktopAppIdentity.test.ts`                                                          | R       | B                                             |
+| `apps/desktop/src/app/DesktopClerk.test.ts`                                                                | R       | B                                             |
+| `apps/desktop/src/app/DesktopConfig.ts`                                                                    | R       | B, H                                          |
+| `apps/desktop/src/app/DesktopConnectionCatalogStore.test.ts`                                               | R       | B                                             |
+| `apps/desktop/src/app/DesktopPreReadyPlatform.test.ts`                                                     | N       | B                                             |
+| `apps/desktop/src/app/DesktopEarlyElectronStartup.test.ts`                                                 | R       | B, H                                          |
+| `apps/desktop/src/app/DesktopEarlyElectronStartup.ts`                                                      | R       | B, H                                          |
+| `apps/desktop/src/app/DesktopEnvironment.test.ts`                                                          | R       | B, H                                          |
+| `apps/desktop/src/app/DesktopEnvironment.ts`                                                               | R       | B, H                                          |
+| `apps/desktop/src/app/DesktopLinuxUrlHandler.test.ts`                                                      | R       | B                                             |
+| `apps/desktop/src/app/DesktopLinuxUrlHandler.ts`                                                           | R       | B                                             |
+| `apps/desktop/src/app/DesktopObservability.test.ts`                                                        | R       | B, H                                          |
+| `apps/desktop/src/app/DesktopStatePaths.ts`                                                                | R       | B, H                                          |
+| `apps/desktop/src/backend/DesktopBackendConfiguration.test.ts`                                             | R       | B, H                                          |
+| `apps/desktop/src/backend/DesktopBackendConfiguration.ts`                                                  | R       | B, H                                          |
+| `apps/desktop/src/backend/DesktopBackendManager.ts`                                                        | R       | B, H                                          |
+| `apps/desktop/src/backend/DesktopServerExposure.test.ts`                                                   | R       | B                                             |
+| `apps/desktop/src/electron/ElectronProtocol.ts`                                                            | R       | B                                             |
+| `apps/desktop/src/settings/DesktopAppSettings.test.ts`                                                     | R       | B, H                                          |
+| `apps/desktop/src/settings/DesktopClientSettings.diagnostics.test.ts`                                      | R       | B, H                                          |
+| `apps/desktop/src/settings/DesktopClientSettings.test.ts`                                                  | R       | B, H                                          |
+| `apps/desktop/src/settings/DesktopSavedEnvironments.test.ts`                                               | R       | B, H                                          |
+| `apps/desktop/src/updates/updatesTestHarness.ts`                                                           | N       | B, H                                          |
+| `apps/desktop/src/window/DesktopWindow.test.ts`                                                            | R       | B, H                                          |
+| `apps/desktop/src/wsl/DesktopWslServerTree.test.ts`                                                        | R       | B                                             |
+| `apps/mobile/app.config.ts`                                                                                | A       | B                                             |
+| `apps/mobile/package.json`                                                                                 | A       | B, 45                                         |
+| `apps/mobile/src/features/threads/NewTaskDraftScreen.tsx`                                                  | A       | 45, 49                                        |
+| `apps/mobile/src/features/threads/ThreadDetailScreen.tsx`                                                  | A       | 45, 49                                        |
+| `apps/mobile/src/features/threads/new-task-flow-provider.tsx`                                              | A       | 45                                            |
+| `apps/mobile/src/features/threads/use-composer-command-menu.ts`                                            | A       | 45, 49                                        |
+| `apps/mobile/src/features/threads/use-composer-command-menu.test.ts`                                       | A       | 45, 49                                        |
+| `apps/mobile/src/state/use-thread-composer-state.ts`                                                       | A       | 45                                            |
+| `apps/mobile/src/App.tsx`                                                                                  | R       | B                                             |
+| `apps/mobile/src/features/connection/pairing.test.ts`                                                      | R       | B                                             |
+| `apps/mobile/src/features/connection/pairing.ts`                                                           | R       | B                                             |
+| `apps/mobile/src/features/review/shikiReviewHighlighter.test.ts`                                           | N       | T                                             |
+| `apps/mobile/src/widgets/AgentActivity.test.ts`                                                            | R       | B                                             |
+| `apps/mobile/src/widgets/AgentActivity.tsx`                                                                | R       | B                                             |
+| `apps/server/scripts/migrate-dev-db.test.ts`                                                               | R       | H                                             |
+| `apps/server/scripts/migrate-dev-db.ts`                                                                    | A       | H                                             |
+| `apps/server/scripts/t3-sqlite-state.test.ts`                                                              | R       | H                                             |
+| `apps/server/scripts/t3-sqlite-state.ts`                                                                   | A       | H                                             |
+| `apps/server/src/binCli.ts`                                                                                | N       | 35                                            |
+| `apps/server/src/cli/app.test.ts`                                                                          | N       | H                                             |
+| `apps/server/src/cli/app.ts`                                                                               | N       | H                                             |
+| `apps/server/src/cli/config.test.ts`                                                                       | A       | H                                             |
+| `apps/server/src/cli/config.ts`                                                                            | R       | H                                             |
+| `apps/server/src/cli/pair.test.ts`                                                                         | R       | H, P                                          |
+| `apps/server/src/cli/pair.ts`                                                                              | R       | H, P                                          |
+| `apps/server/src/cli/theme.test.ts`                                                                        | N       | H                                             |
+| `apps/server/src/cli/theme.ts`                                                                             | N       | H                                             |
+| `apps/server/src/cli/triage.ts`                                                                            | N       | H                                             |
+| `apps/server/src/provider/Drivers/ClaudeDriver.ts`                                                         | N       | 43                                            |
+| `apps/server/src/provider/Drivers/ClaudeSkills.test.ts`                                                    | N       | 43                                            |
+| `apps/server/src/provider/Drivers/ClaudeSkills.ts`                                                         | N       | 42–44                                         |
+| `apps/server/src/provider/Layers/ClaudeCapabilitiesProbe.test.ts`                                          | N       | 43                                            |
+| `apps/server/src/provider/Layers/ClaudeProvider.ts`                                                        | N       | 43                                            |
+| `apps/server/src/provider/Layers/CodexProvider.ts`                                                         | N       | 43                                            |
+| `apps/server/src/provider/Layers/ProviderRegistry.test.ts`                                                 | N       | 42, 43                                        |
+| `apps/server/src/provider/Layers/ProviderRegistry.ts`                                                      | N       | 42, 43                                        |
+| `apps/server/src/provider/providerMaintenanceRunner.test.ts`                                               | N       | 42                                            |
+| `apps/server/src/provider/Services/ProviderRegistry.ts`                                                    | N       | 42                                            |
+| `apps/server/src/provider/testUtils/providerRegistryMock.ts`                                               | N       | 42                                            |
+| `apps/server/src/serverSettings.test.ts`                                                                   | N       | 42                                            |
+| `apps/server/src/serverSettings.ts`                                                                        | N       | 42                                            |
+| `apps/web/src/components/settings/settingsSearch.test.ts`                                                  | N       | 43                                            |
+| `apps/web/src/components/settings/settingsSearch.ts`                                                       | N       | 42–44                                         |
+| `apps/web/src/components/settings/SettingsSidebarNav.tsx`                                                  | N       | 42                                            |
+| `apps/web/src/state/query.ts`                                                                              | N       | 42                                            |
+| `docs/README.md`                                                                                           | N       | 42, 45                                        |
+| `packages/client-runtime/src/state/runtime.test.ts`                                                        | N       | 42                                            |
+| `packages/contracts/src/auth.ts`                                                                           | N       | 35                                            |
+| `apps/server/src/cloud/bootService.test.ts`                                                                | A       | H                                             |
+| `apps/server/src/cloud/bootService.ts`                                                                     | A       | H                                             |
+| `apps/server/src/entrypoint.test.ts`                                                                       | N       | T                                             |
+| `apps/server/src/environment/ServerEnvironment.test.ts`                                                    | N       | 34                                            |
+| `apps/server/src/environment/ServerEnvironment.ts`                                                         | N       | 34                                            |
+| `apps/server/src/http.ts`                                                                                  | R       | B                                             |
+| `apps/server/src/mcp/McpHttpServer.ts`                                                                     | R       | 2                                             |
+| `apps/server/src/mcp/toolkits/worktree/registration.test.ts`                                               | A       | 4, 45                                         |
+| `apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts`                                        | A       | 8, 47, Saved-agent mentions                   |
+| `apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts`                                             | N       | 47, Saved-agent mentions                      |
+| `apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.test.ts`                                         | A       | 8, 28, G, Saved-agent mentions                |
+| `apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts`                                              | A       | 28, 47, G, Saved-agent mentions               |
+| `apps/server/src/orchestration-v2/EffectOutbox.ts`                                                         | R       | 26                                            |
+| `apps/server/src/orchestration-v2/FoundationPersistence.test.ts`                                           | N       | T                                             |
+| `apps/server/src/orchestration-v2/ProviderAdapter.ts`                                                      | R       | 47, N                                         |
+| `apps/server/src/orchestration-v2/ProviderTurnControlService.ts`                                           | R       | 26                                            |
+| `apps/server/src/orchestration-v2/ProviderTurnStartService.test.ts`                                        | A       | 28, N                                         |
+| `apps/server/src/orchestration-v2/ProviderTurnStartService.ts`                                             | A       | 28, 30, N                                     |
+| `apps/server/src/orchestration-v2/RunExecutionService.test.ts`                                             | A       | N                                             |
+| `apps/server/src/orchestration-v2/RunFinalizationService.ts`                                               | R       | 30                                            |
+| `apps/server/src/orchestration-v2/ThreadLaunchService.test.ts`                                             | R       | 10, 11                                        |
+| `apps/server/src/orchestration-v2/ThreadLaunchService.ts`                                                  | R       | 10, 11                                        |
+| `apps/server/src/orchestration-v2/runtimeLayer.test.ts`                                                    | R       | 3                                             |
+| `apps/server/src/orchestration-v2/runtimeLayer.ts`                                                         | R       | 5, 21, 26, 30, 38                             |
+| `apps/server/src/orchestration-v2/testkit/OrchestratorScenario.ts`                                         | N       | T                                             |
+| `apps/server/src/orchestration-v2/testkit/ProviderReplayGate.testkit.test.ts`                              | N       | T                                             |
+| `apps/server/src/orchestration-v2/testkit/ProviderReplayGate.testkit.ts`                                   | N       | T                                             |
+| `apps/server/src/orchestration-v2/testkit/fixtures/delegated_task_status/codex_transcript.ndjson`          | N       | G                                             |
+| `apps/server/src/orchestration-v2/testkit/fixtures/message_steering/codex_transcript.ndjson`               | A       | G                                             |
+| `apps/server/src/orchestration-v2/testkit/fixtures/multi_turn/codex_transcript.ndjson`                     | A       | G                                             |
+| `apps/server/src/orchestration-v2/testkit/fixtures/plan_questions/codex_transcript.ndjson`                 | A       | G                                             |
+| `apps/server/src/orchestration-v2/testkit/fixtures/proposed_plan/codex_transcript.ndjson`                  | A       | G                                             |
+| `apps/server/src/orchestration-v2/testkit/fixtures/provider_thread_resume/codex_transcript.ndjson`         | A       | G                                             |
+| `apps/server/src/orchestration-v2/testkit/fixtures/queued_turn/codex_transcript.ndjson`                    | A       | G                                             |
+| `apps/server/src/orchestration-v2/testkit/fixtures/simple/codex_transcript.ndjson`                         | A       | G                                             |
+| `apps/server/src/orchestration-v2/testkit/fixtures/subagent/codex_transcript.ndjson`                       | A       | G                                             |
+| `apps/server/src/orchestration-v2/testkit/fixtures/subagent_continue/codex_transcript.ndjson`              | A       | G                                             |
+| `apps/server/src/orchestration-v2/testkit/fixtures/subagent_v2/codex_transcript.ndjson`                    | R       | G                                             |
+| `apps/server/src/orchestration-v2/testkit/fixtures/subagent_v2_nested/codex_transcript.ndjson`             | R       | G                                             |
+| `apps/server/src/orchestration-v2/testkit/fixtures/thread_fork_native/codex_transcript.ndjson`             | A       | G                                             |
+| `apps/server/src/orchestration-v2/testkit/fixtures/thread_fork_native_continue/codex_transcript.ndjson`    | A       | G                                             |
+| `apps/server/src/orchestration-v2/testkit/fixtures/thread_fork_native_prior_turn/codex_transcript.ndjson`  | A       | G                                             |
+| `apps/server/src/orchestration-v2/testkit/fixtures/thread_fork_native_siblings/codex_transcript.ndjson`    | A       | G                                             |
+| `apps/server/src/orchestration-v2/testkit/fixtures/thread_merge_back_continue/codex_transcript.ndjson`     | A       | G                                             |
+| `apps/server/src/orchestration-v2/testkit/fixtures/thread_merge_back_siblings/codex_transcript.ndjson`     | A       | G                                             |
+| `apps/server/src/orchestration-v2/testkit/fixtures/thread_rollback/codex_transcript.ndjson`                | A       | G                                             |
+| `apps/server/src/orchestration-v2/testkit/fixtures/todo_list/codex_transcript.ndjson`                      | A       | G                                             |
+| `apps/server/src/orchestration-v2/testkit/fixtures/tool_call_read_only_on_request/codex_transcript.ndjson` | A       | G                                             |
+| `apps/server/src/orchestration-v2/testkit/fixtures/tool_call_restricted_granular/codex_transcript.ndjson`  | A       | G                                             |
+| `apps/server/src/orchestration-v2/testkit/fixtures/tool_call_workspace_never/codex_transcript.ndjson`      | A       | G                                             |
+| `apps/server/src/orchestration-v2/testkit/fixtures/turn_interrupt/codex_transcript.ndjson`                 | A       | G                                             |
+| `apps/server/src/orchestration-v2/testkit/fixtures/turn_interrupt_mid_tool/codex_transcript.ndjson`        | A       | G                                             |
+| `apps/server/src/orchestration-v2/testkit/fixtures/web_search/codex_transcript.ndjson`                     | A       | G                                             |
+| `apps/server/src/os-jank.ts`                                                                               | R       | H                                             |
+| `apps/server/src/persistence/Layers/Sqlite.ts`                                                             | A       | 1, 31                                         |
+| `apps/server/src/provider/AntigravityInstallation.test.ts`                                                 | N       | T                                             |
+| `apps/server/src/provider/Layers/CodexSessionRuntime.test.ts`                                              | A       | G                                             |
+| `apps/server/src/provider/Layers/EventNdjsonLogger.test.ts`                                                | N       | 36                                            |
+| `apps/server/src/provider/Layers/EventNdjsonLogger.ts`                                                     | N       | 36                                            |
+| `apps/server/src/provider/Layers/CodexSessionRuntime.ts`                                                   | N       | G                                             |
+| `apps/server/src/provider/T3OrchestrationInstructions.test.ts`                                             | R       | 8                                             |
+| `apps/server/src/provider/T3OrchestrationInstructions.ts`                                                  | R       | 8, 45                                         |
+| `apps/server/src/provider/testFixtures/codexCollabMockPeer.mjs`                                            | R       | G                                             |
+| `apps/server/src/provider/testFixtures/codexMultiAgentWire.json`                                           | R       | G                                             |
+| `apps/server/src/scheduledTasks/ScheduledTaskService.ts`                                                   | R       | 12                                            |
+| `apps/server/src/server.ts`                                                                                | A       | 5, 9, MCP idle connection patch               |
+| `apps/server/src/serviceLauncher.ts`                                                                       | R       | H                                             |
+| `apps/server/src/telemetry/Identify.ts`                                                                    | R       | H                                             |
+| `apps/server/src/textGeneration/CodexTextGeneration.test.ts`                                               | N       | T                                             |
+| `apps/server/src/ws.ts`                                                                                    | A       | 10, 11, 37, 42, 44, 45                        |
+| `apps/web/index.html`                                                                                      | R       | B                                             |
+| `apps/web/src/branding.test.ts`                                                                            | R       | B                                             |
+| `apps/web/src/branding.ts`                                                                                 | R       | B                                             |
+| `apps/web/src/commandPaletteBus.ts`                                                                        | R       | 13, 42                                        |
+| `apps/web/src/components/ChatView.logic.test.ts`                                                           | R       | 9, 19                                         |
+| `apps/web/src/components/ChatView.logic.ts`                                                                | A       | 9, 19                                         |
+| `packages/contracts/src/index.ts`                                                                          | N       | 42, 44                                        |
+| `packages/contracts/src/rpc.ts`                                                                            | A       | 42, 44, 45                                    |
+| `packages/client-runtime/src/rpc/client.ts`                                                                | A       | 45                                            |
+| `apps/web/src/composer-logic.ts`                                                                           | A       | 45, 49                                        |
+| `apps/server/src/auth/RpcAuthorization.ts`                                                                 | A       | 42, 44, 45                                    |
+| `apps/web/src/components/AppSidebarLayout.tsx`                                                             | N       | 19                                            |
+| `apps/web/src/components/ChatView.tsx`                                                                     | A       | 9–11, 19, 24, 34, 45, 49                      |
+| `apps/web/src/components/CommandPalette.logic.test.ts`                                                     | R       | 15b, 34                                       |
+| `apps/web/src/components/CommandPalette.logic.ts`                                                          | R       | 15b, 34                                       |
+| `apps/web/src/components/CommandPalette.tsx`                                                               | A       | 13, 15b, 19, 20, 34, 42                       |
+| `apps/web/src/components/CommandPaletteResults.tsx`                                                        | R       | 17                                            |
+| `apps/web/src/components/ConfirmDialogHost.tsx`                                                            | R       | 22                                            |
+| `apps/web/src/components/LegacySidebar.tsx`                                                                | R       | 21, 22                                        |
+| `apps/web/src/components/Sidebar.logic.test.ts`                                                            | R       | 16, 19, 21                                    |
+| `apps/web/src/components/Sidebar.logic.ts`                                                                 | R       | 16, 19, 21, 34                                |
+| `apps/web/src/components/ProjectCloneToastCoordinator.tsx`                                                 | N       | 19                                            |
+| `apps/web/src/components/Sidebar.tsx`                                                                      | A       | 9, 16, 19, 21–23, 34                          |
+| `apps/web/src/components/chat/ChatComposer.tsx`                                                            | A       | 9, Saved-agent mentions, Role library, 45, 49 |
+| `apps/web/src/components/chat/ChatHeader.tsx`                                                              | A       | 19                                            |
+| `apps/web/src/components/chat/DraftHeroHeadline.tsx`                                                       | A       | 9                                             |
+| `apps/web/src/components/chat/MessagesTimeline.test.tsx`                                                   | N       | 7, 14, 24                                     |
+| `apps/web/src/components/chat/timelineMinimapItems.ts`                                                     | A       | 24                                            |
+| `apps/web/src/components/chat/MessagesTimeline.tsx`                                                        | A       | B, 7, 14, 24                                  |
+| `apps/web/src/components/chat/QueuedRunsControl.tsx`                                                       | A       | 24                                            |
+| `apps/web/src/components/pullRequest/PullRequestListEmptyState.test.tsx`                                   | R       | 19                                            |
+| `apps/web/src/components/pullRequest/PullRequestListEmptyState.tsx`                                        | R       | 19                                            |
+| `apps/web/src/components/sidebar/SidebarChrome.tsx`                                                        | A       | 6, B                                          |
+| `apps/web/src/confirmDialog.test.ts`                                                                       | R       | 22                                            |
+| `apps/web/src/confirmDialog.ts`                                                                            | R       | 22                                            |
+| `apps/web/src/hooks/useThreadActionMenu.ts`                                                                | A       | 21                                            |
+| `apps/web/src/routeTree.gen.ts`                                                                            | R       | generated route registrations for 6/9         |
+| `apps/web/src/components/onboarding/WelcomeWizard.tsx`                                                     | R       | 39, B                                         |
+| `apps/web/src/routes/welcome.tsx`                                                                          | R       | 39                                            |
+| `apps/web/src/routes/_chat.index.tsx`                                                                      | R       | 9, 19, 34                                     |
+| `apps/web/src/routes/_chat.tsx`                                                                            | R       | 19, 34                                        |
+| `apps/web/tsconfig.json`                                                                                   | R       | B                                             |
+| `packages/client-runtime/package.json`                                                                     | R       | 34, 45                                        |
+| `packages/client-runtime/src/operations/commands.test.ts`                                                  | R       | 10, 11                                        |
+| `packages/client-runtime/src/operations/commands.ts`                                                       | R       | 10, 11                                        |
+| `packages/contracts/package.json`                                                                          | N       | 34                                            |
+| `packages/contracts/src/environment.ts`                                                                    | N       | 34                                            |
+| `packages/contracts/src/model.ts`                                                                          | A       | 32                                            |
+| `packages/contracts/src/orchestrationV2.ts`                                                                | R       | 10, 11                                        |
+| `packages/contracts/src/server.test.ts`                                                                    | N       | 43                                            |
+| `packages/contracts/src/server.ts`                                                                         | N       | 42, 43                                        |
+| `packages/contracts/src/settings.test.ts`                                                                  | N       | 42                                            |
+| `packages/contracts/src/settings.ts`                                                                       | N       | 42                                            |
+| `packages/effect-codex-app-server/scripts/generate.ts`                                                     | A       | G                                             |
+| `packages/effect-codex-app-server/src/_generated/meta.gen.ts`                                              | R       | G                                             |
+| `packages/effect-codex-app-server/src/_generated/namespaces.gen.ts`                                        | R       | G                                             |
+| `packages/effect-codex-app-server/src/_generated/schema.gen.ts`                                            | A       | G                                             |
+| `packages/effect-codex-app-server/src/client.test.ts`                                                      | R       | G                                             |
+| `packages/effect-codex-app-server/src/protocol.test.ts`                                                    | A       | G                                             |
+| `packages/effect-codex-app-server/src/schema.test.ts`                                                      | N       | G                                             |
+| `packages/effect-codex-app-server/test/fixtures/codex-app-server-mock-peer.ts`                             | R       | G                                             |
+| `packages/shared/package.json`                                                                             | N       | 43, 46, 49                                    |
+| `packages/shared/src/devHome.test.ts`                                                                      | R       | H                                             |
+| `packages/shared/src/devHome.ts`                                                                           | R       | H                                             |
+| `packages/shared/src/model.test.ts`                                                                        | A       | 32                                            |
+| `packages/ssh/src/runnerProcess.test.ts`                                                                   | N       | B, H                                          |
+| `packages/ssh/src/tunnel.test.ts`                                                                          | R       | H                                             |
+| `packages/ssh/src/tunnel.ts`                                                                               | R       | H                                             |
+| `pnpm-lock.yaml`                                                                                           | N       | 45                                            |
+| `scripts/build-desktop-artifact.test.ts`                                                                   | A       | B, S                                          |
+| `scripts/build-desktop-artifact.ts`                                                                        | R       | B, S                                          |
+| `scripts/dev-runner.test.ts`                                                                               | R       | H                                             |
+| `scripts/dev-runner.ts`                                                                                    | R       | H                                             |
+| `vite.config.ts`                                                                                           | R       | H                                             |
+| `apps/web/src/composer-logic.test.ts`                                                                      | A       | 49                                            |
+| `apps/web/src/components/chat/ComposerCommandMenu.tsx`                                                     | A       | 49                                            |
+| `apps/web/src/components/chat/composerMenuHighlight.ts`                                                    | A       | 49                                            |
+| `apps/web/src/components/chat/composerMenuHighlight.test.ts`                                               | A       | 49                                            |
+| `packages/shared/src/composerTrigger.ts`                                                                   | A       | 49                                            |
+| `apps/mobile/src/features/threads/ComposerCommandPopover.tsx`                                              | A       | 49                                            |
+| `apps/mobile/src/features/threads/ThreadComposer.tsx`                                                      | A       | 49                                            |
 
 The 2026-09-08 import correction adds bounded file-content schemas and shared selection preparation in `packages/client-runtime/src/state/agentPersonas.ts`, plus import/removal commands in the existing orchestration atom module. Clients send selected JSON contents to the chosen environment, never local paths as server destinations. J5 library code validates and atomically persists imports under a process-wide mutation permit, overlays them on source definitions, and preserves launch snapshots on replacement/removal. The Settings registrations remain thin mounts. Focused tests cover nested file selections, single-file selection, atomic rejection, conflicts, persisted imports, concurrent sessions, restoration, snapshots, and RPC scopes. Native picker/browser interaction still requires an authorized client pass.
 

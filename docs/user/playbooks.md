@@ -52,9 +52,11 @@ from Settings → Personas. A step without one is done by whoever runs the playb
 A persona that is missing or turned off shows as a warning in Settings and does not
 stop the playbook from starting.
 
-Send `/playbook review` to start, or `/playbook` to ask what is available. Text after
-the name stays part of your message, as in `/playbook review, then summarize the risks`. You can also ask
-directly: “Start playbook review.” One playbook can be active per thread;
+Type `/playbook ` to choose a registered playbook, then send the command to start it.
+Send `/playbook review` to start directly, or `/playbook` to ask what is available.
+Text after the name stays part of your message, as in
+`/playbook review, then summarize the risks`. You can also ask directly: “Start
+playbook review.” One playbook can be active per thread;
 finishing or cancelling it leaves the agent ready for other work or another playbook.
 
 You can edit prompts and reorder steps while the run is active. The next retrieval

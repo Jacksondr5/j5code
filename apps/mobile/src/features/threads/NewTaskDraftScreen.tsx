@@ -456,6 +456,7 @@ export function NewTaskDraftScreen(props: {
     draftMessage: flow.prompt,
     ownerKey: flow.draftKey,
     environmentId: selectedProject?.environmentId ?? null,
+    projectId: selectedProject?.id ?? null,
     threadShells: useThreadShells(),
     pullRequestProjectId: selectedEnvironmentServerConfig?.environment.capabilities.pullRequests
       ? (selectedProject?.id ?? null)
@@ -1565,7 +1566,9 @@ export function NewTaskDraftScreen(props: {
     >
       {!voiceInput.isBusy &&
       composerMenu.trigger &&
-      (composerMenu.items.length > 0 || composerMenu.trigger.kind === "pull-request") ? (
+      (composerMenu.items.length > 0 ||
+        composerMenu.trigger.kind === "pull-request" ||
+        composerMenu.trigger.kind === "slash-playbook") ? (
         <View className="mb-2">
           <ComposerCommandPopover
             items={composerMenu.items}
