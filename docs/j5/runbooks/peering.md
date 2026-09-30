@@ -33,7 +33,7 @@ Run each pair of steps on the named host. Every command talks to the local serve
    j5 a2a peer add --peer-origin https://home.example:3773 --credential-file work.credential --label Home
    ```
 
-   Work calls Home's hello route with the credential. It records the peer only if Home answers, the credential names Work, and Home is not Work itself. Re-adding a known peer rotates its credential; re-adding it at a different origin is refused unless you pass `--replace-origin`, because hello proves the origin is reachable, not that it is the same server.
+   Work calls Home's hello route with the credential. It records the peer only if Home answers, the credential names Work, and Home is not Work itself. Re-adding a known peer rotates its credential; re-adding it at a different origin is refused unless you pass `--replace-origin`, because hello proves the origin is reachable, not that it is the same server. On a refused move the server tries the new credential at the recorded origin too and keeps it only if that origin accepts it; the error says which happened. If it was not kept and the new address was the same server, re-pair at the recorded origin.
 
 3. **On Work**, issue Home's credential the same way, and **on Home**, add Work. One Exchange needs both directions, so peering is incomplete until all four steps have run.
 

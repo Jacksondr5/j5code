@@ -8,6 +8,7 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as TestClock from "effect/testing/TestClock";
 import { HttpClient, HttpClientError, HttpClientResponse } from "effect/unstable/http";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
@@ -203,6 +204,13 @@ it.effect("keeps a known peer's origin unless the caller says to move it", () =>
       assert.equal(refused._tag, "PeerOriginConflictError");
       assert.include(refused.message, homeOrigin);
       assert.equal((yield* registry.get(home))?.origin, homeOrigin, "nothing moved");
+      // Both addresses reach Home: the hello retired t1, and the recorded origin accepts t2, so t2 is kept.
+      assert.isTrue(refused._tag === "PeerOriginConflictError" && refused.credentialKept);
+      const stored = yield* (yield* SqlClient.SqlClient)<{ readonly credential: string }>`
+        SELECT credential FROM j5_a2a_peer WHERE environment_id = ${home}
+      `;
+      assert.deepStrictEqual(stored, [{ credential: "t2" }]);
+      assert.equal((yield* registry.get(home))?.label, "Home");
 
       const moved = yield* registry.add({
         origin: movedOrigin,
@@ -224,6 +232,45 @@ it.effect("keeps a known peer's origin unless the caller says to move it", () =>
         }),
       ),
     );
+  }),
+);
+
+it.effect("keeps the recorded credential when a different server claims the same peer", () =>
+  Effect.gen(function* () {
+    const impostorOrigin = "https://copy-of-home.example:3773";
+    const replies: Record<string, HelloReply> = {
+      [homeOrigin]: homeHello(`peer:${work}`),
+      [impostorOrigin]: homeHello(`peer:${work}`),
+    };
+    yield* Effect.gen(function* () {
+      yield* runJ5A2AMigrations();
+      const registry = yield* PeerRegistryService;
+      yield* registry.add({
+        origin: homeOrigin,
+        credential: "t1",
+        label: "Home",
+        replaceOrigin: false,
+        acceptedAt: timestamp,
+      });
+      // A copied environment answers with Home's id, but Home itself does not accept its credential.
+      replies[homeOrigin] = { status: 401, body: { error: "invalid_token" } };
+      const refused = yield* Effect.flip(
+        registry.add({
+          origin: impostorOrigin,
+          credential: "t2",
+          label: "Home",
+          replaceOrigin: false,
+          acceptedAt: timestamp,
+        }),
+      );
+      assert.equal(refused._tag, "PeerOriginConflictError");
+      assert.isTrue(refused._tag === "PeerOriginConflictError" && !refused.credentialKept);
+      assert.include(refused.message, "not accepted");
+      const stored = yield* (yield* SqlClient.SqlClient)<{ readonly credential: string }>`
+        SELECT credential FROM j5_a2a_peer WHERE environment_id = ${home}
+      `;
+      assert.deepStrictEqual(stored, [{ credential: "t1" }], "the working credential survives");
+    }).pipe(Effect.provide(makeTestLayer({ replies, liveSubjects: [`peer:${home}`] })));
   }),
 );
 

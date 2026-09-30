@@ -9,6 +9,7 @@ import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -76,10 +77,19 @@ export class PeerIsSelfError extends Schema.TaggedError<PeerIsSelfError>()("Peer
 /** Hello proves the origin is reachable, not that it is the same server; moving a peer is an explicit act. */
 export class PeerOriginConflictError extends Schema.TaggedError<PeerOriginConflictError>()(
   "PeerOriginConflictError",
-  { environmentId: Schema.String, recordedOrigin: Schema.String, requestedOrigin: Schema.String },
+  {
+    environmentId: Schema.String,
+    recordedOrigin: Schema.String,
+    requestedOrigin: Schema.String,
+    /** Whether the recorded origin accepted the new credential, so it replaced the old one. */
+    credentialKept: Schema.Boolean,
+  },
 ) {
   override get message(): string {
-    return `Peer ${this.environmentId} is recorded at ${this.recordedOrigin}, not ${this.requestedOrigin}. Pass replaceOrigin (\`--replace-origin\`) to move it.`;
+    const credential = this.credentialKept
+      ? `The new credential also works at ${this.recordedOrigin}, so it replaced the old one there.`
+      : `The new credential was not accepted at ${this.recordedOrigin}, so the credential recorded for it is unchanged; if ${this.requestedOrigin} is the same server, its hello may have retired that credential, so re-pair at ${this.recordedOrigin}.`;
+    return `Peer ${this.environmentId} is recorded at ${this.recordedOrigin}, not ${this.requestedOrigin}, and was not moved. ${credential} Pass replaceOrigin (\`--replace-origin\`) to move it.`;
   }
 }
 
@@ -252,10 +262,31 @@ export const layer: Layer.Layer<
         }
         const existing = yield* readRow(hello.environmentId);
         if (existing !== null && existing.origin !== input.origin && !input.replaceOrigin) {
+          // The hello there may have completed a rotation, retiring the credential
+          // recorded here, but only if that origin is the same server. Keep the
+          // new credential only once the recorded origin accepts it too.
+          const recordedHello = yield* helloAtOriginBounded({
+            origin: existing.origin,
+            credential: input.credential,
+          }).pipe(Effect.provideService(HttpClient.HttpClient, httpClient), Effect.option);
+          const credentialKept =
+            Option.isSome(recordedHello) &&
+            recordedHello.value.environmentId === hello.environmentId &&
+            recordedHello.value.subject === expectedSubject;
+          if (credentialKept) {
+            yield* sql`
+              UPDATE j5_a2a_peer
+              SET credential = ${input.credential},
+                  credential_expires_at = ${recordedHello.value.credentialExpiresAt ?? null},
+                  updated_at = ${input.acceptedAt}
+              WHERE environment_id = ${hello.environmentId}
+            `;
+          }
           return yield* new PeerOriginConflictError({
             environmentId: hello.environmentId,
             recordedOrigin: existing.origin,
             requestedOrigin: input.origin,
+            credentialKept,
           });
         }
         const label = input.label?.trim() || hello.environmentId;

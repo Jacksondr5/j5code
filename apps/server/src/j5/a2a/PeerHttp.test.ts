@@ -116,6 +116,7 @@ const makeHandler = (input: {
                     environmentId: home,
                     recordedOrigin: homePeer.origin,
                     requestedOrigin: request.origin,
+                    credentialKept: false,
                   }),
                 )
               : request.origin === "https://other.example"
