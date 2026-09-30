@@ -558,3 +558,200 @@ export const CrewRuntimeRequestRespondResponse = Schema.Struct({
   requestId: RuntimeRequestId,
 });
 export type CrewRuntimeRequestRespondResponse = typeof CrewRuntimeRequestRespondResponse.Type;
+
+/**
+ * Peering: two servers that exchange agent messages. A peer holds a session of
+ * the other server whose subject is `peer:<its own environment id>` and whose
+ * only scope is `a2a:peer`. Records are mutual and pairwise; the client that is
+ * connected to both environments introduces them.
+ */
+const PEER_SUBJECT_PREFIX = "peer:" as const;
+export const peerSubjectForEnvironment = (environmentId: string): string =>
+  `${PEER_SUBJECT_PREFIX}${environmentId}`;
+export const environmentIdFromPeerSubject = (subject: string): string | null =>
+  subject.startsWith(PEER_SUBJECT_PREFIX) && subject.length > PEER_SUBJECT_PREFIX.length
+    ? subject.slice(PEER_SUBJECT_PREFIX.length)
+    : null;
+
+/** An http(s) origin with no path, query, or fragment. */
+export const PeerOrigin = Schema.String.check(
+  Schema.makeFilter((value) => {
+    try {
+      const url = new URL(value);
+      return (
+        ((url.protocol === "http:" || url.protocol === "https:") &&
+          url.pathname === "/" &&
+          url.search === "" &&
+          url.hash === "" &&
+          !value.endsWith("/")) ||
+        "A peer origin must be an http(s) origin such as https://home.example:3773 with no path."
+      );
+    } catch {
+      return "A peer origin must be an http(s) origin such as https://home.example:3773 with no path.";
+    }
+  }),
+);
+export type PeerOrigin = typeof PeerOrigin.Type;
+
+export const PeerRecord = Schema.Struct({
+  environmentId: Schema.String,
+  label: Schema.String,
+  origin: Schema.String,
+  /** When the credential the peer issued to this server expires, as the peer reported it at hello. */
+  credentialExpiresAt: Schema.NullOr(Schema.String),
+  /** Whether the peer still holds a live session here; "missing" means it was revoked or expired and its deliveries are refused. */
+  inboundSession: Schema.Literals(["active", "missing"]),
+  createdAt: Schema.String,
+});
+export type PeerRecord = typeof PeerRecord.Type;
+export const PeerListResponse = Schema.Struct({ peers: Schema.Array(PeerRecord) });
+export type PeerListResponse = typeof PeerListResponse.Type;
+
+/** Mint a credential the named environment will present when it delivers to this server. */
+export const IssuePeerCredentialRequest = Schema.Struct({
+  environmentId: Schema.String.check(Schema.isNonEmpty()),
+  label: Schema.optional(Schema.String),
+});
+export type IssuePeerCredentialRequest = typeof IssuePeerCredentialRequest.Type;
+export const IssuePeerCredentialResponse = Schema.Struct({
+  /** This server's environment id, which the holder records as the peer's id. */
+  environmentId: Schema.String,
+  credential: Schema.String,
+  sessionId: Schema.String,
+  subject: Schema.String,
+  expiresAt: Schema.String,
+});
+export type IssuePeerCredentialResponse = typeof IssuePeerCredentialResponse.Type;
+
+/** Record a peer after proving the credential at the origin; the peer names itself in the hello. */
+export const AddPeerRequest = Schema.Struct({
+  origin: PeerOrigin,
+  credential: Schema.String.check(Schema.isNonEmpty()),
+  label: Schema.optional(Schema.String),
+  /** A known peer keeps its recorded origin unless the caller says to move it. */
+  replaceOrigin: Schema.optional(Schema.Boolean),
+});
+export type AddPeerRequest = typeof AddPeerRequest.Type;
+export const AddPeerResponse = Schema.Struct({ peer: PeerRecord, created: Schema.Boolean });
+export type AddPeerResponse = typeof AddPeerResponse.Type;
+
+export const RemovePeerRequest = Schema.Struct({
+  environmentId: Schema.String.check(Schema.isNonEmpty()),
+});
+export type RemovePeerRequest = typeof RemovePeerRequest.Type;
+export const RemovePeerResponse = Schema.Struct({
+  removed: Schema.Boolean,
+  revokedSessions: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+});
+export type RemovePeerResponse = typeof RemovePeerResponse.Type;
+
+/** What a server answers to a peer credential: who it is and whom the credential names. */
+export const PeerHelloResponse = Schema.Struct({
+  environmentId: Schema.String,
+  subject: Schema.String,
+  /** When the credential used for this hello expires; null when the session never expires. */
+  credentialExpiresAt: Schema.optional(Schema.NullOr(Schema.String)),
+  server: Schema.Struct({ version: Schema.String }),
+});
+export type PeerHelloResponse = typeof PeerHelloResponse.Type;
+
+/**
+ * One message crossing from a peer server. The receiving server records its own
+ * received row (and the Exchange fact an ask or reply implies) before it
+ * delivers locally; a retry with the same message id replays the first receipt.
+ */
+/**
+ * The closing fact a terminal notice carries between servers. A dropped
+ * Exchange names the retirement; a withdrawn ask says only that the asker
+ * cleared it. The receiver works out the disposition from its own copy of
+ * the Exchange, so the wire never says which side the retired party was on.
+ */
+export const PeerTerminalFact = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("dropped"),
+    cause: Schema.Struct({
+      kind: Schema.Literals(["participant-archived", "participant-deleted"]),
+      participantId: Schema.String,
+      squadronId: Schema.String,
+    }),
+  }),
+  Schema.Struct({ kind: Schema.Literal("sender-cleared") }),
+]);
+export type PeerTerminalFact = typeof PeerTerminalFact.Type;
+
+/** Peer-supplied strings are bounded: a peer names a sender, it does not get to fill the ledger. */
+export const PEER_SENDER_LABEL_MAX_CHARS = 200;
+/** One cap for a message's text, enforced at send so nothing is recorded that a peer would refuse. */
+export const A2A_MESSAGE_TEXT_MAX_CHARS = 256_000;
+export const PeerSenderLabel = Schema.String.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(PEER_SENDER_LABEL_MAX_CHARS),
+);
+
+export const PeerDeliveryRequest = Schema.Struct({
+  messageId: Schema.String.check(Schema.isNonEmpty()),
+  senderId: Schema.String.check(Schema.isNonEmpty()),
+  receiverId: Schema.String.check(Schema.isNonEmpty()),
+  exchangeId: Schema.NullOr(Schema.String.check(Schema.isNonEmpty())),
+  correlationId: Schema.String.check(Schema.isNonEmpty()),
+  exchangeRole: Schema.Literals(["none", "ask", "followup", "reply", "terminal_notice"]),
+  envelopeChannel: Schema.Literals(["peer", "silence_notice", "lifecycle_notice"]),
+  text: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(A2A_MESSAGE_TEXT_MAX_CHARS)),
+  originSquadronId: Schema.String.check(Schema.isNonEmpty()),
+  /**
+   * The sender's display name (its thread title) for the receiving side's
+   * people, so a timeline names a remote sender as it names a local one.
+   * Agents keep addressing by id.
+   */
+  senderLabel: Schema.optional(PeerSenderLabel),
+  /** Required when `exchangeRole` is `ask`: the Exchange the receiver now owes a reply to. */
+  intent: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
+  /**
+   * Present on a `terminal_notice`: the closing fact the origin recorded, so the
+   * peer ends its own copy of the Exchange the same way.
+   */
+  terminal: Schema.optional(PeerTerminalFact),
+  /**
+   * Present on a silence notice: the open Exchange whose answerer went quiet.
+   * The notice is not part of that Exchange; the receiver accepts it only when
+   * the Exchange is open here with this peer as its other party.
+   */
+  regardingExchangeId: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
+  /** The origin's clock, kept for display; the receiving server stamps its own time on what it records. */
+  createdAt: Schema.String.check(
+    Schema.makeFilter(
+      (value) => !Number.isNaN(Date.parse(value)) || "createdAt must be an ISO-8601 timestamp.",
+    ),
+  ),
+});
+export type PeerDeliveryRequest = typeof PeerDeliveryRequest.Type;
+
+/** The one thing a peer may read here: the agents it could address, and nothing about people or machines. */
+export const PeerRosterAgent = Schema.Struct({
+  participantId: Schema.String,
+  squadronId: Schema.String,
+  squadronName: Schema.String,
+  threadId: ThreadId,
+  displayName: Schema.NullOr(Schema.String),
+  archived: Schema.Boolean,
+  canReceiveMessage: Schema.Boolean,
+});
+export type PeerRosterAgent = typeof PeerRosterAgent.Type;
+export const PeerRosterResponse = Schema.Struct({ agents: Schema.Array(PeerRosterAgent) });
+export type PeerRosterResponse = typeof PeerRosterResponse.Type;
+export const PeerDeliveryResponse = Schema.Struct({
+  accepted: Schema.Literal(true),
+  receivedSeq: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+  /** True when this message id had already been recorded; nothing was written twice. */
+  replay: Schema.Boolean,
+});
+export type PeerDeliveryResponse = typeof PeerDeliveryResponse.Type;
+
+export const J5_PEER_API_PATHS = {
+  peers: "/api/j5/a2a/peers",
+  credentials: "/api/j5/a2a/peers/credentials",
+  remove: "/api/j5/a2a/peers/remove",
+  hello: "/api/j5/a2a/peers/hello",
+  roster: "/api/j5/a2a/peers/roster",
+  deliver: "/api/j5/a2a/peers/deliver",
+} as const;

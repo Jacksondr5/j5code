@@ -1,5 +1,6 @@
 import type { StoredCommEvent } from "./contracts.ts";
 import type { ThreadId } from "@t3tools/contracts";
+import { A2A_MESSAGE_TEXT_MAX_CHARS } from "@t3tools/contracts/j5";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -19,6 +20,7 @@ import {
   isMachineParticipantId,
   LedgerMessageId,
   MessageSentPayload,
+  LIFECYCLE_PARTICIPANT_ID,
   Participant,
   type ParticipantDirectoryRow,
   ParticipantId,
@@ -31,6 +33,8 @@ import { CREW_ALERT_EXCHANGE_PREFIX } from "./crewFailureAlert.ts";
 import { resolveThreadHome } from "./HomeRegistrar.ts";
 import { isRegisteredHumanPerson, listRegisteredHumanPersonIds } from "./HumanPersonRegistry.ts";
 import { A2ALedgerTransactionWriter, A2ALedger, type A2ALedgerError } from "./LedgerService.ts";
+import { PeerDirectory, type PeerDirectoryError } from "./PeerDirectory.ts";
+import { findPeerCounterparty, findPeerRoute } from "./peerCounterparty.ts";
 
 const encodeSentPayload = Schema.encodeEffect(Schema.toCodecJson(MessageSentPayload));
 
@@ -89,6 +93,16 @@ export class A2AAmbiguousParticipantError extends Schema.TaggedError<A2AAmbiguou
   }
 }
 
+/** Names no server: which peers exist and why one is unreachable are facts for the person's surfaces. */
+export class A2APeersUnreadError extends Schema.TaggedError<A2APeersUnreadError>()(
+  "A2APeersUnreadError",
+  { participantId: Schema.String, unreadPeerCount: Schema.Number },
+) {
+  override get message(): string {
+    return `Participant ${this.participantId} is not homed on this server and has never been seen here, and ${String(this.unreadPeerCount)} peer server(s) could not be read just now. Retry shortly; list_participants reports how many peers are currently unread.`;
+  }
+}
+
 export class A2AParticipantArchivedError extends Schema.TaggedError<A2AParticipantArchivedError>()(
   "A2AParticipantArchivedError",
   {
@@ -98,6 +112,15 @@ export class A2AParticipantArchivedError extends Schema.TaggedError<A2AParticipa
 ) {
   override get message(): string {
     return `Participant ${this.participantId} is archived or permanently retired from home ${this.squadronId} and cannot send or receive messages. Choose an active participant. Unarchive restores only reversibly archived identities.`;
+  }
+}
+
+export class A2AMessageTooLongError extends Schema.TaggedError<A2AMessageTooLongError>()(
+  "A2AMessageTooLongError",
+  { length: Schema.Number, max: Schema.Number },
+) {
+  override get message(): string {
+    return `The message is ${String(this.length)} characters; the most a message may carry is ${String(this.max)}. Shorten it or hand the rest over as a file.`;
   }
 }
 
@@ -265,6 +288,7 @@ export type A2ASendError =
   | A2ALedgerError
   | Schema.SchemaError
   | SqlError
+  | PeerDirectoryError
   | A2AMachineCannotReceiveError
   | A2AMachineSenderNotRegisteredError
   | A2ASenderNotJoinedError
@@ -272,7 +296,9 @@ export type A2ASendError =
   | A2AHomeMembershipStateError
   | A2AParticipantNotFoundError
   | A2AAmbiguousParticipantError
+  | A2APeersUnreadError
   | A2AParticipantArchivedError
+  | A2AMessageTooLongError
   | A2AIntentRequiredError
   | A2AUrgencyRequiredError
   | A2AUrgencyNotAcceptedError
@@ -338,9 +364,37 @@ const exchangeIdFor = (commandId: CommCommandId) =>
 const correlationIdFor = (commandId: CommCommandId) =>
   CorrelationId.make(`correlation:j5:a2a:${encodeURIComponent(commandId)}`);
 
+const withdrawalMessageIdFor = (commandId: CommCommandId) =>
+  LedgerMessageId.make(`message:j5:a2a:withdraw:${encodeURIComponent(commandId)}`);
+
+/** Platform-authored, like the retirement notice: the asker cleared its own ask, nothing is owed. */
+export const formatWithdrawalNotice = (input: {
+  readonly exchangeId: ExchangeId;
+  readonly askerId: ParticipantId;
+}): string =>
+  [
+    "[Cross-agent messaging system notice: exchange withdrawn]",
+    `Exchange ${input.exchangeId} was withdrawn by ${input.askerId}, who no longer needs an answer.`,
+    "Your reply obligation has ended; do not reply to this Exchange.",
+    "This is a platform-authored terminal notice, not a peer reply.",
+  ].join("\n\n");
+
 interface ResolvedSender {
   readonly squadronId: SquadronId;
   readonly participantId: ParticipantId;
+}
+
+/** Where a receiver lives; `environmentId` names a peer server, null means this one. */
+interface ResolvedReceiver {
+  readonly squadronId: SquadronId;
+  readonly participantId: ParticipantId;
+  readonly kind: Participant["kind"];
+  readonly environmentId: string | null;
+}
+
+/** What the tool reports, plus whether a withdrawal now waits for the delivery worker. Agents never see the flag. */
+export interface ClearOwnAskOutcome extends ClearOwnAskResult {
+  readonly withdrawalQueued: boolean;
 }
 
 /** The send body once the sender is resolved; agents and machines share it. */
@@ -352,7 +406,9 @@ export interface A2ASendServiceShape {
   readonly sendAsMachine: (
     input: SendAsMachineInput,
   ) => Effect.Effect<SendMessageResult, A2ASendError>;
-  readonly clearOwnAsk: (input: ClearOwnAskInput) => Effect.Effect<ClearOwnAskResult, A2ASendError>;
+  readonly clearOwnAsk: (
+    input: ClearOwnAskInput,
+  ) => Effect.Effect<ClearOwnAskOutcome, A2ASendError>;
   readonly listParticipants: (
     senderThreadId: ThreadId,
     includeArchived?: boolean,
@@ -363,7 +419,11 @@ export class A2ASendService extends Context.Service<A2ASendService, A2ASendServi
   "t3/j5/a2a/SendService/A2ASendService",
 ) {}
 
-type A2ASendServiceLayerDependencies = A2ALedger | A2ALedgerTransactionWriter | SqlClient.SqlClient;
+type A2ASendServiceLayerDependencies =
+  | A2ALedger
+  | A2ALedgerTransactionWriter
+  | SqlClient.SqlClient
+  | PeerDirectory;
 
 export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDependencies> =
   Layer.effect(
@@ -372,6 +432,7 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
       const ledger = yield* A2ALedger;
       const writer = yield* A2ALedgerTransactionWriter;
       const sql = yield* SqlClient.SqlClient;
+      const peers = yield* PeerDirectory;
 
       const membershipRows = Effect.fn("j5.a2a.send.membershipRows")(function* () {
         return yield* sql<MembershipRow>`
@@ -477,17 +538,109 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
         return { squadronId: SquadronId.make(row.squadron_id), participantId: id };
       });
 
+      /**
+       * The route the ledger already recorded for a remote agent: the ask that
+       * reached it or the ask it sent here. It lets a send to a known participant
+       * be recorded and retried while that peer is asleep, as the definition asks.
+       */
+      const recordedRoute = Effect.fn("j5.a2a.send.recordedRoute")(function* (
+        id: ParticipantId,
+      ): Effect.fn.Return<ResolvedReceiver | null, SqlError> {
+        const route = yield* findPeerRoute(sql, id);
+        return route === null ? null : { participantId: id, kind: "agent", ...route };
+      });
+
+      /**
+       * A receiver no local Squadron homes may be an agent on a peer server. The
+       * platform resolves it through the peers' address books; the sender named a
+       * participant, never a server. Runs outside the ledger transaction: it is
+       * a network read, and the transaction re-checks the local facts afterwards.
+       */
+      const remoteMembership = Effect.fn("j5.a2a.send.remoteMembership")(function* (
+        id: ParticipantId,
+      ): Effect.fn.Return<
+        ResolvedReceiver,
+        | SqlError
+        | PeerDirectoryError
+        | A2AParticipantNotFoundError
+        | A2AAmbiguousParticipantError
+        | A2APeersUnreadError
+        | A2AParticipantArchivedError
+      > {
+        // A participant this server has already exchanged messages with keeps
+        // its recorded route; only an unknown id fans out to every peer's roster,
+        // so one dead peer never taxes a send to a known one.
+        const known = yield* recordedRoute(id);
+        if (known !== null) return known;
+        const reading = yield* peers.resolveAgent(id);
+        const active = reading.agents.filter((agent) => !agent.archived);
+        if (active.length > 1)
+          return yield* new A2AAmbiguousParticipantError({ participantId: id });
+        const agent = active[0] ?? reading.agents[0];
+        if (agent === undefined) {
+          if (reading.unreadPeers.length === 0) {
+            return yield* new A2AParticipantNotFoundError({ participantId: id });
+          }
+          return yield* new A2APeersUnreadError({
+            participantId: id,
+            unreadPeerCount: reading.unreadPeers.length,
+          });
+        }
+        if (agent.archived) {
+          return yield* new A2AParticipantArchivedError({
+            participantId: id,
+            squadronId: agent.squadronId,
+          });
+        }
+        return {
+          squadronId: agent.squadronId,
+          participantId: id,
+          kind: "agent",
+          environmentId: agent.environmentId,
+        };
+      });
+
+      /** Local agent ids only; people and machines are never on a peer, and a known local agent needs no lookup. */
+      const needsRemoteResolution = Effect.fn("j5.a2a.send.needsRemoteResolution")(function* (
+        id: ParticipantId,
+      ) {
+        if (isHumanParticipantId(id) || isMachineParticipantId(id)) return false;
+        const local = yield* sql<{ readonly one: number }>`
+          SELECT 1 AS one FROM j5_a2a_squadron_membership WHERE participant_id = ${id} LIMIT 1
+        `;
+        if (local[0] !== undefined) return false;
+        return (yield* retiredParticipantRows(id)).length === 0;
+      });
+
+      /** The network half of resolution, done before the transaction opens. */
+      const preResolveRemote = Effect.fn("j5.a2a.send.preResolveRemote")(function* (
+        id: ParticipantId,
+      ) {
+        return (yield* needsRemoteResolution(id)) ? yield* remoteMembership(id) : null;
+      });
+
       const participantMembership = Effect.fn("j5.a2a.send.participantMembership")(function* (
         id: ParticipantId,
         senderSquadronId: SquadronId,
-      ) {
+        remote: ResolvedReceiver | null,
+      ): Effect.fn.Return<
+        ResolvedReceiver,
+        | SqlError
+        | Schema.SchemaError
+        | A2AParticipantNotFoundError
+        | A2AAmbiguousParticipantError
+        | A2AParticipantArchivedError
+        | A2AMachineCannotReceiveError
+      > {
         if (isHumanParticipantId(id)) {
           if (!(yield* isRegisteredHumanPerson(sql, id))) {
             return yield* new A2AParticipantNotFoundError({ participantId: id });
           }
           return {
             squadronId: senderSquadronId,
-            participant: { kind: "human" as const, id },
+            participantId: id,
+            kind: "human",
+            environmentId: null,
           };
         }
         if (isMachineParticipantId(id)) {
@@ -500,6 +653,7 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
         if (matches.length === 0) {
           const retired = yield* retiredParticipantRows(id);
           if (retired[0] === undefined) {
+            if (remote !== null) return remote;
             return yield* new A2AParticipantNotFoundError({ participantId: id });
           }
           if (retired.length > 1) {
@@ -519,9 +673,12 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
             squadronId: matches[0]!.squadron_id,
           });
         }
+        const participant = yield* decodeParticipant(matches[0]!.payload);
         return {
           squadronId: SquadronId.make(matches[0]!.squadron_id),
-          participant: yield* decodeParticipant(matches[0]!.payload),
+          participantId: id,
+          kind: participant.kind,
+          environmentId: null,
         };
       });
 
@@ -653,15 +810,24 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
         input: ResolvedSendInput,
         sender: ResolvedSender,
         committed: Array<StoredCommEvent>,
+        remote: ResolvedReceiver | null,
       ) {
         const messageId = messageIdFor(input.commandId);
         const replay = yield* replayedSend(messageId, sender.participantId);
         if (replay !== null) return replay;
+        // The same bound the peer route enforces, applied before anything is
+        // recorded, so no ledger holds a message its receiver would refuse.
+        if (input.message.length > A2A_MESSAGE_TEXT_MAX_CHARS) {
+          return yield* new A2AMessageTooLongError({
+            length: input.message.length,
+            max: A2A_MESSAGE_TEXT_MAX_CHARS,
+          });
+        }
 
-        const receiver = yield* participantMembership(input.to, sender.squadronId);
-        const receiverId = participantId(receiver.participant);
+        const receiver = yield* participantMembership(input.to, sender.squadronId, remote);
+        const receiverId = receiver.participantId;
         if (
-          receiver.participant.kind === "human" &&
+          receiver.kind === "human" &&
           input.expectReply !== true &&
           input.exchangeId === undefined
         ) {
@@ -750,10 +916,10 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
             exchangeRole = "followup";
           } else {
             if (input.intent === undefined) return yield* new A2AIntentRequiredError();
-            if (receiver.participant.kind === "human" && input.urgency === undefined) {
+            if (receiver.kind === "human" && input.urgency === undefined) {
               return yield* new A2AUrgencyRequiredError();
             }
-            if (receiver.participant.kind !== "human" && input.urgency !== undefined) {
+            if (receiver.kind !== "human" && input.urgency !== undefined) {
               return yield* new A2AUrgencyNotAcceptedError({ participantId: receiverId });
             }
             exchangeId = exchangeIdFor(input.commandId);
@@ -776,7 +942,7 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
           return yield* new A2AUrgencyRequiresExchangeError();
         }
 
-        if (receiver.participant.kind === "human" && exchangeRole === "followup") {
+        if (receiver.kind === "human" && exchangeRole === "followup") {
           return yield* new A2AHumanFollowupNotAllowedError({ participantId: receiverId });
         }
 
@@ -799,6 +965,9 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
                 ...(input.attachments === undefined ? {} : { attachments: input.attachments }),
                 originSquadronId: sender.squadronId,
                 receiverSquadronId: receiver.squadronId,
+                ...(receiver.environmentId === null
+                  ? {}
+                  : { receiverEnvironmentId: receiver.environmentId }),
                 exchangeRole,
                 envelopeChannel: "peer",
               }),
@@ -827,11 +996,20 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
       const send: A2ASendServiceShape["send"] = (input) =>
         Effect.gen(function* () {
           const committed: Array<StoredCommEvent> = [];
+          // The sender's standing is checked first so its errors win, then peers
+          // are reached before the writer permit and the transaction: holding
+          // either across the network would block every other send, including
+          // the peer's own send back to us. The transaction re-checks both.
+          const sender = yield* senderMembership(input.senderThreadId);
+          // A retry of a committed send replays whatever has happened to the
+          // receiver since; it never pays for, or fails on, a peer lookup.
+          const replayed = yield* replayedSend(messageIdFor(input.commandId), sender.participantId);
+          const remote = replayed === null ? yield* preResolveRemote(input.to) : null;
           const result = yield* writer.withPermit(
             sql.withTransaction(
               Effect.gen(function* () {
                 const sender = yield* senderMembership(input.senderThreadId);
-                return yield* sendInternal(input, sender, committed);
+                return yield* sendInternal(input, sender, committed, remote);
               }),
             ),
           );
@@ -846,6 +1024,7 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
             sql.withTransaction(
               Effect.gen(function* () {
                 const sender = yield* machineSender(input.senderParticipantId);
+                // A machine sender reaches agents on this server only; peers are not resolved for it.
                 return yield* sendInternal(
                   {
                     commandId: input.commandId,
@@ -855,6 +1034,7 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
                   },
                   sender,
                   committed,
+                  null,
                 );
               }),
             ),
@@ -882,7 +1062,8 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
               exchangeId: input.exchangeId,
               closureKind: "sender-cleared",
               closedAt: replay[0]!.created_at,
-            } satisfies ClearOwnAskResult;
+              withdrawalQueued: false,
+            } satisfies ClearOwnAskOutcome;
           }
 
           const rows = yield* sql<ExchangeRow>`
@@ -910,41 +1091,82 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
             });
           }
 
-          const result = yield* ledger.append({
-            commandId: input.commandId,
-            squadronId: SquadronId.make(exchange.squadron_id),
-            acceptedAt: input.acceptedAt,
-            event: {
-              kind: "exchange.closed",
-              sender: sender.participantId,
-              receiver: ParticipantId.make(exchange.receiver_id),
-              exchangeId: input.exchangeId,
-              correlationId: correlationIdFor(input.commandId),
-              payload: { closureKind: "sender-cleared" },
-              createdAt: input.acceptedAt,
-            },
-          });
-          const eventMatchesClear =
-            result.event.kind === "exchange.closed" &&
-            result.event.exchangeId === input.exchangeId &&
-            result.event.sender === sender.participantId &&
-            typeof result.event.payload === "object" &&
-            result.event.payload !== null &&
-            "closureKind" in result.event.payload &&
-            result.event.payload.closureKind === "sender-cleared";
-          const clearResult = {
+          const receiverId = ParticipantId.make(exchange.receiver_id);
+          const squadronId = SquadronId.make(exchange.squadron_id);
+          const correlationId = correlationIdFor(input.commandId);
+          // A receiver on a peer server holds its own copy of this Exchange and
+          // would keep owing a reply; a terminal notice travels the peer path to
+          // close it there too.
+          const remote = yield* findPeerCounterparty(sql, {
+            squadronId,
             exchangeId: input.exchangeId,
-            closureKind: "sender-cleared" as const,
-            closedAt: result.event.createdAt,
-          } satisfies ClearOwnAskResult;
-          if (!result.committed && eventMatchesClear) return clearResult;
-          if (!result.committed || !eventMatchesClear) {
+            participantId: receiverId,
+          });
+          const withdrawal: ReadonlyArray<CommEvent> =
+            remote === null
+              ? []
+              : [
+                  {
+                    kind: "message.sent",
+                    sender: LIFECYCLE_PARTICIPANT_ID,
+                    receiver: receiverId,
+                    exchangeId: input.exchangeId,
+                    correlationId,
+                    payload: {
+                      messageId: withdrawalMessageIdFor(input.commandId),
+                      text: formatWithdrawalNotice({
+                        exchangeId: input.exchangeId,
+                        askerId: sender.participantId,
+                      }),
+                      originSquadronId: squadronId,
+                      receiverSquadronId: remote.squadronId,
+                      receiverEnvironmentId: remote.environmentId,
+                      exchangeRole: "terminal_notice",
+                      envelopeChannel: "lifecycle_notice",
+                      terminal: { kind: "sender-cleared" },
+                    },
+                    createdAt: input.acceptedAt,
+                  },
+                ];
+          const result = yield* ledger.appendEvents({
+            commandId: input.commandId,
+            squadronId,
+            acceptedAt: input.acceptedAt,
+            events: [
+              {
+                kind: "exchange.closed",
+                sender: sender.participantId,
+                receiver: receiverId,
+                exchangeId: input.exchangeId,
+                correlationId,
+                payload: { closureKind: "sender-cleared" },
+                createdAt: input.acceptedAt,
+              },
+              ...withdrawal,
+            ],
+          });
+          const closedEvent = result.events[0];
+          const eventMatchesClear =
+            closedEvent !== undefined &&
+            closedEvent.kind === "exchange.closed" &&
+            closedEvent.exchangeId === input.exchangeId &&
+            closedEvent.sender === sender.participantId &&
+            typeof closedEvent.payload === "object" &&
+            closedEvent.payload !== null &&
+            "closureKind" in closedEvent.payload &&
+            closedEvent.payload.closureKind === "sender-cleared";
+          if (!eventMatchesClear) {
             return yield* new A2AClearOwnAskCommandConflictError({
               commandId: input.commandId,
               exchangeId: input.exchangeId,
             });
           }
-          return clearResult;
+          return {
+            exchangeId: input.exchangeId,
+            closureKind: "sender-cleared" as const,
+            closedAt: closedEvent.createdAt,
+            withdrawalQueued: result.committed && withdrawal.length > 0,
+          } satisfies ClearOwnAskOutcome;
         });
 
       return A2ASendService.of({ send, sendAsMachine, clearOwnAsk, listParticipants });
