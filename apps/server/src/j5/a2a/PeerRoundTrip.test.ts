@@ -141,7 +141,9 @@ const makeServer = (
             });
           }
           yield* Ref.update(crossed, (rows) => [...rows, input]);
-          // The same fields the live transport puts on the wire, taken from what the worker hands it.
+          // The fields the live transport puts on the wire from what the worker hands
+          // it. The sender label is the live transport's own read of the sender's
+          // thread title (covered in PeerOutbound.test.ts), so it is absent here.
           yield* door
             .receive({
               messageId: input.messageId,

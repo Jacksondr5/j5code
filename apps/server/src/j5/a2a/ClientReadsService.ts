@@ -202,33 +202,34 @@ export const openInboxCountStatement = (sql: SqlClient.SqlClient, personId: Part
   `;
 
 /**
- * The label a peer sent with its latest delivery for each sender, keyed by the
- * server it came from and ordered by this ledger's sequence, so a delivery
- * dated in the future by its origin never pins a name. Every probe and the
- * "nothing newer" check run on the peer route index from migration 26, so the
- * cost follows the senders asked about, not the received history.
+ * The label a peer sent with the delivery this server recorded last, for each
+ * sender asked about. "Last" is by the time this server recorded the row: the
+ * receiver stamps received rows with its own clock, so the origin cannot date
+ * one into the future, and the stamp orders rows across Squadrons, which `seq`
+ * (allocated per Squadron) does not; Squadron id, then seq, break ties so one
+ * row wins. A sender id belongs to one peer (the inbound ownership check refuses
+ * a second origin), so its latest labeled row is that peer's latest label. Each
+ * id is one backward seek on migration 27's index, so the cost follows the ids
+ * asked about, never a sender's history. An id with no label comes back with a
+ * null name; callers skip it (filtering in SQL would evaluate the seek twice).
  */
 export const peerSenderLabelStatement = (
   sql: SqlClient.SqlClient,
   participantIds: ReadonlyArray<string>,
 ) =>
   sql<IdentityRow>`
-    SELECT event.sender AS participant_id,
-           json_extract(event.payload, '$.senderLabel') AS display_name
-    FROM j5_a2a_comm_event AS event
-    WHERE event.kind = 'message.received'
-      AND json_extract(event.payload, '$.originEnvironmentId') IS NOT NULL
-      AND json_extract(event.payload, '$.senderLabel') IS NOT NULL
-      AND event.sender IN ${sql.in(participantIds)}
-      AND NOT EXISTS (
-        SELECT 1 FROM j5_a2a_comm_event AS newer
-        WHERE newer.kind = 'message.received'
-          AND json_extract(newer.payload, '$.originEnvironmentId')
-            = json_extract(event.payload, '$.originEnvironmentId')
-          AND json_extract(newer.payload, '$.senderLabel') IS NOT NULL
-          AND newer.sender = event.sender
-          AND newer.seq > event.seq
-      )
+    SELECT asked.value AS participant_id,
+           (
+             SELECT json_extract(event.payload, '$.senderLabel')
+             FROM j5_a2a_comm_event AS event
+             WHERE event.kind = 'message.received'
+               AND json_extract(event.payload, '$.senderLabel') IS NOT NULL
+               AND json_extract(event.payload, '$.originEnvironmentId') IS NOT NULL
+               AND event.sender = asked.value
+             ORDER BY event.created_at DESC, event.squadron_id DESC, event.seq DESC
+             LIMIT 1
+           ) AS display_name
+    FROM json_each(${JSON.stringify(participantIds)}) AS asked
   `;
 
 /** Test-facing plan hook for the peer label statement. */
@@ -333,7 +334,11 @@ export const layer: Layer.Layer<ClientReadsService, never, A2AHumanInbox | SqlCl
               (participantId) => !named.has(participantId),
             );
             if (unresolved.length > 0) {
-              rows.push(...(yield* peerSenderLabelStatement(sql, unresolved)));
+              rows.push(
+                ...(yield* peerSenderLabelStatement(sql, unresolved)).filter(
+                  (row) => row.display_name !== null,
+                ),
+              );
             }
           }
           const rowsByParticipant = Map.groupBy(rows, (row) => row.participant_id);

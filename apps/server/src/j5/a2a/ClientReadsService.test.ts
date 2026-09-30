@@ -353,26 +353,29 @@ it.effect("names a sender homed on a peer by the label its server sent, after an
         },
       ],
     });
-    // Two deliveries from the same remote sender; the latest by this ledger's
-    // sequence wins, whatever clock the origin stamped on it.
-    const received = (seq: number, label: string, at: string) => sql`
+    // Deliveries from one remote sender into two Squadrons here. Each Squadron
+    // numbers its own rows, so the renamed sender's latest label sits at a
+    // lower seq than an older one; the time this server recorded each wins.
+    const other = SquadronId.make("squadron:client-reads:peer:other");
+    yield* ledger.createSquadron({ squadron: { id: other, name: "Other Reads", createdAt } });
+    const received = (inSquadron: SquadronId, seq: number, label: string, at: string) => sql`
       INSERT INTO j5_a2a_comm_event (
         seq, squadron_id, kind, sender, receiver, exchange_id, correlation_id,
         payload, created_at, command_id
       ) VALUES (
-        ${seq}, ${squadron}, 'message.received', ${remoteSender}, ${local.id}, NULL,
-        ${"correlation:client-reads:peer:" + String(seq)},
+        ${seq}, ${inSquadron}, 'message.received', ${remoteSender}, ${local.id}, NULL,
+        ${`correlation:client-reads:peer:${inSquadron}:${String(seq)}`},
         ${JSON.stringify({
           originSquadronId: "squadron:home",
           originEnvironmentId: "environment-home",
           senderLabel: label,
           message: {},
         })},
-        ${at}, ${"command:client-reads:peer:" + String(seq)}
+        ${at}, ${`command:client-reads:peer:${inSquadron}:${String(seq)}`}
       )
     `;
-    yield* received(2, "Old title", "2099-01-01T00:00:00.000Z");
-    yield* received(3, "Incident asker", "2026-09-21T00:02:00.000Z");
+    yield* received(squadron, 500, "Old title", "2026-09-21T00:01:00.000Z");
+    yield* received(other, 10, "Incident asker", "2026-09-21T00:02:00.000Z");
 
     const identities = yield* reads.participantIdentities({
       participantIds: [remoteSender, local.id],
@@ -383,19 +386,24 @@ it.effect("names a sender homed on a peer by the label its server sent, after an
         { participantId: local.id, identity: { kind: "unknown" } },
       ],
     });
+    // Two rows recorded at the same instant: the tie falls to Squadron id, so one label wins.
+    yield* received(other, 11, "Tie in other", "2026-09-21T00:03:00.000Z");
+    yield* received(squadron, 501, "Tie in peer", "2026-09-21T00:03:00.000Z");
+    const tied = yield* reads.participantIdentities({ participantIds: [remoteSender] });
+    assert.deepStrictEqual(tied.entries, [
+      { participantId: remoteSender, identity: { kind: "known", displayName: "Tie in other" } },
+    ]);
+
+    // Each id asked about is one backward seek on the recency index: no scan, no sort.
     const plan = yield* explainPeerSenderLabelStatement(sql, [remoteSender]);
-    const ledgerReads = plan.filter((row) =>
-      /\b(?:SCAN|SEARCH) (?:event|newer)\b/.test(row.detail),
-    );
     const rendered = plan.map((row) => row.detail).join(" | ");
-    assert.equal(ledgerReads.length, 2, `the outer and the "nothing newer" read: ${rendered}`);
-    assert.isTrue(
-      ledgerReads.every((row) =>
-        /^SEARCH (?:event|newer) USING INDEX j5_a2a_comm_event_received_sender_idx\b/.test(
-          row.detail,
-        ),
-      ),
-      `every touch of the ledger should be an index search, never a scan: ${rendered}`,
+    const ledgerReads = plan.filter((row) => /\b(?:SCAN|SEARCH) event\b/.test(row.detail));
+    assert.equal(ledgerReads.length, 1, `one read of the ledger per id: ${rendered}`);
+    assert.match(
+      ledgerReads[0]!.detail,
+      /^SEARCH event USING INDEX j5_a2a_comm_event_received_label_recency_idx \(sender=\?\)/,
+      rendered,
     );
+    assert.notMatch(rendered, /TEMP B-TREE/, `the index order is the answer order: ${rendered}`);
   }).pipe(Effect.provide(makeTestLayer())),
 );
