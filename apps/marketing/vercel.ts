@@ -7,8 +7,9 @@ export const config: VercelConfig = {
   installCommand: "npm install -g vite-plus && vp install --filter '@t3tools/marketing...'",
   buildCommand: "vp run --filter @t3tools/marketing build",
   outputDirectory: "dist",
-  // `curl … | sh` needs the installer served as plain text, uncompressed by
-  // content negotiation, and never cached past a deploy.
+  // `curl … | sh` needs the installer served as a plain shell script. Caches may
+  // keep it for up to five minutes, so a changed installer reaches everyone
+  // within five minutes of a deploy.
   headers: [
     {
       source: "/install.sh",

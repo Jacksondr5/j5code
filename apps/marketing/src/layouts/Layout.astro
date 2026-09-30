@@ -118,7 +118,7 @@ const socialImageUrl = new URL("/og.png", Astro.site);
     --canvas-line: rgba(18, 32, 47, 0.14);
     --ink: #12202f;
     --ink-muted: #4a5867;
-    --ink-dim: #77838f;
+    --ink-dim: #5f6a76; /* 4.8:1 on chart paper */
     --brass: #c9a24d;
     --brass-deep: #a67f2a;
     --brass-soft: rgba(201, 162, 77, 0.18);
@@ -126,7 +126,7 @@ const socialImageUrl = new URL("/og.png", Astro.site);
     --sea: #3b8fae;
     --foam: #dfe9ee;
     --foam-muted: rgba(223, 233, 238, 0.72);
-    --foam-dim: rgba(223, 233, 238, 0.48);
+    --foam-dim: rgba(223, 233, 238, 0.6); /* 5.0:1 on the lightest navy */
     --line: rgba(223, 233, 238, 0.14);
     --line-strong: rgba(223, 233, 238, 0.28);
     /* Message colors, the same on every scene: an agent sending, receiving, replying. */
@@ -156,7 +156,7 @@ const socialImageUrl = new URL("/og.png", Astro.site);
     --bg-elev: #0c0c0e;
     --fg: #fafafa;
     --fg-muted: #a1a1aa;
-    --fg-dim: #71717a;
+    --fg-dim: #85858e; /* 5.2:1 on T3 cards */
     --border: rgba(255, 255, 255, 0.08);
     --border-strong: rgba(255, 255, 255, 0.14);
     --accent: oklch(0.68 0.17 250);
@@ -175,6 +175,12 @@ const socialImageUrl = new URL("/og.png", Astro.site);
   html {
     color-scheme: dark;
     scroll-behavior: smooth;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
   }
 
   body {

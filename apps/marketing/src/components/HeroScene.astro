@@ -152,21 +152,21 @@ import Boat from "./Boat.astro";
   .hs-ask { fill: var(--msg-ask); }
   .hs-reply { fill: var(--msg-reply); }
 
-  .d1 { offset-path: path("M62 111 Q 110 40 190 31"); animation-name: hop-1; }
-  .d2 { offset-path: path("M190 31 Q 110 40 62 111"); animation-name: hop-2; }
-  .d3 { offset-path: path("M318 111 Q 270 170 190 151"); animation-name: hop-3; }
-  .d4 { offset-path: path("M190 151 Q 270 170 318 111"); animation-name: hop-4; }
-  .d5 { offset-path: path("M62 111 Q 190 -20 318 111"); animation-name: hop-5; }
-  .d6 { offset-path: path("M318 111 Q 190 -20 62 111"); animation-name: hop-6; }
-  .d7 { offset-path: path("M190 31 Q 235 91 190 151"); animation-name: hop-7; }
+  .d1 { offset-path: path("M62 111 Q 110 40 190 31"); animation-name: hs-hop-1; }
+  .d2 { offset-path: path("M190 31 Q 110 40 62 111"); animation-name: hs-hop-2; }
+  .d3 { offset-path: path("M318 111 Q 270 170 190 151"); animation-name: hs-hop-3; }
+  .d4 { offset-path: path("M190 151 Q 270 170 318 111"); animation-name: hs-hop-4; }
+  .d5 { offset-path: path("M62 111 Q 190 -20 318 111"); animation-name: hs-hop-5; }
+  .d6 { offset-path: path("M318 111 Q 190 -20 62 111"); animation-name: hs-hop-6; }
+  .d7 { offset-path: path("M190 31 Q 235 91 190 151"); animation-name: hs-hop-7; }
 
-  @keyframes hop-1 { 0%, 2% { offset-distance: 0%; opacity: 0; } 3% { opacity: 1; } 11% { opacity: 1; } 12%, 100% { offset-distance: 100%; opacity: 0; } }
-  @keyframes hop-2 { 0%, 14% { offset-distance: 0%; opacity: 0; } 15% { opacity: 1; } 23% { opacity: 1; } 24%, 100% { offset-distance: 100%; opacity: 0; } }
-  @keyframes hop-3 { 0%, 26% { offset-distance: 0%; opacity: 0; } 27% { opacity: 1; } 35% { opacity: 1; } 36%, 100% { offset-distance: 100%; opacity: 0; } }
-  @keyframes hop-4 { 0%, 38% { offset-distance: 0%; opacity: 0; } 39% { opacity: 1; } 47% { opacity: 1; } 48%, 100% { offset-distance: 100%; opacity: 0; } }
-  @keyframes hop-5 { 0%, 52% { offset-distance: 0%; opacity: 0; } 53% { opacity: 1; } 61% { opacity: 1; } 62%, 100% { offset-distance: 100%; opacity: 0; } }
-  @keyframes hop-6 { 0%, 64% { offset-distance: 0%; opacity: 0; } 65% { opacity: 1; } 73% { opacity: 1; } 74%, 100% { offset-distance: 100%; opacity: 0; } }
-  @keyframes hop-7 { 0%, 78% { offset-distance: 0%; opacity: 0; } 79% { opacity: 1; } 87% { opacity: 1; } 88%, 100% { offset-distance: 100%; opacity: 0; } }
+  @keyframes hs-hop-1 { 0%, 2% { offset-distance: 0%; opacity: 0; } 3% { opacity: 1; } 11% { opacity: 1; } 12%, 100% { offset-distance: 100%; opacity: 0; } }
+  @keyframes hs-hop-2 { 0%, 14% { offset-distance: 0%; opacity: 0; } 15% { opacity: 1; } 23% { opacity: 1; } 24%, 100% { offset-distance: 100%; opacity: 0; } }
+  @keyframes hs-hop-3 { 0%, 26% { offset-distance: 0%; opacity: 0; } 27% { opacity: 1; } 35% { opacity: 1; } 36%, 100% { offset-distance: 100%; opacity: 0; } }
+  @keyframes hs-hop-4 { 0%, 38% { offset-distance: 0%; opacity: 0; } 39% { opacity: 1; } 47% { opacity: 1; } 48%, 100% { offset-distance: 100%; opacity: 0; } }
+  @keyframes hs-hop-5 { 0%, 52% { offset-distance: 0%; opacity: 0; } 53% { opacity: 1; } 61% { opacity: 1; } 62%, 100% { offset-distance: 100%; opacity: 0; } }
+  @keyframes hs-hop-6 { 0%, 64% { offset-distance: 0%; opacity: 0; } 65% { opacity: 1; } 73% { opacity: 1; } 74%, 100% { offset-distance: 100%; opacity: 0; } }
+  @keyframes hs-hop-7 { 0%, 78% { offset-distance: 0%; opacity: 0; } 79% { opacity: 1; } 87% { opacity: 1; } 88%, 100% { offset-distance: 100%; opacity: 0; } }
 
   /* Flags follow the hops on the same 8s clock: orange on send, blue on
      receive, green on reply, and they keep that color until their next event.

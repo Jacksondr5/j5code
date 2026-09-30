@@ -11,6 +11,6 @@ are upstream's.
   files outside the root included, because the build reads `FORK.md` and stages
   `scripts/install.sh` from the repository root.
 
-Status words on the site are deliberate: **Underway** means shipped, **Charted** means defined in
-`docs/j5/product` and being built, **Horizon** means direction. The upstream pin and the size of
-the integration inventory are read from `FORK.md` at build time.
+Status words on the site are deliberate: **Shipped** means ready to use, **Charted** means in dry
+dock and being built, **Horizon** means on the roadmap. The upstream pin and its date are read from
+`FORK.md` at build time.
