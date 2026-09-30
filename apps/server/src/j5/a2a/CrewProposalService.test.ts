@@ -1678,22 +1678,16 @@ it.effect(
 );
 
 it.effect(
-  "refuses a playbook Crew while the Captain runs a playbook, and still takes one without",
+  "takes a playbook Crew while the Captain runs a playbook; playbook_start keeps one run per thread",
   () =>
     Effect.gen(function* () {
       const { layer, workspaceRoot } = yield* playbookFixture;
       yield* Effect.gen(function* () {
         const gate = yield* CrewProposalService;
-        const run = yield* (yield* PlaybookStore).start(
-          captainThread,
-          workspaceRoot,
-          "release",
-          "run-1",
-        );
-        const refused = yield* proposeRelease(gate, workspaceRoot).pipe(Effect.flip);
-        assert.equal(refused._tag, "CrewProposalRequestError");
-        assert.include(refused.message, `run ${run.runId}`);
-        assert.include(refused.message, "playbook_complete");
+        yield* (yield* PlaybookStore).start(captainThread, workspaceRoot, "release", "run-1");
+        const opened = yield* proposeRelease(gate, workspaceRoot);
+        assert.equal(opened.proposal.status, "open");
+        assert.equal(opened.playbook?.name, "release");
         const plain = yield* gate.propose({
           requestKey: "plain",
           captain,

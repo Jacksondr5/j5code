@@ -512,16 +512,6 @@ export const layer = Layer.effect(
       Effect.gen(function* () {
         let playbook: { ref: CrewPlaybookRef; definition: PlaybookReadResponse } | null = null;
         if (input.playbook !== undefined) {
-          // One playbook run per thread: a Crew following a second one could never start it.
-          const active = yield* playbooks
-            .activeRunFor(input.captain.thread.id)
-            .pipe(Effect.mapError(operationError("reading your playbook runs")));
-          if (active !== null)
-            return yield* new CrewProposalRequestError({
-              detail: `Your thread is running playbook ${active.name} (run ${active.runId}), and a thread runs one playbook at a time.`,
-              nextStep:
-                "Finish it with playbook_complete or cancel it with playbook_cancel, then propose again.",
-            });
           const { definitionPath } = yield* playbooks
             .definitionPathFor(input.playbook.workspaceRoot, input.playbook.name)
             .pipe(Effect.mapError(playbookRefusal(input.playbook.name, "captain")));
