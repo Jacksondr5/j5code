@@ -96,8 +96,8 @@ export const makeJ5A2AAuxiliaryLayer = (
     Layer.provideMerge(agentCrewInstanceLayer),
     Layer.provideMerge(playbookStoreLayer),
   );
-  // Hands each landing of a Crew-linked run to the seat that owns it; its boot sweep finishes
-  // hand-offs a crash or a transient failure left pending.
+  // Hands each landing of a Crew-linked run to the seat that owns it, inside the Captain's step
+  // calls; a pending hand-off is finished by the Captain's next or retried call.
   const playbookCrewRelayProvided = playbookCrewRelayLayer.pipe(
     Layer.provideMerge(agentCrewInstanceLayer),
     Layer.provideMerge(playbookStoreLayer),

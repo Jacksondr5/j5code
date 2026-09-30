@@ -47,7 +47,7 @@ import { SquadronProjectReferences } from "../a2a/SquadronProjectReferences.ts";
 import { J5ToolkitHandlersLive } from "../a2a/mcp/handlers.ts";
 import { J5Toolkit } from "../a2a/mcp/tools.ts";
 import { layer as agentCrewInstanceLayer } from "../a2a/AgentCrewInstanceService.ts";
-import { manualLayer as playbookCrewRelayLayer } from "./PlaybookCrewRelay.ts";
+import { layer as playbookCrewRelayLayer } from "./PlaybookCrewRelay.ts";
 import { makePlaybookStore, PlaybookStore } from "./PlaybookStore.ts";
 import type { playbookTools } from "./mcp.ts";
 

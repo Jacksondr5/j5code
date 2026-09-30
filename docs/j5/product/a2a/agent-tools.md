@@ -367,7 +367,9 @@ is `delivered` (the seat has the step), `captain` (the Captain does it from `cur
 or `pending` (the hand-off hasn't finished; nobody should start the step). Only `captain` means
 the Captain does it. `playbook_current` reports the same `delivery` without handing off again.
 While an earlier hand-off is still pending, `playbook_next`, `playbook_back`, `playbook_reselect`,
-and `playbook_complete` refuse with `delivery_pending` and don't move; retry the same call.
+and `playbook_complete` refuse with `delivery_pending` and don't move; retry the same call. Nothing
+retries a pending hand-off in the background, including after a restart: the Captain's next step
+call, or a retry of the same one, finishes it.
 `playbook_cancel` always works. The platform never advances on its own: the Captain calls
 `playbook_next` after the seat reports back. Archiving the Crew or its Captain cancels its active
 run; `stop_crew` doesn't, and unarchiving doesn't restart it.

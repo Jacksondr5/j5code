@@ -113,7 +113,7 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
    * Hands one landing to its owner. The caller holds the Crew's lock. A resolved landing returns
    * its stored delivery. Only a finished run, a retired Crew, or a live definition that no longer
    * has the step skips a landing; anything that can't be read or sent right now leaves it pending
-   * for a retry or the boot sweep, with the reason.
+   * for the Captain's retry or next move, with the reason.
    */
   const handOff = Effect.fn("PlaybookCrewRelay.handOff")(function* (
     runId: string,
@@ -352,24 +352,7 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
     } satisfies NonNullable<FleetCrew["playbookRun"]>;
   });
 
-  /** Boot sweep: hand off every pending landing a crash or a transient failure left behind. */
-  const reconcile = Effect.gen(function* () {
-    const pending = yield* store.pendingLandings(null);
-    const runIds = [...new Set(pending.map(({ runId }) => runId))];
-    for (const runId of runIds)
-      yield* drainRun(runId).pipe(
-        Effect.catch((error) =>
-          Effect.logWarning("J5 playbook hand-off sweep left a landing pending", { runId, error }),
-        ),
-      );
-    return runIds;
-  }).pipe(
-    Effect.catchCause((cause) =>
-      Effect.logError("J5 playbook hand-off sweep failed", { cause }).pipe(Effect.as([])),
-    ),
-  );
-
-  return { start, mutate, current, deliver, drainRun, currentDelivery, fleetRun, reconcile };
+  return { start, mutate, current, deliver, drainRun, currentDelivery, fleetRun };
 });
 
 export class PlaybookCrewRelay extends Context.Service<
@@ -377,17 +360,8 @@ export class PlaybookCrewRelay extends Context.Service<
   Effect.Success<typeof makePlaybookCrewRelay>
 >()("t3/j5/playbooks/PlaybookCrewRelay") {}
 
-const makeLayer = (daemon: boolean) =>
-  Layer.effect(
-    PlaybookCrewRelay,
-    Effect.gen(function* () {
-      const relay = yield* makePlaybookCrewRelay;
-      if (daemon) yield* Effect.forkScoped(relay.reconcile);
-      return relay;
-    }),
-  );
-
-/** Production: the boot sweep runs once the layer is built. */
-export const layer = makeLayer(true);
-/** For tests, which run `reconcile` themselves. */
-export const manualLayer = makeLayer(false);
+/**
+ * Nothing sweeps pending hand-offs in the background: the Captain's next step call, or a retry
+ * of the same one, finishes them before the run moves.
+ */
+export const layer = Layer.effect(PlaybookCrewRelay, makePlaybookCrewRelay);
