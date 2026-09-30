@@ -527,7 +527,11 @@ it.effect("keeps a message queued behind a held receiver queue undelivered until
     const sends = yield* Ref.make<ReadonlyArray<ThreadManagementSendInput>>([]);
     const database = NodeSqliteClient.layer({ filename: ":memory:" });
     const ledger = ledgerLayer.pipe(Layer.provide(database));
-    const send = sendLayer.pipe(Layer.provide(ledger), Layer.provide(database));
+    const send = sendLayer.pipe(
+      Layer.provide(peerDirectoryNoneLayer),
+      Layer.provide(ledger),
+      Layer.provide(database),
+    );
     const threadManagement = Layer.mock(ThreadManagementService)({
       getThreadProjection: () =>
         Effect.succeed({
@@ -549,6 +553,8 @@ it.effect("keeps a message queued behind a held receiver queue undelivered until
     });
     const transport = deliveryTransportLive.pipe(
       Layer.provide(database),
+      Layer.provide(FetchHttpClient.layer),
+      Layer.provide(Layer.mock(PeerRegistryService)({})),
       Layer.provide(threadManagement),
       Layer.provide(Layer.mock(OrchestratorV2)({})),
       Layer.provide(Layer.mock(EffectOutboxV2)({ listByCommandId: () => Effect.succeed([]) })),
@@ -608,6 +614,7 @@ it.effect("delivers a machine's send to its agent receiver instead of withdrawin
     const transport: A2ADeliveryTransportShape = {
       deliverAgent: (input) => Ref.update(delivered, (senders) => [...senders, input.senderId]),
       cancelAgent: () => Effect.succeed("cancelled" as const),
+      deliverPeer: () => Effect.die("peer delivery is not under test"),
       deliverHuman: () => Effect.void,
     };
     yield* Effect.gen(function* () {
@@ -1088,7 +1095,7 @@ it.effect(
   "records a peer-accepted delivery as delivered even if the sender retired during the call",
   () =>
     Effect.gen(function* () {
-      const database = NodeSqliteClient.layerMemory();
+      const database = NodeSqliteClient.layer({ filename: ":memory:" });
       const ledger = ledgerLayer.pipe(Layer.provide(database));
       const transportLayer = Layer.succeed(
         A2ADeliveryTransport,

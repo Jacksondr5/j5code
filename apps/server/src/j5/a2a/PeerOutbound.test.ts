@@ -88,7 +88,7 @@ const makeSendLayer = (
   agents: ReadonlyArray<RemoteAgent>,
   unreadPeers: ReadonlyArray<string> = [],
 ) => {
-  const database = NodeSqliteClient.layerMemory();
+  const database = NodeSqliteClient.layer({ filename: ":memory:" });
   const ledger = ledgerLayer.pipe(Layer.provide(database));
   const send = sendLayer.pipe(
     Layer.provide(ledger),
@@ -232,7 +232,7 @@ const makeTransportLayer = (
   reply: { readonly status: number; readonly body: unknown },
   posted: Array<{ url: string; authorization: string | undefined; body: unknown }>,
 ) => {
-  const database = NodeSqliteClient.layerMemory();
+  const database = NodeSqliteClient.layer({ filename: ":memory:" });
   const ledger = ledgerLayer.pipe(Layer.provide(database));
   const send = sendLayer.pipe(
     Layer.provide(ledger),

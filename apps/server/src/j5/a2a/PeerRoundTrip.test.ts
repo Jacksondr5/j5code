@@ -90,7 +90,7 @@ const makeServer = (
   delivered: Ref.Ref<Array<AgentDeliveryInput>>,
   crossed: Ref.Ref<Array<PeerDeliveryInput>>,
 ) => {
-  const database = NodeSqliteClient.layerMemory();
+  const database = NodeSqliteClient.layer({ filename: ":memory:" });
   const ledger = ledgerLayer.pipe(Layer.provide(database));
   const directory = Layer.succeed(
     PeerDirectory,
