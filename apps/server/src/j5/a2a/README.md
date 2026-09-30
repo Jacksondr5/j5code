@@ -14,7 +14,7 @@ Human-inbox routes currently authenticate the environment scope, not the named p
 
 The first J5 runtime start mints one opaque, durable `human:<person-id>` local-operator record in the host registry. A person is host-global addressability state: minting creates no Squadron, default, home, or membership event. The participant union remains broad enough to read historical human membership facts, while the live Squadron membership projection is agent-only; participant directories synthesize registered people alongside member agents.
 
-For a cross-squadron send, the receiver ledger's idempotent `message.received` records durable acceptance of the sender's act before transport is attempted. It does not claim successful thread injection: delivery success, retries, and the terminal alarm remain in the sender squadron's delivery projection.
+For a cross-squadron send on one server, the receiver ledger's idempotent `message.received` records durable acceptance of the sender's act before transport is attempted. It does not claim successful thread injection: delivery success, retries, and the terminal alarm remain in the sender squadron's delivery projection. Across servers the receiving peer writes that `message.received` row and its acknowledgement is the sender's delivery receipt: the receipt means the peer accepted the message, and injection into the thread is the peer's own pending delivery, which retries and alarms in the peer's projection, attributed to the sender.
 
 Byte-equivalent rebuilds for the A2 exchange and delivery projections are deferred to the measured-projections milestone (M5). A2 keeps those tables derivable from the communication ledger but does not expose their rebuild operation.
 

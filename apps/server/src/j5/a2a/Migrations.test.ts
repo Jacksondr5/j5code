@@ -63,6 +63,11 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
       { migration_id: 20, name: "CrewAlertExchanges" },
       { migration_id: 21, name: "CrewProposalsResolveOnce" },
       { migration_id: 22, name: "CrewRetiredWithCaptain" },
+      { migration_id: 23, name: "Peers" },
+      { migration_id: 24, name: "PeerDeliveryOrigin" },
+      { migration_id: 25, name: "PeerDeliveryReceiver" },
+      { migration_id: 26, name: "PeerRouteIndexes" },
+      { migration_id: 27, name: "PeerSenderLabelRecency" },
     ]);
     assert.deepStrictEqual(
       migrationEntries.map(([id, name]) => [id, name]),
@@ -89,6 +94,11 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
         [20, "CrewAlertExchanges"],
         [21, "CrewProposalsResolveOnce"],
         [22, "CrewRetiredWithCaptain"],
+        [23, "Peers"],
+        [24, "PeerDeliveryOrigin"],
+        [25, "PeerDeliveryReceiver"],
+        [26, "PeerRouteIndexes"],
+        [27, "PeerSenderLabelRecency"],
       ],
     );
   }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
@@ -1256,7 +1266,7 @@ it.effect("recreates earlier-shaped crews tables when 14 runs over them", () =>
     `;
     assert.deepStrictEqual(
       applied.map((row) => row.migration_id),
-      [13, 14, 15, 16, 17, 18, 19, 20, 21, 22],
+      [13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27],
     );
     const memberColumns = yield* sql<{ readonly name: string }>`
       SELECT name FROM pragma_table_info('j5_agent_crew_member') ORDER BY cid
