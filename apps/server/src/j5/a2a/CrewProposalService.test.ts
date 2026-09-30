@@ -19,6 +19,7 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
 import { SqlError, UnknownError } from "effect/unstable/sql/SqlError";
 import { stringify } from "yaml";
 
@@ -34,6 +35,12 @@ import {
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
 import { createAgentPersonaLibrary } from "../agents/agentPersonaLibrary.ts";
+import { buildAgentPersonaCatalog } from "../agents/agentPersonaRouting.ts";
+import { playbookTools } from "../playbooks/mcp.ts";
+import { makePlaybookCrewRelay } from "../playbooks/PlaybookCrewRelay.ts";
+import { crewLaunchReportText } from "./crewGateNotice.ts";
+import { crewSeatFromInput } from "./mcp/handlers.ts";
+import { J5ProposeCrewInput } from "./mcp/tools.ts";
 import { PlaybookStore, playbookStoreLayer } from "../playbooks/PlaybookStore.ts";
 import { seedPersonas, seedPlaybookOwners } from "../playbooks/testFixtures.ts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
@@ -83,6 +90,7 @@ const thread = (id: ThreadId): OrchestrationV2AppThread =>
     worktreePath: null,
     createdAt,
     archivedAt: null,
+    deletedAt: null,
   }) as unknown as OrchestrationV2AppThread;
 const captain: CrewCaptain = {
   squadronId,
@@ -1269,6 +1277,14 @@ const custom = (seat: string, steps?: ReadonlyArray<string>) => ({
   ...(steps === undefined ? {} : { steps }),
 });
 
+// The Captain's tool calls go through the tools' own input schemas.
+const decodeProposeCrew = Schema.decodeUnknownEffect(J5ProposeCrewInput);
+const playbookStartTool = playbookTools.find(
+  (tool): tool is Extract<(typeof playbookTools)[number], { readonly name: "playbook_start" }> =>
+    tool.name === "playbook_start",
+)!;
+const decodePlaybookStart = Schema.decodeUnknownEffect(playbookStartTool.parametersSchema);
+
 const playbookFixture = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -1762,4 +1778,203 @@ it.effect("stores and reads back a step id longer than a seat name", () =>
       assert.deepStrictEqual(opened.playbook?.unownedSteps, []);
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "the headline Crew: a playbook with two personas, a persona-less step, and a disabled persona launches with the right owners",
+  () =>
+    Effect.gen(function* () {
+      const { layer, workspaceRoot, writePlaybook, commands } = yield* playbookFixture;
+      yield* writePlaybook(
+        "ship",
+        stringify({
+          title: "Ship",
+          description: "Plan, build, review, and release a change.",
+          steps: [
+            { id: "plan", title: "Plan", prompt: "Plan it.", persona: "planner" },
+            { id: "build", title: "Build", prompt: "Build it.", persona: "builder" },
+            { id: "review", title: "Review", prompt: "Review the diff.", persona: "reviewer" },
+            { id: "release", title: "Release", prompt: "Release it." },
+          ],
+        }),
+      );
+      yield* Effect.gen(function* () {
+        const { stateDir } = yield* ServerConfig;
+        const library = createAgentPersonaLibrary({
+          fs: yield* FileSystem.FileSystem,
+          path: yield* Path.Path,
+          stateDir,
+        });
+        // builder is bundled; planner and reviewer are added through the library's own API.
+        for (const id of ["planner", "reviewer"])
+          yield* library.createPersona({
+            id,
+            displayName: id,
+            description: `The ${id} persona.`,
+            instructions: `You are ${id}.`,
+            authorityPolicy: "read-only",
+            modelRoute: [
+              { driver: "codex", model: "gpt-5.6-sol", reasoningEffort: "high" },
+              { driver: "claudeAgent", model: "claude-opus-5-5", reasoningEffort: "high" },
+            ],
+          });
+        yield* library.setEnabled("reviewer", false);
+
+        // 1) Read: the playbook warns about the disabled persona, and list_personas' own
+        // projection shows it unavailable while the other two are available.
+        const read = yield* (yield* PlaybookStore).read(workspaceRoot, "ship");
+        assert.deepStrictEqual(
+          read.warnings.map(({ code, stepId }) => [code, stepId]),
+          [["persona_disabled", "review"]],
+        );
+        const current = yield* library.catalog();
+        const catalog = buildAgentPersonaCatalog([codex], current.definitions);
+        const usable = (id: string) =>
+          !current.disabledIds.includes(id) &&
+          catalog.personas.find(({ personaId }) => personaId === id)?.availability.status ===
+            "available";
+        assert.deepStrictEqual(
+          ["planner", "builder", "reviewer"].map((id) => [id, usable(id)]),
+          [
+            ["planner", true],
+            ["builder", true],
+            ["reviewer", false],
+          ],
+        );
+
+        // 2) Propose: the tool JSON the Captain sends, through the tool schema and the handler's
+        // seat mapping.
+        const input = yield* decodeProposeCrew({
+          squadron_id: squadronId,
+          name: "Ship Crew",
+          brief: "Implement what we discussed. Ship: plan, build, review, and release a change.",
+          playbook: "ship",
+          seats: [
+            { seat: "planner", persona: "planner", reason: "Owns the plan step.", steps: ["plan"] },
+            {
+              seat: "builder",
+              persona: "builder",
+              reason: "Owns build, and release, which names no persona.",
+              steps: ["build", "release"],
+            },
+            {
+              seat: "reviewer-stand-in",
+              reason: "Stands in for reviewer, which is turned off.",
+              instructions: "Review the diff for correctness and report findings with evidence.",
+              steps: ["review"],
+            },
+          ],
+          client_request_id: "headline",
+        });
+        const gate = yield* CrewProposalService;
+        const opened = yield* gate.propose({
+          requestKey: "headline",
+          captain,
+          displayName: input.name,
+          brief: input.brief,
+          playbook: { name: input.playbook!, workspaceRoot },
+          seats: input.seats.map(crewSeatFromInput),
+        });
+        const swap = {
+          stepId: "review",
+          wanted: "reviewer",
+          seatPersona: null,
+          wantedProblem: "disabled" as const,
+        };
+
+        // 3) The proposal records the plan the card shows.
+        assert.equal(opened.playbook?.name, "ship");
+        assert.deepStrictEqual(opened.playbook?.unownedSteps, []);
+        assert.deepStrictEqual(opened.playbook?.swaps, [{ seat: "reviewer-stand-in", swap }]);
+        const stored = (yield* (yield* AgentCrewProposalService).read(opened.proposal.id))!;
+        assert.deepStrictEqual(
+          stored.requestedSeats.map(({ seat, steps, personaSwaps }) => [seat, steps, personaSwaps]),
+          [
+            ["planner", ["plan"], undefined],
+            ["builder", ["build", "release"], undefined],
+            ["reviewer-stand-in", ["review"], [swap]],
+          ],
+        );
+        const preview = yield* gate.preview({ proposalId: opened.proposal.id });
+        assert.deepStrictEqual(preview.seats[2]?.personaSwaps, [swap]);
+        assert.isNotEmpty(preview.approvalToken);
+
+        // 4) Approve with the preview's token and launch.
+        const approved = yield* gate.resolve({
+          proposalId: opened.proposal.id,
+          decision: "approve",
+          approvalToken: preview.approvalToken,
+        });
+        const instance = (yield* (yield* AgentCrewInstanceService).read(approved.instance!.id))!;
+        assert.deepStrictEqual(instance.playbook, stored.playbook);
+        assert.deepStrictEqual(
+          instance.members.map(({ seatName, playbookStepIds }) => [seatName, playbookStepIds]),
+          [
+            ["planner", ["plan"]],
+            ["builder", ["build", "release"]],
+            ["reviewer-stand-in", ["review"]],
+          ],
+        );
+        const builderThread = instance.members.find(
+          ({ seatName }) => seatName === "builder",
+        )!.threadId;
+        const builderBrief = (yield* Ref.get(commands)).find(
+          (command) => command.type === "message.dispatch" && command.threadId === builderThread,
+        );
+        assert.include(
+          builderBrief?.type === "message.dispatch" ? builderBrief.text : "",
+          "your_steps:\n- build: Build\n- release: Release\n</seat_playbook>",
+        );
+
+        // 5) The launch notice gives the Captain the Crew id and the start call.
+        const notice = crewLaunchReportText({
+          proposal: (yield* (yield* AgentCrewProposalService).read(opened.proposal.id))!,
+          instance,
+          verdicts: new Map(),
+          windowMs: 60_000,
+          playbook: { name: "ship", title: read.title },
+        });
+        assert.include(notice, `crew_instance_id: ${instance.id}\n`);
+        assert.include(notice, 'playbook_start(name: "ship"');
+
+        // 6) Start: the first step reaches the planner seat.
+        const start = yield* decodePlaybookStart({
+          name: "ship",
+          client_request_id: "start-ship",
+          crew_instance_id: instance.id,
+        });
+        const before = (yield* Ref.get(commands)).length;
+        const relay = yield* makePlaybookCrewRelay;
+        const started = yield* relay.start({
+          owner: captainThread,
+          root: workspaceRoot,
+          name: start.name,
+          key: start.client_request_id,
+          crewInstanceId: start.crew_instance_id!,
+        });
+        const plannerThread = instance.members.find(
+          ({ seatName }) => seatName === "planner",
+        )!.threadId;
+        assert.deepStrictEqual(started.delivery, {
+          state: "delivered",
+          seat: "planner",
+          threadId: plannerThread,
+        });
+        const handedOff = (yield* Ref.get(commands)).slice(before);
+        assert.lengthOf(handedOff, 1);
+        const stepNotice = handedOff[0];
+        assert.equal(
+          stepNotice?.type === "message.dispatch" ? stepNotice.threadId : null,
+          plannerThread,
+        );
+        assert.include(
+          stepNotice?.type === "message.dispatch" ? stepNotice.text : "",
+          "<j5_playbook_step>",
+        );
+        assert.include(
+          stepNotice?.type === "message.dispatch" ? stepNotice.text : "",
+          "step: plan | Plan",
+        );
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
 );

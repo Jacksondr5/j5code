@@ -191,7 +191,10 @@ options) and/or runtime_mode using orchestrator_capabilities. Saved personas are
 own configuration; only the human may override their runtime before approval. To have the crew
 follow a playbook, set playbook to a name from playbook_list and give seats the step ids they own
 (steps, from playbook_read); a step has one owner, steps no seat owns are yours as Captain, and the
-result reports unowned steps and any step whose persona differs from its seat's. Name the crew for
+result reports unowned steps and any step whose persona differs from its seat's. For a crew built
+from a playbook, staff one seat per distinct persona its steps name, each owning that persona's
+steps, and propose a custom seat, noted in its reason, where a named persona isn't available. Name
+the crew for
 what it is for and give each seat a short lowercase-hyphen name like code-reviewer. The user reviews the
 roster and each seat's resolved provider, model, reasoning, and access in this thread, may remove or
 add seats, and approves or declines; you receive the decision and the roster as a message here.

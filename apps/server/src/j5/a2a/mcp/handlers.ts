@@ -57,7 +57,12 @@ import {
 import { PlacementCommandId } from "../placementContracts.ts";
 import { CommCommandId, type ParticipantDirectoryRow, type SquadronId } from "../contracts.ts";
 import type { ParticipantProvenanceView } from "../placementContracts.ts";
-import { J5Toolkit, type J5ArchiveCrewFailure, type J5McpFailure } from "./tools.ts";
+import {
+  J5Toolkit,
+  type J5ArchiveCrewFailure,
+  type J5McpFailure,
+  type J5ProposeCrewInput,
+} from "./tools.ts";
 
 class J5AgentToolStateError extends Data.TaggedError("J5AgentToolStateError")<{
   readonly state: string;
@@ -441,6 +446,17 @@ const projectCrewProposal = (outcome: CrewProposalOutcome) => ({
           })),
         },
       }),
+});
+
+/** One propose_crew seat as the proposal service takes it; unset fields stay unset. */
+export const crewSeatFromInput = (seat: J5ProposeCrewInput["seats"][number]) => ({
+  seat: seat.seat,
+  agentId: seat.persona ?? null,
+  reason: seat.reason,
+  ...(seat.instructions === undefined ? {} : { instructions: seat.instructions }),
+  ...(seat.model_selection === undefined ? {} : { modelSelection: seat.model_selection }),
+  ...(seat.runtime_mode === undefined ? {} : { runtimeMode: seat.runtime_mode }),
+  ...(seat.steps === undefined ? {} : { steps: seat.steps }),
 });
 
 const handlers = {
@@ -827,15 +843,7 @@ const handlers = {
           displayName: input.name,
           brief: input.brief,
           ...(playbook === undefined ? {} : { playbook }),
-          seats: input.seats.map((seat) => ({
-            seat: seat.seat,
-            agentId: seat.persona ?? null,
-            reason: seat.reason,
-            ...(seat.instructions === undefined ? {} : { instructions: seat.instructions }),
-            ...(seat.model_selection === undefined ? {} : { modelSelection: seat.model_selection }),
-            ...(seat.runtime_mode === undefined ? {} : { runtimeMode: seat.runtime_mode }),
-            ...(seat.steps === undefined ? {} : { steps: seat.steps }),
-          })),
+          seats: input.seats.map(crewSeatFromInput),
         })
         .pipe(Effect.mapError((error) => stateError(error.message, crewProposalNextStep(error))));
       return projectCrewProposal(outcome);

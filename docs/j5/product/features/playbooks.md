@@ -37,6 +37,7 @@ Playbooks are linear sequences. The initiative-level view — a plan whose nodes
 ## Scenarios
 
 - **A release Playbook.** The user writes a five-step release Playbook with per-Role blocks and launches a Crew in Website Redesign with it. The Fleet page shows "step 2 of 5". When the Builder declares step 2 complete, the Sitter's next turn opens with its step-3 instructions. (AC2, AC3, AC5, AC6)
+- **A Crew from a playbook.** The user asks the agent in a thread for a crew to implement what they discussed, using `@playbook:release`. The agent reads the playbook, proposes one seat per persona its steps name (a stand-in for a persona that is turned off), and, once the user approves, starts the playbook as the Crew's Captain. Each step goes to the seat that owns it, and Fleet shows "Step 1 of 4 · planner". (AC2, AC5, AC6)
 - **A judgment step.** Step 4 says "decide whether the migration is safe to run"; the platform delivers the instruction and waits — the agent decides, and declares. (AC3, AC7)
 
 - **A live single-agent procedure.** In Billing Migration, the user edits the current prompt while a Role follows the Playbook. The agent retrieves the revised prompt, moves back to inspect earlier work, and explicitly reselects when its step is removed. Deleting its owner thread cancels the run so the user can remove the definition. (AC8–AC12)
@@ -47,4 +48,5 @@ Playbooks are linear sequences. The initiative-level view — a plan whose nodes
 - 2026-09-08 — rewritten into the definition shape. Former identifiers: R27(a) → AC3–AC4; R27(b) → Definition (linear first); R27(c), skills per step → not part of the definition, parked. The questions for the Playbooks design session — the step schema, how a Playbook attaches at spawn, the delivery channel for step advancement, the initiative-level view, what "declared complete" means for a multi-agent step — are that session's, not this definition's.
 
 - 2026-09-29 — a Crew's run is its Captain's. The Captain links a run to its Crew when starting it (AC2); each step goes to the one seat that owns it, and steps no seat owns are the Captain's, so "every participant" in AC5 is the step's owner rather than every seat; Fleet shows each Crew's step and who holds it (AC6). Archiving the Crew cancels the run.
+- 2026-09-30 — a Crew can be built from a playbook the user mentions with `@playbook:`: the Captain owns the run (1A), each step names the persona that does it (2A), and the Crew records the playbook it follows (3A) (Bryant; #319, #321, #322, #323).
 - 2026-09-23 — restored the end-state definition and AC1–AC7 traceability; clarified live edits, agent-declared movement, terminal history, and deleted-owner recovery ([review](https://github.com/Jacksondr5/j5code/pull/248#discussion_r4084815885)).
