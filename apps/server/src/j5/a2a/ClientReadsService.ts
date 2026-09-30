@@ -162,7 +162,8 @@ const provenanceRows = (sql: SqlClient.SqlClient, participantIds: ReadonlyArray<
     WHERE participant_id IN ${sql.in(participantIds)}
   `;
 
-const participantIdentityRows = (
+/** The one definition of an agent's display name: the title of the thread its first `participant.joined` named. */
+export const participantIdentityRows = (
   sql: SqlClient.SqlClient,
   participantIds: ReadonlyArray<ParticipantId>,
 ) =>
@@ -199,6 +200,46 @@ export const openInboxCountStatement = (sql: SqlClient.SqlClient, personId: Part
       AND exchange.status = 'open'
       AND inbox.person_id = ${personId}
   `;
+
+/**
+ * The label a peer sent with the delivery this server recorded last, for each
+ * sender asked about. "Last" is by the time this server recorded the row: the
+ * receiver stamps received rows with its own clock, so the origin cannot date
+ * one into the future, and the stamp orders rows across Squadrons, which `seq`
+ * (allocated per Squadron) does not; Squadron id, then seq, break ties so one
+ * row wins. A sender id belongs to one peer (the inbound ownership check refuses
+ * a second origin), so its latest labeled row is that peer's latest label. Each
+ * id is one backward seek on migration 27's index, so the cost follows the ids
+ * asked about, never a sender's history. An id with no label comes back with a
+ * null name; callers skip it (filtering in SQL would evaluate the seek twice).
+ */
+export const peerSenderLabelStatement = (
+  sql: SqlClient.SqlClient,
+  participantIds: ReadonlyArray<string>,
+) =>
+  sql<IdentityRow>`
+    SELECT asked.value AS participant_id,
+           (
+             SELECT json_extract(event.payload, '$.senderLabel')
+             FROM j5_a2a_comm_event AS event
+             WHERE event.kind = 'message.received'
+               AND json_extract(event.payload, '$.senderLabel') IS NOT NULL
+               AND json_extract(event.payload, '$.originEnvironmentId') IS NOT NULL
+               AND event.sender = asked.value
+             ORDER BY event.created_at DESC, event.squadron_id DESC, event.seq DESC
+             LIMIT 1
+           ) AS display_name
+    FROM json_each(${JSON.stringify(participantIds)}) AS asked
+  `;
+
+/** Test-facing plan hook for the peer label statement. */
+export const explainPeerSenderLabelStatement = (
+  sql: SqlClient.SqlClient,
+  participantIds: ReadonlyArray<string>,
+) => {
+  const [statement, parameters] = peerSenderLabelStatement(sql, participantIds).compile();
+  return sql.unsafe<QueryPlanRow>(`EXPLAIN QUERY PLAN ${statement}`, parameters);
+};
 
 /** Test-facing plan hook that compiles the production count statement rather than a copy. */
 export const explainOpenInboxCountStatement = (
@@ -285,6 +326,20 @@ export const layer: Layer.Layer<ClientReadsService, never, A2AHumanInbox | SqlCl
                 WHERE participant_id IN ${sql.in(participantIdBatch)}
               `),
             );
+            // A sender homed on a peer has no thread here; the label its server
+            // sent with its latest delivery stands in, and only for ids nothing
+            // local named, so local-only reads never touch received history.
+            const named = new Set(rows.map((row) => row.participant_id));
+            const unresolved = participantIdBatch.filter(
+              (participantId) => !named.has(participantId),
+            );
+            if (unresolved.length > 0) {
+              rows.push(
+                ...(yield* peerSenderLabelStatement(sql, unresolved)).filter(
+                  (row) => row.display_name !== null,
+                ),
+              );
+            }
           }
           const rowsByParticipant = Map.groupBy(rows, (row) => row.participant_id);
           return {

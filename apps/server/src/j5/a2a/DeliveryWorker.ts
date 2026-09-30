@@ -55,6 +55,11 @@ interface DeliveryRow {
   readonly status: "pending" | "retry_scheduled" | "delivered" | "alarmed";
   readonly attempts: number;
   readonly created_at: string;
+  /** Set when the row came in from a peer server; NULL means the origin is `squadron_id` here. */
+  readonly origin_squadron_id: string | null;
+  readonly origin_environment_id: string | null;
+  /** Set when the receiver is homed on a peer server, which writes its own received row. */
+  readonly receiver_environment_id: string | null;
 }
 
 interface OpenExchangeRow {
@@ -219,18 +224,89 @@ const makeLayer = (daemon: boolean) =>
         });
       });
 
+      /**
+       * What the peer needs beyond the row: an ask carries its intent so the
+       * peer opens the Exchange, and a terminal notice carries the fact the
+       * notice was written with, read back from the sent row, never from
+       * whatever the Exchange says by the time the row is delivered. A silence
+       * notice is not part of its Exchange, so it names the Exchange it concerns
+       * from the silence.notice event its own command recorded.
+       */
+      const peerBodyFacts = Effect.fn("j5.a2a.delivery.peerBodyFacts")(function* (
+        row: DeliveryRow,
+      ) {
+        if (row.envelope_channel === "silence_notice") {
+          const regarding = yield* sql<{ readonly exchange_id: string | null }>`
+            SELECT notice.exchange_id
+            FROM j5_a2a_comm_event AS sent
+            JOIN j5_a2a_comm_event AS notice
+              ON notice.squadron_id = sent.squadron_id
+             AND notice.command_id = sent.command_id
+             AND notice.kind = 'silence.notice'
+            WHERE sent.squadron_id = ${row.squadron_id} AND sent.seq = ${row.sent_seq}
+            LIMIT 1
+          `;
+          const exchangeId = regarding[0]?.exchange_id;
+          return exchangeId == null ? {} : { regardingExchangeId: exchangeId };
+        }
+        if (row.exchange_id === null) return {};
+        if (row.exchange_role === "ask") {
+          const intent = yield* sql<{ readonly intent: string }>`
+            SELECT intent FROM j5_a2a_exchange
+            WHERE squadron_id = ${row.squadron_id} AND exchange_id = ${row.exchange_id}
+            LIMIT 1
+          `;
+          return intent[0] === undefined ? {} : { intent: intent[0].intent };
+        }
+        if (row.exchange_role === "terminal_notice") {
+          const sent = yield* sql<{ readonly payload: string }>`
+            SELECT payload FROM j5_a2a_comm_event
+            WHERE squadron_id = ${row.squadron_id} AND seq = ${row.sent_seq}
+            LIMIT 1
+          `;
+          if (sent[0] === undefined) return {};
+          const payload = yield* decodeSentPayload(sent[0].payload).pipe(
+            Effect.mapError(
+              (cause) =>
+                new A2ADeliveryTransportError({ operation: "read terminal notice", cause }),
+            ),
+          );
+          return payload.terminal === undefined ? {} : { terminal: payload.terminal };
+        }
+        return {};
+      });
+
       const attemptDelivery = Effect.fn("j5.a2a.delivery.attempt")(function* (
         row: DeliveryRow,
         attempt: number,
       ) {
-        const originSquadronId = SquadronId.make(row.squadron_id);
+        // The ledger that owns the row records the outcome; the envelope names
+        // the origin, which differs only for rows received from a peer server.
+        const ledgerSquadronId = SquadronId.make(row.squadron_id);
+        const originSquadronId = SquadronId.make(row.origin_squadron_id ?? row.squadron_id);
         const receiverSquadronId = SquadronId.make(row.receiver_squadron_id);
         const messageId = LedgerMessageId.make(row.message_id);
         const senderId = ParticipantId.make(row.sender_id);
         const receiverId = ParticipantId.make(row.receiver_id);
         const exchangeId = row.exchange_id === null ? null : ExchangeId.make(row.exchange_id);
-        yield* appendReceiverEntry(row);
-        if (isHumanParticipantId(receiverId)) {
+        if (row.receiver_environment_id !== null) {
+          yield* transport.deliverPeer({
+            originSquadronId,
+            receiverSquadronId,
+            receiverEnvironmentId: row.receiver_environment_id,
+            correlationId: row.correlation_id,
+            messageId,
+            senderId,
+            receiverId,
+            exchangeId,
+            exchangeRole: row.exchange_role,
+            message: row.message_text,
+            envelopeChannel: row.envelope_channel,
+            createdAt: row.created_at,
+            ...(yield* peerBodyFacts(row)),
+          });
+        } else if (isHumanParticipantId(receiverId)) {
+          yield* appendReceiverEntry(row);
           yield* transport.deliverHuman({
             originSquadronId,
             receiverSquadronId,
@@ -244,6 +320,7 @@ const makeLayer = (daemon: boolean) =>
             createdAt: row.created_at,
           });
         } else {
+          yield* appendReceiverEntry(row);
           // Canonical references live in the immutable sent fact. Reading that
           // indexed row avoids a second projection and a schema migration.
           const sent = yield* sql<{ readonly kind: string; readonly payload: string }>`
@@ -274,16 +351,19 @@ const makeLayer = (daemon: boolean) =>
             envelopeChannel: row.envelope_channel,
           });
         }
-        yield* hooks.afterTransportSuccess({ squadronId: originSquadronId, messageId, attempt });
+        yield* hooks.afterTransportSuccess({ squadronId: ledgerSquadronId, messageId, attempt });
         const outcome = yield* writer.withPermit(
           sql.withTransaction(
             Effect.gen(function* () {
-              if (yield* deliveryUnavailable(row)) return null;
+              // A peer that answered 2xx holds the message; a sender retired during
+              // the call cannot take it back, so only a prior cancellation counts.
+              if (yield* deliveryUnavailable(row, row.receiver_environment_id !== null))
+                return null;
 
               const deliveredAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
               return yield* writer.appendEventsInTransaction({
                 commandId: commandId("delivered", messageId),
-                squadronId: originSquadronId,
+                squadronId: ledgerSquadronId,
                 acceptedAt: deliveredAt,
                 events: [
                   {
@@ -307,7 +387,7 @@ const makeLayer = (daemon: boolean) =>
         if (outcome === null) return yield* cancelDelivery(row, attempt);
         if (outcome.committed) yield* writer.publishCommitted(outcome.events);
         return {
-          squadronId: originSquadronId,
+          squadronId: ledgerSquadronId,
           messageId,
           state: "delivered",
           attempt,
@@ -373,13 +453,21 @@ const makeLayer = (daemon: boolean) =>
 
       const deliveryUnavailable = Effect.fn("j5.a2a.delivery.unavailable")(function* (
         row: DeliveryRow,
+        /** The receiver's server has already accepted the message; parties no longer matter. */
+        accepted = false,
       ) {
         const state = yield* sql<{ readonly status: string }>`SELECT status FROM j5_a2a_delivery
           WHERE squadron_id = ${row.squadron_id} AND message_id = ${row.message_id}`;
         if (state[0]?.status === "cancelled") return true;
         if (state[0]?.status === "delivered") return false;
-        const ids =
-          row.envelope_channel === "peer" ? [row.sender_id, row.receiver_id] : [row.receiver_id];
+        if (accepted) return false;
+        // A participant on a peer server has no membership here; only local parties are checked.
+        const ids = [
+          ...(row.envelope_channel === "peer" && row.origin_environment_id == null
+            ? [row.sender_id]
+            : []),
+          ...(row.receiver_environment_id == null ? [row.receiver_id] : []),
+        ];
         for (const id of ids) {
           // Humans and machines never hold agent membership, and a registered
           // machine is never retired, so only agents can become unavailable.
@@ -408,12 +496,14 @@ const makeLayer = (daemon: boolean) =>
             attempt,
           } satisfies DeliveryMilestone;
         }
-        const state = isHumanParticipantId(ParticipantId.make(row.receiver_id))
-          ? "cancelled"
-          : yield* transport.cancelAgent({
-              receiverId: ParticipantId.make(row.receiver_id),
-              messageId: LedgerMessageId.make(row.message_id),
-            });
+        const state =
+          isHumanParticipantId(ParticipantId.make(row.receiver_id)) ||
+          row.receiver_environment_id != null
+            ? "cancelled"
+            : yield* transport.cancelAgent({
+                receiverId: ParticipantId.make(row.receiver_id),
+                messageId: LedgerMessageId.make(row.message_id),
+              });
         const now = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
         yield* ledger.append({
           commandId: commandId(state, LedgerMessageId.make(row.message_id)),
@@ -461,7 +551,10 @@ const makeLayer = (daemon: boolean) =>
             message_text,
             status,
             attempts,
-            created_at
+            created_at,
+            origin_squadron_id,
+            origin_environment_id,
+            receiver_environment_id
           FROM j5_a2a_delivery
           WHERE status IN ('pending', 'retry_scheduled')
             AND (next_attempt_at IS NULL OR next_attempt_at <= ${now})
