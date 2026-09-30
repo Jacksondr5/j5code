@@ -548,6 +548,10 @@ describe("CodexAdapterV2 runtime policy", () => {
         params.collaborationMode?.settings.developer_instructions ?? "",
         "preview_status",
       );
+      assert.include(
+        params.collaborationMode?.settings.developer_instructions ?? "",
+        T3_CODE_ORCHESTRATION_INSTRUCTIONS,
+      );
     }),
   );
 
