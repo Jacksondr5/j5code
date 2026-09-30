@@ -44,8 +44,7 @@ export function PeerServersSettings({
       headerAction={
         <Button
           size="xs"
-          variant="ghost"
-          className="font-normal text-muted-foreground/60 hover:text-muted-foreground"
+          variant="ghost-muted"
           aria-label="Add peer"
           onClick={() => {
             setDialogGeneration((generation) => generation + 1);
