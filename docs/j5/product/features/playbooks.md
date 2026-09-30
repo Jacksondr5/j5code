@@ -36,7 +36,7 @@ Playbooks are linear sequences. The initiative-level view — a plan whose nodes
 
 ## Scenarios
 
-- **A release Playbook.** The user writes a five-step release Playbook whose steps name the Builder and the Sitter, and launches a Crew in Website Redesign that follows it. The Fleet page shows "Step 2 of 5 · builder". When the Builder reports step 2 done, the Captain advances, and the Sitter's next turn opens with step 3's instructions; a step naming no Role is the Captain's. (AC2, AC3, AC5, AC6)
+- **A release Playbook.** The user writes a five-step release Playbook whose steps name the Builder and the Sitter, and launches a Crew in Website Redesign that follows it. The Fleet page shows "Step 2 of 5 · builder". When the Builder reports step 2 done, the Captain advances, and the Sitter's next turn opens with step 3's instructions; an unowned step is the Captain's. (AC2, AC3, AC5, AC6)
 - **A Crew from a playbook.** The user asks the agent in a thread for a crew to implement what they discussed, using `@playbook:release`. The agent reads the playbook, proposes one seat per persona its steps name (a stand-in for a persona that is turned off), and, once the user approves, starts the playbook as the Crew's Captain. Each step goes to the seat that owns it, and Fleet shows "Step 1 of 4 · planner". (AC2, AC5, AC6)
 - **A judgment step.** Step 4 says "decide whether the migration is safe to run"; the platform delivers the instruction and waits — the agent decides, and declares. (AC3, AC7)
 
