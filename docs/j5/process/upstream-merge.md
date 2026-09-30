@@ -25,7 +25,9 @@ How J5 advances to a new upstream T3 Code. FORK.md holds the rules this depends 
   - **Codex replay fixtures:** take upstream's transcripts and rerun `scripts/j5/migrate-codex-fixtures.mjs` over them; never hand-merge them.
   - **New upstream workflows** that need the `pingdotgg/t3code` repository guard.
 - **Walk every FORK.md integration case and temporary patch.** For each patch, decide keep, retire (upstream fixed it) or narrow.
-- **Rewrite** the [upstream convergence watchlist](../research/upstream-convergence.md) and check the give-back backlog (#276).
+- **Walk the [register of divergences](../product/upstream.md).** For each entry, check whether upstream's change makes it unnecessary, harder to carry, or wrong. Bring any change to the maintainer; retiring a divergence is the default when upstream now does the job.
+- **Port upstream's edits to the files J5 owns outright** (`AGENTS.md`, the PR template; see FORK.md). Keep J5's version and apply what fits.
+- **Rewrite** the [upstream convergence watchlist](../product/upstream-convergence.md) and check the give-back backlog (#276).
 - **Bring the decisions to the maintainer.** Default to adopting upstream and adjusting later if it proves bad.
 
 ## Build and verify

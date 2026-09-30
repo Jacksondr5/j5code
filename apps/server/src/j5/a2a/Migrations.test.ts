@@ -72,8 +72,13 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
       { migration_id: 20, name: "CrewAlertExchanges" },
       { migration_id: 21, name: "CrewProposalsResolveOnce" },
       { migration_id: 22, name: "CrewRetiredWithCaptain" },
-      { migration_id: 23, name: "CrewPlaybooks" },
-      { migration_id: 24, name: "CrewPlaybookRuns" },
+      { migration_id: 23, name: "Peers" },
+      { migration_id: 24, name: "PeerDeliveryOrigin" },
+      { migration_id: 25, name: "PeerDeliveryReceiver" },
+      { migration_id: 26, name: "PeerRouteIndexes" },
+      { migration_id: 27, name: "PeerSenderLabelRecency" },
+      { migration_id: 28, name: "CrewPlaybooks" },
+      { migration_id: 29, name: "CrewPlaybookRuns" },
     ]);
     assert.deepStrictEqual(
       migrationEntries.map(([id, name]) => [id, name]),
@@ -100,8 +105,13 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
         [20, "CrewAlertExchanges"],
         [21, "CrewProposalsResolveOnce"],
         [22, "CrewRetiredWithCaptain"],
-        [23, "CrewPlaybooks"],
-        [24, "CrewPlaybookRuns"],
+        [23, "Peers"],
+        [24, "PeerDeliveryOrigin"],
+        [25, "PeerDeliveryReceiver"],
+        [26, "PeerRouteIndexes"],
+        [27, "PeerSenderLabelRecency"],
+        [28, "CrewPlaybooks"],
+        [29, "CrewPlaybookRuns"],
       ],
     );
   }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
@@ -136,7 +146,7 @@ const crewStores = Layer.mergeAll(crewInstanceLayer, proposalStoreLayer).pipe(
 it.effect("reads Crews recorded before playbooks as following none and owning no steps", () =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    yield* runJ5A2AMigrations({ toMigrationInclusive: 22 });
+    yield* runJ5A2AMigrations({ toMigrationInclusive: 27 });
     yield* sql`
       INSERT INTO j5_a2a_squadron (id, name, created_at)
       VALUES ('squadron', 'Crew', '2026-09-25T00:00:00.000Z')
@@ -181,7 +191,7 @@ it.effect("reads Crews recorded before playbooks as following none and owning no
 it.effect("keeps existing playbook runs as thread runs when Crew links arrive", () =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    yield* runJ5A2AMigrations({ toMigrationInclusive: 23 });
+    yield* runJ5A2AMigrations({ toMigrationInclusive: 28 });
     yield* sql`
       INSERT INTO j5_playbook_run (
         run_id, owner_thread_id, definition_path, current_step_id, status, created_at, updated_at
@@ -1342,7 +1352,7 @@ it.effect("recreates earlier-shaped crews tables when 14 runs over them", () =>
     `;
     assert.deepStrictEqual(
       applied.map((row) => row.migration_id),
-      [13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24],
+      [13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29],
     );
     const memberColumns = yield* sql<{ readonly name: string }>`
       SELECT name FROM pragma_table_info('j5_agent_crew_member') ORDER BY cid

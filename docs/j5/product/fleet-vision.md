@@ -5,7 +5,7 @@ kind: definition
 
 # Fleet vision
 
-Captured verbatim-in-spirit from Jackson (2026-08-14). This is the intent behind the whole product — the context every design decision should be checked against. Companion research: the [prior-art studies](../research/jackson-prior-art/index.md).
+Captured verbatim-in-spirit from Jackson (2026-08-14). This is the intent behind the whole product — the context every design decision should be checked against.
 
 ## The journey that led here
 

@@ -1,4 +1,5 @@
 import { ChatAttachment, ThreadId } from "@t3tools/contracts";
+import { PeerSenderLabel, PeerTerminalFact } from "@t3tools/contracts/j5";
 import * as Schema from "effect/Schema";
 
 const Identifier = Schema.String.check(Schema.isNonEmpty());
@@ -48,6 +49,7 @@ export const isDurableHumanParticipantId = (id: ParticipantId): boolean =>
 export const MACHINE_PARTICIPANT_ID_PREFIX = "machine:";
 export const isMachineParticipantId = (id: ParticipantId): boolean =>
   id.startsWith(MACHINE_PARTICIPANT_ID_PREFIX) && id.length > MACHINE_PARTICIPANT_ID_PREFIX.length;
+export const isPlatformParticipantId = (id: string): boolean => id.startsWith("platform:");
 export const machineParticipantIdForName = (name: string) =>
   ParticipantId.make(`${MACHINE_PARTICIPANT_ID_PREFIX}${name}`);
 
@@ -142,14 +144,30 @@ const NonMembershipCommEvent = Schema.Struct({
   payload: Schema.Json,
 });
 
+/**
+ * The receiver Squadron's own row for a message another Squadron sent. When the
+ * origin is a peer server, `originEnvironmentId` names it and the row is also
+ * the fact this server delivers from, since no `message.sent` exists here.
+ */
+export const MessageReceivedPayload = Schema.Struct({
+  originSquadronId: SquadronId,
+  originEnvironmentId: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
+  /** The id and clock the origin used; this ledger keys and stamps the message itself. */
+  originMessageId: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
+  originCreatedAt: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
+  /** "none": the row records a fact (a withdrawal) and injects nothing into the receiver's thread. */
+  injection: Schema.optional(Schema.Literal("none")),
+  /** From a peer delivery: the sender's display name its server sent, read by the client identity lookup and nothing else. */
+  senderLabel: Schema.optional(PeerSenderLabel),
+  message: Schema.Json,
+});
+export type MessageReceivedPayload = typeof MessageReceivedPayload.Type;
+
 const MessageReceivedCommEvent = Schema.Struct({
   ...eventAddressFields,
   kind: Schema.Literal("message.received"),
   correlationId: CorrelationId,
-  payload: Schema.Struct({
-    originSquadronId: SquadronId,
-    message: Schema.Json,
-  }),
+  payload: MessageReceivedPayload,
 });
 
 const ParticipantJoinedCommEvent = Schema.Struct({
@@ -228,10 +246,14 @@ export type ExchangeOpenedPayload = typeof ExchangeOpenedPayload.Type;
 
 export const MessageSentPayload = Schema.Struct({
   attachments: Schema.optional(Schema.Array(ChatAttachment)),
+  /** Present on a terminal notice headed to a peer server: the fact it carries, fixed when the notice is written. */
+  terminal: Schema.optional(PeerTerminalFact),
   messageId: LedgerMessageId,
   text: Schema.String.check(Schema.isNonEmpty()),
   originSquadronId: SquadronId,
   receiverSquadronId: SquadronId,
+  /** Present when the receiver's Squadron lives on a peer server. */
+  receiverEnvironmentId: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
   exchangeRole: Schema.Literals(["none", "ask", "followup", "reply", "terminal_notice"]),
   envelopeChannel: DeliveryEnvelopeChannel,
 });

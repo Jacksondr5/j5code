@@ -30,10 +30,14 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
+import { FetchHttpClient } from "effect/unstable/http";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as NodeOS from "node:os";
 
+import { EnvironmentAuth } from "../../../auth/EnvironmentAuth.ts";
+import * as ServerSecretStore from "../../../auth/ServerSecretStore.ts";
 import * as CheckpointStore from "../../../checkpointing/CheckpointStore.ts";
+import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
 import { ServerConfig } from "../../../config.ts";
 import { layer as mcpSessionRegistryTestLayer } from "../../../mcp/McpSessionRegistry.testkit.ts";
 import {
@@ -60,14 +64,20 @@ import * as VcsProcess from "../../../vcs/VcsProcess.ts";
 import {
   deliveryCommandId,
   deliveryMessageId,
-  live as deliveryTransportLayer,
+  live as deliveryTransportLive,
 } from "../DeliveryTransport.ts";
 import { manualLayer as deliveryWorkerLayer, A2ADeliveryWorker } from "../DeliveryWorker.ts";
 import { formatClosedHumanEnvelope } from "../EnvelopeFormatter.ts";
 import { A2AHumanInbox, layer as humanInboxLayer } from "../HumanInboxService.ts";
+import { layer as peerRegistryLayer } from "../PeerRegistryService.ts";
 import { ensureLocalOperatorHumanPerson } from "../HumanPersonRegistry.ts";
 import { A2ALedger, layer as ledgerLayer } from "../LedgerService.ts";
+import { noneLayer as peerDirectoryNoneLayer } from "../PeerDirectory.ts";
 import { A2ASendService, layer as sendServiceLayer } from "../SendService.ts";
+import {
+  MachineParticipantService,
+  layer as machineParticipantLayer,
+} from "../MachineParticipantService.ts";
 import { layer as agentCrewInstanceLayer } from "../AgentCrewInstanceService.ts";
 import { A2ASilenceDetector, manualLayer as silenceDetectorLayer } from "../SilenceDetector.ts";
 import {
@@ -121,6 +131,12 @@ export interface DevDeliverySeedReceipt {
       readonly sourceDeliveryMessageId: MessageId;
       readonly noticeLedgerMessageId: LedgerMessageId;
       readonly noticeDeliveryMessageId: MessageId;
+      readonly targetThreadId: ThreadId;
+    };
+    readonly machineMessage: {
+      readonly senderParticipantId: ParticipantId;
+      readonly ledgerMessageId: LedgerMessageId;
+      readonly deliveryMessageId: MessageId;
       readonly targetThreadId: ThreadId;
     };
     readonly rawFutureEnvelope: {
@@ -277,6 +293,22 @@ const unavailableAdapter: ProviderAdapterV2Shape = {
 const makeRuntimeLayer = (databasePath: string, baseDir: string) => {
   const database = makeSqlitePersistenceLive(databasePath).pipe(Layer.provide(NodeServices.layer));
   const config = ServerConfig.layerTest(process.cwd(), baseDir);
+  // The seed never crosses servers: the peer registry is real but empty.
+  const peerRegistry = peerRegistryLayer.pipe(
+    Layer.provide(FetchHttpClient.layer),
+    Layer.provide(Layer.mock(EnvironmentAuth)({ listSessions: () => Effect.succeed([]) })),
+    Layer.provide(
+      ServerEnvironment.identityLayer.pipe(
+        Layer.provide(ServerSecretStore.layer),
+        Layer.provide(config),
+        Layer.provide(NodeServices.layer),
+      ),
+    ),
+  );
+  const deliveryTransportLayer = deliveryTransportLive.pipe(
+    Layer.provide(FetchHttpClient.layer),
+    Layer.provide(peerRegistry),
+  );
   const vcs = VcsDriverRegistry.layer.pipe(
     Layer.provide(VcsProcess.layer),
     Layer.provide(config),
@@ -335,10 +367,11 @@ const makeRuntimeLayer = (databasePath: string, baseDir: string) => {
     Layer.provideMerge(agentCrewInstanceLayer),
   );
   const a2a = Layer.mergeAll(
-    sendServiceLayer,
+    sendServiceLayer.pipe(Layer.provide(peerDirectoryNoneLayer)),
     deliveryWorker,
     silenceDetector,
     humanInboxLayer,
+    machineParticipantLayer,
   ).pipe(Layer.provideMerge(ledgerLayer), Layer.provide(orchestration));
   // Reuse the same outbox layer reference as the V2 event sink so the receipt
   // can prove each provider-start effect is cancelled before this process exits.
@@ -504,6 +537,7 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
       const deliveries = yield* A2ADeliveryWorker;
       const silence = yield* A2ASilenceDetector;
       const inbox = yield* A2AHumanInbox;
+      const machines = yield* MachineParticipantService;
       const outbox = yield* EffectOutboxV2;
 
       yield* assertTargetServerStopped({
@@ -716,6 +750,39 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
         }),
       );
 
+      const machineMessage = yield* atomicScenario(
+        "machine-message",
+        Effect.gen(function* () {
+          const { participant } = yield* machines.register({
+            commandId: CommCommandId.make(seededId(runId, "machine:register")),
+            squadronId,
+            // Machine names are unique across Squadrons, and every run makes a
+            // new Squadron, so a reused home needs a per-run name.
+            name: `seed-watchdog-${runId.slice(-12)}`,
+            acceptedAt: now,
+          });
+          const result = yield* sender.sendAsMachine({
+            commandId: CommCommandId.make(seededId(runId, "machine:send")),
+            senderParticipantId: participant.participantId,
+            to: receiverId,
+            message: "Machine delivery seed: the nightly check passed. No reply is possible.",
+            acceptedAt: now,
+          });
+          yield* deliveries.drain;
+          yield* interruptActiveSeedRun({
+            projectId,
+            threadId: receiverThreadId,
+            commandId: CommandId.make(seededId(runId, "machine:cancel-provider-start")),
+          });
+          return {
+            senderParticipantId: participant.participantId,
+            ledgerMessageId: result.messageId,
+            deliveryMessageId: deliveryMessageId(result.messageId),
+            targetThreadId: receiverThreadId,
+          };
+        }),
+      );
+
       const rawFutureEnvelope = yield* atomicScenario(
         "raw-future-envelope",
         Effect.gen(function* () {
@@ -800,6 +867,7 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
         deliveryCommandId(ta2.replyLedgerMessageId),
         deliveryCommandId(ta3.sourceLedgerMessageId),
         deliveryCommandId(ta3.noticeLedgerMessageId),
+        deliveryCommandId(machineMessage.ledgerMessageId),
         deliveryCommandId(rawFutureEnvelope.ledgerMessageId),
         CommandId.make(seededId(runId, "normal:mcp-send")),
       ];
@@ -833,6 +901,7 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
           ta1PeerExchange: ta1,
           ta2HumanAnswer: ta2,
           ta3Silence: ta3,
+          machineMessage,
           rawFutureEnvelope,
           normalNonA2AContrast,
         },

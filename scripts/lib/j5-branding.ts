@@ -46,3 +46,13 @@ export const J5_BRANDING = {
     },
   },
 } as const;
+
+/**
+ * The iOS project, scheme and `.app` name `expo prebuild` generates for a mobile
+ * app name, mirroring `@expo/config-plugins` `sanitizedName` (e.g. `J5CodeDev`).
+ */
+export const mobileNativeProjectName = (appName: string): string =>
+  appName
+    .replace(/[\W_]+/g, "")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "");

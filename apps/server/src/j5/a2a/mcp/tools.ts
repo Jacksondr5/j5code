@@ -41,6 +41,7 @@ import {
 import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
 import { A2AHomeRegistrar } from "../HomeRegistrar.ts";
 import { A2ALedger } from "../LedgerService.ts";
+import { PeerDirectory } from "../PeerDirectory.ts";
 import { ParticipantPlacementService } from "../PlacementService.ts";
 import { A2ASendService } from "../SendService.ts";
 import { SpawnCompositionService } from "../SpawnCompositionService.ts";
@@ -113,6 +114,8 @@ export type J5ParticipantProvenanceView = typeof J5ParticipantProvenanceView.Typ
 
 export const J5ParticipantDirectoryRow = Schema.Struct({
   squadron_id: SquadronId,
+  /** The Squadron's name beside its id; on the self row, the Squadron the caller belongs to. */
+  squadron_name: Schema.NullOr(Schema.String),
   participant_id: ParticipantId,
   participant: J5Participant,
   self: Schema.Boolean,
@@ -129,6 +132,8 @@ export type J5ParticipantDirectoryRow = typeof J5ParticipantDirectoryRow.Type;
 
 export const J5ListParticipantsResult = Schema.Struct({
   participants: Schema.Array(J5ParticipantDirectoryRow),
+  /** Peer servers whose address books could not be read: their agents are absent, not gone. No server is named. */
+  unread_peer_count: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 });
 
 const NonEmptyString = Schema.String.check(Schema.isNonEmpty());
@@ -436,6 +441,8 @@ const placementDependencies = [
   A2ASendService,
   ParticipantPlacementService,
   OrchestratorV2,
+  PeerDirectory,
+  A2ALedger,
 ];
 
 const spawnDependencies = [
@@ -659,7 +666,7 @@ export const J5ClearOwnAskTool = Tool.make("clear_own_ask", {
   success: ClearOwnAskResult,
   failure: J5McpFailure,
   failureMode: "return",
-  dependencies: [McpInvocationContext.McpInvocationContext, A2ASendService],
+  dependencies: [McpInvocationContext.McpInvocationContext, A2ASendService, A2ADeliveryWorker],
 })
   .annotate(Tool.Title, "Withdraw your open ask")
   .annotate(Tool.Readonly, false)
