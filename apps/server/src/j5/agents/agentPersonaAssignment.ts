@@ -1,4 +1,8 @@
-import { type OrchestrationV2AgentPersonaAssignment, ProviderDriverKind } from "@t3tools/contracts";
+import {
+  isAgentPersonaReasoningOptionId,
+  type OrchestrationV2AgentPersonaAssignment,
+  ProviderDriverKind,
+} from "@t3tools/contracts";
 
 import type { AgentPersonaRouteResolution } from "./agentPersonaRouting.ts";
 import { providerCanEnforceAgentPersonaAuthority } from "./agentPersonaProviderPolicy.ts";
@@ -90,9 +94,8 @@ export function validateAgentPersonaAssignment(
       : undefined;
   }
   const target = definition.modelRoute[assignment.resolvedRoute === "primary" ? 0 : 1];
-  const optionId = target.driver === "codex" ? "reasoningEffort" : "effort";
-  const selectedEffort = assignment.resolvedModelSelection.options?.find(
-    (option) => option.id === optionId,
+  const selectedEffort = assignment.resolvedModelSelection.options?.find(({ id }) =>
+    isAgentPersonaReasoningOptionId(id),
   )?.value;
   if (
     assignment.resolvedDriver !== target.driver ||

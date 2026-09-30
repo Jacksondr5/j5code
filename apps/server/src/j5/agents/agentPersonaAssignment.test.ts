@@ -11,7 +11,7 @@ const criticRoute = {
   personaId: "critic",
   definitionVersion: 1,
   route: "primary",
-  driver: "claudeAgent",
+  driver: ProviderDriverKind.make("claudeAgent"),
   modelSelection: {
     instanceId: ProviderInstanceId.make("claudeAgent"),
     model: "claude-opus-5",
@@ -44,7 +44,7 @@ describe("agent persona assignment", () => {
       status: "authority-not-enforceable",
       personaId: "critic",
       requestedPolicy: "critic-fix",
-      driver: "claudeAgent",
+      driver: ProviderDriverKind.make("claudeAgent"),
     });
   });
 

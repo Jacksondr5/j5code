@@ -26,6 +26,7 @@ import {
   agentPersonaIdFromName,
   defaultAgentPersonaModelRoute,
   agentPersonaModelChoices,
+  agentPersonaModelGroups,
   presentAgentPersonaAssignment,
   presentAgentPersonaCatalog,
 } from "./agentPersonas.ts";
@@ -224,8 +225,12 @@ it("offers editing only for imported entries with server-provided editable detai
   const persona = catalog.personas[0]!;
   expect(presentAgentPersonaCatalog({ personas: [persona] })[0]?.edit).toBeNull();
   const modelRoute = [
-    { driver: "codex", model: "custom-model", reasoningEffort: "high" },
-    { driver: "claudeAgent", model: "fallback-model", reasoningEffort: "medium" },
+    { driver: ProviderDriverKind.make("codex"), model: "custom-model", reasoningEffort: "high" },
+    {
+      driver: ProviderDriverKind.make("claudeAgent"),
+      model: "fallback-model",
+      reasoningEffort: "medium",
+    },
   ] as const;
   expect(
     presentAgentPersonaCatalog({
@@ -286,7 +291,7 @@ it("uses the selected environment's advertised models and reasoning options with
   };
   const choices = agentPersonaModelChoices(
     [provider, { ...provider, instanceId: ProviderInstanceId.make("second-codex") }],
-    [{ driver: "codex", model: "team-model", reasoningEffort: "xhigh" }],
+    [{ driver: ProviderDriverKind.make("codex"), model: "team-model", reasoningEffort: "xhigh" }],
   );
   for (const unavailable of [
     { ...provider, auth: { status: "unauthenticated" as const } },
@@ -303,15 +308,75 @@ it("uses the selected environment's advertised models and reasoning options with
   expect(choices[0]).toMatchObject({
     available: true,
     label: "Codex · team-model",
-    target: { driver: "codex", model: "team-model", reasoningEffort: "high" },
+    target: {
+      driver: ProviderDriverKind.make("codex"),
+      model: "team-model",
+      reasoningEffort: "high",
+    },
     efforts: ["xhigh", "high", "medium", "minimal", "max"],
   });
 });
 
+it("offers every signed-in harness with its own reasoning option", () => {
+  const cursor: ServerProvider = {
+    instanceId: ProviderInstanceId.make("cursor"),
+    driver: ProviderDriverKind.make("cursor"),
+    enabled: true,
+    installed: true,
+    version: null,
+    status: "ready",
+    auth: { status: "authenticated" },
+    checkedAt: "2026-09-30T00:00:00.000Z",
+    availability: "available",
+    slashCommands: [],
+    skills: [],
+    models: [
+      {
+        slug: "gpt-5.5",
+        name: "GPT-5.5",
+        isCustom: false,
+        capabilities: {
+          optionDescriptors: [
+            { id: "fastMode", label: "Fast", type: "boolean" },
+            {
+              id: "reasoning",
+              label: "Reasoning",
+              type: "select",
+              options: [
+                { id: "low", label: "Low" },
+                { id: "high", label: "High" },
+              ],
+            },
+          ],
+        },
+      },
+      {
+        slug: "composer-2",
+        name: "Composer 2",
+        isCustom: false,
+        capabilities: { optionDescriptors: [] },
+      },
+    ],
+  };
+  const choices = agentPersonaModelChoices([cursor], []);
+  expect(choices).toMatchObject([
+    {
+      label: "Cursor · gpt-5.5",
+      target: { driver: "cursor", model: "gpt-5.5", reasoningEffort: "high" },
+      efforts: ["low", "high"],
+    },
+  ]);
+  expect(agentPersonaModelGroups(choices)).toMatchObject([{ driver: "cursor", label: "Cursor" }]);
+});
+
 it("retains unadvertised models and their configured reasoning levels", () => {
   const current = [
-    { driver: "codex", model: "legacy-model", reasoningEffort: "xhigh" },
-    { driver: "claudeAgent", model: "custom-model", reasoningEffort: "low" },
+    { driver: ProviderDriverKind.make("codex"), model: "legacy-model", reasoningEffort: "xhigh" },
+    {
+      driver: ProviderDriverKind.make("claudeAgent"),
+      model: "custom-model",
+      reasoningEffort: "low",
+    },
   ] as const;
   const choices = agentPersonaModelChoices([], current);
   expect(choices.find(({ target }) => target.model === "legacy-model")).toMatchObject({
@@ -326,14 +391,18 @@ it("merges all configured reasoning levels for a shared unadvertised model", () 
   const choices = agentPersonaModelChoices(
     [],
     [
-      { driver: "codex", model: "custom-model", reasoningEffort: "low" },
-      { driver: "codex", model: "custom-model", reasoningEffort: "high" },
-      { driver: "codex", model: "custom-model", reasoningEffort: "xhigh" },
+      { driver: ProviderDriverKind.make("codex"), model: "custom-model", reasoningEffort: "low" },
+      { driver: ProviderDriverKind.make("codex"), model: "custom-model", reasoningEffort: "high" },
+      { driver: ProviderDriverKind.make("codex"), model: "custom-model", reasoningEffort: "xhigh" },
     ],
   );
   expect(choices).toHaveLength(1);
   expect(choices[0]).toMatchObject({
-    target: { driver: "codex", model: "custom-model", reasoningEffort: "xhigh" },
+    target: {
+      driver: ProviderDriverKind.make("codex"),
+      model: "custom-model",
+      reasoningEffort: "xhigh",
+    },
     efforts: ["low", "high", "xhigh"],
   });
 });
@@ -544,8 +613,12 @@ describe("personal agent authoring", () => {
       provider("claudeAgent", "claude", ["claude-opus-5"], "effort"),
     ];
     expect(defaultAgentPersonaModelRoute(providers)).toEqual([
-      { driver: "claudeAgent", model: "claude-opus-5", reasoningEffort: "high" },
-      { driver: "codex", model: "gpt-5.6-terra", reasoningEffort: "high" },
+      {
+        driver: ProviderDriverKind.make("claudeAgent"),
+        model: "claude-opus-5",
+        reasoningEffort: "high",
+      },
+      { driver: ProviderDriverKind.make("codex"), model: "gpt-5.6-terra", reasoningEffort: "high" },
     ]);
     const single = defaultAgentPersonaModelRoute([providers[0]!]);
     expect(single?.[0]).toEqual(single?.[1]);
@@ -562,8 +635,16 @@ it("prefills a duplicate with the source content and a fresh name and ID", () =>
       instructions: "# Scout",
       authority: { defaultPolicy: "read-only", allowedPolicies: ["read-only", "critic-review"] },
       modelRoute: [
-        { driver: "codex", model: "gpt-5.6-terra", reasoningEffort: "high" },
-        { driver: "claudeAgent", model: "claude-opus-5", reasoningEffort: "high" },
+        {
+          driver: ProviderDriverKind.make("codex"),
+          model: "gpt-5.6-terra",
+          reasoningEffort: "high",
+        },
+        {
+          driver: ProviderDriverKind.make("claudeAgent"),
+          model: "claude-opus-5",
+          reasoningEffort: "high",
+        },
       ],
     }),
   ).toEqual({
@@ -573,8 +654,12 @@ it("prefills a duplicate with the source content and a fresh name and ID", () =>
     instructions: "# Scout",
     authorityPolicy: "read-only",
     modelRoute: [
-      { driver: "codex", model: "gpt-5.6-terra", reasoningEffort: "high" },
-      { driver: "claudeAgent", model: "claude-opus-5", reasoningEffort: "high" },
+      { driver: ProviderDriverKind.make("codex"), model: "gpt-5.6-terra", reasoningEffort: "high" },
+      {
+        driver: ProviderDriverKind.make("claudeAgent"),
+        model: "claude-opus-5",
+        reasoningEffort: "high",
+      },
     ],
   });
 });
@@ -696,14 +781,14 @@ describe("blocked reasons and folder status", () => {
             attempts: [
               {
                 route: "primary",
-                driver: "codex",
+                driver: ProviderDriverKind.make("codex"),
                 model: "gpt-5.6-terra",
                 reasoningEffort: "high",
                 failures: ["model-not-advertised"],
               },
               {
                 route: "fallback",
-                driver: "claudeAgent",
+                driver: ProviderDriverKind.make("claudeAgent"),
                 model: "claude-opus-5",
                 reasoningEffort: "high",
                 failures: ["provider-unauthenticated"],

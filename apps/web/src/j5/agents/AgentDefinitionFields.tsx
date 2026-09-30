@@ -1,9 +1,9 @@
 import { useAtomValue } from "@effect/atom-react";
 import {
-  AGENT_PERSONA_HARNESSES,
   AGENT_PERSONA_POLICY_OPTIONS,
   agentPersonaModelChoiceId,
   agentPersonaModelChoices,
+  agentPersonaModelGroups,
 } from "@t3tools/client-runtime/j5/agent-personas";
 import type {
   AgentPersonaAuthorityPolicy,
@@ -52,12 +52,7 @@ export function AgentRoutePolicyFields(props: {
     ...(props.retainRoute ?? []),
     ...value.modelRoute,
   ]);
-  const modelGroups = AGENT_PERSONA_HARNESSES.map((harness) => ({
-    ...harness,
-    models: choices.filter(
-      ({ target, available }) => available && target.driver === harness.driver,
-    ),
-  })).filter(({ models }) => models.length > 0);
+  const modelGroups = agentPersonaModelGroups(choices);
   return (
     <>
       <div className="grid gap-1.5 text-sm">

@@ -576,7 +576,11 @@ describe("editing imported agents", () => {
           description: "Edited description",
           authorityPolicy: "workspace-write",
           modelRoute: [
-            { driver: "codex", model: "team-model", reasoningEffort: "medium" },
+            {
+              driver: ProviderDriverKind.make("codex"),
+              model: "team-model",
+              reasoningEffort: "medium",
+            },
             custom.modelRoute[1],
           ],
         };

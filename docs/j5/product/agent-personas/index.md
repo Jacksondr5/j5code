@@ -47,7 +47,7 @@ Each definition has:
 | `authority.defaultPolicy`, `authority.allowedPolicies` | A default and allowed selection from the runtime-policy vocabulary below. The default must be allowed.                                                                            |
 | `modelRoute`                                           | Ordered primary and fallback targets. Each names `driver`, exact `model`, and `reasoningEffort`.                                                                                  |
 
-Files are limited to 64 KiB. This slice retains exactly two route targets and supports routing to Codex and Claude. Other providers are unavailable for persona activation until their adapter policies are supported. Broader ordered model allowlists belong to a later Role-library revision; none of these limits fixes the persona's name or model choices to the starter examples.
+Files are limited to 64 KiB. This slice retains exactly two route targets. A target may name any provider, and the reasoning value uses whichever option the model advertises for it (`reasoningEffort`, `effort`, `reasoning`, `variant`, or `thinking`). Activation still requires a provider that can enforce the persona's runtime policy, currently Codex and Claude; other providers stay Blocked until their adapter policies are supported. Broader ordered model allowlists belong to a later Role-library revision; none of these limits fixes the persona's name or model choices to the starter examples.
 
 ## Starter examples
 
