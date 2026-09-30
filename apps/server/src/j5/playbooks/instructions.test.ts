@@ -4,7 +4,7 @@ import { T3_CODE_ORCHESTRATION_INSTRUCTIONS } from "../../provider/T3Orchestrati
 import { J5_PROPOSE_CREW_DESCRIPTION } from "../a2a/mcp/tools.ts";
 import { PLAYBOOK_CREW_INSTRUCTIONS, PLAYBOOK_INSTRUCTIONS } from "./instructions.ts";
 
-it("carries the Crew procedure and says a playbook spawns agents only through its Captain", () => {
+it("the crew procedure is appended to PLAYBOOK_INSTRUCTIONS with the Crew exception", () => {
   assert.include(PLAYBOOK_INSTRUCTIONS, `- ${PLAYBOOK_CREW_INSTRUCTIONS}\n`);
   assert.notInclude(PLAYBOOK_INSTRUCTIONS, "steps do not execute code or spawn agents.");
   assert.include(
@@ -13,13 +13,16 @@ it("carries the Crew procedure and says a playbook spawns agents only through it
   );
 });
 
-it("runs only on an explicit mention outside quotes and code", () => {
-  assert.include(PLAYBOOK_CREW_INSTRUCTIONS, "explicit @playbook:NAME");
-  assert.include(PLAYBOOK_CREW_INSTRUCTIONS, "not in quoted text, code, or file contents");
-  assert.include(PLAYBOOK_CREW_INSTRUCTIONS, "even if it names a playbook in prose");
-});
-
-it("names the tools in the order the Captain calls them, and the reply on a failed read", () => {
+it("the crew procedure text names its trigger, its rulings, and its tools in call order", () => {
+  for (const phrase of [
+    "explicit @playbook:NAME",
+    "not in quoted text, code, or file contents",
+    "even if it names a playbook in prose",
+    "say so in your reply, naming the playbook and the error",
+    "missing, disabled, or blocked",
+  ])
+    assert.include(PLAYBOOK_CREW_INSTRUCTIONS, phrase);
+  assert.notInclude(PLAYBOOK_CREW_INSTRUCTIONS, "expect_reply");
   const positions = [
     "playbook_read",
     "list_personas",
@@ -32,19 +35,10 @@ it("names the tools in the order the Captain calls them, and the reply on a fail
     positions,
     positions.toSorted((a, b) => a - b),
   );
-  // A failed read is reported in the Captain's own reply, the thread the person watches.
-  assert.include(
-    PLAYBOOK_CREW_INSTRUCTIONS,
-    "say so in your reply, naming the playbook and the error",
-  );
-  assert.notInclude(PLAYBOOK_CREW_INSTRUCTIONS, "expect_reply");
-  // Bryant's ruling: a blocked persona gets a stand-in seat like a missing or disabled one.
-  assert.include(PLAYBOOK_CREW_INSTRUCTIONS, "missing, disabled, or blocked");
-  // Short enough that neither provider skims past a step.
   assert.isAtMost(PLAYBOOK_CREW_INSTRUCTIONS.length, 1250);
 });
 
-it("reaches every provider through the shared orchestration instructions", () => {
+it("the crew procedure reaches every provider through the shared orchestration instructions", () => {
   assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, PLAYBOOK_CREW_INSTRUCTIONS);
   assert.include(J5_PROPOSE_CREW_DESCRIPTION, "For a crew built from a playbook");
 });
