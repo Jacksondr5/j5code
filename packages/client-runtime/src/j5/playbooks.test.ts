@@ -21,7 +21,8 @@ import {
   expandPlaybookPrompt,
   isPlaybookSlashCommandVisible,
   matchPlaybookSuggestions,
-  shouldCompleteComposerMenuSelection,
+  playbookMenuItems,
+  playbookSelectionText,
   presentPlaybook,
   sortPlaybookRuns,
   playbookWorkspaces,
@@ -518,27 +519,72 @@ it("ranks playbook suggestions by exact name, then prefix, then name or title ma
   ]);
 });
 
-describe("shouldCompleteComposerMenuSelection", () => {
-  it.each([
-    ["Enter", "foreground", "review", "review", false],
-    ["Enter", "foreground", "code-review", "code-review", false],
-    ["Enter", "foreground", "rev", "review", true],
-    ["Enter", "foreground", "review", "review-all", true],
-    ["Enter", "foreground", "REVIEW", "review", false],
-    ["Enter", "foreground", "", "review", true],
-    ["Tab", "foreground", "review", "review", true],
-    ["Enter", null, "review", "review", true],
-  ] as const)(
-    "%s with %s intent and query %j selecting %j completes: %s",
-    (key, intent, query, name, expected) => {
-      expect(
-        shouldCompleteComposerMenuSelection(
-          key,
-          intent,
-          { kind: "slash-playbook", query },
-          { type: "playbook", name },
-        ),
-      ).toBe(expected);
-    },
-  );
+describe("playbook mention picker", () => {
+  const broken = new PlaybookError({
+    code: "step_missing",
+    message: "Step report is missing a prompt.",
+    availableStepIds: [],
+  });
+  const badName = new PlaybookError({
+    code: "invalid_name",
+    message: "Rename Release Plan.yaml to release-plan.yaml.",
+    availableStepIds: [],
+  });
+  const playbooks = [
+    { name: "release-broken", title: "Broken release", issue: broken },
+    { name: "Release Plan", title: "Release Plan", issue: badName },
+    { name: "code-release", title: "Code release", issue: null },
+    { name: "release", title: "Release", issue: null },
+  ];
+  const mention = (text: string) => ({
+    kind: "slash-playbook",
+    query: text.slice(text.lastIndexOf(":") + 1),
+    rangeStart: text.lastIndexOf("@"),
+    rangeEnd: text.length,
+  });
+
+  it("lists valid playbooks first, then invalid ones with their error, but no misnamed file", () => {
+    const text = "Use @playbook:rel";
+    expect(
+      playbookMenuItems(playbooks, mention(text), text).map(({ name, description }) => ({
+        name,
+        description,
+      })),
+    ).toEqual([
+      { name: "release", description: "Release" },
+      { name: "code-release", description: "Code release" },
+      { name: "release-broken", description: "Step report is missing a prompt." },
+    ]);
+  });
+
+  it("matches the raw token, so punctuation typed after a name matches no row", () => {
+    const text = "@playbook:release,";
+    expect(playbookMenuItems(playbooks, mention(text), text)).toEqual([]);
+  });
+
+  it("keeps /playbook suggestions to valid playbooks", () => {
+    const text = "/playbook rel";
+    const trigger = { kind: "slash-playbook", query: "rel", rangeStart: 0, rangeEnd: text.length };
+    expect(playbookMenuItems(playbooks, trigger, text)).toEqual(
+      matchPlaybookSuggestions(playbooks, "rel"),
+    );
+  });
+
+  it("inserts the form that was typed", () => {
+    const command = "/playbook rel";
+    expect(playbookSelectionText(command, { rangeStart: 0, rangeEnd: 13 }, "release")).toBe(
+      "/playbook release ",
+    );
+    const text = "Use @playbook:rel";
+    expect(playbookSelectionText(text, mention(text), "release")).toBe("@playbook:release ");
+  });
+
+  it("gives a bare @playbook: rows to complete, so Enter picks one instead of sending", () => {
+    const text = "Use @playbook:";
+    const rows = playbookMenuItems(playbooks, mention(text), text);
+    expect(rows.map(({ name }) => name)).toEqual(["code-release", "release", "release-broken"]);
+    expect(playbookSelectionText(text, mention(text), rows[0]!.name)).toBe(
+      "@playbook:code-release ",
+    );
+  });
 });

@@ -27,6 +27,15 @@ const SEAMS: ReadonlyArray<Seam> = [
     reaches: ["useAgentMentionPicker(environmentId", "agentMentionReplacement(item.personaId)"],
   },
   {
+    file: "features/threads/use-composer-command-menu.ts",
+    record: "case 49: composer playbook picker",
+    from: "@t3tools/client-runtime/j5/playbooks",
+    reaches: [
+      "playbookMenuItems(playbookQuery.data?.playbooks ?? [], trigger, draftMessage)",
+      "playbookSelectionText(draftMessage, trigger, item.name)",
+    ],
+  },
+  {
     file: "features/threads/ComposerCommandPopover.tsx",
     record: "Saved-agent mentions: persona picker",
     from: "@t3tools/client-runtime/j5/agent-mentions",

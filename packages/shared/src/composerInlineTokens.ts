@@ -1,3 +1,5 @@
+import { isJ5MentionPath } from "./j5/agentMention.ts";
+
 export type ComposerInlineToken =
   | {
       readonly type: "mention";
@@ -88,7 +90,7 @@ function collectMentionTokens(text: string): ComposerInlineToken[] {
     if (
       !path ||
       (quotedPath === undefined &&
-        (path.startsWith("persona:") || SCOPED_PACKAGE_REFERENCE_REGEX.test(path)))
+        (isJ5MentionPath(path) || SCOPED_PACKAGE_REFERENCE_REGEX.test(path)))
     ) {
       continue;
     }

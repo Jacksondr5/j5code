@@ -58,8 +58,8 @@ import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
 import { j5Environment } from "../../j5/state";
 import {
   isPlaybookSlashCommandVisible,
-  matchPlaybookSuggestions,
-  shouldCompleteComposerMenuSelection,
+  playbookMenuItems,
+  playbookSelectionText,
 } from "@t3tools/client-runtime/j5/playbooks";
 import { folderDropTarget, resolveDroppedFolderPath } from "./folderDrop";
 import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
@@ -2584,7 +2584,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     if (!composerTrigger) return [];
     if (composerTrigger.kind === "agent") return agentPicker.items;
     if (composerTrigger.kind === "slash-playbook")
-      return matchPlaybookSuggestions(playbookQuery.data?.playbooks ?? [], composerTrigger.query);
+      return playbookMenuItems(playbookQuery.data?.playbooks ?? [], composerTrigger, prompt);
     if (composerTrigger.kind === "path") {
       // Order (J5 decision): saved agents, then threads, then files. Personas whose id or name
       // starts with the typed text lead; threads only surface for a typed query so `@` alone
@@ -2753,6 +2753,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeThreadId,
     agentPicker.items,
     playbookQuery.data,
+    prompt,
     compactSlashCommandAvailable,
     composerTrigger,
     environmentId,
@@ -2775,23 +2776,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const composerMenuSearchKey = composerTrigger
     ? `${composerTrigger.kind}:${composerTrigger.query.trim().toLowerCase()}`
     : null;
-  // A bare `/playbook ` sends the list request on Enter unless the user picks a name.
-  const composerMenuAutoHighlight = !(
-    composerTrigger?.kind === "slash-playbook" && !composerTrigger.query
-  );
   const activeComposerMenuItem = useMemo(() => {
     const activeItemId = resolveComposerMenuActiveItemId({
       items: composerMenuItems,
       highlightedItemId: composerHighlightedItemId,
       currentSearchKey: composerMenuSearchKey,
       highlightedSearchKey: composerHighlightedSearchKey,
-      autoHighlight: composerMenuAutoHighlight,
     });
     return composerMenuItems.find((item) => item.id === activeItemId) ?? null;
   }, [
     composerHighlightedItemId,
     composerHighlightedSearchKey,
-    composerMenuAutoHighlight,
     composerMenuItems,
     composerMenuSearchKey,
   ]);
@@ -3410,7 +3405,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       highlightedItemId: composerHighlightedItemId,
       currentSearchKey: composerMenuSearchKey,
       highlightedSearchKey: composerHighlightedSearchKey,
-      autoHighlight: composerMenuAutoHighlight,
     });
     setComposerHighlightedItemId((existing) =>
       existing === nextActiveItemId ? existing : nextActiveItemId,
@@ -3421,7 +3415,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   }, [
     composerHighlightedItemId,
     composerHighlightedSearchKey,
-    composerMenuAutoHighlight,
     composerMenuItems,
     composerMenuOpen,
     composerMenuSearchKey,
@@ -3917,9 +3910,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       const { snapshot, trigger } = resolveActiveComposerTrigger();
       if (!trigger) return;
       if (item.type === "playbook") {
-        applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, `/playbook ${item.name} `, {
-          expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
-        });
+        applyPromptReplacement(
+          trigger.rangeStart,
+          trigger.rangeEnd,
+          playbookSelectionText(snapshot.value, trigger, item.name),
+          { expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd) },
+        );
         setComposerHighlightedItemId(null);
         return;
       }
@@ -4415,11 +4411,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }
     if (menuIsActive && (submissionIntent === null || submissionIntent === "foreground")) {
       const currentItems = composerMenuItemsRef.current;
-      const selectedItem =
-        activeComposerMenuItemRef.current ??
-        (key === "Tab" || trigger?.kind !== "slash-playbook" || trigger.query
-          ? currentItems[0]
-          : undefined);
+      const selectedItem = activeComposerMenuItemRef.current ?? currentItems[0];
       if (key === "ArrowDown" && currentItems.length > 0) {
         nudgeComposerMenuHighlight("ArrowDown");
         return true;
@@ -4428,10 +4420,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         nudgeComposerMenuHighlight("ArrowUp");
         return true;
       }
-      if (
-        selectedItem &&
-        shouldCompleteComposerMenuSelection(key, submissionIntent, trigger, selectedItem)
-      ) {
+      if ((key === "Enter" || key === "Tab") && selectedItem) {
         onSelectComposerItem(selectedItem);
         return true;
       }
