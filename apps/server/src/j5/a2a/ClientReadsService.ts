@@ -205,7 +205,7 @@ export const openInboxCountStatement = (sql: SqlClient.SqlClient, personId: Part
  * The label a peer sent with its latest delivery for each sender, keyed by the
  * server it came from and ordered by this ledger's sequence, so a delivery
  * dated in the future by its origin never pins a name. Every probe and the
- * "nothing newer" check run on the peer route index from migration 21, so the
+ * "nothing newer" check run on the peer route index from migration 26, so the
  * cost follows the senders asked about, not the received history.
  */
 export const peerSenderLabelStatement = (
