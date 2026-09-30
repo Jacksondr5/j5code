@@ -18,9 +18,12 @@ describe("playbook mention syntax", () => {
     });
   });
 
-  it("drops trailing punctuation from the name", () => {
-    expect(detectComposerTrigger("@playbook:review,", 17)).toMatchObject({ query: "review" });
-    expect(detectComposerTrigger("@playbook:review.", 17)).toMatchObject({ query: "review" });
+  it("keeps the raw token after the prefix as the query, punctuation included", () => {
+    expect(detectComposerTrigger("@playbook:review-short,", 23)).toMatchObject({
+      query: "review-short,",
+      rangeEnd: 23,
+    });
+    expect(detectComposerTrigger("@playbook:review.", 17)).toMatchObject({ query: "review." });
   });
 
   it("closes after a space and ignores text glued before the prefix", () => {

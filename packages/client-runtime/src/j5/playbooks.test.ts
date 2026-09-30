@@ -546,6 +546,11 @@ describe("playbook mention picker", () => {
     ]);
   });
 
+  it("matches the raw token, so punctuation typed after a name matches no row", () => {
+    const text = "@playbook:release,";
+    expect(playbookMenuItems(playbooks, mention(text), text)).toEqual([]);
+  });
+
   it("keeps /playbook suggestions to valid playbooks", () => {
     const text = "/playbook rel";
     const trigger = { kind: "slash-playbook", query: "rel", rangeStart: 0, rangeEnd: text.length };
