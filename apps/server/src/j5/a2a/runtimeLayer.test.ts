@@ -38,6 +38,8 @@ import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import { runMigrations } from "../../persistence/Migrations.ts";
 import { ThreadLifecycleService } from "../../orchestration-v2/ThreadLifecycleService.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
+import { ThreadLaunchService } from "../../orchestration-v2/ThreadLaunchService.ts";
+import { OrchestrationCommandReceiptRepository } from "../../persistence/Services/OrchestrationCommandReceipts.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { A2AArchiveFacts } from "./ArchiveFactsService.ts";
 import { A2ALifecycleService } from "./LifecycleService.ts";
@@ -50,6 +52,9 @@ import { PeerRegistryService } from "./PeerRegistryService.ts";
 import { makeJ5A2ARuntimeLayer } from "./runtimeLayer.ts";
 
 const archiveDependencies = Layer.mergeAll(
+  // spawn_agent and Crew seats prepare worktrees through upstream's launch and receipts.
+  Layer.mock(ThreadLaunchService)({}),
+  Layer.mock(OrchestrationCommandReceiptRepository)({}),
   Layer.mock(ServerSecretStore)({
     getOrCreateRandom: () => Effect.succeed(new Uint8Array(32).fill(7)),
   }),
@@ -96,6 +101,8 @@ const measureNestedRuntimeBuilds = (nested: "http" | "mcp") =>
           Layer.provide(Layer.mock(OrchestratorV2)({})),
           Layer.provide(Layer.mock(EffectOutboxV2)({ listByCommandId: () => Effect.succeed([]) })),
           Layer.provide(archiveDependencies),
+          Layer.provide(Layer.mock(ProjectService)({})),
+          Layer.provide(Layer.mock(GitWorkflowService)({})),
           Layer.provide(Layer.mock(EnvironmentAuth)({})),
           Layer.provide(
             ServerConfig.layerTest(process.cwd(), { prefix: "j5-a2a-runtime-layer-" }).pipe(

@@ -55,6 +55,8 @@ import { crewSeatRequestKey, spawnThreadId } from "./spawnIds.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import { SpawnCompositionService } from "./SpawnCompositionService.ts";
+import { type FakeCheckout, fakeSpawnWorkspaceLayer } from "./test-support/spawnWorkspaceFakes.ts";
+import type { ThreadLaunchInput } from "../../orchestration-v2/ThreadLaunchService.ts";
 import { ParticipantId, SquadronId } from "./contracts.ts";
 
 const squadronId = SquadronId.make("squadron:crew-launch");
@@ -136,6 +138,71 @@ const fixture = Effect.gen(function* () {
   return { context, commands, captain };
 });
 
+const threadManagementFake = (
+  commands: Ref.Ref<ReadonlyArray<OrchestrationV2Command>>,
+  unreadableOnce: Set<string>,
+  archived: Set<string>,
+  realThreads: boolean,
+  failBriefOnce: Set<string>,
+  beforeDispatch: (
+    command: OrchestrationV2Command,
+  ) => Effect.Effect<void, OrchestratorDispatchError>,
+) =>
+  Layer.mock(ThreadManagementService)({
+    getThreadProjection: (threadId) =>
+      realThreads
+        ? Ref.get(commands).pipe(
+            Effect.flatMap((commands) => {
+              const created = commands.find(
+                (command) => command.type === "thread.create" && command.threadId === threadId,
+              );
+              return created?.type === "thread.create"
+                ? Effect.succeed({
+                    thread: { ...thread(threadId), ...created },
+                    messages: commands.flatMap((command) =>
+                      command.type === "message.dispatch" && command.threadId === threadId
+                        ? [{ id: command.messageId, text: command.text }]
+                        : [],
+                    ),
+                  } as unknown as OrchestrationV2ThreadProjection)
+                : Effect.fail(
+                    new OrchestratorProjectionError({
+                      threadId,
+                      cause: new ProjectionStoreThreadNotFoundError({ threadId }),
+                    }),
+                  );
+            }),
+          )
+        : unreadableOnce.delete(threadId)
+          ? Effect.fail(
+              new OrchestratorProjectionError({
+                threadId,
+                cause: new ProjectionStoreReadError({ threadId }),
+              }),
+            )
+          : Effect.succeed({
+              messages: [],
+              thread: {
+                ...thread(threadId),
+                archivedAt: archived.has(threadId) ? createdAt : null,
+              },
+            } as unknown as OrchestrationV2ThreadProjection),
+    dispatch: (command) =>
+      Effect.gen(function* () {
+        yield* beforeDispatch(command);
+        if (command.type === "message.dispatch" && failBriefOnce.delete(command.threadId))
+          return yield* new OrchestratorDispatchError({
+            commandId: command.commandId,
+            commandType: command.type,
+          });
+        yield* Ref.update(commands, (items) => {
+          if (command.type === "thread.archive") archived.add(command.threadId);
+          return [...items, command];
+        });
+        return { events: [], effects: [] } as never;
+      }),
+  });
+
 const dependencies = (
   commands: Ref.Ref<ReadonlyArray<OrchestrationV2Command>>,
   providers: ReadonlyArray<ServerProvider>,
@@ -150,62 +217,24 @@ const dependencies = (
   beforeDispatch: (
     command: OrchestrationV2Command,
   ) => Effect.Effect<void, OrchestratorDispatchError> = () => Effect.void,
+  // The Captain works in a worktree, so every seat shares it unless a test overrides one.
+  workspace: Parameters<typeof fakeSpawnWorkspaceLayer>[0] = {
+    checkout: { isRepo: true, refName: "main" },
+  },
 ) =>
   Layer.mergeAll(
-    Layer.mock(ThreadManagementService)({
-      getThreadProjection: (threadId) =>
-        realThreads
-          ? Ref.get(commands).pipe(
-              Effect.flatMap((commands) => {
-                const created = commands.find(
-                  (command) => command.type === "thread.create" && command.threadId === threadId,
-                );
-                return created?.type === "thread.create"
-                  ? Effect.succeed({
-                      thread: { ...thread(threadId), ...created },
-                      messages: commands.flatMap((command) =>
-                        command.type === "message.dispatch" && command.threadId === threadId
-                          ? [{ id: command.messageId, text: command.text }]
-                          : [],
-                      ),
-                    } as unknown as OrchestrationV2ThreadProjection)
-                  : Effect.fail(
-                      new OrchestratorProjectionError({
-                        threadId,
-                        cause: new ProjectionStoreThreadNotFoundError({ threadId }),
-                      }),
-                    );
-              }),
-            )
-          : unreadableOnce.delete(threadId)
-            ? Effect.fail(
-                new OrchestratorProjectionError({
-                  threadId,
-                  cause: new ProjectionStoreReadError({ threadId }),
-                }),
-              )
-            : Effect.succeed({
-                messages: [],
-                thread: {
-                  ...thread(threadId),
-                  archivedAt: archived.has(threadId) ? createdAt : null,
-                },
-              } as unknown as OrchestrationV2ThreadProjection),
-      dispatch: (command) =>
-        Effect.gen(function* () {
-          yield* beforeDispatch(command);
-          if (command.type === "message.dispatch" && failBriefOnce.delete(command.threadId))
-            return yield* new OrchestratorDispatchError({
-              commandId: command.commandId,
-              commandType: command.type,
-            });
-          yield* Ref.update(commands, (items) => {
-            if (command.type === "thread.archive") archived.add(command.threadId);
-            return [...items, command];
-          });
-          return { events: [], effects: [] } as never;
-        }),
-    }),
+    fakeSpawnWorkspaceLayer(workspace).pipe(
+      Layer.provideMerge(
+        threadManagementFake(
+          commands,
+          unreadableOnce,
+          archived,
+          realThreads,
+          failBriefOnce,
+          beforeDispatch,
+        ),
+      ),
+    ),
     Layer.mock(SpawnCompositionService)({
       recordFacts: (input) =>
         failHomeOnce.delete(input.threadId)
@@ -563,6 +592,7 @@ it.effect(
             options: [{ id: "reasoningEffort", value: "high" }],
           },
           runtimeMode: "full-access",
+          workspace: { type: "shared" },
         });
         assert.deepStrictEqual(resolvedSeats[0]?.modelSelection.options, [
           { id: "reasoningEffort", value: "high" },
@@ -1606,5 +1636,116 @@ it.effect("a relaunch after a failed link stores the re-approved seat's steps", 
         [["planner", []]],
       );
     }).pipe(Effect.provide(layer));
+  }),
+);
+
+it.effect("gives a root-checkout Captain's seats fresh worktrees unless a seat asks to share", () =>
+  Effect.gen(function* () {
+    const { context, commands, captain: worktreeCaptain } = yield* fixture;
+    const captain = {
+      ...worktreeCaptain,
+      thread: { ...worktreeCaptain.thread, branch: null, worktreePath: null },
+    };
+    const launches = yield* Ref.make<ReadonlyArray<ThreadLaunchInput>>([]);
+    const codex = provider("codex", "codex", [{ slug: "gpt-5.6-sol", options: ["high"] }]);
+    const layerFor = (checkout: FakeCheckout) =>
+      crewLaunchLayer.pipe(
+        Layer.provideMerge(
+          dependencies(
+            commands,
+            [codex],
+            new Set(),
+            new Set(),
+            new Set(),
+            false,
+            new Set(),
+            () => Effect.void,
+            { checkout, launches },
+          ),
+        ),
+        Layer.provideMerge(Layer.succeedContext(context)),
+        Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-launch-" })),
+        Layer.provideMerge(NodeServices.layer),
+      );
+    const seats = [
+      { name: "builder", agentId: null, reason: "Implements", instructions: "Build it" },
+      {
+        name: "reviewer",
+        agentId: null,
+        reason: "Reviews",
+        instructions: "Review it",
+        workspace: { type: "shared" as const },
+      },
+    ];
+
+    yield* Effect.gen(function* () {
+      const launcher = yield* CrewLaunchService;
+      // An explicit worktree outside a git repository is refused before anything exists.
+      const refused = yield* launcher
+        .launch({
+          providerSessionId: "session",
+          requestKey: "no-repo",
+          captain,
+          displayName: "Pair",
+          seats: [{ ...seats[0]!, workspace: { type: "worktree" } }],
+          brief: "Ship it.",
+        })
+        .pipe(Effect.flip);
+      assert.equal(refused._tag, "CrewLaunchSeatUnavailableError");
+      assert.include(refused.message, "not a git repository");
+      assert.lengthOf(yield* Ref.get(commands), 0);
+    }).pipe(Effect.provide(layerFor({ isRepo: false, refName: null })));
+
+    yield* Effect.gen(function* () {
+      const launcher = yield* CrewLaunchService;
+      const resolved = yield* launcher.resolveSeats(captain, seats);
+      assert.deepStrictEqual(
+        resolved.map((seat) => seat.runtime.workspace),
+        [{ type: "worktree", baseRef: "j5/main", startFromOrigin: false }, { type: "shared" }],
+      );
+      yield* launcher.launch({
+        providerSessionId: "session",
+        requestKey: "root-captain",
+        captain,
+        displayName: "Pair",
+        seats,
+        resolvedSeats: resolved,
+        brief: "Ship it.",
+      });
+      const captured = yield* Ref.get(commands);
+      const builderThread = spawnThreadId({
+        providerSessionId: "session",
+        requestKey: crewSeatRequestKey("root-captain", "builder"),
+      });
+      const creates = captured.filter((command) => command.type === "thread.create");
+      assert.deepStrictEqual(
+        creates.map((command) =>
+          command.type === "thread.create"
+            ? [command.threadId === builderThread, command.branch, command.worktreePath]
+            : [],
+        ),
+        [
+          [true, null, null],
+          [false, null, null],
+        ],
+      );
+      assert.include(creates[0]!.commandId, "spawn-create-worktree");
+      assert.notInclude(creates[1]!.commandId, "spawn-create-worktree");
+      // The builder's brief waits on ThreadLaunch; only the reviewer's starts at once.
+      const briefs = captured.filter((command) => command.type === "message.dispatch");
+      assert.lengthOf(briefs, 1);
+      assert.notEqual(briefs[0]?.threadId, builderThread);
+      const [launch] = yield* Ref.get(launches);
+      assert.equal(launch?.threadId, builderThread);
+      assert.isTrue(launch?.reuseExistingThread);
+      assert.equal(launch?.squadronId, squadronId);
+      assert.deepStrictEqual(launch?.workspaceStrategy, {
+        type: "worktree",
+        baseRef: "j5/main",
+        startFromOrigin: false,
+      });
+      assert.include(launch?.initialMessage?.text, "your_seat: builder");
+      assert.include(launch?.initialMessage?.text, "- reviewer: participant_id=");
+    }).pipe(Effect.provide(layerFor({ isRepo: true, refName: "j5/main" })));
   }),
 );

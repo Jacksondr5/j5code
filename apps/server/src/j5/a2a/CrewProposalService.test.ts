@@ -59,6 +59,7 @@ import {
   CrewLaunchService,
   layer as crewLaunchLayer,
   type CrewCaptain,
+  type CrewLaunchSeat,
   type ResolvedCrewLaunchSeat,
 } from "./CrewLaunchService.ts";
 import {
@@ -71,6 +72,8 @@ import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import { SpawnCompositionService } from "./SpawnCompositionService.ts";
+import type { ResolvedSpawnWorkspace } from "./spawnWorkspace.ts";
+import { fakeSpawnWorkspaceLayer, noRepository } from "./test-support/spawnWorkspaceFakes.ts";
 import { crewSeatRequestKey, spawnThreadId } from "./spawnIds.ts";
 import { ParticipantId, SquadronId } from "./contracts.ts";
 
@@ -102,6 +105,14 @@ const captain: CrewCaptain = {
 const launchFailure = (cause: unknown) =>
   new CrewLaunchOperationError({ phase: "test launcher", seatName: null, createdSeats: [], cause });
 
+const decodeProposeCrewInput = Schema.decodeUnknownEffect(J5ProposeCrewInput);
+
+/** The launcher's resolution is tested on its own; here a seat's choice passes through as given. */
+const fakeWorkspace = (seat: CrewLaunchSeat): ResolvedSpawnWorkspace =>
+  seat.workspace?.type === "worktree"
+    ? { type: "worktree", baseRef: seat.workspace.baseRef ?? "main", startFromOrigin: false }
+    : { type: "shared" };
+
 /**
  * The launcher is exercised by its own test; here it records members so the gate can be proven.
  * Like the real one it records the Crew before any seat spawns and reports it through
@@ -120,6 +131,7 @@ const fakeLauncher = (crews: AgentCrewInstanceService["Service"]) =>
               runtimeMode: seat.runtimeMode ?? captain.thread.runtimeMode,
               outputArtifact: null,
               agentDisplayName: seat.agentId ?? "custom",
+              workspace: fakeWorkspace(seat),
               runtime: {
                 seat: seat.name,
                 provider: "Codex",
@@ -129,6 +141,7 @@ const fakeLauncher = (crews: AgentCrewInstanceService["Service"]) =>
                 access: "Full access",
                 modelSelection: seat.modelSelection ?? captain.thread.modelSelection,
                 runtimeMode: seat.runtimeMode ?? captain.thread.runtimeMode,
+                workspace: fakeWorkspace(seat),
               },
             }) satisfies ResolvedCrewLaunchSeat,
         ),
@@ -954,6 +967,70 @@ it.effect(
 );
 
 it.effect(
+  "carries a seat's workspace from propose_crew through storage, preview, and approval",
+  () =>
+    Effect.gen(function* () {
+      const { layer } = yield* fixture;
+      yield* Effect.gen(function* () {
+        const gate = yield* CrewProposalService;
+        const store = yield* AgentCrewProposalService;
+        const input = yield* decodeProposeCrewInput({
+          name: "Pair",
+          brief: "Ship it",
+          seats: [
+            {
+              seat: "builder",
+              persona: "builder",
+              reason: "Implements",
+              workspace: { type: "worktree", base_ref: "release", branch: "fix/login" },
+            },
+          ],
+        });
+        const proposed = input.seats.map(crewSeatFromInput);
+        assert.deepStrictEqual(proposed[0]?.workspace, {
+          type: "worktree",
+          baseRef: "release",
+          branch: "fix/login",
+        });
+        // A Captain may choose a saved persona's workspace; only its runtime is the human's to change.
+        const open = yield* gate.propose({
+          requestKey: "workspace-round-trip",
+          captain,
+          displayName: input.name,
+          brief: input.brief,
+          seats: proposed,
+        });
+        assert.deepStrictEqual((yield* store.read(open.proposal.id))?.requestedSeats, proposed);
+        const first = yield* gate.preview({ proposalId: open.proposal.id });
+        assert.deepStrictEqual(first.seats[0]?.workspace, {
+          type: "worktree",
+          baseRef: "release",
+          startFromOrigin: false,
+        });
+        const shared = [{ ...proposed[0]!, workspace: { type: "shared" as const } }];
+        const stale = yield* gate
+          .resolve({
+            proposalId: open.proposal.id,
+            decision: "approve",
+            seats: shared,
+            approvalToken: first.approvalToken,
+          })
+          .pipe(Effect.flip);
+        assert.equal(stale._tag, "CrewProposalRequestError");
+        const current = yield* gate.preview({ proposalId: open.proposal.id, seats: shared });
+        assert.notEqual(current.approvalToken, first.approvalToken);
+        yield* gate.resolve({
+          proposalId: open.proposal.id,
+          decision: "approve",
+          seats: shared,
+          approvalToken: current.approvalToken,
+        });
+        assert.deepStrictEqual((yield* store.read(open.proposal.id))?.approvedSeats, shared);
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
+);
+
+it.effect(
   "persists custom runtime overrides through proposal storage, human edits, and approval",
   () =>
     Effect.gen(function* () {
@@ -1321,6 +1398,7 @@ const playbookFixture = Effect.gen(function* () {
     Layer.provideMerge(crewLaunchLayer),
     Layer.provideMerge(Layer.mock(CrewLaunchReporter)({ watch: () => Effect.void })),
     Layer.provideMerge(playbookStoreLayer),
+    Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: noRepository })),
     Layer.provideMerge(
       Layer.mock(ThreadManagementService)({
         getThreadProjection: (threadId) =>

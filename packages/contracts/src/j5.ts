@@ -137,6 +137,22 @@ export const CrewPersonaSwap = Schema.Struct({
 export type CrewPersonaSwap = typeof CrewPersonaSwap.Type;
 
 /**
+ * Where a Crew seat works: the Captain's own checkout (`shared`), or a fresh worktree the server
+ * prepares before the seat's brief starts. Unset on a requested seat means the server default; on
+ * a preview's seat runtime it is the resolved choice, with `baseRef` filled in.
+ */
+export const CrewSeatWorkspace = Schema.Union([
+  Schema.Struct({ type: Schema.Literal("shared") }),
+  Schema.Struct({
+    type: Schema.Literal("worktree"),
+    baseRef: Schema.optionalKey(Schema.String),
+    branch: Schema.optionalKey(Schema.String),
+    startFromOrigin: Schema.optionalKey(Schema.Boolean),
+  }),
+]);
+export type CrewSeatWorkspace = typeof CrewSeatWorkspace.Type;
+
+/**
  * One requested or approved Crew seat, as the Captain proposed it or the human edited it. A null
  * agent is a custom seat. Human runtime edits apply to every seat; omitted fields use the persona
  * defaults or, for a custom seat, inherit the Captain.
@@ -150,6 +166,7 @@ export const CrewProposalSeat = Schema.Struct({
   runtimeMode: Schema.optional(RuntimeMode),
   /** Ids of the playbook steps this seat owns; only on a Crew that follows a playbook. */
   steps: Schema.optionalKey(Schema.Array(Schema.String)),
+  workspace: Schema.optionalKey(CrewSeatWorkspace),
   /** Computed by the server at propose and approve; a client's value is ignored. */
   personaSwaps: Schema.optionalKey(Schema.Array(CrewPersonaSwap)),
 });
@@ -201,6 +218,8 @@ export const CrewProposalSeatRuntime = Schema.Struct({
   access: Schema.String,
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
+  /** Absent from servers that predate seat workspaces, which always share the Captain's checkout. */
+  workspace: Schema.optionalKey(CrewSeatWorkspace),
   /** The seat's persona swaps as the edited roster would record them. */
   personaSwaps: Schema.optionalKey(Schema.Array(CrewPersonaSwap)),
 });
