@@ -22,6 +22,7 @@ import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { peerHttpRouteLayer } from "./PeerHttp.ts";
 import { RosterService } from "./RosterService.ts";
+import { PeerStoreService, type PeerPollInput } from "./PeerStoreService.ts";
 import {
   A2APeerReceiverNotDeliverableError,
   A2APeerReceiverNotFoundError,
@@ -30,6 +31,7 @@ import {
 } from "./PeerInboundService.ts";
 import {
   PeerCredentialMismatchError,
+  PeerLinkModeConflictError,
   PeerOriginConflictError,
   PeerRegistryService,
   PeerUnreachableError,
@@ -41,10 +43,25 @@ const home = EnvironmentId.make("environment-home");
 const homePeer: PeerRecord = {
   environmentId: home,
   label: "Home",
+  linkMode: "push",
   origin: "https://home.example:3773",
   credentialExpiresAt: "2036-09-16T00:00:00.000Z",
   inboundSession: "active",
   createdAt: "2026-09-16T00:00:00.000Z",
+  lastPolledAt: null,
+  lastError: null,
+  waitingCount: 0,
+  oldestWaitingAt: null,
+};
+
+const laptop = EnvironmentId.make("environment-laptop");
+const laptopPeer: PeerRecord = {
+  ...homePeer,
+  environmentId: laptop,
+  label: "JM-LT-04213",
+  linkMode: "store",
+  origin: null,
+  credentialExpiresAt: null,
 };
 
 interface IssuedSession {
@@ -64,6 +81,10 @@ const makeHandler = (input: {
   readonly removed?: Array<string>;
   readonly received?: Array<PeerInboundInput>;
   readonly notifications?: { count: number };
+  readonly polls?: Array<PeerPollInput>;
+  /** Holds each poll's body until it is released. */
+  readonly pollHeld?: Promise<void>;
+  readonly grants?: Array<string>;
 }) => {
   const auth = Layer.mock(EnvironmentAuth.EnvironmentAuth)({
     authenticateHttpRequest: () =>
@@ -124,26 +145,43 @@ const makeHandler = (input: {
               ? Effect.fail(
                   new PeerOriginConflictError({
                     environmentId: home,
-                    recordedOrigin: homePeer.origin,
+                    recordedOrigin: homePeer.origin!,
                     requestedOrigin: request.origin,
                     credentialKept: false,
                   }),
                 )
-              : request.origin === "https://other.example"
+              : request.origin === "https://polls-here.example"
                 ? Effect.fail(
-                    new PeerCredentialMismatchError({
-                      origin: request.origin,
-                      expectedSubject: `peer:${work}`,
-                      actualSubject: "peer:environment-elsewhere",
+                    new PeerLinkModeConflictError({
+                      environmentId: laptop,
+                      recorded: "store",
+                      requested: "push",
                     }),
                   )
-                : Effect.sync(() => {
-                    input.adds?.push(request);
-                    return { peer: { ...homePeer, origin: request.origin }, created: true };
-                  }),
-        get: (environmentId) => Effect.succeed(environmentId === home ? homePeer : null),
+                : request.origin === "https://other.example"
+                  ? Effect.fail(
+                      new PeerCredentialMismatchError({
+                        origin: request.origin,
+                        expectedSubject: `peer:${work}`,
+                        actualSubject: "peer:environment-elsewhere",
+                      }),
+                    )
+                  : Effect.sync(() => {
+                      input.adds?.push(request);
+                      return { peer: { ...homePeer, origin: request.origin }, created: true };
+                    }),
+        get: (environmentId) =>
+          Effect.succeed(
+            environmentId === home ? homePeer : environmentId === laptop ? laptopPeer : null,
+          ),
         selfEnvironmentId: Effect.succeed(work),
         selfLabel: Effect.succeed("Work VM"),
+        adoptStorePeer: ({ environmentId }) =>
+          Effect.succeed(environmentId === home || environmentId === laptop),
+        grantStore: ({ environmentId }) =>
+          Effect.sync(() => {
+            input.grants?.push(environmentId);
+          }),
         list: () => Effect.succeed([homePeer]),
         remove: (environmentId) =>
           Effect.sync(() => {
@@ -169,6 +207,23 @@ const makeHandler = (input: {
                   const replay = (input.received?.length ?? 0) > 1;
                   return { receivedSeq: 12, replay };
                 }),
+      }),
+    ),
+    Layer.provide(
+      Layer.mock(PeerStoreService)({
+        startPoll: (request) =>
+          Effect.sync(() => {
+            input.polls?.push(request);
+            return Effect.promise(() => input.pollHeld ?? Promise.resolve()).pipe(
+              Effect.as({
+                deliveries: [],
+                rosterHash: "hash-held",
+                more: false,
+                label: "Work VM",
+                capabilities: { poll: true },
+              }),
+            );
+          }),
       }),
     ),
     Layer.provide(
@@ -257,7 +312,7 @@ it("answers hello with this environment and the credential's subject, and comple
     assert.isString((body.server as { version: string }).version);
     assert.equal(body.label, "Work VM", "the answering server names itself");
     assert.equal(body.peerProtocolVersion, PEER_PROTOCOL_VERSION);
-    assert.deepStrictEqual(body.capabilities, {});
+    assert.deepStrictEqual(body.capabilities, { poll: true }, "this server stores for a poller");
     assert.deepStrictEqual(
       revoked,
       ["auth-session:old-home"],
@@ -336,6 +391,41 @@ it("issues a peer credential bound to the peer's subject with only a2a:peer and 
   }
 });
 
+it("marks a credential for a peer that will poll, and refuses to change a recorded peer's mode", async () => {
+  const issued: Array<IssuedSession> = [];
+  const grants: Array<string> = [];
+  const { dispose, handler } = makeHandler({
+    subject: "admin",
+    scopes: [AuthAccessWriteScope],
+    issued,
+    grants,
+  });
+  try {
+    const fresh = await handler(
+      post(J5_PEER_API_PATHS.credentials, { environmentId: "environment-new", store: true }),
+    );
+    assert.equal(fresh.status, 201);
+    assert.deepStrictEqual(grants, ["environment-new"], "the store mark waits for the first proof");
+
+    const rotated = await handler(
+      post(J5_PEER_API_PATHS.credentials, { environmentId: laptop, store: true }),
+    );
+    assert.equal(rotated.status, 201, "a store peer's credential rotates in the same mode");
+    assert.deepStrictEqual(grants, ["environment-new"], "a recorded store peer needs no new mark");
+
+    for (const request of [{ environmentId: home, store: true }, { environmentId: laptop }]) {
+      const refused = await handler(post(J5_PEER_API_PATHS.credentials, request));
+      assert.equal(refused.status, 409);
+      const body = (await refused.json()) as { error: string; message: string };
+      assert.equal(body.error, "peer_link_mode_conflict");
+      assert.include(body.message, "remove the peer and peer again");
+    }
+    assert.equal(issued.length, 2, "a refused change issues nothing");
+  } finally {
+    await dispose();
+  }
+});
+
 it("adds a peer through the registry and maps its refusals to stable codes", async () => {
   const adds: Array<AddPeerInput> = [];
   const { dispose, handler } = makeHandler({
@@ -371,6 +461,7 @@ it("adds a peer through the registry and maps its refusals to stable codes", asy
       { origin: "https://dark.example", status: 502, error: "peer_unreachable" },
       { origin: "https://other.example", status: 409, error: "peer_credential_mismatch" },
       { origin: "https://conflict.example", status: 409, error: "peer_origin_conflict" },
+      { origin: "https://polls-here.example", status: 409, error: "peer_link_mode_conflict" },
       { origin: "https://bad.example/with/path", status: 400, error: "invalid_request" },
       { origin: "ftp://bad.example", status: 400, error: "invalid_request" },
     ];
@@ -584,4 +675,131 @@ it("shows a recorded peer only the agents it could address, and nobody else the 
     await stranger.dispose();
     await machine.dispose();
   }
+});
+
+it("hands a storing peer's poll to the store, and refuses a poll from a peer this server sends to", async () => {
+  const polls: Array<PeerPollInput> = [];
+  // The status and protocol header arrive while the body is still held.
+  let release = () => {};
+  const pollHeld = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const laptopHandler = makeHandler({
+    subject: `peer:${laptop}`,
+    scopes: [AuthA2APeerScope],
+    polls,
+    pollHeld,
+  });
+  try {
+    const polled = await laptopHandler.handler(
+      post(J5_PEER_API_PATHS.poll, {
+        acks: [{ messageId: "message:one", outcome: "received", receivedSeq: 4, replay: false }],
+        rosterHash: "hash-laptop",
+        label: "JM-LT-04213",
+      }),
+    );
+    assert.equal(polled.status, 200);
+    assert.equal(polled.headers.get("x-j5-peer-protocol"), String(PEER_PROTOCOL_VERSION));
+    release();
+    assert.deepStrictEqual(await polled.json(), {
+      deliveries: [],
+      rosterHash: "hash-held",
+      more: false,
+      label: "Work VM",
+      capabilities: { poll: true },
+    });
+    assert.equal(polls.length, 1);
+    assert.equal(polls[0]!.environmentId, laptop, "the poller is the credential's subject");
+    assert.equal(polls[0]!.protocolVersion, 1, "a poll without the header states version 1");
+    assert.equal(polls[0]!.request.acks.length, 1);
+
+    const malformed = await laptopHandler.handler(post(J5_PEER_API_PATHS.poll, { acks: "no" }));
+    assert.equal(malformed.status, 400);
+  } finally {
+    await laptopHandler.dispose();
+  }
+
+  const homeHandler = makeHandler({ subject: `peer:${home}`, scopes: [AuthA2APeerScope], polls });
+  try {
+    const refused = await homeHandler.handler(
+      post(J5_PEER_API_PATHS.poll, { acks: [], rosterHash: "hash-home" }),
+    );
+    assert.equal(refused.status, 409);
+    assert.equal(((await refused.json()) as { error: string }).error, "peer_not_polling");
+    assert.equal(polls.length, 1, "nothing is handed out to a peer this server sends to");
+  } finally {
+    await homeHandler.dispose();
+  }
+});
+
+it("refuses a poll without the peer scope, from a stranger, or on another protocol, before the store sees it", async () => {
+  const polls: Array<PeerPollInput> = [];
+  const body = {
+    acks: [{ messageId: "message:one", outcome: "received", receivedSeq: 4, replay: false }],
+    rosterHash: "hash-laptop",
+  };
+  const cases: ReadonlyArray<{
+    readonly name: string;
+    readonly subject: string;
+    readonly scopes: ReadonlyArray<AuthEnvironmentScope>;
+    readonly protocol?: string;
+    readonly status: number;
+    readonly error: string;
+  }> = [
+    {
+      name: "a machine token",
+      subject: "machine:watchdog",
+      scopes: [AuthA2ASendScope],
+      status: 403,
+      error: "insufficient_scope",
+    },
+    {
+      name: "a peer-scoped session not bound to a peer",
+      subject: "admin",
+      scopes: [AuthA2APeerScope],
+      status: 403,
+      error: "peer_subject_required",
+    },
+    {
+      name: "an environment that is not a recorded peer",
+      subject: "peer:environment-stranger",
+      scopes: [AuthA2APeerScope],
+      status: 403,
+      error: "peer_not_registered",
+    },
+    {
+      name: "the laptop on another protocol",
+      subject: `peer:${laptop}`,
+      scopes: [AuthA2APeerScope],
+      protocol: "2",
+      status: 409,
+      error: "peer_protocol_mismatch",
+    },
+  ];
+  for (const testCase of cases) {
+    const { dispose, handler } = makeHandler({
+      subject: testCase.subject,
+      scopes: testCase.scopes,
+      polls,
+    });
+    try {
+      const request = post(J5_PEER_API_PATHS.poll, body);
+      if (testCase.protocol !== undefined) {
+        request.headers.set("x-j5-peer-protocol", testCase.protocol);
+      }
+      const refused = await handler(request);
+      assert.equal(refused.status, testCase.status, testCase.name);
+      // Upstream's scope refusal names its code `code`; the J5 routes name theirs `error`.
+      const refusal = (await refused.json()) as { error?: string; code?: string };
+      assert.equal(refusal.error ?? refusal.code, testCase.error, testCase.name);
+      assert.equal(
+        refused.headers.get("x-j5-peer-protocol"),
+        String(PEER_PROTOCOL_VERSION),
+        `${testCase.name}: every peer answer states this server's protocol`,
+      );
+    } finally {
+      await dispose();
+    }
+  }
+  assert.deepStrictEqual(polls, [], "no refused poll acknowledges or hands out anything");
 });

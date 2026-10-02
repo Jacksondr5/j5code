@@ -996,6 +996,25 @@ it.effect("addresses drop notices to a counterparty on a peer server in both dir
           },
         ],
       });
+      // Home accepted the outbound ask, so it holds that Exchange and is told when it drops.
+      yield* ledger.append({
+        commandId: CommCommandId.make("command:lifecycle:peers:outbound:delivered"),
+        squadronId,
+        acceptedAt: openedAt,
+        event: {
+          kind: "message.delivered",
+          sender: sender.id,
+          receiver: remoteAnswerer,
+          exchangeId: outboundExchange,
+          correlationId: CorrelationId.make("correlation:lifecycle:outbound"),
+          payload: {
+            messageId: LedgerMessageId.make("message:lifecycle:outbound"),
+            attempt: 1,
+            channel: "agent",
+          },
+          createdAt: openedAt,
+        },
+      });
 
       const receiverGone = yield* lifecycle.archiveParticipant({
         participantId: receiver.id,
@@ -1042,4 +1061,86 @@ it.effect("addresses drop notices to a counterparty on a peer server in both dir
       ]);
     }).pipe(Effect.provide(makeTestLayer(notices)));
   }),
+);
+
+it.effect(
+  "sends a peer server no drop notice for an ask that never reached it, and one for an ask it was handed",
+  () =>
+    Effect.gen(function* () {
+      const notices = yield* Ref.make<ReadonlyArray<DeliveredNotice>>([]);
+      yield* Effect.gen(function* () {
+        yield* runJ5A2AMigrations();
+        const squadronId = SquadronId.make("squadron:lifecycle:unheld");
+        yield* createSquadron(squadronId, "Unheld");
+        yield* join(squadronId, sender, "unheld:sender");
+        const ledger = yield* A2ALedger;
+        const lifecycle = yield* A2ALifecycleService;
+        const sql = yield* SqlClient.SqlClient;
+        const homeSquadron = SquadronId.make("squadron:home-support");
+        const ask = (name: string) =>
+          ledger.appendEvents({
+            commandId: CommCommandId.make(`command:lifecycle:unheld:${name}`),
+            squadronId,
+            acceptedAt: openedAt,
+            events: [
+              {
+                kind: "exchange.opened",
+                sender: sender.id,
+                receiver: ParticipantId.make(`agent:j5:a2a:thread:${name}`),
+                exchangeId: ExchangeId.make(`exchange:lifecycle:${name}`),
+                correlationId: CorrelationId.make(`correlation:lifecycle:${name}`),
+                payload: { intent: name, urgency: null },
+                createdAt: openedAt,
+              },
+              {
+                kind: "message.sent",
+                sender: sender.id,
+                receiver: ParticipantId.make(`agent:j5:a2a:thread:${name}`),
+                exchangeId: ExchangeId.make(`exchange:lifecycle:${name}`),
+                correlationId: CorrelationId.make(`correlation:lifecycle:${name}`),
+                payload: {
+                  messageId: LedgerMessageId.make(`message:lifecycle:${name}`),
+                  text: `${name} ask`,
+                  originSquadronId: squadronId,
+                  receiverSquadronId: homeSquadron,
+                  receiverEnvironmentId: "environment-laptop",
+                  exchangeRole: "ask",
+                  envelopeChannel: "peer",
+                },
+                createdAt: openedAt,
+              },
+            ],
+          });
+        yield* ask("waiting");
+        yield* ask("handed");
+        // The laptop polled and was handed one ask, which it has not acknowledged yet.
+        yield* sql`
+          UPDATE j5_a2a_delivery SET handed_out_at = ${openedAt}
+          WHERE message_id = 'message:lifecycle:handed'
+        `;
+
+        const gone = yield* lifecycle.archiveParticipant({ participantId: sender.id, archivedAt });
+        assert.deepStrictEqual(
+          [...gone.droppedExchangeIds].toSorted(),
+          ["exchange:lifecycle:handed", "exchange:lifecycle:waiting"],
+          "both Exchanges drop here",
+        );
+        const noticesSent = yield* sql<{ readonly receiver: string }>`
+          SELECT receiver FROM j5_a2a_comm_event
+          WHERE kind = 'message.sent' AND json_extract(payload, '$.envelopeChannel') = 'lifecycle_notice'
+        `;
+        assert.deepStrictEqual(
+          noticesSent,
+          [{ receiver: "agent:j5:a2a:thread:handed" }],
+          "only the peer that was handed its ask hears of the drop",
+        );
+        const asks = yield* sql<{ readonly message_id: string; readonly status: string }>`
+          SELECT message_id, status FROM j5_a2a_delivery WHERE exchange_role = 'ask' ORDER BY message_id
+        `;
+        assert.deepStrictEqual(asks, [
+          { message_id: "message:lifecycle:handed", status: "pending" },
+          { message_id: "message:lifecycle:waiting", status: "cancelled" },
+        ]);
+      }).pipe(Effect.provide(makeTestLayer(notices)));
+    }),
 );

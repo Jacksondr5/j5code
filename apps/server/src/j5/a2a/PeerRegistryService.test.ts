@@ -152,10 +152,15 @@ it.effect(
         assert.deepStrictEqual(first.peer, {
           environmentId: home,
           label: "Home",
+          linkMode: "push",
           origin: homeOrigin,
           credentialExpiresAt: homeExpiry,
           inboundSession: "active",
           createdAt: timestamp,
+          lastPolledAt: null,
+          lastError: null,
+          waitingCount: 0,
+          oldestWaitingAt: null,
         });
         assert.equal(seen.length, 1);
         assert.equal(seen[0]!.url, `${homeOrigin}${J5_PEER_API_PATHS.hello}`);
@@ -494,6 +499,99 @@ it.effect(
                 peerProtocolVersion: 2,
               },
               headers: { "x-j5-peer-protocol": "2" },
+            },
+          },
+        }),
+      ),
+    ),
+);
+
+it.effect(
+  "records a polling peer only when it first presents the credential issued for it as store",
+  () =>
+    Effect.gen(function* () {
+      yield* runJ5A2AMigrations();
+      const registry = yield* PeerRegistryService;
+      const laptop = "environment-laptop";
+      yield* registry.grantStore({
+        environmentId: laptop,
+        sessionId: "auth-session:laptop-store",
+        issuedAt: timestamp,
+      });
+      assert.deepStrictEqual(yield* registry.list(), [], "an unused credential records nothing");
+
+      const otherSession = yield* registry.adoptStorePeer({
+        environmentId: laptop,
+        sessionId: "auth-session:something-else",
+        at: timestamp,
+      });
+      assert.isFalse(otherSession, "only the session issued as store is proof");
+
+      assert.isTrue(
+        yield* registry.adoptStorePeer({
+          environmentId: laptop,
+          sessionId: "auth-session:laptop-store",
+          at: "2026-10-02T12:00:00.000Z",
+        }),
+      );
+      const recorded = yield* registry.get(laptop);
+      assert.equal(recorded?.linkMode, "store");
+      assert.isNull(recorded?.origin ?? null, "this server never connects to a peer that polls it");
+      assert.equal(recorded?.label, laptop, "named by its id until its first poll");
+      assert.equal(recorded?.createdAt, "2026-10-02T12:00:00.000Z");
+      // Later proofs find the record; the grant is spent.
+      assert.isTrue(
+        yield* registry.adoptStorePeer({
+          environmentId: laptop,
+          sessionId: "auth-session:something-else",
+          at: timestamp,
+        }),
+      );
+
+      const polled = yield* registry.recordPoll({
+        environmentId: laptop,
+        receivedAt: "2026-10-02T12:01:00.000Z",
+        protocolVersion: 1,
+        label: "JM-LT-04213",
+        capabilities: {},
+        roster: undefined,
+      });
+      assert.isNull(polled.rosterHash, "no snapshot until the poller sends one");
+      const named = yield* registry.get(laptop);
+      assert.equal(named?.label, "JM-LT-04213");
+      assert.equal(named?.lastPolledAt, "2026-10-02T12:01:00.000Z", "its arrival is the heartbeat");
+
+      // Adding it as a peer to send to directly would change its mode, which needs a removal first.
+      const conflict = yield* Effect.flip(
+        registry.add({
+          origin: "https://laptop.example",
+          credential: "laptop-token",
+          replaceOrigin: false,
+          acceptedAt: timestamp,
+        }),
+      );
+      assert.equal(conflict._tag, "PeerLinkModeConflictError");
+
+      assert.deepStrictEqual(yield* registry.remove(laptop), { removed: true });
+      assert.isFalse(
+        yield* registry.adoptStorePeer({
+          environmentId: laptop,
+          sessionId: "auth-session:laptop-store",
+          at: timestamp,
+        }),
+        "peering again starts empty",
+      );
+    }).pipe(
+      Effect.provide(
+        makeTestLayer({
+          replies: {
+            "https://laptop.example": {
+              status: 200,
+              body: {
+                environmentId: "environment-laptop",
+                subject: `peer:${work}`,
+                server: { version: "0.0.0-test" },
+              },
             },
           },
         }),

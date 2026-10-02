@@ -1,3 +1,4 @@
+import { PeerDeliveryRequest, type PeerPollAck } from "@t3tools/contracts/j5";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -35,10 +36,16 @@ import {
   type DeliveryMilestone,
 } from "./contracts.ts";
 import { A2ALedgerTransactionWriter, A2ALedger, type A2ALedgerError } from "./LedgerService.ts";
+import { buildPeerDeliveryBody } from "./peerDeliveryBody.ts";
 
 export const A2A_DELIVERY_CONFIG_VERSION = config.version;
 
+/** One poll hands out at most this many deliveries, or about this many bytes of message text. */
+export const PEER_POLL_BATCH_COUNT = 50;
+export const PEER_POLL_BATCH_BYTES = 1_000_000;
+
 const decodeSentPayload = Schema.decodeUnknownEffect(Schema.fromJsonString(MessageSentPayload));
+const encodeDeliveryBody = Schema.encodeSync(Schema.fromJsonString(PeerDeliveryRequest));
 
 interface DeliveryRow {
   readonly squadron_id: string;
@@ -101,6 +108,18 @@ export interface A2ADeliveryWorkerShape {
   readonly runOnce: Effect.Effect<DeliveryMilestone | null, A2ADeliveryWorkerError>;
   readonly drain: Effect.Effect<ReadonlyArray<DeliveryMilestone>, A2ADeliveryWorkerError>;
   readonly listAlarms: Effect.Effect<ReadonlyArray<DeliveryAlarm>, A2ADeliveryWorkerError>;
+  /** The next batch of messages stored for a polling peer, stamped as handed out. */
+  readonly handOutToPeer: (environmentId: string) => Effect.Effect<
+    {
+      readonly deliveries: ReadonlyArray<PeerDeliveryRequest>;
+      readonly more: boolean;
+    },
+    A2ADeliveryWorkerError
+  >;
+  readonly acknowledgePeer: (
+    environmentId: string,
+    acks: ReadonlyArray<PeerPollAck>,
+  ) => Effect.Effect<void, A2ADeliveryWorkerError>;
   readonly subscribeMilestones: Effect.Effect<Stream.Stream<DeliveryMilestone>, never, Scope.Scope>;
 }
 
@@ -156,6 +175,13 @@ const makeLayer = (daemon: boolean) =>
       const wakeups = yield* Queue.unbounded<void>();
       const milestones = yield* PubSub.unbounded<DeliveryMilestone>();
       const drainPermit = yield* Semaphore.make(1);
+      // A row for a peer that polls waits for its poll: never attempted, retried or alarmed here.
+      const notStoredForPollingPeer = sql`(
+        receiver_environment_id IS NULL
+        OR receiver_environment_id NOT IN (
+          SELECT environment_id FROM j5_a2a_peer WHERE link_mode = 'store'
+        )
+      )`;
 
       const appendReceiverEntry = Effect.fn("j5.a2a.delivery.appendReceiverEntry")(function* (
         row: DeliveryRow,
@@ -195,58 +221,6 @@ const makeLayer = (daemon: boolean) =>
         });
       });
 
-      /**
-       * What the peer needs beyond the row: an ask carries its intent so the
-       * peer opens the Exchange, and a terminal notice carries the fact the
-       * notice was written with, read back from the sent row, never from
-       * whatever the Exchange says by the time the row is delivered. A silence
-       * notice is not part of its Exchange, so it names the Exchange it concerns
-       * from the silence.notice event its own command recorded.
-       */
-      const peerBodyFacts = Effect.fn("j5.a2a.delivery.peerBodyFacts")(function* (
-        row: DeliveryRow,
-      ) {
-        if (row.envelope_channel === "silence_notice") {
-          const regarding = yield* sql<{ readonly exchange_id: string | null }>`
-            SELECT notice.exchange_id
-            FROM j5_a2a_comm_event AS sent
-            JOIN j5_a2a_comm_event AS notice
-              ON notice.squadron_id = sent.squadron_id
-             AND notice.command_id = sent.command_id
-             AND notice.kind = 'silence.notice'
-            WHERE sent.squadron_id = ${row.squadron_id} AND sent.seq = ${row.sent_seq}
-            LIMIT 1
-          `;
-          const exchangeId = regarding[0]?.exchange_id;
-          return exchangeId == null ? {} : { regardingExchangeId: exchangeId };
-        }
-        if (row.exchange_id === null) return {};
-        if (row.exchange_role === "ask") {
-          const intent = yield* sql<{ readonly intent: string }>`
-            SELECT intent FROM j5_a2a_exchange
-            WHERE squadron_id = ${row.squadron_id} AND exchange_id = ${row.exchange_id}
-            LIMIT 1
-          `;
-          return intent[0] === undefined ? {} : { intent: intent[0].intent };
-        }
-        if (row.exchange_role === "terminal_notice") {
-          const sent = yield* sql<{ readonly payload: string }>`
-            SELECT payload FROM j5_a2a_comm_event
-            WHERE squadron_id = ${row.squadron_id} AND seq = ${row.sent_seq}
-            LIMIT 1
-          `;
-          if (sent[0] === undefined) return {};
-          const payload = yield* decodeSentPayload(sent[0].payload).pipe(
-            Effect.mapError(
-              (cause) =>
-                new A2ADeliveryTransportError({ operation: "read terminal notice", cause }),
-            ),
-          );
-          return payload.terminal === undefined ? {} : { terminal: payload.terminal };
-        }
-        return {};
-      });
-
       const attemptDelivery = Effect.fn("j5.a2a.delivery.attempt")(function* (
         row: DeliveryRow,
         attempt: number,
@@ -262,19 +236,13 @@ const makeLayer = (daemon: boolean) =>
         const exchangeId = row.exchange_id === null ? null : ExchangeId.make(row.exchange_id);
         if (row.receiver_environment_id !== null) {
           yield* transport.deliverPeer({
-            originSquadronId,
-            receiverSquadronId,
             receiverEnvironmentId: row.receiver_environment_id,
-            correlationId: row.correlation_id,
-            messageId,
-            senderId,
-            receiverId,
-            exchangeId,
-            exchangeRole: row.exchange_role,
-            message: row.message_text,
-            envelopeChannel: row.envelope_channel,
-            createdAt: row.created_at,
-            ...(yield* peerBodyFacts(row)),
+            body: yield* buildPeerDeliveryBody(sql, row).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new A2ADeliveryTransportError({ operation: "build peer delivery", cause }),
+              ),
+            ),
           });
         } else if (isHumanParticipantId(receiverId)) {
           yield* appendReceiverEntry(row);
@@ -333,6 +301,19 @@ const makeLayer = (daemon: boolean) =>
           });
         }
         yield* hooks.afterTransportSuccess({ squadronId: ledgerSquadronId, messageId, attempt });
+        return yield* recordDelivered(row, attempt);
+      });
+
+      /** The receipt: a local delivery, a peer's 2xx, or a polling peer's acknowledgement. */
+      const recordDelivered = Effect.fn("j5.a2a.delivery.recordDelivered")(function* (
+        row: DeliveryRow,
+        attempt: number,
+      ) {
+        const ledgerSquadronId = SquadronId.make(row.squadron_id);
+        const messageId = LedgerMessageId.make(row.message_id);
+        const senderId = ParticipantId.make(row.sender_id);
+        const receiverId = ParticipantId.make(row.receiver_id);
+        const exchangeId = row.exchange_id === null ? null : ExchangeId.make(row.exchange_id);
         const outcome = yield* writer.withPermit(
           sql.withTransaction(
             Effect.gen(function* () {
@@ -379,12 +360,15 @@ const makeLayer = (daemon: boolean) =>
         row: DeliveryRow,
         attempt: number,
         cause: Cause.Cause<A2ADeliveryAttemptError>,
+        /** A polling peer refused the message: permanent, with the peer's own reason. */
+        refusal?: string,
       ) {
         const failedAtDate = yield* DateTime.now;
         const failedAt = DateTime.formatIso(failedAtDate);
         // A held queue is not a failed delivery: it stays retry_scheduled, never delivered or alarmed.
         const held = heldError(cause);
-        const alarmed = held === undefined && attempt >= config.alarmAfterAttempts;
+        const alarmed =
+          refusal !== undefined || (held === undefined && attempt >= config.alarmAfterAttempts);
         const nextAttemptAt = alarmed
           ? null
           : DateTime.formatIso(
@@ -396,7 +380,9 @@ const makeLayer = (daemon: boolean) =>
         const outcome = yield* writer.withPermit(
           sql.withTransaction(
             Effect.gen(function* () {
-              if (yield* deliveryUnavailable(row)) return null;
+              // A polling peer that refused a row it was handed already decided it;
+              // a sender retired since cannot take that back, as with a receipt.
+              if (yield* deliveryUnavailable(row, refusal !== undefined)) return null;
               return yield* writer.appendEventsInTransaction({
                 commandId: commandId("failed", messageId, attempt),
                 squadronId: SquadronId.make(row.squadron_id),
@@ -411,7 +397,7 @@ const makeLayer = (daemon: boolean) =>
                     payload: {
                       messageId,
                       attempt,
-                      error: held?.message ?? errorText(cause),
+                      error: refusal ?? held?.message ?? errorText(cause),
                       nextAttemptAt,
                       alarmed,
                     },
@@ -539,6 +525,7 @@ const makeLayer = (daemon: boolean) =>
           FROM j5_a2a_delivery
           WHERE status IN ('pending', 'retry_scheduled')
             AND (next_attempt_at IS NULL OR next_attempt_at <= ${now})
+            AND ${notStoredForPollingPeer}
           ORDER BY sent_seq, squadron_id, message_id
           LIMIT 1
         `;
@@ -574,6 +561,7 @@ const makeLayer = (daemon: boolean) =>
           SELECT next_attempt_at
           FROM j5_a2a_delivery
           WHERE status IN ('pending', 'retry_scheduled')
+            AND ${notStoredForPollingPeer}
           ORDER BY next_attempt_at IS NOT NULL, next_attempt_at, sent_seq
           LIMIT 1
         `;
@@ -616,8 +604,11 @@ const makeLayer = (daemon: boolean) =>
       // Share the attempt permit so cancellation observes transport acceptance before writing a terminal fact.
       const cancelParticipantDeliveries = Effect.fn("j5.a2a.delivery.cancelParticipantDeliveries")(
         function* (participantId: ParticipantId) {
+          // A row handed out to a polling peer may already be in the peer's
+          // thread, so only its acknowledgement decides it.
           const rows = yield* sql<DeliveryRow>`SELECT * FROM j5_a2a_delivery
           WHERE status IN ('pending', 'retry_scheduled', 'alarmed')
+            AND handed_out_at IS NULL
             AND (sender_id = ${participantId} OR receiver_id = ${participantId})`;
           for (const row of rows) {
             const milestone = yield* cancelDelivery(row, row.attempts + 1);
@@ -625,12 +616,89 @@ const makeLayer = (daemon: boolean) =>
           }
         },
       );
+      /**
+       * A polling peer's waiting rows, oldest first, up to the batch limit, each
+       * stamped the first time it is handed out. A row not acknowledged is
+       * handed out again next time; the peer records each idempotently by its
+       * message id. Runs under the drain permit, so a cancellation sees either
+       * no hand-out or a stamped row, never a row in between.
+       */
+      const handOutToPeer = Effect.fn("j5.a2a.delivery.handOutToPeer")(function* (
+        environmentId: string,
+      ) {
+        const rows = yield* sql<DeliveryRow>`
+          SELECT * FROM j5_a2a_delivery
+          WHERE receiver_environment_id = ${environmentId}
+            AND status IN ('pending', 'retry_scheduled')
+          ORDER BY sent_seq, squadron_id, message_id
+          LIMIT ${PEER_POLL_BATCH_COUNT + 1}
+        `;
+        // The bound is on what goes over the wire: each body as UTF-8 JSON.
+        // One delivery always goes, however large, so a big message never stalls the rest.
+        const deliveries: Array<PeerDeliveryRequest> = [];
+        let bytes = 0;
+        for (const row of rows.slice(0, PEER_POLL_BATCH_COUNT)) {
+          const body = yield* buildPeerDeliveryBody(sql, row);
+          const size = Buffer.byteLength(encodeDeliveryBody(body), "utf8");
+          if (deliveries.length > 0 && bytes + size > PEER_POLL_BATCH_BYTES) break;
+          deliveries.push(body);
+          bytes += size;
+        }
+        if (deliveries.length === 0) return { deliveries: [], more: false };
+        const handedOutAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
+        yield* sql`
+          UPDATE j5_a2a_delivery SET handed_out_at = ${handedOutAt}
+          WHERE receiver_environment_id = ${environmentId}
+            AND handed_out_at IS NULL
+            AND message_id IN ${sql.in(deliveries.map((delivery) => delivery.messageId))}
+        `;
+        return { deliveries, more: rows.length > deliveries.length };
+      });
+
+      /** A polling peer's answer about each row it was handed: a receipt, or its refusal. */
+      const acknowledgePeer = Effect.fn("j5.a2a.delivery.acknowledgePeer")(function* (
+        environmentId: string,
+        acks: ReadonlyArray<PeerPollAck>,
+      ) {
+        for (const ack of acks) {
+          const rows = yield* sql<DeliveryRow>`
+            SELECT * FROM j5_a2a_delivery
+            WHERE receiver_environment_id = ${environmentId}
+              AND message_id = ${ack.messageId}
+              AND handed_out_at IS NOT NULL
+              AND status IN ('pending', 'retry_scheduled')
+            LIMIT 1
+          `;
+          // Already decided, never handed out, or not this peer's: nothing to record.
+          const row = rows[0];
+          if (row === undefined) continue;
+          const milestone =
+            ack.outcome === "received"
+              ? yield* recordDelivered(row, row.attempts + 1)
+              : yield* recordFailure(
+                  row,
+                  row.attempts + 1,
+                  Cause.empty,
+                  `${ack.code}: ${ack.message}`,
+                );
+          yield* PubSub.publish(milestones, milestone);
+        }
+      });
+
       return A2ADeliveryWorker.of({
         cancelParticipantDeliveries: (participantId) =>
           drainPermit
             .withPermit(cancelParticipantDeliveries(participantId))
             .pipe(Effect.mapError(workerError("cancel participant deliveries"))),
         notify: Queue.offer(wakeups, undefined).pipe(Effect.asVoid),
+        handOutToPeer: (environmentId) =>
+          drainPermit
+            .withPermit(handOutToPeer(environmentId))
+            .pipe(Effect.mapError(workerError("hand out to a polling peer"))),
+        acknowledgePeer: (environmentId, acks) =>
+          drainPermit
+            .withPermit(acknowledgePeer(environmentId, acks))
+            .pipe(Effect.mapError(workerError("record a polling peer's acknowledgements"))),
         runOnce,
         drain,
         listAlarms: sql<{

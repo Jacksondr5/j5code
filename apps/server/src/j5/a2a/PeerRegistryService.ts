@@ -2,8 +2,11 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import {
   J5_PEER_API_PATHS,
   PEER_SENDER_LABEL_MAX_CHARS,
+  PeerCapabilities,
   PeerHelloResponse,
+  PeerRosterAgent,
   peerSubjectForEnvironment,
+  type PeerLinkMode,
   type PeerRecord,
 } from "@t3tools/contracts/j5";
 import * as Context from "effect/Context";
@@ -113,6 +116,16 @@ export class PeerSessionReadError extends Schema.TaggedError<PeerSessionReadErro
   }
 }
 
+/** A pair's way of travelling changes only by removing the peer and peering again. */
+export class PeerLinkModeConflictError extends Schema.TaggedError<PeerLinkModeConflictError>()(
+  "PeerLinkModeConflictError",
+  { environmentId: Schema.String, recorded: Schema.String, requested: Schema.String },
+) {
+  override get message(): string {
+    return `Peer ${this.environmentId} is recorded here with link mode ${this.recorded}, not ${this.requested}. To change how messages travel, remove the peer and peer again.`;
+  }
+}
+
 export type AddPeerError =
   | SqlError
   | PeerSessionReadError
@@ -121,11 +134,29 @@ export type AddPeerError =
   | PeerCredentialMismatchError
   | PeerIsSelfError
   | PeerProtocolMismatchError
+  | PeerLinkModeConflictError
   | PeerOriginConflictError;
 
-/** A peer record plus the credential this server presents to it; never leaves the process. */
+/** A peer record plus what this server needs to reach or read it; never leaves the process. */
 export interface PeerConnection extends PeerRecord {
-  readonly credential: string;
+  /** The credential the peer issued to this server; null for a peer that polls, which this server never calls. */
+  readonly credential: string | null;
+  /** A storing record's roster snapshot from the poller; null before its first poll and for other modes. */
+  readonly roster: ReadonlyArray<PeerRosterAgent> | null;
+}
+
+/** What a poll tells the storing server about the poller. */
+export interface PeerPollFacts {
+  readonly environmentId: string;
+  /** When the poll arrived; the roster snapshot is dated by it. */
+  readonly receivedAt: string;
+  readonly protocolVersion: number;
+  readonly label: string | undefined;
+  readonly capabilities: PeerCapabilities | undefined;
+  /** Present only when the poller's roster changed since the snapshot held here. */
+  readonly roster:
+    | { readonly agents: ReadonlyArray<PeerRosterAgent>; readonly hash: string }
+    | undefined;
 }
 
 export interface PeerRegistryServiceShape {
@@ -166,6 +197,36 @@ export interface PeerRegistryServiceShape {
     environmentId: string,
     reported: string | undefined,
   ) => Effect.Effect<string | null, SqlError>;
+  /** Marks a credential just issued as one whose holder will poll this server. */
+  readonly grantStore: (input: {
+    readonly environmentId: string;
+    readonly sessionId: string;
+    readonly issuedAt: string;
+  }) => Effect.Effect<void, SqlError>;
+  /**
+   * The first time a store credential is presented, its holder becomes this
+   * server's `store` peer: the proof stands in for reaching it at an origin.
+   * True when the session's environment is now a recorded peer.
+   */
+  readonly adoptStorePeer: (input: {
+    readonly environmentId: string;
+    readonly sessionId: string;
+    readonly at: string;
+  }) => Effect.Effect<boolean, SqlError>;
+  /**
+   * Records an authorized poll from a peer this server stores for, and its
+   * arrival as the heartbeat a peer's online and offline are read from: a
+   * poll held here proves the poller is there. It ends any last error.
+   * Answers with the roster hash now held for it.
+   */
+  readonly recordPoll: (
+    facts: PeerPollFacts,
+  ) => Effect.Effect<{ readonly rosterHash: string | null }, SqlError>;
+  /** Why the last exchange with a peer failed, or null once one succeeds; a no-op when nothing changes. */
+  readonly recordLastError: (
+    environmentId: string,
+    error: string | null,
+  ) => Effect.Effect<void, SqlError>;
 }
 
 export class PeerRegistryService extends Context.Service<
@@ -176,15 +237,34 @@ export class PeerRegistryService extends Context.Service<
 interface PeerRow {
   readonly environment_id: string;
   readonly label: string;
-  readonly origin: string;
+  readonly link_mode: PeerLinkMode;
+  readonly origin: string | null;
   readonly credential_expires_at: string | null;
+  readonly last_polled_at: string | null;
+  readonly last_error: string | null;
   readonly created_at: string;
   readonly updated_at: string;
 }
 
 interface PeerConnectionRow extends PeerRow {
-  readonly credential: string;
+  readonly credential: string | null;
+  readonly roster_json: string | null;
 }
+
+interface WaitingRow {
+  readonly environment_id: string;
+  readonly waiting: number;
+  readonly oldest: string | null;
+}
+
+const decodeRosterSnapshot = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Array(PeerRosterAgent)),
+);
+// Encoding a value that already has its type cannot fail.
+const encodeRosterSnapshot = Schema.encodeSync(
+  Schema.fromJsonString(Schema.Array(PeerRosterAgent)),
+);
+const encodeCapabilities = Schema.encodeSync(Schema.fromJsonString(PeerCapabilities));
 
 const decodeHello = Schema.decodeUnknownEffect(PeerHelloResponse);
 
@@ -299,20 +379,62 @@ export const layer: Layer.Layer<
       Effect.mapError((cause) => new PeerSessionReadError({ cause })),
     );
 
-    const recordFromRow = (row: PeerRow, live: ReadonlySet<string>): PeerRecord => ({
+    /** Messages recorded here and not yet delivered to each peer: the backlog a row shows. */
+    const waitingByEnvironment = Effect.fn("j5.a2a.peer.waiting")(function* (
+      environmentId?: string,
+    ) {
+      const rows = yield* sql<WaitingRow>`
+        SELECT receiver_environment_id AS environment_id, COUNT(*) AS waiting, MIN(created_at) AS oldest
+        FROM j5_a2a_delivery
+        WHERE receiver_environment_id IS NOT NULL
+          AND status IN ('pending', 'retry_scheduled')
+          AND ${environmentId === undefined ? sql`1 = 1` : sql`receiver_environment_id = ${environmentId}`}
+        GROUP BY receiver_environment_id
+      `;
+      return new Map(rows.map((row) => [row.environment_id, row] as const));
+    });
+
+    const recordFromRow = (
+      row: PeerRow,
+      live: ReadonlySet<string>,
+      waiting: ReadonlyMap<string, WaitingRow>,
+    ): PeerRecord => ({
       environmentId: row.environment_id,
       label: row.label,
+      linkMode: row.link_mode,
       origin: row.origin,
       credentialExpiresAt: row.credential_expires_at,
       inboundSession: live.has(peerSubjectForEnvironment(row.environment_id))
         ? "active"
         : "missing",
       createdAt: row.created_at,
+      lastPolledAt: row.last_polled_at,
+      lastError: row.last_error,
+      waitingCount: waiting.get(row.environment_id)?.waiting ?? 0,
+      oldestWaitingAt: waiting.get(row.environment_id)?.oldest ?? null,
+    });
+
+    const connectionFromRow = Effect.fn("j5.a2a.peer.connectionFromRow")(function* (
+      row: PeerConnectionRow,
+      live: ReadonlySet<string>,
+      waiting: ReadonlyMap<string, WaitingRow>,
+    ) {
+      // A snapshot this server cannot read is no snapshot: the peer reads as not yet polled.
+      const roster =
+        row.roster_json === null
+          ? null
+          : yield* decodeRosterSnapshot(row.roster_json).pipe(Effect.orElseSucceed(() => null));
+      return {
+        ...recordFromRow(row, live, waiting),
+        credential: row.credential,
+        roster,
+      } satisfies PeerConnection;
     });
 
     const readRow = Effect.fn("j5.a2a.peer.readRow")(function* (environmentId: string) {
       const rows = yield* sql<PeerRow>`
-        SELECT environment_id, label, origin, credential_expires_at, created_at, updated_at
+        SELECT environment_id, label, link_mode, origin, credential_expires_at, last_polled_at,
+          last_error, created_at, updated_at
         FROM j5_a2a_peer
         WHERE environment_id = ${environmentId}
         LIMIT 1
@@ -342,7 +464,19 @@ export const layer: Layer.Layer<
           });
         }
         const existing = yield* readRow(hello.environmentId);
-        if (existing !== null && existing.origin !== input.origin && !input.replaceOrigin) {
+        if (existing !== null && existing.link_mode !== "push") {
+          return yield* new PeerLinkModeConflictError({
+            environmentId: hello.environmentId,
+            recorded: existing.link_mode,
+            requested: "push",
+          });
+        }
+        if (
+          existing !== null &&
+          existing.origin !== null &&
+          existing.origin !== input.origin &&
+          !input.replaceOrigin
+        ) {
           // The hello there may have completed a rotation, retiring the credential
           // recorded here, but only if that origin is the same server. Keep the
           // new credential only once the recorded origin accepts it too.
@@ -375,71 +509,154 @@ export const layer: Layer.Layer<
         const expiresAt = hello.credentialExpiresAt ?? null;
         // One statement records or rotates; created_at survives an update.
         const rows = yield* sql<PeerRow>`
-          INSERT INTO j5_a2a_peer (environment_id, label, origin, credential, credential_expires_at, created_at, updated_at)
-          VALUES (${hello.environmentId}, ${label}, ${input.origin}, ${input.credential}, ${expiresAt}, ${input.acceptedAt}, ${input.acceptedAt})
+          INSERT INTO j5_a2a_peer (
+            environment_id, label, link_mode, origin, credential, credential_expires_at,
+            peer_protocol_version, peer_capabilities, created_at, updated_at
+          )
+          VALUES (
+            ${hello.environmentId}, ${label}, 'push', ${input.origin}, ${input.credential}, ${expiresAt},
+            ${hello.peerProtocolVersion ?? 1}, ${encodeCapabilities(hello.capabilities ?? {})},
+            ${input.acceptedAt}, ${input.acceptedAt}
+          )
           ON CONFLICT(environment_id) DO UPDATE SET
             label = excluded.label,
             origin = excluded.origin,
             credential = excluded.credential,
             credential_expires_at = excluded.credential_expires_at,
+            peer_protocol_version = excluded.peer_protocol_version,
+            peer_capabilities = excluded.peer_capabilities,
+            last_error = NULL,
             updated_at = excluded.updated_at
-          RETURNING environment_id, label, origin, credential_expires_at, created_at, updated_at
+          RETURNING environment_id, label, link_mode, origin, credential_expires_at, last_polled_at,
+            last_error, created_at, updated_at
         `;
         const row = rows[0]!;
         const live = yield* liveSubjects;
-        return { peer: recordFromRow(row, live), created: existing === null };
+        const waiting = yield* waitingByEnvironment(row.environment_id);
+        return { peer: recordFromRow(row, live, waiting), created: existing === null };
       });
 
     const get: PeerRegistryServiceShape["get"] = (environmentId) =>
       Effect.gen(function* () {
         const row = yield* readRow(environmentId);
         if (row === null) return null;
-        return recordFromRow(row, yield* liveSubjects);
+        return recordFromRow(row, yield* liveSubjects, yield* waitingByEnvironment(environmentId));
       });
 
     const connections: PeerRegistryServiceShape["connections"] = () =>
       Effect.gen(function* () {
         const rows = yield* sql<PeerConnectionRow>`
-          SELECT environment_id, label, origin, credential, credential_expires_at, created_at, updated_at
+          SELECT environment_id, label, link_mode, origin, credential, credential_expires_at,
+            last_polled_at, last_error, roster_json, created_at, updated_at
           FROM j5_a2a_peer
           ORDER BY label, environment_id
         `;
         if (rows.length === 0) return [];
         const live = yield* liveSubjects;
-        return rows.map((row) => ({ ...recordFromRow(row, live), credential: row.credential }));
+        const waiting = yield* waitingByEnvironment();
+        return yield* Effect.forEach(rows, (row) => connectionFromRow(row, live, waiting));
       });
 
     /** One peer's connection for a delivery attempt: one row and its session status, not the whole registry. */
     const connection: PeerRegistryServiceShape["connection"] = (environmentId) =>
       Effect.gen(function* () {
         const rows = yield* sql<PeerConnectionRow>`
-          SELECT environment_id, label, origin, credential, credential_expires_at, created_at, updated_at
+          SELECT environment_id, label, link_mode, origin, credential, credential_expires_at,
+            last_polled_at, last_error, roster_json, created_at, updated_at
           FROM j5_a2a_peer
           WHERE environment_id = ${environmentId}
           LIMIT 1
         `;
         const row = rows[0];
         if (row === undefined) return null;
-        return { ...recordFromRow(row, yield* liveSubjects), credential: row.credential };
+        return yield* connectionFromRow(
+          row,
+          yield* liveSubjects,
+          yield* waitingByEnvironment(environmentId),
+        );
       });
 
     const list: PeerRegistryServiceShape["list"] = () =>
       Effect.gen(function* () {
         const rows = yield* sql<PeerRow>`
-          SELECT environment_id, label, origin, credential_expires_at, created_at, updated_at
+          SELECT environment_id, label, link_mode, origin, credential_expires_at, last_polled_at,
+            last_error, created_at, updated_at
           FROM j5_a2a_peer
           ORDER BY label, environment_id
         `;
         if (rows.length === 0) return [];
         const live = yield* liveSubjects;
-        return rows.map((row) => recordFromRow(row, live));
+        const waiting = yield* waitingByEnvironment();
+        return rows.map((row) => recordFromRow(row, live, waiting));
       });
 
     const remove: PeerRegistryServiceShape["remove"] = (environmentId) =>
-      sql<{ readonly environment_id: string }>`
-        DELETE FROM j5_a2a_peer WHERE environment_id = ${environmentId}
-        RETURNING environment_id
-      `.pipe(Effect.map((rows) => ({ removed: rows.length > 0 })));
+      sql.withTransaction(
+        Effect.gen(function* () {
+          yield* sql`DELETE FROM j5_a2a_peer_store_grant WHERE environment_id = ${environmentId}`;
+          const rows = yield* sql<{ readonly environment_id: string }>`
+            DELETE FROM j5_a2a_peer WHERE environment_id = ${environmentId}
+            RETURNING environment_id
+          `;
+          return { removed: rows.length > 0 };
+        }),
+      );
+
+    const grantStore: PeerRegistryServiceShape["grantStore"] = (input) =>
+      sql`
+        INSERT INTO j5_a2a_peer_store_grant (session_id, environment_id, issued_at)
+        VALUES (${input.sessionId}, ${input.environmentId}, ${input.issuedAt})
+      `.pipe(Effect.asVoid);
+
+    const adoptStorePeer: PeerRegistryServiceShape["adoptStorePeer"] = (input) =>
+      sql.withTransaction(
+        Effect.gen(function* () {
+          if ((yield* readRow(input.environmentId)) !== null) return true;
+          const grant = yield* sql`
+            SELECT 1 FROM j5_a2a_peer_store_grant
+            WHERE session_id = ${input.sessionId} AND environment_id = ${input.environmentId}
+          `;
+          if (grant.length === 0) return false;
+          // Its name is its environment id until its first poll tells this server its own.
+          yield* sql`
+            INSERT INTO j5_a2a_peer (environment_id, label, link_mode, created_at, updated_at)
+            VALUES (${input.environmentId}, ${input.environmentId}, 'store', ${input.at}, ${input.at})
+          `;
+          yield* sql`DELETE FROM j5_a2a_peer_store_grant WHERE environment_id = ${input.environmentId}`;
+          return true;
+        }),
+      );
+
+    const recordPoll: PeerRegistryServiceShape["recordPoll"] = (facts) =>
+      Effect.gen(function* () {
+        const label = facts.label?.trim().slice(0, PEER_SENDER_LABEL_MAX_CHARS);
+        const capabilities =
+          facts.capabilities === undefined ? null : encodeCapabilities(facts.capabilities);
+        const roster =
+          facts.roster === undefined ? null : encodeRosterSnapshot(facts.roster.agents);
+        // The snapshot and the name change only when the poller sent new ones.
+        const rows = yield* sql<{ readonly roster_hash: string | null }>`
+          UPDATE j5_a2a_peer SET
+            label = COALESCE(${label === undefined || label.length === 0 ? null : label}, label),
+            peer_protocol_version = ${facts.protocolVersion},
+            peer_capabilities = COALESCE(${capabilities}, peer_capabilities),
+            roster_json = COALESCE(${roster}, roster_json),
+            roster_hash = COALESCE(${facts.roster?.hash ?? null}, roster_hash),
+            roster_received_at = CASE WHEN ${roster} IS NULL THEN roster_received_at ELSE ${facts.receivedAt} END,
+            last_polled_at = ${facts.receivedAt},
+            last_error = NULL,
+            updated_at = ${facts.receivedAt}
+          WHERE environment_id = ${facts.environmentId} AND link_mode = 'store'
+          RETURNING roster_hash
+        `;
+        return { rosterHash: rows[0]?.roster_hash ?? null };
+      });
+
+    const recordLastError: PeerRegistryServiceShape["recordLastError"] = (environmentId, error) =>
+      sql`
+        UPDATE j5_a2a_peer SET last_error = ${error}
+        WHERE environment_id = ${environmentId} AND last_error IS NOT ${error}
+      `.pipe(Effect.asVoid);
 
     const recordLabel: PeerRegistryServiceShape["recordLabel"] = (environmentId, reported) =>
       Effect.gen(function* () {
@@ -463,6 +680,10 @@ export const layer: Layer.Layer<
       list,
       remove,
       recordLabel,
+      grantStore,
+      adoptStorePeer,
+      recordPoll,
+      recordLastError,
     });
   }),
 );

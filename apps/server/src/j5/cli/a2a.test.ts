@@ -321,6 +321,7 @@ it.live("lists the roster as one line per participant and answers whoami", () =>
   );
 });
 
+/** A record as a server from before poll mode answers it, with none of the poll-mode fields. */
 const homePeer = {
   environmentId: "environment-home",
   label: "Home",
@@ -328,6 +329,15 @@ const homePeer = {
   credentialExpiresAt: "2036-09-16T00:00:00.000Z",
   inboundSession: "active",
   createdAt: "2026-09-16T00:00:00.000Z",
+};
+/** The same record decoded here: a peer of an older server sends directly, and nothing waits for it. */
+const homePeerDecoded = {
+  ...homePeer,
+  linkMode: "push",
+  lastPolledAt: null,
+  lastError: null,
+  waitingCount: 0,
+  oldestWaitingAt: null,
 };
 
 it.live("issues a peer credential, adds, lists, and removes a peer through the admin routes", () =>
@@ -389,11 +399,11 @@ it.live("issues a peer credential, adds, lists, and removes a peer through the a
           { origin: "https://home.example:3773", credential: "issued-by-home" },
           "the peer names itself at hello; no name is typed here",
         );
-        assert.deepStrictEqual(lastJson().peer, homePeer);
+        assert.deepStrictEqual(lastJson().peer, homePeerDecoded);
 
         yield* runCli(["a2a", "peer", "list", ...common]);
         assert.equal(stub.requests[2]!.method, "GET");
-        assert.deepStrictEqual(lastJson().peers, [homePeer]);
+        assert.deepStrictEqual(lastJson().peers, [homePeerDecoded]);
 
         yield* runCli(["a2a", "peer", "remove", "--environment", "environment-home", ...common]);
         assert.deepStrictEqual(stub.requests[3]!.body, { environmentId: "environment-home" });

@@ -96,10 +96,15 @@ export class A2AAmbiguousParticipantError extends Schema.TaggedError<A2AAmbiguou
 /** Names no server: which peers exist and why one is unreachable are facts for the person's surfaces. */
 export class A2APeersUnreadError extends Schema.TaggedError<A2APeersUnreadError>()(
   "A2APeersUnreadError",
-  { participantId: Schema.String, unreadPeerCount: Schema.Number },
+  {
+    participantId: Schema.String,
+    unreadPeerCount: Schema.Number,
+    /** Why each unread peer server could not be read, naming it: "Laptop has not polled yet". */
+    reasons: Schema.Array(Schema.String),
+  },
 ) {
   override get message(): string {
-    return `Participant ${this.participantId} is not homed on this server and has never been seen here, and ${String(this.unreadPeerCount)} peer server(s) could not be read just now. Retry shortly; list_participants reports how many peers are currently unread.`;
+    return `Participant ${this.participantId} is not homed on this server and has never been seen here, and ${String(this.unreadPeerCount)} peer server(s) could not be read just now (${this.reasons.join("; ")}). Retry shortly; list_participants reports how many peers are currently unread.`;
   }
 }
 
@@ -557,7 +562,21 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
         // its recorded route; only an unknown id fans out to every peer's roster,
         // so one dead peer never taxes a send to a known one.
         const known = yield* recordedRoute(id);
-        if (known !== null) return known;
+        if (known !== null) {
+          // A peer that polls sends its roster with every change, so its
+          // snapshot already knows an archive: refuse now, without a network read.
+          const snapshot =
+            known.environmentId === null
+              ? null
+              : yield* peers.snapshotAgent(known.environmentId, id);
+          if (snapshot?.archived === true) {
+            return yield* new A2AParticipantArchivedError({
+              participantId: id,
+              squadronId: snapshot.squadronId,
+            });
+          }
+          return known;
+        }
         const reading = yield* peers.resolveAgent(id);
         const active = reading.agents.filter((agent) => !agent.archived);
         if (active.length > 1)
@@ -570,6 +589,9 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
           return yield* new A2APeersUnreadError({
             participantId: id,
             unreadPeerCount: reading.unreadPeers.length,
+            reasons: reading.unreadPeers.map((peer) =>
+              peer.reason.startsWith(peer.label) ? peer.reason : `${peer.label}: ${peer.reason}`,
+            ),
           });
         }
         if (agent.archived) {
