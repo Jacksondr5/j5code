@@ -2,7 +2,7 @@ import { Tooltip, TooltipTrigger, TooltipPopup } from "../../components/ui/toolt
 import type { ChatMessage } from "~/types";
 import { useNowMinute } from "~/hooks/useNowMinute";
 import type { ScopedThreadRef } from "@t3tools/contracts";
-import { InboxIcon, SendIcon } from "lucide-react";
+import { ChevronRightIcon, InboxIcon, SendIcon } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { renderCrewNotice } from "../crew/CrewNoticeRenderer";
@@ -406,12 +406,16 @@ function A2ABodyClamp({ body }: { readonly body: string }) {
         <button
           type="button"
           aria-expanded={expanded}
-          className="mt-1 cursor-pointer text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70"
+          className="mt-1 inline-flex cursor-pointer items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70"
           onClick={() => setExpanded((current) => !current)}
         >
+          <ChevronRightIcon
+            aria-hidden
+            className={expanded ? "size-3 shrink-0 rotate-90" : "size-3 shrink-0"}
+          />
           {expanded
-            ? "⌄ Collapse"
-            : `› ${hiddenLineCount} more ${hiddenLineCount === 1 ? "line" : "lines"}`}
+            ? "Collapse"
+            : `${hiddenLineCount} more ${hiddenLineCount === 1 ? "line" : "lines"}`}
         </button>
       ) : null}
     </div>
