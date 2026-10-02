@@ -33,10 +33,11 @@ import packageJson from "../../../package.json" with { type: "json" };
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
 import { annotateEnvironmentRequest } from "../../auth/http.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
-import { PeerInboundService } from "./PeerInboundService.ts";
+import { PeerInboundService, peerDeliveryRefusal } from "./PeerInboundService.ts";
 import { PeerRegistryService } from "./PeerRegistryService.ts";
 import { PeerStoreService } from "./PeerStoreService.ts";
 import { RosterService } from "./RosterService.ts";
+import { toPeerRoster } from "./peerRoster.ts";
 import { peerProtocolHeaders, peerProtocolMismatch, statedPeerProtocol } from "./peerProtocol.ts";
 import {
   authenticate,
@@ -101,6 +102,8 @@ const addFailure = (error: unknown): Effect.Effect<HttpServerResponse.HttpServer
       return Effect.succeed(jsonError(400, "peer_is_self", message));
     case "PeerProtocolMismatchError":
       return Effect.succeed(jsonError(409, "peer_protocol_mismatch", message));
+    case "PeerPollUnsupportedError":
+      return Effect.succeed(jsonError(409, "peer_poll_unsupported", message));
     case "PeerLinkModeConflictError":
       return Effect.succeed(jsonError(409, "peer_link_mode_conflict", message));
     default:
@@ -111,25 +114,20 @@ const addFailure = (error: unknown): Effect.Effect<HttpServerResponse.HttpServer
 };
 
 const deliveryFailure = (error: unknown): Effect.Effect<HttpServerResponse.HttpServerResponse> => {
-  const tag = tagOf(error);
-  const message = messageOf(error, "Delivery failed.");
-  switch (tag) {
-    case "A2APeerReceiverNotFoundError":
-      return Effect.succeed(jsonError(404, "recipient_not_found", message));
-    case "A2APeerReceiverNotDeliverableError":
-    case "A2APeerSenderNotOwnedError":
-      return Effect.succeed(jsonError(403, "policy_refused", message, { reason: tag }));
-    case "A2APeerAskIntentRequiredError":
-      return Effect.succeed(requestFailure(message));
-    case "A2APeerSenderNotAllowedError":
-      return Effect.succeed(jsonError(403, "policy_refused", message, { reason: tag }));
-    case "CommCommandConflictError":
-      return Effect.succeed(jsonError(409, "message_id_conflict", message));
-    default:
-      return Effect.logError("J5 A2A peer delivery failed", { cause: error }).pipe(
-        Effect.as(jsonError(500, tag, "Delivery failed.")),
-      );
+  const refusal = peerDeliveryRefusal(error);
+  if (refusal !== null) {
+    return Effect.succeed(
+      jsonError(
+        refusal.status,
+        refusal.code,
+        refusal.message,
+        refusal.reason === undefined ? {} : { reason: refusal.reason },
+      ),
+    );
   }
+  return Effect.logError("J5 A2A peer delivery failed", { cause: error }).pipe(
+    Effect.as(jsonError(500, tagOf(error), "Delivery failed.")),
+  );
 };
 
 export const peerHttpRouteLayer = Layer.unwrap(
@@ -353,6 +351,7 @@ export const peerHttpRouteLayer = Layer.unwrap(
           peers.add({
             origin: decoded.success.origin,
             credential: decoded.success.credential,
+            linkMode: decoded.success.poll === true ? "poll" : "push",
             replaceOrigin: decoded.success.replaceOrigin ?? false,
             acceptedAt,
           }),
@@ -469,24 +468,7 @@ export const peerHttpRouteLayer = Layer.unwrap(
         }
         return HttpServerResponse.jsonUnsafe({
           label: yield* peers.selfLabel,
-          agents: listed.success.flatMap((entry) =>
-            entry.kind === "agent" &&
-            entry.squadronId !== null &&
-            entry.squadronName !== null &&
-            entry.threadId !== null
-              ? [
-                  {
-                    participantId: entry.participantId,
-                    squadronId: entry.squadronId,
-                    squadronName: entry.squadronName,
-                    threadId: entry.threadId,
-                    displayName: entry.displayName,
-                    archived: entry.archived,
-                    canReceiveMessage: entry.canReceiveMessage,
-                  },
-                ]
-              : [],
-          ),
+          agents: toPeerRoster(listed.success),
         } satisfies PeerRosterResponse);
       }).pipe(Effect.catchTags(respondableTags), statingPeerProtocol),
     );
