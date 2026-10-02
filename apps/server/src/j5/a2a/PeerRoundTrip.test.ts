@@ -125,6 +125,7 @@ const makeServer = (
           unreadPeers: [],
           selfName: self.environmentId,
         }),
+      snapshotAgent: () => Effect.succeed(null),
       serverName: () => Effect.succeed(otherLabel),
     }),
   );
@@ -150,28 +151,9 @@ const makeServer = (
             });
           }
           yield* Ref.update(crossed, (rows) => [...rows, input]);
-          // The fields the live transport puts on the wire from what the worker hands
-          // it. The sender label is the live transport's own read of the sender's
-          // thread title (covered in PeerOutbound.test.ts), so it is absent here.
+          // The body the worker built is exactly what the live transport puts on the wire.
           yield* door
-            .receive({
-              messageId: input.messageId,
-              senderId: input.senderId,
-              receiverId: input.receiverId,
-              exchangeId: input.exchangeId,
-              correlationId: input.correlationId,
-              exchangeRole: input.exchangeRole,
-              envelopeChannel: input.envelopeChannel,
-              text: input.message,
-              originSquadronId: input.originSquadronId,
-              ...(input.intent === undefined ? {} : { intent: input.intent }),
-              ...(input.terminal === undefined ? {} : { terminal: input.terminal }),
-              ...(input.regardingExchangeId === undefined
-                ? {}
-                : { regardingExchangeId: input.regardingExchangeId }),
-              createdAt: input.createdAt,
-              originEnvironmentId: self.environmentId,
-            })
+            .receive({ ...input.body, originEnvironmentId: self.environmentId })
             .pipe(
               Effect.mapError(
                 (cause) => new A2ADeliveryTransportError({ operation: "deliver to peer", cause }),
@@ -364,8 +346,8 @@ it.effect(
         yield* Ref.set(homeDoor, homeServer.inbound);
         // Home's record of Work carries the name Work reported for itself at hello.
         yield* homeServer.sql`
-          INSERT INTO j5_a2a_peer (environment_id, label, origin, credential, created_at, updated_at)
-          VALUES (${work.environmentId}, 'Work VM', 'https://work.example', 'work-token', ${timestamp}, ${timestamp})
+          INSERT INTO j5_a2a_peer (environment_id, label, link_mode, origin, credential, created_at, updated_at)
+          VALUES (${work.environmentId}, 'Work VM', 'push', 'https://work.example', 'work-token', ${timestamp}, ${timestamp})
         `;
 
         // Work asks Home by participant id, naming no server.
@@ -499,8 +481,8 @@ it.effect(
         // The withdrawal crosses as a platform notice carrying the fact it was written with.
         assert.equal((yield* workServer.worker.runOnce)?.state, "delivered");
         const notice = (yield* Ref.get(pair.crossed)).at(-1)!;
-        assert.equal(notice.exchangeRole, "terminal_notice");
-        assert.deepStrictEqual(notice.terminal, { kind: "sender-cleared" });
+        assert.equal(notice.body.exchangeRole, "terminal_notice");
+        assert.deepStrictEqual(notice.body.terminal, { kind: "sender-cleared" });
 
         const closure = yield* homeServer.sql<{
           readonly status: string;
@@ -548,8 +530,8 @@ it.effect(
         // The drop notice goes to the answerer, on Home, with the retirement but no disposition.
         assert.equal((yield* workServer.worker.runOnce)?.state, "delivered");
         const notice = (yield* Ref.get(pair.crossed)).at(-1)!;
-        assert.equal(notice.receiverId, home.agent.id);
-        assert.deepStrictEqual(notice.terminal, {
+        assert.equal(notice.body.receiverId, home.agent.id);
+        assert.deepStrictEqual(notice.body.terminal, {
           kind: "dropped",
           cause: {
             kind: "participant-archived",
@@ -597,9 +579,9 @@ it.effect(
         `;
         assert.equal(crossing?.state, "delivered", why[0]?.last_error ?? "");
         const notice = (yield* Ref.get(pair.crossed)).at(-1)!;
-        assert.equal(notice.envelopeChannel, "silence_notice");
-        assert.equal(notice.receiverId, work.agent.id);
-        assert.equal(notice.regardingExchangeId, exchangeId, "the notice names its Exchange");
+        assert.equal(notice.body.envelopeChannel, "silence_notice");
+        assert.equal(notice.body.receiverId, work.agent.id);
+        assert.equal(notice.body.regardingExchangeId, exchangeId, "the notice names its Exchange");
 
         // Work accepts it for the Exchange it holds with Home and tells its waiting agent.
         assert.equal((yield* workServer.worker.runOnce)?.state, "delivered");

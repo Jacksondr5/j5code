@@ -1,7 +1,9 @@
 import { assert, it } from "@effect/vitest";
 import { EventId, type OrchestrationV2StoredEvent, ThreadId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
@@ -13,6 +15,7 @@ import { ThreadManagementService } from "../../orchestration-v2/ThreadManagement
 import {
   A2ADeliveryTransport,
   A2ADeliveryTransportError,
+  type A2ADeliveryTransportShape,
   type AgentDeliveryInput,
   type HumanDeliveryInput,
 } from "./DeliveryTransport.ts";
@@ -67,6 +70,8 @@ const makeTestLayer = (
   notices: Ref.Ref<ReadonlyArray<DeliveredNotice>>,
   storedEvents: Stream.Stream<OrchestrationV2StoredEvent> = Stream.never,
   failPeerDeliveries = false,
+  deliverPeer: A2ADeliveryTransportShape["deliverPeer"] = () =>
+    Effect.die("peer delivery is not under test"),
 ) => {
   const database = NodeSqliteClient.layer({ filename: ":memory:" });
   const ledger = ledgerLayer.pipe(Layer.provide(database));
@@ -89,7 +94,7 @@ const makeTestLayer = (
             )
           : Ref.update(notices, (current) => [...current, { channel: "agent" as const, input }]),
       cancelAgent: () => Effect.succeed("cancelled" as const),
-      deliverPeer: () => Effect.die("peer delivery is not under test"),
+      deliverPeer,
       deliverHuman: (input) =>
         Ref.update(notices, (current) => [...current, { channel: "human" as const, input }]),
     }),
@@ -996,6 +1001,25 @@ it.effect("addresses drop notices to a counterparty on a peer server in both dir
           },
         ],
       });
+      // Home accepted the outbound ask, so it holds that Exchange and is told when it drops.
+      yield* ledger.append({
+        commandId: CommCommandId.make("command:lifecycle:peers:outbound:delivered"),
+        squadronId,
+        acceptedAt: openedAt,
+        event: {
+          kind: "message.delivered",
+          sender: sender.id,
+          receiver: remoteAnswerer,
+          exchangeId: outboundExchange,
+          correlationId: CorrelationId.make("correlation:lifecycle:outbound"),
+          payload: {
+            messageId: LedgerMessageId.make("message:lifecycle:outbound"),
+            attempt: 1,
+            channel: "agent",
+          },
+          createdAt: openedAt,
+        },
+      });
 
       const receiverGone = yield* lifecycle.archiveParticipant({
         participantId: receiver.id,
@@ -1041,5 +1065,177 @@ it.effect("addresses drop notices to a counterparty on a peer server in both dir
         { receiver_environment_id: "environment-home" },
       ]);
     }).pipe(Effect.provide(makeTestLayer(notices)));
+  }),
+);
+
+it.effect(
+  "sends a peer server no drop notice for an ask that never reached it, and one for an ask it was handed",
+  () =>
+    Effect.gen(function* () {
+      const notices = yield* Ref.make<ReadonlyArray<DeliveredNotice>>([]);
+      yield* Effect.gen(function* () {
+        yield* runJ5A2AMigrations();
+        const squadronId = SquadronId.make("squadron:lifecycle:unheld");
+        yield* createSquadron(squadronId, "Unheld");
+        yield* join(squadronId, sender, "unheld:sender");
+        const ledger = yield* A2ALedger;
+        const lifecycle = yield* A2ALifecycleService;
+        const sql = yield* SqlClient.SqlClient;
+        const homeSquadron = SquadronId.make("squadron:home-support");
+        const ask = (name: string) =>
+          ledger.appendEvents({
+            commandId: CommCommandId.make(`command:lifecycle:unheld:${name}`),
+            squadronId,
+            acceptedAt: openedAt,
+            events: [
+              {
+                kind: "exchange.opened",
+                sender: sender.id,
+                receiver: ParticipantId.make(`agent:j5:a2a:thread:${name}`),
+                exchangeId: ExchangeId.make(`exchange:lifecycle:${name}`),
+                correlationId: CorrelationId.make(`correlation:lifecycle:${name}`),
+                payload: { intent: name, urgency: null },
+                createdAt: openedAt,
+              },
+              {
+                kind: "message.sent",
+                sender: sender.id,
+                receiver: ParticipantId.make(`agent:j5:a2a:thread:${name}`),
+                exchangeId: ExchangeId.make(`exchange:lifecycle:${name}`),
+                correlationId: CorrelationId.make(`correlation:lifecycle:${name}`),
+                payload: {
+                  messageId: LedgerMessageId.make(`message:lifecycle:${name}`),
+                  text: `${name} ask`,
+                  originSquadronId: squadronId,
+                  receiverSquadronId: homeSquadron,
+                  receiverEnvironmentId: "environment-laptop",
+                  exchangeRole: "ask",
+                  envelopeChannel: "peer",
+                },
+                createdAt: openedAt,
+              },
+            ],
+          });
+        yield* ask("waiting");
+        yield* ask("handed");
+        // The laptop polled and was handed one ask, which it has not acknowledged yet.
+        yield* sql`
+          UPDATE j5_a2a_delivery SET handed_out_at = ${openedAt}
+          WHERE message_id = 'message:lifecycle:handed'
+        `;
+
+        const gone = yield* lifecycle.archiveParticipant({ participantId: sender.id, archivedAt });
+        assert.deepStrictEqual(
+          [...gone.droppedExchangeIds].toSorted(),
+          ["exchange:lifecycle:handed", "exchange:lifecycle:waiting"],
+          "both Exchanges drop here",
+        );
+        const noticesSent = yield* sql<{ readonly receiver: string }>`
+          SELECT receiver FROM j5_a2a_comm_event
+          WHERE kind = 'message.sent' AND json_extract(payload, '$.envelopeChannel') = 'lifecycle_notice'
+        `;
+        assert.deepStrictEqual(
+          noticesSent,
+          [{ receiver: "agent:j5:a2a:thread:handed" }],
+          "only the peer that was handed its ask hears of the drop",
+        );
+        const asks = yield* sql<{ readonly message_id: string; readonly status: string }>`
+          SELECT message_id, status FROM j5_a2a_delivery WHERE exchange_role = 'ask' ORDER BY message_id
+        `;
+        assert.deepStrictEqual(asks, [
+          { message_id: "message:lifecycle:handed", status: "pending" },
+          { message_id: "message:lifecycle:waiting", status: "cancelled" },
+        ]);
+      }).pipe(Effect.provide(makeTestLayer(notices)));
+    }),
+);
+
+it.effect("closes an Exchange on a peer server whose ask lands while its sender is archived", () =>
+  Effect.gen(function* () {
+    const notices = yield* Ref.make<ReadonlyArray<DeliveredNotice>>([]);
+    const entered = yield* Deferred.make<void>();
+    const land = yield* Deferred.make<void>();
+    // The peer's 2xx arrives only once the archive is under way.
+    const deliverPeer: A2ADeliveryTransportShape["deliverPeer"] = () =>
+      Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(land)));
+    yield* Effect.gen(function* () {
+      yield* runJ5A2AMigrations();
+      const squadronId = SquadronId.make("squadron:lifecycle:inflight");
+      yield* createSquadron(squadronId, "In flight");
+      yield* join(squadronId, sender, "inflight:sender");
+      const ledger = yield* A2ALedger;
+      const lifecycle = yield* A2ALifecycleService;
+      const worker = yield* A2ADeliveryWorker;
+      const sql = yield* SqlClient.SqlClient;
+      const remote = ParticipantId.make("agent:j5:a2a:thread:remote-answerer");
+      const exchangeId = ExchangeId.make("exchange:lifecycle:inflight");
+      yield* ledger.appendEvents({
+        commandId: CommCommandId.make("command:lifecycle:inflight"),
+        squadronId,
+        acceptedAt: openedAt,
+        events: [
+          {
+            kind: "exchange.opened",
+            sender: sender.id,
+            receiver: remote,
+            exchangeId,
+            correlationId: CorrelationId.make("correlation:lifecycle:inflight"),
+            payload: { intent: "inflight", urgency: null },
+            createdAt: openedAt,
+          },
+          {
+            kind: "message.sent",
+            sender: sender.id,
+            receiver: remote,
+            exchangeId,
+            correlationId: CorrelationId.make("correlation:lifecycle:inflight"),
+            payload: {
+              messageId: LedgerMessageId.make("message:lifecycle:inflight"),
+              text: "inflight ask",
+              originSquadronId: squadronId,
+              receiverSquadronId: SquadronId.make("squadron:home-support"),
+              receiverEnvironmentId: "environment-home",
+              exchangeRole: "ask",
+              envelopeChannel: "peer",
+            },
+            createdAt: openedAt,
+          },
+        ],
+      });
+
+      const attempt = yield* Effect.forkChild(worker.runOnce);
+      yield* Deferred.await(entered);
+      // The archive is committed while the peer has not answered yet.
+      const committed = yield* ledger.subscribeCommitted;
+      const archivedFact = yield* Effect.forkChild(
+        committed.pipe(
+          Stream.filter(
+            (event) => event.kind === "participant.archived" && event.receiver === sender.id,
+          ),
+          Stream.runHead,
+        ),
+      );
+      const archive = yield* Effect.forkChild(
+        lifecycle.archiveParticipant({ participantId: sender.id, archivedAt }),
+      );
+      yield* Fiber.join(archivedFact);
+      yield* Deferred.succeed(land, undefined);
+      assert.equal((yield* Fiber.join(attempt))?.state, "delivered");
+      const gone = yield* Fiber.join(archive);
+      assert.deepStrictEqual([...gone.droppedExchangeIds], [exchangeId]);
+
+      const told = yield* sql<{ readonly receiver: string }>`
+          SELECT receiver FROM j5_a2a_comm_event
+          WHERE kind = 'message.sent' AND json_extract(payload, '$.envelopeChannel') = 'lifecycle_notice'
+        `;
+      assert.deepStrictEqual(
+        told,
+        [{ receiver: remote }],
+        "the peer holds the Exchange, so it is told it closed",
+      );
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(makeTestLayer(notices, Stream.never, false, deliverPeer)),
+    );
   }),
 );

@@ -2183,6 +2183,7 @@ it.effect(
                 selfName: "Work VM",
               }),
             resolveAgent: () => Effect.die("unused"),
+            snapshotAgent: () => Effect.succeed(null),
             serverName: () => Effect.die("unused"),
           }),
         ),

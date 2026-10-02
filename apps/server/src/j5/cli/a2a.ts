@@ -597,7 +597,7 @@ const formatPeerLine = (peer: PeerRecord) =>
   [
     peer.environmentId,
     peer.label,
-    peer.origin,
+    peer.origin ?? "polls this server",
     peer.createdAt,
     peer.inboundSession === "active" ? "inbound: active" : "inbound: no live session",
     peer.credentialExpiresAt === null ? "" : `our credential expires ${peer.credentialExpiresAt}`,

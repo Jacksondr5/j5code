@@ -30,6 +30,7 @@ import Migration0026 from "./migrations/026_PeerRouteIndexes.ts";
 import Migration0027 from "./migrations/027_PeerSenderLabelRecency.ts";
 import Migration0028 from "./migrations/028_CrewPlaybooks.ts";
 import Migration0029 from "./migrations/029_CrewPlaybookRuns.ts";
+import Migration0030 from "./migrations/030_PeerPollMode.ts";
 
 export const J5_A2A_MIGRATIONS_TABLE = "j5_a2a_migrations";
 
@@ -69,6 +70,7 @@ export const migrationEntries = [
   [27, "PeerSenderLabelRecency", Migration0027],
   [28, "CrewPlaybooks", Migration0028],
   [29, "CrewPlaybookRuns", Migration0029],
+  [30, "PeerPollMode", Migration0030],
 ] as const;
 
 const makeMigrationLoader = (throughId?: number) =>
