@@ -11,6 +11,7 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   PeerRegistryService,
   type PeerConnection,
+  type PeerRegistryServiceShape,
   type PeerSessionReadError,
 } from "./PeerRegistryService.ts";
 import { ParticipantId, SquadronId } from "./contracts.ts";
@@ -19,8 +20,9 @@ import { peerProtocolHeaders, peerProtocolMismatch, statedPeerProtocol } from ".
 /**
  * The address book across peers. Every read asks each peer's roster live:
  * peers are few and a live answer is never stale, and a peer that does not
- * answer is reported as unread rather than guessed at. Agents see the rows by
- * their Squadron; which server a Squadron lives on stays here.
+ * answer is reported as unread rather than guessed at. Once this server has a
+ * peer, a reading names this server and each peer by its own name, so agents
+ * see where each participant lives; they still address it by id.
  */
 
 const PEER_ROSTER_TIMEOUT = Duration.seconds(5);
@@ -46,6 +48,8 @@ export interface UnreadPeer {
 export interface PeerDirectoryReading {
   readonly agents: ReadonlyArray<RemoteAgent>;
   readonly unreadPeers: ReadonlyArray<UnreadPeer>;
+  /** This server's name, or null when it has no peers and so names no server at all. */
+  readonly selfName: string | null;
 }
 
 export type PeerDirectoryError = SqlError | PeerSessionReadError;
@@ -56,6 +60,8 @@ export interface PeerDirectoryShape {
   readonly resolveAgent: (
     participantId: ParticipantId,
   ) => Effect.Effect<PeerDirectoryReading, PeerDirectoryError>;
+  /** A peer server's name as last reported, or its environment id once it is no longer recorded. */
+  readonly serverName: (environmentId: string) => Effect.Effect<string, PeerDirectoryError>;
 }
 
 export class PeerDirectory extends Context.Service<PeerDirectory, PeerDirectoryShape>()(
@@ -66,8 +72,9 @@ export class PeerDirectory extends Context.Service<PeerDirectory, PeerDirectoryS
 export const noneLayer = Layer.succeed(
   PeerDirectory,
   PeerDirectory.of({
-    listAgents: () => Effect.succeed({ agents: [], unreadPeers: [] }),
-    resolveAgent: () => Effect.succeed({ agents: [], unreadPeers: [] }),
+    listAgents: () => Effect.succeed({ agents: [], unreadPeers: [], selfName: null }),
+    resolveAgent: () => Effect.succeed({ agents: [], unreadPeers: [], selfName: null }),
+    serverName: (environmentId) => Effect.succeed(environmentId),
   }),
 );
 
@@ -102,7 +109,10 @@ class PeerSessionMissingError extends Schema.TaggedError<PeerSessionMissingError
 
 const reasonOf = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
 
-const readPeerRoster = Effect.fn("j5.a2a.peer.directory.roster")(function* (peer: PeerConnection) {
+const readPeerRoster = Effect.fn("j5.a2a.peer.directory.roster")(function* (
+  peer: PeerConnection,
+  peers: PeerRegistryServiceShape,
+) {
   const client = yield* HttpClient.HttpClient;
   const request = HttpClientRequest.get(`${peer.origin}${J5_PEER_API_PATHS.roster}`).pipe(
     HttpClientRequest.bearerToken(peer.credential),
@@ -119,9 +129,14 @@ const readPeerRoster = Effect.fn("j5.a2a.peer.directory.roster")(function* (peer
     return yield* new PeerRosterStatusError({ status: response.status });
   }
   const roster = yield* response.json.pipe(Effect.flatMap(decodeRoster));
+  // Each read refreshes the peer's name, so a renamed server is named anew without a re-add.
+  const label =
+    roster.label === undefined
+      ? peer.label
+      : ((yield* peers.recordLabel(peer.environmentId, roster.label)) ?? peer.label);
   return roster.agents.map((entry): RemoteAgent => ({
     environmentId: peer.environmentId,
-    environmentLabel: peer.label,
+    environmentLabel: label,
     squadronId: SquadronId.make(entry.squadronId),
     squadronName: entry.squadronName,
     participantId: ParticipantId.make(entry.participantId),
@@ -135,11 +150,12 @@ const readPeerRoster = Effect.fn("j5.a2a.peer.directory.roster")(function* (peer
 /** A peer that no longer holds a session here cannot complete an Exchange with us; it is reported, never read as if healthy. */
 const readPeerRosterIfAuthorized = Effect.fn("j5.a2a.peer.directory.rosterIfAuthorized")(function* (
   peer: PeerConnection,
+  peers: PeerRegistryServiceShape,
 ) {
   if (peer.inboundSession === "missing") {
     return yield* new PeerSessionMissingError({ environmentId: peer.environmentId });
   }
-  return yield* readPeerRoster(peer);
+  return yield* readPeerRoster(peer, peers);
 });
 
 export const layer: Layer.Layer<PeerDirectory, never, PeerRegistryService | HttpClient.HttpClient> =
@@ -152,10 +168,11 @@ export const layer: Layer.Layer<PeerDirectory, never, PeerRegistryService | Http
       const listAgents: PeerDirectoryShape["listAgents"] = () =>
         Effect.gen(function* () {
           const connections = yield* peers.connections();
+          const selfName = connections.length === 0 ? null : yield* peers.selfLabel;
           const readings = yield* Effect.forEach(
             connections,
             (peer) =>
-              readPeerRosterIfAuthorized(peer).pipe(
+              readPeerRosterIfAuthorized(peer, peers).pipe(
                 // One bound for the whole read: connect, body, and decode.
                 Effect.timeout(PEER_ROSTER_TIMEOUT),
                 Effect.provideService(HttpClient.HttpClient, httpClient),
@@ -178,17 +195,21 @@ export const layer: Layer.Layer<PeerDirectory, never, PeerRegistryService | Http
             unreadPeers: readings.flatMap((reading) =>
               reading.unread === null ? [] : [reading.unread],
             ),
+            selfName,
           } satisfies PeerDirectoryReading;
         });
 
       const resolveAgent: PeerDirectoryShape["resolveAgent"] = (participantId) =>
         listAgents().pipe(
           Effect.map((reading) => ({
+            ...reading,
             agents: reading.agents.filter((agent) => agent.participantId === participantId),
-            unreadPeers: reading.unreadPeers,
           })),
         );
 
-      return PeerDirectory.of({ listAgents, resolveAgent });
+      const serverName: PeerDirectoryShape["serverName"] = (environmentId) =>
+        peers.get(environmentId).pipe(Effect.map((peer) => peer?.label ?? environmentId));
+
+      return PeerDirectory.of({ listAgents, resolveAgent, serverName });
     }),
   );

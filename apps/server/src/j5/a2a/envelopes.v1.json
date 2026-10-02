@@ -1,9 +1,10 @@
 {
-  "version": 20,
-  "peerMessage": "[Cross-agent message from {{senderId}} in squadron {{originSquadronId}}]\n\n{{message}}\n\n{{exchangeInstruction}}",
+  "version": 21,
+  "peerMessage": "[Cross-agent message from {{senderId}} in squadron {{originSquadronId}}{{senderServer}}]\n\n{{message}}\n\n{{exchangeInstruction}}",
+  "senderServer": ", on {{serverName}}",
   "machineMessage": "[Message from automation {{senderId}} in squadron {{originSquadronId}}]\n\n{{message}}\n\n{{machineInstruction}}",
   "machineInstruction": "This message came from an automated sender outside any agent session. It cannot receive a reply; act on it directly, and take any question to a person or a peer agent with send_message.",
-  "peerClosedMessage": "[Cross-agent message from {{senderId}} in squadron {{originSquadronId}}]\n\n{{message}}\n\n{{closedExchangeInstruction}}",
+  "peerClosedMessage": "[Cross-agent message from {{senderId}} in squadron {{originSquadronId}}{{senderServer}}]\n\n{{message}}\n\n{{closedExchangeInstruction}}",
   "humanClosedMessage": "[Message from {{senderId}}]\n\n{{message}}\n\n{{closedExchangeInstruction}}",
   "silenceNotice": "[Cross-agent messaging system notice: {{noticeType}}]\n\n{{message}}\n\nThis is a platform-authored delivery signal, not a peer reply.",
   "replyInstruction": "Reply once with send_message(to=\"{{senderId}}\", exchange_id=\"{{exchangeId}}\", message=\"...\") to close the exchange. Follow-ups from the asker carrying this id join the same exchange.",

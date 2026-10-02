@@ -73,18 +73,13 @@ export function PeerIntroductionDialog({
   // environment until then, and choosing another environment clears the edits.
   const [primaryOriginEdit, setPrimaryOrigin] = useState<string | null>(null);
   const [otherOriginEdit, setOtherOrigin] = useState<string | null>(null);
-  const [primaryLabelEdit, setPrimaryLabel] = useState<string | null>(null);
-  const [otherLabelEdit, setOtherLabel] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<PeeringOutcome | null>(null);
   const primaryOrigin = primaryOriginEdit ?? defaultPeerOrigin(primaryBaseUrl);
   const otherOrigin = otherOriginEdit ?? defaultPeerOrigin(otherBaseUrl);
-  const primaryLabel = primaryLabelEdit ?? primary?.label ?? "";
-  const otherLabel = otherLabelEdit ?? other?.label ?? "";
   const chooseOther = (value: EnvironmentId | null) => {
     setOtherId(value);
     setOtherOrigin(null);
-    setOtherLabel(null);
     setOutcome(null);
   };
 
@@ -100,9 +95,10 @@ export function PeerIntroductionDialog({
   });
 
   // The two sides as the request will send them; the step titles read from the same values.
+  // Each server's name is its own, as its environment reports it.
   const local: PeeringSide = {
     environmentId: primaryEnvironmentId,
-    label: primaryLabel.trim() || (primary?.label ?? primaryEnvironmentId),
+    label: primary?.label ?? primaryEnvironmentId,
     origin: primaryOrigin.trim(),
   };
   const remote: PeeringSide | null =
@@ -110,7 +106,7 @@ export function PeerIntroductionDialog({
       ? null
       : {
           environmentId: otherId,
-          label: otherLabel.trim() || other.label,
+          label: other.label,
           origin: otherOrigin.trim(),
         };
   const remoteLabel = remote?.label ?? "the other server";
@@ -129,11 +125,7 @@ export function PeerIntroductionDialog({
             label: holder.label,
           }),
         record: (recorder, target, credential) =>
-          addPeer(recorder.environmentId, {
-            origin: target.origin,
-            credential,
-            label: target.label,
-          }),
+          addPeer(recorder.environmentId, { origin: target.origin, credential }),
       });
       setOutcome(result);
       if (result.ok) {
@@ -208,9 +200,6 @@ export function PeerIntroductionDialog({
                 originTitle={`Reaches ${remoteLabel} at`}
                 originValue={otherOrigin}
                 onOriginChange={setOtherOrigin}
-                labelTitle={`Known on ${remoteLabel} as`}
-                labelValue={primaryLabel}
-                onLabelChange={setPrimaryLabel}
                 disabled={busy || otherId === null}
               />
               <PeerSideFields
@@ -218,9 +207,6 @@ export function PeerIntroductionDialog({
                 originTitle="Reaches this server at"
                 originValue={primaryOrigin}
                 onOriginChange={setPrimaryOrigin}
-                labelTitle="Known on this server as"
-                labelValue={otherLabel}
-                onLabelChange={setOtherLabel}
                 disabled={busy || otherId === null}
               />
             </div>
@@ -284,26 +270,20 @@ export function PeerIntroductionDialog({
 
 /**
  * One side of the pairing, from that server's point of view: where it reaches
- * the other server, and what the other server will call it. The two columns
- * mirror each other and stack when the dialog is narrow.
+ * the other server. The two columns mirror each other and stack when the
+ * dialog is narrow.
  */
 function PeerSideFields({
   heading,
   originTitle,
   originValue,
   onOriginChange,
-  labelTitle,
-  labelValue,
-  onLabelChange,
   disabled,
 }: {
   readonly heading: string;
   readonly originTitle: string;
   readonly originValue: string;
   readonly onOriginChange: (value: string) => void;
-  readonly labelTitle: string;
-  readonly labelValue: string;
-  readonly onLabelChange: (value: string) => void;
   readonly disabled: boolean;
 }) {
   const warning = peerOriginWarning(originValue);
@@ -322,15 +302,6 @@ function PeerSideFields({
         {warning !== null ? (
           <span className="text-xs font-normal text-warning-foreground">{warning}</span>
         ) : null}
-      </label>
-      <label className="flex flex-col gap-1.5 text-sm font-medium text-foreground">
-        {labelTitle}
-        <Input
-          nativeInput
-          value={labelValue}
-          disabled={disabled}
-          onChange={(event) => onLabelChange(event.currentTarget.value)}
-        />
       </label>
     </fieldset>
   );

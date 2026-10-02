@@ -14,6 +14,7 @@ import * as ProjectService from "../../../project/ProjectService.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   CommandId,
+  EnvironmentId,
   MessageId,
   ProjectId,
   ProviderDriverKind,
@@ -35,7 +36,6 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as NodeOS from "node:os";
 
 import { EnvironmentAuth } from "../../../auth/EnvironmentAuth.ts";
-import * as ServerSecretStore from "../../../auth/ServerSecretStore.ts";
 import * as CheckpointStore from "../../../checkpointing/CheckpointStore.ts";
 import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
 import { ServerConfig } from "../../../config.ts";
@@ -298,11 +298,9 @@ const makeRuntimeLayer = (databasePath: string, baseDir: string) => {
     Layer.provide(FetchHttpClient.layer),
     Layer.provide(Layer.mock(EnvironmentAuth)({ listSessions: () => Effect.succeed([]) })),
     Layer.provide(
-      ServerEnvironment.identityLayer.pipe(
-        Layer.provide(ServerSecretStore.layer),
-        Layer.provide(config),
-        Layer.provide(NodeServices.layer),
-      ),
+      Layer.mock(ServerEnvironment.ServerEnvironment)({
+        getEnvironmentId: Effect.succeed(EnvironmentId.make("environment:a2a-seed")),
+      }),
     ),
   );
   const deliveryTransportLayer = deliveryTransportLive.pipe(

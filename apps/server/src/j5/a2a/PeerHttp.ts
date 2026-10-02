@@ -198,6 +198,7 @@ export const peerHttpRouteLayer = Layer.unwrap(
         );
         if (refused !== null) return refused;
         const environmentId = yield* peers.selfEnvironmentId;
+        const label = yield* peers.selfLabel;
         // The peer holds this credential, so any earlier one for it is done.
         yield* rotationPermit
           .withPermit(revokeOtherSessionsForSubject(session.subject, session.sessionId))
@@ -212,6 +213,7 @@ export const peerHttpRouteLayer = Layer.unwrap(
           credentialExpiresAt:
             session.expiresAt === undefined ? null : DateTime.formatIso(session.expiresAt),
           server: { version: packageJson.version },
+          label,
           peerProtocolVersion: PEER_PROTOCOL_VERSION,
           capabilities: {},
         } satisfies PeerHelloResponse);
@@ -292,7 +294,6 @@ export const peerHttpRouteLayer = Layer.unwrap(
           peers.add({
             origin: decoded.success.origin,
             credential: decoded.success.credential,
-            label: decoded.success.label,
             replaceOrigin: decoded.success.replaceOrigin ?? false,
             acceptedAt,
           }),
@@ -408,6 +409,7 @@ export const peerHttpRouteLayer = Layer.unwrap(
           return jsonError(500, tagOf(listed.failure), "Roster read failed.");
         }
         return HttpServerResponse.jsonUnsafe({
+          label: yield* peers.selfLabel,
           agents: listed.success.flatMap((entry) =>
             entry.kind === "agent" &&
             entry.squadronId !== null &&

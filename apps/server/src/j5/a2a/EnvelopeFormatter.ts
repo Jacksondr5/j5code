@@ -21,15 +21,21 @@ const deliveryInstruction = (input: {
         exchangeId: input.exchangeId,
       });
 
+/** A sender on a peer server is named with the server it lives on; a local sender's line is unchanged. */
+const senderServer = (serverName: string | undefined) =>
+  serverName === undefined ? "" : render(config.senderServer, { serverName });
+
 export const formatPeerEnvelope = (input: {
   readonly senderId: ParticipantId;
   readonly originSquadronId: SquadronId;
   readonly exchangeId: ExchangeId | null;
   readonly message: string;
+  readonly senderServerName?: string;
 }): string =>
   render(config.peerMessage, {
     senderId: input.senderId,
     originSquadronId: input.originSquadronId,
+    senderServer: senderServer(input.senderServerName),
     message: input.message,
     exchangeInstruction: deliveryInstruction(input),
   });
@@ -51,10 +57,12 @@ export const formatClosedPeerEnvelope = (input: {
   readonly senderId: ParticipantId;
   readonly originSquadronId: SquadronId;
   readonly message: string;
+  readonly senderServerName?: string;
 }): string =>
   render(config.peerClosedMessage, {
     senderId: input.senderId,
     originSquadronId: input.originSquadronId,
+    senderServer: senderServer(input.senderServerName),
     message: input.message,
     closedExchangeInstruction: config.closedExchangeInstruction,
   });

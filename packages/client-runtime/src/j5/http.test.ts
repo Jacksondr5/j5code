@@ -579,7 +579,6 @@ it.effect(
       const added = yield* addPeer(work, {
         origin: "https://home.test",
         credential: "home-issued",
-        label: "Home",
       }).pipe(Effect.provide(remoteHttpClientLayer(fetch)));
       expect(added.created).toBe(true);
       expect(added.peer.label).toBe("Home");
@@ -600,7 +599,6 @@ it.effect(
       expect(requests[1]!.body).toEqual({
         origin: "https://home.test",
         credential: "home-issued",
-        label: "Home",
       });
     }),
 );

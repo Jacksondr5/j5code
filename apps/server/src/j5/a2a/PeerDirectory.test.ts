@@ -59,6 +59,8 @@ const makeTestLayer = (
   seen: Array<{ url: string; authorization: string | undefined; protocol?: string | undefined }>,
   /** The protocol header the roster answers state, if any. */
   answeredProtocol?: string,
+  /** The name the roster answer reports for its server, and where recorded names go. */
+  naming?: { readonly answered: string; readonly recorded: Array<[string, string | undefined]> },
 ) => {
   const http = Layer.succeed(
     HttpClient.HttpClient,
@@ -76,18 +78,35 @@ const makeTestLayer = (
         }
         return HttpClientResponse.fromWeb(
           request,
-          new Response(encodeJson(homeRoster), {
-            status: 200,
-            headers: {
-              "content-type": "application/json",
-              ...(answeredProtocol === undefined ? {} : { "x-j5-peer-protocol": answeredProtocol }),
+          new Response(
+            encodeJson(
+              naming === undefined ? homeRoster : { ...homeRoster, label: naming.answered },
+            ),
+            {
+              status: 200,
+              headers: {
+                "content-type": "application/json",
+                ...(answeredProtocol === undefined
+                  ? {}
+                  : { "x-j5-peer-protocol": answeredProtocol }),
+              },
             },
-          }),
+          ),
         );
       }),
     ),
   );
-  const registry = Layer.mock(PeerRegistryService)({ connections: () => Effect.succeed(peers) });
+  const registry = Layer.mock(PeerRegistryService)({
+    connections: () => Effect.succeed(peers),
+    selfLabel: Effect.succeed("Work VM"),
+    get: (environmentId) =>
+      Effect.succeed(peers.find((peer) => peer.environmentId === environmentId) ?? null),
+    recordLabel: (environmentId, reported) =>
+      Effect.sync(() => {
+        naming?.recorded.push([environmentId, reported]);
+        return reported ?? null;
+      }),
+  });
   return peerDirectoryLayer.pipe(Layer.provide(http), Layer.provide(registry));
 };
 
@@ -108,6 +127,7 @@ it.effect(
         "the peer route lists agents only, so nothing else can appear",
       );
       assert.equal(reading.agents[0]!.environmentId, "environment-home");
+      assert.equal(reading.selfName, "Work VM", "once peered, a reading names this server");
       assert.equal(reading.agents[0]!.displayName, "Support triage");
       assert.equal(reading.unreadPeers.length, 1);
       assert.equal(reading.unreadPeers[0]!.environmentId, "environment-mac");
@@ -136,6 +156,22 @@ it.effect("resolves one participant id to the agents that carry it and nothing e
     assert.deepStrictEqual(missing.agents, []);
     assert.deepStrictEqual(missing.unreadPeers, []);
   }).pipe(Effect.provide(makeTestLayer([homePeer], []))),
+);
+
+it.effect("names no server without peers, and names a peer by its recorded name", () =>
+  Effect.gen(function* () {
+    const lonely = yield* Effect.flatMap(PeerDirectory, (directory) => directory.listAgents()).pipe(
+      Effect.provide(makeTestLayer([], [])),
+    );
+    assert.isNull(lonely.selfName, "a server with no peers names no server");
+    const named = yield* Effect.flatMap(PeerDirectory, (directory) =>
+      Effect.all([
+        directory.serverName(homePeer.environmentId),
+        directory.serverName("environment-removed"),
+      ]),
+    ).pipe(Effect.provide(makeTestLayer([homePeer], [])));
+    assert.deepStrictEqual(named, [homePeer.label, "environment-removed"]);
+  }),
 );
 
 it.effect("reports a peer whose session here is gone as unread, without reading it", () =>
@@ -174,5 +210,22 @@ it.effect("reads no agents from a peer whose roster answer states another protoc
       directory.listAgents(),
     ).pipe(Effect.provide(makeTestLayer([homePeer], [], "1")));
     assert.equal(matching.agents.length, 2, "a peer that states the same version is read");
+  }),
+);
+
+it.effect("refreshes a peer's name from each roster read, so a renamed server is named anew", () =>
+  Effect.gen(function* () {
+    const recorded: Array<[string, string | undefined]> = [];
+    const reading = yield* Effect.flatMap(PeerDirectory, (directory) =>
+      directory.listAgents(),
+    ).pipe(
+      Effect.provide(makeTestLayer([homePeer], [], undefined, { answered: "Home Mac", recorded })),
+    );
+    assert.deepStrictEqual(recorded, [["environment-home", "Home Mac"]]);
+    assert.deepStrictEqual(
+      [...new Set(reading.agents.map((agent) => agent.environmentLabel))],
+      ["Home Mac"],
+      "the rows carry the name the peer just reported",
+    );
   }),
 );

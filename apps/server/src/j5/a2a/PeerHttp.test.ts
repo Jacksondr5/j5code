@@ -143,6 +143,7 @@ const makeHandler = (input: {
                   }),
         get: (environmentId) => Effect.succeed(environmentId === home ? homePeer : null),
         selfEnvironmentId: Effect.succeed(work),
+        selfLabel: Effect.succeed("Work VM"),
         list: () => Effect.succeed([homePeer]),
         remove: (environmentId) =>
           Effect.sync(() => {
@@ -254,6 +255,7 @@ it("answers hello with this environment and the credential's subject, and comple
     assert.equal(body.subject, `peer:${home}`);
     assert.equal(body.credentialExpiresAt, "2036-09-16T00:00:00.000Z");
     assert.isString((body.server as { version: string }).version);
+    assert.equal(body.label, "Work VM", "the answering server names itself");
     assert.equal(body.peerProtocolVersion, PEER_PROTOCOL_VERSION);
     assert.deepStrictEqual(body.capabilities, {});
     assert.deepStrictEqual(
@@ -346,6 +348,7 @@ it("adds a peer through the registry and maps its refusals to stable codes", asy
       post(J5_PEER_API_PATHS.peers, {
         origin: "https://home.example:3773",
         credential: "home-token",
+        // An older client still sends the name it typed; the peer's own name wins.
         label: "Home",
       }),
     );
@@ -561,6 +564,7 @@ it("shows a recorded peer only the agents it could address, and nobody else the 
     const response = await peer.handler(get(J5_PEER_API_PATHS.roster));
     assert.equal(response.status, 200);
     assert.deepStrictEqual(await response.json(), {
+      label: "Work VM",
       agents: [
         {
           participantId: "agent:j5:a2a:thread:local-triage",

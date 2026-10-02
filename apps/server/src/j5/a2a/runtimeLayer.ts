@@ -1,4 +1,3 @@
-import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Layer from "effect/Layer";
 import { OrchestrationV2EventSinkLayerLive } from "../../orchestration-v2/runtimeLayer.ts";
 import { layer as playbookCrewRelayLayer } from "../playbooks/PlaybookCrewRelay.ts";
@@ -7,8 +6,6 @@ import { FetchHttpClient } from "effect/unstable/http";
 
 import { layer as artifactWorkspaceLayer } from "../artifacts/ArtifactWorkspace.ts";
 import { layer as agentCrewInstanceLayer } from "./AgentCrewInstanceService.ts";
-import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
-import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
 import { layer as archiveFactsLayer, placementFactsLayer } from "./ArchiveFactsService.ts";
 import { layer as archiveAgentLayer } from "./ArchiveAgentService.ts";
 import { layer as archiveCrewLayer } from "./ArchiveCrewService.ts";
@@ -68,21 +65,14 @@ export const makeJ5SquadronCreationLayer = (
 
 export const J5SquadronCreationLayer = makeJ5SquadronCreationLayer();
 
-// Peering reaches other servers, so its layers carry their own HTTP client and
-// this server's identity (the environment-id file the server publishes at
-// startup). The registry is built once here and shared by the outbound
-// transport, the peer directory the send service resolves through, and the
-// peer routes.
-const serverIdentityLayer = ServerEnvironment.identityLayer.pipe(
-  Layer.provide(ServerSecretStore.layer),
-  Layer.provide(NodeServices.layer),
-);
+// Peering reaches other servers, so its layers carry their own HTTP client.
+// This server's identity and name come from the server's own environment
+// descriptor, the one its clients read. The registry is built once here and
+// shared by the outbound transport, the peer directory the send service
+// resolves through, and the peer routes.
 // One HTTP client serves every layer that reaches a peer.
 const peerHttpClient = FetchHttpClient.layer;
-const peerRegistryProvided = peerRegistryLayer.pipe(
-  Layer.provide(serverIdentityLayer),
-  Layer.provide(peerHttpClient),
-);
+const peerRegistryProvided = peerRegistryLayer.pipe(Layer.provide(peerHttpClient));
 const peerDirectoryProvided = peerDirectoryLayer.pipe(
   Layer.provide(peerRegistryProvided),
   Layer.provide(peerHttpClient),
