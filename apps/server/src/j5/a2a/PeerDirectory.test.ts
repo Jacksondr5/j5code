@@ -56,13 +56,19 @@ const homeRoster: PeerRosterResponse = {
 
 const makeTestLayer = (
   peers: ReadonlyArray<PeerConnection>,
-  seen: Array<{ url: string; authorization: string | undefined }>,
+  seen: Array<{ url: string; authorization: string | undefined; protocol?: string | undefined }>,
+  /** The protocol header the roster answers state, if any. */
+  answeredProtocol?: string,
 ) => {
   const http = Layer.succeed(
     HttpClient.HttpClient,
     HttpClient.make((request) =>
       Effect.gen(function* () {
-        seen.push({ url: request.url, authorization: request.headers.authorization });
+        seen.push({
+          url: request.url,
+          authorization: request.headers.authorization,
+          protocol: request.headers["x-j5-peer-protocol"],
+        });
         if (request.url.startsWith(macPeer.origin)) {
           return yield* new HttpClientError.HttpClientError({
             reason: new HttpClientError.TransportError({ request, description: "ECONNREFUSED" }),
@@ -72,7 +78,10 @@ const makeTestLayer = (
           request,
           new Response(encodeJson(homeRoster), {
             status: 200,
-            headers: { "content-type": "application/json" },
+            headers: {
+              "content-type": "application/json",
+              ...(answeredProtocol === undefined ? {} : { "x-j5-peer-protocol": answeredProtocol }),
+            },
           }),
         );
       }),
@@ -141,5 +150,29 @@ it.effect("reports a peer whose session here is gone as unread, without reading 
     assert.equal(reading.unreadPeers[0]!.environmentId, homePeer.environmentId);
     assert.include(reading.unreadPeers[0]!.reason, "revoked or has expired");
     assert.deepStrictEqual(seen, [], "no roster request goes to a peer that cannot answer us back");
+  }),
+);
+
+it.effect("reads no agents from a peer whose roster answer states another protocol", () =>
+  Effect.gen(function* () {
+    const seen: Array<{ url: string; authorization: string | undefined; protocol?: string }> = [];
+    const reading = yield* Effect.flatMap(PeerDirectory, (directory) =>
+      directory.listAgents(),
+    ).pipe(Effect.provide(makeTestLayer([homePeer], seen, "2")));
+    assert.deepStrictEqual(reading.agents, [], "a roster read on another protocol is not trusted");
+    assert.deepStrictEqual(reading.unreadPeers, [
+      {
+        environmentId: homePeer.environmentId,
+        label: "Home",
+        reason:
+          "Home runs peer protocol 2 and this server runs 1. Update J5 on this server, then try again.",
+      },
+    ]);
+    assert.equal(seen[0]!.protocol, "1", "the read states this server's protocol");
+
+    const matching = yield* Effect.flatMap(PeerDirectory, (directory) =>
+      directory.listAgents(),
+    ).pipe(Effect.provide(makeTestLayer([homePeer], [], "1")));
+    assert.equal(matching.agents.length, 2, "a peer that states the same version is read");
   }),
 );

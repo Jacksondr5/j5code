@@ -93,6 +93,8 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   j5Squadrons: Schema.optionalKey(Schema.Boolean),
   /** J5 person-scoped inbox, count, and answer routes. */
   j5HumanInbox: Schema.optionalKey(Schema.Boolean),
+  /** J5 peering poll mode: the poll and reachability routes and the link-mode peer fields. */
+  j5PeerPoll: Schema.optionalKey(Schema.Boolean),
   repositoryIdentity: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   connectionProbe: Schema.optionalKey(Schema.Boolean),
   /** Missing on older servers, which still accept inline image attachments. */

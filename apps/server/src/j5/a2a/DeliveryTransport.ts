@@ -31,6 +31,7 @@ import {
 } from "./EnvelopeFormatter.ts";
 import { participantIdentityRows } from "./ClientReadsService.ts";
 import { PeerRegistryService } from "./PeerRegistryService.ts";
+import { peerProtocolHeaders, peerProtocolMismatch, statedPeerProtocol } from "./peerProtocol.ts";
 import {
   type DeliveryEnvelopeChannel,
   SquadronId,
@@ -504,12 +505,24 @@ export const live: Layer.Layer<
             HttpClientRequest.post(`${peer.origin}${J5_PEER_API_PATHS.deliver}`).pipe(
               HttpClientRequest.bearerToken(peer.credential),
               HttpClientRequest.acceptJson,
+              HttpClientRequest.setHeaders(peerProtocolHeaders),
             ),
             body,
           );
           const response = yield* httpClient
             .execute(request)
             .pipe(Effect.timeout(PEER_DELIVERY_TIMEOUT));
+          // An older server answers 201 to a body it cannot read, so its version is checked first.
+          const mismatch = peerProtocolMismatch({
+            stated: statedPeerProtocol(response.headers),
+            peer: peer.label,
+          });
+          if (mismatch !== null) {
+            return yield* new A2ADeliveryTargetError({
+              participantId: input.receiverId,
+              state: mismatch,
+            });
+          }
           if (response.status === 200 || response.status === 201) return;
           const text = yield* response.text;
           if (response.status === 404 || response.status === 403) {
