@@ -94,6 +94,8 @@ const remoteView = (server: Server, label: string): RemoteAgent => ({
   displayName: label,
   archived: false,
   canReceiveMessage: true,
+  available: true,
+  lastAvailableAt: null,
 });
 
 /** One server's runtime; `peer` is the other server's inbound door, wired after both exist. */
@@ -123,7 +125,8 @@ const makeServer = (
           selfName: self.environmentId,
         }),
       snapshotAgent: () => Effect.succeed(null),
-      serverName: () => Effect.succeed(otherLabel),
+      serverStatus: () =>
+        Effect.succeed({ name: otherLabel, available: true, lastAvailableAt: null }),
     }),
   );
   const send = sendLayer.pipe(

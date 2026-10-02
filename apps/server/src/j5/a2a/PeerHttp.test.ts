@@ -24,6 +24,7 @@ import { ServerConfig } from "../../config.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { peerHttpRouteLayer } from "./PeerHttp.ts";
 import { RosterService } from "./RosterService.ts";
+import { PeerRemovalService } from "./PeerRemovalService.ts";
 import { PeerStoreService, type PeerPollInput } from "./PeerStoreService.ts";
 import {
   A2APeerReceiverNotDeliverableError,
@@ -221,6 +222,16 @@ const makeHandler = (input: {
                   const replay = (input.received?.length ?? 0) > 1;
                   return { receivedSeq: 12, replay };
                 }),
+      }),
+    ),
+    // Removal wipes what waits on the peer, then removes the record as the registry does.
+    Layer.provide(
+      Layer.mock(PeerRemovalService)({
+        remove: (environmentId) =>
+          Effect.sync(() => {
+            input.removed?.push(environmentId);
+            return { removed: environmentId === home, cancelledMessages: 0, droppedExchanges: 0 };
+          }),
       }),
     ),
     Layer.provide(

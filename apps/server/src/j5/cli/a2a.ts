@@ -845,7 +845,7 @@ const peerRemoveCommand = Command.make("remove", {
   ),
 }).pipe(
   Command.withDescription(
-    "Remove a peer and revoke the credential it held for this server; delivery ends in both directions. Needs an access:write token, or runs on the server host with a temporary local admin session.",
+    "Remove a peer and revoke the credential it held for this server; delivery ends in both directions. Messages still waiting for it are cancelled and open Exchanges with its agents are dropped, and each agent here that was involved is told. Needs an access:write token, or runs on the server host with a temporary local admin session.",
   ),
   Command.withHandler((flags) =>
     runOutcome(

@@ -129,8 +129,8 @@ function PeerRow({
   const remove = async () => {
     const confirmed = await (requestConfirmDialog(
       otherManageable
-        ? `Remove ${peer.label} as a peer? Both servers drop their record of the other and revoke the credential they issued. Agents on the two servers will no longer be able to message each other.`
-        : `Remove ${peer.label} as a peer? This server drops its record of ${peer.label} and revokes the credential ${peer.label} holds here. ${peer.label} keeps its own record of this server until you remove it there, and agents on the two servers will no longer be able to message each other.`,
+        ? `Remove ${peer.label} as a peer? Both servers drop their record of the other and revoke the credential they issued. Agents on the two servers will no longer be able to message each other; messages still waiting are cancelled and open Exchanges between them are dropped, and each agent involved is told.`
+        : `Remove ${peer.label} as a peer? This server drops its record of ${peer.label} and revokes the credential ${peer.label} holds here. ${peer.label} keeps its own record of this server until you remove it there, and agents on the two servers will no longer be able to message each other. Messages still waiting for ${peer.label} are cancelled and open Exchanges with its agents are dropped, and each agent here that was involved is told.`,
       { variant: "destructive" },
       { confirmLabel: "Remove peer" },
     ) ?? Promise.resolve(false));

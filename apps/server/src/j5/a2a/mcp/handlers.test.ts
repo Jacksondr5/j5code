@@ -2046,6 +2046,9 @@ it.effect(
         displayName: "Support triage",
         archived: false,
         canReceiveMessage: true,
+        // Home is a peer this server sends to directly, so nothing measures it.
+        available: null,
+        lastAvailableAt: null,
       };
       const dependencies = Layer.mergeAll(
         Layer.succeed(
@@ -2072,6 +2075,8 @@ it.effect(
                     displayName: "Retired",
                     archived: true,
                     canReceiveMessage: false,
+                    available: false,
+                    lastAvailableAt: "2026-10-02T09:00:00.000Z",
                   },
                 ],
                 unreadPeers: [
@@ -2081,7 +2086,7 @@ it.effect(
               }),
             resolveAgent: () => Effect.die("unused"),
             snapshotAgent: () => Effect.succeed(null),
-            serverName: () => Effect.die("unused"),
+            serverStatus: () => Effect.die("unused"),
           }),
         ),
         Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
@@ -2136,7 +2141,11 @@ it.effect(
         assert.equal(remoteRow.thread_id, "thread:support");
         assert.deepStrictEqual(remoteRow.provenance, { kind: "unrecorded" });
         assert.isFalse(hasKey(remoteRow, "environment_id"), "a server is named, never its id");
-        assert.deepStrictEqual(remoteRow.server, { name: "Home", local: false });
+        assert.deepStrictEqual(
+          remoteRow.server,
+          { name: "Home", local: false },
+          "nothing measures a peer this server sends to, so the row claims nothing",
+        );
         assert.deepStrictEqual(listed.participants[0]!.server, { name: "Work VM", local: true });
         assert.equal(listed.unread_peer_count, 1, "an unread peer is counted");
         assert.isFalse(hasKey(listed, "unread_peers"));
@@ -2151,6 +2160,16 @@ it.effect(
           ],
         );
         assert.equal(withArchived.participants[2]!.can_receive_message, false);
+        assert.deepStrictEqual(
+          withArchived.participants[2]!.server,
+          {
+            name: "Home",
+            local: false,
+            available: false,
+            last_available_at: "2026-10-02T09:00:00.000Z",
+          },
+          "an agent on a peer that polls, and is offline, says so, and since when",
+        );
       }).pipe(Effect.provide(layer));
     }),
 );
