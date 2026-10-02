@@ -88,6 +88,8 @@ export class SquadronThreadCreationService extends Context.Service<
   SquadronThreadCreationServiceShape
 >()("t3/j5/a2a/SquadronThreadCreationService") {}
 
+const decodeSquadronId = Schema.decodeUnknownEffect(SquadronId);
+
 export const registrationCommandIdForCreation = (commandId: string) =>
   CommCommandId.make(`command:j5:a2a:thread-creation:${encodeURIComponent(commandId)}`);
 
@@ -117,7 +119,7 @@ export const layer: Layer.Layer<
             commandId: input.commandId,
           });
         }
-        const squadronId = yield* Schema.decodeUnknownEffect(SquadronId)(input.squadronId);
+        const squadronId = yield* decodeSquadronId(input.squadronId);
 
         // A J5 spawn that needs a fresh worktree records its home and placement first, then hands
         // the thread to ThreadLaunch, which lands here. That home was admitted by the spawn, which

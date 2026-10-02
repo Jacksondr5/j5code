@@ -45,7 +45,7 @@ import { PeerDirectory } from "../PeerDirectory.ts";
 import { ParticipantPlacementService } from "../PlacementService.ts";
 import { A2ASendService } from "../SendService.ts";
 import { SpawnCompositionService } from "../SpawnCompositionService.ts";
-import { SpawnWorkspaceService } from "../spawnWorkspace.ts";
+import { GitRefName, SpawnWorkspaceService } from "../spawnWorkspace.ts";
 import { SquadronJoinService } from "../SquadronJoinService.ts";
 import { SquadronProjectReferences } from "../SquadronProjectReferences.ts";
 import {
@@ -138,7 +138,6 @@ export const J5ListParticipantsResult = Schema.Struct({
 });
 
 const NonEmptyString = Schema.String.check(Schema.isNonEmpty());
-const GitRefName = NonEmptyString.check(Schema.isMaxLength(255));
 
 /** The snake_case MCP form of a spawn's workspace choice; see `spawnWorkspace.ts`. */
 export const J5SpawnWorkspace = Schema.Union([

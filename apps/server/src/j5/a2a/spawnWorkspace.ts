@@ -31,7 +31,19 @@ import { ThreadManagementService } from "../../orchestration-v2/ThreadManagement
 import { ProjectService } from "../../project/ProjectService.ts";
 import { lifecycleCommandId, type SpawnStableInput } from "./spawnIds.ts";
 
-const GitRefName = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(255));
+/**
+ * A branch or ref a caller names for a worktree. Git takes it as a positional argument, so a
+ * leading dash would be read as an option; whitespace and control characters are never valid.
+ */
+const GIT_REF_PATTERN = /^[^-\s\p{Cc}][^\s\p{Cc}]*$/u;
+const GIT_REF_MESSAGE =
+  "A git ref must not start with '-' or contain whitespace or control characters";
+
+export const GitRefName = Schema.String.check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(255),
+  Schema.isPattern(GIT_REF_PATTERN, { message: GIT_REF_MESSAGE }),
+);
 
 /**
  * Where a spawned thread works, as a caller asks for it: the caller's own checkout (`shared`), or
@@ -91,6 +103,19 @@ export const resolveSpawnWorkspace = (
   door: "spawn" | "seat",
 ): Result.Result<ResolvedSpawnWorkspace, SpawnWorkspaceError> => {
   if (choice?.type === "shared") return Result.succeed({ type: "shared" });
+  // Checked here as well as in the schemas: the person's card edits arrive through the client
+  // contract, which doesn't constrain refs, and every door resolves through this function.
+  const badRef = [choice?.baseRef, choice?.branch].find(
+    (ref) => ref !== undefined && (ref.length > 255 || !GIT_REF_PATTERN.test(ref)),
+  );
+  if (badRef !== undefined)
+    return Result.fail(
+      new SpawnWorkspaceError({
+        detail: `${GIT_REF_MESSAGE}: ${JSON.stringify(badRef)}.`,
+        nextStep:
+          "Name an existing branch or ref for base_ref, and a plain branch name for branch.",
+      }),
+    );
   if (choice === undefined) {
     if ((door === "seat" && checkout.inWorktree) || !checkout.isRepo || checkout.refName === null)
       return Result.succeed({ type: "shared" });

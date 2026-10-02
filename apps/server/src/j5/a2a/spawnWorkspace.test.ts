@@ -12,9 +12,11 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
+import * as Schema from "effect/Schema";
 import * as Result from "effect/Result";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
@@ -38,8 +40,9 @@ import { SquadronJoinService } from "./SquadronJoinService.ts";
 import { SquadronProjectReferences } from "./SquadronProjectReferences.ts";
 import { ParticipantId, SquadronId, type ParticipantDirectoryRow } from "./contracts.ts";
 import { J5ToolkitHandlersLive } from "./mcp/handlers.ts";
-import { J5Toolkit, type J5SpawnAgentInput } from "./mcp/tools.ts";
+import { J5SpawnAgentInput, J5Toolkit } from "./mcp/tools.ts";
 import {
+  SpawnWorkspaceChoice,
   SpawnWorkspaceService,
   resolveSpawnWorkspace,
   type SpawnCheckout,
@@ -546,3 +549,28 @@ it.effect("an interrupted waiter gives back its place, and the next start still 
     }).pipe(Effect.provide(layer));
   }),
 );
+
+it("refuses a git ref git would read as an option, in both the MCP and stored forms", () => {
+  const mcp = Schema.decodeUnknownExit(J5SpawnAgentInput);
+  const stored = Schema.decodeUnknownExit(SpawnWorkspaceChoice);
+  for (const ref of ["--force", "-b", "main --orphan", "fix\nlogin", "\tmain"]) {
+    for (const field of ["base_ref", "branch"] as const)
+      assert.isTrue(
+        Exit.isFailure(mcp({ ...spawnArgs, workspace: { type: "worktree", [field]: ref } })),
+        `${field} ${JSON.stringify(ref)}`,
+      );
+    assert.isTrue(Exit.isFailure(stored({ type: "worktree", baseRef: ref })));
+    // The person's card edits use the unconstrained client contract; the resolver refuses too.
+    assert.isTrue(
+      Result.isFailure(
+        resolveSpawnWorkspace(checkout(), { type: "worktree", baseRef: ref }, "seat"),
+      ),
+    );
+  }
+  for (const ref of ["j5/main", "release-1.2", "feature/a-b"])
+    assert.isTrue(
+      Exit.isSuccess(
+        mcp({ ...spawnArgs, workspace: { type: "worktree", base_ref: ref, branch: ref } }),
+      ),
+    );
+});
