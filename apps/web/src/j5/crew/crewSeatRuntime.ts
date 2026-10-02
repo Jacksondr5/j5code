@@ -5,7 +5,11 @@ import type {
   ServerProvider,
   ServerProviderModel,
 } from "@t3tools/contracts";
-import type { CrewProposalSeat, CrewProposalSeatRuntime } from "@t3tools/contracts/j5";
+import type {
+  CrewProposalSeat,
+  CrewProposalSeatRuntime,
+  CrewSeatWorkspace,
+} from "@t3tools/contracts/j5";
 import { buildProviderOptionSelectionsFromDescriptors } from "@t3tools/shared/model";
 
 import { CUSTOM_AGENT } from "./crewProposalDraft";
@@ -16,6 +20,7 @@ export interface CrewSeatDraft {
   readonly instructions: string;
   readonly modelSelection?: ModelSelection;
   readonly runtimeMode?: RuntimeMode;
+  readonly workspace?: CrewSeatWorkspace;
 }
 
 export const CREW_ACCESS_OPTIONS = [
@@ -60,6 +65,7 @@ export const crewSeatDraft = (seat: CrewProposalSeat): CrewSeatDraft => ({
   instructions: seat.instructions ?? "",
   ...(seat.modelSelection === undefined ? {} : { modelSelection: seat.modelSelection }),
   ...(seat.runtimeMode === undefined ? {} : { runtimeMode: seat.runtimeMode }),
+  ...(seat.workspace === undefined ? {} : { workspace: seat.workspace }),
 });
 
 /** Freeze the resolved runtime before changing one field, so unrelated settings stay put. */
@@ -77,12 +83,34 @@ export const resolvedCrewSeatDraft = (
   };
 };
 
-/** A newly selected persona starts from its own defaults; overrides belong to the previous member. */
+/**
+ * A newly selected persona starts from its own runtime defaults; those overrides belong to the
+ * previous member. Where the seat works is about the seat, so it stays.
+ */
 export const chooseCrewSeatPersona = (draft: CrewSeatDraft, agentId: string): CrewSeatDraft => ({
   seat: draft.seat,
   instructions: draft.instructions,
   agentId,
+  ...(draft.workspace === undefined ? {} : { workspace: draft.workspace }),
 });
+
+export const CREW_WORKSPACE_OPTIONS = [
+  { value: "shared", label: "Captain's checkout" },
+  { value: "worktree", label: "New worktree" },
+] as const;
+
+/** Choosing a worktree leaves its base to the server, which bases it on the Captain's branch. */
+export const chooseCrewSeatWorkspace = (
+  draft: CrewSeatDraft,
+  type: CrewSeatWorkspace["type"],
+): CrewSeatDraft => ({ ...draft, workspace: { type } });
+
+export const describeCrewSeatWorkspace = (workspace: CrewSeatWorkspace): string =>
+  workspace.type === "shared"
+    ? "Captain's checkout"
+    : workspace.baseRef === undefined
+      ? "New worktree"
+      : `New worktree from ${workspace.baseRef}`;
 
 /** A different model starts with its own advertised defaults, never options from another model. */
 export const crewModelSelection = (
@@ -138,5 +166,6 @@ export const applyCrewSeatDraft = (
   ...(draft.instructions ? { instructions: draft.instructions } : {}),
   ...(draft.modelSelection ? { modelSelection: draft.modelSelection } : {}),
   ...(draft.runtimeMode ? { runtimeMode: draft.runtimeMode } : {}),
+  ...(draft.workspace ? { workspace: draft.workspace } : {}),
   ...(seat.steps === undefined ? {} : { steps: seat.steps }),
 });
