@@ -6,7 +6,11 @@ import {
   type ServerProviderModel,
 } from "@t3tools/contracts";
 
-import { buildAgentPersonaCatalog, resolveAgentPersonaRoute } from "./agentPersonaRouting.ts";
+import {
+  agentPersonaModelSelection,
+  buildAgentPersonaCatalog,
+  resolveAgentPersonaRoute,
+} from "./agentPersonaRouting.ts";
 import { providerCanEnforceAgentPersonaAuthority } from "./agentPersonaProviderPolicy.ts";
 import { listBuiltInAgentPersonas, type AgentModelTarget } from "./agentPersonas.ts";
 
@@ -205,11 +209,11 @@ describe("agent persona routing", () => {
       );
       assert.deepEqual(
         resolution.attempts.map(({ failures }) => failures.map(({ code }) => code)),
-        definition.modelRoute.map((target) => [
+        definition.modelRoute.map((target) =>
           providerCanEnforceAgentPersonaAuthority(target.driver, definition.authority.defaultPolicy)
-            ? "provider-not-configured"
-            : "authority-not-enforceable",
-        ]),
+            ? ["provider-not-configured"]
+            : ["authority-not-enforceable", "provider-not-configured"],
+        ),
       );
     }
   });
@@ -265,6 +269,42 @@ describe("agent persona routing", () => {
         ["cursor", [{ code: "authority-not-enforceable" }]],
       ],
     );
+  });
+
+  it("names a missing provider alongside an unenforceable one", () => {
+    const [scout] = listBuiltInAgentPersonas();
+    const typo = {
+      driver: ProviderDriverKind.make("claude"),
+      model: "claude-opus-5",
+      reasoningEffort: "high",
+    };
+    const resolution = resolveAgentPersonaRoute({
+      personaId: scout!.id,
+      definition: { ...scout!, modelRoute: [typo, typo] },
+      providers: [],
+    });
+
+    assert.equal(resolution.status, "unavailable");
+    if (resolution.status !== "unavailable") return;
+    assert.deepEqual(
+      resolution.attempts.map(({ failures }) => failures),
+      [
+        [{ code: "authority-not-enforceable" }, { code: "provider-not-configured" }],
+        [{ code: "authority-not-enforceable" }, { code: "provider-not-configured" }],
+      ],
+    );
+  });
+
+  it("launches with the model's own reasoning option id", () => {
+    const selection = (driver: string, optionId: string) =>
+      agentPersonaModelSelection(
+        provider({ instanceId: driver, driver, models: [model("m", optionId)] }),
+        { driver: ProviderDriverKind.make(driver), model: "m", reasoningEffort: "high" },
+      ).options;
+
+    assert.deepEqual(selection("opencode", "variant"), [{ id: "variant", value: "high" }]);
+    assert.deepEqual(selection("cursor", "reasoning"), [{ id: "reasoning", value: "high" }]);
+    assert.deepEqual(selection("pi", "thinking"), [{ id: "thinking", value: "high" }]);
   });
 
   it("uses fallback only after recording why the primary is ineligible", () => {
@@ -389,7 +429,7 @@ describe("agent persona routing", () => {
       assert.equal(publisher.availability.reason, "authority-not-enforceable");
       assert.deepEqual(
         publisher.availability.attempts?.map(({ failures }) => failures),
-        [["authority-not-enforceable"], ["authority-not-enforceable"]],
+        [["authority-not-enforceable"], ["authority-not-enforceable", "provider-not-configured"]],
       );
     }
   });

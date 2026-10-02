@@ -3,6 +3,7 @@ import {
   AgentPersonaImportConflictError,
   agentPersonaReasoningDescriptor,
   isAgentPersonaDefinitionFile,
+  isAgentPersonaReasoningOptionId,
   PROVIDER_DISPLAY_NAMES,
   AGENT_PERSONA_IMPORT_MAX_BYTES,
   AGENT_PERSONA_IMPORT_MAX_FILES,
@@ -83,8 +84,8 @@ export function presentAgentPersonaAssignment(
         ? " · Review"
         : "";
   const provider = providerLabel(assignment.resolvedDriver);
-  const effort = assignment.resolvedModelSelection.options?.find(
-    ({ id }) => id === "reasoningEffort" || id === "effort",
+  const effort = assignment.resolvedModelSelection.options?.find(({ id }) =>
+    isAgentPersonaReasoningOptionId(id),
   )?.value;
 
   return {
@@ -350,11 +351,18 @@ export function agentPersonaIdError(id: string): string | null {
   return null;
 }
 
-/** First advertised model per harness, so a new agent starts with a launchable route. */
+/**
+ * First advertised model per harness, so a new agent starts with a launchable route. Codex
+ * and Claude come first because only they can enforce persona runtime policies today.
+ */
 export function defaultAgentPersonaModelRoute(
   providers: ReadonlyArray<ServerProvider>,
 ): [AgentPersonaModelTarget, AgentPersonaModelTarget] | null {
-  const available = agentPersonaModelChoices(providers, []).filter(({ available }) => available);
+  const choices = agentPersonaModelChoices(providers, []).filter(({ available }) => available);
+  const enforceable = choices.filter(
+    ({ target }) => target.driver === "codex" || target.driver === "claudeAgent",
+  );
+  const available = enforceable.length > 0 ? enforceable : choices;
   const primary = available[0];
   if (primary === undefined) return null;
   const fallback =

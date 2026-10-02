@@ -5,6 +5,7 @@ import type {
   RuntimeMode,
   ServerProvider,
 } from "@t3tools/contracts";
+import { isAgentPersonaReasoningOptionId } from "@t3tools/contracts";
 import type {
   CrewPersonaSwap,
   CrewProposalPlaybook,
@@ -101,11 +102,11 @@ export function describeCrewSeatRuntime(
   const model = provider.models.find((candidate) => candidate.slug === selection.model);
   const resolved = materializeCrewModelSelection(selection, provider);
   const descriptor = model?.capabilities?.optionDescriptors?.find((option) =>
-    ["reasoningEffort", "effort", "variant", "thinking"].includes(option.id),
+    isAgentPersonaReasoningOptionId(option.id),
   );
   const effort = resolved.options?.find((option) =>
     descriptor === undefined
-      ? ["reasoningEffort", "effort", "variant", "thinking"].includes(option.id)
+      ? isAgentPersonaReasoningOptionId(option.id)
       : option.id === descriptor.id,
   )?.value;
   const reasoning =

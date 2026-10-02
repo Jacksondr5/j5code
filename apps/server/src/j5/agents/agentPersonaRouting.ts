@@ -52,9 +52,8 @@ export type AgentPersonaRouteResolution =
 export function unavailableAgentPersonaReason(
   resolution: Extract<AgentPersonaRouteResolution, { status: "unavailable" }>,
 ): "routes-unavailable" | "authority-not-enforceable" {
-  return resolution.attempts.every(
-    ({ failures }) =>
-      failures.length > 0 && failures.every(({ code }) => code === "authority-not-enforceable"),
+  return resolution.attempts.every(({ failures }) =>
+    failures.some(({ code }) => code === "authority-not-enforceable"),
   )
     ? "authority-not-enforceable"
     : "routes-unavailable";
@@ -128,10 +127,14 @@ export function resolveAgentPersonaRoute(input: {
     const failures: Array<AgentPersonaRouteFailure> = [];
 
     if (!providerCanEnforceAgentPersonaAuthority(target.driver, authorityPolicy)) {
+      // Also name a missing provider, so a mistyped driver doesn't read as a policy gap alone.
       rejectedTargets.push({
         route,
         target,
-        failures: [{ code: "authority-not-enforceable" }],
+        failures: [
+          { code: "authority-not-enforceable" },
+          ...(candidates.length === 0 ? [{ code: "provider-not-configured" as const }] : []),
+        ],
       });
       continue;
     }

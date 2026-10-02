@@ -75,6 +75,21 @@ describe("agent persona catalog presentation", () => {
       personaLabel: "Critic · Fix",
       routeLabel: "Codex · gpt-5.6-terra · high",
     });
+    expect(
+      presentAgentPersonaAssignment({
+        personaId: "scout",
+        definitionVersion: 1,
+        authorityPolicy: "read-only",
+        runtimeModeOverride: "full-access",
+        resolvedRoute: "override",
+        resolvedDriver: ProviderDriverKind.make("opencode"),
+        resolvedModelSelection: {
+          instanceId: ProviderInstanceId.make("opencode"),
+          model: "glm-5",
+          options: [{ id: "variant", value: "high" }],
+        },
+      }).routeLabel,
+    ).toBe("OpenCode · glm-5 · high");
   });
 
   it("preserves all twelve server-provided personas for every client", () => {
@@ -559,10 +574,10 @@ it("presents removed source agents as restorable and never launchable", () => {
 });
 
 const provider = (
-  driver: "codex" | "claudeAgent",
+  driver: string,
   instanceId: string,
   models: ReadonlyArray<string>,
-  optionId: "reasoningEffort" | "effort",
+  optionId: string,
 ): ServerProvider => ({
   instanceId: ProviderInstanceId.make(instanceId),
   driver: ProviderDriverKind.make(driver),
@@ -622,6 +637,11 @@ describe("personal agent authoring", () => {
     ]);
     const single = defaultAgentPersonaModelRoute([providers[0]!]);
     expect(single?.[0]).toEqual(single?.[1]);
+    const withCursor = defaultAgentPersonaModelRoute([
+      provider("cursor", "cursor", ["composer-2"], "reasoning"),
+      providers[0]!,
+    ]);
+    expect(withCursor?.map(({ driver }) => String(driver))).toEqual(["codex", "codex"]);
   });
 });
 
