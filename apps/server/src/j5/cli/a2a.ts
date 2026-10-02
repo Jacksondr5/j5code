@@ -682,10 +682,6 @@ const peerAddCommand = Command.make("add", {
     Flag.withDescription("File holding that credential."),
     Flag.optional,
   ),
-  label: Flag.String("label").pipe(
-    Flag.withDescription("A name for the peer. Default: its environment id."),
-    Flag.optional,
-  ),
   replaceOrigin: Flag.Boolean("replace-origin").pipe(
     Flag.withDescription(
       "Move a known peer to a new origin. Without it, re-adding a peer at a different origin is refused, because hello proves reachability, not identity.",
@@ -716,7 +712,6 @@ const peerAddCommand = Command.make("add", {
               body: {
                 origin: peerOrigin,
                 credential,
-                ...(Option.isSome(flags.label) ? { label: flags.label.value } : {}),
                 ...(flags.replaceOrigin ? { replaceOrigin: true } : {}),
               },
               timeoutMs: Math.max(flags.timeoutMs, 10_000),

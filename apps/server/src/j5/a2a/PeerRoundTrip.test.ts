@@ -114,12 +114,18 @@ const makeServer = (
     PeerDirectory,
     PeerDirectory.of({
       listAgents: () =>
-        Effect.succeed({ agents: [remoteView(other, otherLabel)], unreadPeers: [] }),
+        Effect.succeed({
+          agents: [remoteView(other, otherLabel)],
+          unreadPeers: [],
+          selfName: self.environmentId,
+        }),
       resolveAgent: (id) =>
         Effect.succeed({
           agents: id === other.agent.id ? [remoteView(other, otherLabel)] : [],
           unreadPeers: [],
+          selfName: self.environmentId,
         }),
+      serverName: () => Effect.succeed(otherLabel),
     }),
   );
   const send = sendLayer.pipe(
@@ -356,6 +362,11 @@ it.effect(
         );
         yield* Ref.set(workDoor, workServer.inbound);
         yield* Ref.set(homeDoor, homeServer.inbound);
+        // Home's record of Work carries the name Work reported for itself at hello.
+        yield* homeServer.sql`
+          INSERT INTO j5_a2a_peer (environment_id, label, origin, credential, created_at, updated_at)
+          VALUES (${work.environmentId}, 'Work VM', 'https://work.example', 'work-token', ${timestamp}, ${timestamp})
+        `;
 
         // Work asks Home by participant id, naming no server.
         const asked = yield* workServer.send.send({
@@ -368,6 +379,7 @@ it.effect(
           acceptedAt: timestamp,
         });
         assert.equal(asked.exchangeState, "open");
+        assert.equal(asked.receiverServer, "Home", "the send names where the receiver lives");
         const askRow = yield* workServer.sql<{
           readonly receiver_environment_id: string | null;
           readonly receiver_squadron_id: string;
@@ -400,6 +412,7 @@ it.effect(
           "the envelope names Work's Squadron",
         );
         assert.equal(homeInjected[0]!.senderId, work.agent.id);
+        assert.equal(homeInjected[0]!.senderServerName, "Work VM", "and the server it came from");
 
         // Home replies to the Exchange it now holds; the reply crosses back and closes Work's Exchange.
         const replied = yield* homeServer.send.send({

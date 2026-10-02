@@ -93,6 +93,8 @@ export interface AgentDeliveryInput {
   readonly message: string;
   readonly attachments?: ReadonlyArray<ChatAttachment>;
   readonly envelopeChannel: DeliveryEnvelopeChannel;
+  /** The peer server a received message came from, named in its envelope; absent for a local sender. */
+  readonly senderServerName?: string;
 }
 
 export interface HumanDeliveryInput extends AgentDeliveryInput {
@@ -222,6 +224,9 @@ export const formatAgentDeliveryEnvelope = (input: AgentDeliveryInput): string =
               senderId: input.senderId,
               originSquadronId: input.originSquadronId,
               message: input.message,
+              ...(input.senderServerName === undefined
+                ? {}
+                : { senderServerName: input.senderServerName }),
             })
         : isHumanParticipantId(input.senderId)
           ? assertPersonReply(input)
@@ -236,6 +241,9 @@ export const formatAgentDeliveryEnvelope = (input: AgentDeliveryInput): string =
                 originSquadronId: input.originSquadronId,
                 exchangeId: input.exchangeId,
                 message: input.message,
+                ...(input.senderServerName === undefined
+                  ? {}
+                  : { senderServerName: input.senderServerName }),
               });
     case "silence_notice":
     case "lifecycle_notice":

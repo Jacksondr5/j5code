@@ -50,7 +50,6 @@ import { FetchHttpClient } from "effect/unstable/http";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { EnvironmentAuth } from "../../auth/EnvironmentAuth.ts";
-import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
 import * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
 import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
 import { ServerConfig } from "../../config.ts";
@@ -164,11 +163,9 @@ const peerRegistryTestLayer = peerRegistryLayer.pipe(
   Layer.provide(FetchHttpClient.layer),
   Layer.provide(Layer.mock(EnvironmentAuth)({ listSessions: () => Effect.succeed([]) })),
   Layer.provide(
-    ServerEnvironment.identityLayer.pipe(
-      Layer.provide(ServerSecretStore.layer),
-      Layer.provide(serverConfigLayer),
-      Layer.provide(NodeServices.layer),
-    ),
+    Layer.mock(ServerEnvironment.ServerEnvironment)({
+      getEnvironmentId: Effect.succeed(EnvironmentId.make("environment:a2a-integration")),
+    }),
   ),
 );
 const deliveryTransportLayer = deliveryTransportLive.pipe(

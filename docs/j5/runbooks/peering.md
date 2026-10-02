@@ -30,16 +30,16 @@ Run each pair of steps on the named host. Every command talks to the local serve
 2. **On Work**, record Home, proving the credential at Home's origin:
 
    ```sh
-   j5 a2a peer add --peer-origin https://home.example:3773 --credential-file work.credential --label Home
+   j5 a2a peer add --peer-origin https://home.example:3773 --credential-file work.credential
    ```
 
-   Work calls Home's hello route with the credential. It records the peer only if Home answers, the credential names Work, and Home is not Work itself. Re-adding a known peer rotates its credential; re-adding it at a different origin is refused unless you pass `--replace-origin`, because hello proves the origin is reachable, not that it is the same server. On a refused move the server tries the new credential at the recorded origin too and keeps it only if that origin accepts it; the error says which happened. If it was not kept and the new address was the same server, re-pair at the recorded origin.
+   Work calls Home's hello route with the credential. It records the peer only if Home answers, the credential names Work, and Home is not Work itself. Home names itself in that answer: the record takes Home's own name, the one its clients show, and refreshes it each time the two servers talk. To rename a server, rename its machine (on Linux, `hostnamectl set-hostname --pretty "Work VM"`). Re-adding a known peer rotates its credential; re-adding it at a different origin is refused unless you pass `--replace-origin`, because hello proves the origin is reachable, not that it is the same server. On a refused move the server tries the new credential at the recorded origin too and keeps it only if that origin accepts it; the error says which happened. If it was not kept and the new address was the same server, re-pair at the recorded origin.
 
 3. **On Work**, issue Home's credential the same way, and **on Home**, add Work. One Exchange needs both directions, so peering is incomplete until all four steps have run.
 
 ## Inspecting and ending peering
 
-- `j5 a2a peer list` prints one line per peer: environment id, label, origin, recorded at, whether the peer still holds a live session here (`inbound: active` or `inbound: no live session`), and when the credential it issued us expires.
+- `j5 a2a peer list` prints one line per peer: environment id, the peer's own name, origin, recorded at, whether the peer still holds a live session here (`inbound: active` or `inbound: no live session`), and when the credential it issued us expires.
 - `j5 a2a peer remove --environment <id>` deletes this server's record of the peer and revokes the session that peer held here. Delivery ends in both directions from this server's point of view; run it on the other server too to clean up its side. Open Exchanges with agents on that server are not closed by removal: a later reply or follow-up to one fails delivery and alarms, and the answerer's silence detector keeps measuring the debt. Close or withdraw them first, or archive the agents involved, if you want them settled (tracked in issue #286).
 - Revoking the `Peer: …` session in Settings → Connections ends inbound delivery from that peer: its deliveries are refused and alarm on its side. This server's own record and outbound delivery are untouched until you `remove` the peer; `peer list` shows the peer as `inbound: no live session` meanwhile.
 
