@@ -17,6 +17,7 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
 import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
+import { peerProtocolHeaders, peerProtocolMismatch, statedPeerProtocol } from "./peerProtocol.ts";
 
 /**
  * The peer registry: the other servers this one exchanges agent messages
@@ -93,6 +94,16 @@ export class PeerOriginConflictError extends Schema.TaggedError<PeerOriginConfli
   }
 }
 
+/** A breaking peer protocol change: the older server must update before the two can peer. */
+export class PeerProtocolMismatchError extends Schema.TaggedError<PeerProtocolMismatchError>()(
+  "PeerProtocolMismatchError",
+  { origin: Schema.String, reason: Schema.String },
+) {
+  override get message(): string {
+    return this.reason;
+  }
+}
+
 export class PeerSessionReadError extends Schema.TaggedError<PeerSessionReadError>()(
   "PeerSessionReadError",
   { cause: Schema.Defect() },
@@ -109,6 +120,7 @@ export type AddPeerError =
   | PeerCredentialRejectedError
   | PeerCredentialMismatchError
   | PeerIsSelfError
+  | PeerProtocolMismatchError
   | PeerOriginConflictError;
 
 /** A peer record plus the credential this server presents to it; never leaves the process. */
@@ -186,6 +198,7 @@ const helloAtOrigin = Effect.fn("j5.a2a.peer.hello")(function* (input: {
   const request = HttpClientRequest.get(`${input.origin}${J5_PEER_API_PATHS.hello}`).pipe(
     HttpClientRequest.bearerToken(input.credential),
     HttpClientRequest.acceptJson,
+    HttpClientRequest.setHeaders(peerProtocolHeaders),
   );
   const response = yield* client
     .execute(request)
@@ -194,6 +207,14 @@ const helloAtOrigin = Effect.fn("j5.a2a.peer.hello")(function* (input: {
         (cause) => new PeerUnreachableError({ origin: input.origin, reason: reasonOf(cause) }),
       ),
     );
+  // Checked before the status: a server on another protocol may answer 200 to a request it misread.
+  const mismatch = peerProtocolMismatch({
+    stated: statedPeerProtocol(response.headers),
+    peer: `The server at ${input.origin}`,
+  });
+  if (mismatch !== null) {
+    return yield* new PeerProtocolMismatchError({ origin: input.origin, reason: mismatch });
+  }
   if (response.status === 401 || response.status === 403) {
     return yield* new PeerCredentialRejectedError({
       origin: input.origin,
@@ -206,7 +227,7 @@ const helloAtOrigin = Effect.fn("j5.a2a.peer.hello")(function* (input: {
       reason: `the hello route answered HTTP ${String(response.status)}`,
     });
   }
-  return yield* response.json.pipe(
+  const hello = yield* response.json.pipe(
     Effect.flatMap(decodeHello),
     Effect.mapError(
       (cause) =>
@@ -216,6 +237,15 @@ const helloAtOrigin = Effect.fn("j5.a2a.peer.hello")(function* (input: {
         }),
     ),
   );
+  // The body states the version too; a peer is recorded only when both agree with this server.
+  const bodyMismatch = peerProtocolMismatch({
+    stated: hello.peerProtocolVersion,
+    peer: `The server at ${input.origin}`,
+  });
+  if (bodyMismatch !== null) {
+    return yield* new PeerProtocolMismatchError({ origin: input.origin, reason: bodyMismatch });
+  }
+  return hello;
 });
 
 /** The whole exchange is bounded: a peer that answers headers and then stalls the body cannot hold a request open. */

@@ -3,6 +3,7 @@ import {
   AddPeerRequest,
   IssuePeerCredentialRequest,
   J5_PEER_API_PATHS,
+  PEER_PROTOCOL_VERSION,
   PeerDeliveryRequest,
   RemovePeerRequest,
   environmentIdFromPeerSubject,
@@ -22,7 +23,7 @@ import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
-import { HttpRouter, HttpServerResponse } from "effect/unstable/http";
+import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
 import packageJson from "../../../package.json" with { type: "json" };
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
@@ -31,6 +32,7 @@ import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { PeerInboundService } from "./PeerInboundService.ts";
 import { PeerRegistryService } from "./PeerRegistryService.ts";
 import { RosterService } from "./RosterService.ts";
+import { peerProtocolHeaders, peerProtocolMismatch, statedPeerProtocol } from "./peerProtocol.ts";
 import {
   authenticate,
   jsonError,
@@ -65,6 +67,18 @@ const decodeAddRequest = Schema.decodeUnknownEffect(AddPeerRequest);
 const decodeRemoveRequest = Schema.decodeUnknownEffect(RemovePeerRequest);
 const decodeDeliveryRequest = Schema.decodeUnknownEffect(PeerDeliveryRequest);
 
+/** A peer on another protocol is refused before its request is read; the caller sees why in the 409. */
+const protocolRefusal = (peer: string) =>
+  Effect.map(HttpServerRequest.HttpServerRequest, (request) => {
+    const reason = peerProtocolMismatch({ stated: statedPeerProtocol(request.headers), peer });
+    return reason === null ? null : jsonError(409, "peer_protocol_mismatch", reason);
+  });
+
+/** Every answer on a peer route states this server's protocol, so the caller checks it too. */
+const statingPeerProtocol = <E, R>(
+  route: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>,
+) => route.pipe(Effect.map(HttpServerResponse.setHeaders(peerProtocolHeaders)));
+
 const addFailure = (error: unknown): Effect.Effect<HttpServerResponse.HttpServerResponse> => {
   const tag = tagOf(error);
   const message = messageOf(error, "Adding the peer failed.");
@@ -79,6 +93,8 @@ const addFailure = (error: unknown): Effect.Effect<HttpServerResponse.HttpServer
       return Effect.succeed(jsonError(409, "peer_origin_conflict", message));
     case "PeerIsSelfError":
       return Effect.succeed(jsonError(400, "peer_is_self", message));
+    case "PeerProtocolMismatchError":
+      return Effect.succeed(jsonError(409, "peer_protocol_mismatch", message));
     default:
       return Effect.logError("J5 A2A peer add failed", { cause: error }).pipe(
         Effect.as(jsonError(500, tag, "Adding the peer failed.")),
@@ -177,6 +193,10 @@ export const peerHttpRouteLayer = Layer.unwrap(
         yield* annotateEnvironmentRequest("j5.a2a.peer.hello");
         const session = yield* authenticate;
         yield* requireScope(session, AuthA2APeerScope);
+        const refused = yield* protocolRefusal(
+          `Peer ${environmentIdFromPeerSubject(session.subject) ?? session.subject}`,
+        );
+        if (refused !== null) return refused;
         const environmentId = yield* peers.selfEnvironmentId;
         // The peer holds this credential, so any earlier one for it is done.
         yield* rotationPermit
@@ -192,8 +212,10 @@ export const peerHttpRouteLayer = Layer.unwrap(
           credentialExpiresAt:
             session.expiresAt === undefined ? null : DateTime.formatIso(session.expiresAt),
           server: { version: packageJson.version },
+          peerProtocolVersion: PEER_PROTOCOL_VERSION,
+          capabilities: {},
         } satisfies PeerHelloResponse);
-      }).pipe(Effect.catchTags(respondableTags)),
+      }).pipe(Effect.catchTags(respondableTags), statingPeerProtocol),
     );
 
     const issueCredentialRoute = HttpRouter.add(
@@ -341,6 +363,8 @@ export const peerHttpRouteLayer = Layer.unwrap(
         yield* requireScope(session, AuthA2APeerScope);
         const origin = yield* registeredPeerForSession(session);
         if (Result.isFailure(origin)) return origin.failure;
+        const refused = yield* protocolRefusal(`Peer ${origin.success}`);
+        if (refused !== null) return refused;
         const body = yield* readJsonBody;
         if (Result.isFailure(body)) return requestFailure("The request body must be JSON.");
         const decoded = yield* Effect.result(decodeDeliveryRequest(body.success));
@@ -362,7 +386,7 @@ export const peerHttpRouteLayer = Layer.unwrap(
           } satisfies PeerDeliveryResponse,
           { status: received.success.replay ? 200 : 201 },
         );
-      }).pipe(Effect.catchTags(respondableTags)),
+      }).pipe(Effect.catchTags(respondableTags), statingPeerProtocol),
     );
 
     // A peer resolves receivers here, and sees only what it could address:
@@ -376,6 +400,8 @@ export const peerHttpRouteLayer = Layer.unwrap(
         yield* requireScope(session, AuthA2APeerScope);
         const origin = yield* registeredPeerForSession(session);
         if (Result.isFailure(origin)) return origin.failure;
+        const refused = yield* protocolRefusal(`Peer ${origin.success}`);
+        if (refused !== null) return refused;
         const listed = yield* Effect.result(roster.list());
         if (Result.isFailure(listed)) {
           yield* Effect.logError("J5 A2A peer roster read failed", { cause: listed.failure });
@@ -401,7 +427,7 @@ export const peerHttpRouteLayer = Layer.unwrap(
               : [],
           ),
         } satisfies PeerRosterResponse);
-      }).pipe(Effect.catchTags(respondableTags)),
+      }).pipe(Effect.catchTags(respondableTags), statingPeerProtocol),
     );
 
     return Layer.mergeAll(
