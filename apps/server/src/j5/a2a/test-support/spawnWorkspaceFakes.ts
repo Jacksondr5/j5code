@@ -12,7 +12,7 @@ import {
   type ThreadLaunchInput,
 } from "../../../orchestration-v2/ThreadLaunchService.ts";
 import { ProjectService } from "../../../project/ProjectService.ts";
-import { layerFromReceiptStore } from "../spawnWorkspace.ts";
+import { makeLayerFromReceiptStore } from "../spawnWorkspace.ts";
 
 export interface FakeCheckout {
   readonly isRepo: boolean;
@@ -34,10 +34,12 @@ export const fakeSpawnWorkspaceLayer = (options: {
   readonly launches?: Ref.Ref<ReadonlyArray<ThreadLaunchInput>>;
   readonly launch?: (input: ThreadLaunchInput) => Effect.Effect<void>;
   readonly accepted?: Effect.Effect<ReadonlyArray<CommandId>>;
-  /** Runs as each spawn reads git, just before it asks for the start permit. */
-  readonly onInspect?: Effect.Effect<void>;
+  /** Runs once a start has queued behind another start of the same thread. */
+  readonly onStartQueued?: (threadId: ThreadId) => Effect.Effect<void>;
 }) =>
-  layerFromReceiptStore.pipe(
+  makeLayerFromReceiptStore(
+    options.onStartQueued === undefined ? {} : { onStartQueued: options.onStartQueued },
+  ).pipe(
     Layer.provide(
       Layer.mergeAll(
         Layer.mock(ProjectService)({
@@ -48,12 +50,10 @@ export const fakeSpawnWorkspaceLayer = (options: {
         }),
         Layer.mock(GitWorkflowService)({
           localStatus: () =>
-            (options.onInspect ?? Effect.void).pipe(
-              Effect.as({
-                isRepo: options.checkout.isRepo,
-                refName: options.checkout.refName,
-              } as never),
-            ),
+            Effect.succeed({
+              isRepo: options.checkout.isRepo,
+              refName: options.checkout.refName,
+            } as never),
           listLocalBranchNames: () =>
             Effect.succeed([...(options.checkout.localBranchNames ?? [])]),
         }),
