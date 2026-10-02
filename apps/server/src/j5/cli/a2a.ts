@@ -13,6 +13,8 @@ import {
   IssuePeerCredentialResponse,
   J5_PEER_API_PATHS,
   PeerListResponse,
+  peerPollState,
+  peerPollStoppedReason,
   RemovePeerResponse,
   type PeerRecord,
   A2ARosterResponse,
@@ -27,6 +29,7 @@ import {
 import * as Config from "effect/Config";
 import * as Console from "effect/Console";
 import * as Data from "effect/Data";
+import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -593,14 +596,52 @@ const tokenCommand = Command.make("token").pipe(
   Command.withSubcommands([tokenIssueCommand]),
 );
 
-const formatPeerLine = (peer: PeerRecord) =>
+/** How messages travel, in the dialog's words. */
+const peerLinkDescription = (peer: PeerRecord) =>
+  peer.linkMode === "store"
+    ? "polls this server for its messages"
+    : peer.linkMode === "poll"
+      ? `this server polls it at ${peer.origin ?? "?"}`
+      : `sends directly both ways, at ${peer.origin ?? "?"}`;
+
+/**
+ * Polling stopped, online, offline since, or not polled yet, as Settings →
+ * Connections words it; empty for a direct peer. A stopped poller makes no
+ * claim about the last poll that worked.
+ */
+const peerPollHealth = (peer: PeerRecord, nowMs: number) => {
+  const stopped = peerPollStoppedReason(peer);
+  if (stopped !== null) return `polling stopped: ${stopped}`;
+  const state = peerPollState(peer, nowMs);
+  if (state === null) return "";
+  if (state.kind === "never") {
+    return peer.linkMode === "store" ? "has not polled yet" : "not polled yet";
+  }
+  return state.kind === "online"
+    ? `online, last polled ${state.lastPolledAt}`
+    : `offline since ${state.since}`;
+};
+
+const formatPeerLine = (peer: PeerRecord, nowMs: number) =>
   [
     peer.environmentId,
     peer.label,
-    peer.origin ?? "polls this server",
+    peerLinkDescription(peer),
     peer.createdAt,
-    peer.inboundSession === "active" ? "inbound: active" : "inbound: no live session",
+    // A poller never holds a session from the server it polls, so it has no inbound to report.
+    peer.linkMode === "poll"
+      ? ""
+      : peer.inboundSession === "active"
+        ? "inbound: active"
+        : "inbound: no live session",
     peer.credentialExpiresAt === null ? "" : `our credential expires ${peer.credentialExpiresAt}`,
+    peerPollHealth(peer, nowMs),
+    peer.waitingCount === 0
+      ? ""
+      : `${String(peer.waitingCount)} waiting since ${peer.oldestWaitingAt ?? "?"}`,
+    peer.lastError === null || peerPollStoppedReason(peer) !== null
+      ? ""
+      : `last error: ${peer.lastError}`,
   ]
     .filter((part) => part.length > 0)
     .join("\t");
@@ -763,7 +804,7 @@ const resolvePeerCredential = Effect.fn("j5.a2a.cli.resolvePeerCredential")(func
 
 const peerListCommand = Command.make("list", connectionFlags).pipe(
   Command.withDescription(
-    "List recorded peers: environment id, label, origin, recorded at. Needs an access:read token, or runs on the server host with a temporary local admin session.",
+    "List recorded peers: environment id, the peer's own name, how messages travel, recorded at, the session it holds here, when the credential it issued expires, its last poll, what waits for it, and the last error. Needs an access:read token, or runs on the server host with a temporary local admin session.",
   ),
   Command.withHandler((flags) =>
     runOutcome(
@@ -781,12 +822,13 @@ const peerListCommand = Command.make("list", connectionFlags).pipe(
             });
             if (reply.status !== 200) return yield* failureFromReply(reply);
             const listed = yield* decodeReply(PeerListResponse, reply.body);
+            const nowMs = DateTime.toEpochMillis(yield* DateTime.now);
             return {
               json: { peers: listed.peers },
               text:
                 listed.peers.length === 0
                   ? "No peers recorded."
-                  : listed.peers.map(formatPeerLine).join("\n"),
+                  : listed.peers.map((peer) => formatPeerLine(peer, nowMs)).join("\n"),
             } satisfies Outcome;
           }),
         );

@@ -1,11 +1,13 @@
 import type { EnvironmentId } from "@t3tools/contracts";
 import {
   J5_PEER_API_PATHS,
+  PEER_POLL_STOPPED_PREFIX,
   PeerCapabilities,
   PeerHelloResponse,
   PeerRosterAgent,
   peerSubjectForEnvironment,
   type PeerLinkMode,
+  type PeerProbeResponse,
   type PeerRecord,
 } from "@t3tools/contracts/j5";
 import * as Context from "effect/Context";
@@ -17,7 +19,7 @@ import * as PubSub from "effect/PubSub";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as Schema from "effect/Schema";
-import { HttpClient, HttpClientRequest } from "effect/unstable/http";
+import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 
@@ -36,6 +38,20 @@ import { peerProtocolHeaders, peerProtocolMismatch, statedPeerProtocol } from ".
  */
 
 const PEER_HELLO_TIMEOUT = Duration.seconds(5);
+const PEER_PROBE_TIMEOUT = Duration.seconds(4);
+const PUBLIC_IDENTITY_PATH = "/.well-known/t3/environment";
+const hostOf = (origin: string) => {
+  try {
+    return new URL(origin).host;
+  } catch {
+    return origin;
+  }
+};
+const decodePublicIdentity = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Struct({ environmentId: Schema.String, label: Schema.String })),
+);
+/** The most of a probed answer this server reads: a public identity is a few hundred bytes. */
+const PEER_PROBE_BODY_MAX_BYTES = 64 * 1024;
 
 export interface AddPeerInput {
   readonly origin: string;
@@ -107,6 +123,14 @@ export class PeerProtocolMismatchError extends Schema.TaggedError<PeerProtocolMi
   "PeerProtocolMismatchError",
   { origin: Schema.String, reason: Schema.String },
 ) {
+  override get message(): string {
+    return this.reason;
+  }
+}
+
+class PeerProbeFailure extends Schema.TaggedError<PeerProbeFailure>()("PeerProbeFailure", {
+  reason: Schema.String,
+}) {
   override get message(): string {
     return this.reason;
   }
@@ -215,6 +239,12 @@ export interface PeerRegistryServiceShape {
     environmentId: string,
     reported: string | undefined,
   ) => Effect.Effect<string | null, SqlError>;
+  /**
+   * The reachability check: fetch the public identity at an origin, bounded,
+   * and say who answered or the error it got. It reads that one fixed path and
+   * records nothing.
+   */
+  readonly probe: (origin: string) => Effect.Effect<PeerProbeResponse>;
   /** Marks a credential just issued as one whose holder will poll this server. */
   readonly grantStore: (input: {
     readonly environmentId: string;
@@ -243,7 +273,12 @@ export interface PeerRegistryServiceShape {
   ) => Effect.Effect<{ readonly rosterHash: string | null }, SqlError>;
   /** The heartbeat alone, on the poller: a 200's headers answer its poll before the body arrives. */
   readonly recordPolled: (environmentId: string, at: string) => Effect.Effect<void, SqlError>;
-  /** Why the last exchange with a peer failed, or null once one succeeds; a no-op when nothing changes. */
+  /**
+   * Why the last exchange with a peer failed, or null once one succeeds; a
+   * no-op when nothing changes. A poller's stop stands until it polls again
+   * or the peer is recorded again: other errors and successes leave it, and
+   * only a newer stop replaces it.
+   */
   readonly recordLastError: (
     environmentId: string,
     error: string | null,
@@ -627,6 +662,59 @@ export const layer: Layer.Layer<
         )
         .pipe(Effect.tap(() => changed));
 
+    const probe: PeerRegistryServiceShape["probe"] = (origin) =>
+      Effect.gen(function* () {
+        // The probe fetches that one path at that origin: a redirect is an
+        // answer to report, never a second fetch somewhere else.
+        const response = yield* httpClient
+          .execute(
+            HttpClientRequest.get(`${origin}${PUBLIC_IDENTITY_PATH}`).pipe(
+              HttpClientRequest.acceptJson,
+            ),
+          )
+          .pipe(Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }));
+        if (response.status !== 200) {
+          return yield* new PeerProbeFailure({
+            reason: `answered HTTP ${String(response.status)}`,
+          });
+        }
+        // What answered may be anything, so its body is bounded and never repeated.
+        const notIdentity = new PeerProbeFailure({ reason: "answered, but not as a J5 server" });
+        let read = 0;
+        const body = yield* response.stream.pipe(
+          Stream.mapEffect((chunk) => {
+            read += chunk.byteLength;
+            return read > PEER_PROBE_BODY_MAX_BYTES
+              ? Effect.fail(notIdentity)
+              : Effect.succeed(chunk);
+          }),
+          Stream.decodeText,
+          Stream.mkString,
+        );
+        const identity = yield* decodePublicIdentity(body).pipe(Effect.mapError(() => notIdentity));
+        return {
+          outcome: "reached",
+          origin,
+          environmentId: identity.environmentId,
+          label: reportedLabel(identity.label) ?? identity.environmentId,
+        } satisfies PeerProbeResponse;
+      }).pipe(
+        Effect.timeoutOrElse({
+          duration: PEER_PROBE_TIMEOUT,
+          orElse: () =>
+            new PeerProbeFailure({
+              reason: `connection timed out after ${Duration.format(PEER_PROBE_TIMEOUT)}`,
+            }),
+        }),
+        Effect.catch((cause) =>
+          Effect.succeed<PeerProbeResponse>({
+            outcome: "failed",
+            origin,
+            error: `${hostOf(origin)}: ${reasonOf(cause)}`,
+          }),
+        ),
+      );
+
     const grantStore: PeerRegistryServiceShape["grantStore"] = (input) =>
       sql`
         INSERT INTO j5_a2a_peer_store_grant (session_id, environment_id, issued_at)
@@ -687,6 +775,11 @@ export const layer: Layer.Layer<
       sql`
         UPDATE j5_a2a_peer SET last_error = ${error}
         WHERE environment_id = ${environmentId} AND last_error IS NOT ${error}
+          AND (
+            last_error IS NULL
+            OR substr(last_error, 1, ${PEER_POLL_STOPPED_PREFIX.length}) <> ${PEER_POLL_STOPPED_PREFIX}
+            OR substr(${error}, 1, ${PEER_POLL_STOPPED_PREFIX.length}) = ${PEER_POLL_STOPPED_PREFIX}
+          )
       `.pipe(Effect.asVoid);
 
     const recordLabel: PeerRegistryServiceShape["recordLabel"] = (environmentId, reported) =>
@@ -717,6 +810,7 @@ export const layer: Layer.Layer<
       list,
       remove,
       recordLabel,
+      probe,
       grantStore,
       adoptStorePeer,
       recordPoll,

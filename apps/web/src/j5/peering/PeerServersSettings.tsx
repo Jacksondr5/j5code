@@ -1,4 +1,4 @@
-import { AuthAccessWriteScope, type EnvironmentId } from "@t3tools/contracts";
+import { AuthAccessWriteScope, EnvironmentId } from "@t3tools/contracts";
 import { PlusIcon } from "lucide-react";
 import { useState } from "react";
 
@@ -12,6 +12,13 @@ import { useEnvironmentSessionState } from "../../state/session";
 import { peersQueryAtom } from "../state";
 import { PeerIntroductionDialog } from "./PeerIntroductionDialog";
 import { refreshPeers, removePeer, type PeerRecord } from "./peeringClient";
+import {
+  isPeerCredentialRejected,
+  peerPollState,
+  peerPollStoppedReason,
+} from "@t3tools/contracts/j5";
+import { useNowMinute } from "../../hooks/useNowMinute";
+import { formatRelativeTimeLabel } from "../../timestampFormat";
 
 /**
  * The servers this environment exchanges agent messages with. A peer is also
@@ -34,6 +41,13 @@ export function PeerServersSettings({
   const [dialogOpen, setDialogOpen] = useState(false);
   // Each opening mounts a fresh dialog, so a previous introduction's fields and steps never carry over.
   const [dialogGeneration, setDialogGeneration] = useState(0);
+  // Peering a pair again starts the dialog with that pair's remote server chosen.
+  const [dialogOther, setDialogOther] = useState<EnvironmentId | null>(null);
+  const openDialog = (otherEnvironmentId: EnvironmentId | null) => {
+    setDialogOther(otherEnvironmentId);
+    setDialogGeneration((generation) => generation + 1);
+    setDialogOpen(true);
+  };
 
   // Peering is an administrative act on this server, like pairing links and sessions.
   if (primaryEnvironmentId === null || !canManage) return null;
@@ -46,10 +60,7 @@ export function PeerServersSettings({
           size="xs"
           variant="ghost-muted"
           aria-label="Add peer"
-          onClick={() => {
-            setDialogGeneration((generation) => generation + 1);
-            setDialogOpen(true);
-          }}
+          onClick={() => openDialog(null)}
         >
           <PlusIcon className="size-3" />
           <span>Add peer</span>
@@ -61,6 +72,7 @@ export function PeerServersSettings({
           key={peer.environmentId}
           peer={peer}
           primaryEnvironmentId={primaryEnvironmentId}
+          onPeerAgain={() => openDialog(EnvironmentId.make(peer.environmentId))}
           otherEnvironmentId={
             environments.find(
               (environment) =>
@@ -73,7 +85,7 @@ export function PeerServersSettings({
       {peers.data !== null && peers.data.length === 0 ? (
         <SettingsRow
           title="No peers yet"
-          description="Peer this server with another environment you are connected to so their agents can exchange messages. Agents address each other by participant id and never see which server the other is on."
+          description="Peer this server with another environment you are connected to so their agents can exchange messages. Agents address each other by participant id and see which server each one lives on."
         />
       ) : null}
       {peers.error !== null ? (
@@ -84,6 +96,7 @@ export function PeerServersSettings({
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         primaryEnvironmentId={primaryEnvironmentId}
+        initialOtherEnvironmentId={dialogOther}
         onPeered={(otherEnvironmentId) => {
           refreshPeers(primaryEnvironmentId);
           refreshPeers(otherEnvironmentId);
@@ -96,10 +109,12 @@ export function PeerServersSettings({
 function PeerRow({
   peer,
   primaryEnvironmentId,
+  onPeerAgain,
   otherEnvironmentId,
 }: {
   readonly peer: PeerRecord;
   readonly primaryEnvironmentId: EnvironmentId;
+  readonly onPeerAgain: () => void;
   /** The peer as one of this client's connected environments, when it is one. */
   readonly otherEnvironmentId: EnvironmentId | null;
 }) {
@@ -151,12 +166,72 @@ function PeerRow({
   return (
     <SettingsRow
       title={peer.label}
-      description={`${peer.origin ?? "Polls this server"} · ${peer.environmentId}`}
+      description={<PeerStatus peer={peer} />}
       control={
-        <Button size="sm" variant="ghost" disabled={removing} onClick={() => void remove()}>
-          {removing ? "Removing…" : "Remove"}
-        </Button>
+        <span className="flex gap-2">
+          {/* Only peering again fixes a rejected credential; a mismatch needs an update instead. */}
+          {isPeerCredentialRejected(peer) ? (
+            <Button size="sm" variant="outline" disabled={removing} onClick={onPeerAgain}>
+              Peer again
+            </Button>
+          ) : null}
+          <Button size="sm" variant="ghost" disabled={removing} onClick={() => void remove()}>
+            {removing ? "Removing…" : "Remove"}
+          </Button>
+        </span>
       }
     />
+  );
+}
+
+/** How messages travel, in the dialog's words, and the health that matters for that way. */
+function PeerStatus({ peer }: { readonly peer: PeerRecord }) {
+  // Re-rendered each minute, so "online" turns to "offline since" between the list's refreshes.
+  // The minute only triggers the render: it is up to 59 s behind, and the online
+  // window is measured against the real time, as the CLI measures it.
+  useNowMinute();
+  const state = peerPollState(peer, Date.now());
+  const travel =
+    peer.linkMode === "store"
+      ? "Polls this server for its A2A messages"
+      : peer.linkMode === "poll"
+        ? `${peer.origin ?? ""} · this server polls it for A2A messages`
+        : `${peer.origin ?? ""} · sends directly both ways`;
+  const rejected = isPeerCredentialRejected(peer);
+  // Once polling stopped, the last poll that worked says nothing about the peer.
+  const stoppedReason = peerPollStoppedReason(peer);
+  const stopped = stoppedReason !== null;
+  const health = rejected
+    ? `Polling stopped · ${peer.label} rejected the credential`
+    : stopped
+      ? "Polling stopped"
+      : state === null
+        ? peer.inboundSession === "active"
+          ? "Session active"
+          : "No live session here: its deliveries are refused"
+        : state.kind === "never"
+          ? peer.linkMode === "store"
+            ? "Has not polled yet"
+            : "Not polled yet"
+          : state.kind === "online"
+            ? `Online · last polled ${formatRelativeTimeLabel(state.lastPolledAt)}`
+            : `Offline since ${formatRelativeTimeLabel(state.since)}`;
+  return (
+    <span className="flex flex-col gap-0.5">
+      <span>{travel}</span>
+      <span className={stopped ? "text-destructive" : undefined}>
+        {health}
+        {peer.waitingCount > 0 && peer.oldestWaitingAt !== null
+          ? ` · ${String(peer.waitingCount)} waiting · oldest ${formatRelativeTimeLabel(peer.oldestWaitingAt)}`
+          : peer.linkMode === "store"
+            ? " · 0 waiting"
+            : ""}
+      </span>
+      {rejected ? (
+        <span>Peer again to issue a new one.</span>
+      ) : peer.lastError !== null ? (
+        <span className="text-destructive">{stoppedReason ?? peer.lastError}</span>
+      ) : null}
+    </span>
   );
 }

@@ -1,6 +1,7 @@
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as Struct from "effect/Struct";
+export * from "./j5/peerPoll.ts";
 export * from "./j5/playbook.ts";
 
 import { ModelSelection } from "./modelSelection.ts";
@@ -946,6 +947,35 @@ export const PeerPollResponse = Schema.Struct({
 });
 export type PeerPollResponse = typeof PeerPollResponse.Type;
 
+/**
+ * The reachability check before peering: the origins a server thinks others
+ * might reach it at, and one server fetching another's public identity at an
+ * origin. Nothing is recorded; the check only informs the setup.
+ */
+export const PeerAddressesResponse = Schema.Struct({
+  /** Its non-loopback interface addresses with its port, and its configured host; empty when it listens on loopback only. */
+  origins: Schema.Array(Schema.String),
+});
+export type PeerAddressesResponse = typeof PeerAddressesResponse.Type;
+export const PeerProbeRequest = Schema.Struct({ origin: PeerOrigin });
+export type PeerProbeRequest = typeof PeerProbeRequest.Type;
+export const PeerProbeResponse = Schema.Union([
+  Schema.Struct({
+    outcome: Schema.Literal("reached"),
+    origin: Schema.String,
+    /** Who answered: the caller compares it with the server it expected, so a loopback to itself is a miss. */
+    environmentId: Schema.String,
+    label: Schema.String,
+  }),
+  Schema.Struct({
+    outcome: Schema.Literal("failed"),
+    origin: Schema.String,
+    /** The probe's own error, such as "10.20.4.17:3773: connection timed out after 4 s". */
+    error: Schema.String,
+  }),
+]);
+export type PeerProbeResponse = typeof PeerProbeResponse.Type;
+
 export const J5_PEER_API_PATHS = {
   peers: "/api/j5/a2a/peers",
   credentials: "/api/j5/a2a/peers/credentials",
@@ -954,4 +984,6 @@ export const J5_PEER_API_PATHS = {
   roster: "/api/j5/a2a/peers/roster",
   deliver: "/api/j5/a2a/peers/deliver",
   poll: "/api/j5/a2a/peers/poll",
+  addresses: "/api/j5/a2a/peers/addresses",
+  probe: "/api/j5/a2a/peers/probe",
 } as const;

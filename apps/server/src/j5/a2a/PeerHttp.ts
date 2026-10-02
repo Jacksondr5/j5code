@@ -6,6 +6,7 @@ import {
   PEER_PROTOCOL_VERSION,
   PeerDeliveryRequest,
   PeerPollRequest,
+  PeerProbeRequest,
   RemovePeerRequest,
   environmentIdFromPeerSubject,
   peerSubjectForEnvironment,
@@ -14,7 +15,9 @@ import {
   type PeerDeliveryResponse,
   type PeerHelloResponse,
   type PeerListResponse,
+  type PeerAddressesResponse,
   type PeerPollResponse,
+  type PeerProbeResponse,
   type PeerRosterResponse,
   type RemovePeerResponse,
 } from "@t3tools/contracts/j5";
@@ -28,7 +31,10 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
+import * as NodeOS from "node:os";
+
 import packageJson from "../../../package.json" with { type: "json" };
+import { ServerConfig } from "../../config.ts";
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
 import { annotateEnvironmentRequest } from "../../auth/http.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
@@ -36,6 +42,7 @@ import { PeerInboundService, peerDeliveryRefusal } from "./PeerInboundService.ts
 import { PeerRegistryService } from "./PeerRegistryService.ts";
 import { PeerStoreService } from "./PeerStoreService.ts";
 import { RosterService } from "./RosterService.ts";
+import { peerAddressOrigins } from "./peerReachability.ts";
 import { toPeerRoster } from "./peerRoster.ts";
 import { peerProtocolHeaders, peerProtocolMismatch, statedPeerProtocol } from "./peerProtocol.ts";
 import {
@@ -72,6 +79,7 @@ const decodeAddRequest = Schema.decodeUnknownEffect(AddPeerRequest);
 const decodeRemoveRequest = Schema.decodeUnknownEffect(RemovePeerRequest);
 const decodeDeliveryRequest = Schema.decodeUnknownEffect(PeerDeliveryRequest);
 const decodePollRequest = Schema.decodeUnknownEffect(PeerPollRequest);
+const decodeProbeRequest = Schema.decodeUnknownEffect(PeerProbeRequest);
 
 /** A peer on another protocol is refused before its request is read; the caller sees why in the 409. */
 const protocolRefusal = (peer: string) =>
@@ -136,6 +144,7 @@ export const peerHttpRouteLayer = Layer.unwrap(
     const worker = yield* A2ADeliveryWorker;
     const roster = yield* RosterService;
     const store = yield* PeerStoreService;
+    const config = yield* ServerConfig;
     const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
 
     // Rotation and removal list sessions and then revoke; one permit keeps them
@@ -472,6 +481,44 @@ export const peerHttpRouteLayer = Layer.unwrap(
       }).pipe(Effect.catchTags(respondableTags), statingPeerProtocol),
     );
 
+    // The check before peering: where this server might be reached, and
+    // whether this server can reach another at an origin. Nothing is recorded.
+    const addressesRoute = HttpRouter.add(
+      "GET",
+      J5_PEER_API_PATHS.addresses,
+      Effect.gen(function* () {
+        yield* annotateEnvironmentRequest("j5.a2a.peer.addresses");
+        const session = yield* authenticate;
+        yield* requireScope(session, AuthAccessWriteScope);
+        return HttpServerResponse.jsonUnsafe({
+          origins: peerAddressOrigins({
+            host: config.host,
+            port: config.port,
+            interfaces: NodeOS.networkInterfaces(),
+          }),
+        } satisfies PeerAddressesResponse);
+      }).pipe(Effect.catchTags(respondableTags)),
+    );
+
+    const probeRoute = HttpRouter.add(
+      "POST",
+      J5_PEER_API_PATHS.probe,
+      Effect.gen(function* () {
+        yield* annotateEnvironmentRequest("j5.a2a.peer.probe");
+        const session = yield* authenticate;
+        yield* requireScope(session, AuthAccessWriteScope);
+        const body = yield* readJsonBody;
+        if (Result.isFailure(body)) return requestFailure("The request body must be JSON.");
+        const decoded = yield* Effect.result(decodeProbeRequest(body.success));
+        if (Result.isFailure(decoded)) {
+          return requestFailure("origin (an http(s) origin with no path) is required.");
+        }
+        return HttpServerResponse.jsonUnsafe(
+          (yield* peers.probe(decoded.success.origin)) satisfies PeerProbeResponse,
+        );
+      }).pipe(Effect.catchTags(respondableTags)),
+    );
+
     // A peer this server stores messages for asks for them here, acknowledging
     // what the last poll handed out; the request is held while nothing waits.
     const pollRoute = HttpRouter.add(
@@ -536,6 +583,8 @@ export const peerHttpRouteLayer = Layer.unwrap(
     );
 
     return Layer.mergeAll(
+      addressesRoute,
+      probeRoute,
       pollRoute,
       helloRoute,
       rosterRoute,

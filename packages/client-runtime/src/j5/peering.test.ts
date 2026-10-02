@@ -4,8 +4,19 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   defaultPeerOrigin,
   introducePeers,
+  introducePollingPeer,
   peerOriginWarning,
+  peeringCandidates,
+  peeringChoiceReady,
+  peeringLines,
+  peeringReachFrom,
+  peeringRunMode,
+  recommendPeering,
+  recordedPeeringChoice,
+  repeeringChoice,
   resolvePeeringReadiness,
+  type PeeringReach,
+  type PeeringServer,
   type PeeringSide,
 } from "./peering.ts";
 
@@ -114,5 +125,345 @@ describe("introducePeers", () => {
       { step: "record-local", status: "skipped", detail: null },
     ]);
     expect(calls).toHaveLength(3);
+  });
+});
+
+const laptop: PeeringServer = {
+  environmentId: EnvironmentId.make("environment-laptop"),
+  label: "JM-LT-04213",
+  serverVersion: "0.0.48",
+  supportsPoll: true,
+  runMode: "desktop",
+};
+const vm: PeeringServer = {
+  environmentId: EnvironmentId.make("environment-vm"),
+  label: "Work VM",
+  serverVersion: "0.0.48",
+  supportsPoll: true,
+  runMode: "service",
+};
+const vmOrigin = "https://work-vm.corp.example:3773";
+const laptopOrigin = "http://10.20.4.17:3773";
+const reached = (origin: string): PeeringReach => ({ kind: "reached", origin });
+const failed: PeeringReach = {
+  kind: "failed",
+  errors: ["10.20.4.17:3773: connection timed out after 4s"],
+};
+
+describe("peeringRunMode", () => {
+  it("reads how a server is run from its self-update capability", () => {
+    expect(peeringRunMode("boot-service")).toBe("service");
+    expect(peeringRunMode("desktop-managed")).toBe("desktop");
+    expect(peeringRunMode("respawn")).toBe("by-hand");
+    expect(peeringRunMode(undefined)).toBe("by-hand");
+  });
+});
+
+describe("peeringCandidates and peeringReachFrom", () => {
+  it("tries the client's own address first, never loopback, each once", () => {
+    expect(
+      peeringCandidates({
+        clientUrl: `${vmOrigin}/`,
+        addresses: ["http://10.0.0.5:3773", vmOrigin, "http://127.0.0.1:3773"],
+      }),
+    ).toEqual([vmOrigin, "http://10.0.0.5:3773"]);
+    expect(peeringCandidates({ clientUrl: "http://localhost:3773", addresses: [] })).toEqual([]);
+  });
+
+  it("counts a probe only when the expected server answers, and keeps each error verbatim", () => {
+    const candidates = ["http://127.0.0.2:3773", laptopOrigin];
+    expect(peeringReachFrom({ expected: laptop, candidates: [], probes: [] })).toEqual({
+      kind: "untested",
+      error: null,
+    });
+    expect(
+      peeringReachFrom({
+        expected: laptop,
+        candidates,
+        probes: [
+          {
+            outcome: "reached",
+            origin: "http://127.0.0.2:3773",
+            environmentId: "environment-vm",
+            label: "Work VM",
+          },
+          {
+            outcome: "failed",
+            origin: laptopOrigin,
+            error: "10.20.4.17:3773: connection timed out after 4s",
+          },
+        ],
+      }),
+    ).toEqual({
+      kind: "failed",
+      errors: [
+        "127.0.0.2:3773: Work VM answered, not JM-LT-04213",
+        "10.20.4.17:3773: connection timed out after 4s",
+      ],
+    });
+    expect(
+      peeringReachFrom({
+        expected: laptop,
+        candidates,
+        probes: [
+          {
+            outcome: "reached",
+            origin: laptopOrigin,
+            environmentId: "environment-laptop",
+            label: "JM-LT-04213",
+          },
+        ],
+      }),
+    ).toEqual(reached(laptopOrigin));
+  });
+
+  it("keeps the error when a server could not list its own addresses", () => {
+    expect(
+      peeringReachFrom({
+        expected: laptop,
+        candidates: [],
+        probes: [],
+        addressesError: "access expired",
+      }),
+    ).toEqual({ kind: "untested", error: "access expired" });
+    expect(
+      peeringReachFrom({
+        expected: laptop,
+        candidates: [laptopOrigin],
+        probes: [
+          {
+            outcome: "failed",
+            origin: laptopOrigin,
+            error: "10.20.4.17:3773: connection refused",
+          },
+        ],
+        addressesError: "access expired",
+      }),
+    ).toEqual({
+      kind: "failed",
+      errors: [
+        "JM-LT-04213 could not list its addresses: access expired",
+        "10.20.4.17:3773: connection refused",
+      ],
+    });
+  });
+});
+
+describe("recommendPeering", () => {
+  it("polls without asking when one direction cannot connect", () => {
+    const recommendation = recommendPeering({
+      local: laptop,
+      remote: vm,
+      localToRemote: reached(vmOrigin),
+      remoteToLocal: failed,
+    });
+    expect(recommendation).toEqual({
+      kind: "setup",
+      choice: { connections: "local-only", localOrigin: "", remoteOrigin: vmOrigin },
+      question: null,
+    });
+    if (recommendation.kind !== "setup") throw new Error("unreachable");
+    expect(peeringLines(recommendation.choice, laptop, vm)).toEqual([
+      "JM-LT-04213 sends A2A messages to Work VM directly.",
+      "Work VM stores A2A messages for JM-LT-04213 and waits for JM-LT-04213 to poll for them.",
+    ]);
+  });
+
+  it("sends directly both ways without asking when both connect and both run as services", () => {
+    const home = { ...laptop, label: "Home Server", runMode: "service" as const };
+    const recommendation = recommendPeering({
+      local: home,
+      remote: vm,
+      localToRemote: reached(vmOrigin),
+      remoteToLocal: reached("https://home.tail1234.ts.net:3773"),
+    });
+    expect(recommendation.kind === "setup" && recommendation.question).toBeNull();
+    if (recommendation.kind !== "setup") throw new Error("unreachable");
+    expect(peeringLines(recommendation.choice, home, vm)).toEqual([
+      `Home Server sends A2A messages to Work VM directly, at ${vmOrigin}.`,
+      "Work VM sends A2A messages to Home Server directly, at https://home.tail1234.ts.net:3773.",
+    ]);
+  });
+
+  it("asks how to reach a side the desktop app runs or that was started by hand, storing by default", () => {
+    for (const runMode of ["desktop", "by-hand"] as const) {
+      const homeMac = { ...laptop, label: "Home Mac", runMode };
+      const recommendation = recommendPeering({
+        local: homeMac,
+        remote: vm,
+        localToRemote: reached(vmOrigin),
+        remoteToLocal: reached("https://home-mac.tail1234.ts.net:3773"),
+      });
+      if (recommendation.kind !== "setup") throw new Error("unreachable");
+      expect(recommendation.question?.toward).toBe("local");
+      expect(recommendation.question?.reason).toBe(runMode);
+      expect(recommendation.choice.connections).toBe("local-only");
+      expect(recommendation.question?.directChoice.connections).toBe("both");
+      expect(recommendation.question?.directNeedsAddress).toBe(false);
+    }
+  });
+
+  it("asks about a direction it could not test, with polling the default and an address to send directly", () => {
+    const recommendation = recommendPeering({
+      local: laptop,
+      remote: vm,
+      localToRemote: reached(vmOrigin),
+      remoteToLocal: { kind: "untested", error: null },
+    });
+    if (recommendation.kind !== "setup") throw new Error("unreachable");
+    expect(recommendation.question).toMatchObject({
+      toward: "local",
+      reason: "untested",
+      directNeedsAddress: true,
+    });
+    expect(recommendation.choice.connections).toBe("local-only");
+    expect(peeringChoiceReady(recommendation.choice)).toBe(true);
+    expect(peeringChoiceReady(recommendation.question!.directChoice)).toBe(false);
+  });
+
+  it("offers nothing when either server is too old, or when neither can reach the other", () => {
+    const old = { ...vm, supportsPoll: false, serverVersion: "0.0.44" };
+    expect(
+      recommendPeering({
+        local: laptop,
+        remote: old,
+        localToRemote: reached(vmOrigin),
+        remoteToLocal: failed,
+      }),
+    ).toEqual({ kind: "too-old", server: old });
+    expect(
+      recommendPeering({ local: laptop, remote: vm, localToRemote: failed, remoteToLocal: failed }),
+    ).toEqual({ kind: "no-route" });
+  });
+});
+
+describe("recordedPeeringChoice", () => {
+  // Two desktop servers, peered from Home Mac with the default: Laptop polls Home Mac.
+  const homeMac = { ...laptop, label: "Home Mac", runMode: "desktop" as const };
+  const desktop = {
+    ...vm,
+    environmentId: EnvironmentId.make("environment-laptop"),
+    label: "Laptop",
+    runMode: "desktop" as const,
+  };
+  const homeMacOrigin = "https://home-mac.tail1234.ts.net:3773";
+  const laptopTailnetOrigin = "https://laptop.tail1234.ts.net:3773";
+  const laptopRecord = { linkMode: "poll", origin: homeMacOrigin } as const;
+  const homeMacRecord = { linkMode: "store", origin: null } as const;
+
+  it("peers a recorded pair again the way it is set up, from either side", () => {
+    const setUp = recommendPeering({
+      local: homeMac,
+      remote: desktop,
+      localToRemote: reached(laptopTailnetOrigin),
+      remoteToLocal: reached(homeMacOrigin),
+    });
+    expect(setUp.kind === "setup" && setUp.choice.connections).toBe("remote-only");
+
+    // From Laptop, whose credential was rejected, a fresh check would turn it around.
+    const fresh = recommendPeering({
+      local: desktop,
+      remote: homeMac,
+      localToRemote: reached(homeMacOrigin),
+      remoteToLocal: reached(laptopTailnetOrigin),
+    });
+    expect(fresh.kind === "setup" && fresh.choice.connections).toBe("remote-only");
+    const fromLaptop = recordedPeeringChoice({ local: laptopRecord, remote: homeMacRecord });
+    expect(fromLaptop).toEqual({
+      connections: "local-only",
+      localOrigin: "",
+      remoteOrigin: homeMacOrigin,
+    });
+    expect(peeringLines(fromLaptop!, desktop, homeMac)[1]).toBe(
+      "Home Mac stores A2A messages for Laptop and waits for Laptop to poll for them.",
+    );
+
+    // From Home Mac, the same pairing: Laptop polls it at the same address.
+    const fromHomeMac = recordedPeeringChoice({ local: homeMacRecord, remote: laptopRecord });
+    expect(fromHomeMac).toEqual({
+      connections: "remote-only",
+      localOrigin: homeMacOrigin,
+      remoteOrigin: "",
+    });
+    expect(peeringChoiceReady(fromHomeMac!)).toBe(true);
+
+    // An edit made while peering again cannot move the recorded address, or the way.
+    const edits = { localOrigin: "https://elsewhere.example:3773", remoteOrigin: "https://x:1" };
+    expect(repeeringChoice(fromLaptop!, edits)).toEqual(fromLaptop);
+    expect(repeeringChoice(fromHomeMac!, edits)).toEqual(fromHomeMac);
+  });
+
+  it("lets an edit fill only an address neither record holds", () => {
+    // Home Mac stores for Laptop, but Laptop's own record could not be read.
+    const partial = recordedPeeringChoice({ local: homeMacRecord, remote: null })!;
+    expect(peeringChoiceReady(partial)).toBe(false);
+    const filled = repeeringChoice(partial, {
+      localOrigin: homeMacOrigin,
+      remoteOrigin: "https://ignored.example:3773",
+    });
+    expect(filled).toEqual({
+      connections: "remote-only",
+      localOrigin: homeMacOrigin,
+      remoteOrigin: "",
+    });
+    expect(peeringChoiceReady(filled)).toBe(true);
+  });
+
+  it("keeps both addresses of a pair that sends directly, and has nothing for a new pair", () => {
+    expect(
+      recordedPeeringChoice({
+        local: { linkMode: "push", origin: laptopTailnetOrigin },
+        remote: { linkMode: "push", origin: homeMacOrigin },
+      }),
+    ).toEqual({
+      connections: "both",
+      localOrigin: homeMacOrigin,
+      remoteOrigin: laptopTailnetOrigin,
+    });
+    expect(recordedPeeringChoice({ local: null, remote: laptopRecord })?.connections).toBe(
+      "remote-only",
+    );
+    expect(recordedPeeringChoice({ local: null, remote: null })).toBeNull();
+  });
+});
+
+describe("introducePollingPeer", () => {
+  it("issues a store credential on the reachable server, then records it on the poller", async () => {
+    const calls: Array<string> = [];
+    const outcome = await introducePollingPeer({
+      poller: { environmentId: laptop.environmentId, label: laptop.label, origin: "" },
+      storer: { environmentId: vm.environmentId, label: vm.label, origin: vmOrigin },
+      issue: async (storer, poller) => {
+        calls.push(`issue on ${storer.label} for ${poller.label}`);
+        return { credential: "vm-issued" };
+      },
+      record: async (poller, storer, credential) => {
+        calls.push(
+          `record ${storer.label} at ${storer.origin} on ${poller.label} with ${credential}`,
+        );
+      },
+    });
+    expect(outcome.ok).toBe(true);
+    expect(calls).toEqual([
+      "issue on Work VM for JM-LT-04213",
+      `record Work VM at ${vmOrigin} on JM-LT-04213 with vm-issued`,
+    ]);
+
+    const refused = await introducePollingPeer({
+      poller: { environmentId: laptop.environmentId, label: laptop.label, origin: "" },
+      storer: { environmentId: vm.environmentId, label: vm.label, origin: vmOrigin },
+      issue: async () => {
+        throw new Error("Work VM does not store messages for a peer that polls");
+      },
+      record: async () => undefined,
+    });
+    expect(refused.steps).toEqual([
+      {
+        step: "issue-store",
+        status: "failed",
+        detail: "Work VM does not store messages for a peer that polls",
+      },
+      { step: "record-poll", status: "skipped", detail: null },
+    ]);
   });
 });

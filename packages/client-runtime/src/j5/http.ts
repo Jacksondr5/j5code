@@ -49,6 +49,9 @@ import {
   type FleetReadRequest,
   j5SquadronActionPath,
   type IssuePeerCredentialRequest,
+  PeerAddressesResponse,
+  PeerProbeResponse,
+  type PeerProbeRequest,
   type RemovePeerRequest,
 } from "@t3tools/contracts/j5";
 import type { ProjectId, ThreadId } from "@t3tools/contracts";
@@ -438,6 +441,30 @@ export const addPeer = Effect.fn("j5.http.addPeer")(function* (
   );
   const response = yield* executeJ5Request(prepared, request, WRITE_TIMEOUT_MS);
   return yield* HttpClientResponse.schemaBodyJson(AddPeerResponse)(response);
+});
+
+/** Where this server thinks others might reach it; the check before peering probes each. */
+export const listPeerAddresses = Effect.fn("j5.http.listPeerAddresses")(function* (
+  prepared: PreparedConnection,
+) {
+  const response = yield* executeJ5Request(
+    prepared,
+    HttpClientRequest.get(J5_PEER_API_PATHS.addresses),
+    READ_TIMEOUT_MS,
+  );
+  return (yield* HttpClientResponse.schemaBodyJson(PeerAddressesResponse)(response)).origins;
+});
+
+/** This server fetches another's public identity at the origin, bounded on the server. */
+export const probePeer = Effect.fn("j5.http.probePeer")(function* (
+  prepared: PreparedConnection,
+  input: PeerProbeRequest,
+) {
+  const request = yield* HttpClientRequest.post(J5_PEER_API_PATHS.probe).pipe(
+    HttpClientRequest.bodyJson(input),
+  );
+  const response = yield* executeJ5Request(prepared, request, WRITE_TIMEOUT_MS);
+  return yield* HttpClientResponse.schemaBodyJson(PeerProbeResponse)(response);
 });
 
 export const removePeer = Effect.fn("j5.http.removePeer")(function* (
