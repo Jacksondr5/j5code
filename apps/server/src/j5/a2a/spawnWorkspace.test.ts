@@ -10,7 +10,9 @@ import {
   type OrchestrationV2ThreadProjection,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
@@ -141,10 +143,17 @@ const callerThread = (threadId: ThreadId) =>
     },
   }) as unknown as OrchestrationV2ThreadProjection;
 
-const spawnHarness = (input: { readonly checkout: FakeCheckout }) =>
+const spawnHarness = (input: {
+  readonly checkout: FakeCheckout;
+  /** The durable command log; pass one from an earlier harness to model a restart. */
+  readonly commands?: Ref.Ref<ReadonlyArray<OrchestrationV2Command>>;
+  /** Runs inside each thread.create before it lands, so a test can hold a start open. */
+  readonly beforeCreate?: Effect.Effect<void>;
+  readonly onInspect?: Effect.Effect<void>;
+}) =>
   Effect.gen(function* () {
     const log = yield* Ref.make<ReadonlyArray<string>>([]);
-    const commands = yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]);
+    const commands = input.commands ?? (yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]));
     const launches = yield* Ref.make<ReadonlyArray<ThreadLaunchInput>>([]);
     const failFacts = yield* Ref.make(false);
     const callerRow = {
@@ -200,8 +209,7 @@ const spawnHarness = (input: { readonly checkout: FakeCheckout }) =>
         getThreadShell: () => Effect.succeed(null),
         dispatch: (command) =>
           Effect.gen(function* () {
-            // Interleave concurrent spawns between the receipt check and the create.
-            yield* Effect.yieldNow;
+            if (command.type === "thread.create" && input.beforeCreate) yield* input.beforeCreate;
             yield* Ref.update(commands, (items) => [...items, command]);
             yield* Ref.update(log, (items) => [...items, command.type]);
             return { events: [], effects: [] } as never;
@@ -268,6 +276,7 @@ const spawnHarness = (input: { readonly checkout: FakeCheckout }) =>
           checkout: input.checkout,
           launches,
           launch: () => Ref.update(log, (items) => [...items, "launch"]),
+          ...(input.onInspect === undefined ? {} : { onInspect: input.onInspect }),
           // An accepted create leaves its receipt, as the orchestrator's does.
           accepted: Ref.get(commands).pipe(
             Effect.map((all) =>
@@ -372,20 +381,28 @@ it.effect("an explicit shared workspace keeps the caller's checkout and starts t
   }),
 );
 
-it.effect("binds a client_request_id to the workspace it was first accepted with", () =>
+it.effect("binds a client_request_id to its first workspace type, across a restart", () =>
   Effect.gen(function* () {
-    const { layer, call, commands, launches, failFacts } = yield* spawnHarness({
-      checkout: { isRepo: true, refName: "j5/main" },
-    });
+    const first = yield* spawnHarness({ checkout: { isRepo: true, refName: "j5/main" } });
     yield* Effect.gen(function* () {
       // The worktree create is accepted, then the spawn stops before its home is recorded.
-      yield* Ref.set(failFacts, true);
-      const halfDone = yield* call({ ...spawnArgs, client_request_id: "bound" });
+      yield* Ref.set(first.failFacts, true);
+      const halfDone = yield* first.call({
+        ...spawnArgs,
+        workspace: { type: "worktree", base_ref: "j5/main" },
+        client_request_id: "bound",
+      });
       assert.isTrue(halfDone.isFailure);
-      assert.lengthOf(yield* Ref.get(commands), 1);
-      yield* Ref.set(failFacts, false);
+      assert.lengthOf(yield* Ref.get(first.commands), 1);
+    }).pipe(Effect.provide(first.layer));
 
-      const switched = yield* call({
+    // A fresh server: a new permit, the same durable receipts.
+    const restarted = yield* spawnHarness({
+      checkout: { isRepo: true, refName: "j5/main" },
+      commands: first.commands,
+    });
+    yield* Effect.gen(function* () {
+      const switched = yield* restarted.call({
         ...spawnArgs,
         workspace: { type: "shared" },
         client_request_id: "bound",
@@ -395,35 +412,79 @@ it.effect("binds a client_request_id to the workspace it was first accepted with
         (switched.result as { readonly message: string }).message,
         "already bound to a worktree workspace",
       );
-      assert.lengthOf(yield* Ref.get(commands), 1);
+      assert.lengthOf(yield* Ref.get(restarted.commands), 1);
 
-      const resumed = yield* call({ ...spawnArgs, client_request_id: "bound" });
+      // Options are not bound: nothing was provisioned yet, so the retry's base takes effect.
+      const resumed = yield* restarted.call({
+        ...spawnArgs,
+        workspace: { type: "worktree", base_ref: "release" },
+        client_request_id: "bound",
+      });
       assert.isFalse(resumed.isFailure);
-      const [first, replay] = yield* Ref.get(commands);
-      assert.equal(replay?.commandId, first?.commandId);
-      assert.lengthOf(yield* Ref.get(launches), 1);
-    }).pipe(Effect.provide(layer));
+      const [original, replay] = yield* Ref.get(restarted.commands);
+      assert.equal(replay?.commandId, original?.commandId);
+      const launches = yield* Ref.get(restarted.launches);
+      assert.lengthOf(launches, 1);
+      assert.equal(
+        launches[0]?.workspaceStrategy.type === "worktree" && launches[0].workspaceStrategy.baseRef,
+        "release",
+      );
+    }).pipe(Effect.provide(restarted.layer));
   }),
 );
 
-it.effect("two concurrent spawns on one key with opposite workspaces create the thread once", () =>
+it.effect("a concurrent opposite-type start on one key waits for the first, then is refused", () =>
   Effect.gen(function* () {
-    const { layer, call, commands } = yield* spawnHarness({
+    const createEntered = yield* Deferred.make<void>();
+    const releaseCreate = yield* Deferred.make<void>();
+    const inspections = yield* Ref.make(0);
+    const secondInspected = yield* Deferred.make<void>();
+    const harness = yield* spawnHarness({
       checkout: { isRepo: true, refName: "j5/main" },
+      beforeCreate: Deferred.succeed(createEntered, undefined).pipe(
+        Effect.andThen(Deferred.await(releaseCreate)),
+      ),
+      onInspect: Ref.updateAndGet(inspections, (count) => count + 1).pipe(
+        Effect.flatMap((count) =>
+          count === 2 ? Deferred.succeed(secondInspected, undefined) : Effect.void,
+        ),
+      ),
     });
     yield* Effect.gen(function* () {
-      const outcomes = yield* Effect.all(
-        [
-          call({ ...spawnArgs, workspace: { type: "worktree" }, client_request_id: "raced" }),
-          call({ ...spawnArgs, workspace: { type: "shared" }, client_request_id: "raced" }),
-        ],
-        { concurrency: "unbounded" },
+      const winner = yield* harness
+        .call({ ...spawnArgs, workspace: { type: "worktree" }, client_request_id: "raced" })
+        .pipe(Effect.forkChild);
+      // The first start holds the permit, stopped inside its create.
+      yield* Deferred.await(createEntered);
+      const loser = yield* harness
+        .call({ ...spawnArgs, workspace: { type: "shared" }, client_request_id: "raced" })
+        .pipe(Effect.forkChild);
+      // The second has read git and gone on to ask for the permit; let it run as far as it can.
+      yield* Deferred.await(secondInspected);
+      for (let turn = 0; turn < 20; turn++) yield* Effect.yieldNow;
+      yield* Deferred.succeed(releaseCreate, undefined);
+
+      assert.isFalse((yield* Fiber.join(winner)).isFailure);
+      const refused = yield* Fiber.join(loser);
+      assert.isTrue(refused.isFailure);
+      assert.include(
+        (refused.result as { readonly message: string }).message,
+        "already bound to a worktree workspace",
       );
-      assert.deepStrictEqual(outcomes.map((outcome) => outcome.isFailure).sort(), [false, true]);
-      const creates = (yield* Ref.get(commands)).filter(
-        (command) => command.type === "thread.create",
-      );
+      const commands = yield* Ref.get(harness.commands);
+      const creates = commands.filter((command) => command.type === "thread.create");
       assert.lengthOf(creates, 1);
-    }).pipe(Effect.provide(layer));
+      const [create] = creates;
+      // The one thread is the winner's: unbound until ThreadLaunch prepares its worktree.
+      if (create?.type === "thread.create") {
+        assert.include(create.commandId, "spawn-create-worktree");
+        assert.isNull(create.worktreePath);
+      }
+      assert.lengthOf(yield* Ref.get(harness.launches), 1);
+      assert.lengthOf(
+        commands.filter((command) => command.type === "message.dispatch"),
+        0,
+      );
+    }).pipe(Effect.provide(harness.layer));
   }),
 );

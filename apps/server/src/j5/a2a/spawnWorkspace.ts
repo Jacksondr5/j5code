@@ -172,7 +172,13 @@ export interface SpawnWorkspaceServiceShape {
   }) => Effect.Effect<SpawnCheckout>;
   /**
    * Runs one spawn's start (create, facts, brief) with no other start for the same thread in
-   * flight, after refusing a request key already accepted with the other workspace.
+   * flight, after refusing a request key already accepted with the other workspace type.
+   *
+   * Invariant: every door that dispatches `thread.create` for a spawn thread id goes through this
+   * permit. The orchestrator has no existing-thread guard and the projection upserts, so a second
+   * create under the other type's command id would overwrite the first thread; only this check,
+   * made under the permit, keeps it from being dispatched. The receipt it reads is durable, so the
+   * binding outlives the in-process permit across a restart.
    */
   readonly withSpawnStart: <A, E, R>(
     input: {

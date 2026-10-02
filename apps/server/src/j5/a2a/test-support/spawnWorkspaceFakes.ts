@@ -34,6 +34,8 @@ export const fakeSpawnWorkspaceLayer = (options: {
   readonly launches?: Ref.Ref<ReadonlyArray<ThreadLaunchInput>>;
   readonly launch?: (input: ThreadLaunchInput) => Effect.Effect<void>;
   readonly accepted?: Effect.Effect<ReadonlyArray<CommandId>>;
+  /** Runs as each spawn reads git, just before it asks for the start permit. */
+  readonly onInspect?: Effect.Effect<void>;
 }) =>
   layerFromReceiptStore.pipe(
     Layer.provide(
@@ -46,10 +48,12 @@ export const fakeSpawnWorkspaceLayer = (options: {
         }),
         Layer.mock(GitWorkflowService)({
           localStatus: () =>
-            Effect.succeed({
-              isRepo: options.checkout.isRepo,
-              refName: options.checkout.refName,
-            } as never),
+            (options.onInspect ?? Effect.void).pipe(
+              Effect.as({
+                isRepo: options.checkout.isRepo,
+                refName: options.checkout.refName,
+              } as never),
+            ),
           listLocalBranchNames: () =>
             Effect.succeed([...(options.checkout.localBranchNames ?? [])]),
         }),

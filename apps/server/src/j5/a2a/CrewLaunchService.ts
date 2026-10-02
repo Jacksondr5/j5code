@@ -496,18 +496,9 @@ export const layer = Layer.effect(
 
     const detailOf = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
 
-    /**
-     * Create each seat's thread and commit its home and placement, carrying on past a seat that
-     * fails. A failed create is checked against the store: only a thread that never came to exist
-     * is `not_created`; one that exists without its home is `not_started`.
-     */
-    const spawnSeats = Effect.fn("j5.a2a.crewLaunch.spawnSeats")(function* (
-      captain: CrewCaptain,
-      planned: ReadonlyArray<Planned>,
-    ) {
-      const outcomes: Array<CrewSeatLaunchOutcome> = [];
-      const created: Array<Planned> = [];
-      for (const member of planned) {
+    /** Create one seat's thread and commit its home and placement. */
+    const startSeat = (captain: CrewCaptain, member: Planned) =>
+      Effect.gen(function* () {
         const seatName = member.seat.name;
         const create = yield* Effect.result(
           threadManagement.dispatch({
@@ -529,24 +520,20 @@ export const layer = Layer.effect(
         const child = yield* Effect.result(
           getThreadProjectionIfPresent(threadManagement, member.threadId),
         );
-        if (Result.isFailure(child)) {
-          outcomes.push({
+        if (Result.isFailure(child))
+          return {
             seatName,
             kind: "not_started",
             detail: `reading the seat thread failed: ${detailOf(child.failure)}`,
-          });
-          continue;
-        }
-        if (child.success === null) {
-          outcomes.push({
+          } satisfies CrewSeatLaunchOutcome;
+        if (child.success === null)
+          return {
             seatName,
             kind: "not_created",
             detail: Result.isFailure(create)
               ? detailOf(create.failure)
               : "the thread did not appear after it was created",
-          });
-          continue;
-        }
+          } satisfies CrewSeatLaunchOutcome;
         const facts = yield* Effect.result(
           composition.recordFacts({
             homeCommandId: spawnHomeCommandId(member.stableInput),
@@ -561,16 +548,47 @@ export const layer = Layer.effect(
             createdAt: DateTime.formatIso(child.success.thread.createdAt),
           }),
         );
-        if (Result.isFailure(facts)) {
-          outcomes.push({
+        if (Result.isFailure(facts))
+          return {
             seatName,
             kind: "not_started",
             detail: `recording its home and placement failed: ${detailOf(facts.failure)}`,
-          });
+          } satisfies CrewSeatLaunchOutcome;
+        return { seatName, kind: "created" } satisfies CrewSeatLaunchOutcome;
+      });
+
+    /**
+     * Create each seat's thread and commit its home and placement, carrying on past a seat that
+     * fails. A failed create is checked against the store: only a thread that never came to exist
+     * is `not_created`; one that exists without its home is `not_started`.
+     */
+    const spawnSeats = Effect.fn("j5.a2a.crewLaunch.spawnSeats")(function* (
+      captain: CrewCaptain,
+      planned: ReadonlyArray<Planned>,
+    ) {
+      const outcomes: Array<CrewSeatLaunchOutcome> = [];
+      const created: Array<Planned> = [];
+      for (const member of planned) {
+        const seatName = member.seat.name;
+        // One start per seat thread at a time, like spawn_agent (see `withSpawnStart`). The
+        // approval token already binds each seat's workspace type, so the type check never
+        // refuses here; the brief takes the permit again once every seat exists.
+        const started = yield* Effect.result(
+          spawnWorkspace.withSpawnStart(
+            {
+              stableInput: member.stableInput,
+              threadId: member.threadId,
+              workspace: member.workspace,
+            },
+            startSeat(captain, member),
+          ),
+        );
+        if (Result.isFailure(started)) {
+          outcomes.push({ seatName, kind: "not_started", detail: detailOf(started.failure) });
           continue;
         }
-        outcomes.push({ seatName, kind: "created" });
-        created.push(member);
+        outcomes.push(started.success);
+        if (started.success.kind === "created") created.push(member);
       }
       return { outcomes, created };
     });
@@ -629,19 +647,26 @@ export const layer = Layer.effect(
           },
         });
         const dispatched = yield* Effect.result(
-          spawnWorkspace.startBrief({
-            workspace: member.workspace,
-            stableInput: member.stableInput,
-            squadronId: captain.squadronId,
-            projectId: captain.thread.projectId,
-            threadId: member.threadId,
-            title: spawnTitle(member.seat.name, undefined),
-            messageId: spawnMessageId(member.stableInput),
-            text,
-            modelSelection: member.modelSelection,
-            runtimeMode: member.runtimeMode,
-            interactionMode: captain.thread.interactionMode,
-          }),
+          spawnWorkspace.withSpawnStart(
+            {
+              stableInput: member.stableInput,
+              threadId: member.threadId,
+              workspace: member.workspace,
+            },
+            spawnWorkspace.startBrief({
+              workspace: member.workspace,
+              stableInput: member.stableInput,
+              squadronId: captain.squadronId,
+              projectId: captain.thread.projectId,
+              threadId: member.threadId,
+              title: spawnTitle(member.seat.name, undefined),
+              messageId: spawnMessageId(member.stableInput),
+              text,
+              modelSelection: member.modelSelection,
+              runtimeMode: member.runtimeMode,
+              interactionMode: captain.thread.interactionMode,
+            }),
+          ),
         );
         if (Result.isFailure(dispatched))
           failed.set(
