@@ -594,7 +594,15 @@ const handlers = {
           provenance: projectProvenance({ kind: "unrecorded" } as const),
           placement_parent_id: null,
           display_name: agent.displayName,
-          server: { name: agent.environmentLabel, local: false },
+          server: {
+            name: agent.environmentLabel,
+            local: false,
+            // Only a server that polls this one has its availability measured.
+            ...(agent.available === null ? {} : { available: agent.available }),
+            ...(agent.available === null || agent.lastAvailableAt === null
+              ? {}
+              : { last_available_at: agent.lastAvailableAt }),
+          },
         }));
       return {
         unread_peer_count: remote.unreadPeers.length,

@@ -31,6 +31,7 @@ import { ServerConfig } from "../../config.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { peerHttpRouteLayer } from "./PeerHttp.ts";
 import { RosterService } from "./RosterService.ts";
+import { PeerRemovalService } from "./PeerRemovalService.ts";
 import { PeerStoreService, type PeerPollInput } from "./PeerStoreService.ts";
 import {
   A2APeerReceiverNotDeliverableError,
@@ -233,6 +234,16 @@ const makeHandler = (input: {
                   const replay = (input.received?.length ?? 0) > 1;
                   return { receivedSeq: 12, replay };
                 }),
+      }),
+    ),
+    // Removal wipes what waits on the peer, then removes the record as the registry does.
+    Layer.provide(
+      Layer.mock(PeerRemovalService)({
+        remove: (environmentId) =>
+          Effect.sync(() => {
+            input.removed?.push(environmentId);
+            return { removed: environmentId === home, cancelledMessages: 0, droppedExchanges: 0 };
+          }),
       }),
     ),
     Layer.provide(
@@ -509,18 +520,19 @@ it("adds a peer through the registry and maps its refusals to stable codes", asy
   }
 });
 
-it("lists peers with access:read and removes one while revoking the session it held", async () => {
-  const revoked: Array<string> = [];
-  const removed: Array<string> = [];
+it("lists peers with access:read and removes one after revoking every session it held", async () => {
+  // Revocations and the removal are recorded in one list, so their order shows.
+  const operations: Array<string> = [];
   const reader = makeHandler({ subject: "viewer", scopes: [AuthAccessReadScope] });
   const admin = makeHandler({
     subject: "admin",
     scopes: [AuthAccessWriteScope, AuthOrchestrationOperateScope],
-    revoked,
-    removed,
+    revoked: operations,
+    removed: operations,
     existingSessions: [
       { sessionId: AuthSessionId.make("auth-session:home"), subject: `peer:${home}` },
       { sessionId: AuthSessionId.make("auth-session:web"), subject: "one-time-token" },
+      { sessionId: AuthSessionId.make("auth-session:home-rotated"), subject: `peer:${home}` },
     ],
   });
   try {
@@ -535,9 +547,12 @@ it("lists peers with access:read and removes one while revoking the session it h
 
     const response = await admin.handler(post(J5_PEER_API_PATHS.remove, { environmentId: home }));
     assert.equal(response.status, 200);
-    assert.deepStrictEqual(await response.json(), { removed: true, revokedSessions: 1 });
-    assert.deepStrictEqual(removed, [home]);
-    assert.deepStrictEqual(revoked, ["auth-session:home"]);
+    assert.deepStrictEqual(await response.json(), { removed: true, revokedSessions: 2 });
+    assert.deepStrictEqual(
+      operations,
+      ["auth-session:home", "auth-session:home-rotated", home],
+      "the peer can no longer deliver or poll before the wipe begins",
+    );
 
     const missing = await admin.handler(
       post(J5_PEER_API_PATHS.remove, { environmentId: "environment-unknown" }),
