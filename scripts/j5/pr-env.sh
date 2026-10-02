@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # pr-env.sh — stand up an isolated test environment for a PR, no agents required.
 #
-#   scripts/j5/pr-env.sh <pr-number> [--fresh] [--branch <name>] [--peer]
+#   scripts/j5/pr-env.sh <pr-number> [--fresh] [--branch <name>] [--peer [--poll]]
 #
 #   scripts/j5/pr-env.sh 35            # build + serve PR #35, reusing its state dir
 #   scripts/j5/pr-env.sh 35 --fresh    # same, but wipe state first (first-run gate fires again)
 #   scripts/j5/pr-env.sh 0 --branch j5/main   # test main itself
 #   scripts/j5/pr-env.sh 35 --peer     # two servers from one build, peered as Local and Remote
+#   scripts/j5/pr-env.sh 35 --peer --poll   # the same, but Remote polls Local for its messages
 #
 # What it does: fetches the PR head into a dedicated worktree under
 # ~/.j5code-pr-envs/, builds the version-matched server+web bundle, and serves it
@@ -23,17 +24,25 @@
 # URLs stay valid. Both logs stream here, each line prefixed [Local] or [Remote].
 # Pair your browser with Local's URL, then add Remote under Settings → Connections
 # → Add environment with Remote's URL. Rerunning re-peers idempotently.
+#
+# --poll peers them in poll mode instead, as a laptop behind an office firewall
+# peers with a reachable server: Local stores Remote's messages and Remote polls
+# Local for them, so Local never connects to Remote. Rerunning on state peered
+# the other way is refused, because a pair's mode changes only by removing the
+# peer: use --fresh.
 set -euo pipefail
 
 REPO="${J5_REPO:-$HOME/repos/jacksondr5/j5code}"
-PR="${1:?usage: pr-env.sh <pr-number> [--fresh] [--branch <name>] [--peer]}"; shift
-FRESH=0; BRANCH=""; PEER=0
+PR="${1:?usage: pr-env.sh <pr-number> [--fresh] [--branch <name>] [--peer [--poll]]}"; shift
+FRESH=0; BRANCH=""; PEER=0; POLL=0
 while [ $# -gt 0 ]; do case "$1" in
   --fresh) FRESH=1 ;;
   --branch) BRANCH="$2"; shift ;;
   --peer) PEER=1 ;;
+  --poll) POLL=1 ;;
   *) echo "unknown flag: $1" >&2; exit 2 ;;
 esac; shift; done
+if [ "$POLL" = 1 ] && [ "$PEER" = 0 ]; then echo "--poll needs --peer" >&2; exit 2; fi
 
 ENVROOT="$HOME/.j5code-pr-envs/pr$PR"
 SRC="$ENVROOT/src"; STATE="$ENVROOT/state"; PEER_STATE="$ENVROOT/state-remote"
@@ -126,15 +135,18 @@ environment_id() { # <origin>
 j5() { "$NODE_BIN" apps/server/dist/bin.mjs "$@"; }
 # The issuer mints the credential the holder presents when delivering to it; the
 # holder then records the issuer at its origin, proving that credential there.
-peer_one_way() { # <issuer state> <issuer origin> <issuer label> <holder id> <holder state> <holder origin> <holder label>
+# With "poll" as the eighth argument, the issuer stores the holder's messages and the
+# holder polls the issuer for them, so the issuer never connects to the holder.
+peer_one_way() { # <issuer state> <issuer origin> <issuer label> <holder id> <holder state> <holder origin> <holder label> [poll]
   # Capture stdout alone: a process substitution inside $(...) would write its
   # prefixed stderr into the captured credential. Node's warnings go to a file
   # and surface only when the step fails.
-  local credential errors="$ENVROOT/peer-credential.err"
+  local credential errors="$ENVROOT/peer-credential.err" store=() poll=()
+  if [ "${8:-}" = poll ]; then store=(--store); poll=(--poll); fi
   credential=$(j5 a2a peer credential --base-dir "$1" --origin "$2" --for "$4" --label "$7" --credential-only \
-    2>"$errors") \
+    ${store[@]+"${store[@]}"} 2>"$errors") \
     || { echo "== $3 could not issue a peer credential for $7 ==" >&2; tag "${C_PEER}[peer]${C_OFF}" "" < "$errors"; return 1; }
-  j5 a2a peer add --base-dir "$5" --origin "$6" --peer-origin "$2" --credential "$credential" \
+  j5 a2a peer add --base-dir "$5" --origin "$6" --peer-origin "$2" --credential "$credential" ${poll[@]+"${poll[@]}"} \
     2>&1 | tag "${C_PEER}[peer]${C_OFF}" "" \
     || { echo "== $7 could not record $3 at $2 ==" >&2; return 1; }
 }
@@ -163,14 +175,21 @@ LOCAL_ID=$(environment_id "$LOCAL_ORIGIN"); REMOTE_ID=$(environment_id "$REMOTE_
 if [ "$LOCAL_ID" = "$REMOTE_ID" ]; then
   echo "== both servers report environment $LOCAL_ID; the state dirs are not separate ==" >&2; exit 1
 fi
-echo "${C_PEER}[peer]${C_OFF} peering Local ($LOCAL_ID) <-> Remote ($REMOTE_ID)"
-retry 5 3 "Local recording Remote" \
-  peer_one_way "$PEER_STATE" "$REMOTE_ORIGIN" Remote "$LOCAL_ID" "$STATE" "$LOCAL_ORIGIN" Local
-retry 5 3 "Remote recording Local" \
-  peer_one_way "$STATE" "$LOCAL_ORIGIN" Local "$REMOTE_ID" "$PEER_STATE" "$REMOTE_ORIGIN" Remote
-
-echo ""
-echo "== peered. Local $LOCAL_ORIGIN ($LOCAL_ID)  <->  Remote $REMOTE_ORIGIN ($REMOTE_ID) =="
+if [ "$POLL" = 1 ]; then
+  echo "${C_PEER}[peer]${C_OFF} peering in poll mode: Remote ($REMOTE_ID) polls Local ($LOCAL_ID)"
+  retry 5 3 "Remote recording Local to poll" \
+    peer_one_way "$STATE" "$LOCAL_ORIGIN" Local "$REMOTE_ID" "$PEER_STATE" "$REMOTE_ORIGIN" Remote poll
+  echo ""
+  echo "== peered. Remote $REMOTE_ORIGIN ($REMOTE_ID) polls Local $LOCAL_ORIGIN ($LOCAL_ID); Local never connects to Remote =="
+else
+  echo "${C_PEER}[peer]${C_OFF} peering Local ($LOCAL_ID) <-> Remote ($REMOTE_ID)"
+  retry 5 3 "Local recording Remote" \
+    peer_one_way "$PEER_STATE" "$REMOTE_ORIGIN" Remote "$LOCAL_ID" "$STATE" "$LOCAL_ORIGIN" Local
+  retry 5 3 "Remote recording Local" \
+    peer_one_way "$STATE" "$LOCAL_ORIGIN" Local "$REMOTE_ID" "$PEER_STATE" "$REMOTE_ORIGIN" Remote
+  echo ""
+  echo "== peered. Local $LOCAL_ORIGIN ($LOCAL_ID)  <->  Remote $REMOTE_ORIGIN ($REMOTE_ID) =="
+fi
 echo "== Local pairing URL:  $(pairing_url "$LOCAL_LOG" "$PORT")"
 echo "== Remote pairing URL: $(pairing_url "$REMOTE_LOG" "$PEER_PORT")"
 echo "== pair your browser with Local's URL, then Settings → Connections → Add environment with Remote's URL =="

@@ -13,6 +13,9 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as PubSub from "effect/PubSub";
+import type * as Scope from "effect/Scope";
+import * as Stream from "effect/Stream";
 import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -37,6 +40,8 @@ const PEER_HELLO_TIMEOUT = Duration.seconds(5);
 export interface AddPeerInput {
   readonly origin: string;
   readonly credential: string;
+  /** `poll` when this server cannot be reached and polls the peer; `push` sends directly both ways. */
+  readonly linkMode: "push" | "poll";
   /** Re-adding a known peer at a different origin is refused unless the caller says so. */
   readonly replaceOrigin: boolean;
   readonly acceptedAt: string;
@@ -126,6 +131,16 @@ export class PeerLinkModeConflictError extends Schema.TaggedError<PeerLinkModeCo
   }
 }
 
+/** A poll pairing needs a storing server that keeps messages for a poller. */
+export class PeerPollUnsupportedError extends Schema.TaggedError<PeerPollUnsupportedError>()(
+  "PeerPollUnsupportedError",
+  { origin: Schema.String },
+) {
+  override get message(): string {
+    return `The server at ${this.origin} does not store messages for a peer that polls. Update J5 there, then peer again.`;
+  }
+}
+
 export type AddPeerError =
   | SqlError
   | PeerSessionReadError
@@ -135,6 +150,7 @@ export type AddPeerError =
   | PeerIsSelfError
   | PeerProtocolMismatchError
   | PeerLinkModeConflictError
+  | PeerPollUnsupportedError
   | PeerOriginConflictError;
 
 /** A peer record plus what this server needs to reach or read it; never leaves the process. */
@@ -177,6 +193,8 @@ export interface PeerRegistryServiceShape {
   readonly connection: (
     environmentId: string,
   ) => Effect.Effect<PeerConnection | null, SqlError | PeerSessionReadError>;
+  /** A signal each time a peer is recorded, rotated or removed, for the pollers to follow. */
+  readonly subscribeChanges: Effect.Effect<Stream.Stream<void>, never, Scope.Scope>;
   /** Proves the credential at the origin, then upserts; re-adding the same peer rotates its origin and credential. */
   readonly add: (
     input: AddPeerInput,
@@ -214,14 +232,17 @@ export interface PeerRegistryServiceShape {
     readonly at: string;
   }) => Effect.Effect<boolean, SqlError>;
   /**
-   * Records an authorized poll from a peer this server stores for, and its
-   * arrival as the heartbeat a peer's online and offline are read from: a
-   * poll held here proves the poller is there. It ends any last error.
-   * Answers with the roster hash now held for it.
+   * Records a poll, and its time as the heartbeat a peer's online and offline
+   * are read from, ending any last error. On the storing server it is what
+   * the poller told it, at arrival: a poll held there proves the poller is
+   * there. On the poller it is what the storing server answered (no roster).
+   * Answers with the roster hash held for the poller.
    */
   readonly recordPoll: (
     facts: PeerPollFacts,
   ) => Effect.Effect<{ readonly rosterHash: string | null }, SqlError>;
+  /** The heartbeat alone, on the poller: a 200's headers answer its poll before the body arrives. */
+  readonly recordPolled: (environmentId: string, at: string) => Effect.Effect<void, SqlError>;
   /** Why the last exchange with a peer failed, or null once one succeeds; a no-op when nothing changes. */
   readonly recordLastError: (
     environmentId: string,
@@ -366,6 +387,8 @@ export const layer: Layer.Layer<
     const httpClient = yield* HttpClient.HttpClient;
     const identity = yield* ServerEnvironment.ServerEnvironment;
     const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+    const changes = yield* PubSub.unbounded<void>();
+    const changed = PubSub.publish(changes, undefined);
 
     /** The subjects that currently hold a live session here; a peer without one cannot deliver to us. */
     const liveSubjects = serverAuth.listSessions().pipe(
@@ -458,12 +481,16 @@ export const layer: Layer.Layer<
             actualSubject: hello.subject,
           });
         }
+        // Refused before anything is recorded: the dialog never offers it, so this guards the CLI.
+        if (input.linkMode === "poll" && hello.capabilities?.poll !== true) {
+          return yield* new PeerPollUnsupportedError({ origin: input.origin });
+        }
         const existing = yield* readRow(hello.environmentId);
-        if (existing !== null && existing.link_mode !== "push") {
+        if (existing !== null && existing.link_mode !== input.linkMode) {
           return yield* new PeerLinkModeConflictError({
             environmentId: hello.environmentId,
             recorded: existing.link_mode,
-            requested: "push",
+            requested: input.linkMode,
           });
         }
         if (
@@ -509,7 +536,7 @@ export const layer: Layer.Layer<
             peer_protocol_version, peer_capabilities, created_at, updated_at
           )
           VALUES (
-            ${hello.environmentId}, ${label}, 'push', ${input.origin}, ${input.credential}, ${expiresAt},
+            ${hello.environmentId}, ${label}, ${input.linkMode}, ${input.origin}, ${input.credential}, ${expiresAt},
             ${hello.peerProtocolVersion ?? 1}, ${encodeCapabilities(hello.capabilities ?? {})},
             ${input.acceptedAt}, ${input.acceptedAt}
           )
@@ -526,6 +553,7 @@ export const layer: Layer.Layer<
             last_error, created_at, updated_at
         `;
         const row = rows[0]!;
+        yield* changed;
         const live = yield* liveSubjects;
         const waiting = yield* waitingByEnvironment(row.environment_id);
         return { peer: recordFromRow(row, live, waiting), created: existing === null };
@@ -586,16 +614,18 @@ export const layer: Layer.Layer<
       });
 
     const remove: PeerRegistryServiceShape["remove"] = (environmentId) =>
-      sql.withTransaction(
-        Effect.gen(function* () {
-          yield* sql`DELETE FROM j5_a2a_peer_store_grant WHERE environment_id = ${environmentId}`;
-          const rows = yield* sql<{ readonly environment_id: string }>`
+      sql
+        .withTransaction(
+          Effect.gen(function* () {
+            yield* sql`DELETE FROM j5_a2a_peer_store_grant WHERE environment_id = ${environmentId}`;
+            const rows = yield* sql<{ readonly environment_id: string }>`
             DELETE FROM j5_a2a_peer WHERE environment_id = ${environmentId}
             RETURNING environment_id
           `;
-          return { removed: rows.length > 0 };
-        }),
-      );
+            return { removed: rows.length > 0 };
+          }),
+        )
+        .pipe(Effect.tap(() => changed));
 
     const grantStore: PeerRegistryServiceShape["grantStore"] = (input) =>
       sql`
@@ -641,11 +671,17 @@ export const layer: Layer.Layer<
             last_polled_at = ${facts.receivedAt},
             last_error = NULL,
             updated_at = ${facts.receivedAt}
-          WHERE environment_id = ${facts.environmentId} AND link_mode = 'store'
+          WHERE environment_id = ${facts.environmentId} AND link_mode IN ('store', 'poll')
           RETURNING roster_hash
         `;
         return { rosterHash: rows[0]?.roster_hash ?? null };
       });
+
+    const recordPolled: PeerRegistryServiceShape["recordPolled"] = (environmentId, at) =>
+      sql`
+        UPDATE j5_a2a_peer SET last_polled_at = ${at}, last_error = NULL
+        WHERE environment_id = ${environmentId}
+      `.pipe(Effect.asVoid);
 
     const recordLastError: PeerRegistryServiceShape["recordLastError"] = (environmentId, error) =>
       sql`
@@ -666,6 +702,7 @@ export const layer: Layer.Layer<
       });
 
     return PeerRegistryService.of({
+      subscribeChanges: PubSub.subscribe(changes).pipe(Effect.map(Stream.fromSubscription)),
       selfEnvironmentId: identity.getEnvironmentId,
       // Cleaned and capped as a peer will store it: a long computer name must not fail every exchange.
       selfLabel: identity.getDescriptor.pipe(
@@ -683,6 +720,7 @@ export const layer: Layer.Layer<
       grantStore,
       adoptStorePeer,
       recordPoll,
+      recordPolled,
       recordLastError,
     });
   }),

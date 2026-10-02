@@ -156,6 +156,7 @@ it.effect(
         const first = yield* registry.add({
           origin: homeOrigin,
           credential: "home-issued-token",
+          linkMode: "push",
           replaceOrigin: false,
           acceptedAt: timestamp,
         });
@@ -183,6 +184,7 @@ it.effect(
         const again = yield* registry.add({
           origin: homeOrigin,
           credential: "home-issued-token-2",
+          linkMode: "push",
           replaceOrigin: false,
           acceptedAt: "2026-09-17T00:00:00.000Z",
         });
@@ -195,6 +197,7 @@ it.effect(
         const unnamed = yield* registry.add({
           origin: homeOrigin,
           credential: "home-issued-token-3",
+          linkMode: "push",
           replaceOrigin: false,
           acceptedAt: "2026-09-17T00:00:00.000Z",
         });
@@ -205,6 +208,7 @@ it.effect(
         const long = yield* registry.add({
           origin: homeOrigin,
           credential: "home-issued-token-4",
+          linkMode: "push",
           replaceOrigin: false,
           acceptedAt: "2026-09-17T00:00:00.000Z",
         });
@@ -218,6 +222,7 @@ it.effect(
         const hostile = yield* registry.add({
           origin: homeOrigin,
           credential: "home-issued-token-5",
+          linkMode: "push",
           replaceOrigin: false,
           acceptedAt: "2026-09-17T00:00:00.000Z",
         });
@@ -260,6 +265,7 @@ it.effect("keeps a known peer's origin unless the caller says to move it", () =>
       yield* registry.add({
         origin: homeOrigin,
         credential: "t1",
+        linkMode: "push",
         replaceOrigin: false,
         acceptedAt: timestamp,
       });
@@ -267,6 +273,7 @@ it.effect("keeps a known peer's origin unless the caller says to move it", () =>
         registry.add({
           origin: movedOrigin,
           credential: "t2",
+          linkMode: "push",
           replaceOrigin: false,
           acceptedAt: timestamp,
         }),
@@ -285,6 +292,7 @@ it.effect("keeps a known peer's origin unless the caller says to move it", () =>
       const moved = yield* registry.add({
         origin: movedOrigin,
         credential: "t2",
+        linkMode: "push",
         replaceOrigin: true,
         acceptedAt: timestamp,
       });
@@ -317,6 +325,7 @@ it.effect("keeps the recorded credential when a different server claims the same
       yield* registry.add({
         origin: homeOrigin,
         credential: "t1",
+        linkMode: "push",
         replaceOrigin: false,
         acceptedAt: timestamp,
       });
@@ -326,6 +335,7 @@ it.effect("keeps the recorded credential when a different server claims the same
         registry.add({
           origin: impostorOrigin,
           credential: "t2",
+          linkMode: "push",
           replaceOrigin: false,
           acceptedAt: timestamp,
         }),
@@ -350,6 +360,7 @@ it.effect(
       const added = yield* registry.add({
         origin: homeOrigin,
         credential: "t",
+        linkMode: "push",
         replaceOrigin: false,
         acceptedAt: timestamp,
       });
@@ -373,6 +384,7 @@ it.effect(
           registry.add({
             origin,
             credential: "token",
+            linkMode: "push",
             replaceOrigin: false,
             acceptedAt: timestamp,
           }),
@@ -421,6 +433,7 @@ it.effect(
         yield* registry.add({
           origin: homeOrigin,
           credential: "home-issued-token",
+          linkMode: "push",
           replaceOrigin: false,
           acceptedAt: timestamp,
         });
@@ -468,6 +481,7 @@ it.effect(
         registry.add({
           origin,
           credential: "token",
+          linkMode: "push",
           replaceOrigin: false,
           acceptedAt: timestamp,
         });
@@ -602,6 +616,7 @@ it.effect(
         registry.add({
           origin: "https://laptop.example",
           credential: "laptop-token",
+          linkMode: "push",
           replaceOrigin: false,
           acceptedAt: timestamp,
         }),
@@ -627,6 +642,63 @@ it.effect(
                 environmentId: "environment-laptop",
                 subject: `peer:${work}`,
                 server: { version: "0.0.0-test" },
+              },
+            },
+          },
+        }),
+      ),
+    ),
+);
+
+it.effect(
+  "records a peer to poll only when it stores for pollers, and keeps one mode per peer",
+  () =>
+    Effect.gen(function* () {
+      yield* runJ5A2AMigrations();
+      const registry = yield* PeerRegistryService;
+      const add = (origin: string, linkMode: "push" | "poll") =>
+        registry.add({
+          origin,
+          credential: "vm-issued",
+          linkMode,
+          replaceOrigin: false,
+          acceptedAt: timestamp,
+        });
+
+      const older = yield* Effect.flip(add("https://older-vm.example", "poll"));
+      assert.equal(older._tag, "PeerPollUnsupportedError");
+      assert.include(older.message, "Update J5 there");
+      assert.deepStrictEqual(yield* registry.list(), [], "refused before anything is recorded");
+
+      const recorded = yield* add("https://vm.example", "poll");
+      assert.equal(recorded.peer.linkMode, "poll");
+      assert.equal(recorded.peer.origin, "https://vm.example", "this server connects to the VM");
+      assert.isTrue((yield* add("https://vm.example", "poll")).created === false, "re-add rotates");
+
+      const switched = yield* Effect.flip(add("https://vm.example", "push"));
+      assert.equal(switched._tag, "PeerLinkModeConflictError");
+      assert.include(switched.message, "remove the peer and peer again");
+    }).pipe(
+      Effect.provide(
+        makeTestLayer({
+          replies: {
+            "https://older-vm.example": {
+              status: 200,
+              body: {
+                environmentId: "environment-older-vm",
+                subject: `peer:${work}`,
+                server: { version: "0.0.44" },
+              },
+            },
+            "https://vm.example": {
+              status: 200,
+              body: {
+                environmentId: "environment-vm",
+                subject: `peer:${work}`,
+                server: { version: "0.0.48" },
+                label: "Work VM",
+                peerProtocolVersion: 1,
+                capabilities: { poll: true },
               },
             },
           },

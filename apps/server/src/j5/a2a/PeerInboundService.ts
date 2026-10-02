@@ -45,6 +45,39 @@ export interface PeerInboundResult {
   readonly replay: boolean;
 }
 
+/**
+ * How a refused delivery from a peer is answered, the same whether it came to
+ * the deliver route or was handed to this server by a poll and is refused in
+ * the next poll's ack. Null for a failure that is not a refusal, which is
+ * retried rather than answered.
+ */
+export const peerDeliveryRefusal = (
+  error: unknown,
+): {
+  readonly status: number;
+  readonly code: string;
+  readonly message: string;
+  readonly reason?: string;
+} | null => {
+  const tag =
+    typeof error === "object" && error !== null && "_tag" in error ? String(error._tag) : "";
+  const message = error instanceof Error ? error.message : "Delivery refused.";
+  switch (tag) {
+    case "A2APeerReceiverNotFoundError":
+      return { status: 404, code: "recipient_not_found", message };
+    case "A2APeerReceiverNotDeliverableError":
+    case "A2APeerSenderNotOwnedError":
+    case "A2APeerSenderNotAllowedError":
+      return { status: 403, code: "policy_refused", message, reason: tag };
+    case "A2APeerAskIntentRequiredError":
+      return { status: 400, code: "invalid_request", message };
+    case "CommCommandConflictError":
+      return { status: 409, code: "message_id_conflict", message };
+    default:
+      return null;
+  }
+};
+
 export class A2APeerReceiverNotFoundError extends Schema.TaggedError<A2APeerReceiverNotFoundError>()(
   "A2APeerReceiverNotFoundError",
   { participantId: Schema.String },

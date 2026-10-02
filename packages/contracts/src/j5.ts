@@ -750,6 +750,8 @@ export const AddPeerRequest = Schema.Struct({
   credential: Schema.String.check(Schema.isNonEmpty()),
   /** A known peer keeps its recorded origin unless the caller says to move it. */
   replaceOrigin: Schema.optional(Schema.Boolean),
+  /** This server cannot be reached, so it polls the peer, which stores its messages until then. */
+  poll: Schema.optional(Schema.Boolean),
 });
 export type AddPeerRequest = typeof AddPeerRequest.Type;
 export const AddPeerResponse = Schema.Struct({ peer: PeerRecord, created: Schema.Boolean });
