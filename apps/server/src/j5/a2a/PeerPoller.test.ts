@@ -1,6 +1,8 @@
 import { ThreadId, type OrchestrationV2StoredEvent } from "@t3tools/contracts";
 import {
   PeerPollRequest,
+  peerPollStoppedError,
+  peerPollStoppedReason,
   type A2ARosterEntry,
   type PeerDeliveryRequest,
   type PeerPollResponse,
@@ -459,7 +461,9 @@ it.effect("stops on a rejected credential or a protocol mismatch, and says why",
       assert.equal(mismatched.kind, "stopped");
       assert.equal(
         harness.lastErrors.at(-1),
-        "Work VM runs peer protocol 2 and this server runs 1. Update J5 on this server, then try again.",
+        peerPollStoppedError(
+          "Work VM runs peer protocol 2 and this server runs 1. Update J5 on this server, then try again.",
+        ),
       );
       assert.isEmpty(harness.polls, "neither is a heartbeat");
     }).pipe(Effect.provide(makeTestLayer(harness)));
@@ -713,13 +717,28 @@ it.effect(
         }
         assert.include(harness.lastErrors[0] ?? "", "runs peer protocol 2");
         assert.include(harness.lastErrors.at(-1) ?? "", "answered the poll with HTTP 502");
+        // Every stop reads as stopped wherever peers are shown; the retried 502 does not.
+        assert.deepStrictEqual(
+          harness.lastErrors.map(
+            (lastError) => peerPollStoppedReason({ linkMode: "poll", lastError }) !== null,
+          ),
+          [true, true, true, true, false],
+        );
         // A body that does arrive words the reason.
         harness.answers.push({
           status: 409,
           body: { error: "peer_not_polling", message: "Work VM sends to this server directly." },
         });
         assert.equal((yield* pollOnce).kind, "stopped");
-        assert.equal(harness.lastErrors.at(-1), "Work VM sends to this server directly.");
+        assert.equal(
+          harness.lastErrors.at(-1),
+          peerPollStoppedError("Work VM sends to this server directly."),
+        );
+        assert.equal(
+          peerPollStoppedReason({ linkMode: "poll", lastError: harness.lastErrors.at(-1) ?? null }),
+          "Work VM sends to this server directly.",
+          "shown without the mark",
+        );
       }).pipe(Effect.provide(makeTestLayer(harness)));
     }),
   10_000,

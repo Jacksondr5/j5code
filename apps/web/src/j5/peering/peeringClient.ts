@@ -35,6 +35,24 @@ export async function removePeer(environmentId: EnvironmentId, peerEnvironmentId
   return result.value;
 }
 
+export async function listPeerAddresses(environmentId: EnvironmentId) {
+  const result = await j5Environment.listPeerAddresses.run(appAtomRegistry, {
+    environmentId,
+    input: {},
+  });
+  if (result._tag === "Failure") throw Cause.squash(result.cause);
+  return result.value;
+}
+
+export async function probePeer(environmentId: EnvironmentId, origin: string) {
+  const result = await j5Environment.probePeer.run(appAtomRegistry, {
+    environmentId,
+    input: { origin },
+  });
+  if (result._tag === "Failure") throw Cause.squash(result.cause);
+  return result.value;
+}
+
 export function refreshPeers(environmentId: EnvironmentId) {
   appAtomRegistry.refresh(peersQueryAtom(environmentId));
 }
