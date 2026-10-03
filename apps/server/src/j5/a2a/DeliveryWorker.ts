@@ -324,7 +324,8 @@ const makeLayer = (daemon: boolean) =>
           // Canonical references live in the immutable sent fact. Reading that
           // indexed row avoids a second projection and a schema migration.
           const sent = yield* sql<{ readonly kind: string; readonly payload: string }>`
-            SELECT kind, payload FROM j5_a2a_comm_event WHERE seq = ${row.sent_seq}
+            SELECT kind, payload FROM j5_a2a_comm_event
+            WHERE squadron_id = ${row.squadron_id} AND seq = ${row.sent_seq}
           `;
           const payload =
             sent[0]?.kind === "message.sent"
