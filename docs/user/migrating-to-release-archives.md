@@ -111,8 +111,10 @@ and links `~/.local/bin/j5` to it. It never reads `T3CODE_HOME`.
 
 If `command -v j5` (step 1.8) pointed somewhere other than `~/.local/bin/j5`,
 remove the npm copy so the new one wins: `npm uninstall -g @jacksondr5/j5code`.
-Then `command -v j5` must print `~/.local/bin/j5`. If `~/.local/bin` is not on
-`PATH`, add it (the installer prints the line) or use `~/.local/bin/j5` below.
+Then `command -v j5` must print `~/.local/bin/j5`. If `~/.local/bin` wasn't on
+`PATH`, the installer added it to your shell's startup file: open a new terminal.
+For a shell it doesn't recognize, add the directory yourself or use
+`~/.local/bin/j5` below.
 
 ## 4. Move the service
 
