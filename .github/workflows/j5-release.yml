@@ -282,8 +282,8 @@ jobs:
           set -euo pipefail
           scratch="$(mktemp -d "$RUNNER_TEMP/j5-cli.XXXXXX")"
           tar -xzf "release-cli/t3-$RELEASE_VERSION-darwin-arm64.tar.gz" -C "$scratch" --strip-components=1
-          codesign --verify --strict --verbose=2 "$scratch/t3"
-          details="$(codesign -dv --verbose=4 "$scratch/t3" 2>&1)"
+          codesign --verify --strict --verbose=2 "$scratch/j5"
+          details="$(codesign -dv --verbose=4 "$scratch/j5" 2>&1)"
           grep -Fx "TeamIdentifier=$APPLE_TEAM_ID" <<<"$details"
           grep -E '^CodeDirectory .*flags=0x[0-9a-f]*\(runtime\)' <<<"$details"
 

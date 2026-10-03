@@ -324,7 +324,7 @@ migrations after upstream migrations.
 
     Left as upstream: archive file names (`t3-<version>-<platform>.tar.gz`, which existing servers download by name), tsdown's intermediate `dist-exe/t3`, and upstream's npm packaging (`scripts/build-npm-platform-packages.ts`, `packages/shared/src/legacyCliLauncher.ts`), which J5 doesn't publish.
 
-    **Transition link.** On macOS and Linux the archive also carries `t3 -> j5`. Service launchers and servers from before the rename look for `t3` in a new version's directory, and in-app updates never replace the launcher, so the link stays until a release removes it together with a `SERVICE_LAUNCHER_PROTOCOL` bump. That bump makes those installs refuse the update with upstream's "update the launcher" message instead of failing to spawn. The smoke script runs both names.
+    **Transition link.** On macOS and Linux the archive also carries `t3 -> j5`. Service launchers and servers from before the rename look for `t3` in a new version's directory, and in-app updates never replace the launcher, so the link stays until a release removes it together with a `SERVICE_LAUNCHER_PROTOCOL` bump. Servers from after the rename then refuse the update with upstream's "update the launcher" message. Servers from before it never reach that check: their self-update verifies the staged `t3`, which won't exist, so the update fails with a generic install error and the running version stays. The smoke script runs both names. `.github/workflows/j5-release.yml` (J5-owned) verifies the macOS signature on `j5`.
 
     **Not supported:** new code doesn't run pre-rename version directories, so `j5 update --allow-downgrade` to a release before the rename fails verification.
 

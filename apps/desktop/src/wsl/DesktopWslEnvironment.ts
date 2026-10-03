@@ -382,7 +382,7 @@ export const buildWslRuntimeInstallScript = (
     'cleanup_runtime_install() { rm -rf "$runtime_tmp"; }',
     "trap cleanup_runtime_install EXIT",
     // The release archive has one top-level `t3-<version>-linux-<arch>/`
-    // directory; strip it so the executable lands at `$runtime_root/t3`.
+    // directory; strip it so the executable lands at `$runtime_root/j5`.
     `tar -xzf ${shellQuote(linuxArchivePath)} -C "$runtime_tmp" --strip-components=1`,
     // Never write the ready marker over a tree whose executable does not run.
     // Failing here drops out to the mounted-tree fallback, which is
