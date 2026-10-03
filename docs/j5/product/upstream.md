@@ -338,6 +338,22 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Decided:** Jackson, 2026-10-04, PR #445. Recorded in `BRANDING.md`.
 
+#### D28. The release executable is `j5`
+
+**Upstream:** the executable in each release archive is `t3`, and the `t3` command on `PATH` links to it.
+
+**J5:** the executable is `j5`, so the command, the file it runs, and the process are all `j5`. Archive file names keep upstream's `t3-<version>-<platform>` names. Until a later release retires it, each archive also carries a `t3` link to `j5`.
+
+**Why:** J5 shouldn't point at `t3` at all. With the old name, `~/.local/bin/j5` ran a file called `t3` and the server showed up as `t3`, which is confusing next to an installed T3 Code. Archive names stay, because existing servers download updates by those names and people never see them.
+
+**Consequences:**
+
+- **The `t3` link has to stay for now.** Service launchers from before the rename start a new version as `t3`, and in-app updates never replace the launcher. Retiring the link needs a `SERVICE_LAUNCHER_PROTOCOL` bump in the same release, so those installs are told to update their launcher instead of failing.
+- **No downgrade across the rename.** Downgrading below the rename with `j5 update --allow-downgrade` isn't supported.
+- **At each advance:** check new upstream code that locates the executable by name.
+
+**Decided:** Jackson, 2026-10-02 (#403). Recorded in FORK.md case 50.
+
 ### Awaiting a decision
 
 These already diverge on `j5/main`, but no human ruling is on record. Each landed as an implementer's call inside a merged PR. The person rules on each one; an approved entry moves up into its section, and a rejected one becomes a fix.
@@ -401,3 +417,4 @@ None yet.
 - 2026-09-26 — created: the three zones, the decision protocol, and the register, seeded from FORK.md and the worklog records (Jackson, [#327](https://github.com/Jacksondr5/j5code/issues/327)).
 - 2026-10-04 — D25 added: user-visible copy, marks and branch names (PR #445).
 - 2026-10-04 — D26 added: `j5 triage` points at J5's repository (PR #446).
+- 2026-10-04 — D28 added: the release executable is named `j5` (PR #414).

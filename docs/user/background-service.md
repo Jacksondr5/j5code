@@ -106,8 +106,8 @@ that session open.
 
 On macOS, check **System Settings → General → Login Items** if the service no
 longer starts at login. If agent work cannot access Desktop, Documents, or
-Downloads, it may need Full Disk Access for the `t3` executable (the program
-behind `j5`) listed in `ProgramArguments` in
+Downloads, it may need Full Disk Access for the executable listed in
+`ProgramArguments` in
 `~/Library/LaunchAgents/codes.jackson.j5code.service.plist`.
 
 For failures after signing in to T3 Connect, see
