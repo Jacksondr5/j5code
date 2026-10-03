@@ -43,7 +43,7 @@ Two different things share the word "handoff". J5 docs call upstream's history t
 ## Long-running autonomy
 
 - **Upstream:** Limited state for usage limits, snoozing until the reset, opt-in auto-resume, scheduled tasks across environments on a shared Scheduler, and startup failures that retry and then fail visibly.
-- **J5:** committed Stop also beats usage-limit auto-resume; scheduled creation needs a Squadron (#273); a queued-run watchdog. Retire the watchdog if upstream's visible startup failures leave it with nothing to report.
+- **J5:** committed Stop also beats usage-limit auto-resume; a scheduled new thread is refused in a project that several Squadrons share; a queued-run watchdog. Retire the watchdog if upstream's visible startup failures leave it with nothing to report.
 
 ## Skills
 
