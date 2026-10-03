@@ -69,9 +69,7 @@ export const operationFailure = (error: unknown) => {
           tag === "SquadronDeleteBlockedError" ||
           tag === "SquadronJoinProjectReferenceError"
         ? 409
-        : tag === "SquadronNameRequiredError" ||
-            tag === "SquadronThreadCreationMissingSquadronError" ||
-            tag === "SchemaError"
+        : tag === "SquadronNameRequiredError" || tag === "SchemaError"
           ? 400
           : 500;
   if (status === 500) {
