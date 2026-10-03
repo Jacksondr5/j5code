@@ -39,6 +39,15 @@ it.layer(NodeServices.layer)("j5 on the agents' PATH", (it) => {
         }),
         `/home/u/.local/bin:/usr/bin:${runtime}`,
       );
+      // The macOS service file's frozen install-time version gives way to the running one.
+      assert.equal(
+        yield* pathAfterStartup({
+          path: "/home/u/.j5code/runtime/versions/1.0.0:/usr/bin",
+          executable: `${runtime}/j5`,
+          isExecutable: true,
+        }),
+        `/usr/bin:${runtime}`,
+      );
       // A restart in the same environment doesn't add it twice.
       assert.equal(
         yield* pathAfterStartup({
