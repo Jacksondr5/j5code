@@ -49,6 +49,17 @@ export const readReceiverBacklog = Effect.fn("j5.a2a.readReceiverBacklog")(
     const participant = yield* decodeParticipant(rows[0].payload);
     if (participant.kind !== "agent") return undefined;
 
+    // Committed deliveries the worker has not handed to this thread yet. Read before
+    // the runs: the worker commits a run before it marks the delivery delivered, so
+    // every message lands in at least one of the two reads. The drain index keeps this
+    // to the small set of pending rows.
+    const pendingRows = yield* sql<{ readonly message_id: string; readonly sender_id: string }>`
+      SELECT message_id, sender_id FROM j5_a2a_delivery
+      WHERE status IN ('pending', 'retry_scheduled')
+        AND receiver_id = ${input.receiverId}
+        AND receiver_environment_id IS NULL
+    `;
+
     const target = yield* orchestrator.getThreadRecords(participant.threadId, [
       "runs",
       "providerTurns",
@@ -71,14 +82,9 @@ export const readReceiverBacklog = Effect.fn("j5.a2a.readReceiverBacklog")(
     if (sentRun === undefined && astraPeerSteeringRun(target, "peer") !== undefined)
       return undefined;
 
-    // Committed deliveries the worker has not handed to this thread yet. The drain
-    // index keeps this to the small set of pending rows.
-    const pending = (yield* sql<{ readonly message_id: string; readonly sender_id: string }>`
-      SELECT message_id, sender_id FROM j5_a2a_delivery
-      WHERE status IN ('pending', 'retry_scheduled')
-        AND receiver_id = ${input.receiverId}
-        AND receiver_environment_id IS NULL
-    `).filter((row) => !runByMessage.has(deliveryMessageId(LedgerMessageId.make(row.message_id))));
+    const pending = pendingRows.filter(
+      (row) => !runByMessage.has(deliveryMessageId(LedgerMessageId.make(row.message_id))),
+    );
     // Neither queued nor pending: cancelled or alarmed, so it is not waiting.
     if (sentRun === undefined && !pending.some((row) => row.message_id === input.sentMessageId))
       return undefined;
