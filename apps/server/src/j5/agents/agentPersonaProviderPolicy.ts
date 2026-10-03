@@ -1,11 +1,16 @@
-import type { AgentPersonaAuthorityPolicy, RuntimeMode } from "@t3tools/contracts";
+import {
+  DEFAULT_RUNTIME_MODE,
+  type AgentPersonaAuthorityPolicy,
+  type RuntimeMode,
+} from "@t3tools/contracts";
 
 import { getAgentAuthorityRules } from "./agentPersonas.ts";
 
 export interface AgentPersonaProviderPolicy {
   readonly runtimeMode: RuntimeMode;
   readonly approvalPolicy?: "never";
-  readonly sandboxPolicy:
+  /** Absent when the provider can't sandbox the policy; the persona's instructions still apply. */
+  readonly sandboxPolicy?:
     | {
         readonly type: "readOnly";
         readonly access: { readonly type: "fullAccess" };
@@ -48,12 +53,17 @@ export function providerCanEnforceAgentPersonaAuthority(
   }
 }
 
+/**
+ * The sandbox for a persona launch where the provider can enforce it. Elsewhere the persona runs
+ * unsandboxed in `fallbackRuntimeMode`, and its authority policy is only operating instructions.
+ */
 export function translateAgentPersonaProviderPolicy(
   authorityPolicy: AgentPersonaAuthorityPolicy,
   driver: string,
+  fallbackRuntimeMode: RuntimeMode = DEFAULT_RUNTIME_MODE,
 ): AgentPersonaProviderPolicy {
   if (!providerCanEnforceAgentPersonaAuthority(driver, authorityPolicy)) {
-    return READ_ONLY_POLICY;
+    return { runtimeMode: fallbackRuntimeMode };
   }
 
   switch (getAgentAuthorityRules(authorityPolicy).workspace) {

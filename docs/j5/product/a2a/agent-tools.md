@@ -176,7 +176,7 @@ user's budget. Read-only."
 Named `list_agents` until 2026-09-17. No inputs. Result: `personas[]` with `id`, `display_name`, `description`, `runtime_policy`,
 `availability` (`available`, `blocked`, `disabled`) and `route` (driver · model · reasoning, or
 null when blocked). The same catalog Settings → Personas shows; disabled imports read as disabled,
-unroutable or unenforceable personas as blocked. This is the P-B(a) spawn listing the spawning guide
+unroutable personas as blocked. This is the P-B(a) spawn listing the spawning guide
 asked for.
 
 ### `propose_crew`

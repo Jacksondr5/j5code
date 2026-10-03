@@ -6,13 +6,16 @@ import {
   type ServerProviderModel,
 } from "@t3tools/contracts";
 
-import { buildAgentPersonaCatalog, resolveAgentPersonaRoute } from "./agentPersonaRouting.ts";
-import { providerCanEnforceAgentPersonaAuthority } from "./agentPersonaProviderPolicy.ts";
+import {
+  agentPersonaModelSelection,
+  buildAgentPersonaCatalog,
+  resolveAgentPersonaRoute,
+} from "./agentPersonaRouting.ts";
 import { listBuiltInAgentPersonas, type AgentModelTarget } from "./agentPersonas.ts";
 
 function model(
   slug: string,
-  optionId: "reasoningEffort" | "effort",
+  optionId: string,
   efforts: ReadonlyArray<string> = ["medium", "high"],
 ): ServerProviderModel {
   return {
@@ -34,7 +37,7 @@ function model(
 
 function provider(input: {
   readonly instanceId: string;
-  readonly driver: "codex" | "claudeAgent";
+  readonly driver: string;
   readonly models: ReadonlyArray<ServerProviderModel>;
   readonly enabled?: boolean;
   readonly installed?: boolean;
@@ -75,7 +78,7 @@ function providerForTarget(
 }
 
 describe("agent persona routing", () => {
-  it("uses every enforceable persona's declared primary route when it is available", () => {
+  it("uses every persona's declared primary route when it is available", () => {
     for (const definition of listBuiltInAgentPersonas()) {
       const [primary, fallback] = definition.modelRoute;
       const resolution = resolveAgentPersonaRoute({
@@ -83,11 +86,7 @@ describe("agent persona routing", () => {
         providers: [providerForTarget(fallback), providerForTarget(primary)],
       });
 
-      const enforceable = providerCanEnforceAgentPersonaAuthority(
-        primary.driver,
-        definition.authority.defaultPolicy,
-      );
-      assert.equal(resolution.status, enforceable ? "available" : "unavailable", definition.id);
+      assert.equal(resolution.status, "available", definition.id);
       if (resolution.status === "unavailable") continue;
       assert.equal(resolution.route, "primary", definition.id);
       assert.equal(resolution.driver, primary.driver, definition.id);
@@ -95,7 +94,7 @@ describe("agent persona routing", () => {
     }
   });
 
-  it("uses only an enforceable declared fallback after its primary is unavailable", () => {
+  it("uses the declared fallback after its primary is unavailable", () => {
     for (const definition of listBuiltInAgentPersonas()) {
       const [primary, fallback] = definition.modelRoute;
       const resolution = resolveAgentPersonaRoute({
@@ -103,11 +102,7 @@ describe("agent persona routing", () => {
         providers: [providerForTarget(primary, { enabled: false }), providerForTarget(fallback)],
       });
 
-      const enforceable = providerCanEnforceAgentPersonaAuthority(
-        fallback.driver,
-        definition.authority.defaultPolicy,
-      );
-      assert.equal(resolution.status, enforceable ? "available" : "unavailable", definition.id);
+      assert.equal(resolution.status, "available", definition.id);
       if (resolution.status === "unavailable") continue;
       assert.equal(resolution.route, "fallback", definition.id);
       assert.equal(resolution.driver, fallback.driver, definition.id);
@@ -115,46 +110,6 @@ describe("agent persona routing", () => {
       assert.deepEqual(
         resolution.rejectedTargets.map(({ target }) => target),
         [primary],
-      );
-    }
-  });
-
-  it("skips Claude and uses the Codex fallback for Critic Fix Mode", () => {
-    const definition = listBuiltInAgentPersonas().find(({ id }) => id === "critic")!;
-    const [primary, fallback] = definition.modelRoute;
-    const resolution = resolveAgentPersonaRoute({
-      personaId: "critic",
-      authorityPolicy: "critic-fix",
-      providers: [providerForTarget(primary), providerForTarget(fallback)],
-    });
-
-    assert.equal(resolution.status, "available");
-    if (resolution.status === "unavailable") return;
-    assert.equal(resolution.route, "fallback");
-    assert.equal(resolution.driver, "codex");
-    assert.deepEqual(
-      resolution.rejectedTargets[0]?.failures.map(({ code }) => code),
-      ["authority-not-enforceable"],
-    );
-  });
-
-  it("blocks Builder fallback, Investigator, and Publisher when authority cannot be enforced", () => {
-    for (const personaId of ["builder", "investigator", "publisher"] as const) {
-      const definition = listBuiltInAgentPersonas().find(({ id }) => id === personaId)!;
-      const [primary, fallback] = definition.modelRoute;
-      const providers =
-        personaId === "builder"
-          ? [providerForTarget(primary, { enabled: false }), providerForTarget(fallback)]
-          : [providerForTarget(primary), providerForTarget(fallback)];
-      const resolution = resolveAgentPersonaRoute({ personaId, providers });
-
-      assert.equal(resolution.status, "unavailable", personaId);
-      if (resolution.status === "available") continue;
-      assert.isTrue(
-        resolution.attempts.some(({ failures }) =>
-          failures.some(({ code }) => code === "authority-not-enforceable"),
-        ),
-        personaId,
       );
     }
   });
@@ -205,11 +160,7 @@ describe("agent persona routing", () => {
       );
       assert.deepEqual(
         resolution.attempts.map(({ failures }) => failures.map(({ code }) => code)),
-        definition.modelRoute.map((target) => [
-          providerCanEnforceAgentPersonaAuthority(target.driver, definition.authority.defaultPolicy)
-            ? "provider-not-configured"
-            : "authority-not-enforceable",
-        ]),
+        definition.modelRoute.map(() => ["provider-not-configured"]),
       );
     }
   });
@@ -220,7 +171,7 @@ describe("agent persona routing", () => {
       providers: [
         provider({
           instanceId: "codex",
-          driver: "codex",
+          driver: ProviderDriverKind.make("codex"),
           models: [model("gpt-5.6-terra", "reasoningEffort")],
         }),
       ],
@@ -231,7 +182,7 @@ describe("agent persona routing", () => {
       personaId: "scout",
       definitionVersion: 1,
       route: "primary",
-      driver: "codex",
+      driver: ProviderDriverKind.make("codex"),
       modelSelection: {
         instanceId: ProviderInstanceId.make("codex"),
         model: "gpt-5.6-terra",
@@ -241,19 +192,56 @@ describe("agent persona routing", () => {
     });
   });
 
+  it("routes any signed-in provider and marks it unsandboxed when it cannot enforce the policy", () => {
+    const [scout] = listBuiltInAgentPersonas();
+    const cursorRoute = {
+      driver: ProviderDriverKind.make("cursor"),
+      model: "gpt-5.5",
+      reasoningEffort: "high",
+    };
+    const catalog = buildAgentPersonaCatalog(
+      [provider({ instanceId: "cursor", driver: "cursor", models: [model("gpt-5.5", "effort")] })],
+      [{ ...scout!, modelRoute: [cursorRoute, cursorRoute] }],
+    );
+
+    assert.deepEqual(catalog.personas[0]?.availability, {
+      status: "available",
+      resolvedRoute: "primary",
+      resolvedDriver: ProviderDriverKind.make("cursor"),
+      resolvedModelSelection: {
+        instanceId: ProviderInstanceId.make("cursor"),
+        model: "gpt-5.5",
+        options: [{ id: "effort", value: "high" }],
+      },
+      sandboxed: false,
+    });
+  });
+
+  it("launches with the model's own reasoning option id", () => {
+    const selection = (driver: string, optionId: string) =>
+      agentPersonaModelSelection(
+        provider({ instanceId: driver, driver, models: [model("m", optionId)] }),
+        { driver: ProviderDriverKind.make(driver), model: "m", reasoningEffort: "high" },
+      ).options;
+
+    assert.deepEqual(selection("opencode", "variant"), [{ id: "variant", value: "high" }]);
+    assert.deepEqual(selection("cursor", "reasoning"), [{ id: "reasoning", value: "high" }]);
+    assert.deepEqual(selection("pi", "thinking"), [{ id: "thinking", value: "high" }]);
+  });
+
   it("uses fallback only after recording why the primary is ineligible", () => {
     const resolution = resolveAgentPersonaRoute({
       personaId: "skeptic",
       providers: [
         provider({
           instanceId: "claudeAgent",
-          driver: "claudeAgent",
+          driver: ProviderDriverKind.make("claudeAgent"),
           enabled: false,
           models: [model("claude-opus-5", "effort")],
         }),
         provider({
           instanceId: "codex",
-          driver: "codex",
+          driver: ProviderDriverKind.make("codex"),
           models: [model("gpt-5.6-terra", "reasoningEffort")],
         }),
       ],
@@ -267,7 +255,7 @@ describe("agent persona routing", () => {
       {
         route: "primary",
         target: {
-          driver: "claudeAgent",
+          driver: ProviderDriverKind.make("claudeAgent"),
           model: "claude-opus-5",
           reasoningEffort: "high",
         },
@@ -286,8 +274,16 @@ describe("agent persona routing", () => {
     const resolution = resolveAgentPersonaRoute({
       personaId: "scout",
       providers: [
-        provider({ instanceId: "codex_work", driver: "codex", models: [terra] }),
-        provider({ instanceId: "codex", driver: "codex", models: [terra] }),
+        provider({
+          instanceId: "codex_work",
+          driver: ProviderDriverKind.make("codex"),
+          models: [terra],
+        }),
+        provider({
+          instanceId: "codex",
+          driver: ProviderDriverKind.make("codex"),
+          models: [terra],
+        }),
       ],
     });
 
@@ -302,12 +298,12 @@ describe("agent persona routing", () => {
       providers: [
         provider({
           instanceId: "claudeAgent",
-          driver: "claudeAgent",
+          driver: ProviderDriverKind.make("claudeAgent"),
           models: [model("claude-sonnet-5", "effort")],
         }),
         provider({
           instanceId: "codex",
-          driver: "codex",
+          driver: ProviderDriverKind.make("codex"),
           models: [model("gpt-5.6-terra", "reasoningEffort", ["medium"])],
         }),
       ],
@@ -325,7 +321,7 @@ describe("agent persona routing", () => {
     const catalog = buildAgentPersonaCatalog([
       provider({
         instanceId: "codex",
-        driver: "codex",
+        driver: ProviderDriverKind.make("codex"),
         models: [model("gpt-5.6-terra", "reasoningEffort")],
       }),
     ]);
@@ -344,19 +340,13 @@ describe("agent persona routing", () => {
         model: "gpt-5.6-terra",
         options: [{ id: "reasoningEffort", value: "high" }],
       },
+      sandboxed: true,
     });
-    assert.equal(
-      catalog.personas.find(({ personaId }) => personaId === "builder")?.availability.status,
-      "unavailable",
-    );
+    // Codex can't sandbox publish-only, so Publisher launches with its policy as instructions.
     const publisher = catalog.personas.find(({ personaId }) => personaId === "publisher")!;
-    assert.equal(publisher.availability.status, "unavailable");
-    if (publisher.availability.status === "unavailable") {
-      assert.equal(publisher.availability.reason, "authority-not-enforceable");
-      assert.deepEqual(
-        publisher.availability.attempts?.map(({ failures }) => failures),
-        [["authority-not-enforceable"], ["authority-not-enforceable"]],
-      );
+    assert.equal(publisher.availability.status, "available");
+    if (publisher.availability.status === "available") {
+      assert.isFalse(publisher.availability.sandboxed);
     }
   });
 });

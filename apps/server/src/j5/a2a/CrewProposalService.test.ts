@@ -1867,8 +1867,16 @@ it.effect(
             instructions: `You are ${id}.`,
             authorityPolicy: "read-only",
             modelRoute: [
-              { driver: "codex", model: "gpt-5.6-sol", reasoningEffort: "high" },
-              { driver: "claudeAgent", model: "claude-opus-5-5", reasoningEffort: "high" },
+              {
+                driver: ProviderDriverKind.make("codex"),
+                model: "gpt-5.6-sol",
+                reasoningEffort: "high",
+              },
+              {
+                driver: ProviderDriverKind.make("claudeAgent"),
+                model: "claude-opus-5-5",
+                reasoningEffort: "high",
+              },
             ],
           });
         yield* library.setEnabled("reviewer", false);

@@ -8,10 +8,7 @@ import {
   type createAgentPersonaLibrary,
 } from "./agentPersonaLibrary.ts";
 import { getAgentAuthorityRules } from "./agentPersonas.ts";
-import {
-  providerCanEnforceAgentPersonaAuthority,
-  translateAgentPersonaProviderPolicy,
-} from "./agentPersonaProviderPolicy.ts";
+import { translateAgentPersonaProviderPolicy } from "./agentPersonaProviderPolicy.ts";
 import { agentPersonaArtifactInstructions } from "./agentPersonaArtifacts.ts";
 import { makeCrewSeatLookup, withCrewSeatQuestions } from "../a2a/crewSeatRuntime.ts";
 
@@ -36,20 +33,16 @@ export const resolveAgentPersonaRuntime = Effect.fn("resolveAgentPersonaRuntime"
     instructions = getBuiltInAgentPersonaInstructions(assignment);
   } else {
     const definition = yield* library.readSnapshot(assignment);
-    if (
-      !definition.authority.allowedPolicies.includes(assignment.authorityPolicy) ||
-      (assignment.runtimeModeOverride === undefined &&
-        !providerCanEnforceAgentPersonaAuthority(
-          assignment.resolvedDriver,
-          assignment.authorityPolicy,
-        ))
-    ) {
+    if (!definition.authority.allowedPolicies.includes(assignment.authorityPolicy)) {
       return yield* new AgentPersonaLibraryError({
         message: "The assigned persona runtime permissions are unsupported.",
       });
     }
     const rules = getAgentAuthorityRules(assignment.authorityPolicy);
     instructions = `${definition.instructions}\n\n## Selected behavior: ${assignment.authorityPolicy}\nThese are operating instructions, not additional sandbox guarantees.\n${
+      // Providers that can't sandbox the policy rely on this line alone to keep the persona read-only.
+      rules.workspace === "read-only" ? "Do not create, edit, or delete files.\n" : ""
+    }${
       rules.mayCommit
         ? "Commit and push only within the authorized publication scope."
         : "Never commit or push."
@@ -65,7 +58,11 @@ export const resolveAgentPersonaRuntime = Effect.fn("resolveAgentPersonaRuntime"
   }
   return {
     ...(assignment.runtimeModeOverride === undefined
-      ? translateAgentPersonaProviderPolicy(assignment.authorityPolicy, assignment.resolvedDriver)
+      ? translateAgentPersonaProviderPolicy(
+          assignment.authorityPolicy,
+          assignment.resolvedDriver,
+          thread.runtimeMode,
+        )
       : { runtimeMode: assignment.runtimeModeOverride }),
     ...(instructions === undefined ? {} : { agentPersonaInstructions: instructions }),
   };

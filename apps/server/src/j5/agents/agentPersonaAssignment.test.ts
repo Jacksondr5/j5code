@@ -5,13 +5,14 @@ import {
   buildAgentPersonaAssignment,
   validateAgentPersonaAssignment,
 } from "./agentPersonaAssignment.ts";
+import { listBuiltInAgentPersonas } from "./agentPersonas.ts";
 
 const criticRoute = {
   status: "available",
   personaId: "critic",
   definitionVersion: 1,
   route: "primary",
-  driver: "claudeAgent",
+  driver: ProviderDriverKind.make("claudeAgent"),
   modelSelection: {
     instanceId: ProviderInstanceId.make("claudeAgent"),
     model: "claude-opus-5",
@@ -35,17 +36,14 @@ describe("agent persona assignment", () => {
     });
   });
 
-  it("blocks Critic Fix Mode on a provider that cannot enforce workspace authority", () => {
+  it("assigns Critic Fix Mode on a provider that cannot sandbox it", () => {
     const result = buildAgentPersonaAssignment({
       resolution: criticRoute,
       authorityPolicy: "critic-fix",
     });
-    assert.deepEqual(result, {
-      status: "authority-not-enforceable",
-      personaId: "critic",
-      requestedPolicy: "critic-fix",
-      driver: "claudeAgent",
-    });
+    assert.equal(result.status, "assigned");
+    if (result.status !== "assigned") return;
+    assert.equal(result.assignment.authorityPolicy, "critic-fix");
   });
 
   it("rejects an authority policy outside the persona contract", () => {
@@ -76,6 +74,35 @@ describe("agent persona assignment", () => {
         },
       }),
       "Persona assignment uses an authority policy outside its definition.",
+    );
+  });
+
+  it("matches the declared reasoning under whichever option id the provider uses", () => {
+    const [scout] = listBuiltInAgentPersonas();
+    const target = {
+      driver: ProviderDriverKind.make("opencode"),
+      model: "glm-5",
+      reasoningEffort: "high",
+    };
+    const definition = { ...scout!, modelRoute: [target, target] as const };
+    const assignment = (id: string) => ({
+      personaId: scout!.id,
+      definitionVersion: scout!.version,
+      authorityPolicy: scout!.authority.defaultPolicy,
+      runtimeModeOverride: "full-access" as const,
+      resolvedRoute: "primary" as const,
+      resolvedDriver: target.driver,
+      resolvedModelSelection: {
+        instanceId: ProviderInstanceId.make("opencode"),
+        model: "glm-5",
+        options: [{ id, value: "high" }],
+      },
+    });
+
+    assert.isUndefined(validateAgentPersonaAssignment(assignment("variant"), definition));
+    assert.equal(
+      validateAgentPersonaAssignment(assignment("fastMode"), definition),
+      "Persona assignment does not match its declared model route.",
     );
   });
 

@@ -1,8 +1,7 @@
 import {
+  agentPersonaReasoningDescriptor,
   defaultInstanceIdForDriver,
   isProviderAvailable,
-  ProviderDriverKind,
-  type AgentPersonaAuthorityPolicy,
   type AgentPersonaRouteFailureCode as ContractRouteFailureCode,
   type ModelSelection,
   type OrchestrationV2AgentPersonaCatalog,
@@ -49,20 +48,20 @@ export type AgentPersonaRouteResolution =
       readonly attempts: ReadonlyArray<AgentPersonaRouteAttempt>;
     };
 
-export function unavailableAgentPersonaReason(
-  resolution: Extract<AgentPersonaRouteResolution, { status: "unavailable" }>,
-): "routes-unavailable" | "authority-not-enforceable" {
-  return resolution.attempts.every(
-    ({ failures }) =>
-      failures.length > 0 && failures.every(({ code }) => code === "authority-not-enforceable"),
-  )
-    ? "authority-not-enforceable"
-    : "routes-unavailable";
+/** The launch selection for a target on a provider that already passed the availability check. */
+export function agentPersonaModelSelection(
+  provider: ServerProvider,
+  target: AgentModelTarget,
+): ModelSelection {
+  const descriptor = agentPersonaReasoningDescriptor(
+    provider.models.find((model) => model.slug === target.model),
+  );
+  return {
+    instanceId: provider.instanceId,
+    model: target.model,
+    options: [{ id: descriptor?.id ?? "reasoningEffort", value: target.reasoningEffort }],
+  };
 }
-
-/** Codex advertises reasoning as `reasoningEffort`; every other supported driver uses `effort`. */
-export const agentPersonaReasoningOptionId = (driver: AgentModelTarget["driver"]) =>
-  driver === "codex" ? "reasoningEffort" : "effort";
 
 /** Why one provider instance cannot serve one declared route target right now. */
 export function agentPersonaTargetUnavailableReason(
@@ -77,14 +76,8 @@ export function agentPersonaTargetUnavailableReason(
   const model = provider.models.find((candidate) => candidate.slug === target.model);
   if (model === undefined) return "model-not-advertised";
 
-  const optionId = agentPersonaReasoningOptionId(target.driver);
-  const descriptor = model.capabilities?.optionDescriptors?.find(
-    (candidate) => candidate.id === optionId,
-  );
-  if (
-    descriptor?.type !== "select" ||
-    !descriptor.options.some((option) => option.id === target.reasoningEffort)
-  ) {
+  const descriptor = agentPersonaReasoningDescriptor(model);
+  if (!descriptor?.options.some((option) => option.id === target.reasoningEffort)) {
     return "reasoning-effort-not-advertised";
   }
   return undefined;
@@ -111,25 +104,14 @@ export function resolveAgentPersonaRoute(input: {
   readonly personaId: AgentPersonaId;
   readonly definition?: AgentPersonaDefinition;
   readonly providers: ReadonlyArray<ServerProvider>;
-  readonly authorityPolicy?: AgentPersonaAuthorityPolicy;
 }): AgentPersonaRouteResolution {
   const definition = input.definition ?? getBuiltInAgentPersona(input.personaId);
-  const authorityPolicy = input.authorityPolicy ?? definition.authority.defaultPolicy;
   const rejectedTargets: Array<AgentPersonaRouteAttempt> = [];
 
   for (const [index, target] of definition.modelRoute.entries()) {
     const route = index === 0 ? "primary" : "fallback";
     const candidates = candidatesForTarget(input.providers, target);
     const failures: Array<AgentPersonaRouteFailure> = [];
-
-    if (!providerCanEnforceAgentPersonaAuthority(target.driver, authorityPolicy)) {
-      rejectedTargets.push({
-        route,
-        target,
-        failures: [{ code: "authority-not-enforceable" }],
-      });
-      continue;
-    }
 
     if (candidates.length === 0) {
       failures.push({ code: "provider-not-configured" });
@@ -142,18 +124,13 @@ export function resolveAgentPersonaRoute(input: {
         continue;
       }
 
-      const optionId = agentPersonaReasoningOptionId(target.driver);
       return {
         status: "available",
         personaId: definition.id,
         definitionVersion: definition.version,
         route,
         driver: target.driver,
-        modelSelection: {
-          instanceId: provider.instanceId,
-          model: target.model,
-          options: [{ id: optionId, value: target.reasoningEffort }],
-        },
+        modelSelection: agentPersonaModelSelection(provider, target),
         rejectedTargets,
       };
     }
@@ -198,12 +175,16 @@ export function buildAgentPersonaCatalog(
             ? {
                 status: "available" as const,
                 resolvedRoute: resolution.route,
-                resolvedDriver: ProviderDriverKind.make(resolution.driver),
+                resolvedDriver: resolution.driver,
                 resolvedModelSelection: resolution.modelSelection,
+                sandboxed: providerCanEnforceAgentPersonaAuthority(
+                  resolution.driver,
+                  definition.authority.defaultPolicy,
+                ),
               }
             : {
                 status: "unavailable" as const,
-                reason: unavailableAgentPersonaReason(resolution),
+                reason: "routes-unavailable" as const,
                 // Settings shows these so a blocked badge names the missing model or provider.
                 attempts: resolution.attempts.map((attempt) => ({
                   route: attempt.route,

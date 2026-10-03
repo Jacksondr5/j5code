@@ -5,12 +5,14 @@ import type {
   RuntimeMode,
   ServerProvider,
 } from "@t3tools/contracts";
+import { isAgentPersonaReasoningOptionId } from "@t3tools/contracts";
 import type {
   CrewPersonaSwap,
   CrewProposalPlaybook,
   CrewProposalSeatRuntime,
 } from "@t3tools/contracts/j5";
 import { getProviderOptionCurrentValue } from "@t3tools/shared/model";
+import { providerCanEnforceAgentPersonaAuthority } from "../agents/agentPersonaProviderPolicy.ts";
 import type { CrewCaptain, ResolvedCrewLaunchSeat } from "./CrewLaunchService.ts";
 import type { CrewProposal } from "./AgentCrewProposalService.ts";
 
@@ -101,11 +103,11 @@ export function describeCrewSeatRuntime(
   const model = provider.models.find((candidate) => candidate.slug === selection.model);
   const resolved = materializeCrewModelSelection(selection, provider);
   const descriptor = model?.capabilities?.optionDescriptors?.find((option) =>
-    ["reasoningEffort", "effort", "variant", "thinking"].includes(option.id),
+    isAgentPersonaReasoningOptionId(option.id),
   );
   const effort = resolved.options?.find((option) =>
     descriptor === undefined
-      ? ["reasoningEffort", "effort", "variant", "thinking"].includes(option.id)
+      ? isAgentPersonaReasoningOptionId(option.id)
       : option.id === descriptor.id,
   )?.value;
   const reasoning =
@@ -119,7 +121,10 @@ export function describeCrewSeatRuntime(
           : "Off"
         : "Provider default";
   const access =
-    assignment !== null && assignment.runtimeModeOverride === undefined
+    // An unsandboxed persona seat shows its real mode; the persona's policy is only instructions.
+    assignment !== null &&
+    assignment.runtimeModeOverride === undefined &&
+    providerCanEnforceAgentPersonaAuthority(assignment.resolvedDriver, assignment.authorityPolicy)
       ? mode === "approval-required"
         ? "Read only"
         : "Repository write"
