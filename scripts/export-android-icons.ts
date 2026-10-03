@@ -5,12 +5,12 @@
 // Icon Composer exports already contain a rounded-square silhouette, and Android masks
 // the central 72dp of a 108dp adaptive canvas, so exporting them as a foreground produces
 // a double-framed icon with the letters cropped by the mask. Instead, each variant gets a
-// full-bleed background layer (the artwork behind the wordmark) and a shared transparent
-// foreground that keeps the wordmark inside the safe zone.
+// full-bleed background layer (the artwork behind the boat) and a transparent foreground
+// that keeps the boat inside the safe zone.
 //
 // The Android 12+ splash screen masks its icon to a circle covering the central two thirds
 // of a 288dp canvas, which is the same proportion the launcher crops. Composing the two
-// adaptive layers into one 288dp image therefore makes the splash frame the wordmark
+// adaptive layers into one 288dp image therefore makes the splash frame the boat
 // exactly like the launcher icon does.
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
@@ -28,8 +28,9 @@ type IconVariant = "dev" | "nightly" | "prod";
 const ADAPTIVE_CANVAS = 432;
 // 288dp at xxxhdpi: the full Android 12+ splash canvas, so the icon needs no upscaling.
 const SPLASH_CANVAS = 1152;
-// Icon Composer's layer sources use a 128pt viewBox; the wordmark path spans this box.
-const TEXT = { x: 15.53, y: 37, width: 94.5, height: 57 };
+// Icon Composer's layer sources use a 128pt viewBox; every channel's J5 boat (text.svg) is
+// centered on 64,64 and fits this box.
+const TEXT = { x: 19, y: 26.5, width: 90, height: 75 };
 // Wordmark width as a fraction of the 108dp canvas. The visible area is 72dp (66dp
 // guaranteed), so 0.48 leaves the letters at ~72% of the mask with room for the
 // launcher's own zoom effects.
@@ -38,8 +39,6 @@ const WORDMARK_FRACTION = 0.48;
 const COMPOSER_CANVAS_PT = 1024;
 const SVG_DENSITY = 300;
 const OUTPUT_DIRECTORY = "apps/mobile/assets";
-// Production has no background artwork, so its splash composes onto the adaptive color.
-const PRODUCTION_BACKGROUND_COLOR = "#000000";
 
 export class AndroidIconRenderError extends Schema.TaggedError<AndroidIconRenderError>()(
   "AndroidIconRenderError",
@@ -82,15 +81,6 @@ const composite = (
     catch: (cause) => new AndroidIconRenderError({ layer, cause }),
   });
 
-const solidCanvas = (layer: string, size: number, background: string) =>
-  Effect.tryPromise({
-    try: () =>
-      sharp({ create: { width: size, height: size, channels: 4, background } })
-        .png()
-        .toBuffer(),
-    catch: (cause) => new AndroidIconRenderError({ layer, cause }),
-  });
-
 const readLayerSource = Effect.fn("androidIcons.readLayerSource")(function* (
   repositoryRoot: string,
   variant: IconVariant,
@@ -105,9 +95,10 @@ const readLayerSource = Effect.fn("androidIcons.readLayerSource")(function* (
 
 const renderForeground = Effect.fn("androidIcons.renderForeground")(function* (
   repositoryRoot: string,
+  variant: IconVariant,
   size: number,
 ) {
-  const text = yield* readLayerSource(repositoryRoot, "prod", "text.svg");
+  const text = yield* readLayerSource(repositoryRoot, variant, "text.svg");
   const paths = text.match(/<path[^>]*\/>/g) ?? [];
   return yield* rasterize(
     "foreground",
@@ -193,7 +184,11 @@ const renderBackground = Effect.fn("androidIcons.renderBackground")(function* (
     case "nightly":
       return yield* renderNightlyBackground(repositoryRoot, size);
     case "prod":
-      return yield* solidCanvas("prod-background", size, PRODUCTION_BACKGROUND_COLOR);
+      return yield* rasterize(
+        "prod-background",
+        fullBleed(yield* readLayerSource(repositoryRoot, "prod", "background.svg")),
+        size,
+      );
   }
 });
 
@@ -202,7 +197,7 @@ const renderSplashIcon = Effect.fn("androidIcons.renderSplashIcon")(function* (
   variant: IconVariant,
 ) {
   const background = yield* renderBackground(repositoryRoot, variant, SPLASH_CANVAS);
-  const foreground = yield* renderForeground(repositoryRoot, SPLASH_CANVAS);
+  const foreground = yield* renderForeground(repositoryRoot, variant, SPLASH_CANVAS);
   return yield* composite(`${variant}-splash`, background, [{ input: foreground }]);
 });
 
@@ -211,7 +206,18 @@ const exportAndroidIcons = Effect.gen(function* () {
   const path = yield* Path.Path;
   const repositoryRoot = path.resolve(import.meta.dirname, "..");
   const outputs = [
-    ["android-icon-foreground.png", yield* renderForeground(repositoryRoot, ADAPTIVE_CANVAS)],
+    [
+      "android-icon-foreground-dev.png",
+      yield* renderForeground(repositoryRoot, "dev", ADAPTIVE_CANVAS),
+    ],
+    [
+      "android-icon-foreground-nightly.png",
+      yield* renderForeground(repositoryRoot, "nightly", ADAPTIVE_CANVAS),
+    ],
+    [
+      "android-icon-foreground-prod.png",
+      yield* renderForeground(repositoryRoot, "prod", ADAPTIVE_CANVAS),
+    ],
     [
       "android-icon-background-dev.png",
       yield* renderDevelopmentBackground(repositoryRoot, ADAPTIVE_CANVAS),
@@ -219,6 +225,10 @@ const exportAndroidIcons = Effect.gen(function* () {
     [
       "android-icon-background-nightly.png",
       yield* renderNightlyBackground(repositoryRoot, ADAPTIVE_CANVAS),
+    ],
+    [
+      "android-icon-background-prod.png",
+      yield* renderBackground(repositoryRoot, "prod", ADAPTIVE_CANVAS),
     ],
     ["android-splash-icon-dev.png", yield* renderSplashIcon(repositoryRoot, "dev")],
     ["android-splash-icon-nightly.png", yield* renderSplashIcon(repositoryRoot, "nightly")],
