@@ -122,16 +122,18 @@ import { routeChevrons } from "../lib/route";
           <article class="card mode">
             <div class="mode-copy">
               <div class="tag"><i></i>Direct connection</div>
-              <h3>When a device can reach the other.</h3>
+              <h3>When one device can reach the other.</h3>
               <p>
                 The sending device opens a connection to the receiving one and delivers the message
                 straight to the agent. Delivery is immediate, and nothing is stored in between.
               </p>
             </div>
             <div class="use">
-              <b>Choose it for</b> devices that are always on and can reach each other: two cloud VMs, or
-              a VM and a home server on Tailscale. If the receiving device is off, the message can't be
-              delivered.
+              <p>
+                <b>Choose it for</b> devices that are always on and can reach each other: two cloud VMs, or
+                a VM and a home server on Tailscale. If the receiving device is off, the message can't be
+                delivered.
+              </p>
             </div>
             <figure class="mode-stage"><PeeringScene variant="direct" /><PeeringScene variant="direct" compact /></figure>
           </article>
@@ -139,16 +141,18 @@ import { routeChevrons } from "../lib/route";
           <article class="card mode">
             <div class="mode-copy">
               <div class="tag"><i></i>Polling</div>
-              <h3>When a device can't be reached.</h3>
+              <h3>When one device cannot reach the other.</h3>
               <p>
                 The reachable device stores the messages, and the device that can't be reached polls for
                 them over a connection it opens itself. Its own messages and replies still go directly.
               </p>
             </div>
             <div class="use">
-              <b>Choose it for</b> a laptop behind an office firewall, or any device other machines can't
-              connect to. There's nothing to configure on the firewall or proxy: the laptop only makes
-              ordinary outgoing HTTPS connections.
+              <p>
+                <b>Choose it for</b> a laptop behind an office firewall, or any device other machines can't
+                connect to. There's nothing to configure on the firewall or proxy: the laptop only makes
+                ordinary outgoing HTTPS connections.
+              </p>
             </div>
             <figure class="mode-stage"><PeeringScene variant="firewall" /><PeeringScene variant="firewall" compact /></figure>
           </article>
@@ -164,8 +168,10 @@ import { routeChevrons } from "../lib/route";
               </p>
             </div>
             <div class="use">
-              <b>Choose it for</b> the desktop app, or any device that isn't always on. If you're not
-              sure, use polling: it works on any network.
+              <p>
+                <b>Choose it for</b> the desktop app, or any device that isn't always on. If you're not
+                sure, use polling: it works on any network.
+              </p>
             </div>
             <figure class="mode-stage"><PeeringScene variant="asleep" /><PeeringScene variant="asleep" compact /></figure>
           </article>
@@ -468,10 +474,14 @@ import { routeChevrons } from "../lib/route";
     background: var(--brass);
   }
 
+  /* As tall as the copy beside it, and set in the same size. */
   .use {
-    font-size: 14.5px;
+    display: flex;
+    align-items: center;
+    align-self: stretch;
+    font-size: 16px;
     line-height: 1.6;
-    padding: 14px 16px;
+    padding: 16px 20px;
     border-left: 3px solid var(--brass);
     background: rgba(201, 162, 77, 0.1);
     border-radius: 0 8px 8px 0;
