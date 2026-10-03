@@ -13,8 +13,11 @@ import * as Path from "effect/Path";
  * starts, which inherit its PATH (#397). Runs after the PATH is hydrated from
  * the login shell. The executable's directory goes last, so a `j5` already on
  * the person's PATH still wins, and the archive's transition `t3` link never
- * shadows an installed T3 Code. Only the release executable does this; a
- * server run from source or by the desktop app has no `j5` beside it.
+ * shadows an installed T3 Code. Other versions' directories from the same
+ * runtime tree are dropped first: the macOS service file freezes the
+ * install-time one into PATH, and it would otherwise win with an older `j5`.
+ * Only the release executable does this; a server run from source or by the
+ * desktop app has no `j5` beside it.
  */
 export const appendOwnCliToPath = Effect.gen(function* () {
   const path = yield* Path.Path;
@@ -23,6 +26,12 @@ export const appendOwnCliToPath = Effect.gen(function* () {
   const executable = yield* HostProcessExecutablePath;
   if (!(yield* HostProcessIsExecutable)) return;
   if (path.basename(executable) !== (platform === "win32" ? "j5.exe" : "j5")) return;
-  const merged = mergePathEntries(environment["PATH"], path.dirname(executable), platform);
+  const ownDir = path.dirname(executable);
+  const delimiter = platform === "win32" ? ";" : ":";
+  const others = (environment["PATH"] ?? "")
+    .split(delimiter)
+    .filter((entry) => entry === ownDir || path.dirname(entry) !== path.dirname(ownDir))
+    .join(delimiter);
+  const merged = mergePathEntries(others, ownDir, platform);
   if (merged !== undefined) environment["PATH"] = merged;
 });
