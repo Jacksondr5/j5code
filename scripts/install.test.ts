@@ -142,3 +142,76 @@ describe.skipIf(
     },
   );
 });
+
+// J5: the PATH step, run against an already-downloaded version so nothing is fetched.
+describe.skipIf(
+  HostProcessPlatform.defaultValue() !== "linux" ||
+    HostProcessArchitecture.defaultValue() !== "x64",
+)("installer PATH line", () => {
+  const runInstaller = async (
+    configure: (paths: { readonly home: string; readonly bin: string }) => Promise<void>,
+    environment: (paths: { readonly home: string }) => Record<string, string>,
+  ) => {
+    const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "j5-install-path-"));
+    const home = NodePath.join(root, "user");
+    const bin = NodePath.join(root, "bin");
+    const versionDir = NodePath.join(root, "j5home/runtime/versions/1.2.3");
+    await NodeFSP.mkdir(home);
+    await NodeFSP.mkdir(versionDir, { recursive: true });
+    await NodeFSP.writeFile(NodePath.join(versionDir, "j5"), "#!/bin/sh\n", { mode: 0o755 });
+    await NodeFSP.writeFile(NodePath.join(versionDir, ".install-complete"), "1.2.3\n");
+    await configure({ home, bin });
+    const output = NodeChildProcess.execFileSync(
+      "sh",
+      [NodePath.resolve(import.meta.dirname, "install.sh")],
+      {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        env: {
+          PATH: "/usr/bin:/bin",
+          HOME: home,
+          T3CODE_VERSION: "1.2.3",
+          J5CODE_HOME: NodePath.join(root, "j5home"),
+          T3CODE_INSTALL_BIN_DIR: bin,
+          ...environment({ home }),
+        },
+      },
+    );
+    return { root, home, bin, output };
+  };
+
+  it("falls back to the hint when the profile can't be written", async () => {
+    const { root, home, bin, output } = await runInstaller(
+      async ({ home }) => {
+        await NodeFSP.writeFile(NodePath.join(home, ".bashrc"), "alias ll='ls -l'\n", {
+          mode: 0o444,
+        });
+      },
+      () => ({ SHELL: "/bin/bash" }),
+    );
+    try {
+      expect(output).toContain(`Add ${bin} to your PATH`);
+      expect(await NodeFSP.readFile(NodePath.join(home, ".bashrc"), "utf8")).toBe(
+        "alias ll='ls -l'\n",
+      );
+    } finally {
+      await NodeFSP.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("writes fish's line under XDG_CONFIG_HOME, scoped to the shell's PATH", async () => {
+    const { root, bin, output } = await runInstaller(
+      async () => {},
+      ({ home }) => ({ SHELL: "/usr/bin/fish", XDG_CONFIG_HOME: NodePath.join(home, "xdg") }),
+    );
+    try {
+      const config = NodePath.join(root, "user/xdg/fish/config.fish");
+      expect(await NodeFSP.readFile(config, "utf8")).toBe(
+        `fish_add_path --path "${bin}" ${J5_PATH_MARKER}\n`,
+      );
+      expect(output).toContain(`in ${config}`);
+    } finally {
+      await NodeFSP.rm(root, { recursive: true, force: true });
+    }
+  });
+});

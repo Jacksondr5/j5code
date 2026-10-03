@@ -34,4 +34,25 @@ it.layer(NodeServices.layer)("j5 shell profile line", (it) => {
       assert.equal(yield* fs.readFileString(bashrc), before);
     }).pipe(Effect.scoped, Effect.provideService(HostProcessPlatform, "linux")),
   );
+
+  it.effect("keeps every other byte of a non-UTF-8 profile, including .profile", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const home = yield* fs.makeTempDirectoryScoped({ prefix: "j5-shell-profile-bytes-" });
+      const profile = path.join(home, ".profile");
+      // "export NAME=Ren\xe9" in latin1, which isn't valid UTF-8.
+      const before = Uint8Array.from([...Buffer.from("export NAME=Ren"), 0xe9, 0x0a]);
+      const line = Buffer.from(`export PATH="${home}/.local/bin:$PATH" ${J5_PATH_MARKER}\n`);
+      yield* fs.writeFile(profile, Uint8Array.from([...before, ...line]));
+
+      const found = yield* findJ5PathLines.pipe(
+        Effect.provideService(HostProcessEnvironment, { HOME: home }),
+      );
+      assert.deepStrictEqual(found, [profile]);
+
+      yield* removeJ5PathLines(found);
+      assert.deepStrictEqual([...(yield* fs.readFile(profile))], [...before]);
+    }).pipe(Effect.scoped, Effect.provideService(HostProcessPlatform, "linux")),
+  );
 });

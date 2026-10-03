@@ -236,29 +236,45 @@ esac
 # in step with packages/shared/src/j5/shellProfile.ts.
 marker='# Added by J5 Code; `j5 uninstall` removes this line.'
 profile=
+line="export PATH=\"${bin_dir}:\$PATH\" ${marker}"
 case "$(basename "${SHELL:-}")" in
-  zsh)
-    profile="${ZDOTDIR:-$HOME}/.zshrc"
-    line="export PATH=\"${bin_dir}:\$PATH\" ${marker}"
-    ;;
+  zsh) profile="${ZDOTDIR:-$HOME}/.zshrc" ;;
   bash)
-    # macOS terminals start login shells, which read .bash_profile instead.
-    if [ "$platform" = darwin ]; then profile="$HOME/.bash_profile"; else profile="$HOME/.bashrc"; fi
-    line="export PATH=\"${bin_dir}:\$PATH\" ${marker}"
+    if [ "$platform" = darwin ]; then
+      # macOS terminals start login shells, which read only the first of these
+      # that exists; creating .bash_profile would hide an existing .profile.
+      profile="$HOME/.bash_profile"
+      for candidate in "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.profile"; do
+        if [ -e "$candidate" ]; then profile="$candidate"; break; fi
+      done
+    else
+      profile="$HOME/.bashrc"
+    fi
     ;;
   fish)
-    profile="$HOME/.config/fish/config.fish"
-    line="fish_add_path \"${bin_dir}\" ${marker}"
+    profile="${XDG_CONFIG_HOME:-$HOME/.config}/fish/config.fish"
+    # --path changes only this shell's PATH, so deleting the line undoes it.
+    line="fish_add_path --path \"${bin_dir}\" ${marker}"
     ;;
 esac
-if [ -z "$profile" ]; then
+path_hint() {
   printf '  Add %s to your PATH, then run %sj5%s.\n\n' "$bin_dir" "$bold" "$reset"
   exit 0
+}
+[ -n "$profile" ] || path_hint
+if grep -qF "$marker" "$profile" 2>/dev/null; then
+  printf '  %s already adds %s to your PATH.\n  Open a new terminal, then run %sj5%s.\n\n' "$profile" "$bin_dir" "$bold" "$reset"
+  exit 0
 fi
-if ! grep -qF "$marker" "$profile" 2>/dev/null; then
-  mkdir -p "$(dirname "$profile")"
-  # Start on a fresh line when the file doesn't end with one.
-  if [ -s "$profile" ] && [ -n "$(tail -c 1 "$profile")" ]; then printf '\n' >> "$profile"; fi
-  printf '%s\n' "$line" >> "$profile"
+# A read-only profile (a home-manager link, say) gets the hint, not a failure.
+if ! {
+  mkdir -p "$(dirname "$profile")" &&
+    {
+      # Start on a fresh line when the file doesn't end with one.
+      if [ -s "$profile" ] && [ -n "$(tail -c 1 "$profile")" ]; then printf '\n'; fi
+      printf '%s\n' "$line"
+    } >> "$profile"
+} 2>/dev/null; then
+  path_hint
 fi
 printf '  Added %s to your PATH in %s.\n  Open a new terminal, then run %sj5%s.\n\n' "$bin_dir" "$profile" "$bold" "$reset"

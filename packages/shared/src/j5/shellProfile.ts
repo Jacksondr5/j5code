@@ -9,12 +9,15 @@ export const J5_PATH_MARKER = "# Added by J5 Code; `j5 uninstall` removes this l
 export function shellProfilePaths(input: {
   readonly home: string;
   readonly zdotdir?: string | undefined;
+  readonly xdgConfigHome?: string | undefined;
 }): ReadonlyArray<string> {
   return [
     `${input.zdotdir || input.home}/.zshrc`,
     `${input.home}/.bashrc`,
     `${input.home}/.bash_profile`,
-    `${input.home}/.config/fish/config.fish`,
+    `${input.home}/.bash_login`,
+    `${input.home}/.profile`,
+    `${input.xdgConfigHome || `${input.home}/.config`}/fish/config.fish`,
   ];
 }
 
