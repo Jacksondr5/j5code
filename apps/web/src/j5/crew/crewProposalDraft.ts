@@ -34,6 +34,7 @@ export const addSeat = (
         ...(instructions ? { instructions } : {}),
         ...(draft.modelSelection ? { modelSelection: draft.modelSelection } : {}),
         ...(draft.runtimeMode ? { runtimeMode: draft.runtimeMode } : {}),
+        ...(draft.workspace ? { workspace: draft.workspace } : {}),
       },
     ],
     error: null,

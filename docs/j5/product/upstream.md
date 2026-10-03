@@ -54,7 +54,7 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Why:** upstream's delegated child is "a Peer Agent in a Subagent costume": the person can't talk to it, yet it outlives the agent that started it. That is the awkward middle J5's vocabulary exists to remove. The Crew shape was added after an agent asked to "spawn a crew" made subagents instead, because nothing it had been told mentioned a Crew. Personas later gave `delegate_task` a purpose again: a persona needs a way to run as a subagent.
 
-**Consequences:** upstream's launch and workspace guidance never reaches J5 agents. As a result, a Peer Agent shares its caller's branch and worktree (#274). The instructions file is also edited for playbooks and personas, so every upstream advance merges upstream's prompt changes by hand, and a test pins J5's wording.
+**Consequences:** upstream's launch and workspace guidance never reaches J5 agents. `spawn_agent` and Crew seats carry their own workspace choice instead and reuse upstream's ThreadLaunch to prepare worktrees (#274). The instructions file is also edited for playbooks and personas, so every upstream advance merges upstream's prompt changes by hand, and a test pins J5's wording.
 
 **Decided:** Jackson with Product, 2026-08-24 (ST1–ST5); the Crew shape on 2026-09-17; the persona route in Jackson's review of 2026-09-13, which partly reverses ST5. Whether `delegate_task` stays at all is under discussion (#336). Recorded in FORK.md case 8 and the saved-agent mentions section.
 

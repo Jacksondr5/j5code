@@ -13,6 +13,10 @@ import { modelSelectionsEqual } from "@t3tools/shared/model";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
+import { CommandReceiptStoreV2 } from "../../orchestration-v2/CommandReceiptStore.ts";
+import { ProjectionStoreV2 } from "../../orchestration-v2/ProjectionStore.ts";
+import { unboundWorktreeTurnRefusal } from "../a2a/spawnWorktreeTurns.ts";
+
 import { validateAgentPersonaAssignment } from "./agentPersonaAssignment.ts";
 import { prepareAgentPersonaLaunch } from "./agentPersonaLaunch.ts";
 import { validateAgentPersonaSubagent } from "./agentPersonaSubagent.ts";
@@ -152,6 +156,8 @@ export const makeAgentPersonaGuards = <D, A, E>(deps: {
 }) =>
   Effect.gen(function* () {
     const library = yield* makeAgentPersonaLibrary;
+    const receipts = yield* CommandReceiptStoreV2;
+    const projections = yield* ProjectionStoreV2;
     const reject = (command: CommandContext, message: string | undefined) =>
       message === undefined ? Effect.void : Effect.fail(deps.dispatchError(command, message));
     return {
@@ -172,12 +178,25 @@ export const makeAgentPersonaGuards = <D, A, E>(deps: {
       /** Thread commands: explicit model or provider changes are rejected on persona threads. */
       routeLocked: (thread: PersonaThread, command: CommandContext): Effect.Effect<void, D> =>
         reject(command, agentPersonaRouteLockedError(thread, command.type)),
-      /** Message dispatch: a different model selection than the resolved route is rejected. */
+      /**
+       * Message dispatch, the one J5 check every ordinary turn passes: a different model selection
+       * than a persona's resolved route is rejected, and so is a turn for a J5 spawn that asked for
+       * a worktree of its own and has none (see `unboundWorktreeTurnRefusal`).
+       */
       modelMismatch: (
-        thread: PersonaThread,
-        command: CommandContext & { readonly modelSelection?: ModelSelection | undefined },
+        thread: PersonaThread &
+          Pick<OrchestrationV2AppThread, "worktreePath" | "createdBy" | "creationSource">,
+        command: Parameters<typeof unboundWorktreeTurnRefusal>[3] &
+          CommandContext & { readonly modelSelection?: ModelSelection | undefined },
       ): Effect.Effect<void, D> =>
-        reject(command, agentPersonaModelMismatchError(thread, command.modelSelection)),
+        reject(command, agentPersonaModelMismatchError(thread, command.modelSelection)).pipe(
+          Effect.andThen(
+            unboundWorktreeTurnRefusal(receipts, projections, thread, command).pipe(
+              Effect.mapError((cause) => deps.dispatchError(command, cause)),
+              Effect.flatMap((refusal) => reject(command, refusal ?? undefined)),
+            ),
+          ),
+        ),
       /** Delegated child: an explicit assignment must match the child's provider and route. */
       subagent: (
         command: CommandContext & {

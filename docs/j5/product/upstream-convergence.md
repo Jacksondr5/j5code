@@ -19,7 +19,7 @@ Checked against `t3code/codex-turn-mapping` @ `67a2be0fdb` (V2, pingdotgg/t3code
 ## Launch, workspaces and parallel agents
 
 - **Upstream:** workspace-aware launches (new worktree, existing worktree, project root), configurable branch names, tracked worktree setup and clone progress. Multi-model send starts the same first message on several models, each in its own worktree. There's no coordination between them: it's for comparing outputs.
-- **J5:** `spawn_agent` and Crews create Peer Agents with Squadron homes and briefs. Today they share the caller's checkout (#274). Multi-model send is refused from a saved-agent draft, because a saved agent locks its model.
+- **J5:** `spawn_agent` and Crews create Peer Agents with Squadron homes and briefs. A Peer Agent or seat can get a fresh worktree, prepared through upstream's ThreadLaunch on a thread J5 has already created and homed (#274); J5 still doesn't expose `t3_thread_launch` or `create_threads`. Multi-model send is refused from a saved-agent draft, because a saved agent locks its model.
 - **Watch for:** grouping or coordination of fanned-out threads, which would come close to Crews.
 
 ## Lineage, subagents and fleet views

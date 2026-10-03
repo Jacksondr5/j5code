@@ -38,6 +38,8 @@ import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import { runMigrations } from "../../persistence/Migrations.ts";
 import { ThreadLifecycleService } from "../../orchestration-v2/ThreadLifecycleService.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
+import { ThreadLaunchService } from "../../orchestration-v2/ThreadLaunchService.ts";
+import { OrchestrationCommandReceiptRepository } from "../../persistence/Services/OrchestrationCommandReceipts.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { A2AArchiveFacts } from "./ArchiveFactsService.ts";
 import { A2ALifecycleService } from "./LifecycleService.ts";
@@ -46,10 +48,14 @@ import { ParticipantPlacementService } from "./PlacementService.ts";
 import { A2ASilenceDetector } from "./SilenceDetector.ts";
 import { ThreadHomesService } from "./ThreadHomesService.ts";
 import { SpawnCompositionService } from "./SpawnCompositionService.ts";
+import { SpawnWorkspaceService, layer as spawnWorkspaceLayer } from "./spawnWorkspace.ts";
 import { PeerRegistryService } from "./PeerRegistryService.ts";
 import { makeJ5A2ARuntimeLayer } from "./runtimeLayer.ts";
 
 const archiveDependencies = Layer.mergeAll(
+  // spawn_agent and Crew seats prepare worktrees through upstream's launch and receipts.
+  Layer.mock(ThreadLaunchService)({}),
+  Layer.mock(OrchestrationCommandReceiptRepository)({}),
   Layer.mock(ServerSecretStore)({
     getOrCreateRandom: () => Effect.succeed(new Uint8Array(32).fill(7)),
   }),
@@ -96,6 +102,8 @@ const measureNestedRuntimeBuilds = (nested: "http" | "mcp") =>
           Layer.provide(Layer.mock(OrchestratorV2)({})),
           Layer.provide(Layer.mock(EffectOutboxV2)({ listByCommandId: () => Effect.succeed([]) })),
           Layer.provide(archiveDependencies),
+          Layer.provide(Layer.mock(ProjectService)({})),
+          Layer.provide(Layer.mock(GitWorkflowService)({})),
           Layer.provide(Layer.mock(EnvironmentAuth)({})),
           Layer.provide(
             ServerConfig.layerTest(process.cwd(), { prefix: "j5-a2a-runtime-layer-" }).pipe(
@@ -128,6 +136,7 @@ it.effect("shares one runtime and outbox across the production HTTP and MCP regi
       let threadManagementBuilds = 0;
       const transports = new Set<A2ADeliveryTransport["Service"]>();
       const outboxes = new Set<EffectOutboxV2["Service"]>();
+      const spawnWorkspaces = new Set<SpawnWorkspaceService["Service"]>();
       const countedLedger = ledgerLayer.pipe(
         Layer.tap((context) => Effect.sync(() => ledgers.add(Context.get(context, A2ALedger)))),
       );
@@ -146,8 +155,15 @@ it.effect("shares one runtime and outbox across the production HTTP and MCP regi
       const spawnCompositionConsumer = Layer.effectDiscard(
         SpawnCompositionService.pipe(Effect.asVoid),
       );
+      // spawn_agent reads the workspace service from the route graph; CrewLaunch is built with it.
+      const spawnWorkspaceConsumer = Layer.effectDiscard(SpawnWorkspaceService.pipe(Effect.asVoid));
       const runtime = makeJ5A2ARuntimeLayer({
         ledger: countedLedger,
+        spawnWorkspace: spawnWorkspaceLayer.pipe(
+          Layer.tap((context) =>
+            Effect.sync(() => spawnWorkspaces.add(Context.get(context, SpawnWorkspaceService))),
+          ),
+        ),
         deliveryTransport: deliveryTransportLayer.pipe(
           Layer.provide(FetchHttpClient.layer),
           Layer.provide(Layer.mock(PeerRegistryService)({})),
@@ -169,6 +185,7 @@ it.effect("shares one runtime and outbox across the production HTTP and MCP regi
             archiveFactsConsumer,
             threadHomesConsumer,
             spawnCompositionConsumer,
+            spawnWorkspaceConsumer,
           ).pipe(
             Layer.provideMerge(runtime),
             Layer.provide(countedThreadManagement),
@@ -226,6 +243,8 @@ it.effect("shares one runtime and outbox across the production HTTP and MCP regi
       assert.equal(threadManagementBuilds, 1);
       assert.equal(transports.size, 1);
       assert.equal(outboxes.size, 1);
+      // The start guard holds only if spawn_agent and CrewLaunch share one workspace service.
+      assert.equal(spawnWorkspaces.size, 1);
       const sql = Context.get(databaseContext, SqlClient.SqlClient);
       const people = yield* sql<{
         readonly is_local_operator: number;

@@ -5,6 +5,7 @@ import * as Schema from "effect/Schema";
 
 import { CommandId, ProjectId, ThreadId } from "@t3tools/contracts";
 import {
+  A2AHomeConflictError,
   A2AHomeRegistrar,
   type A2AHomeRegistrationError,
   type A2AHomeLookupError,
@@ -87,6 +88,8 @@ export class SquadronThreadCreationService extends Context.Service<
   SquadronThreadCreationServiceShape
 >()("t3/j5/a2a/SquadronThreadCreationService") {}
 
+const decodeSquadronId = Schema.decodeUnknownEffect(SquadronId);
+
 export const registrationCommandIdForCreation = (commandId: string) =>
   CommCommandId.make(`command:j5:a2a:thread-creation:${encodeURIComponent(commandId)}`);
 
@@ -100,6 +103,13 @@ export const layer: Layer.Layer<
     const registrar = yield* A2AHomeRegistrar;
     const projectReferences = yield* SquadronProjectReferences;
 
+    const findRegisteredHome: SquadronThreadCreationServiceShape["findRegisteredHome"] = (
+      threadId,
+    ) =>
+      registrar
+        .getHomeForThread(threadId)
+        .pipe(Effect.catchTag("A2AHomeNotFoundError", () => Effect.succeed(null)));
+
     const registerAtDurableLaunch: SquadronThreadCreationServiceShape["registerAtDurableLaunch"] = (
       input,
     ) =>
@@ -109,7 +119,21 @@ export const layer: Layer.Layer<
             commandId: input.commandId,
           });
         }
-        const squadronId = yield* Schema.decodeUnknownEffect(SquadronId)(input.squadronId);
+        const squadronId = yield* decodeSquadronId(input.squadronId);
+
+        // A J5 spawn that needs a fresh worktree records its home and placement first, then hands
+        // the thread to ThreadLaunch, which lands here. That home was admitted by the spawn, which
+        // never required the one-project reference below, so it is returned as it stands; without
+        // this, a second join would be appended under this creation's command id.
+        const existing = yield* findRegisteredHome(input.threadId);
+        if (existing !== null) {
+          if (existing.squadronId === squadronId) return existing;
+          return yield* new A2AHomeConflictError({
+            threadId: input.threadId,
+            existingSquadronId: existing.squadronId,
+            requestedSquadronId: squadronId,
+          });
+        }
 
         const references = yield* projectReferences.listForSquadron(squadronId);
         const referencedProjectIds = references.map((reference) => reference.projectId);
@@ -128,13 +152,6 @@ export const layer: Layer.Layer<
           commandId: registrationCommandIdForCreation(input.commandId),
         });
       });
-
-    const findRegisteredHome: SquadronThreadCreationServiceShape["findRegisteredHome"] = (
-      threadId,
-    ) =>
-      registrar
-        .getHomeForThread(threadId)
-        .pipe(Effect.catchTag("A2AHomeNotFoundError", () => Effect.succeed(null)));
 
     return SquadronThreadCreationService.of({ registerAtDurableLaunch, findRegisteredHome });
   }),

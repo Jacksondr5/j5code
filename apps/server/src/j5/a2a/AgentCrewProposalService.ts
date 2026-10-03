@@ -9,6 +9,7 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 
 import { CREW_NAME_MAX_CHARS, CREW_REASON_MAX_CHARS, CREW_TEXT_MAX_CHARS } from "./crewLimits.ts";
 import { ParticipantId, SquadronId } from "./contracts.ts";
+import { SpawnWorkspaceChoice } from "./spawnWorkspace.ts";
 
 // The same bounds as the MCP verbs: the human's card edits arrive over HTTP and must not be the
 // one way to store an unbounded or empty seat (Sentry S-3, 2026-09-14).
@@ -32,6 +33,8 @@ export const CrewProposalSeat = Schema.Struct({
       Schema.isMaxLength(PLAYBOOK_MAX_STEPS),
     ),
   ),
+  /** Where the seat works; unset takes the Crew default resolved at preview. */
+  workspace: Schema.optionalKey(SpawnWorkspaceChoice),
   /** Recomputed by the server whenever the seats are validated; never taken from a client. */
   personaSwaps: Schema.optionalKey(Schema.Array(CrewPersonaSwap)),
 });

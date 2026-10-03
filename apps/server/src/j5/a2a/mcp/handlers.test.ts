@@ -64,6 +64,7 @@ import {
 } from "../contracts.ts";
 import { PlaybookStore } from "../../playbooks/PlaybookStore.ts";
 import { ProjectService } from "../../../project/ProjectService.ts";
+import { fakeSpawnWorkspaceLayer, noRepository } from "../test-support/spawnWorkspaceFakes.ts";
 import { J5ToolkitHandlersLive } from "./handlers.ts";
 import {
   J5ListParticipantsResult,
@@ -231,7 +232,10 @@ it.effect("namespaces mutating-tool idempotency and sender identity from authent
       NodeServices.layer,
       SqlitePersistenceMemory,
     );
-    const layer = J5ToolkitHandlersLive.pipe(Layer.provideMerge(dependencies));
+    const layer = J5ToolkitHandlersLive.pipe(
+      Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: noRepository })),
+      Layer.provideMerge(dependencies),
+    );
 
     yield* Effect.gen(function* () {
       const toolkit = yield* J5Toolkit;
@@ -428,7 +432,10 @@ it.effect("keeps participant listing placement-read-only", () =>
       Layer.mock(SquadronProjectReferences)({}),
       NodeServices.layer,
     );
-    const layer = J5ToolkitHandlersLive.pipe(Layer.provideMerge(dependencies));
+    const layer = J5ToolkitHandlersLive.pipe(
+      Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: noRepository })),
+      Layer.provideMerge(dependencies),
+    );
 
     yield* Effect.gen(function* () {
       const toolkit = yield* J5Toolkit;
@@ -942,7 +949,10 @@ it.effect("preflights home before creation and records facts before the one stab
       Layer.mock(SquadronProjectReferences)({}),
       NodeServices.layer,
     );
-    const layer = J5ToolkitHandlersLive.pipe(Layer.provideMerge(dependencies));
+    const layer = J5ToolkitHandlersLive.pipe(
+      Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: noRepository })),
+      Layer.provideMerge(dependencies),
+    );
 
     yield* Effect.gen(function* () {
       const toolkit = yield* J5Toolkit;
@@ -1094,7 +1104,10 @@ it.effect("refuses spawn before thread creation when the caller has no home", ()
       Layer.mock(SquadronProjectReferences)({}),
       NodeServices.layer,
     );
-    const layer = J5ToolkitHandlersLive.pipe(Layer.provideMerge(dependencies));
+    const layer = J5ToolkitHandlersLive.pipe(
+      Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: noRepository })),
+      Layer.provideMerge(dependencies),
+    );
 
     yield* Effect.gen(function* () {
       const toolkit = yield* J5Toolkit;
@@ -1267,7 +1280,10 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
 
       ServerConfig.layerTest(process.cwd(), { prefix: "j5-mcp-spawn-persona-" }),
     ).pipe(Layer.provideMerge(NodeServices.layer));
-    const layer = J5ToolkitHandlersLive.pipe(Layer.provideMerge(dependencies));
+    const layer = J5ToolkitHandlersLive.pipe(
+      Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: noRepository })),
+      Layer.provideMerge(dependencies),
+    );
 
     yield* Effect.gen(function* () {
       const toolkit = yield* J5Toolkit;
@@ -1487,7 +1503,10 @@ it.effect("archives a crew only as a unit through its captain with one confirmat
       Layer.mock(CrewStopService)({}),
       NodeServices.layer,
     );
-    const layer = J5ToolkitHandlersLive.pipe(Layer.provideMerge(dependencies));
+    const layer = J5ToolkitHandlersLive.pipe(
+      Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: noRepository })),
+      Layer.provideMerge(dependencies),
+    );
 
     yield* Effect.gen(function* () {
       const toolkit = yield* J5Toolkit;
@@ -1587,7 +1606,10 @@ it.effect("lists saved agents with purpose, policy, availability, and route", ()
       Layer.mock(CrewProposalService)({}),
       ServerConfig.layerTest(process.cwd(), { prefix: "j5-mcp-list-agents-" }),
     ).pipe(Layer.provideMerge(NodeServices.layer));
-    const layer = J5ToolkitHandlersLive.pipe(Layer.provideMerge(dependencies));
+    const layer = J5ToolkitHandlersLive.pipe(
+      Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: noRepository })),
+      Layer.provideMerge(dependencies),
+    );
     yield* Effect.gen(function* () {
       const toolkit = yield* J5Toolkit;
       const response = yield* toolkit
@@ -1730,7 +1752,10 @@ it.effect("routes crew proposals through a captain that is not itself a crew mem
       Layer.mock(ProjectService)({}),
       NodeServices.layer,
     );
-    const layer = J5ToolkitHandlersLive.pipe(Layer.provideMerge(dependencies));
+    const layer = J5ToolkitHandlersLive.pipe(
+      Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: noRepository })),
+      Layer.provideMerge(dependencies),
+    );
     yield* Effect.gen(function* () {
       const toolkit = yield* J5Toolkit;
       const run = <K extends "propose_crew" | "request_crew_member" | "spawn_agent">(
@@ -1959,7 +1984,10 @@ it.effect("stops exactly one placed agent without consulting or touching descend
       Layer.mock(SquadronProjectReferences)({}),
       NodeServices.layer,
     );
-    const layer = J5ToolkitHandlersLive.pipe(Layer.provideMerge(dependencies));
+    const layer = J5ToolkitHandlersLive.pipe(
+      Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: noRepository })),
+      Layer.provideMerge(dependencies),
+    );
 
     yield* Effect.gen(function* () {
       const toolkit = yield* J5Toolkit;
@@ -2102,7 +2130,10 @@ it.effect(
         Layer.mock(SquadronProjectReferences)({}),
         NodeServices.layer,
       );
-      const layer = J5ToolkitHandlersLive.pipe(Layer.provideMerge(dependencies));
+      const layer = J5ToolkitHandlersLive.pipe(
+        Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: noRepository })),
+        Layer.provideMerge(dependencies),
+      );
 
       yield* Effect.gen(function* () {
         const toolkit = yield* J5Toolkit;

@@ -6,10 +6,11 @@ import {
 import type { CrewProposalSeatRuntime } from "@t3tools/contracts/j5";
 import { describe, expect, it } from "vite-plus/test";
 
-import { CUSTOM_AGENT, addSeat } from "./crewProposalDraft";
+import { CUSTOM_AGENT, addSeat, saveSeat } from "./crewProposalDraft";
 import {
   applyCrewSeatDraft,
   chooseCrewSeatPersona,
+  chooseCrewSeatWorkspace,
   chooseCrewHarness,
   crewModelSelection,
   crewReasoningDescriptor,
@@ -214,5 +215,32 @@ describe("crewSeatStopsForApprovals", () => {
     // A read-only persona resolves to approval-required with approvals disabled: it never asks.
     expect(crewSeatStopsForApprovals(persona, { runtimeMode: "approval-required" })).toBe(false);
     expect(crewSeatStopsForApprovals(custom, undefined)).toBe(false);
+  });
+});
+
+describe("crew seat workspace", () => {
+  it("keeps a seat's workspace through a persona change and the save, and flips it", () => {
+    const proposed = {
+      ...seat,
+      workspace: { type: "worktree" as const, baseRef: "release", branch: "fix/login" },
+    };
+    const draft = chooseCrewSeatPersona(crewSeatDraft(proposed), "critic");
+    expect(draft.workspace).toEqual(proposed.workspace);
+    const saved = saveSeat([proposed], proposed.seat, draft);
+    expect(saved.error).toBeNull();
+    expect(saved.seats[0]?.workspace).toEqual(proposed.workspace);
+    expect(applyCrewSeatDraft(proposed, draft).workspace).toEqual(proposed.workspace);
+
+    const shared = saveSeat(
+      saved.seats,
+      proposed.seat,
+      chooseCrewSeatWorkspace(crewSeatDraft(saved.seats[0]!), "shared"),
+    );
+    expect(shared.seats[0]?.workspace).toEqual({ type: "shared" });
+  });
+
+  it("leaves an unchosen workspace to the server default", () => {
+    const added = addSeat([], { seat: "reviewer", agentId: CUSTOM_AGENT, instructions: "Review" });
+    expect(added.seats[0]).not.toHaveProperty("workspace");
   });
 });

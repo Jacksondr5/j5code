@@ -1,0 +1,420 @@
+import type {
+  CommandId,
+  MessageId,
+  ModelSelection,
+  ProjectId,
+  ProviderInteractionMode,
+  RuntimeMode,
+  ThreadId,
+} from "@t3tools/contracts";
+import * as Context from "effect/Context";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
+
+import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
+import {
+  CommandReceiptStoreV2,
+  layerFromApplicationReceipts as commandReceiptStoreLayer,
+} from "../../orchestration-v2/CommandReceiptStore.ts";
+import {
+  type ThreadLaunchError,
+  ThreadLaunchService,
+} from "../../orchestration-v2/ThreadLaunchService.ts";
+import type { OrchestratorV2Error } from "../../orchestration-v2/Orchestrator.ts";
+import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
+import { ProjectService } from "../../project/ProjectService.ts";
+import { lifecycleCommandId, spawnThreadId, type SpawnStableInput } from "./spawnIds.ts";
+import { spawnWorktreeCreateCommandId } from "./spawnWorktreeTurns.ts";
+
+/**
+ * A branch or ref a caller names for a worktree. Git takes it as a positional argument, so a
+ * leading dash would be read as an option; whitespace and control characters are never valid.
+ */
+const GIT_REF_PATTERN = /^[^-\s\p{Cc}][^\s\p{Cc}]*$/u;
+const GIT_REF_MESSAGE =
+  "A git ref must not start with '-' or contain whitespace or control characters";
+
+export const GitRefName = Schema.String.check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(255),
+  Schema.isPattern(GIT_REF_PATTERN, { message: GIT_REF_MESSAGE }),
+);
+
+/**
+ * Where a spawned thread works, as a caller asks for it: the caller's own checkout (`shared`), or
+ * a fresh worktree that upstream's ThreadLaunch prepares before the brief starts. Stored on Crew
+ * seats in this camelCase form; omitted means the default for the door it came through.
+ */
+export const SpawnWorkspaceChoice = Schema.Union([
+  Schema.Struct({ type: Schema.Literal("shared") }),
+  Schema.Struct({
+    type: Schema.Literal("worktree"),
+    baseRef: Schema.optionalKey(GitRefName),
+    branch: Schema.optionalKey(GitRefName),
+    startFromOrigin: Schema.optionalKey(Schema.Boolean),
+  }),
+]);
+export type SpawnWorkspaceChoice = typeof SpawnWorkspaceChoice.Type;
+
+export type ResolvedSpawnWorkspace =
+  | { readonly type: "shared" }
+  | {
+      readonly type: "worktree";
+      readonly baseRef: string;
+      readonly branch?: string;
+      readonly startFromOrigin: boolean;
+    };
+
+/** A base ref as a caller named it; from origin, its fetched remote-tracking copy also counts. */
+export interface SpawnBaseRef {
+  readonly ref: string;
+  readonly startFromOrigin: boolean;
+}
+
+/** The base refs a set of choices name explicitly, for `inspect` to verify. */
+export const namedBaseRefs = (
+  choices: ReadonlyArray<SpawnWorkspaceChoice | undefined>,
+): ReadonlyArray<SpawnBaseRef> =>
+  choices.flatMap((choice) =>
+    choice?.type === "worktree" && choice.baseRef !== undefined
+      ? [{ ref: choice.baseRef, startFromOrigin: choice.startFromOrigin ?? false }]
+      : [],
+  );
+
+/** What the caller's checkout looks like to git, read once per spawn or Crew roster. */
+export interface SpawnCheckout {
+  readonly inWorktree: boolean;
+  readonly isRepo: boolean;
+  /** The branch checked out where the caller works; null when detached or not a repository. */
+  readonly refName: string | null;
+  readonly localBranchNames: ReadonlyArray<string>;
+  /** Base refs a caller named that git can't resolve to a commit, as they were asked for. */
+  readonly missingBaseRefs: ReadonlyArray<SpawnBaseRef>;
+  /** Why git could not be read, so an explicit worktree request can say so. */
+  readonly problem: string | null;
+}
+
+export class SpawnWorkspaceError extends Data.TaggedError("SpawnWorkspaceError")<{
+  readonly detail: string;
+  readonly nextStep: string;
+}> {
+  override get message(): string {
+    return this.detail;
+  }
+}
+
+/**
+ * The default and the checks for one choice. spawn_agent is the door for independent work, so it
+ * defaults to a worktree wherever git can make one. A Crew seat defaults to its Captain's checkout
+ * when the Captain already works in a worktree, which exists for this task and lets reviewers see
+ * the builder's uncommitted work; a Captain on the project root gets a worktree per seat, so
+ * nothing writes into the person's own checkout by default.
+ */
+export const resolveSpawnWorkspace = (
+  checkout: SpawnCheckout,
+  choice: SpawnWorkspaceChoice | undefined,
+  door: "spawn" | "seat",
+): Result.Result<ResolvedSpawnWorkspace, SpawnWorkspaceError> => {
+  if (choice?.type === "shared") return Result.succeed({ type: "shared" });
+  // Checked here as well as in the schemas: the person's card edits arrive through the client
+  // contract, which doesn't constrain refs, and every door resolves through this function.
+  const badRef = [choice?.baseRef, choice?.branch].find(
+    (ref) => ref !== undefined && (ref.length > 255 || !GIT_REF_PATTERN.test(ref)),
+  );
+  if (badRef !== undefined)
+    return Result.fail(
+      new SpawnWorkspaceError({
+        detail: `${GIT_REF_MESSAGE}: ${JSON.stringify(badRef)}.`,
+        nextStep:
+          "Name an existing branch or ref for base_ref, and a plain branch name for branch.",
+      }),
+    );
+  if (choice === undefined) {
+    if ((door === "seat" && checkout.inWorktree) || !checkout.isRepo || checkout.refName === null)
+      return Result.succeed({ type: "shared" });
+    return Result.succeed({ type: "worktree", baseRef: checkout.refName, startFromOrigin: false });
+  }
+  if (!checkout.isRepo)
+    return Result.fail(
+      new SpawnWorkspaceError({
+        detail: `A worktree was requested, but the caller's checkout is not a git repository${checkout.problem === null ? "" : ` (${checkout.problem})`}.`,
+        nextStep: 'Use workspace {"type":"shared"} to work in the caller\'s checkout.',
+      }),
+    );
+  const baseRef = choice.baseRef ?? checkout.refName;
+  if (baseRef === null)
+    return Result.fail(
+      new SpawnWorkspaceError({
+        detail:
+          "A worktree was requested, but the caller's checkout has no current branch (detached HEAD?).",
+        nextStep: 'Pass workspace.base_ref, or use workspace {"type":"shared"}.',
+      }),
+    );
+  if (
+    choice.baseRef !== undefined &&
+    checkout.missingBaseRefs.some(
+      (missing) =>
+        missing.ref === choice.baseRef &&
+        missing.startFromOrigin === (choice.startFromOrigin ?? false),
+    )
+  )
+    return Result.fail(
+      new SpawnWorkspaceError({
+        detail: `Base ref '${choice.baseRef}' doesn't resolve to a commit in this repository${choice.startFromOrigin === true ? ", locally or as a fetched origin branch" : ""}.`,
+        nextStep: "Name an existing branch, tag, or commit for workspace.base_ref, or omit it.",
+      }),
+    );
+  if (choice.branch !== undefined && checkout.localBranchNames.includes(choice.branch))
+    return Result.fail(
+      new SpawnWorkspaceError({
+        detail: `Branch '${choice.branch}' already exists.`,
+        nextStep:
+          "Choose a different workspace.branch, or omit it and let the server name the branch.",
+      }),
+    );
+  return Result.succeed({
+    type: "worktree",
+    baseRef,
+    ...(choice.branch === undefined ? {} : { branch: choice.branch }),
+    startFromOrigin: choice.startFromOrigin ?? false,
+  });
+};
+
+/**
+ * A request key is bound to the workspace it was first accepted with: the create command id
+ * encodes the choice. Shared keeps the original id, so spawns already in flight still replay.
+ */
+export const spawnCreateCommandId = (
+  stableInput: SpawnStableInput,
+  workspace: ResolvedSpawnWorkspace["type"],
+): CommandId =>
+  workspace === "shared"
+    ? lifecycleCommandId({ ...stableInput, operation: "spawn-create" })
+    : // Keyed by the thread, so the turn guard can tell this thread asked for a worktree.
+      spawnWorktreeCreateCommandId(spawnThreadId(stableInput));
+
+/** The new thread's binding at creation: the caller's checkout, or none until ThreadLaunch sets it. */
+export const spawnThreadCheckout = (
+  workspace: ResolvedSpawnWorkspace,
+  caller: { readonly branch: string | null; readonly worktreePath: string | null },
+) =>
+  workspace.type === "shared"
+    ? { branch: caller.branch, worktreePath: caller.worktreePath }
+    : { branch: null, worktreePath: null };
+
+export interface StartSpawnBriefInput {
+  readonly workspace: ResolvedSpawnWorkspace;
+  readonly stableInput: SpawnStableInput;
+  readonly squadronId: string;
+  readonly projectId: ProjectId;
+  readonly threadId: ThreadId;
+  readonly title: string;
+  readonly messageId: MessageId;
+  readonly text: string;
+  readonly modelSelection: ModelSelection;
+  readonly runtimeMode: RuntimeMode;
+  readonly interactionMode: ProviderInteractionMode;
+}
+
+export interface SpawnWorkspaceServiceShape {
+  /** Reads git once for the caller's checkout; a failed read only rules out a worktree. */
+  readonly inspect: (caller: {
+    readonly projectId: ProjectId;
+    readonly worktreePath: string | null;
+    readonly listBranches: boolean;
+    /** Explicit base refs to check before anything is created (see `namedBaseRefs`). */
+    readonly baseRefs: ReadonlyArray<SpawnBaseRef>;
+  }) => Effect.Effect<SpawnCheckout>;
+  /**
+   * Runs one spawn's start (create, facts, brief), refusing it while another start for the same
+   * thread is in flight, and refusing a request key already accepted with the other workspace type.
+   *
+   * Invariant: every door that dispatches `thread.create` for a spawn thread id goes through this.
+   * The orchestrator has no existing-thread guard and the projection upserts, so a second create
+   * under the other type's command id would overwrite the first thread. With one start in flight
+   * per thread, the receipt check can't race the create it guards. The receipt is durable, so the
+   * binding outlives the in-process guard across a restart.
+   */
+  readonly withSpawnStart: <A, E, R>(
+    input: {
+      readonly stableInput: SpawnStableInput;
+      readonly threadId: ThreadId;
+      readonly workspace: ResolvedSpawnWorkspace;
+    },
+    effect: Effect.Effect<A, E, R>,
+  ) => Effect.Effect<A, E | SpawnWorkspaceError, R>;
+  /**
+   * Starts the brief on a created, registered thread. Shared starts it now; a worktree hands the
+   * thread to ThreadLaunch, which holds the brief as a preparing run until the worktree exists
+   * and is bound, then releases it (or fails the run). The project's setup script starts before
+   * the release but is awaited only when it asks to finish first, so the agent may begin while it
+   * is still running.
+   */
+  readonly startBrief: (
+    input: StartSpawnBriefInput,
+  ) => Effect.Effect<void, OrchestratorV2Error | ThreadLaunchError>;
+  /** Whether J5 created this thread to work in a worktree of its own. */
+  readonly askedForWorktree: (threadId: ThreadId) => Effect.Effect<boolean, SpawnWorkspaceError>;
+}
+
+export class SpawnWorkspaceService extends Context.Service<
+  SpawnWorkspaceService,
+  SpawnWorkspaceServiceShape
+>()("t3/j5/a2a/spawnWorkspace/SpawnWorkspaceService") {}
+
+const detailOf = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
+
+const make = Effect.gen(function* () {
+  const projects = yield* ProjectService;
+  const git = yield* GitWorkflowService;
+  const receipts = yield* CommandReceiptStoreV2;
+  const launcher = yield* ThreadLaunchService;
+  const threads = yield* ThreadManagementService;
+  // Spawn threads with a start running in this process. A second start for one of them is
+  // refused rather than queued: it would only replay the first, and retrying is safe.
+  const startsInFlight = new Set<ThreadId>();
+
+  const inspect: SpawnWorkspaceServiceShape["inspect"] = (caller) =>
+    Effect.gen(function* () {
+      const cwd =
+        caller.worktreePath ??
+        Option.getOrNull(yield* projects.getById(caller.projectId))?.workspaceRoot ??
+        null;
+      if (cwd === null) return yield* Effect.fail("the project is not readable");
+      const status = yield* git.localStatus({ cwd });
+      const localBranchNames =
+        status.isRepo && caller.listBranches ? yield* git.listLocalBranchNames(cwd) : [];
+      const missingBaseRefs = status.isRepo
+        ? yield* Effect.filter(caller.baseRefs, (base) =>
+            git.hasCommit({ cwd, refName: base.ref }).pipe(
+              Effect.flatMap((found) =>
+                found || !base.startFromOrigin
+                  ? Effect.succeed(found)
+                  : git.hasCommit({ cwd, refName: `refs/remotes/origin/${base.ref}` }),
+              ),
+              Effect.map((found) => !found),
+            ),
+          )
+        : [];
+      return {
+        inWorktree: caller.worktreePath !== null,
+        isRepo: status.isRepo,
+        refName: status.refName,
+        localBranchNames,
+        missingBaseRefs,
+        problem: null,
+      } satisfies SpawnCheckout;
+    }).pipe(
+      Effect.catch((cause) =>
+        Effect.succeed({
+          inWorktree: caller.worktreePath !== null,
+          isRepo: false,
+          refName: null,
+          localBranchNames: [],
+          missingBaseRefs: [],
+          problem: detailOf(cause),
+        } satisfies SpawnCheckout),
+      ),
+    );
+
+  const withSpawnStart: SpawnWorkspaceServiceShape["withSpawnStart"] = (input, effect) =>
+    // The check, the add, and the releasing finalizer run with no interruptible gap, so an
+    // interrupt can't leak an entry and block every later start of this thread.
+    Effect.uninterruptibleMask((restore) =>
+      Effect.suspend(() => {
+        if (startsInFlight.has(input.threadId))
+          return Effect.fail(
+            new SpawnWorkspaceError({
+              detail: `A start for client_request_id ${input.stableInput.requestKey} is already in progress.`,
+              nextStep: "Retry with the same client_request_id once it returns.",
+            }),
+          );
+        startsInFlight.add(input.threadId);
+        return restore(
+          Effect.gen(function* () {
+            const other = input.workspace.type === "shared" ? "worktree" : "shared";
+            const bound = yield* receipts
+              .getByCommandId(spawnCreateCommandId(input.stableInput, other))
+              .pipe(
+                Effect.mapError(
+                  (error) =>
+                    new SpawnWorkspaceError({
+                      detail: `The spawn's earlier workspace choice could not be read: ${error.message}`,
+                      nextStep: "Retry with the same client_request_id.",
+                    }),
+                ),
+              );
+            if (Option.isSome(bound))
+              return yield* new SpawnWorkspaceError({
+                detail: `client_request_id ${input.stableInput.requestKey} is already bound to a ${other} workspace.`,
+                nextStep: `Retry with workspace {"type":"${other}"}, or use a fresh client_request_id.`,
+              });
+            return yield* effect;
+          }),
+        ).pipe(Effect.ensuring(Effect.sync(() => startsInFlight.delete(input.threadId))));
+      }),
+    );
+
+  const startBrief: SpawnWorkspaceServiceShape["startBrief"] = (input) =>
+    input.workspace.type === "shared"
+      ? threads
+          .dispatch({
+            type: "message.dispatch",
+            createdBy: "agent",
+            creationSource: "mcp",
+            commandId: lifecycleCommandId({ ...input.stableInput, operation: "spawn-brief" }),
+            threadId: input.threadId,
+            messageId: input.messageId,
+            text: input.text,
+            attachments: [],
+            modelSelection: input.modelSelection,
+            dispatchMode: { type: "start_immediately" },
+          })
+          .pipe(Effect.asVoid)
+      : launcher
+          .launch({
+            commandId: lifecycleCommandId({ ...input.stableInput, operation: "spawn-launch" }),
+            squadronId: input.squadronId,
+            threadId: input.threadId,
+            reuseExistingThread: true,
+            projectId: input.projectId,
+            title: input.title,
+            modelSelection: input.modelSelection,
+            runtimeMode: input.runtimeMode,
+            interactionMode: input.interactionMode,
+            workspaceStrategy: {
+              type: "worktree",
+              baseRef: input.workspace.baseRef,
+              ...(input.workspace.branch === undefined ? {} : { branch: input.workspace.branch }),
+              startFromOrigin: input.workspace.startFromOrigin,
+            },
+            initialMessage: { messageId: input.messageId, text: input.text, attachments: [] },
+            createdBy: "agent",
+            creationSource: "mcp",
+          })
+          .pipe(Effect.asVoid);
+
+  const askedForWorktree: SpawnWorkspaceServiceShape["askedForWorktree"] = (threadId) =>
+    receipts.getByCommandId(spawnWorktreeCreateCommandId(threadId)).pipe(
+      Effect.map((receipt) => Option.isSome(receipt) && receipt.value.status === "accepted"),
+      Effect.mapError(
+        (error) =>
+          new SpawnWorkspaceError({
+            detail: `Thread ${threadId}'s workspace request could not be read: ${error.message}`,
+            nextStep: "Retry once the command receipts are readable.",
+          }),
+      ),
+    );
+
+  return SpawnWorkspaceService.of({ inspect, withSpawnStart, startBrief, askedForWorktree });
+});
+
+/** Takes the receipt store from its caller; tests provide their own. */
+export const layerFromReceiptStore = Layer.effect(SpawnWorkspaceService, make);
+
+/** The receipt store is a stateless reader over the shared receipt table, built here for J5. */
+export const layer = layerFromReceiptStore.pipe(Layer.provide(commandReceiptStoreLayer));

@@ -12,7 +12,7 @@ import type { CrewProposal, CrewProposalSeat } from "./crewProposalsClient";
 import { addSeat, describeSeatAgent, removeSeat, saveSeat } from "./crewProposalDraft";
 import { describePersonaSwap, removedSeatSteps, stepTitle, unownedSteps } from "./crewPlaybookPlan";
 import { CrewSeatDialog } from "./CrewSeatDialog";
-import { crewSeatStopsForApprovals } from "./crewSeatRuntime";
+import { crewSeatStopsForApprovals, describeCrewSeatWorkspace } from "./crewSeatRuntime";
 import type { CrewProposalSeatRuntime } from "@t3tools/contracts/j5";
 import { useParticipantLabels } from "../a2a/ParticipantIdentitiesClient";
 import { useCrewProposalPreview } from "./useCrewProposalPreview";
@@ -163,9 +163,15 @@ export function CrewProposalCard(props: {
                   </div>
                   {runtime ? (
                     <p className="break-words">
-                      {[runtime.provider, runtime.model, runtime.reasoning, runtime.access].join(
-                        " · ",
-                      )}
+                      {[
+                        runtime.provider,
+                        runtime.model,
+                        runtime.reasoning,
+                        runtime.access,
+                        ...(runtime.workspace
+                          ? [describeCrewSeatWorkspace(runtime.workspace)]
+                          : []),
+                      ].join(" · ")}
                       <span className="ml-2">Harness: {runtime.harness}</span>
                     </p>
                   ) : (

@@ -492,6 +492,7 @@ export const layer = Layer.effect(
         modelSelection: seat.modelSelection,
         runtimeMode: seat.runtimeMode,
         steps: seat.steps,
+        workspace: seat.workspace,
       }));
       if (proposal.kind === "roster") {
         return yield* launcher.launch({
@@ -710,6 +711,7 @@ export const layer = Layer.effect(
           modelSelection: seat.modelSelection,
           runtimeMode: seat.runtimeMode,
           steps: seat.steps,
+          workspace: seat.workspace,
         })),
       );
 
@@ -836,7 +838,7 @@ export const layer = Layer.effect(
           )
             return yield* new CrewProposalRequestError({
               detail:
-                "The crew runtime preview is missing or has changed since it was shown: the roster, a seat's runtime, the playbook plan, or the Captain's branch or worktree may have changed.",
+                "The crew runtime preview is missing or has changed since it was shown: the roster, a seat's runtime, the playbook plan, a seat's workspace, or the Captain's branch or worktree may have changed.",
               nextStep: "Refresh the preview and review the current settings before approving.",
             });
           const launched = yield* fulfil(

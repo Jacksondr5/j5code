@@ -1,3 +1,5 @@
+import { ThreadLaunchService } from "../../../orchestration-v2/ThreadLaunchService.ts";
+import { OrchestrationCommandReceiptRepositoryLive } from "../../../persistence/Layers/OrchestrationCommandReceipts.ts";
 import { J5SquadronCreationLayer } from "../runtimeLayer.ts";
 import { AntigravityInstallation } from "../../../provider/AntigravityInstallation.ts";
 import * as ModelManifest from "../../../provider/ModelManifest.ts";
@@ -171,6 +173,9 @@ const liveLayer = Layer.mergeAll(
   handlersLayer,
 ).pipe(
   Layer.provide(Layer.mock(GitWorkflow.GitWorkflowService)({})),
+  // The project is unreadable here, so every spawn shares the caller's checkout.
+  Layer.provide(Layer.mock(ThreadLaunchService)({})),
+  Layer.provide(OrchestrationCommandReceiptRepositoryLive),
   Layer.provide(
     Layer.mock(SourceControlProviderRegistry)({
       resolveLink: () => Effect.die("unused title link"),

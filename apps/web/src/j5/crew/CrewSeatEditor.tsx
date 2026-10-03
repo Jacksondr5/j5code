@@ -17,7 +17,9 @@ import { serverEnvironment } from "../../state/server";
 import { CUSTOM_AGENT, describeSeatAgent } from "./crewProposalDraft";
 import {
   CREW_ACCESS_OPTIONS,
+  CREW_WORKSPACE_OPTIONS,
   chooseCrewSeatPersona,
+  chooseCrewSeatWorkspace,
   chooseCrewHarness,
   crewModelSelection,
   crewReasoningDescriptor,
@@ -83,6 +85,7 @@ export function CrewSeatEditor(props: CrewSeatEditorProps) {
           </Select>
         </div>
       </div>
+      <CrewSeatWorkspaceField {...props} />
       {props.environmentId === null ? (
         <p className="text-xs text-muted-foreground">
           Connect to the crew’s environment to choose its runtime.
@@ -105,6 +108,39 @@ export function CrewSeatEditor(props: CrewSeatEditorProps) {
           onChange={(event) => changeInstructions(event.currentTarget.value)}
         />
       </label>
+    </div>
+  );
+}
+
+/** Shown once the server resolves seat workspaces; older servers always share the checkout. */
+function CrewSeatWorkspaceField(props: CrewSeatEditorProps) {
+  const type = props.value.workspace?.type ?? props.runtime?.workspace?.type;
+  if (type === undefined) return null;
+  const label = props.value.seat || "New seat";
+  return (
+    <div className="grid min-w-0 gap-1 text-xs text-muted-foreground sm:max-w-xs">
+      <span>Workspace</span>
+      <Select
+        value={type}
+        disabled={props.disabled}
+        onValueChange={(next) => {
+          const option = CREW_WORKSPACE_OPTIONS.find(({ value }) => value === next);
+          if (option) props.onChange(chooseCrewSeatWorkspace(props.value, option.value));
+        }}
+      >
+        <SelectTrigger aria-label={`${label} workspace`}>
+          <SelectValue>
+            {CREW_WORKSPACE_OPTIONS.find(({ value }) => value === type)?.label}
+          </SelectValue>
+        </SelectTrigger>
+        <SelectPopup alignItemWithTrigger={false}>
+          {CREW_WORKSPACE_OPTIONS.map((option) => (
+            <SelectItem key={option.value} value={option.value}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </SelectPopup>
+      </Select>
     </div>
   );
 }
