@@ -36,7 +36,11 @@ import {
   layer as crewInstanceLayer,
 } from "./AgentCrewInstanceService.ts";
 import { A2ADeliveryWorker, manualLayer as deliveryWorkerLayer } from "./DeliveryWorker.ts";
-import { A2ADeliveryTransport, type A2ADeliveryTransportShape } from "./DeliveryTransport.ts";
+import {
+  A2ADeliveryTransport,
+  type A2ADeliveryTransportShape,
+  deliveryMessageId,
+} from "./DeliveryTransport.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { noneLayer as peerDirectoryNoneLayer } from "./PeerDirectory.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
@@ -99,7 +103,7 @@ const decodeMessageSentPayload = Schema.decodeUnknownEffect(
   Schema.fromJsonString(MessageSentPayload),
 );
 
-const makeTestLayer = () => {
+const makeTestLayer = (runs: ReadonlyArray<OrchestrationV2Run> = []) => {
   const database = NodeSqliteClient.layer({ filename: ":memory:" });
   const ledger = ledgerLayer.pipe(Layer.provide(database));
   const send = sendLayer.pipe(
@@ -110,7 +114,7 @@ const makeTestLayer = () => {
   const threads = Layer.mock(ThreadManagementService)({
     getThreadProjection: () =>
       Effect.succeed({
-        runs: [],
+        runs,
         turnItems: [
           {
             runId: RunId.make("run:silence:test"),
@@ -383,9 +387,18 @@ const dropExchange = Effect.fn("test.j5.a2a.silence.dropExchange")(function* (
 const terminalEvent = (
   status: "completed" | "failed" | "interrupted" | "cancelled" | "rolled_back",
   sequence = 100,
+  carries: {
+    readonly id: RunId;
+    readonly userMessageId: MessageId;
+    readonly completedAtSecond: number;
+  } = {
+    id: RunId.make("run:silence:test"),
+    userMessageId: MessageId.make("message:silence:upstream"),
+    completedAtSecond: 3,
+  },
 ): OrchestrationV2StoredEvent => {
-  const completedAt = DateTime.makeUnsafe(iso(3));
-  const runId = RunId.make("run:silence:test");
+  const completedAt = DateTime.makeUnsafe(iso(carries.completedAtSecond));
+  const runId = carries.id;
   return {
     sequence,
     commandId: null,
@@ -403,7 +416,7 @@ const terminalEvent = (
         providerInstanceId: ProviderInstanceId.make("codex"),
         modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "test-model" },
         providerThreadId: null,
-        userMessageId: MessageId.make("message:silence:upstream"),
+        userMessageId: carries.userMessageId,
         rootNodeId: null,
         activeAttemptId: null,
         status,
@@ -551,6 +564,82 @@ it.effect("emits processed mid-turn silence and dedupes a later lifecycle sequen
     assert.deepStrictEqual(delivered, [{ status: "delivered" }]);
   }).pipe(Effect.provide(makeTestLayer())),
 );
+
+const runOf = (stored: OrchestrationV2StoredEvent): OrchestrationV2Run => {
+  if (stored.event.type !== "run.updated") throw new Error("expected a run event");
+  return stored.event.payload;
+};
+
+const otherRun = (name: string, completedAtSecond: number, sequence = 100) =>
+  terminalEvent("completed", sequence, {
+    id: RunId.make(`run:silence:${name}`),
+    userMessageId: MessageId.make(`message:silence:${name}`),
+    completedAtSecond,
+  });
+
+const carrierRun = (messageId: LedgerMessageId, completedAtSecond: number, sequence = 101) =>
+  terminalEvent("completed", sequence, {
+    id: RunId.make("run:silence:carrier"),
+    userMessageId: deliveryMessageId(messageId),
+    completedAtSecond,
+  });
+
+it.effect("waits for the run that carries a queued ask before reporting silence (#433)", () => {
+  // The ask's id is only known after the send, so the projection reads the runs through this.
+  const runs: Array<OrchestrationV2Run> = [];
+  return Effect.gen(function* () {
+    yield* seed();
+    const ask = yield* seedInbound(2);
+    const busy = otherRun("busy", 3);
+    const carrier = carrierRun(ask.messageId, 5);
+    runs.push(runOf(busy), runOf(carrier));
+    const detector = yield* A2ASilenceDetector;
+
+    yield* detector.handleStoredEvent(busy);
+    assert.lengthOf(yield* readNotices(), 0, "the run that was already busy never saw the ask");
+
+    yield* detector.handleStoredEvent(carrier);
+    const notices = yield* readNotices();
+    assert.lengthOf(notices, 1);
+    assert.equal(notices[0]?.state, "turn-ended-no-reply");
+    assert.equal(notices[0]?.runId, runOf(carrier).id);
+  }).pipe(Effect.provide(makeTestLayer(runs)));
+});
+
+it.effect("reconciling stays quiet while the run that carries the ask is still queued", () => {
+  const runs: Array<OrchestrationV2Run> = [];
+  return Effect.gen(function* () {
+    yield* seed();
+    const ask = yield* seedInbound(2);
+    runs.push(
+      { ...runOf(carrierRun(ask.messageId, 0)), status: "queued", completedAt: null },
+      { ...runOf(otherRun("later", 4)), status: "cancelled" },
+    );
+    yield* (yield* A2ASilenceDetector).reconcileOpenExchanges;
+    assert.lengthOf(yield* readNotices(), 0, "a later run ending is not the ask's run ending");
+  }).pipe(Effect.provide(makeTestLayer(runs)));
+});
+
+it.effect("reports the carrying run when its delivery is recorded after it ended", () => {
+  const runs: Array<OrchestrationV2Run> = [];
+  return Effect.gen(function* () {
+    yield* seed();
+    const ask = yield* seedInbound(4);
+    const carrier = carrierRun(ask.messageId, 3, 100);
+    const later = otherRun("later", 5, 101);
+    runs.push(runOf(carrier), { ...runOf(later), status: "queued", completedAt: null });
+    const detector = yield* A2ASilenceDetector;
+
+    yield* detector.handleStoredEvent(carrier);
+    yield* detector.handleDeliveryEvent(ask.deliveryEvent);
+    runs[1] = runOf(later);
+    yield* detector.handleStoredEvent(later);
+
+    const notices = yield* readNotices();
+    assert.lengthOf(notices, 1);
+    assert.equal(notices[0]?.runId, runOf(carrier).id);
+  }).pipe(Effect.provide(makeTestLayer(runs)));
+});
 
 it.effect("no-ops when A9 drops after the A3 read but before its serialized append", () =>
   Effect.gen(function* () {
