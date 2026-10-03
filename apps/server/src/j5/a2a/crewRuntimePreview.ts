@@ -12,6 +12,7 @@ import type {
   CrewProposalSeatRuntime,
 } from "@t3tools/contracts/j5";
 import { getProviderOptionCurrentValue } from "@t3tools/shared/model";
+import { providerCanEnforceAgentPersonaAuthority } from "../agents/agentPersonaProviderPolicy.ts";
 import type { CrewCaptain, ResolvedCrewLaunchSeat } from "./CrewLaunchService.ts";
 import type { CrewProposal } from "./AgentCrewProposalService.ts";
 
@@ -120,7 +121,10 @@ export function describeCrewSeatRuntime(
           : "Off"
         : "Provider default";
   const access =
-    assignment !== null && assignment.runtimeModeOverride === undefined
+    // An unsandboxed persona seat shows its real mode; the persona's policy is only instructions.
+    assignment !== null &&
+    assignment.runtimeModeOverride === undefined &&
+    providerCanEnforceAgentPersonaAuthority(assignment.resolvedDriver, assignment.authorityPolicy)
       ? mode === "approval-required"
         ? "Read only"
         : "Repository write"

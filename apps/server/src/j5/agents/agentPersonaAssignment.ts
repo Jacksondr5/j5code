@@ -5,7 +5,6 @@ import {
 } from "@t3tools/contracts";
 
 import type { AgentPersonaRouteResolution } from "./agentPersonaRouting.ts";
-import { providerCanEnforceAgentPersonaAuthority } from "./agentPersonaProviderPolicy.ts";
 import {
   getBuiltInAgentPersona,
   type AgentAuthorityPolicyId,
@@ -25,12 +24,6 @@ export type AgentPersonaAssignmentResult =
       readonly personaId: AgentPersonaId;
       readonly requestedPolicy: AgentAuthorityPolicyId;
       readonly allowedPolicies: ReadonlyArray<AgentAuthorityPolicyId>;
-    }
-  | {
-      readonly status: "authority-not-enforceable";
-      readonly personaId: AgentPersonaId;
-      readonly requestedPolicy: AgentAuthorityPolicyId;
-      readonly driver: AvailableAgentPersonaRoute["driver"];
     };
 
 export function buildAgentPersonaAssignment(input: {
@@ -48,15 +41,6 @@ export function buildAgentPersonaAssignment(input: {
       allowedPolicies: definition.authority.allowedPolicies,
     };
   }
-  if (!providerCanEnforceAgentPersonaAuthority(input.resolution.driver, authorityPolicy)) {
-    return {
-      status: "authority-not-enforceable",
-      personaId: definition.id,
-      requestedPolicy: authorityPolicy,
-      driver: input.resolution.driver,
-    };
-  }
-
   return {
     status: "assigned",
     assignment: {
@@ -81,12 +65,6 @@ export function validateAgentPersonaAssignment(
     !definition.authority.allowedPolicies.some((policy) => policy === assignment.authorityPolicy)
   ) {
     return "Persona assignment uses an authority policy outside its definition.";
-  }
-  if (
-    assignment.runtimeModeOverride === undefined &&
-    !providerCanEnforceAgentPersonaAuthority(assignment.resolvedDriver, assignment.authorityPolicy)
-  ) {
-    return "Persona assignment targets a provider that cannot enforce its authority policy.";
   }
   if (assignment.resolvedRoute === "override") {
     return assignment.definitionDigest === undefined

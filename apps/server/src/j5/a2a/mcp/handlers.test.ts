@@ -1362,19 +1362,6 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
       assert.include(failureMessage(outOfRoute), "outside its declared routes");
       assert.include(failureMessage(outOfRoute), "or omit persona");
 
-      const unenforceable = yield* call({
-        ...scout,
-        persona: "builder",
-        provider: ProviderInstanceId.make("claudeAgent"),
-        model: "claude-opus-5",
-        client_request_id: "spawn-persona-unenforceable",
-      });
-      assert.isTrue(unenforceable.isFailure);
-      assert.include(
-        failureMessage(unenforceable),
-        "cannot enforce its workspace-write permissions on claudeAgent",
-      );
-
       const unknown = yield* call({
         ...scout,
         persona: "nobody",
@@ -1383,6 +1370,19 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
       assert.isTrue(unknown.isFailure);
       assert.include(failureMessage(unknown), "Unknown agent nobody");
       assert.lengthOf(yield* Ref.get(commands), commandCount);
+
+      // Claude can't sandbox workspace-write, so Builder spawns unsandboxed in the default mode.
+      const unsandboxed = yield* call({
+        ...scout,
+        persona: "builder",
+        provider: ProviderInstanceId.make("claudeAgent"),
+        model: "claude-opus-5",
+        client_request_id: "spawn-persona-unsandboxed",
+      });
+      assert.isFalse(unsandboxed.isFailure, failureMessage(unsandboxed));
+      const unsandboxedCreate = (yield* createdThreads()).at(-1)!;
+      assert.equal(unsandboxedCreate.agentPersonaAssignment?.personaId, "builder");
+      assert.equal(unsandboxedCreate.runtimeMode, "full-access");
     }).pipe(Effect.provide(layer));
   }),
 );

@@ -152,7 +152,7 @@ export function presentAgentPersonaCatalog(
           ? agentPersonaBlockedReasons(persona.availability.attempts ?? [])
           : [],
       route: available
-        ? `${providerLabel(persona.availability.resolvedDriver)} · ${persona.availability.resolvedModelSelection.model} · ${persona.availability.resolvedRoute}`
+        ? `${providerLabel(persona.availability.resolvedDriver)} · ${persona.availability.resolvedModelSelection.model} · ${persona.availability.resolvedRoute}${persona.availability.sandboxed === false ? " · not sandboxed on this provider" : ""}`
         : persona.availability.reason === "authority-not-enforceable"
           ? "Required authority is not yet enforceable"
           : removed

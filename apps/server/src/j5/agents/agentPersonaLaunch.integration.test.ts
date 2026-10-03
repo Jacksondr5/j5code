@@ -342,18 +342,17 @@ it.effect("launches one persona directly without requiring workflow sequencing",
         `Persona thread ${launched.threadId} has an immutable model route.`,
       );
 
-      const publisherError = yield* launches
-        .launch({
-          ...launchInput({
-            command: "command:launch:publisher-blocked",
-            thread: "thread:launch:publisher-blocked",
-          }),
-          agentPersona: { personaId: "publisher" },
-        })
-        .pipe(Effect.flip);
+      // Codex can't sandbox publish-only; Publisher launches with its policy as instructions.
+      const publisher = yield* launches.launch({
+        ...launchInput({
+          command: "command:launch:publisher-unsandboxed",
+          thread: "thread:launch:publisher-unsandboxed",
+        }),
+        agentPersona: { personaId: "publisher" },
+      });
       assert.equal(
-        publisherError.message,
-        "Persona publisher is blocked because neither route can enforce its authority policy.",
+        publisher.projection.thread.agentPersonaAssignment?.authorityPolicy,
+        "publish-only",
       );
 
       const invalidAuthorityError = yield* launches

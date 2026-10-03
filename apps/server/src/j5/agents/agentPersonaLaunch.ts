@@ -2,11 +2,7 @@ import type { OrchestrationV2AgentPersonaRequest, ServerProvider } from "@t3tool
 import * as Effect from "effect/Effect";
 import { buildAgentPersonaAssignment } from "./agentPersonaAssignment.ts";
 import { AgentPersonaLibraryError, type createAgentPersonaLibrary } from "./agentPersonaLibrary.ts";
-import {
-  resolveAgentPersonaRoute,
-  unavailableAgentPersonaReason,
-  type AgentPersonaRouteAttempt,
-} from "./agentPersonaRouting.ts";
+import { resolveAgentPersonaRoute, type AgentPersonaRouteAttempt } from "./agentPersonaRouting.ts";
 
 const routeFailurePhrase = (
   target: AgentPersonaRouteAttempt["target"],
@@ -78,16 +74,12 @@ export const prepareAgentPersonaLaunch = Effect.fn("prepareAgentPersonaLaunch")(
     request.authorityPolicy === undefined ? {} : { authorityPolicy: request.authorityPolicy };
   const resolution = resolveAgentPersonaRoute({
     personaId: request.personaId,
-    ...authority,
     definition,
     providers,
   });
   if (resolution.status === "unavailable") {
     return yield* new AgentPersonaLibraryError({
-      message:
-        unavailableAgentPersonaReason(resolution) === "authority-not-enforceable"
-          ? `Persona ${request.personaId} is blocked because neither route can enforce its authority policy.`
-          : `Persona ${request.personaId} is blocked because its primary and fallback models are unavailable: ${describeRouteAttempts(resolution.attempts)}.`,
+      message: `Persona ${request.personaId} is blocked because its primary and fallback models are unavailable: ${describeRouteAttempts(resolution.attempts)}.`,
     });
   }
   const result = buildAgentPersonaAssignment({ ...authority, definition, resolution });

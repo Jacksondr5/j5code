@@ -64,7 +64,7 @@ instructions: |-
   Cite sources and distinguish observations from inference.
 ```
 
-Choose exact models and reasoning values advertised by the environment. A route may name any provider driver, but a persona activates only on a provider that can enforce its runtime policy: Codex and Claude in this revision. Other providers show the route as Blocked. `diagnostic` and `publish-only` are blocked pending the required operation boundaries.
+Choose exact models and reasoning values advertised by the environment. A route may name any provider driver. Codex enforces every write policy with a sandbox and Claude enforces `read-only` and `critic-review`; on any other combination, including `diagnostic` and `publish-only` everywhere, the persona launches unsandboxed in the thread's runtime mode and its policy is only instructions. Settings shows those routes as "not sandboxed on this provider".
 
 Copy and customize the starter files in `apps/server/src/j5/agents/examples/` when working from the repository. Source folders may be shared through git. The source format is identical for starter and custom personas. The file limit is 64 KiB, with 32,768 characters available for instructions. Declare custom handoff names in an optional `artifacts` array before referencing them in `inputArtifacts` or `outputArtifact`.
 
