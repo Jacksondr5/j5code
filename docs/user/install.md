@@ -62,6 +62,12 @@ Download the macOS (Apple silicon) app from
 publishes no desktop build for other platforms and no package-manager listing;
 `winget`, Homebrew, and AUR packages named T3 Code install upstream T3 Code.
 
+Agents and terminals the app runs can use the `j5` command without any setup: the
+app keeps the CLI built into it at `~/.j5code/bin/j5` and gives them that
+directory. The app doesn't change your own `PATH` or shell startup files. To run
+`j5` in your own terminal, use `~/.j5code/bin/j5` or add `~/.j5code/bin` to your
+`PATH`.
+
 ### Windows Subsystem for Linux
 
 Choose a WSL distro in **Settings → Connections** to run agents and projects

@@ -310,6 +310,7 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 - **Updates.** Only `t3 update` moves that link. An update from the app leaves the command on the old version.
 - **`PATH`.** When the link's directory isn't on `PATH`, the installer prints a line for the person to add.
 - **Agents.** Agents and terminals inherit the server's `PATH`, which has `t3` only if the person's shell provides it.
+- **The desktop app.** It installs no command, and its agents have `t3` only if the person's shell provides it.
 
 **J5:**
 
@@ -318,6 +319,7 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 - **The command follows the service.** When the background service's server starts as the committed version, after an update or any restart, it repoints the installer's `~/.local/bin/j5` at itself.
 - **The installer puts it on `PATH`.** When `~/.local/bin` isn't on `PATH`, the installer adds one marked line to the shell's startup file (zsh, bash, or fish) that puts the directory last, and `j5 uninstall` removes it. A profile it can't write gets the printed hint instead, and `J5CODE_NO_MODIFY_PATH` skips the edit.
 - **Agents get the server's own `j5`.** A release server keeps `<home>/bin/j5` pointed at itself, and every server that finds a `j5` there puts `<home>/bin` first on the `PATH` its agents and terminals inherit.
+- **The Mac app gives its agents `j5` too.** At every launch it writes a script that runs its bundled CLI to `<home>/bin/j5`, which its server then puts first for its agents. It leaves the person's own `PATH` and shell startup files alone.
 
 **Why:**
 
@@ -326,6 +328,7 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 - **Following updates.** On the dogfood box the command ran 0.0.44 while the service ran 0.0.47, so agents called a CLI three versions behind their server (#398). Upstream has the same gap with `t3`; the fix is in the give-back backlog (#276).
 - **The installer and `PATH`.** A stock macOS shell doesn't have `~/.local/bin` on `PATH`, so a fresh install's `j5` wasn't found until the person edited their profile (#397). Jackson chose a profile line over linking into `/usr/local/bin`, which needs an admin prompt and a root-owned file the server couldn't repoint.
 - **Agents.** An agent that can't find `j5` tends to work around it without saying so. Giving every agent its server's CLI, whatever the person's shell setup, removes that failure. The directory is J5's own and holds only `j5`, so it can go first without shadowing anything, including an installed T3 Code's `t3`.
+- **The Mac app.** Most desktop apps never edit shell startup files; the few that do have a record of bugs from it. Agents were the actual problem, and they don't need the person's shell changed. A command the person asks for, as VS Code offers, is #441.
 
 **Consequences:**
 
@@ -338,9 +341,10 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 - **`j5 service status` asks for a repair after an update from the app.** The service's unit still names the launcher it was installed with, and the now-current `j5` reports that as needing `j5 service install`. That is accurate: running it replaces the launcher, with a restart. An agent that follows the suggestion restarts its own server. Keeping the launcher current is a separate improvement.
 - **`j5 uninstall` removes the `PATH` line only with its command.** The installer's link and its line go when the link belongs to the home being uninstalled, so uninstalling another home, such as an agent's scratch home, leaves them.
 - **A terminal can still find another `j5` first.** The directory is first for what the server starts directly. A shell that re-reads the person's profile can put their own directories, and a `j5` in them, ahead again.
+- **Desktop-only users have no `j5` in their own terminal yet.** They can run `~/.j5code/bin/j5` until the in-app install command exists (#441).
 - **At each advance:** check new upstream code that locates the executable by name, upstream's `SERVICE_LAUNCHER_PROTOCOL` (J5's number must stay above it), and that the startup hook still runs after `prepareTrial`.
 
-**Decided:** Jackson, 2026-10-02 (#403) and 2026-10-03 (the protocol bump and the `j5 update` step; #398; #397). Recorded in FORK.md cases 50 to 53.
+**Decided:** Jackson, 2026-10-02 (#403) and 2026-10-03 (the protocol bump and the `j5 update` step; #398; #397, including leaving the person's `PATH` alone in the Mac app). Recorded in FORK.md cases 50 to 54.
 
 ### Awaiting a decision
 
