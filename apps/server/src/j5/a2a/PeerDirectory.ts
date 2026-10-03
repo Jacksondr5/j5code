@@ -1,6 +1,12 @@
 import type { ThreadId } from "@t3tools/contracts";
-import { J5_PEER_API_PATHS, PeerRosterResponse, type PeerRosterAgent } from "@t3tools/contracts/j5";
+import {
+  J5_PEER_API_PATHS,
+  PeerRosterResponse,
+  peerPollState,
+  type PeerRosterAgent,
+} from "@t3tools/contracts/j5";
 import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -22,10 +28,36 @@ import { peerProtocolHeaders, peerProtocolMismatch, statedPeerProtocol } from ".
  * connects to for its roster live: peers are few and a live answer is never
  * stale, and a peer that does not answer is reported as unread rather than
  * guessed at. A peer that polls this server is never called; its roster is the
- * snapshot it sent with its last poll, and before its first it is unread. Once this server has a
- * peer, a reading names this server and each peer by its own name, so agents
- * see where each participant lives; they still address it by id.
+ * snapshot it sent with its last poll, and before its first it is unread. Once
+ * this server has a peer, a reading names this server and each peer by its own
+ * name, and says whether each peer is available, so agents see where each
+ * participant lives and whether it can hear them now; they still address it by
+ * id.
  */
+
+/**
+ * Whether a peer that polls this server can take a message now: it is online
+ * or not. Null for a peer this server sends to or polls, where nothing
+ * measures it, so nothing claims it.
+ */
+export interface PeerAvailability {
+  readonly available: boolean | null;
+  /** When a peer that polls last polled; null for any other peer, or one never polled. */
+  readonly lastAvailableAt: string | null;
+}
+
+const availabilityOf = (
+  peer: Pick<PeerConnection, "linkMode" | "lastPolledAt">,
+  nowMs: number,
+): PeerAvailability => {
+  if (peer.linkMode !== "store") return { available: null, lastAvailableAt: null };
+  // Online and offline as every surface reads them.
+  const state = peerPollState(peer, nowMs);
+  return {
+    available: state?.kind === "online",
+    lastAvailableAt: peer.lastPolledAt,
+  };
+};
 
 const PEER_ROSTER_TIMEOUT = Duration.seconds(5);
 
@@ -39,6 +71,9 @@ export interface RemoteAgent {
   readonly displayName: string | null;
   readonly archived: boolean;
   readonly canReceiveMessage: boolean;
+  /** Its server's availability, when it polls this one: a message to it now waits or not. */
+  readonly available: boolean | null;
+  readonly lastAvailableAt: string | null;
 }
 
 export interface UnreadPeer {
@@ -71,8 +106,13 @@ export interface PeerDirectoryShape {
     environmentId: string,
     participantId: ParticipantId,
   ) => Effect.Effect<RemoteAgent | null, PeerDirectoryError>;
-  /** A peer server's name as last reported, or its environment id once it is no longer recorded. */
-  readonly serverName: (environmentId: string) => Effect.Effect<string, PeerDirectoryError>;
+  /**
+   * A peer server's name as last reported, or its environment id once it is no
+   * longer recorded, and whether a message to it now is delivered or waits.
+   */
+  readonly serverStatus: (
+    environmentId: string,
+  ) => Effect.Effect<{ readonly name: string } & PeerAvailability, PeerDirectoryError>;
 }
 
 export class PeerDirectory extends Context.Service<PeerDirectory, PeerDirectoryShape>()(
@@ -86,7 +126,8 @@ export const noneLayer = Layer.succeed(
     listAgents: () => Effect.succeed({ agents: [], unreadPeers: [], selfName: null }),
     resolveAgent: () => Effect.succeed({ agents: [], unreadPeers: [], selfName: null }),
     snapshotAgent: () => Effect.succeed(null),
-    serverName: (environmentId) => Effect.succeed(environmentId),
+    serverStatus: (environmentId) =>
+      Effect.succeed({ name: environmentId, available: null, lastAvailableAt: null }),
   }),
 );
 
@@ -132,9 +173,11 @@ const reasonOf = (cause: unknown) => (cause instanceof Error ? cause.message : S
 const remoteAgents = (
   peer: PeerConnection,
   agents: ReadonlyArray<PeerRosterAgent>,
+  availability: PeerAvailability,
   label: string = peer.label,
 ): ReadonlyArray<RemoteAgent> =>
   agents.map((entry): RemoteAgent => ({
+    ...availability,
     environmentId: peer.environmentId,
     environmentLabel: label,
     squadronId: SquadronId.make(entry.squadronId),
@@ -177,7 +220,7 @@ const readPeerRoster = Effect.fn("j5.a2a.peer.directory.roster")(function* (
     roster.label === undefined
       ? peer.label
       : ((yield* peers.recordLabel(peer.environmentId, roster.label)) ?? peer.label);
-  return remoteAgents(peer, roster.agents, label);
+  return remoteAgents(peer, roster.agents, { available: null, lastAvailableAt: null }, label);
 });
 
 /** A peer that no longer holds a session here cannot complete an Exchange with us; it is reported, never read as if healthy. */
@@ -193,7 +236,11 @@ const readPeerRosterIfAuthorized = Effect.fn("j5.a2a.peer.directory.rosterIfAuth
   }
   if (peer.origin === null || peer.credential === null) {
     if (peer.roster === null) return yield* new PeerNotPolledError({ label: peer.label });
-    return remoteAgents(peer, peer.roster);
+    return remoteAgents(
+      peer,
+      peer.roster,
+      availabilityOf(peer, DateTime.toEpochMillis(yield* DateTime.now)),
+    );
   }
   return yield* readPeerRoster(
     { ...peer, origin: peer.origin, credential: peer.credential },
@@ -250,22 +297,26 @@ export const layer: Layer.Layer<PeerDirectory, never, PeerRegistryService | Http
           })),
         );
 
-      const serverName: PeerDirectoryShape["serverName"] = (environmentId) =>
-        peers.get(environmentId).pipe(Effect.map((peer) => peer?.label ?? environmentId));
+      const serverStatus: PeerDirectoryShape["serverStatus"] = (environmentId) =>
+        Effect.gen(function* () {
+          const peer = yield* peers.get(environmentId);
+          if (peer === null) return { name: environmentId, available: null, lastAvailableAt: null };
+          const nowMs = DateTime.toEpochMillis(yield* DateTime.now);
+          return { name: peer.label, ...availabilityOf(peer, nowMs) };
+        });
 
       const snapshotAgent: PeerDirectoryShape["snapshotAgent"] = (environmentId, participantId) =>
-        peers
-          .connection(environmentId)
-          .pipe(
-            Effect.map((peer) =>
-              peer === null || peer.roster === null
-                ? null
-                : (remoteAgents(peer, peer.roster).find(
-                    (agent) => agent.participantId === participantId,
-                  ) ?? null),
-            ),
+        Effect.gen(function* () {
+          const peer = yield* peers.connection(environmentId);
+          if (peer === null || peer.roster === null) return null;
+          const availability = availabilityOf(peer, DateTime.toEpochMillis(yield* DateTime.now));
+          return (
+            remoteAgents(peer, peer.roster, availability).find(
+              (agent) => agent.participantId === participantId,
+            ) ?? null
           );
+        });
 
-      return PeerDirectory.of({ listAgents, resolveAgent, snapshotAgent, serverName });
+      return PeerDirectory.of({ listAgents, resolveAgent, snapshotAgent, serverStatus });
     }),
   );

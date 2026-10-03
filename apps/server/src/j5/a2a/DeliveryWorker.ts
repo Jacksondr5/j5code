@@ -17,9 +17,11 @@ import type * as Scope from "effect/Scope";
 import config from "./delivery-config.v1.json" with { type: "json" };
 import {
   type A2ADeliveryHeldError,
+  type A2ADeliveryRefusedError,
   A2ADeliveryTransport,
   A2ADeliveryTransportError,
   isHeldError,
+  isRefusedError,
 } from "./DeliveryTransport.ts";
 import {
   CommCommandId,
@@ -36,6 +38,13 @@ import {
   type DeliveryMilestone,
 } from "./contracts.ts";
 import { A2ALedgerTransactionWriter, A2ALedger, type A2ALedgerError } from "./LedgerService.ts";
+import {
+  canBeNotified,
+  type DroppedExchange,
+  formatNotDeliveredNotice,
+  notDeliveredNoticeEvent,
+  peerDropEvents,
+} from "./deliveryNotices.ts";
 import { buildPeerDeliveryBody } from "./peerDeliveryBody.ts";
 
 export const A2A_DELIVERY_CONFIG_VERSION = config.version;
@@ -130,6 +139,7 @@ export class A2ADeliveryWorker extends Context.Service<A2ADeliveryWorker, A2ADel
 type A2ADeliveryAttemptError =
   | A2ALedgerError
   | A2ADeliveryTransportError
+  | A2ADeliveryRefusedError
   | A2ADeliveryHeldError
   | A2ADeliveryHookError
   | SqlError;
@@ -151,6 +161,20 @@ export const heldQueueRecheckMs = (attempt: number) =>
 const heldError = (cause: Cause.Cause<A2ADeliveryAttemptError>) => {
   const error = Cause.findErrorOption(cause);
   return error._tag === "Some" && isHeldError(error.value) ? error.value : undefined;
+};
+
+/** A peer server's refusal: its code, and its own sentence for why. */
+interface PeerRefusal {
+  readonly code: string;
+  readonly message: string;
+}
+
+/** A peer server's refusal of a direct send: as final as a polling peer's refusing ack. */
+const refusalOf = (cause: Cause.Cause<A2ADeliveryAttemptError>): PeerRefusal | undefined => {
+  const error = Cause.findErrorOption(cause);
+  return error._tag === "Some" && isRefusedError(error.value)
+    ? { code: error.value.code, message: error.value.refusal }
+    : undefined;
 };
 
 const backoffMs = (attempt: number) =>
@@ -360,8 +384,8 @@ const makeLayer = (daemon: boolean) =>
         row: DeliveryRow,
         attempt: number,
         cause: Cause.Cause<A2ADeliveryAttemptError>,
-        /** A polling peer refused the message: permanent, with the peer's own reason. */
-        refusal?: string,
+        /** The peer server refused the message: permanent, with the peer's own reason. */
+        refusal?: PeerRefusal,
       ) {
         const failedAtDate = yield* DateTime.now;
         const failedAt = DateTime.formatIso(failedAtDate);
@@ -380,9 +404,11 @@ const makeLayer = (daemon: boolean) =>
         const outcome = yield* writer.withPermit(
           sql.withTransaction(
             Effect.gen(function* () {
-              // A polling peer that refused a row it was handed already decided it;
-              // a sender retired since cannot take that back, as with a receipt.
+              // A peer server that refused the message already decided it; a
+              // sender retired since cannot take that back, as with a receipt.
               if (yield* deliveryUnavailable(row, refusal !== undefined)) return null;
+              const told =
+                refusal === undefined ? [] : yield* refusalNotices(row, refusal.message, failedAt);
               return yield* writer.appendEventsInTransaction({
                 commandId: commandId("failed", messageId, attempt),
                 squadronId: SquadronId.make(row.squadron_id),
@@ -397,12 +423,16 @@ const makeLayer = (daemon: boolean) =>
                     payload: {
                       messageId,
                       attempt,
-                      error: refusal ?? held?.message ?? errorText(cause),
+                      error:
+                        refusal === undefined
+                          ? (held?.message ?? errorText(cause))
+                          : `${refusal.code}: ${refusal.message}`,
                       nextAttemptAt,
                       alarmed,
                     },
                     createdAt: failedAt,
                   },
+                  ...told,
                 ],
               });
             }),
@@ -416,6 +446,51 @@ const makeLayer = (daemon: boolean) =>
           state: alarmed ? ("alarmed" as const) : ("retry_scheduled" as const),
           attempt,
         } satisfies DeliveryMilestone;
+      });
+
+      /**
+       * What the sender is told of a peer server's refusal: one not-delivered
+       * notice. A refused ask's notice also closes its Exchange, which is
+       * dropped as refused.
+       */
+      const refusalNotices = Effect.fn("j5.a2a.delivery.refusalNotices")(function* (
+        row: DeliveryRow,
+        reason: string,
+        createdAt: string,
+      ) {
+        if (row.receiver_environment_id === null) return [];
+        const serverName =
+          (yield* sql<{ readonly label: string }>`
+            SELECT label FROM j5_a2a_peer WHERE environment_id = ${row.receiver_environment_id}
+          `)[0]?.label ?? row.receiver_environment_id;
+        if (row.exchange_role === "ask" && row.exchange_id !== null) {
+          const exchange = (yield* sql<DroppedExchange>`
+            SELECT squadron_id, exchange_id, sender_id, receiver_id FROM j5_a2a_exchange
+            WHERE squadron_id = ${row.squadron_id} AND exchange_id = ${row.exchange_id}
+              AND status = 'open'
+          `)[0];
+          if (exchange !== undefined) {
+            return peerDropEvents({
+              exchange,
+              disposition: "receiver-retired",
+              cause: {
+                kind: "delivery-refused",
+                participantId: ParticipantId.make(row.receiver_id),
+                squadronId: SquadronId.make(row.receiver_squadron_id),
+              },
+              localSquadronId: row.squadron_id,
+              noticeText: formatNotDeliveredNotice({
+                receiverId: row.receiver_id,
+                serverName,
+                reason,
+                exchangeId: exchange.exchange_id,
+              }),
+              createdAt,
+            });
+          }
+        }
+        if (!canBeNotified(row.sender_id)) return [];
+        return [notDeliveredNoticeEvent({ message: row, serverName, reason, createdAt })];
       });
 
       const deliveryUnavailable = Effect.fn("j5.a2a.delivery.unavailable")(function* (
@@ -539,7 +614,9 @@ const makeLayer = (daemon: boolean) =>
         }
         const exit = yield* Effect.exit(attemptDelivery(row, attempt));
         const milestone =
-          exit._tag === "Success" ? exit.value : yield* recordFailure(row, attempt, exit.cause);
+          exit._tag === "Success"
+            ? exit.value
+            : yield* recordFailure(row, attempt, exit.cause, refusalOf(exit.cause));
         yield* PubSub.publish(milestones, milestone);
         return milestone;
       });
@@ -675,13 +752,13 @@ const makeLayer = (daemon: boolean) =>
           const milestone =
             ack.outcome === "received"
               ? yield* recordDelivered(row, row.attempts + 1)
-              : yield* recordFailure(
-                  row,
-                  row.attempts + 1,
-                  Cause.empty,
-                  `${ack.code}: ${ack.message}`,
-                );
+              : yield* recordFailure(row, row.attempts + 1, Cause.empty, {
+                  code: ack.code,
+                  message: ack.message,
+                });
           yield* PubSub.publish(milestones, milestone);
+          // A refusal queues its notice here, outside the drain: wake it.
+          if (ack.outcome !== "received") yield* Queue.offer(wakeups, undefined);
         }
       });
 

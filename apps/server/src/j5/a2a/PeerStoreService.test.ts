@@ -12,6 +12,7 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import { HttpClient } from "effect/unstable/http";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -24,6 +25,7 @@ import { A2ADeliveryTransport } from "./DeliveryTransport.ts";
 import {
   A2ADeliveryWorker,
   PEER_POLL_BATCH_BYTES,
+  layer as deliveryWorkerDaemonLayer,
   manualLayer as deliveryWorkerLayer,
 } from "./DeliveryWorker.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
@@ -73,23 +75,26 @@ const noHttp = Layer.succeed(
   HttpClient.make(() => Effect.die("nothing here calls a polling peer")),
 );
 
-const makeTestLayer = () => {
+/**
+ * `delivering` runs the worker as the server does, as a daemon that delivers
+ * to agents here, so a test can wait for a notice's receipt.
+ */
+const makeTestLayer = (options: { readonly delivering?: boolean } = {}) => {
   const database = NodeSqliteClient.layer({ filename: ":memory:" });
   const ledger = ledgerLayer.pipe(Layer.provide(database));
   const transport = Layer.succeed(
     A2ADeliveryTransport,
     A2ADeliveryTransport.of({
       cancelAgent: () => Effect.succeed("cancelled" as const),
-      deliverAgent: () => Effect.die("nothing is delivered locally here"),
+      deliverAgent: () =>
+        options.delivering === true ? Effect.void : Effect.die("nothing is delivered locally here"),
       deliverHuman: () => Effect.die("nothing is delivered to a person here"),
       deliverPeer: () => Effect.die("a polling peer is never sent to"),
     }),
   );
-  const worker = deliveryWorkerLayer.pipe(
-    Layer.provide(ledger),
-    Layer.provide(database),
-    Layer.provide(transport),
-  );
+  const worker = (
+    options.delivering === true ? deliveryWorkerDaemonLayer : deliveryWorkerLayer
+  ).pipe(Layer.provide(ledger), Layer.provide(database), Layer.provide(transport));
   const registry = peerRegistryLayer.pipe(
     Layer.provide(database),
     Layer.provide(noHttp),
@@ -463,6 +468,13 @@ it.effect(
       yield* poll({ roster: [{ ...snapshot[0]!, archived: true }], rosterHash: "hash-2" });
       const archived = yield* directory.listAgents();
       assert.isTrue(archived.agents[0]!.archived);
+      // Online while it polls; offline two minutes after its last poll.
+      assert.isTrue(archived.agents[0]!.available);
+      const lastPolled = archived.agents[0]!.lastAvailableAt;
+      yield* TestClock.adjust("3 minutes");
+      const offline = (yield* directory.listAgents()).agents[0]!;
+      assert.isFalse(offline.available, "its agents stay listed, as of its last poll");
+      assert.equal(offline.lastAvailableAt, lastPolled);
       // A send to a known agent reads the snapshot alone, so it is refused at once.
       assert.isTrue((yield* directory.snapshotAgent(laptop, iosBuild))?.archived);
       assert.isNull(yield* directory.snapshotAgent(laptop, billing.id));
@@ -691,4 +703,99 @@ it.effect("lets a poller acknowledge and be handed only the rows stored for it",
       "another peer's acknowledgement records nothing",
     );
   }).pipe(Effect.provide(makeTestLayer())),
+);
+
+it.effect("delivers a refusal's notice at once, with nothing else to wake the worker", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      yield* seed();
+      const ledger = yield* A2ALedger;
+      const worker = yield* A2ADeliveryWorker;
+      const milestones = yield* worker.subscribeMilestones;
+      const deliveredNext = (pattern: RegExp) =>
+        milestones.pipe(
+          Stream.filter(
+            (milestone) => milestone.state === "delivered" && pattern.test(milestone.messageId),
+          ),
+          Stream.take(1),
+          Stream.runCollect,
+        );
+      // A local message, delivered as a send delivers it. Once it arrives the
+      // worker has nothing left to do, and sleeps until woken.
+      const ops: AgentParticipant = {
+        kind: "agent",
+        id: ParticipantId.make("agent:j5:a2a:thread:ops"),
+        threadId: ThreadId.make("thread:ops"),
+      };
+      yield* ledger.appendEvents({
+        commandId: CommCommandId.make("command:peer-store:warm-up"),
+        squadronId: vmSquadron,
+        acceptedAt: timestamp,
+        events: [
+          {
+            kind: "participant.joined",
+            sender: null,
+            receiver: ops.id,
+            exchangeId: null,
+            correlationId: null,
+            payload: { participant: ops },
+            createdAt: timestamp,
+          },
+          {
+            kind: "message.sent",
+            sender: billing.id,
+            receiver: ops.id,
+            exchangeId: null,
+            correlationId: CorrelationId.make("correlation:warm-up"),
+            payload: {
+              messageId: LedgerMessageId.make("message:warm-up"),
+              text: "warm-up",
+              originSquadronId: vmSquadron,
+              receiverSquadronId: vmSquadron,
+              exchangeRole: "none",
+              envelopeChannel: "peer",
+            },
+            createdAt: timestamp,
+          },
+        ],
+      });
+      yield* worker.notify;
+      yield* deliveredNext(/warm-up/);
+      // drain shares the daemon's permit, so this returns once the daemon's own
+      // drain is done; yielding lets it go back to waiting for a wake.
+      yield* worker.drain;
+      yield* Effect.yieldNow;
+
+      const ask = yield* store("ask", { ask: true });
+      yield* poll();
+      yield* poll({
+        acks: [
+          {
+            messageId: ask,
+            outcome: "refused",
+            code: "policy_refused",
+            message: "agent:j5:a2a:thread:ios-build is archived and cannot receive.",
+          },
+        ],
+      });
+      // Only the refused ack wakes it now: billing's notice arrives.
+      const [notice] = yield* deliveredNext(/:(not-delivered|peer-drop):/);
+      assert.isDefined(notice);
+      const sql = yield* SqlClient.SqlClient;
+      const told = yield* sql<{ readonly message_text: string }>`
+        SELECT message_text FROM j5_a2a_delivery WHERE message_id = ${notice!.messageId}
+      `;
+      assert.include(
+        told[0]!.message_text,
+        "was not delivered: agent:j5:a2a:thread:ios-build is archived and cannot receive.",
+        "the peer's own sentence, without its code",
+      );
+      assert.notInclude(told[0]!.message_text, "policy_refused");
+      assert.equal(
+        (yield* statusOf(ask))!.last_error,
+        "policy_refused: agent:j5:a2a:thread:ios-build is archived and cannot receive.",
+        "the code stays on the record",
+      );
+    }),
+  ).pipe(Effect.provide(makeTestLayer({ delivering: true }))),
 );

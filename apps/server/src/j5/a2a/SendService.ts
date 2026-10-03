@@ -2,6 +2,7 @@ import type { StoredCommEvent } from "./contracts.ts";
 import type { ThreadId } from "@t3tools/contracts";
 import { A2A_MESSAGE_TEXT_MAX_CHARS } from "@t3tools/contracts/j5";
 import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -92,6 +93,16 @@ export class A2AAmbiguousParticipantError extends Schema.TaggedError<A2AAmbiguou
     return `Participant ${this.participantId} is active in more than one squadron and cannot be addressed unambiguously. Call list_participants and choose a participantId with canReceiveMessage=true, or ask the human to repair squadron membership.`;
   }
 }
+
+/** "3 h ago", for a time an agent reads at a glance. */
+const agoText = (elapsedMs: number) => {
+  const minutes = Math.floor(Math.max(0, elapsedMs) / 60_000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${String(minutes)} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${String(hours)} h ago`;
+  return `${String(Math.floor(hours / 24))} d ago`;
+};
 
 /** Names no server: which peers exist and why one is unreachable are facts for the person's surfaces. */
 export class A2APeersUnreadError extends Schema.TaggedError<A2APeersUnreadError>()(
@@ -988,22 +999,49 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
 
       /**
        * A receiver on a peer server is named by where it lives; the recorded row
-       * says which, on a replay too. The send is already committed, so a name
-       * this server cannot read never turns it into a failure.
+       * says which, on a replay too. When that server polls this one and is
+       * offline, the result says the message waits for it and since when it was
+       * last available. The send is already committed, so a fact this server
+       * cannot read never turns it into a failure.
        */
       const withReceiverServer = (result: SendMessageResult) =>
         Effect.gen(function* () {
-          const rows = yield* sql<{ readonly receiver_environment_id: string | null }>`
-            SELECT receiver_environment_id FROM j5_a2a_delivery
+          const rows = yield* sql<{
+            readonly receiver_environment_id: string | null;
+            readonly receiver_id: string;
+          }>`
+            SELECT receiver_environment_id, receiver_id FROM j5_a2a_delivery
             WHERE message_id = ${result.messageId}
             LIMIT 1
           `;
-          const environmentId = rows[0]?.receiver_environment_id ?? null;
-          if (environmentId === null) return result;
-          const receiverServer = yield* peers
-            .serverName(environmentId)
-            .pipe(Effect.orElseSucceed(() => environmentId));
-          return { ...result, receiverServer };
+          const row = rows[0];
+          const environmentId = row?.receiver_environment_id ?? null;
+          if (row === undefined || environmentId === null) return result;
+          const server = yield* peers.serverStatus(environmentId).pipe(
+            Effect.orElseSucceed(() => ({
+              name: environmentId,
+              available: null,
+              lastAvailableAt: null,
+            })),
+          );
+          if (server.available !== false) return { ...result, receiverServer: server.name };
+          const receiver = yield* peers
+            .snapshotAgent(environmentId, ParticipantId.make(row.receiver_id))
+            .pipe(Effect.orElseSucceed(() => null));
+          const nowMs = DateTime.toEpochMillis(yield* DateTime.now);
+          const lastAvailable =
+            server.lastAvailableAt === null
+              ? "not yet available"
+              : `last available ${agoText(nowMs - Date.parse(server.lastAvailableAt))}`;
+          return {
+            ...result,
+            receiverServer: server.name,
+            delivery: "waiting_for_recipient",
+            ...(server.lastAvailableAt === null
+              ? {}
+              : { recipientLastAvailableAt: server.lastAvailableAt }),
+            note: `Recorded. ${receiver?.displayName ?? row.receiver_id} is on ${server.name}, which is offline, ${lastAvailable}; it receives this when ${server.name} is next available.`,
+          } satisfies SendMessageResult;
         }).pipe(
           Effect.orElseSucceed(() => result),
           Effect.withSpan("j5.a2a.send.withReceiverServer"),

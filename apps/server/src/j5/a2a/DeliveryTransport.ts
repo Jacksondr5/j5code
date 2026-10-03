@@ -12,6 +12,7 @@ import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -25,6 +26,7 @@ import {
   formatMachineEnvelope,
   formatPeerEnvelope,
 } from "./EnvelopeFormatter.ts";
+import { PeerDeliveryRefusalCode } from "./PeerInboundService.ts";
 import { PeerRegistryService } from "./PeerRegistryService.ts";
 import { peerProtocolHeaders, peerProtocolMismatch, statedPeerProtocol } from "./peerProtocol.ts";
 import {
@@ -77,6 +79,24 @@ export class A2ADeliveryHeldError extends Schema.TaggedError<A2ADeliveryHeldErro
 
 export const isHeldError = Schema.is(A2ADeliveryHeldError);
 
+/** The peer server refused the message for good: its receiver is gone or will not take it. */
+export class A2ADeliveryRefusedError extends Schema.TaggedError<A2ADeliveryRefusedError>()(
+  "A2ADeliveryRefusedError",
+  {
+    participantId: Schema.String,
+    /** The peer's refusal code, such as `policy_refused`. */
+    code: Schema.String,
+    /** The peer's own sentence for why, which the sender is told. */
+    refusal: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `The peer server refused the message to ${this.participantId}: ${this.code}: ${this.refusal}`;
+  }
+}
+
+export const isRefusedError = Schema.is(A2ADeliveryRefusedError);
+
 export interface AgentDeliveryInput {
   readonly originSquadronId: SquadronId;
   readonly receiverSquadronId: SquadronId;
@@ -119,7 +139,7 @@ export interface A2ADeliveryTransportShape {
   ) => Effect.Effect<void, A2ADeliveryTransportError>;
   readonly deliverPeer: (
     input: PeerDeliveryInput,
-  ) => Effect.Effect<void, A2ADeliveryTransportError>;
+  ) => Effect.Effect<void, A2ADeliveryTransportError | A2ADeliveryRefusedError>;
 }
 
 export class A2ADeliveryTransport extends Context.Service<
@@ -161,6 +181,10 @@ interface HumanExchangeRow {
 }
 
 const decodeParticipant = Schema.decodeUnknownEffect(Schema.fromJsonString(Participant));
+const decodeRefusalOption = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.Struct({ error: PeerDeliveryRefusalCode, message: Schema.String })),
+);
+const decodeRefusal = (text: string) => decodeRefusalOption(text).pipe(Option.getOrNull);
 const assertNever = (channel: never): never => {
   throw new Error(`Unsupported A2A delivery envelope channel: ${String(channel)}`);
 };
@@ -506,10 +530,17 @@ export const live: Layer.Layer<
             return;
           }
           const text = yield* response.text;
-          if (response.status === 404 || response.status === 403) {
-            return yield* new A2ADeliveryTargetError({
+          // Only an error answer that is the peer's own refusal, with its code
+          // and reason, is final: it decided, so retrying cannot change it. A
+          // bare status, such as an older server's missing route or a proxy's
+          // page, or any other 2xx, is retried and alarms like any failure.
+          const refused =
+            response.status >= 200 && response.status < 300 ? null : decodeRefusal(text);
+          if (refused !== null) {
+            return yield* new A2ADeliveryRefusedError({
               participantId: receiverId,
-              state: `peer ${peer.label} refused the delivery (HTTP ${String(response.status)}): ${text.slice(0, 500)}`,
+              code: refused.error,
+              refusal: refused.message.slice(0, 4_000),
             });
           }
           return yield* new A2ADeliveryTransportError({
@@ -517,8 +548,10 @@ export const live: Layer.Layer<
             cause: `Peer ${peer.label} answered HTTP ${String(response.status)}: ${text.slice(0, 500)}`,
           });
         }).pipe(
-          Effect.mapError(
-            (cause) => new A2ADeliveryTransportError({ operation: "deliver to peer", cause }),
+          Effect.mapError((cause) =>
+            isRefusedError(cause)
+              ? cause
+              : new A2ADeliveryTransportError({ operation: "deliver to peer", cause }),
           ),
         ),
       deliverHuman: (input) =>
