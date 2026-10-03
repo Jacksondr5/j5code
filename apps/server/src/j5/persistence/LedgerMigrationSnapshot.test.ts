@@ -21,7 +21,7 @@ import {
 
 // Migration 030 does not exist yet. The stand-in is a database whose latest applied J5 migration
 // is 29, with a build that knows a 30.
-const STAND_IN = { migrationIds: [28, 29, 30], fromMigrationId: 30 } as const;
+const STAND_IN = { migrationIds: [28, 29, 30], guardedMigrationIds: [30] };
 
 const withDatabasePath = <A, E>(
   body: (paths: {
@@ -91,7 +91,7 @@ it.effect("snapshots once, before the pending migration, and not again after it 
       const path = yield* Path.Path;
       const atDatabase = Effect.provide(NodeSqliteClient.layer({ filename: dbPath }));
       // The real migrator and the real lane: 29 is the pending migration.
-      const threshold = { fromMigrationId: 29 };
+      const guarded = { guardedMigrationIds: [29] };
       const snapshotPath = ledgerMigrationSnapshotPath(path, dbPath, 29);
       assert.isTrue(snapshotPath.endsWith("statev2.pre-j5-029.sqlite"));
 
@@ -104,13 +104,13 @@ it.effect("snapshots once, before the pending migration, and not again after it 
       }).pipe(atDatabase);
       const beforeMigration = readContent(dbPath);
 
-      yield* snapshotBeforeJ5LedgerMigration(dbPath, threshold);
+      yield* snapshotBeforeJ5LedgerMigration(dbPath, guarded);
       assert.deepStrictEqual(readContent(snapshotPath), beforeMigration);
 
       yield* runJ5A2AMigrations().pipe(atDatabase);
       assert.notDeepEqual(readContent(dbPath), beforeMigration);
       NodeFS.rmSync(snapshotPath);
-      yield* snapshotBeforeJ5LedgerMigration(dbPath, threshold);
+      yield* snapshotBeforeJ5LedgerMigration(dbPath, guarded);
       assert.isFalse(NodeFS.existsSync(snapshotPath));
     }),
   ),
@@ -139,15 +139,15 @@ it.effect("takes no snapshot of a database that has no J5 ledger yet", () =>
   ),
 );
 
-it.effect("takes no snapshot when no migration at or above the threshold is pending", () =>
+it.effect("takes no snapshot when the pending migration is not a guarded one", () =>
   withDatabasePath(({ dbPath, snapshotPath }) =>
     Effect.gen(function* () {
       const path = yield* Path.Path;
       createLedgerDatabase(dbPath, 28);
-      // 29 is pending, but it is below the threshold and this build knows no 30.
+      // 29 is pending but not guarded, and this build knows no 30.
       yield* snapshotBeforeJ5LedgerMigration(dbPath, {
         migrationIds: [28, 29],
-        fromMigrationId: 30,
+        guardedMigrationIds: [30],
       });
       assert.deepStrictEqual(NodeFS.readdirSync(path.dirname(dbPath)), ["statev2.sqlite"]);
       assert.isFalse(NodeFS.existsSync(snapshotPath));
@@ -155,17 +155,38 @@ it.effect("takes no snapshot when no migration at or above the threshold is pend
   ),
 );
 
-it.effect("names the snapshot for the migration about to run and keeps the earlier one", () =>
+it.effect("an ordinary later migration takes no snapshot and leaves the earlier one alone", () =>
   withDatabasePath(({ dbPath, snapshotPath }) =>
     Effect.gen(function* () {
       const path = yield* Path.Path;
-      // 030 already ran and left its snapshot. A later build adds 031.
+      // 030 already ran and left its snapshot. A later build adds an unguarded 031.
       createLedgerDatabase(dbPath, 30);
       NodeFS.writeFileSync(snapshotPath, "the state before 030");
 
       yield* snapshotBeforeJ5LedgerMigration(dbPath, {
         migrationIds: [29, 30, 31],
-        fromMigrationId: 30,
+        guardedMigrationIds: [30],
+      });
+
+      assert.strictEqual(NodeFS.readFileSync(snapshotPath, "utf8"), "the state before 030");
+      assert.deepStrictEqual(NodeFS.readdirSync(path.dirname(dbPath)).toSorted(), [
+        "statev2.pre-j5-030.sqlite",
+        "statev2.sqlite",
+      ]);
+    }),
+  ),
+);
+
+it.effect("a guarded later migration gets its own snapshot and leaves the earlier one alone", () =>
+  withDatabasePath(({ dbPath, snapshotPath }) =>
+    Effect.gen(function* () {
+      const path = yield* Path.Path;
+      createLedgerDatabase(dbPath, 30);
+      NodeFS.writeFileSync(snapshotPath, "the state before 030");
+
+      yield* snapshotBeforeJ5LedgerMigration(dbPath, {
+        migrationIds: [29, 30, 31],
+        guardedMigrationIds: [30, 31],
       });
 
       assert.strictEqual(NodeFS.readFileSync(snapshotPath, "utf8"), "the state before 030");

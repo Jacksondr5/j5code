@@ -8,8 +8,11 @@ import * as Schema from "effect/Schema";
 
 import { J5_A2A_MIGRATIONS_TABLE, migrationEntries } from "../a2a/Migrations.ts";
 
-/** The first J5 ledger migration that rewrites data a person cannot rebuild by hand. */
-export const J5_LEDGER_SNAPSHOT_FROM_MIGRATION = 30;
+/**
+ * The J5 ledger migrations that get a snapshot first. Add an id only when its migration rewrites
+ * or drops data destructively; an ordinary migration must not cost a full copy of the database.
+ */
+export const J5_LEDGER_SNAPSHOT_MIGRATIONS: ReadonlyArray<number> = [30];
 
 const describeCause = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
 
@@ -32,7 +35,8 @@ const isLedgerMigrationSnapshotError = Schema.is(LedgerMigrationSnapshotError);
 export interface SnapshotBeforeJ5LedgerMigrationOptions {
   /** The J5 ledger migration ids this build knows. Defaults to `migrationEntries`. */
   readonly migrationIds?: ReadonlyArray<number>;
-  readonly fromMigrationId?: number;
+  /** Defaults to `J5_LEDGER_SNAPSHOT_MIGRATIONS`. */
+  readonly guardedMigrationIds?: ReadonlyArray<number>;
 }
 
 /** `statev2.sqlite` → `statev2.pre-j5-030.sqlite`, beside the database. */
@@ -60,17 +64,17 @@ const readLatestAppliedMigration = (filename: string) => {
 };
 
 /**
- * Call before anything opens the database read-write. When a J5 ledger migration at or above the
- * threshold is about to run, this copies the database to `statev2.pre-j5-<id>.sqlite` first, and
+ * Call before anything opens the database read-write. When a guarded J5 ledger migration is about
+ * to run, this copies the database to `statev2.pre-j5-<id>.sqlite` first, and
  * fails rather than let the migration run without that copy. It replaces an older snapshot of the
  * same name: a pending migration means the database is still the pre-migration one. Nothing
  * deletes snapshots; a person does (`docs/j5/runbooks/dogfood-runtime.md`).
  */
 export const snapshotBeforeJ5LedgerMigration = Effect.fn("snapshotBeforeJ5LedgerMigration")(
   function* (dbPath: string, options: SnapshotBeforeJ5LedgerMigrationOptions = {}) {
-    const fromMigrationId = options.fromMigrationId ?? J5_LEDGER_SNAPSHOT_FROM_MIGRATION;
-    const guardedIds = (options.migrationIds ?? migrationEntries.map(([id]) => id))
-      .filter((id) => id >= fromMigrationId)
+    const knownIds = new Set(options.migrationIds ?? migrationEntries.map(([id]) => id));
+    const guardedIds = (options.guardedMigrationIds ?? J5_LEDGER_SNAPSHOT_MIGRATIONS)
+      .filter((id) => knownIds.has(id))
       .toSorted((left, right) => left - right);
     const lowestGuardedId = guardedIds[0];
     if (lowestGuardedId === undefined) return;
