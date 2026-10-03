@@ -345,6 +345,8 @@ export const SendMessageResult = Schema.Struct({
   exchangeState: Schema.Literals(["none", "open", "closing", "closed"]),
   joinedExistingExchange: Schema.Boolean,
   durableAtSeq: PositiveInt,
+  /** Present when the receiver is busy and the message will wait behind its running turn. */
+  deliveryNotice: Schema.optional(Schema.String),
 });
 export type SendMessageResult = typeof SendMessageResult.Type;
 

@@ -12,6 +12,7 @@ import {
   formatClosedPeerEnvelope,
   formatMachineEnvelope,
   formatPeerEnvelope,
+  formatReceiverBacklogNotice,
   formatSilenceNoticeEnvelope,
 } from "./EnvelopeFormatter.ts";
 import { SquadronId, ExchangeId, ParticipantId } from "./contracts.ts";
@@ -49,7 +50,7 @@ it("renders the versioned peer envelope with exact reply semantics", () => {
     message: "Please verify the worker.",
   });
 
-  assert.equal(A2A_ENVELOPE_VERSION, 19);
+  assert.equal(A2A_ENVELOPE_VERSION, 20);
   assert.include(rendered, "Cross-agent message");
   assert.notMatch(rendered, /\b(?:J5|A2A)\b/);
   assert.include(rendered, "agent:sender");
@@ -115,10 +116,24 @@ it("does not interpret caller text as an envelope template", () => {
   assert.equal(rendered.match(/send_message\(/g)?.length, 1);
 });
 
+it("renders the receiver backlog notice with its measured counts", () => {
+  const rendered = formatReceiverBacklogNotice({
+    receiverId: ParticipantId.make("agent:busy"),
+    waiting: 3,
+    fromYou: 2,
+  });
+
+  assert.include(rendered, "agent:busy");
+  assert.include(rendered, "3 message(s) waiting");
+  assert.include(rendered, "2 from you");
+  assert.include(rendered, "in one message");
+  assert.notInclude(rendered, "{{");
+});
+
 it("keeps the tool descriptions on their documented contracts", () => {
   assert.equal(
     A2A_SEND_TOOL_DESCRIPTION,
-    "Send one durable message. To another agent, three uses: a **plain send** when you don't need a reply; an **ask** — set expect_reply=true with a one-line intent, opening an exchange the receiver owes a reply to; a **reply** — include the exchange_id from the ask you are answering, which closes that exchange. To the human, only an ask: a plain send to a person is refused — if nobody needs to act, say it in your own thread instead. Set urgency only when asking the human. Use this tool only for participants already returned by list_participants; when creating a Peer Agent, put any reply expectation in spawn_agent's brief instead of sending a follow-up ask. Returns once the message is committed; delivery continues asynchronously — carry on with your work, and the reply arrives later as an incoming message. A caller without a registered home is refused. Reuse client_request_id to retry the same send safely.",
+    "Send one durable message. To another agent, three uses: a **plain send** when you don't need a reply; an **ask** — set expect_reply=true with a one-line intent, opening an exchange the receiver owes a reply to; a **reply** — include the exchange_id from the ask you are answering, which closes that exchange. To the human, only an ask: a plain send to a person is refused — if nobody needs to act, say it in your own thread instead. Set urgency only when asking the human. Use this tool only for participants already returned by list_participants; when creating a Peer Agent, put any reply expectation in spawn_agent's brief instead of sending a follow-up ask. Returns once the message is committed; delivery continues asynchronously — carry on with your work, and the reply arrives later as an incoming message. An agent that is busy usually handles each message as its own turn after its current one ends, so put related updates in one message rather than sending them one by one; the result's deliveryNotice says when your message will wait behind the receiver's current turn. A caller without a registered home is refused. Reuse client_request_id to retry the same send safely.",
   );
   assert.include(
     A2A_SEND_TOOL_DESCRIPTION,
