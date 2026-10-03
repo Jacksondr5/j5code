@@ -2077,8 +2077,10 @@ it.effect(
                 unreadPeers: [
                   { environmentId: "environment-mac", label: "Mac", reason: "ECONNREFUSED" },
                 ],
+                selfName: "Work VM",
               }),
             resolveAgent: () => Effect.die("unused"),
+            serverName: () => Effect.die("unused"),
           }),
         ),
         Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
@@ -2132,8 +2134,10 @@ it.effect(
         assert.equal(remoteRow.self, false);
         assert.equal(remoteRow.thread_id, "thread:support");
         assert.deepStrictEqual(remoteRow.provenance, { kind: "unrecorded" });
-        assert.isFalse(hasKey(remoteRow, "environment_id"), "no verb reveals a server");
-        assert.equal(listed.unread_peer_count, 1, "an unread peer is counted, never named");
+        assert.isFalse(hasKey(remoteRow, "environment_id"), "a server is named, never its id");
+        assert.deepStrictEqual(remoteRow.server, { name: "Home", local: false });
+        assert.deepStrictEqual(listed.participants[0]!.server, { name: "Work VM", local: true });
+        assert.equal(listed.unread_peer_count, 1, "an unread peer is counted");
         assert.isFalse(hasKey(listed, "unread_peers"));
 
         const withArchived = yield* callList(true);

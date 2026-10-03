@@ -533,17 +533,20 @@ const handlers = {
       const orchestrator = yield* OrchestratorV2;
       const includeArchived = input.include_archived ?? false;
       const directory = yield* service.listParticipants(scope.threadId, includeArchived);
-      // A Squadron's name beside its id is how an agent tells its own home from
-      // a peer's without any server being named. Names are enrichment: a read
-      // that fails leaves them null rather than taking the address book with it.
+      // A Squadron's name beside its id places a participant. Names are
+      // enrichment: a read that fails leaves them null rather than taking the
+      // address book with it.
       const squadronNames = new Map(
         (yield* (yield* A2ALedger).listSquadrons().pipe(Effect.orElseSucceed(() => []))).map(
           (squadron) => [squadron.id, squadron.name] as const,
         ),
       );
-      // Agents homed on peer servers sit beside local ones, told apart only by
-      // their Squadron. A peer that did not answer is reported, never omitted.
+      // Agents homed on peer servers sit beside local ones. Once this server has
+      // a peer, every row names the server it lives on; with none, no row does.
+      // A peer that did not answer is reported, never omitted.
       const remote = yield* (yield* PeerDirectory).listAgents();
+      const localServer =
+        remote.selfName === null ? {} : { server: { name: remote.selfName, local: true } };
       const placements = yield* ParticipantPlacementService;
       const squadronIds = [...new Set(directory.map((row) => row.squadronId))];
       const placementRows = (yield* Effect.forEach(
@@ -582,6 +585,7 @@ const handlers = {
           provenance: projectProvenance({ kind: "unrecorded" } as const),
           placement_parent_id: null,
           display_name: agent.displayName,
+          server: { name: agent.environmentLabel, local: false },
         }));
       return {
         unread_peer_count: remote.unreadPeers.length,
@@ -623,6 +627,7 @@ const handlers = {
                   : row.participant.kind === "machine"
                     ? row.participant.name
                     : null,
+              ...localServer,
             };
           })
           .concat(remoteRows),

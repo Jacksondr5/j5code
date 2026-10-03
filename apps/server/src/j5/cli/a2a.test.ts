@@ -381,16 +381,14 @@ it.live("issues a peer credential, adds, lists, and removes a peer through the a
           "https://home.example:3773/",
           "--credential",
           "issued-by-home",
-          "--label",
-          "Home",
           ...common,
         ]);
         assert.equal(process.exitCode, undefined);
-        assert.deepStrictEqual(stub.requests[1]!.body, {
-          origin: "https://home.example:3773",
-          credential: "issued-by-home",
-          label: "Home",
-        });
+        assert.deepStrictEqual(
+          stub.requests[1]!.body,
+          { origin: "https://home.example:3773", credential: "issued-by-home" },
+          "the peer names itself at hello; no name is typed here",
+        );
         assert.deepStrictEqual(lastJson().peer, homePeer);
 
         yield* runCli(["a2a", "peer", "list", ...common]);

@@ -50,7 +50,7 @@ it("renders the versioned peer envelope with exact reply semantics", () => {
     message: "Please verify the worker.",
   });
 
-  assert.equal(A2A_ENVELOPE_VERSION, 20);
+  assert.equal(A2A_ENVELOPE_VERSION, 21);
   assert.include(rendered, "Cross-agent message");
   assert.notMatch(rendered, /\b(?:J5|A2A)\b/);
   assert.include(rendered, "agent:sender");
@@ -59,6 +59,28 @@ it("renders the versioned peer envelope with exact reply semantics", () => {
   assert.include(rendered, 'send_message(to="agent:sender", exchange_id="exchange:one"');
   assert.include(rendered, "Reply once");
   assert.notInclude(rendered, "{{");
+});
+
+it("names a remote sender's server in its sender line and leaves a local one unchanged", () => {
+  const sender = {
+    senderId: ParticipantId.make("agent:sender"),
+    originSquadronId: SquadronId.make("squadron:origin"),
+    message: "Build the iOS target.",
+  };
+  const remote = formatPeerEnvelope({ ...sender, exchangeId: null, senderServerName: "Work VM" });
+  const local = formatPeerEnvelope({ ...sender, exchangeId: null });
+  const closed = formatClosedPeerEnvelope({ ...sender, senderServerName: "Work VM" });
+
+  assert.include(
+    remote,
+    "[Cross-agent message from agent:sender in squadron squadron:origin, on Work VM]",
+  );
+  assert.include(
+    closed,
+    "[Cross-agent message from agent:sender in squadron squadron:origin, on Work VM]",
+  );
+  assert.include(local, "[Cross-agent message from agent:sender in squadron squadron:origin]");
+  for (const rendered of [remote, local, closed]) assert.notInclude(rendered, "{{");
 });
 
 it.effect("keeps the send_message runtime description byte-equal to its documented contract", () =>

@@ -347,6 +347,8 @@ export const SendMessageResult = Schema.Struct({
   durableAtSeq: PositiveInt,
   /** Present when the receiver is busy and the message will wait behind its running turn. */
   deliveryNotice: Schema.optional(Schema.String),
+  /** The name of the peer server the receiver lives on; absent for a receiver on this server. */
+  receiverServer: Schema.optionalKey(Schema.String),
 });
 export type SendMessageResult = typeof SendMessageResult.Type;
 

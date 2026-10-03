@@ -128,12 +128,14 @@ export const J5ParticipantDirectoryRow = Schema.Struct({
   provenance: J5ParticipantProvenanceView,
   placement_parent_id: Schema.NullOr(ParticipantId),
   display_name: Schema.NullOr(Schema.String),
+  /** Where the participant lives, by the server's own name; present once this server has a peer. */
+  server: Schema.optionalKey(Schema.Struct({ name: Schema.String, local: Schema.Boolean })),
 });
 export type J5ParticipantDirectoryRow = typeof J5ParticipantDirectoryRow.Type;
 
 export const J5ListParticipantsResult = Schema.Struct({
   participants: Schema.Array(J5ParticipantDirectoryRow),
-  /** Peer servers whose address books could not be read: their agents are absent, not gone. No server is named. */
+  /** Peer servers whose address books could not be read: their agents are absent, not gone. */
   unread_peer_count: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 });
 

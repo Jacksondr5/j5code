@@ -310,6 +310,14 @@ const makeLayer = (daemon: boolean) =>
                   ),
                 )
               : undefined;
+          // A message received from a peer server names that server in its
+          // envelope, by the name the peer last reported for itself.
+          const senderServerName =
+            row.origin_environment_id === null
+              ? undefined
+              : ((yield* sql<{ readonly label: string }>`
+                  SELECT label FROM j5_a2a_peer WHERE environment_id = ${row.origin_environment_id}
+                `)[0]?.label ?? row.origin_environment_id);
           yield* transport.deliverAgent({
             originSquadronId,
             receiverSquadronId,
@@ -321,6 +329,7 @@ const makeLayer = (daemon: boolean) =>
             message: row.message_text,
             ...(payload?.attachments === undefined ? {} : { attachments: payload.attachments }),
             envelopeChannel: row.envelope_channel,
+            ...(senderServerName === undefined ? {} : { senderServerName }),
           });
         }
         yield* hooks.afterTransportSuccess({ squadronId: ledgerSquadronId, messageId, attempt });

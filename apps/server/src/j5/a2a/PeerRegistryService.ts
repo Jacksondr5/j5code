@@ -1,6 +1,7 @@
 import type { EnvironmentId } from "@t3tools/contracts";
 import {
   J5_PEER_API_PATHS,
+  PEER_SENDER_LABEL_MAX_CHARS,
   PeerHelloResponse,
   peerSubjectForEnvironment,
   type PeerRecord,
@@ -33,7 +34,6 @@ const PEER_HELLO_TIMEOUT = Duration.seconds(5);
 export interface AddPeerInput {
   readonly origin: string;
   readonly credential: string;
-  readonly label: string | undefined;
   /** Re-adding a known peer at a different origin is refused unless the caller says so. */
   readonly replaceOrigin: boolean;
   readonly acceptedAt: string;
@@ -131,6 +131,8 @@ export interface PeerConnection extends PeerRecord {
 export interface PeerRegistryServiceShape {
   /** This server's environment id, the identity a peer's credential must name. */
   readonly selfEnvironmentId: Effect.Effect<EnvironmentId>;
+  /** This server's own name: the label its environment descriptor publishes, which peers record. */
+  readonly selfLabel: Effect.Effect<string>;
   /**
    * Every recorded peer with the credential to reach it, for directory reads.
    * A peer whose session here is gone is still listed, marked "missing", so a
@@ -155,6 +157,15 @@ export interface PeerRegistryServiceShape {
   readonly remove: (
     environmentId: string,
   ) => Effect.Effect<{ readonly removed: boolean }, SqlError>;
+  /**
+   * The name a peer reported for itself when this server last talked to it,
+   * written only when it changed. Answers with the name now recorded; a peer
+   * that reported none keeps the recorded one.
+   */
+  readonly recordLabel: (
+    environmentId: string,
+    reported: string | undefined,
+  ) => Effect.Effect<string | null, SqlError>;
 }
 
 export class PeerRegistryService extends Context.Service<
@@ -176,6 +187,12 @@ interface PeerConnectionRow extends PeerRow {
 }
 
 const decodeHello = Schema.decodeUnknownEffect(PeerHelloResponse);
+
+/** A peer-supplied name, bounded like any other; undefined when the peer reported none. */
+const reportedLabel = (label: string | undefined) => {
+  const trimmed = label?.trim().slice(0, PEER_SENDER_LABEL_MAX_CHARS);
+  return trimmed === undefined || trimmed.length === 0 ? undefined : trimmed;
+};
 
 /** The message plus the cause chain: a transport error alone never says why the socket failed. */
 const reasonOf = (cause: unknown): string => {
@@ -266,14 +283,14 @@ export const layer: Layer.Layer<
   never,
   | SqlClient.SqlClient
   | HttpClient.HttpClient
-  | ServerEnvironment.ServerEnvironmentIdentity
+  | ServerEnvironment.ServerEnvironment
   | EnvironmentAuth.EnvironmentAuth
 > = Layer.effect(
   PeerRegistryService,
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const httpClient = yield* HttpClient.HttpClient;
-    const identity = yield* ServerEnvironment.ServerEnvironmentIdentity;
+    const identity = yield* ServerEnvironment.ServerEnvironment;
     const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
 
     /** The subjects that currently hold a live session here; a peer without one cannot deliver to us. */
@@ -353,7 +370,8 @@ export const layer: Layer.Layer<
             credentialKept,
           });
         }
-        const label = input.label?.trim() || hello.environmentId;
+        // The peer names itself; a server from before names omits it and the recorded name stands.
+        const label = reportedLabel(hello.label) ?? existing?.label ?? hello.environmentId;
         const expiresAt = hello.credentialExpiresAt ?? null;
         // One statement records or rotates; created_at survives an update.
         const rows = yield* sql<PeerRow>`
@@ -423,14 +441,28 @@ export const layer: Layer.Layer<
         RETURNING environment_id
       `.pipe(Effect.map((rows) => ({ removed: rows.length > 0 })));
 
+    const recordLabel: PeerRegistryServiceShape["recordLabel"] = (environmentId, reported) =>
+      Effect.gen(function* () {
+        const label = reportedLabel(reported);
+        if (label !== undefined) {
+          yield* sql`
+            UPDATE j5_a2a_peer SET label = ${label}
+            WHERE environment_id = ${environmentId} AND label <> ${label}
+          `;
+        }
+        return (yield* readRow(environmentId))?.label ?? null;
+      });
+
     return PeerRegistryService.of({
       selfEnvironmentId: identity.getEnvironmentId,
+      selfLabel: identity.getDescriptor.pipe(Effect.map((descriptor) => descriptor.label)),
       connections,
       connection,
       add,
       get,
       list,
       remove,
+      recordLabel,
     });
   }),
 );

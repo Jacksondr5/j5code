@@ -82,6 +82,7 @@ const directoryLayer = (agents: ReadonlyArray<RemoteAgent>, unreadPeers: Readonl
             label,
             reason: "ECONNREFUSED",
           })),
+          selfName: "Work",
         }),
       resolveAgent: (id) =>
         Effect.succeed({
@@ -91,7 +92,13 @@ const directoryLayer = (agents: ReadonlyArray<RemoteAgent>, unreadPeers: Readonl
             label,
             reason: "ECONNREFUSED",
           })),
+          selfName: "Work",
         }),
+      serverName: (environmentId) =>
+        Effect.succeed(
+          agents.find((agent) => agent.environmentId === environmentId)?.environmentLabel ??
+            environmentId,
+        ),
     }),
   );
 
@@ -161,6 +168,17 @@ it.effect(
         acceptedAt: timestamp,
       });
       assert.equal(sent.exchangeState, "open");
+      assert.equal(sent.receiverServer, "Home", "the result names where the receiver lives");
+      const replayed = yield* send.send({
+        commandId: CommCommandId.make("command:peer-outbound:ask"),
+        senderThreadId: billing.threadId,
+        to: remoteSupport,
+        message: "What is the incident status?",
+        expectReply: true,
+        intent: "incident status",
+        acceptedAt: timestamp,
+      });
+      assert.equal(replayed.receiverServer, "Home", "a replay names it too");
       const rows = yield* sql<{
         readonly receiver_squadron_id: string;
         readonly receiver_environment_id: string | null;

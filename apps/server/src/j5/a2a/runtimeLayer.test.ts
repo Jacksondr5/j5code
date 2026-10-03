@@ -98,6 +98,11 @@ const measureNestedRuntimeBuilds = (nested: "http" | "mcp") =>
           Layer.provide(archiveDependencies),
           Layer.provide(Layer.mock(EnvironmentAuth)({})),
           Layer.provide(
+            Layer.mock(ServerEnvironment)({
+              getEnvironmentId: Effect.succeed(EnvironmentId.make("environment:runtime-nested")),
+            }),
+          ),
+          Layer.provide(
             ServerConfig.layerTest(process.cwd(), { prefix: "j5-a2a-runtime-layer-" }).pipe(
               Layer.provide(NodeServices.layer),
             ),
@@ -217,6 +222,13 @@ it.effect("shares one runtime and outbox across the production HTTP and MCP regi
           { disableListenLog: true, disableLogger: true },
         ).pipe(
           Layer.provide(Layer.mock(EnvironmentAuth)({})),
+          Layer.provide(
+            Layer.mock(ServerEnvironment)({
+              getEnvironmentId: Effect.succeed(
+                EnvironmentId.make("environment:runtime-composition"),
+              ),
+            }),
+          ),
           Layer.provide(NodeHttpServer.layerTest),
           Layer.provide(NodeServices.layer),
         ),
