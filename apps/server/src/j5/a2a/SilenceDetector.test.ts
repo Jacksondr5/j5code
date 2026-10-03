@@ -36,7 +36,11 @@ import {
   layer as crewInstanceLayer,
 } from "./AgentCrewInstanceService.ts";
 import { A2ADeliveryWorker, manualLayer as deliveryWorkerLayer } from "./DeliveryWorker.ts";
-import { A2ADeliveryTransport, type A2ADeliveryTransportShape } from "./DeliveryTransport.ts";
+import {
+  A2ADeliveryTransport,
+  type A2ADeliveryTransportShape,
+  deliveryMessageId,
+} from "./DeliveryTransport.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { noneLayer as peerDirectoryNoneLayer } from "./PeerDirectory.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
@@ -99,7 +103,9 @@ const decodeMessageSentPayload = Schema.decodeUnknownEffect(
   Schema.fromJsonString(MessageSentPayload),
 );
 
-const makeTestLayer = () => {
+const makeTestLayer = (
+  runs: ReadonlyArray<Pick<OrchestrationV2Run, "id" | "userMessageId">> = [],
+) => {
   const database = NodeSqliteClient.layer({ filename: ":memory:" });
   const ledger = ledgerLayer.pipe(Layer.provide(database));
   const send = sendLayer.pipe(
@@ -110,7 +116,7 @@ const makeTestLayer = () => {
   const threads = Layer.mock(ThreadManagementService)({
     getThreadProjection: () =>
       Effect.succeed({
-        runs: [],
+        runs,
         turnItems: [
           {
             runId: RunId.make("run:silence:test"),
@@ -383,9 +389,18 @@ const dropExchange = Effect.fn("test.j5.a2a.silence.dropExchange")(function* (
 const terminalEvent = (
   status: "completed" | "failed" | "interrupted" | "cancelled" | "rolled_back",
   sequence = 100,
+  carries: {
+    readonly id: RunId;
+    readonly userMessageId: MessageId;
+    readonly completedAtSecond: number;
+  } = {
+    id: RunId.make("run:silence:test"),
+    userMessageId: MessageId.make("message:silence:upstream"),
+    completedAtSecond: 3,
+  },
 ): OrchestrationV2StoredEvent => {
-  const completedAt = DateTime.makeUnsafe(iso(3));
-  const runId = RunId.make("run:silence:test");
+  const completedAt = DateTime.makeUnsafe(iso(carries.completedAtSecond));
+  const runId = carries.id;
   return {
     sequence,
     commandId: null,
@@ -403,7 +418,7 @@ const terminalEvent = (
         providerInstanceId: ProviderInstanceId.make("codex"),
         modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "test-model" },
         providerThreadId: null,
-        userMessageId: MessageId.make("message:silence:upstream"),
+        userMessageId: carries.userMessageId,
         rootNodeId: null,
         activeAttemptId: null,
         status,
@@ -550,6 +565,37 @@ it.effect("emits processed mid-turn silence and dedupes a later lifecycle sequen
     `;
     assert.deepStrictEqual(delivered, [{ status: "delivered" }]);
   }).pipe(Effect.provide(makeTestLayer())),
+);
+
+// The ask's id is only known after the send, so the projection reads it through this cell.
+const queuedAskRuns: Array<Pick<OrchestrationV2Run, "id" | "userMessageId">> = [];
+
+it.effect("waits for the run that carries a queued ask before reporting silence (#433)", () =>
+  Effect.gen(function* () {
+    yield* seed();
+    const ask = yield* seedInbound(2);
+    const busy = {
+      id: RunId.make("run:silence:busy"),
+      userMessageId: MessageId.make("message:silence:upstream"),
+      completedAtSecond: 3,
+    };
+    const carrier = {
+      id: RunId.make("run:silence:carrier"),
+      userMessageId: deliveryMessageId(ask.messageId),
+      completedAtSecond: 5,
+    };
+    queuedAskRuns.splice(0, queuedAskRuns.length, busy, carrier);
+    const detector = yield* A2ASilenceDetector;
+
+    yield* detector.handleStoredEvent(terminalEvent("completed", 100, busy));
+    assert.lengthOf(yield* readNotices(), 0, "the run that was already busy never saw the ask");
+
+    yield* detector.handleStoredEvent(terminalEvent("completed", 101, carrier));
+    const notices = yield* readNotices();
+    assert.lengthOf(notices, 1);
+    assert.equal(notices[0]?.state, "turn-ended-no-reply");
+    assert.equal(notices[0]?.runId, carrier.id);
+  }).pipe(Effect.provide(makeTestLayer(queuedAskRuns))),
 );
 
 it.effect("no-ops when A9 drops after the A3 read but before its serialized append", () =>

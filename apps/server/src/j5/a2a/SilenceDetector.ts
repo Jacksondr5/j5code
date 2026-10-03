@@ -349,7 +349,7 @@ const makeLayer = (daemon: boolean) =>
               dependency ?? {
                 ...base,
                 state: "turn-ended-no-reply" as const,
-                // Lifecycle queries only select deliveries at or before this run ended.
+                // Lifecycle queries only select deliveries this run carried or took mid-turn.
                 // The delivery/reconciliation path exclusively owns never-processed.
                 processing: "processed" as const,
               }
@@ -582,6 +582,7 @@ const makeLayer = (daemon: boolean) =>
           ORDER BY created_at, squadron_id, exchange_id
         `;
         const appended: Array<StoredCommEvent> = [];
+        let runs: ReadonlyArray<OrchestrationV2Run> | undefined;
         for (const exchange of inbound) {
           const delivered = yield* sql<DeliveredMessageRow>`
             SELECT
@@ -598,6 +599,13 @@ const makeLayer = (daemon: boolean) =>
           `;
           const delivery = delivered[0];
           if (delivery === undefined) continue;
+          // A message queued behind a busy receiver is its own run's user message, so only
+          // that run ending can leave it unanswered. A steered message has no run of its own.
+          const carried = deliveryMessageId(LedgerMessageId.make(delivery.message_id));
+          if (run.userMessageId !== carried) {
+            runs ??= (yield* threads.getThreadProjection(stored.event.threadId)).runs;
+            if (runs.some((candidate) => candidate.userMessageId === carried)) continue;
+          }
           const payload = yield* deriveNotice(
             run,
             stored.event.threadId,
