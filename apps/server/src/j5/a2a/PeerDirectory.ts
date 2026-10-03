@@ -185,7 +185,10 @@ const readPeerRosterIfAuthorized = Effect.fn("j5.a2a.peer.directory.rosterIfAuth
   peer: PeerConnection,
   peers: PeerRegistryServiceShape,
 ) {
-  if (peer.inboundSession === "missing") {
+  // A peer this server polls holds no session here by design: this server
+  // polls it for what comes back, so only the modes that take deliveries here
+  // need one.
+  if (peer.linkMode !== "poll" && peer.inboundSession === "missing") {
     return yield* new PeerSessionMissingError({ environmentId: peer.environmentId });
   }
   if (peer.origin === null || peer.credential === null) {
