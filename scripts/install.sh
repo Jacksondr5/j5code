@@ -267,8 +267,13 @@ path_hint() {
 }
 [ -n "$profile" ] || path_hint
 [ -z "${J5CODE_NO_MODIFY_PATH:-}" ] || path_hint
+# The line quotes bin_dir in double quotes; a directory the shell would expand
+# or split there gets the hint instead of a line that points somewhere else.
+case "$bin_dir" in
+  *[\"\$\`\\]*) path_hint ;;
+esac
 if grep -qF "$marker" "$profile" 2>/dev/null; then
-  printf '  %s already adds %s to your PATH.\n  Open a new terminal, then run %sj5%s.\n\n' "$profile" "$bin_dir" "$bold" "$reset"
+  printf '  %s already has the PATH line from an earlier J5 Code install.\n  Open a new terminal, then run %sj5%s.\n\n' "$profile" "$bold" "$reset"
   exit 0
 fi
 # A read-only profile (a home-manager link, say) gets the hint, not a failure.

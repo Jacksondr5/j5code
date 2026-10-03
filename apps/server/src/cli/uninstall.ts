@@ -19,7 +19,7 @@ import { Command, Flag, GlobalFlag, Prompt } from "effect/unstable/cli";
 
 import * as BootService from "../cloud/bootService.ts";
 import { pinnedRuntimeVersionsDir } from "../cloud/pinnedRuntime.ts";
-import { findJ5PathLines, removeJ5PathLines } from "../j5/cli/shellProfile.ts";
+import { planShellCleanup, removeJ5PathLines } from "../j5/cli/shellProfile.ts";
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
 import { bootServiceLayer } from "./service.ts";
 import { findWindowsShim, launcherOwnsVersionsDir, resolveLauncherPath } from "./update.ts";
@@ -134,13 +134,22 @@ const runUninstall = Effect.fn("cli.uninstall.run")(function* (input: {
   const service = yield* BootService.BootService;
   const plan = yield* planUninstall({ baseDir: input.baseDir });
   // J5: the PATH line the installer added to shell startup files (#397, FORK.md case 52).
-  const profiles = yield* findJ5PathLines;
+  const cleanup = yield* planShellCleanup(input.baseDir).pipe(
+    Effect.mapError(
+      (error) =>
+        new CliUninstallError({ reason: `Could not read a shell startup file: ${error.message}` }),
+    ),
+  );
+  const profiles = cleanup.profiles;
+  // The installer's link, when uninstall wasn't started through it.
+  const installerLink = cleanup.installerLink === plan.launcher ? undefined : cleanup.installerLink;
 
   if (
     !plan.service &&
     plan.launcher === undefined &&
     plan.runtimeDir === undefined &&
-    profiles.length === 0
+    profiles.length === 0 &&
+    installerLink === undefined
   ) {
     yield* Console.log(`Nothing to remove: j5 is not installed for ${input.baseDir}.`);
     if (!(yield* HostProcessIsExecutable)) {
@@ -157,6 +166,7 @@ const runUninstall = Effect.fn("cli.uninstall.run")(function* (input: {
   if (plan.runtimeDir !== undefined) {
     yield* Console.log(`  every downloaded version under ${plan.runtimeDir}`);
   }
+  if (installerLink !== undefined) yield* Console.log(`  the launcher at ${installerLink}`);
   for (const profile of profiles) yield* Console.log(`  the PATH line J5 added to ${profile}`);
   yield* Console.log(
     `Your projects, threads, and settings under ${plan.userdataDir} are kept. Delete that directory yourself if you want them gone too.`,
@@ -192,6 +202,17 @@ const runUninstall = Effect.fn("cli.uninstall.run")(function* (input: {
         ),
       );
     yield* Console.log(`Removed ${plan.launcher}.`);
+  }
+  if (installerLink !== undefined) {
+    yield* fs
+      .remove(installerLink, { force: true })
+      .pipe(
+        Effect.mapError(
+          () =>
+            new CliUninstallError({ reason: `Could not remove the launcher at ${installerLink}.` }),
+        ),
+      );
+    yield* Console.log(`Removed ${installerLink}.`);
   }
   if (profiles.length > 0) {
     yield* removeJ5PathLines(profiles).pipe(

@@ -231,4 +231,24 @@ describe.skipIf(
       await NodeFSP.rm(root, { recursive: true, force: true });
     }
   });
+
+  it("prints the hint for a directory the shell would expand in the line", async () => {
+    const { root, home, output } = await runInstaller(
+      async ({ home }) => {
+        await NodeFSP.writeFile(NodePath.join(home, ".zshrc"), "alias ll='ls -l'\n");
+      },
+      ({ home }) => ({
+        SHELL: "/bin/zsh",
+        T3CODE_INSTALL_BIN_DIR: NodePath.join(home, "cli$tools"),
+      }),
+    );
+    try {
+      expect(output).toContain(`Add ${NodePath.join(home, "cli$tools")} to your PATH`);
+      expect(await NodeFSP.readFile(NodePath.join(home, ".zshrc"), "utf8")).toBe(
+        "alias ll='ls -l'\n",
+      );
+    } finally {
+      await NodeFSP.rm(root, { recursive: true, force: true });
+    }
+  });
 });
