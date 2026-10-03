@@ -338,21 +338,31 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Decided:** Jackson, 2026-10-04, PR #445. Recorded in `BRANDING.md`.
 
-#### D28. The release executable is `j5`
+#### D28. The `j5` command
 
-**Upstream:** the executable in each release archive is `t3`, and the `t3` command on `PATH` links to it.
+**Upstream:**
 
-**J5:** the executable is `j5`, so the command, the file it runs, and the process are all `j5`. Archive file names keep upstream's `t3-<version>-<platform>` names. Until a later release retires it, each archive also carries a `t3` link to `j5`.
+- **The executable.** Each release archive's executable is `t3`, and the `t3` command on `PATH` links to it.
 
-**Why:** J5 shouldn't point at `t3` at all. With the old name, `~/.local/bin/j5` ran a file called `t3` and the server showed up as `t3`, which is confusing next to an installed T3 Code. Archive names stay, because existing servers download updates by those names and people never see them.
+**J5:**
+
+- **The executable is `j5`.** The command, the file it runs, and the process are all `j5`. Archive file names keep upstream's `t3-<version>-<platform>` names.
+- **Existing servers are moved once, by hand.** The rename is launcher protocol 4. A server from before it is refused the update from the app with a message to run `j5 update` on its machine; that command installs the new version and replaces the service's launcher. Each archive carries a `t3` link to `j5` so those servers can run that check and that command.
+
+**Why:**
+
+- **The name.** J5 shouldn't point at `t3` at all. With the old name, `~/.local/bin/j5` ran a file called `t3` and the server showed up as `t3`, which is confusing next to an installed T3 Code. Archive names stay, because existing servers download updates by those names and people never see them.
+- **The one-time step.** An update from the app never replaces the service's launcher, and an old launcher starts every new version as `t3`. Shipping a `t3` link indefinitely would leave the migration unfinished, and removing it later would break those servers. Refusing the update with a clear message moves each server and its launcher across together.
 
 **Consequences:**
 
-- **The `t3` link has to stay for now.** Service launchers from before the rename start a new version as `t3`, and in-app updates never replace the launcher. Retiring the link needs a `SERVICE_LAUNCHER_PROTOCOL` bump in the same release. Servers from after the rename are then told to update their launcher. Servers from before it fail the update with a generic install error and keep running their version.
+- **One visit per existing server.** Each server on 0.0.47 or earlier needs `j5 update` run on its machine. It keeps running its old version until then.
+- **The launcher reads protocol-3 state files.** The old CLI's `j5 update` writes one before starting the new launcher. This is a second line in upstream's `serviceProtocol.ts`.
+- **The `t3` link is temporary.** Removing it is tracked in #440. After that, a server still on 0.0.47 or earlier gets a generic install error and needs the installer and `j5 service install`.
 - **No downgrade across the rename.** Downgrading below the rename with `j5 update --allow-downgrade` isn't supported.
-- **At each advance:** check new upstream code that locates the executable by name.
+- **At each advance:** check new upstream code that locates the executable by name, and upstream's `SERVICE_LAUNCHER_PROTOCOL`: J5's number must stay above it.
 
-**Decided:** Jackson, 2026-10-02 (#403). Recorded in FORK.md case 50.
+**Decided:** Jackson, 2026-10-02 (#403) and 2026-10-03 (the protocol bump and the `j5 update` step). Recorded in FORK.md case 50.
 
 ### Awaiting a decision
 
@@ -417,4 +427,4 @@ None yet.
 - 2026-09-26 — created: the three zones, the decision protocol, and the register, seeded from FORK.md and the worklog records (Jackson, [#327](https://github.com/Jacksondr5/j5code/issues/327)).
 - 2026-10-04 — D25 added: user-visible copy, marks and branch names (PR #445).
 - 2026-10-04 — D26 added: `j5 triage` points at J5's repository (PR #446).
-- 2026-10-04 — D28 added: the release executable is named `j5` (PR #414).
+- 2026-10-04 — D28 added: the `j5` command (PR #414).
