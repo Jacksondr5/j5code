@@ -11,7 +11,7 @@ import {
   isDeliveryMessageId,
 } from "./DeliveryTransport.ts";
 import { formatReceiverBacklogNotice } from "./EnvelopeFormatter.ts";
-import { Participant, type LedgerMessageId, type ParticipantId } from "./contracts.ts";
+import { LedgerMessageId, Participant, type ParticipantId } from "./contracts.ts";
 
 export interface ReceiverBacklog {
   /** Messages that will each start their own turn once the receiver's current turn ends. */
@@ -24,11 +24,13 @@ const decodeParticipant = Schema.decodeUnknownEffect(Schema.fromJsonString(Parti
 
 /**
  * What a just-sent message is waiting behind: the receiver's running turn and the
- * A2A messages already queued after it. Undefined when the message will not wait:
- * the receiver is idle, takes peer messages mid-turn (Astra), or is not an agent
- * on this server. Measured when called and never stored, so it is advice to the
- * sender, not a delivery fact. A failed read is logged and reads as undefined:
- * the message is already committed, and the send must not fail over advice.
+ * A2A messages after it, both those already queued as runs and those the delivery
+ * worker has not handed over yet. Undefined when the message will not wait: the
+ * receiver is idle, takes it mid-turn (Astra), holds its queue, is not an agent on
+ * this server, or the message has already run or will never run. Measured when
+ * called and never stored, so it is advice to the sender, not a delivery fact. A
+ * failed read is logged and reads as undefined: the message is already committed,
+ * and the send must not fail over advice.
  */
 export const readReceiverBacklog = Effect.fn("j5.a2a.readReceiverBacklog")(
   function* (input: {
@@ -53,18 +55,36 @@ export const readReceiverBacklog = Effect.fn("j5.a2a.readReceiverBacklog")(
       "providerThreads",
       "providerSessions",
     ]);
-    if (target.thread.archivedAt !== null) return undefined;
-    const sent = deliveryMessageId(input.sentMessageId);
-    if (latestActiveRun(target) === undefined) return undefined;
-    // This message already started a run (the receiver was idle) or has run since;
-    // a replayed send reports the current state, not the state when it was first sent.
-    if (target.runs.some((run) => run.userMessageId === sent && run.status !== "queued"))
+    if (target.thread.archivedAt !== null || latestActiveRun(target) === undefined)
       return undefined;
-    if (astraPeerSteeringRun(target, "peer") !== undefined) return undefined;
     // A held queue drains only when someone resumes the thread, so "after its current
     // turn ends" would be false. Telling the sender about held receivers is #272.
     if (target.runs.some((run) => run.status === "queued" && run.queueHeld === true))
       return undefined;
+
+    const runByMessage = new Map(target.runs.map((run) => [run.userMessageId, run]));
+    const sentRun = runByMessage.get(deliveryMessageId(input.sentMessageId));
+    // Already started or finished (a replay reports the current state, not the first one).
+    if (sentRun !== undefined && sentRun.status !== "queued") return undefined;
+    // Not yet handed over, so a running Astra turn will take it mid-turn. Once queued,
+    // it stays queued even if the receiver's turn later becomes steerable.
+    if (sentRun === undefined && astraPeerSteeringRun(target, "peer") !== undefined)
+      return undefined;
+
+    // Committed deliveries the worker has not handed to this thread yet. The drain
+    // index keeps this to the small set of pending rows.
+    const pending = (yield* sql<{ readonly message_id: string; readonly sender_id: string }>`
+      SELECT message_id, sender_id FROM j5_a2a_delivery
+      WHERE status IN ('pending', 'retry_scheduled')
+        AND receiver_id = ${input.receiverId}
+        AND receiver_environment_id IS NULL
+    `).filter((row) => !runByMessage.has(deliveryMessageId(LedgerMessageId.make(row.message_id))));
+    // Neither queued nor pending: cancelled or alarmed, so it is not waiting.
+    if (sentRun === undefined && !pending.some((row) => row.message_id === input.sentMessageId))
+      return undefined;
+    const callerId = (yield* sql<{ readonly sender_id: string }>`
+      SELECT sender_id FROM j5_a2a_delivery WHERE message_id = ${input.sentMessageId} LIMIT 1
+    `)[0]?.sender_id;
 
     const queued = target.runs.filter(
       (run) => run.status === "queued" && isDeliveryMessageId(run.userMessageId),
@@ -75,14 +95,12 @@ export const readReceiverBacklog = Effect.fn("j5.a2a.readReceiverBacklog")(
         : (yield* orchestrator.getThreadRecords(participant.threadId, ["messages"], {
             messageIds: queued.map((run) => run.userMessageId),
           })).messages;
-    const fromCaller = queuedMessages.filter(
-      (message) => message.senderThreadId === input.callerThreadId,
-    ).length;
-    // The delivery worker may not have queued this message yet; it will wait all the same.
-    const sentQueued = queued.some((run) => run.userMessageId === sent);
-    return sentQueued
-      ? ({ waiting: queued.length, fromCaller } satisfies ReceiverBacklog)
-      : ({ waiting: queued.length + 1, fromCaller: fromCaller + 1 } satisfies ReceiverBacklog);
+    return {
+      waiting: queued.length + pending.length,
+      fromCaller:
+        queuedMessages.filter((message) => message.senderThreadId === input.callerThreadId).length +
+        pending.filter((row) => row.sender_id === callerId).length,
+    } satisfies ReceiverBacklog;
   },
   (effect, input) =>
     effect.pipe(
