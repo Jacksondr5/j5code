@@ -69,7 +69,7 @@ it("retains declared persona output while allowing conversation before that outp
   });
   assert.include(text, "do not wait for an artifact or coordination approval");
   assert.include(text, "write_artifact to exactly `handoffs/review.md`");
-  assert.include(text, "must not delay sharing intermediate findings or results");
+  assert.include(text, "must not delay sharing findings or results");
   assert.notInclude(text, "a chat message is not a delivery");
 });
 

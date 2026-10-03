@@ -130,6 +130,7 @@ import {
 } from "../run-observability/QueuedRunWatchdog.ts";
 import { formatClosedHumanEnvelope, formatPeerEnvelope } from "./EnvelopeFormatter.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
+import { readReceiverBacklog } from "./receiverBacklog.ts";
 import { noneLayer as peerDirectoryNoneLayer } from "./PeerDirectory.ts";
 import { A2ALifecycleService, manualLayer as lifecycleServiceLayer } from "./LifecycleService.ts";
 import { A2ASenderRetiredError, A2ASendService, layer as sendServiceLayer } from "./SendService.ts";
@@ -877,6 +878,127 @@ for (const model of ["gpt-6-astra", "astra"]) {
     }),
   );
 }
+
+/** Starts a user turn on the target and returns once its provider turn is running. */
+const startBusyTurn = Effect.fn("A2AIntegration.startBusyTurn")(function* (target: {
+  readonly projectId: ProjectId;
+  readonly threadId: ThreadId;
+}) {
+  const threads = yield* ThreadManagementService;
+  const worker = yield* OrchestrationEffectWorkerV2;
+  const sink = yield* EventSinkV2;
+  const running = yield* sink.stream({ threadId: target.threadId }).pipe(
+    Stream.filter(
+      (stored) =>
+        stored.event.type === "provider-turn.updated" && stored.event.payload.status === "running",
+    ),
+    Stream.runHead,
+    Effect.forkChild({ startImmediately: true }),
+  );
+  yield* threads.sendToThread({
+    projectId: target.projectId,
+    commandId: CommandId.make(`command:${target.threadId}:busy-start`),
+    threadId: target.threadId,
+    messageId: MessageId.make(`message:${target.threadId}:busy-start`),
+    text: "Stay busy while peers write.",
+    attachments: [],
+    mode: "auto",
+    createdBy: "user",
+    creationSource: "web",
+  });
+  yield* runWorkerUntil(worker, running);
+});
+
+it.effect("measures the backlog a send waits behind on a busy receiver", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const ledger = yield* A2ALedger;
+      const transport = yield* A2ADeliveryTransport;
+      const target = yield* seedTarget("backlog");
+      const callerThreadId = ThreadId.make("thread:j5-a2a-delivery-backlog-caller");
+      const callerId = ParticipantId.make("agent:j5-a2a-delivery-backlog-caller");
+      yield* ledger.appendEvents({
+        commandId: CommCommandId.make("command:j5-a2a-delivery-backlog-join-caller"),
+        squadronId: target.squadronId,
+        acceptedAt: "2026-08-17T12:00:00.000Z",
+        events: [
+          {
+            kind: "participant.joined",
+            sender: null,
+            receiver: callerId,
+            exchangeId: null,
+            correlationId: null,
+            payload: { participant: { kind: "agent", id: callerId, threadId: callerThreadId } },
+            createdAt: "2026-08-17T12:00:00.000Z",
+          },
+        ],
+      });
+      const backlogFor = (sentMessageId: LedgerMessageId) =>
+        readReceiverBacklog({ receiverId: target.receiverId, callerThreadId, sentMessageId });
+      const deliver = (messageId: LedgerMessageId, senderId: ParticipantId) =>
+        transport.deliverAgent({
+          ...target.delivery,
+          messageId,
+          senderId,
+          exchangeId: null,
+          exchangeRole: "none",
+          message: `Update ${messageId}`,
+        });
+      const first = LedgerMessageId.make("message:j5-a2a-delivery-backlog-1");
+      const second = LedgerMessageId.make("message:j5-a2a-delivery-backlog-2");
+      const third = LedgerMessageId.make("message:j5-a2a-delivery-backlog-3");
+
+      // An idle receiver takes the message at once: nothing to warn about.
+      assert.isUndefined(yield* backlogFor(first));
+      // Nor when the active run is the one this very message started.
+      yield* deliver(first, callerId);
+      assert.isUndefined(yield* backlogFor(first));
+      yield* startPendingTestTurn(target.threadId);
+      yield* finishTestTurn(harness, target.threadId);
+
+      yield* startBusyTurn(target);
+      // Sent but not yet queued by the worker: it still waits.
+      assert.deepStrictEqual(yield* backlogFor(second), { waiting: 1, fromCaller: 1 });
+      yield* deliver(second, callerId);
+      assert.deepStrictEqual(yield* backlogFor(second), { waiting: 1, fromCaller: 1 });
+      // Another sender's queued message counts toward the backlog, not toward the caller.
+      yield* deliver(
+        LedgerMessageId.make("message:j5-a2a-delivery-backlog-other"),
+        target.senderId,
+      );
+      assert.deepStrictEqual(yield* backlogFor(third), { waiting: 3, fromCaller: 2 });
+
+      // Only agents on this server are measured.
+      assert.isUndefined(
+        yield* readReceiverBacklog({
+          receiverId: ParticipantId.make("agent:j5-a2a-delivery-backlog-elsewhere"),
+          callerThreadId,
+          sentMessageId: third,
+        }),
+      );
+    }).pipe(Effect.provide(makeTestLayer(harness)));
+  }),
+);
+
+it.effect(
+  "reports no backlog for a running Astra receiver, which takes peer messages mid-turn",
+  () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness;
+      yield* Effect.gen(function* () {
+        const target = yield* seedTarget("backlog-astra", "gpt-6-astra");
+        yield* startBusyTurn(target);
+        assert.isUndefined(
+          yield* readReceiverBacklog({
+            receiverId: target.receiverId,
+            callerThreadId: ThreadId.make("thread:j5-a2a-delivery-backlog-astra-caller"),
+            sentMessageId: target.messageId,
+          }),
+        );
+      }).pipe(Effect.provide(makeTestLayer(harness)));
+    }),
+);
 
 it.effect(
   "queues behind a busy recipient's active turn and never aborts its running tool batch",

@@ -35,10 +35,12 @@ import {
 } from "../CrewProposalService.ts";
 import { CrewStopService } from "../CrewStopService.ts";
 import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
+import { formatReceiverBacklogNotice } from "../EnvelopeFormatter.ts";
 import { A2AHomeRegistrar, participantIdForThread } from "../HomeRegistrar.ts";
 import { A2ALedger } from "../LedgerService.ts";
 import { PeerDirectory } from "../PeerDirectory.ts";
 import { ParticipantPlacementService } from "../PlacementService.ts";
+import { readReceiverBacklog } from "../receiverBacklog.ts";
 import { A2ASendService } from "../SendService.ts";
 import { SpawnCompositionService } from "../SpawnCompositionService.ts";
 import { SquadronJoinService } from "../SquadronJoinService.ts";
@@ -500,7 +502,21 @@ const handlers = {
         acceptedAt,
       });
       yield* worker.notify;
-      return result;
+      const backlog = yield* readReceiverBacklog({
+        receiverId: input.to,
+        callerThreadId: scope.threadId,
+        sentMessageId: result.messageId,
+      });
+      return backlog === undefined
+        ? result
+        : {
+            ...result,
+            deliveryNotice: formatReceiverBacklogNotice({
+              receiverId: input.to,
+              waiting: backlog.waiting,
+              fromYou: backlog.fromCaller,
+            }),
+          };
     }).pipe(Effect.mapError(failure)),
   clear_own_ask: (input) =>
     Effect.gen(function* () {
