@@ -155,6 +155,28 @@ it.effect("takes no snapshot when no migration at or above the threshold is pend
   ),
 );
 
+it.effect("names the snapshot for the migration about to run and keeps the earlier one", () =>
+  withDatabasePath(({ dbPath, snapshotPath }) =>
+    Effect.gen(function* () {
+      const path = yield* Path.Path;
+      // 030 already ran and left its snapshot. A later build adds 031.
+      createLedgerDatabase(dbPath, 30);
+      NodeFS.writeFileSync(snapshotPath, "the state before 030");
+
+      yield* snapshotBeforeJ5LedgerMigration(dbPath, {
+        migrationIds: [29, 30, 31],
+        fromMigrationId: 30,
+      });
+
+      assert.strictEqual(NodeFS.readFileSync(snapshotPath, "utf8"), "the state before 030");
+      assert.deepStrictEqual(
+        readContent(ledgerMigrationSnapshotPath(path, dbPath, 31)),
+        readContent(dbPath),
+      );
+    }),
+  ),
+);
+
 it.effect("replaces an older snapshot and a partial file left by a crashed attempt", () =>
   withDatabasePath(({ dbPath, snapshotPath }) =>
     Effect.gen(function* () {

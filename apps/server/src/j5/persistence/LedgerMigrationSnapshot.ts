@@ -27,6 +27,8 @@ export class LedgerMigrationSnapshotError extends Schema.TaggedError<LedgerMigra
   }
 }
 
+const isLedgerMigrationSnapshotError = Schema.is(LedgerMigrationSnapshotError);
+
 export interface SnapshotBeforeJ5LedgerMigrationOptions {
   /** The J5 ledger migration ids this build knows. Defaults to `migrationEntries`. */
   readonly migrationIds?: ReadonlyArray<number>;
@@ -70,41 +72,49 @@ export const snapshotBeforeJ5LedgerMigration = Effect.fn("snapshotBeforeJ5Ledger
     const guardedIds = (options.migrationIds ?? migrationEntries.map(([id]) => id))
       .filter((id) => id >= fromMigrationId)
       .toSorted((left, right) => left - right);
-    const guardedId = guardedIds[0];
-    if (guardedId === undefined) return;
+    const lowestGuardedId = guardedIds[0];
+    if (lowestGuardedId === undefined) return;
 
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const snapshotPath = ledgerMigrationSnapshotPath(path, dbPath, guardedId);
-    const partialPath = `${snapshotPath}.partial`;
-    // The migrator skips every id at or below the latest applied one, so that is what pending means.
-    const isPending = (filename: string) => {
-      const latest = readLatestAppliedMigration(filename);
-      return latest !== undefined && guardedIds.some((id) => id > latest);
-    };
-
-    const fail = (cause: unknown) =>
-      Schema.is(LedgerMigrationSnapshotError)(cause)
+    const failFor = (migrationId: number) => (cause: unknown) =>
+      isLedgerMigrationSnapshotError(cause)
         ? cause
         : new LedgerMigrationSnapshotError({
             databasePath: dbPath,
-            snapshotPath,
-            migrationId: guardedId,
+            snapshotPath: ledgerMigrationSnapshotPath(path, dbPath, migrationId),
+            migrationId,
             cause,
           });
-    const checkPending = (filename: string) =>
-      Effect.try({ try: () => isPending(filename), catch: fail });
+    // The migrator skips every id at or below the latest applied one, so that is what pending
+    // means. The snapshot is named for the first guarded migration that will actually run.
+    const readFirstPending = (
+      filename: string,
+      fail: (cause: unknown) => LedgerMigrationSnapshotError,
+    ) =>
+      Effect.try({
+        try: () => {
+          const latest = readLatestAppliedMigration(filename);
+          return latest === undefined ? undefined : guardedIds.find((id) => id > latest);
+        },
+        catch: fail,
+      });
+
+    if (!(yield* fs.exists(dbPath).pipe(Effect.mapError(failFor(lowestGuardedId))))) return;
+    const pendingId = yield* readFirstPending(dbPath, failFor(lowestGuardedId));
+    if (pendingId === undefined) return;
+
+    const fail = failFor(pendingId);
+    const snapshotPath = ledgerMigrationSnapshotPath(path, dbPath, pendingId);
+    const partialPath = `${snapshotPath}.partial`;
 
     yield* Effect.gen(function* () {
-      if (!(yield* fs.exists(dbPath))) return;
-      if (!(yield* checkPending(dbPath))) return;
-
       const { size } = yield* fs.stat(dbPath);
       yield* Effect.logInfo("Snapshotting the database before a J5 ledger migration", {
         databasePath: dbPath,
         databaseBytes: Number(size),
         snapshotPath,
-        migrationId: guardedId,
+        migrationId: pendingId,
       });
       const [elapsed, published] = yield* Effect.gen(function* () {
         // A crash mid-backup leaves this behind.
@@ -122,7 +132,7 @@ export const snapshotBeforeJ5LedgerMigration = Effect.fn("snapshotBeforeJ5Ledger
         });
         // Another process may have migrated while this one copied. Never publish a
         // post-migration copy over a real snapshot.
-        if (!(yield* checkPending(partialPath))) {
+        if ((yield* readFirstPending(partialPath, fail)) !== pendingId) {
           yield* fs.remove(partialPath, { force: true });
           return false;
         }
