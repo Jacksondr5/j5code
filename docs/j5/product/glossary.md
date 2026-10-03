@@ -20,6 +20,7 @@ The J5 vocabulary, in one place, so that a name used anywhere in these docs reso
 | fleet                  | All of a user's agents across every connected server — the totality, never a sub-grouping                  | [cross-device.md](cross-device.md)                           |
 | peer server            | Another server this server exchanges agent messages with, by mutual record ("peer" alone is another agent) | [cross-device.md](cross-device.md)                           |
 | peering, peer registry | The mutual recording of two servers as each other's peer servers, and the set of a server's peer records   | [cross-device.md](cross-device.md)                           |
+| link mode              | How messages travel between two peer servers: sent directly (`push`), or polled for (`poll`, `store`)      | [cross-device.md](cross-device.md)                           |
 | **Squadron**           | The user-created grouping of agents and their work that everything else is organized under                 | [features/squadron.md](features/squadron.md)                 |
 | **Squadron home**      | The one Squadron an agent belongs to, recorded when it is created                                          | [features/squadron.md](features/squadron.md)                 |
 | **Registrar**          | The part of the platform that records an agent's Squadron home when the agent is created                   | [features/squadron.md](features/squadron.md)                 |
