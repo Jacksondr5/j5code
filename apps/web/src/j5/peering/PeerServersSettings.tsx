@@ -151,7 +151,7 @@ function PeerRow({
   return (
     <SettingsRow
       title={peer.label}
-      description={`${peer.origin} · ${peer.environmentId}`}
+      description={`${peer.origin ?? "Polls this server"} · ${peer.environmentId}`}
       control={
         <Button size="sm" variant="ghost" disabled={removing} onClick={() => void remove()}>
           {removing ? "Removing…" : "Remove"}

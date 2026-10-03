@@ -33,6 +33,7 @@ import {
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { MachineParticipantService } from "./MachineParticipantService.ts";
 import { PeerInboundService } from "./PeerInboundService.ts";
+import { PeerStoreService } from "./PeerStoreService.ts";
 import { PeerRegistryService } from "./PeerRegistryService.ts";
 import { RosterService } from "./RosterService.ts";
 import { A2ASendService } from "./SendService.ts";
@@ -363,6 +364,7 @@ it("registers B6 client reads through the authenticated aggregate", async () => 
           Layer.mock(ParticipantPlacementService)({}),
           Layer.mock(PeerRegistryService)({}),
           Layer.mock(PeerInboundService)({}),
+          Layer.mock(PeerStoreService)({}),
         ),
       ),
       Layer.provide(Layer.mock(ProjectService.ProjectService)({})),

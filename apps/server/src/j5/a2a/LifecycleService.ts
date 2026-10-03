@@ -15,6 +15,7 @@ import { A2ADeliveryWorker, type A2ADeliveryWorkerError } from "./DeliveryWorker
 import {
   type ArchiveParticipantInput,
   CommCommandId,
+  type CommEvent,
   CorrelationId,
   SquadronId,
   ExchangeId,
@@ -278,6 +279,59 @@ const makeLayer = (daemon: boolean) =>
             const messageId = noticeMessageId(exchange, disposition);
             const correlationId = noticeCorrelationId(exchange, disposition);
             const receiver = yield* counterparty(affectedParticipantId, exchange);
+            // A peer server holds an Exchange it was asked on only once the ask
+            // reached it: delivered, or handed out to it when it polls. An ask
+            // still waiting here is cancelled with its sender, so the peer never
+            // had the Exchange and is sent no notice closing it.
+            const peerNeverHeldIt =
+              receiver.environmentId !== null &&
+              disposition === "sender-retired" &&
+              (yield* sql`
+                SELECT 1 FROM j5_a2a_delivery
+                WHERE squadron_id = ${exchange.squadron_id}
+                  AND exchange_id = ${exchange.exchange_id}
+                  AND receiver_id = ${affectedParticipantId}
+                  AND receiver_environment_id = ${receiver.environmentId}
+                  AND (status = 'delivered' OR handed_out_at IS NOT NULL)
+                LIMIT 1
+              `).length === 0;
+            const noticeEvent: CommEvent = {
+              kind: "message.sent",
+              sender: LIFECYCLE_PARTICIPANT_ID,
+              receiver: affectedParticipantId,
+              exchangeId,
+              correlationId,
+              payload: {
+                messageId,
+                text: formatLifecycleNotice({
+                  exchangeId,
+                  retiredParticipantId: input.participantId,
+                  operation: input.operation,
+                  disposition,
+                }),
+                originSquadronId: SquadronId.make(exchange.squadron_id),
+                receiverSquadronId: receiver.squadronId,
+                ...(receiver.environmentId === null
+                  ? {}
+                  : {
+                      receiverEnvironmentId: receiver.environmentId,
+                      terminal: {
+                        kind: "dropped" as const,
+                        cause: {
+                          kind:
+                            input.operation === "deleted"
+                              ? ("participant-deleted" as const)
+                              : ("participant-archived" as const),
+                          participantId: input.participantId,
+                          squadronId: input.squadronId,
+                        },
+                      },
+                    }),
+                exchangeRole: "terminal_notice",
+                envelopeChannel: "lifecycle_notice",
+              },
+              createdAt: input.archivedAt,
+            };
             yield* ledger.appendEvents({
               commandId: dropCommandId(exchange, disposition),
               squadronId: SquadronId.make(exchange.squadron_id),
@@ -308,43 +362,7 @@ const makeLayer = (daemon: boolean) =>
                   },
                   createdAt: input.archivedAt,
                 },
-                {
-                  kind: "message.sent",
-                  sender: LIFECYCLE_PARTICIPANT_ID,
-                  receiver: affectedParticipantId,
-                  exchangeId,
-                  correlationId,
-                  payload: {
-                    messageId,
-                    text: formatLifecycleNotice({
-                      exchangeId,
-                      retiredParticipantId: input.participantId,
-                      operation: input.operation,
-                      disposition,
-                    }),
-                    originSquadronId: SquadronId.make(exchange.squadron_id),
-                    receiverSquadronId: receiver.squadronId,
-                    ...(receiver.environmentId === null
-                      ? {}
-                      : {
-                          receiverEnvironmentId: receiver.environmentId,
-                          terminal: {
-                            kind: "dropped" as const,
-                            cause: {
-                              kind:
-                                input.operation === "deleted"
-                                  ? ("participant-deleted" as const)
-                                  : ("participant-archived" as const),
-                              participantId: input.participantId,
-                              squadronId: input.squadronId,
-                            },
-                          },
-                        }),
-                    exchangeRole: "terminal_notice",
-                    envelopeChannel: "lifecycle_notice",
-                  },
-                  createdAt: input.archivedAt,
-                },
+                ...(peerNeverHeldIt ? [] : [noticeEvent]),
               ],
             });
             dropped.push(exchangeId);

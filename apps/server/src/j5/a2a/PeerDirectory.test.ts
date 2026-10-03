@@ -15,20 +15,32 @@ const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const homePeer: PeerConnection = {
   environmentId: "environment-home",
   label: "Home",
+  linkMode: "push",
   origin: "https://home.example:3773",
   credential: "home-token",
   credentialExpiresAt: null,
   inboundSession: "active",
   createdAt: "2026-09-16T00:00:00.000Z",
+  lastPolledAt: null,
+  lastError: null,
+  waitingCount: 0,
+  oldestWaitingAt: null,
+  roster: null,
 };
 const macPeer: PeerConnection = {
   environmentId: "environment-mac",
   label: "Mac",
+  linkMode: "push",
   origin: "https://mac.example:3773",
   credential: "mac-token",
   credentialExpiresAt: null,
   inboundSession: "active",
   createdAt: "2026-09-16T00:00:00.000Z",
+  lastPolledAt: null,
+  lastError: null,
+  waitingCount: 0,
+  oldestWaitingAt: null,
+  roster: null,
 };
 
 const homeRoster: PeerRosterResponse = {
@@ -71,7 +83,7 @@ const makeTestLayer = (
           authorization: request.headers.authorization,
           protocol: request.headers["x-j5-peer-protocol"],
         });
-        if (request.url.startsWith(macPeer.origin)) {
+        if (request.url.startsWith(macPeer.origin!)) {
           return yield* new HttpClientError.HttpClientError({
             reason: new HttpClientError.TransportError({ request, description: "ECONNREFUSED" }),
           });
@@ -99,6 +111,7 @@ const makeTestLayer = (
   const registry = Layer.mock(PeerRegistryService)({
     connections: () => Effect.succeed(peers),
     selfLabel: Effect.succeed("Work VM"),
+    recordLastError: () => Effect.void,
     get: (environmentId) =>
       Effect.succeed(peers.find((peer) => peer.environmentId === environmentId) ?? null),
     recordLabel: (environmentId, reported) =>
@@ -138,7 +151,7 @@ it.effect(
         `${macPeer.origin}${J5_PEER_API_PATHS.roster}`,
       ]);
       assert.equal(
-        seen.find((request) => request.url.startsWith(homePeer.origin))?.authorization,
+        seen.find((request) => request.url.startsWith(homePeer.origin!))?.authorization,
         "Bearer home-token",
       );
     }),
@@ -228,4 +241,58 @@ it.effect("refreshes a peer's name from each roster read, so a renamed server is
       "the rows carry the name the peer just reported",
     );
   }),
+);
+
+it.effect(
+  "keeps a protocol mismatch on the peer's record until a roster read succeeds in full",
+  () =>
+    Effect.gen(function* () {
+      const lastErrors: Array<string | null> = [];
+      const answers: Array<{ readonly status: number; readonly protocol: string }> = [
+        { status: 200, protocol: "2" },
+        { status: 500, protocol: "1" },
+        { status: 200, protocol: "1" },
+      ];
+      const http = Layer.succeed(
+        HttpClient.HttpClient,
+        HttpClient.make((request) =>
+          Effect.sync(() => {
+            const answer = answers.shift()!;
+            return HttpClientResponse.fromWeb(
+              request,
+              new Response(encodeJson(homeRoster), {
+                status: answer.status,
+                headers: {
+                  "content-type": "application/json",
+                  "x-j5-peer-protocol": answer.protocol,
+                },
+              }),
+            );
+          }),
+        ),
+      );
+      const registry = Layer.mock(PeerRegistryService)({
+        connections: () => Effect.succeed([homePeer]),
+        selfLabel: Effect.succeed("Work VM"),
+        recordLastError: (_environmentId, error) =>
+          Effect.sync(() => {
+            lastErrors.push(error);
+          }),
+      });
+      yield* Effect.gen(function* () {
+        const directory = yield* PeerDirectory;
+        yield* directory.listAgents();
+        assert.equal(lastErrors.length, 1);
+        assert.include(lastErrors[0] ?? "", "runs peer protocol 2");
+        // The same version answers, but with an error: the request failed, so the mismatch stands.
+        const failed = yield* directory.listAgents();
+        assert.equal(failed.unreadPeers.length, 1);
+        assert.equal(lastErrors.length, 1, "a failed read clears nothing");
+        const read = yield* directory.listAgents();
+        assert.equal(read.agents.length, 2);
+        assert.deepStrictEqual(lastErrors.at(-1), null, "a full read clears it");
+      }).pipe(
+        Effect.provide(peerDirectoryLayer.pipe(Layer.provide(http), Layer.provide(registry))),
+      );
+    }),
 );

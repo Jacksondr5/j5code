@@ -5,6 +5,8 @@ import {
   J5_PEER_API_PATHS,
   PEER_PROTOCOL_VERSION,
   PeerDeliveryRequest,
+  PeerPollRequest,
+  PEER_PROTOCOL_HEADER,
   RemovePeerRequest,
   environmentIdFromPeerSubject,
   peerSubjectForEnvironment,
@@ -13,6 +15,7 @@ import {
   type PeerDeliveryResponse,
   type PeerHelloResponse,
   type PeerListResponse,
+  type PeerPollResponse,
   type PeerRosterResponse,
   type RemovePeerResponse,
 } from "@t3tools/contracts/j5";
@@ -23,6 +26,7 @@ import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
+import * as Stream from "effect/Stream";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
 import packageJson from "../../../package.json" with { type: "json" };
@@ -31,6 +35,7 @@ import { annotateEnvironmentRequest } from "../../auth/http.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { PeerInboundService } from "./PeerInboundService.ts";
 import { PeerRegistryService } from "./PeerRegistryService.ts";
+import { PeerStoreService } from "./PeerStoreService.ts";
 import { RosterService } from "./RosterService.ts";
 import { peerProtocolHeaders, peerProtocolMismatch, statedPeerProtocol } from "./peerProtocol.ts";
 import {
@@ -66,6 +71,7 @@ const decodeIssueRequest = Schema.decodeUnknownEffect(IssuePeerCredentialRequest
 const decodeAddRequest = Schema.decodeUnknownEffect(AddPeerRequest);
 const decodeRemoveRequest = Schema.decodeUnknownEffect(RemovePeerRequest);
 const decodeDeliveryRequest = Schema.decodeUnknownEffect(PeerDeliveryRequest);
+const decodePollRequest = Schema.decodeUnknownEffect(PeerPollRequest);
 
 /** A peer on another protocol is refused before its request is read; the caller sees why in the 409. */
 const protocolRefusal = (peer: string) =>
@@ -95,6 +101,8 @@ const addFailure = (error: unknown): Effect.Effect<HttpServerResponse.HttpServer
       return Effect.succeed(jsonError(400, "peer_is_self", message));
     case "PeerProtocolMismatchError":
       return Effect.succeed(jsonError(409, "peer_protocol_mismatch", message));
+    case "PeerLinkModeConflictError":
+      return Effect.succeed(jsonError(409, "peer_link_mode_conflict", message));
     default:
       return Effect.logError("J5 A2A peer add failed", { cause: error }).pipe(
         Effect.as(jsonError(500, tag, "Adding the peer failed.")),
@@ -130,12 +138,28 @@ export const peerHttpRouteLayer = Layer.unwrap(
     const inbound = yield* PeerInboundService;
     const worker = yield* A2ADeliveryWorker;
     const roster = yield* RosterService;
+    const store = yield* PeerStoreService;
     const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
 
     // Rotation and removal list sessions and then revoke; one permit keeps them
     // serial so concurrent calls cannot leave two live credentials or revoke a
     // credential that was just issued.
     const rotationPermit = yield* Semaphore.make(1);
+
+    /** Whether the session's environment is a recorded peer, recording a store peer on its first proof. */
+    const adoptingStorePeer = (
+      session: EnvironmentAuth.AuthenticatedSession,
+      environmentId: string,
+    ) =>
+      DateTime.now.pipe(
+        Effect.flatMap((now) =>
+          peers.adoptStorePeer({
+            environmentId,
+            sessionId: session.sessionId,
+            at: DateTime.formatIso(now),
+          }),
+        ),
+      );
 
     /** A credential alone is not enough: the environment it names must be a recorded peer. */
     const registeredPeerForSession = (session: EnvironmentAuth.AuthenticatedSession) =>
@@ -150,12 +174,12 @@ export const peerHttpRouteLayer = Layer.unwrap(
             ),
           );
         }
-        const peer = yield* Effect.result(peers.get(environmentId));
+        const peer = yield* Effect.result(adoptingStorePeer(session, environmentId));
         if (Result.isFailure(peer)) {
           yield* Effect.logError("J5 A2A peer lookup failed", { cause: peer.failure });
           return Result.fail(jsonError(500, tagOf(peer.failure), "Peer lookup failed."));
         }
-        return peer.success !== null
+        return peer.success
           ? Result.succeed(environmentId)
           : Result.fail(
               jsonError(
@@ -193,10 +217,17 @@ export const peerHttpRouteLayer = Layer.unwrap(
         yield* annotateEnvironmentRequest("j5.a2a.peer.hello");
         const session = yield* authenticate;
         yield* requireScope(session, AuthA2APeerScope);
-        const refused = yield* protocolRefusal(
-          `Peer ${environmentIdFromPeerSubject(session.subject) ?? session.subject}`,
-        );
+        const holder = environmentIdFromPeerSubject(session.subject);
+        const refused = yield* protocolRefusal(`Peer ${holder ?? session.subject}`);
         if (refused !== null) return refused;
+        // A poller's hello is the first proof of a store credential; it records the poller here.
+        if (holder !== null) {
+          yield* adoptingStorePeer(session, holder).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("J5 A2A peer hello could not record a polling peer", { cause }),
+            ),
+          );
+        }
         const environmentId = yield* peers.selfEnvironmentId;
         const label = yield* peers.selfLabel;
         // The peer holds this credential, so any earlier one for it is done.
@@ -215,7 +246,7 @@ export const peerHttpRouteLayer = Layer.unwrap(
           server: { version: packageJson.version },
           label,
           peerProtocolVersion: PEER_PROTOCOL_VERSION,
-          capabilities: {},
+          capabilities: { poll: true },
         } satisfies PeerHelloResponse);
       }).pipe(Effect.catchTags(respondableTags), statingPeerProtocol),
     );
@@ -245,14 +276,42 @@ export const peerHttpRouteLayer = Layer.unwrap(
         }
         const subject = peerSubjectForEnvironment(decoded.success.environmentId);
         const label = decoded.success.label?.trim() || decoded.success.environmentId;
+        // A pair's way of travelling changes only by removing the peer and peering again.
+        const store = decoded.success.store === true;
+        const existing = yield* Effect.result(peers.get(decoded.success.environmentId));
+        if (Result.isFailure(existing)) {
+          yield* Effect.logError("J5 A2A peer lookup failed", { cause: existing.failure });
+          return jsonError(500, tagOf(existing.failure), "Peer lookup failed.");
+        }
+        if (existing.success !== null && (existing.success.linkMode === "store") !== store) {
+          return jsonError(
+            409,
+            "peer_link_mode_conflict",
+            `Peer ${existing.success.label} is recorded here with link mode ${existing.success.linkMode}, so this server ${store ? "sends to it directly" : "stores its messages until it polls"}. To change how messages travel, remove the peer and peer again.`,
+          );
+        }
+        const issuedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
         const issued = yield* Effect.result(
           rotationPermit.withPermit(
-            serverAuth.issueSession({
-              scopes: [AuthA2APeerScope],
-              subject,
-              label: `Peer: ${label}`,
-              ttl: PEER_SESSION_TTL,
-            }),
+            serverAuth
+              .issueSession({
+                scopes: [AuthA2APeerScope],
+                subject,
+                label: `Peer: ${label}`,
+                ttl: PEER_SESSION_TTL,
+              })
+              .pipe(
+                // A store peer already recorded rotates as any peer does; only a new one needs the mark.
+                Effect.tap((session) =>
+                  store && existing.success === null
+                    ? peers.grantStore({
+                        environmentId: decoded.success.environmentId,
+                        sessionId: session.sessionId,
+                        issuedAt,
+                      })
+                    : Effect.void,
+                ),
+              ),
           ),
         );
         if (Result.isFailure(issued)) {
@@ -432,7 +491,68 @@ export const peerHttpRouteLayer = Layer.unwrap(
       }).pipe(Effect.catchTags(respondableTags), statingPeerProtocol),
     );
 
+    // A peer this server stores messages for asks for them here, acknowledging
+    // what the last poll handed out; the request is held while nothing waits.
+    const pollRoute = HttpRouter.add(
+      "POST",
+      J5_PEER_API_PATHS.poll,
+      Effect.gen(function* () {
+        yield* annotateEnvironmentRequest("j5.a2a.peer.poll");
+        const session = yield* authenticate;
+        yield* requireScope(session, AuthA2APeerScope);
+        const origin = yield* registeredPeerForSession(session);
+        if (Result.isFailure(origin)) return origin.failure;
+        const refused = yield* protocolRefusal(`Peer ${origin.success}`);
+        if (refused !== null) return refused;
+        const record = yield* Effect.result(peers.get(origin.success));
+        if (Result.isFailure(record)) {
+          yield* Effect.logError("J5 A2A peer lookup failed", { cause: record.failure });
+          return jsonError(500, tagOf(record.failure), "Peer lookup failed.");
+        }
+        if (record.success?.linkMode !== "store") {
+          return jsonError(
+            409,
+            "peer_not_polling",
+            `Environment ${origin.success} is recorded here with link mode ${record.success?.linkMode ?? "none"}, so this server sends to it directly and stores nothing for it. To poll instead, remove the peer and peer again.`,
+          );
+        }
+        const body = yield* readJsonBody;
+        if (Result.isFailure(body)) return requestFailure("The request body must be JSON.");
+        const decoded = yield* Effect.result(decodePollRequest(body.success));
+        if (Result.isFailure(decoded)) {
+          return requestFailure(
+            "acks and rosterHash are required; roster, label and capabilities are optional.",
+          );
+        }
+        const request = yield* HttpServerRequest.HttpServerRequest;
+        const started = yield* Effect.result(
+          store.startPoll({
+            environmentId: origin.success,
+            request: decoded.success,
+            protocolVersion: Number(request.headers[PEER_PROTOCOL_HEADER] ?? "1"),
+          }),
+        );
+        if (Result.isFailure(started)) {
+          yield* Effect.logError("J5 A2A peer poll failed", { cause: started.failure });
+          return jsonError(500, tagOf(started.failure), "The poll failed.");
+        }
+        // The status and headers go out now and only the body is held, so the
+        // poller can tell a held poll cut on the way from one never answered.
+        // Node sends headers with the first body bytes, so the body opens with
+        // whitespace JSON ignores.
+        const answer = started.success.pipe(
+          Effect.map((polled) => JSON.stringify(polled satisfies PeerPollResponse)),
+          Effect.tapCause((cause) => Effect.logError("J5 A2A peer poll failed", { cause })),
+        );
+        return HttpServerResponse.stream(
+          Stream.concat(Stream.make(" "), Stream.fromEffect(answer)).pipe(Stream.encodeText),
+          { contentType: "application/json" },
+        );
+      }).pipe(Effect.catchTags(respondableTags), statingPeerProtocol),
+    );
+
     return Layer.mergeAll(
+      pollRoute,
       helloRoute,
       rosterRoute,
       issueCredentialRoute,

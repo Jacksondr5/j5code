@@ -8,6 +8,7 @@ import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
+import * as TestClock from "effect/testing/TestClock";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
@@ -52,11 +53,17 @@ const remoteSupport = ParticipantId.make("agent:j5:a2a:thread:support");
 const homePeer: PeerConnection = {
   environmentId: "environment-home",
   label: "Home",
+  linkMode: "push",
   origin: "https://home.example:3773",
   credential: "home-token",
   credentialExpiresAt: null,
   inboundSession: "active",
   createdAt: timestamp,
+  lastPolledAt: null,
+  lastError: null,
+  waitingCount: 0,
+  oldestWaitingAt: null,
+  roster: null,
 };
 const supportOnHome: RemoteAgent = {
   environmentId: homePeer.environmentId,
@@ -94,6 +101,7 @@ const directoryLayer = (agents: ReadonlyArray<RemoteAgent>, unreadPeers: Readonl
           })),
           selfName: "Work",
         }),
+      snapshotAgent: () => Effect.succeed(null),
       serverName: (environmentId) =>
         Effect.succeed(
           agents.find((agent) => agent.environmentId === environmentId)?.environmentLabel ??
@@ -105,13 +113,14 @@ const directoryLayer = (agents: ReadonlyArray<RemoteAgent>, unreadPeers: Readonl
 const makeSendLayer = (
   agents: ReadonlyArray<RemoteAgent>,
   unreadPeers: ReadonlyArray<string> = [],
+  directory: Layer.Layer<PeerDirectory> = directoryLayer(agents, unreadPeers),
 ) => {
   const database = NodeSqliteClient.layer({ filename: ":memory:" });
   const ledger = ledgerLayer.pipe(Layer.provide(database));
   const send = sendLayer.pipe(
     Layer.provide(ledger),
     Layer.provide(database),
-    Layer.provide(directoryLayer(agents, unreadPeers)),
+    Layer.provide(directory),
   );
   return Layer.mergeAll(database, ledger, send);
 };
@@ -265,7 +274,11 @@ it.effect(
       }).pipe(Effect.provide(makeSendLayer([], ["Home"])));
       assert.equal(unread._tag, "A2APeersUnreadError");
       assert.include(unread.message, "1 peer server(s) could not be read");
-      assert.notInclude(unread.message, "Home", "no server is named to the agent");
+      assert.include(
+        unread.message,
+        "(Home: ECONNREFUSED)",
+        "the refusal names the server and why",
+      );
     }),
 );
 
@@ -277,13 +290,17 @@ interface PostedRequest {
 }
 
 /** The live transport's peer branch, with the HTTP hop stubbed and everything else in memory. */
+type TransportReply = {
+  readonly status: number;
+  readonly body: unknown;
+  readonly headers?: Record<string, string>;
+};
+
+/** One reply for every request, or one per request in order. */
 const makeTransportLayer = (
-  reply: {
-    readonly status: number;
-    readonly body: unknown;
-    readonly headers?: Record<string, string>;
-  },
+  replies: TransportReply | Array<TransportReply>,
   posted: Array<PostedRequest>,
+  lastErrors: Array<string | null> = [],
 ) => {
   const database = NodeSqliteClient.layer({ filename: ":memory:" });
   const ledger = ledgerLayer.pipe(Layer.provide(database));
@@ -306,6 +323,7 @@ const makeTransportLayer = (
           body,
           protocol: request.headers["x-j5-peer-protocol"],
         });
+        const reply = Array.isArray(replies) ? replies.shift()! : replies;
         return HttpClientResponse.fromWeb(
           request,
           new Response(encodeJson(reply.body), {
@@ -324,6 +342,10 @@ const makeTransportLayer = (
         connections: () => Effect.succeed([homePeer]),
         connection: (environmentId) =>
           Effect.succeed(environmentId === homePeer.environmentId ? homePeer : null),
+        recordLastError: (_environmentId, error) =>
+          Effect.sync(() => {
+            lastErrors.push(error);
+          }),
       }),
     ),
     Layer.provide(Layer.mock(ThreadManagementService)({})),
@@ -364,6 +386,7 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const posted: Array<PostedRequest> = [];
+      const lastErrors: Array<string | null> = [];
       yield* Effect.gen(function* () {
         const { sent, deliver } = yield* crossingAsk();
         assert.equal((yield* deliver)?.state, "delivered");
@@ -371,6 +394,11 @@ it.effect(
         assert.equal(posted[0]!.url, `${homePeer.origin}${J5_PEER_API_PATHS.deliver}`);
         assert.equal(posted[0]!.authorization, "Bearer home-token");
         assert.equal(posted[0]!.protocol, String(PEER_PROTOCOL_VERSION), "it states its protocol");
+        assert.deepStrictEqual(
+          lastErrors,
+          [null],
+          "a delivery that succeeds clears the row's error",
+        );
         const body = posted[0]!.body as PeerDeliveryRequest;
         assert.equal(body.messageId, sent.messageId);
         assert.equal(body.senderId, billing.id);
@@ -386,6 +414,7 @@ it.effect(
           makeTransportLayer(
             { status: 201, body: { accepted: true, receivedSeq: 3, replay: false } },
             posted,
+            lastErrors,
           ),
         ),
       );
@@ -397,6 +426,7 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const posted: Array<PostedRequest> = [];
+      const lastErrors: Array<string | null> = [];
       const outcome = yield* Effect.gen(function* () {
         const { deliver } = yield* crossingAsk();
         const milestone = yield* deliver;
@@ -415,8 +445,16 @@ it.effect(
               headers: { "x-j5-peer-protocol": "2" },
             },
             posted,
+            lastErrors,
           ),
         ),
+      );
+      assert.deepStrictEqual(
+        lastErrors,
+        [
+          "Home runs peer protocol 2 and this server runs 1. Update J5 on this server, then try again.",
+        ],
+        "the peer's row shows the mismatch until a later delivery succeeds",
       );
       assert.notEqual(outcome.state, "delivered");
       assert.include(
@@ -655,4 +693,110 @@ it.effect("carries a withdrawn ask to the peer as a sender-cleared terminal noti
       ),
     );
   }),
+);
+
+it.effect("keeps a protocol mismatch on the peer's record until a delivery to it succeeds", () =>
+  Effect.gen(function* () {
+    const posted: Array<PostedRequest> = [];
+    const lastErrors: Array<string | null> = [];
+    yield* Effect.gen(function* () {
+      const { deliver } = yield* crossingAsk();
+      yield* deliver;
+      assert.equal(lastErrors.length, 1);
+      assert.include(lastErrors[0] ?? "", "runs peer protocol 2");
+      // The retry reaches a server on the same version that fails anyway: the mismatch stands.
+      yield* TestClock.adjust("1 minute");
+      yield* deliver;
+      assert.equal(lastErrors.length, 1, "a failed delivery clears nothing");
+      yield* TestClock.adjust("5 minutes");
+      assert.equal((yield* deliver)?.state, "delivered");
+      assert.deepStrictEqual(lastErrors.at(-1), null, "a delivery that succeeds clears it");
+    }).pipe(
+      Effect.provide(
+        makeTransportLayer(
+          [
+            { status: 201, body: {}, headers: { "x-j5-peer-protocol": "2" } },
+            { status: 500, body: { error: "internal" } },
+            { status: 201, body: { accepted: true, receivedSeq: 3, replay: false } },
+          ],
+          posted,
+          lastErrors,
+        ),
+      ),
+    );
+  }),
+);
+
+it.effect(
+  "refuses a send to a known agent its polling server's snapshot shows archived, without reading any roster",
+  () =>
+    Effect.gen(function* () {
+      yield* seedLocal();
+      const ledger = yield* A2ALedger;
+      const send = yield* A2ASendService;
+      const sql = yield* SqlClient.SqlClient;
+      // An earlier message reached this agent on Home: its route is recorded.
+      yield* ledger.append({
+        commandId: CommCommandId.make("command:peer-outbound:snapshot:earlier"),
+        squadronId: localSquadron,
+        acceptedAt: timestamp,
+        event: {
+          kind: "message.sent",
+          sender: billing.id,
+          receiver: remoteSupport,
+          exchangeId: null,
+          correlationId: CorrelationId.make("correlation:peer-outbound:snapshot:earlier"),
+          payload: {
+            messageId: LedgerMessageId.make("message:peer-outbound:snapshot:earlier"),
+            text: "earlier",
+            originSquadronId: localSquadron,
+            receiverSquadronId: supportOnHome.squadronId,
+            receiverEnvironmentId: homePeer.environmentId,
+            exchangeRole: "none",
+            envelopeChannel: "peer",
+          },
+          createdAt: timestamp,
+        },
+      });
+      const refused = yield* Effect.flip(
+        send.send({
+          commandId: CommCommandId.make("command:peer-outbound:snapshot:follow-up"),
+          senderThreadId: billing.threadId,
+          to: remoteSupport,
+          message: "Still there?",
+          acceptedAt: timestamp,
+        }),
+      );
+      assert.equal(refused._tag, "A2AParticipantArchivedError");
+      const rows = yield* sql<{ readonly message_id: string }>`
+        SELECT message_id FROM j5_a2a_delivery ORDER BY sent_seq
+      `;
+      assert.deepStrictEqual(
+        rows.map((row) => row.message_id),
+        ["message:peer-outbound:snapshot:earlier"],
+        "nothing is recorded for the refused follow-up",
+      );
+    }).pipe(
+      Effect.provide(
+        makeSendLayer(
+          [],
+          [],
+          Layer.succeed(
+            PeerDirectory,
+            PeerDirectory.of({
+              // A known route never fans out to the peers' rosters.
+              listAgents: () => Effect.die("no roster read for a known route"),
+              resolveAgent: () => Effect.die("no roster read for a known route"),
+              snapshotAgent: (environmentId, participantId) =>
+                Effect.succeed(
+                  environmentId === homePeer.environmentId && participantId === remoteSupport
+                    ? { ...supportOnHome, archived: true, canReceiveMessage: false }
+                    : null,
+                ),
+              serverName: () => Effect.succeed(homePeer.label),
+            }),
+          ),
+        ),
+      ),
+    ),
 );

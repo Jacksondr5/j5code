@@ -1,3 +1,4 @@
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 export * from "./j5/playbook.ts";
 
@@ -612,16 +613,36 @@ export const PeerOrigin = Schema.String.check(
 );
 export type PeerOrigin = typeof PeerOrigin.Type;
 
+/**
+ * How messages travel between this server and a peer: `push` sends directly
+ * both ways; `store` keeps messages here until the peer polls for them; `poll`
+ * is this server's record of a peer it polls.
+ */
+export const PeerLinkMode = Schema.Literals(["push", "store", "poll"]);
+export type PeerLinkMode = typeof PeerLinkMode.Type;
+
 export const PeerRecord = Schema.Struct({
   environmentId: Schema.String,
   /** The peer server's own name, as it last reported it; its environment id until it reports one. */
   label: Schema.String,
-  origin: Schema.String,
+  /** Servers from before poll mode omit it; every peer they record sends directly. */
+  linkMode: PeerLinkMode.pipe(Schema.withDecodingDefault(Effect.succeed("push" as const))),
+  /** Where this server reaches the peer; null for a peer that polls this server. */
+  origin: Schema.NullOr(Schema.String),
   /** When the credential the peer issued to this server expires, as the peer reported it at hello. */
   credentialExpiresAt: Schema.NullOr(Schema.String),
   /** Whether the peer still holds a live session here; "missing" means it was revoked or expired and its deliveries are refused. */
   inboundSession: Schema.Literals(["active", "missing"]),
   createdAt: Schema.String,
+  /** When the peer last polled here, or this server last had an answer to a poll of the peer. */
+  lastPolledAt: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  /** Why the last exchange with the peer failed: a poll failure or a peer protocol mismatch. */
+  lastError: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  /** Messages recorded here and not yet delivered to the peer, and when the oldest was sent. */
+  waitingCount: Schema.Int.pipe(Schema.withDecodingDefault(Effect.succeed(0))),
+  oldestWaitingAt: Schema.NullOr(Schema.String).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
 });
 export type PeerRecord = typeof PeerRecord.Type;
 export const PeerListResponse = Schema.Struct({ peers: Schema.Array(PeerRecord) });
@@ -636,6 +657,8 @@ export const IssuePeerCredentialRequest = Schema.Struct({
    * comes from what the peer reports at hello.
    */
   label: Schema.optional(Schema.String),
+  /** The holder will poll this server, which stores its messages until then. */
+  store: Schema.optional(Schema.Boolean),
 });
 export type IssuePeerCredentialRequest = typeof IssuePeerCredentialRequest.Type;
 export const IssuePeerCredentialResponse = Schema.Struct({
@@ -794,6 +817,49 @@ export const PeerDeliveryResponse = Schema.Struct({
 });
 export type PeerDeliveryResponse = typeof PeerDeliveryResponse.Type;
 
+/** A polling peer's answer about one delivery it was handed in the previous poll. */
+export const PeerPollAck = Schema.Union([
+  Schema.Struct({
+    messageId: Schema.String.check(Schema.isNonEmpty()),
+    outcome: Schema.Literal("received"),
+    receivedSeq: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+    replay: Schema.Boolean,
+  }),
+  Schema.Struct({
+    messageId: Schema.String.check(Schema.isNonEmpty()),
+    outcome: Schema.Literal("refused"),
+    /** The refusal the deliver route would have answered with. */
+    code: Schema.String,
+    message: Schema.String.check(Schema.isMaxLength(4_000)),
+  }),
+]);
+export type PeerPollAck = typeof PeerPollAck.Type;
+
+/** A poll asks for the messages stored for the poller, acknowledges the last batch, and refreshes what the poller tells. */
+export const PeerPollRequest = Schema.Struct({
+  acks: Schema.Array(PeerPollAck),
+  /** The poller's agent roster, sent only when its hash differs from the one the last response held. */
+  roster: Schema.optional(Schema.Array(PeerRosterAgent)),
+  rosterHash: Schema.String.check(Schema.isNonEmpty()),
+  /** The poller's own name. */
+  label: Schema.optional(PeerSenderLabel),
+  capabilities: Schema.optional(PeerCapabilities),
+});
+export type PeerPollRequest = typeof PeerPollRequest.Type;
+
+export const PeerPollResponse = Schema.Struct({
+  /** Oldest first, each the body a direct delivery carries. */
+  deliveries: Schema.Array(PeerDeliveryRequest),
+  /** The roster snapshot this server holds for the poller, or null before its first. */
+  rosterHash: Schema.NullOr(Schema.String),
+  /** More deliveries are waiting beyond this batch. */
+  more: Schema.Boolean,
+  /** The storing server's own name and capabilities, so the poller refreshes them every poll. */
+  label: Schema.String,
+  capabilities: PeerCapabilities,
+});
+export type PeerPollResponse = typeof PeerPollResponse.Type;
+
 export const J5_PEER_API_PATHS = {
   peers: "/api/j5/a2a/peers",
   credentials: "/api/j5/a2a/peers/credentials",
@@ -801,4 +867,5 @@ export const J5_PEER_API_PATHS = {
   hello: "/api/j5/a2a/peers/hello",
   roster: "/api/j5/a2a/peers/roster",
   deliver: "/api/j5/a2a/peers/deliver",
+  poll: "/api/j5/a2a/peers/poll",
 } as const;
