@@ -243,7 +243,7 @@ it.effect("shares one runtime and outbox across the production HTTP and MCP regi
       assert.equal(threadManagementBuilds, 1);
       assert.equal(transports.size, 1);
       assert.equal(outboxes.size, 1);
-      // The start permit holds only if spawn_agent and CrewLaunch share one workspace service.
+      // The start guard holds only if spawn_agent and CrewLaunch share one workspace service.
       assert.equal(spawnWorkspaces.size, 1);
       const sql = Context.get(databaseContext, SqlClient.SqlClient);
       const people = yield* sql<{

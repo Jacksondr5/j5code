@@ -103,7 +103,7 @@ export const makeJ5A2AAuxiliaryLayer = (
 ) => {
   const deliveryTransportProvided = options.deliveryTransport ?? deliveryTransportWithPeers;
   // One instance for spawn_agent (the MCP handlers read it from this graph) and CrewLaunch: its
-  // start permits are in-process, so a second build would reopen the race they close.
+  // in-flight start guard is in-process, so a second build would reopen the race it closes.
   const spawnWorkspaceProvided = options.spawnWorkspace ?? spawnWorkspaceLayer;
   const sendServiceProvided = sendServiceLayer.pipe(Layer.provide(peerDirectoryProvided));
   const deliveryWorkerProvided = deliveryWorkerLayer.pipe(
