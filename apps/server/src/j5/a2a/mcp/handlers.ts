@@ -44,6 +44,7 @@ import { A2ASendService } from "../SendService.ts";
 import { SpawnCompositionService } from "../SpawnCompositionService.ts";
 import {
   SpawnWorkspaceService,
+  namedBaseRefs,
   resolveSpawnWorkspace,
   spawnCreateCommandId,
   spawnThreadCheckout,
@@ -772,6 +773,7 @@ const handlers = {
         projectId: parent.thread.projectId,
         worktreePath: parent.thread.worktreePath,
         listBranches,
+        baseRefs: namedBaseRefs([choice]),
       });
       const workspace = yield* Effect.fromResult(
         resolveSpawnWorkspace(checkout, choice, "spawn"),

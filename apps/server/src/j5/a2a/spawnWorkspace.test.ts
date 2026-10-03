@@ -43,7 +43,6 @@ import { J5ToolkitHandlersLive } from "./mcp/handlers.ts";
 import { J5SpawnAgentInput, J5Toolkit } from "./mcp/tools.ts";
 import {
   SpawnWorkspaceChoice,
-  SpawnWorkspaceService,
   resolveSpawnWorkspace,
   type SpawnCheckout,
 } from "./spawnWorkspace.ts";
@@ -54,6 +53,7 @@ const checkout = (overrides: Partial<SpawnCheckout> = {}): SpawnCheckout => ({
   isRepo: true,
   refName: "j5/main",
   localBranchNames: ["j5/main", "taken"],
+  missingBaseRefs: [],
   problem: null,
   ...overrides,
 });
@@ -522,3 +522,42 @@ it("refuses a git ref git would read as an option, in both the MCP and stored fo
       ),
     );
 });
+
+it.effect("refuses a base ref git can't resolve before anything is created", () =>
+  Effect.gen(function* () {
+    const { layer, call, commands, launches } = yield* spawnHarness({
+      checkout: {
+        isRepo: true,
+        refName: "j5/main",
+        missingRefs: ["no-such-ref", "only-on-origin"],
+      },
+    });
+    yield* Effect.gen(function* () {
+      const refused = yield* call({
+        ...spawnArgs,
+        workspace: { type: "worktree", base_ref: "no-such-ref" },
+        client_request_id: "missing-base",
+      });
+      assert.isTrue(refused.isFailure);
+      assert.include(
+        (refused.result as { readonly message: string }).message,
+        "Base ref 'no-such-ref' doesn't resolve to a commit",
+      );
+      assert.lengthOf(yield* Ref.get(commands), 0);
+      // From origin, its fetched copy is enough; locally it isn't.
+      const local = yield* call({
+        ...spawnArgs,
+        workspace: { type: "worktree", base_ref: "only-on-origin" },
+        client_request_id: "remote-base-local",
+      });
+      assert.isTrue(local.isFailure);
+      const fromOrigin = yield* call({
+        ...spawnArgs,
+        workspace: { type: "worktree", base_ref: "only-on-origin", start_from_origin: true },
+        client_request_id: "remote-base-origin",
+      });
+      assert.isFalse(fromOrigin.isFailure);
+      assert.lengthOf(yield* Ref.get(launches), 1);
+    }).pipe(Effect.provide(layer));
+  }),
+);

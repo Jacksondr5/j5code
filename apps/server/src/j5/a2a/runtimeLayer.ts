@@ -176,7 +176,10 @@ export const makeJ5A2AAuxiliaryLayer = (
     Layer.provideMerge(agentCrewInstanceLayer),
   );
   // The finish notifier tells a Captain when a seat's handoff file appears, so it reads the workspace.
+  // It also tells a plain spawner when a Peer Agent's worktree failed, asking the one workspace
+  // service whether the agent was spawned for one.
   const crewSeatFinishNotifierProvided = crewSeatFinishNotifierLayer.pipe(
+    Layer.provideMerge(spawnWorkspaceProvided),
     Layer.provideMerge(crewLaunchReporterProvided),
     Layer.provideMerge(captainArchiveCascadeProvided),
     Layer.provideMerge(agentCrewInstanceLayer),

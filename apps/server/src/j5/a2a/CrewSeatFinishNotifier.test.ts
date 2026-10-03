@@ -48,6 +48,12 @@ import { participantIdForThread } from "./HomeRegistrar.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import { SquadronId } from "./contracts.ts";
+import { SpawnWorkspaceService } from "./spawnWorkspace.ts";
+
+/** None of these threads was spawned for a worktree of its own. */
+const notSpawnedForWorktree = Layer.mock(SpawnWorkspaceService)({
+  askedForWorktree: () => Effect.succeed(false),
+});
 
 it("provider errors cannot split a finish digest or replace participant fields", () => {
   const text = seatFinishedNoticeText({
@@ -260,6 +266,7 @@ it.effect("tells the Captain how each finished seat ended, and settles nothing",
     // The launch report covers a failed first turn while it is pending; here the builder's.
     const covered = yield* Ref.make<ReadonlySet<string>>(new Set());
     const layer = notifierLayer.pipe(
+      Layer.provideMerge(notSpawnedForWorktree),
       Layer.provideMerge(
         Layer.mock(CrewLaunchReporter)({
           coversFailure: (threadId) =>
@@ -483,6 +490,7 @@ it.effect(
         handoff: { status: "none declared" },
       });
       const layer = notifierLayer.pipe(
+        Layer.provideMerge(notSpawnedForWorktree),
         Layer.provideMerge(
           Layer.mock(CrewLaunchReporter)({ coversFailure: () => Effect.succeed(false) }),
         ),
@@ -614,6 +622,7 @@ it.effect(
       const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]);
       const noticesFail = yield* Ref.make(true);
       const layer = notifierLayer.pipe(
+        Layer.provideMerge(notSpawnedForWorktree),
         Layer.provideMerge(
           Layer.mock(CrewLaunchReporter)({ coversFailure: () => Effect.succeed(false) }),
         ),
@@ -730,6 +739,7 @@ it.effect(
         ],
       } as unknown as OrchestrationV2ThreadProjection;
       const layer = notifierLayer.pipe(
+        Layer.provideMerge(notSpawnedForWorktree),
         Layer.provideMerge(
           Layer.mock(CrewLaunchReporter)({ coversFailure: () => Effect.succeed(false) }),
         ),
@@ -875,6 +885,7 @@ it.effect("the boot sweep tells the Captain about a finished seat nothing report
         ],
       }) as unknown as OrchestrationV2ThreadProjection;
     const layer = notifierLayer.pipe(
+      Layer.provideMerge(notSpawnedForWorktree),
       Layer.provideMerge(
         Layer.mock(CrewLaunchReporter)({ coversFailure: () => Effect.succeed(false) }),
       ),
@@ -976,6 +987,7 @@ it.effect(
         }),
       ).pipe(Layer.provide(artifactWorkspaceLayer));
       const layer = notifierLayer.pipe(
+        Layer.provideMerge(notSpawnedForWorktree),
         Layer.provideMerge(
           Layer.mock(CrewLaunchReporter)({ coversFailure: () => Effect.succeed(false) }),
         ),
@@ -1052,6 +1064,7 @@ const daemonHarness = (latestSequence: EventSinkV2["Service"]["latestSequence"])
     const started = yield* Deferred.make<number>();
     let streamCalls = 0;
     const layer = daemonNotifierLayer.pipe(
+      Layer.provideMerge(notSpawnedForWorktree),
       Layer.provideMerge(
         Layer.mock(CrewLaunchReporter)({
           reconcile: Effect.succeed([]),
@@ -1119,5 +1132,106 @@ it.effect("a failed high-water read retries instead of streaming from the beginn
       assert.equal(yield* Deferred.await(harness.started), 4200);
       assert.equal(reads, 2);
     }).pipe(Effect.provide(harness.layer));
+  }).pipe(Effect.scoped),
+);
+
+it.effect("tells a plain spawner once its Peer Agent's worktree preparation failed", () =>
+  Effect.gen(function* () {
+    const database = NodeSqliteClient.layer({ filename: ":memory:" });
+    const storage = Layer.mergeAll(ledgerLayer, crewInstanceLayer).pipe(
+      Layer.provideMerge(database),
+    );
+    const context = yield* Layer.build(storage);
+    yield* runJ5A2AMigrations().pipe(Effect.provide(context));
+    const sql = Context.get(context, SqlClient.SqlClient);
+    yield* Context.get(context, A2ALedger).createSquadron({
+      squadron: { id: squadronId, name: "Finish", createdAt: DateTime.formatIso(createdAt) },
+    });
+    const spawnerThread = ThreadId.make("thread:spawner");
+    const peerThread = ThreadId.make("thread:peer");
+    const boundThread = ThreadId.make("thread:peer-bound");
+    const sharedThread = ThreadId.make("thread:peer-shared");
+    for (const [index, child] of [peerThread, boundThread, sharedThread].entries())
+      yield* sql`
+        INSERT INTO j5_a2a_participant_placement (
+          squadron_id, participant_id, provenance_kind, provenance_participant_id,
+          provenance_source, placement_parent_id, created_event_seq, updated_event_seq
+        ) VALUES (
+          ${squadronId}, ${participantIdForThread(child)}, 'spawned-by',
+          ${participantIdForThread(spawnerThread)}, 'j5_spawn',
+          ${participantIdForThread(spawnerThread)}, ${index + 1}, ${index + 1}
+        )
+      `;
+    const failure = {
+      class: "validation_error" as const,
+      message: "Workspace preparation failed during provision worktree: no-such-ref",
+      code: null,
+      retryable: false,
+    };
+    const childProjection = (threadId: ThreadId) =>
+      ({
+        ...projection(threadId),
+        thread: {
+          ...projection(threadId).thread,
+          agentPersonaAssignment: undefined,
+          worktreePath: threadId === boundThread ? "/repo-worktrees/peer" : null,
+        },
+        turnItems: [{ runId: RunId.make("run:prep"), type: "error", status: "failed", failure }],
+      }) as unknown as OrchestrationV2ThreadProjection;
+    const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]);
+    const layer = notifierLayer.pipe(
+      Layer.provideMerge(
+        Layer.mock(SpawnWorkspaceService)({
+          askedForWorktree: (threadId) => Effect.succeed(threadId !== sharedThread),
+        }),
+      ),
+      Layer.provideMerge(Layer.mock(CrewLaunchReporter)({})),
+      Layer.provideMerge(
+        Layer.mock(ThreadManagementService)({
+          getThreadProjection: (threadId) =>
+            Effect.succeed(
+              threadId === spawnerThread ? projection(threadId) : childProjection(threadId),
+            ),
+          dispatch: (command) =>
+            Ref.update(dispatched, (items) => [...items, command]).pipe(
+              Effect.as({ events: [], effects: [] } as never),
+            ),
+        }),
+      ),
+      Layer.provideMerge(Layer.mock(CrewCaptainArchiveCascade)({})),
+      Layer.provideMerge(Layer.mock(EventSinkV2)({})),
+      Layer.provideMerge(artifactWorkspaceLayer),
+      Layer.provideMerge(Layer.succeedContext(context)),
+      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-spawn-prep-" })),
+      Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(Layer.mock(A2ADeliveryWorker)({ notify: Effect.void })),
+    );
+    yield* Effect.gen(function* () {
+      const notifier = yield* CrewSeatFinishNotifier;
+      assert.equal(
+        yield* notifier.handleStoredEvent(terminalRunEvent(peerThread, "run:prep", "failed")),
+        peerThread,
+      );
+      const [notice] = yield* Ref.get(dispatched);
+      assert.equal(notice?.type, "message.dispatch");
+      if (notice?.type === "message.dispatch") {
+        assert.equal(notice.threadId, spawnerThread);
+        assert.equal(notice.createdBy, "system");
+        assert.include(notice.text, "<j5_spawn_workspace_failed>");
+        assert.include(notice.text, `participant_id: ${participantIdForThread(peerThread)}`);
+        assert.include(notice.text, "no-such-ref");
+        assert.include(notice.text, "takes no turns");
+      }
+      // A peer that has its worktree, one that shares its spawner's checkout, and a completed
+      // run say nothing.
+      assert.isNull(
+        yield* notifier.handleStoredEvent(terminalRunEvent(boundThread, "run:prep", "failed")),
+      );
+      assert.isNull(
+        yield* notifier.handleStoredEvent(terminalRunEvent(sharedThread, "run:prep", "failed")),
+      );
+      assert.isNull(yield* notifier.handleStoredEvent(terminalRunEvent(peerThread, "run:done")));
+      assert.lengthOf(yield* Ref.get(dispatched), 1);
+    }).pipe(Effect.provide(layer));
   }).pipe(Effect.scoped),
 );

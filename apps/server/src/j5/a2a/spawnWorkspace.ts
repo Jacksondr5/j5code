@@ -27,7 +27,8 @@ import {
 import type { OrchestratorV2Error } from "../../orchestration-v2/Orchestrator.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { ProjectService } from "../../project/ProjectService.ts";
-import { lifecycleCommandId, type SpawnStableInput } from "./spawnIds.ts";
+import { lifecycleCommandId, spawnThreadId, type SpawnStableInput } from "./spawnIds.ts";
+import { spawnWorktreeCreateCommandId } from "./spawnWorktreeTurns.ts";
 
 /**
  * A branch or ref a caller names for a worktree. Git takes it as a positional argument, so a
@@ -68,6 +69,22 @@ export type ResolvedSpawnWorkspace =
       readonly startFromOrigin: boolean;
     };
 
+/** A base ref as a caller named it; from origin, its fetched remote-tracking copy also counts. */
+export interface SpawnBaseRef {
+  readonly ref: string;
+  readonly startFromOrigin: boolean;
+}
+
+/** The base refs a set of choices name explicitly, for `inspect` to verify. */
+export const namedBaseRefs = (
+  choices: ReadonlyArray<SpawnWorkspaceChoice | undefined>,
+): ReadonlyArray<SpawnBaseRef> =>
+  choices.flatMap((choice) =>
+    choice?.type === "worktree" && choice.baseRef !== undefined
+      ? [{ ref: choice.baseRef, startFromOrigin: choice.startFromOrigin ?? false }]
+      : [],
+  );
+
 /** What the caller's checkout looks like to git, read once per spawn or Crew roster. */
 export interface SpawnCheckout {
   readonly inWorktree: boolean;
@@ -75,6 +92,8 @@ export interface SpawnCheckout {
   /** The branch checked out where the caller works; null when detached or not a repository. */
   readonly refName: string | null;
   readonly localBranchNames: ReadonlyArray<string>;
+  /** Base refs a caller named that git can't resolve to a commit, as they were asked for. */
+  readonly missingBaseRefs: ReadonlyArray<SpawnBaseRef>;
   /** Why git could not be read, so an explicit worktree request can say so. */
   readonly problem: string | null;
 }
@@ -135,6 +154,20 @@ export const resolveSpawnWorkspace = (
         nextStep: 'Pass workspace.base_ref, or use workspace {"type":"shared"}.',
       }),
     );
+  if (
+    choice.baseRef !== undefined &&
+    checkout.missingBaseRefs.some(
+      (missing) =>
+        missing.ref === choice.baseRef &&
+        missing.startFromOrigin === (choice.startFromOrigin ?? false),
+    )
+  )
+    return Result.fail(
+      new SpawnWorkspaceError({
+        detail: `Base ref '${choice.baseRef}' doesn't resolve to a commit in this repository${choice.startFromOrigin === true ? ", locally or as a fetched origin branch" : ""}.`,
+        nextStep: "Name an existing branch, tag, or commit for workspace.base_ref, or omit it.",
+      }),
+    );
   if (choice.branch !== undefined && checkout.localBranchNames.includes(choice.branch))
     return Result.fail(
       new SpawnWorkspaceError({
@@ -159,10 +192,10 @@ export const spawnCreateCommandId = (
   stableInput: SpawnStableInput,
   workspace: ResolvedSpawnWorkspace["type"],
 ): CommandId =>
-  lifecycleCommandId({
-    ...stableInput,
-    operation: workspace === "shared" ? "spawn-create" : "spawn-create-worktree",
-  });
+  workspace === "shared"
+    ? lifecycleCommandId({ ...stableInput, operation: "spawn-create" })
+    : // Keyed by the thread, so the turn guard can tell this thread asked for a worktree.
+      spawnWorktreeCreateCommandId(spawnThreadId(stableInput));
 
 /** The new thread's binding at creation: the caller's checkout, or none until ThreadLaunch sets it. */
 export const spawnThreadCheckout = (
@@ -193,6 +226,8 @@ export interface SpawnWorkspaceServiceShape {
     readonly projectId: ProjectId;
     readonly worktreePath: string | null;
     readonly listBranches: boolean;
+    /** Explicit base refs to check before anything is created (see `namedBaseRefs`). */
+    readonly baseRefs: ReadonlyArray<SpawnBaseRef>;
   }) => Effect.Effect<SpawnCheckout>;
   /**
    * Runs one spawn's start (create, facts, brief), refusing it while another start for the same
@@ -220,6 +255,8 @@ export interface SpawnWorkspaceServiceShape {
   readonly startBrief: (
     input: StartSpawnBriefInput,
   ) => Effect.Effect<void, OrchestratorV2Error | ThreadLaunchError>;
+  /** Whether J5 created this thread to work in a worktree of its own. */
+  readonly askedForWorktree: (threadId: ThreadId) => Effect.Effect<boolean, SpawnWorkspaceError>;
 }
 
 export class SpawnWorkspaceService extends Context.Service<
@@ -249,11 +286,24 @@ const make = Effect.gen(function* () {
       const status = yield* git.localStatus({ cwd });
       const localBranchNames =
         status.isRepo && caller.listBranches ? yield* git.listLocalBranchNames(cwd) : [];
+      const missingBaseRefs = status.isRepo
+        ? yield* Effect.filter(caller.baseRefs, (base) =>
+            git.hasCommit({ cwd, refName: base.ref }).pipe(
+              Effect.flatMap((found) =>
+                found || !base.startFromOrigin
+                  ? Effect.succeed(found)
+                  : git.hasCommit({ cwd, refName: `refs/remotes/origin/${base.ref}` }),
+              ),
+              Effect.map((found) => !found),
+            ),
+          )
+        : [];
       return {
         inWorktree: caller.worktreePath !== null,
         isRepo: status.isRepo,
         refName: status.refName,
         localBranchNames,
+        missingBaseRefs,
         problem: null,
       } satisfies SpawnCheckout;
     }).pipe(
@@ -263,6 +313,7 @@ const make = Effect.gen(function* () {
           isRepo: false,
           refName: null,
           localBranchNames: [],
+          missingBaseRefs: [],
           problem: detailOf(cause),
         } satisfies SpawnCheckout),
       ),
@@ -345,7 +396,19 @@ const make = Effect.gen(function* () {
           })
           .pipe(Effect.asVoid);
 
-  return SpawnWorkspaceService.of({ inspect, withSpawnStart, startBrief });
+  const askedForWorktree: SpawnWorkspaceServiceShape["askedForWorktree"] = (threadId) =>
+    receipts.getByCommandId(spawnWorktreeCreateCommandId(threadId)).pipe(
+      Effect.map((receipt) => Option.isSome(receipt) && receipt.value.status === "accepted"),
+      Effect.mapError(
+        (error) =>
+          new SpawnWorkspaceError({
+            detail: `Thread ${threadId}'s workspace request could not be read: ${error.message}`,
+            nextStep: "Retry once the command receipts are readable.",
+          }),
+      ),
+    );
+
+  return SpawnWorkspaceService.of({ inspect, withSpawnStart, startBrief, askedForWorktree });
 });
 
 /** Takes the receipt store from its caller; tests provide their own. */

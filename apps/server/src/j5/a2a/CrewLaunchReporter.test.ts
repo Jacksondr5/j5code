@@ -53,6 +53,12 @@ import { participantIdForThread } from "./HomeRegistrar.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import { ParticipantId, SquadronId } from "./contracts.ts";
+import { SpawnWorkspaceService } from "./spawnWorkspace.ts";
+
+/** None of these threads was spawned for a worktree of its own. */
+const notSpawnedForWorktree = Layer.mock(SpawnWorkspaceService)({
+  askedForWorktree: () => Effect.succeed(false),
+});
 
 const squadronId = SquadronId.make("squadron:launch-report");
 const captainThread = ThreadId.make("thread:captain");
@@ -879,6 +885,7 @@ it.effect(
       yield* setSeat(id, "first", [facts]);
       const event = runEvent(threadId, facts);
       const integrated = notifierLayer.pipe(
+        Layer.provideMerge(notSpawnedForWorktree),
         Layer.provideMerge(layer),
         Layer.provideMerge(Layer.mock(CrewCaptainArchiveCascade)({})),
         Layer.provideMerge(Layer.mock(ArtifactWorkspace)({})),

@@ -18,6 +18,8 @@ export interface FakeCheckout {
   readonly isRepo: boolean;
   readonly refName: string | null;
   readonly localBranchNames?: ReadonlyArray<string>;
+  /** Refs git can't resolve; every other ref exists. */
+  readonly missingRefs?: ReadonlyArray<string>;
 }
 
 /** A project that is not a git repository: every default resolves to the caller's checkout. */
@@ -52,6 +54,8 @@ export const fakeSpawnWorkspaceLayer = (options: {
             } as never),
           listLocalBranchNames: () =>
             Effect.succeed([...(options.checkout.localBranchNames ?? [])]),
+          hasCommit: ({ refName }) =>
+            Effect.succeed(!(options.checkout.missingRefs ?? []).includes(refName)),
         }),
         Layer.mock(ThreadLaunchService)({
           launch: (input) =>
