@@ -19,6 +19,8 @@ import * as Layer from "effect/Layer";
 import { HttpRouter, HttpServer } from "effect/unstable/http";
 
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import { ServerConfig } from "../../config.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { peerHttpRouteLayer } from "./PeerHttp.ts";
 import { RosterService } from "./RosterService.ts";
@@ -85,6 +87,8 @@ const makeHandler = (input: {
   /** Holds each poll's body until it is released. */
   readonly pollHeld?: Promise<void>;
   readonly grants?: Array<string>;
+  /** Each origin the probe route hands to the registry. */
+  readonly probes?: Array<string>;
 }) => {
   const auth = Layer.mock(EnvironmentAuth.EnvironmentAuth)({
     authenticateHttpRequest: () =>
@@ -136,6 +140,16 @@ const makeHandler = (input: {
   const routes = peerHttpRouteLayer.pipe(
     Layer.provide(
       Layer.mock(PeerRegistryService)({
+        probe: (origin) =>
+          Effect.sync(() => {
+            input.probes?.push(origin);
+            return {
+              outcome: "reached" as const,
+              origin,
+              environmentId: "environment-vm",
+              label: "Work VM",
+            };
+          }),
         add: (request) =>
           request.origin === "https://dark.example"
             ? Effect.fail(
@@ -277,6 +291,11 @@ const makeHandler = (input: {
       }),
     ),
     Layer.provideMerge(auth),
+    Layer.provide(
+      ServerConfig.layerTest(process.cwd(), { prefix: "j5-peer-http-" }).pipe(
+        Layer.provide(NodeServices.layer),
+      ),
+    ),
     Layer.provide(HttpServer.layerServices),
   );
   return HttpRouter.toWebHandler(routes, { disableLogger: true });
@@ -802,4 +821,57 @@ it("refuses a poll without the peer scope, from a stranger, or on another protoc
     }
   }
   assert.deepStrictEqual(polls, [], "no refused poll acknowledges or hands out anything");
+});
+
+it("lists this server's own addresses and probes one origin, only for a person who can manage peers", async () => {
+  const probes: Array<string> = [];
+  for (const scopes of [[AuthA2APeerScope], [AuthAccessReadScope]]) {
+    const denied = makeHandler({ subject: "person", scopes, probes });
+    try {
+      assert.equal((await denied.handler(get(J5_PEER_API_PATHS.addresses))).status, 403);
+      const probe = await denied.handler(
+        post(J5_PEER_API_PATHS.probe, { origin: "https://vm.example:3773" }),
+      );
+      assert.equal(probe.status, 403);
+    } finally {
+      await denied.dispose();
+    }
+  }
+  assert.deepStrictEqual(probes, [], "a refused caller never makes this server fetch anything");
+
+  const admin = makeHandler({ subject: "person", scopes: [AuthAccessWriteScope], probes });
+  try {
+    const addresses = await admin.handler(get(J5_PEER_API_PATHS.addresses));
+    assert.equal(addresses.status, 200);
+    const { origins } = (await addresses.json()) as { origins: ReadonlyArray<string> };
+    for (const origin of origins) {
+      const host = new URL(origin).hostname.replace(/^\[|\]$/g, "");
+      assert.notMatch(host, /^(127\.|::1$|localhost$)/, `${origin} is not a loopback address`);
+    }
+
+    for (const body of [
+      {},
+      { origin: "https://vm.example:3773/elsewhere" },
+      { origin: "file:///etc/passwd" },
+      { origin: "not a url" },
+    ]) {
+      const refused = await admin.handler(post(J5_PEER_API_PATHS.probe, body));
+      assert.equal(refused.status, 400, JSON.stringify(body));
+    }
+    assert.deepStrictEqual(probes, [], "malformed input is refused before anything is fetched");
+
+    const probed = await admin.handler(
+      post(J5_PEER_API_PATHS.probe, { origin: "https://vm.example:3773" }),
+    );
+    assert.equal(probed.status, 200);
+    assert.deepStrictEqual(await probed.json(), {
+      outcome: "reached",
+      origin: "https://vm.example:3773",
+      environmentId: "environment-vm",
+      label: "Work VM",
+    });
+    assert.deepStrictEqual(probes, ["https://vm.example:3773"], "only the origin asked for");
+  } finally {
+    await admin.dispose();
+  }
 });

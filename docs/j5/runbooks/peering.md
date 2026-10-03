@@ -7,15 +7,16 @@ kind: runbook
 
 How an operator records two J5 servers as each other's peers so their agents can exchange messages. The behavior is defined in [cross-device](../product/cross-device.md) (Peering); this page tells an operator what to type. The web app's Settings → Connections offers the same steps in one action when a client is connected to both servers; the CLI is for headless hosts and scripts.
 
-Peering is mutual and pairwise. Each server ends up holding two things: a credential the other server issued to it, and a record of where the other server is reached. Nothing about how agents address each other changes; a participant on a peer is addressed by the same id as a local one.
+Peering is mutual and pairwise, and a pair travels one of two ways. **Sending directly**: each server holds a credential the other issued and the origin it reaches the other at, and delivers to it. **Polling**: one server cannot be reached, such as a laptop behind an office firewall, so it opens every connection itself. The reachable server issues it a credential and stores its messages; the unreachable one records the reachable one, sends to it directly, and polls it for what it stores. Agents address a participant on a peer by the same id as a local one, and see which server it lives on.
 
 ## Vocabulary
 
 - **Work** and **Home** below are the two servers. Every step names which host it runs on.
 - **Environment id** is a server's stable identity, printed by `j5 a2a peer credential` and shown by the client in Settings → Connections.
 - **Origin** is the URL one server reaches the other at. It is not necessarily the URL your laptop uses: a loopback or SSH-forwarded address that works for the client does not work between servers.
+- **A server's name** is its own: the label its environment descriptor publishes, from the machine's name. Each peer record carries the other server's current name, refreshed each time they talk. To rename a server, rename its machine, then restart J5 on it, which reads its name when it starts: the computer name in System Settings on macOS, `hostnamectl set-hostname --pretty "Work VM"` on Linux. A machine you cannot rename keeps its name; tell your agents what it is in your own instructions ("JM-LT-04213 is my work laptop").
 
-## Peering two servers
+## Peering two servers that send directly
 
 Run each pair of steps on the named host. Every command talks to the local server; run on the server host it needs no token (a temporary local admin session is minted and revoked). From elsewhere, pass `--token` with an `access:write` token.
 
@@ -25,7 +26,7 @@ Run each pair of steps on the named host. Every command talks to the local serve
    j5 a2a peer credential --for <work environment id> --label Work --credential-only > work.credential
    ```
 
-   The credential is a session in Home's auth database with subject `peer:<work environment id>` and the single scope `a2a:peer`, valid for ten years so peering never lapses quietly; Home's record of the peer shows when it expires. It appears in Settings → Connections as `Peer: Work`. Issuing again for the same environment does not revoke the earlier credential yet: the earlier one is revoked when Work proves the new one at Home's hello route (step 2), so a rotation that stops halfway leaves Work able to deliver.
+   The credential is a session in Home's auth database with subject `peer:<work environment id>` and the single scope `a2a:peer`, valid for ten years so peering never lapses quietly; Home's record of the peer shows when it expires. It appears in Settings → Connections as `Peer: Work`; `--label` only names that session, and the peer record takes Work's own name. Issuing again for the same environment does not revoke the earlier credential yet: the earlier one is revoked when Work proves the new one at Home's hello route (step 2), so a rotation that stops halfway leaves Work able to deliver.
 
 2. **On Work**, record Home, proving the credential at Home's origin:
 
@@ -33,13 +34,35 @@ Run each pair of steps on the named host. Every command talks to the local serve
    j5 a2a peer add --peer-origin https://home.example:3773 --credential-file work.credential
    ```
 
-   Work calls Home's hello route with the credential. It records the peer only if Home answers, the credential names Work, and Home is not Work itself. Home names itself in that answer: the record takes Home's own name, the one its clients show, and refreshes it each time the two servers talk. To rename a server, rename its machine (on Linux, `hostnamectl set-hostname --pretty "Work VM"`). Re-adding a known peer rotates its credential; re-adding it at a different origin is refused unless you pass `--replace-origin`, because hello proves the origin is reachable, not that it is the same server. On a refused move the server tries the new credential at the recorded origin too and keeps it only if that origin accepts it; the error says which happened. If it was not kept and the new address was the same server, re-pair at the recorded origin.
+   Work calls Home's hello route with the credential. It records the peer only if Home answers, the credential names Work, and Home is not Work itself. Home names itself in that answer: the record takes Home's own name, the one its clients show, and refreshes it each time the two servers talk; see **A server's name** above to rename one. Re-adding a known peer rotates its credential; re-adding it at a different origin is refused unless you pass `--replace-origin`, because hello proves the origin is reachable, not that it is the same server. On a refused move the server tries the new credential at the recorded origin too and keeps it only if that origin accepts it; the error says which happened. If it was not kept and the new address was the same server, re-pair at the recorded origin.
 
 3. **On Work**, issue Home's credential the same way, and **on Home**, add Work. One Exchange needs both directions, so peering is incomplete until all four steps have run.
 
+## Peering a server that polls
+
+When one server cannot be reached, it polls. Below, **VM** can be reached and **Laptop** cannot. There are two steps, because only Laptop connects.
+
+1. **On VM**, issue Laptop a credential marked for polling:
+
+   ```sh
+   j5 a2a peer credential --for <laptop environment id> --label Laptop --store --credential-only > laptop.credential
+   ```
+
+   Nothing is recorded on VM yet. VM records Laptop as a peer it stores messages for the first time Laptop presents this credential.
+
+2. **On Laptop**, record VM at its origin, to poll:
+
+   ```sh
+   j5 a2a peer add --peer-origin https://vm.example:3773 --credential-file laptop.credential --poll
+   ```
+
+   Laptop says hello at VM's origin, which proves VM is reachable and records Laptop on VM. Laptop then polls VM whenever J5 runs on it, picks up what VM stores for it, and sends its own messages to VM directly. A poll pairing is refused before anything is recorded if VM's J5 is too old to store for a poller; update it there.
+
+A pair's mode changes only by removing the peer on both servers and peering again. Issuing `--store` for a peer recorded to send directly, or adding with `--poll` a peer recorded the other way, is refused with that instruction.
+
 ## Inspecting and ending peering
 
-- `j5 a2a peer list` prints one line per peer: environment id, the peer's own name, origin, recorded at, whether the peer still holds a live session here (`inbound: active` or `inbound: no live session`), and when the credential it issued us expires.
+- `j5 a2a peer list` prints one line per peer: environment id, the peer's own name, how messages travel (`sends directly both ways, at <origin>`, `this server polls it at <origin>`, or `polls this server for its messages`), recorded at, whether the peer still holds a live session here (`inbound: active` or `inbound: no live session`; omitted for a peer this server polls, which never holds one), when the credential it issued us expires, and for a pair that polls: whether it is online (`online, last polled <time>`, within the last two minutes), `offline since <time>` after that, or `has not polled yet` (`not polled yet` for a peer this server polls); how many messages wait for it and since when; and the last error. A server that polls stops on a rejected credential, a protocol mismatch, or a 403/409 refusal, and then prints `polling stopped: <reason>` in place of its health and last error; peer again, or update J5 on the server it names. A server it cannot reach is retried, backing off to once a minute.
 - `j5 a2a peer remove --environment <id>` deletes this server's record of the peer and revokes the session that peer held here. Delivery ends in both directions from this server's point of view; run it on the other server too to clean up its side. Open Exchanges with agents on that server are not closed by removal: a later reply or follow-up to one fails delivery and alarms, and the answerer's silence detector keeps measuring the debt. Close or withdraw them first, or archive the agents involved, if you want them settled (tracked in issue #286).
 - Revoking the `Peer: …` session in Settings → Connections ends inbound delivery from that peer: its deliveries are refused and alarm on its side. This server's own record and outbound delivery are untouched until you `remove` the peer; `peer list` shows the peer as `inbound: no live session` meanwhile.
 

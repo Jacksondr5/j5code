@@ -1,9 +1,14 @@
+// @effect-diagnostics nodeBuiltinImport:off
 import { AuthA2APeerScope, AuthSessionId, EnvironmentId } from "@t3tools/contracts";
 import {
   J5_PEER_API_PATHS,
   PEER_SENDER_LABEL_MAX_CHARS,
+  peerCredentialRejectedReason,
+  peerPollStoppedError,
   type PeerHelloResponse,
 } from "@t3tools/contracts/j5";
+import * as NodeHttp from "node:http";
+
 import { assert, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -11,7 +16,12 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as TestClock from "effect/testing/TestClock";
-import { HttpClient, HttpClientError, HttpClientResponse } from "effect/unstable/http";
+import {
+  FetchHttpClient,
+  HttpClient,
+  HttpClientError,
+  HttpClientResponse,
+} from "effect/unstable/http";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
@@ -668,4 +678,158 @@ it.effect(
         }),
       ),
     ),
+);
+
+it.effect("probes an origin for who answers, or the error it got, within four seconds", () =>
+  Effect.gen(function* () {
+    yield* runJ5A2AMigrations();
+    const registry = yield* PeerRegistryService;
+    assert.deepStrictEqual(yield* registry.probe("https://vm.example:3773"), {
+      outcome: "reached",
+      origin: "https://vm.example:3773",
+      environmentId: "environment-vm",
+      label: "Work VM",
+    });
+    const refused = yield* registry.probe("https://dark.example:3773");
+    assert.equal(refused.outcome, "failed");
+    assert.match(
+      refused.outcome === "failed" ? refused.error : "",
+      /^dark\.example:3773: .*ECONNREFUSED/,
+      "the probe's own error, after the address it tried",
+    );
+    assert.deepStrictEqual(yield* registry.probe("https://not-j5.example"), {
+      outcome: "failed",
+      origin: "https://not-j5.example",
+      error: "not-j5.example: answered HTTP 404",
+    });
+    const stalling = yield* Effect.forkChild(registry.probe("https://10.20.4.17:3773"));
+    yield* TestClock.adjust("4 seconds");
+    const stalled = yield* Fiber.join(stalling);
+    assert.equal(stalled.outcome, "failed");
+    assert.include(
+      stalled.outcome === "failed" ? stalled.error : "",
+      "10.20.4.17:3773: connection timed out after 4",
+    );
+  }).pipe(
+    Effect.provide(
+      makeTestLayer({
+        replies: {
+          "https://vm.example:3773/.well-known/t3/environment": {
+            status: 200,
+            body: { environmentId: "environment-vm", label: "Work VM", platform: {} },
+          },
+          "https://dark.example:3773/.well-known/t3/environment": { unreachable: "ECONNREFUSED" },
+          "https://not-j5.example/.well-known/t3/environment": { status: 404 },
+          "https://10.20.4.17:3773/.well-known/t3/environment": { stall: true },
+        },
+      }),
+    ),
+  ),
+);
+
+it.live("never follows a redirect from the address it probes", () =>
+  Effect.gen(function* () {
+    // A real server and the real fetch client, since following is fetch's own behavior.
+    const hits: Array<string> = [];
+    const server = NodeHttp.createServer((request, response) => {
+      hits.push(request.url ?? "");
+      if (request.url === "/.well-known/t3/environment") {
+        response.writeHead(302, { location: "/elsewhere" }).end();
+        return;
+      }
+      response
+        .writeHead(200, { "content-type": "application/json" })
+        .end(JSON.stringify({ environmentId: "environment-elsewhere", label: "Elsewhere" }));
+    });
+    const port = yield* Effect.acquireRelease(
+      Effect.callback<number>((resume) => {
+        server.listen(0, "127.0.0.1", () => {
+          const address = server.address();
+          resume(
+            Effect.succeed(typeof address === "object" && address !== null ? address.port : 0),
+          );
+        });
+      }),
+      () => Effect.callback<void>((resume) => void server.close(() => resume(Effect.void))),
+    );
+    const origin = `http://127.0.0.1:${String(port)}`;
+    const probed = yield* Effect.gen(function* () {
+      yield* runJ5A2AMigrations();
+      return yield* (yield* PeerRegistryService).probe(origin);
+    }).pipe(
+      Effect.provide(
+        peerRegistryLayer.pipe(
+          Layer.provideMerge(NodeSqliteClient.layer({ filename: ":memory:" })),
+          Layer.provide(FetchHttpClient.layer),
+          Layer.provide(
+            Layer.mock(ServerEnvironment.ServerEnvironment)({
+              getEnvironmentId: Effect.succeed(work),
+            }),
+          ),
+          Layer.provide(Layer.mock(EnvironmentAuth.EnvironmentAuth)({})),
+        ),
+      ),
+    );
+    assert.deepStrictEqual(probed, {
+      outcome: "failed",
+      origin,
+      error: `127.0.0.1:${String(port)}: answered HTTP 302`,
+    });
+    assert.deepStrictEqual(hits, ["/.well-known/t3/environment"], "one fetch, of that one path");
+  }).pipe(Effect.scoped),
+);
+
+it.effect("keeps a poller's stop until it polls again, whatever else is recorded", () =>
+  Effect.gen(function* () {
+    yield* runJ5A2AMigrations();
+    const registry = yield* PeerRegistryService;
+    yield* registry.add({
+      origin: homeOrigin,
+      credential: "home-issued-token",
+      linkMode: "poll",
+      replaceOrigin: false,
+      acceptedAt: timestamp,
+    });
+    const lastError = registry.get(home).pipe(Effect.map((peer) => peer?.lastError ?? null));
+    const stopped = peerPollStoppedError("Home refused the poll (HTTP 409)");
+    yield* registry.recordLastError(home, stopped);
+
+    // A roster read that worked clears the error, and one that met a mismatch records it.
+    yield* registry.recordLastError(home, null);
+    yield* registry.recordLastError(
+      home,
+      "Home runs peer protocol 2 and this server runs 1. Update J5 on this server, then try again.",
+    );
+    assert.equal(yield* lastError, stopped, "neither erases the stop");
+
+    const rejected = peerPollStoppedError(peerCredentialRejectedReason("Home"));
+    yield* registry.recordLastError(home, rejected);
+    assert.equal(yield* lastError, rejected, "a newer stop replaces it");
+
+    yield* registry.recordPolled(home, timestamp);
+    assert.isNull(yield* lastError, "the poller's own successful poll clears it");
+    yield* registry.recordLastError(home, "could not reach Home: ECONNREFUSED");
+    yield* registry.recordLastError(home, null);
+    assert.isNull(yield* lastError, "without a stop, errors come and go as before");
+  }).pipe(
+    Effect.provide(
+      makeTestLayer({
+        replies: {
+          [homeOrigin]: {
+            status: 200,
+            body: {
+              environmentId: home,
+              subject: `peer:${work}`,
+              credentialExpiresAt: homeExpiry,
+              server: { version: "0.0.0-test" },
+              label: "Home",
+              peerProtocolVersion: 1,
+              capabilities: { poll: true },
+            },
+          },
+        },
+        liveSubjects: [],
+      }),
+    ),
+  ),
 );

@@ -1,6 +1,8 @@
 import {
   J5_PEER_API_PATHS,
   PeerPollResponse,
+  peerCredentialRejectedReason,
+  peerPollStoppedError,
   type PeerPollAck,
   type PeerPollRequest,
 } from "@t3tools/contracts/j5";
@@ -36,8 +38,10 @@ import { peerRosterHash, toPeerRoster } from "./peerRoster.ts";
  * through the inbound service exactly as the deliver route does, one at a time
  * and in order. Messages this server sends to the peer still go directly.
  *
- * The loop is the heartbeat: a held poll answers within the hold, so a poll
- * completes at least that often while the server runs. A roster change
+ * The loop is the heartbeat: the storing server answers a poll's headers as
+ * soon as it arrives, so it sees this server present at least once per hold
+ * while it runs, and this server stamps its own last poll when those headers
+ * arrive. A roster change
  * abandons the poll in flight, so the peer learns of an archive or a rename at
  * once.
  */
@@ -110,6 +114,8 @@ type PollExchange =
       readonly kind: "answered";
       readonly response: HttpClientResponse.HttpClientResponse;
       readonly body: string;
+      /** When the headers arrived: the poll's stamp, kept when the body follows. */
+      readonly answeredAt: string;
     };
 
 const make = (daemon: boolean) =>
@@ -219,10 +225,16 @@ const make = (daemon: boolean) =>
             return { kind: "refused", response } satisfies PollExchange;
           }
           // A 200's headers answer the poll: the heartbeat. Only the body is held.
-          yield* peers.recordPolled(environmentId, DateTime.formatIso(yield* DateTime.now));
+          const answeredAt = DateTime.formatIso(yield* DateTime.now);
+          yield* peers.recordPolled(environmentId, answeredAt);
           const body = yield* Effect.result(response.text);
           if (body._tag === "Failure") return { kind: "cut" } satisfies PollExchange;
-          return { kind: "answered", response, body: body.success } satisfies PollExchange;
+          return {
+            kind: "answered",
+            response,
+            body: body.success,
+            answeredAt,
+          } satisfies PollExchange;
         });
         // One bound for the whole held request: past the hold and its margin it
         // was lost, such as across a sleep, and the headers phase ends sooner.
@@ -239,9 +251,10 @@ const make = (daemon: boolean) =>
           yield* peers.recordLastError(environmentId, reason);
           return { kind: "failed", reason } as const;
         }
+        // Only a stop is recorded as one; everything else here is retried.
         const stop = (reason: string) =>
           peers
-            .recordLastError(environmentId, reason)
+            .recordLastError(environmentId, peerPollStoppedError(reason))
             .pipe(Effect.as({ kind: "stopped", reason } as const));
         if (exchanged.kind === "refused") {
           // The headers decide. The body only words the reason, briefly, so one
@@ -253,9 +266,7 @@ const make = (daemon: boolean) =>
           });
           if (mismatch !== null) return yield* stop(mismatch);
           if (response.status === 401) {
-            return yield* stop(
-              `${peer.label} rejected this server's credential (HTTP 401). Peer again to issue a new one.`,
-            );
+            return yield* stop(peerCredentialRejectedReason(peer.label));
           }
           const message = yield* response.json.pipe(
             Effect.map((json) =>
@@ -269,8 +280,7 @@ const make = (daemon: boolean) =>
           );
           if (response.status === 403 || response.status === 409) {
             return yield* stop(
-              message ??
-                `${peer.label} refused the poll (HTTP ${String(response.status)}), so polling stopped until the two servers are peered again.`,
+              message ?? `${peer.label} refused the poll (HTTP ${String(response.status)})`,
             );
           }
           const reason = `${peer.label} answered the poll with HTTP ${String(response.status)}${message === null ? "" : `: ${message}`}`;
@@ -292,10 +302,10 @@ const make = (daemon: boolean) =>
           return { kind: "failed", reason } as const;
         }
         const polled = decoded.success;
-        // The storing server's own name and capabilities.
+        // The storing server's own name and capabilities, under the poll's stamp.
         yield* peers.recordPoll({
           environmentId,
-          receivedAt: DateTime.formatIso(yield* DateTime.now),
+          receivedAt: exchanged.answeredAt,
           protocolVersion: Number(statedPeerProtocol(response.headers) ?? "1"),
           label: polled.label,
           capabilities: polled.capabilities,

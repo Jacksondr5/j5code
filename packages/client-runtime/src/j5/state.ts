@@ -15,6 +15,7 @@ import type {
   PlaybookRunsRequest,
   AddPeerRequest,
   IssuePeerCredentialRequest,
+  PeerProbeRequest,
   RemovePeerRequest,
 } from "@t3tools/contracts/j5";
 import * as Effect from "effect/Effect";
@@ -214,9 +215,13 @@ export function createJ5EnvironmentAtoms<R, E>(
           Effect.flatMap((prepared) => J5Http.answerHumanExchange(prepared, input)),
         ),
     }),
+    // Polls, backlogs and errors change while Connections stays open, and
+    // nothing pushes them, so the list is read again on an interval well inside
+    // the two-minute online window.
     peers: createEnvironmentQueryAtomFamily(runtime, {
       label: "j5:peers",
       staleTimeMs: 30_000,
+      refreshIntervalMs: 30_000,
       execute: (_input: Record<string, never>) =>
         preparedConnection.pipe(Effect.flatMap(J5Http.listPeers)),
     }),
@@ -231,6 +236,16 @@ export function createJ5EnvironmentAtoms<R, E>(
       label: "j5:add-peer",
       execute: (input: AddPeerRequest) =>
         preparedConnection.pipe(Effect.flatMap((prepared) => J5Http.addPeer(prepared, input))),
+    }),
+    listPeerAddresses: createEnvironmentCommand(runtime, {
+      label: "j5:peer-addresses",
+      execute: (_input: Record<string, never>) =>
+        preparedConnection.pipe(Effect.flatMap(J5Http.listPeerAddresses)),
+    }),
+    probePeer: createEnvironmentCommand(runtime, {
+      label: "j5:probe-peer",
+      execute: (input: PeerProbeRequest) =>
+        preparedConnection.pipe(Effect.flatMap((prepared) => J5Http.probePeer(prepared, input))),
     }),
     removePeer: createEnvironmentCommand(runtime, {
       label: "j5:remove-peer",
