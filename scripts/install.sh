@@ -14,6 +14,8 @@
 #   J5CODE_HOME              J5 home directory (default: ~/.j5code). T3CODE_HOME
 #                            belongs to T3 Code and is never read.
 #   T3CODE_INSTALL_BIN_DIR   where the `j5` symlink goes (default: ~/.local/bin)
+#   J5CODE_NO_MODIFY_PATH    set to leave shell startup files alone and only print
+#                            the PATH line to add
 #   T3CODE_RELEASE_BASE_URL  mirror for releases/download (default: GitHub)
 #
 # The archive is unpacked into $J5CODE_HOME/runtime/versions/<version>, the
@@ -236,7 +238,9 @@ esac
 # in step with packages/shared/src/j5/shellProfile.ts.
 marker='# Added by J5 Code; `j5 uninstall` removes this line.'
 profile=
-line="export PATH=\"${bin_dir}:\$PATH\" ${marker}"
+# The directory goes last: `j5` replaces nothing, so it has no reason to take
+# precedence over what is already on PATH.
+line="export PATH=\"\$PATH:${bin_dir}\" ${marker}"
 case "$(basename "${SHELL:-}")" in
   zsh) profile="${ZDOTDIR:-$HOME}/.zshrc" ;;
   bash)
@@ -254,7 +258,7 @@ case "$(basename "${SHELL:-}")" in
   fish)
     profile="${XDG_CONFIG_HOME:-$HOME/.config}/fish/config.fish"
     # --path changes only this shell's PATH, so deleting the line undoes it.
-    line="fish_add_path --path \"${bin_dir}\" ${marker}"
+    line="fish_add_path --path --append \"${bin_dir}\" ${marker}"
     ;;
 esac
 path_hint() {
@@ -262,6 +266,7 @@ path_hint() {
   exit 0
 }
 [ -n "$profile" ] || path_hint
+[ -z "${J5CODE_NO_MODIFY_PATH:-}" ] || path_hint
 if grep -qF "$marker" "$profile" 2>/dev/null; then
   printf '  %s already adds %s to your PATH.\n  Open a new terminal, then run %sj5%s.\n\n' "$profile" "$bin_dir" "$bold" "$reset"
   exit 0
