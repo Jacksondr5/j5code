@@ -312,7 +312,7 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Consequences:**
 
-- **The `t3` link has to stay for now.** Service launchers from before the rename start a new version as `t3`, and in-app updates never replace the launcher. Retiring the link needs a `SERVICE_LAUNCHER_PROTOCOL` bump in the same release, so those installs are told to update their launcher instead of failing.
+- **The `t3` link has to stay for now.** Service launchers from before the rename start a new version as `t3`, and in-app updates never replace the launcher. Retiring the link needs a `SERVICE_LAUNCHER_PROTOCOL` bump in the same release. Servers from after the rename are then told to update their launcher. Servers from before it fail the update with a generic install error and keep running their version.
 - **No downgrade across the rename.** Downgrading below the rename with `j5 update --allow-downgrade` isn't supported.
 - **At each advance:** check new upstream code that locates the executable by name.
 
