@@ -150,7 +150,7 @@ message, ask, reply, plain message, Exchange, intent, urgency, obligation, envel
 
 ### Sending to a busy agent
 
-29. A send to an agent on the same server whose turn is running, and which will not take the message into that turn, returns a notice stating how many messages are waiting for it, how many of them the caller sent, and that each will run as its own turn; a send to an idle agent, to a running Codex Astra turn, or to an agent on a peer server returns no notice, and no send is refused because of the backlog.
+29. A send to an agent whose turn is running, and which will not take the message into that turn, returns a notice stating how many messages are waiting for it, how many of them the caller sent, and that each will run as its own turn; a send to an idle agent or to a running Codex Astra turn returns no notice, and no send is refused because of the backlog.
 
 ## Scenarios
 

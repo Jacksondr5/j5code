@@ -10,6 +10,7 @@ import {
   deliveryMessageId,
   isDeliveryMessageId,
 } from "./DeliveryTransport.ts";
+import { formatReceiverBacklogNotice } from "./EnvelopeFormatter.ts";
 import { Participant, type LedgerMessageId, type ParticipantId } from "./contracts.ts";
 
 export interface ReceiverBacklog {
@@ -54,10 +55,16 @@ export const readReceiverBacklog = Effect.fn("j5.a2a.readReceiverBacklog")(
     ]);
     if (target.thread.archivedAt !== null) return undefined;
     const sent = deliveryMessageId(input.sentMessageId);
-    const active = latestActiveRun(target);
-    // A run started by this very message means the receiver was idle when it arrived.
-    if (active === undefined || active.userMessageId === sent) return undefined;
+    if (latestActiveRun(target) === undefined) return undefined;
+    // This message already started a run (the receiver was idle) or has run since;
+    // a replayed send reports the current state, not the state when it was first sent.
+    if (target.runs.some((run) => run.userMessageId === sent && run.status !== "queued"))
+      return undefined;
     if (astraPeerSteeringRun(target, "peer") !== undefined) return undefined;
+    // A held queue drains only when someone resumes the thread, so "after its current
+    // turn ends" would be false. Telling the sender about held receivers is #272.
+    if (target.runs.some((run) => run.status === "queued" && run.queueHeld === true))
+      return undefined;
 
     const queued = target.runs.filter(
       (run) => run.status === "queued" && isDeliveryMessageId(run.userMessageId),
@@ -87,3 +94,20 @@ export const readReceiverBacklog = Effect.fn("j5.a2a.readReceiverBacklog")(
       ),
     ),
 );
+
+/** Adds the backlog notice to a send result when the message will wait behind the receiver's turn. */
+export const withDeliveryNotice = Effect.fn("j5.a2a.withDeliveryNotice")(function* <
+  R extends { readonly messageId: LedgerMessageId },
+>(result: R, input: { readonly receiverId: ParticipantId; readonly callerThreadId: ThreadId }) {
+  const backlog = yield* readReceiverBacklog({ ...input, sentMessageId: result.messageId });
+  return backlog === undefined
+    ? result
+    : {
+        ...result,
+        deliveryNotice: formatReceiverBacklogNotice({
+          receiverId: input.receiverId,
+          waiting: backlog.waiting,
+          fromYou: backlog.fromCaller,
+        }),
+      };
+});

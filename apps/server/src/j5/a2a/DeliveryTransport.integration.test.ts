@@ -958,6 +958,8 @@ it.effect("measures the backlog a send waits behind on a busy receiver", () =>
       yield* finishTestTurn(harness, target.threadId);
 
       yield* startBusyTurn(target);
+      // A replayed send of a message that has already run reports the current state.
+      assert.isUndefined(yield* backlogFor(first));
       // Sent but not yet queued by the worker: it still waits.
       assert.deepStrictEqual(yield* backlogFor(second), { waiting: 1, fromCaller: 1 });
       yield* deliver(second, callerId);
@@ -975,6 +977,24 @@ it.effect("measures the backlog a send waits behind on a busy receiver", () =>
           receiverId: ParticipantId.make("agent:j5-a2a-delivery-backlog-elsewhere"),
           callerThreadId,
           sentMessageId: third,
+        }),
+      );
+    }).pipe(Effect.provide(makeTestLayer(harness)));
+  }),
+);
+
+it.effect("reports no backlog while the receiver's queue is held", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const target = yield* seedTarget("backlog-held");
+      yield* holdTargetQueue(target);
+      // A held queue waits for someone to resume the thread, not for the turn to end.
+      assert.isUndefined(
+        yield* readReceiverBacklog({
+          receiverId: target.receiverId,
+          callerThreadId: ThreadId.make("thread:j5-a2a-delivery-backlog-held-caller"),
+          sentMessageId: target.messageId,
         }),
       );
     }).pipe(Effect.provide(makeTestLayer(harness)));
