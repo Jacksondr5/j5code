@@ -398,6 +398,42 @@ it.effect("inherits the Registrar home from a proposed-plan parent at durable la
   }).pipe(Effect.provide(harness.layer));
 });
 
+it.effect("registers a plan child in its parent's Squadron over the one the launch sent", () => {
+  const registrations: Array<{ readonly squadronId?: string }> = [];
+  const harness = makeHarness({
+    findRegisteredHome: () =>
+      Effect.succeed({
+        squadronId: "squadron:parent-home" as never,
+        participantId: "agent:parent" as never,
+      }),
+    registerAtDurableLaunch: (input) => {
+      registrations.push(input);
+      return Effect.succeed({
+        squadronId: "squadron:parent-home" as never,
+        participantId: "agent:child" as never,
+      });
+    },
+  });
+  return Effect.gen(function* () {
+    const launches = yield* ThreadLaunch.ThreadLaunchService;
+    yield* launches.launch({
+      ...launchInput({
+        command: "command:launch:plan-home-over-sent",
+        thread: "thread:launch:plan-home-over-sent",
+        squadronId: "squadron:sent",
+      }),
+      sourcePlanRef: {
+        threadId: ThreadId.make("thread:launch:parent"),
+        planId: "plan:launch:parent" as never,
+      },
+    });
+    assert.deepStrictEqual(
+      registrations.map((registration) => registration.squadronId),
+      ["squadron:parent-home"],
+    );
+  }).pipe(Effect.provide(harness.layer));
+});
+
 it.effect("keeps a proposed-plan child of a no-home legacy parent native", () => {
   const harness = makeHarness({
     registerAtDurableLaunch: () => Effect.die("legacy no-home child must not register"),
