@@ -9,7 +9,7 @@ export const J5_BRANDING = {
   cli: {
     /** Historical npm package; releases ship as archives from 0.0.44 on. */
     packageName: "@jacksondr5/j5code",
-    /** The command `install.sh` puts on PATH (a symlink to the archive's `t3`). */
+    /** The command on PATH, and the name of the archive's executable. */
     command: "j5",
   },
   desktop: {

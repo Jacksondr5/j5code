@@ -5,7 +5,7 @@
 #   curl -fsSL https://github.com/Jacksondr5/j5code/releases/latest/download/install.sh | sh
 #
 # J5 publishes archives for macOS (Apple silicon) and Linux x64. The archive's
-# executable keeps upstream's internal `t3` name; the command on PATH is `j5`.
+# executable is `j5`; releases before the rename named it `t3`.
 #
 # Environment:
 #   T3CODE_CHANNEL           release train to follow: stable, nightly, or preview
@@ -212,7 +212,8 @@ else
   step "Extracting J5 Code..."
   tar -xzf "${staging}/${archive}" -C "$staging" --strip-components=1
   rm -f "${staging}/${archive}" "${staging}/SHA256SUMS"
-  "${staging}/t3" --version >/dev/null || fail "the downloaded executable does not run"
+  if [ -e "${staging}/j5" ]; then exe=j5; else exe=t3; fi
+  "${staging}/${exe}" --version >/dev/null || fail "the downloaded executable does not run"
   printf '%s\n' "$version" > "${staging}/.install-complete"
 
   rm -rf "$target_dir"
@@ -222,7 +223,8 @@ fi
 
 step "Setting up the j5 command..."
 mkdir -p "$bin_dir"
-ln -sfn "${target_dir}/t3" "${bin_dir}/j5"
+if [ -e "${target_dir}/j5" ]; then exe=j5; else exe=t3; fi
+ln -sfn "${target_dir}/${exe}" "${bin_dir}/j5"
 if "$interactive"; then printf '\r\033[2K' >&2; fi
 printf '  %sInstalled J5 Code %s%s\n\n' "$green" "$version" "$reset" >&2
 case ":${PATH}:" in

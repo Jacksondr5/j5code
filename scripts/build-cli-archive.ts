@@ -467,7 +467,8 @@ const buildCliArchive = Effect.fn("buildCliArchive")(function* (input: {
   const path = yield* Path.Path;
   const repoRoot = yield* RepoRoot;
   const serverDir = path.join(repoRoot, "apps/server");
-  const executableName = input.platform === "win" ? "t3.exe" : "t3";
+  const executableName = input.platform === "win" ? "j5.exe" : "j5";
+  const hostExecutableName = input.platform === "win" ? "t3.exe" : "t3";
   // tsdown suffixes cross-built executables with their target (t3-darwin-x64);
   // a host build is plain t3. Prefer the exact target when both exist.
   const targetKey = `${input.platform === "mac" ? "darwin" : input.platform}-${input.arch}`;
@@ -483,7 +484,7 @@ const buildCliArchive = Effect.fn("buildCliArchive")(function* (input: {
   const builtExecutable = (yield* fs.exists(targetExecutable))
     ? targetExecutable
     : targetKey === hostKey
-      ? path.join(serverDir, "dist-exe", executableName)
+      ? path.join(serverDir, "dist-exe", hostExecutableName)
       : targetExecutable;
   const webClient = path.join(serverDir, "dist/client");
   const resourceMonitorDir = Option.getOrElse(input.resourceMonitorDir, () =>
@@ -525,6 +526,11 @@ const buildCliArchive = Effect.fn("buildCliArchive")(function* (input: {
   }
   if (input.platform !== "win") {
     yield* fs.chmod(executablePath, 0o755);
+    // J5: service launchers and servers from before the rename look for `t3`
+    // in a new version's directory, and in-app updates never replace the
+    // launcher. Drop this link only together with a SERVICE_LAUNCHER_PROTOCOL
+    // bump, so those installs are told to update their launcher.
+    yield* fs.symlink(executableName, path.join(contentDir, "t3"));
   }
 
   yield* fs.makeDirectory(input.outputDir, { recursive: true });

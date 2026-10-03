@@ -10,7 +10,7 @@ step. Stop and ask the owner wherever it says to.
   self-contained server for macOS (Apple silicon) and Linux x64 to its
   [GitHub Release](https://github.com/Jacksondr5/j5code/releases), plus
   `install.sh` and `SHA256SUMS`. The installer links the `j5` command into
-  `~/.local/bin`; the program it points to is named `t3` inside the release.
+  `~/.local/bin`.
 - **Service name:** the background service becomes **`j5code.service`**
   (systemd, Linux) and **`codes.jackson.j5code.service`** (launchd, macOS). It
   used to be `t3code.service` / `com.t3tools.t3code.service`, which collided with
