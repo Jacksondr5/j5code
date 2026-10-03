@@ -35,6 +35,7 @@ import {
 import { guardHttpResponseWriteErrors } from "./httpResponseErrorGuard.ts";
 import { configureMcpHttpConnections } from "./mcpHttpConnections.ts";
 import { fixPath } from "./os-jank.ts";
+import { appendOwnCliToPath } from "./j5/cli/agentPath.ts";
 import { websocketRpcRouteLayer } from "./ws.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import * as NodePtyAdapter from "./terminal/NodePtyAdapter.ts";
@@ -668,6 +669,8 @@ const makeServerLayer = Layer.unwrap(
     const launcherLayer = ServiceLauncherClient.layer;
 
     yield* fixPath();
+    // J5: agents and terminals can run this server's own `j5` (#397, FORK.md case 53).
+    yield* appendOwnCliToPath;
 
     const httpListeningLayer = Layer.effectDiscard(
       Effect.gen(function* () {
