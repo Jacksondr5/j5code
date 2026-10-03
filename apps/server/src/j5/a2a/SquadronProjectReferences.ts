@@ -73,6 +73,19 @@ const referenceFromRow = (row: SquadronProjectReferenceRow): SquadronProjectRefe
   createdAt: row.created_at,
 });
 
+/** Every Squadron that references the project, oldest first. */
+export const listSquadronReferencesForProject = Effect.fn(
+  "j5.a2a.squadronProjectReferences.listForProject",
+)(function* (sql: SqlClient.SqlClient, projectId: ProjectId) {
+  const rows = yield* sql<SquadronProjectReferenceRow>`
+    SELECT squadron_id, project_id, ordinal, created_at
+    FROM j5_a2a_squadron_project_reference
+    WHERE project_id = ${projectId}
+    ORDER BY created_at, squadron_id
+  `;
+  return rows.map(referenceFromRow);
+});
+
 export const layer: Layer.Layer<SquadronProjectReferences, never, SqlClient.SqlClient> =
   Layer.effect(
     SquadronProjectReferences,
@@ -103,17 +116,8 @@ export const layer: Layer.Layer<SquadronProjectReferences, never, SqlClient.SqlC
         },
       );
 
-      const listForProject = Effect.fn("j5.a2a.squadronProjectReferences.listForProject")(
-        function* (projectId: ProjectId) {
-          const rows = yield* sql<SquadronProjectReferenceRow>`
-        SELECT squadron_id, project_id, ordinal, created_at
-        FROM j5_a2a_squadron_project_reference
-        WHERE project_id = ${projectId}
-        ORDER BY created_at, squadron_id
-      `;
-          return rows.map(referenceFromRow);
-        },
-      );
+      const listForProject = (projectId: ProjectId) =>
+        listSquadronReferencesForProject(sql, projectId);
 
       const replaceForSquadron = Effect.fn("j5.a2a.squadronProjectReferences.replaceForSquadron")(
         function* (input: ReplaceSquadronProjectReferencesInput) {
