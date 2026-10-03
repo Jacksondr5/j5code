@@ -228,6 +228,37 @@ ln -sfn "${target_dir}/${exe}" "${bin_dir}/j5"
 if "$interactive"; then printf '\r\033[2K' >&2; fi
 printf '  %sInstalled J5 Code %s%s\n\n' "$green" "$version" "$reset" >&2
 case ":${PATH}:" in
-  *":${bin_dir}:"*) printf '  Run %sj5%s to get started.\n\n' "$bold" "$reset" ;;
-  *) printf '  Add %s to your PATH, then run %sj5%s.\n\n' "$bin_dir" "$bold" "$reset" ;;
+  *":${bin_dir}:"*) printf '  Run %sj5%s to get started.\n\n' "$bold" "$reset"; exit 0 ;;
 esac
+
+# J5: put bin_dir on PATH for new terminals with one marked line in the shell's
+# startup file. `j5 uninstall` removes lines ending with this marker; keep it
+# in step with packages/shared/src/j5/shellProfile.ts.
+marker='# Added by J5 Code; `j5 uninstall` removes this line.'
+profile=
+case "$(basename "${SHELL:-}")" in
+  zsh)
+    profile="${ZDOTDIR:-$HOME}/.zshrc"
+    line="export PATH=\"${bin_dir}:\$PATH\" ${marker}"
+    ;;
+  bash)
+    # macOS terminals start login shells, which read .bash_profile instead.
+    if [ "$platform" = darwin ]; then profile="$HOME/.bash_profile"; else profile="$HOME/.bashrc"; fi
+    line="export PATH=\"${bin_dir}:\$PATH\" ${marker}"
+    ;;
+  fish)
+    profile="$HOME/.config/fish/config.fish"
+    line="fish_add_path \"${bin_dir}\" ${marker}"
+    ;;
+esac
+if [ -z "$profile" ]; then
+  printf '  Add %s to your PATH, then run %sj5%s.\n\n' "$bin_dir" "$bold" "$reset"
+  exit 0
+fi
+if ! grep -qF "$marker" "$profile" 2>/dev/null; then
+  mkdir -p "$(dirname "$profile")"
+  # Start on a fresh line when the file doesn't end with one.
+  if [ -s "$profile" ] && [ -n "$(tail -c 1 "$profile")" ]; then printf '\n' >> "$profile"; fi
+  printf '%s\n' "$line" >> "$profile"
+fi
+printf '  Added %s to your PATH in %s.\n  Open a new terminal, then run %sj5%s.\n\n' "$bin_dir" "$profile" "$bold" "$reset"

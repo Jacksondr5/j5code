@@ -6,6 +6,7 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodeHttp from "node:http";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
+import { J5_PATH_MARKER } from "@t3tools/shared/j5/shellProfile";
 import { describe, expect, it } from "vite-plus/test";
 
 // util-linux's script gives the real installer a terminal without a browser or extra packages.
@@ -66,9 +67,15 @@ describe.skipIf(
         "'",
         "'\\''",
       );
+      // The installer edits the shell's startup file, so give it a scratch home and shell.
+      const userHome = NodePath.join(root, "user");
+      await NodeFSP.mkdir(userHome);
+      await NodeFSP.writeFile(NodePath.join(userHome, ".bashrc"), "alias ll='ls -l'");
       const child = NodeChildProcess.spawn("script", ["-qec", `sh '${installer}'`, "/dev/null"], {
         env: {
           ...process.env,
+          HOME: userHome,
+          SHELL: "/bin/bash",
           TERM: "xterm",
           NO_COLOR: "1",
           T3CODE_VERSION: version,
@@ -120,6 +127,10 @@ describe.skipIf(
           );
           expect(await NodeFSP.readdir(versions)).toEqual([version]);
           expect(await NodeFSP.readdir(NodePath.join(root, "bin"))).toEqual(["j5"]);
+          expect(await NodeFSP.readFile(NodePath.join(userHome, ".bashrc"), "utf8")).toBe(
+            `alias ll='ls -l'\nexport PATH="${NodePath.join(root, "bin")}:$PATH" ${J5_PATH_MARKER}\n`,
+          );
+          expect(output).toContain(`in ${NodePath.join(userHome, ".bashrc")}`);
         }
         await expect(NodeFSP.access(NodePath.join(root, "t3-home"))).rejects.toThrow();
       } finally {

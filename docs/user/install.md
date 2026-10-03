@@ -18,9 +18,11 @@ curl -fsSL https://github.com/Jacksondr5/j5code/releases/latest/download/install
 ```
 
 This puts `j5` in `~/.local/bin` and keeps downloaded versions and your data in
-`~/.j5code` (set `J5CODE_HOME` to use another directory). If your shell reports
-`command not found` afterwards, that directory is not on your `PATH` yet; the
-installer prints the line to add. Set `T3CODE_VERSION` to pin an exact version.
+`~/.j5code` (set `J5CODE_HOME` to use another directory). If `~/.local/bin` isn't
+on your `PATH`, the installer adds one line to your shell's startup file (zsh,
+bash, or fish), so `j5` works in new terminals. `j5 uninstall` removes that line.
+For other shells, add the directory yourself. Set `T3CODE_VERSION` to pin an exact
+version.
 
 Upgrading a server that was installed from npm (`@jacksondr5/j5code` 0.0.43 or
 earlier)? Follow [Migrating to release archives](./migrating-to-release-archives.md)

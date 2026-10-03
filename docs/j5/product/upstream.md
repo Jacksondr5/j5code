@@ -344,18 +344,21 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 - **The executable.** Each release archive's executable is `t3`, and the `t3` command on `PATH` links to it.
 - **Updates.** Only `t3 update` moves that link. An update from the app leaves the command on the old version.
+- **`PATH`.** When the link's directory isn't on `PATH`, the installer prints a line for the person to add.
 
 **J5:**
 
 - **The executable is `j5`.** The command, the file it runs, and the process are all `j5`. Archive file names keep upstream's `t3-<version>-<platform>` names.
 - **Existing servers are moved once, by hand.** The rename is launcher protocol 4. A server from before it is refused the update from the app with a message to run `j5 update` on its machine; that command installs the new version and replaces the service's launcher. Each archive carries a `t3` link to `j5` so those servers can run that check and that command.
 - **The command follows the service.** When the background service's server starts as the committed version, after an update or any restart, it repoints the installer's `~/.local/bin/j5` at itself.
+- **The installer puts it on `PATH`.** When `~/.local/bin` isn't on `PATH`, the installer adds one marked line to the shell's startup file (zsh, bash, or fish), and `j5 uninstall` removes it.
 
 **Why:**
 
 - **The name.** J5 shouldn't point at `t3` at all. With the old name, `~/.local/bin/j5` ran a file called `t3` and the server showed up as `t3`, which is confusing next to an installed T3 Code. Archive names stay, because existing servers download updates by those names and people never see them.
 - **The one-time step.** An update from the app never replaces the service's launcher, and an old launcher starts every new version as `t3`. Shipping a `t3` link indefinitely would leave the migration unfinished, and removing it later would break those servers. Refusing the update with a clear message moves each server and its launcher across together.
 - **Following updates.** On the dogfood box the command ran 0.0.44 while the service ran 0.0.47, so agents called a CLI three versions behind their server (#398). Upstream has the same gap with `t3`; the fix is in the give-back backlog (#276).
+- **The installer and `PATH`.** A stock macOS shell doesn't have `~/.local/bin` on `PATH`, so a fresh install's `j5` wasn't found until the person edited their profile (#397). Jackson chose a profile line over linking into `/usr/local/bin`, which needs an admin prompt and a root-owned file the server couldn't repoint.
 
 **Consequences:**
 
@@ -367,7 +370,7 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 - **`j5 service status` asks for a repair after an update from the app.** The service's unit still names the launcher it was installed with, and the now-current `j5` reports that as needing `j5 service install`. That is accurate: running it replaces the launcher, with a restart. An agent that follows the suggestion restarts its own server. Keeping the launcher current is a separate improvement.
 - **At each advance:** check new upstream code that locates the executable by name, upstream's `SERVICE_LAUNCHER_PROTOCOL` (J5's number must stay above it), and that the startup hook still runs after `prepareTrial`.
 
-**Decided:** Jackson, 2026-10-02 (#403) and 2026-10-03 (the protocol bump and the `j5 update` step; #398). Recorded in FORK.md cases 50 and 51.
+**Decided:** Jackson, 2026-10-02 (#403) and 2026-10-03 (the protocol bump and the `j5 update` step; #398; #397). Recorded in FORK.md cases 50 to 52.
 
 ### Awaiting a decision
 

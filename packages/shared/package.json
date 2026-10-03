@@ -227,6 +227,10 @@
       "types": "./src/j5/crewRuntimeRequests.ts",
       "import": "./src/j5/crewRuntimeRequests.ts"
     },
+    "./j5/shellProfile": {
+      "types": "./src/j5/shellProfile.ts",
+      "import": "./src/j5/shellProfile.ts"
+    },
     "./composerTrigger": {
       "types": "./src/composerTrigger.ts",
       "import": "./src/composerTrigger.ts"
