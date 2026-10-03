@@ -707,6 +707,7 @@ indicate approval. The deleted hook remains explicitly marked.
 | `scripts/build-desktop-artifact.ts`                                                                        | R       | B, S                                          |
 | `scripts/dev-runner.test.ts`                                                                               | R       | H                                             |
 | `scripts/dev-runner.ts`                                                                                    | R       | H                                             |
+| `scripts/export-android-icons.ts`                                                                          | N       | B                                             |
 | `vite.config.ts`                                                                                           | R       | H                                             |
 | `apps/web/src/composer-logic.test.ts`                                                                      | N       | 49                                            |
 | `apps/web/src/components/chat/ComposerCommandMenu.tsx`                                                     | A       | 49, Saved-agent mentions                      |
@@ -714,6 +715,13 @@ indicate approval. The deleted hook remains explicitly marked.
 | `packages/shared/src/composerInlineTokens.ts`                                                              | A       | 49, Saved-agent mentions                      |
 | `apps/mobile/src/features/threads/ComposerCommandPopover.tsx`                                              | A       | 49, Saved-agent mentions                      |
 | `apps/mobile/src/features/threads/ThreadComposer.tsx`                                                      | A       | 49, Role library                              |
+| `assets/dev/app-icon.icon/Assets/annotations.svg`                                                          | N       | B                                             |
+| `assets/dev/app-icon.icon/Assets/text.svg`                                                                 | N       | B                                             |
+| `assets/dev/app-icon.icon/icon.json`                                                                       | N       | B                                             |
+| `assets/nightly/app-icon.icon/Assets/text.svg`                                                             | N       | B                                             |
+| `assets/nightly/app-icon.icon/icon.json`                                                                   | N       | B                                             |
+| `assets/prod/app-icon.icon/Assets/text.svg`                                                                | N       | B                                             |
+| `assets/prod/app-icon.icon/icon.json`                                                                      | N       | B                                             |
 
 The 2026-09-08 import correction adds bounded file-content schemas and shared selection preparation in `packages/client-runtime/src/state/agentPersonas.ts`, plus import/removal commands in the existing orchestration atom module. Clients send selected JSON contents to the chosen environment, never local paths as server destinations. J5 library code validates and atomically persists imports under a process-wide mutation permit, overlays them on source definitions, and preserves launch snapshots on replacement/removal. The Settings registrations remain thin mounts. Focused tests cover nested file selections, single-file selection, atomic rejection, conflicts, persisted imports, concurrent sessions, restoration, snapshots, and RPC scopes. Native picker/browser interaction still requires an authorized client pass.
 
