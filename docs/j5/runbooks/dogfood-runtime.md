@@ -359,7 +359,7 @@ again. Everything written after the snapshot is lost, as with any restore.
 
 Nothing deletes these snapshots, and each is a full copy of the database. Delete
 `statev2.pre-j5-*.sqlite` by hand once the new version has proven itself. A file ending in
-`.partial` is a copy that was interrupted; the next start replaces it.
+`.partial` is a copy that was interrupted; delete it too.
 
 ## Backups
 

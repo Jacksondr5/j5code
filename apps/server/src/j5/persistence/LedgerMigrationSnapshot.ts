@@ -110,7 +110,8 @@ export const snapshotBeforeJ5LedgerMigration = Effect.fn("snapshotBeforeJ5Ledger
 
     const fail = failFor(pendingId);
     const snapshotPath = ledgerMigrationSnapshotPath(path, dbPath, pendingId);
-    const partialPath = `${snapshotPath}.partial`;
+    // Per process: two processes starting together must each publish only their own complete copy.
+    const partialPath = `${snapshotPath}.${process.pid}.partial`;
 
     yield* Effect.gen(function* () {
       const { size } = yield* fs.stat(dbPath);
@@ -121,7 +122,7 @@ export const snapshotBeforeJ5LedgerMigration = Effect.fn("snapshotBeforeJ5Ledger
         migrationId: pendingId,
       });
       const [elapsed, published] = yield* Effect.gen(function* () {
-        // A crash mid-backup leaves this behind.
+        // A crashed attempt by a process with this id leaves this behind.
         yield* fs.remove(partialPath, { force: true });
         yield* Effect.tryPromise({
           try: async () => {

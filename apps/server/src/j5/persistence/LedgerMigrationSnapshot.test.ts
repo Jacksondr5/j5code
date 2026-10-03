@@ -203,12 +203,12 @@ it.effect("replaces an older snapshot and a partial file left by a crashed attem
     Effect.gen(function* () {
       createLedgerDatabase(dbPath, 29);
       NodeFS.writeFileSync(snapshotPath, "an older snapshot");
-      NodeFS.writeFileSync(`${snapshotPath}.partial`, "half a backup");
+      NodeFS.writeFileSync(`${snapshotPath}.${process.pid}.partial`, "half a backup");
 
       yield* snapshotBeforeJ5LedgerMigration(dbPath, STAND_IN);
 
       assert.deepStrictEqual(readContent(snapshotPath), readContent(dbPath));
-      assert.isFalse(NodeFS.existsSync(`${snapshotPath}.partial`));
+      assert.isFalse(NodeFS.existsSync(`${snapshotPath}.${process.pid}.partial`));
     }),
   ),
 );
@@ -253,7 +253,7 @@ it.effect("fails, and publishes nothing, when the snapshot cannot be written", (
       assert.strictEqual(error.migrationId, 30);
       assert.include(error.message, snapshotPath);
       assert.include(error.message, "The migration has not run.");
-      assert.isFalse(NodeFS.existsSync(`${snapshotPath}.partial`));
+      assert.isFalse(NodeFS.existsSync(`${snapshotPath}.${process.pid}.partial`));
       assert.deepStrictEqual(readContent(dbPath), before);
     }),
   ),
