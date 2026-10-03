@@ -128,7 +128,7 @@ describe.skipIf(
           expect(await NodeFSP.readdir(versions)).toEqual([version]);
           expect(await NodeFSP.readdir(NodePath.join(root, "bin"))).toEqual(["j5"]);
           expect(await NodeFSP.readFile(NodePath.join(userHome, ".bashrc"), "utf8")).toBe(
-            `alias ll='ls -l'\nexport PATH="${NodePath.join(root, "bin")}:$PATH" ${J5_PATH_MARKER}\n`,
+            `alias ll='ls -l'\nexport PATH="$PATH:${NodePath.join(root, "bin")}" ${J5_PATH_MARKER}\n`,
           );
           expect(output).toContain(`in ${NodePath.join(userHome, ".bashrc")}`);
         }
@@ -207,9 +207,26 @@ describe.skipIf(
     try {
       const config = NodePath.join(root, "user/xdg/fish/config.fish");
       expect(await NodeFSP.readFile(config, "utf8")).toBe(
-        `fish_add_path --path "${bin}" ${J5_PATH_MARKER}\n`,
+        `fish_add_path --path --append "${bin}" ${J5_PATH_MARKER}\n`,
       );
       expect(output).toContain(`in ${config}`);
+    } finally {
+      await NodeFSP.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("leaves startup files alone when asked to", async () => {
+    const { root, home, bin, output } = await runInstaller(
+      async ({ home }) => {
+        await NodeFSP.writeFile(NodePath.join(home, ".zshrc"), "alias ll='ls -l'\n");
+      },
+      () => ({ SHELL: "/bin/zsh", J5CODE_NO_MODIFY_PATH: "1" }),
+    );
+    try {
+      expect(output).toContain(`Add ${bin} to your PATH`);
+      expect(await NodeFSP.readFile(NodePath.join(home, ".zshrc"), "utf8")).toBe(
+        "alias ll='ls -l'\n",
+      );
     } finally {
       await NodeFSP.rm(root, { recursive: true, force: true });
     }
