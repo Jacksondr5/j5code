@@ -307,16 +307,19 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 **Upstream:**
 
 - **The executable.** Each release archive's executable is `t3`, and the `t3` command on `PATH` links to it.
+- **Updates.** Only `t3 update` moves that link. An update from the app leaves the command on the old version.
 
 **J5:**
 
 - **The executable is `j5`.** The command, the file it runs, and the process are all `j5`. Archive file names keep upstream's `t3-<version>-<platform>` names.
 - **Existing servers are moved once, by hand.** The rename is launcher protocol 4. A server from before it is refused the update from the app with a message to run `j5 update` on its machine; that command installs the new version and replaces the service's launcher. Each archive carries a `t3` link to `j5` so those servers can run that check and that command.
+- **The command follows the service.** When the background service's server starts as the committed version, after an update or any restart, it repoints the installer's `~/.local/bin/j5` at itself.
 
 **Why:**
 
 - **The name.** J5 shouldn't point at `t3` at all. With the old name, `~/.local/bin/j5` ran a file called `t3` and the server showed up as `t3`, which is confusing next to an installed T3 Code. Archive names stay, because existing servers download updates by those names and people never see them.
 - **The one-time step.** An update from the app never replaces the service's launcher, and an old launcher starts every new version as `t3`. Shipping a `t3` link indefinitely would leave the migration unfinished, and removing it later would break those servers. Refusing the update with a clear message moves each server and its launcher across together.
+- **Following updates.** On the dogfood box the command ran 0.0.44 while the service ran 0.0.47, so agents called a CLI three versions behind their server (#398). Upstream has the same gap with `t3`; the fix is in the give-back backlog (#276).
 
 **Consequences:**
 
@@ -324,9 +327,10 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 - **The launcher reads protocol-3 state files.** The old CLI's `j5 update` writes one before starting the new launcher. This is a second line in upstream's `serviceProtocol.ts`.
 - **The `t3` link is temporary.** Removing it is tracked in #440. After that, a server still on 0.0.47 or earlier gets a generic install error and needs the installer and `j5 service install`.
 - **No downgrade across the rename.** Downgrading below the rename with `j5 update --allow-downgrade` isn't supported.
-- **At each advance:** check new upstream code that locates the executable by name, and upstream's `SERVICE_LAUNCHER_PROTOCOL`: J5's number must stay above it.
+- **Only the default link is repointed.** The repoint covers only the installer's default link, `~/.local/bin/j5`, and only when it already points into the home's runtime. A link placed elsewhere stays where it is.
+- **At each advance:** check new upstream code that locates the executable by name, upstream's `SERVICE_LAUNCHER_PROTOCOL` (J5's number must stay above it), and that the startup hook still runs after `prepareTrial`.
 
-**Decided:** Jackson, 2026-10-02 (#403) and 2026-10-03 (the protocol bump and the `j5 update` step). Recorded in FORK.md case 50.
+**Decided:** Jackson, 2026-10-02 (#403) and 2026-10-03 (the protocol bump and the `j5 update` step; #398). Recorded in FORK.md cases 50 and 51.
 
 ### Awaiting a decision
 
