@@ -644,6 +644,75 @@ it.effect("delivers a machine's send to its agent receiver instead of withdrawin
   }),
 );
 
+it.effect("delivers each message the attachments from its own ledger's sent event", () =>
+  Effect.gen(function* () {
+    const delivered = yield* Ref.make<ReadonlyArray<readonly [string, ReadonlyArray<string>]>>([]);
+    const transport: A2ADeliveryTransportShape = {
+      deliverAgent: (input) =>
+        Ref.update(delivered, (entries) => [
+          ...entries,
+          [input.messageId, (input.attachments ?? []).map((attachment) => attachment.id)] as const,
+        ]),
+      cancelAgent: () => Effect.succeed("cancelled" as const),
+      deliverPeer: () => Effect.die("peer delivery is not under test"),
+      deliverHuman: () => Effect.void,
+    };
+    yield* Effect.gen(function* () {
+      yield* runJ5A2AMigrations();
+      // Two ledgers built the same way number their events alike, so both
+      // message.sent facts land on the same seq.
+      const sendIn = Effect.fn(function* (name: string) {
+        const squadronId = SquadronId.make(`squadron:delivery:ledger-${name}`);
+        const ledgerSender: AgentParticipant = {
+          kind: "agent",
+          id: ParticipantId.make(`agent:delivery-sender-${name}`),
+          threadId: ThreadId.make(`thread:delivery-sender-${name}`),
+        };
+        const ledgerReceiver: AgentParticipant = {
+          kind: "agent",
+          id: ParticipantId.make(`agent:delivery-receiver-${name}`),
+          threadId: ThreadId.make(`thread:delivery-receiver-${name}`),
+        };
+        yield* (yield* A2ALedger).createSquadron({
+          squadron: { id: squadronId, name: `Ledger ${name}`, createdAt: timestamp },
+        });
+        yield* join(squadronId, ledgerSender, `ledger-${name}-sender`);
+        yield* join(squadronId, ledgerReceiver, `ledger-${name}-receiver`);
+        return yield* (yield* A2ASendService).send({
+          commandId: CommCommandId.make(`command:delivery:ledger-${name}`),
+          senderThreadId: ledgerSender.threadId,
+          to: ledgerReceiver.id,
+          message: `Attachment from ledger ${name}`,
+          attachments: [
+            {
+              type: "file",
+              id: `attachment-${name}`,
+              name: `${name}.txt`,
+              mimeType: "text/plain",
+              sizeBytes: 1,
+            },
+          ],
+          acceptedAt: timestamp,
+        });
+      });
+      const first = yield* sendIn("one");
+      const second = yield* sendIn("two");
+      const sentSeqs = yield* (yield* SqlClient.SqlClient)<{ readonly sent_seq: number }>`
+        SELECT sent_seq FROM j5_a2a_delivery ORDER BY sent_seq
+      `;
+      assert.lengthOf(sentSeqs, 2);
+      assert.equal(sentSeqs[0]?.sent_seq, sentSeqs[1]?.sent_seq);
+
+      const worker = yield* A2ADeliveryWorker;
+      assert.equal((yield* worker.runOnce)?.state, "delivered");
+      assert.equal((yield* worker.runOnce)?.state, "delivered");
+      const byMessage = new Map(yield* Ref.get(delivered));
+      assert.deepStrictEqual(byMessage.get(first.messageId), ["attachment-one"]);
+      assert.deepStrictEqual(byMessage.get(second.messageId), ["attachment-two"]);
+    }).pipe(Effect.provide(makeTestLayer(transport)));
+  }),
+);
+
 it.effect("delivers to the human through the idempotent inbox-data transport", () =>
   Effect.gen(function* () {
     const database = NodeSqliteClient.layer({ filename: ":memory:" });
