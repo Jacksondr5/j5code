@@ -6,11 +6,14 @@ import * as Path from "effect/Path";
 import {
   HostProcessEnvironment,
   HostProcessExecutablePath,
+  HostProcessInvokedAs,
   HostProcessIsExecutable,
   HostProcessPlatform,
+  HostProcessWorkingDirectory,
 } from "@t3tools/shared/hostProcess";
 
-import { exposeOwnCliToAgents } from "./agentPath.ts";
+import { resolveLauncherPath } from "../../cli/update.ts";
+import { exposeOwnCliToAgents, withoutAgentCliOnPath } from "./agentPath.ts";
 
 // A home with two installed versions; returns each version's executable.
 const makeHome = Effect.gen(function* () {
@@ -81,6 +84,56 @@ it.layer(NodeServices.layer)("j5 for the server's agents", (it) => {
 
       assert.equal(environment["PATH"], "/usr/bin");
       assert.isFalse(yield* fs.exists(path.join(baseDir, "bin")));
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("puts the desktop app's script first for the app's server, after PATH hydration", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const { baseDir } = yield* makeHome;
+      const bin = path.join(baseDir, "bin");
+      yield* fs.makeDirectory(bin, { recursive: true });
+      yield* fs.writeFileString(path.join(bin, "j5"), "#!/bin/sh\n");
+      // What the app's server has after rebuilding PATH from a profile that
+      // prepends the person's own directories.
+      const environment: NodeJS.ProcessEnv = { PATH: `/home/u/.local/bin:${bin}:/usr/bin` };
+
+      yield* startServer({
+        baseDir,
+        environment,
+        executable: "/Applications/J5 Code.app/Contents/MacOS/J5 Code",
+        isExecutable: false,
+      });
+
+      assert.equal(environment["PATH"], `${bin}:/home/u/.local/bin:/usr/bin`);
+      assert.equal(yield* fs.readFileString(path.join(bin, "j5")), "#!/bin/sh\n");
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("j5 update finds the person's link, not the agents' one", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const { baseDir, running } = yield* makeHome;
+      const agents = path.join(baseDir, "bin/j5");
+      const installer = path.join(baseDir, "local-bin/j5");
+      for (const link of [agents, installer]) {
+        yield* fs.makeDirectory(path.dirname(link), { recursive: true });
+        yield* fs.symlink(running, link);
+      }
+
+      // Typed as `j5` in a J5 terminal, where the agents' directory is first.
+      const found = yield* withoutAgentCliOnPath(baseDir, resolveLauncherPath).pipe(
+        Effect.provideService(HostProcessEnvironment, {
+          PATH: `${path.dirname(agents)}:${path.dirname(installer)}`,
+        }),
+        Effect.provideService(HostProcessInvokedAs, "j5"),
+        Effect.provideService(HostProcessWorkingDirectory, baseDir),
+        Effect.provideService(HostProcessPlatform, "linux"),
+      );
+
+      assert.equal(found, installer);
     }).pipe(Effect.scoped),
   );
 });

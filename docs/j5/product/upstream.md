@@ -317,7 +317,7 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 - **Existing servers are moved once, by hand.** The rename is launcher protocol 4. A server from before it is refused the update from the app with a message to run `j5 update` on its machine; that command installs the new version and replaces the service's launcher. Each archive carries a `t3` link to `j5` so those servers can run that check and that command.
 - **The command follows the service.** When the background service's server starts as the committed version, after an update or any restart, it repoints the installer's `~/.local/bin/j5` at itself.
 - **The installer puts it on `PATH`.** When `~/.local/bin` isn't on `PATH`, the installer adds one marked line to the shell's startup file (zsh, bash, or fish) that puts the directory last, and `j5 uninstall` removes it. A profile it can't write gets the printed hint instead, and `J5CODE_NO_MODIFY_PATH` skips the edit.
-- **Agents get the server's own `j5`.** A release server keeps `<home>/bin/j5` pointed at itself and puts `<home>/bin` first on the `PATH` its agents and terminals inherit.
+- **Agents get the server's own `j5`.** A release server keeps `<home>/bin/j5` pointed at itself, and every server that finds a `j5` there puts `<home>/bin` first on the `PATH` its agents and terminals inherit.
 
 **Why:**
 
@@ -335,6 +335,9 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 - **No downgrade across the rename.** Downgrading below the rename with `j5 update --allow-downgrade` isn't supported.
 - **Only the default link is repointed.** The repoint covers only the installer's default link, `~/.local/bin/j5`, and only when it already points into the home's runtime. A link placed elsewhere stays where it is.
 - **One `j5` per home for agents.** If two servers share a home, the last one started owns `<home>/bin/j5`.
+- **`j5 service status` asks for a repair after an update from the app.** The service's unit still names the launcher it was installed with, and the now-current `j5` reports that as needing `j5 service install`. That is accurate: running it replaces the launcher, with a restart. An agent that follows the suggestion restarts its own server. Keeping the launcher current is a separate improvement.
+- **`j5 uninstall` removes the `PATH` line only with its command.** The installer's link and its line go when the link belongs to the home being uninstalled, so uninstalling another home, such as an agent's scratch home, leaves them.
+- **A terminal can still find another `j5` first.** The directory is first for what the server starts directly. A shell that re-reads the person's profile can put their own directories, and a `j5` in them, ahead again.
 - **At each advance:** check new upstream code that locates the executable by name, upstream's `SERVICE_LAUNCHER_PROTOCOL` (J5's number must stay above it), and that the startup hook still runs after `prepareTrial`.
 
 **Decided:** Jackson, 2026-10-02 (#403) and 2026-10-03 (the protocol bump and the `j5 update` step; #398; #397). Recorded in FORK.md cases 50 to 53.
