@@ -2,6 +2,7 @@ import {
   OrchestrationV2ProviderFailure,
   type OrchestrationV2Run,
   type OrchestrationV2StoredEvent,
+  type OrchestrationV2ThreadProjection,
   RunId,
   ThreadId,
 } from "@t3tools/contracts";
@@ -199,24 +200,17 @@ const noticeMessage = (payload: SilenceNoticePayload, exchangeId: ExchangeId): s
 };
 
 /**
- * The run that owes the reply to a delivered message. A message queued behind a busy receiver,
- * or sent to an idle one, is its own run's user message, and only that run can leave it
- * unanswered. A message steered into a running turn has no run of its own, so it falls to the
- * latest run that had not ended when it was delivered.
+ * The run a delivered message belongs to is the run that owes its reply: the run the message
+ * started or queued as, the turn it was steered into, or the turn a queued message was promoted
+ * into. Undefined when the thread holds no run for the message.
  */
-const runForDelivery = (
-  runs: ReadonlyArray<OrchestrationV2Run>,
-  deliveredAt: string,
+const owingRun = (
+  thread: Pick<OrchestrationV2ThreadProjection, "runs" | "messages">,
   messageId: LedgerMessageId,
 ): OrchestrationV2Run | undefined => {
-  const carried = deliveryMessageId(messageId);
-  const delivered = DateTime.toEpochMillis(DateTime.makeUnsafe(deliveredAt));
-  return (
-    runs.find((run) => run.userMessageId === carried) ??
-    runs.findLast(
-      (run) => run.completedAt === null || delivered <= DateTime.toEpochMillis(run.completedAt),
-    )
-  );
+  const delivered = deliveryMessageId(messageId);
+  const runId = thread.messages.find((message) => message.id === delivered)?.runId;
+  return thread.runs.find((run) => run.id === runId);
 };
 
 const makeLayer = (daemon: boolean) =>
@@ -229,6 +223,9 @@ const makeLayer = (daemon: boolean) =>
       const events = yield* EventSinkV2;
       const crews = yield* AgentCrewInstanceService;
       const sql = yield* SqlClient.SqlClient;
+
+      const readRunsAndMessages = (threadId: ThreadId) =>
+        threads.getThreadRecords(threadId, ["runs", "messages"], { messageRoles: ["user"] });
 
       /**
        * A seat's failed run reaches its Captain as a Crew fact, from the launch report or the
@@ -359,7 +356,7 @@ const makeLayer = (daemon: boolean) =>
               dependency ?? {
                 ...base,
                 state: "turn-ended-no-reply" as const,
-                // Lifecycle queries only select deliveries this run carried or took mid-turn.
+                // Lifecycle handling only reports the run the delivered message belongs to.
                 // The delivery/reconciliation path exclusively owns never-processed.
                 processing: "processed" as const,
               }
@@ -474,8 +471,7 @@ const makeLayer = (daemon: boolean) =>
         const subjectId = ParticipantId.make(row.receiver_id);
         const messageId = LedgerMessageId.make(row.message_id);
         const threadId = ThreadId.make(row.thread_id);
-        const projection = yield* threads.getThreadProjection(threadId);
-        const run = runForDelivery(projection.runs, row.delivered_at, messageId);
+        const run = owingRun(yield* readRunsAndMessages(threadId), messageId);
         let payload: SilenceNoticePayload;
         if (run === undefined) {
           payload = {
@@ -597,7 +593,7 @@ const makeLayer = (daemon: boolean) =>
           ORDER BY created_at, squadron_id, exchange_id
         `;
         const appended: Array<StoredCommEvent> = [];
-        let runs: ReadonlyArray<OrchestrationV2Run> | undefined;
+        let thread: Pick<OrchestrationV2ThreadProjection, "runs" | "messages"> | undefined;
         for (const exchange of inbound) {
           const delivered = yield* sql<DeliveredMessageRow>`
             SELECT
@@ -616,12 +612,8 @@ const makeLayer = (daemon: boolean) =>
           if (delivery === undefined) continue;
           // An Exchange stays open after its notice; later runs need not read the thread for it.
           if (yield* alreadyNoticed(exchange, delivery.message_id)) continue;
-          // Another run may carry this message as its own; that run's end reports the silence.
-          const carried = deliveryMessageId(LedgerMessageId.make(delivery.message_id));
-          if (run.userMessageId !== carried) {
-            runs ??= (yield* threads.getThreadProjection(stored.event.threadId)).runs;
-            if (runs.some((candidate) => candidate.userMessageId === carried)) continue;
-          }
+          thread ??= yield* readRunsAndMessages(stored.event.threadId);
+          if (owingRun(thread, LedgerMessageId.make(delivery.message_id))?.id !== run.id) continue;
           const payload = yield* deriveNotice(
             run,
             stored.event.threadId,

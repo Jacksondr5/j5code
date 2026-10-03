@@ -103,7 +103,27 @@ const decodeMessageSentPayload = Schema.decodeUnknownEffect(
   Schema.fromJsonString(MessageSentPayload),
 );
 
-const makeTestLayer = (runs: ReadonlyArray<OrchestrationV2Run> = []) => {
+const defaultRunId = RunId.make("run:silence:test");
+
+/**
+ * The receiver's thread as the detector reads it. Each test layer starts it over with the
+ * default run; `seedInbound` records which run a delivered ask belongs to.
+ */
+const thread: {
+  runs: Array<OrchestrationV2Run>;
+  messages: Array<{ readonly id: MessageId; readonly runId: RunId }>;
+} = { runs: [], messages: [] };
+
+const threadMock = (overrides: Partial<ThreadManagementService["Service"]> = {}) => {
+  thread.runs = [runOf(terminalEvent("completed"))];
+  thread.messages = [];
+  return Layer.mock(ThreadManagementService)({
+    getThreadRecords: (() => Effect.succeed(thread)) as never,
+    ...overrides,
+  });
+};
+
+const makeTestLayer = () => {
   const database = NodeSqliteClient.layer({ filename: ":memory:" });
   const ledger = ledgerLayer.pipe(Layer.provide(database));
   const send = sendLayer.pipe(
@@ -111,10 +131,9 @@ const makeTestLayer = (runs: ReadonlyArray<OrchestrationV2Run> = []) => {
     Layer.provide(ledger),
     Layer.provide(database),
   );
-  const threads = Layer.mock(ThreadManagementService)({
+  const threads = threadMock({
     getThreadProjection: () =>
       Effect.succeed({
-        runs,
         turnItems: [
           {
             runId: RunId.make("run:silence:test"),
@@ -154,7 +173,6 @@ const makeDaemonTestLayer = (
   storedEvents: (input?: {
     readonly afterSequence?: number;
   }) => Stream.Stream<OrchestrationV2StoredEvent>,
-  runs: ReadonlyArray<OrchestrationV2Run>,
   latestSequence: EventSinkV2Shape["latestSequence"],
 ) => {
   const database = SqlitePersistenceMemory;
@@ -164,11 +182,7 @@ const makeDaemonTestLayer = (
     Layer.provide(ledger),
     Layer.provide(database),
   );
-  const threads = Layer.mock(ThreadManagementService)({
-    getThreadProjection: () =>
-      Effect.succeed({ runs, turnItems: [] } as unknown as OrchestrationV2ThreadProjection),
-    streamStoredEventsFrom: storedEvents,
-  });
+  const threads = threadMock({ streamStoredEventsFrom: storedEvents });
   const transport = Layer.succeed(
     A2ADeliveryTransport,
     A2ADeliveryTransport.of({
@@ -392,7 +406,7 @@ const terminalEvent = (
     readonly userMessageId: MessageId;
     readonly completedAtSecond: number;
   } = {
-    id: RunId.make("run:silence:test"),
+    id: defaultRunId,
     userMessageId: MessageId.make("message:silence:upstream"),
     completedAtSecond: 3,
   },
@@ -442,9 +456,16 @@ const readNotices = Effect.fn("test.j5.a2a.silence.readNotices")(function* () {
   );
 });
 
-const seedInbound = Effect.fn("test.j5.a2a.silence.seedInbound")(function* (deliveredAt: number) {
+const seedInbound = Effect.fn("test.j5.a2a.silence.seedInbound")(function* (
+  deliveredAt: number,
+  // The run the delivered ask belongs to; null when the thread never took the message.
+  owner: RunId | null = defaultRunId,
+) {
   const exchange = yield* openExchange(waiter, subject.id, `inbound-${deliveredAt}`);
   assert.isNotNull(exchange.exchangeId);
+  if (owner !== null) {
+    thread.messages.push({ id: deliveryMessageId(exchange.messageId), runId: owner });
+  }
   const deliveryEvent = yield* markDelivered(
     exchange.messageId,
     exchange.exchangeId!,
@@ -570,6 +591,8 @@ const runOf = (stored: OrchestrationV2StoredEvent): OrchestrationV2Run => {
   return stored.event.payload;
 };
 
+const carrierRunId = RunId.make("run:silence:carrier");
+
 const otherRun = (name: string, completedAtSecond: number, sequence = 100) =>
   terminalEvent("completed", sequence, {
     id: RunId.make(`run:silence:${name}`),
@@ -577,22 +600,25 @@ const otherRun = (name: string, completedAtSecond: number, sequence = 100) =>
     completedAtSecond,
   });
 
-const carrierRun = (messageId: LedgerMessageId, completedAtSecond: number, sequence = 101) =>
-  terminalEvent("completed", sequence, {
-    id: RunId.make("run:silence:carrier"),
+const carrierRun = (
+  messageId: LedgerMessageId,
+  completedAtSecond: number,
+  sequence = 101,
+  status: "completed" | "cancelled" = "completed",
+) =>
+  terminalEvent(status, sequence, {
+    id: carrierRunId,
     userMessageId: deliveryMessageId(messageId),
     completedAtSecond,
   });
 
-it.effect("waits for the run that carries a queued ask before reporting silence (#433)", () => {
-  // The ask's id is only known after the send, so the projection reads the runs through this.
-  const runs: Array<OrchestrationV2Run> = [];
-  return Effect.gen(function* () {
+it.effect("waits for the run that carries a queued ask before reporting silence (#433)", () =>
+  Effect.gen(function* () {
     yield* seed();
-    const ask = yield* seedInbound(2);
+    const ask = yield* seedInbound(2, carrierRunId);
     const busy = otherRun("busy", 3);
     const carrier = carrierRun(ask.messageId, 5);
-    runs.push(runOf(busy), runOf(carrier));
+    thread.runs = [runOf(busy), runOf(carrier)];
     const detector = yield* A2ASilenceDetector;
 
     yield* detector.handleStoredEvent(busy);
@@ -602,44 +628,65 @@ it.effect("waits for the run that carries a queued ask before reporting silence 
     const notices = yield* readNotices();
     assert.lengthOf(notices, 1);
     assert.equal(notices[0]?.state, "turn-ended-no-reply");
-    assert.equal(notices[0]?.runId, runOf(carrier).id);
-  }).pipe(Effect.provide(makeTestLayer(runs)));
-});
+    assert.equal(notices[0]?.runId, carrierRunId);
+  }).pipe(Effect.provide(makeTestLayer())),
+);
 
-it.effect("reconciling stays quiet while the run that carries the ask is still queued", () => {
-  const runs: Array<OrchestrationV2Run> = [];
-  return Effect.gen(function* () {
+it.effect("reconciling stays quiet while the run that carries the ask is still queued", () =>
+  Effect.gen(function* () {
     yield* seed();
-    const ask = yield* seedInbound(2);
-    runs.push(
+    const ask = yield* seedInbound(2, carrierRunId);
+    thread.runs = [
       { ...runOf(carrierRun(ask.messageId, 0)), status: "queued", completedAt: null },
       { ...runOf(otherRun("later", 4)), status: "cancelled" },
-    );
+    ];
     yield* (yield* A2ASilenceDetector).reconcileOpenExchanges;
     assert.lengthOf(yield* readNotices(), 0, "a later run ending is not the ask's run ending");
-  }).pipe(Effect.provide(makeTestLayer(runs)));
-});
+  }).pipe(Effect.provide(makeTestLayer())),
+);
 
-it.effect("reports the carrying run when its delivery is recorded after it ended", () => {
-  const runs: Array<OrchestrationV2Run> = [];
-  return Effect.gen(function* () {
+it.effect("reports the carrying run when its delivery is recorded after it ended", () =>
+  Effect.gen(function* () {
     yield* seed();
-    const ask = yield* seedInbound(4);
+    const ask = yield* seedInbound(4, carrierRunId);
     const carrier = carrierRun(ask.messageId, 3, 100);
     const later = otherRun("later", 5, 101);
-    runs.push(runOf(carrier), { ...runOf(later), status: "queued", completedAt: null });
+    thread.runs = [runOf(carrier), { ...runOf(later), status: "queued", completedAt: null }];
     const detector = yield* A2ASilenceDetector;
 
     yield* detector.handleStoredEvent(carrier);
     yield* detector.handleDeliveryEvent(ask.deliveryEvent);
-    runs[1] = runOf(later);
+    thread.runs = [runOf(carrier), runOf(later)];
     yield* detector.handleStoredEvent(later);
 
     const notices = yield* readNotices();
     assert.lengthOf(notices, 1);
-    assert.equal(notices[0]?.runId, runOf(carrier).id);
-  }).pipe(Effect.provide(makeTestLayer(runs)));
-});
+    assert.equal(notices[0]?.runId, carrierRunId);
+  }).pipe(Effect.provide(makeTestLayer())),
+);
+
+it.effect("follows a queued ask promoted into the running turn (#435)", () =>
+  Effect.gen(function* () {
+    yield* seed();
+    const running = otherRun("running", 5, 101);
+    // Promotion cancels the queued run and moves its message into the running turn.
+    const ask = yield* seedInbound(2, runOf(running).id);
+    const promoted = carrierRun(ask.messageId, 3, 100, "cancelled");
+    thread.runs = [{ ...runOf(running), status: "running", completedAt: null }, runOf(promoted)];
+    const detector = yield* A2ASilenceDetector;
+
+    yield* detector.handleStoredEvent(promoted);
+    yield* detector.reconcileOpenExchanges;
+    assert.lengthOf(yield* readNotices(), 0, "the turn that took the ask can still answer it");
+
+    thread.runs = [runOf(running), runOf(promoted)];
+    yield* detector.handleStoredEvent(running);
+    const notices = yield* readNotices();
+    assert.lengthOf(notices, 1);
+    assert.equal(notices[0]?.state, "turn-ended-no-reply");
+    assert.equal(notices[0]?.runId, runOf(running).id);
+  }).pipe(Effect.provide(makeTestLayer())),
+);
 
 it.effect("no-ops when A9 drops after the A3 read but before its serialized append", () =>
   Effect.gen(function* () {
@@ -706,7 +753,7 @@ it.effect("keeps both historical facts when A3 appends before A9 drops", () =>
 it.effect("emits never-processed when no turn started after the latest delivery", () =>
   Effect.gen(function* () {
     yield* seed();
-    const inbound = yield* seedInbound(4);
+    const inbound = yield* seedInbound(4, null);
     yield* (yield* A2ASilenceDetector).handleDeliveryEvent(inbound.deliveryEvent);
     const notices = yield* readNotices();
     assert.equal(notices[0]?.state, "turn-ended-no-reply");
@@ -719,9 +766,6 @@ it.effect("emits never-processed when no turn started after the latest delivery"
 
 it.effect("daemon retries its stored-event stream and advances the durable cursor", () => {
   const stored = terminalEvent("completed", 130);
-  assert.equal(stored.event.type, "run.updated");
-  if (stored.event.type !== "run.updated") return Effect.die("expected run.updated fixture");
-  const run = stored.event.payload;
   let streamCalls = 0;
   const observedCursors: Array<number> = [];
   const gateEffect = Effect.gen(function* () {
@@ -740,7 +784,6 @@ it.effect("daemon retries its stored-event stream and advances the durable curso
         if ((input?.afterSequence ?? 0) >= stored.sequence) return Stream.never;
         return Stream.fromEffect(Deferred.await(gate).pipe(Effect.as(stored)));
       },
-      [run],
       () => Effect.succeed(75),
     );
 
@@ -792,7 +835,6 @@ it.effect(
             Stream.concat(Stream.never),
           );
         },
-        [],
         () =>
           Effect.suspend(() => {
             reads += 1;
@@ -842,7 +884,6 @@ it.effect("backs off exponentially across consecutive lifecycle stream failures"
           Stream.never,
         );
       },
-      [],
       () => Effect.succeed(75),
     );
 
@@ -1124,6 +1165,7 @@ it.effect("addresses a silence notice to a waiter on a peer server through the p
       ],
     });
     assert.equal((yield* (yield* A2ADeliveryWorker).runOnce)?.state, "delivered");
+    thread.messages.push({ id: deliveryMessageId(messageId), runId: defaultRunId });
 
     const appended = yield* (yield* A2ASilenceDetector).handleStoredEvent(
       terminalEvent("completed"),
