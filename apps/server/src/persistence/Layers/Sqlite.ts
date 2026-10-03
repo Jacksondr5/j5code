@@ -8,6 +8,7 @@ import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import { initializeV2Database } from "../initializeV2Database.ts";
 import { runJ5CompatibleUpstreamMigrations } from "../../j5/persistence/UpstreamMigrationCompatibility.ts";
 import { runJ5A2AMigrations } from "../../j5/a2a/Migrations.ts";
+import { snapshotBeforeJ5LedgerMigration } from "../../j5/persistence/LedgerMigrationSnapshot.ts";
 import { ServerConfig } from "../../config.ts";
 
 const setup = Layer.effectDiscard(
@@ -28,6 +29,7 @@ export const makeSqlitePersistenceLive = Effect.fn("makeSqlitePersistenceLive")(
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   yield* fs.makeDirectory(path.dirname(dbPath), { recursive: true });
+  yield* snapshotBeforeJ5LedgerMigration(dbPath).pipe(Effect.orDie);
 
   return Layer.provideMerge(
     setup,

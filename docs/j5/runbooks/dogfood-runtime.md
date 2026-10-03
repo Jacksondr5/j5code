@@ -332,6 +332,35 @@ server against the two files at once. Ledger writes made between the snapshot an
 the accepted cost, which is why updates happen at quiet moments. If the bad version never actually
 started (build failure), skip the restore and just rebuild at the previous commit.
 
+### Restoring the automatic pre-migration snapshot
+
+Some J5 ledger migrations rewrite data that cannot be rebuilt by hand; migration 030 is the first.
+Before one of them runs, the server copies the database to
+`userdata/statev2.pre-j5-<migration>.sqlite`, for example `statev2.pre-j5-030.sqlite`, and logs the
+path, the size and how long it took. It does this on its own at startup, whether or not the update
+script ran. If the copy fails (a full disk, for instance) the server refuses to start and the
+migration does not run; free space and start it again.
+
+To go back to the state before that migration:
+
+```sh
+systemctl --user stop j5code.service              # 1. stop the server
+cd ~/.j5code/userdata
+mkdir -p ../db-aside
+mv statev2.sqlite statev2.sqlite-wal statev2.sqlite-shm ../db-aside/ 2>/dev/null
+mv statev2.pre-j5-030.sqlite statev2.sqlite       # 2. move the snapshot back
+cd ~/j5code && git checkout <previous-commit>     # 3. run the previous version
+# rebuild as in the rollback steps above, then:
+systemctl --user start j5code.service
+```
+
+Run the previous version, not the new one: the new one would take a fresh snapshot and migrate
+again. Everything written after the snapshot is lost, as with any restore.
+
+Nothing deletes these snapshots, and each is a full copy of the database. Delete
+`statev2.pre-j5-*.sqlite` by hand once the new version has proven itself. A file ending in
+`.partial` is a copy that was interrupted; delete it too.
+
 ## Backups
 
 Interim story until the client-pulled backup design lands: the nightly snapshot timer plus the
