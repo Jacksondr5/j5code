@@ -11,6 +11,12 @@ name: J5 Release
 #     fetches. packages/shared/src/cliRelease.ts, the installer, `j5 update`,
 #     the background service, and SSH remote launch all download from here.
 # J5 no longer publishes to npm (FORK.md release-archive case).
+#
+# A build whose version is `<x.y.z>-preview.<yyyymmdd>.<n>` publishes a preview:
+# a GitHub pre-release that never becomes "latest", so the stable installer
+# URL, `j5 update`, and desktop updates never pick it up. Maintainers cut one
+# from an unmerged branch to test installs and updates before a release; see
+# docs/j5/runbooks/macos-packaging.md.
 
 on:
   workflow_dispatch:
@@ -34,6 +40,7 @@ jobs:
     outputs:
       ref: ${{ steps.source.outputs.ref }}
       version: ${{ steps.source.outputs.version }}
+      preview: ${{ steps.source.outputs.preview }}
       published: ${{ steps.source.outputs.published }}
     steps:
       - uses: actions/github-script@v8
@@ -61,14 +68,17 @@ jobs:
               const { data } = await github.rest.repos.getContent({ ...context.repo, path, ref: run.head_sha });
               return JSON.parse(Buffer.from(data.content, 'base64').toString()).version;
             }));
-            if (!/^\d+\.\d+\.\d+$/.test(versions[0]) || versions.some(version => version !== versions[0])) {
-              throw new Error(`This workflow requires one stable version across ${paths.join(', ')}; found ${versions.join(', ')}.`);
+            // The preview pattern is the one packages/shared/src/cliRelease.ts and
+            // scripts/build-desktop-artifact.ts recognise.
+            const preview = /^\d+\.\d+\.\d+-preview\.\d{8}\.\d+$/.test(versions[0]);
+            if ((!preview && !/^\d+\.\d+\.\d+$/.test(versions[0])) || versions.some(version => version !== versions[0])) {
+              throw new Error(`This workflow requires one stable or preview version across ${paths.join(', ')}; found ${versions.join(', ')}.`);
             }
             const version = versions[0];
             // Release archives replace the npm package from 0.0.44 on; an older
             // version number would be offered as a downgrade to every installed
             // J5 and would collide with the npm-era tags.
-            const [major, minor, patch] = version.split('.').map(Number);
+            const [major, minor, patch] = version.split('-', 1)[0].split('.').map(Number);
             if (major === 0 && minor === 0 && patch < 44) {
               throw new Error(`J5 release archives start at 0.0.44; ${version} belongs to the npm era.`);
             }
@@ -101,10 +111,11 @@ jobs:
             }
             core.setOutput('ref', run.head_sha);
             core.setOutput('version', version);
+            core.setOutput('preview', String(preview));
             core.setOutput('published', String(published));
             core.notice(published
               ? `J5 Code ${version} is already published; nothing to do.`
-              : `Publishing J5 Code ${version} from ${run.head_sha}.`);
+              : `Publishing J5 Code ${version}${preview ? ' as a preview' : ''} from ${run.head_sha}.`);
 
   verify:
     needs: resolve
@@ -306,6 +317,7 @@ jobs:
       GH_REPO: ${{ github.repository }}
       RELEASE_VERSION: ${{ needs.resolve.outputs.version }}
       RELEASE_SHA: ${{ needs.resolve.outputs.ref }}
+      RELEASE_PREVIEW: ${{ needs.resolve.outputs.preview }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -331,7 +343,12 @@ jobs:
           set -euo pipefail
           test -f "release-assets/J5-Code-$RELEASE_VERSION-arm64.dmg"
           test -f "release-assets/J5-Code-$RELEASE_VERSION-arm64.zip"
-          grep -Fx "version: $RELEASE_VERSION" release-assets/latest-mac.yml
+          # A preview desktop build has no update feed, so it emits no metadata.
+          if [[ "$RELEASE_PREVIEW" == true ]]; then
+            test ! -e release-assets/latest-mac.yml
+          else
+            grep -Fx "version: $RELEASE_VERSION" release-assets/latest-mac.yml
+          fi
           archives=(
             "t3-$RELEASE_VERSION-darwin-arm64.tar.gz"
             "t3-$RELEASE_VERSION-linux-x64.tar.gz"
@@ -352,7 +369,21 @@ jobs:
             test "$tag_sha" = "$RELEASE_SHA"
           fi
           if ! gh release view "$tag" >/dev/null 2>&1; then
-            cat > "$RUNNER_TEMP/release-notes.md" <<EOF
+            if [[ "$RELEASE_PREVIEW" == true ]]; then
+              cat > "$RUNNER_TEMP/release-notes.md" <<EOF
+          J5 Code $RELEASE_VERSION (preview)
+
+          A maintainers' test build cut from an unreleased branch. It can be broken, gets no fixes, and is never offered as an update.
+
+          - Command-line server, fresh install:
+            \`curl -fsSL https://github.com/$GH_REPO/releases/download/$tag/install.sh | T3CODE_VERSION=$RELEASE_VERSION sh\`
+          - Command-line server, from an installed \`j5\`: \`j5 update $RELEASE_VERSION\` in a terminal.
+          - macOS app: the DMG below. It replaces an installed J5 Code and never updates itself; reinstall a stable DMG to go back.
+
+          Built from $RELEASE_SHA.
+          EOF
+            else
+              cat > "$RUNNER_TEMP/release-notes.md" <<EOF
           J5 Code $RELEASE_VERSION
 
           - macOS Apple Silicon app, Developer ID signed and notarized by Apple.
@@ -364,7 +395,14 @@ jobs:
 
           Built from $RELEASE_SHA.
           EOF
+            fi
             gh release create "$tag" --target "$RELEASE_SHA" --title "J5 Code $RELEASE_VERSION" --notes-file "$RUNNER_TEMP/release-notes.md" --draft
           fi
           gh release upload "$tag" release-assets/* --clobber
-          gh release edit "$tag" --draft=false --latest
+          # A preview must never become "latest": the stable installer URL and
+          # desktop updates resolve through it.
+          if [[ "$RELEASE_PREVIEW" == true ]]; then
+            gh release edit "$tag" --draft=false --prerelease --latest=false
+          else
+            gh release edit "$tag" --draft=false --latest
+          fi
