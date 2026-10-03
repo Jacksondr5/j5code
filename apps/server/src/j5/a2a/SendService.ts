@@ -209,23 +209,6 @@ export class A2AExchangeAlreadyAnsweredError extends Schema.TaggedError<A2AExcha
   }
 }
 
-export class A2ACrossSquadronReplyInvariantError extends Schema.TaggedError<A2ACrossSquadronReplyInvariantError>()(
-  "A2ACrossSquadronReplyInvariantError",
-  {
-    exchangeId: Schema.String,
-    exchangeSquadronId: Schema.String,
-    senderSquadronId: Schema.String,
-    replyPersisted: Schema.Boolean,
-  },
-) {
-  override get message(): string {
-    const replyState = this.replyPersisted
-      ? "A durable reply is already persisted for this command under the cross-Squadron state; this replay sent nothing new."
-      : "A cross-Squadron reply cannot record the required closure fact, so nothing was sent.";
-    return `Exchange ${this.exchangeId} belongs to ${this.exchangeSquadronId}, but the replying sender's immutable home is ${this.senderSquadronId}. ${replyState} Report this invariant failure with the exchange and Squadron ids; do not retry send_message for this exchange.`;
-  }
-}
-
 export class A2AClearOwnAskSenderMismatchError extends Schema.TaggedError<A2AClearOwnAskSenderMismatchError>()(
   "A2AClearOwnAskSenderMismatchError",
   {
@@ -307,7 +290,6 @@ export type A2ASendError =
   | A2AHumanFollowupNotAllowedError
   | A2AExchangeNotOpenError
   | A2AExchangeAlreadyAnsweredError
-  | A2ACrossSquadronReplyInvariantError
   | A2AExchangeParticipantMismatchError
   | A2AClearOwnAskSenderMismatchError
   | A2AClearOwnAskAlreadyClosedError
@@ -363,6 +345,10 @@ const exchangeIdFor = (commandId: CommCommandId) =>
 
 const correlationIdFor = (commandId: CommCommandId) =>
   CorrelationId.make(`correlation:j5:a2a:${encodeURIComponent(commandId)}`);
+
+/** A receipt binds one command to one ledger, so a closure recorded in the asker's ledger has its own. */
+const replyClosureCommandIdFor = (commandId: CommCommandId) =>
+  CommCommandId.make(`command:j5:a2a:reply-closure:${encodeURIComponent(commandId)}`);
 
 const withdrawalMessageIdFor = (commandId: CommCommandId) =>
   LedgerMessageId.make(`message:j5:a2a:withdraw:${encodeURIComponent(commandId)}`);
@@ -770,28 +756,6 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
         `;
         if (rows.length !== 1) return null;
         const row = rows[0]!;
-        const exchange =
-          row.exchange_id === null
-            ? []
-            : yield* sql<ExchangeRow>`
-                SELECT squadron_id, exchange_id, sender_id, receiver_id, status
-                FROM j5_a2a_exchange
-                WHERE exchange_id = ${row.exchange_id}
-                LIMIT 1
-              `;
-        const isCrossSquadronReply =
-          exchange[0] !== undefined &&
-          exchange[0].squadron_id !== row.squadron_id &&
-          exchange[0].receiver_id === row.sender_id &&
-          exchange[0].sender_id === row.receiver_id;
-        if (isCrossSquadronReply) {
-          return yield* new A2ACrossSquadronReplyInvariantError({
-            exchangeId: row.exchange_id!,
-            exchangeSquadronId: exchange[0]!.squadron_id,
-            senderSquadronId: row.squadron_id,
-            replyPersisted: true,
-          });
-        }
         return {
           messageId,
           exchangeId: row.exchange_id === null ? null : ExchangeId.make(row.exchange_id),
@@ -839,6 +803,8 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
         let joinedExistingExchange = false;
         let openEvent: CommEvent | undefined;
         let closeEvent: CommEvent | undefined;
+        // The ledger that opened the Exchange records its closure; an ask from another ledger is closed there.
+        let closeSquadronId = sender.squadronId;
 
         if (input.exchangeId !== undefined) {
           if (input.urgency !== undefined) {
@@ -868,14 +834,6 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
           exchangeId = input.exchangeId;
           joinedExistingExchange = isFollowup;
           if (isReply) {
-            if (exchange.squadron_id !== sender.squadronId) {
-              return yield* new A2ACrossSquadronReplyInvariantError({
-                exchangeId,
-                exchangeSquadronId: exchange.squadron_id,
-                senderSquadronId: sender.squadronId,
-                replyPersisted: false,
-              });
-            }
             const acceptedReplies = yield* sql<{ readonly count: number }>`
                 SELECT COUNT(*) AS count
                 FROM j5_a2a_delivery
@@ -886,6 +844,7 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
             }
             exchangeRole = "reply";
             exchangeState = "closed";
+            closeSquadronId = SquadronId.make(exchange.squadron_id);
             closeEvent = {
               kind: "exchange.closed",
               sender: sender.participantId,
@@ -947,6 +906,7 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
         }
 
         const correlationId = correlationIdFor(input.commandId);
+        const closesElsewhere = closeEvent !== undefined && closeSquadronId !== sender.squadronId;
         const result = yield* writer.appendEventsInTransaction({
           commandId: input.commandId,
           squadronId: sender.squadronId,
@@ -973,16 +933,27 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
               }),
               createdAt: input.acceptedAt,
             },
-            ...(closeEvent === undefined ? [] : [closeEvent]),
+            ...(closeEvent === undefined || closesElsewhere ? [] : [closeEvent]),
           ],
         });
         if (result.committed) committed.push(...result.events);
+        if (closeEvent !== undefined && closesElsewhere) {
+          // Inside the reply's transaction, so an answered Exchange is never left open.
+          const closure = yield* writer.appendEventsInTransaction({
+            commandId: replyClosureCommandIdFor(input.commandId),
+            squadronId: closeSquadronId,
+            acceptedAt: input.acceptedAt,
+            events: [closeEvent],
+          });
+          if (closure.committed) committed.push(...closure.events);
+        }
         const sent = result.events.find((event) => event.kind === "message.sent");
         if (sent === undefined) {
           return yield* new A2AParticipantNotFoundError({ participantId: receiverId });
         }
         const opened = result.events.some((event) => event.kind === "exchange.opened");
-        const closed = result.events.some((event) => event.kind === "exchange.closed");
+        const closed =
+          closesElsewhere || result.events.some((event) => event.kind === "exchange.closed");
         return {
           messageId,
           exchangeId,

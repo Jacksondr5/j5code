@@ -198,15 +198,25 @@ const noticeMessage = (payload: SilenceNoticePayload, exchangeId: ExchangeId): s
   }
 };
 
-const runCoversDelivery = (
-  run: OrchestrationV2Run,
+/**
+ * The run that owes the reply to a delivered message. A message queued behind a busy receiver,
+ * or sent to an idle one, is its own run's user message, and only that run can leave it
+ * unanswered. A message steered into a running turn has no run of its own, so it falls to the
+ * latest run that had not ended when it was delivered.
+ */
+const runForDelivery = (
+  runs: ReadonlyArray<OrchestrationV2Run>,
   deliveredAt: string,
   messageId: LedgerMessageId,
-): boolean => {
-  if (run.userMessageId === deliveryMessageId(messageId)) return true;
+): OrchestrationV2Run | undefined => {
+  const carried = deliveryMessageId(messageId);
   const delivered = DateTime.toEpochMillis(DateTime.makeUnsafe(deliveredAt));
-  const completed = run.completedAt === null ? null : DateTime.toEpochMillis(run.completedAt);
-  return completed === null || delivered <= completed;
+  return (
+    runs.find((run) => run.userMessageId === carried) ??
+    runs.findLast(
+      (run) => run.completedAt === null || delivered <= DateTime.toEpochMillis(run.completedAt),
+    )
+  );
 };
 
 const makeLayer = (daemon: boolean) =>
@@ -349,7 +359,7 @@ const makeLayer = (daemon: boolean) =>
               dependency ?? {
                 ...base,
                 state: "turn-ended-no-reply" as const,
-                // Lifecycle queries only select deliveries at or before this run ended.
+                // Lifecycle queries only select deliveries this run carried or took mid-turn.
                 // The delivery/reconciliation path exclusively owns never-processed.
                 processing: "processed" as const,
               }
@@ -364,6 +374,21 @@ const makeLayer = (daemon: boolean) =>
         }
       });
 
+      const alreadyNoticed = Effect.fn("j5.a2a.silence.alreadyNoticed")(function* (
+        exchange: ExchangeRow,
+        messageId: string,
+      ) {
+        const prior = yield* sql<{ readonly count: number }>`
+          SELECT COUNT(*) AS count
+          FROM j5_a2a_comm_event
+          WHERE squadron_id = ${exchange.squadron_id}
+            AND kind = 'silence.notice'
+            AND exchange_id = ${exchange.exchange_id}
+            AND json_extract(payload, '$.deliveryMessageId') = ${messageId}
+        `;
+        return (prior[0]?.count ?? 0) > 0;
+      });
+
       const appendNotice = Effect.fn("j5.a2a.silence.appendNotice")(function* (
         exchange: ExchangeRow,
         payload: SilenceNoticePayload,
@@ -371,15 +396,7 @@ const makeLayer = (daemon: boolean) =>
         yield* decodeSilenceNotice(payload);
         if (payload.state === "errored" && (yield* captainHearsFailureElsewhere(exchange)))
           return [];
-        const prior = yield* sql<{ readonly count: number }>`
-          SELECT COUNT(*) AS count
-          FROM j5_a2a_comm_event
-          WHERE squadron_id = ${exchange.squadron_id}
-            AND kind = 'silence.notice'
-            AND exchange_id = ${exchange.exchange_id}
-            AND json_extract(payload, '$.deliveryMessageId') = ${payload.deliveryMessageId}
-        `;
-        if ((prior[0]?.count ?? 0) > 0) return [];
+        if (yield* alreadyNoticed(exchange, payload.deliveryMessageId)) return [];
 
         const exchangeId = ExchangeId.make(exchange.exchange_id);
         // The waiter may be on a peer server; the notice then travels the peer path back.
@@ -458,9 +475,7 @@ const makeLayer = (daemon: boolean) =>
         const messageId = LedgerMessageId.make(row.message_id);
         const threadId = ThreadId.make(row.thread_id);
         const projection = yield* threads.getThreadProjection(threadId);
-        const run = projection.runs.findLast((candidate) =>
-          runCoversDelivery(candidate, row.delivered_at, messageId),
-        );
+        const run = runForDelivery(projection.runs, row.delivered_at, messageId);
         let payload: SilenceNoticePayload;
         if (run === undefined) {
           payload = {
@@ -582,6 +597,7 @@ const makeLayer = (daemon: boolean) =>
           ORDER BY created_at, squadron_id, exchange_id
         `;
         const appended: Array<StoredCommEvent> = [];
+        let runs: ReadonlyArray<OrchestrationV2Run> | undefined;
         for (const exchange of inbound) {
           const delivered = yield* sql<DeliveredMessageRow>`
             SELECT
@@ -598,6 +614,14 @@ const makeLayer = (daemon: boolean) =>
           `;
           const delivery = delivered[0];
           if (delivery === undefined) continue;
+          // An Exchange stays open after its notice; later runs need not read the thread for it.
+          if (yield* alreadyNoticed(exchange, delivery.message_id)) continue;
+          // Another run may carry this message as its own; that run's end reports the silence.
+          const carried = deliveryMessageId(LedgerMessageId.make(delivery.message_id));
+          if (run.userMessageId !== carried) {
+            runs ??= (yield* threads.getThreadProjection(stored.event.threadId)).runs;
+            if (runs.some((candidate) => candidate.userMessageId === carried)) continue;
+          }
           const payload = yield* deriveNotice(
             run,
             stored.event.threadId,

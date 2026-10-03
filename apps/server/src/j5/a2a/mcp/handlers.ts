@@ -39,6 +39,7 @@ import { A2AHomeRegistrar, participantIdForThread } from "../HomeRegistrar.ts";
 import { A2ALedger } from "../LedgerService.ts";
 import { PeerDirectory } from "../PeerDirectory.ts";
 import { ParticipantPlacementService } from "../PlacementService.ts";
+import { withDeliveryNotice } from "../receiverBacklog.ts";
 import { A2ASendService } from "../SendService.ts";
 import { SpawnCompositionService } from "../SpawnCompositionService.ts";
 import {
@@ -508,7 +509,10 @@ const handlers = {
         acceptedAt,
       });
       yield* worker.notify;
-      return result;
+      return yield* withDeliveryNotice(result, {
+        receiverId: input.to,
+        callerThreadId: scope.threadId,
+      });
     }).pipe(Effect.mapError(failure)),
   clear_own_ask: (input) =>
     Effect.gen(function* () {

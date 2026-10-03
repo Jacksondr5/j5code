@@ -79,3 +79,15 @@ export const formatSilenceNoticeEnvelope = (input: {
     noticeType: input.noticeType,
     message: input.message,
   });
+
+/** Told to a sender whose message will wait behind the receiver's running turn. */
+export const formatReceiverBacklogNotice = (input: {
+  readonly receiverId: ParticipantId;
+  readonly waiting: number;
+  readonly fromYou: number;
+}): string =>
+  render(config.receiverBacklogNotice, {
+    receiverId: input.receiverId,
+    waiting: String(input.waiting),
+    fromYou: String(input.fromYou),
+  });

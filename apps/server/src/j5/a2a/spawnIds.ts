@@ -125,7 +125,7 @@ export const spawnFirstTurnText = (input: {
     crew.obligation === undefined
       ? []
       : [
-          `<seat_obligation>\nYour agent definition returns a ${crew.obligation.kind}. Before you finish, write it with write_artifact to exactly \`${crew.obligation.path}\` as Markdown (your instructions list the required contents); this is in addition to direct messages and must not delay sharing intermediate findings or results. Your Captain is told when the file appears; rewrite the same path to revise it.\n</seat_obligation>`,
+          `<seat_obligation>\nYour agent definition returns a ${crew.obligation.kind}. Before you finish, write it with write_artifact to exactly \`${crew.obligation.path}\` as Markdown (your instructions list the required contents); this is in addition to direct messages and must not delay sharing findings or results. Your Captain is told when the file appears; rewrite the same path to revise it.\n</seat_obligation>`,
         ];
   const playbook =
     crew.playbook === undefined

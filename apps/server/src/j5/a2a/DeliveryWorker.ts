@@ -62,13 +62,6 @@ interface DeliveryRow {
   readonly receiver_environment_id: string | null;
 }
 
-interface OpenExchangeRow {
-  readonly squadron_id: string;
-  readonly exchange_id: string;
-  readonly sender_id: string;
-  readonly receiver_id: string;
-}
-
 export interface DeliveryAttempt {
   readonly squadronId: SquadronId;
   readonly messageId: LedgerMessageId;
@@ -172,6 +165,7 @@ const makeLayer = (daemon: boolean) =>
         const receiverSquadronId = SquadronId.make(row.receiver_squadron_id);
         const exchangeId = row.exchange_id === null ? null : ExchangeId.make(row.exchange_id);
         const receivedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
+        // A reply's Exchange was closed in this ledger when the reply was accepted.
         const events: Array<CommEvent> = [
           {
             kind: "message.received",
@@ -193,29 +187,6 @@ const makeLayer = (daemon: boolean) =>
             createdAt: receivedAt,
           },
         ];
-        if (exchangeId !== null && row.exchange_role === "reply") {
-          const exchanges = yield* sql<OpenExchangeRow>`
-            SELECT squadron_id, exchange_id, sender_id, receiver_id
-            FROM j5_a2a_exchange
-            WHERE squadron_id = ${receiverSquadronId}
-              AND exchange_id = ${exchangeId}
-              AND status = 'open'
-              AND sender_id = ${row.receiver_id}
-              AND receiver_id = ${row.sender_id}
-            LIMIT 1
-          `;
-          if (exchanges[0] !== undefined) {
-            events.push({
-              kind: "exchange.closed",
-              sender: ParticipantId.make(row.sender_id),
-              receiver: ParticipantId.make(row.receiver_id),
-              exchangeId,
-              correlationId: CorrelationId.make(row.correlation_id),
-              payload: { replyMessageId: LedgerMessageId.make(row.message_id) },
-              createdAt: receivedAt,
-            });
-          }
-        }
         yield* ledger.appendEvents({
           commandId: commandId("receive", LedgerMessageId.make(row.message_id)),
           squadronId: receiverSquadronId,
@@ -324,7 +295,8 @@ const makeLayer = (daemon: boolean) =>
           // Canonical references live in the immutable sent fact. Reading that
           // indexed row avoids a second projection and a schema migration.
           const sent = yield* sql<{ readonly kind: string; readonly payload: string }>`
-            SELECT kind, payload FROM j5_a2a_comm_event WHERE seq = ${row.sent_seq}
+            SELECT kind, payload FROM j5_a2a_comm_event
+            WHERE squadron_id = ${row.squadron_id} AND seq = ${row.sent_seq}
           `;
           const payload =
             sent[0]?.kind === "message.sent"

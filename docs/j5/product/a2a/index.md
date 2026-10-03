@@ -71,6 +71,8 @@ Two policies govern what happens when a message reaches an agent whose turn is r
 
 The **agent-side policy** is J5's: a message from an agent **queues** behind the running turn and starts when it ends. **Steering** — injecting into the running turn — is a controller's act, and in J5 the only controller of an agent's turn is the person, so no agent's message steers. There is one exception, ruled for one provider: a peer's message to an already-running Codex Astra turn is delivered into the turn as an ordinary envelope, because Astra is built to take messages during work. What the agent does with it is the agent's judgment, exactly as with any other message; the platform adds no guidance about whose instructions win. Platform notices always queue.
 
+A queued message costs its receiver a whole turn, so a stream of small updates becomes a stream of turns. When a sender's message will wait behind the receiver's running turn, the platform tells the sender at once, with the measured backlog, and advises one message in place of many. It advises; it never refuses or holds a send.
+
 The **person-side policy** is upstream's: whether the person's own send steers or queues, the shortcuts for choosing, and how the composer and the queued rows present a steer follow upstream on every client (documented in upstream's `docs/user/composer.md`). J5 adds nothing to the person's steer.
 
 ## The person as a participant
@@ -146,6 +148,10 @@ message, ask, reply, plain message, Exchange, intent, urgency, obligation, envel
 27. A machine participant's message is delivered wrapped in an envelope that names the sender as automated and states that no reply can reach it; the thread view attributes the card to the machine's name and marks it as automation.
 28. A machine participant acts only through a token whose scope is `a2a:send` and whose subject is its own participant id; a token with any other subject, or without that scope, is refused.
 
+### Sending to a busy agent
+
+29. A send to an agent whose turn is running, and which will not take the message into that turn, returns a notice stating how many messages are waiting for it, how many of them the caller sent, and that each will run as its own turn; a send to an idle agent or to a running Codex Astra turn returns no notice, and no send is refused because of the backlog.
+
 ## Scenarios
 
 - **An ask and its answer.** An agent in Billing Migration asks its Captain "which schema version do we target?" with intent "schema target". The Captain's turn ends without replying; the platform records a silence notice and delivers it to the asker, whose next turn sees that the Captain's turn ended without replying. The Captain's next turn replies; the Exchange closes; the asker sees the answer. (AC5, AC9, AC20, AC21)
@@ -169,3 +175,4 @@ message, ask, reply, plain message, Exchange, intent, urgency, obligation, envel
 - 2026-09-15 — machine participants: registered non-agent senders with an immutable Squadron home and no thread, plain sends only, never receive, token-bound identity through the `a2a:send` scope; AC24–AC28 and the scraper scenario (issue #74).
 - 2026-09-24 — the truthful-steer layer is retired with the upstream V2 advance: the person's steer and queue presentation follows upstream's as-is, and AC14 keeps only the rule that a person alone steers; remaining steer UX gaps are tracked in the upstream give-back backlog (issue #276).
 - 2026-09-16 — a receiver's Squadron may live on a peer server; addressing, envelopes and delivery facts are unchanged, and peering itself is defined in cross-device ([record](../../worklog/2026-09-16-cross-server-peering-session.md)).
+- 2026-10-03 — a sender whose message will wait behind a busy receiver is told the measured backlog when it sends; AC29 (issue #424). Merging queued messages and refusing past a limit were rejected; receivers on peer servers are issue #425.

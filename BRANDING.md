@@ -48,6 +48,23 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
 - Linux capture: `apps/desktop/src/snapShot/{KdeSnapShot,HyprlandSnapShot,GnomeCaptureSetup,linuxCaptureSession}.ts` and `apps/desktop/gnome-extension/`. These newly adopted integrations still use upstream helper directories, desktop/extension identities and bus names. They can collide with an installed T3 Code; OS integration isolation is incomplete until [#138](https://github.com/Jacksondr5/j5code/issues/138) is resolved.
 - Desktop packaging: `apps/desktop/package.json`, `scripts/build-desktop-artifact.ts`, and both DMG
   background SVGs.
+- App icons: each channel's Icon Composer `text.svg` under `assets/` is a paper boat from the
+  marketing site (`BoatSprite.astro`, `PersonaScene.astro`): production the Captain, dev a
+  speedboat, nightly the Reviewer's sloop with its searchlight. Each is flattened to plain
+  `<path>` elements and fitted around 64,64 inside the 90×75pt box that
+  `scripts/export-android-icons.ts` uses (`TEXT`), because that script lifts those paths for
+  each channel's Android foreground (`android-icon-foreground-<variant>.png`, wired in
+  `apps/mobile/app.config.ts`; upstream shares one foreground). Dev keeps upstream's blueprint,
+  with `annotations.svg` redrawn around the speedboat, and nightly keeps upstream's night sky.
+  Production adds a `background.svg` layer, the site hero's navy with its sea glow and contour
+  lines, which the Android script also renders as `android-icon-background-prod.png` for the
+  release adaptive icon. Generated files keep upstream's names (`black-*`, `t3-black-*`).
+  `android-icon-mark.png` and `android-notification-icon.png` are flat Captain silhouettes with
+  the deck, mast, star and portholes cut out, rendered once from the Captain layer. If upstream
+  redraws its icon sources, keep the J5 layers and re-export (`assets/README.md`). Icon
+  Composer 27's "macOS pre-Tahoe" export comes out full-bleed, so the three `*-macos-1024.png`
+  files are its plain macOS export at design generation 26, scaled to 824×824 at a 100px inset
+  over a black drop shadow (alpha 0.3, 8px down, blur sigma 12) that matches upstream's.
 - Mobile OS identity and links: `apps/mobile/app.config.ts`, mobile package scripts, `App.tsx`,
   `src/lib/appLinking.ts` (scheme-only `j5code` wake links), pairing QR handling, the Agent Activity
   widget, and the Android subscription-usage widget's fallback deep link in

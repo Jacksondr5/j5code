@@ -1,5 +1,6 @@
 import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { SqlitePersistenceMemory } from "../../../persistence/Layers/Sqlite.ts";
 import {
   EnvironmentId,
   type ModelSelection,
@@ -229,6 +230,7 @@ it.effect("namespaces mutating-tool idempotency and sender identity from authent
       Layer.mock(SquadronJoinService)({}),
       Layer.mock(SquadronProjectReferences)({}),
       NodeServices.layer,
+      SqlitePersistenceMemory,
     );
     const layer = J5ToolkitHandlersLive.pipe(
       Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: noRepository })),

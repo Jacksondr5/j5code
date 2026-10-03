@@ -146,8 +146,14 @@ const stablePart = (value: string) => encodeURIComponent(value);
 export const deliveryCommandId = (messageId: LedgerMessageId) =>
   CommandId.make(`command:j5:a2a:delivery:${stablePart(messageId)}`);
 
+const DELIVERY_MESSAGE_ID_PREFIX = "message:j5:a2a:delivery:";
+
 export const deliveryMessageId = (messageId: LedgerMessageId) =>
-  MessageId.make(`message:j5:a2a:delivery:${stablePart(messageId)}`);
+  MessageId.make(`${DELIVERY_MESSAGE_ID_PREFIX}${stablePart(messageId)}`);
+
+/** Whether a thread message is an A2A delivery (a peer message or a platform notice). */
+export const isDeliveryMessageId = (messageId: string) =>
+  messageId.startsWith(DELIVERY_MESSAGE_ID_PREFIX);
 
 interface MembershipRow {
   readonly payload: string;
@@ -179,7 +185,10 @@ const assertPersonReply = (input: AgentDeliveryInput): never => {
 
 /** Use the active run's selection, not the picker selection for future runs. */
 export const astraPeerSteeringRun = (
-  target: OrchestrationV2ThreadProjection,
+  target: Pick<
+    OrchestrationV2ThreadProjection,
+    "thread" | "runs" | "providerTurns" | "providerThreads" | "providerSessions"
+  >,
   channel: DeliveryEnvelopeChannel,
 ) => {
   if (channel !== "peer" || target.thread.archivedAt !== null) return undefined;
