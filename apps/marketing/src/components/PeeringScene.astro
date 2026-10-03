@@ -1,26 +1,34 @@
 ---
 /**
  * One of the peering page's three scenes: a cloud VM on the left and a second
- * device on the right, with two agents on each. Boats are agents and dots are
- * messages, flying flag to flag as on the homepage's A2A scene.
+ * device on the right, with an agent on each. Boats are agents and dots are messages. A route that
+ * goes directly is drawn as an arc of chevrons pointing at the receiver, one
+ * arc per direction, and its messages fly along it. Polled messages have no
+ * arc: they wait on the VM's pier until the barge fetches them.
  *
  * - direct: both devices can reach each other; asks and replies go straight
  *   across, 8s loop.
  * - firewall: the laptop can't be reached, so asks for it wait on the VM's
  *   pier and the flagless barge (J5 polling) fetches each one and hands it to
- *   its agent. Replies go directly. 14s loop.
+ *   its agent. Replies go directly. 7s loop.
  * - asleep: the laptop sleeps while three asks wait, then wakes and the barge
  *   fetches them all in order. 16s loop.
+ *
+ * The compact layout, for phones, is the same scene drawn at half the width
+ * so everything reads larger: the page renders both and shows one.
  *
  * Gated by the motion controller through --motion-state. Under reduced motion
  * each scene holds one still: the firewall scene an ask waiting with the barge
  * at home, the asleep scene the laptop asleep with three asks waiting.
  */
+import { routeChevrons, routePath, type Route } from "../lib/route";
+
 interface Props {
   variant: "direct" | "firewall" | "asleep";
+  compact?: boolean;
 }
 
-const { variant } = Astro.props;
+const { variant, compact = false } = Astro.props;
 
 const copy = {
   direct: {
@@ -43,125 +51,170 @@ const copy = {
   },
 }[variant];
 
-const water = "M0 158 Q 40 152 80 158 T 160 158 T 240 158 T 320 158 T 400 158 T 480 158 T 560 158 T 640 158 T 720 158 T 800 158";
-const lowWater = "M0 218 Q 40 212 80 218 T 160 218 T 240 218 T 320 218 T 400 218 T 480 218 T 560 218 T 640 218 T 720 218 T 800 218";
+// Direct has no pier, so its frame stops just under the waterline.
+const g = compact
+  ? {
+      width: 400, regions: [[6, 190], [204, 190]], boatY: 104, vm: 53, device: 251,
+      lanes: [10, 84], water: 172, lowWater: 235, pierX: 22, bargeHome: 290, bargeY: 207,
+      bottom: variant === "direct" ? 196 : 257, labelY: [30, 47], chevronGap: 11, chevronSize: 3.4, chevronInset: 24,
+    }
+  : {
+      width: 800, regions: [[8, 384], [408, 384]], boatY: 90, vm: 180, device: 524,
+      lanes: [-14, 62], water: 158, lowWater: 218, pierX: 40, bargeHome: 600, bargeY: 190,
+      bottom: variant === "direct" ? 180 : 240, labelY: [32, 50], chevronGap: 12, chevronSize: 3, chevronInset: 30,
+    };
+const scale = 1.5;
+
+const [left, right] = g.regions as [[number, number], [number, number]];
+const mid = g.width / 2;
+const rightEdge = right[0] + right[1];
+const wave = (y: number) =>
+  `M0 ${y} Q 40 ${y - 6} 80 ${y}` + Array.from({ length: g.width / 80 }, (_, i) => ` T ${160 + i * 80} ${y}`).join("");
+
+// Flag tips: messages leave from and land on them.
+const mastY = g.boatY - 2;
+const vm = g.vm + 32 * scale;
+const device = g.device + 32 * scale;
+const direct = (from: number, to: number, lift: number): Route => ({
+  from: [from, mastY], control: [(from + to) / 2, lift], to: [to, mastY],
+});
+
+// Messages ride at deck height: on the pier's planks and on the barge's hold.
+const deckY = g.bargeY + 4.5;
+const pierSlots = [14, 32, 50].map((dx) => g.pierX + dx);
+const bargeAtPier = g.pierX + 78;
+const holdSlots = [20, 32, 44];
+const toPier = (from: number, slot: number, lift = 50): Route => ({
+  from: [from, mastY], control: [(from + pierSlots[slot]!) / 2, mastY - lift], to: [pierSlots[slot]!, deckY],
+});
+const load = (pier: number, hold = pier): Route => ({
+  from: [pierSlots[pier]!, deckY],
+  control: [(pierSlots[pier]! + bargeAtPier + holdSlots[hold]!) / 2, deckY - 34],
+  to: [bargeAtPier + holdSlots[hold]!, deckY],
+});
+const unload = (hold: number, to: number): Route => ({
+  from: [g.bargeHome + holdSlots[hold]!, deckY],
+  control: [Math.max(g.bargeHome + holdSlots[hold]!, to) + 15, (deckY + mastY) / 2],
+  to: [to, mastY],
+});
+
+// Two lanes, so each direction has its own. A scene with one direct route uses the upper.
+const [upper, lower] = g.lanes as [number, number];
+type Dot = [name: string, kind: "ask" | "reply", route: Route, direct?: boolean];
+const dots: Dot[] = {
+  // The VM asks and the device replies, then the device asks and the VM replies.
+  direct: [
+    ["h1", "ask", direct(vm, device, upper), true],
+    ["h2", "reply", direct(device, vm, lower), true],
+    ["h3", "ask", direct(device, vm, lower), true],
+    ["h4", "reply", direct(vm, device, upper), true],
+  ] as Dot[],
+  firewall: [
+    ["d1", "ask", toPier(vm, 0)],
+    ["l1", "ask", load(0)],
+    ["u1", "ask", unload(0, device)],
+    ["r1", "reply", direct(device, vm, upper), true],
+  ] as Dot[],
+  asleep: [
+    ["s1", "ask", toPier(vm, 0)],
+    ["s2", "ask", toPier(vm, 1)],
+    ["s3", "ask", toPier(vm, 2, 75)],
+    ["l1", "ask", load(0)],
+    ["l2", "ask", load(1)],
+    ["l3", "ask", load(2)],
+    ["u1", "ask", unload(0, device)],
+    ["u2", "ask", unload(1, device)],
+    ["u3", "ask", unload(2, device)],
+    ["r1", "reply", direct(device, vm, upper), true],
+  ] as Dot[],
+}[variant];
+const lanes = [...new Set(dots.filter((dot) => dot[3]).map((dot) => routeChevrons(dot[2], g.chevronGap, g.chevronSize, g.chevronInset)))];
+
 const prefix = { direct: "s1", firewall: "s2", asleep: "s3" }[variant];
-// Asleep's second boat on each side neither sends nor receives, so its flag holds.
-const still = variant === "asleep";
+const boats = [
+  { x: g.vm, bob: "b1", flag: `${prefix}-fS` },
+  { x: g.device, bob: "b3", flag: `${prefix}-fL` },
+];
+const held = variant === "firewall" ? [0] : [0, 1, 2];
 ---
 
-<svg class:list={["scene", prefix]} viewBox="0 -24 800 264" role="img" aria-label={copy.label} data-motion>
-  <rect class="region" x="8" y="8" width="384" height="226" rx="14" />
-  <rect class="region" x="408" y="8" width="384" height="226" rx="14" />
-  <text class="lbl" x="24" y="32">CLOUD VM</text><text class="lbl-sub" x="24" y="50">{copy.leftSub}</text>
-  <text class="lbl" x="424" y="32">{copy.right}</text>
-  {copy.rightSub && <text class="lbl-sub" x="424" y="50">{copy.rightSub}</text>}
-  {variant === "asleep" && <text class="lbl-sub anim s3-awake" x="424" y="50">awake</text>}
+<svg
+  class:list={["scene", prefix, compact ? "compact" : "wide"]}
+  viewBox={`0 -24 ${g.width} ${g.bottom + 24}`}
+  style={`--barge-run: ${bargeAtPier - g.bargeHome}px`}
+  role="img"
+  aria-label={copy.label}
+  data-motion
+>
+  <rect class="region" x={left[0]} y="8" width={left[1]} height={g.bottom - 14} rx="14" />
+  <rect class="region" x={right[0]} y="8" width={right[1]} height={g.bottom - 14} rx="14" />
+  {/* Labels sit in the outer corners, clear of the arcs. */}
+  <text class="lbl" x={left[0] + 16} y={g.labelY[0]}>CLOUD VM</text>
+  <text class="lbl-sub" x={left[0] + 16} y={g.labelY[1]}>{copy.leftSub}</text>
+  <text class="lbl" x={rightEdge - 16} y={g.labelY[0]} text-anchor="end">{copy.right}</text>
+  {copy.rightSub && <text class="lbl-sub" x={rightEdge - 16} y={g.labelY[1]} text-anchor="end">{copy.rightSub}</text>}
+  {variant === "asleep" && <text class="lbl-sub anim s3-awake" x={rightEdge - 16} y={g.labelY[1]} text-anchor="end">awake</text>}
 
   {
     variant === "firewall" ? (
       <>
-        <line class="firewall" x1="400" y1="40" x2="400" y2="232" />
-        <text class="firewall-lbl" x="400" y="-8" text-anchor="middle">FIREWALL · NO INCOMING CONNECTIONS</text>
+        <line class="firewall" x1={mid} y1="40" x2={mid} y2={g.bottom - 8} />
+        <text class="firewall-lbl" x={mid} y="-8" text-anchor="middle">FIREWALL · NO INCOMING CONNECTIONS</text>
       </>
     ) : (
-      <>
-        <line class="divider" x1="400" y1="40" x2="400" y2="232" />
-        <text class="divider-lbl" x="400" y="-8" text-anchor="middle">NETWORK</text>
-      </>
+      <text class="divider-lbl" x={mid} y="-8" text-anchor="middle">NETWORK</text>
     )
   }
-  <path class="water" d={water} />
+  <path class="water" d={wave(g.water)} />
+  {lanes.map((d) => <path class="lane" d={d} />)}
 
   {
     variant !== "direct" && (
       <>
-        <path class="water" d={lowWater} />
-        <line class="pier-pile" x1="206" y1="203" x2="206" y2="224" />
-        <line class="pier-pile" x1="268" y1="203" x2="268" y2="224" />
-        <rect class="pier-plank" x="200" y="199" width="74" height="5" rx="1" />
-        <text class="lbl-sub pier-lbl" x="190" y="212" text-anchor="end">waiting on the VM</text>
-      </>
-    )
-  }
-
-  <g transform="translate(30 110) scale(1.1)"><g class="bob b1"><use class:list={["agent anim", `${prefix}-fS1`]} href="#j5-boat" /></g></g>
-  <g transform="translate(140 110) scale(1.1)"><g class="bob b2"><use class:list={["agent", !still && "anim", `${prefix}-fS2`]} href="#j5-boat" /></g></g>
-  <g transform="translate(560 110) scale(1.1)"><g class="bob b3"><use class:list={["agent anim", `${prefix}-fL1`]} href="#j5-boat" /></g></g>
-  <g transform="translate(670 110) scale(1.1)"><g class="bob b4"><use class:list={["agent", !still && "anim", `${prefix}-fL2`]} href="#j5-boat" /></g></g>
-
-  {
-    variant === "direct" && (
-      <>
-        <circle class="dot ask s1-h1" r="4.5" />
-        <circle class="dot reply s1-h2" r="4.5" />
-        <circle class="dot ask s1-h3" r="4.5" />
-        <circle class="dot reply s1-h4" r="4.5" />
+        <path class="water" d={wave(g.lowWater)} />
+        <line class="pier-pile" x1={g.pierX + 6} y1={g.bargeY + 13} x2={g.pierX + 6} y2={g.bargeY + 34} />
+        <line class="pier-pile" x1={g.pierX + 68} y1={g.bargeY + 13} x2={g.pierX + 68} y2={g.bargeY + 34} />
+        <rect class="pier-plank" x={g.pierX} y={g.bargeY + 9} width="74" height="5" rx="1" />
       </>
     )
   }
 
   {
-    variant === "firewall" && (
+    boats.map((boat) => (
+      <g transform={`translate(${boat.x} ${g.boatY}) scale(${scale})`}>
+        <g class:list={["bob", boat.bob]}><use class:list={["agent anim", boat.flag]} href="#j5-boat" /></g>
+      </g>
+    ))
+  }
+
+  {
+    variant !== "direct" && (
       <>
-        <circle class="held ask s2-p1" cx="214" cy="194.5" r="4.5" />
-        <circle class="held ask s2-p2" cx="214" cy="194.5" r="4.5" />
-        <g transform="translate(600 190)">
-          <g class="anim s2-barge">
+        {held.map((slot, i) => <circle class:list={["held ask", `${prefix}-p${i + 1}`]} cx={pierSlots[slot]} cy={deckY} r="4.5" />)}
+        <g transform={`translate(${g.bargeHome} ${g.bargeY})`}>
+          <g class:list={["anim", `${prefix}-barge`]}>
             <g class="bob barge-bob">
               <use href="#j5-barge" />
-              <circle class="held ask s2-c1" cx="20" cy="4.5" r="4.5" />
-              <circle class="held ask s2-c2" cx="20" cy="4.5" r="4.5" />
+              {held.map((slot, i) => <circle class:list={["held ask", `${prefix}-c${i + 1}`]} cx={holdSlots[slot]} cy="4.5" r="4.5" />)}
             </g>
           </g>
         </g>
-        <circle class="dot ask s2-d1" r="4.5" />
-        <circle class="dot ask s2-l1" r="4.5" />
-        <circle class="dot ask s2-u1" r="4.5" />
-        <circle class="dot reply s2-r1" r="4.5" />
-        <circle class="dot ask s2-d2" r="4.5" />
-        <circle class="dot ask s2-l2" r="4.5" />
-        <circle class="dot ask s2-u2" r="4.5" />
-        <circle class="dot reply s2-r2" r="4.5" />
       </>
     )
   }
 
   {
     variant === "asleep" && (
-      <>
-        <circle class="held ask s3-p1" cx="214" cy="194.5" r="4.5" />
-        <circle class="held ask s3-p2" cx="232" cy="194.5" r="4.5" />
-        <circle class="held ask s3-p3" cx="250" cy="194.5" r="4.5" />
-        <g transform="translate(600 190)">
-          <g class="anim s3-barge">
-            <g class="bob barge-bob">
-              <use href="#j5-barge" />
-              <circle class="held ask s3-c1" cx="20" cy="4.5" r="4.5" />
-              <circle class="held ask s3-c2" cx="32" cy="4.5" r="4.5" />
-              <circle class="held ask s3-c3" cx="44" cy="4.5" r="4.5" />
-            </g>
-          </g>
-        </g>
-        {/* Night falls over the whole laptop, agents and poller alike. */}
-        <g class="anim s3-night">
-          <rect x="408" y="8" width="384" height="226" rx="14" fill="#0a1c30" fill-opacity="0.62" />
-          <path d="M770 22 a12 12 0 1 0 9 20 a9.5 9.5 0 1 1 -9 -20z" fill="#dfe9ee" />
-          <text class="lbl night-lbl" x="752" y="36" text-anchor="end">ASLEEP</text>
-        </g>
-        <circle class="dot ask s3-s1" r="4.5" />
-        <circle class="dot ask s3-s2" r="4.5" />
-        <circle class="dot ask s3-s3" r="4.5" />
-        <circle class="dot ask s3-l1" r="4.5" />
-        <circle class="dot ask s3-l2" r="4.5" />
-        <circle class="dot ask s3-l3" r="4.5" />
-        <circle class="dot ask s3-u1" r="4.5" />
-        <circle class="dot ask s3-u2" r="4.5" />
-        <circle class="dot ask s3-u3" r="4.5" />
-        <circle class="dot reply s3-r1" r="4.5" />
-      </>
+      // Night falls over the whole laptop, agents and poller alike.
+      <g class="anim s3-night">
+        <rect x={right[0]} y="8" width={right[1]} height={g.bottom - 14} rx="14" fill="#0a1c30" fill-opacity="0.62" />
+        <path d={`M${rightEdge - 22} 60 a12 12 0 1 0 9 20 a9.5 9.5 0 1 1 -9 -20z`} fill="#dfe9ee" />
+        <text class="lbl night-lbl" x={rightEdge - 40} y="74" text-anchor="end">ASLEEP</text>
+      </g>
     )
   }
+
+  {dots.map(([name, kind, route]) => <circle class:list={["dot", kind, `${prefix}-${name}`]} r="4.5" style={`offset-path: path("${routePath(route)}")`} />)}
 </svg>
 
 <style>
@@ -183,9 +236,7 @@ const still = variant === "asleep";
   }
 
   .b1 { --bob-dur: 5.2s; --bob-delay: -1s; }
-  .b2 { --bob-dur: 5.6s; --bob-delay: -2.4s; }
   .b3 { --bob-dur: 5.8s; --bob-delay: -3s; }
-  .b4 { --bob-dur: 5.4s; --bob-delay: -0.4s; }
   .barge-bob { --bob-dur: 6.4s; --bob-delay: -1.7s; }
 
   .region { fill: var(--canvas-2); fill-opacity: 0.55; stroke: var(--canvas-line); }
@@ -193,17 +244,20 @@ const still = variant === "asleep";
   .lbl-sub { font: 400 12px var(--font-sans); fill: var(--ink-dim); }
   .night-lbl { fill: var(--foam); }
   .water { fill: none; stroke: var(--sea); stroke-opacity: 0.45; stroke-width: 1.2; }
-  .divider { stroke: var(--ink-dim); stroke-opacity: 0.4; stroke-width: 1.2; stroke-dasharray: 2 6; }
+  .lane { fill: none; stroke: var(--ink-dim); stroke-opacity: 0.7; stroke-width: 1.3; stroke-linecap: round; stroke-linejoin: round; }
   .divider-lbl { font: 500 10.5px var(--font-mono); letter-spacing: 0.08em; fill: var(--ink-dim); }
   .firewall { stroke: var(--signal); stroke-width: 2.4; stroke-dasharray: 1 6; stroke-linecap: round; }
   .firewall-lbl { font: 600 10.5px var(--font-mono); letter-spacing: 0.08em; fill: var(--signal); }
   .pier-plank { fill: var(--brass-deep); stroke: var(--ink); stroke-width: 1.2; }
   .pier-pile { stroke: var(--ink); stroke-width: 2.2; }
 
-  /* On a phone the scene scales to about 40%, so the labels grow to stay legible. */
+  /* Phones get the compact layout, drawn at half the width so everything reads larger. */
+  .compact { display: none; }
+  .compact .lbl, .compact .lbl-sub { font-size: 13px; }
+  .compact .divider-lbl, .compact .firewall-lbl { font-size: 11.5px; }
   @media (max-width: 600px) {
-    .lbl, .lbl-sub, .divider-lbl, .firewall-lbl { font-size: 18px; }
-    .lbl-sub:not(.pier-lbl) { transform: translateY(10px); }
+    .wide { display: none; }
+    .compact { display: block; }
   }
 
   .dot, .held { opacity: 0; }
@@ -216,67 +270,43 @@ const still = variant === "asleep";
   .ask { fill: var(--msg-ask); }
   .reply { fill: var(--msg-reply); }
 
-  /* Direct, 8s. S1 asks L1, L1 replies; L2 asks S2, S2 replies. */
+  /* Direct, 8s. The VM asks and the device replies, then the other way round. */
   .s1 .dot, .s1 .anim { animation-duration: 8s; }
-  .s1-h1 { offset-path: path("M65 108 Q 330 -30 595 108"); animation-name: s1-h1; }
-  .s1-h2 { offset-path: path("M595 108 Q 330 -30 65 108"); animation-name: s1-h2; }
-  .s1-h3 { offset-path: path("M705 108 Q 440 -30 175 108"); animation-name: s1-h3; }
-  .s1-h4 { offset-path: path("M175 108 Q 440 -30 705 108"); animation-name: s1-h4; }
+  .s1-h1 { animation-name: s1-h1; }
+  .s1-h2 { animation-name: s1-h2; }
+  .s1-h3 { animation-name: s1-h3; }
+  .s1-h4 { animation-name: s1-h4; }
   @keyframes s1-h1 { 0%, 4% { offset-distance: 0%; opacity: 0; } 5% { opacity: 1; } 13% { opacity: 1; } 14%, 100% { offset-distance: 100%; opacity: 0; } }
   @keyframes s1-h2 { 0%, 20% { offset-distance: 0%; opacity: 0; } 21% { opacity: 1; } 29% { opacity: 1; } 30%, 100% { offset-distance: 100%; opacity: 0; } }
   @keyframes s1-h3 { 0%, 50% { offset-distance: 0%; opacity: 0; } 51% { opacity: 1; } 59% { opacity: 1; } 60%, 100% { offset-distance: 100%; opacity: 0; } }
   @keyframes s1-h4 { 0%, 66% { offset-distance: 0%; opacity: 0; } 67% { opacity: 1; } 75% { opacity: 1; } 76%, 100% { offset-distance: 100%; opacity: 0; } }
-  .s1-fS1 { --pennant: var(--msg-receive); animation-name: s1-fS1; }
-  .s1-fL1 { --pennant: var(--msg-reply); animation-name: s1-fL1; }
-  .s1-fS2 { --pennant: var(--msg-reply); animation-name: s1-fS2; }
-  .s1-fL2 { --pennant: var(--msg-receive); animation-name: s1-fL2; }
-  @keyframes s1-fS1 { 0%, 3.5% { --pennant: var(--msg-receive); } 4.5%, 29.5% { --pennant: var(--msg-ask); } 30.5%, 100% { --pennant: var(--msg-receive); } }
-  @keyframes s1-fL1 { 0%, 13.5% { --pennant: var(--msg-reply); } 14.5%, 19.5% { --pennant: var(--msg-receive); } 20.5%, 100% { --pennant: var(--msg-reply); } }
-  @keyframes s1-fL2 { 0%, 49.5% { --pennant: var(--msg-receive); } 50.5%, 75.5% { --pennant: var(--msg-ask); } 76.5%, 100% { --pennant: var(--msg-receive); } }
-  @keyframes s1-fS2 { 0%, 59.5% { --pennant: var(--msg-reply); } 60.5%, 65.5% { --pennant: var(--msg-receive); } 66.5%, 100% { --pennant: var(--msg-reply); } }
+  .s1-fS { --pennant: var(--msg-reply); animation-name: s1-fS; }
+  .s1-fL { --pennant: var(--msg-receive); animation-name: s1-fL; }
+  @keyframes s1-fS { 0%, 3.5% { --pennant: var(--msg-reply); } 4.5%, 29.5% { --pennant: var(--msg-ask); } 30.5%, 65.5% { --pennant: var(--msg-receive); } 66.5%, 100% { --pennant: var(--msg-reply); } }
+  @keyframes s1-fL { 0%, 19.5% { --pennant: var(--msg-receive); } 20.5%, 49.5% { --pennant: var(--msg-reply); } 50.5%, 75.5% { --pennant: var(--msg-ask); } 76.5%, 100% { --pennant: var(--msg-receive); } }
 
-  /* Firewall, 14s. The barge stays home on the laptop and sets out only when an
+  /* Firewall, 7s. The barge stays home on the laptop and sets out only when an
      ask waits on the VM's pier: it crosses, loads it, comes back, and hands it
-     to its agent. Replies go directly. */
-  .s2 .dot, .s2 .held, .s2 .anim { animation-duration: 14s; }
+     to its agent. The reply goes directly. */
+  .s2 .dot, .s2 .held, .s2 .anim { animation-duration: 7s; }
   .s2-barge { animation-name: s2-barge; }
-  @keyframes s2-barge {
-    0%, 9% { transform: translateX(0); } 21%, 24% { transform: translateX(-322px); }
-    36%, 52% { transform: translateX(0); } 64%, 67% { transform: translateX(-322px); }
-    79%, 100% { transform: translateX(0); }
-  }
+  @keyframes s2-barge { 0%, 18% { transform: translateX(0); } 42%, 48% { transform: translateX(var(--barge-run)); } 72%, 100% { transform: translateX(0); } }
   .s2-p1 { opacity: 1; animation-name: s2-p1; }
-  .s2-p2 { animation-name: s2-p2; }
   .s2-c1 { animation-name: s2-c1; }
-  .s2-c2 { animation-name: s2-c2; }
-  @keyframes s2-p1 { 0%, 7.9% { opacity: 0; } 8%, 20.9% { opacity: 1; } 21%, 100% { opacity: 0; } }
-  @keyframes s2-p2 { 0%, 50.9% { opacity: 0; } 51%, 63.9% { opacity: 1; } 64%, 100% { opacity: 0; } }
-  @keyframes s2-c1 { 0%, 23.9% { opacity: 0; } 24%, 36.9% { opacity: 1; } 37%, 100% { opacity: 0; } }
-  @keyframes s2-c2 { 0%, 66.9% { opacity: 0; } 67%, 79.9% { opacity: 1; } 80%, 100% { opacity: 0; } }
-  .s2-d1 { offset-path: path("M65 108 Q 140 50 214 194.5"); animation-name: s2-d1; }
-  .s2-l1 { offset-path: path("M214 194.5 Q 256 160 298 194.5"); animation-name: s2-l1; }
-  .s2-u1 { offset-path: path("M620 194.5 Q 630 140 595 108"); animation-name: s2-u1; }
-  .s2-r1 { offset-path: path("M595 108 Q 330 -30 65 108"); animation-name: s2-r1; }
-  .s2-d2 { offset-path: path("M175 108 Q 210 70 214 194.5"); animation-name: s2-d2; }
-  .s2-l2 { offset-path: path("M214 194.5 Q 256 160 298 194.5"); animation-name: s2-l2; }
-  .s2-u2 { offset-path: path("M620 194.5 Q 690 170 705 108"); animation-name: s2-u2; }
-  .s2-r2 { offset-path: path("M705 108 Q 440 -30 175 108"); animation-name: s2-r2; }
-  @keyframes s2-d1 { 0%, 3% { offset-distance: 0%; opacity: 0; } 3.5% { opacity: 1; } 7.5% { opacity: 1; } 8%, 100% { offset-distance: 100%; opacity: 0; } }
-  @keyframes s2-l1 { 0%, 21% { offset-distance: 0%; opacity: 0; } 21.3% { opacity: 1; } 23.7% { opacity: 1; } 24%, 100% { offset-distance: 100%; opacity: 0; } }
-  @keyframes s2-u1 { 0%, 37% { offset-distance: 0%; opacity: 0; } 37.5% { opacity: 1; } 39.5% { opacity: 1; } 40%, 100% { offset-distance: 100%; opacity: 0; } }
-  @keyframes s2-r1 { 0%, 43% { offset-distance: 0%; opacity: 0; } 43.5% { opacity: 1; } 48.5% { opacity: 1; } 49%, 100% { offset-distance: 100%; opacity: 0; } }
-  @keyframes s2-d2 { 0%, 46% { offset-distance: 0%; opacity: 0; } 46.5% { opacity: 1; } 50.5% { opacity: 1; } 51%, 100% { offset-distance: 100%; opacity: 0; } }
-  @keyframes s2-l2 { 0%, 64% { offset-distance: 0%; opacity: 0; } 64.3% { opacity: 1; } 66.7% { opacity: 1; } 67%, 100% { offset-distance: 100%; opacity: 0; } }
-  @keyframes s2-u2 { 0%, 80% { offset-distance: 0%; opacity: 0; } 80.5% { opacity: 1; } 82.5% { opacity: 1; } 83%, 100% { offset-distance: 100%; opacity: 0; } }
-  @keyframes s2-r2 { 0%, 86% { offset-distance: 0%; opacity: 0; } 86.5% { opacity: 1; } 91.5% { opacity: 1; } 92%, 100% { offset-distance: 100%; opacity: 0; } }
-  .s2-fS1 { --pennant: var(--msg-receive); animation-name: s2-fS1; }
-  .s2-fL1 { --pennant: var(--msg-reply); animation-name: s2-fL1; }
-  .s2-fS2 { --pennant: var(--msg-receive); animation-name: s2-fS2; }
-  .s2-fL2 { --pennant: var(--msg-reply); animation-name: s2-fL2; }
-  @keyframes s2-fS1 { 0%, 2.5% { --pennant: var(--msg-receive); } 3.5%, 48.5% { --pennant: var(--msg-ask); } 49.5%, 100% { --pennant: var(--msg-receive); } }
-  @keyframes s2-fL1 { 0%, 39.5% { --pennant: var(--msg-reply); } 40.5%, 42.5% { --pennant: var(--msg-receive); } 43.5%, 100% { --pennant: var(--msg-reply); } }
-  @keyframes s2-fS2 { 0%, 45.5% { --pennant: var(--msg-receive); } 46.5%, 91.5% { --pennant: var(--msg-ask); } 92.5%, 100% { --pennant: var(--msg-receive); } }
-  @keyframes s2-fL2 { 0%, 82.5% { --pennant: var(--msg-reply); } 83.5%, 85.5% { --pennant: var(--msg-receive); } 86.5%, 100% { --pennant: var(--msg-reply); } }
+  @keyframes s2-p1 { 0%, 15.8% { opacity: 0; } 16%, 41.8% { opacity: 1; } 42%, 100% { opacity: 0; } }
+  @keyframes s2-c1 { 0%, 47.8% { opacity: 0; } 48%, 73.8% { opacity: 1; } 74%, 100% { opacity: 0; } }
+  .s2-d1 { animation-name: s2-d1; }
+  .s2-l1 { animation-name: s2-l1; }
+  .s2-u1 { animation-name: s2-u1; }
+  .s2-r1 { animation-name: s2-r1; }
+  @keyframes s2-d1 { 0%, 6% { offset-distance: 0%; opacity: 0; } 7% { opacity: 1; } 15% { opacity: 1; } 16%, 100% { offset-distance: 100%; opacity: 0; } }
+  @keyframes s2-l1 { 0%, 42% { offset-distance: 0%; opacity: 0; } 42.6% { opacity: 1; } 47.4% { opacity: 1; } 48%, 100% { offset-distance: 100%; opacity: 0; } }
+  @keyframes s2-u1 { 0%, 74% { offset-distance: 0%; opacity: 0; } 75% { opacity: 1; } 79% { opacity: 1; } 80%, 100% { offset-distance: 100%; opacity: 0; } }
+  @keyframes s2-r1 { 0%, 86% { offset-distance: 0%; opacity: 0; } 87% { opacity: 1; } 97% { opacity: 1; } 98%, 100% { offset-distance: 100%; opacity: 0; } }
+  .s2-fS { --pennant: var(--msg-receive); animation-name: s2-fS; }
+  .s2-fL { --pennant: var(--msg-reply); animation-name: s2-fL; }
+  @keyframes s2-fS { 0%, 5% { --pennant: var(--msg-receive); } 7%, 97% { --pennant: var(--msg-ask); } 99%, 100% { --pennant: var(--msg-receive); } }
+  @keyframes s2-fL { 0%, 79% { --pennant: var(--msg-reply); } 81%, 85% { --pennant: var(--msg-receive); } 87%, 100% { --pennant: var(--msg-reply); } }
 
   /* Asleep, then awake, 16s. No firewall: a sleeping device can't take
      messages, so it polls. Asks wait on the VM's pier; on waking the barge
@@ -289,7 +319,7 @@ const still = variant === "asleep";
   @keyframes s3-awake { 0%, 36% { opacity: 0; } 42%, 95% { opacity: 1; } 100% { opacity: 0; } }
   .s3-barge { animation-name: s3-barge; }
   @keyframes s3-barge {
-    0%, 42% { transform: translateX(0); } 54%, 65% { transform: translateX(-322px); }
+    0%, 42% { transform: translateX(0); } 54%, 65% { transform: translateX(var(--barge-run)); }
     77%, 100% { transform: translateX(0); }
   }
   .s3-p1, .s3-p2, .s3-p3 { opacity: 1; }
@@ -305,16 +335,16 @@ const still = variant === "asleep";
   @keyframes s3-c1 { 0%, 58.4% { opacity: 0; } 58.5%, 76.9% { opacity: 1; } 77%, 100% { opacity: 0; } }
   @keyframes s3-c2 { 0%, 61.4% { opacity: 0; } 61.5%, 79.9% { opacity: 1; } 80%, 100% { opacity: 0; } }
   @keyframes s3-c3 { 0%, 64.4% { opacity: 0; } 64.5%, 82.9% { opacity: 1; } 83%, 100% { opacity: 0; } }
-  .s3-s1 { offset-path: path("M65 108 Q 140 50 214 194.5"); animation-name: s3-s1; }
-  .s3-s2 { offset-path: path("M175 108 Q 210 70 232 194.5"); animation-name: s3-s2; }
-  .s3-s3 { offset-path: path("M65 108 Q 160 30 250 194.5"); animation-name: s3-s3; }
-  .s3-l1 { offset-path: path("M214 194.5 Q 256 160 298 194.5"); animation-name: s3-l1; }
-  .s3-l2 { offset-path: path("M232 194.5 Q 271 160 310 194.5"); animation-name: s3-l2; }
-  .s3-l3 { offset-path: path("M250 194.5 Q 286 160 322 194.5"); animation-name: s3-l3; }
-  .s3-u1 { offset-path: path("M620 194.5 Q 630 140 595 108"); animation-name: s3-u1; }
-  .s3-u2 { offset-path: path("M632 194.5 Q 695 170 705 108"); animation-name: s3-u2; }
-  .s3-u3 { offset-path: path("M644 194.5 Q 705 175 705 108"); animation-name: s3-u3; }
-  .s3-r1 { offset-path: path("M595 108 Q 330 -30 65 108"); animation-name: s3-r1; }
+  .s3-s1 { animation-name: s3-s1; }
+  .s3-s2 { animation-name: s3-s2; }
+  .s3-s3 { animation-name: s3-s3; }
+  .s3-l1 { animation-name: s3-l1; }
+  .s3-l2 { animation-name: s3-l2; }
+  .s3-l3 { animation-name: s3-l3; }
+  .s3-u1 { animation-name: s3-u1; }
+  .s3-u2 { animation-name: s3-u2; }
+  .s3-u3 { animation-name: s3-u3; }
+  .s3-r1 { animation-name: s3-r1; }
   @keyframes s3-s1 { 0%, 4% { offset-distance: 0%; opacity: 0; } 4.5% { opacity: 1; } 8.5% { opacity: 1; } 9%, 100% { offset-distance: 100%; opacity: 0; } }
   @keyframes s3-s2 { 0%, 14% { offset-distance: 0%; opacity: 0; } 14.5% { opacity: 1; } 18.5% { opacity: 1; } 19%, 100% { offset-distance: 100%; opacity: 0; } }
   @keyframes s3-s3 { 0%, 24% { offset-distance: 0%; opacity: 0; } 24.5% { opacity: 1; } 28.5% { opacity: 1; } 29%, 100% { offset-distance: 100%; opacity: 0; } }
@@ -325,12 +355,10 @@ const still = variant === "asleep";
   @keyframes s3-u2 { 0%, 80% { offset-distance: 0%; opacity: 0; } 80.3% { opacity: 1; } 82.7% { opacity: 1; } 83%, 100% { offset-distance: 100%; opacity: 0; } }
   @keyframes s3-u3 { 0%, 83% { offset-distance: 0%; opacity: 0; } 83.3% { opacity: 1; } 85.7% { opacity: 1; } 86%, 100% { offset-distance: 100%; opacity: 0; } }
   @keyframes s3-r1 { 0%, 87% { offset-distance: 0%; opacity: 0; } 87.5% { opacity: 1; } 91.5% { opacity: 1; } 92%, 100% { offset-distance: 100%; opacity: 0; } }
-  .s3-fS1 { --pennant: var(--msg-receive); animation-name: s3-fS1; }
-  .s3-fS2 { --pennant: var(--msg-ask); }
-  .s3-fL1 { --pennant: var(--msg-reply); animation-name: s3-fL1; }
-  .s3-fL2 { --pennant: var(--msg-receive); }
-  @keyframes s3-fS1 { 0%, 3.5% { --pennant: var(--msg-receive); } 4.5%, 91.5% { --pennant: var(--msg-ask); } 92.5%, 100% { --pennant: var(--msg-receive); } }
-  @keyframes s3-fL1 { 0%, 79.5% { --pennant: var(--msg-reply); } 80.5%, 86.5% { --pennant: var(--msg-receive); } 87.5%, 100% { --pennant: var(--msg-reply); } }
+  .s3-fS { --pennant: var(--msg-receive); animation-name: s3-fS; }
+  .s3-fL { --pennant: var(--msg-reply); animation-name: s3-fL; }
+  @keyframes s3-fS { 0%, 3.5% { --pennant: var(--msg-receive); } 4.5%, 91.5% { --pennant: var(--msg-ask); } 92.5%, 100% { --pennant: var(--msg-receive); } }
+  @keyframes s3-fL { 0%, 79.5% { --pennant: var(--msg-reply); } 80.5%, 86.5% { --pennant: var(--msg-receive); } 87.5%, 100% { --pennant: var(--msg-reply); } }
 
   /* Each scene holds its still frame: the base values above. */
   @media (prefers-reduced-motion: reduce) {
