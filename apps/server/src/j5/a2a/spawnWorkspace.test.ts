@@ -156,7 +156,6 @@ const spawnHarness = (input: {
   readonly commands?: Ref.Ref<ReadonlyArray<OrchestrationV2Command>>;
   /** Runs inside each thread.create before it lands, so a test can hold a start open. */
   readonly beforeCreate?: Effect.Effect<void>;
-  readonly onStartQueued?: (threadId: ThreadId) => Effect.Effect<void>;
 }) =>
   Effect.gen(function* () {
     const log = yield* Ref.make<ReadonlyArray<string>>([]);
@@ -283,7 +282,6 @@ const spawnHarness = (input: {
           checkout: input.checkout,
           launches,
           launch: () => Ref.update(log, (items) => [...items, "launch"]),
-          ...(input.onStartQueued === undefined ? {} : { onStartQueued: input.onStartQueued }),
           // An accepted create leaves its receipt, as the orchestrator's does.
           accepted: Ref.get(commands).pipe(
             Effect.map((all) =>
@@ -440,13 +438,12 @@ it.effect("binds a client_request_id to its first workspace type, across a resta
   }),
 );
 
-it.effect("a concurrent opposite-type start on one key waits for the first, then is refused", () =>
+it.effect("a second start on one key while the first is in flight is refused, not queued", () =>
   Effect.gen(function* () {
     const createsEntered = yield* Ref.make(0);
     const createEntered = yield* Deferred.make<void>();
     const secondCreateEntered = yield* Deferred.make<void>();
     const releaseCreate = yield* Deferred.make<void>();
-    const loserQueued = yield* Deferred.make<void>();
     const harness = yield* spawnHarness({
       checkout: { isRepo: true, refName: "j5/main" },
       // Every create waits for the release, and says whether it is the first or a second one.
@@ -456,38 +453,38 @@ it.effect("a concurrent opposite-type start on one key waits for the first, then
         ),
         Effect.andThen(Deferred.await(releaseCreate)),
       ),
-      onStartQueued: () => Deferred.succeed(loserQueued, undefined),
     });
     yield* Effect.gen(function* () {
       const winner = yield* harness
         .call({ ...spawnArgs, workspace: { type: "worktree" }, client_request_id: "raced" })
         .pipe(Effect.forkChild);
-      // The first start holds the permit, stopped inside its create.
+      // The first start is in flight, stopped inside its create.
       yield* Deferred.await(createEntered);
       const loser = yield* harness
         .call({ ...spawnArgs, workspace: { type: "shared" }, client_request_id: "raced" })
         .pipe(Effect.forkChild);
-      // Release only once the loser is held: queued behind the winner's permit, or (with no
-      // permit) already inside a create of its own, which the assertions below then catch.
-      const held = yield* Effect.raceFirst(
-        Deferred.await(loserQueued).pipe(Effect.as("queued" as const)),
-        Deferred.await(secondCreateEntered).pipe(Effect.as("second create" as const)),
+      // The second start returns while the first still holds its create; without the guard it
+      // would reach a create of its own instead, which ends this race the other way.
+      const second = yield* Effect.raceFirst(
+        Fiber.join(loser).pipe(Effect.map((result) => ({ kind: "returned" as const, result }))),
+        Deferred.await(secondCreateEntered).pipe(Effect.as({ kind: "second create" as const })),
       );
       yield* Deferred.succeed(releaseCreate, undefined);
-      assert.equal(held, "queued");
+      assert.equal(second.kind, "returned");
+      if (second.kind === "returned") {
+        assert.isTrue(second.result.isFailure);
+        assert.include(
+          (second.result.result as { readonly message: string }).message,
+          "already in progress",
+        );
+      }
 
       assert.isFalse((yield* Fiber.join(winner)).isFailure);
-      const refused = yield* Fiber.join(loser);
-      assert.isTrue(refused.isFailure);
-      assert.include(
-        (refused.result as { readonly message: string }).message,
-        "already bound to a worktree workspace",
-      );
       const commands = yield* Ref.get(harness.commands);
       const creates = commands.filter((command) => command.type === "thread.create");
       assert.lengthOf(creates, 1);
-      const [create] = creates;
       // The one thread is the winner's: unbound until ThreadLaunch prepares its worktree.
+      const [create] = creates;
       if (create?.type === "thread.create") {
         assert.include(create.commandId, "spawn-create-worktree");
         assert.isNull(create.worktreePath);
@@ -498,55 +495,6 @@ it.effect("a concurrent opposite-type start on one key waits for the first, then
         0,
       );
     }).pipe(Effect.provide(harness.layer));
-  }),
-);
-
-it.effect("an interrupted waiter gives back its place, and the next start still runs", () =>
-  Effect.gen(function* () {
-    const queued = yield* Ref.make(0);
-    const secondQueued = yield* Deferred.make<void>();
-    const thirdQueued = yield* Deferred.make<void>();
-    const holding = yield* Deferred.make<void>();
-    const release = yield* Deferred.make<void>();
-    const order = yield* Ref.make<ReadonlyArray<string>>([]);
-    const layer = fakeSpawnWorkspaceLayer({
-      checkout: { isRepo: true, refName: "j5/main" },
-      onStartQueued: () =>
-        Ref.updateAndGet(queued, (count) => count + 1).pipe(
-          Effect.flatMap((count) =>
-            Deferred.succeed(count === 1 ? secondQueued : thirdQueued, undefined),
-          ),
-        ),
-    }).pipe(Layer.provide(Layer.mock(ThreadManagementService)({})));
-    yield* Effect.gen(function* () {
-      const workspaces = yield* SpawnWorkspaceService;
-      const start = (name: string, body: Effect.Effect<void> = Effect.void) =>
-        workspaces.withSpawnStart(
-          {
-            stableInput: { providerSessionId: "s", requestKey: "k" },
-            threadId: ThreadId.make("thread:permit"),
-            workspace: { type: "shared" },
-          },
-          body.pipe(Effect.andThen(Ref.update(order, (all) => [...all, name]))),
-        );
-      const first = yield* start(
-        "first",
-        Deferred.succeed(holding, undefined).pipe(Effect.andThen(Deferred.await(release))),
-      ).pipe(Effect.forkChild);
-      yield* Deferred.await(holding);
-      const second = yield* start("second").pipe(Effect.forkChild);
-      yield* Deferred.await(secondQueued);
-      yield* Fiber.interrupt(second);
-      const third = yield* start("third").pipe(Effect.forkChild);
-      yield* Deferred.await(thirdQueued);
-      yield* Deferred.succeed(release, undefined);
-      yield* Fiber.join(first);
-      yield* Fiber.join(third);
-      assert.deepStrictEqual(yield* Ref.get(order), ["first", "third"]);
-      // The permit is free again: a later start runs without queueing.
-      yield* start("fourth");
-      assert.equal(yield* Ref.get(queued), 2);
-    }).pipe(Effect.provide(layer));
   }),
 );
 

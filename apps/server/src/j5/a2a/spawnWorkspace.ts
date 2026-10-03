@@ -9,11 +9,9 @@ import type {
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
-import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 
@@ -197,14 +195,14 @@ export interface SpawnWorkspaceServiceShape {
     readonly listBranches: boolean;
   }) => Effect.Effect<SpawnCheckout>;
   /**
-   * Runs one spawn's start (create, facts, brief) with no other start for the same thread in
-   * flight, after refusing a request key already accepted with the other workspace type.
+   * Runs one spawn's start (create, facts, brief), refusing it while another start for the same
+   * thread is in flight, and refusing a request key already accepted with the other workspace type.
    *
-   * Invariant: every door that dispatches `thread.create` for a spawn thread id goes through this
-   * permit. The orchestrator has no existing-thread guard and the projection upserts, so a second
-   * create under the other type's command id would overwrite the first thread; only this check,
-   * made under the permit, keeps it from being dispatched. The receipt it reads is durable, so the
-   * binding outlives the in-process permit across a restart.
+   * Invariant: every door that dispatches `thread.create` for a spawn thread id goes through this.
+   * The orchestrator has no existing-thread guard and the projection upserts, so a second create
+   * under the other type's command id would overwrite the first thread. With one start in flight
+   * per thread, the receipt check can't race the create it guards. The receipt is durable, so the
+   * binding outlives the in-process guard across a restart.
    */
   readonly withSpawnStart: <A, E, R>(
     input: {
@@ -231,178 +229,127 @@ export class SpawnWorkspaceService extends Context.Service<
 
 const detailOf = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
 
-export interface SpawnWorkspaceOptions {
-  /**
-   * Runs once a start has queued behind another start of the same thread, and before it waits.
-   * Tests use it to know the contender is held at the permit; production passes nothing.
-   */
-  readonly onStartQueued?: (threadId: ThreadId) => Effect.Effect<void>;
-}
+const make = Effect.gen(function* () {
+  const projects = yield* ProjectService;
+  const git = yield* GitWorkflowService;
+  const receipts = yield* CommandReceiptStoreV2;
+  const launcher = yield* ThreadLaunchService;
+  const threads = yield* ThreadManagementService;
+  // Spawn threads with a start running in this process. A second start for one of them is
+  // refused rather than queued: it would only replay the first, and retrying is safe.
+  const startsInFlight = new Set<ThreadId>();
 
-/**
- * One start per thread id at a time, first come first served. A key is present while a start
- * holds it, with the tickets of the starts queued behind it. A queued start can't pass until the
- * holder hands it the permit, which makes the queue a fact a test can wait on; an interrupted
- * waiter takes its ticket back.
- */
-const makeStartPermits = (onQueued: (threadId: ThreadId) => Effect.Effect<void>) =>
-  Effect.gen(function* () {
-    const held = yield* Ref.make(new Map<ThreadId, ReadonlyArray<Deferred.Deferred<void>>>());
-    const enter = (threadId: ThreadId, ticket: Deferred.Deferred<void>) =>
-      Ref.modify(held, (current) => {
-        const queue = current.get(threadId);
-        const next = new Map(current);
-        next.set(threadId, queue === undefined ? [] : [...queue, ticket]);
-        return [queue !== undefined, next] as const;
-      });
-    const leave = (threadId: ThreadId, ticket: Deferred.Deferred<void>) =>
-      Ref.modify(held, (current) => {
-        const queue = current.get(threadId) ?? [];
-        const next = new Map(current);
-        // Still queued: this start never held the permit, so it only withdraws its ticket.
-        if (queue.includes(ticket)) {
-          next.set(
-            threadId,
-            queue.filter((waiting) => waiting !== ticket),
-          );
-          return [null, next] as const;
-        }
-        const [following, ...rest] = queue;
-        if (following === undefined) next.delete(threadId);
-        else next.set(threadId, rest);
-        return [following ?? null, next] as const;
-      }).pipe(
-        Effect.flatMap((following) =>
-          following === null ? Effect.void : Deferred.succeed(following, undefined),
-        ),
-      );
-    return <A, E, R>(threadId: ThreadId, effect: Effect.Effect<A, E, R>) =>
-      Effect.gen(function* () {
-        const ticket = yield* Deferred.make<void>();
-        return yield* Effect.acquireUseRelease(
-          enter(threadId, ticket),
-          (queued) =>
-            queued
-              ? onQueued(threadId).pipe(
-                  Effect.andThen(Deferred.await(ticket)),
-                  Effect.andThen(effect),
-                )
-              : effect,
-          () => leave(threadId, ticket),
-        );
-      });
-  });
-
-const make = (options: SpawnWorkspaceOptions) =>
-  Effect.gen(function* () {
-    const projects = yield* ProjectService;
-    const git = yield* GitWorkflowService;
-    const receipts = yield* CommandReceiptStoreV2;
-    const launcher = yield* ThreadLaunchService;
-    const threads = yield* ThreadManagementService;
-    const withStartPermit = yield* makeStartPermits(options.onStartQueued ?? (() => Effect.void));
-
-    const inspect: SpawnWorkspaceServiceShape["inspect"] = (caller) =>
-      Effect.gen(function* () {
-        const cwd =
-          caller.worktreePath ??
-          Option.getOrNull(yield* projects.getById(caller.projectId))?.workspaceRoot ??
-          null;
-        if (cwd === null) return yield* Effect.fail("the project is not readable");
-        const status = yield* git.localStatus({ cwd });
-        const localBranchNames =
-          status.isRepo && caller.listBranches ? yield* git.listLocalBranchNames(cwd) : [];
-        return {
+  const inspect: SpawnWorkspaceServiceShape["inspect"] = (caller) =>
+    Effect.gen(function* () {
+      const cwd =
+        caller.worktreePath ??
+        Option.getOrNull(yield* projects.getById(caller.projectId))?.workspaceRoot ??
+        null;
+      if (cwd === null) return yield* Effect.fail("the project is not readable");
+      const status = yield* git.localStatus({ cwd });
+      const localBranchNames =
+        status.isRepo && caller.listBranches ? yield* git.listLocalBranchNames(cwd) : [];
+      return {
+        inWorktree: caller.worktreePath !== null,
+        isRepo: status.isRepo,
+        refName: status.refName,
+        localBranchNames,
+        problem: null,
+      } satisfies SpawnCheckout;
+    }).pipe(
+      Effect.catch((cause) =>
+        Effect.succeed({
           inWorktree: caller.worktreePath !== null,
-          isRepo: status.isRepo,
-          refName: status.refName,
-          localBranchNames,
-          problem: null,
-        } satisfies SpawnCheckout;
-      }).pipe(
-        Effect.catch((cause) =>
-          Effect.succeed({
-            inWorktree: caller.worktreePath !== null,
-            isRepo: false,
-            refName: null,
-            localBranchNames: [],
-            problem: detailOf(cause),
-          } satisfies SpawnCheckout),
-        ),
-      );
+          isRepo: false,
+          refName: null,
+          localBranchNames: [],
+          problem: detailOf(cause),
+        } satisfies SpawnCheckout),
+      ),
+    );
 
-    const withSpawnStart: SpawnWorkspaceServiceShape["withSpawnStart"] = (input, effect) =>
-      withStartPermit(
-        input.threadId,
-        Effect.gen(function* () {
-          const other = input.workspace.type === "shared" ? "worktree" : "shared";
-          const bound = yield* receipts
-            .getByCommandId(spawnCreateCommandId(input.stableInput, other))
-            .pipe(
-              Effect.mapError(
-                (error) =>
-                  new SpawnWorkspaceError({
-                    detail: `The spawn's earlier workspace choice could not be read: ${error.message}`,
-                    nextStep: "Retry with the same client_request_id.",
-                  }),
-              ),
-            );
-          if (Option.isSome(bound))
-            return yield* new SpawnWorkspaceError({
-              detail: `client_request_id ${input.stableInput.requestKey} is already bound to a ${other} workspace.`,
-              nextStep: `Retry with workspace {"type":"${other}"}, or use a fresh client_request_id.`,
-            });
-          return yield* effect;
-        }),
-      );
+  const withSpawnStart: SpawnWorkspaceServiceShape["withSpawnStart"] = (input, effect) =>
+    // The check, the add, and the releasing finalizer run with no interruptible gap, so an
+    // interrupt can't leak an entry and block every later start of this thread.
+    Effect.uninterruptibleMask((restore) =>
+      Effect.suspend(() => {
+        if (startsInFlight.has(input.threadId))
+          return Effect.fail(
+            new SpawnWorkspaceError({
+              detail: `A start for client_request_id ${input.stableInput.requestKey} is already in progress.`,
+              nextStep: "Retry with the same client_request_id once it returns.",
+            }),
+          );
+        startsInFlight.add(input.threadId);
+        return restore(
+          Effect.gen(function* () {
+            const other = input.workspace.type === "shared" ? "worktree" : "shared";
+            const bound = yield* receipts
+              .getByCommandId(spawnCreateCommandId(input.stableInput, other))
+              .pipe(
+                Effect.mapError(
+                  (error) =>
+                    new SpawnWorkspaceError({
+                      detail: `The spawn's earlier workspace choice could not be read: ${error.message}`,
+                      nextStep: "Retry with the same client_request_id.",
+                    }),
+                ),
+              );
+            if (Option.isSome(bound))
+              return yield* new SpawnWorkspaceError({
+                detail: `client_request_id ${input.stableInput.requestKey} is already bound to a ${other} workspace.`,
+                nextStep: `Retry with workspace {"type":"${other}"}, or use a fresh client_request_id.`,
+              });
+            return yield* effect;
+          }),
+        ).pipe(Effect.ensuring(Effect.sync(() => startsInFlight.delete(input.threadId))));
+      }),
+    );
 
-    const startBrief: SpawnWorkspaceServiceShape["startBrief"] = (input) =>
-      input.workspace.type === "shared"
-        ? threads
-            .dispatch({
-              type: "message.dispatch",
-              createdBy: "agent",
-              creationSource: "mcp",
-              commandId: lifecycleCommandId({ ...input.stableInput, operation: "spawn-brief" }),
-              threadId: input.threadId,
-              messageId: input.messageId,
-              text: input.text,
-              attachments: [],
-              modelSelection: input.modelSelection,
-              dispatchMode: { type: "start_immediately" },
-            })
-            .pipe(Effect.asVoid)
-        : launcher
-            .launch({
-              commandId: lifecycleCommandId({ ...input.stableInput, operation: "spawn-launch" }),
-              squadronId: input.squadronId,
-              threadId: input.threadId,
-              reuseExistingThread: true,
-              projectId: input.projectId,
-              title: input.title,
-              modelSelection: input.modelSelection,
-              runtimeMode: input.runtimeMode,
-              interactionMode: input.interactionMode,
-              workspaceStrategy: {
-                type: "worktree",
-                baseRef: input.workspace.baseRef,
-                ...(input.workspace.branch === undefined ? {} : { branch: input.workspace.branch }),
-                startFromOrigin: input.workspace.startFromOrigin,
-              },
-              initialMessage: { messageId: input.messageId, text: input.text, attachments: [] },
-              createdBy: "agent",
-              creationSource: "mcp",
-            })
-            .pipe(Effect.asVoid);
+  const startBrief: SpawnWorkspaceServiceShape["startBrief"] = (input) =>
+    input.workspace.type === "shared"
+      ? threads
+          .dispatch({
+            type: "message.dispatch",
+            createdBy: "agent",
+            creationSource: "mcp",
+            commandId: lifecycleCommandId({ ...input.stableInput, operation: "spawn-brief" }),
+            threadId: input.threadId,
+            messageId: input.messageId,
+            text: input.text,
+            attachments: [],
+            modelSelection: input.modelSelection,
+            dispatchMode: { type: "start_immediately" },
+          })
+          .pipe(Effect.asVoid)
+      : launcher
+          .launch({
+            commandId: lifecycleCommandId({ ...input.stableInput, operation: "spawn-launch" }),
+            squadronId: input.squadronId,
+            threadId: input.threadId,
+            reuseExistingThread: true,
+            projectId: input.projectId,
+            title: input.title,
+            modelSelection: input.modelSelection,
+            runtimeMode: input.runtimeMode,
+            interactionMode: input.interactionMode,
+            workspaceStrategy: {
+              type: "worktree",
+              baseRef: input.workspace.baseRef,
+              ...(input.workspace.branch === undefined ? {} : { branch: input.workspace.branch }),
+              startFromOrigin: input.workspace.startFromOrigin,
+            },
+            initialMessage: { messageId: input.messageId, text: input.text, attachments: [] },
+            createdBy: "agent",
+            creationSource: "mcp",
+          })
+          .pipe(Effect.asVoid);
 
-    return SpawnWorkspaceService.of({ inspect, withSpawnStart, startBrief });
-  });
+  return SpawnWorkspaceService.of({ inspect, withSpawnStart, startBrief });
+});
 
 /** Takes the receipt store from its caller; tests provide their own. */
-export const makeLayerFromReceiptStore = (options: SpawnWorkspaceOptions = {}) =>
-  Layer.effect(SpawnWorkspaceService, make(options));
-
-export const layerFromReceiptStore = makeLayerFromReceiptStore();
+export const layerFromReceiptStore = Layer.effect(SpawnWorkspaceService, make);
 
 /** The receipt store is a stateless reader over the shared receipt table, built here for J5. */
 export const layer = layerFromReceiptStore.pipe(Layer.provide(commandReceiptStoreLayer));

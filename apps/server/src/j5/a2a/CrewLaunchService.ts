@@ -570,9 +570,10 @@ export const layer = Layer.effect(
       const created: Array<Planned> = [];
       for (const member of planned) {
         const seatName = member.seat.name;
-        // One start per seat thread at a time, like spawn_agent (see `withSpawnStart`). The
-        // approval token already binds each seat's workspace type, so the type check never
-        // refuses here; the brief takes the permit again once every seat exists.
+        // Seats go through the same start guard as spawn_agent (see `withSpawnStart`), so every
+        // door that creates a spawn thread keeps its invariant. A Crew's launches are already
+        // serialized and its approval binds each seat's workspace type, so neither refusal is
+        // expected here; the brief takes the guard again once every seat exists.
         const started = yield* Effect.result(
           spawnWorkspace.withSpawnStart(
             {
