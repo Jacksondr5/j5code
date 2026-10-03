@@ -99,8 +99,9 @@ workflow uses GitHub-hosted runners and does not deploy relay or Vercel services
 The install one-liner (`https://github.com/Jacksondr5/j5code/releases/latest/download/install.sh`),
 `j5 update`, the background service, and desktop SSH remote launch all download from these releases.
 J5 no longer publishes to npm. The CLI executable is `j5`; its workspace name remains `t3` to preserve
-upstream task references and Effect service identifiers, and the archive's program keeps the name
-`t3`.
+upstream task references and Effect service identifiers. The archive's program is `j5`, with a `t3`
+link beside it so a server from before the rename can run the update check that tells it to use
+`j5 update`.
 
 `J5 Signed macOS Build` builds an Apple Silicon DMG and ZIP on a GitHub-hosted macOS runner,
 signs with Developer ID, and notarizes the app. It verifies the mounted app's identity, signature,

@@ -10,7 +10,7 @@ step. Stop and ask the owner wherever it says to.
   self-contained server for macOS (Apple silicon) and Linux x64 to its
   [GitHub Release](https://github.com/Jacksondr5/j5code/releases), plus
   `install.sh` and `SHA256SUMS`. The installer links the `j5` command into
-  `~/.local/bin`; the program it points to is named `t3` inside the release.
+  `~/.local/bin`.
 - **Service name:** the background service becomes **`j5code.service`**
   (systemd, Linux) and **`codes.jackson.j5code.service`** (launchd, macOS). It
   used to be `t3code.service` / `com.t3tools.t3code.service`, which collided with
@@ -201,8 +201,9 @@ Keep the old files until you are sure you will not roll back.
 
 - `~/.j5code/runtime/service-launcher.mjs` (the old launcher).
 - Old npm runtimes: directories in `~/.j5code/runtime/versions/` that contain
-  `node_modules/@jacksondr5/j5code` and no `t3` program at their top level
-  (versions 0.0.43 and earlier). Keep every directory that has a `t3` program.
+  `node_modules/@jacksondr5/j5code` and no `j5` or `t3` program at their top
+  level (versions 0.0.43 and earlier). Keep every directory that has a `j5` or
+  `t3` program.
 - `~/j5-migration-backup/` once you no longer need a rollback.
 - **Keep** `~/.j5code/userdata/state.sqlite`: it is the database as it was before
   the upgrade.

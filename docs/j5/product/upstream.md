@@ -302,6 +302,32 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Decided:** introduced in PR #94 (2026-09-04). Jackson approved it on 2026-09-28, closing the carry-or-drop question FORK.md's 2026-09-06 review left open. Recorded in FORK.md's final upstream-file review ("Pair discovery isolation and activation retry") and its `pair.ts` rows.
 
+#### D25. The `j5` command
+
+**Upstream:**
+
+- **The executable.** Each release archive's executable is `t3`, and the `t3` command on `PATH` links to it.
+
+**J5:**
+
+- **The executable is `j5`.** The command, the file it runs, and the process are all `j5`. Archive file names keep upstream's `t3-<version>-<platform>` names.
+- **Existing servers are moved once, by hand.** The rename is launcher protocol 4. A server from before it is refused the update from the app with a message to run `j5 update` on its machine; that command installs the new version and replaces the service's launcher. Each archive carries a `t3` link to `j5` so those servers can run that check and that command.
+
+**Why:**
+
+- **The name.** J5 shouldn't point at `t3` at all. With the old name, `~/.local/bin/j5` ran a file called `t3` and the server showed up as `t3`, which is confusing next to an installed T3 Code. Archive names stay, because existing servers download updates by those names and people never see them.
+- **The one-time step.** An update from the app never replaces the service's launcher, and an old launcher starts every new version as `t3`. Shipping a `t3` link indefinitely would leave the migration unfinished, and removing it later would break those servers. Refusing the update with a clear message moves each server and its launcher across together.
+
+**Consequences:**
+
+- **One visit per existing server.** Each server on 0.0.47 or earlier needs `j5 update` run on its machine. It keeps running its old version until then.
+- **The launcher reads protocol-3 state files.** The old CLI's `j5 update` writes one before starting the new launcher. This is a second line in upstream's `serviceProtocol.ts`.
+- **The `t3` link is temporary.** Removing it is tracked in #440. After that, a server still on 0.0.47 or earlier gets a generic install error and needs the installer and `j5 service install`.
+- **No downgrade across the rename.** Downgrading below the rename with `j5 update --allow-downgrade` isn't supported.
+- **At each advance:** check new upstream code that locates the executable by name, and upstream's `SERVICE_LAUNCHER_PROTOCOL`: J5's number must stay above it.
+
+**Decided:** Jackson, 2026-10-02 (#403) and 2026-10-03 (the protocol bump and the `j5 update` step). Recorded in FORK.md case 50.
+
 ### Awaiting a decision
 
 These already diverge on `j5/main`, but no human ruling is on record. Each landed as an implementer's call inside a merged PR. The person rules on each one; an approved entry moves up into its section, and a rejected one becomes a fix.

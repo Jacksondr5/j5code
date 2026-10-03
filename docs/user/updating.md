@@ -63,6 +63,11 @@ update itself to a release archive: **Update server** fails because no newer npm
 version exists. Follow [Migrating to release archives](./migrating-to-release-archives.md)
 on that machine once; later updates work from the app and with `j5 update` again.
 
+Occasionally an update changes how the background service starts, and **Update
+server** stops with a message asking you to run `j5 update` on the server's
+machine. Run it there once. The server keeps running its current version until
+you do, and later updates work from the app again.
+
 ## If an update fails
 
 Keep the client open until it reconnects or reports a failure. A failed service
