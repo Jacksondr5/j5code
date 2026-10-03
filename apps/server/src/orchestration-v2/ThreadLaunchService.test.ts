@@ -49,7 +49,7 @@ import * as ServerSettings from "../serverSettings.ts";
 import * as ScheduledTasks from "../scheduledTasks/ScheduledTaskService.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import {
-  SquadronThreadCreationMissingSquadronError,
+  SquadronThreadCreationAmbiguousProjectError,
   SquadronThreadCreationService,
 } from "../j5/a2a/SquadronThreadCreationService.ts";
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
@@ -288,7 +288,7 @@ function waitUntil<E, R>(predicate: () => Effect.Effect<boolean, E, R>): Effect.
   });
 }
 
-it.effect("keeps a durable named thread when the required Squadron registration is absent", () => {
+it.effect("keeps a durable named thread when its Squadron registration is refused", () => {
   let setupCalls = 0;
   const harness = makeHarness({
     runSetup: () =>
@@ -299,7 +299,11 @@ it.effect("keeps a durable named thread when the required Squadron registration 
     registerAtDurableLaunch: (input) =>
       input.squadronId === undefined
         ? Effect.fail(
-            new SquadronThreadCreationMissingSquadronError({ commandId: input.commandId }),
+            new SquadronThreadCreationAmbiguousProjectError({
+              commandId: input.commandId,
+              projectId: input.projectId,
+              squadronIds: ["squadron:first", "squadron:second"],
+            }),
           )
         : Effect.die("test expected no Squadron"),
   });

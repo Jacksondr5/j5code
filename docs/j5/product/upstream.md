@@ -144,13 +144,13 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Upstream:** a first run lands in a draft.
 
-**J5:** the person creates a named Squadron, with its folder, before the first thread. There is no automatic default Squadron.
+**J5:** the person creates a named Squadron, with its folder, before the first thread. The server no longer requires that: a thread launched without a Squadron registers into its project's Squadron, and when the project has none the server creates one named after the project. When several Squadrons reference the project, the launch is refused.
 
-**Why:** an unnamed default becomes a junk drawer that defeats the concept. Agents need a home, and the gate says so.
+**Why:** an unnamed default becomes a junk drawer that defeats the concept. Agents need a home, and the gate says so. The server rule is the first step of retiring Squadrons into projects ([#412](https://github.com/Jacksondr5/j5code/issues/412)), where a thread's home is its project. A Squadron created this way carries its project's name, so it isn't the unnamed default the gate guards against.
 
-**Consequences:** because a folder is required, a Squadron with no repository isn't possible. That rules out a real future use: non-coding work such as a support rotation. A failed read offers only a retry, never a guessed home.
+**Consequences:** because a folder is required, a Squadron with no repository isn't possible. That rules out a real future use: non-coding work such as a support rotation. A failed read offers only a retry, never a guessed home. The web client still sends a Squadron with every launch, so the gate is what a person sees until the client's new-thread doors return to upstream. Until then the server rule is reached only by launches that send none, such as ACP session import.
 
-**Decided:** Jackson, 2026-08-24 (SC2); the folder requirement from DV2 (2026-08-25) and the Squadron definition (2026-09-05). Recorded in FORK.md case 9.
+**Decided:** Jackson, 2026-08-24 (SC2); the folder requirement from DV2 (2026-08-25) and the Squadron definition (2026-09-05). The server rule: Jackson, 2026-10-03, in the plan to retire Squadrons. Recorded in FORK.md cases 9 and 10.
 
 #### D10. Welcome wizard assigns imported conversations a Squadron
 

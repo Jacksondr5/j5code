@@ -1,6 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Layer from "effect/Layer";
 import { OrchestrationV2EventSinkLayerLive } from "../../orchestration-v2/runtimeLayer.ts";
+import { ProjectionProjectRepositoryLive } from "../../persistence/Layers/ProjectionProjects.ts";
 import { layer as playbookCrewRelayLayer } from "../playbooks/PlaybookCrewRelay.ts";
 import { playbookStoreLayer } from "../playbooks/PlaybookStore.ts";
 import { FetchHttpClient } from "effect/unstable/http";
@@ -58,7 +59,10 @@ export const makeJ5SquadronCreationLayer = (
 ) => {
   const ledgerProvided = options.ledger ?? ledgerLayer;
   const registrarAndReferences = Layer.mergeAll(homeRegistrarLayer, squadronProjectReferencesLayer);
-  return Layer.merge(squadronThreadCreationServiceLayer, spawnCompositionLayer).pipe(
+  return Layer.merge(
+    squadronThreadCreationServiceLayer.pipe(Layer.provide(ProjectionProjectRepositoryLive)),
+    spawnCompositionLayer,
+  ).pipe(
     Layer.provideMerge(homeRegistrationTransactionLayer),
     Layer.provideMerge(participantPlacementLayer),
     Layer.provideMerge(registrarAndReferences),

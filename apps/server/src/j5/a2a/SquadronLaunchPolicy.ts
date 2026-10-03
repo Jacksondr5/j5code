@@ -36,9 +36,11 @@ export type SquadronLaunchPolicy =
     };
 
 /**
- * DV5's closed, named noninteractive cohort table. Interactive user-origin
- * creation is the only route that must supply a Squadron now; this does not
- * choose or infer one for any native cohort.
+ * DV5's closed, named noninteractive cohort table. `require-squadron` launches
+ * register a home: the Squadron they send, or else their project's Squadron
+ * (`SquadronThreadCreationService`). The native cohorts stay without a home
+ * only until the ledger re-keys to projects (#412), when every thread
+ * registers at creation; the exemption is not permanent.
  */
 export const resolveSquadronLaunchPolicy = (input: {
   readonly createdBy: OrchestrationV2Actor;
