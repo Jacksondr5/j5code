@@ -1793,7 +1793,7 @@ for (const refusal of ["wrong home", "unavailable participant"] as const) {
 for (const crossSquadron of [false, true]) {
   it.effect(
     crossSquadron
-      ? "delivers a cross-Squadron ask once and preserves explicit cross-Squadron reply refusal"
+      ? "dispatches a cross-Squadron peer ask and reply once, closing the asker's Exchange"
       : "dispatches a same-Squadron peer ask and reply once through the accepted ledger operation",
     () =>
       Effect.gen(function* () {
@@ -1869,21 +1869,6 @@ for (const crossSquadron of [false, true]) {
             message: "Confirmed from the recipient's Squadron.",
             acceptedAt: ask.acceptedAt,
           };
-          if (crossSquadron) {
-            const error = yield* send.send(replyInput).pipe(Effect.flip);
-            assert.equal(error._tag, "A2ACrossSquadronReplyInvariantError");
-            assert.deepStrictEqual(yield* delivery.drain, []);
-            assert.lengthOf((yield* orchestrator.getThreadProjection(sender.threadId)).messages, 0);
-            assert.deepStrictEqual(
-              yield* sql<{ readonly status: string }>`
-          SELECT status FROM j5_a2a_exchange WHERE exchange_id = ${accepted.exchangeId}
-        `,
-              [{ status: "open" }],
-            );
-            assert.deepStrictEqual(yield* send.send(ask), accepted);
-            assert.lengthOf(yield* Ref.get(harness.startedInputs), 1);
-            return;
-          }
           const reply = yield* send.send(replyInput);
           assert.equal(reply.exchangeState, "closed");
           assert.deepStrictEqual(yield* send.send(replyInput), reply);
