@@ -28,6 +28,7 @@ import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewIns
 import { CrewLaunchReporter } from "./CrewLaunchReporter.ts";
 import { CrewCaptainArchiveCascade } from "./CrewCaptainArchiveCascade.ts";
 import { readEventStoreHighWater } from "./eventStoreHighWater.ts";
+import { getThreadProjectionIfPresent } from "./threadProjectionReads.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
 import { formatRunFailureField, runFailureDetail } from "./runFailures.ts";
 import { lifecycleCommandId, lifecycleId } from "./spawnIds.ts";
@@ -242,45 +243,60 @@ const makeLayer = (daemon: boolean) =>
        */
       const notifySpawnerOfMissingWorktree = Effect.fn(
         "j5.a2a.crewSeatFinish.notifySpawnerOfMissingWorktree",
-      )(function* (threadId: ThreadId, run: OrchestrationV2Run) {
-        if (run.status !== "failed") return null;
-        const projection = yield* threads.getThreadProjection(threadId);
-        if (projection.thread.worktreePath !== null || projection.thread.archivedAt !== null)
-          return null;
-        if (!(yield* spawnWorkspace.askedForWorktree(threadId))) return null;
-        const participantId = participantIdForThread(threadId);
-        const spawnedBy = (yield* sql<{ readonly provenance_participant_id: string | null }>`
+      )(
+        function* (threadId: ThreadId, run: OrchestrationV2Run) {
+          if (run.status !== "failed") return null;
+          const projection = yield* threads.getThreadProjection(threadId);
+          if (projection.thread.worktreePath !== null || projection.thread.archivedAt !== null)
+            return null;
+          if (!(yield* spawnWorkspace.askedForWorktree(threadId))) return null;
+          const participantId = participantIdForThread(threadId);
+          const spawnedBy = (yield* sql<{ readonly provenance_participant_id: string | null }>`
           SELECT provenance_participant_id FROM j5_a2a_participant_placement
           WHERE participant_id = ${participantId}
             AND provenance_kind = 'spawned-by' AND provenance_source = 'j5_spawn'
           LIMIT 1
         `)[0]?.provenance_participant_id;
-        const spawnerThreadId =
-          spawnedBy === undefined || spawnedBy === null ? null : threadIdForParticipant(spawnedBy);
-        if (spawnerThreadId === null) return null;
-        const spawner = yield* threads.getThreadProjection(spawnerThreadId);
-        if (spawner.thread.archivedAt !== null) return null;
-        const stable = { providerSessionId: FINISH_SESSION, requestKey: `${threadId}:${run.id}` };
-        yield* threads.dispatch({
-          type: "message.dispatch",
-          createdBy: "system",
-          creationSource: "server",
-          commandId: lifecycleCommandId({ ...stable, operation: "spawn-workspace-failed" }),
-          threadId: spawnerThreadId,
-          messageId: MessageId.make(
-            lifecycleId({ ...stable, kind: "message", operation: "spawn-workspace-failed" }),
+          const spawnerThreadId =
+            spawnedBy === undefined || spawnedBy === null
+              ? null
+              : threadIdForParticipant(spawnedBy);
+          if (spawnerThreadId === null) return null;
+          const spawner = yield* getThreadProjectionIfPresent(threads, spawnerThreadId);
+          if (spawner === null || spawner.thread.archivedAt !== null) return null;
+          const stable = { providerSessionId: FINISH_SESSION, requestKey: `${threadId}:${run.id}` };
+          yield* threads.dispatch({
+            type: "message.dispatch",
+            createdBy: "system",
+            creationSource: "server",
+            commandId: lifecycleCommandId({ ...stable, operation: "spawn-workspace-failed" }),
+            threadId: spawnerThreadId,
+            messageId: MessageId.make(
+              lifecycleId({ ...stable, kind: "message", operation: "spawn-workspace-failed" }),
+            ),
+            text: spawnWorkspaceFailedNoticeText({
+              participantId,
+              threadId,
+              failure: runFailureDetail(projection, run.id),
+            }),
+            attachments: [],
+            modelSelection: spawner.thread.modelSelection,
+            dispatchMode: { type: "start_immediately" },
+          });
+          return threadId;
+        },
+        (notice, threadId) =>
+          // A courtesy notice never holds up the stream every Crew reaction shares: a spawner that
+          // can't be read or told is logged and skipped, since the turn guard refuses either way.
+          notice.pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("J5 spawn workspace failure notice skipped", {
+                threadId,
+                cause,
+              }).pipe(Effect.as(null)),
+            ),
           ),
-          text: spawnWorkspaceFailedNoticeText({
-            participantId,
-            threadId,
-            failure: runFailureDetail(projection, run.id),
-          }),
-          attachments: [],
-          modelSelection: spawner.thread.modelSelection,
-          dispatchMode: { type: "start_immediately" },
-        });
-        return threadId;
-      });
+      );
 
       const owedReplies = Effect.fn("j5.a2a.crewSeatFinish.owedReplies")(function* (
         participantId: string,

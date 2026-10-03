@@ -49,6 +49,11 @@ import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import { SquadronId } from "./contracts.ts";
 import { SpawnWorkspaceService } from "./spawnWorkspace.ts";
+import { OrchestratorProjectionError } from "../../orchestration-v2/Orchestrator.ts";
+import {
+  ProjectionStoreReadError,
+  ProjectionStoreThreadNotFoundError,
+} from "../../orchestration-v2/ProjectionStore.ts";
 
 /** None of these threads was spawned for a worktree of its own. */
 const notSpawnedForWorktree = Layer.mock(SpawnWorkspaceService)({
@@ -1151,15 +1156,27 @@ it.effect("tells a plain spawner once its Peer Agent's worktree preparation fail
     const peerThread = ThreadId.make("thread:peer");
     const boundThread = ThreadId.make("thread:peer-bound");
     const sharedThread = ThreadId.make("thread:peer-shared");
-    for (const [index, child] of [peerThread, boundThread, sharedThread].entries())
+    // Two peers whose spawners can't be told: one spawner is gone, one can't be read.
+    const orphanThread = ThreadId.make("thread:peer-orphan");
+    const strandedThread = ThreadId.make("thread:peer-stranded");
+    const goneSpawner = ThreadId.make("thread:spawner-gone");
+    const unreadableSpawner = ThreadId.make("thread:spawner-unreadable");
+    const placements: ReadonlyArray<readonly [ThreadId, ThreadId]> = [
+      [peerThread, spawnerThread],
+      [boundThread, spawnerThread],
+      [sharedThread, spawnerThread],
+      [orphanThread, goneSpawner],
+      [strandedThread, unreadableSpawner],
+    ];
+    for (const [index, [child, parent]] of placements.entries())
       yield* sql`
         INSERT INTO j5_a2a_participant_placement (
           squadron_id, participant_id, provenance_kind, provenance_participant_id,
           provenance_source, placement_parent_id, created_event_seq, updated_event_seq
         ) VALUES (
           ${squadronId}, ${participantIdForThread(child)}, 'spawned-by',
-          ${participantIdForThread(spawnerThread)}, 'j5_spawn',
-          ${participantIdForThread(spawnerThread)}, ${index + 1}, ${index + 1}
+          ${participantIdForThread(parent)}, 'j5_spawn',
+          ${participantIdForThread(parent)}, ${index + 1}, ${index + 1}
         )
       `;
     const failure = {
@@ -1189,9 +1206,23 @@ it.effect("tells a plain spawner once its Peer Agent's worktree preparation fail
       Layer.provideMerge(
         Layer.mock(ThreadManagementService)({
           getThreadProjection: (threadId) =>
-            Effect.succeed(
-              threadId === spawnerThread ? projection(threadId) : childProjection(threadId),
-            ),
+            threadId === goneSpawner
+              ? Effect.fail(
+                  new OrchestratorProjectionError({
+                    threadId,
+                    cause: new ProjectionStoreThreadNotFoundError({ threadId }),
+                  }),
+                )
+              : threadId === unreadableSpawner
+                ? Effect.fail(
+                    new OrchestratorProjectionError({
+                      threadId,
+                      cause: new ProjectionStoreReadError({ threadId }),
+                    }),
+                  )
+                : Effect.succeed(
+                    threadId === spawnerThread ? projection(threadId) : childProjection(threadId),
+                  ),
           dispatch: (command) =>
             Ref.update(dispatched, (items) => [...items, command]).pipe(
               Effect.as({ events: [], effects: [] } as never),
@@ -1231,6 +1262,13 @@ it.effect("tells a plain spawner once its Peer Agent's worktree preparation fail
         yield* notifier.handleStoredEvent(terminalRunEvent(sharedThread, "run:prep", "failed")),
       );
       assert.isNull(yield* notifier.handleStoredEvent(terminalRunEvent(peerThread, "run:done")));
+      // A spawner that is gone or can't be read is skipped, never failing the shared stream.
+      assert.isNull(
+        yield* notifier.handleStoredEvent(terminalRunEvent(orphanThread, "run:prep", "failed")),
+      );
+      assert.isNull(
+        yield* notifier.handleStoredEvent(terminalRunEvent(strandedThread, "run:prep", "failed")),
+      );
       assert.lengthOf(yield* Ref.get(dispatched), 1);
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.scoped),

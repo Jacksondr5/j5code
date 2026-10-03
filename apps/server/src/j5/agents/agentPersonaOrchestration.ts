@@ -14,6 +14,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 import { CommandReceiptStoreV2 } from "../../orchestration-v2/CommandReceiptStore.ts";
+import { ProjectionStoreV2 } from "../../orchestration-v2/ProjectionStore.ts";
 import { unboundWorktreeTurnRefusal } from "../a2a/spawnWorktreeTurns.ts";
 
 import { validateAgentPersonaAssignment } from "./agentPersonaAssignment.ts";
@@ -156,6 +157,7 @@ export const makeAgentPersonaGuards = <D, A, E>(deps: {
   Effect.gen(function* () {
     const library = yield* makeAgentPersonaLibrary;
     const receipts = yield* CommandReceiptStoreV2;
+    const projections = yield* ProjectionStoreV2;
     const reject = (command: CommandContext, message: string | undefined) =>
       message === undefined ? Effect.void : Effect.fail(deps.dispatchError(command, message));
     return {
@@ -184,12 +186,12 @@ export const makeAgentPersonaGuards = <D, A, E>(deps: {
       modelMismatch: (
         thread: PersonaThread &
           Pick<OrchestrationV2AppThread, "worktreePath" | "createdBy" | "creationSource">,
-        command: Parameters<typeof unboundWorktreeTurnRefusal>[2] &
+        command: Parameters<typeof unboundWorktreeTurnRefusal>[3] &
           CommandContext & { readonly modelSelection?: ModelSelection | undefined },
       ): Effect.Effect<void, D> =>
         reject(command, agentPersonaModelMismatchError(thread, command.modelSelection)).pipe(
           Effect.andThen(
-            unboundWorktreeTurnRefusal(receipts, thread, command).pipe(
+            unboundWorktreeTurnRefusal(receipts, projections, thread, command).pipe(
               Effect.mapError((cause) => deps.dispatchError(command, cause)),
               Effect.flatMap((refusal) => reject(command, refusal ?? undefined)),
             ),

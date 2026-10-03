@@ -1,5 +1,6 @@
 import { assert, it } from "@effect/vitest";
 import { CommandId, MessageId, type ThreadId } from "@t3tools/contracts";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
@@ -118,6 +119,42 @@ it.effect("holds a worktree spawn's brief as preparing until ThreadLaunch releas
     );
   }).pipe(Effect.provide(spawnLayer(harness)));
 });
+
+it.effect("a message sent while the worktree is still being created waits for it", () =>
+  Effect.gen(function* () {
+    const checkoutStarted = yield* Deferred.make<void>();
+    const finishCheckout = yield* Deferred.make<void>();
+    const harness = makeHarness({
+      createWorktree: (input) =>
+        Deferred.succeed(checkoutStarted, undefined).pipe(
+          Effect.andThen(Deferred.await(finishCheckout)),
+          Effect.as({
+            worktree: {
+              path: "/repo-worktrees/feature",
+              refName: input.newRefName,
+              headSha: "abc",
+            },
+          } as never),
+        ),
+    });
+    yield* Effect.gen(function* () {
+      yield* startWorktreeSpawn;
+      // The peer is registered with no worktree yet, its brief held as a preparing run.
+      yield* Deferred.await(checkoutStarted);
+      yield* ordinaryMessage("early", threadId, { createdBy: "agent", creationSource: "mcp" });
+      const threads = yield* ThreadManagementService;
+      const queued = yield* threads.getThreadProjection(threadId);
+      assert.isNull(queued.thread.worktreePath);
+      assert.lengthOf(queued.runs, 2);
+      yield* Deferred.succeed(finishCheckout, undefined);
+      const projection = yield* firstRunReaches(threadId, new Set(["starting"]));
+      // Both turns belong to the thread that is now bound to its worktree.
+      assert.equal(projection.thread.worktreePath, "/repo-worktrees/feature");
+      assert.lengthOf(projection.runs, 2);
+      assert.isFalse(projection.runs.some((run) => run.status === "failed"));
+    }).pipe(Effect.provide(spawnLayer(harness)));
+  }),
+);
 
 it.effect("a failed worktree preparation fails the brief with the detail Captains are told", () => {
   const harness = makeHarness({
