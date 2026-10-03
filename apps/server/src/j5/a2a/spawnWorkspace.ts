@@ -249,8 +249,10 @@ export interface SpawnWorkspaceServiceShape {
   ) => Effect.Effect<A, E | SpawnWorkspaceError, R>;
   /**
    * Starts the brief on a created, registered thread. Shared starts it now; a worktree hands the
-   * thread to ThreadLaunch, which holds the brief as a preparing run until the worktree, branch
-   * and setup script are ready, then releases it (or fails the run).
+   * thread to ThreadLaunch, which holds the brief as a preparing run until the worktree exists
+   * and is bound, then releases it (or fails the run). The project's setup script starts before
+   * the release but is awaited only when it asks to finish first, so the agent may begin while it
+   * is still running.
    */
   readonly startBrief: (
     input: StartSpawnBriefInput,
