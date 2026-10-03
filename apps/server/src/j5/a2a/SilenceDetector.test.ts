@@ -919,6 +919,56 @@ it.effect("emits nothing for an idle agent that owes no reply", () =>
   }).pipe(Effect.provide(makeTestLayer())),
 );
 
+it.effect(
+  "emits nothing for a reply to another Squadron that is accepted but not yet delivered",
+  () =>
+    Effect.gen(function* () {
+      yield* runJ5A2AMigrations();
+      const ledger = yield* A2ALedger;
+      const subjectSquadronId = SquadronId.make("squadron:silence-test:subject");
+      yield* ledger.createSquadron({
+        squadron: { id: squadronId, name: "Silence waiter", createdAt: iso(0) },
+      });
+      yield* ledger.createSquadron({
+        squadron: { id: subjectSquadronId, name: "Silence subject", createdAt: iso(0) },
+      });
+      yield* join(waiter, "waiter");
+      yield* ledger.append({
+        commandId: CommCommandId.make("command:silence:join:cross-subject"),
+        squadronId: subjectSquadronId,
+        acceptedAt: iso(0),
+        event: {
+          kind: "participant.joined",
+          sender: null,
+          receiver: subject.id,
+          exchangeId: null,
+          correlationId: null,
+          payload: { participant: subject },
+          createdAt: iso(0),
+        },
+      });
+      const exchange = yield* seedInbound(2);
+      yield* (yield* A2ASendService).send({
+        commandId: CommCommandId.make("command:silence:send:cross-reply"),
+        senderThreadId: subject.threadId,
+        to: waiter.id,
+        message: "Answered before the turn ended.",
+        exchangeId: exchange.exchangeId!,
+        acceptedAt: iso(3),
+      });
+      const pending = yield* (yield* SqlClient.SqlClient)<{ readonly status: string }>`
+      SELECT status FROM j5_a2a_delivery WHERE exchange_role = 'reply'
+    `;
+      assert.deepStrictEqual(pending, [{ status: "pending" }], "the worker has not run");
+
+      const appended = yield* (yield* A2ASilenceDetector).handleStoredEvent(
+        terminalEvent("completed"),
+      );
+      assert.deepStrictEqual(appended, []);
+      assert.deepStrictEqual(yield* readNotices(), []);
+    }).pipe(Effect.provide(makeTestLayer())),
+);
+
 it.effect("emits nothing when the human is the quiet recipient", () =>
   Effect.gen(function* () {
     yield* seed();

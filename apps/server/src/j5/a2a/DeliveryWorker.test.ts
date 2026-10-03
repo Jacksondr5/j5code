@@ -303,11 +303,12 @@ it.effect("cross-squadron half-write recovery records exactly one receiver entry
   }),
 );
 
-it.effect("refuses a cross-squadron reply before delivery or closure", () =>
+it.effect("delivers a cross-squadron reply to the asker and closes its Exchange once", () =>
   Effect.gen(function* () {
-    const injections = yield* Ref.make(0);
+    const delivered = yield* Ref.make<ReadonlyArray<string>>([]);
     const transport: A2ADeliveryTransportShape = {
-      deliverAgent: () => Ref.update(injections, (count) => count + 1),
+      deliverAgent: (input) =>
+        Ref.update(delivered, (all) => [...all, `${input.exchangeRole}:${input.receiverId}`]),
       cancelAgent: () => Effect.succeed("cancelled" as const),
       deliverPeer: () => Effect.die("peer delivery is not under test"),
       deliverHuman: () => Effect.void,
@@ -341,59 +342,60 @@ it.effect("refuses a cross-squadron reply before delivery or closure", () =>
       assert.equal(opened.exchangeState, "open");
       assert.equal((yield* worker.runOnce)?.state, "delivered");
 
-      const replyInput = {
+      const reply = yield* sendService.send({
         commandId: CommCommandId.make("command:exchange:cross:reply"),
         senderThreadId: receiver.threadId,
         to: sender.id,
         message: "Cross-squadron reply delivered.",
         exchangeId: opened.exchangeId!,
         acceptedAt: timestamp,
-      } as const;
-      const error = yield* Effect.flip(sendService.send(replyInput));
-      assert.equal(error._tag, "A2ACrossSquadronReplyInvariantError");
-      if (error._tag === "A2ACrossSquadronReplyInvariantError") {
-        assert.equal(error.exchangeId, opened.exchangeId);
-        assert.equal(error.exchangeSquadronId, senderSquadronId);
-        assert.equal(error.senderSquadronId, receiverSquadronId);
-        assert.isFalse(error.replyPersisted);
-        assert.include(error.message, "nothing was sent");
-      }
-
-      const exchange = yield* sql<{ readonly status: string }>`
-        SELECT status
-        FROM j5_a2a_exchange
-        WHERE exchange_id = ${opened.exchangeId!}
-      `;
-      assert.deepStrictEqual(exchange, [{ status: "open" }]);
-      const sideEffects = yield* sql<{
-        readonly reply_deliveries: number;
-        readonly closures: number;
-        readonly reply_receipts: number;
-      }>`
-        SELECT
-          (
-            SELECT COUNT(*)
-            FROM j5_a2a_delivery
-            WHERE exchange_id = ${opened.exchangeId!}
-              AND exchange_role = 'reply'
-          ) AS reply_deliveries,
-          (
-            SELECT COUNT(*)
-            FROM j5_a2a_comm_event
-            WHERE exchange_id = ${opened.exchangeId!}
-              AND kind = 'exchange.closed'
-          ) AS closures,
-          (
-            SELECT COUNT(*)
-            FROM j5_a2a_comm_event
-            WHERE squadron_id = ${senderSquadronId}
-              AND kind = 'message.received'
-          ) AS reply_receipts
-      `;
-      assert.deepStrictEqual(sideEffects, [
-        { reply_deliveries: 0, closures: 0, reply_receipts: 0 },
+      });
+      assert.equal(reply.exchangeState, "closed");
+      assert.deepStrictEqual(yield* worker.drain, [
+        {
+          squadronId: receiverSquadronId,
+          messageId: reply.messageId,
+          state: "delivered",
+          attempt: 1,
+        },
       ]);
-      assert.equal(yield* Ref.get(injections), 1);
+      assert.deepStrictEqual(yield* Ref.get(delivered), [
+        `ask:${receiver.id}`,
+        `reply:${sender.id}`,
+      ]);
+
+      const kinds = Effect.fn(function* (squadronId: SquadronId) {
+        const page = yield* ledgerService.readEvents({
+          squadronId,
+          cursor: { afterSeq: 0 },
+          limit: 100,
+        });
+        assert.isTrue(page.complete);
+        return page.events.map((event) => `${event.seq}:${event.kind}`);
+      });
+      // The asker's ledger closes when the reply is accepted, then records its arrival.
+      assert.deepStrictEqual(yield* kinds(senderSquadronId), [
+        "1:participant.joined",
+        "2:exchange.opened",
+        "3:message.sent",
+        "4:message.delivered",
+        "5:exchange.closed",
+        "6:message.received",
+      ]);
+      assert.deepStrictEqual(yield* kinds(receiverSquadronId), [
+        "1:participant.joined",
+        "2:message.received",
+        "3:message.sent",
+        "4:message.delivered",
+      ]);
+      assert.deepStrictEqual(
+        yield* sql<{ readonly status: string; readonly closed_seq: number }>`
+          SELECT status, closed_seq
+          FROM j5_a2a_exchange
+          WHERE exchange_id = ${opened.exchangeId!}
+        `,
+        [{ status: "closed", closed_seq: 5 }],
+      );
     }).pipe(Effect.provide(makeTestLayer(transport)));
   }),
 );
