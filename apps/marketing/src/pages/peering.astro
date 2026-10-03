@@ -83,7 +83,8 @@ import { routeChevrons } from "../lib/route";
             <div class="way-stage">
               <svg viewBox="0 -10 340 92" role="img" aria-label="Two agents joined directly" data-motion>
                 <path class="water" d="M0 74 Q 40 68 80 74 T 160 74 T 240 74 T 320 74 T 400 74" />
-                <path class="tie" d={routeChevrons({ from: [78, 17], control: [178, -22], to: [278, 17] }, 11, 3)} />
+                {/* Starts past the sender's flag tip, so the arc sits centred between the two flags. */}
+                <path class="tie" d={routeChevrons({ from: [100, 14], control: [186, -20], to: [272, 14] }, 11, 3, 6)} />
                 <g transform="translate(40 18) scale(1.2)"><g class="bob b1"><use class="agent" href="#j5-boat" /></g></g>
                 <g transform="translate(240 18) scale(1.2)"><g class="bob b3"><use class="agent" href="#j5-boat" /></g></g>
               </svg>
