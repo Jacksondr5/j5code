@@ -526,10 +526,10 @@ const buildCliArchive = Effect.fn("buildCliArchive")(function* (input: {
   }
   if (input.platform !== "win") {
     yield* fs.chmod(executablePath, 0o755);
-    // J5: service launchers and servers from before the rename look for `t3`
-    // in a new version's directory, and in-app updates never replace the
-    // launcher. Drop this link only together with a SERVICE_LAUNCHER_PROTOCOL
-    // bump, so those installs are told to update their launcher.
+    // J5: a server from before the rename runs a new version as `t3`: its
+    // update check from the app, which answers "run `j5 update`" (launcher
+    // protocol 4), and that `j5 update` itself. Without this link both fail
+    // with a generic install error. Nothing after the rename looks for it.
     yield* fs.symlink(executableName, path.join(contentDir, "t3"));
   }
 

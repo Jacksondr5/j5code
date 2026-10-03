@@ -323,13 +323,18 @@ migrations after upstream migrations.
 
     Left as upstream: archive file names (`t3-<version>-<platform>.tar.gz`, which existing servers download by name), tsdown's intermediate `dist-exe/t3`, and upstream's npm packaging (`scripts/build-npm-platform-packages.ts`, `packages/shared/src/legacyCliLauncher.ts`), which J5 doesn't publish.
 
-    **Transition link.** On macOS and Linux the archive also carries `t3 -> j5`. Service launchers and servers from before the rename look for `t3` in a new version's directory, and in-app updates never replace the launcher, so the link stays until a release removes it together with a `SERVICE_LAUNCHER_PROTOCOL` bump. Servers from after the rename then refuse the update with upstream's "update the launcher" message. Servers from before it never reach that check: their self-update verifies the staged `t3`, which won't exist, so the update fails with a generic install error and the running version stays. The smoke script runs both names. `.github/workflows/j5-release.yml` (J5-owned) verifies the macOS signature on `j5`.
+    **Moving existing servers across (Jackson's 2026-10-03 plan).** A server from before the rename can't be switched by an update from the app: its launcher, which in-app updates never replace, starts new versions as `t3`. So the rename is launcher protocol 4, and each existing server is moved once, by hand:
+    - **The refusal.** `apps/server/src/cloud/serviceProtocol.ts` sets `SERVICE_LAUNCHER_PROTOCOL = 4`. `apps/server/src/cloud/servicePreflight.ts` answers a protocol-3 server with "Run `j5 update` on the server's machine", so its update from the app stops with that message and the server keeps running.
+    - **The one command.** `j5 update`, run by the old CLI, installs the new version, writes the service's state file as protocol 3, repoints the unit at the new launcher and starts it. `decodeServiceState` therefore also reads protocol 3 (`READABLE_SERVICE_STATE_PROTOCOLS`); the state document didn't change. Without that the new launcher would exit and leave the server down until `j5 service install`.
+    - **The `t3` link.** On macOS and Linux the archive carries `t3 -> j5`, because the old server runs both the update check and `j5 update`'s verification as `<new version>/t3`. Nothing after the rename looks for it. Removing it is #440; after that a server still on 0.0.47 or earlier fails with a generic install error and needs the installer and `j5 service install`.
+
+    The smoke script runs both names. `.github/workflows/j5-release.yml` (J5-owned) verifies the macOS signature on `j5`.
 
     **Not supported:** new code doesn't run pre-rename version directories, so `j5 update --allow-downgrade` to a release before the rename fails verification.
 
-    **On a pin advance:** re-check every upstream use of `pinnedRuntimePaths`, `runtimePaths` and the archive's executable name.
+    **On a pin advance:** re-check every upstream use of `pinnedRuntimePaths`, `runtimePaths` and the archive's executable name. If upstream raises `SERVICE_LAUNCHER_PROTOCOL` to 4 or past it, take a number above upstream's and re-decide which older state documents the launcher reads.
 
-    **Proofs:** `scripts/install.test.ts` (new and pre-rename archives), `pinnedRuntime.test.ts`, `serviceLauncher.test.ts`, `bootService.test.ts`, `selfUpdate.test.ts`, `tunnel.test.ts`, the WSL and backend-configuration tests, and `build-desktop-artifact.test.ts`. A local probe on 2026-10-03 had the installed 0.0.47 executable `update` a scratch home to a renamed 0.0.99 archive from a local mirror; it verified through `t3`, and `<version>/t3 serve`, the old launcher's spawn, ran the `j5` executable.
+    **Proofs:** `scripts/install.test.ts` (new and pre-rename archives), `pinnedRuntime.test.ts`, `serviceLauncher.test.ts`, `bootService.test.ts`, `selfUpdate.test.ts`, `tunnel.test.ts`, the WSL and backend-configuration tests, and `build-desktop-artifact.test.ts`. `apps/server/src/cloud/j5/renameTransition.test.ts` covers the refusal message and the protocol-3 state file. A local probe on 2026-10-03 used a renamed 0.0.99 archive on a local mirror and a scratch home: the installed 0.0.47 executable's `update` installed it through `t3`; the check an old server runs (`t3 __service-preflight --launcher-protocol 3`) returned the `j5 update` message; and the new launcher, started as `<version>/t3 __service-launcher` over a protocol-3 state file, ran the server as `j5`. The service manager's own stop and start under the old CLI's `j5 update` is the one step not run: it acts on the machine's real service, so it needs a throwaway machine. Jackson accepted shipping without it.
 
 ## Pin and upstream advance runbook
 
@@ -565,6 +570,8 @@ indicate approval. The deleted hook remains explicitly marked.
 | `apps/server/src/cloud/pinnedRuntime.test.ts`                                                              | N       | 50                                            |
 | `apps/server/src/cloud/pinnedRuntime.ts`                                                                   | N       | 50                                            |
 | `apps/server/src/cloud/selfUpdate.test.ts`                                                                 | N       | 50                                            |
+| `apps/server/src/cloud/servicePreflight.ts`                                                                | N       | 50                                            |
+| `apps/server/src/cloud/serviceProtocol.ts`                                                                 | N       | 50                                            |
 | `apps/server/src/provider/Drivers/ClaudeDriver.ts`                                                         | N       | 43                                            |
 | `apps/server/src/provider/Drivers/ClaudeSkills.test.ts`                                                    | N       | 43                                            |
 | `apps/server/src/provider/Drivers/ClaudeSkills.ts`                                                         | N       | 42–44                                         |

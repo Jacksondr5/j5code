@@ -96,7 +96,7 @@ const smokeCliArchive = Effect.fn("smokeCliArchive")(function* (input: {
   }
   const contentDir = path.join(scratch, root);
   const executable = path.join(contentDir, platform === "win32" ? "j5.exe" : "j5");
-  // J5: the transition link pre-rename launchers start (see build-cli-archive.ts).
+  // J5: the link pre-rename servers update through (see build-cli-archive.ts).
   const legacyExecutable = platform === "win32" ? undefined : path.join(contentDir, "t3");
   for (const required of [
     executable,
