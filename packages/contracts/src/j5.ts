@@ -664,6 +664,21 @@ export const RemovePeerResponse = Schema.Struct({
 });
 export type RemovePeerResponse = typeof RemovePeerResponse.Type;
 
+/**
+ * Peer servers' own wire protocol. A breaking change bumps the version and a
+ * mismatch stops peering until both servers match; an additive change is an
+ * optional field or a capability and never bumps it. A server from before
+ * versioning omits both and counts as version 1 with no capabilities.
+ */
+export const PEER_PROTOCOL_VERSION = 1;
+/** Every peer request and response states its sender's version here; a server from before versioning sends none. */
+export const PEER_PROTOCOL_HEADER = "x-j5-peer-protocol";
+export const PeerCapabilities = Schema.Struct({
+  /** This server stores messages for a peer that polls for them. */
+  poll: Schema.optionalKey(Schema.Boolean),
+});
+export type PeerCapabilities = typeof PeerCapabilities.Type;
+
 /** What a server answers to a peer credential: who it is and whom the credential names. */
 export const PeerHelloResponse = Schema.Struct({
   environmentId: Schema.String,
@@ -671,6 +686,8 @@ export const PeerHelloResponse = Schema.Struct({
   /** When the credential used for this hello expires; null when the session never expires. */
   credentialExpiresAt: Schema.optional(Schema.NullOr(Schema.String)),
   server: Schema.Struct({ version: Schema.String }),
+  peerProtocolVersion: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
+  capabilities: Schema.optional(PeerCapabilities),
 });
 export type PeerHelloResponse = typeof PeerHelloResponse.Type;
 

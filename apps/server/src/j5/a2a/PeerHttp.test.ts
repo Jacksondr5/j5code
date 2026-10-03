@@ -10,7 +10,7 @@ import {
   type AuthClientSession,
   type AuthEnvironmentScope,
 } from "@t3tools/contracts";
-import { J5_PEER_API_PATHS, type PeerRecord } from "@t3tools/contracts/j5";
+import { J5_PEER_API_PATHS, PEER_PROTOCOL_VERSION, type PeerRecord } from "@t3tools/contracts/j5";
 import { assert, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
@@ -254,6 +254,8 @@ it("answers hello with this environment and the credential's subject, and comple
     assert.equal(body.subject, `peer:${home}`);
     assert.equal(body.credentialExpiresAt, "2036-09-16T00:00:00.000Z");
     assert.isString((body.server as { version: string }).version);
+    assert.equal(body.peerProtocolVersion, PEER_PROTOCOL_VERSION);
+    assert.deepStrictEqual(body.capabilities, {});
     assert.deepStrictEqual(
       revoked,
       ["auth-session:old-home"],
@@ -457,6 +459,47 @@ it("accepts a delivery from a recorded peer, stamps its environment, and wakes t
     const again = await handler(post(J5_PEER_API_PATHS.deliver, delivery));
     assert.equal(again.status, 200);
     assert.deepStrictEqual(await again.json(), { accepted: true, receivedSeq: 12, replay: true });
+  } finally {
+    await dispose();
+  }
+});
+
+it("refuses a peer on another protocol before reading its request, and states its own on every answer", async () => {
+  const received: Array<PeerInboundInput> = [];
+  const { dispose, handler } = makeHandler({
+    subject: `peer:${home}`,
+    scopes: [AuthA2APeerScope],
+    received,
+  });
+  const withProtocol = (request: Request, version: string) => {
+    request.headers.set("x-j5-peer-protocol", version);
+    return request;
+  };
+  try {
+    for (const request of [
+      withProtocol(get(J5_PEER_API_PATHS.hello), "2"),
+      withProtocol(get(J5_PEER_API_PATHS.roster), "2"),
+      withProtocol(post(J5_PEER_API_PATHS.deliver, delivery), "2"),
+    ]) {
+      const refused = await handler(request);
+      assert.equal(refused.status, 409);
+      assert.equal(refused.headers.get("x-j5-peer-protocol"), String(PEER_PROTOCOL_VERSION));
+      const body = (await refused.json()) as { error: string; message: string };
+      assert.equal(body.error, "peer_protocol_mismatch");
+      assert.equal(
+        body.message,
+        `Peer ${home} runs peer protocol 2 and this server runs 1. Update J5 on this server, then try again.`,
+      );
+    }
+    assert.deepStrictEqual(received, [], "a mismatched delivery is never recorded");
+
+    // A server from before versioning states nothing and counts as version 1.
+    const unversioned = await handler(post(J5_PEER_API_PATHS.deliver, delivery));
+    assert.equal(unversioned.status, 201);
+    assert.equal(unversioned.headers.get("x-j5-peer-protocol"), String(PEER_PROTOCOL_VERSION));
+    const matching = await handler(withProtocol(get(J5_PEER_API_PATHS.hello), "1"));
+    assert.equal(matching.status, 200);
+    assert.equal(matching.headers.get("x-j5-peer-protocol"), String(PEER_PROTOCOL_VERSION));
   } finally {
     await dispose();
   }
