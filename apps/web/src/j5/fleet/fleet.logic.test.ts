@@ -6,7 +6,9 @@ import { formatCrewStateSummary, summarizeCrewState, type CrewSeatThread } from 
 import {
   buildFleetTree,
   countFleetAlerts,
+  countFleetProjects,
   fleetInvolvedThreadRefs,
+  orderFleetRowsByProject,
   originLabel,
   partitionFleet,
   playbookRunHeader,
@@ -383,5 +385,57 @@ describe("roster seats without thread facts", () => {
     );
     expect(sections.settled.map((row) => row.squadron.environmentId)).toEqual([environmentId]);
     expect(sections.active.map((row) => row.squadron.environmentId)).toEqual([other]);
+  });
+});
+
+describe("fleet rows by project", () => {
+  const laptop = EnvironmentId.make("laptop");
+  const server = EnvironmentId.make("server");
+  const squadron = (environmentId: EnvironmentId, id: string, name: string) => ({
+    id,
+    name,
+    crews: [],
+    agents: [],
+    environmentId,
+  });
+  const row = (owner: ReturnType<typeof squadron>, participantId: string, threadId?: null) => ({
+    squadron: owner,
+    node: {
+      row: {
+        agent: agent(participantId, threadId === null ? { threadId: null } : {}),
+        depth: 0,
+        crewInstanceId: null,
+      },
+      children: [],
+      crews: [],
+    },
+  });
+  const zeta = squadron(laptop, "squadron:zeta", "Zeta");
+  const appHere = squadron(laptop, "squadron:app", "App squadron");
+  const appThere = squadron(server, "squadron:app-remote", "App on the server");
+  const orphan = squadron(laptop, "squadron:orphan", "Mango");
+  const app = { projectKey: "repo:app", displayName: "App" };
+  const zebra = { projectKey: "laptop:zebra", displayName: "Zebra" };
+  // Both machines' copies of the app resolve to one logical project; `orphan` resolves to none.
+  const projectOf = (owner: ReturnType<typeof squadron>) =>
+    owner === orphan ? undefined : owner === zeta ? zebra : app;
+  const rows = [
+    row(zeta, "z-agent"),
+    row(appThere, "remote-agent"),
+    row(orphan, "lost"),
+    row(appHere, "local-b"),
+    row(appHere, "local-a"),
+    row(zeta, "machine", null),
+  ];
+
+  it("puts one logical project's rows from two machines together, keeping their order", () => {
+    expect(
+      orderFleetRowsByProject(rows, projectOf).map((entry) => entry.node.row.agent.participantId),
+    ).toEqual(["remote-agent", "local-b", "local-a", "lost", "z-agent", "machine"]);
+  });
+
+  it("counts logical projects, and an unresolved root by its Squadron", () => {
+    expect(countFleetProjects(rows, projectOf)).toBe(3);
+    expect(countFleetProjects([], projectOf)).toBe(0);
   });
 });

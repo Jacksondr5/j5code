@@ -1,7 +1,7 @@
 import type { PreparedConnection } from "@t3tools/client-runtime/connection";
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { listCrewMemberships } from "@t3tools/client-runtime/j5/http";
-import { createScopedThreadReadStore } from "@t3tools/client-runtime/j5/threadHomes";
+import { createScopedThreadReadStore } from "@t3tools/client-runtime/j5/scopedThreadReadStore";
 import type { EnvironmentId, ScopedThreadRef, ThreadId } from "@t3tools/contracts";
 import type { CrewMembershipEntry, ThreadCrewMembership } from "@t3tools/contracts/j5";
 import { useSyncExternalStore } from "react";
@@ -55,10 +55,10 @@ const store = createScopedThreadReadStore<ThreadCrewMembership, CrewMembershipEn
 });
 
 /**
- * Called beside the thread-home read whenever the row set changes; incremental, so a shells or
+ * Called by `useThreadRowReads` whenever the row set changes; incremental, so a shells or
  * connection change reads only the rows not yet answered for (an empty answer counts). A thread
- * can gain or lose a Crew at any time: a launch or decision on this device re-reads every
- * requested row, and the Fleet poll re-reads only the rows the roster names as involved.
+ * can gain or lose a Crew at any time: the Fleet poll re-reads the rows the roster names as
+ * involved.
  */
 export const requestCrewMemberships = (
   refs: ReadonlyArray<ScopedThreadRef>,
@@ -69,7 +69,6 @@ export const requestCrewMemberships = (
   store.request(refs, force);
 };
 
-export const refreshCrewMemberships = () => store.refreshRequested();
 /**
  * The Fleet poll's re-read: the rows the roster says sit in or command a Crew, plus every row
  * still showing a chip, so a Captain whose last Crew retired (here or on another device) is

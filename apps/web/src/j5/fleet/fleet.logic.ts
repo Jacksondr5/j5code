@@ -63,7 +63,7 @@ const byLabel = (left: FleetAgent, right: FleetAgent) =>
   (left.displayName ?? left.participantId).localeCompare(right.displayName ?? right.participantId);
 
 /**
- * Placement tree grouped per Squadron: roots are agents whose parent is null or not in the
+ * Placement tree per Squadron, the unit each machine's ledger answers in: roots are agents whose parent is null or not in the
  * Squadron; Crew members are pulled out of the plain child list and grouped under their
  * Captain by Crew. A seat on the roster that is not placed yet (or never created: the read
  * carries it with no thread) still hangs under its Captain, so a Crew's group always counts
@@ -234,6 +234,57 @@ export function partitionFleet<S extends FleetSquadron & { readonly environmentI
     }
   }
   return { active, settled, settledAgentCount, agentCount };
+}
+
+/** The slice of a logical project the Fleet page orders and counts by. */
+export interface FleetProject {
+  readonly projectKey: string;
+  readonly displayName: string;
+}
+
+/** The label a root row sorts under: its project, or its Squadron's name while that is unresolved. */
+const fleetRowLabel = <S extends FleetSquadron>(
+  row: FleetSectionRow<S>,
+  project: FleetProject | undefined,
+) => project?.displayName ?? row.squadron.name;
+
+/**
+ * Orders a section's roots by upstream's logical project, so the copies of one project on two
+ * machines sit together although each machine's ledger answered for its own rows. Within a
+ * project the roots keep the order `buildFleetTree` gave them (AC9: nothing reorders by
+ * activity). A root whose project cannot be resolved sorts by the Squadron name it shows instead.
+ */
+export function orderFleetRowsByProject<S extends FleetSquadron>(
+  rows: ReadonlyArray<FleetSectionRow<S>>,
+  projectOf: (squadron: S, root: FleetAgent) => FleetProject | undefined,
+): ReadonlyArray<FleetSectionRow<S>> {
+  return rows
+    .map((row, index) => ({ row, index, project: projectOf(row.squadron, row.node.row.agent) }))
+    .toSorted(
+      (left, right) =>
+        fleetRowLabel(left.row, left.project).localeCompare(
+          fleetRowLabel(right.row, right.project),
+          undefined,
+          { sensitivity: "base", numeric: true },
+        ) ||
+        (left.project?.projectKey ?? "").localeCompare(right.project?.projectKey ?? "") ||
+        left.index - right.index,
+    )
+    .map(({ row }) => row);
+}
+
+/** How many projects the listed roots span; an unresolved root counts by its Squadron. */
+export function countFleetProjects<S extends FleetSquadron & { readonly environmentId: string }>(
+  rows: ReadonlyArray<FleetSectionRow<S>>,
+  projectOf: (squadron: S, root: FleetAgent) => FleetProject | undefined,
+) {
+  return new Set(
+    rows.map(
+      (row) =>
+        projectOf(row.squadron, row.node.row.agent)?.projectKey ??
+        `squadron:${row.squadron.environmentId}:${row.squadron.id}`,
+    ),
+  ).size;
 }
 
 /** Roster alert badge: measured "needs a human" facts only, so nothing here is guessed. */

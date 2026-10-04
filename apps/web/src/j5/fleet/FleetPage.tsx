@@ -8,6 +8,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { ChevronRightIcon, RefreshCwIcon } from "lucide-react";
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 
+import { ProjectFavicon } from "../../components/ProjectFavicon";
 import { resolveThreadStatusPill } from "../../components/Sidebar.logic";
 import { WorkspaceBreadcrumb, WorkspaceBreadcrumbItem } from "../../components/WorkspaceBreadcrumb";
 import { Badge } from "../../components/ui/badge";
@@ -17,13 +18,15 @@ import { SidebarInset } from "../../components/ui/sidebar";
 import { toastManager } from "../../components/ui/toast";
 import { isElectron } from "../../env";
 import { cn } from "../../lib/utils";
+import type { SidebarProjectSnapshot } from "../../sidebarProjectGrouping";
 import { useAllEnvironmentShellsBootstrapped, useThreadShells } from "../../state/entities";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { formatElapsedDurationLabel } from "../../timestampFormat";
-import { CaptainMark } from "../squadron/CaptainMark";
+import { CaptainMark } from "../crew/CaptainMark";
 import { PlaybookRunsSection } from "../playbooks/PlaybookRunsSection";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "../../workspaceTitlebar";
 import { fleetDetailSourcesAtom } from "../state";
+import { useSquadronProjects } from "../useSquadronProjects";
 import { requestConfirmDialog } from "../../confirmDialog";
 import { ArchiveWarningCrewSeats, type ArchiveWarningCrew } from "../a2a/ArchiveWarningContent";
 import { archiveCrew } from "../crew/crewArchiveClient";
@@ -35,7 +38,9 @@ import {
 } from "../crew/crewState";
 import { stopCrew } from "../crew/crewStopClient";
 import {
+  countFleetProjects,
   fleetCrewAnchorId,
+  orderFleetRowsByProject,
   originLabel,
   partitionFleet,
   playbookRunHeader,
@@ -54,8 +59,8 @@ import {
   type ScopedFleetSquadron,
 } from "./fleetClient";
 
-/** Header and rows share one template so the Squadron, Status, asks, and activity columns line up. */
-const FLEET_GRID_CLASS = "grid grid-cols-[minmax(0,1fr)_9rem_8rem_5rem_7rem] items-center gap-3";
+/** Header and rows share one template so the Project, Status, asks, and activity columns line up. */
+const FLEET_GRID_CLASS = "grid grid-cols-[minmax(0,1fr)_11rem_8rem_5rem_7rem] items-center gap-3";
 
 type ThreadLookup = ReadonlyMap<string, EnvironmentThreadShell>;
 
@@ -83,7 +88,7 @@ const seatBadgeWithSteps = (
 };
 
 /**
- * The Roster (SB6): every agent in every Squadron on every connected environment in three
+ * The Roster (SB6): every agent on every connected environment, by project, in three
  * sections. Active holds one table of everything still in motion, indented by placement with
  * Crews as collapsible units under their Captain; Settled and Retired are collapsed expanders
  * for what upstream's settle mechanic marked done and for the Crews that were archived. Status
@@ -128,12 +133,35 @@ export function FleetPage() {
       ),
     [threads],
   );
-  const sections = useMemo(
-    () =>
-      partitionFleet(squadrons, (environmentId, threadId) =>
-        threadsByKey.get(scopedThreadKey(scopeThreadRef(environmentId, ThreadId.make(threadId)))),
-      ),
-    [squadrons, threadsByKey],
+  const projects = useSquadronProjects();
+  // Each machine's ledger still answers per Squadron. A row with a thread names its project
+  // itself; a machine sender, or a retired Crew, takes the project its Squadron references.
+  const projectOf = useCallback(
+    (squadron: ScopedFleetSquadron, agent: FleetAgent | null) => {
+      const thread =
+        agent === null ? undefined : threadFor(threadsByKey, squadron.environmentId, agent);
+      return (
+        (thread === undefined
+          ? undefined
+          : projects.ofProject(squadron.environmentId, thread.projectId)) ??
+        projects.ofSquadron(squadron.environmentId, squadron.id)
+      );
+    },
+    [projects, threadsByKey],
+  );
+  const sections = useMemo(() => {
+    const partitioned = partitionFleet(squadrons, (environmentId, threadId) =>
+      threadsByKey.get(scopedThreadKey(scopeThreadRef(environmentId, ThreadId.make(threadId)))),
+    );
+    return {
+      ...partitioned,
+      active: orderFleetRowsByProject(partitioned.active, projectOf),
+      settled: orderFleetRowsByProject(partitioned.settled, projectOf),
+    };
+  }, [projectOf, squadrons, threadsByKey]);
+  const projectCount = useMemo(
+    () => countFleetProjects([...sections.active, ...sections.settled], projectOf),
+    [projectOf, sections],
   );
   const retired = useMemo(() => retiredCrews(squadrons), [squadrons]);
   // Playbook runs name the Crew they follow from this read, and jump to its group.
@@ -173,7 +201,7 @@ export function FleetPage() {
   );
 
   const { agentCount } = sections;
-  const tableProps = { showEnvironment, threadsByKey, onOpenThread: openThread };
+  const tableProps = { showEnvironment, threadsByKey, onOpenThread: openThread, projectOf };
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden">
@@ -197,7 +225,7 @@ export function FleetPage() {
                 <p className="mt-1 text-sm text-muted-foreground">
                   {loading && squadrons.length === 0
                     ? "Reading the roster…"
-                    : `${agentCount} ${agentCount === 1 ? "agent" : "agents"} across ${squadrons.length} ${squadrons.length === 1 ? "Squadron" : "Squadrons"}`}
+                    : `${agentCount} ${agentCount === 1 ? "agent" : "agents"} across ${projectCount} ${projectCount === 1 ? "project" : "projects"}`}
                 </p>
               </div>
               <Button
@@ -220,7 +248,7 @@ export function FleetPage() {
             ) : null}
             {!loading && squadrons.length === 0 ? (
               <p className="mt-6 text-sm text-muted-foreground">
-                No Squadrons yet. Agents appear here once a Squadron has members.
+                No agents yet. They appear here once a thread starts in a project.
               </p>
             ) : null}
             {squadrons.length > 0 ? (
@@ -275,6 +303,11 @@ interface FleetRowsProps {
   readonly showEnvironment: boolean;
   readonly threadsByKey: ThreadLookup;
   readonly onOpenThread: (environmentId: EnvironmentId, threadId: string) => void;
+  /** The logical project of a Squadron's row; `null` asks for the Squadron's own project. */
+  readonly projectOf: (
+    squadron: ScopedFleetSquadron,
+    agent: FleetAgent | null,
+  ) => SidebarProjectSnapshot | undefined;
 }
 
 function FleetTable(
@@ -290,7 +323,7 @@ function FleetTable(
         )}
       >
         <span>Agent</span>
-        <span>Squadron</span>
+        <span>Project</span>
         <span>Status</span>
         <span className="text-right">Open asks</span>
         <span className="text-right">Last activity</span>
@@ -497,7 +530,7 @@ function FleetNodeRows(
 }
 
 /**
- * Retired Crews of every Squadron as one-line rows, each naming its Squadron, that open to the
+ * Retired Crews of every project as one-line rows, each naming its project, that open to the
  * brief and the approved roster with each seat's approval version and reason, so a successor can
  * be proposed from what was decided rather than from memory (Crews AC20). A retired Crew comes
  * back only with its Captain (AC17), so its row offers no action beyond naming its Captain, whose
@@ -541,7 +574,7 @@ function RetiredCrewItem(props: FleetRowsProps & FleetSquadronCrew<ScopedFleetSq
             className="size-3.5 shrink-0 text-muted-foreground transition-transform duration-150 group-open/retired-crew:rotate-90"
           />
           <span className="min-w-0 truncate font-medium text-foreground/80">{crew.crewName}</span>
-          <SquadronLabel squadron={squadron} showEnvironment={props.showEnvironment} />
+          <ProjectLabel {...props} agent={null} />
           <span className="ms-auto shrink-0 text-xs text-muted-foreground tabular-nums">
             v{crew.version} · {seatCount} {seatCount === 1 ? "seat" : "seats"} · retired{" "}
             {crew.archivedAt === null ? (
@@ -622,17 +655,27 @@ function RetiredCrewCaptain(
   );
 }
 
-/** The Squadron a row belongs to; the environment joins it only once several are merged. */
-function SquadronLabel(props: {
-  readonly squadron: ScopedFleetSquadron;
-  readonly showEnvironment: boolean;
-}) {
+/**
+ * The project a row belongs to, with upstream's icon and display name. The row's own machine
+ * follows once several are connected, since each machine keeps its own ledger. While the project
+ * is unresolved the Squadron name the read carries stands in.
+ */
+function ProjectLabel(
+  props: Pick<FleetRowsProps, "projectOf" | "showEnvironment"> & {
+    readonly squadron: ScopedFleetSquadron;
+    readonly agent: FleetAgent | null;
+  },
+) {
+  const project = props.projectOf(props.squadron, props.agent);
   return (
-    <span className="min-w-0 truncate text-xs text-muted-foreground">
-      {props.squadron.name}
-      {props.showEnvironment ? (
-        <span className="text-muted-foreground/70"> · {props.squadron.environmentLabel}</span>
-      ) : null}
+    <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+      {project === undefined ? null : <ProjectFavicon project={project} className="size-3.5" />}
+      <span className="min-w-0 truncate">
+        {project?.displayName ?? props.squadron.name}
+        {props.showEnvironment ? (
+          <span className="text-muted-foreground/70"> · {props.squadron.environmentLabel}</span>
+        ) : null}
+      </span>
     </span>
   );
 }
@@ -683,12 +726,8 @@ function FleetRowItem(
             <CaptainMark title={`Commands ${props.captainOf.join(", ")}`} />
           ) : null}
         </span>
-        {/* A placement tree lives in one Squadron, so only its root names it. */}
-        {props.row.depth === 0 ? (
-          <SquadronLabel squadron={props.squadron} showEnvironment={props.showEnvironment} />
-        ) : (
-          <span />
-        )}
+        {/* A placement tree lives in one project, so only its root names it. */}
+        {props.row.depth === 0 ? <ProjectLabel {...props} agent={agent} /> : <span />}
         <span className="flex items-center gap-1.5 text-xs">
           {status === null ? (
             <span className="text-muted-foreground">
