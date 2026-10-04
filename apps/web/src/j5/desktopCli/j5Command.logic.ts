@@ -15,7 +15,7 @@ export function describeJ5CommandResult(result: DesktopJ5CommandResult): J5Comma
         title: "Installed the j5 command",
         description:
           result.profile !== null
-            ? `Linked ${result.command} and added its folder to your PATH in ${result.profile}. Open a new terminal to use it.`
+            ? `Linked ${result.command}. ${result.profile} adds its folder to your PATH; open a new terminal to use it.`
             : result.pathHint !== null
               ? `Linked ${result.command}. Add ${result.pathHint} to your PATH to use it.`
               : `Linked ${result.command}. Its folder is already on your PATH.`,

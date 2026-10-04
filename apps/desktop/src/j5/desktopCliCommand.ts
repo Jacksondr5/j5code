@@ -1,17 +1,47 @@
 import type { DesktopJ5CommandResult } from "@t3tools/contracts";
 import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
 import {
-  hasJ5PathLine,
+  bashLoginFiles,
+  J5_PATH_MARKER,
   j5PathEntry,
   shellProfilePaths,
-  withoutJ5PathLines,
 } from "@t3tools/shared/j5/shellProfile";
+import { readEnvironmentFromLoginShell } from "@t3tools/shared/shell";
+import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import type * as PlatformError from "effect/PlatformError";
+import * as Schema from "effect/Schema";
 
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
+
+export class DesktopJ5CommandError extends Schema.TaggedError<DesktopJ5CommandError>()(
+  "DesktopJ5CommandError",
+  { script: Schema.String },
+) {
+  override get message(): string {
+    return `J5 Code's own j5 script is missing at ${this.script}. Restart J5 Code and try again.`;
+  }
+}
+
+/**
+ * zsh's ZDOTDIR, which decides where `.zshrc` lives. The app is usually
+ * launched from Finder and doesn't inherit it, so it is asked of the login
+ * shell when the command runs.
+ */
+export const LoginShellZdotdir = Context.Reference<(shell: string) => string | undefined>(
+  "@j5/desktop/LoginShellZdotdir",
+  {
+    defaultValue: () => (shell) => {
+      try {
+        return readEnvironmentFromLoginShell(shell, ["ZDOTDIR"])["ZDOTDIR"];
+      } catch {
+        return undefined;
+      }
+    },
+  },
+);
 
 // Profiles needn't be UTF-8. Reading each byte as one latin1 character keeps
 // every byte through an edit; J5's line and marker are ASCII.
@@ -27,16 +57,26 @@ const optionOnNotFound = <A, R>(effect: Effect.Effect<A, PlatformError.PlatformE
   );
 
 /** Where the command goes and what it links to: the app's script in the J5 home. */
-const commandPaths = Effect.gen(function* () {
+const commandContext = Effect.gen(function* () {
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
+  const processEnvironment = yield* HostProcessEnvironment;
   const { path, homeDirectory: home } = environment;
   const binDir = path.join(home, ".local", "bin");
+  const shell = processEnvironment["SHELL"];
+  const zdotdir =
+    processEnvironment["ZDOTDIR"] ??
+    (shell?.split("/").pop() === "zsh" ? (yield* LoginShellZdotdir)(shell) : undefined);
   return {
     supported: environment.isPackaged && environment.platform === "darwin",
     home,
     binDir,
     command: path.join(binDir, "j5"),
     script: path.join(environment.baseDir, "bin", "j5"),
+    shell,
+    zdotdir,
+    xdgConfigHome: processEnvironment["XDG_CONFIG_HOME"],
+    // The process PATH was hydrated from the login shell at startup.
+    onPath: (processEnvironment["PATH"] ?? "").split(":").includes(binDir),
   };
 });
 
@@ -51,8 +91,8 @@ const commandPaths = Effect.gen(function* () {
 export const installJ5Command = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
-  const processEnvironment = yield* HostProcessEnvironment;
-  const { supported, home, binDir, command, script } = yield* commandPaths;
+  const context = yield* commandContext;
+  const { home, binDir, command, script } = context;
   const result = (
     outcome: DesktopJ5CommandResult["outcome"],
     changes?: { readonly profile?: string; readonly pathHint?: string },
@@ -62,29 +102,29 @@ export const installJ5Command = Effect.gen(function* () {
     profile: changes?.profile ?? null,
     pathHint: changes?.pathHint ?? null,
   });
-  if (!supported) return result("unsupported");
+  if (!context.supported) return result("unsupported");
 
   const target = yield* fs.readLink(command).pipe(Effect.option);
   const ours = Option.isSome(target) && target.value === script;
+  if (!ours && (Option.isSome(target) || (yield* fs.exists(command)))) return result("kept");
+  // The app writes the script at every launch; without it the link would be dead.
+  if (!(yield* fs.exists(script))) return yield* new DesktopJ5CommandError({ script });
   if (!ours) {
-    if (Option.isSome(target) || (yield* fs.exists(command))) return result("kept");
     yield* fs.makeDirectory(binDir, { recursive: true });
     yield* fs.symlink(script, command);
   }
 
-  // The process PATH was hydrated from the login shell at startup.
-  if ((processEnvironment["PATH"] ?? "").split(":").includes(binDir)) return result("installed");
+  if (context.onPath) return result("installed");
   const loginFiles = new Set<string>();
-  for (const name of [".bash_profile", ".bash_login", ".profile"]) {
-    const file = environment.path.join(home, name);
+  for (const file of bashLoginFiles(home)) {
     if (yield* fs.exists(file)) loginFiles.add(file);
   }
   const entry = j5PathEntry({
-    shell: processEnvironment["SHELL"],
+    shell: context.shell,
     platform: environment.platform,
     home,
-    zdotdir: processEnvironment["ZDOTDIR"],
-    xdgConfigHome: processEnvironment["XDG_CONFIG_HOME"],
+    zdotdir: context.zdotdir,
+    xdgConfigHome: context.xdgConfigHome,
     binDir,
     exists: (file) => loginFiles.has(file),
   });
@@ -95,7 +135,8 @@ export const installJ5Command = Effect.gen(function* () {
     const existing = yield* optionOnNotFound(fs.readFile(entry.profile)).pipe(
       Effect.map(Option.match({ onNone: () => "", onSome: asBytes })),
     );
-    if (hasJ5PathLine(existing)) return true;
+    // This exact line: a marked line for some other directory isn't ours.
+    if (existing.split("\n").includes(entry.line)) return true;
     const separator = existing.length > 0 && !existing.endsWith("\n") ? "\n" : "";
     yield* fs.makeDirectory(environment.path.dirname(entry.profile), { recursive: true });
     yield* fs.writeFileString(entry.profile, `${separator}${entry.line}\n`, { flag: "a" });
@@ -107,38 +148,45 @@ export const installJ5Command = Effect.gen(function* () {
 });
 
 /**
- * Removes what `installJ5Command` added: the link, when it is still the app's,
- * and J5's marked PATH line from the shell startup files. A `j5` from
- * something else is left alone, with the line that finds it.
+ * Removes what `installJ5Command` added: J5's marked PATH line for
+ * `~/.local/bin` from the shell startup files, then the link, when it is still
+ * the app's. A `j5` from something else is left alone, with the line that
+ * finds it. The link goes last, so a profile that can't be edited leaves a
+ * retry something to act on.
  */
 export const uninstallJ5Command = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
-  const processEnvironment = yield* HostProcessEnvironment;
-  const { supported, home, command, script } = yield* commandPaths;
+  const context = yield* commandContext;
+  const { home, binDir, command, script } = context;
   const result = (
     outcome: DesktopJ5CommandResult["outcome"],
     profile: string | null = null,
   ): DesktopJ5CommandResult => ({ outcome, command, profile, pathHint: null });
-  if (!supported) return result("unsupported");
+  if (!context.supported) return result("unsupported");
 
   const target = yield* fs.readLink(command).pipe(Effect.option);
   if (Option.isNone(target) || target.value !== script) return result("nothing");
-  yield* fs.remove(command, { force: true });
 
+  // Only the line for this directory; a command-line install into another
+  // directory wrote its own marked line and still needs it.
+  const isOurLine = (line: string) => line.endsWith(J5_PATH_MARKER) && line.includes(binDir);
   let edited: string | null = null;
   const profiles = shellProfilePaths({
     home,
-    zdotdir: processEnvironment["ZDOTDIR"],
-    xdgConfigHome: processEnvironment["XDG_CONFIG_HOME"],
+    zdotdir: context.zdotdir,
+    xdgConfigHome: context.xdgConfigHome,
   });
   for (const profile of profiles) {
     const contents = yield* optionOnNotFound(fs.readFile(profile));
-    if (Option.isNone(contents) || !hasJ5PathLine(asBytes(contents.value))) continue;
+    if (Option.isNone(contents)) continue;
+    const lines = asBytes(contents.value).split("\n");
+    if (!lines.some(isOurLine)) continue;
     yield* fs.writeFile(
       profile,
-      Buffer.from(withoutJ5PathLines(asBytes(contents.value)), "latin1"),
+      Buffer.from(lines.filter((line) => !isOurLine(line)).join("\n"), "latin1"),
     );
     edited ??= profile;
   }
+  yield* fs.remove(command, { force: true });
   return result("removed", edited);
 });

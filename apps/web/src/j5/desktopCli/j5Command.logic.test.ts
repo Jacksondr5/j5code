@@ -14,7 +14,7 @@ describe("the notice after installing the j5 command", () => {
         pathHint: null,
       }).description,
     ).toBe(
-      "Linked /Users/a/.local/bin/j5 and added its folder to your PATH in /Users/a/.zshrc. Open a new terminal to use it.",
+      "Linked /Users/a/.local/bin/j5. /Users/a/.zshrc adds its folder to your PATH; open a new terminal to use it.",
     );
   });
 

@@ -21,6 +21,10 @@ export function shellProfilePaths(input: {
   ];
 }
 
+/** The files a macOS bash login shell looks for; it reads only the first that exists. */
+export const bashLoginFiles = (home: string): ReadonlyArray<string> =>
+  [".bash_profile", ".bash_login", ".profile"].map((name) => `${home}/${name}`);
+
 /**
  * The startup file a shell reads and the line that puts `binDir` last on its
  * PATH, as `scripts/install.sh` chooses them; keep the two in step. `exists`
@@ -46,9 +50,7 @@ export function j5PathEntry(input: {
     case "bash": {
       if (input.platform !== "darwin")
         return { profile: `${input.home}/.bashrc`, line: exportLine };
-      const loginFiles = [".bash_profile", ".bash_login", ".profile"].map(
-        (name) => `${input.home}/${name}`,
-      );
+      const loginFiles = bashLoginFiles(input.home);
       return { profile: loginFiles.find(input.exists) ?? loginFiles[0]!, line: exportLine };
     }
     case "fish":
