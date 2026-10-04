@@ -275,7 +275,7 @@ describe("ssh tunnel scripts", () => {
     assert.include(devLaunch, 'DEFAULT_SERVER_HOME="$HOME/.j5code"');
     assert.notInclude(launch, "$HOME/.t3/runtime");
     assert.notInclude(launch, "server-home");
-    assert.include(launch, "Remote T3 server did not become ready");
+    assert.include(launch, "Remote J5 server did not become ready");
     assert.include(launch, 'wait_ready "60000"');
     assert.include(launch, 'if [ -s "$LOG_FILE" ]; then');
     assert.include(launch, "It wrote nothing to %s");
@@ -526,7 +526,7 @@ describe("ssh tunnel scripts", () => {
                 ...makeSuccessfulProcess(""),
                 exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(1)),
                 stderr: Stream.make(
-                  new TextEncoder().encode("Remote T3 server did not stop within 2 seconds.\n"),
+                  new TextEncoder().encode("Remote J5 server did not stop within 2 seconds.\n"),
                 ),
               };
             }
@@ -568,7 +568,7 @@ describe("ssh tunnel scripts", () => {
             assert.instanceOf(disconnected.failure, SshCommandError);
             assert.equal(
               disconnected.failure.message,
-              "Remote T3 server did not stop within 2 seconds.",
+              "Remote J5 server did not stop within 2 seconds.",
             );
           }
         } else {

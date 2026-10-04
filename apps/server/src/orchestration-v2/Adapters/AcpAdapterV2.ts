@@ -5130,8 +5130,8 @@ export function makeAcpAdapterV2(options: AcpAdapterV2Options): ProviderAdapterV
               Effect.fail(
                 EffectAcpErrors.AcpRequestError.internalError(
                   disposition === "ask"
-                    ? `The active T3 runtime policy requires approval for ${operation}. Request permission with session/request_permission before retrying.`
-                    : `The active T3 runtime policy does not allow ${operation}.`,
+                    ? `The active J5 runtime policy requires approval for ${operation}. Request permission with session/request_permission before retrying.`
+                    : `The active J5 runtime policy does not allow ${operation}.`,
                 ),
               ),
             ),

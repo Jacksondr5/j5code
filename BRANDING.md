@@ -88,10 +88,22 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
 - Shared client copy: `packages/client-runtime` has no branding import, so its user-visible
   strings stay product-neutral instead of naming T3 Code: `connection/compatibility.ts` ("Update the
   server on …") and `state/pullRequestDiffHttp.ts` ("quit and reopen the app").
+- User-visible copy and marks (2026-10-04): every string a person or an agent reads names the
+  product "J5 Code" (bare "T3" becomes "J5"), across web, desktop, mobile, the server's CLI and
+  error messages, agent instructions and MCP tool titles, native capture helpers, and `docs/user/`.
+  The compact mark on t3-code MCP tool rows and the mobile header is `J5Wordmark`
+  (`apps/web/src/j5/branding/`, `apps/mobile/src/j5/branding/`). These are literal edits in upstream
+  files, so after an advance run
+  `git grep -nE "T3 Code|\bT3\b" -- apps packages native docs/user` and rebrand new hits that are
+  not listed under the unchanged internals below.
+- Branch names: `WORKTREE_BRANCH_PREFIX` in `packages/shared/src/git.ts` and the
+  `branchNamePrefix` default in `packages/contracts/src/settings.ts` are `j5code`, and fork pull
+  requests check out as `j5code/pr-<n>/…` (`GitManager.ts`, `BitbucketApi.ts`). The temporary-branch
+  matcher still accepts `t3code/<hash>` so worktrees created before the rename can be renamed.
 - New upstream files: the list above names only known sites. On every advance, also grep the files
   upstream added since the old pin for `t3code`, `T3 Code`, `.t3`, `T3CODE_HOME`, `pingdotgg`,
-  `t3.codes/install`, and `npx t3`, then rebrand identity sites and leave deliberate internals and
-  general copy (below) unchanged.
+  `t3.codes/install`, and `npx t3`, then rebrand identity sites and user-visible copy, and leave the
+  deliberate internals below unchanged.
 
 ## Deliberately unchanged upstream internals
 
@@ -101,10 +113,17 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
   names (`T3CODE_CHANNEL`, `T3CODE_VERSION`, `T3CODE_INSTALL_BIN_DIR`, `T3CODE_RELEASE_BASE_URL`), the
   `T3_BOOT_SERVICE_UNIT` key, and the `__service-launcher` subcommand stay upstream's.
 - Database schema names, persisted mobile storage keys, internal CLI flags, and code identifiers.
-- General upstream product copy and documentation outside the identity sites above, including
-  settings copy naming "T3 Code"/"T3 Connect" (`LocalEnvironmentSetting`, `NotificationSettings`,
-  `EnvironmentRow`), mobile "About T3 Code"/"Update T3 Code…" and widget descriptions, and the
-  `T3Wordmark` icon on t3-code MCP tool rows.
+- "T3 Connect" and "T3 Account": upstream's hosted relay and sign-in, named as upstream names
+  them wherever they appear, along with `infra/relay`, `app.t3.codes`, and the mobile legal links
+  to `t3.codes`.
+- The `t3-code` MCP server key, its `T3 Code` MCP server name, and the Codex client info
+  (`t3code_desktop` / "T3 Code Desktop"): protocol identity that tool names, aliases
+  (`t3McpToolPresentation.ts`) and recorded provider fixtures depend on.
+- `j5 triage` (`apps/server/src/cli/triagePrompt.ts`, `.github/triage/PLAYBOOK.md`) still describes
+  T3 Code and files issues on `pingdotgg/t3code`; where J5 reports should go is undecided.
+- `t3.json`, its schema URL, the `refs/t3code/*` hidden refs, upstream's `README.md`,
+  `packaging/aur`, the Linux capture helper identities (#138), the iOS widget's `T3Mark` image
+  asset, and developer scripts under `scripts/` and `apps/server/scripts/`.
 
 ## Cloud and update posture
 

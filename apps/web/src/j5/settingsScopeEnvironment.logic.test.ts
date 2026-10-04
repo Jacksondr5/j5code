@@ -37,7 +37,7 @@ const groups: SidebarProjectSnapshot[] = [
   {
     ...laptopCheckout,
     projectKey: "t3code",
-    displayName: "T3 Code",
+    displayName: "J5 Code",
     memberProjects: [laptopCheckout, serverCheckout],
     memberProjectRefs: [],
     groupedProjectCount: 2,
