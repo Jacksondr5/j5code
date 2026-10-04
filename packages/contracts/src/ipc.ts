@@ -23,6 +23,7 @@ import { AdvertisedEndpoint } from "./remoteAccess.ts";
 import { ExecutionEnvironmentDescriptor } from "./environment.ts";
 import { type ClientSettings, type QuitConfirmationMode, SnapShotShortcut } from "./settings.ts";
 import type { EditorId } from "./editor.ts";
+import type { DesktopJ5CommandResult } from "./j5/desktopCli.ts";
 
 import type {
   DesktopAppActivationRequest,
@@ -1191,6 +1192,9 @@ export interface DesktopBridge {
   }) => Promise<DesktopServerExposureState>;
   getAdvertisedEndpoints: () => Promise<readonly AdvertisedEndpoint[]>;
   getWslState: () => Promise<DesktopWslState>;
+  // J5: the `j5` command for the person's own terminal (FORK.md case 55).
+  installJ5Command: () => Promise<DesktopJ5CommandResult>;
+  uninstallJ5Command: () => Promise<DesktopJ5CommandResult>;
   setWslBackendEnabled: (enabled: boolean) => Promise<DesktopWslState>;
   setWslDistro: (distro: string | null) => Promise<DesktopWslState>;
   setWslOnly: (enabled: boolean) => Promise<DesktopWslState>;

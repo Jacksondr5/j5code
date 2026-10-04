@@ -203,6 +203,7 @@ import {
 import type { Project } from "../types";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 import { readPullRequestListPreferences } from "~/components/pullRequest/pullRequestListPreferences";
+import { j5CommandPaletteActions } from "../j5/desktopCli/j5CommandPaletteActions";
 import { openSquadronCreate, resolveAddProjectDoor } from "../j5/squadron/SquadronCreateRequest";
 import { useSquadronDirectory } from "../j5/squadron/SquadronDirectory";
 import { selectDraftSquadron } from "../j5/squadron/SquadronDraftState";
@@ -1988,6 +1989,9 @@ function OpenCommandPaletteDialog(props: {
       await navigate({ to: "/usage" });
     },
   });
+
+  // J5 (case 55): the desktop app can install its `j5` command for your own terminal.
+  actionItems.push(...j5CommandPaletteActions());
 
   actionItems.push({
     kind: "action",

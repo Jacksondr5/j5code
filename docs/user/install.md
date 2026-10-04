@@ -64,9 +64,12 @@ publishes no desktop build for other platforms and no package-manager listing;
 
 Agents and terminals the app runs can use the `j5` command without any setup: the
 app keeps the CLI built into it at `~/.j5code/bin/j5` and gives them that
-directory. The app doesn't change your own `PATH` or shell startup files. To run
-`j5` in your own terminal, use `~/.j5code/bin/j5` or add `~/.j5code/bin` to your
-`PATH`.
+directory. The app doesn't change your own `PATH` or shell startup files unless
+you ask. To use `j5` in your own terminal, open the command palette and run
+**Install 'j5' command in PATH**. It links `~/.local/bin/j5` to the app's CLI and,
+if that directory isn't on your `PATH`, adds it at the end in your shell's
+startup file, then tells you what it changed. **Uninstall 'j5' command from
+PATH** undoes both.
 
 ### Windows Subsystem for Linux
 
