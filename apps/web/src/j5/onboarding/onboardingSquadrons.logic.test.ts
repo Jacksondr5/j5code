@@ -60,6 +60,42 @@ describe("resolveOnboardingAssignment", () => {
   });
 });
 
+describe("a folder whose project already has a Squadron", () => {
+  const existing = [squadron("squadron:alpha", laptop, [apiProject])];
+  const folder = { key: "k", title: "acme-api" };
+
+  it("uses the existing Squadron and never resolves to a new one", () => {
+    expect(resolveOnboardingAssignment(new Map(), folder, existing)).toEqual({
+      kind: "existing",
+      squadronId: "squadron:alpha",
+    });
+    const stale = new Map<string, OnboardingSquadronAssignment>([
+      ["k", { kind: "new", name: "second" }],
+    ]);
+    expect(resolveOnboardingAssignment(stale, folder, existing)).toEqual({
+      kind: "existing",
+      squadronId: "squadron:alpha",
+    });
+  });
+
+  it("creates nothing at import even when the choice still says new", async () => {
+    const createSquadron = vi.fn();
+    const homes = new Map<string, OnboardingSquadronHome>();
+    const result = await ensureOnboardingSquadron({
+      key: "k",
+      projectRef: { environmentId: laptop, projectId: apiProject },
+      assignment: { kind: "new", name: "second" },
+      homes,
+      existingSquadrons: existing,
+      createSquadron,
+      isDefiniteRejection,
+    });
+
+    expect(createSquadron).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ kind: "ready", home: { squadronId: "squadron:alpha" } });
+  });
+});
+
 describe("eligibleExistingSquadrons", () => {
   const directory = [
     squadron("squadron:alpha", laptop, [apiProject]),

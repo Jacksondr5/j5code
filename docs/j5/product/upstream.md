@@ -131,7 +131,7 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Why:** the ledger is still keyed by Squadron, and these checks were written when a Squadron could differ from its project. They don't limit communication: any agent can still message any other.
 
-**Consequences:** the checks collapse into upstream's same-project rule when the ledger re-keys to projects ([#412](https://github.com/Jacksondr5/j5code/issues/412)), and this entry retires then. Merge-back hasn't been exercised live. Until then a project that several Squadrons reference refuses new threads, and the app no longer offers Delete Squadron to repair it.
+**Consequences:** the checks collapse into upstream's same-project rule when the ledger re-keys to projects ([#412](https://github.com/Jacksondr5/j5code/issues/412)), and this entry retires then. Merge-back hasn't been exercised live. Until then a project that several Squadrons reference refuses new threads, and the app no longer offers Delete Squadron to repair it. The repair a person does have is the server's delete route, `POST /api/j5/squadrons/<squadronId>/delete`.
 
 **Decided:** Jackson, 2026-09-28 (the organize check and merge-back limit, which arrived without a ruling in the 2026-09-17 integration). The Squadron as the person's unit of choice (new-thread doors, Add Project, the sidebar scope, thread cards, the clone notice) was decided between 2026-08-24 and 2026-09-25 and went back to upstream's project on 2026-10-04, in the plan to retire Squadrons. Recorded in FORK.md cases 10 and 38, and its root-spawn section.
 
@@ -143,7 +143,7 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Why:** agents need a home in the ledger, and the ledger is still keyed by Squadron. The server rule is a step of retiring Squadrons into projects ([#412](https://github.com/Jacksondr5/j5code/issues/412)), where a thread's home is its project. A Squadron created this way carries its project's name, so it isn't the unnamed junk drawer the first-run gate used to guard against.
 
-**Consequences:** the person never creates, names or sees a Squadron: the gate, Create Squadron, rename and delete are gone, and the app shows projects. The welcome wizard still has a Squadron stage (D10). A project that several Squadrons reference can't start a thread, and the app offers no repair for it.
+**Consequences:** the person never creates, names or sees a Squadron: the gate, Create Squadron, rename and delete are gone, and the app shows projects. The welcome wizard still has a Squadron stage (D10). A project that several Squadrons reference can't start a thread, and the app offers no repair for it; the server's delete route (`POST /api/j5/squadrons/<squadronId>/delete`) is the way out. The wizard's Squadron stage no longer offers a new Squadron for a folder whose project already has one, so the app itself can't create that state.
 
 **Decided:** Jackson, 2026-08-24 (SC2), for the original gate. The server rule and the gate's removal: Jackson, 2026-10-03, in the plan to retire Squadrons. Recorded in FORK.md cases 9 and 10.
 

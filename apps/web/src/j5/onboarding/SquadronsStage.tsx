@@ -118,8 +118,8 @@ export function SquadronsStage({
           {folders.map((folder) => {
             const home = homes.get(folder.key);
             const outcome = outcomes.get(folder.key);
-            const assignment = resolveOnboardingAssignment(assignments, folder);
             const existing = eligibleExistingSquadrons(squadrons, folder);
+            const assignment = resolveOnboardingAssignment(assignments, folder, existing);
             return (
               <li
                 key={folder.key}
@@ -217,17 +217,22 @@ function AssignmentControl({
   readonly disabled: boolean;
   readonly onChange: (assignment: OnboardingSquadronAssignment) => void;
 }) {
-  const items = [
-    { value: NEW_SQUADRON_VALUE, label: "New Squadron" },
-    ...existing.map((entry) => ({ value: entry.squadron.id, label: entry.squadron.name })),
-  ];
+  // A folder whose project already has a Squadron is not offered a new one.
+  const existingItems = existing.map((entry) => ({
+    value: entry.squadron.id,
+    label: entry.squadron.name,
+  }));
+  const items =
+    existingItems.length > 0
+      ? existingItems
+      : [{ value: NEW_SQUADRON_VALUE, label: "New Squadron" }];
   if (assignment.kind === "unconfirmed") {
     return (
       <div className="flex flex-wrap items-center gap-2">
         {existing.length > 0 ? (
           <ExistingSelect
             folder={folder}
-            items={items.slice(1)}
+            items={existingItems}
             value={null}
             disabled={disabled}
             onChange={(squadronId) => onChange({ kind: "existing", squadronId })}
@@ -243,14 +248,16 @@ function AssignmentControl({
         >
           Refresh
         </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={disabled}
-          onClick={() => onChange({ kind: "new", name: assignment.name })}
-        >
-          Create it again
-        </Button>
+        {existing.length > 0 ? null : (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={disabled}
+            onClick={() => onChange({ kind: "new", name: assignment.name })}
+          >
+            Create it again
+          </Button>
+        )}
       </div>
     );
   }

@@ -45,11 +45,24 @@ export const defaultOnboardingAssignment = (candidate: {
   readonly title: string;
 }): OnboardingSquadronAssignment => ({ kind: "new", name: candidate.title });
 
+/**
+ * A folder whose project already has a Squadron uses it and is never offered a new one: a second
+ * Squadron on one project makes the project refuse new threads, and the app has no repair for
+ * that. Pass the folder's eligible Squadrons as `existing` to apply the rule.
+ */
 export const resolveOnboardingAssignment = (
   assignments: ReadonlyMap<string, OnboardingSquadronAssignment>,
   candidate: { readonly key: string; readonly title: string },
-): OnboardingSquadronAssignment =>
-  assignments.get(candidate.key) ?? defaultOnboardingAssignment(candidate);
+  existing: ReadonlyArray<{ readonly squadron: { readonly id: string } }> = [],
+): OnboardingSquadronAssignment => {
+  const chosen = assignments.get(candidate.key);
+  const first = existing[0];
+  if (first === undefined) return chosen ?? defaultOnboardingAssignment(candidate);
+  return chosen?.kind === "existing" &&
+    existing.some((entry) => entry.squadron.id === chosen.squadronId)
+    ? chosen
+    : { kind: "existing", squadronId: first.squadron.id };
+};
 
 /**
  * Existing Squadrons are offered only from the folder's own environment and only when they
@@ -130,6 +143,17 @@ export async function ensureOnboardingSquadron(input: {
       };
     }
     const home = { squadronId: chosen.squadron.id, name: chosen.squadron.name, projectRef };
+    input.homes.set(input.key, home);
+    return { kind: "ready", home };
+  }
+  // The project already has a Squadron: use it, whatever the choice says. See
+  // `resolveOnboardingAssignment`.
+  const already = eligibleExistingSquadrons(input.existingSquadrons, {
+    environmentId: projectRef.environmentId,
+    projectId: projectRef.projectId,
+  })[0];
+  if (already !== undefined) {
+    const home = { squadronId: already.squadron.id, name: already.squadron.name, projectRef };
     input.homes.set(input.key, home);
     return { kind: "ready", home };
   }
