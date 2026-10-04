@@ -129,12 +129,12 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 - Every new-thread door asks for a Squadron, and a draft without one can't send.
 - Add Project opens Create Squadron.
 - The new-thread headline reads "What should we build in ⟨Squadron⟩?", and the placeholder asks the person to choose a Squadron.
-- Sidebar cards lead with the Squadron instead of the folder, and the sidebar scopes by Squadron instead of filtering by project.
+- The sidebar scopes by Squadron instead of filtering by project. Thread cards name the project, as upstream does.
 - The clone notice's "Open project" action is gone.
 - Archiving or unarchiving another agent that has a Squadron home also requires the caller to belong to that Squadron, on top of upstream's same-project rule.
 - Merge-back is refused unless both threads share a Squadron home, or both have none.
 
-**Why:** upstream's model is one folder, one project. Work isn't shaped like that: many efforts touch one repository, and one effort touches several. The Squadron is what the person chooses between. Reusing the project flow with a new name would rebuild the one-to-one shape the Squadron exists to replace. On cards, two Squadrons over one folder looked identical, and once a Squadron spans several folders a folder name stops identifying the work. Upstream scopes an agent's actions on other threads to its project; J5 keeps that and adds a Squadron check on top, so a shared Squadron never reaches across projects. This doesn't limit communication: any agent can still message any other.
+**Why:** upstream's model is one folder, one project. Work isn't shaped like that: many efforts touch one repository, and one effort touches several. The Squadron is what the person chooses between. Reusing the project flow with a new name would rebuild the one-to-one shape the Squadron exists to replace. Upstream scopes an agent's actions on other threads to its project; J5 keeps that and adds a Squadron check on top, so a shared Squadron never reaches across projects. This doesn't limit communication: any agent can still message any other.
 
 **Consequences:** a Squadron has one folder for now. Many small seams in upstream UI must be re-checked at every advance, and each case lists its own check. J5 replaces upstream's whole headline component; a smaller J5-owned headline at the same mount would be cheaper to carry. Merge-back hasn't been exercised live. Open gaps: the scheduling selector (#38), the legacy sidebar door (#39), and project nouns still left in some upstream copy.
 
