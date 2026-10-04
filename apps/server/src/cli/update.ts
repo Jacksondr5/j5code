@@ -42,6 +42,7 @@ import { compareExactServiceVersions, isExactServiceVersion } from "../cloud/ser
 import * as ProcessRunner from "../processRunner.ts";
 import { isProcessAlive, readPersistedServerRuntimeState } from "../serverRuntimeState.ts";
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
+import { withoutAgentCliOnPath } from "../j5/cli/agentPath.ts";
 import { createUpdateProgress } from "./updateProgress.ts";
 import { bootServiceLayer } from "./service.ts";
 
@@ -553,7 +554,10 @@ const runUpdate = Effect.fn("cli.update.run")(function* (input: {
     ),
   );
 
-  const launchedAs = (yield* HostProcessIsExecutable) ? yield* resolveLauncherPath : undefined;
+  // J5: the person's own link, not the agents' `<home>/bin/j5` (FORK.md case 53).
+  const launchedAs = (yield* HostProcessIsExecutable)
+    ? yield* withoutAgentCliOnPath(input.baseDir, resolveLauncherPath)
+    : undefined;
   const repointed = yield* repointLauncher({
     launchedAs,
     versionsDir: path.dirname(runtime.versionDir),
