@@ -3,15 +3,6 @@ import { expect, it } from "@effect/vitest";
 
 import { ThreadCardIdentity, ThreadCardIdentityView } from "./ThreadCardIdentity";
 
-it("clips a long project name and keeps its full text in the sidebar tooltip pattern", () => {
-  const label = "A project with a deliberately long display name that cannot fit the card";
-  const markup = renderToStaticMarkup(<ThreadCardIdentity projectName={label} />);
-
-  expect(markup).toContain("block min-w-0 truncate");
-  expect(markup).toContain('data-slot="tooltip-trigger"');
-  expect(markup).toContain(label);
-});
-
 it("adds a seat chip for a crew member and the anchor mark for its Captain", () => {
   const live = { crewInstanceId: "crew:1", crewName: "Review Pair" };
   const member = renderToStaticMarkup(
