@@ -302,6 +302,18 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Decided:** Jackson, 2026-10-04, PR #446. Recorded in `BRANDING.md`.
 
+#### D27. Usage telemetry reports to J5's PostHog project
+
+**Upstream:** the server sends product usage events to upstream's PostHog project by default, and `T3CODE_TELEMETRY_ENABLED=false` turns them off.
+
+**J5:** the same events, identifier and opt-out, sent to a PostHog project Jackson owns.
+
+**Why:** J5 servers were reporting their users' usage to T3 Tools, which J5 has no agreement with and whose data Jackson can't see or delete. He wants the usage data himself, and J5's privacy page has to name who receives it.
+
+**Consequences:** one default in `AnalyticsService.ts` differs, so each upstream advance checks the token is still J5's. Jackson is responsible for the data: the project discards client IP addresses, and J5's privacy page describes what is sent. Releases installed before this change keep reporting to upstream's project. There is no Settings toggle, only the environment variable.
+
+**Decided:** Jackson, 2026-10-04. Recorded in `BRANDING.md`.
+
 #### D21. Pair discovery stays inside a worktree
 
 **Upstream:** `pair` is the CLI command that mints a one-time link for connecting a browser or the mobile app to a running server. When it finds no server in the current worktree, it falls back to the default install.
