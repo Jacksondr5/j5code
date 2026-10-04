@@ -2753,7 +2753,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       category: "public.app-category.developer-tools",
       extendInfo: {
         NSScreenCaptureUsageDescription:
-          "T3 Code captures the active window when you use the window capture shortcut.",
+          "J5 Code captures the active window when you use the window capture shortcut.",
       },
       protocols: [
         {

@@ -78,10 +78,10 @@ export const mapJ5OrchestratorCapabilities = (
 });
 
 export const J5_ORCHESTRATOR_CAPABILITIES_DESCRIPTION =
-  "List provider instances, models, selectable model options, provider constraints, and the current runtime and interaction modes available to this T3 thread.";
+  "List provider instances, models, selectable model options, provider constraints, and the current runtime and interaction modes available to this J5 thread.";
 
 export const J5_THREAD_READ_DESCRIPTION =
-  "Read durable state and a paginated timeline from a T3 thread in the calling project. The default messages view returns user messages, assistant messages, and proposed plans; activity returns all summarized timeline items. Continue with afterPosition=nextPosition.";
+  "Read durable state and a paginated timeline from a J5 thread in the calling project. The default messages view returns user messages, assistant messages, and proposed plans; activity returns all summarized timeline items. Continue with afterPosition=nextPosition.";
 
 export const J5OrchestratorCapabilitiesTool = Tool.make("orchestrator_capabilities", {
   description: J5_ORCHESTRATOR_CAPABILITIES_DESCRIPTION,
@@ -103,7 +103,7 @@ export const J5ThreadReadTool = Tool.make("t3_thread_read", {
   failureMode: "return",
   dependencies,
 })
-  .annotate(Tool.Title, "Read a T3 thread")
+  .annotate(Tool.Title, "Read a J5 thread")
   .annotate(Tool.Readonly, false)
   .annotate(Tool.Destructive, false)
   .annotate(Tool.Idempotent, true);

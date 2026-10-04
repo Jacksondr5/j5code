@@ -314,6 +314,18 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Decided:** introduced in PR #94 (2026-09-04). Jackson approved it on 2026-09-28, closing the carry-or-drop question FORK.md's 2026-09-06 review left open. Recorded in FORK.md's final upstream-file review ("Pair discovery isolation and activation retry") and its `pair.ts` rows.
 
+#### D25. The product is named J5 Code wherever a person or an agent reads it
+
+**Upstream:** the app, its CLI output, error messages, agent instructions and tool titles say "T3 Code", tool rows and the mobile header show the T3 mark, and new worktree branches start with `t3code/`.
+
+**J5:** all of that says "J5 Code" and shows the J5 mark, and new branches start with `j5code/`. Upstream's own services keep their names ("T3 Connect", "T3 Account"), as do protocol identifiers such as the `t3-code` MCP server. Documentation keeps upstream's wording.
+
+**Why:** J5 and T3 Code can be installed side by side, and a person should always be able to tell which one they are looking at. The old name kept reappearing because the branding rules left general copy alone.
+
+**Consequences:** these are literal edits in roughly 230 upstream files, so every upstream advance has to rebrand the strings upstream added or changed; the grep is in [Merging upstream](../process/upstream-merge.md) and `BRANDING.md` lists what stays. Temporary branches created under `t3code/` are still recognized.
+
+**Decided:** Jackson, 2026-10-04, PR #445. Recorded in `BRANDING.md`.
+
 ### Awaiting a decision
 
 These already diverge on `j5/main`, but no human ruling is on record. Each landed as an implementer's call inside a merged PR. The person rules on each one; an approved entry moves up into its section, and a rejected one becomes a fix.
@@ -375,4 +387,5 @@ None yet.
 ## History
 
 - 2026-09-26 — created: the three zones, the decision protocol, and the register, seeded from FORK.md and the worklog records (Jackson, [#327](https://github.com/Jacksondr5/j5code/issues/327)).
+- 2026-10-04 — D25 added: user-visible copy, marks and branch names (PR #445).
 - 2026-10-04 — D26 added: `j5 triage` points at J5's repository (PR #446).

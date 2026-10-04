@@ -158,7 +158,7 @@ describe("CursorAdapterV2", () => {
       assert.lengthOf(sentMessages, 1);
       assert.isTrue(sentMessages[0]!.startsWith("/review this with $HOME and $missing\n\n"));
       assert.include(sentMessages[0]!, "Cursor");
-      assert.include(sentMessages[0]!, "T3 Code");
+      assert.include(sentMessages[0]!, "J5 Code");
     }).pipe(Effect.scoped, Effect.provide(Layer.merge(NodeServices.layer, idAllocatorLayer))),
   );
 
