@@ -14,6 +14,8 @@
 #   J5CODE_HOME              J5 home directory (default: ~/.j5code). T3CODE_HOME
 #                            belongs to T3 Code and is never read.
 #   T3CODE_INSTALL_BIN_DIR   where the `j5` symlink goes (default: ~/.local/bin)
+#   J5CODE_NO_MODIFY_PATH    set to leave shell startup files alone and only print
+#                            the PATH line to add
 #   T3CODE_RELEASE_BASE_URL  mirror for releases/download (default: GitHub)
 #
 # The archive is unpacked into $J5CODE_HOME/runtime/versions/<version>, the
@@ -228,6 +230,61 @@ ln -sfn "${target_dir}/${exe}" "${bin_dir}/j5"
 if "$interactive"; then printf '\r\033[2K' >&2; fi
 printf '  %sInstalled J5 Code %s%s\n\n' "$green" "$version" "$reset" >&2
 case ":${PATH}:" in
-  *":${bin_dir}:"*) printf '  Run %sj5%s to get started.\n\n' "$bold" "$reset" ;;
-  *) printf '  Add %s to your PATH, then run %sj5%s.\n\n' "$bin_dir" "$bold" "$reset" ;;
+  *":${bin_dir}:"*) printf '  Run %sj5%s to get started.\n\n' "$bold" "$reset"; exit 0 ;;
 esac
+
+# J5: put bin_dir on PATH for new terminals with one marked line in the shell's
+# startup file. `j5 uninstall` removes lines ending with this marker; keep it
+# in step with packages/shared/src/j5/shellProfile.ts.
+marker='# Added by J5 Code; `j5 uninstall` removes this line.'
+profile=
+# The directory goes last: `j5` replaces nothing, so it has no reason to take
+# precedence over what is already on PATH.
+line="export PATH=\"\$PATH:${bin_dir}\" ${marker}"
+case "$(basename "${SHELL:-}")" in
+  zsh) profile="${ZDOTDIR:-$HOME}/.zshrc" ;;
+  bash)
+    if [ "$platform" = darwin ]; then
+      # macOS terminals start login shells, which read only the first of these
+      # that exists; creating .bash_profile would hide an existing .profile.
+      profile="$HOME/.bash_profile"
+      for candidate in "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.profile"; do
+        if [ -e "$candidate" ]; then profile="$candidate"; break; fi
+      done
+    else
+      profile="$HOME/.bashrc"
+    fi
+    ;;
+  fish)
+    profile="${XDG_CONFIG_HOME:-$HOME/.config}/fish/config.fish"
+    # --path changes only this shell's PATH, so deleting the line undoes it.
+    line="fish_add_path --path --append \"${bin_dir}\" ${marker}"
+    ;;
+esac
+path_hint() {
+  printf '  Add %s to your PATH, then run %sj5%s.\n\n' "$bin_dir" "$bold" "$reset"
+  exit 0
+}
+[ -n "$profile" ] || path_hint
+[ -z "${J5CODE_NO_MODIFY_PATH:-}" ] || path_hint
+# The line quotes bin_dir in double quotes; a directory the shell would expand
+# or split there gets the hint instead of a line that points somewhere else.
+case "$bin_dir" in
+  *[\"\$\`\\]*) path_hint ;;
+esac
+if grep -qF "$marker" "$profile" 2>/dev/null; then
+  printf '  %s already has the PATH line from an earlier J5 Code install.\n  Open a new terminal, then run %sj5%s.\n\n' "$profile" "$bold" "$reset"
+  exit 0
+fi
+# A read-only profile (a home-manager link, say) gets the hint, not a failure.
+if ! {
+  mkdir -p "$(dirname "$profile")" &&
+    {
+      # Start on a fresh line when the file doesn't end with one.
+      if [ -s "$profile" ] && [ -n "$(tail -c 1 "$profile")" ]; then printf '\n'; fi
+      printf '%s\n' "$line"
+    } >> "$profile"
+} 2>/dev/null; then
+  path_hint
+fi
+printf '  Added %s to your PATH in %s.\n  Open a new terminal, then run %sj5%s.\n\n' "$bin_dir" "$profile" "$bold" "$reset"
