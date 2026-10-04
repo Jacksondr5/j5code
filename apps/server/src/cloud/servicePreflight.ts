@@ -26,8 +26,7 @@ export function runServicePreflight(input: {
     return {
       status: "blocked",
       version,
-      reason:
-        "This update changes how the background service starts. Run `j5 update` on the server's machine to finish it.",
+      reason: "Run `j5 update` on the server's machine to finish it.",
     };
   }
   if (input.launcherProtocol !== SERVICE_LAUNCHER_PROTOCOL) {

@@ -17,8 +17,7 @@ it("tells a pre-rename server to finish the update with j5 update", () => {
   ).toEqual({
     status: "blocked",
     version: "1.2.3",
-    reason:
-      "This update changes how the background service starts. Run `j5 update` on the server's machine to finish it.",
+    reason: "Run `j5 update` on the server's machine to finish it.",
   });
 });
 
