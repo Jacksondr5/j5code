@@ -10,6 +10,10 @@ import { exposeClerkBridge } from "@clerk/electron/preload";
 import { contextBridge, ipcRenderer, webFrame, webUtils } from "electron";
 
 import * as IpcChannels from "./ipc/channels.ts";
+import {
+  INSTALL_J5_COMMAND_CHANNEL,
+  UNINSTALL_J5_COMMAND_CHANNEL,
+} from "./j5/desktopCliChannels.ts";
 
 const SNAP_SHOT_EVENT_TYPES = new Set([
   "requested",
@@ -168,6 +172,9 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     ipcRenderer.invoke(IpcChannels.SET_TAILSCALE_SERVE_ENABLED_CHANNEL, input),
   getAdvertisedEndpoints: () => ipcRenderer.invoke(IpcChannels.GET_ADVERTISED_ENDPOINTS_CHANNEL),
   getWslState: () => ipcRenderer.invoke(IpcChannels.GET_WSL_STATE_CHANNEL),
+  // J5 (FORK.md case 55)
+  installJ5Command: () => ipcRenderer.invoke(INSTALL_J5_COMMAND_CHANNEL),
+  uninstallJ5Command: () => ipcRenderer.invoke(UNINSTALL_J5_COMMAND_CHANNEL),
   setWslBackendEnabled: (enabled) =>
     ipcRenderer.invoke(IpcChannels.SET_WSL_BACKEND_ENABLED_CHANNEL, enabled),
   setWslDistro: (distro) => ipcRenderer.invoke(IpcChannels.SET_WSL_DISTRO_CHANNEL, distro),

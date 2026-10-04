@@ -50,6 +50,20 @@ it.layer(NodeServices.layer)("j5 uninstall's shell cleanup", (it) => {
     }).pipe(Effect.scoped, Effect.provideService(HostProcessPlatform, "linux")),
   );
 
+  it.effect("takes the link the desktop app's install command made", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const { home, baseDir, command } = yield* makeHome;
+      yield* fs.remove(command);
+      yield* fs.symlink(path.join(baseDir, "bin/j5"), command);
+
+      const { profiles, installerLink } = yield* plan(home, baseDir);
+      assert.equal(installerLink, command);
+      assert.deepStrictEqual(profiles, [path.join(home, ".zshrc")]);
+    }).pipe(Effect.scoped, Effect.provideService(HostProcessPlatform, "linux")),
+  );
+
   it.effect("leaves another home's j5 and its line alone", () =>
     Effect.gen(function* () {
       const path = yield* Path.Path;
