@@ -140,8 +140,12 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
   `scripts/lib/j5-branding.ts`. `apps/mobile/eas.json` targets Apple team `46A73QH3S8`
   and App Store Connect app `6809314460`; preserve these fork destinations during pin advances.
   See [iOS distribution](docs/operations/j5-mobile-distribution.md).
-- Clerk, relay, and telemetry remain optional and use the upstream `T3CODE_*` / `EXPO_PUBLIC_*`
-  configuration names. No J5 service endpoints are provisioned by the build setup.
+- Clerk and relay remain optional and use the upstream `T3CODE_*` / `EXPO_PUBLIC_*`
+  configuration names. No J5 relay or sign-in endpoints are provisioned by the build setup.
+- Product usage telemetry reports to J5's own PostHog project (US region): the default
+  `T3CODE_POSTHOG_KEY` in `apps/server/src/telemetry/AnalyticsService.ts` is J5's project token,
+  not upstream's. Events, identifier, host and the `T3CODE_TELEMETRY_ENABLED=false` opt-out are
+  upstream's, unchanged. Keep J5's token when an upstream advance touches that default.
 
 ## 2026-09-06 verification boundary
 
