@@ -4,8 +4,6 @@ import { useState } from "react";
 import { NoProjectsHero } from "../components/NoProjectsHero";
 import { WelcomeWizard } from "../components/onboarding/WelcomeWizard";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
-import { openOnboardingSquadronDraft } from "../j5/onboarding/onboardingSquadrons.logic";
-import { selectDraftSquadron } from "../j5/squadron/SquadronDraftState";
 
 /** Onboarding overlays the workspace. Visiting /welcome reopens setup. */
 export const Route = createFileRoute("/welcome")({
@@ -37,16 +35,10 @@ function WelcomeRouteView() {
       {isWelcomeRoute && !dismissed ? (
         <WelcomeWizard
           localAvailable={localAvailable}
-          onDone={(projectRef, squadron) => {
+          onDone={(projectRef) => {
             setDismissed(true);
             if (projectRef !== undefined) {
-              // The landing draft carries the folder's Squadron so its first send has a home.
-              void openOnboardingSquadronDraft({
-                projectRef,
-                squadron,
-                handleNewThread: (ref) => openNewThread(ref, { replace: true }),
-                selectDraftSquadron,
-              }).catch(() => {
+              void openNewThread(projectRef, { replace: true }).catch(() => {
                 void navigate({ to: "/", replace: true });
               });
               return;

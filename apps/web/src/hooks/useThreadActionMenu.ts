@@ -1,3 +1,4 @@
+import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { requestCustomSnooze } from "../components/CustomSnoozeDialog";
 import {
   type AtomCommandResult,
@@ -36,11 +37,11 @@ import {
 import { buildPhysicalToLogicalProjectKeyMap } from "../sidebarProjectGrouping";
 import { threadRuntimeCanArchive } from "@t3tools/client-runtime/state/models";
 import { useCopyToClipboard } from "./useCopyToClipboard";
+import { useNewThreadHandler } from "./useHandleNewThread";
 import { useClientSettings } from "./useSettings";
 import { useThreadActions } from "./useThreadActions";
 import { requestConfirmDialog } from "../confirmDialog";
 import { archiveWithPreflight } from "../j5/a2a/archiveFlow";
-import { useSquadronNewThreadOnBranch } from "../j5/squadron/useSquadronNewThreadOnBranch";
 
 function failureToast(title: string, error: unknown) {
   toastManager.add(
@@ -96,8 +97,7 @@ export function useThreadActionMenu(input: {
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   });
-  // J5 (case 19): header new-thread-on-branch launches through the source's Squadron home.
-  const newThreadOnBranch = useSquadronNewThreadOnBranch(threadRef);
+  const handleNewThread = useNewThreadHandler();
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
   const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
   const timestampFormat = useClientSettings((s) => s.timestampFormat);
@@ -193,9 +193,22 @@ export function useThreadActionMenu(input: {
             });
             return;
           }
-          case "new-thread-on-branch":
-            await newThreadOnBranch(thread);
+          case "new-thread-on-branch": {
+            // Explicit branch carry-over: reuse the thread's worktree when it
+            // has one, otherwise its branch on the local checkout.
+            const result = await settlePromise(() =>
+              handleNewThread(scopeProjectRef(threadRef.environmentId, thread.projectId), {
+                branch: thread.branch,
+                worktreePath: thread.worktreePath,
+                envMode: thread.worktreePath ? "worktree" : "local",
+                startFromOrigin: false,
+              }),
+            );
+            if (result._tag === "Failure") {
+              failureToast("Could not create thread", squashAtomCommandFailure(result));
+            }
             return;
+          }
           case "settle":
             await reportFailure("Failed to settle thread", () => settleThread(threadRef));
             return;
@@ -333,9 +346,9 @@ export function useThreadActionMenu(input: {
       copyPathToClipboard,
       copyThreadIdToClipboard,
       deleteThread,
+      handleNewThread,
       logicalProjectKeyByPhysicalKey,
       markThreadUnread,
-      newThreadOnBranch,
       onStartRename,
       pinThread,
       projectCwd,

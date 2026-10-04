@@ -126,9 +126,7 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **J5:** the Squadron takes the project's place wherever the person chooses or reads what a thread belongs to:
 
-- Every new-thread door asks for a Squadron, and a draft without one can't send.
 - Add Project opens Create Squadron.
-- The new-thread headline reads "What should we build in ⟨Squadron⟩?", and the placeholder asks the person to choose a Squadron.
 - The sidebar scopes by Squadron instead of filtering by project. Thread cards name the project, as upstream does.
 - The clone notice's "Open project" action is gone.
 - Archiving or unarchiving another agent that has a Squadron home also requires the caller to belong to that Squadron, on top of upstream's same-project rule.
@@ -136,21 +134,21 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Why:** upstream's model is one folder, one project. Work isn't shaped like that: many efforts touch one repository, and one effort touches several. The Squadron is what the person chooses between. Reusing the project flow with a new name would rebuild the one-to-one shape the Squadron exists to replace. Upstream scopes an agent's actions on other threads to its project; J5 keeps that and adds a Squadron check on top, so a shared Squadron never reaches across projects. This doesn't limit communication: any agent can still message any other.
 
-**Consequences:** a Squadron has one folder for now. Many small seams in upstream UI must be re-checked at every advance, and each case lists its own check. J5 replaces upstream's whole headline component; a smaller J5-owned headline at the same mount would be cheaper to carry. Merge-back hasn't been exercised live. Open gaps: the scheduling selector (#38), the legacy sidebar door (#39), and project nouns still left in some upstream copy.
+**Consequences:** a Squadron has one folder for now. The new-thread doors, the draft headline and the composer placeholder are upstream's again: a new thread is started in a project, and the server puts it in that project's Squadron (D9). The remaining seams in upstream UI must be re-checked at every advance, and each case lists its own check. Merge-back hasn't been exercised live. Starting an implementation thread from a plan still uses J5's single launch instead of upstream's create-then-start, so the new thread gets a Squadron home; that returns to upstream when the ledger re-keys to projects. Open gaps: the scheduling selector (#38), the legacy sidebar door (#39), and project nouns still left in some upstream copy.
 
-**Decided:** Jackson, 2026-08-24 (SC2, SC3), 2026-08-29 (SB3), 2026-08-31 (E7), 2026-09-01 (#47, cards), 2026-09-12 (cross-environment drafts), 2026-09-24 (sidebar scope), 2026-09-25 (clone notice), and 2026-09-28 (the organize check and merge-back limit, which arrived without a ruling in the 2026-09-17 integration). Recorded in FORK.md cases 9, 10, 13, 15b, 16–20, 23, 34 and 38, and its root-spawn section.
+**Decided:** Jackson, 2026-08-24 (SC2, SC3), 2026-08-29 (SB3), 2026-08-31 (E7), 2026-09-01 (#47, cards), 2026-09-12 (cross-environment drafts), 2026-09-24 (sidebar scope), 2026-09-25 (clone notice), and 2026-09-28 (the organize check and merge-back limit, which arrived without a ruling in the 2026-09-17 integration). The doors, headline and placeholder went back to upstream on 2026-10-04, in the plan to retire Squadrons ([#412](https://github.com/Jacksondr5/j5code/issues/412)). Recorded in FORK.md cases 9, 10, 13, 16–18, 23, 34 and 38, and its root-spawn section.
 
-#### D9. First run creates a Squadron
+#### D9. A thread's Squadron is created for it
 
-**Upstream:** a first run lands in a draft.
+**Upstream:** a first run lands in a draft, and a thread belongs to its project.
 
-**J5:** the person creates a named Squadron, with its folder, before the first thread. The server no longer requires that: a thread launched without a Squadron registers into its project's Squadron, and when the project has none the server creates one named after the project. When several Squadrons reference the project, the launch is refused.
+**J5:** a first run lands in a draft, as upstream. Underneath, a thread launched without a Squadron registers into its project's Squadron, and when the project has none the server creates one named after the project. When several Squadrons reference the project, the launch is refused.
 
-**Why:** an unnamed default becomes a junk drawer that defeats the concept. Agents need a home, and the gate says so. The server rule is the first step of retiring Squadrons into projects ([#412](https://github.com/Jacksondr5/j5code/issues/412)), where a thread's home is its project. A Squadron created this way carries its project's name, so it isn't the unnamed default the gate guards against.
+**Why:** agents need a home in the ledger, and the ledger is still keyed by Squadron. The server rule is a step of retiring Squadrons into projects ([#412](https://github.com/Jacksondr5/j5code/issues/412)), where a thread's home is its project. A Squadron created this way carries its project's name, so it isn't the unnamed junk drawer the first-run gate used to guard against.
 
-**Consequences:** because a folder is required, a Squadron with no repository isn't possible. That rules out a real future use: non-coding work such as a support rotation. A failed read offers only a retry, never a guessed home. The web client still sends a Squadron with every launch, so the gate is what a person sees until the client's new-thread doors return to upstream. Until then the server rule is reached only by launches that send none, such as ACP session import.
+**Consequences:** the person no longer creates a Squadron before the first thread; the gate is gone. Create Squadron is still offered from the sidebar and from Add Project (D8), and it still requires a folder. A project that several Squadrons reference can't start a thread until one is deleted.
 
-**Decided:** Jackson, 2026-08-24 (SC2); the folder requirement from DV2 (2026-08-25) and the Squadron definition (2026-09-05). The server rule: Jackson, 2026-10-03, in the plan to retire Squadrons. Recorded in FORK.md cases 9 and 10.
+**Decided:** Jackson, 2026-08-24 (SC2), for the original gate. The server rule and the gate's removal: Jackson, 2026-10-03, in the plan to retire Squadrons. Recorded in FORK.md cases 9 and 10.
 
 #### D10. Welcome wizard assigns imported conversations a Squadron
 
@@ -176,17 +174,17 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Decided:** DV5, dated 2026-08-31 in the dogfood v0 overrides, refused every such run. Jackson, 2026-09-28: a gap to fill. Narrowed to shared projects on 2026-10-03, in the plan to retire Squadrons. Recorded in FORK.md case 12.
 
-#### D12. Multi-model send carries the Squadron
+#### D12. Multi-model send is refused from a persona draft
 
 **Upstream:** a draft can fan out to several models, each in its own thread.
 
-**J5:** each thread gets the draft's Squadron, and fanning out is refused from a persona draft.
+**J5:** fanning out is refused from a persona draft.
 
-**Why:** the person chose a Squadron for the draft, so every thread it fans out to belongs there. A thread sent without one would join its project's Squadron instead, which need not be the one chosen, and is refused when several Squadrons share the project. A persona pins one model, so fanning it out would run every thread on that same model.
+**Why:** a persona pins one model, so fanning it out would run every thread on that same model.
 
-**Consequences:** each advance checks that every fan-out path sends the draft's Squadron.
+**Consequences:** each advance checks that no fan-out path carries a persona.
 
-**Decided:** 2026-09-24 (#7b), a merge-time decision made to let that day's advance proceed. How fan-out should really work in J5 is open (#338). Recorded in FORK.md case 19.
+**Decided:** 2026-09-24 (#7b), a merge-time decision made to let that day's advance proceed. How fan-out should really work in J5 is open (#338). The fan-out threads no longer carry a Squadron (2026-10-04, [#412](https://github.com/Jacksondr5/j5code/issues/412)). Recorded in FORK.md case 19.
 
 ### Archive and lifecycle
 

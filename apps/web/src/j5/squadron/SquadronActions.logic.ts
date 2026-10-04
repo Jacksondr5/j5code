@@ -1,7 +1,4 @@
-import { parseScopedThreadKey } from "@t3tools/client-runtime/environment";
 import type { ScopedSquadronRef } from "@t3tools/contracts/j5";
-
-import type { SquadronDraftState } from "./SquadronScope.logic";
 
 export type SquadronActionsState =
   | { readonly kind: "hidden" }
@@ -52,27 +49,6 @@ export const resolveScopeAfterSquadronDelete = (
   deleted: ScopedSquadronRef,
 ): ScopedSquadronRef | null =>
   ambient !== null && sameSquadron(ambient, deleted) ? null : ambient;
-
-/**
- * Draft carriers are keyed by scoped thread ref and hold a bare Squadron id, so only carriers on
- * the deleted Squadron's own environment are dropped. Returns the same record when nothing
- * pointed at it, so subscribers are not notified for nothing.
- */
-export const dropDraftStatesForDeletedSquadron = <TContent>(
-  draftStates: Readonly<Record<string, SquadronDraftState<TContent>>>,
-  deleted: ScopedSquadronRef,
-): Readonly<Record<string, SquadronDraftState<TContent>>> => {
-  const remaining = Object.entries(draftStates).filter(
-    ([key, state]) =>
-      !(
-        state.squadronId === deleted.squadronId &&
-        parseScopedThreadKey(key)?.environmentId === deleted.environmentId
-      ),
-  );
-  return remaining.length === Object.keys(draftStates).length
-    ? draftStates
-    : Object.fromEntries(remaining);
-};
 
 export type SquadronDeleteFailure =
   | { readonly kind: "refused"; readonly message: string }
