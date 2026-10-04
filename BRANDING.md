@@ -44,6 +44,8 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
   playbook from `j5/main`, and file issues there with the `via-triage` template and label
   (`.github/ISSUE_TEMPLATE/via-triage.yml`). Upstream's copies point at `pingdotgg/t3code` and
   `main`; re-apply after an advance that touches them.
+- Security policy: `.github/SECURITY.md` is deleted. Upstream's file sends reports to T3 Tools'
+  address, and J5 has no private reporting channel yet. Keep it deleted when an advance changes it.
 - Desktop runtime identity and state: `DesktopEnvironment.ts`, `DesktopStatePaths.ts`,
   `DesktopEarlyElectronStartup.ts`, `DesktopAppIdentity.ts`, `DesktopUserData.ts` (profile names;
   never a T3 profile), `wsl/DesktopWslEnvironment.ts` (`~/.j5code/wsl-runtime`), and the user-visible

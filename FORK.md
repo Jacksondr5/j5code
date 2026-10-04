@@ -483,6 +483,7 @@ indicate approval. The deleted hook remains explicitly marked.
 
 | Upstream-owned path                                                                                        | History | Contract                                      |
 | ---------------------------------------------------------------------------------------------------------- | ------- | --------------------------------------------- |
+| `.github/SECURITY.md` (deleted)                                                                            | N       | B                                             |
 | `.github/workflows/ci.yml`                                                                                 | A       | C                                             |
 | `.github/workflows/mobile-fingerprint-check.yml`                                                           | R       | C                                             |
 | `.gitignore`                                                                                               | R       | H                                             |
