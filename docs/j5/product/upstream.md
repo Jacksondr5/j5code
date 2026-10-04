@@ -389,7 +389,7 @@ These already diverge on `j5/main`, but no human ruling is on record. Each lande
 
 **Upstream:** every thread except provider subagents appears in the sidebar.
 
-**J5:** an agent-spawned Peer Agent, Crew seats included, leaves the top level of the sidebar unless pinned, and appears in the expander under the agent that spawned it. "Agent-spawned" is read from upstream's own thread fields: `createdBy` is `agent` and `creationSource` is `mcp`. A thread an agent forked is exempt and stays at the top level: a fork's placement parent is its source's parent, not the agent that forked it, so nesting it would leave it under no row.
+**J5:** an agent-spawned Peer Agent, Crew seats included, leaves the top level of the sidebar unless pinned, and appears in the expander under the agent that spawned it.
 
 **Why:** once agents spawn agents, a flat list stops telling the truth about what is running (Bryant, #205).
 

@@ -192,21 +192,24 @@ it("keeps a Squadron scope within its own environment even when IDs match", () =
   ).toBeNull();
 });
 
-describe("sidebar membership before the Squadron scope", () => {
-  const known = (id: string) => ({ kind: "known" as const, squadron: { id } });
+describe("SB5 sidebar membership", () => {
+  const known = (id: string, origin?: "human" | "agent") => ({
+    kind: "known" as const,
+    squadron: { id },
+    ...(origin === undefined ? {} : { origin }),
+  });
   const key = (id: string) => scopedThreadKey(scopeThreadRef(environmentId, ThreadId.make(id)));
-  const spawned = { createdBy: "agent", creationSource: "mcp", forkedFrom: null } as const;
   it("applies membership before the squadron scope, including when zoomed out", () => {
     const homes = new Map([
-      [key("captain"), known("alpha")],
-      [key("member"), known("alpha")],
-      [key("pinned-member"), known("alpha")],
-      [key("other"), known("bravo")],
+      [key("captain"), known("alpha", "human")],
+      [key("member"), known("alpha", "agent")],
+      [key("pinned-member"), known("alpha", "agent")],
+      [key("other"), known("bravo", "human")],
     ]);
     const threads = [
       { environmentId, id: "captain", pinnedAt: null },
-      { environmentId, id: "member", pinnedAt: null, ...spawned },
-      { environmentId, id: "pinned-member", pinnedAt: "2026-09-09T00:00:00Z", ...spawned },
+      { environmentId, id: "member", pinnedAt: null },
+      { environmentId, id: "pinned-member", pinnedAt: "2026-09-09T00:00:00Z" },
       { environmentId, id: "other", pinnedAt: null },
       { environmentId, id: "native", pinnedAt: null },
     ];

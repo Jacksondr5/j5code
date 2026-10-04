@@ -2,7 +2,7 @@ import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environ
 import { ThreadId, type EnvironmentId } from "@t3tools/contracts";
 import type { ScopedSquadronRef } from "@t3tools/contracts/j5";
 
-import { isSidebarMember, type SidebarMembershipThread } from "../threads/sidebarMembership";
+import { isSidebarMember } from "../threads/sidebarMembership";
 
 export interface SquadronChoice {
   readonly environmentId: EnvironmentId;
@@ -27,11 +27,15 @@ export const resolveSquadronScope = <T extends SquadronChoice>(
   ) ?? null;
 
 export type SidebarThreadHome =
-  | { readonly kind: "known"; readonly squadron: { readonly id: string } }
+  | {
+      readonly kind: "known";
+      readonly squadron: { readonly id: string };
+      readonly origin?: "human" | "agent" | undefined;
+    }
   | { readonly kind: "unknown" };
 
 /**
- * Sidebar membership first, then the selected scope, which admits only that Squadron's immutable,
+ * SB5 membership first, then the selected scope, which admits only that Squadron's immutable,
  * known Registrar homes. Homes are keyed by scoped thread ref, so the same thread id in two
  * environments never shares a home.
  */
@@ -39,7 +43,8 @@ export const filterThreadsForSquadronScope = <
   T extends {
     readonly id: string;
     readonly environmentId: EnvironmentId;
-  } & SidebarMembershipThread,
+    readonly pinnedAt?: string | null | undefined;
+  },
 >(
   threads: ReadonlyArray<T>,
   scope: SquadronChoice | null,
@@ -49,7 +54,7 @@ export const filterThreadsForSquadronScope = <
     homesByThreadId.get(
       scopedThreadKey(scopeThreadRef(thread.environmentId, ThreadId.make(thread.id))),
     );
-  const members = threads.filter(isSidebarMember);
+  const members = threads.filter((thread) => isSidebarMember(thread, homeOf(thread)));
   if (scope === null) return members;
   return members.filter((thread) => {
     const home = homeOf(thread);
