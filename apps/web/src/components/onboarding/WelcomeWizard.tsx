@@ -3,12 +3,12 @@ import { useAtomValue } from "@effect/atom-react";
 import type {
   AgentSessionProjectCandidate,
   EnvironmentId,
+  ProjectId,
   ScopedProjectRef,
   ServerConfig,
   ServerProvider,
 } from "@t3tools/contracts";
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
-import type { ScopedSquadronRef } from "@t3tools/contracts/j5";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -29,25 +29,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { TYPOGRAPHY_ADVANCED_STORAGE_KEY } from "../../appearanceFonts";
 import { APP_BASE_NAME, CLI_COMMAND } from "../../branding";
-import {
-  ensureOnboardingSquadron,
-  hasKeptConversations,
-  isOnboardingFolderComplete,
-  resolveOnboardingAssignment,
-  resolveOnboardingLandingSquadron,
-  summarizeAssignmentEntries,
-} from "../../j5/onboarding/onboardingSquadrons.logic";
-import { SquadronsStage } from "../../j5/onboarding/SquadronsStage";
-import {
-  useOnboardingImportSession,
-  type OnboardingImportSession,
-} from "../../j5/onboarding/useOnboardingImportSession";
-import {
-  assignImportedThreads,
-  createSquadron,
-  isDefiniteSquadronRejection,
-} from "../../j5/squadron/squadronClient";
-import { useSquadronDirectory } from "../../j5/squadron/SquadronDirectory";
 import { useLocalStorage } from "../../hooks/useLocalStorage";
 import { hasCloudPublicConfig } from "../../cloud/publicConfig";
 import { useT3ConnectAuthPrompt } from "../clerk/useT3ConnectAuthPrompt";
@@ -101,17 +82,16 @@ import { formatRelativeTime } from "../../timestampFormat";
  * First-run welcome wizard. Rendered over the workspace at `/welcome` on a
  * fresh install (no completed-onboarding flag, empty workspace). Flow per the
  * onboarding overhaul spec: connection choice → sign-in/pair (remote paths) →
- * provider setup with inline install terminal → project selection → Squadron
- * assignment and import → main screen.
+ * provider setup with inline install terminal → project import → main screen.
  * Every step past the connection gate is skippable; the whole wizard is
  * re-runnable by clearing the flag.
  */
 
-type WizardStep = "connection" | "agents" | "import" | "squadrons";
+type WizardStep = "connection" | "agents" | "import";
 const NO_ENVIRONMENTS: readonly EnvironmentId[] = [];
 
 const AGENT_ONBOARDING_THREAD_ID = ThreadId.make("onboarding-agent-setup");
-const ONBOARDING_STAGES = ["Connect", "Providers", "Projects", "Squadrons"] as const;
+const ONBOARDING_STAGES = ["Connect", "Providers", "Projects"] as const;
 const SCAN_LIMIT_MESSAGE = "Scan limit reached. Some projects or conversations may be missing.";
 
 export function WelcomeWizard({
@@ -120,11 +100,9 @@ export function WelcomeWizard({
 }: {
   /** Whether this client is authenticated to the server serving the app. */
   readonly localAvailable: boolean;
-  readonly onDone: (projectRef?: ScopedProjectRef, squadron?: ScopedSquadronRef) => void;
+  readonly onDone: (projectRef?: ScopedProjectRef) => void;
 }) {
   const completeOnboarding = useCompleteOnboarding();
-  // Folder choices and retry memory outlive the import step so Back keeps them.
-  const importSession = useOnboardingImportSession();
   const [step, setStep] = useState<WizardStep>("connection");
   const { environments } = useEnvironments();
   const [selection, setSelection] = useState<ReadonlySet<EnvironmentId> | null>(null);
@@ -152,9 +130,7 @@ export function WelcomeWizard({
   }, [environments]);
   const selectedIds =
     selection ?? new Set(primaryEnvironment ? [primaryEnvironment.environmentId] : []);
-  const scans = useProjectScans(
-    step === "import" || step === "squadrons" ? setupIds : NO_ENVIRONMENTS,
-  );
+  const scans = useProjectScans(step === "import" ? setupIds : NO_ENVIRONMENTS);
   const isLoadingProjects =
     step === "import" &&
     scans.every((scan) => scan.data === null) &&
@@ -164,9 +140,9 @@ export function WelcomeWizard({
     setSetupIds(ids);
     setStep("agents");
   };
-  const stageIndex = step === "agents" ? 1 : step === "import" ? 2 : step === "squadrons" ? 3 : 0;
+  const stageIndex = step === "agents" ? 1 : step === "import" ? 2 : 0;
   const finish = useCallback(
-    (projectRef?: ScopedProjectRef, squadron?: ScopedSquadronRef) => {
+    (projectRef?: ScopedProjectRef) => {
       if (finishingPromiseRef.current !== null) return finishingPromiseRef.current;
       if (completionErrorToastIdRef.current !== null) {
         toastManager.close(completionErrorToastIdRef.current);
@@ -179,7 +155,7 @@ export function WelcomeWizard({
             toastManager.close(completionErrorToastIdRef.current);
             completionErrorToastIdRef.current = null;
           }
-          onDone(projectRef, squadron);
+          onDone(projectRef);
           return true;
         })
         .catch(() => {
@@ -220,7 +196,7 @@ export function WelcomeWizard({
             isStepDisabled={(index) => isImporting || index >= stageIndex}
             onStepChange={(index) => {
               if (isImporting || index > stageIndex) return;
-              setStep(index === 0 ? "connection" : index === 1 ? "agents" : "import");
+              setStep(index === 0 ? "connection" : "agents");
             }}
           />
         </WizardHeader>
@@ -255,13 +231,9 @@ export function WelcomeWizard({
             <AgentsStep environmentIds={setupIds} onContinue={() => setStep("import")} />
           ) : (
             <ImportStep
-              view={step === "squadrons" ? "squadrons" : "import"}
-              session={importSession}
               scans={scans}
               isImporting={isImporting}
               setIsImporting={setIsImporting}
-              onContinue={() => setStep("squadrons")}
-              onBack={() => setStep("import")}
               onDone={finish}
             />
           )}
@@ -955,43 +927,33 @@ function AgentInstallTerminal({
   );
 }
 
-// ── Steps 4 and 5: choose folders, then assign Squadrons and import ──
+// ── Step 4: import ───────────────────────────────────────────
 
-/**
- * One component serves the Projects and Squadrons stages so the scan, the selection, and the
- * run share state. Projects only selects; the Squadrons view owns the final button, which is
- * the first and only action that creates anything.
- */
 function ImportStep({
-  view,
-  session,
   scans,
   isImporting,
   setIsImporting,
-  onContinue,
-  onBack,
   onDone,
 }: {
-  readonly view: "import" | "squadrons";
-  readonly session: OnboardingImportSession;
   readonly scans: ReturnType<typeof useProjectScans>;
   readonly isImporting: boolean;
   readonly setIsImporting: (value: boolean) => void;
-  readonly onContinue: () => void;
-  readonly onBack: () => void;
-  readonly onDone: (
-    projectRef?: ScopedProjectRef,
-    squadron?: ScopedSquadronRef,
-  ) => Promise<boolean>;
+  readonly onDone: (projectRef?: ScopedProjectRef) => Promise<boolean>;
 }) {
   const { environments } = useEnvironments();
   const createProject = useAtomCommand(projectEnvironment.create, { reportFailure: false });
   const importThreads = useAtomCommand(agentSessionImport, { reportFailure: false });
   const projects = useProjects();
-  const { squadrons } = useSquadronDirectory();
-  const { selectedKeys: selectedPaths, setSelectedKeys: setSelectedPaths, memory } = session;
+  const [selectedPaths, setSelectedPaths] = useState<ReadonlySet<string> | null>(null);
   const [importError, setImportError] = useState("");
   const [landingProject, setLandingProject] = useState<ScopedProjectRef | null>(null);
+  // Keep project creation attempts separate from completed history imports so both can retry.
+  const importedProjectsRef = useRef(new Map<string, ScopedProjectRef>());
+  const projectsWithImportedHistoryRef = useRef(new Map<string, ScopedProjectRef>());
+  const lastImportSelectionRef = useRef<ReadonlyArray<string>>([]);
+  const projectAttemptsRef = useRef(
+    new Map<string, { readonly projectId: ProjectId; readonly commandId: CommandId }>(),
+  );
   const importGenerationRef = useRef(0);
 
   // Ignore command completions after leaving the import step.
@@ -1012,14 +974,11 @@ function ImportStep({
       )
     ) {
       setLandingProject(null);
-      void onDone(
-        landingProject,
-        resolveOnboardingLandingSquadron(landingProject, memory.homes),
-      ).then((completed) => {
+      void onDone(landingProject).then((completed) => {
         if (!completed) setIsImporting(false);
       });
     }
-  }, [landingProject, memory, onDone, projects, setIsImporting]);
+  }, [landingProject, onDone, projects, setIsImporting]);
 
   const { available: candidates, recent } = useMemo(
     () =>
@@ -1041,11 +1000,10 @@ function ImportStep({
   const selected = candidates.filter((candidate) => selectedKeys.has(candidate.key));
 
   const finishAfterImport = () => {
-    // The current selection is the last run's, or a deliberate edit of it after Back.
     const projectRef = resolveOnboardingLandingProject(
-      selected.map((candidate) => candidate.key),
-      memory.projectsWithImportedHistory,
-      memory.importedProjects,
+      lastImportSelectionRef.current,
+      projectsWithImportedHistoryRef.current,
+      importedProjectsRef.current,
     );
     if (projectRef === undefined) {
       void onDone();
@@ -1063,10 +1021,10 @@ function ImportStep({
     }
     setIsImporting(true);
     setImportError("");
+    lastImportSelectionRef.current = selection.map((candidate) => candidate.key);
     const importGeneration = importGenerationRef.current;
-    const importedProjects = memory.importedProjects;
-    const projectAttempts = memory.projectAttempts;
-    let squadronFailures = 0;
+    const importedProjects = importedProjectsRef.current;
+    const projectAttempts = projectAttemptsRef.current;
     // Interrupted imports are neither failures nor successes — the command was
     // superseded or the environment dropped — but they still didn't land, so
     // they must not read as "imported everything". Retries skip paths that
@@ -1081,7 +1039,12 @@ function ImportStep({
     const refreshEnvironments = new Set<EnvironmentId>();
     for (const candidate of selection) {
       const { environmentId } = candidate;
-      if (importGeneration !== importGenerationRef.current) return;
+      if (
+        importGeneration !== importGenerationRef.current ||
+        importedProjects !== importedProjectsRef.current
+      ) {
+        return;
+      }
       if (importedProjects.has(candidate.key)) continue;
       let projectId = resolveOnboardingProjectId(readProjects(), environmentId, candidate);
       if (projectId === null) {
@@ -1106,99 +1069,47 @@ function ImportStep({
             defaultModelSelection: null,
           },
         });
-        if (importGeneration !== importGenerationRef.current) return;
+        if (
+          importGeneration !== importGenerationRef.current ||
+          importedProjects !== importedProjectsRef.current
+        ) {
+          return;
+        }
         if (result._tag !== "Success") {
           if (!isAtomCommandInterrupted(result)) {
             projectAttempts.delete(candidate.key);
             refreshEnvironments.add(environmentId);
-            session.setOutcome(candidate.key, { kind: "project_failed" });
           }
           continue;
         }
       }
 
-      // J5: the folder's Squadron exists before its history lands, so even an empty or failed
-      // import leaves the folder owned. A remembered home is reused; nothing is created twice.
-      const assignment = resolveOnboardingAssignment(session.assignments, candidate);
-      const squadronResult = await ensureOnboardingSquadron({
-        key: candidate.key,
-        projectRef: scopeProjectRef(environmentId, projectId),
-        assignment,
-        homes: memory.homes,
-        existingSquadrons: squadrons,
-        createSquadron,
-        isDefiniteRejection: isDefiniteSquadronRejection,
-      });
-      if (importGeneration !== importGenerationRef.current) return;
-      if (squadronResult.kind !== "ready") {
-        squadronFailures += 1;
-        if (squadronResult.kind === "unconfirmed") {
-          session.setAssignment(candidate.key, {
-            kind: "unconfirmed",
-            name: assignment.kind === "new" ? assignment.name : candidate.title,
-          });
-          session.setOutcome(candidate.key, { kind: "squadron_unconfirmed" });
-        } else {
-          session.setOutcome(candidate.key, {
-            kind: "squadron_failed",
-            message: squadronResult.message,
-          });
-        }
-        continue;
-      }
-      const home = squadronResult.home;
-
       const threadImportResult = await importThreads({
         environmentId,
         input: { projectId, expectedWorkspaceRoot: candidate.path },
       });
-      if (importGeneration !== importGenerationRef.current) return;
+      if (
+        importGeneration !== importGenerationRef.current ||
+        importedProjects !== importedProjectsRef.current
+      ) {
+        return;
+      }
       if (threadImportResult._tag === "Success") {
         importedThreadCount += threadImportResult.value.importedCount;
         skippedThreadCount += threadImportResult.value.skippedCount;
         if (threadImportResult.value.importedCount > 0) {
-          memory.projectsWithImportedHistory.set(
+          projectsWithImportedHistoryRef.current.set(
             candidate.key,
             scopeProjectRef(environmentId, projectId),
           );
         }
-        // J5: home every imported conversation that has none yet in the chosen Squadron.
-        let assigned;
-        try {
-          assigned = await assignImportedThreads(environmentId, {
-            squadronId: home.squadronId,
-            projectId,
-          });
-        } catch (error) {
-          if (importGeneration !== importGenerationRef.current) return;
-          squadronFailures += 1;
-          session.setOutcome(candidate.key, {
-            kind: "assign_failed",
-            squadronName: home.name,
-            message: error instanceof Error ? error.message : "Could not assign the conversations.",
-          });
-          continue;
-        }
-        if (importGeneration !== importGenerationRef.current) return;
-        const outcome = {
-          kind: "done",
-          squadronName: home.name,
-          importedCount: threadImportResult.value.importedCount,
-          skippedCount: threadImportResult.value.skippedCount,
-          assignment: summarizeAssignmentEntries(assigned.entries),
-        } as const;
-        session.setOutcome(candidate.key, outcome);
-        if (hasKeptConversations(outcome.assignment)) memory.keptFolders.add(candidate.key);
-        if (isOnboardingFolderComplete(outcome)) {
+        if (threadImportResult.value.skippedCount === 0) {
           importedProjectsCount += 1;
           importedProjects.set(candidate.key, scopeProjectRef(environmentId, projectId));
-        } else if (outcome.assignment.failed > 0) {
-          squadronFailures += 1;
         }
       } else if (!isAtomCommandInterrupted(threadImportResult)) {
         projectAttempts.delete(candidate.key);
         refreshEnvironments.add(environmentId);
-        session.setOutcome(candidate.key, { kind: "import_failed", squadronName: home.name });
       }
     }
     for (const scan of scans) {
@@ -1206,11 +1117,6 @@ function ImportStep({
     }
     setIsImporting(false);
     if (importedProjectsCount < selection.length) {
-      if (squadronFailures > 0) {
-        // Rows above explain each folder; the aggregate only points at them.
-        setImportError("Some folders did not finish. Fix them above, then retry.");
-        return;
-      }
       if (importedThreadCount > 0 && skippedThreadCount > 0) {
         setImportError(
           `Imported ${importedThreadCount} ${importedThreadCount === 1 ? "thread" : "threads"}. ${skippedThreadCount} ${skippedThreadCount === 1 ? "thread" : "threads"} could not be imported.`,
@@ -1228,8 +1134,6 @@ function ImportStep({
       }
       return;
     }
-    // J5: kept conversations are an exception report; leave it on screen until Continue.
-    if (selection.some((candidate) => memory.keptFolders.has(candidate.key))) return;
     finishAfterImport();
   };
 
@@ -1252,38 +1156,10 @@ function ImportStep({
     );
   }
 
-  if (view === "squadrons") {
-    return (
-      <SquadronsStage
-        folders={selected.map((candidate) => ({
-          key: candidate.key,
-          environmentId: candidate.environmentId,
-          environmentLabel:
-            environments.find(
-              (environment) => environment.environmentId === candidate.environmentId,
-            )?.label ?? "Computer",
-          title: candidate.title,
-          path: candidate.path,
-          projectId: resolveOnboardingProjectId(projects, candidate.environmentId, candidate),
-        }))}
-        squadrons={squadrons}
-        assignments={session.assignments}
-        onAssignmentChange={session.setAssignment}
-        homes={memory.homes}
-        outcomes={session.outcomes}
-        isImporting={isImporting}
-        summary={importError}
-        onBack={onBack}
-        onSkip={finishAfterImport}
-        onImport={() => void runImport(selected)}
-      />
-    );
-  }
-
   return (
     <StepShell
       title="Choose your projects"
-      description="Choose the folders to bring in from your selected computers."
+      description="Import projects and conversations from your selected computers."
     >
       {candidates.length > 0 ? (
         <div className="mt-5 flex items-center justify-between gap-3 text-xs text-muted-foreground">
@@ -1363,13 +1239,23 @@ function ImportStep({
           })}
         </div>
       </ScrollArea>
+      {importError ? <p className="mt-3 text-sm text-destructive">{importError}</p> : null}
       <div className="mt-6 flex flex-wrap items-center justify-end gap-3">
-        <Button variant="ghost-muted" disabled={isImporting} onClick={() => void onDone()}>
-          Do not import projects
+        <Button
+          variant="ghost-muted"
+          disabled={isImporting}
+          onClick={importError ? finishAfterImport : () => void onDone()}
+        >
+          {importError ? "Continue without the rest" : "Do not import projects"}
         </Button>
-        <Button autoFocus disabled={isImporting || selected.length === 0} onClick={onContinue}>
-          Continue
-          <ArrowRightIcon className="size-3.5" />
+        <Button
+          autoFocus
+          disabled={isImporting || selected.length === 0}
+          onClick={() => void runImport(selected)}
+        >
+          {isImporting
+            ? "Importing…"
+            : `Import ${selected.length} ${selected.length === 1 ? "project" : "projects"}`}
         </Button>
       </div>
     </StepShell>

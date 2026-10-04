@@ -143,21 +143,9 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Why:** agents need a home in the ledger, and the ledger is still keyed by Squadron. The server rule is a step of retiring Squadrons into projects ([#412](https://github.com/Jacksondr5/j5code/issues/412)), where a thread's home is its project. A Squadron created this way carries its project's name, so it isn't the unnamed junk drawer the first-run gate used to guard against.
 
-**Consequences:** the person never creates or names a Squadron outside the welcome wizard: the gate, Create Squadron, rename and delete are gone, and the app shows projects. A Squadron's name is still visible in two places until the ledger re-keys to projects: the playbook author picker in Settings, which lists Squadrons, and Fleet and the Inbox, which fall back to the Squadron's name when its project can't be resolved. The welcome wizard still has a Squadron stage (D10). A project that several Squadrons reference can't start a thread, and the app offers no repair for it; the server's delete route (`POST /api/j5/squadrons/<squadronId>/delete`) is the way out, once the extra Squadron's agents and Crews are archived. The wizard's Squadron stage no longer offers a new Squadron for a folder whose project already has one, so the app itself can't create that state.
+**Consequences:** the person never creates or names a Squadron: the gate, Create Squadron, rename and delete are gone, and the app shows projects. A Squadron's name is still visible in two places until the ledger re-keys to projects: the playbook author picker in Settings, which lists Squadrons, and Fleet and the Inbox, which fall back to the Squadron's name when its project can't be resolved. A project that several Squadrons reference can't start a thread, and the app offers no repair for it; the server's delete route (`POST /api/j5/squadrons/<squadronId>/delete`) is the way out, once the extra Squadron's agents and Crews are archived. Nothing in the app can create that state any more.
 
 **Decided:** Jackson, 2026-08-24 (SC2), for the original gate. The server rule and the gate's removal: Jackson, 2026-10-03, in the plan to retire Squadrons. Recorded in FORK.md cases 9 and 10.
-
-#### D10. Welcome wizard assigns imported conversations a Squadron
-
-**Upstream:** the welcome wizard imports conversations into projects.
-
-**J5:** a fourth stage gives each imported folder's conversations a Squadron home.
-
-**Why:** upstream's wizard imports conversations into projects, and J5 threads need a Squadron home (D8). The stage gives imported conversations one from the start.
-
-**Consequences:** native desktop and remote onboarding weren't exercised. An archive can race the assignment (#179).
-
-**Decided:** Jackson, during the 2026-09-17 upstream integration (PR #178), confirmed 2026-09-28. Recorded in FORK.md case 39.
 
 #### D11. A scheduled task can't start a thread in a project that several Squadrons share
 
@@ -432,7 +420,9 @@ The person ruled against these. They still diverge on `j5/main` until their fix 
 
 ### Retired
 
-None yet.
+#### D10. Welcome wizard assigns imported conversations a Squadron
+
+J5 added a fourth stage to upstream's welcome wizard that gave each imported folder's conversations a Squadron home (Jackson, 2026-09-17, PR #178). Retired 2026-10-04 in the plan to retire Squadrons ([#412](https://github.com/Jacksondr5/j5code/issues/412)): the wizard has upstream's three stages again. Imported conversations register in the ledger when it re-keys to projects.
 
 ## History
 
