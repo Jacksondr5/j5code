@@ -78,6 +78,38 @@ describe("a folder whose project already has a Squadron", () => {
     });
   });
 
+  it("is ready to import although a stale choice is unconfirmed or has no name", () => {
+    const selected = [{ ...folder, environmentId: laptop, projectId: apiProject }];
+    for (const stale of [
+      { kind: "unconfirmed", name: "acme-api" },
+      { kind: "new", name: " " },
+    ] as const) {
+      const assignments = new Map<string, OnboardingSquadronAssignment>([["k", stale]]);
+      expect(resolveOnboardingSquadronsReadiness(selected, assignments, new Map())).not.toBe(
+        "ready",
+      );
+      expect(resolveOnboardingSquadronsReadiness(selected, assignments, new Map(), existing)).toBe(
+        "ready",
+      );
+    }
+  });
+
+  it("uses the existing Squadron at import when a lost create has since appeared", async () => {
+    const createSquadron = vi.fn();
+    const result = await ensureOnboardingSquadron({
+      key: "k",
+      projectRef: { environmentId: laptop, projectId: apiProject },
+      assignment: { kind: "unconfirmed", name: "acme-api" },
+      homes: new Map(),
+      existingSquadrons: existing,
+      createSquadron,
+      isDefiniteRejection,
+    });
+
+    expect(createSquadron).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ kind: "ready", home: { squadronId: "squadron:alpha" } });
+  });
+
   it("creates nothing at import even when the choice still says new", async () => {
     const createSquadron = vi.fn();
     const homes = new Map<string, OnboardingSquadronHome>();
@@ -195,7 +227,7 @@ describe("ensureOnboardingSquadron", () => {
     });
   });
 
-  it("reports a lost create as unconfirmed and never creates again on its own", async () => {
+  it("reports a lost create as unconfirmed, and never creates again on its own", async () => {
     const createSquadron = vi.fn(async () => {
       throw new Error("socket hang up");
     });
@@ -209,12 +241,13 @@ describe("ensureOnboardingSquadron", () => {
       createSquadron,
       isDefiniteRejection,
     });
+    // Still nothing in the directory for this project: the person has to resolve it.
     const retried = await ensureOnboardingSquadron({
       key: "a",
       projectRef,
       assignment: { kind: "unconfirmed", name: "acme-api" },
       homes,
-      existingSquadrons: [squadron("squadron:acme-api", laptop, [apiProject])],
+      existingSquadrons: [squadron("squadron:acme-web", laptop, [webProject])],
       createSquadron,
       isDefiniteRejection,
     });

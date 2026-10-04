@@ -82,7 +82,7 @@ export function SquadronsStage({
       const outcome = outcomes.get(folder.key);
       return outcome !== undefined && isOnboardingFolderComplete(outcome);
     });
-  const readiness = resolveOnboardingSquadronsReadiness(folders, assignments, homes);
+  const readiness = resolveOnboardingSquadronsReadiness(folders, assignments, homes, squadrons);
   // The wizard panel animates its height with overflow hidden while this stage mounts. A plain
   // autoFocus scrolls that clipped container to reveal the button and hides the heading, so
   // focus the primary action once without scrolling.
