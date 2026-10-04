@@ -633,6 +633,7 @@ indicate approval. The deleted hook remains explicitly marked.
 | `apps/server/src/scheduledTasks/ScheduledTaskService.ts`                                                   | R       | 12                                            |
 | `apps/server/src/server.ts`                                                                                | A       | 5, 9, MCP idle connection patch               |
 | `apps/server/src/serviceLauncher.ts`                                                                       | R       | H                                             |
+| `apps/server/src/telemetry/AnalyticsService.ts`                                                            | N       | B                                             |
 | `apps/server/src/telemetry/Identify.ts`                                                                    | R       | H                                             |
 | `apps/server/src/textGeneration/CodexTextGeneration.test.ts`                                               | N       | T                                             |
 | `apps/server/src/ws.ts`                                                                                    | A       | 10, 11, 37, 42, 44, 45                        |
