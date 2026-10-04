@@ -90,11 +90,11 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
   server on …") and `state/pullRequestDiffHttp.ts` ("quit and reopen the app").
 - User-visible copy and marks (2026-10-04): every string a person or an agent reads names the
   product "J5 Code" (bare "T3" becomes "J5"), across web, desktop, mobile, the server's CLI and
-  error messages, agent instructions and MCP tool titles, native capture helpers, and `docs/user/`.
+  error messages, agent instructions and MCP tool titles, native capture helpers.
   The compact mark on t3-code MCP tool rows and the mobile header is `J5Wordmark`
   (`apps/web/src/j5/branding/`, `apps/mobile/src/j5/branding/`). These are literal edits in upstream
   files, so after an advance run
-  `git grep -nE "T3 Code|\bT3\b" -- apps packages native docs/user` and rebrand new hits that are
+  `git grep -nE "T3 Code|\bT3\b" -- apps packages native` and rebrand new hits that are
   not listed under the unchanged internals below.
 - Branch names: `WORKTREE_BRANCH_PREFIX` in `packages/shared/src/git.ts` and the
   `branchNamePrefix` default in `packages/contracts/src/settings.ts` are `j5code`, and fork pull
@@ -113,6 +113,9 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
   names (`T3CODE_CHANNEL`, `T3CODE_VERSION`, `T3CODE_INSTALL_BIN_DIR`, `T3CODE_RELEASE_BASE_URL`), the
   `T3_BOOT_SERVICE_UNIT` key, and the `__service-launcher` subcommand stay upstream's.
 - Database schema names, persisted mobile storage keys, internal CLI flags, and code identifiers.
+- Documentation, including `docs/user/`: it keeps upstream's "T3 Code" wording, which marks what
+  is upstream's and what is J5's for the agents that read it. Facts that J5 changes (paths, names,
+  defaults) are still corrected there.
 - "T3 Connect" and "T3 Account": upstream's hosted relay and sign-in, named as upstream names
   them wherever they appear, along with `infra/relay`, `app.t3.codes`, and the mobile legal links
   to `t3.codes`.
