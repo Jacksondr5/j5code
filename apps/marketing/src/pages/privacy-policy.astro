@@ -1,0 +1,78 @@
+---
+import Document from "../components/Document.astro";
+import { CONTACT_EMAIL } from "../lib/site";
+---
+
+<Document
+  title="Privacy"
+  description="What J5 Code sends from your machines, who receives it, and how to turn it off."
+  updated="2026-10-04"
+>
+  <p>
+    J5 Code is open-source software maintained by Jackson Miller. It runs on your own machines.
+    There is no hosted J5 service and no J5 account, so your projects, conversations, and files
+    are never sent to the maintainer. They leave your machines only when you run an agent, as
+    described below.
+  </p>
+
+  <h2>Usage data</h2>
+  <p>
+    The J5 Code server sends usage events to PostHog, an analytics service, so the maintainer can
+    see how the software is used. Events are stored in the United States.
+  </p>
+  <p>The events are:</p>
+  <ul>
+    <li>the server starting, with a count of your threads and projects;</li>
+    <li>
+      a client connecting, with the kind of client (web, desktop, or mobile), its version, its
+      operating system, the browser name on web, the device model and operating system version on
+      mobile, and how it connected;
+    </li>
+    <li>a thread starting, and a turn being requested;</li>
+    <li>
+      a turn finishing, with the provider, model, reasoning effort, permission mode, result,
+      duration, and token totals.
+    </li>
+  </ul>
+  <p>
+    Each event also carries the J5 Code version, the server's operating system and processor
+    architecture, and the WSL distribution name if there is one.
+  </p>
+  <p>
+    Events are tied to an identifier: a one-way hash of your Codex account ID, or of your Claude
+    user ID if there is no Codex account, or of a random ID created on your machine if there is
+    neither. The original ID is never sent. IP addresses are not stored.
+  </p>
+  <p>
+    Events never include prompts, responses, file contents, file or project names, authentication
+    tokens, or conversation IDs.
+  </p>
+  <p>
+    To turn this off, set <code>T3CODE_TELEMETRY_ENABLED=false</code> in the server's environment
+    before starting it.
+  </p>
+
+  <h2>Other connections J5 Code makes</h2>
+  <ul>
+    <li>
+      <strong>Update checks.</strong> J5 Code checks GitHub for new releases and downloads them
+      from there. GitHub sees the request, under its own privacy policy.
+    </li>
+    <li>
+      <strong>Your agent providers.</strong> When you run an agent, your prompts and code go to the
+      provider you chose (such as OpenAI, Anthropic, or Cursor) through that provider's own tool,
+      under your account and their terms. J5 Code's maintainer never receives them.
+    </li>
+  </ul>
+
+  <h2>The mobile app</h2>
+  <p>
+    The mobile app connects to J5 Code servers you add and stores those connection details on your
+    device. It contains no analytics and sends nothing to the maintainer.
+  </p>
+
+  <h2>Contact</h2>
+  <p>
+    Questions or requests about this page: <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>.
+  </p>
+</Document>
