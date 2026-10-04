@@ -395,7 +395,6 @@ import { createPageScrollController, type PageScrollKey } from "./chat/pageScrol
 import { isTimelineScrollTarget } from "./chat/timelineScrollTarget";
 import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
 import { clearDraftAgent, draftAgentPersonaLaunch } from "../j5/agents/agentDraftState";
-import { refreshAfterThreadLaunch } from "../j5/squadron/refreshAfterThreadLaunch";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import type { AssistantCitationRequest } from "./chat/AssistantCitationSource";
@@ -8681,7 +8680,6 @@ export default function ChatView(props: ChatViewProps) {
                 throw error;
               }
               startedCount += 1;
-              refreshAfterThreadLaunch(scopeThreadRef(environmentId, targetThreadId));
             } catch (error) {
               if (requestMayHaveStarted && !uncertainMultipleSubmissionsRef.current.has(retryKey)) {
                 uncertainMultipleSubmissionsRef.current.set(retryKey, targetThreadId);
@@ -9115,8 +9113,6 @@ export default function ChatView(props: ChatViewProps) {
             );
           }
         }
-        if (isFirstMessage)
-          refreshAfterThreadLaunch(scopeThreadRef(environmentId, threadIdForSend));
       }
     }
 

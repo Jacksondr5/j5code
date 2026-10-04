@@ -29,7 +29,6 @@ import {
   reduceSidebarProjectScopeMenuState,
   resolveAdjacentThreadId,
   resolveProjectStatusIndicator,
-  resolveSidebarEmptyState,
   resolveSidebarStageBadgeLabel,
   resolveSidebarThreadSection,
   resolveSidebarThreadStatus,
@@ -399,47 +398,6 @@ describe("resolveSidebarStageBadgeLabel", () => {
         fallbackStageLabel: "Alpha",
       }),
     ).toBe("Alpha");
-  });
-});
-
-describe("resolveSidebarEmptyState", () => {
-  it("keeps the loading state distinct from ready-with-zero Squadrons", () => {
-    const loading = resolveSidebarEmptyState({
-      directoryStatus: "loading",
-      squadronCount: 0,
-      squadronScopeName: null,
-    });
-    const readyWithZero = resolveSidebarEmptyState({
-      directoryStatus: "ready",
-      squadronCount: 0,
-      squadronScopeName: null,
-    });
-
-    expect(loading).toEqual({ kind: "loading", message: "Loading Squadrons…" });
-    expect(readyWithZero).toEqual({ kind: "no-squadrons", message: "No Squadrons yet" });
-    expect(loading).not.toEqual(readyWithZero);
-  });
-
-  it("names a selected Squadron's unreadable homes instead of calling it empty", () => {
-    const failedRead = resolveSidebarEmptyState({
-      directoryStatus: "ready",
-      squadronCount: 1,
-      squadronScopeName: "Alpha",
-      scopeReadFailed: true,
-    });
-    const emptyScope = resolveSidebarEmptyState({
-      directoryStatus: "ready",
-      squadronCount: 1,
-      squadronScopeName: "Alpha",
-      scopeReadFailed: false,
-    });
-
-    expect(failedRead).toEqual({
-      kind: "scope-read-failed",
-      message: "Couldn’t read thread homes",
-    });
-    expect(emptyScope).toEqual({ kind: "scoped", message: "No threads in Alpha yet" });
-    expect(failedRead).not.toEqual(emptyScope);
   });
 });
 
