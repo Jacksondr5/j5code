@@ -12,7 +12,7 @@ import {
 } from "./triagePrompt.ts";
 
 it("stays byte-identical to .github/triage/PLAYBOOK.md", () => {
-  // Old releases fetch the repo copy from `main` and follow it when it differs
+  // Old releases fetch the repo copy from `j5/main` and follow it when it differs
   // from their bundled playbook. The two must say the same thing at HEAD, or a
   // playbook edit silently changes behavior only for old (or only for new)
   // installs. Edit both files together.
