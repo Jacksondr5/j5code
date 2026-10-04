@@ -122,8 +122,6 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
 - The `t3-code` MCP server key, its `T3 Code` MCP server name, and the Codex client info
   (`t3code_desktop` / "T3 Code Desktop"): protocol identity that tool names, aliases
   (`t3McpToolPresentation.ts`) and recorded provider fixtures depend on.
-- `j5 triage` (`apps/server/src/cli/triagePrompt.ts`, `.github/triage/PLAYBOOK.md`) still describes
-  T3 Code and files issues on `pingdotgg/t3code`; where J5 reports should go is undecided.
 - `t3.json`, its schema URL, the `refs/t3code/*` hidden refs, upstream's `README.md`,
   `packaging/aur`, the Linux capture helper identities (#138), the iOS widget's `T3Mark` image
   asset, and developer scripts under `scripts/` and `apps/server/scripts/`.
