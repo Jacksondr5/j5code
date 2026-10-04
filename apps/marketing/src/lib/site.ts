@@ -10,6 +10,7 @@ export const UPSTREAM_V2_PR_URL = "https://github.com/pingdotgg/t3code/pull/2829
 export const T3_SITE_URL = "https://t3.codes";
 
 export const SITE_URL = "https://j5.codes";
+export const CONTACT_EMAIL = "hello@j5.codes";
 /**
  * The self-contained server for macOS (Apple silicon) and Linux x64; no Node
  * needed. The site serves the installer itself (staged from scripts/install.sh
