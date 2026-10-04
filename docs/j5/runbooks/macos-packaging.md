@@ -94,8 +94,11 @@ For a preview, to test installs and updates from a branch before it merges:
      `curl -fsSL https://github.com/Jacksondr5/j5code/releases/download/v<version>/install.sh | T3CODE_VERSION=<version> sh`.
    - **Installed server:** run `j5 update <version>` in a terminal and confirm the prompt.
    - **Desktop app:** install the release's DMG. It replaces the installed app and has no update
-     feed, so reinstall a stable DMG to go back. While it is installed, it offers to update each
-     connected server to its own version; that is how an in-app server update is tested.
+     feed, so reinstall a stable DMG to go back; its window title uses the nightly name. While it
+     is installed, it offers to update a connected server to its own version, which is how an
+     in-app server update is tested. The offer compares `x.y.z` only, so a server already on that
+     `x.y.z`, stable or an earlier preview of it, gets no offer: return it to an older stable
+     first, or use `j5 update <version>` on its machine.
 4. A server on a preview follows previews. Return it to stable with
    `j5 update --channel stable`, adding `--allow-downgrade` if the stable release is older.
 5. Delete the preview release, its tag, and the branch once the work has shipped.
@@ -106,7 +109,7 @@ A preview is a GitHub pre-release and is never marked latest. The stable install
 `J5 Release` publishes one GitHub Release, tagged `v<version>` at the build's commit, containing:
 
 - the signed and notarized Apple Silicon DMG and ZIP from the selected build run, with their
-  blockmaps and `latest-mac.yml` (a preview build has no update feed and emits neither);
+  blockmaps and `latest-mac.yml` (a preview build has no update feed and emits no `latest-mac.yml`);
 - self-contained CLI archives `t3-<version>-darwin-arm64.tar.gz` (Developer ID signed and notarized)
   and `t3-<version>-linux-x64.tar.gz`, built and smoke-tested in the release run from the same
   commit;

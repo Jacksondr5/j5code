@@ -396,7 +396,11 @@ jobs:
           Built from $RELEASE_SHA.
           EOF
             fi
-            gh release create "$tag" --target "$RELEASE_SHA" --title "J5 Code $RELEASE_VERSION" --notes-file "$RUNNER_TEMP/release-notes.md" --draft
+            # Marked from the start: a draft left behind by a failed run must not
+            # become "latest" if someone publishes it by hand.
+            prerelease=()
+            if [[ "$RELEASE_PREVIEW" == true ]]; then prerelease=(--prerelease); fi
+            gh release create "$tag" --target "$RELEASE_SHA" --title "J5 Code $RELEASE_VERSION" --notes-file "$RUNNER_TEMP/release-notes.md" --draft "${prerelease[@]}"
           fi
           gh release upload "$tag" release-assets/* --clobber
           # A preview must never become "latest": the stable installer URL and
