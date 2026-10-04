@@ -190,7 +190,7 @@ export const triageCommand = Command.make("triage", {
           generatedAt: DateTime.formatIso(now),
           version,
           releaseTag: /^[^-+]+-(?:nightly|preview)\./.test(version)
-            ? `v${version} (prerelease build; if this tag does not exist, clone main)`
+            ? `v${version} (prerelease build; if this tag does not exist, clone j5/main)`
             : `v${version}`,
           os: `${yield* HostProcessPlatform} ${yield* HostProcessArchitecture} (${NodeOS.release()})`,
           nodeVersion: process.version,
