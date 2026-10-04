@@ -66,6 +66,7 @@ These files exist upstream, but J5 owns its copy outright and they are not integ
 
 - `AGENTS.md`: the instructions every agent harness loads. It started as upstream's and keeps much of upstream's guidance, rewritten for J5 (Jackson, 2026-09-26).
 - `.github/pull_request_template.md`: J5's PR checklist (Jackson, 2026-09-26).
+- `README.md`: J5's front page, written from the j5.codes site: what J5 adds, J5's install paths, links to the user docs and the J5 docs, and local development (Jackson, 2026-10-04). Keep its `Install vp` heading; `docs/user/install.md` and `docs/operations/development.md` link to it.
 
 `CLAUDE.md` stays upstream's (`@AGENTS.md`), and imports J5's `AGENTS.md` through it.
 

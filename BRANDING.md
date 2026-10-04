@@ -39,6 +39,11 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
 - Background service and CLI copy (FORK.md case 41): `apps/server/src/cloud/bootService.ts` and
   `cloud/j5/legacyBootService.ts` (service names), and `apps/server/src/cli/update.ts`, `uninstall.ts`,
   `updateProgress.ts`, and `service.ts` (`j5` strings, cgroup `/j5code.service`, `j5.cmd`).
+- Triage (`j5 triage`): `apps/server/src/cli/triagePrompt.ts` and its byte-identical repo copy
+  `.github/triage/PLAYBOOK.md` name J5 Code, clone and search `Jacksondr5/j5code`, refresh the
+  playbook from `j5/main`, and file issues there with the `via-triage` template and label
+  (`.github/ISSUE_TEMPLATE/via-triage.yml`). Upstream's copies point at `pingdotgg/t3code` and
+  `main`; re-apply after an advance that touches them.
 - Desktop runtime identity and state: `DesktopEnvironment.ts`, `DesktopStatePaths.ts`,
   `DesktopEarlyElectronStartup.ts`, `DesktopAppIdentity.ts`, `DesktopUserData.ts` (profile names;
   never a T3 profile), `wsl/DesktopWslEnvironment.ts` (`~/.j5code/wsl-runtime`), and the user-visible
