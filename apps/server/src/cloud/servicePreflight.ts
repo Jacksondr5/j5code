@@ -20,6 +20,15 @@ export function runServicePreflight(input: {
   readonly version?: string;
 }): ServicePreflightResult {
   const version = input.version ?? packageJson.version;
+  // J5: a pre-rename server (protocol 3). `j5 update` on its machine installs
+  // this version and replaces its launcher in one step (FORK.md case 50).
+  if (input.launcherProtocol === 3) {
+    return {
+      status: "blocked",
+      version,
+      reason: "Run `j5 update` on the server's machine to finish it.",
+    };
+  }
   if (input.launcherProtocol !== SERVICE_LAUNCHER_PROTOCOL) {
     return {
       status: "blocked",

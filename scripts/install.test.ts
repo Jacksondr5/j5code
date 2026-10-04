@@ -14,9 +14,14 @@ describe.skipIf(
   HostProcessPlatform.defaultValue() !== "linux" ||
     HostProcessArchitecture.defaultValue() !== "x64",
 )("installer terminal", () => {
-  it.each([false, true])(
-    "preserves download and install behavior (HTTP failure: %s)",
-    async (fail) => {
+  // Releases before the rename ship the executable as `t3`; the installer links whichever is there.
+  it.each([
+    { fail: false, executable: "j5" },
+    { fail: true, executable: "j5" },
+    { fail: false, executable: "t3" },
+  ])(
+    "preserves download and install behavior (HTTP failure: $fail, executable: $executable)",
+    async ({ fail, executable }) => {
       const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-install-progress-"));
       const version = "1.2.3";
       const stem = `t3-${version}-linux-${HostProcessArchitecture.defaultValue()}`;
@@ -25,9 +30,11 @@ describe.skipIf(
       let sawPartialProgress = false;
       let output = "";
       await NodeFSP.mkdir(NodePath.join(root, stem));
-      await NodeFSP.writeFile(NodePath.join(root, stem, "t3"), "#!/bin/sh\necho 't3 v1.2.3'\n", {
-        mode: 0o755,
-      });
+      await NodeFSP.writeFile(
+        NodePath.join(root, stem, executable),
+        `#!/bin/sh\necho '${executable} v1.2.3'\n`,
+        { mode: 0o755 },
+      );
       await NodeFSP.writeFile(
         NodePath.join(root, stem, "payload"),
         NodeCrypto.randomBytes(64 * 1024),
@@ -107,7 +114,10 @@ describe.skipIf(
             NodeChildProcess.execFileSync(NodePath.join(root, "bin/j5"), ["--version"], {
               encoding: "utf8",
             }).trim(),
-          ).toBe("t3 v1.2.3");
+          ).toBe(`${executable} v1.2.3`);
+          expect(await NodeFSP.readlink(NodePath.join(root, "bin/j5"))).toBe(
+            NodePath.join(versions, version, executable),
+          );
           expect(await NodeFSP.readdir(versions)).toEqual([version]);
           expect(await NodeFSP.readdir(NodePath.join(root, "bin"))).toEqual(["j5"]);
         }
