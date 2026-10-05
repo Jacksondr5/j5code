@@ -85,7 +85,7 @@ describe("agent persona assignment", () => {
       reasoningEffort: "high",
     };
     const definition = { ...scout!, modelRoute: [target, target] as const };
-    const assignment = (id: string) => ({
+    const assignment = (...options: ReadonlyArray<{ id: string; value: string }>) => ({
       personaId: scout!.id,
       definitionVersion: scout!.version,
       authorityPolicy: scout!.authority.defaultPolicy,
@@ -95,14 +95,25 @@ describe("agent persona assignment", () => {
       resolvedModelSelection: {
         instanceId: ProviderInstanceId.make("opencode"),
         model: "glm-5",
-        options: [{ id, value: "high" }],
+        options,
       },
     });
+    const mismatch = "Persona assignment does not match its declared model route.";
 
-    assert.isUndefined(validateAgentPersonaAssignment(assignment("variant"), definition));
+    assert.isUndefined(
+      validateAgentPersonaAssignment(assignment({ id: "variant", value: "high" }), definition),
+    );
     assert.equal(
-      validateAgentPersonaAssignment(assignment("fastMode"), definition),
-      "Persona assignment does not match its declared model route.",
+      validateAgentPersonaAssignment(assignment({ id: "fastMode", value: "high" }), definition),
+      mismatch,
+    );
+    // A second reasoning option could be the one the provider honors.
+    assert.equal(
+      validateAgentPersonaAssignment(
+        assignment({ id: "effort", value: "high" }, { id: "reasoningEffort", value: "low" }),
+        definition,
+      ),
+      mismatch,
     );
   });
 

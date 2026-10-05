@@ -56,10 +56,15 @@ export function agentPersonaModelSelection(
   const descriptor = agentPersonaReasoningDescriptor(
     provider.models.find((model) => model.slug === target.model),
   );
+  if (descriptor === undefined) {
+    throw new Error(
+      `Model ${target.model} on ${provider.instanceId} advertises no reasoning option; check availability first.`,
+    );
+  }
   return {
     instanceId: provider.instanceId,
     model: target.model,
-    options: [{ id: descriptor?.id ?? "reasoningEffort", value: target.reasoningEffort }],
+    options: [{ id: descriptor.id, value: target.reasoningEffort }],
   };
 }
 
