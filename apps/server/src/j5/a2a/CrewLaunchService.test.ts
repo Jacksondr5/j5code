@@ -1922,3 +1922,70 @@ it.effect("launches each seat in the workspace it names, and refuses one git can
     }).pipe(Effect.provide(layerFor(repo)));
   }),
 );
+
+it.effect("reads the Captain's repository fresh, after changes made from a shell", () =>
+  Effect.gen(function* () {
+    const { context, commands, captain } = yield* fixture;
+    const codex = provider("codex", "codex", [{ slug: "gpt-5.6-sol", options: ["high"] }]);
+    const live = yield* Ref.make<FakeCheckout>({
+      isRepo: true,
+      refName: "j5/main",
+      worktrees: [{ path: "/repo-worktrees/builder", branch: "fix/login" }],
+    });
+    const layer = crewLaunchLayer.pipe(
+      Layer.provideMerge(
+        dependencies(
+          commands,
+          [codex],
+          new Set(),
+          new Set(),
+          new Set(),
+          false,
+          new Set(),
+          () => Effect.void,
+          { checkout: { isRepo: false, refName: null }, liveCheckout: live },
+        ),
+      ),
+      Layer.provideMerge(Layer.succeedContext(context)),
+      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-launch-" })),
+      Layer.provideMerge(NodeServices.layer),
+    );
+    const reviewer = (worktreePath: string) => ({
+      name: "reviewer",
+      agentId: null,
+      reason: "Reviews",
+      instructions: "Review it",
+      workspace: { type: "existing_worktree" as const, worktreePath },
+    });
+    yield* Effect.gen(function* () {
+      const launcher = yield* CrewLaunchService;
+      // The preview reads the builder's worktree on fix/login, and the snapshot is cached.
+      assert.deepStrictEqual((yield* launcher.workspaceOptions(captain)).worktrees, [
+        { path: "/repo-worktrees/builder", branch: "fix/login" },
+      ]);
+      // From its own shell, the builder switches branch and adds a worktree, which upstream's
+      // ref cache never hears about.
+      yield* Ref.set(live, {
+        isRepo: true,
+        refName: "j5/main",
+        worktrees: [
+          { path: "/repo-worktrees/builder", branch: "fix/signup" },
+          { path: "/repo-worktrees/scout", branch: "spike" },
+        ],
+      });
+      const [resolved] = yield* launcher.resolveSeats(captain, [
+        reviewer("/repo-worktrees/builder"),
+      ]);
+      assert.deepStrictEqual(resolved?.runtime.workspace, {
+        type: "existing_worktree",
+        worktreePath: "/repo-worktrees/builder",
+        branch: "fix/signup",
+      });
+      yield* launcher.resolveSeats(captain, [reviewer("/repo-worktrees/scout")]);
+      assert.deepStrictEqual((yield* launcher.workspaceOptions(captain)).worktrees, [
+        { path: "/repo-worktrees/builder", branch: "fix/signup" },
+        { path: "/repo-worktrees/scout", branch: "spike" },
+      ]);
+    }).pipe(Effect.provide(layer));
+  }),
+);

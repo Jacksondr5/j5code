@@ -55,12 +55,18 @@ const fakeRefs = (checkout: FakeCheckout, workspaceRoot: string) => {
  */
 export const fakeSpawnWorkspaceLayer = (options: {
   readonly checkout: FakeCheckout;
+  /**
+   * When given, git reads this instead, and refs are served like upstream's cache: the snapshot
+   * taken at the last `refresh` (or the first read) until the next one.
+   */
+  readonly liveCheckout?: Ref.Ref<FakeCheckout>;
   readonly workspaceRoot?: string;
   readonly launches?: Ref.Ref<ReadonlyArray<ThreadLaunchInput>>;
   readonly launch?: (input: ThreadLaunchInput) => Effect.Effect<void>;
   readonly accepted?: Effect.Effect<ReadonlyArray<CommandId>>;
-}) =>
-  layerFromReceiptStore.pipe(
+}) => {
+  let cachedCheckout: FakeCheckout | undefined;
+  return layerFromReceiptStore.pipe(
     Layer.provide(
       Layer.mergeAll(
         Layer.mock(ProjectService)({
@@ -70,18 +76,25 @@ export const fakeSpawnWorkspaceLayer = (options: {
             ),
         }),
         Layer.mock(GitWorkflowService)({
-          listRefs: () => {
-            const refs = options.checkout.isRepo
-              ? fakeRefs(options.checkout, options.workspaceRoot ?? "/repo")
-              : [];
-            return Effect.succeed({
-              refs,
-              isRepo: options.checkout.isRepo,
-              hasPrimaryRemote: false,
-              nextCursor: null,
-              totalCount: refs.length,
-            });
-          },
+          listRefs: (input) =>
+            Effect.gen(function* () {
+              const checkout =
+                options.liveCheckout === undefined
+                  ? options.checkout
+                  : input.refresh === true || cachedCheckout === undefined
+                    ? (cachedCheckout = yield* Ref.get(options.liveCheckout))
+                    : cachedCheckout;
+              const refs = checkout.isRepo
+                ? fakeRefs(checkout, options.workspaceRoot ?? "/repo")
+                : [];
+              return {
+                refs,
+                isRepo: checkout.isRepo,
+                hasPrimaryRemote: false,
+                nextCursor: null,
+                totalCount: refs.length,
+              };
+            }),
           hasCommit: ({ refName }) =>
             Effect.succeed(!(options.checkout.missingRefs ?? []).includes(refName)),
         }),
@@ -118,3 +131,4 @@ export const fakeSpawnWorkspaceLayer = (options: {
       ),
     ),
   );
+};

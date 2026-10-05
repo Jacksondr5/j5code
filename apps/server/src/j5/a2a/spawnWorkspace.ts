@@ -319,7 +319,14 @@ const make = Effect.gen(function* () {
       if (project === null) return yield* Effect.fail("the project is not readable");
       const root = worktreePathKey(project.workspaceRoot);
       const cwd = caller.worktreePath ?? project.workspaceRoot;
-      const first = yield* git.listRefs({ cwd, refKind: "local", limit: BRANCH_PAGE });
+      // Agents change branches and worktrees from their own shells, which upstream's ref cache
+      // doesn't see, so every read starts fresh; the later pages come from that new snapshot.
+      const first = yield* git.listRefs({
+        cwd,
+        refKind: "local",
+        limit: BRANCH_PAGE,
+        refresh: true,
+      });
       if (!first.isRepo) return yield* Effect.fail("the project is not a git repository");
       // Pages come from one cached snapshot per repository, so reading every worktree is cheap.
       const refs = [...first.refs];
