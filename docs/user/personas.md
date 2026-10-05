@@ -16,7 +16,7 @@ To run a persona inside a conversation, type `@persona:` followed by its ID, or 
 
 Open **Settings → Personas** on web, desktop, or mobile to see the reusable personas in a connected environment. Select an environment to inspect its library and available model routes. Personas can be authored in folders and shared through git; supplied examples are starting points you can customize.
 
-To create a personal persona without writing a file, use **Create persona** beside **Personas**. Give it a name, a stable ID for `@persona:` mentions, a one-line description, markdown instructions, a runtime policy, and primary and fallback models. The persona is stored in the selected environment as an imported definition, so it can be edited, switched off, or removed like any import. Instructions describe behavior; only the runtime policy is enforced.
+To create a personal persona without writing a file, use **Create persona** beside **Personas**. Give it a name, a stable ID for `@persona:` mentions, a one-line description, markdown instructions, a runtime policy, and primary and fallback models. The persona is stored in the selected environment as an imported definition, so it can be edited, switched off, or removed like any import. Instructions describe behavior; only the runtime policy is enforced. **Full access (unsandboxed)** removes the sandbox: the persona runs with full access on every supported provider, so it can use the network and run any command, and nothing but its instructions limits what it does.
 
 To import definitions written as files:
 

@@ -25,6 +25,7 @@ import {
   agentPersonaIdError,
   agentPersonaIdFromName,
   agentPersonaPolicyDrivers,
+  AGENT_PERSONA_POLICY_OPTIONS,
   agentPersonaPolicyNote,
   defaultAgentPersonaModelRoute,
   agentPersonaModelChoices,
@@ -681,6 +682,24 @@ describe("personal agent authoring", () => {
     expect(
       agentPersonaPolicyNote(agentPersonaPolicyDrivers(catalog, "publish-only"), [target("codex")]),
     ).toBe("No provider can sandbox this policy yet, so it won't launch.");
+    const fullAccess = agentPersonaPolicyDrivers(
+      {
+        personas: [],
+        policyEnforcement: [
+          {
+            policy: "full-access" as const,
+            drivers: [ProviderDriverKind.make("codex"), ProviderDriverKind.make("cursor")],
+          },
+        ],
+      },
+      "full-access",
+    );
+    expect(agentPersonaPolicyNote(fullAccess, [target("codex")], "full-access")).toBe(
+      "Unsandboxed: runs with full access on Codex and Cursor.",
+    );
+    expect(agentPersonaPolicyNote(fullAccess, [target("claudeAgent")], "full-access")).toBe(
+      "Unsandboxed: runs with full access on Codex and Cursor. Claude routes won't launch with this policy.",
+    );
     // An older server sends no table; the editor says nothing rather than guessing.
     expect(
       agentPersonaPolicyNote(agentPersonaPolicyDrivers({ personas: [] }, "read-only"), []),
@@ -725,6 +744,37 @@ it("prefills a duplicate with the source content and a fresh name and ID", () =>
       },
     ],
   });
+});
+
+it("labels the full-access policy and offers it in the editor", () => {
+  expect(AGENT_PERSONA_POLICY_OPTIONS.find(({ value }) => value === "full-access")).toEqual({
+    value: "full-access",
+    label: "Full access (unsandboxed)",
+  });
+  const row = presentAgentPersonaCatalog({
+    personas: [
+      {
+        ...catalog.personas[0]!,
+        defaultAuthorityPolicy: "read-only",
+        allowedAuthorityPolicies: ["read-only", "full-access"],
+      },
+    ],
+  })[0];
+  expect(row?.authority).toBe("Read only (default), Full access");
+  expect(
+    agentPersonaDuplicateDraft({
+      id: "operator",
+      version: 1,
+      displayName: "Operator",
+      description: "Operates.",
+      instructions: "# Operator",
+      authority: { defaultPolicy: "full-access", allowedPolicies: ["full-access"] },
+      modelRoute: [
+        { driver: ProviderDriverKind.make("codex"), model: "m", reasoningEffort: "high" },
+        { driver: ProviderDriverKind.make("cursor"), model: "m", reasoningEffort: "high" },
+      ],
+    }).authorityPolicy,
+  ).toBe("full-access");
 });
 
 it("reports drift only when both the snapshot and the current definition carry digests", () => {

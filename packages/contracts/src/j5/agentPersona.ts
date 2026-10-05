@@ -51,6 +51,7 @@ export const AgentPersonaAuthorityPolicy = Schema.Literals([
   "critic-fix",
   "diagnostic",
   "publish-only",
+  "full-access",
 ]);
 export type AgentPersonaAuthorityPolicy = typeof AgentPersonaAuthorityPolicy.Type;
 

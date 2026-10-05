@@ -22,7 +22,7 @@ import { OrchestratorMcpService } from "../../mcp/OrchestratorMcpService.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { emptyProjection } from "../../orchestration-v2/ProjectionStore.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
-import { invokeAgent } from "./agentInvocation.ts";
+import { InvokeAgentInput, invokeAgent } from "./agentInvocation.ts";
 import { makeAgentPersonaLibrary } from "./agentPersonaLibrary.ts";
 import { BUILT_IN_AGENT_PERSONAS } from "./agentPersonas.ts";
 import { resolveAgentPersonaRuntime } from "./agentPersonaRuntime.ts";
@@ -36,6 +36,7 @@ const definition = {
 };
 const definitionYaml = yaml(definition);
 const isPublicCommand = Schema.is(OrchestrationV2PublicCommand);
+const decodeInvokeAgentInput = Schema.decodeUnknownSync(InvokeAgentInput);
 const providers: ServerProvider[] = definition.modelRoute.map((target) => ({
   instanceId: ProviderInstanceId.make(target.driver),
   driver: ProviderDriverKind.make(target.driver),
@@ -241,6 +242,55 @@ describe("saved agent subagent invocation", () => {
       assert.lengthOf(calls, 0);
     }).pipe(Effect.provide(testLayer)),
   );
+  it.effect("delegates a full-access child unrestricted; read-only parents are denied", () =>
+    Effect.gen(function* () {
+      const { library, calls, invoke, parent } = yield* fixture;
+      const unrestricted = {
+        ...definition,
+        id: "team-operator",
+        authority: { defaultPolicy: "full-access", allowedPolicies: ["full-access"] },
+      };
+      yield* library.importFiles({
+        files: [{ name: "operator.yaml", content: yaml(unrestricted) }],
+        replaceExisting: false,
+      });
+      // A plain (non-persona) parent may delegate it.
+      yield* invoke("team-operator");
+      assert.lengthOf(calls, 1);
+      assert.equal(calls[0]?.runtimeMode, "full-access");
+      assert.equal(calls[0]?.agentPersonaAssignment?.authorityPolicy, "full-access");
+
+      // A full-access persona parent may delegate it too.
+      parent.thread = {
+        ...parent.thread,
+        agentPersonaAssignment: calls[0]!.agentPersonaAssignment,
+      };
+      yield* invoke("team-operator");
+      assert.lengthOf(calls, 2);
+
+      // A read-only persona parent may not.
+      yield* invoke();
+      const readOnlyChild = calls.pop()!;
+      assert.equal(readOnlyChild.runtimeMode, "approval-required");
+      parent.thread = {
+        ...parent.thread,
+        agentPersonaAssignment: readOnlyChild.agentPersonaAssignment,
+      };
+      calls.length = 0;
+      const denied = yield* invoke("team-operator");
+      assert.isTrue(denied._tag === "Failure");
+      assert.lengthOf(calls, 0);
+    }).pipe(Effect.provide(testLayer)),
+  );
+  it("drops a caller-provided runtime mode before delegating", () => {
+    const decoded = decodeInvokeAgentInput({
+      personaId: "team-operator",
+      task: "x",
+      clientRequestId: "r",
+      runtimeMode: "full-access",
+    });
+    assert.notProperty(decoded, "runtimeMode");
+  });
   it.effect("rejects a forged child assignment on the public command boundary", () =>
     Effect.gen(function* () {
       const { calls, invoke } = yield* fixture;

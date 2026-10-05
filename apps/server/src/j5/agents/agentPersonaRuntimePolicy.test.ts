@@ -163,4 +163,29 @@ it.layer(TestLayer)("agent persona runtime policy", (it) => {
       assert.equal(resolved.agentPersonaInstructions, BUILDER_AGENT_PERSONA_INSTRUCTIONS_V1);
     }),
   );
+
+  it.effect("runs a full-access persona unrestricted regardless of the thread runtime mode", () =>
+    Effect.gen(function* () {
+      const policy = yield* RuntimePolicyV2;
+      const now = yield* DateTime.now;
+      const thread = {
+        ...makeThread({ now, worktreePath: "/project-worktree" }),
+        runtimeMode: "approval-required",
+        agentPersonaAssignment: {
+          personaId: "builder",
+          definitionVersion: 1,
+          authorityPolicy: "full-access",
+          resolvedRoute: "primary",
+          resolvedDriver: ProviderDriverKind.make("codex"),
+          resolvedModelSelection: modelSelection,
+        },
+      } satisfies OrchestrationV2AppThread;
+
+      const resolved = yield* policy.resolve({ thread, modelSelection });
+
+      assert.equal(resolved.runtimeMode, "full-access");
+      assert.isUndefined(resolved.approvalPolicy);
+      assert.isUndefined(resolved.sandboxPolicy);
+    }),
+  );
 });

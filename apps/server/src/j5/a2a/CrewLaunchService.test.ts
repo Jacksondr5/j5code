@@ -21,6 +21,8 @@ import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 
 import { makeAgentPersonaLibrary } from "../agents/agentPersonaLibrary.ts";
+import { BUILT_IN_AGENT_PERSONAS } from "../agents/agentPersonas.ts";
+import { stringify as toYaml } from "yaml";
 import { resolveAgentPersonaRuntime } from "../agents/agentPersonaRuntime.ts";
 import { guardAgentPersonaThreadCreate } from "../agents/agentPersonaOrchestration.ts";
 import { ServerSecretStore } from "../../auth/ServerSecretStore.ts";
@@ -961,6 +963,61 @@ it.effect(
         assert.lengthOf(yield* Ref.get(commands), 0);
       }).pipe(Effect.provide(layer));
     }).pipe(Effect.scoped),
+);
+
+it.effect("a full-access persona seat runs full access unless the seat overrides it", () =>
+  Effect.gen(function* () {
+    const { context, commands, captain } = yield* fixture;
+    const layer = crewLaunchLayer.pipe(
+      Layer.provideMerge(
+        dependencies(commands, [
+          provider("codex", "codex", [{ slug: "gpt-5.6-sol", options: ["high"] }]),
+        ]),
+      ),
+      Layer.provideMerge(Layer.succeedContext(context)),
+      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-full-access-seat-" })),
+      Layer.provideMerge(NodeServices.layer),
+    );
+    yield* Effect.gen(function* () {
+      const launcher = yield* CrewLaunchService;
+      const library = yield* makeAgentPersonaLibrary;
+      const route = {
+        driver: ProviderDriverKind.make("codex"),
+        model: "gpt-5.6-sol",
+        reasoningEffort: "high",
+      };
+      yield* library.importFiles({
+        files: [
+          {
+            name: "operator.yaml",
+            content: toYaml({
+              ...BUILT_IN_AGENT_PERSONAS.scout,
+              id: "operator",
+              displayName: "Operator",
+              authority: { defaultPolicy: "full-access", allowedPolicies: ["full-access"] },
+              modelRoute: [{ ...route }, { ...route }],
+            }),
+          },
+        ],
+        replaceExisting: false,
+      });
+      const seat = { name: "operator", agentId: "operator", reason: "Operate" };
+      const [unset] = yield* launcher.resolveSeats(captain, [seat]);
+      assert.deepStrictEqual(
+        [unset!.runtimeMode, unset!.runtime.access],
+        ["full-access", "Full access"],
+      );
+      assert.equal(unset!.assignment?.authorityPolicy, "full-access");
+      // An explicit seat mode still wins over the persona's policy.
+      const [overridden] = yield* launcher.resolveSeats(captain, [
+        { ...seat, runtimeMode: "approval-required" },
+      ]);
+      assert.deepStrictEqual(
+        [overridden!.runtimeMode, overridden!.runtime.access],
+        ["approval-required", "Supervised"],
+      );
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
 );
 
 it.effect("refuses persona seats whose effective ACP access the harness cannot enforce", () =>

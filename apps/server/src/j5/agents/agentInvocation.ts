@@ -72,11 +72,11 @@ export const invokeAgent = Effect.fn("j5.invokeAgent")(function* (
     parent.thread.agentPersonaAssignment !== undefined &&
     "sandboxPolicy" in parentPolicy &&
     parentPolicy.sandboxPolicy.type === "readOnly" &&
-    policy.sandboxPolicy.type !== "readOnly"
+    (!("sandboxPolicy" in policy) || policy.sandboxPolicy.type !== "readOnly")
   ) {
     return yield* new OrchestratorMcpFailure({
       code: "runtime_mode_escalation_denied",
-      message: "A read-only agent cannot invoke an agent with write access.",
+      message: "A read-only agent cannot invoke an agent with write or full access.",
     });
   }
   const { personaId: _personaId, ...delegate } = input;

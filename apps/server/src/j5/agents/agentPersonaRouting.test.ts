@@ -271,6 +271,30 @@ describe("agent persona routing", () => {
     );
   });
 
+  it("routes a full-access persona to a Cursor route", () => {
+    const [scout] = listBuiltInAgentPersonas();
+    const cursorRoute = {
+      driver: ProviderDriverKind.make("cursor"),
+      model: "gpt-5.5",
+      reasoningEffort: "high",
+    };
+    const resolution = resolveAgentPersonaRoute({
+      personaId: scout!.id,
+      definition: {
+        ...scout!,
+        authority: { defaultPolicy: "full-access", allowedPolicies: ["full-access"] },
+        modelRoute: [cursorRoute, cursorRoute],
+      },
+      providers: [
+        provider({ instanceId: "cursor", driver: "cursor", models: [model("gpt-5.5", "effort")] }),
+      ],
+    });
+
+    assert.equal(resolution.status, "available");
+    if (resolution.status !== "available") return;
+    assert.equal(String(resolution.driver), "cursor");
+  });
+
   it("names a missing provider alongside an unenforceable one", () => {
     const [scout] = listBuiltInAgentPersonas();
     const typo = {

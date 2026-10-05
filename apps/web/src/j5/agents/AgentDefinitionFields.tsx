@@ -63,6 +63,7 @@ export function AgentRoutePolicyFields(props: {
   const policyNote = agentPersonaPolicyNote(
     agentPersonaPolicyDrivers(catalog.data, value.authorityPolicy),
     value.modelRoute,
+    value.authorityPolicy,
   );
   return (
     <>

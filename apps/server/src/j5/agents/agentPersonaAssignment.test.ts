@@ -126,4 +126,51 @@ describe("agent persona assignment", () => {
     if (result.status !== "assigned") return;
     assert.isUndefined(validateAgentPersonaAssignment(result.assignment));
   });
+
+  describe("full-access policy", () => {
+    const [scout] = listBuiltInAgentPersonas();
+    const fullAccess = {
+      ...scout!,
+      authority: { defaultPolicy: "full-access", allowedPolicies: ["full-access"] },
+    } as const;
+    const resolution = (driver: string) =>
+      ({
+        ...criticRoute,
+        personaId: scout!.id,
+        driver: ProviderDriverKind.make(driver),
+        modelSelection: {
+          instanceId: ProviderInstanceId.make(driver),
+          model: "any-model",
+        },
+      }) as const;
+
+    it("assigns a declared full-access policy on Codex, Claude, and Cursor", () => {
+      for (const driver of ["codex", "claudeAgent", "cursor"]) {
+        const result = buildAgentPersonaAssignment({
+          resolution: resolution(driver),
+          definition: fullAccess,
+        });
+        assert.equal(result.status, "assigned");
+        if (result.status !== "assigned") return;
+        assert.equal(result.assignment.authorityPolicy, "full-access");
+      }
+    });
+
+    it("rejects it when the persona does not allow full access", () => {
+      const result = buildAgentPersonaAssignment({
+        resolution: resolution("codex"),
+        definition: scout!,
+        authorityPolicy: "full-access",
+      });
+      assert.equal(result.status, "invalid-authority-policy");
+    });
+
+    it("blocks it on a driver that cannot honor it", () => {
+      const result = buildAgentPersonaAssignment({
+        resolution: resolution("unknownDriver"),
+        definition: fullAccess,
+      });
+      assert.equal(result.status, "authority-not-enforceable");
+    });
+  });
 });

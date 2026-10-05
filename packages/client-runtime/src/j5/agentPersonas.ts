@@ -37,6 +37,7 @@ const AUTHORITY_LABELS: Readonly<Record<AgentPersonaAuthorityPolicy, string>> = 
   "critic-fix": "Targeted fixes",
   diagnostic: "Diagnostic writes",
   "publish-only": "Publish only",
+  "full-access": "Full access",
 };
 
 export interface AgentPersonaCatalogRow {
@@ -217,6 +218,7 @@ export const AGENT_PERSONA_POLICY_OPTIONS = [
   { value: "critic-fix", label: "Targeted fixes" },
   { value: "diagnostic", label: "Diagnostic writes (not yet supported)" },
   { value: "publish-only", label: "Publish only (not yet supported)" },
+  { value: "full-access", label: "Full access (unsandboxed)" },
 ] as const satisfies ReadonlyArray<{ value: AgentPersonaAuthorityPolicy; label: string }>;
 
 export const agentPersonaModelChoiceId = (target: AgentPersonaModelTarget) =>
@@ -388,13 +390,21 @@ function listLabels(drivers: ReadonlyArray<ProviderDriverKind>): string {
 export function agentPersonaPolicyNote(
   drivers: ReadonlyArray<ProviderDriverKind> | undefined,
   modelRoute: ReadonlyArray<AgentPersonaModelTarget>,
+  policy?: AgentPersonaAuthorityPolicy,
 ): string | null {
   if (drivers === undefined) return null;
-  if (drivers.length === 0) return "No provider can sandbox this policy yet, so it won't launch.";
+  const unsandboxed = policy === "full-access";
+  if (drivers.length === 0) {
+    return unsandboxed
+      ? "No provider supports this policy yet, so it won't launch."
+      : "No provider can sandbox this policy yet, so it won't launch.";
+  }
   const outside = [...new Set(modelRoute.map(({ driver }) => driver))].filter(
     (driver) => !drivers.includes(driver),
   );
-  const where = `Sandboxed on ${listLabels(drivers)}.`;
+  const where = unsandboxed
+    ? `Unsandboxed: runs with full access on ${listLabels(drivers)}.`
+    : `Sandboxed on ${listLabels(drivers)}.`;
   return outside.length === 0
     ? where
     : `${where} ${listLabels(outside)} routes won't launch with this policy.`;

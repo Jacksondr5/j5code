@@ -70,4 +70,19 @@ describe("agent persona contracts", () => {
     const { definitionDigest: _digest, displayName: _name, ...legacy } = assignment;
     expect(decodePersonaAssignment(legacy).definitionDigest).toBeUndefined();
   });
+
+  it("decodes the full-access authority policy and rejects unknown ones", () => {
+    const assignment = {
+      personaId: "operator",
+      definitionVersion: 1,
+      authorityPolicy: "full-access",
+      resolvedRoute: "primary",
+      resolvedDriver: "codex",
+      resolvedModelSelection: { instanceId: "codex", model: "gpt-5.6-terra" },
+    };
+    expect(decodePersonaAssignment(assignment)).toEqual(assignment);
+    expect(() =>
+      decodePersonaAssignment({ ...assignment, authorityPolicy: "root-access" }),
+    ).toThrow();
+  });
 });
