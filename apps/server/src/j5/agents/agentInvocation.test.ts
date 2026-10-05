@@ -294,17 +294,21 @@ describe("saved agent subagent invocation", () => {
 
         // A full-access persona parent whose stored thread mode is narrower (a composer launch)
         // may still delegate; the child inherits the stored mode but runs on its snapshot.
-        parent.thread = {
-          ...parent.thread,
-          runtimeMode: "approval-required",
-          agentPersonaAssignment: child.agentPersonaAssignment,
-        };
-        yield* invoke("team-operator");
-        assert.lengthOf(calls, 2);
-        assert.equal(calls[1]?.runtimeMode, "inherit");
-        const inherited = yield* effective(calls[1]!);
-        assert.equal(inherited.runtimeMode, "full-access");
-        assert.notProperty(inherited, "sandboxPolicy");
+        for (const runtimeMode of ["approval-required", "auto-accept-edits"] as const) {
+          parent.thread = {
+            ...parent.thread,
+            runtimeMode,
+            agentPersonaAssignment: child.agentPersonaAssignment,
+          };
+          yield* invoke("team-operator");
+          const delegated = calls.at(-1)!;
+          assert.equal(delegated.runtimeMode, "inherit");
+          const inherited = yield* effective(delegated);
+          assert.equal(inherited.runtimeMode, "full-access");
+          assert.notProperty(inherited, "sandboxPolicy");
+          assert.notProperty(inherited, "approvalPolicy");
+        }
+        assert.lengthOf(calls, 3);
 
         // A workspace-write persona parent may not delegate broader access.
         yield* invoke("team-writer");
