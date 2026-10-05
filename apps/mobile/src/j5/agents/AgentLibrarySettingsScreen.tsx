@@ -475,6 +475,13 @@ export function AgentLibrarySettingsScreen() {
                             {persona.availabilityLabel}
                           </Text>
                         </View>
+                        {persona.unsandboxed ? (
+                          <View className="rounded-full border border-warning-border bg-warning px-2 py-0.5">
+                            <Text className="text-xs font-t3-medium text-warning-foreground">
+                              Full access
+                            </Text>
+                          </View>
+                        ) : null}
                         {persona.originLabel ? (
                           <View className="rounded-full border border-border px-2 py-0.5">
                             <Text className="text-xs font-t3-medium text-foreground-muted">

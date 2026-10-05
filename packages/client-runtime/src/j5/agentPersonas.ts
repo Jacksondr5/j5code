@@ -56,6 +56,8 @@ export interface AgentPersonaCatalogRow {
   readonly acceptedInput: string | undefined;
   readonly outputArtifact: string | undefined;
   readonly authority: string;
+  /** The persona can run unsandboxed, so library rows flag it wherever it comes from. */
+  readonly unsandboxed: boolean;
   readonly availability: "available" | "blocked" | "disabled" | "removed";
   readonly availabilityLabel: "Available" | "Blocked" | "Disabled" | "Removed";
   readonly route: string;
@@ -128,6 +130,7 @@ export function presentAgentPersonaCatalog(
       description: persona.description,
       acceptedInput: persona.acceptedInput,
       outputArtifact: persona.outputArtifact,
+      unsandboxed: persona.allowedAuthorityPolicies.includes("full-access"),
       authority: persona.allowedAuthorityPolicies
         .map(
           (policy) =>

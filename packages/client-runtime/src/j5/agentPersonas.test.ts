@@ -761,6 +761,8 @@ it("labels the full-access policy and offers it in the editor", () => {
     ],
   })[0];
   expect(row?.authority).toBe("Read only (default), Full access");
+  expect(row?.unsandboxed).toBe(true);
+  expect(presentAgentPersonaCatalog(catalog)[0]?.unsandboxed).toBe(false);
   expect(
     agentPersonaDuplicateDraft({
       id: "operator",

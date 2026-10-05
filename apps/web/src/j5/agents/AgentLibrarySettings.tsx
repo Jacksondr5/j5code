@@ -514,6 +514,7 @@ export function AgentLibrarySettings() {
                         {persona.availabilityLabel}
                       </Badge>
                     )}
+                    {persona.unsandboxed ? <Badge variant="warning">Full access</Badge> : null}
                     {persona.originLabel ? (
                       <>
                         <span aria-hidden="true">·</span>

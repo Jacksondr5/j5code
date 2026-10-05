@@ -310,12 +310,18 @@ describe("saved agent subagent invocation", () => {
         }
         assert.lengthOf(calls, 3);
 
-        // A workspace-write persona parent may not delegate broader access.
+        // A workspace-write persona parent may not delegate broader access, even when its
+        // stored thread mode (the composer's) is full-access.
         yield* invoke("team-writer");
         const writer = calls.pop()!;
-        parent.thread = { ...parent.thread, agentPersonaAssignment: writer.agentPersonaAssignment };
+        parent.thread = {
+          ...parent.thread,
+          runtimeMode: "full-access",
+          agentPersonaAssignment: writer.agentPersonaAssignment,
+        };
         calls.length = 0;
         assert.isTrue((yield* invoke("team-operator"))._tag === "Failure");
+        assert.lengthOf(calls, 0);
 
         // Nor may a read-only persona parent.
         yield* invoke();
