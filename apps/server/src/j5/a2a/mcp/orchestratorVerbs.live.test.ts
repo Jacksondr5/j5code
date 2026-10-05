@@ -1,4 +1,3 @@
-import { GitVcsDriver } from "../../../vcs/GitVcsDriver.ts";
 import { ThreadLaunchService } from "../../../orchestration-v2/ThreadLaunchService.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../../../persistence/Layers/OrchestrationCommandReceipts.ts";
 import { J5SquadronCreationLayer } from "../runtimeLayer.ts";
@@ -176,7 +175,6 @@ const liveLayer = Layer.mergeAll(
   Layer.provide(Layer.mock(GitWorkflow.GitWorkflowService)({})),
   // The project is unreadable here, so every spawn shares the caller's checkout.
   Layer.provide(Layer.mock(ThreadLaunchService)({})),
-  Layer.provide(Layer.mock(GitVcsDriver)({})),
   Layer.provide(OrchestrationCommandReceiptRepositoryLive),
   Layer.provide(
     Layer.mock(SourceControlProviderRegistry)({
