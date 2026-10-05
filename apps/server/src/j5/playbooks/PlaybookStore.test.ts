@@ -20,7 +20,7 @@ import * as Queue from "effect/Queue";
 import * as Result from "effect/Result";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as Stream from "effect/Stream";
-import { stringify } from "yaml";
+import { parse, stringify } from "yaml";
 
 import { runJ5A2AMigrations } from "../a2a/Migrations.ts";
 import { makePlaybookStore, type PlaybookMutation } from "./PlaybookStore.ts";
@@ -987,5 +987,60 @@ it.effect("enforces the shared byte and step limits at their boundaries", () =>
       (yield* Effect.flip(store.start(owner, workspaceRoot, "demo", "bytes"))).code,
       "invalid_definition",
     );
+  }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
+);
+
+it.effect("exports the stem file name and a YAML body that imports back unchanged", () =>
+  Effect.gen(function* () {
+    const { fs, store, workspaceRoot, filename, write } = yield* makeFixture;
+    const original: PlaybookDefinition = {
+      title: "Title that is not the file name",
+      description: "Colons: quotes \" and 'apostrophes' # not a comment",
+      steps: [
+        { id: "b-first", title: "Second alphabetically", prompt: "  leading and trailing  \n" },
+        { id: "a-second", title: "Multiline", prompt: "Line one\n\nLine three: yes\n- not a list" },
+      ],
+    };
+    yield* write("stem", original);
+    const exported = yield* store.exportDefinition(workspaceRoot, "stem");
+    assert.equal(exported.fileName, "stem.yaml");
+    assert.notInclude(exported.fileName, "Title");
+    // Importing writes the exported bytes under the file's stem, so the copy must decode identically.
+    yield* fs.writeFileString(filename("copy"), exported.yaml);
+    assert.deepStrictEqual(parse(exported.yaml), original);
+    assert.deepStrictEqual(
+      parse(yield* fs.readFileString(filename("copy"))),
+      parse(yield* fs.readFileString(filename("stem"))),
+    );
+    const copy = (yield* store.discover(workspaceRoot)).playbooks.find(
+      ({ name }) => name === "copy",
+    );
+    assert.isNull(copy?.issue);
+    assert.deepStrictEqual(
+      copy?.steps.map(({ id }) => id),
+      ["b-first", "a-second"],
+    );
+  }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
+);
+
+it.effect("rejects exports of missing, misnamed, and invalid definitions", () =>
+  Effect.gen(function* () {
+    const { fs, store, workspaceRoot, filename } = yield* makeFixture;
+    const code = (name: string) =>
+      store.exportDefinition(workspaceRoot, name).pipe(
+        Effect.flip,
+        Effect.map((error) => (error as { code?: string }).code),
+      );
+    assert.equal(yield* code("missing"), "not_found");
+    assert.equal(yield* code("../demo"), "invalid_name");
+    yield* fs.writeFileString(filename("broken"), "title: [broken");
+    assert.equal(yield* code("broken"), "invalid_definition");
+    yield* fs.writeFileString(
+      filename("dupes"),
+      stringify({
+        ...definition(["same", "same"]),
+      }),
+    );
+    assert.equal(yield* code("dupes"), "invalid_definition");
   }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
 );

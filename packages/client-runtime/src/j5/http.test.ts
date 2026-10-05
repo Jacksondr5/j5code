@@ -26,6 +26,7 @@ import {
   readThreadPlaybooks,
   readAllPlaybooks,
   readPlaybookLibrary,
+  exportPlaybook,
   renamePlaybook,
 } from "./http.ts";
 
@@ -140,6 +141,36 @@ it.effect("deletes from the selected environment and workspace with its own cred
       { projectId: "same-project", threadId: "same-thread", name: "demo" },
       { projectId: "same-project", threadId: "same-thread", name: "demo" },
     ]);
+  }),
+);
+
+it.effect("exports from the selected environment and workspace with its own credentials", () =>
+  Effect.gen(function* () {
+    const requests: Request[] = [];
+    const fetch: typeof globalThis.fetch = async (input, init) => {
+      requests.push(new Request(input, init));
+      return Response.json({ fileName: "demo.yaml", yaml: "title: Demo\n" });
+    };
+    const results = [];
+    for (const id of ["alpha", "bravo"]) {
+      results.push(
+        yield* exportPlaybook(prepared(id, { _tag: "Bearer", token: `${id}-token` }), {
+          projectId: ProjectId.make("same-project"),
+          threadId: ThreadId.make("same-thread"),
+          name: "demo",
+        }).pipe(Effect.provide(remoteHttpClientLayer(fetch))),
+      );
+    }
+    expect(results).toEqual(Array(2).fill({ fileName: "demo.yaml", yaml: "title: Demo\n" }));
+    expect(requests.map((request) => [request.url, request.headers.get("authorization")])).toEqual([
+      ["https://alpha.test/api/j5/playbooks/export", "Bearer alpha-token"],
+      ["https://bravo.test/api/j5/playbooks/export", "Bearer bravo-token"],
+    ]);
+    expect(yield* Effect.promise(() => requests[0]!.json())).toEqual({
+      projectId: "same-project",
+      threadId: "same-thread",
+      name: "demo",
+    });
   }),
 );
 

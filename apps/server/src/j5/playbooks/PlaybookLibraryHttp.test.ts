@@ -490,24 +490,33 @@ it.effect("rejects invalid rename inputs and invalid YAML", () =>
   }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );
 
-it.effect("exports a playbook as YAML that imports back to the same definition", () =>
+it.effect("exports the selected workspace definition with read scope only", () =>
   Effect.gen(function* () {
-    const { fs, filename, projectRoot, read, postExport } = yield* fixture;
-    const request = { projectId, name: "demo" };
-    assert.equal((yield* postExport(request, null)).status, 401);
-    const response = yield* postExport(request);
-    assert.equal(response.status, 200);
-    const exported = (yield* Effect.promise(() => response.json())) as {
-      fileName: string;
-      yaml: string;
-    };
-    assert.equal(exported.fileName, "demo.yaml");
-    const original = (yield* read()).playbooks[0];
-    // Import is a plain file write into .j5/playbooks under the exported name.
-    yield* fs.remove(filename(projectRoot));
-    yield* fs.writeFileString(filename(projectRoot), exported.yaml);
-    assert.deepStrictEqual((yield* read()).playbooks[0], original);
-    assert.equal((yield* postExport({ projectId, name: "missing" })).status, 404);
+    const { postExport } = yield* fixture;
+    const fileOf = (response: Response) =>
+      Effect.promise(() => response.json()).pipe(
+        Effect.map((body) => body as { fileName: string; yaml: string }),
+      );
+    assert.equal((yield* postExport({ projectId, name: "demo" }, null)).status, 401);
+    assert.equal(
+      (yield* postExport({ projectId, name: "demo" }, "Bearer without-read")).status,
+      403,
+    );
+    const project = yield* fileOf(yield* postExport({ projectId, name: "demo" }));
+    assert.equal(project.fileName, "demo.yaml");
+    assert.include(project.yaml, "Project library");
+    const worktree = yield* fileOf(
+      yield* postExport({ projectId, threadId: worktreeThread, name: "demo" }),
+    );
+    assert.include(worktree.yaml, "Worktree library");
+    for (const body of [
+      { projectId: missingProjectId, name: "demo" },
+      { projectId, threadId: mismatchedThread, name: "demo" },
+      { projectId, threadId: deletedThread, name: "demo" },
+      { projectId, threadId: missingThread, name: "demo" },
+    ]) {
+      assert.equal((yield* postExport(body)).status, 404);
+    }
     assert.equal((yield* postExport({ projectId, name: "../demo" })).status, 400);
   }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );

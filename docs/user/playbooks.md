@@ -17,8 +17,8 @@ a file with an existing name asks before replacing it. Changes also apply to run
 using that definition. An active run must be completed or cancelled before its
 definition can be deleted; completed run history remains.
 
-On web, desktop, and mobile, **Export YAML** on a playbook saves or shares its `<name>.yaml`,
-which web and desktop can import into another workspace or environment.
+**Export YAML** downloads `<name>.yaml` on web and desktop and shares the YAML from mobile.
+Web and desktop can import it back into another workspace or environment.
 
 On web and desktop, open **Fleet** and use its **Playbook runs** section to follow
 runs across your connected environments. The overview shows
