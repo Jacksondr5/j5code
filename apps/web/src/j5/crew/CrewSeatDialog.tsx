@@ -1,5 +1,9 @@
 import type { EnvironmentId } from "@t3tools/contracts";
-import type { CrewProposalSeat, CrewProposalSeatRuntime } from "@t3tools/contracts/j5";
+import type {
+  CrewProposalSeat,
+  CrewProposalSeatRuntime,
+  CrewWorkspaceOptions,
+} from "@t3tools/contracts/j5";
 import { useMemo, useState } from "react";
 
 import { Button } from "../../components/ui/button";
@@ -23,6 +27,8 @@ export function CrewSeatDialog(props: {
   readonly proposalId: string;
   readonly previewSeatName: string;
   readonly runtime?: CrewProposalSeatRuntime | undefined;
+  /** What the Captain's repository offers a seat's workspace, from the roster's preview. */
+  readonly workspaceOptions?: CrewWorkspaceOptions | undefined;
   readonly environmentId: EnvironmentId | null;
   readonly agents: ReadonlyArray<{ readonly personaId: string; readonly displayName: string }>;
   readonly disabled: boolean;
@@ -30,7 +36,14 @@ export function CrewSeatDialog(props: {
   readonly onClose: () => void;
 }) {
   const [draft, setDraft] = useState<CrewSeatDraft>(() => {
-    if (props.seat === null) return { seat: "", agentId: CUSTOM_AGENT, instructions: "" };
+    if (props.seat === null)
+      return {
+        seat: "",
+        agentId: CUSTOM_AGENT,
+        instructions: "",
+        // A seat the person adds starts in the Captain's checkout.
+        workspace: { type: "shared" },
+      };
     const initial = crewSeatDraft(props.seat);
     return props.seat.agentId === null ? resolvedCrewSeatDraft(initial, props.runtime) : initial;
   });
@@ -47,6 +60,7 @@ export function CrewSeatDialog(props: {
         seat: props.previewSeatName,
         agentId: draft.agentId === CUSTOM_AGENT ? null : draft.agentId,
         reason: "Member runtime preview",
+        workspace: { type: "shared" as const },
         ...(draft.agentId === CUSTOM_AGENT ? { instructions: "Crew member" } : {}),
       },
     ],
@@ -101,6 +115,7 @@ export function CrewSeatDialog(props: {
               environmentId={props.environmentId}
               agents={props.agents}
               runtime={matchingRuntime}
+              workspaceOptions={props.workspaceOptions ?? preview.data?.workspaceOptions}
               disabled={props.disabled}
               existing={!adding}
               onChange={setDraft}

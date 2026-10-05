@@ -1,6 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId } from "@t3tools/contracts";
-import type { CrewProposalSeatRuntime } from "@t3tools/contracts/j5";
+import type { CrewProposalSeatRuntime, CrewWorkspaceOptions } from "@t3tools/contracts/j5";
 import { getProviderOptionCurrentValue } from "@t3tools/shared/model";
 
 import { Input } from "../../components/ui/input";
@@ -20,6 +20,8 @@ import {
   CREW_WORKSPACE_OPTIONS,
   chooseCrewSeatPersona,
   chooseCrewSeatWorkspace,
+  setCrewSeatBaseRef,
+  setCrewSeatWorktree,
   chooseCrewHarness,
   crewModelSelection,
   crewReasoningDescriptor,
@@ -33,6 +35,8 @@ interface CrewSeatEditorProps {
   readonly environmentId: EnvironmentId | null;
   readonly agents: ReadonlyArray<{ readonly personaId: string; readonly displayName: string }>;
   readonly runtime?: CrewProposalSeatRuntime | undefined;
+  /** What the Captain's repository offers a seat's workspace, from the latest preview. */
+  readonly workspaceOptions?: CrewWorkspaceOptions | undefined;
   readonly disabled: boolean;
   readonly existing?: boolean;
   readonly onChange: (value: CrewSeatDraft) => void;
@@ -112,35 +116,102 @@ export function CrewSeatEditor(props: CrewSeatEditorProps) {
   );
 }
 
-/** Shown once the server resolves seat workspaces; older servers always share the checkout. */
+/** Where the seat works, with the choices the Captain's repository offers. */
 function CrewSeatWorkspaceField(props: CrewSeatEditorProps) {
-  const type = props.value.workspace?.type ?? props.runtime?.workspace?.type;
-  if (type === undefined) return null;
+  const workspace = props.value.workspace;
+  const options = props.workspaceOptions;
   const label = props.value.seat || "New seat";
+  // The current value stays selectable even when it isn't on the first page of branches.
+  const branches =
+    workspace?.type === "worktree" && !(options?.branches ?? []).includes(workspace.baseRef)
+      ? [workspace.baseRef, ...(options?.branches ?? [])].filter((branch) => branch.length > 0)
+      : (options?.branches ?? []);
   return (
-    <div className="grid min-w-0 gap-1 text-xs text-muted-foreground sm:max-w-xs">
-      <span>Workspace</span>
-      <Select
-        value={type}
-        disabled={props.disabled}
-        onValueChange={(next) => {
-          const option = CREW_WORKSPACE_OPTIONS.find(({ value }) => value === next);
-          if (option) props.onChange(chooseCrewSeatWorkspace(props.value, option.value));
-        }}
-      >
-        <SelectTrigger aria-label={`${label} workspace`}>
-          <SelectValue>
-            {CREW_WORKSPACE_OPTIONS.find(({ value }) => value === type)?.label}
-          </SelectValue>
-        </SelectTrigger>
-        <SelectPopup alignItemWithTrigger={false}>
-          {CREW_WORKSPACE_OPTIONS.map((option) => (
-            <SelectItem key={option.value} value={option.value}>
-              {option.label}
-            </SelectItem>
-          ))}
-        </SelectPopup>
-      </Select>
+    <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid min-w-0 gap-1 text-xs text-muted-foreground">
+        <span>Workspace</span>
+        <Select
+          value={workspace?.type ?? null}
+          disabled={props.disabled}
+          onValueChange={(next) => {
+            const option = CREW_WORKSPACE_OPTIONS.find(({ value }) => value === next);
+            if (option) props.onChange(chooseCrewSeatWorkspace(props.value, option.value, options));
+          }}
+        >
+          <SelectTrigger aria-label={`${label} workspace`}>
+            <SelectValue>
+              {CREW_WORKSPACE_OPTIONS.find(({ value }) => value === workspace?.type)?.label ??
+                "Choose workspace"}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectPopup alignItemWithTrigger={false}>
+            {CREW_WORKSPACE_OPTIONS.map((option) => (
+              <SelectItem
+                key={option.value}
+                value={option.value}
+                disabled={option.value === "existing_worktree" && !options?.worktrees.length}
+              >
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectPopup>
+        </Select>
+      </div>
+      {workspace?.type === "worktree" ? (
+        <div className="grid min-w-0 gap-1 text-xs text-muted-foreground">
+          <span>Base branch</span>
+          <Select
+            value={workspace.baseRef || null}
+            disabled={props.disabled || branches.length === 0}
+            onValueChange={(next) => {
+              if (next) props.onChange(setCrewSeatBaseRef(props.value, next));
+            }}
+          >
+            <SelectTrigger aria-label={`${label} base branch`}>
+              <SelectValue>{workspace.baseRef || "Choose branch"}</SelectValue>
+            </SelectTrigger>
+            <SelectPopup alignItemWithTrigger={false}>
+              {branches.map((branch) => (
+                <SelectItem key={branch} value={branch}>
+                  {branch}
+                </SelectItem>
+              ))}
+            </SelectPopup>
+          </Select>
+          {options?.branchesTruncated ? (
+            <span>Showing the first {options.branches.length} local branches.</span>
+          ) : null}
+        </div>
+      ) : null}
+      {workspace?.type === "existing_worktree" ? (
+        <div className="grid min-w-0 gap-1 text-xs text-muted-foreground">
+          <span>Worktree</span>
+          <Select
+            value={workspace.worktreePath || null}
+            disabled={props.disabled || !options?.worktrees.length}
+            onValueChange={(next) => {
+              if (next) props.onChange(setCrewSeatWorktree(props.value, next));
+            }}
+          >
+            <SelectTrigger aria-label={`${label} worktree`}>
+              <SelectValue>
+                {options?.worktrees.find(({ path }) => path === workspace.worktreePath)?.branch ??
+                  (workspace.worktreePath || "Choose worktree")}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectPopup alignItemWithTrigger={false}>
+              {(options?.worktrees ?? []).map((worktree) => (
+                <SelectItem key={worktree.path} value={worktree.path}>
+                  <span className="grid gap-0.5">
+                    <span>{worktree.branch}</span>
+                    <span className="text-xs text-muted-foreground">{worktree.path}</span>
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectPopup>
+          </Select>
+        </div>
+      ) : null}
     </div>
   );
 }

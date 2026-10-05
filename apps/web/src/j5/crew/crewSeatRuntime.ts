@@ -9,6 +9,7 @@ import type {
   CrewProposalSeat,
   CrewProposalSeatRuntime,
   CrewSeatWorkspace,
+  CrewWorkspaceOptions,
 } from "@t3tools/contracts/j5";
 import { buildProviderOptionSelectionsFromDescriptors } from "@t3tools/shared/model";
 
@@ -97,20 +98,44 @@ export const chooseCrewSeatPersona = (draft: CrewSeatDraft, agentId: string): Cr
 export const CREW_WORKSPACE_OPTIONS = [
   { value: "shared", label: "Captain's checkout" },
   { value: "worktree", label: "New worktree" },
+  { value: "existing_worktree", label: "Existing worktree" },
 ] as const;
 
-/** Choosing a worktree leaves its base to the server, which bases it on the Captain's branch. */
+/**
+ * A new type starts from what the Captain's repository offers: a new worktree from the Captain's
+ * current branch, an existing worktree at the first one listed. The server checks both again.
+ */
 export const chooseCrewSeatWorkspace = (
   draft: CrewSeatDraft,
   type: CrewSeatWorkspace["type"],
-): CrewSeatDraft => ({ ...draft, workspace: { type } });
+  options: CrewWorkspaceOptions | undefined,
+): CrewSeatDraft => ({
+  ...draft,
+  workspace:
+    type === "shared"
+      ? { type }
+      : type === "worktree"
+        ? { type, baseRef: options?.currentBranch ?? options?.branches[0] ?? "" }
+        : { type, worktreePath: options?.worktrees[0]?.path ?? "" },
+});
+
+/** A new worktree's base branch; other fields of the choice stay as they were. */
+export const setCrewSeatBaseRef = (draft: CrewSeatDraft, baseRef: string): CrewSeatDraft =>
+  draft.workspace?.type === "worktree"
+    ? { ...draft, workspace: { ...draft.workspace, baseRef } }
+    : { ...draft, workspace: { type: "worktree", baseRef } };
+
+export const setCrewSeatWorktree = (draft: CrewSeatDraft, worktreePath: string): CrewSeatDraft => ({
+  ...draft,
+  workspace: { type: "existing_worktree", worktreePath },
+});
 
 export const describeCrewSeatWorkspace = (workspace: CrewSeatWorkspace): string =>
   workspace.type === "shared"
     ? "Captain's checkout"
-    : workspace.baseRef === undefined
-      ? "New worktree"
-      : `New worktree from ${workspace.baseRef}`;
+    : workspace.type === "worktree"
+      ? `New worktree from ${workspace.baseRef}`
+      : `Existing worktree on ${workspace.branch ?? workspace.worktreePath}`;
 
 /** A different model starts with its own advertised defaults, never options from another model. */
 export const crewModelSelection = (

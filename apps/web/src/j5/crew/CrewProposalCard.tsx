@@ -168,9 +168,7 @@ export function CrewProposalCard(props: {
                         runtime.model,
                         runtime.reasoning,
                         runtime.access,
-                        ...(runtime.workspace
-                          ? [describeCrewSeatWorkspace(runtime.workspace)]
-                          : []),
+                        describeCrewSeatWorkspace(runtime.workspace),
                       ].join(" · ")}
                       <span className="ml-2">Harness: {runtime.harness}</span>
                     </p>
@@ -258,6 +256,7 @@ export function CrewProposalCard(props: {
           proposalId={proposal.id}
           previewSeatName={editor.seat?.seat ?? proposal.requestedSeats[0]!.seat}
           runtime={editor.runtime}
+          workspaceOptions={preview.data?.workspaceOptions}
           environmentId={props.environmentId}
           agents={agents}
           disabled={props.busy}

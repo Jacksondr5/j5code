@@ -34,7 +34,8 @@ export const addSeat = (
         ...(instructions ? { instructions } : {}),
         ...(draft.modelSelection ? { modelSelection: draft.modelSelection } : {}),
         ...(draft.runtimeMode ? { runtimeMode: draft.runtimeMode } : {}),
-        ...(draft.workspace ? { workspace: draft.workspace } : {}),
+        // A seat the person adds starts in the Captain's checkout until they choose otherwise.
+        workspace: draft.workspace ?? { type: "shared" },
       },
     ],
     error: null,
@@ -52,8 +53,11 @@ export const saveSeat = (
   const validated = addSeat(removeSeat(seats, seatName), { ...draft, seat: seatName });
   if (validated.error !== null) return { seats, error: validated.error };
   // The card cannot reassign playbook steps, so an edited seat keeps the ones it owns.
+  // An edit keeps the seat's own workspace, or its lack of one; only a new seat defaults.
+  const { workspace: _defaulted, ...edited } = validated.seats[validated.seats.length - 1]!;
   const updated = {
-    ...validated.seats[validated.seats.length - 1]!,
+    ...edited,
+    ...(draft.workspace === undefined ? {} : { workspace: draft.workspace }),
     reason: current.reason,
     ...(current.steps === undefined ? {} : { steps: current.steps }),
   };

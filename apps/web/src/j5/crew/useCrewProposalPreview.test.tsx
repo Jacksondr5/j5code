@@ -14,10 +14,17 @@ const seats: ReadonlyArray<CrewProposalSeat> = [
 ];
 const response: CrewProposalPreviewResponse = {
   proposalId: "proposal:1",
+  workspaceOptions: {
+    currentBranch: "main",
+    branches: ["main"],
+    branchesTruncated: false,
+    worktrees: [],
+  },
   approvalToken: "preview:1",
   seats: [
     {
       seat: "reviewer",
+      workspace: { type: "shared" },
       modelSelection: {
         instanceId: ProviderInstanceId.make("codex"),
         model: "gpt-6-astra",
