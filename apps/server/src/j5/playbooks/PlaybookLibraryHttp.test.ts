@@ -15,7 +15,6 @@ import {
 } from "@t3tools/contracts";
 import {
   PLAYBOOK_DELETE_PATH,
-  PLAYBOOK_EXPORT_PATH,
   PLAYBOOK_LIBRARY_PATH,
   PLAYBOOK_RENAME_PATH,
   PlaybookLibraryResponse,
@@ -232,19 +231,6 @@ const fixture = Effect.gen(function* () {
         }),
       ),
     );
-  const postExport = (body: Schema.Json, authorization: string | null = "Bearer read") =>
-    Effect.promise(() =>
-      handler(
-        new Request(`http://environment.test${PLAYBOOK_EXPORT_PATH}`, {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            ...(authorization === null ? {} : { authorization }),
-          },
-          body: encodeBody(body),
-        }),
-      ),
-    );
   const read = Effect.fn("test.playbooks.library.read")(function* (threadId?: ThreadId) {
     const response = yield* post({ projectId, ...(threadId === undefined ? {} : { threadId }) });
     assert.equal(response.status, 200);
@@ -259,7 +245,6 @@ const fixture = Effect.gen(function* () {
     post,
     postDelete,
     postRename,
-    postExport,
     read,
     handler,
     projectReads,
@@ -487,36 +472,5 @@ it.effect("rejects invalid rename inputs and invalid YAML", () =>
     }
     yield* fs.writeFileString(filename(projectRoot), "title: [broken");
     assert.equal((yield* postRename({ projectId, name: "demo", title: "Nope" })).status, 400);
-  }).pipe(Effect.scoped, Effect.provide(TestLayer)),
-);
-
-it.effect("exports the selected workspace definition with read scope only", () =>
-  Effect.gen(function* () {
-    const { postExport } = yield* fixture;
-    const fileOf = (response: Response) =>
-      Effect.promise(() => response.json()).pipe(
-        Effect.map((body) => body as { fileName: string; yaml: string }),
-      );
-    assert.equal((yield* postExport({ projectId, name: "demo" }, null)).status, 401);
-    assert.equal(
-      (yield* postExport({ projectId, name: "demo" }, "Bearer without-read")).status,
-      403,
-    );
-    const project = yield* fileOf(yield* postExport({ projectId, name: "demo" }));
-    assert.equal(project.fileName, "demo.yaml");
-    assert.include(project.yaml, "Project library");
-    const worktree = yield* fileOf(
-      yield* postExport({ projectId, threadId: worktreeThread, name: "demo" }),
-    );
-    assert.include(worktree.yaml, "Worktree library");
-    for (const body of [
-      { projectId: missingProjectId, name: "demo" },
-      { projectId, threadId: mismatchedThread, name: "demo" },
-      { projectId, threadId: deletedThread, name: "demo" },
-      { projectId, threadId: missingThread, name: "demo" },
-    ]) {
-      assert.equal((yield* postExport(body)).status, 404);
-    }
-    assert.equal((yield* postExport({ projectId, name: "../demo" })).status, 400);
   }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );

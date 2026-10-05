@@ -9,16 +9,8 @@ export const PLAYBOOK_NAME_PATTERN = /^[^/\\\p{Cc}]+$/u;
 
 export const J5_PLAYBOOK_WS_METHODS = {
   subscribeChanges: "j5.playbooks.subscribeChanges",
+  exportPlaybook: "j5.playbooks.export",
 } as const;
-
-export const J5PlaybookRpcGroup = RpcGroup.make(
-  Rpc.make(J5_PLAYBOOK_WS_METHODS.subscribeChanges, {
-    payload: Schema.Struct({}),
-    success: Schema.Int,
-    error: EnvironmentAuthorizationError,
-    stream: true,
-  }),
-);
 
 const Text = Schema.String.check(Schema.isPattern(/\S/));
 export const PlaybookStep = Schema.Struct({ id: Text, title: Text, prompt: Text });
@@ -123,4 +115,18 @@ export const PlaybookExportRequest = Schema.Struct({
 });
 export type PlaybookExportRequest = typeof PlaybookExportRequest.Type;
 export const PlaybookExportResponse = Schema.Struct({ fileName: Text, yaml: Schema.String });
-export const PLAYBOOK_EXPORT_PATH = "/api/j5/playbooks/export";
+export type PlaybookExportResponse = typeof PlaybookExportResponse.Type;
+
+export const J5PlaybookRpcGroup = RpcGroup.make(
+  Rpc.make(J5_PLAYBOOK_WS_METHODS.subscribeChanges, {
+    payload: Schema.Struct({}),
+    success: Schema.Int,
+    error: EnvironmentAuthorizationError,
+    stream: true,
+  }),
+  Rpc.make(J5_PLAYBOOK_WS_METHODS.exportPlaybook, {
+    payload: PlaybookExportRequest,
+    success: PlaybookExportResponse,
+    error: Schema.Union([PlaybookError, EnvironmentAuthorizationError]),
+  }),
+);

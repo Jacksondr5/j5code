@@ -1,13 +1,10 @@
 import {
   PLAYBOOK_DELETE_PATH,
-  PLAYBOOK_EXPORT_PATH,
   PLAYBOOK_LIBRARY_PATH,
   PLAYBOOK_RENAME_PATH,
   PlaybookDeleteRequest,
   PlaybookDeleteResponse,
   PlaybookError,
-  PlaybookExportRequest,
-  PlaybookExportResponse,
   PlaybookLibraryRequest,
   PlaybookLibraryResponse,
   PlaybookRenameRequest,
@@ -15,7 +12,6 @@ import {
 } from "@t3tools/contracts/j5";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import {
@@ -32,8 +28,8 @@ import {
 } from "../a2a/ClientReadsHttp.ts";
 import { ProjectService } from "../../project/ProjectService.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
-import { ProjectionStoreThreadNotFoundError } from "../../orchestration-v2/ProjectionStore.ts";
 import { PlaybookStore } from "./PlaybookStore.ts";
+import { resolvePlaybookWorkspaceRoot } from "./workspaceRoot.ts";
 
 const decodeRequest = Schema.decodeUnknownEffect(PlaybookLibraryRequest);
 const encodeResponse = Schema.encodeEffect(PlaybookLibraryResponse);
@@ -41,10 +37,7 @@ const decodeDeleteRequest = Schema.decodeUnknownEffect(PlaybookDeleteRequest);
 const encodeDeleteResponse = Schema.encodeEffect(PlaybookDeleteResponse);
 const decodeRenameRequest = Schema.decodeUnknownEffect(PlaybookRenameRequest);
 const encodeRenameResponse = Schema.encodeEffect(PlaybookRenameResponse);
-const decodeExportRequest = Schema.decodeUnknownEffect(PlaybookExportRequest);
-const encodeExportResponse = Schema.encodeEffect(PlaybookExportResponse);
 const isPlaybookError = Schema.is(PlaybookError);
-const isMissingThread = Schema.is(ProjectionStoreThreadNotFoundError);
 const missing = () =>
   HttpServerResponse.jsonUnsafe(
     {
@@ -79,29 +72,9 @@ export const playbookLibraryHttpRouteLayer = Layer.unwrap(
     const projects = yield* ProjectService;
     const threads = yield* ThreadManagementService;
     const workspaceRoot = (input: PlaybookLibraryRequest) =>
-      Effect.gen(function* () {
-        const project = yield* projects
-          .getById(input.projectId)
-          .pipe(Effect.catch((error) => failEnvironmentInternal("internal_error", error)));
-        if (Option.isNone(project) || project.value.deletedAt !== null) return null;
-        let root = project.value.workspaceRoot;
-        if (input.threadId !== undefined) {
-          const projection = yield* threads.getThreadProjection(input.threadId).pipe(
-            Effect.catchTag("OrchestratorProjectionError", (error) =>
-              isMissingThread(error.cause) ? Effect.succeed(null) : Effect.fail(error),
-            ),
-            Effect.catch((error) => failEnvironmentInternal("internal_error", error)),
-          );
-          if (
-            !projection ||
-            projection.thread.deletedAt !== null ||
-            projection.thread.projectId !== project.value.id
-          )
-            return null;
-          root = projection.thread.worktreePath ?? root;
-        }
-        return root;
-      });
+      resolvePlaybookWorkspaceRoot(projects, threads, input).pipe(
+        Effect.catch((error) => failEnvironmentInternal("internal_error", error)),
+      );
     const libraryRoute = HttpRouter.add(
       "POST",
       PLAYBOOK_LIBRARY_PATH,
@@ -151,30 +124,6 @@ export const playbookLibraryHttpRouteLayer = Layer.unwrap(
         }),
       ),
     );
-    const exportRoute = HttpRouter.add(
-      "POST",
-      PLAYBOOK_EXPORT_PATH,
-      Effect.gen(function* () {
-        yield* annotateEnvironmentRequest("j5.playbooks.export");
-        const request = yield* HttpServerRequest.HttpServerRequest;
-        yield* authenticateClientRead;
-        const body = yield* Effect.result(request.json.pipe(Effect.flatMap(decodeExportRequest)));
-        if (Result.isFailure(body)) return invalidRequest("Select a playbook in this workspace.");
-        const root = yield* workspaceRoot(body.success);
-        if (root === null) return missing();
-        return yield* store.exportDefinition(root, body.success.name).pipe(
-          Effect.flatMap(encodeExportResponse),
-          Effect.map((data) => HttpServerResponse.jsonUnsafe(data)),
-          Effect.catch(mutationError),
-        );
-      }).pipe(
-        Effect.catchTags({
-          EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
-          EnvironmentInternalError: HttpServerRespondable.toResponse,
-          EnvironmentScopeRequiredError: HttpServerRespondable.toResponse,
-        }),
-      ),
-    );
     const renameRoute = HttpRouter.add(
       "POST",
       PLAYBOOK_RENAME_PATH,
@@ -200,6 +149,6 @@ export const playbookLibraryHttpRouteLayer = Layer.unwrap(
         }),
       ),
     );
-    return Layer.mergeAll(libraryRoute, exportRoute, deleteRoute, renameRoute);
+    return Layer.mergeAll(libraryRoute, deleteRoute, renameRoute);
   }),
 );

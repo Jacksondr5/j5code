@@ -1,19 +1,50 @@
 import { AuthOrchestrationReadScope } from "@t3tools/contracts";
-import { J5_PLAYBOOK_WS_METHODS } from "@t3tools/contracts/j5";
-import type { ObserveRpcStream } from "../agents/agentPersonaRpc.ts";
-import type { PlaybookStore } from "./PlaybookStore.ts";
+import { J5_PLAYBOOK_WS_METHODS, type PlaybookExportRequest } from "@t3tools/contracts/j5";
+import * as Effect from "effect/Effect";
+import { ProjectService } from "../../project/ProjectService.ts";
+import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
+import type { ObserveRpcEffect, ObserveRpcStream } from "../agents/agentPersonaRpc.ts";
+import { playbookError, type PlaybookStore } from "./PlaybookStore.ts";
+import { resolvePlaybookWorkspaceRoot } from "./workspaceRoot.ts";
 
 export const PLAYBOOK_RPC_SCOPES = {
   [J5_PLAYBOOK_WS_METHODS.subscribeChanges]: AuthOrchestrationReadScope,
+  [J5_PLAYBOOK_WS_METHODS.exportPlaybook]: AuthOrchestrationReadScope,
 } as const;
 
-/** Share the server's store revision through the authenticated WebSocket connection. */
-export function makePlaybookRpcHandlers(
-  store: Pick<PlaybookStore["Service"], "changes">,
-  observeStream: ObserveRpcStream,
-) {
+/** Share the server's store revision through the authenticated WebSocket connection and export definitions. */
+export const makePlaybookRpcHandlers = Effect.fn("makePlaybookRpcHandlers")(function* (options: {
+  readonly store: Pick<PlaybookStore["Service"], "changes" | "exportDefinition">;
+  readonly observeStream: ObserveRpcStream;
+  readonly observe: ObserveRpcEffect;
+}) {
+  const projects = yield* ProjectService;
+  const threads = yield* ThreadManagementService;
+  const { store, observeStream, observe } = options;
   return {
     [J5_PLAYBOOK_WS_METHODS.subscribeChanges]: () =>
       observeStream(J5_PLAYBOOK_WS_METHODS.subscribeChanges, store.changes),
+    [J5_PLAYBOOK_WS_METHODS.exportPlaybook]: (input: PlaybookExportRequest) =>
+      observe(
+        J5_PLAYBOOK_WS_METHODS.exportPlaybook,
+        resolvePlaybookWorkspaceRoot(projects, threads, input).pipe(
+          Effect.mapError((error) =>
+            playbookError(
+              "operation_failed",
+              error instanceof Error ? error.message : "Could not resolve the workspace.",
+            ),
+          ),
+          Effect.flatMap((root) =>
+            root === null
+              ? Effect.fail(
+                  playbookError(
+                    "workspace_not_found",
+                    "This project or thread workspace is no longer available.",
+                  ),
+                )
+              : store.exportDefinition(root, input.name),
+          ),
+        ),
+      ),
   };
-}
+});

@@ -22,6 +22,8 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as Stream from "effect/Stream";
 import { parse, stringify } from "yaml";
 
+import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
+import { ProjectService } from "../../project/ProjectService.ts";
 import { runJ5A2AMigrations } from "../a2a/Migrations.ts";
 import { makePlaybookStore, type PlaybookMutation } from "./PlaybookStore.ts";
 import { makePlaybookRpcHandlers, PLAYBOOK_RPC_SCOPES } from "./playbookRpc.ts";
@@ -74,7 +76,15 @@ it.effect(
         revision: number;
         runs: ReadonlyArray<PlaybookProgress>;
       }>();
-      const handlers = makePlaybookRpcHandlers(store, (_method, stream) => stream);
+      const handlers = yield* makePlaybookRpcHandlers({
+        store,
+        observeStream: (_method, stream) => stream,
+        observe: (_method, effect) => effect,
+      }).pipe(
+        Effect.provide(
+          Layer.merge(Layer.mock(ProjectService)({}), Layer.mock(ThreadManagementService)({})),
+        ),
+      );
       assert.equal(
         PLAYBOOK_RPC_SCOPES[J5_PLAYBOOK_WS_METHODS.subscribeChanges],
         AuthOrchestrationReadScope,

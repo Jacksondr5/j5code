@@ -10,7 +10,6 @@ import type {
   FleetReadRequest,
   PlaybookLibraryRequest,
   PlaybookDeleteRequest,
-  PlaybookExportRequest,
   PlaybookRenameRequest,
   PlaybookRunsRequest,
 } from "@t3tools/contracts/j5";
@@ -25,6 +24,7 @@ import { EnvironmentSupervisor } from "../connection/supervisor.ts";
 import {
   createEnvironmentCommand,
   createEnvironmentQueryAtomFamily,
+  createEnvironmentRpcCommand,
   createEnvironmentRpcSubscriptionAtomFamily,
 } from "../state/runtime.ts";
 import * as J5Http from "./http.ts";
@@ -82,12 +82,9 @@ export function createJ5EnvironmentAtoms<R, E>(
           Effect.flatMap((prepared) => J5Http.deletePlaybook(prepared, input)),
         ),
     }),
-    exportPlaybook: createEnvironmentCommand(runtime, {
+    exportPlaybook: createEnvironmentRpcCommand(runtime, {
       label: "j5:export-playbook",
-      execute: (input: PlaybookExportRequest) =>
-        preparedConnection.pipe(
-          Effect.flatMap((prepared) => J5Http.exportPlaybook(prepared, input)),
-        ),
+      tag: J5_PLAYBOOK_WS_METHODS.exportPlaybook,
     }),
     renamePlaybook: createEnvironmentCommand(runtime, {
       label: "j5:rename-playbook",
