@@ -6,6 +6,7 @@ import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
+import * as Result from "effect/Result";
 
 import {
   McpInvocationContext,
@@ -467,7 +468,7 @@ export const crewSeatFromInput = (seat: J5ProposeCrewInput["seats"][number]) => 
   ...(seat.model_selection === undefined ? {} : { modelSelection: seat.model_selection }),
   ...(seat.runtime_mode === undefined ? {} : { runtimeMode: seat.runtime_mode }),
   ...(seat.steps === undefined ? {} : { steps: seat.steps }),
-  ...(seat.workspace === undefined ? {} : { workspace: spawnWorkspaceFromInput(seat.workspace) }),
+  workspace: spawnWorkspaceFromInput(seat.workspace),
 });
 
 const handlers = {
@@ -759,24 +760,29 @@ const handlers = {
       };
       const threadId = spawnThreadId(stableInput);
       const spawnWorkspace = yield* SpawnWorkspaceService;
-      const choice =
-        input.workspace === undefined ? undefined : spawnWorkspaceFromInput(input.workspace);
+      const choice = spawnWorkspaceFromInput(input.workspace);
       // A replay must not refuse the branch its own first attempt created, so a named branch is
       // checked for only before the thread exists.
-      const listBranches =
-        choice?.type === "worktree" &&
+      const checkBranches =
+        choice.type === "worktree" &&
         choice.branch !== undefined &&
         (yield* threadManagement
           .getThreadShell(threadId)
           .pipe(Effect.orElseSucceed(() => null))) === null;
-      const checkout = yield* spawnWorkspace.inspect({
-        projectId: parent.thread.projectId,
-        worktreePath: parent.thread.worktreePath,
-        listBranches,
-        baseRefs: namedBaseRefs([choice]),
-      });
+      // Sharing the caller's checkout asks nothing of git.
+      const checkout =
+        choice.type === "shared"
+          ? null
+          : yield* spawnWorkspace.inspect({
+              projectId: parent.thread.projectId,
+              worktreePath: parent.thread.worktreePath,
+              checkBranches,
+              baseRefs: namedBaseRefs([choice]),
+            });
       const workspace = yield* Effect.fromResult(
-        resolveSpawnWorkspace(checkout, choice, "spawn"),
+        checkout === null
+          ? Result.succeed({ type: "shared" } as const)
+          : resolveSpawnWorkspace(checkout, choice),
       ).pipe(
         Effect.mapError((error) =>
           stateError(`Peer Agent was not created: ${error.detail}`, error.nextStep),
@@ -956,9 +962,7 @@ const handlers = {
               : { modelSelection: input.model_selection }),
             ...(input.runtime_mode === undefined ? {} : { runtimeMode: input.runtime_mode }),
             ...(input.steps === undefined ? {} : { steps: input.steps }),
-            ...(input.workspace === undefined
-              ? {}
-              : { workspace: spawnWorkspaceFromInput(input.workspace) }),
+            workspace: spawnWorkspaceFromInput(input.workspace),
           },
           brief: input.brief ?? null,
         })

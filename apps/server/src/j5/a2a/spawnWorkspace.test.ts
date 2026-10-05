@@ -48,75 +48,71 @@ import {
 } from "./spawnWorkspace.ts";
 import { type FakeCheckout, fakeSpawnWorkspaceLayer } from "./test-support/spawnWorkspaceFakes.ts";
 
-const checkout = (overrides: Partial<SpawnCheckout> = {}): SpawnCheckout => ({
-  inWorktree: false,
-  isRepo: true,
-  refName: "j5/main",
+const checkout = (
+  overrides: Partial<Extract<SpawnCheckout, { readonly readable: true }>> = {},
+): SpawnCheckout => ({
+  readable: true,
+  currentBranch: "j5/main",
+  branches: ["j5/main", "taken"],
+  branchesTruncated: false,
+  worktrees: [{ path: "/repo-worktrees/feature", branch: "fix/login" }],
   localBranchNames: ["j5/main", "taken"],
   missingBaseRefs: [],
-  problem: null,
   ...overrides,
 });
 
-it("defaults spawns to a worktree and seats to their Captain's worktree, where git allows", () => {
+it("resolves each explicit choice; only shared asks nothing of git", () => {
   const resolve = (...args: Parameters<typeof resolveSpawnWorkspace>) =>
     Result.getOrThrow(resolveSpawnWorkspace(...args));
-  const fresh = { type: "worktree", baseRef: "j5/main", startFromOrigin: false } as const;
-  // Root-checkout threads record no branch; the live checkout decides.
-  assert.deepStrictEqual(resolve(checkout(), undefined, "spawn"), fresh);
-  assert.deepStrictEqual(resolve(checkout(), undefined, "seat"), fresh);
-  assert.deepStrictEqual(resolve(checkout({ inWorktree: true }), undefined, "spawn"), fresh);
-  assert.deepStrictEqual(resolve(checkout({ inWorktree: true }), undefined, "seat"), {
-    type: "shared",
-  });
-  for (const door of ["spawn", "seat"] as const) {
-    assert.deepStrictEqual(resolve(checkout({ isRepo: false, refName: null }), undefined, door), {
-      type: "shared",
-    });
-    assert.deepStrictEqual(resolve(checkout({ refName: null }), undefined, door), {
-      type: "shared",
-    });
-  }
-  assert.deepStrictEqual(resolve(checkout(), { type: "shared" }, "spawn"), { type: "shared" });
+  const unreadable: SpawnCheckout = { readable: false, problem: "git is not installed" };
+  assert.deepStrictEqual(resolve(unreadable, { type: "shared" }), { type: "shared" });
   assert.deepStrictEqual(
-    resolve(
-      checkout({ inWorktree: true }),
-      { type: "worktree", baseRef: "release", branch: "fix/login", startFromOrigin: true },
-      "seat",
-    ),
-    { type: "worktree", baseRef: "release", branch: "fix/login", startFromOrigin: true },
+    resolve(checkout(), {
+      type: "worktree",
+      baseRef: "release",
+      branch: "fix/new",
+      startFromOrigin: true,
+    }),
+    { type: "worktree", baseRef: "release", branch: "fix/new", startFromOrigin: true },
+  );
+  assert.deepStrictEqual(resolve(checkout(), { type: "worktree", baseRef: "j5/main" }), {
+    type: "worktree",
+    baseRef: "j5/main",
+    startFromOrigin: false,
+  });
+  // An existing worktree resolves to git's own path and the branch checked out there.
+  assert.deepStrictEqual(
+    resolve(checkout(), { type: "existing_worktree", worktreePath: "/repo-worktrees/feature/" }),
+    { type: "existing_worktree", worktreePath: "/repo-worktrees/feature", branch: "fix/login" },
   );
 });
 
-it("refuses an explicit worktree git cannot make, with the next step", () => {
+it("refuses a choice git can't give, with the next step", () => {
   const refusal = (...args: Parameters<typeof resolveSpawnWorkspace>) => {
     const result = resolveSpawnWorkspace(...args);
     assert.isTrue(Result.isFailure(result));
     return Result.isFailure(result) ? result.failure : undefined;
   };
-  const notRepo = refusal(
-    checkout({ isRepo: false, refName: null, problem: "git is not installed" }),
-    { type: "worktree" },
-    "spawn",
+  // An unreadable repository refuses rather than falling back to the caller's checkout.
+  const unreadable = refusal(
+    { readable: false, problem: "git is not installed" },
+    { type: "worktree", baseRef: "j5/main" },
   );
-  assert.include(notRepo?.detail, "not a git repository (git is not installed)");
-  assert.include(notRepo?.nextStep, '{"type":"shared"}');
+  assert.include(unreadable?.detail, "can't be read (git is not installed)");
+  assert.include(unreadable?.nextStep, '{"type":"shared"}');
   assert.include(
-    refusal(checkout({ refName: null }), { type: "worktree" }, "spawn")?.nextStep,
-    "workspace.base_ref",
-  );
-  assert.isTrue(
-    Result.isSuccess(
-      resolveSpawnWorkspace(
-        checkout({ refName: null }),
-        { type: "worktree", baseRef: "v1" },
-        "seat",
-      ),
-    ),
-  );
-  assert.include(
-    refusal(checkout(), { type: "worktree", branch: "taken" }, "spawn")?.detail,
+    refusal(checkout(), { type: "worktree", baseRef: "j5/main", branch: "taken" })?.detail,
     "Branch 'taken' already exists",
+  );
+  const unknown = refusal(checkout(), { type: "existing_worktree", worktreePath: "/repo" });
+  assert.include(unknown?.detail, "isn't one of this project's worktrees");
+  assert.include(unknown?.detail, "/repo-worktrees/feature");
+  assert.include(
+    refusal(checkout({ worktrees: [] }), {
+      type: "existing_worktree",
+      worktreePath: "/repo-worktrees/feature",
+    })?.detail,
+    "The project has none",
   );
 });
 
@@ -314,15 +310,16 @@ const spawnArgs = {
   provider: ProviderInstanceId.make("codex"),
   model: "gpt-5.6-sol",
   reasoning: "high",
+  workspace: { type: "worktree", base_ref: "j5/main" },
 } satisfies J5SpawnAgentInput;
 
-it.effect("spawns into a fresh worktree by default, keeping home, placement, and result", () =>
+it.effect("spawns into a new worktree from base_ref, keeping home, placement, and result", () =>
   Effect.gen(function* () {
     const { layer, call, log, commands, launches } = yield* spawnHarness({
       checkout: { isRepo: true, refName: "j5/main" },
     });
     yield* Effect.gen(function* () {
-      const spawned = yield* call({ ...spawnArgs, client_request_id: "default-worktree" });
+      const spawned = yield* call({ ...spawnArgs, client_request_id: "new-worktree" });
       assert.isFalse(spawned.isFailure);
       const result = spawned.result as { readonly thread_id: ThreadId };
       assert.deepStrictEqual(spawned.result, {
@@ -415,7 +412,7 @@ it.effect("binds a client_request_id to its first workspace type, across a resta
       assert.isTrue(switched.isFailure);
       assert.include(
         (switched.result as { readonly message: string }).message,
-        "already bound to a worktree workspace",
+        'already bound to workspace {"type":"worktree"}',
       );
       assert.lengthOf(yield* Ref.get(restarted.commands), 1);
 
@@ -456,7 +453,11 @@ it.effect("a second start on one key while the first is in flight is refused, no
     });
     yield* Effect.gen(function* () {
       const winner = yield* harness
-        .call({ ...spawnArgs, workspace: { type: "worktree" }, client_request_id: "raced" })
+        .call({
+          ...spawnArgs,
+          workspace: { type: "worktree", base_ref: "j5/main" },
+          client_request_id: "raced",
+        })
         .pipe(Effect.forkChild);
       // The first start is in flight, stopped inside its create.
       yield* Deferred.await(createEntered);
@@ -510,9 +511,7 @@ it("refuses a git ref git would read as an option, in both the MCP and stored fo
     assert.isTrue(Exit.isFailure(stored({ type: "worktree", baseRef: ref })));
     // The person's card edits use the unconstrained client contract; the resolver refuses too.
     assert.isTrue(
-      Result.isFailure(
-        resolveSpawnWorkspace(checkout(), { type: "worktree", baseRef: ref }, "seat"),
-      ),
+      Result.isFailure(resolveSpawnWorkspace(checkout(), { type: "worktree", baseRef: ref })),
     );
   }
   for (const ref of ["j5/main", "release-1.2", "feature/a-b"])
@@ -558,6 +557,67 @@ it.effect("refuses a base ref git can't resolve before anything is created", () 
       });
       assert.isFalse(fromOrigin.isFailure);
       assert.lengthOf(yield* Ref.get(launches), 1);
+    }).pipe(Effect.provide(layer));
+  }),
+);
+
+const decodeSpawnInput = Schema.decodeUnknownExit(J5SpawnAgentInput);
+
+it("requires a workspace on every spawn", () => {
+  const { workspace: _workspace, ...withoutWorkspace } = spawnArgs;
+  assert.isTrue(Exit.isFailure(decodeSpawnInput(withoutWorkspace)));
+  assert.isTrue(
+    Exit.isFailure(
+      decodeSpawnInput({
+        ...spawnArgs,
+        workspace: { type: "worktree" },
+      }),
+    ),
+  );
+});
+
+it.effect("spawns into an existing worktree on its branch, with no preparation", () =>
+  Effect.gen(function* () {
+    const { layer, call, log, commands, launches } = yield* spawnHarness({
+      checkout: {
+        isRepo: true,
+        refName: "j5/main",
+        worktrees: [{ path: "/repo-worktrees/builder", branch: "fix/login" }],
+      },
+    });
+    yield* Effect.gen(function* () {
+      const spawned = yield* call({
+        ...spawnArgs,
+        workspace: { type: "existing_worktree", worktree_path: "/repo-worktrees/builder" },
+        client_request_id: "existing",
+      });
+      assert.isFalse(spawned.isFailure);
+      assert.deepStrictEqual(yield* Ref.get(log), ["thread.create", "facts", "message.dispatch"]);
+      const [create] = yield* Ref.get(commands);
+      if (create?.type === "thread.create") {
+        assert.equal(create.worktreePath, "/repo-worktrees/builder");
+        assert.equal(create.branch, "fix/login");
+        assert.include(create.commandId, "spawn-create-existing");
+      }
+      assert.lengthOf(yield* Ref.get(launches), 0);
+      // The key is now bound to the existing worktree; a new-worktree retry is refused.
+      const switched = yield* call({ ...spawnArgs, client_request_id: "existing" });
+      assert.isTrue(switched.isFailure);
+      assert.include(
+        (switched.result as { readonly message: string }).message,
+        'already bound to workspace {"type":"existing_worktree"}',
+      );
+      const elsewhere = yield* call({
+        ...spawnArgs,
+        workspace: { type: "existing_worktree", worktree_path: "/tmp/not-a-worktree" },
+        client_request_id: "elsewhere",
+      });
+      assert.isTrue(elsewhere.isFailure);
+      assert.include(
+        (elsewhere.result as { readonly message: string }).message,
+        "Its worktrees: /repo-worktrees/builder",
+      );
+      assert.lengthOf(yield* Ref.get(commands), 2);
     }).pipe(Effect.provide(layer));
   }),
 );

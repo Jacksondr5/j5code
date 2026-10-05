@@ -18,6 +18,7 @@ const definition = {
 const catalog = { definitions: [{ id: "builder-bot" }], disabledIds: ["builder-bot"] };
 const seat = (name: string, agentId: string | null, steps?: ReadonlyArray<string>) =>
   ({
+    workspace: { type: "shared" as const },
     seat: name,
     agentId,
     reason: "Holds a seat",
@@ -136,7 +137,14 @@ describe("crewApprovalToken", () => {
       },
     } as unknown as CrewCaptain;
     const seats = [
-      { seat: { name: "helper", agentId: null, reason: "Helps" } },
+      {
+        seat: {
+          workspace: { type: "shared" as const },
+          name: "helper",
+          agentId: null,
+          reason: "Helps",
+        },
+      },
     ] as unknown as ReadonlyArray<ResolvedCrewLaunchSeat>;
     const before = NodeCrypto.createHash("sha256")
       .update(

@@ -129,7 +129,12 @@ const runEvent = (threadId: ThreadId, facts: RunFacts): OrchestrationV2StoredEve
     },
   }) as unknown as OrchestrationV2StoredEvent;
 
-const seat = (name: string, agentId: string) => ({ seat: name, agentId, reason: `${name} works` });
+const seat = (name: string, agentId: string) => ({
+  workspace: { type: "shared" as const },
+  seat: name,
+  agentId,
+  reason: `${name} works`,
+});
 
 /**
  * With `daemon`, the production layer runs its sweep and stream against these reads. With
@@ -421,6 +426,7 @@ it.effect(
 const reseated = (name: string) => {
   const threadId = ThreadId.make(`thread:reseated:${name}`);
   return {
+    workspace: { type: "shared" as const },
     seatName: name,
     agentId: "scout",
     participantId: participantIdForThread(threadId),

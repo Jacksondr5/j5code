@@ -48,7 +48,7 @@ it("publishes the ratified single-target lifecycle contracts fail-closed", () =>
   };
   assert.sameMembers(
     [...(spawnSchema.required ?? [])],
-    ["brief", "provider", "model", "reasoning"],
+    ["brief", "provider", "model", "reasoning", "workspace"],
   );
   assert.sameMembers([...(stopSchema.required ?? [])], ["squadron_id", "participant_id"]);
   assert.property(spawnSchema.properties ?? {}, "client_request_id");
@@ -128,6 +128,7 @@ it("publishes every tool with a top-level object input schema", () => {
 
 it("accepts explicit custom seat settings through both crew tools without requiring a persona", () => {
   const custom = {
+    workspace: { type: "shared" as const },
     seat: "reviewer",
     reason: "Review correctness",
     instructions: "Report findings and evidence.",

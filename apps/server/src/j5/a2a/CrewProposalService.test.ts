@@ -109,9 +109,23 @@ const decodeProposeCrewInput = Schema.decodeUnknownEffect(J5ProposeCrewInput);
 
 /** The launcher's resolution is tested on its own; here a seat's choice passes through as given. */
 const fakeWorkspace = (seat: CrewLaunchSeat): ResolvedSpawnWorkspace =>
-  seat.workspace?.type === "worktree"
-    ? { type: "worktree", baseRef: seat.workspace.baseRef ?? "main", startFromOrigin: false }
-    : { type: "shared" };
+  seat.workspace.type === "worktree"
+    ? { type: "worktree", baseRef: seat.workspace.baseRef, startFromOrigin: false }
+    : seat.workspace.type === "existing_worktree"
+      ? {
+          type: "existing_worktree",
+          worktreePath: seat.workspace.worktreePath,
+          branch: "fix/login",
+        }
+      : { type: "shared" };
+
+/** What the fake launcher offers the card: the Captain on main, with one worktree. */
+const fakeWorkspaceOptions = {
+  currentBranch: "main",
+  branches: ["main", "release"],
+  branchesTruncated: false,
+  worktrees: [{ path: "/repo-worktrees/feature", branch: "fix/login" }],
+};
 
 /**
  * The launcher is exercised by its own test; here it records members so the gate can be proven.
@@ -120,6 +134,7 @@ const fakeWorkspace = (seat: CrewLaunchSeat): ResolvedSpawnWorkspace =>
  */
 const fakeLauncher = (crews: AgentCrewInstanceService["Service"]) =>
   Layer.mock(CrewLaunchService)({
+    workspaceOptions: () => Effect.succeed(fakeWorkspaceOptions),
     resolveSeats: (captain, seats) =>
       Effect.succeed(
         seats.map(
@@ -259,6 +274,7 @@ const seedCrew = (gate: CrewProposalService["Service"], requestKey: string, size
       displayName: `Crew ${requestKey}`,
       brief: "Fill the seats.",
       seats: Array.from({ length: size }, (_, index) => ({
+        workspace: { type: "shared" as const },
         seat: `s${index}`,
         agentId: "scout",
         reason: "Holds a seat",
@@ -414,8 +430,18 @@ it.effect(
         const gate = withPreview(yield* CrewProposalService);
         const store = yield* AgentCrewProposalService;
         const seats = [
-          { seat: "builder", agentId: "builder", reason: "Implements the fix" },
-          { seat: "critic", agentId: "critic", reason: "Reviews it" },
+          {
+            workspace: { type: "shared" as const },
+            seat: "builder",
+            agentId: "builder",
+            reason: "Implements the fix",
+          },
+          {
+            workspace: { type: "shared" as const },
+            seat: "critic",
+            agentId: "critic",
+            reason: "Reviews it",
+          },
         ];
         const open = yield* gate.propose({
           requestKey: "propose-1",
@@ -444,7 +470,12 @@ it.effect(
           decision: "approve",
           seats: [
             ...seats,
-            { seat: "sentry", agentId: "sentry", reason: "Human added a security pass" },
+            {
+              workspace: { type: "shared" as const },
+              seat: "sentry",
+              agentId: "sentry",
+              reason: "Human added a security pass",
+            },
           ],
         });
         assert.equal(approved.proposal.status, "approved");
@@ -479,7 +510,14 @@ it.effect("gates every roster on the human and gates additions with the seat cap
         captain,
         displayName: "Release Crew",
         brief: "Follow the release runbook.",
-        seats: [{ seat: "builder", agentId: "builder", reason: "Release step 1" }],
+        seats: [
+          {
+            workspace: { type: "shared" as const },
+            seat: "builder",
+            agentId: "builder",
+            reason: "Release step 1",
+          },
+        ],
       });
       assert.equal(opened.proposal.status, "open");
       assert.isNull(opened.instance);
@@ -494,7 +532,12 @@ it.effect("gates every roster on the human and gates additions with the seat cap
         requestKey: "add-1",
         captain,
         crewInstanceId: null,
-        seat: { seat: "critic", agentId: "critic", reason: "Needs review" },
+        seat: {
+          workspace: { type: "shared" as const },
+          seat: "critic",
+          agentId: "critic",
+          reason: "Needs review",
+        },
         brief: null,
       });
       assert.equal(request.proposal.status, "open");
@@ -507,7 +550,12 @@ it.effect("gates every roster on the human and gates additions with the seat cap
           requestKey: "add-2",
           captain,
           crewInstanceId: instance.id,
-          seat: { seat: "builder", agentId: "scout", reason: "Duplicate seat name" },
+          seat: {
+            workspace: { type: "shared" as const },
+            seat: "builder",
+            agentId: "scout",
+            reason: "Duplicate seat name",
+          },
           brief: null,
         })
         .pipe(Effect.flip);
@@ -518,7 +566,12 @@ it.effect("gates every roster on the human and gates additions with the seat cap
           requestKey: "add-3",
           captain,
           crewInstanceId: instance.id,
-          seat: { seat: "ghost", agentId: "nobody", reason: "Not in library" },
+          seat: {
+            workspace: { type: "shared" as const },
+            seat: "ghost",
+            agentId: "nobody",
+            reason: "Not in library",
+          },
           brief: null,
         })
         .pipe(Effect.flip);
@@ -530,7 +583,12 @@ it.effect("gates every roster on the human and gates additions with the seat cap
           requestKey: "add-custom-bare",
           captain,
           crewInstanceId: instance.id,
-          seat: { seat: "scribe", agentId: null, reason: "Keeps notes" },
+          seat: {
+            workspace: { type: "shared" as const },
+            seat: "scribe",
+            agentId: null,
+            reason: "Keeps notes",
+          },
           brief: null,
         })
         .pipe(Effect.flip);
@@ -541,7 +599,13 @@ it.effect("gates every roster on the human and gates additions with the seat cap
           requestKey: "add-custom-blank",
           captain,
           crewInstanceId: instance.id,
-          seat: { seat: "scribe", agentId: null, reason: "Keeps notes", instructions: " \n\t " },
+          seat: {
+            workspace: { type: "shared" as const },
+            seat: "scribe",
+            agentId: null,
+            reason: "Keeps notes",
+            instructions: " \n\t ",
+          },
           brief: null,
         })
         .pipe(Effect.flip);
@@ -553,6 +617,7 @@ it.effect("gates every roster on the human and gates additions with the seat cap
         captain,
         crewInstanceId: instance.id,
         seat: {
+          workspace: { type: "shared" as const },
           seat: "scribe",
           agentId: null,
           reason: "Keeps notes",
@@ -580,6 +645,7 @@ it.effect("gates every roster on the human and gates additions with the seat cap
           displayName: "Too Big",
           brief: "x",
           seats: Array.from({ length: CREW_SEAT_CAP + 1 }, (_, index) => ({
+            workspace: { type: "shared" as const },
             seat: `s${index}`,
             agentId: "scout",
             reason: "r",
@@ -593,7 +659,12 @@ it.effect("gates every roster on the human and gates additions with the seat cap
           requestKey: "add-4",
           captain: { ...captain, participantId: ParticipantId.make("agent:j5:a2a:thread:other") },
           crewInstanceId: instance.id,
-          seat: { seat: "x", agentId: "scout", reason: "r" },
+          seat: {
+            workspace: { type: "shared" as const },
+            seat: "x",
+            agentId: "scout",
+            reason: "r",
+          },
           brief: null,
         })
         .pipe(Effect.flip);
@@ -617,7 +688,14 @@ it.effect(
           captain,
           displayName: "Boom",
           brief: "This launch fails.",
-          seats: [{ seat: "builder", agentId: "builder", reason: "r" }],
+          seats: [
+            {
+              workspace: { type: "shared" as const },
+              seat: "builder",
+              agentId: "builder",
+              reason: "r",
+            },
+          ],
         });
         const failed = yield* gate
           .resolve({ proposalId: boom.proposal.id, decision: "approve" })
@@ -630,7 +708,14 @@ it.effect(
           captain,
           displayName: "Claim Crew",
           brief: "Build it.",
-          seats: [{ seat: "builder", agentId: "builder", reason: "Builds" }],
+          seats: [
+            {
+              workspace: { type: "shared" as const },
+              seat: "builder",
+              agentId: "builder",
+              reason: "Builds",
+            },
+          ],
         });
         const approved = yield* gate.resolve({
           proposalId: roster.proposal.id,
@@ -650,14 +735,26 @@ it.effect(
           requestKey: "claim-add-1",
           captain,
           crewInstanceId: approved.instance!.id,
-          seat: { seat: "critic", agentId: "critic", reason: "Reviews" },
+          seat: {
+            workspace: { type: "shared" as const },
+            seat: "critic",
+            agentId: "critic",
+            reason: "Reviews",
+          },
           brief: null,
         });
         const duplicate = yield* gate
           .resolve({
             proposalId: addition.proposal.id,
             decision: "approve",
-            seats: [{ seat: "builder", agentId: "critic", reason: "Renamed on the card" }],
+            seats: [
+              {
+                workspace: { type: "shared" as const },
+                seat: "builder",
+                agentId: "critic",
+                reason: "Renamed on the card",
+              },
+            ],
           })
           .pipe(Effect.flip);
         assert.include(duplicate.message, "already has a seat named builder");
@@ -673,7 +770,12 @@ it.effect(
           requestKey: "flaky-add-1",
           captain,
           crewInstanceId: approved.instance!.id,
-          seat: { seat: "sentry", agentId: "critic", reason: "Security pass" },
+          seat: {
+            workspace: { type: "shared" as const },
+            seat: "sentry",
+            agentId: "critic",
+            reason: "Security pass",
+          },
           brief: null,
         });
         yield* Ref.set(resolveFailure, true);
@@ -701,7 +803,12 @@ it.effect(
             requestKey: "clash-add-1",
             captain,
             crewInstanceId: approved.instance!.id,
-            seat: { seat: "sentry", agentId: "critic", reason: "r" },
+            seat: {
+              workspace: { type: "shared" as const },
+              seat: "sentry",
+              agentId: "critic",
+              reason: "r",
+            },
             brief: null,
           })
           .pipe(Effect.flip);
@@ -721,7 +828,14 @@ it.effect("holds every door to the same seat shape and seats nobody into a retir
         captain,
         displayName: "Shape Crew",
         brief: "Mind the names.",
-        seats: [{ seat: "builder", agentId: "builder", reason: "Builds" }],
+        seats: [
+          {
+            workspace: { type: "shared" as const },
+            seat: "builder",
+            agentId: "builder",
+            reason: "Builds",
+          },
+        ],
       });
       // The card can submit any string; the rule the MCP schema enforces holds here too.
       for (const seat of ["", "Two Words", "colon:name", "x".repeat(101)]) {
@@ -729,7 +843,14 @@ it.effect("holds every door to the same seat shape and seats nobody into a retir
           .resolve({
             proposalId: opened.proposal.id,
             decision: "approve",
-            seats: [{ seat, agentId: "builder", reason: "Builds" }],
+            seats: [
+              {
+                workspace: { type: "shared" as const },
+                seat,
+                agentId: "builder",
+                reason: "Builds",
+              },
+            ],
           })
           .pipe(Effect.flip);
         assert.equal(refused._tag, "CrewProposalRequestError", seat);
@@ -738,7 +859,14 @@ it.effect("holds every door to the same seat shape and seats nobody into a retir
         .resolve({
           proposalId: opened.proposal.id,
           decision: "approve",
-          seats: [{ seat: "builder", agentId: "builder", reason: "r".repeat(501) }],
+          seats: [
+            {
+              workspace: { type: "shared" as const },
+              seat: "builder",
+              agentId: "builder",
+              reason: "r".repeat(501),
+            },
+          ],
         })
         .pipe(Effect.flip);
       assert.equal(tooLong._tag, "CrewProposalRequestError");
@@ -748,11 +876,23 @@ it.effect("holds every door to the same seat shape and seats nobody into a retir
         requestKey: "shape-add-1",
         captain,
         crewInstanceId: approved.instance!.id,
-        seat: { seat: "critic", agentId: "critic", reason: "Reviews" },
+        seat: {
+          workspace: { type: "shared" as const },
+          seat: "critic",
+          agentId: "critic",
+          reason: "Reviews",
+        },
         brief: null,
       });
       const rawGate = yield* CrewProposalService;
-      const duplicateSeats = [{ seat: "builder", agentId: "critic", reason: "Already held" }];
+      const duplicateSeats = [
+        {
+          workspace: { type: "shared" as const },
+          seat: "builder",
+          agentId: "critic",
+          reason: "Already held",
+        },
+      ];
       const duplicatePreview = yield* rawGate
         .preview({ proposalId: addition.proposal.id, seats: duplicateSeats })
         .pipe(Effect.flip);
@@ -795,8 +935,18 @@ it.effect("a decision that races another device's on the same gate is refused, n
         displayName: "Race Pair",
         brief: "Two devices decide at once.",
         seats: [
-          { seat: "builder", agentId: "builder", reason: "Builds" },
-          { seat: "critic", agentId: "critic", reason: "Reviews" },
+          {
+            workspace: { type: "shared" as const },
+            seat: "builder",
+            agentId: "builder",
+            reason: "Builds",
+          },
+          {
+            workspace: { type: "shared" as const },
+            seat: "critic",
+            agentId: "critic",
+            reason: "Reviews",
+          },
         ],
       });
       // Device A approves while device B declines: exactly one resolution lands.
@@ -842,8 +992,18 @@ it.effect(
           displayName: "Boom after record",
           brief: "The second seat never spawns.",
           seats: [
-            { seat: "builder", agentId: "builder", reason: "Builds" },
-            { seat: "critic", agentId: "critic", reason: "Reviews" },
+            {
+              workspace: { type: "shared" as const },
+              seat: "builder",
+              agentId: "builder",
+              reason: "Builds",
+            },
+            {
+              workspace: { type: "shared" as const },
+              seat: "critic",
+              agentId: "critic",
+              reason: "Reviews",
+            },
           ],
         });
         // The approval resolves the card even though one seat was never created.
@@ -886,7 +1046,14 @@ it.effect("a failed decline notice leaves the decision retryable", () =>
         captain,
         displayName: "Review",
         brief: "Review the change",
-        seats: [{ seat: "critic", agentId: "critic", reason: "Review" }],
+        seats: [
+          {
+            workspace: { type: "shared" as const },
+            seat: "critic",
+            agentId: "critic",
+            reason: "Review",
+          },
+        ],
       });
       yield* Ref.set(noticeFailure, true);
       yield* gate.resolve({ proposalId: open.proposal.id, decision: "decline" }).pipe(Effect.flip);
@@ -913,7 +1080,15 @@ it.effect(
           captain,
           displayName: "Review",
           brief: "Review changes",
-          seats: [{ seat: "reader", agentId: null, reason: "Read", instructions: "Read changes" }],
+          seats: [
+            {
+              workspace: { type: "shared" as const },
+              seat: "reader",
+              agentId: null,
+              reason: "Read",
+              instructions: "Read changes",
+            },
+          ],
         });
         const proposalId = open.proposal.id;
         const preview = yield* gate.preview({ proposalId });
@@ -949,7 +1124,13 @@ it.effect(
           captain,
           crewInstanceId: approved.instance!.id,
           brief: null,
-          seat: { seat: "writer", agentId: null, reason: "Write", instructions: "Write notes" },
+          seat: {
+            workspace: { type: "shared" as const },
+            seat: "writer",
+            agentId: null,
+            reason: "Write",
+            instructions: "Write notes",
+          },
         });
         const additionPreview = yield* gate.preview({ proposalId: addition.proposal.id });
         yield* Ref.set(captainModel, "gpt-5.6-sol");
@@ -1002,6 +1183,8 @@ it.effect(
         });
         assert.deepStrictEqual((yield* store.read(open.proposal.id))?.requestedSeats, proposed);
         const first = yield* gate.preview({ proposalId: open.proposal.id });
+        // Every preview carries what the card offers: the Captain's branch, branches, worktrees.
+        assert.deepStrictEqual(first.workspaceOptions, fakeWorkspaceOptions);
         assert.deepStrictEqual(first.seats[0]?.workspace, {
           type: "worktree",
           baseRef: "release",
@@ -1026,6 +1209,18 @@ it.effect(
           approvalToken: current.approvalToken,
         });
         assert.deepStrictEqual((yield* store.read(open.proposal.id))?.approvedSeats, shared);
+        // A seat with no workspace, as one recorded before they were required, is refused.
+        const { workspace: _workspace, ...unplaced } = shared[0]!;
+        const refused = yield* gate
+          .propose({
+            requestKey: "workspace-missing",
+            captain,
+            displayName: "Pair",
+            brief: "Ship it",
+            seats: [unplaced],
+          })
+          .pipe(Effect.flip);
+        assert.include(refused.message, "A seat needs a workspace");
       }).pipe(Effect.provide(layer));
     }).pipe(Effect.scoped),
 );
@@ -1039,6 +1234,7 @@ it.effect(
         const gate = yield* CrewProposalService;
         const store = yield* AgentCrewProposalService;
         const proposed = {
+          workspace: { type: "shared" as const },
           seat: "custom-reviewer",
           agentId: null,
           reason: "Reviews",
@@ -1133,7 +1329,12 @@ it.effect(
             requestKey,
             captain,
             crewInstanceId: instance.id,
-            seat: { seat, agentId: "scout", reason: "Wants the last seat" },
+            seat: {
+              workspace: { type: "shared" as const },
+              seat,
+              agentId: "scout",
+              reason: "Wants the last seat",
+            },
             brief: null,
           });
 
@@ -1199,7 +1400,14 @@ it.effect(
           captain,
           displayName: "Unlinked Crew",
           brief: "Build it.",
-          seats: [{ seat: "maker", agentId: "builder", reason: "Builds" }],
+          seats: [
+            {
+              workspace: { type: "shared" as const },
+              seat: "maker",
+              agentId: "builder",
+              reason: "Builds",
+            },
+          ],
         });
         yield* Ref.set(attachFailure, true);
         // The launch report finds its Crew through the link, so a swallowed failure would launch
@@ -1228,7 +1436,14 @@ it.effect("a roster left open while its Captain was archived is refused, and sti
         captain,
         displayName: "Late Crew",
         brief: "Pick up after the Captain.",
-        seats: [{ seat: "builder", agentId: "builder", reason: "Builds" }],
+        seats: [
+          {
+            workspace: { type: "shared" as const },
+            seat: "builder",
+            agentId: "builder",
+            reason: "Builds",
+          },
+        ],
       });
       yield* Ref.set(archivedThreads, new Set([captainThread]));
 
@@ -1264,13 +1479,25 @@ it.effect(
           captain,
           displayName: "Orphan Crew",
           brief: "Nobody commands this.",
-          seats: [{ seat: "builder", agentId: "builder", reason: "Builds" }],
+          seats: [
+            {
+              workspace: { type: "shared" as const },
+              seat: "builder",
+              agentId: "builder",
+              reason: "Builds",
+            },
+          ],
         });
         const addition = yield* gate.requestMember({
           requestKey: "deleted-captain-add",
           captain,
           crewInstanceId: instance.id,
-          seat: { seat: "critic", agentId: "critic", reason: "Reviews" },
+          seat: {
+            workspace: { type: "shared" as const },
+            seat: "critic",
+            agentId: "critic",
+            reason: "Reviews",
+          },
           brief: null,
         });
         yield* Ref.set(deletedThreads, new Set([captainThread]));
@@ -1347,6 +1574,7 @@ const release = () => ({
   ],
 });
 const custom = (seat: string, steps?: ReadonlyArray<string>) => ({
+  workspace: { type: "shared" as const },
   seat,
   agentId: null,
   reason: `Seat ${seat}`,
@@ -1981,14 +2209,22 @@ it.effect(
           brief: "Implement what we discussed. Ship: plan, build, review, and release a change.",
           playbook: "ship",
           seats: [
-            { seat: "planner", persona: "planner", reason: "Owns the plan step.", steps: ["plan"] },
             {
+              workspace: { type: "shared" as const },
+              seat: "planner",
+              persona: "planner",
+              reason: "Owns the plan step.",
+              steps: ["plan"],
+            },
+            {
+              workspace: { type: "shared" as const },
               seat: "builder",
               persona: "builder",
               reason: "Owns build, and release, which names no persona.",
               steps: ["build", "release"],
             },
             {
+              workspace: { type: "shared" as const },
               seat: "reviewer-stand-in",
               reason: "Stands in for reviewer, which is turned off.",
               instructions: "Review the diff for correctness and report findings with evidence.",

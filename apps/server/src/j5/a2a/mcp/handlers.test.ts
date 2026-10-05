@@ -966,6 +966,7 @@ it.effect("preflights home before creation and records facts before the one stab
             Effect.provideService(McpInvocationContext, invocation),
           );
       const args = {
+        workspace: { type: "shared" as const },
         brief: "Prove the post-#18 verb slice and report the result.",
         provider: ProviderInstanceId.make("codex-luna"),
         model: "gpt-5.6-luna",
@@ -1113,6 +1114,7 @@ it.effect("refuses spawn before thread creation when the caller has no home", ()
       const toolkit = yield* J5Toolkit;
       const result = yield* toolkit
         .handle("spawn_agent", {
+          workspace: { type: "shared" as const },
           brief: "This must never start.",
           provider: ProviderInstanceId.make("codex-luna"),
           model: "gpt-5.6-luna",
@@ -1311,6 +1313,7 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
           ),
         );
       const scout = {
+        workspace: { type: "shared" as const },
         brief: "Collect evidence about the auth flow and report back.",
         persona: "scout",
         provider: ProviderInstanceId.make("codex"),
@@ -1358,6 +1361,7 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
       });
 
       const plain = yield* call({
+        workspace: { type: "shared" as const },
         brief: "No saved agent here.",
         provider: ProviderInstanceId.make("codex"),
         model: "gpt-5.6-sol",
@@ -1673,7 +1677,14 @@ it.effect("routes crew proposals through a captain that is not itself a crew mem
       status: "open",
       brief: "Fix the flaky login test.",
       displayName: "Login Fix Crew",
-      requestedSeats: [{ seat: "builder", agentId: "builder", reason: "Implements" }],
+      requestedSeats: [
+        {
+          workspace: { type: "shared" as const },
+          seat: "builder",
+          agentId: "builder",
+          reason: "Implements",
+        },
+      ],
       approvedSeats: null,
       createdAt: "2026-09-09T16:00:00.000Z",
       resolvedAt: null,
@@ -1786,15 +1797,26 @@ it.effect("routes crew proposals through a captain that is not itself a crew mem
         name: "Login Fix Crew",
         brief: "Fix the flaky login test.",
         seats: [
-          { seat: "builder", persona: "builder", reason: "Implements" },
           {
+            workspace: { type: "shared" as const },
+            seat: "builder",
+            persona: "builder",
+            reason: "Implements",
+          },
+          {
+            workspace: { type: "shared" as const },
             seat: "reviewer",
             reason: "Reviews correctness",
             instructions: "Review and report concrete risks.",
             model_selection: customSelection,
             runtime_mode: "approval-required",
           },
-          { seat: "researcher", reason: "Researches", instructions: "Inspect related behavior." },
+          {
+            workspace: { type: "shared" as const },
+            seat: "researcher",
+            reason: "Researches",
+            instructions: "Inspect related behavior.",
+          },
         ],
         client_request_id: "propose-1",
       });
@@ -1807,8 +1829,14 @@ it.effect("routes crew proposals through a captain that is not itself a crew mem
       });
 
       assert.deepStrictEqual(yield* Ref.get(proposedSeats), [
-        { seat: "builder", agentId: "builder", reason: "Implements" },
         {
+          workspace: { type: "shared" as const },
+          seat: "builder",
+          agentId: "builder",
+          reason: "Implements",
+        },
+        {
+          workspace: { type: "shared" as const },
           seat: "reviewer",
           agentId: null,
           reason: "Reviews correctness",
@@ -1817,6 +1845,7 @@ it.effect("routes crew proposals through a captain that is not itself a crew mem
           runtimeMode: "approval-required",
         },
         {
+          workspace: { type: "shared" as const },
           seat: "researcher",
           agentId: null,
           reason: "Researches",
@@ -1825,6 +1854,7 @@ it.effect("routes crew proposals through a captain that is not itself a crew mem
       ]);
 
       const added = yield* run("request_crew_member", {
+        workspace: { type: "shared" as const },
         seat: "security",
         reason: "Security pass",
         instructions: "Review authorization boundaries.",
@@ -1843,6 +1873,7 @@ it.effect("routes crew proposals through a captain that is not itself a crew mem
       assert.lengthOf(addedResult.members, 1);
       assert.deepStrictEqual(yield* Ref.get(addedSeats), [
         {
+          workspace: { type: "shared" as const },
           seat: "security",
           agentId: null,
           reason: "Security pass",
@@ -1856,13 +1887,16 @@ it.effect("routes crew proposals through a captain that is not itself a crew mem
       const refused = yield* run("propose_crew", {
         name: "Nested",
         brief: "x",
-        seats: [{ seat: "s", persona: "scout", reason: "r" }],
+        seats: [
+          { workspace: { type: "shared" as const }, seat: "s", persona: "scout", reason: "r" },
+        ],
       });
       assert.isTrue(refused.isFailure);
       assert.include(message(refused), "crew members cannot request crews or seats");
       assert.lengthOf(yield* Ref.get(proposals), 2);
       // Nor may a seat spawn a solo Peer Agent: only the Captain grows a Crew, through the gate.
       const spawned = yield* run("spawn_agent", {
+        workspace: { type: "shared" as const },
         brief: "Help me",
         provider: "codex",
         model: "gpt-5.6-terra",

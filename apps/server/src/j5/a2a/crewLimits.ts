@@ -20,7 +20,8 @@ export const CREW_SEAT_NAME_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 export type CrewSeatShapeProblem =
   | { readonly field: "seat"; readonly detail: string }
   | { readonly field: "reason"; readonly detail: string }
-  | { readonly field: "instructions"; readonly detail: string };
+  | { readonly field: "instructions"; readonly detail: string }
+  | { readonly field: "workspace"; readonly detail: string };
 
 /** The bound a seat breaks, if any; checked at every door so human-edited seats meet the same rule. */
 export const crewSeatShapeProblem = (seat: {
@@ -28,6 +29,7 @@ export const crewSeatShapeProblem = (seat: {
   readonly agentId: string | null;
   readonly reason: string;
   readonly instructions?: string | undefined;
+  readonly workspace?: unknown;
 }): CrewSeatShapeProblem | null => {
   if (seat.seat.length === 0 || seat.seat.length > CREW_NAME_MAX_CHARS)
     return {
@@ -51,6 +53,13 @@ export const crewSeatShapeProblem = (seat: {
     };
   // A custom seat has no definition behind it, so its instructions are all it runs on; the card
   // requires them and so does every other door.
+  // Every seat names where it works; only a seat recorded before that was required lacks it.
+  if (seat.workspace === undefined)
+    return {
+      field: "workspace",
+      detail:
+        "A seat needs a workspace: the Captain's checkout, a new worktree, or an existing worktree.",
+    };
   if (seat.agentId === null && seat.instructions === undefined)
     return {
       field: "instructions",

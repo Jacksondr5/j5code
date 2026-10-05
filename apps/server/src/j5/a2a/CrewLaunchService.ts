@@ -3,7 +3,7 @@ import {
   materializeCrewModelSelection,
   crewModelSelectionProblem,
 } from "./crewRuntimePreview.ts";
-import type { CrewProposalSeatRuntime } from "@t3tools/contracts/j5";
+import type { CrewProposalSeatRuntime, CrewWorkspaceOptions } from "@t3tools/contracts/j5";
 import { isProviderAvailable } from "@t3tools/contracts";
 import type {
   ModelSelection,
@@ -71,8 +71,8 @@ export interface CrewLaunchSeat {
   readonly runtimeMode?: RuntimeMode | undefined;
   /** Ids of the playbook steps the seat owns; recorded on its member row. */
   readonly steps?: ReadonlyArray<string> | undefined;
-  /** Where the seat works; unset takes the Crew default (see `resolveSpawnWorkspace`). */
-  readonly workspace?: SpawnWorkspaceChoice | undefined;
+  /** Where the seat works, chosen for every seat. */
+  readonly workspace: SpawnWorkspaceChoice;
 }
 
 /**
@@ -238,6 +238,11 @@ export interface CrewLaunchServiceShape {
   readonly launch: (input: CrewLaunchInput) => Effect.Effect<CrewLaunchResult, CrewLaunchError>;
   /** Spawn approved additional seats under the Captain of an existing Crew, the same way. */
   readonly addSeats: (input: CrewAddSeatsInput) => Effect.Effect<CrewLaunchResult, CrewLaunchError>;
+  /**
+   * What the roster card can offer a seat's workspace: the Captain's branch, the first page of
+   * local branches, and the project's worktrees. An unreadable repository offers none.
+   */
+  readonly workspaceOptions: (captain: CrewCaptain) => Effect.Effect<CrewWorkspaceOptions>;
 }
 
 export class CrewLaunchService extends Context.Service<CrewLaunchService, CrewLaunchServiceShape>()(
@@ -260,18 +265,24 @@ export const layer = Layer.effect(
       seats: ReadonlyArray<CrewLaunchSeat>,
     ) {
       const providers = yield* registry.getProviders;
-      // Every seat's workspace resolves against one read of the Captain's checkout, here at
-      // preview, so the approval token binds what each seat will get.
-      const checkout = yield* spawnWorkspace.inspect({
-        projectId: captain.thread.projectId,
-        worktreePath: captain.thread.worktreePath,
-        listBranches: seats.some(
-          (seat) => seat.workspace?.type === "worktree" && seat.workspace.branch !== undefined,
-        ),
-        baseRefs: namedBaseRefs(seats.map((seat) => seat.workspace)),
-      });
+      // Every seat's workspace resolves against one read of the Captain's repository, here at
+      // preview, so the approval token binds what each seat will get. Shared seats need none.
+      const checkout = seats.every((seat) => seat.workspace.type === "shared")
+        ? null
+        : yield* spawnWorkspace.inspect({
+            projectId: captain.thread.projectId,
+            worktreePath: captain.thread.worktreePath,
+            checkBranches: seats.some(
+              (seat) => seat.workspace.type === "worktree" && seat.workspace.branch !== undefined,
+            ),
+            baseRefs: namedBaseRefs(seats.map((seat) => seat.workspace)),
+          });
       const resolveWorkspace = (seat: CrewLaunchSeat) =>
-        Effect.fromResult(resolveSpawnWorkspace(checkout, seat.workspace, "seat")).pipe(
+        Effect.fromResult(
+          checkout === null
+            ? Result.succeed({ type: "shared" } as const)
+            : resolveSpawnWorkspace(checkout, seat.workspace),
+        ).pipe(
           Effect.mapError(
             (error) =>
               new CrewLaunchSeatUnavailableError({
@@ -873,6 +884,27 @@ export const layer = Layer.effect(
         );
       }).pipe((addition) => crews.serialize(input.instance.id, addition));
 
-    return CrewLaunchService.of({ launch, addSeats, resolveSeats });
+    const workspaceOptions: CrewLaunchServiceShape["workspaceOptions"] = (captain) =>
+      spawnWorkspace
+        .inspect({
+          projectId: captain.thread.projectId,
+          worktreePath: captain.thread.worktreePath,
+          checkBranches: false,
+          baseRefs: [],
+        })
+        .pipe(
+          Effect.map((checkout) =>
+            checkout.readable
+              ? {
+                  currentBranch: checkout.currentBranch,
+                  branches: checkout.branches,
+                  branchesTruncated: checkout.branchesTruncated,
+                  worktrees: checkout.worktrees,
+                }
+              : { currentBranch: null, branches: [], branchesTruncated: false, worktrees: [] },
+          ),
+        );
+
+    return CrewLaunchService.of({ launch, addSeats, resolveSeats, workspaceOptions });
   }),
 );

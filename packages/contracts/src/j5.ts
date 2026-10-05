@@ -137,20 +137,38 @@ export const CrewPersonaSwap = Schema.Struct({
 export type CrewPersonaSwap = typeof CrewPersonaSwap.Type;
 
 /**
- * Where a Crew seat works: the Captain's own checkout (`shared`), or a fresh worktree the server
- * prepares before the seat's brief starts. Unset on a requested seat means the server default; on
- * a preview's seat runtime it is the resolved choice, with `baseRef` filled in.
+ * Where a Crew seat works, chosen for every seat: the Captain's own checkout (`shared`), a new
+ * worktree the server prepares from `baseRef` before the seat's brief starts, or one of the
+ * project's existing worktrees. On a preview's seat runtime it is the resolved choice; an existing
+ * worktree's `branch` is then the one git has checked out there.
  */
 export const CrewSeatWorkspace = Schema.Union([
   Schema.Struct({ type: Schema.Literal("shared") }),
   Schema.Struct({
     type: Schema.Literal("worktree"),
-    baseRef: Schema.optionalKey(Schema.String),
+    baseRef: Schema.String,
     branch: Schema.optionalKey(Schema.String),
     startFromOrigin: Schema.optionalKey(Schema.Boolean),
   }),
+  Schema.Struct({
+    type: Schema.Literal("existing_worktree"),
+    worktreePath: Schema.String,
+    branch: Schema.optionalKey(Schema.String),
+  }),
 ]);
 export type CrewSeatWorkspace = typeof CrewSeatWorkspace.Type;
+
+/** What the roster card offers when a seat's workspace is edited, read from the Captain's repo. */
+export const CrewWorkspaceOptions = Schema.Struct({
+  /** The branch checked out where the Captain works, to prefill a new worktree's base. */
+  currentBranch: Schema.NullOr(Schema.String),
+  /** The first page of local branches; `branchesTruncated` says there are more. */
+  branches: Schema.Array(Schema.String),
+  branchesTruncated: Schema.Boolean,
+  /** The project's worktrees other than its main checkout, each with its branch. */
+  worktrees: Schema.Array(Schema.Struct({ path: Schema.String, branch: Schema.String })),
+});
+export type CrewWorkspaceOptions = typeof CrewWorkspaceOptions.Type;
 
 /**
  * One requested or approved Crew seat, as the Captain proposed it or the human edited it. A null
@@ -166,6 +184,10 @@ export const CrewProposalSeat = Schema.Struct({
   runtimeMode: Schema.optional(RuntimeMode),
   /** Ids of the playbook steps this seat owns; only on a Crew that follows a playbook. */
   steps: Schema.optionalKey(Schema.Array(Schema.String)),
+  /**
+   * Every seat proposed now names one; only seats recorded before workspaces were required lack
+   * it, and the server refuses to launch those until one is chosen.
+   */
   workspace: Schema.optionalKey(CrewSeatWorkspace),
   /** Computed by the server at propose and approve; a client's value is ignored. */
   personaSwaps: Schema.optionalKey(Schema.Array(CrewPersonaSwap)),
@@ -218,8 +240,7 @@ export const CrewProposalSeatRuntime = Schema.Struct({
   access: Schema.String,
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
-  /** Absent from servers that predate seat workspaces, which always share the Captain's checkout. */
-  workspace: Schema.optionalKey(CrewSeatWorkspace),
+  workspace: CrewSeatWorkspace,
   /** The seat's persona swaps as the edited roster would record them. */
   personaSwaps: Schema.optionalKey(Schema.Array(CrewPersonaSwap)),
 });
@@ -233,6 +254,7 @@ export const CrewProposalPreviewResponse = Schema.Struct({
   proposalId: Schema.String,
   approvalToken: Schema.String,
   seats: Schema.Array(CrewProposalSeatRuntime),
+  workspaceOptions: CrewWorkspaceOptions,
   /** The plan the approval token binds: the live playbook and the steps no seat owns. */
   playbook: Schema.optionalKey(Schema.NullOr(CrewProposalPlaybook)),
   unownedSteps: Schema.optionalKey(Schema.Array(Schema.String)),

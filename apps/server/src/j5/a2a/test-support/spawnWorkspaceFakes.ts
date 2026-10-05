@@ -16,14 +16,37 @@ import { layerFromReceiptStore } from "../spawnWorkspace.ts";
 
 export interface FakeCheckout {
   readonly isRepo: boolean;
+  /** The branch checked out where the caller works. */
   readonly refName: string | null;
+  /** Other local branches; `refName` and the worktrees' branches are local too. */
   readonly localBranchNames?: ReadonlyArray<string>;
+  /** Worktrees beside the main checkout at `/repo`, each on its branch. */
+  readonly worktrees?: ReadonlyArray<{ readonly path: string; readonly branch: string }>;
   /** Refs git can't resolve; every other ref exists. */
   readonly missingRefs?: ReadonlyArray<string>;
 }
 
-/** A project that is not a git repository: every default resolves to the caller's checkout. */
+/** A project that is not a git repository; only a shared choice can resolve there. */
 export const noRepository: FakeCheckout = { isRepo: false, refName: null };
+
+const fakeRefs = (checkout: FakeCheckout, workspaceRoot: string) => {
+  const worktrees = checkout.worktrees ?? [];
+  const names = [
+    ...new Set([
+      ...(checkout.refName === null ? [] : [checkout.refName]),
+      ...(checkout.localBranchNames ?? []),
+      ...worktrees.map((worktree) => worktree.branch),
+    ]),
+  ];
+  return names.map((name) => ({
+    name,
+    current: name === checkout.refName,
+    isDefault: false,
+    worktreePath:
+      worktrees.find((worktree) => worktree.branch === name)?.path ??
+      (name === checkout.refName ? workspaceRoot : null),
+  }));
+};
 
 /**
  * The workspace service over fake git, a recording ThreadLaunch, and receipts for the command ids
@@ -47,13 +70,18 @@ export const fakeSpawnWorkspaceLayer = (options: {
             ),
         }),
         Layer.mock(GitWorkflowService)({
-          localStatus: () =>
-            Effect.succeed({
+          listRefs: () => {
+            const refs = options.checkout.isRepo
+              ? fakeRefs(options.checkout, options.workspaceRoot ?? "/repo")
+              : [];
+            return Effect.succeed({
+              refs,
               isRepo: options.checkout.isRepo,
-              refName: options.checkout.refName,
-            } as never),
-          listLocalBranchNames: () =>
-            Effect.succeed([...(options.checkout.localBranchNames ?? [])]),
+              hasPrimaryRemote: false,
+              nextCursor: null,
+              totalCount: refs.length,
+            });
+          },
           hasCommit: ({ refName }) =>
             Effect.succeed(!(options.checkout.missingRefs ?? []).includes(refName)),
         }),

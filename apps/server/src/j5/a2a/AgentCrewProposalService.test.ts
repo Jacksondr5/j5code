@@ -26,10 +26,16 @@ const squadronId = SquadronId.make("squadron:crew-proposals");
 const captain = ParticipantId.make("agent:j5:a2a:captain-proposals");
 const captainThreadId = ThreadId.make("thread:captain-proposals");
 
-const seat = (name: string) => ({ seat: name, agentId: "scout", reason: "Holds a seat" });
+const seat = (name: string) => ({
+  workspace: { type: "shared" as const },
+  seat: name,
+  agentId: "scout",
+  reason: "Holds a seat",
+});
 
 /** A roster row minted by a launch: its identity is its own, not derived from any proposal. */
 const rosterMember = (crewId: string, name: string) => ({
+  workspace: { type: "shared" as const },
   seatName: name,
   agentId: "scout",
   participantId: ParticipantId.make(`agent:j5:a2a:thread:${crewId}:${name}`),

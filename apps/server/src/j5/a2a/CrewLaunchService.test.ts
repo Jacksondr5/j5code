@@ -57,6 +57,7 @@ import { runJ5A2AMigrations } from "./Migrations.ts";
 import { SpawnCompositionService } from "./SpawnCompositionService.ts";
 import { type FakeCheckout, fakeSpawnWorkspaceLayer } from "./test-support/spawnWorkspaceFakes.ts";
 import type { ThreadLaunchInput } from "../../orchestration-v2/ThreadLaunchService.ts";
+import type { SpawnWorkspaceChoice } from "./spawnWorkspace.ts";
 import { ParticipantId, SquadronId } from "./contracts.ts";
 
 const squadronId = SquadronId.make("squadron:crew-launch");
@@ -288,8 +289,18 @@ it.effect("launches an approved roster whole, records it, briefs each seat, then
           captain,
           displayName: "Release Crew",
           seats: [
-            { name: "builder", agentId: "builder", reason: "Implements" },
-            { name: "publisher", agentId: "publisher", reason: "Publishes" },
+            {
+              workspace: { type: "shared" as const },
+              name: "builder",
+              agentId: "builder",
+              reason: "Implements",
+            },
+            {
+              workspace: { type: "shared" as const },
+              name: "publisher",
+              agentId: "publisher",
+              reason: "Publishes",
+            },
           ],
           brief: "Ship the login fix.",
         })
@@ -304,12 +315,18 @@ it.effect("launches an approved roster whole, records it, briefs each seat, then
         displayName: "Review Pair",
         seats: [
           {
+            workspace: { type: "shared" as const },
             name: "builder",
             agentId: "builder",
             reason: "Implements",
             instructions: "Send code to critic.",
           },
-          { name: "critic", agentId: "critic", reason: "Reviews" },
+          {
+            workspace: { type: "shared" as const },
+            name: "critic",
+            agentId: "critic",
+            reason: "Reviews",
+          },
         ],
         brief: "Ship the login fix.",
       });
@@ -342,7 +359,14 @@ it.effect("launches an approved roster whole, records it, briefs each seat, then
         requestKey: "add-1",
         captain,
         instance,
-        seats: [{ name: "sentry", agentId: "sentry", reason: "Security pass" }],
+        seats: [
+          {
+            workspace: { type: "shared" as const },
+            name: "sentry",
+            agentId: "sentry",
+            reason: "Security pass",
+          },
+        ],
       });
       assert.equal(grown.version, 2);
       assert.deepStrictEqual(
@@ -386,8 +410,14 @@ it.effect(
           captain,
           displayName: "Notes Crew",
           seats: [
-            { name: "critic", agentId: "critic", reason: "Reviews" },
             {
+              workspace: { type: "shared" as const },
+              name: "critic",
+              agentId: "critic",
+              reason: "Reviews",
+            },
+            {
+              workspace: { type: "shared" as const },
               name: "scribe",
               agentId: null,
               reason: "Keeps notes",
@@ -447,7 +477,15 @@ it.effect(
           requestKey: "launch-custom-2",
           captain: personaCaptain,
           displayName: "Notes Crew 2",
-          seats: [{ name: "scribe", agentId: null, reason: "Keeps notes", instructions: "Notes." }],
+          seats: [
+            {
+              workspace: { type: "shared" as const },
+              name: "scribe",
+              agentId: null,
+              reason: "Keeps notes",
+              instructions: "Notes.",
+            },
+          ],
           brief: "Review the login fix.",
         });
         const underPersona = (yield* Ref.get(commands)).findLast(
@@ -485,7 +523,14 @@ it.effect(
             requestKey: "signed-out-1",
             captain,
             displayName: "Signed Out",
-            seats: [{ name: "builder", agentId: "builder", reason: "Implements" }],
+            seats: [
+              {
+                workspace: { type: "shared" as const },
+                name: "builder",
+                agentId: "builder",
+                reason: "Implements",
+              },
+            ],
             brief: "Ship it.",
           })
           .pipe(Effect.flip);
@@ -523,7 +568,13 @@ it.effect("custom seats refuse unavailable providers before recording or spawnin
             captain,
             displayName: "Notes",
             seats: [
-              { name: "scribe", agentId: null, reason: "Notes", instructions: "Take notes." },
+              {
+                workspace: { type: "shared" as const },
+                name: "scribe",
+                agentId: null,
+                reason: "Notes",
+                instructions: "Take notes.",
+              },
             ],
             brief: "Review.",
           })
@@ -577,7 +628,13 @@ it.effect(
       yield* Effect.gen(function* () {
         const launcher = yield* CrewLaunchService;
         const seats = [
-          { name: "scribe", agentId: null, reason: "Notes", instructions: "Take notes" },
+          {
+            workspace: { type: "shared" as const },
+            name: "scribe",
+            agentId: null,
+            reason: "Notes",
+            instructions: "Take notes",
+          },
         ];
         const resolvedSeats = yield* launcher.resolveSeats(captain, seats);
         assert.deepStrictEqual(resolvedSeats[0]?.runtime, {
@@ -635,13 +692,24 @@ it.effect(
         if (create?.type === "thread.create")
           assert.deepStrictEqual(create.modelSelection, resolvedSeats[0]?.modelSelection);
         const saved = yield* launcher.resolveSeats(captain, [
-          { name: "builder", agentId: "builder", reason: "Build" },
+          {
+            workspace: { type: "shared" as const },
+            name: "builder",
+            agentId: "builder",
+            reason: "Build",
+          },
         ]);
         assert.equal(saved[0]?.assignment?.resolvedDriver, "codex");
         assert.equal(saved[0]?.runtime.harness, "Codex");
         assert.equal(saved[0]?.runtime.access, "Repository write");
         const accessOnly = (yield* launcher.resolveSeats(captain, [
-          { name: "builder", agentId: "builder", reason: "Build", runtimeMode: "full-access" },
+          {
+            workspace: { type: "shared" as const },
+            name: "builder",
+            agentId: "builder",
+            reason: "Build",
+            runtimeMode: "full-access",
+          },
         ]))[0]!;
         assert.deepStrictEqual(accessOnly.modelSelection, saved[0]?.modelSelection);
         assert.equal(accessOnly.assignment?.resolvedRoute, saved[0]?.assignment?.resolvedRoute);
@@ -717,6 +785,7 @@ it.effect(
       yield* Effect.gen(function* () {
         const launcher = yield* CrewLaunchService;
         const custom = {
+          workspace: { type: "shared" as const },
           name: "reviewer",
           agentId: null,
           reason: "Review",
@@ -947,6 +1016,7 @@ it.effect(
       yield* Effect.gen(function* () {
         const launcher = yield* CrewLaunchService;
         const custom = {
+          workspace: { type: "shared" as const },
           name: "reviewer",
           agentId: null,
           reason: "Review",
@@ -962,7 +1032,16 @@ it.effect(
           // Full access default is one the harness enforces, so it now launches.
           const resolved = yield* launcher.resolveSeats(
             { ...captain, thread: { ...captain.thread, runtimeMode } },
-            [custom, acp, { name: "builder", agentId: "builder", reason: "Build" }],
+            [
+              custom,
+              acp,
+              {
+                workspace: { type: "shared" as const },
+                name: "builder",
+                agentId: "builder",
+                reason: "Build",
+              },
+            ],
           );
           assert.deepStrictEqual(
             resolved.map((seat) => [seat.seat.name, seat.runtimeMode, seat.runtime.access]),
@@ -1008,6 +1087,7 @@ it.effect("refuses persona seats whose effective ACP access the harness cannot e
     yield* Effect.gen(function* () {
       const launcher = yield* CrewLaunchService;
       const seat = {
+        workspace: { type: "shared" as const },
         name: "builder",
         agentId: "builder",
         reason: "Build",
@@ -1065,7 +1145,14 @@ it.effect("pins non-reasoning provider defaults for persona seats without overri
     );
     yield* Effect.gen(function* () {
       const launcher = yield* CrewLaunchService;
-      const seats = [{ name: "builder", agentId: "builder", reason: "Build" }];
+      const seats = [
+        {
+          workspace: { type: "shared" as const },
+          name: "builder",
+          agentId: "builder",
+          reason: "Build",
+        },
+      ];
       const before = (yield* launcher.resolveSeats(captain, seats))[0]!;
       assert.deepStrictEqual(
         before.modelSelection.options?.find((option) => option.id === "fastMode"),
@@ -1175,7 +1262,14 @@ const unitFixture = Effect.gen(function* () {
       requestKey: "unit-1",
       captain,
       displayName: "Review Pair",
-      seats: [{ name: "builder", agentId: "builder", reason: "Implements" }],
+      seats: [
+        {
+          workspace: { type: "shared" as const },
+          name: "builder",
+          agentId: "builder",
+          reason: "Implements",
+        },
+      ],
       brief: "Ship the login fix.",
     });
     return instance;
@@ -1188,7 +1282,14 @@ const unitFixture = Effect.gen(function* () {
         requestKey: "add-sentry",
         captain,
         instance,
-        seats: [{ name: "sentry", agentId: "sentry", reason: "Security pass" }],
+        seats: [
+          {
+            workspace: { type: "shared" as const },
+            name: "sentry",
+            agentId: "sentry",
+            reason: "Security pass",
+          },
+        ],
       });
       return grown;
     });
@@ -1233,9 +1334,24 @@ it.effect(
           captain: unit.captain,
           displayName: "Trio",
           seats: [
-            { name: "builder", agentId: "builder", reason: "Implements" },
-            { name: "critic", agentId: "critic", reason: "Reviews" },
-            { name: "sentry", agentId: "sentry", reason: "Security pass" },
+            {
+              workspace: { type: "shared" as const },
+              name: "builder",
+              agentId: "builder",
+              reason: "Implements",
+            },
+            {
+              workspace: { type: "shared" as const },
+              name: "critic",
+              agentId: "critic",
+              reason: "Reviews",
+            },
+            {
+              workspace: { type: "shared" as const },
+              name: "sentry",
+              agentId: "sentry",
+              reason: "Security pass",
+            },
           ],
           brief: "Ship the login fix.",
         });
@@ -1415,7 +1531,14 @@ it.effect(
           requestKey: "add-sentry",
           captain: unit.captain,
           instance,
-          seats: [{ name: "sentry", agentId: "sentry", reason: "Security pass" }],
+          seats: [
+            {
+              workspace: { type: "shared" as const },
+              name: "sentry",
+              agentId: "sentry",
+              reason: "Security pass",
+            },
+          ],
         });
         assert.deepStrictEqual(
           added.seats.map((outcome) => [outcome.seatName, outcome.kind]),
@@ -1480,7 +1603,14 @@ it.effect(
             requestKey: "add-sentry",
             captain: unit.captain,
             instance,
-            seats: [{ name: "sentry", agentId: "sentry", reason: "Security pass" }],
+            seats: [
+              {
+                workspace: { type: "shared" as const },
+                name: "sentry",
+                agentId: "sentry",
+                reason: "Security pass",
+              },
+            ],
             onReserved: () =>
               Effect.fail(
                 new CrewLaunchOperationError({
@@ -1525,6 +1655,7 @@ it.effect("records a playbook Crew's step owners and surfaces a taken step unwra
         ],
       };
       const custom = (name: string, steps?: ReadonlyArray<string>) => ({
+        workspace: { type: "shared" as const },
         name,
         agentId: null,
         reason: `Seat ${name}`,
@@ -1605,6 +1736,7 @@ it.effect("a relaunch after a failed link stores the re-approved seat's steps", 
         },
       };
       const seat = (steps?: ReadonlyArray<string>) => ({
+        workspace: { type: "shared" as const },
         name: "planner",
         agentId: null,
         reason: "Plans",
@@ -1639,13 +1771,9 @@ it.effect("a relaunch after a failed link stores the re-approved seat's steps", 
   }),
 );
 
-it.effect("gives a root-checkout Captain's seats fresh worktrees unless a seat asks to share", () =>
+it.effect("launches each seat in the workspace it names, and refuses one git can't give", () =>
   Effect.gen(function* () {
-    const { context, commands, captain: worktreeCaptain } = yield* fixture;
-    const captain = {
-      ...worktreeCaptain,
-      thread: { ...worktreeCaptain.thread, branch: null, worktreePath: null },
-    };
+    const { context, commands, captain } = yield* fixture;
     const launches = yield* Ref.make<ReadonlyArray<ThreadLaunchInput>>([]);
     const codex = provider("codex", "codex", [{ slug: "gpt-5.6-sol", options: ["high"] }]);
     const layerFor = (checkout: FakeCheckout) =>
@@ -1667,85 +1795,130 @@ it.effect("gives a root-checkout Captain's seats fresh worktrees unless a seat a
         Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-launch-" })),
         Layer.provideMerge(NodeServices.layer),
       );
+    const seat = (name: string, workspace: SpawnWorkspaceChoice) => ({
+      name,
+      agentId: null,
+      reason: "Works",
+      instructions: `Be the ${name}`,
+      workspace,
+    });
     const seats = [
-      { name: "builder", agentId: null, reason: "Implements", instructions: "Build it" },
-      {
-        name: "reviewer",
-        agentId: null,
-        reason: "Reviews",
-        instructions: "Review it",
-        workspace: { type: "shared" as const },
-      },
+      seat("builder", { type: "worktree", baseRef: "j5/main" }),
+      seat("reviewer", { type: "existing_worktree", worktreePath: "/repo-worktrees/feature/" }),
+      seat("scribe", { type: "shared" }),
     ];
 
     yield* Effect.gen(function* () {
       const launcher = yield* CrewLaunchService;
-      // An explicit worktree outside a git repository is refused before anything exists.
+      // Outside a git repository only the shared seat could resolve, so nothing is created.
       const refused = yield* launcher
         .launch({
           providerSessionId: "session",
           requestKey: "no-repo",
           captain,
-          displayName: "Pair",
-          seats: [{ ...seats[0]!, workspace: { type: "worktree" } }],
+          displayName: "Trio",
+          seats,
           brief: "Ship it.",
         })
         .pipe(Effect.flip);
       assert.equal(refused._tag, "CrewLaunchSeatUnavailableError");
       assert.include(refused.message, "not a git repository");
       assert.lengthOf(yield* Ref.get(commands), 0);
+      assert.deepStrictEqual(yield* launcher.workspaceOptions(captain), {
+        currentBranch: null,
+        branches: [],
+        branchesTruncated: false,
+        worktrees: [],
+      });
     }).pipe(Effect.provide(layerFor({ isRepo: false, refName: null })));
 
+    const repo: FakeCheckout = {
+      isRepo: true,
+      refName: "j5/main",
+      localBranchNames: ["release"],
+      worktrees: [{ path: "/repo-worktrees/feature", branch: "fix/login" }],
+    };
     yield* Effect.gen(function* () {
       const launcher = yield* CrewLaunchService;
+      // A path git doesn't list as a worktree is refused, naming the ones it does.
+      const unknown = yield* launcher
+        .resolveSeats(captain, [
+          seat("reviewer", { type: "existing_worktree", worktreePath: "/elsewhere" }),
+        ])
+        .pipe(Effect.flip);
+      assert.include(unknown.message, "isn't one of this project's worktrees");
+      assert.include(unknown.message, "/repo-worktrees/feature");
+      assert.deepStrictEqual(yield* launcher.workspaceOptions(captain), {
+        currentBranch: "j5/main",
+        branches: ["j5/main", "release", "fix/login"],
+        branchesTruncated: false,
+        worktrees: [{ path: "/repo-worktrees/feature", branch: "fix/login" }],
+      });
+
       const resolved = yield* launcher.resolveSeats(captain, seats);
       assert.deepStrictEqual(
-        resolved.map((seat) => seat.runtime.workspace),
-        [{ type: "worktree", baseRef: "j5/main", startFromOrigin: false }, { type: "shared" }],
+        resolved.map((entry) => entry.runtime.workspace),
+        [
+          { type: "worktree", baseRef: "j5/main", startFromOrigin: false },
+          {
+            type: "existing_worktree",
+            worktreePath: "/repo-worktrees/feature",
+            branch: "fix/login",
+          },
+          { type: "shared" },
+        ],
       );
       yield* launcher.launch({
         providerSessionId: "session",
-        requestKey: "root-captain",
+        requestKey: "trio",
         captain,
-        displayName: "Pair",
+        displayName: "Trio",
         seats,
         resolvedSeats: resolved,
         brief: "Ship it.",
       });
+      const threadOf = (name: string) =>
+        spawnThreadId({
+          providerSessionId: "session",
+          requestKey: crewSeatRequestKey("trio", name),
+        });
       const captured = yield* Ref.get(commands);
-      const builderThread = spawnThreadId({
-        providerSessionId: "session",
-        requestKey: crewSeatRequestKey("root-captain", "builder"),
-      });
-      const creates = captured.filter((command) => command.type === "thread.create");
-      assert.deepStrictEqual(
-        creates.map((command) =>
-          command.type === "thread.create"
-            ? [command.threadId === builderThread, command.branch, command.worktreePath]
-            : [],
-        ),
-        [
-          [true, null, null],
-          [false, null, null],
-        ],
-      );
-      assert.include(creates[0]!.commandId, "spawn-create-worktree");
-      assert.notInclude(creates[1]!.commandId, "spawn-create-worktree");
-      // The builder's brief waits on ThreadLaunch; only the reviewer's starts at once.
+      const createOf = (name: string) =>
+        captured.find(
+          (command) => command.type === "thread.create" && command.threadId === threadOf(name),
+        );
+      const builder = createOf("builder");
+      const reviewer = createOf("reviewer");
+      const scribe = createOf("scribe");
+      if (builder?.type === "thread.create") {
+        assert.isNull(builder.worktreePath);
+        assert.include(builder.commandId, "spawn-create-worktree");
+      }
+      // The existing worktree binds at creation, on the branch git has there.
+      if (reviewer?.type === "thread.create") {
+        assert.equal(reviewer.worktreePath, "/repo-worktrees/feature");
+        assert.equal(reviewer.branch, "fix/login");
+        assert.include(reviewer.commandId, "spawn-create-existing");
+      }
+      if (scribe?.type === "thread.create") {
+        assert.equal(scribe.worktreePath, captain.thread.worktreePath);
+        assert.equal(scribe.branch, captain.thread.branch);
+      }
+      // Only the new worktree waits on ThreadLaunch; the other two briefs start at once.
       const briefs = captured.filter((command) => command.type === "message.dispatch");
-      assert.lengthOf(briefs, 1);
-      assert.notEqual(briefs[0]?.threadId, builderThread);
+      assert.sameMembers(
+        briefs.map((command) => command.threadId),
+        [threadOf("reviewer"), threadOf("scribe")],
+      );
       const [launch] = yield* Ref.get(launches);
-      assert.equal(launch?.threadId, builderThread);
+      assert.equal(launch?.threadId, threadOf("builder"));
       assert.isTrue(launch?.reuseExistingThread);
-      assert.equal(launch?.squadronId, squadronId);
       assert.deepStrictEqual(launch?.workspaceStrategy, {
         type: "worktree",
         baseRef: "j5/main",
         startFromOrigin: false,
       });
       assert.include(launch?.initialMessage?.text, "your_seat: builder");
-      assert.include(launch?.initialMessage?.text, "- reviewer: participant_id=");
-    }).pipe(Effect.provide(layerFor({ isRepo: true, refName: "j5/main" })));
+    }).pipe(Effect.provide(layerFor(repo)));
   }),
 );

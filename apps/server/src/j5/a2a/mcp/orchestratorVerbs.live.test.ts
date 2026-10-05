@@ -335,6 +335,7 @@ describe.runIf(process.env.T3_J5_LUNA_LIVE_ORCHESTRATOR === "1")(
           const brief =
             "Do not edit files. Confirm that you are running in the isolated workspace, then wait for further direction before replying.";
           const spawned = yield* callSpawn({
+            workspace: { type: "shared" as const },
             brief,
             title: "Luna verb E2E peer",
             provider: codexInstanceId,
@@ -356,6 +357,7 @@ describe.runIf(process.env.T3_J5_LUNA_LIVE_ORCHESTRATOR === "1")(
           assert.equal(terminal.status, "interrupted");
 
           const replay = yield* callSpawn({
+            workspace: { type: "shared" as const },
             brief:
               "A conflicting retry must not replace the first committed spawn context or brief.",
             title: "Luna verb E2E peer",

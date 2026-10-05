@@ -33,7 +33,10 @@ export const CrewProposalSeat = Schema.Struct({
       Schema.isMaxLength(PLAYBOOK_MAX_STEPS),
     ),
   ),
-  /** Where the seat works; unset takes the Crew default resolved at preview. */
+  /**
+   * Where the seat works, as the Captain or the person chose it. Required at every door that
+   * files or approves a seat; absent only on seats recorded before it was, which stay readable.
+   */
   workspace: Schema.optionalKey(SpawnWorkspaceChoice),
   /** Recomputed by the server whenever the seats are validated; never taken from a client. */
   personaSwaps: Schema.optionalKey(Schema.Array(CrewPersonaSwap)),
