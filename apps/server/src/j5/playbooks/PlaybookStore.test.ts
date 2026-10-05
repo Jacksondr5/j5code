@@ -1054,3 +1054,15 @@ it.effect("rejects exports of missing, misnamed, and invalid definitions", () =>
     assert.equal(yield* code("dupes"), "invalid_definition");
   }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
 );
+
+it.effect("exports a near-limit definition byte-for-byte so it stays importable", () =>
+  Effect.gen(function* () {
+    const { fs, store, workspaceRoot, filename } = yield* makeFixture;
+    const source = `title: Demo\ndescription: Demo\nsteps:\n- id: one\n  title: One\n  prompt: "${"word ".repeat(50000)}end"\n`;
+    assert.isBelow(Buffer.byteLength(source), PLAYBOOK_MAX_BYTES);
+    yield* fs.writeFileString(filename("big"), source);
+    const exported = yield* store.exportDefinition(workspaceRoot, "big");
+    assert.equal(exported.yaml, source);
+    assert.isAtMost(Buffer.byteLength(exported.yaml), PLAYBOOK_MAX_BYTES);
+  }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
+);

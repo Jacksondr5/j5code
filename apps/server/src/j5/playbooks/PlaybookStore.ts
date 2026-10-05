@@ -111,7 +111,7 @@ export const makePlaybookStore = Effect.gen(function* () {
           ids,
         );
       }
-      return { definition, document };
+      return { definition, document, text };
     },
     Effect.mapError((error) =>
       isPlaybookError(error)
@@ -302,8 +302,9 @@ export const makePlaybookStore = Effect.gen(function* () {
     const filename = path.resolve(workspaceRoot, ".j5/playbooks", `${name}.yaml`);
     if (!(yield* fs.exists(filename)))
       return yield* playbookError("not_found", "This playbook no longer exists.");
-    const { document } = yield* readDefinitionDocument(filename);
-    return { fileName: `${name}.yaml`, yaml: document.toString() };
+    // Export the validated source bytes: re-rendering can grow the file past the import limit.
+    const { text } = yield* readDefinitionDocument(filename);
+    return { fileName: `${name}.yaml`, yaml: text };
   }, Effect.mapError(storageError));
 
   const renameDefinition = Effect.fn("PlaybookStore.renameDefinition")(function* (
