@@ -1,5 +1,6 @@
 import { stringify as toYaml } from "yaml";
 import { makeAgentPersonaLibrary } from "../../agents/agentPersonaLibrary.ts";
+import { resolveAgentPersonaRuntime } from "../../agents/agentPersonaRuntime.ts";
 import { BUILT_IN_AGENT_PERSONAS } from "../../agents/agentPersonas.ts";
 import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -1415,6 +1416,16 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
       const operatorCreate = (yield* createdThreads()).at(-1)!;
       assert.equal(operatorCreate.agentPersonaAssignment?.authorityPolicy, "full-access");
       assert.equal(operatorCreate.runtimeMode, "full-access");
+      const operatorPolicy = yield* resolveAgentPersonaRuntime(
+        {
+          agentPersonaAssignment: operatorCreate.agentPersonaAssignment!,
+          runtimeMode: operatorCreate.runtimeMode,
+        },
+        library,
+      );
+      assert.equal(operatorPolicy.runtimeMode, "full-access");
+      assert.notProperty(operatorPolicy, "sandboxPolicy");
+      assert.notProperty(operatorPolicy, "approvalPolicy");
     }).pipe(Effect.provide(layer));
   }),
 );

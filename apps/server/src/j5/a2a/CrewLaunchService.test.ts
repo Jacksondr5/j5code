@@ -1008,6 +1008,13 @@ it.effect("a full-access persona seat runs full access unless the seat overrides
         ["full-access", "Full access"],
       );
       assert.equal(unset!.assignment?.authorityPolicy, "full-access");
+      const unsetPolicy = yield* resolveAgentPersonaRuntime(
+        { agentPersonaAssignment: unset!.assignment!, runtimeMode: unset!.runtimeMode },
+        library,
+      );
+      assert.equal(unsetPolicy.runtimeMode, "full-access");
+      assert.notProperty(unsetPolicy, "sandboxPolicy");
+      assert.notProperty(unsetPolicy, "approvalPolicy");
       // An explicit seat mode still wins over the persona's policy.
       const [overridden] = yield* launcher.resolveSeats(captain, [
         { ...seat, runtimeMode: "approval-required" },
@@ -1016,6 +1023,16 @@ it.effect("a full-access persona seat runs full access unless the seat overrides
         [overridden!.runtimeMode, overridden!.runtime.access],
         ["approval-required", "Supervised"],
       );
+      // The override, not the persona's unrestricted policy, reaches the provider runtime.
+      const overriddenPolicy = yield* resolveAgentPersonaRuntime(
+        {
+          agentPersonaAssignment: overridden!.assignment!,
+          runtimeMode: overridden!.runtimeMode,
+        },
+        library,
+      );
+      assert.equal(overriddenPolicy.runtimeMode, "approval-required");
+      assert.notProperty(overriddenPolicy, "sandboxPolicy");
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.scoped),
 );

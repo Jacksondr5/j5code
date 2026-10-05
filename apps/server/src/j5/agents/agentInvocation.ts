@@ -7,7 +7,7 @@ import {
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { McpInvocationContext } from "../../mcp/McpInvocationContext.ts";
-import { OrchestratorMcpService } from "../../mcp/OrchestratorMcpService.ts";
+import { OrchestratorMcpService, resolveRuntimeMode } from "../../mcp/OrchestratorMcpService.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
 import { prepareAgentPersonaLaunch } from "./agentPersonaLaunch.ts";
@@ -68,23 +68,38 @@ export const invokeAgent = Effect.fn("j5.invokeAgent")(function* (
     assignment.authorityPolicy,
     assignment.resolvedDriver,
   );
-  if (
-    parent.thread.agentPersonaAssignment !== undefined &&
-    "sandboxPolicy" in parentPolicy &&
-    parentPolicy.sandboxPolicy.type === "readOnly" &&
-    (!("sandboxPolicy" in policy) || policy.sandboxPolicy.type !== "readOnly")
-  ) {
-    return yield* new OrchestratorMcpFailure({
-      code: "runtime_mode_escalation_denied",
-      message: "A read-only agent cannot invoke an agent with write or full access.",
-    });
+  const personaParent = parent.thread.agentPersonaAssignment !== undefined;
+  if (personaParent) {
+    if (
+      "sandboxPolicy" in parentPolicy &&
+      parentPolicy.sandboxPolicy.type === "readOnly" &&
+      (!("sandboxPolicy" in policy) || policy.sandboxPolicy.type !== "readOnly")
+    ) {
+      return yield* new OrchestratorMcpFailure({
+        code: "runtime_mode_escalation_denied",
+        message: "A read-only agent cannot invoke an agent with write or full access.",
+      });
+    }
+    // A persona runs under its policy, not its stored thread mode (a composer launch keeps the
+    // composer's mode), so judge escalation by what the parent actually runs with.
+    yield* resolveRuntimeMode(parentPolicy.runtimeMode, policy.runtimeMode);
   }
+  // delegateTask compares the request with the parent's stored mode. The child's real
+  // permissions come from its persona snapshot, so when the check above already cleared a
+  // broader child it inherits the stored mode instead of tripping that comparison.
+  const runtimeMode =
+    personaParent &&
+    (yield* resolveRuntimeMode(parent.thread.runtimeMode, policy.runtimeMode).pipe(
+      Effect.match({ onFailure: () => true, onSuccess: () => false }),
+    ))
+      ? "inherit"
+      : policy.runtimeMode;
   const { personaId: _personaId, ...delegate } = input;
   return yield* service.delegateTask(scope, {
     ...delegate,
     title: input.title ?? assignment.displayName ?? input.personaId,
     mode: input.mode ?? "async",
-    runtimeMode: policy.runtimeMode,
+    runtimeMode,
     target: {
       providerInstanceId: assignment.resolvedModelSelection.instanceId,
       model: assignment.resolvedModelSelection.model,
