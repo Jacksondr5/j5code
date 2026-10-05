@@ -28,11 +28,8 @@ export const makePlaybookRpcHandlers = Effect.fn("makePlaybookRpcHandlers")(func
       observe(
         J5_PLAYBOOK_WS_METHODS.exportPlaybook,
         resolvePlaybookWorkspaceRoot(projects, threads, input).pipe(
-          Effect.mapError((error) =>
-            playbookError(
-              "operation_failed",
-              error instanceof Error ? error.message : "Could not resolve the workspace.",
-            ),
+          Effect.mapError(() =>
+            playbookError("operation_failed", "Could not resolve the workspace."),
           ),
           Effect.flatMap((root) =>
             root === null
