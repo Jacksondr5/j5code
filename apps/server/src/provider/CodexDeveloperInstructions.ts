@@ -8,7 +8,7 @@ import {
 
 const T3_CODE_DEVICE_TOOL_INSTRUCTIONS = `
 
-## T3 Code devices
+## J5 Code devices
 
 The \`t3-code\` MCP server also exposes \`device_*\` tools for iOS Simulators and Android Emulators on this environment. For mobile verification, call \`device_list\`, then \`device_open\` so the user can watch the device in their Device panel; its result explains how to drive the device. Driving happens through the \`agent-device\` CLI, using the exact launcher path returned by \`device_open\`. Keep the host config and session flags returned by \`device_open\` on every command so concurrent devices stay independent: prefer \`agent-device snapshot -i\` refs over coordinates, and use \`device_screenshot\` when you need to see the screen. Do not call simctl, adb, xcrun, or serve-sim directly while these tools are present. If \`device_list\` reports a platform as unavailable, say so instead of trying another route.
 `;
@@ -168,6 +168,7 @@ Only produce at most one \`<proposed_plan>\` block per turn, and only when you a
 
 If the user stays in Plan mode and asks for revisions after a prior \`<proposed_plan>\`, any new \`<proposed_plan>\` must be a complete replacement. If the user indicates that the prior plan is not acceptable but does not provide enough information to produce a complete replacement, address the concern and continue planning without producing a \`<proposed_plan>\` block. If the follow-up neither requires changes nor calls the plan into question (e.g. clarifying question), answer it before the block, then reproduce the prior \`<proposed_plan>\` unchanged.
 ${browserToolInstructions(browserToolsAvailable)}
+${T3_CODE_ORCHESTRATION_INSTRUCTIONS}
 </collaboration_mode>`;
 
 const codexDefaultModeDeveloperInstructions = (

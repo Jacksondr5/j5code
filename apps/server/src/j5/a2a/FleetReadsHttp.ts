@@ -7,6 +7,7 @@ import { HttpRouter, HttpServerRespondable, HttpServerResponse } from "effect/un
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { annotateEnvironmentRequest } from "../../auth/http.ts";
+import { PlaybookCrewRelay } from "../playbooks/PlaybookCrewRelay.ts";
 import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewInstanceService.ts";
 import { authenticateClientRead, jsonBody } from "./ClientReadsHttp.ts";
 import { A2ALedger } from "./LedgerService.ts";
@@ -33,6 +34,8 @@ export const projectFleetSquadron = (input: {
   readonly participants: ReadonlyArray<ParticipantPlacementView>;
   readonly crews: ReadonlyArray<AgentCrewInstance>;
   readonly openAsks: ReadonlyMap<string, number>;
+  /** Each live Crew's active playbook run, by Crew id. */
+  readonly playbookRuns?: ReadonlyMap<string, J5Contracts.FleetCrew["playbookRun"]>;
 }): FleetResponse["squadrons"][number] => {
   const seatByParticipant = new Map<string, FleetAgent["crew"]>();
   for (const crew of input.crews) {
@@ -51,30 +54,52 @@ export const projectFleetSquadron = (input: {
   const agents = input.participants.filter(
     (row) => row.participant.kind === "agent" && row.archivedAt == null,
   );
+  // A seat on a live roster that the ledger has no row for (reserved, never created) is still a
+  // seat of that Crew: it rides under its Captain with no thread, so the client counts it as
+  // unknown instead of dropping it. A seat whose row was archived is retired, not unknown.
+  const recorded = new Set(input.participants.map((row) => row.participantId as string));
+  const unrecordedSeats = input.crews.flatMap((crew) =>
+    crew.archivedAt !== null
+      ? []
+      : crew.members
+          .filter((member) => !recorded.has(member.participantId))
+          .map((member): FleetAgent => ({
+            participantId: member.participantId,
+            threadId: null,
+            displayName: member.seatName,
+            origin: "agent",
+            placementParentId: crew.captainParticipantId,
+            crew: seatByParticipant.get(member.participantId) ?? null,
+            openAsks: 0,
+          })),
+  );
   return {
     id: input.squadron.id,
     name: input.squadron.name,
-    agents: agents.map((row) => ({
-      participantId: row.participantId,
-      threadId: row.threadId,
-      displayName:
-        "displayName" in row.participant && typeof row.participant.displayName === "string"
-          ? row.participant.displayName
-          : null,
-      // Every agent-created path (spawn_agent, Crew seats, join_squadron) records a placement
-      // at creation, so an agent with a Squadron home and no placement row is one a person
-      // launched through the composer: `unrecorded` is that measured fact, not a guess. Recorded
-      // `unknown` (a native thread that joined later) stays `?`.
-      origin:
-        row.provenance.kind === "spawned-by"
-          ? "agent"
-          : row.provenance.kind === "unknown"
-            ? "unknown"
-            : "human",
-      placementParentId: row.placementParentId,
-      crew: seatByParticipant.get(row.participantId) ?? null,
-      openAsks: input.openAsks.get(row.participantId) ?? 0,
-    })),
+    agents: [
+      ...agents.map((row): FleetAgent => ({
+        participantId: row.participantId,
+        threadId: row.threadId,
+        displayName:
+          "displayName" in row.participant && typeof row.participant.displayName === "string"
+            ? row.participant.displayName
+            : null,
+        // Every agent-created path (spawn_agent, Crew seats, join_squadron) records a placement
+        // at creation, so an agent with a Squadron home and no placement row is one a person
+        // launched through the composer: `unrecorded` is that measured fact, not a guess. Recorded
+        // `unknown` (a native thread that joined later) stays `?`.
+        origin:
+          row.provenance.kind === "spawned-by"
+            ? "agent"
+            : row.provenance.kind === "unknown"
+              ? "unknown"
+              : "human",
+        placementParentId: row.placementParentId,
+        crew: seatByParticipant.get(row.participantId) ?? null,
+        openAsks: input.openAsks.get(row.participantId) ?? 0,
+      })),
+      ...unrecordedSeats,
+    ],
     // Archived Crews ride along with their roster snapshot: the brief, the seats, and who
     // approved each stay readable for whoever proposes the successor (Crews AC20).
     crews: input.crews.map((crew) => ({
@@ -86,13 +111,19 @@ export const projectFleetSquadron = (input: {
       version: crew.version,
       createdAt: crew.createdAt,
       archivedAt: crew.archivedAt,
-      roster: crew.members.map((member) => ({
-        seat: member.seatName,
-        agentId: member.agentId,
-        participantId: member.participantId,
-        addedVersion: member.addedVersion,
-        reason: member.reason,
-      })),
+      playbook: crew.playbook == null ? null : { name: crew.playbook.name },
+      roster: crew.members.map((member) => {
+        const steps = member.playbookStepIds ?? [];
+        return {
+          seat: member.seatName,
+          agentId: member.agentId,
+          participantId: member.participantId,
+          addedVersion: member.addedVersion,
+          reason: member.reason,
+          ...(steps.length === 0 ? {} : { steps }),
+        };
+      }),
+      playbookRun: input.playbookRuns?.get(crew.id) ?? null,
     })),
   };
 };
@@ -108,6 +139,7 @@ export const makeFleetReadsHttpRouteLayer = (path: HttpRouter.PathInput) =>
       const ledger = yield* A2ALedger;
       const placements = yield* ParticipantPlacementService;
       const crews = yield* AgentCrewInstanceService;
+      const relay = yield* PlaybookCrewRelay;
       const sql = yield* SqlClient.SqlClient;
       const readFleet = (includeRetired: boolean) =>
         Effect.gen(function* () {
@@ -127,15 +159,22 @@ export const makeFleetReadsHttpRouteLayer = (path: HttpRouter.PathInput) =>
             `;
               for (const row of rows) openAsks.set(row.receiver_id, Number(row.count));
             }
+            // Retired Crews carry rosters and briefs; only the page that shows them pays for them.
+            const squadronCrews = (yield* crews.listForSquadron(squadron.id)).filter(
+              (crew) => includeRetired || crew.archivedAt === null,
+            );
+            // Archiving a Crew cancels its run, so only live Crews can have one.
+            const playbookRuns = new Map<string, J5Contracts.FleetCrew["playbookRun"]>();
+            for (const crew of squadronCrews)
+              if (crew.archivedAt === null)
+                playbookRuns.set(crew.id, yield* relay.fleetRun(crew.id));
             result.push(
               projectFleetSquadron({
                 squadron,
                 participants,
-                // Retired Crews carry rosters and briefs; only the page that shows them pays for them.
-                crews: (yield* crews.listForSquadron(squadron.id)).filter(
-                  (crew) => includeRetired || crew.archivedAt === null,
-                ),
+                crews: squadronCrews,
                 openAsks,
+                playbookRuns,
               }),
             );
           }

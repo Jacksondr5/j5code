@@ -11,25 +11,33 @@ import {
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
+import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { ServerConfig } from "../../config.ts";
+import { EventSinkStreamError, EventSinkV2 } from "../../orchestration-v2/EventSink.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import { agentHandoffArtifactPath } from "../agents/agentPersonaArtifacts.ts";
 import {
   ArtifactWorkspace,
+  ArtifactWorkspaceError,
   layer as artifactWorkspaceLayer,
 } from "../artifacts/ArtifactWorkspace.ts";
 import {
   AgentCrewInstanceService,
   layer as crewInstanceLayer,
 } from "./AgentCrewInstanceService.ts";
+import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import {
   CrewSeatFinishNotifier,
+  layer as daemonNotifierLayer,
   manualLayer as notifierLayer,
   seatNoticeSections,
   seatFinishedNoticeText,
@@ -193,7 +201,7 @@ const terminalRunEvent = (
 
 it.effect("tells the Captain how each finished seat ended, and settles nothing", () =>
   Effect.gen(function* () {
-    const database = NodeSqliteClient.layerMemory();
+    const database = NodeSqliteClient.layer({ filename: ":memory:" });
     const storage = Layer.mergeAll(ledgerLayer, crewInstanceLayer).pipe(
       Layer.provideMerge(database),
     );
@@ -268,10 +276,12 @@ it.effect("tells the Captain how each finished seat ended, and settles nothing",
         }),
       ),
       Layer.provideMerge(Layer.mock(CrewCaptainArchiveCascade)({})),
+      Layer.provideMerge(Layer.mock(EventSinkV2)({})),
       Layer.provideMerge(artifactWorkspaceLayer),
       Layer.provideMerge(Layer.succeedContext(context)),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-finish-" })),
       Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(Layer.mock(A2ADeliveryWorker)({ notify: Effect.void })),
     );
     yield* Effect.gen(function* () {
       const notifier = yield* CrewSeatFinishNotifier;
@@ -403,7 +413,7 @@ it.effect(
   "folds a notice into the digest queued behind the Captain's turn and stays silent when nothing changed",
   () =>
     Effect.gen(function* () {
-      const database = NodeSqliteClient.layerMemory();
+      const database = NodeSqliteClient.layer({ filename: ":memory:" });
       const storage = Layer.mergeAll(ledgerLayer, crewInstanceLayer).pipe(
         Layer.provideMerge(database),
       );
@@ -487,10 +497,12 @@ it.effect(
           }),
         ),
         Layer.provideMerge(Layer.mock(CrewCaptainArchiveCascade)({})),
+        Layer.provideMerge(Layer.mock(EventSinkV2)({})),
         Layer.provideMerge(artifactWorkspaceLayer),
         Layer.provideMerge(Layer.succeedContext(context)),
         Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-fold-" })),
         Layer.provideMerge(NodeServices.layer),
+        Layer.provideMerge(Layer.mock(A2ADeliveryWorker)({ notify: Effect.void })),
       );
       yield* Effect.gen(function* () {
         const notifier = yield* CrewSeatFinishNotifier;
@@ -572,7 +584,7 @@ it.effect(
   "leaves a seat unreported when its notice to the Captain fails, so the next pass retries",
   () =>
     Effect.gen(function* () {
-      const database = NodeSqliteClient.layerMemory();
+      const database = NodeSqliteClient.layer({ filename: ":memory:" });
       const storage = Layer.mergeAll(ledgerLayer, crewInstanceLayer).pipe(
         Layer.provideMerge(database),
       );
@@ -621,10 +633,12 @@ it.effect(
           }),
         ),
         Layer.provideMerge(Layer.mock(CrewCaptainArchiveCascade)({})),
+        Layer.provideMerge(Layer.mock(EventSinkV2)({})),
         Layer.provideMerge(artifactWorkspaceLayer),
         Layer.provideMerge(Layer.succeedContext(context)),
         Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-retry-" })),
         Layer.provideMerge(NodeServices.layer),
+        Layer.provideMerge(Layer.mock(A2ADeliveryWorker)({ notify: Effect.void })),
       );
       yield* Effect.gen(function* () {
         const notifier = yield* CrewSeatFinishNotifier;
@@ -644,9 +658,165 @@ it.effect(
     }).pipe(Effect.scoped),
 );
 
+it.effect(
+  "an unreadable handoff is never reported missing: the notice waits and the retry carries the file",
+  () =>
+    Effect.gen(function* () {
+      const database = NodeSqliteClient.layer({ filename: ":memory:" });
+      const storage = Layer.mergeAll(ledgerLayer, crewInstanceLayer).pipe(
+        Layer.provideMerge(database),
+      );
+      const context = yield* Layer.build(storage);
+      yield* runJ5A2AMigrations().pipe(Effect.provide(context));
+      yield* Context.get(context, A2ALedger).createSquadron({
+        squadron: { id: squadronId, name: "Unreadable", createdAt: DateTime.formatIso(createdAt) },
+      });
+      yield* Context.get(context, AgentCrewInstanceService).record({
+        id: "crew:unreadable",
+        squadronId,
+        captainParticipantId: participantIdForThread(captainThread),
+        captainThreadId: captainThread,
+        displayName: "Unreadable Crew",
+        brief: "Finish the work.",
+        createdAt: DateTime.formatIso(createdAt),
+        members: [
+          {
+            seatName: "builder",
+            agentId: "builder",
+            participantId: participantIdForThread(builderThread),
+            threadId: builderThread,
+            reason: null,
+          },
+          {
+            seatName: "critic",
+            agentId: "critic",
+            participantId: participantIdForThread(criticThread),
+            threadId: criticThread,
+            reason: null,
+          },
+        ],
+      });
+      const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]);
+      const captain = yield* Ref.make(captainProjection({ running: false, messages: [] }));
+      const readsFail = yield* Ref.make(false);
+      const flakyWorkspace = Layer.effect(
+        ArtifactWorkspace,
+        Effect.gen(function* () {
+          const real = yield* ArtifactWorkspace;
+          return ArtifactWorkspace.of({
+            ...real,
+            read: (input) =>
+              Ref.get(readsFail).pipe(
+                Effect.flatMap((fail) =>
+                  fail
+                    ? Effect.fail(new ArtifactWorkspaceError({ operation: "read", detail: "EIO" }))
+                    : real.read(input),
+                ),
+              ),
+          });
+        }),
+      ).pipe(Layer.provide(artifactWorkspaceLayer));
+      // The builder's finish is outstanding for the boot sweep; the critic has no run on record.
+      const builderFinished = {
+        ...projection(builderThread),
+        runs: [
+          {
+            id: RunId.make("run:b1"),
+            ordinal: 1,
+            threadId: builderThread,
+            status: "completed",
+            completedAt: createdAt,
+          },
+        ],
+      } as unknown as OrchestrationV2ThreadProjection;
+      const layer = notifierLayer.pipe(
+        Layer.provideMerge(
+          Layer.mock(CrewLaunchReporter)({ coversFailure: () => Effect.succeed(false) }),
+        ),
+        Layer.provideMerge(
+          Layer.mock(ThreadManagementService)({
+            getThreadProjection: (threadId) =>
+              threadId === captainThread
+                ? Ref.get(captain)
+                : Effect.succeed(
+                    threadId === builderThread ? builderFinished : projection(threadId),
+                  ),
+            dispatch: (command) =>
+              Ref.update(dispatched, (items) => [...items, command]).pipe(
+                Effect.as({ events: [], effects: [] } as never),
+              ),
+          }),
+        ),
+        Layer.provideMerge(Layer.mock(CrewCaptainArchiveCascade)({})),
+        Layer.provideMerge(Layer.mock(EventSinkV2)({})),
+        Layer.provideMerge(flakyWorkspace),
+        Layer.provideMerge(Layer.succeedContext(context)),
+        Layer.provideMerge(
+          ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-unreadable-" }),
+        ),
+        Layer.provideMerge(NodeServices.layer),
+        Layer.provideMerge(Layer.mock(A2ADeliveryWorker)({ notify: Effect.void })),
+      );
+      yield* Effect.gen(function* () {
+        const notifier = yield* CrewSeatFinishNotifier;
+        const workspace = yield* ArtifactWorkspace;
+        const notices = Ref.get(dispatched).pipe(
+          Effect.map((commands) =>
+            commands.flatMap((command) => (command.type === "message.dispatch" ? [command] : [])),
+          ),
+        );
+        // A file that was checked and is not there is missing.
+        assert.equal(
+          yield* notifier.handleStoredEvent(terminalRunEvent(criticThread, "run:c1")),
+          criticThread,
+        );
+        const [missing] = yield* notices;
+        assert.include(missing?.text ?? "", "handoff: missing (ReviewHandoff)");
+
+        // A read that failed for any other reason sends nothing, so the finish stays unreported.
+        yield* workspace.write({
+          projectId: ProjectId.make("project:crew-finish"),
+          relativePath: agentHandoffArtifactPath({
+            personaId: "builder",
+            artifact: "CodeCompleteHandoff",
+            threadId: builderThread,
+          }),
+          content: "# Done\n\nShipped.\n",
+        });
+        yield* Ref.set(readsFail, true);
+        assert.isNull(yield* notifier.handleStoredEvent(terminalRunEvent(builderThread, "run:b1")));
+        assert.lengthOf(yield* Ref.get(dispatched), 1);
+
+        // After recovery the boot sweep delivers the written handoff as the finish's first notice.
+        yield* Ref.set(readsFail, false);
+        assert.deepStrictEqual(yield* notifier.reconcile, [builderThread]);
+        const delivered = (yield* notices)[1];
+        assert.lengthOf(yield* Ref.get(dispatched), 2);
+        assert.include(delivered?.text ?? "", "handoff: written (CodeCompleteHandoff)");
+        assert.match(delivered?.text ?? "", /handoff_digest: [0-9a-f]{12}/);
+        assert.include(delivered?.text ?? "", "<handoff_body>\n# Done");
+
+        // The Captain now holds that notice; the same unchanged handoff is not sent again.
+        yield* Ref.set(
+          captain,
+          captainProjection({
+            running: false,
+            messages: [
+              { id: "msg:missing", text: missing?.text ?? "", at: "2026-09-09T16:02:00Z" },
+              { id: "msg:written", text: delivered?.text ?? "", at: "2026-09-09T16:03:00Z" },
+            ],
+          }),
+        );
+        yield* notifier.reconcile;
+        yield* notifier.handleStoredEvent(terminalRunEvent(builderThread, "run:b1"));
+        assert.lengthOf(yield* Ref.get(dispatched), 2);
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
+);
+
 it.effect("the boot sweep tells the Captain about a finished seat nothing reported", () =>
   Effect.gen(function* () {
-    const database = NodeSqliteClient.layerMemory();
+    const database = NodeSqliteClient.layer({ filename: ":memory:" });
     const storage = Layer.mergeAll(ledgerLayer, crewInstanceLayer).pipe(
       Layer.provideMerge(database),
     );
@@ -725,10 +895,12 @@ it.effect("the boot sweep tells the Captain about a finished seat nothing report
         }),
       ),
       Layer.provideMerge(Layer.mock(CrewCaptainArchiveCascade)({})),
+      Layer.provideMerge(Layer.mock(EventSinkV2)({})),
       Layer.provideMerge(artifactWorkspaceLayer),
       Layer.provideMerge(Layer.succeedContext(context)),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-sweep-" })),
       Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(Layer.mock(A2ADeliveryWorker)({ notify: Effect.void })),
     );
     yield* Effect.gen(function* () {
       const notifier = yield* CrewSeatFinishNotifier;
@@ -749,5 +921,203 @@ it.effect("the boot sweep tells the Captain about a finished seat nothing report
         assert.include(notice.text, "run_status: failed");
       }
     }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "a handoff that can never be read still lets the finish reach the Captain, saying why",
+  () =>
+    Effect.gen(function* () {
+      const database = NodeSqliteClient.layer({ filename: ":memory:" });
+      const storage = Layer.mergeAll(ledgerLayer, crewInstanceLayer).pipe(
+        Layer.provideMerge(database),
+      );
+      const context = yield* Layer.build(storage);
+      yield* runJ5A2AMigrations().pipe(Effect.provide(context));
+      yield* Context.get(context, A2ALedger).createSquadron({
+        squadron: { id: squadronId, name: "Oversized", createdAt: DateTime.formatIso(createdAt) },
+      });
+      yield* Context.get(context, AgentCrewInstanceService).record({
+        id: "crew:oversized",
+        squadronId,
+        captainParticipantId: participantIdForThread(captainThread),
+        captainThreadId: captainThread,
+        displayName: "Oversized Crew",
+        brief: "Finish the work.",
+        createdAt: DateTime.formatIso(createdAt),
+        members: [
+          {
+            seatName: "critic",
+            agentId: "critic",
+            participantId: participantIdForThread(criticThread),
+            threadId: criticThread,
+            reason: null,
+          },
+        ],
+      });
+      const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]);
+      // What sits at the handoff path: facts that never change on a retry.
+      const failure = yield* Ref.make<"too_large" | "not_a_file" | "outside_root">("too_large");
+      const workspace = Layer.effect(
+        ArtifactWorkspace,
+        Effect.gen(function* () {
+          const real = yield* ArtifactWorkspace;
+          return ArtifactWorkspace.of({
+            ...real,
+            read: () =>
+              Ref.get(failure).pipe(
+                Effect.flatMap((reason) =>
+                  Effect.fail(
+                    new ArtifactWorkspaceError({ operation: "read", detail: reason, reason }),
+                  ),
+                ),
+              ),
+          });
+        }),
+      ).pipe(Layer.provide(artifactWorkspaceLayer));
+      const layer = notifierLayer.pipe(
+        Layer.provideMerge(
+          Layer.mock(CrewLaunchReporter)({ coversFailure: () => Effect.succeed(false) }),
+        ),
+        Layer.provideMerge(
+          Layer.mock(ThreadManagementService)({
+            getThreadProjection: (threadId) => Effect.succeed(projection(threadId)),
+            dispatch: (command) =>
+              Ref.update(dispatched, (items) => [...items, command]).pipe(
+                Effect.as({ events: [], effects: [] } as never),
+              ),
+          }),
+        ),
+        Layer.provideMerge(Layer.mock(CrewCaptainArchiveCascade)({})),
+        Layer.provideMerge(Layer.mock(EventSinkV2)({})),
+        Layer.provideMerge(workspace),
+        Layer.provideMerge(Layer.succeedContext(context)),
+        Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-oversized-" })),
+        Layer.provideMerge(NodeServices.layer),
+        Layer.provideMerge(Layer.mock(A2ADeliveryWorker)({ notify: Effect.void })),
+      );
+      yield* Effect.gen(function* () {
+        const notifier = yield* CrewSeatFinishNotifier;
+        const lastNotice = Ref.get(dispatched).pipe(
+          Effect.map((commands) => {
+            const last = commands.at(-1);
+            return last?.type === "message.dispatch" ? last.text : "";
+          }),
+        );
+        // Over the read limit: the file exists, so it is written, named by path, never inlined.
+        assert.equal(
+          yield* notifier.handleStoredEvent(terminalRunEvent(criticThread, "run:big")),
+          criticThread,
+        );
+        const big = yield* lastNotice;
+        assert.include(big, "handoff: written (ReviewHandoff)");
+        assert.include(big, "handoff_size: over the read limit");
+        assert.notInclude(big, "<handoff_body>");
+        assert.include(big, "Read it with read_artifact");
+
+        // A directory at the path is not a handoff, and the notice says so.
+        yield* Ref.set(failure, "not_a_file");
+        assert.equal(
+          yield* notifier.handleStoredEvent(terminalRunEvent(criticThread, "run:dir")),
+          criticThread,
+        );
+        const dir = yield* lastNotice;
+        assert.include(dir, "handoff: unavailable (ReviewHandoff)");
+        assert.include(dir, "handoff_reason: not a regular file");
+        assert.notInclude(dir, "handoff: written");
+
+        yield* Ref.set(failure, "outside_root");
+        assert.equal(
+          yield* notifier.handleStoredEvent(terminalRunEvent(criticThread, "run:link")),
+          criticThread,
+        );
+        assert.include(yield* lastNotice, "handoff_reason: link leaves the artifacts directory");
+        assert.lengthOf(yield* Ref.get(dispatched), 3);
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
+);
+
+/**
+ * The notifier's daemon over an empty Crew store: `started` resolves with the sequence its
+ * stored-event stream was opened after.
+ */
+const daemonHarness = (latestSequence: EventSinkV2["Service"]["latestSequence"]) =>
+  Effect.gen(function* () {
+    const database = NodeSqliteClient.layer({ filename: ":memory:" });
+    const storage = Layer.mergeAll(ledgerLayer, crewInstanceLayer).pipe(
+      Layer.provideMerge(database),
+    );
+    const context = yield* Layer.build(storage);
+    yield* runJ5A2AMigrations().pipe(Effect.provide(context));
+    const started = yield* Deferred.make<number>();
+    let streamCalls = 0;
+    const layer = daemonNotifierLayer.pipe(
+      Layer.provideMerge(
+        Layer.mock(CrewLaunchReporter)({
+          reconcile: Effect.succeed([]),
+        }),
+      ),
+      Layer.provideMerge(
+        Layer.mock(ThreadManagementService)({
+          streamStoredEventsFrom: (input) => {
+            streamCalls += 1;
+            return Stream.fromEffect(Deferred.succeed(started, input?.afterSequence ?? 0)).pipe(
+              Stream.drain,
+              Stream.concat(Stream.never),
+            );
+          },
+        }),
+      ),
+      Layer.provideMerge(
+        Layer.mock(CrewCaptainArchiveCascade)({
+          reconcile: Effect.succeed([]),
+        }),
+      ),
+      Layer.provideMerge(Layer.mock(EventSinkV2)({ latestSequence })),
+      Layer.provideMerge(artifactWorkspaceLayer),
+      Layer.provideMerge(Layer.succeedContext(context)),
+      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-daemon-" })),
+      Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(Layer.mock(A2ADeliveryWorker)({ notify: Effect.void })),
+    );
+    return { layer, started, streamCalls: () => streamCalls };
+  });
+
+it.effect(
+  "the daemon's stream starts after the event store's latest sequence, not from the beginning",
+  () =>
+    Effect.gen(function* () {
+      const harness = yield* daemonHarness(() => Effect.succeed(4200));
+      yield* Effect.gen(function* () {
+        yield* CrewSeatFinishNotifier;
+        // Replaying from 0 re-fires old reactions, such as an old Captain archive retiring
+        // live Crews on every restart (#349).
+        assert.equal(yield* Deferred.await(harness.started), 4200);
+      }).pipe(Effect.provide(harness.layer));
+    }).pipe(Effect.scoped),
+);
+
+it.effect("a failed high-water read retries instead of streaming from the beginning", () =>
+  Effect.gen(function* () {
+    const firstReadFailed = yield* Deferred.make<void>();
+    let reads = 0;
+    const harness = yield* daemonHarness(() =>
+      Effect.suspend(() => {
+        reads += 1;
+        return reads === 1
+          ? Deferred.succeed(firstReadFailed, undefined).pipe(
+              Effect.andThen(Effect.fail(new EventSinkStreamError({}))),
+            )
+          : Effect.succeed(4200);
+      }),
+    );
+    yield* Effect.gen(function* () {
+      yield* CrewSeatFinishNotifier;
+      yield* Deferred.await(firstReadFailed);
+      assert.equal(harness.streamCalls(), 0);
+      yield* TestClock.adjust(Duration.millis(250));
+      assert.equal(yield* Deferred.await(harness.started), 4200);
+      assert.equal(reads, 2);
+    }).pipe(Effect.provide(harness.layer));
   }).pipe(Effect.scoped),
 );

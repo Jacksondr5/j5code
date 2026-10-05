@@ -1,6 +1,7 @@
 import { preloadPatchFile } from "@pierre/diffs/ssr";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ComposerPromptEditor, type ComposerPromptEditorHandle } from "../ComposerPromptEditor";
+import { EMPTY_COMPOSER_CONTEXT_RECORDS } from "../composerContextPresentation";
 import { terminalThemeFromApp } from "../ThreadTerminalDrawer";
 import { useTheme } from "../../hooks/useTheme";
 import { DISCONNECTED_COMPOSER_PLACEHOLDER } from "../../composerPlaceholder";
@@ -9,12 +10,11 @@ import { PREFERRED_HIGHLIGHTER } from "../../lib/syntaxHighlighting";
 import { GhosttyTerminalSurface } from "~/terminal/ghostty/surface";
 
 // The font previews are the real surfaces, not lookalikes: the composer's
-// Lexical editor, the diff panel's file diff, and the Ghostty canvas
+// Tiptap editor, the diff panel's file diff, and the Ghostty canvas
 // renderer. Each already consumes the appearance font tokens (or, for the
 // terminal, the settings passed down as props), so what the row shows is
 // exactly what the app renders.
 
-const EMPTY_TERMINAL_CONTEXTS: ReadonlyArray<never> = [];
 const EMPTY_SKILLS: ReadonlyArray<never> = [];
 
 // Serialized the way the composer stores inline tokens: the $skill and the
@@ -42,12 +42,11 @@ export function PromptFontPreview() {
         editorRef={editorRef}
         value={prompt}
         cursor={cursor}
-        terminalContexts={EMPTY_TERMINAL_CONTEXTS}
+        contextRecords={EMPTY_COMPOSER_CONTEXT_RECORDS}
         skills={EMPTY_SKILLS}
         disabled={false}
         placeholder={DISCONNECTED_COMPOSER_PLACEHOLDER}
-        className="max-h-40 min-h-12"
-        onRemoveTerminalContext={noop}
+        className="max-h-42 min-h-14"
         onChange={onChange}
         onPaste={noop}
       />
@@ -148,7 +147,7 @@ export function CodeFontPreview() {
 // A zsh-style prompt: green arrow, cyan project, blue/red git segment,
 // yellow dirty marker. It doubles as the echo loop's fresh-line prompt.
 const TERMINAL_PROMPT =
-  "\x1b[1;32m→\x1b[0m \x1b[1;36mt3code\x1b[0m \x1b[1;34mgit:(\x1b[1;31mmain\x1b[1;34m)\x1b[0m \x1b[1;33m✗\x1b[0m ";
+  "\x1b[1;32m→\x1b[0m \x1b[1;36mj5code\x1b[0m \x1b[1;34mgit:(\x1b[1;31mmain\x1b[1;34m)\x1b[0m \x1b[1;33m✗\x1b[0m ";
 // A dev-server startup: brand line, addresses, a test summary, and a READY
 // badge. Together the lines cover bold, dim, underline, the six accent
 // colors, and a background cell, so a font choice shows every SGR the

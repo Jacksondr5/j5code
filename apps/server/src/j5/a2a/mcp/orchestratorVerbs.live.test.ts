@@ -29,12 +29,15 @@ import * as BackgroundPolicy from "../../../background/BackgroundPolicy.ts";
 import * as HostPowerMonitor from "../../../background/HostPowerMonitor.ts";
 import * as CheckpointStore from "../../../checkpointing/CheckpointStore.ts";
 import { ServerConfig } from "../../../config.ts";
+import { EnvironmentAuth } from "../../../auth/EnvironmentAuth.ts";
 import * as ServerSecretStore from "../../../auth/ServerSecretStore.ts";
 import { layer as mcpSessionRegistryTestLayer } from "../../../mcp/McpSessionRegistry.testkit.ts";
 import { McpInvocationContext } from "../../../mcp/McpInvocationContext.ts";
 import * as OrchestratorMcpService from "../../../mcp/OrchestratorMcpService.ts";
 import { runDaemonWithOptions as runEffectWorkerDaemonWithOptions } from "../../../orchestration-v2/EffectWorker.ts";
 import { OrchestratorV2 } from "../../../orchestration-v2/Orchestrator.ts";
+import { layerFromProviderInstanceRegistry as providerAdapterRegistryFromInstances } from "../../../orchestration-v2/ProviderAdapterRegistry.ts";
+import { SourceControlProviderRegistry } from "../../../sourceControl/SourceControlProviderRegistry.ts";
 import { layer as threadLifecycleServiceLayer } from "../../../orchestration-v2/ThreadLifecycleService.ts";
 import { OrchestrationV2LayerLive as UpstreamOrchestrationV2LayerLive } from "../../../orchestration-v2/runtimeLayer.ts";
 import { ProviderInstanceRegistryHydrationLive } from "../../../provider/Layers/ProviderInstanceRegistryHydration.ts";
@@ -119,6 +122,10 @@ const providerInstanceRegistryLayer = ProviderInstanceRegistryHydrationLive.pipe
         Layer.provide(NodeServices.layer),
       ),
       ModelManifest.layerTest,
+      ServerSecretStore.layer.pipe(
+        Layer.provide(serverConfigLayer),
+        Layer.provide(NodeServices.layer),
+      ),
       CodexResetCredit.layer,
       OpenCodeRuntimeLive.pipe(Layer.provide(NodeServices.layer)),
       Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers),
@@ -137,12 +144,20 @@ const secretStoreLayer = ServerSecretStore.layer.pipe(
   Layer.provide(NodeServices.layer),
 );
 const orchestratorMcpLayer = OrchestratorMcpService.layer.pipe(
-  Layer.provide(Layer.mergeAll(orchestrationLayer, Layer.mock(ScheduledTaskService)({}))),
+  Layer.provide(
+    Layer.mergeAll(
+      orchestrationLayer,
+      Layer.mock(ScheduledTaskService)({}),
+      providerAdapterRegistryFromInstances,
+    ),
+  ),
 );
 const j5Layer = J5A2ARuntimeLayer.pipe(
   Layer.provideMerge(orchestrationLayer),
   Layer.provide(threadLifecycleLayer),
   Layer.provide(secretStoreLayer),
+  // The peer registry checks which peer sessions are live; this test has no peers.
+  Layer.provide(Layer.mock(EnvironmentAuth)({ listSessions: () => Effect.succeed([]) })),
 );
 const handlersLayer = J5ToolkitHandlersLive.pipe(
   Layer.provideMerge(j5Layer),
@@ -157,6 +172,11 @@ const liveLayer = Layer.mergeAll(
 ).pipe(
   Layer.provide(Layer.mock(GitWorkflow.GitWorkflowService)({})),
   Layer.provide(
+    Layer.mock(SourceControlProviderRegistry)({
+      resolveLink: () => Effect.die("unused title link"),
+    }),
+  ),
+  Layer.provide(
     Layer.mock(ProjectService.ProjectService)({
       getById: () => Effect.succeed(Option.none()),
     }),
@@ -169,6 +189,7 @@ const liveLayer = Layer.mergeAll(
   Layer.provideMerge(providerRegistryLayer),
   Layer.provide(providerInstanceRegistryLayer),
   Layer.provide(backgroundPolicyLayer),
+  Layer.provide(ModelManifest.layerTest),
   Layer.provide(NodeServices.layer),
 );
 const testLayer = Layer.mergeAll(liveLayer, NodeServices.layer);

@@ -10,7 +10,7 @@ import { SkillLinksPanel, type SkillLinkSelection } from "./SkillLinksPanel";
 import { ChevronRightIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { getDriverOption } from "../../components/settings/providerDriverMeta";
+import { ProviderInstanceIcon } from "../../components/chat/ProviderInstanceIcon";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../../components/ui/collapsible";
@@ -24,6 +24,7 @@ import {
   TableRow,
 } from "../../components/ui/table";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip";
+import { useOptionalSettingsScope } from "../../components/settings/SettingsScopeContext";
 import {
   Select,
   SelectItem,
@@ -32,6 +33,7 @@ import {
   SelectValue,
 } from "../../components/ui/select";
 import { useEnvironment } from "../../state/environments";
+import { lockedSettingsScopeProject } from "../settingsScopeEnvironment.logic";
 import { useProjects } from "../../state/entities";
 import { EMPTY_SERVER_PROVIDERS, serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -89,11 +91,17 @@ export function SkillInventoryPanel({ environmentId }: { readonly environmentId:
   const environment = useEnvironment(environmentId);
   const allProjects = useProjects();
   const projects = allProjects.filter((project) => project.environmentId === environmentId);
+  // A project named in the settings scope sentence locks the inventory to its checkout.
+  const lockedProject = lockedSettingsScopeProject(
+    useOptionalSettingsScope()?.scope,
+    environmentId,
+  );
   const [projectId, setProjectId] = useState<string | null>(null);
   const project =
-    projectId === ""
+    lockedProject ??
+    (projectId === ""
       ? undefined
-      : (projects.find((entry) => entry.id === projectId) ?? projects[0]);
+      : (projects.find((entry) => entry.id === projectId) ?? projects[0]));
   // Make the primitive explicit so React Compiler preserves the inventory memoization.
   const cwd = project ? String(project.workspaceRoot) : undefined;
   const providers =
@@ -189,7 +197,7 @@ export function SkillInventoryPanel({ environmentId }: { readonly environmentId:
               : !connected
                 ? ("not-checked" as const)
                 : skillDiscoveryState(provider, cwd),
-            Icon: getDriverOption(provider.driver)?.icon,
+            driver: provider.driver,
             checkedAt:
               (cwd
                 ? provider.workspaceSnapshots?.find((snapshot) => snapshot.cwd === cwd)?.checkedAt
@@ -246,6 +254,7 @@ export function SkillInventoryPanel({ environmentId }: { readonly environmentId:
           Project
           <Select
             value={project?.id ?? ""}
+            disabled={lockedProject !== null}
             onValueChange={(value) => {
               setProjectId(value ?? "");
               setLinkSelection(null);
@@ -311,10 +320,14 @@ export function SkillInventoryPanel({ environmentId }: { readonly environmentId:
       <div className="grid gap-1 text-xs text-muted-foreground" role="status">
         {!connected ? <p>Environment disconnected. Cached results may be stale.</p> : null}
         {displayedProviders.map((provider) => {
-          const { state, Icon, label, checkedAt } = providerDetails.get(provider.instanceId)!;
+          const { state, driver, label, checkedAt } = providerDetails.get(provider.instanceId)!;
           return (
             <p key={provider.instanceId} className="flex min-w-0 items-center gap-1.5">
-              {Icon ? <Icon aria-hidden className="size-3 shrink-0" /> : null}
+              <ProviderInstanceIcon
+                driverKind={driver}
+                displayName={label}
+                iconClassName="size-3"
+              />
               <span>
                 {label}:{" "}
                 {state === "checked"
@@ -348,209 +361,223 @@ export function SkillInventoryPanel({ environmentId }: { readonly environmentId:
             const group = visibleRows.filter((row) => row.origin === origin);
             if (!group.length) return null;
             return (
-              <Collapsible
+              <div
                 key={origin}
-                open={!collapsedOrigins.has(origin)}
-                onOpenChange={(open) => {
-                  setCollapsedOrigins((previous) => {
-                    const next = new Set(previous);
-                    if (open) next.delete(origin);
-                    else next.add(origin);
-                    return next;
-                  });
-                }}
                 className="min-w-0 overflow-hidden rounded-xl border border-border/60 bg-card/40"
               >
-                <h3>
-                  <CollapsibleTrigger className="group flex min-h-11 w-full items-center gap-2 bg-muted/40 px-3 py-2 text-left text-sm font-medium hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
-                    <ChevronRightIcon
-                      aria-hidden
-                      className="size-4 shrink-0 text-muted-foreground group-data-panel-open:rotate-90"
-                    />
-                    <span className="flex-1">{origin}</span>
-                    <span className="text-xs font-normal tabular-nums text-muted-foreground">
-                      {group.length}
-                      <span className="sr-only"> skill locations</span>
-                    </span>
-                  </CollapsibleTrigger>
-                </h3>
-                <p className="bg-muted/40 pr-3 pb-3 pl-9 text-xs leading-relaxed text-muted-foreground">
-                  {SKILL_ORIGIN_DESCRIPTIONS[origin]}
-                </p>
-                <CollapsiblePanel className="border-t border-border/60 transition-none duration-0">
-                  <Table aria-label={`${origin} skill inventory`} className="min-w-160 table-fixed">
-                    <colgroup>
-                      <col className="w-[40%]" />
-                      {displayedProviders.map((provider) => (
-                        <col key={provider.instanceId} />
-                      ))}
-                    </colgroup>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Skill</TableHead>
-                        {displayedProviders.map((provider) => {
-                          const { Icon, label } = providerDetails.get(provider.instanceId)!;
-                          return (
-                            <TableHead key={provider.instanceId}>
-                              <Tooltip>
-                                <TooltipTrigger
-                                  render={
-                                    <span
-                                      tabIndex={0}
-                                      className="flex min-w-0 items-center gap-1"
-                                    />
-                                  }
-                                >
-                                  {Icon ? <Icon aria-hidden className="size-3 shrink-0" /> : null}
-                                  <span className="truncate">{label}</span>
-                                </TooltipTrigger>
-                                <TooltipPopup>{label}</TooltipPopup>
-                              </Tooltip>
-                            </TableHead>
-                          );
-                        })}
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {group.map((row) => {
-                        const selectedRecords = displayedProviders.flatMap((provider) =>
-                          (row.records.get(provider.instanceId) ?? []).map((skill) => ({
-                            provider,
-                            skill,
-                          })),
-                        );
-                        const first = selectedRecords[0]!.skill;
-                        return (
-                          <TableRow key={row.key}>
-                            <TableCell className="min-w-0 py-1">
-                              <Tooltip>
-                                <TooltipTrigger
-                                  render={
-                                    <span
-                                      tabIndex={0}
-                                      className="flex min-w-0 items-center gap-2"
-                                    />
-                                  }
-                                >
-                                  <span className="max-w-full shrink-0 truncate font-medium">
-                                    {first.displayName ?? first.name}
-                                  </span>
-                                  <span className="truncate text-muted-foreground">
-                                    {first.description ?? first.shortDescription}
-                                  </span>
-                                </TooltipTrigger>
-                                <TooltipPopup className="max-w-md whitespace-normal break-words">
-                                  <SkillRecordDetails skill={first} />
-                                </TooltipPopup>
-                              </Tooltip>
-                              {!skillLinkUnavailableReason(row.origin) ? (
-                                <div className="flex flex-wrap gap-1">
-                                  {(["link", "unlink"] as const).map((action) => (
-                                    <Button
-                                      key={action}
-                                      variant="ghost"
-                                      size="sm"
-                                      disabled={!connected}
-                                      onClick={() =>
-                                        setLinkSelection({
-                                          action,
-                                          source: {
-                                            instanceId: selectedRecords[0]!.provider.instanceId,
-                                            path: first.path,
-                                            name: first.name,
-                                          },
-                                          origin: row.origin,
-                                        })
+                <Collapsible
+                  open={!collapsedOrigins.has(origin)}
+                  onOpenChange={(open) => {
+                    setCollapsedOrigins((previous) => {
+                      const next = new Set(previous);
+                      if (open) next.delete(origin);
+                      else next.add(origin);
+                      return next;
+                    });
+                  }}
+                >
+                  <h3>
+                    <CollapsibleTrigger className="group flex min-h-11 w-full items-center gap-2 bg-muted/40 px-3 py-2 text-left text-sm font-medium hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
+                      <ChevronRightIcon
+                        aria-hidden
+                        className="size-4 shrink-0 text-muted-foreground group-data-panel-open:rotate-90"
+                      />
+                      <span className="flex-1">{origin}</span>
+                      <span className="text-xs font-normal tabular-nums text-muted-foreground">
+                        {group.length}
+                        <span className="sr-only"> skill locations</span>
+                      </span>
+                    </CollapsibleTrigger>
+                  </h3>
+                  <p className="bg-muted/40 pr-3 pb-3 pl-9 text-xs leading-relaxed text-muted-foreground">
+                    {SKILL_ORIGIN_DESCRIPTIONS[origin]}
+                  </p>
+                  <CollapsiblePanel>
+                    <div className="border-t border-border/60">
+                      <Table
+                        aria-label={`${origin} skill inventory`}
+                        className="min-w-160 table-fixed"
+                      >
+                        <colgroup>
+                          <col className="w-[40%]" />
+                          {displayedProviders.map((provider) => (
+                            <col key={provider.instanceId} />
+                          ))}
+                        </colgroup>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Skill</TableHead>
+                            {displayedProviders.map((provider) => {
+                              const { driver, label } = providerDetails.get(provider.instanceId)!;
+                              return (
+                                <TableHead key={provider.instanceId}>
+                                  <Tooltip>
+                                    <TooltipTrigger
+                                      render={
+                                        <span
+                                          tabIndex={0}
+                                          className="flex min-w-0 items-center gap-1"
+                                        />
                                       }
                                     >
-                                      {action === "link" ? "Link…" : "Unlink…"}
-                                    </Button>
-                                  ))}
-                                </div>
-                              ) : null}
-                            </TableCell>
-                            {displayedProviders.map((provider) => {
-                              const records = row.records.get(provider.instanceId);
-                              const { state, label } = providerDetails.get(provider.instanceId)!;
-                              return (
-                                <TableCell key={provider.instanceId} className="py-1">
-                                  {records ? (
-                                    <div className="grid min-w-0 grid-cols-1 justify-items-start gap-1">
-                                      {records.map((skill) => {
-                                        const status =
-                                          state === "checked"
-                                            ? skill.enabled
-                                              ? "Enabled"
-                                              : "Disabled"
-                                            : `${missingSkillLabel(state)} · Stale`;
-                                        return (
-                                          <Tooltip
-                                            key={JSON.stringify([
-                                              skill.path,
-                                              skill.name,
-                                              skill.pluginId,
-                                            ])}
-                                          >
-                                            <TooltipTrigger
-                                              render={
-                                                <span
-                                                  tabIndex={0}
-                                                  className="max-w-full"
-                                                  aria-label={`${label}: ${skill.name} · ${status}`}
-                                                />
-                                              }
-                                            >
-                                              <Badge
-                                                size="sm"
-                                                variant={
-                                                  state !== "checked"
-                                                    ? "warning"
-                                                    : skill.enabled
-                                                      ? "success"
-                                                      : "secondary"
-                                                }
-                                                className="max-w-full"
-                                              >
-                                                <span className="truncate">{status}</span>
-                                              </Badge>
-                                            </TooltipTrigger>
-                                            <TooltipPopup className="max-w-md whitespace-normal break-words">
-                                              <p className="font-medium">
-                                                {label}: {status}
-                                              </p>
-                                              <SkillRecordDetails skill={skill} />
-                                            </TooltipPopup>
-                                          </Tooltip>
-                                        );
-                                      })}
-                                    </div>
-                                  ) : (
-                                    <Tooltip>
-                                      <TooltipTrigger
-                                        render={
-                                          <span
-                                            tabIndex={0}
-                                            className="block truncate text-muted-foreground"
-                                          />
-                                        }
-                                      >
-                                        {missingSkillLabel(state)}
-                                      </TooltipTrigger>
-                                      <TooltipPopup>
-                                        {label}: {missingSkillLabel(state)}
-                                      </TooltipPopup>
-                                    </Tooltip>
-                                  )}
-                                </TableCell>
+                                      <ProviderInstanceIcon
+                                        driverKind={driver}
+                                        displayName={label}
+                                        iconClassName="size-3"
+                                      />
+                                      <span className="truncate">{label}</span>
+                                    </TooltipTrigger>
+                                    <TooltipPopup>{label}</TooltipPopup>
+                                  </Tooltip>
+                                </TableHead>
                               );
                             })}
                           </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </CollapsiblePanel>
-              </Collapsible>
+                        </TableHeader>
+                        <TableBody>
+                          {group.map((row) => {
+                            const selectedRecords = displayedProviders.flatMap((provider) =>
+                              (row.records.get(provider.instanceId) ?? []).map((skill) => ({
+                                provider,
+                                skill,
+                              })),
+                            );
+                            const first = selectedRecords[0]!.skill;
+                            return (
+                              <TableRow key={row.key}>
+                                <TableCell className="min-w-0">
+                                  <Tooltip>
+                                    <TooltipTrigger
+                                      render={
+                                        <span
+                                          tabIndex={0}
+                                          className="flex min-w-0 items-center gap-2"
+                                        />
+                                      }
+                                    >
+                                      <span className="max-w-full shrink-0 truncate font-medium">
+                                        {first.displayName ?? first.name}
+                                      </span>
+                                      <span className="truncate text-muted-foreground">
+                                        {first.description ?? first.shortDescription}
+                                      </span>
+                                    </TooltipTrigger>
+                                    <TooltipPopup className="max-w-md whitespace-normal break-words">
+                                      <SkillRecordDetails skill={first} />
+                                    </TooltipPopup>
+                                  </Tooltip>
+                                  {!skillLinkUnavailableReason(row.origin) ? (
+                                    <div className="flex flex-wrap gap-1">
+                                      {(["link", "unlink"] as const).map((action) => (
+                                        <Button
+                                          key={action}
+                                          variant="ghost"
+                                          size="sm"
+                                          disabled={!connected}
+                                          onClick={() =>
+                                            setLinkSelection({
+                                              action,
+                                              source: {
+                                                instanceId: selectedRecords[0]!.provider.instanceId,
+                                                path: first.path,
+                                                name: first.name,
+                                              },
+                                              origin: row.origin,
+                                            })
+                                          }
+                                        >
+                                          {action === "link" ? "Link…" : "Unlink…"}
+                                        </Button>
+                                      ))}
+                                    </div>
+                                  ) : null}
+                                </TableCell>
+                                {displayedProviders.map((provider) => {
+                                  const records = row.records.get(provider.instanceId);
+                                  const { state, label } = providerDetails.get(
+                                    provider.instanceId,
+                                  )!;
+                                  return (
+                                    <TableCell key={provider.instanceId}>
+                                      {records ? (
+                                        <div className="grid min-w-0 grid-cols-1 justify-items-start gap-1">
+                                          {records.map((skill) => {
+                                            const status =
+                                              state === "checked"
+                                                ? skill.enabled
+                                                  ? "Enabled"
+                                                  : "Disabled"
+                                                : `${missingSkillLabel(state)} · Stale`;
+                                            return (
+                                              <Tooltip
+                                                key={JSON.stringify([
+                                                  skill.path,
+                                                  skill.name,
+                                                  skill.pluginId,
+                                                ])}
+                                              >
+                                                <TooltipTrigger
+                                                  render={
+                                                    <span
+                                                      tabIndex={0}
+                                                      className="max-w-full"
+                                                      aria-label={`${label}: ${skill.name} · ${status}`}
+                                                    />
+                                                  }
+                                                >
+                                                  <Badge
+                                                    size="sm"
+                                                    variant={
+                                                      state !== "checked"
+                                                        ? "warning"
+                                                        : skill.enabled
+                                                          ? "success"
+                                                          : "secondary"
+                                                    }
+                                                    className="max-w-full"
+                                                  >
+                                                    <span className="truncate">{status}</span>
+                                                  </Badge>
+                                                </TooltipTrigger>
+                                                <TooltipPopup className="max-w-md whitespace-normal break-words">
+                                                  <p className="font-medium">
+                                                    {label}: {status}
+                                                  </p>
+                                                  <SkillRecordDetails skill={skill} />
+                                                </TooltipPopup>
+                                              </Tooltip>
+                                            );
+                                          })}
+                                        </div>
+                                      ) : (
+                                        <Tooltip>
+                                          <TooltipTrigger
+                                            render={
+                                              <span
+                                                tabIndex={0}
+                                                className="block truncate text-muted-foreground"
+                                              />
+                                            }
+                                          >
+                                            {missingSkillLabel(state)}
+                                          </TooltipTrigger>
+                                          <TooltipPopup>
+                                            {label}: {missingSkillLabel(state)}
+                                          </TooltipPopup>
+                                        </Tooltip>
+                                      )}
+                                    </TableCell>
+                                  );
+                                })}
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </CollapsiblePanel>
+                </Collapsible>
+              </div>
             );
           })}
         </div>

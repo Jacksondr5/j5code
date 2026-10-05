@@ -6,6 +6,7 @@ import { agentCrewReadsHttpRouteLayer } from "./AgentCrewReadsHttp.ts";
 import { crewArchiveHttpRouteLayer } from "./CrewArchiveHttp.ts";
 import { crewProposalsHttpRouteLayer } from "./CrewProposalsHttp.ts";
 import { crewStopHttpRouteLayer } from "./CrewStopHttp.ts";
+import { crewRuntimeRequestsHttpRouteLayer } from "./CrewRuntimeRequestsHttp.ts";
 import { fleetReadsHttpRouteLayer } from "./FleetReadsHttp.ts";
 import { spawnedChildrenHttpRouteLayer } from "./SpawnedChildrenHttp.ts";
 import {
@@ -17,6 +18,7 @@ import {
 import { humanInboxHttpRouteLayer } from "./HumanInboxHttp.ts";
 import { importedThreadsHttpRouteLayer } from "./ImportedThreadsHttp.ts";
 import { machineSenderHttpRouteLayer } from "./MachineSenderHttp.ts";
+import { peerHttpRouteLayer } from "./PeerHttp.ts";
 import { preArchiveFactsHttpRouteLayer } from "./PreArchiveFactsHttp.ts";
 import { layer as squadronManagementServiceLayer } from "./SquadronManagementService.ts";
 import { squadronHttpRouteLayer } from "./SquadronHttp.ts";
@@ -34,6 +36,7 @@ export const j5AuthenticatedRoutesLayer = Layer.mergeAll(
   crewArchiveHttpRouteLayer,
   crewProposalsHttpRouteLayer,
   crewStopHttpRouteLayer,
+  crewRuntimeRequestsHttpRouteLayer,
   fleetReadsHttpRouteLayer,
   spawnedChildrenHttpRouteLayer,
   playbookHttpRouteLayer,
@@ -42,6 +45,7 @@ export const j5AuthenticatedRoutesLayer = Layer.mergeAll(
   humanInboxHttpRouteLayer,
   importedThreadsHttpRouteLayer,
   machineSenderHttpRouteLayer,
+  peerHttpRouteLayer,
   preArchiveFactsHttpRouteLayer,
   squadronHttpRouteLayer,
   threadHomesHttpRouteLayer,

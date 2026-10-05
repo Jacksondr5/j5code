@@ -2,6 +2,7 @@ import {
   OrchestrationV2ProviderFailure,
   type OrchestrationV2Run,
   type OrchestrationV2StoredEvent,
+  type OrchestrationV2ThreadProjection,
   RunId,
   ThreadId,
 } from "@t3tools/contracts";
@@ -14,12 +15,14 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
+import { EventSinkV2 } from "../../orchestration-v2/EventSink.ts";
 import * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
 import { AgentCrewInstanceService } from "./AgentCrewInstanceService.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { deliveryMessageId } from "./DeliveryTransport.ts";
 import { formatSilenceNoticeEnvelope } from "./EnvelopeFormatter.ts";
 import { A2ALedger } from "./LedgerService.ts";
+import { findPeerCounterparty } from "./peerCounterparty.ts";
 import {
   CommCommandId,
   CorrelationId,
@@ -35,6 +38,12 @@ import {
 
 export const STOPPED_NOTICE_INSTRUCTION =
   "Do not retry this work or replace the agent automatically; wait for operator direction." as const;
+
+// The ledger stores JSON; an absent reset time is an absent key, never `undefined`.
+const SilenceFailureDetail = Schema.Struct({
+  ...OrchestrationV2ProviderFailure.fields,
+  resetAt: Schema.optionalKey(Schema.NullOr(Schema.String)),
+});
 
 const noticeBase = {
   subjectId: ParticipantId,
@@ -53,7 +62,7 @@ export const SilenceNoticePayload = Schema.Union([
     ...noticeBase,
     state: Schema.Literal("errored"),
     runId: RunId,
-    detail: OrchestrationV2ProviderFailure,
+    detail: SilenceFailureDetail,
   }),
   Schema.Struct({
     ...noticeBase,
@@ -190,15 +199,18 @@ const noticeMessage = (payload: SilenceNoticePayload, exchangeId: ExchangeId): s
   }
 };
 
-const runCoversDelivery = (
-  run: OrchestrationV2Run,
-  deliveredAt: string,
+/**
+ * The run a delivered message belongs to is the run that owes its reply: the run the message
+ * started or queued as, the turn it was steered into, or the turn a queued message was promoted
+ * into. Undefined when the thread holds no run for the message.
+ */
+const owingRun = (
+  thread: Pick<OrchestrationV2ThreadProjection, "runs" | "messages">,
   messageId: LedgerMessageId,
-): boolean => {
-  if (run.userMessageId === deliveryMessageId(messageId)) return true;
-  const delivered = DateTime.toEpochMillis(DateTime.makeUnsafe(deliveredAt));
-  const completed = run.completedAt === null ? null : DateTime.toEpochMillis(run.completedAt);
-  return completed === null || delivered <= completed;
+): OrchestrationV2Run | undefined => {
+  const delivered = deliveryMessageId(messageId);
+  const runId = thread.messages.find((message) => message.id === delivered)?.runId;
+  return thread.runs.find((run) => run.id === runId);
 };
 
 const makeLayer = (daemon: boolean) =>
@@ -208,8 +220,12 @@ const makeLayer = (daemon: boolean) =>
       const ledger = yield* A2ALedger;
       const deliveryWorker = yield* A2ADeliveryWorker;
       const threads = yield* ThreadManagement.ThreadManagementService;
+      const events = yield* EventSinkV2;
       const crews = yield* AgentCrewInstanceService;
       const sql = yield* SqlClient.SqlClient;
+
+      const readRunsAndMessages = (threadId: ThreadId) =>
+        threads.getThreadRecords(threadId, ["runs", "messages"], { messageRoles: ["user"] });
 
       /**
        * A seat's failed run reaches its Captain as a Crew fact, from the launch report or the
@@ -240,14 +256,16 @@ const makeLayer = (daemon: boolean) =>
             candidate.type === "error" &&
             candidate.status === "failed",
         );
-        return item?.type === "error"
-          ? item.failure
-          : {
-              class: "unknown" as const,
-              message: "The provider run failed without a persisted error detail.",
-              code: null,
-              retryable: null,
-            };
+        if (item?.type === "error") {
+          const { resetAt, ...failure } = item.failure;
+          return resetAt === undefined ? failure : { ...failure, resetAt };
+        }
+        return {
+          class: "unknown" as const,
+          message: "The provider run failed without a persisted error detail.",
+          code: null,
+          retryable: null,
+        };
       });
 
       const dependencyNotice = Effect.fn("j5.a2a.silence.dependencyNotice")(function* (
@@ -338,7 +356,7 @@ const makeLayer = (daemon: boolean) =>
               dependency ?? {
                 ...base,
                 state: "turn-ended-no-reply" as const,
-                // Lifecycle queries only select deliveries at or before this run ended.
+                // Lifecycle handling only reports the run the delivered message belongs to.
                 // The delivery/reconciliation path exclusively owns never-processed.
                 processing: "processed" as const,
               }
@@ -353,6 +371,21 @@ const makeLayer = (daemon: boolean) =>
         }
       });
 
+      const alreadyNoticed = Effect.fn("j5.a2a.silence.alreadyNoticed")(function* (
+        exchange: ExchangeRow,
+        messageId: string,
+      ) {
+        const prior = yield* sql<{ readonly count: number }>`
+          SELECT COUNT(*) AS count
+          FROM j5_a2a_comm_event
+          WHERE squadron_id = ${exchange.squadron_id}
+            AND kind = 'silence.notice'
+            AND exchange_id = ${exchange.exchange_id}
+            AND json_extract(payload, '$.deliveryMessageId') = ${messageId}
+        `;
+        return (prior[0]?.count ?? 0) > 0;
+      });
+
       const appendNotice = Effect.fn("j5.a2a.silence.appendNotice")(function* (
         exchange: ExchangeRow,
         payload: SilenceNoticePayload,
@@ -360,17 +393,15 @@ const makeLayer = (daemon: boolean) =>
         yield* decodeSilenceNotice(payload);
         if (payload.state === "errored" && (yield* captainHearsFailureElsewhere(exchange)))
           return [];
-        const prior = yield* sql<{ readonly count: number }>`
-          SELECT COUNT(*) AS count
-          FROM j5_a2a_comm_event
-          WHERE squadron_id = ${exchange.squadron_id}
-            AND kind = 'silence.notice'
-            AND exchange_id = ${exchange.exchange_id}
-            AND json_extract(payload, '$.deliveryMessageId') = ${payload.deliveryMessageId}
-        `;
-        if ((prior[0]?.count ?? 0) > 0) return [];
+        if (yield* alreadyNoticed(exchange, payload.deliveryMessageId)) return [];
 
         const exchangeId = ExchangeId.make(exchange.exchange_id);
+        // The waiter may be on a peer server; the notice then travels the peer path back.
+        const remoteWaiter = yield* findPeerCounterparty(sql, {
+          squadronId: SquadronId.make(exchange.squadron_id),
+          exchangeId,
+          participantId: ParticipantId.make(exchange.sender_id),
+        });
         const messageId = messageIdFor(
           exchange.squadron_id,
           exchange.exchange_id,
@@ -413,7 +444,11 @@ const makeLayer = (daemon: boolean) =>
                     message: noticeMessage(payload, exchangeId),
                   }),
                   originSquadronId: SquadronId.make(exchange.squadron_id),
-                  receiverSquadronId: SquadronId.make(exchange.squadron_id),
+                  receiverSquadronId:
+                    remoteWaiter?.squadronId ?? SquadronId.make(exchange.squadron_id),
+                  ...(remoteWaiter === null
+                    ? {}
+                    : { receiverEnvironmentId: remoteWaiter.environmentId }),
                   exchangeRole: "none",
                   envelopeChannel: "silence_notice",
                 },
@@ -436,10 +471,7 @@ const makeLayer = (daemon: boolean) =>
         const subjectId = ParticipantId.make(row.receiver_id);
         const messageId = LedgerMessageId.make(row.message_id);
         const threadId = ThreadId.make(row.thread_id);
-        const projection = yield* threads.getThreadProjection(threadId);
-        const run = projection.runs.findLast((candidate) =>
-          runCoversDelivery(candidate, row.delivered_at, messageId),
-        );
+        const run = owingRun(yield* readRunsAndMessages(threadId), messageId);
         let payload: SilenceNoticePayload;
         if (run === undefined) {
           payload = {
@@ -561,6 +593,7 @@ const makeLayer = (daemon: boolean) =>
           ORDER BY created_at, squadron_id, exchange_id
         `;
         const appended: Array<StoredCommEvent> = [];
+        let thread: Pick<OrchestrationV2ThreadProjection, "runs" | "messages"> | undefined;
         for (const exchange of inbound) {
           const delivered = yield* sql<DeliveredMessageRow>`
             SELECT
@@ -577,6 +610,10 @@ const makeLayer = (daemon: boolean) =>
           `;
           const delivery = delivered[0];
           if (delivery === undefined) continue;
+          // An Exchange stays open after its notice; later runs need not read the thread for it.
+          if (yield* alreadyNoticed(exchange, delivery.message_id)) continue;
+          thread ??= yield* readRunsAndMessages(stored.event.threadId);
+          if (owingRun(thread, LedgerMessageId.make(delivery.message_id))?.id !== run.id) continue;
           const payload = yield* deriveNotice(
             run,
             stored.event.threadId,
@@ -622,11 +659,9 @@ const makeLayer = (daemon: boolean) =>
       const initializeCursor = Effect.fn("j5.a2a.silence.initializeCursor")(function* () {
         const existing = yield* readCursor();
         if (existing !== null) return existing;
-        const highWaterRows = yield* sql<{ readonly sequence: number }>`
-          SELECT COALESCE(MAX(sequence), 0) AS sequence
-          FROM orchestration_v2_events
-        `;
-        const highWater = highWaterRows[0]?.sequence ?? 0;
+        // A failed read fails the init, which the lifecycle daemon retries with backoff; the
+        // cursor is never seeded at 0, which would replay the whole event history (#349).
+        const highWater = yield* events.latestSequence();
         yield* reconcileOpenExchangesRaw();
         yield* writeCursor(highWater);
         return highWater;

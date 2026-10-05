@@ -6,11 +6,16 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
 import { HttpRouter, HttpServer } from "effect/unstable/http";
 
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
+import { PlaybookStore, playbookStoreLayer } from "../playbooks/PlaybookStore.ts";
 import { AgentCrewProposalService, type CrewProposal } from "./AgentCrewProposalService.ts";
 import { makeCrewProposalsHttpRouteLayer } from "./CrewProposalsHttp.ts";
 import { CrewProposalNotOpenError, CrewProposalService } from "./CrewProposalService.ts";
@@ -84,7 +89,7 @@ it("lists open proposals for readers and resolves them only for operators", asyn
             harness: "Claude Code",
             model: "Claude Fable 5.1",
             reasoning: "High",
-            access: "Approval required",
+            access: "Supervised",
             modelSelection: customSeat.modelSelection,
             runtimeMode: customSeat.runtimeMode,
           },
@@ -112,7 +117,7 @@ it("lists open proposals for readers and resolves them only for operators", asyn
   });
   const routes = (scopes: ReadonlyArray<string>) =>
     makeCrewProposalsHttpRouteLayer(paths).pipe(
-      Layer.provide(Layer.mergeAll(gate, store)),
+      Layer.provide(Layer.mergeAll(gate, store, Layer.mock(PlaybookStore)({}))),
       Layer.provideMerge(authWith(scopes)),
       Layer.provide(HttpServer.layerServices),
     );
@@ -155,7 +160,7 @@ it("lists open proposals for readers and resolves them only for operators", asyn
           harness: "Claude Code",
           model: "Claude Fable 5.1",
           reasoning: "High",
-          access: "Approval required",
+          access: "Supervised",
           modelSelection: customSeat.modelSelection,
           runtimeMode: customSeat.runtimeMode,
         },
@@ -218,3 +223,78 @@ it("lists open proposals for readers and resolves them only for operators", asyn
     await reader.dispose();
   }
 });
+
+it.effect(
+  "projects each open proposal's playbook from the live YAML, and a broken one as its issue",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "j5-crew-proposals-http-" });
+      yield* fs.makeDirectory(path.join(root, ".j5/playbooks"), { recursive: true });
+      yield* fs.writeFileString(
+        path.join(root, ".j5/playbooks/release.yaml"),
+        "title: Release\ndescription: Ship.\nsteps:\n  - id: plan\n    title: Plan\n    prompt: Plan.\n    persona: planner\n  - id: review\n    title: Review\n    prompt: Review.\n",
+      );
+      const withPlaybook = (
+        id: string,
+        name: string,
+        steps: ReadonlyArray<string>,
+      ): CrewProposal => ({
+        ...proposal,
+        id,
+        requestedSeats: [{ seat: "planner", agentId: null, reason: "Plans", steps }],
+        playbook: { name, definitionPath: path.join(root, ".j5/playbooks", `${name}.yaml`) },
+      });
+      const store = Layer.mock(AgentCrewProposalService)({
+        listOpen: () =>
+          Effect.succeed([
+            proposal,
+            withPlaybook("p-live", "release", ["plan"]),
+            withPlaybook("p-lost", "release", ["ship"]),
+            withPlaybook("p-gone", "gone", []),
+          ]),
+      });
+      const routes = makeCrewProposalsHttpRouteLayer(paths).pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            Layer.mock(CrewProposalService)({}),
+            store,
+            playbookStoreLayer.pipe(
+              Layer.provide(NodeSqliteClient.layer({ filename: ":memory:" })),
+              Layer.provide(NodeServices.layer),
+            ),
+          ),
+        ),
+        Layer.provideMerge(authWith([AuthOrchestrationReadScope])),
+        Layer.provide(HttpServer.layerServices),
+      );
+      const reader = HttpRouter.toWebHandler(routes, { disableLogger: true });
+      yield* Effect.addFinalizer(() => Effect.promise(() => reader.dispose()));
+      const list = yield* Effect.promise(() =>
+        reader.handler(
+          new Request(`http://environment.test${paths.list}`, { method: "POST", body: "{}" }),
+        ),
+      );
+      assert.equal(list.status, 200);
+      const { proposals } = (yield* Effect.promise(() => list.json())) as {
+        proposals: Array<{
+          id: string;
+          playbook?: { name: string; title: string; steps: unknown[]; issue: string | null } | null;
+        }>;
+      };
+      assert.isNull(proposals[0]?.playbook);
+      assert.deepStrictEqual(proposals[1]?.playbook, {
+        name: "release",
+        title: "Release",
+        steps: [
+          { id: "plan", title: "Plan", persona: "planner" },
+          { id: "review", title: "Review" },
+        ],
+        issue: null,
+      });
+      assert.include(proposals[2]?.playbook?.issue, "Step ship is no longer in the playbook");
+      assert.deepStrictEqual(proposals[3]?.playbook?.steps, []);
+      assert.include(proposals[3]?.playbook?.issue, "No playbook named gone");
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);

@@ -39,7 +39,10 @@ const foreignThread = ThreadId.make("thread:playbook-rpc-foreign");
 const deletedThread = ThreadId.make("thread:playbook-rpc-deleted");
 const missingThread = ThreadId.make("thread:playbook-rpc-missing");
 const createdAt = "2026-09-21T09:00:00.000Z";
-const TestLayer = Layer.mergeAll(NodeSqliteClient.layerMemory(), NodeServices.layer);
+const TestLayer = Layer.mergeAll(
+  NodeSqliteClient.layer({ filename: ":memory:" }),
+  NodeServices.layer,
+);
 
 const definition = (title: string) => ({
   title,

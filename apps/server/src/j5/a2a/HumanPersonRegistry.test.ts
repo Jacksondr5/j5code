@@ -35,5 +35,5 @@ it.effect("mints one opaque local operator once without Squadron state", () =>
         (SELECT COUNT(*) FROM j5_a2a_comm_event) AS events
     `;
     assert.deepStrictEqual(domainCounts, [{ squadrons: 0, memberships: 0, events: 0 }]);
-  }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+  }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );

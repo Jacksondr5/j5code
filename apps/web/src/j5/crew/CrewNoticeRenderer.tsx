@@ -112,7 +112,7 @@ function CrewGateCard(props: {
                     <TooltipTrigger
                       render={
                         <span className="flex min-w-0 items-center gap-2">
-                          <Badge variant="outline" className="shrink-0 px-1 py-0 text-[10px]">
+                          <Badge variant="outline" size="sm" className="shrink-0">
                             {seat.seat}
                           </Badge>
                           {label.toLowerCase() !== seat.seat.toLowerCase() ? (
@@ -144,6 +144,19 @@ function CrewGateCard(props: {
               </li>
             );
           })}
+          {notice.notCreated.map((seat) => (
+            <li key={seat.seat}>
+              <div className="flex min-w-0 items-center gap-2 px-1.5 py-1 text-sm">
+                <Badge variant="outline" size="sm" className="shrink-0">
+                  {seat.seat}
+                </Badge>
+                <span className="ms-auto shrink-0 rounded-md bg-red-500/15 px-1.5 py-0.5 text-[11px] font-semibold text-red-700 dark:text-red-300">
+                  Not created
+                </span>
+              </div>
+              <p className="ps-1.5 text-xs text-muted-foreground">{seat.detail}</p>
+            </li>
+          ))}
         </ul>
       ) : notice.requestedSeats.length > 0 ? (
         <p className="mt-2 text-xs text-muted-foreground">
@@ -217,7 +230,7 @@ function CrewSeatsCard(props: {
                 >
                   {status.label}
                 </span>
-                <Badge variant="outline" className="shrink-0 px-1 py-0 text-[10px]">
+                <Badge variant="outline" size="sm" className="shrink-0">
                   {seat.seat}
                 </Badge>
                 {crews.size > 1 && seat.crewName !== null ? (
@@ -229,13 +242,22 @@ function CrewSeatsCard(props: {
                       handoff.status === "written" ? TONE_CLASS.muted : TONE_CLASS.warn
                     }`}
                   >
-                    {handoff.status === "written" ? "Handoff written" : "Handoff missing"} ·{" "}
-                    {handoff.kind}
+                    {handoff.status === "written"
+                      ? "Handoff written"
+                      : handoff.status === "unavailable"
+                        ? "Handoff unavailable"
+                        : "Handoff missing"}{" "}
+                    · {handoff.kind}
                   </span>
                 )}
               </button>
               {seat.failure !== null ? (
                 <p className="ms-1.5 text-xs text-muted-foreground">{seat.failure}</p>
+              ) : null}
+              {handoff.status === "unavailable" && handoff.reason !== null ? (
+                <p className="ms-1.5 text-xs text-muted-foreground">
+                  The handoff can't be read: {handoff.reason}.
+                </p>
               ) : null}
               {handoff.status === "written" && handoff.artifactPath !== null ? (
                 <div className="ms-1.5 flex flex-col gap-1">

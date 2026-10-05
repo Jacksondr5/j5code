@@ -1,14 +1,28 @@
 import type { ServerSelfUpdateOutcome } from "@t3tools/contracts";
 
-/** Protocol 2 snapshots SQLite before trials so migrations can be rolled back safely. */
-export const SERVICE_LAUNCHER_PROTOCOL = 2 as const;
+// Protocol 3 requires the standalone executable layout. Bump when runtimePaths
+// or the installed runtime tree changes incompatibly; launchers survive self-updates.
+// J5: protocol 4 is the executable's rename from `t3` to `j5` (FORK.md case 50).
+// A server on protocol 3 is refused the update from the app and told to run
+// `j5 update` on its machine, which replaces its launcher.
+export const SERVICE_LAUNCHER_PROTOCOL = 4 as const;
+// J5: protocol 4 left the state document unchanged. A pre-rename `j5 update`
+// writes it as protocol 3 and then starts the new launcher, which has to read it.
+const READABLE_SERVICE_STATE_PROTOCOLS: ReadonlySet<unknown> = new Set([
+  3,
+  SERVICE_LAUNCHER_PROTOCOL,
+]);
 export const SERVICE_LAUNCHER_CONTEXT_ENV = "T3_SERVICE_LAUNCHER_CONTEXT";
-export const SERVICE_LAUNCHER_FILE = "service-launcher.mjs";
 export const SERVICE_STATE_FILE = "service-state.json";
 /** Written by the launcher just before an explicit stop kills its child, so
     the child can tell "the service is going away" from "the launcher is about
     to start my replacement" while a pending update is recorded. */
 export const SERVICE_STOP_MARKER_FILE = ".service-stopping";
+/** Written by `t3 update` when the unit was repointed at a new version but the
+    running service was deliberately left on the old one. The launcher removes
+    it when it starts (whoever restarted the service), so while it exists the
+    service is known to be behind its unit and status reports it that way. */
+export const SERVICE_RESTART_PENDING_FILE = ".restart-pending";
 
 export interface PendingServiceUpdate {
   readonly id: string;
@@ -146,7 +160,7 @@ export function decodeServiceState(value: unknown): ServiceState | undefined {
   if (!isRecord(value)) return undefined;
   const update = value.update === undefined ? undefined : decodeServiceUpdate(value.update);
   if (
-    value.protocol !== SERVICE_LAUNCHER_PROTOCOL ||
+    !READABLE_SERVICE_STATE_PROTOCOLS.has(value.protocol) ||
     typeof value.activeVersion !== "string" ||
     !isExactServiceVersion(value.activeVersion) ||
     (value.update !== undefined && update === undefined) ||

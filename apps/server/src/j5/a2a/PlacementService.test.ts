@@ -33,7 +33,7 @@ const isParentNotFound = Schema.is(PlacementParentNotFoundError);
 const isParticipantNotFound = Schema.is(PlacementParticipantNotFoundError);
 const isSquadronNotFound = Schema.is(PlacementSquadronNotFoundError);
 const TestLayer = Layer.merge(ledgerLayer, placementLayer).pipe(
-  Layer.provideMerge(NodeSqliteClient.layerMemory()),
+  Layer.provideMerge(NodeSqliteClient.layer({ filename: ":memory:" })),
 );
 
 const agent = (name: string): Extract<Participant, { kind: "agent" }> => ({

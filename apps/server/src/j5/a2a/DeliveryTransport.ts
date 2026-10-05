@@ -2,13 +2,22 @@ import {
   type ChatAttachment,
   CommandId,
   MessageId,
+  type OrchestrationV2Run,
   type OrchestrationV2ThreadProjection,
+  ThreadId,
 } from "@t3tools/contracts";
+import {
+  J5_PEER_API_PATHS,
+  PEER_SENDER_LABEL_MAX_CHARS,
+  type PeerDeliveryRequest,
+} from "@t3tools/contracts/j5";
 import { normalizeModelSlug } from "@t3tools/shared/model";
 import * as Context from "effect/Context";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
+import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
@@ -20,6 +29,8 @@ import {
   formatMachineEnvelope,
   formatPeerEnvelope,
 } from "./EnvelopeFormatter.ts";
+import { participantIdentityRows } from "./ClientReadsService.ts";
+import { PeerRegistryService } from "./PeerRegistryService.ts";
 import {
   type DeliveryEnvelopeChannel,
   SquadronId,
@@ -51,6 +62,25 @@ export class A2ADeliveryTransportError extends Schema.TaggedError<A2ADeliveryTra
   },
 ) {}
 
+/**
+ * The receiver durably accepted the message, but its run waits behind a held queue
+ * (upstream holds queued runs after a restart until someone resumes the thread).
+ * The message is not delivered yet; the worker retries without alarming.
+ */
+export class A2ADeliveryHeldError extends Schema.TaggedError<A2ADeliveryHeldError>()(
+  "A2ADeliveryHeldError",
+  {
+    participantId: Schema.String,
+    runId: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `${this.participantId} holds queued messages until someone resumes its thread; run ${this.runId} is queued, not delivered.`;
+  }
+}
+
+export const isHeldError = Schema.is(A2ADeliveryHeldError);
+
 export interface AgentDeliveryInput {
   readonly originSquadronId: SquadronId;
   readonly receiverSquadronId: SquadronId;
@@ -68,6 +98,22 @@ export interface HumanDeliveryInput extends AgentDeliveryInput {
   readonly createdAt: string;
 }
 
+/** A receiver homed on a peer server: the peer writes its own received row and delivers from there. */
+export interface PeerDeliveryInput extends AgentDeliveryInput {
+  readonly receiverEnvironmentId: string;
+  /** The delivery row's correlation id; the worker already holds it, so the transport never re-reads it. */
+  readonly correlationId: string;
+  readonly createdAt: string;
+  /** An ask's intent, so the peer can open the Exchange on its side. */
+  readonly intent?: string;
+  /** A terminal notice's closing fact, as written on the notice itself. */
+  readonly terminal?: PeerDeliveryRequest["terminal"];
+  /** A silence notice's Exchange, as recorded beside the notice. */
+  readonly regardingExchangeId?: string;
+}
+
+const PEER_DELIVERY_TIMEOUT = Duration.seconds(15);
+
 export interface A2ADeliveryTransportShape {
   /** Withdraw an accepted queue entry, or prove that delivery already reached its run/provider. */
   readonly cancelAgent: (input: {
@@ -76,9 +122,12 @@ export interface A2ADeliveryTransportShape {
   }) => Effect.Effect<"cancelled" | "delivered", A2ADeliveryTransportError>;
   readonly deliverAgent: (
     input: AgentDeliveryInput,
-  ) => Effect.Effect<void, A2ADeliveryTransportError>;
+  ) => Effect.Effect<void, A2ADeliveryTransportError | A2ADeliveryHeldError>;
   readonly deliverHuman: (
     input: HumanDeliveryInput,
+  ) => Effect.Effect<void, A2ADeliveryTransportError>;
+  readonly deliverPeer: (
+    input: PeerDeliveryInput,
   ) => Effect.Effect<void, A2ADeliveryTransportError>;
 }
 
@@ -97,8 +146,14 @@ const stablePart = (value: string) => encodeURIComponent(value);
 export const deliveryCommandId = (messageId: LedgerMessageId) =>
   CommandId.make(`command:j5:a2a:delivery:${stablePart(messageId)}`);
 
+const DELIVERY_MESSAGE_ID_PREFIX = "message:j5:a2a:delivery:";
+
 export const deliveryMessageId = (messageId: LedgerMessageId) =>
-  MessageId.make(`message:j5:a2a:delivery:${stablePart(messageId)}`);
+  MessageId.make(`${DELIVERY_MESSAGE_ID_PREFIX}${stablePart(messageId)}`);
+
+/** Whether a thread message is an A2A delivery (a peer message or a platform notice). */
+export const isDeliveryMessageId = (messageId: string) =>
+  messageId.startsWith(DELIVERY_MESSAGE_ID_PREFIX);
 
 interface MembershipRow {
   readonly payload: string;
@@ -115,7 +170,6 @@ interface HumanExchangeRow {
 }
 
 const decodeParticipant = Schema.decodeUnknownEffect(Schema.fromJsonString(Participant));
-
 const assertNever = (channel: never): never => {
   throw new Error(`Unsupported A2A delivery envelope channel: ${String(channel)}`);
 };
@@ -131,7 +185,10 @@ const assertPersonReply = (input: AgentDeliveryInput): never => {
 
 /** Use the active run's selection, not the picker selection for future runs. */
 export const astraPeerSteeringRun = (
-  target: OrchestrationV2ThreadProjection,
+  target: Pick<
+    OrchestrationV2ThreadProjection,
+    "thread" | "runs" | "providerTurns" | "providerThreads" | "providerSessions"
+  >,
   channel: DeliveryEnvelopeChannel,
 ) => {
   if (channel !== "peer" || target.thread.archivedAt !== null) return undefined;
@@ -190,13 +247,20 @@ export const formatAgentDeliveryEnvelope = (input: AgentDeliveryInput): string =
 export const live: Layer.Layer<
   A2ADeliveryTransport,
   never,
-  ThreadManagement.ThreadManagementService | OrchestratorV2 | EffectOutboxV2 | SqlClient.SqlClient
+  | ThreadManagement.ThreadManagementService
+  | OrchestratorV2
+  | EffectOutboxV2
+  | SqlClient.SqlClient
+  | PeerRegistryService
+  | HttpClient.HttpClient
 > = Layer.effect(
   A2ADeliveryTransport,
   Effect.gen(function* () {
     const threads = yield* ThreadManagement.ThreadManagementService;
     const orchestrator = yield* OrchestratorV2;
     const outbox = yield* EffectOutboxV2;
+    const peers = yield* PeerRegistryService;
+    const httpClient = yield* HttpClient.HttpClient;
     const awaitSteeringOutcome = Effect.fn(function* (effectId: string) {
       // Only bound the observer. The provider effect may still acknowledge later;
       // retries must inspect that same durable effect, never inject a new one.
@@ -209,6 +273,17 @@ export const live: Layer.Layer<
       }
     });
     const sql = yield* SqlClient.SqlClient;
+    // An agent sender is homed in the delivery's origin Squadron, so its thread
+    // is one primary-key read on the (agent-only) membership projection.
+    const agentThreadId = Effect.fn("j5.a2a.delivery.agentThreadId")(function* (
+      squadronId: SquadronId,
+      participantId: ParticipantId,
+    ) {
+      const rows = yield* sql<{ readonly thread_id: string }>`SELECT thread_id
+        FROM j5_a2a_squadron_membership
+        WHERE squadron_id = ${squadronId} AND participant_id = ${participantId}`;
+      return rows[0] === undefined ? undefined : ThreadId.make(rows[0].thread_id);
+    });
 
     return A2ADeliveryTransport.of({
       cancelAgent: (input) =>
@@ -313,11 +388,19 @@ export const live: Layer.Layer<
             ? undefined
             : astraPeerSteeringRun(target, input.envelopeChannel);
           const envelope = formatAgentDeliveryEnvelope(input);
+          // Upstream links an agent-authored message to its sending thread.
+          const senderThreadId =
+            input.envelopeChannel === "peer" &&
+            !isHumanParticipantId(input.senderId) &&
+            !isMachineParticipantId(input.senderId)
+              ? yield* agentThreadId(input.originSquadronId, input.senderId)
+              : undefined;
           const sendInput = {
             projectId: target.thread.projectId,
             commandId: deliveryCommandId(input.messageId),
             threadId: participant.threadId,
             messageId: deliveryMessageId(input.messageId),
+            ...(senderThreadId === undefined ? {} : { senderThreadId }),
             text: envelope,
             attachments: input.attachments ?? [],
             mode: "queue",
@@ -330,8 +413,14 @@ export const live: Layer.Layer<
                   : "agent",
             creationSource: "mcp",
           } satisfies ThreadManagement.ThreadManagementSendInput;
+          const heldRun = (run: OrchestrationV2Run | undefined) =>
+            run?.status === "queued" && run.queueHeld === true
+              ? Effect.fail(
+                  new A2ADeliveryHeldError({ participantId: input.receiverId, runId: run.id }),
+                )
+              : Effect.void;
           if (steeringRun === undefined) {
-            yield* threads.sendToThread(sendInput);
+            yield* heldRun((yield* threads.sendToThread(sendInput)).run);
           } else {
             // Pin the checked run and model. If it completed before admission,
             // upstream can accept this same message as a queued follow-up.
@@ -342,6 +431,9 @@ export const live: Layer.Layer<
               messageId: sendInput.messageId,
               text: sendInput.text,
               attachments: sendInput.attachments,
+              ...(sendInput.senderThreadId === undefined
+                ? {}
+                : { senderThreadId: sendInput.senderThreadId }),
               createdBy: sendInput.createdBy,
               creationSource: sendInput.creationSource,
               modelSelection: steeringRun.modelSelection,
@@ -356,15 +448,83 @@ export const live: Layer.Layer<
             yield* awaitSteeringOutcome(steer.id);
           } else if (steeringRun !== undefined) {
             const accepted = yield* orchestrator.getThreadProjection(participant.threadId);
-            if (accepted.runs.some((run) => run.userMessageId === sendInput.messageId)) return;
+            const followUp = accepted.runs.find((run) => run.userMessageId === sendInput.messageId);
+            if (followUp !== undefined) return yield* heldRun(followUp);
             return yield* new A2ADeliveryTransportError({
               operation: "await peer steering",
               cause: "The committed command has no steering effect.",
             });
           }
         }).pipe(
+          Effect.mapError((cause) =>
+            isHeldError(cause)
+              ? cause
+              : new A2ADeliveryTransportError({ operation: "deliver agent", cause }),
+          ),
+        ),
+      deliverPeer: (input) =>
+        Effect.gen(function* () {
+          const peer = yield* peers.connection(input.receiverEnvironmentId);
+          if (peer === null) {
+            return yield* new A2ADeliveryTargetError({
+              participantId: input.receiverId,
+              state: `peer ${input.receiverEnvironmentId} is no longer recorded on this server`,
+            });
+          }
+          // The sender's name travels with the message for the peer's people, so
+          // its timeline names a remote sender as it names a local one. Read by
+          // the statement the client identity read uses, so both servers agree
+          // on the name. Best-effort: a name this server cannot read never holds
+          // a delivery.
+          const labelRows = yield* Effect.orElseSucceed(
+            participantIdentityRows(sql, [input.senderId]),
+            () => [],
+          );
+          const senderLabel =
+            labelRows[0]?.display_name?.trim().slice(0, PEER_SENDER_LABEL_MAX_CHARS) ?? "";
+          const body = {
+            messageId: input.messageId,
+            senderId: input.senderId,
+            receiverId: input.receiverId,
+            exchangeId: input.exchangeId,
+            correlationId: input.correlationId,
+            exchangeRole: input.exchangeRole,
+            envelopeChannel: input.envelopeChannel,
+            text: input.message,
+            originSquadronId: input.originSquadronId,
+            ...(input.intent === undefined ? {} : { intent: input.intent }),
+            ...(input.terminal === undefined ? {} : { terminal: input.terminal }),
+            ...(input.regardingExchangeId === undefined
+              ? {}
+              : { regardingExchangeId: input.regardingExchangeId }),
+            ...(senderLabel.length === 0 ? {} : { senderLabel }),
+            createdAt: input.createdAt,
+          } satisfies PeerDeliveryRequest;
+          const request = yield* HttpClientRequest.bodyJson(
+            HttpClientRequest.post(`${peer.origin}${J5_PEER_API_PATHS.deliver}`).pipe(
+              HttpClientRequest.bearerToken(peer.credential),
+              HttpClientRequest.acceptJson,
+            ),
+            body,
+          );
+          const response = yield* httpClient
+            .execute(request)
+            .pipe(Effect.timeout(PEER_DELIVERY_TIMEOUT));
+          if (response.status === 200 || response.status === 201) return;
+          const text = yield* response.text;
+          if (response.status === 404 || response.status === 403) {
+            return yield* new A2ADeliveryTargetError({
+              participantId: input.receiverId,
+              state: `peer ${peer.label} refused the delivery (HTTP ${String(response.status)}): ${text.slice(0, 500)}`,
+            });
+          }
+          return yield* new A2ADeliveryTransportError({
+            operation: "deliver to peer",
+            cause: `Peer ${peer.label} answered HTTP ${String(response.status)}: ${text.slice(0, 500)}`,
+          });
+        }).pipe(
           Effect.mapError(
-            (cause) => new A2ADeliveryTransportError({ operation: "deliver agent", cause }),
+            (cause) => new A2ADeliveryTransportError({ operation: "deliver to peer", cause }),
           ),
         ),
       deliverHuman: (input) =>

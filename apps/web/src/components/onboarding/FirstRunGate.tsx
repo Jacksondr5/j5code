@@ -9,6 +9,7 @@ import {
   useClientSettings,
   useClientSettingsHydrationStatus,
 } from "../../hooks/useSettings";
+import { isLocalEnvironmentDisabled } from "../../localEnvironment";
 import { useCompleteOnboarding } from "../../onboarding/firstRun";
 import {
   isFirstRunWorkspaceProvenanceAuthoritative,
@@ -126,6 +127,7 @@ export function FirstRunGate({
 
   const { decision: nextDecision, persistCompletion } = hostedStatic
     ? resolveHostedFirstRunDecision({
+        localEnvironmentDisabled: isLocalEnvironmentDisabled(),
         hydrated,
         completed: onboardingCompletedAt !== null,
         catalogReady: environmentCatalogReady,
@@ -212,7 +214,7 @@ function FirstRunRecovery({
         <p className="mt-2 text-sm text-muted-foreground">
           {settingsReadFailed
             ? "Your saved settings could not be loaded."
-            : "T3 Code could not confirm this workspace."}
+            : "J5 Code could not confirm this workspace."}
         </p>
         <Button
           className="mt-5"

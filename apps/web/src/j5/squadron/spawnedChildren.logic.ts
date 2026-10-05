@@ -12,26 +12,39 @@ export interface SpawnedChildThread extends CrewSeatThread {
 
 export interface SpawnedChildRow<T extends SpawnedChildThread> {
   readonly child: SpawnedChild;
-  readonly thread: T;
+  /** Undefined for a Crew seat whose thread the client holds no facts for: its state is unknown. */
+  readonly thread: T | undefined;
 }
 
-/** Live children only, most recent first; a child whose thread is not yet in client state waits. */
+const activityOf = <T extends SpawnedChildThread>(row: SpawnedChildRow<T>) =>
+  row.thread?.updatedAt ?? "";
+
+/**
+ * Live children, most recent first. A Crew seat the client holds no thread for stays as a row
+ * with no facts, so its Crew never under-counts or vanishes; it sorts last and reads as unknown.
+ * A solo peer with no thread in client state waits until it arrives.
+ */
 export function selectSpawnedChildRows<T extends SpawnedChildThread>(
   children: ReadonlyArray<SpawnedChild>,
   threadsById: ReadonlyMap<string, T>,
 ): ReadonlyArray<SpawnedChildRow<T>> {
   return children
-    .flatMap((child) => {
+    .flatMap((child): Array<SpawnedChildRow<T>> => {
       const thread = threadsById.get(child.threadId);
-      return thread === undefined || thread.archivedAt !== null ? [] : [{ child, thread }];
+      if (thread === undefined) return child.seat === null ? [] : [{ child, thread }];
+      return thread.archivedAt !== null ? [] : [{ child, thread }];
     })
-    .toSorted((left, right) => right.thread.updatedAt.localeCompare(left.thread.updatedAt));
+    .toSorted((left, right) => activityOf(right).localeCompare(activityOf(left)));
 }
 
 /** The collapsed header's discovery cue: a measured "needs a human" fact on any child. */
 export const spawnedChildrenNeedAttention = <T extends SpawnedChildThread>(
   rows: ReadonlyArray<SpawnedChildRow<T>>,
-) => rows.some(({ thread }) => thread.hasPendingApprovals || thread.hasPendingUserInput);
+) =>
+  rows.some(
+    ({ thread }) =>
+      thread !== undefined && (thread.hasPendingApprovals || thread.hasPendingUserInput),
+  );
 
 /**
  * One collapsible group under a Captain's row: a named Crew, or the solo Peer Agents it spawned
@@ -71,9 +84,7 @@ export const groupSpawnedChildren = <T extends SpawnedChildThread>(
   }
   // Rows arrive newest first, so each Crew's first seat carries its newest activity.
   const crewGroups = [...crews.entries()]
-    .toSorted(([, left], [, right]) =>
-      right[0]!.thread.updatedAt.localeCompare(left[0]!.thread.updatedAt),
-    )
+    .toSorted(([, left], [, right]) => activityOf(right[0]!).localeCompare(activityOf(left[0]!)))
     .map(([crewInstanceId, seats]): SpawnedChildGroup<T> => {
       const state = formatCrewStateSummary(summarizeCrewState(seats.map(({ thread }) => thread)));
       const count = `${seats.length} ${seats.length === 1 ? "seat" : "seats"}`;

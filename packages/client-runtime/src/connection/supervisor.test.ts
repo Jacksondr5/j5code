@@ -56,11 +56,13 @@ const RELAY_TARGET = new RelayConnectionTarget({
 const TARGET_ENTRY: ConnectionCatalogEntry = {
   target: TARGET,
   profile: Option.none(),
+  enabled: true,
 };
 
 const RELAY_ENTRY: ConnectionCatalogEntry = {
   target: RELAY_TARGET,
   profile: Option.none(),
+  enabled: true,
 };
 
 const PREPARED_CONNECTION: PreparedConnection = {
@@ -1301,7 +1303,6 @@ describe("EnvironmentSupervisor", () => {
             }),
             Layer.succeed(ClientCapabilities.ClientPresentation, {
               metadata: { label: "Test client", deviceType: "desktop" },
-              scopes: AuthStandardClientScopes,
             }),
           ),
         ),

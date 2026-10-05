@@ -1,3 +1,4 @@
+import type { OrchestrationV2HistoricalMessage } from "@t3tools/contracts";
 import {
   ChatAttachment,
   CheckpointId,
@@ -51,6 +52,8 @@ export const ProviderAdapterV2RuntimePolicy = Schema.Struct({
   sandboxPolicy: Schema.optional(Schema.Unknown),
   reasoningEffort: Schema.optional(Schema.String),
   agentPersonaInstructions: Schema.optional(Schema.String),
+  // J5: set only for a live Crew seat, which asks its Captain instead of the person (j5/a2a/crewSeatQuestions.ts).
+  crewSeat: Schema.optional(Schema.Boolean),
 });
 export type ProviderAdapterV2RuntimePolicy = typeof ProviderAdapterV2RuntimePolicy.Type;
 
@@ -61,6 +64,7 @@ export const ProviderAdapterV2TurnMessage = Schema.Struct({
   createdBy: OrchestrationV2ConversationMessage.fields.createdBy,
   creationSource: OrchestrationV2ConversationMessage.fields.creationSource,
   scheduledTaskId: OrchestrationV2ConversationMessage.fields.scheduledTaskId,
+  senderThreadId: OrchestrationV2ConversationMessage.fields.senderThreadId,
 });
 export type ProviderAdapterV2TurnMessage = typeof ProviderAdapterV2TurnMessage.Type;
 
@@ -198,6 +202,8 @@ export class ProviderAdapterResumeThreadError extends Schema.TaggedError<Provide
     providerSessionId: ProviderSessionId,
     providerThreadId: ProviderThreadId,
     cause: Schema.optional(Schema.Defect()),
+    /** The provider reported that the native conversation no longer exists. */
+    nativeThreadMissing: Schema.optional(Schema.Boolean),
   },
 ) {
   override get message(): string {
@@ -358,6 +364,7 @@ export class ProviderAdapterProtocolError extends Schema.TaggedError<ProviderAda
   {
     driver: ProviderDriverKind,
     detail: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
     payload: Schema.optional(Schema.Unknown),
   },
 ) {
@@ -489,6 +496,11 @@ export interface ProviderAdapterV2EventSubscription {
   readonly close: Effect.Effect<void>;
 }
 
+export interface ProviderAdapterV2HistoricalContext {
+  readonly messages: ReadonlyArray<OrchestrationV2HistoricalMessage>;
+  readonly context: string;
+}
+
 export interface ProviderAdapterV2SessionRuntime {
   readonly instanceId: ProviderInstanceId;
   readonly driver: ProviderDriverKind;
@@ -516,6 +528,12 @@ export interface ProviderAdapterV2SessionRuntime {
   readonly hasPendingBackgroundWorkForThread?: (
     providerThread: OrchestrationV2ProviderThread,
   ) => Effect.Effect<boolean>;
+  /** Capacity for the requested model/options, independent of native thread usage. */
+  readonly getModelContextWindow?: (modelSelection: ModelSelection) => number | undefined;
+  /** Whether an option-only change preserves measured native usage and capacity.
+   * Compaction thresholds are still discarded. Unknown transitions invalidate usage.
+   */
+  readonly canReuseContextUsage?: (previous: ModelSelection, next: ModelSelection) => boolean;
   readonly ensureThread: (
     input: ProviderAdapterV2EnsureThreadInput,
   ) => Effect.Effect<OrchestrationV2ProviderThread, ProviderAdapterV2Error>;
@@ -525,6 +543,12 @@ export interface ProviderAdapterV2SessionRuntime {
     readonly modelSelection?: ModelSelection;
     readonly runtimePolicy?: ProviderAdapterV2RuntimePolicy;
   }) => Effect.Effect<OrchestrationV2ProviderThread, ProviderAdapterV2Error>;
+  /** False means the native protocol explicitly does not support history injection. */
+  readonly injectHistory?: (
+    input: ProviderAdapterV2HistoricalContext & {
+      readonly providerThread: OrchestrationV2ProviderThread;
+    },
+  ) => Effect.Effect<boolean, ProviderAdapterV2Error>;
   readonly startTurn: (
     input: ProviderAdapterV2TurnInput,
   ) => Effect.Effect<void, ProviderAdapterV2Error>;

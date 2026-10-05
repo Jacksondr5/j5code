@@ -48,6 +48,18 @@ describe("T3 orchestration provider instructions", () => {
   });
 
   it("creates mixed crews from chat and keeps coordination independent of approvals and artifacts", () => {
+    assert.include(
+      T3_CODE_ORCHESTRATION_INSTRUCTIONS,
+      "A request to create, start, or assemble a crew must go through `propose_crew` on the `t3-code` MCP server",
+    );
+    assert.include(
+      T3_CODE_ORCHESTRATION_INSTRUCTIONS,
+      "Never substitute provider-native Subagents, `delegate_task`, or individual `spawn_agent` calls for a requested crew",
+    );
+    assert.include(
+      T3_CODE_ORCHESTRATION_INSTRUCTIONS,
+      "report that blocker instead of launching replacement agents",
+    );
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "asks for a crew in ordinary chat");
     assert.include(
       T3_CODE_ORCHESTRATION_INSTRUCTIONS,
@@ -56,7 +68,7 @@ describe("T3 orchestration provider instructions", () => {
     assert.notInclude(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "`list_agents`");
     assert.include(
       T3_CODE_ORCHESTRATION_INSTRUCTIONS,
-      "Custom seats inherit your configuration by default",
+      "Custom seats inherit your harness, model, and reasoning by default and run with full access",
     );
     assert.include(
       T3_CODE_ORCHESTRATION_INSTRUCTIONS,
@@ -128,9 +140,9 @@ describe("T3 orchestration provider instructions", () => {
       state: { interactionMode: "default", hasT3Mcp: true },
     });
 
-    assert.include(injected, "T3 Code interaction mode: Default");
-    assert.include(injected, "T3 Code collaborative browser");
-    assert.include(injected, "T3 Code orchestration");
+    assert.include(injected, "J5 Code interaction mode: Default");
+    assert.include(injected, "J5 Code collaborative browser");
+    assert.include(injected, "J5 Code orchestration");
     assert.include(injected, "<user_request>\nInspect the repository.\n</user_request>");
   });
 
@@ -148,14 +160,14 @@ describe("T3 orchestration provider instructions", () => {
         state: { ...defaultState, interactionMode: "plan" },
         previousState: defaultState,
       }),
-      "T3 Code interaction mode: Plan",
+      "J5 Code interaction mode: Plan",
     );
     const withoutMcp = t3AcpPromptWithInstructions({
       prompt,
       state: { interactionMode: "default", hasT3Mcp: false },
     });
-    assert.include(withoutMcp, "T3 Code interaction mode: Default");
-    assert.notInclude(withoutMcp, "T3 Code collaborative browser");
-    assert.notInclude(withoutMcp, "T3 Code orchestration");
+    assert.include(withoutMcp, "J5 Code interaction mode: Default");
+    assert.notInclude(withoutMcp, "J5 Code collaborative browser");
+    assert.notInclude(withoutMcp, "J5 Code orchestration");
   });
 });

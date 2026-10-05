@@ -10,7 +10,9 @@ import { useEnvironmentQuery } from "../../state/query";
 import { agentPersonaEnvironment } from "../agents/agentPersonaAtoms";
 import type { CrewProposal, CrewProposalSeat } from "./crewProposalsClient";
 import { addSeat, describeSeatAgent, removeSeat, saveSeat } from "./crewProposalDraft";
+import { describePersonaSwap, removedSeatSteps, stepTitle, unownedSteps } from "./crewPlaybookPlan";
 import { CrewSeatDialog } from "./CrewSeatDialog";
+import { crewSeatStopsForApprovals } from "./crewSeatRuntime";
 import type { CrewProposalSeatRuntime } from "@t3tools/contracts/j5";
 import { useParticipantLabels } from "../a2a/ParticipantIdentitiesClient";
 import { useCrewProposalPreview } from "./useCrewProposalPreview";
@@ -48,11 +50,7 @@ export function CrewProposalCard(props: {
   readonly onOpenCaptain?: (() => void) | undefined;
 }) {
   const { proposal } = props;
-  // A gate handed back after a failed launch reopens with the seats the person approved, so a
-  // seat they removed stays removed and a retry sends what they last saw.
-  const [seats, setSeats] = useState<ReadonlyArray<CrewProposalSeat>>(
-    proposal.approvedSeats ?? proposal.requestedSeats,
-  );
+  const [seats, setSeats] = useState<ReadonlyArray<CrewProposalSeat>>(proposal.requestedSeats);
   const [editor, setEditor] = useState<{
     readonly seat: CrewProposalSeat | null;
     readonly runtime?: CrewProposalSeatRuntime | undefined;
@@ -71,6 +69,17 @@ export function CrewProposalCard(props: {
   );
   const agents = useMemo(() => rows.filter((agent) => agent.availability === "available"), [rows]);
   const preview = useCrewProposalPreview(props.environmentId, proposal.id, seats, props.busy);
+  const runtimeFor = (seat: CrewProposalSeat) =>
+    preview.runtimeSeats?.find((row) => row.seat === seat.seat);
+  const stopping = seats.filter((seat) => crewSeatStopsForApprovals(seat, runtimeFor(seat))).length;
+  // The preview carries the plan the approval token binds; the list's copy is only a first paint.
+  const playbook = preview.data?.playbook ?? proposal.playbook ?? null;
+  const unowned =
+    preview.data?.unownedSteps ??
+    // An addition's other steps belong to live members only the server knows about.
+    (proposal.kind === "roster" ? unownedSteps(playbook, seats) : []);
+  const titles = (ids: ReadonlyArray<string>) =>
+    ids.map((id) => stepTitle(playbook, id)).join(", ");
 
   return (
     <li
@@ -80,8 +89,10 @@ export function CrewProposalCard(props: {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <Badge variant="warning" className="uppercase tracking-wide">
-              {proposal.kind === "roster" ? "New crew" : "Add a seat"}
+            <Badge variant="warning">
+              <span className="uppercase tracking-wide">
+                {proposal.kind === "roster" ? "New crew" : "Add a seat"}
+              </span>
             </Badge>
             {props.environmentId === null ? (
               <span>Captain</span>
@@ -115,9 +126,21 @@ export function CrewProposalCard(props: {
         </summary>
         <p className="mt-1 whitespace-pre-wrap break-words text-foreground/90">{proposal.brief}</p>
       </details>
+      {playbook === null ? null : (
+        <div className="mt-2 text-xs text-muted-foreground">
+          <p>
+            Follows playbook: <span className="text-foreground">{playbook.title}</span>
+          </p>
+          {playbook.issue === null ? null : (
+            <p className="text-destructive" role="alert">
+              {playbook.issue}
+            </p>
+          )}
+        </div>
+      )}
       <ul className="mt-3 space-y-2">
         {seats.map((seat) => {
-          const runtime = preview.runtimeSeats?.find((row) => row.seat === seat.seat);
+          const runtime = runtimeFor(seat);
           return (
             <li
               key={seat.seat}
@@ -132,6 +155,11 @@ export function CrewProposalCard(props: {
                         ? "Custom crew member"
                         : describeSeatAgent(rows, seat.agentId)}
                     </span>
+                    {crewSeatStopsForApprovals(seat, runtime) ? (
+                      <Badge variant="warning" size="sm">
+                        Stops for approvals
+                      </Badge>
+                    ) : null}
                   </div>
                   {runtime ? (
                     <p className="break-words">
@@ -153,6 +181,17 @@ export function CrewProposalCard(props: {
                       </p>
                     </details>
                   ) : null}
+                  {seat.steps !== undefined && seat.steps.length > 0 ? (
+                    <p className="break-words">Steps: {titles(seat.steps)}</p>
+                  ) : null}
+                  {(runtime === undefined
+                    ? (seat.personaSwaps ?? [])
+                    : (runtime.personaSwaps ?? [])
+                  ).map((swap) => (
+                    <p key={swap.stepId} className="break-words text-warning">
+                      {stepTitle(playbook, swap.stepId)} {describePersonaSwap(swap, seat.seat)}
+                    </p>
+                  ))}
                 </div>
                 <div className="flex items-center justify-self-end gap-1">
                   <Button
@@ -183,6 +222,18 @@ export function CrewProposalCard(props: {
           );
         })}
       </ul>
+      {playbook === null ? null : (
+        <div className="mt-3 space-y-0.5 text-xs text-muted-foreground">
+          {removedSeatSteps(proposal.requestedSeats, seats).map(({ seat, steps }) => (
+            <p key={seat} role="status">
+              Removing {seat} leaves {titles(steps)} unowned.
+            </p>
+          ))}
+          {unowned.length === 0 ? null : (
+            <p className="break-words">Unowned steps, done by the Captain: {titles(unowned)}</p>
+          )}
+        </div>
+      )}
       <Button
         className="mt-3"
         aria-label="Add crew member"
@@ -230,6 +281,13 @@ export function CrewProposalCard(props: {
             Refresh runtime
           </Button>
         </div>
+      ) : null}
+      {stopping > 0 ? (
+        <p className="mt-3 text-xs text-muted-foreground">
+          {stopping === 1
+            ? "1 seat will stop for approvals in its own thread."
+            : `${stopping} seats will stop for approvals in their own threads.`}
+        </p>
       ) : null}
       <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
         <Button

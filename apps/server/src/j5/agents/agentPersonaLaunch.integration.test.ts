@@ -1,4 +1,6 @@
-import * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
+import * as ProjectCloneTracker from "../../project/ProjectCloneTracker.ts";
+import * as WorktreeSetupTracker from "../../project/WorktreeSetupTracker.ts";
+import * as TerminalManager from "../../terminal/Manager.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it, vi } from "@effect/vitest";
 import {
@@ -118,7 +120,9 @@ function makeHarness(options: HarnessOptions = {}) {
     options.generateTitle ?? (() => Effect.succeed({ title: "Generated title" })),
   );
   const externalServices = Layer.mergeAll(
-    Layer.mock(CheckpointStore.CheckpointStore)({ warmCheckpoint: () => Effect.void }),
+    WorktreeSetupTracker.layer,
+    Layer.mock(ProjectCloneTracker.ProjectCloneTracker)({ get: () => Effect.succeed(null) }),
+    Layer.mock(TerminalManager.TerminalManager)({ close: () => Effect.void }),
     Layer.succeed(ProjectService.ProjectService, {
       create: () => Effect.die("unused"),
       bootstrap: () => Effect.die("unused"),

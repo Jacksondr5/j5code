@@ -25,13 +25,19 @@ import { Button } from "../../components/ui/button";
 import { ScrollArea } from "../../components/ui/scroll-area";
 import { SidebarInset } from "../../components/ui/sidebar";
 import { Textarea } from "../../components/ui/textarea";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip";
 import { isElectron } from "../../env";
 import { cn } from "../../lib/utils";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { formatElapsedDurationLabel } from "../../timestampFormat";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "../../workspaceTitlebar";
 import { answerHumanExchange } from "./humanInboxClient";
+import { useScopedParticipantLabels } from "./ParticipantIdentitiesClient";
+import { presentParticipantIdentity } from "./ParticipantIdentity";
 import { CrewProposalCard } from "../crew/CrewProposalCard";
+import { CrewRuntimeRequestsSection } from "../crew/CrewRuntimeRequestsSection";
+import type { ScopedCrewRuntimeRequest } from "../crew/crewRuntimeRequests.logic";
+import { useCrewRuntimeRequests } from "../crew/crewRuntimeRequestsClient";
 import { inboxCrewRequests } from "../crew/crewProposals.logic";
 import {
   mergeCrewProposalSources,
@@ -58,6 +64,32 @@ interface HumanInboxAnswerAttempt {
 }
 
 type HumanInboxAnswers = Readonly<Record<string, string>>;
+type SenderLabels = ReadonlyMap<EnvironmentId, ReadonlyMap<string, string>>;
+
+const noLabels: ReadonlyMap<string, string> = new Map();
+
+function SenderName({
+  item,
+  senderLabels,
+  className,
+}: {
+  readonly item: HumanInboxItem;
+  readonly senderLabels: SenderLabels;
+  readonly className?: string;
+}) {
+  const sender = presentParticipantIdentity({
+    participantId: item.senderId,
+    participantLabels: senderLabels.get(item.environmentId) ?? noLabels,
+  });
+  if (sender.tooltipParticipantId === null)
+    return <span className={className}>{sender.label}</span>;
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<span className={className} />}>{sender.label}</TooltipTrigger>
+      <TooltipPopup>{sender.tooltipParticipantId}</TooltipPopup>
+    </Tooltip>
+  );
+}
 
 const urgencyPresentation = {
   blocking: { label: "Blocking", variant: "destructive" as const },
@@ -148,7 +180,7 @@ function OpenThreadButton({
   const available = environmentAvailable && item.senderThreadId !== null;
   return (
     <Button
-      className="w-fit gap-1.5"
+      className="w-fit"
       disabled={!available}
       onClick={() => onOpen(item)}
       size="sm"
@@ -175,10 +207,12 @@ function OpenInboxItem({
   pendingExchangeId,
   setAnswers,
   onOpenThread,
+  senderLabels,
   showEnvironment,
 }: {
   readonly item: HumanInboxItem;
   readonly answer: (item: HumanInboxItem) => void;
+  readonly senderLabels: SenderLabels;
   readonly answerText: string;
   readonly pendingExchangeId: string | null;
   readonly showEnvironment: boolean;
@@ -191,14 +225,16 @@ function OpenInboxItem({
     <li className="border-b border-border/70 last:border-b-0">
       <details className="group/details">
         <summary className="flex cursor-pointer list-none items-start gap-3 px-1 py-4 outline-hidden marker:hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background sm:gap-4 [&::-webkit-details-marker]:hidden">
-          <Badge className="mt-0.5 uppercase tracking-wide" variant={urgency.variant}>
-            {urgency.label}
+          <Badge className="mt-0.5" variant={urgency.variant}>
+            <span className="uppercase tracking-wide">{urgency.label}</span>
           </Badge>
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-              <span className="max-w-full truncate font-medium text-foreground/80">
-                {item.senderId}
-              </span>
+              <SenderName
+                className="max-w-full truncate font-medium text-foreground/80"
+                item={item}
+                senderLabels={senderLabels}
+              />
               <span aria-hidden>·</span>
               <span className="truncate">{item.squadronName}</span>
               {showEnvironment || !item.connected ? (
@@ -235,7 +271,7 @@ function OpenInboxItem({
           <div className="mt-4 flex flex-col gap-3">
             <Textarea
               aria-label={`Answer ${item.intent}`}
-              className="min-h-24 resize-y text-base sm:text-sm"
+              className="min-h-24 resize-y"
               onChange={(event) =>
                 captureHumanInboxAnswer(event, scopedInboxItemKey(item), setAnswers)
               }
@@ -271,10 +307,12 @@ function OpenInboxItem({
 function AnsweredShelf({
   items,
   onOpenThread,
+  senderLabels,
   showEnvironment,
 }: {
   readonly items: ReadonlyArray<HumanInboxItem>;
   readonly onOpenThread: (item: HumanInboxItem) => void;
+  readonly senderLabels: SenderLabels;
   readonly showEnvironment: boolean;
 }) {
   if (items.length === 0) return null;
@@ -299,7 +337,7 @@ function AnsweredShelf({
               <div className="min-w-0 flex-1">
                 <p className="break-words text-sm font-medium text-foreground/80">{item.intent}</p>
                 <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                  {item.senderId} · {item.squadronName}
+                  <SenderName item={item} senderLabels={senderLabels} /> · {item.squadronName}
                   {showEnvironment ? ` · ${item.environmentLabel}` : ""}
                   {` · ${formatAnsweredAgeLabel(answeredDuration)}`}
                 </p>
@@ -338,6 +376,13 @@ export function HumanInboxPage() {
   const items = useMemo(() => mergeHumanInboxSources(openSources), [openSources]);
   const answeredItems = useMemo(() => mergeHumanInboxSources(answeredSources), [answeredSources]);
   const showEnvironment = spansMultipleEnvironments([...items, ...answeredItems]);
+  const senderLabels = useScopedParticipantLabels(
+    [...items, ...answeredItems].map((item) => ({
+      environmentId: item.environmentId,
+      participantId: item.senderId,
+      connected: item.connected,
+    })),
+  );
   const [answers, setAnswers] = useState<HumanInboxAnswers>({});
   const [pendingExchangeId, setPendingExchangeId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -350,6 +395,7 @@ export function HumanInboxPage() {
   );
   const [resolvingProposalId, setResolvingProposalId] = useState<string | null>(null);
   useCrewProposalsRefresh();
+  const runtimeRequests = useCrewRuntimeRequests();
   const previousOpenItems = useRef(new Map<EnvironmentId, ReadonlySet<string>>());
   useEffect(() => {
     const next = new Map<EnvironmentId, ReadonlySet<string>>();
@@ -478,6 +524,16 @@ export function HumanInboxPage() {
     [navigate],
   );
 
+  const openCrewThread = useCallback(
+    (request: ScopedCrewRuntimeRequest) => {
+      void navigate({
+        to: "/$environmentId/$threadId",
+        params: buildThreadRouteParams(scopeThreadRef(request.environmentId, request.threadId)),
+      });
+    },
+    [navigate],
+  );
+
   const openThread = useCallback(
     (item: HumanInboxItem) => {
       if (!item.connected || item.senderThreadId === null) return;
@@ -492,7 +548,7 @@ export function HumanInboxPage() {
   );
 
   return (
-    <SidebarInset className="h-dvh min-h-0 overflow-hidden bg-background text-foreground">
+    <SidebarInset className="h-dvh min-h-0 overflow-hidden">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <header
           className={cn(
@@ -506,7 +562,7 @@ export function HumanInboxPage() {
           </WorkspaceBreadcrumb>
         </header>
         <ScrollArea className="min-h-0 flex-1">
-          <main className="mx-auto w-full max-w-4xl px-4 py-8 sm:px-8 sm:py-10">
+          <main className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-8 sm:py-10">
             <div className="flex flex-wrap items-end justify-between gap-4 border-b border-border pb-5">
               <div>
                 <h1 className="text-balance text-2xl font-semibold tracking-tight">Inbox</h1>
@@ -517,6 +573,10 @@ export function HumanInboxPage() {
                         proposals.length === 0
                           ? ""
                           : ` · ${proposals.length} crew ${proposals.length === 1 ? "request" : "requests"}`
+                      }${
+                        runtimeRequests.length === 0
+                          ? ""
+                          : ` · ${runtimeRequests.length} crew agent ${runtimeRequests.length === 1 ? "request" : "requests"}`
                       }`}
                 </p>
               </div>
@@ -580,11 +640,14 @@ export function HumanInboxPage() {
               </section>
             ) : null}
 
+            <CrewRuntimeRequestsSection requests={runtimeRequests} onOpenThread={openCrewThread} />
+
             {complete &&
             !loading &&
             error === null &&
             items.length === 0 &&
-            proposals.length === 0 ? (
+            proposals.length === 0 &&
+            runtimeRequests.length === 0 ? (
               <div className="flex min-h-56 flex-col items-center justify-center px-6 py-12 text-center">
                 <span className="flex size-10 items-center justify-center rounded-full bg-success/10 text-success">
                   <InboxIcon aria-hidden className="size-5" />
@@ -604,6 +667,7 @@ export function HumanInboxPage() {
                     key={scopedInboxItemKey(item)}
                     onOpenThread={openThread}
                     pendingExchangeId={pendingExchangeId}
+                    senderLabels={senderLabels}
                     setAnswers={setAnswers}
                     showEnvironment={showEnvironment}
                   />
@@ -614,6 +678,7 @@ export function HumanInboxPage() {
             <AnsweredShelf
               items={answeredItems}
               onOpenThread={openThread}
+              senderLabels={senderLabels}
               showEnvironment={showEnvironment}
             />
           </main>

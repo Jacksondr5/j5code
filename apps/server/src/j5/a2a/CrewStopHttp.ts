@@ -61,11 +61,18 @@ export const makeCrewStopHttpRouteLayer = (path: HttpRouter.PathInput) =>
                 Effect.flatMap((result) =>
                   encodeStop({
                     crewInstanceId: result.crewInstanceId,
-                    members: result.members.map((member) => ({
-                      seat: member.seatName,
-                      participantId: member.participantId,
-                      result: member.result,
-                    })),
+                    // A seat whose thread never came to exist has no result a client knows.
+                    members: result.members.flatMap((member) =>
+                      member.result === "never_created"
+                        ? []
+                        : [
+                            {
+                              seat: member.seatName,
+                              participantId: member.participantId,
+                              result: member.result,
+                            },
+                          ],
+                    ),
                   }),
                 ),
               ),

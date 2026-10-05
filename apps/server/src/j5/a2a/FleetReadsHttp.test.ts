@@ -144,3 +144,141 @@ it("projects agents with origin, placement, crew seat, and owed asks; humans are
     ],
   );
 });
+
+it("keeps every live roster seat: one with no ledger row rides under its Captain with no thread", () => {
+  const critic = participantIdForThread(ThreadId.make("thread:critic"));
+  const retiredSeat = participantIdForThread(ThreadId.make("thread:retired-seat"));
+  const seat = (seatName: string, participantId: ParticipantId) => ({
+    seatName,
+    agentId: null,
+    participantId,
+    threadId: ThreadId.make(`thread:${seatName}`),
+    addedVersion: 1,
+    reason: null,
+  });
+  const projected = projectFleetSquadron({
+    squadron: { id: squadronId, name: "Fleet" },
+    participants: [
+      agentRow(captain, captainThread, { kind: "unrecorded" }, null),
+      agentRow(builder, builderThread, spawnedBy(captain), captain),
+      agentRow(
+        retiredSeat,
+        ThreadId.make("thread:retired-seat"),
+        spawnedBy(captain),
+        captain,
+        "2026-09-14T20:00:00Z",
+      ),
+    ],
+    crews: [
+      {
+        ...crew,
+        members: [...crew.members, seat("critic", critic), seat("retired", retiredSeat)],
+      },
+      // A retired Crew's never-created seats are not rows.
+      {
+        ...crew,
+        id: "crew:old",
+        archivedAt: "2026-09-09T18:00:00.000Z",
+        members: [seat("ghost", ParticipantId.make("agent:j5:a2a:ghost"))],
+      },
+    ],
+    openAsks: new Map(),
+  });
+  assert.deepStrictEqual(
+    projected.agents.map((agent) => [agent.participantId, agent.threadId, agent.placementParentId]),
+    [
+      [captain, captainThread, null],
+      [builder, builderThread, captain],
+      [critic, null, captain],
+    ],
+  );
+  assert.deepStrictEqual(projected.agents[2], {
+    participantId: critic,
+    threadId: null,
+    displayName: "critic",
+    origin: "agent",
+    placementParentId: captain,
+    crew: {
+      crewInstanceId: "crew:1",
+      crewName: "Review Pair",
+      seat: "critic",
+      captainParticipantId: captain,
+    },
+    openAsks: 0,
+  });
+});
+
+it("carries a Crew's playbook and each seat's steps on the Fleet roster", () => {
+  const projected = projectFleetSquadron({
+    squadron: { id: squadronId, name: "Fleet" },
+    participants: [agentRow(captain, captainThread, { kind: "unrecorded" }, null)],
+    crews: [
+      {
+        ...crew,
+        playbook: { name: "release", definitionPath: "/repo/.j5/playbooks/release.yaml" },
+        members: [{ ...crew.members[0]!, playbookStepIds: ["plan", "build"] }],
+      },
+      {
+        ...crew,
+        id: "crew:plain",
+        playbook: null,
+        members: [{ ...crew.members[0]!, playbookStepIds: [] }],
+      },
+    ],
+    openAsks: new Map(),
+  });
+  assert.deepStrictEqual(projected.crews[0]?.playbook, { name: "release" });
+  assert.deepStrictEqual(projected.crews[0]?.roster[0]?.steps, ["plan", "build"]);
+  assert.isNull(projected.crews[1]?.playbook);
+  assert.notProperty(projected.crews[1]?.roster[0], "steps");
+});
+
+it("carries each live Crew's playbook run, and null for a Crew without one", () => {
+  const playbookRun = {
+    runId: "run:1",
+    position: 2,
+    total: 3,
+    stepId: "review",
+    stepTitle: "Review",
+    state: "pending" as const,
+    seat: "builder",
+  };
+  const projected = projectFleetSquadron({
+    squadron: { id: squadronId, name: "Fleet" },
+    participants: [],
+    crews: [crew, { ...crew, id: "crew:idle" }],
+    openAsks: new Map(),
+    playbookRuns: new Map([
+      ["crew:1", playbookRun],
+      ["crew:idle", null],
+    ]),
+  });
+  assert.deepStrictEqual(
+    projected.crews.map((entry) => [entry.crewInstanceId, entry.playbookRun]),
+    [
+      ["crew:1", playbookRun],
+      ["crew:idle", null],
+    ],
+  );
+});
+
+it("carries a run whose playbook can't be read, with its issue, for the header to flag", () => {
+  const playbookRun = {
+    runId: "run:1",
+    position: 0,
+    total: 0,
+    stepId: "review",
+    stepTitle: "review",
+    state: "delivered" as const,
+    seat: "builder",
+    issue: "Cannot read the live playbook.",
+  };
+  const projected = projectFleetSquadron({
+    squadron: { id: squadronId, name: "Fleet" },
+    participants: [],
+    crews: [crew],
+    openAsks: new Map(),
+    playbookRuns: new Map([["crew:1", playbookRun]]),
+  });
+  assert.deepStrictEqual(projected.crews[0]?.playbookRun, playbookRun);
+});

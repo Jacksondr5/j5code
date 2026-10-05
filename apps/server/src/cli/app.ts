@@ -59,7 +59,7 @@ export class DesktopAppUnreachableError extends Schema.TaggedError<DesktopAppUnr
   },
 ) {
   override get message(): string {
-    return "Could not reach the T3 Code desktop app. Start or update the desktop app on this machine, then run `j5 app` again. A running T3 Code server is not enough.";
+    return "Could not reach the J5 Code desktop app. Start or update the desktop app on this machine, then run `j5 app` again. A running J5 Code server is not enough.";
   }
 }
 
@@ -73,7 +73,7 @@ export class DesktopAppRequestFailedError extends Schema.TaggedError<DesktopAppR
   },
 ) {
   override get message(): string {
-    return `T3 Code could not open ${this.workspaceRoot} (${this.code}).`;
+    return `J5 Code could not open ${this.workspaceRoot} (${this.code}).`;
   }
 }
 
@@ -178,9 +178,9 @@ function sendDesktopAppActivationRequest(input: {
 }
 
 const appEnvironment = Config.all({
-  t3Home: Config.string("J5CODE_HOME").pipe(Config.option, Config.map(Option.getOrUndefined)),
-  sshConnection: Config.string("SSH_CONNECTION").pipe(Config.option),
-  sshTty: Config.string("SSH_TTY").pipe(Config.option),
+  t3Home: Config.String("J5CODE_HOME").pipe(Config.option, Config.map(Option.getOrUndefined)),
+  sshConnection: Config.String("SSH_CONNECTION").pipe(Config.option),
+  sshTty: Config.String("SSH_TTY").pipe(Config.option),
 });
 
 const runAppCommand = Effect.fn("cli.app")(function* (flags: {
@@ -246,16 +246,16 @@ const runAppCommand = Effect.fn("cli.app")(function* (flags: {
     });
   }
 
-  yield* Console.log(`Opened ${workspaceRoot} in T3 Code.`);
+  yield* Console.log(`Opened ${workspaceRoot} in J5 Code.`);
 });
 
 export const appCommand = Command.make("app", {
   baseDir: baseDirFlag,
-  workspaceRoot: Argument.string("path").pipe(
+  workspaceRoot: Argument.String("path").pipe(
     Argument.withDescription("Project directory. Default: current directory."),
     Argument.optional,
   ),
 }).pipe(
-  Command.withDescription("Open a project in the running T3 Code desktop app."),
+  Command.withDescription("Open a project in the running J5 Code desktop app."),
   Command.withHandler(runAppCommand),
 );

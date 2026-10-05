@@ -11,7 +11,6 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
-import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -26,14 +25,24 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
+import {
+  EventSinkStreamError,
+  EventSinkV2,
+  type EventSinkV2Shape,
+} from "../../orchestration-v2/EventSink.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import {
   AgentCrewInstanceService,
   layer as crewInstanceLayer,
 } from "./AgentCrewInstanceService.ts";
 import { A2ADeliveryWorker, manualLayer as deliveryWorkerLayer } from "./DeliveryWorker.ts";
-import { A2ADeliveryTransport, type A2ADeliveryTransportShape } from "./DeliveryTransport.ts";
+import {
+  A2ADeliveryTransport,
+  type A2ADeliveryTransportShape,
+  deliveryMessageId,
+} from "./DeliveryTransport.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
+import { noneLayer as peerDirectoryNoneLayer } from "./PeerDirectory.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import { A2ASendService, layer as sendLayer } from "./SendService.ts";
 import {
@@ -48,6 +57,7 @@ import {
   CorrelationId,
   ExchangeId,
   LedgerMessageId,
+  MessageSentPayload,
   SquadronId,
   ParticipantId,
   SILENCE_DETECTOR_PARTICIPANT_ID,
@@ -89,15 +99,41 @@ const failureDetail = {
 
 const iso = (second: number) => `2026-08-19T12:00:${String(second).padStart(2, "0")}.000Z`;
 const decodeSilenceNotice = Schema.decodeUnknownEffect(SilenceNoticePayload);
+const decodeMessageSentPayload = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(MessageSentPayload),
+);
+
+const defaultRunId = RunId.make("run:silence:test");
+
+/**
+ * The receiver's thread as the detector reads it. Each test layer starts it over with the
+ * default run; `seedInbound` records which run a delivered ask belongs to.
+ */
+const thread: {
+  runs: Array<OrchestrationV2Run>;
+  messages: Array<{ readonly id: MessageId; readonly runId: RunId }>;
+} = { runs: [], messages: [] };
+
+const threadMock = (overrides: Partial<ThreadManagementService["Service"]> = {}) => {
+  thread.runs = [runOf(terminalEvent("completed"))];
+  thread.messages = [];
+  return Layer.mock(ThreadManagementService)({
+    getThreadRecords: (() => Effect.succeed(thread)) as never,
+    ...overrides,
+  });
+};
 
 const makeTestLayer = () => {
-  const database = NodeSqliteClient.layerMemory();
+  const database = NodeSqliteClient.layer({ filename: ":memory:" });
   const ledger = ledgerLayer.pipe(Layer.provide(database));
-  const send = sendLayer.pipe(Layer.provide(ledger), Layer.provide(database));
-  const threads = Layer.mock(ThreadManagementService)({
+  const send = sendLayer.pipe(
+    Layer.provide(peerDirectoryNoneLayer),
+    Layer.provide(ledger),
+    Layer.provide(database),
+  );
+  const threads = threadMock({
     getThreadProjection: () =>
       Effect.succeed({
-        runs: [],
         turnItems: [
           {
             runId: RunId.make("run:silence:test"),
@@ -113,6 +149,7 @@ const makeTestLayer = () => {
     A2ADeliveryTransport.of({
       deliverAgent: () => Effect.void,
       cancelAgent: () => Effect.succeed("cancelled" as const),
+      deliverPeer: () => Effect.die("peer delivery is not under test"),
       deliverHuman: () => Effect.void,
     } satisfies A2ADeliveryTransportShape),
   );
@@ -125,6 +162,7 @@ const makeTestLayer = () => {
     Layer.provide(ledger),
     Layer.provide(database),
     Layer.provide(threads),
+    Layer.provide(Layer.mock(EventSinkV2)({})),
     Layer.provideMerge(crewInstanceLayer.pipe(Layer.provide(database))),
     Layer.provideMerge(worker),
   );
@@ -135,53 +173,22 @@ const makeDaemonTestLayer = (
   storedEvents: (input?: {
     readonly afterSequence?: number;
   }) => Stream.Stream<OrchestrationV2StoredEvent>,
-  runs: ReadonlyArray<OrchestrationV2Run>,
-  initialHighWater: number,
+  latestSequence: EventSinkV2Shape["latestSequence"],
 ) => {
-  const database = SqlitePersistenceMemory.pipe(
-    Layer.tap((context) => {
-      const sql = Context.get(context, SqlClient.SqlClient);
-      return sql`
-        INSERT OR IGNORE INTO orchestration_v2_events (
-            sequence,
-            event_id,
-            command_id,
-            thread_id,
-            run_id,
-            node_id,
-            provider,
-            raw_event_id,
-            event_type,
-            occurred_at,
-            payload_json
-          ) VALUES (
-            ${initialHighWater},
-            'event:silence:cursor-high-water',
-            NULL,
-            'thread:silence:cursor-high-water',
-            NULL,
-            NULL,
-            NULL,
-            NULL,
-            'thread.created',
-            ${iso(0)},
-            '{}'
-          )
-        `;
-    }),
-  );
+  const database = SqlitePersistenceMemory;
   const ledger = ledgerLayer.pipe(Layer.provide(database));
-  const send = sendLayer.pipe(Layer.provide(ledger), Layer.provide(database));
-  const threads = Layer.mock(ThreadManagementService)({
-    getThreadProjection: () =>
-      Effect.succeed({ runs, turnItems: [] } as unknown as OrchestrationV2ThreadProjection),
-    streamStoredEventsFrom: storedEvents,
-  });
+  const send = sendLayer.pipe(
+    Layer.provide(peerDirectoryNoneLayer),
+    Layer.provide(ledger),
+    Layer.provide(database),
+  );
+  const threads = threadMock({ streamStoredEventsFrom: storedEvents });
   const transport = Layer.succeed(
     A2ADeliveryTransport,
     A2ADeliveryTransport.of({
       deliverAgent: () => Effect.void,
       cancelAgent: () => Effect.succeed("cancelled" as const),
+      deliverPeer: () => Effect.die("peer delivery is not under test"),
       deliverHuman: () => Effect.void,
     } satisfies A2ADeliveryTransportShape),
   );
@@ -194,6 +201,7 @@ const makeDaemonTestLayer = (
     Layer.provide(ledger),
     Layer.provide(database),
     Layer.provide(threads),
+    Layer.provide(Layer.mock(EventSinkV2)({ latestSequence })),
     Layer.provideMerge(crewInstanceLayer.pipe(Layer.provide(database))),
     Layer.provideMerge(worker),
   );
@@ -393,9 +401,18 @@ const dropExchange = Effect.fn("test.j5.a2a.silence.dropExchange")(function* (
 const terminalEvent = (
   status: "completed" | "failed" | "interrupted" | "cancelled" | "rolled_back",
   sequence = 100,
+  carries: {
+    readonly id: RunId;
+    readonly userMessageId: MessageId;
+    readonly completedAtSecond: number;
+  } = {
+    id: defaultRunId,
+    userMessageId: MessageId.make("message:silence:upstream"),
+    completedAtSecond: 3,
+  },
 ): OrchestrationV2StoredEvent => {
-  const completedAt = DateTime.makeUnsafe(iso(3));
-  const runId = RunId.make("run:silence:test");
+  const completedAt = DateTime.makeUnsafe(iso(carries.completedAtSecond));
+  const runId = carries.id;
   return {
     sequence,
     commandId: null,
@@ -413,7 +430,7 @@ const terminalEvent = (
         providerInstanceId: ProviderInstanceId.make("codex"),
         modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "test-model" },
         providerThreadId: null,
-        userMessageId: MessageId.make("message:silence:upstream"),
+        userMessageId: carries.userMessageId,
         rootNodeId: null,
         activeAttemptId: null,
         status,
@@ -439,9 +456,16 @@ const readNotices = Effect.fn("test.j5.a2a.silence.readNotices")(function* () {
   );
 });
 
-const seedInbound = Effect.fn("test.j5.a2a.silence.seedInbound")(function* (deliveredAt: number) {
+const seedInbound = Effect.fn("test.j5.a2a.silence.seedInbound")(function* (
+  deliveredAt: number,
+  // The run the delivered ask belongs to; null when the thread never took the message.
+  owner: RunId | null = defaultRunId,
+) {
   const exchange = yield* openExchange(waiter, subject.id, `inbound-${deliveredAt}`);
   assert.isNotNull(exchange.exchangeId);
+  if (owner !== null) {
+    thread.messages.push({ id: deliveryMessageId(exchange.messageId), runId: owner });
+  }
   const deliveryEvent = yield* markDelivered(
     exchange.messageId,
     exchange.exchangeId!,
@@ -562,6 +586,108 @@ it.effect("emits processed mid-turn silence and dedupes a later lifecycle sequen
   }).pipe(Effect.provide(makeTestLayer())),
 );
 
+const runOf = (stored: OrchestrationV2StoredEvent): OrchestrationV2Run => {
+  if (stored.event.type !== "run.updated") throw new Error("expected a run event");
+  return stored.event.payload;
+};
+
+const carrierRunId = RunId.make("run:silence:carrier");
+
+const otherRun = (name: string, completedAtSecond: number, sequence = 100) =>
+  terminalEvent("completed", sequence, {
+    id: RunId.make(`run:silence:${name}`),
+    userMessageId: MessageId.make(`message:silence:${name}`),
+    completedAtSecond,
+  });
+
+const carrierRun = (
+  messageId: LedgerMessageId,
+  completedAtSecond: number,
+  sequence = 101,
+  status: "completed" | "cancelled" = "completed",
+) =>
+  terminalEvent(status, sequence, {
+    id: carrierRunId,
+    userMessageId: deliveryMessageId(messageId),
+    completedAtSecond,
+  });
+
+it.effect("waits for the run that carries a queued ask before reporting silence (#433)", () =>
+  Effect.gen(function* () {
+    yield* seed();
+    const ask = yield* seedInbound(2, carrierRunId);
+    const busy = otherRun("busy", 3);
+    const carrier = carrierRun(ask.messageId, 5);
+    thread.runs = [runOf(busy), runOf(carrier)];
+    const detector = yield* A2ASilenceDetector;
+
+    yield* detector.handleStoredEvent(busy);
+    assert.lengthOf(yield* readNotices(), 0, "the run that was already busy never saw the ask");
+
+    yield* detector.handleStoredEvent(carrier);
+    const notices = yield* readNotices();
+    assert.lengthOf(notices, 1);
+    assert.equal(notices[0]?.state, "turn-ended-no-reply");
+    assert.equal(notices[0]?.runId, carrierRunId);
+  }).pipe(Effect.provide(makeTestLayer())),
+);
+
+it.effect("reconciling stays quiet while the run that carries the ask is still queued", () =>
+  Effect.gen(function* () {
+    yield* seed();
+    const ask = yield* seedInbound(2, carrierRunId);
+    thread.runs = [
+      { ...runOf(carrierRun(ask.messageId, 0)), status: "queued", completedAt: null },
+      { ...runOf(otherRun("later", 4)), status: "cancelled" },
+    ];
+    yield* (yield* A2ASilenceDetector).reconcileOpenExchanges;
+    assert.lengthOf(yield* readNotices(), 0, "a later run ending is not the ask's run ending");
+  }).pipe(Effect.provide(makeTestLayer())),
+);
+
+it.effect("reports the carrying run when its delivery is recorded after it ended", () =>
+  Effect.gen(function* () {
+    yield* seed();
+    const ask = yield* seedInbound(4, carrierRunId);
+    const carrier = carrierRun(ask.messageId, 3, 100);
+    const later = otherRun("later", 5, 101);
+    thread.runs = [runOf(carrier), { ...runOf(later), status: "queued", completedAt: null }];
+    const detector = yield* A2ASilenceDetector;
+
+    yield* detector.handleStoredEvent(carrier);
+    yield* detector.handleDeliveryEvent(ask.deliveryEvent);
+    thread.runs = [runOf(carrier), runOf(later)];
+    yield* detector.handleStoredEvent(later);
+
+    const notices = yield* readNotices();
+    assert.lengthOf(notices, 1);
+    assert.equal(notices[0]?.runId, carrierRunId);
+  }).pipe(Effect.provide(makeTestLayer())),
+);
+
+it.effect("follows a queued ask promoted into the running turn (#435)", () =>
+  Effect.gen(function* () {
+    yield* seed();
+    const running = otherRun("running", 5, 101);
+    // Promotion cancels the queued run and moves its message into the running turn.
+    const ask = yield* seedInbound(2, runOf(running).id);
+    const promoted = carrierRun(ask.messageId, 3, 100, "cancelled");
+    thread.runs = [{ ...runOf(running), status: "running", completedAt: null }, runOf(promoted)];
+    const detector = yield* A2ASilenceDetector;
+
+    yield* detector.handleStoredEvent(promoted);
+    yield* detector.reconcileOpenExchanges;
+    assert.lengthOf(yield* readNotices(), 0, "the turn that took the ask can still answer it");
+
+    thread.runs = [runOf(running), runOf(promoted)];
+    yield* detector.handleStoredEvent(running);
+    const notices = yield* readNotices();
+    assert.lengthOf(notices, 1);
+    assert.equal(notices[0]?.state, "turn-ended-no-reply");
+    assert.equal(notices[0]?.runId, runOf(running).id);
+  }).pipe(Effect.provide(makeTestLayer())),
+);
+
 it.effect("no-ops when A9 drops after the A3 read but before its serialized append", () =>
   Effect.gen(function* () {
     yield* seed();
@@ -627,7 +753,7 @@ it.effect("keeps both historical facts when A3 appends before A9 drops", () =>
 it.effect("emits never-processed when no turn started after the latest delivery", () =>
   Effect.gen(function* () {
     yield* seed();
-    const inbound = yield* seedInbound(4);
+    const inbound = yield* seedInbound(4, null);
     yield* (yield* A2ASilenceDetector).handleDeliveryEvent(inbound.deliveryEvent);
     const notices = yield* readNotices();
     assert.equal(notices[0]?.state, "turn-ended-no-reply");
@@ -640,9 +766,6 @@ it.effect("emits never-processed when no turn started after the latest delivery"
 
 it.effect("daemon retries its stored-event stream and advances the durable cursor", () => {
   const stored = terminalEvent("completed", 130);
-  assert.equal(stored.event.type, "run.updated");
-  if (stored.event.type !== "run.updated") return Effect.die("expected run.updated fixture");
-  const run = stored.event.payload;
   let streamCalls = 0;
   const observedCursors: Array<number> = [];
   const gateEffect = Effect.gen(function* () {
@@ -661,8 +784,7 @@ it.effect("daemon retries its stored-event stream and advances the durable curso
         if ((input?.afterSequence ?? 0) >= stored.sequence) return Stream.never;
         return Stream.fromEffect(Deferred.await(gate).pipe(Effect.as(stored)));
       },
-      [run],
-      75,
+      () => Effect.succeed(75),
     );
 
     return yield* Effect.scoped(
@@ -697,6 +819,52 @@ it.effect("daemon retries its stored-event stream and advances the durable curso
   return gateEffect;
 });
 
+it.effect(
+  "a new cursor starts at the event store's latest sequence, retrying a failed read rather than 0",
+  () =>
+    Effect.gen(function* () {
+      const firstReadFailed = yield* Deferred.make<void>();
+      const streamStarted = yield* Deferred.make<number>();
+      let reads = 0;
+      let streamCalls = 0;
+      const daemonLayer = makeDaemonTestLayer(
+        (input) => {
+          streamCalls += 1;
+          return Stream.fromEffect(Deferred.succeed(streamStarted, input?.afterSequence ?? 0)).pipe(
+            Stream.drain,
+            Stream.concat(Stream.never),
+          );
+        },
+        () =>
+          Effect.suspend(() => {
+            reads += 1;
+            return reads === 1
+              ? Deferred.succeed(firstReadFailed, undefined).pipe(
+                  Effect.andThen(Effect.fail(new EventSinkStreamError({}))),
+                )
+              : Effect.succeed(4200);
+          }),
+      );
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          yield* Deferred.await(firstReadFailed);
+          assert.equal(streamCalls, 0);
+          yield* TestClock.adjust(Duration.millis(250));
+          assert.equal(yield* Deferred.await(streamStarted), 4200);
+          const cursor = yield* (yield* SqlClient.SqlClient)<{
+            readonly after_sequence: number | null;
+          }>`
+            SELECT after_sequence
+            FROM j5_a2a_silence_detector_cursor
+            WHERE singleton = 1
+          `;
+          assert.deepStrictEqual(cursor, [{ after_sequence: 4200 }]);
+        }).pipe(Effect.provide(daemonLayer)),
+      );
+    }),
+);
+
 it.effect("backs off exponentially across consecutive lifecycle stream failures", () =>
   Effect.gen(function* () {
     const failures = yield* Queue.unbounded<number>();
@@ -716,8 +884,7 @@ it.effect("backs off exponentially across consecutive lifecycle stream failures"
           Stream.never,
         );
       },
-      [],
-      75,
+      () => Effect.succeed(75),
     );
 
     yield* Effect.scoped(
@@ -882,6 +1049,56 @@ it.effect("emits nothing for an idle agent that owes no reply", () =>
   }).pipe(Effect.provide(makeTestLayer())),
 );
 
+it.effect(
+  "emits nothing for a reply to another Squadron that is accepted but not yet delivered",
+  () =>
+    Effect.gen(function* () {
+      yield* runJ5A2AMigrations();
+      const ledger = yield* A2ALedger;
+      const subjectSquadronId = SquadronId.make("squadron:silence-test:subject");
+      yield* ledger.createSquadron({
+        squadron: { id: squadronId, name: "Silence waiter", createdAt: iso(0) },
+      });
+      yield* ledger.createSquadron({
+        squadron: { id: subjectSquadronId, name: "Silence subject", createdAt: iso(0) },
+      });
+      yield* join(waiter, "waiter");
+      yield* ledger.append({
+        commandId: CommCommandId.make("command:silence:join:cross-subject"),
+        squadronId: subjectSquadronId,
+        acceptedAt: iso(0),
+        event: {
+          kind: "participant.joined",
+          sender: null,
+          receiver: subject.id,
+          exchangeId: null,
+          correlationId: null,
+          payload: { participant: subject },
+          createdAt: iso(0),
+        },
+      });
+      const exchange = yield* seedInbound(2);
+      yield* (yield* A2ASendService).send({
+        commandId: CommCommandId.make("command:silence:send:cross-reply"),
+        senderThreadId: subject.threadId,
+        to: waiter.id,
+        message: "Answered before the turn ended.",
+        exchangeId: exchange.exchangeId!,
+        acceptedAt: iso(3),
+      });
+      const pending = yield* (yield* SqlClient.SqlClient)<{ readonly status: string }>`
+      SELECT status FROM j5_a2a_delivery WHERE exchange_role = 'reply'
+    `;
+      assert.deepStrictEqual(pending, [{ status: "pending" }], "the worker has not run");
+
+      const appended = yield* (yield* A2ASilenceDetector).handleStoredEvent(
+        terminalEvent("completed"),
+      );
+      assert.deepStrictEqual(appended, []);
+      assert.deepStrictEqual(yield* readNotices(), []);
+    }).pipe(Effect.provide(makeTestLayer())),
+);
+
 it.effect("emits nothing when the human is the quiet recipient", () =>
   Effect.gen(function* () {
     yield* seed();
@@ -898,5 +1115,77 @@ it.effect("emits nothing when the human is the quiet recipient", () =>
     const appended = yield* (yield* A2ASilenceDetector).handleDeliveryEvent(delivered);
     assert.deepStrictEqual(appended, []);
     assert.deepStrictEqual(yield* readNotices(), []);
+  }).pipe(Effect.provide(makeTestLayer())),
+);
+
+it.effect("addresses a silence notice to a waiter on a peer server through the peer path", () =>
+  Effect.gen(function* () {
+    yield* seed();
+    const ledger = yield* A2ALedger;
+    const sql = yield* SqlClient.SqlClient;
+    const remoteAsker = ParticipantId.make("agent:j5:a2a:thread:remote-asker");
+    const exchangeId = ExchangeId.make("exchange:j5:a2a:remote-ask");
+    const correlationId = CorrelationId.make("correlation:j5:a2a:remote-ask");
+    const messageId = LedgerMessageId.make("message:j5:a2a:remote-ask");
+    // The ask came in from a peer: the inbound service's two facts, as it records them.
+    yield* ledger.appendEvents({
+      commandId: CommCommandId.make("command:silence:remote-ask"),
+      squadronId,
+      acceptedAt: iso(0),
+      events: [
+        {
+          kind: "exchange.opened",
+          sender: remoteAsker,
+          receiver: subject.id,
+          exchangeId,
+          correlationId,
+          payload: { intent: "incident status", urgency: null },
+          createdAt: iso(0),
+        },
+        {
+          kind: "message.received",
+          sender: remoteAsker,
+          receiver: subject.id,
+          exchangeId,
+          correlationId,
+          payload: {
+            originSquadronId: SquadronId.make("squadron:home-support"),
+            originEnvironmentId: "environment-home",
+            message: {
+              messageId,
+              text: "What is the incident status?",
+              originSquadronId: "squadron:home-support",
+              receiverSquadronId: squadronId,
+              exchangeRole: "ask",
+              envelopeChannel: "peer",
+            },
+          },
+          createdAt: iso(0),
+        },
+      ],
+    });
+    assert.equal((yield* (yield* A2ADeliveryWorker).runOnce)?.state, "delivered");
+    thread.messages.push({ id: deliveryMessageId(messageId), runId: defaultRunId });
+
+    const appended = yield* (yield* A2ASilenceDetector).handleStoredEvent(
+      terminalEvent("completed"),
+    );
+    assert.equal(appended.length, 1);
+    const notices = yield* readNotices();
+    assert.equal(notices[0]?.state, "turn-ended-no-reply");
+
+    const sent = yield* sql<{ readonly receiver: string; readonly payload: string }>`
+      SELECT receiver, payload FROM j5_a2a_comm_event
+      WHERE kind = 'message.sent' AND json_extract(payload, '$.envelopeChannel') = 'silence_notice'
+    `;
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0]!.receiver, remoteAsker);
+    const payload = yield* decodeMessageSentPayload(sent[0]!.payload);
+    assert.equal(payload.receiverEnvironmentId, "environment-home");
+    assert.equal(payload.receiverSquadronId, "squadron:home-support");
+    const row = yield* sql<{ readonly receiver_environment_id: string | null }>`
+      SELECT receiver_environment_id FROM j5_a2a_delivery WHERE message_id = ${payload.messageId}
+    `;
+    assert.deepStrictEqual(row, [{ receiver_environment_id: "environment-home" }]);
   }).pipe(Effect.provide(makeTestLayer())),
 );

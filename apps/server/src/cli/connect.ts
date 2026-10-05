@@ -20,7 +20,6 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as References from "effect/References";
 import * as Schema from "effect/Schema";
-import * as Terminal from "effect/Terminal";
 import { Command, Flag, GlobalFlag, Prompt } from "effect/unstable/cli";
 import {
   FetchHttpClient,
@@ -56,43 +55,45 @@ import {
   recoverServiceOnboardingOffer,
 } from "./service.ts";
 
-const jsonFlag = Flag.boolean("json").pipe(
+const jsonFlag = Flag.Boolean("json").pipe(
   Flag.withDescription("Emit JSON instead of human-readable output."),
   Flag.withDefault(false),
 );
 
 const isCloudCliTokenManagerError = Schema.is(CliTokenManager.CloudCliTokenManagerError);
 
-const headlessFlag = Flag.boolean("headless").pipe(
-  Flag.withDescription("Authorize without a local browser using out-of-band OAuth."),
+const headlessFlag = Flag.Boolean("headless").pipe(
+  Flag.withDescription("Authorize without a local browser using the OAuth device flow."),
   Flag.withDefault(false),
 );
 
 /**
  * Inside an SSH session there is no local browser to complete the loopback
- * OAuth callback, so out-of-band OAuth is the only flow that can work.
+ * OAuth callback, so the device authorization grant is the only flow that
+ * can work.
  */
 export const headlessSessionConfig = Config.all({
-  sshConnection: Config.string("SSH_CONNECTION").pipe(Config.option),
-  sshTty: Config.string("SSH_TTY").pipe(Config.option),
+  sshConnection: Config.String("SSH_CONNECTION").pipe(Config.option),
+  sshTty: Config.String("SSH_TTY").pipe(Config.option),
 }).pipe(
   Config.map(({ sshConnection, sshTty }) => Option.isSome(sshConnection) || Option.isSome(sshTty)),
 );
 
-const promptForOutOfBandOAuthCode = Effect.fn("cloud.cli.prompt_for_out_of_band_oauth_code")(
-  function* ({ authorizeUrl, validate }: CliTokenManager.OutOfBandOAuthPromptInput) {
-    yield* Console.log(formatHeadlessAuthorizationPrompt(authorizeUrl));
-    return yield* Prompt.run(Prompt.text({ message: "Authorization code", validate }));
-  },
-);
+const showDeviceAuthorizationPrompt = (prompt: CliTokenManager.DeviceAuthorizationPrompt) =>
+  Console.log(formatDeviceAuthorizationPrompt(prompt));
 
-function formatHeadlessAuthorizationPrompt(authorizeUrl: string): string {
+function formatDeviceAuthorizationPrompt(
+  prompt: CliTokenManager.DeviceAuthorizationPrompt,
+): string {
+  const minutes = Math.max(1, Math.round(Duration.toMinutes(prompt.expiresIn)));
   return [
     "Headless authorization",
     "Open this URL on a device with a browser:",
-    `  ${authorizeUrl}`,
+    `  ${prompt.verificationUriComplete ?? prompt.verificationUri}`,
     "",
-    "After signing in, return here and enter the code shown in your browser.",
+    `Confirm this code when asked: ${prompt.userCode}`,
+    "",
+    `Waiting for approval (expires in ${minutes} min). Press Ctrl+C to cancel.`,
   ].join("\n");
 }
 
@@ -110,7 +111,7 @@ const authorizeCli = Effect.fn("cloud.cli.authorize")(function* (options: {
     yield* Console.log("\nHeadless mode enabled. A new authorization link is ready below.");
   }
   // A stored credential whose refresh fails (revoked, expired grant) must
-  // fall through to a fresh out-of-band authorization, not dead-end the command.
+  // fall through to a fresh device authorization, not dead-end the command.
   const existing = yield* tokens.getExisting.pipe(
     Effect.catchTag("CloudCliCredentialRefreshError", () =>
       Console.log(
@@ -121,13 +122,11 @@ const authorizeCli = Effect.fn("cloud.cli.authorize")(function* (options: {
   if (Option.isSome(existing)) {
     return existing.value.identity ?? null;
   }
-  const { token, identity } = yield* CliTokenManager.outOfBandOAuthLogin(
-    promptForOutOfBandOAuthCode,
+  const { token, identity } = yield* CliTokenManager.deviceAuthorizationLogin(
+    showDeviceAuthorizationPrompt,
   ).pipe(
     Effect.mapError((cause) =>
-      // Ctrl-C / EOF at the prompt is a QuitError; let it propagate so the CLI
-      // cancels quietly instead of dumping an authorization error.
-      Terminal.isQuitError(cause) || isCloudCliTokenManagerError(cause)
+      isCloudCliTokenManagerError(cause)
         ? cause
         : new CliTokenManager.CloudCliAuthorizationError({ cause }),
     ),
@@ -194,7 +193,7 @@ function formatCloudStatus(status: CloudCliStatus, options?: { readonly json?: b
     : !status.desired
       ? "Run `j5 connect link` to enable T3 Connect."
       : !status.linked
-        ? "Start T3 to provision the environment link and launch its managed tunnel."
+        ? "Start J5 Code to provision the environment link and launch its managed tunnel."
         : undefined;
 
   return [
@@ -215,7 +214,7 @@ const CLOUD_CLI_LIVE_SERVER_TIMEOUT = Duration.seconds(5);
 
 const confirmRelayClientInstall = (version: string) =>
   Prompt.run(
-    Prompt.confirm({
+    Prompt.Confirm({
       message: `The T3 relay client is required for T3 Connect. Download and install version ${version}?`,
       initial: false,
     }),
@@ -512,7 +511,7 @@ const connectLoginCommand = Command.make("login", {
 const connectLinkCommand = Command.make("link", {
   ...projectLocationFlags,
   headless: headlessFlag,
-  publishOnly: Flag.boolean("publish-only").pipe(
+  publishOnly: Flag.Boolean("publish-only").pipe(
     Flag.withDescription(
       "Link to publish agent activity only — no managed tunnel. Reach this environment out of band (e.g. Tailscale).",
     ),
@@ -530,7 +529,7 @@ const connectLinkCommand = Command.make("link", {
           const serveCommand = yield* resolveCliCommand("serve");
           yield* Console.log(
             flags.publishOnly
-              ? `✓ Authorized${connectedAs(linked.identity)}\n\nNext\n  Start T3 to publish agent activity (no managed tunnel).`
+              ? `✓ Authorized${connectedAs(linked.identity)}\n\nNext\n  Start J5 Code to publish agent activity (no managed tunnel).`
               : `✓ Authorized${connectedAs(linked.identity)}\n\nNext\n  Start the server with \`${serveCommand}\` to make this machine reachable.`,
           );
         }
@@ -585,7 +584,7 @@ const connectStatusCommand = Command.make("status", {
 
 const connectPublishCommand = Command.make("publish", {
   ...projectLocationFlags,
-  disable: Flag.boolean("disable").pipe(
+  disable: Flag.Boolean("disable").pipe(
     Flag.withDescription("Stop publishing agent activity to your mobile clients."),
     Flag.withDefault(false),
   ),
@@ -640,13 +639,13 @@ const connectPublishCommand = Command.make("publish", {
         // link is pending at all.
         if (yield* CliState.readCliDesiredCloudLink) {
           yield* Console.log(
-            "A T3 Connect link is already pending. Start T3 to finish provisioning it; publishing starts once it links.",
+            "A T3 Connect link is already pending. Start J5 Code to finish provisioning it; publishing starts once it links.",
           );
           return;
         }
         yield* CliState.setCliDesiredCloudLink(true, "publish_only");
         yield* Console.log(
-          "Restart T3 to finish authorizing this environment to publish (no managed tunnel is created).",
+          "Restart J5 Code to finish authorizing this environment to publish (no managed tunnel is created).",
         );
       }),
     ),
@@ -697,8 +696,8 @@ export const connectCommand = Command.make("connect", {
           const platform = yield* HostProcessPlatform;
           yield* Console.log(
             platform === "darwin"
-              ? "\n✓ Background service ready\n\nT3 Code is set to run while you are logged in to this Mac. The server establishes the T3 Connect link on startup."
-              : "\n✓ Background service ready\n\nT3 Code is set to keep running after you log out. The server establishes the T3 Connect link on startup.",
+              ? "\n✓ Background service ready\n\nJ5 Code is set to run while you are logged in to this Mac. The server establishes the T3 Connect link on startup."
+              : "\n✓ Background service ready\n\nJ5 Code is set to keep running after you log out. The server establishes the T3 Connect link on startup.",
           );
           return;
         }

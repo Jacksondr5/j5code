@@ -80,7 +80,7 @@ export function resolveVersionMismatch(
   return {
     clientVersion: normalizedClientVersion,
     serverVersion: normalizedServerVersion,
-    hint: "Version mismatch. Try syncing the client and server to the same T3 Code version.",
+    hint: "Version mismatch. Try syncing the client and server to the same J5 Code version.",
   };
 }
 
@@ -116,7 +116,7 @@ export function supportsServerUpdateThreadContinuation(
 
 /** The command to hand users whose server cannot update itself. */
 export function manualServerUpdateCommand(targetVersion: string): string {
-  return `npx @jacksondr5/j5code@${targetVersion}`;
+  return `j5 update ${targetVersion}`;
 }
 
 export function serverUpdateGuidance(capability: ServerSelfUpdateCapability): string {

@@ -8,7 +8,6 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
-import { FastCheck } from "effect/testing";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
@@ -39,7 +38,7 @@ const isLedgerGapError = Schema.is(LedgerGapError);
 const isA2AStorageError = Schema.is(A2AStorageError);
 
 const memoryLedgerLayer = () =>
-  ledgerLayer.pipe(Layer.provideMerge(NodeSqliteClient.layerMemory()));
+  ledgerLayer.pipe(Layer.provideMerge(NodeSqliteClient.layer({ filename: ":memory:" })));
 
 const fileLedgerLayer = (filename: string) =>
   ledgerLayer.pipe(Layer.provideMerge(NodeSqliteClient.layer({ filename })));
@@ -215,8 +214,8 @@ it.effect("publishes committed events in their per-squadron sequence order", () 
 it.effect.prop(
   "reads generated ledgers strictly once and gap-free across cursor pages",
   {
-    eventCount: FastCheck.integer({ min: 1, max: 32 }),
-    pageSize: FastCheck.integer({ min: 1, max: 8 }),
+    eventCount: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 32 })),
+    pageSize: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 8 })),
   },
   ({ eventCount, pageSize }) =>
     Effect.gen(function* () {
@@ -246,7 +245,7 @@ it.effect.prop(
       );
       assert.equal(new Set(sequences).size, eventCount);
     }).pipe(Effect.provide(memoryLedgerLayer())),
-  { fastCheck: { numRuns: 24 } },
+  { arbitrary: { runs: 24 } },
 );
 
 it.effect("negative control: a deleted ledger row fails the gap-free read", () =>

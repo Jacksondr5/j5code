@@ -107,7 +107,7 @@ export class ThemeFileInvalidError extends Schema.TaggedError<ThemeFileInvalidEr
   { filePath: Schema.String, cause: Schema.Defect() },
 ) {
   override get message(): string {
-    return `${this.filePath} is not a valid theme file. Use a theme exported from T3 Code, or a seeded file with name, appearance, canvas, and accent.`;
+    return `${this.filePath} is not a valid theme file. Use a theme exported from J5 Code, or a seeded file with name, appearance, canvas, and accent.`;
   }
 }
 
@@ -178,7 +178,7 @@ export class ThemeTargetMissingError extends Schema.TaggedError<ThemeTargetMissi
   }
 }
 
-const envT3Home = Config.string("J5CODE_HOME").pipe(Config.option);
+const envT3Home = Config.String("J5CODE_HOME").pipe(Config.option);
 
 const resolveThemePaths = Effect.fn(function* (explicitBaseDir: Option.Option<string>) {
   // Same precedence as the rest of the CLI: --base-dir, then J5CODE_HOME,
@@ -463,11 +463,11 @@ const resolvableThemeIds = Effect.fn(function* (themesDir: string) {
 
 const themeSetCommand = Command.make("set", {
   baseDir: baseDirFlag,
-  id: Flag.string("id").pipe(
+  id: Flag.String("id").pipe(
     Flag.withDescription("Theme id to publish a file under, instead of its filename."),
     Flag.optional,
   ),
-  theme: Argument.string("theme").pipe(
+  theme: Argument.String("theme").pipe(
     Argument.withDescription(
       'A theme id (a built-in, or one this machine publishes — themes/nightfall.json is "nightfall"), or a path to a theme JSON file to publish and set in one step.',
     ),

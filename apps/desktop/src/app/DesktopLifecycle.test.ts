@@ -32,7 +32,7 @@ function makeElectronAppLayer(
 
   return Layer.succeed(ElectronApp.ElectronApp, {
     metadata: Effect.die("unexpected metadata read"),
-    name: Effect.succeed("T3 Code"),
+    name: Effect.succeed("J5 Code"),
     systemLocale: Effect.succeed("en-US"),
     whenReady: Effect.void,
     quit,
@@ -43,7 +43,6 @@ function makeElectronAppLayer(
     setAboutPanelOptions: () => Effect.void,
     setAppUserModelId: () => Effect.void,
     getAppMetrics: Effect.succeed([]),
-    isDefaultProtocolClient: () => Effect.succeed(false),
     setAsDefaultProtocolClient: () => Effect.succeed(true),
     setDesktopName: () => Effect.void,
     setDockIcon: () => Effect.void,

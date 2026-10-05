@@ -1,6 +1,7 @@
 import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
+  CommandId,
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -10,14 +11,19 @@ import {
   type OrchestrationV2ThreadProjection,
   type ServerProvider,
 } from "@t3tools/contracts";
+import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 
 import { makeAgentPersonaLibrary } from "../agents/agentPersonaLibrary.ts";
 import { resolveAgentPersonaRuntime } from "../agents/agentPersonaRuntime.ts";
 import { guardAgentPersonaThreadCreate } from "../agents/agentPersonaOrchestration.ts";
+import { ServerSecretStore } from "../../auth/ServerSecretStore.ts";
 import { ServerConfig } from "../../config.ts";
 import {
   OrchestratorDispatchError,
@@ -33,11 +39,19 @@ import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import {
   AgentCrewInstanceService,
   layer as crewInstanceLayer,
+  type AgentCrewInstance,
 } from "./AgentCrewInstanceService.ts";
+import { ArchiveAgentService } from "./ArchiveAgentService.ts";
+import { playbookStoreLayer } from "../playbooks/PlaybookStore.ts";
+import { ArchiveCrewService, layer as archiveCrewLayer } from "./ArchiveCrewService.ts";
 import { describeCrewSeatRuntime } from "./crewRuntimePreview.ts";
-import { CrewLaunchService, layer as crewLaunchLayer } from "./CrewLaunchService.ts";
+import {
+  CrewLaunchOperationError,
+  CrewLaunchService,
+  layer as crewLaunchLayer,
+} from "./CrewLaunchService.ts";
 import { A2AHomeConflictError, participantIdForThread } from "./HomeRegistrar.ts";
-import { crewSeatRequestKey, spawnCrewInstanceId, spawnThreadId } from "./spawnIds.ts";
+import { crewSeatRequestKey, spawnThreadId } from "./spawnIds.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import { SpawnCompositionService } from "./SpawnCompositionService.ts";
@@ -96,7 +110,7 @@ const thread = (id: ThreadId): OrchestrationV2AppThread =>
   }) as unknown as OrchestrationV2AppThread;
 
 const fixture = Effect.gen(function* () {
-  const database = NodeSqliteClient.layerMemory();
+  const database = NodeSqliteClient.layer({ filename: ":memory:" });
   const storage = Layer.mergeAll(ledgerLayer, crewInstanceLayer).pipe(Layer.provideMerge(database));
   const context = yield* Layer.build(storage);
   yield* runJ5A2AMigrations().pipe(Effect.provide(context));
@@ -132,6 +146,10 @@ const dependencies = (
   archived: Set<string> = new Set(),
   realThreads = false,
   failBriefOnce: Set<string> = new Set(),
+  /** Runs before each command lands, so a test can hold a spawn open. */
+  beforeDispatch: (
+    command: OrchestrationV2Command,
+  ) => Effect.Effect<void, OrchestratorDispatchError> = () => Effect.void,
 ) =>
   Layer.mergeAll(
     Layer.mock(ThreadManagementService)({
@@ -175,6 +193,7 @@ const dependencies = (
               } as unknown as OrchestrationV2ThreadProjection),
       dispatch: (command) =>
         Effect.gen(function* () {
+          yield* beforeDispatch(command);
           if (command.type === "message.dispatch" && failBriefOnce.delete(command.threadId))
             return yield* new OrchestratorDispatchError({
               commandId: command.commandId,
@@ -249,7 +268,7 @@ it.effect("launches an approved roster whole, records it, briefs each seat, then
       assert.equal(refused._tag, "CrewLaunchSeatUnavailableError");
       assert.lengthOf(yield* Ref.get(commands), 0);
 
-      const instance = yield* launcher.launch({
+      const { instance } = yield* launcher.launch({
         providerSessionId: "session",
         requestKey: "launch-1",
         captain,
@@ -289,7 +308,7 @@ it.effect("launches an approved roster whole, records it, briefs each seat, then
       }
       assert.isNotNull(yield* crews.findMembership(instance.members[1]!.participantId));
 
-      const grown = yield* launcher.addSeats({
+      const { instance: grown } = yield* launcher.addSeats({
         providerSessionId: "session",
         requestKey: "add-1",
         captain,
@@ -316,108 +335,7 @@ it.effect("launches an approved roster whole, records it, briefs each seat, then
 );
 
 it.effect(
-  "a retry after the person renamed a seat retires the seat the failed launch created",
-  () =>
-    Effect.gen(function* () {
-      const { context, commands, captain } = yield* fixture;
-      const codex = provider("codex", "codex", [
-        { slug: "gpt-5.6-sol", options: ["high"] },
-        { slug: "gpt-5.6-terra", options: ["high"] },
-      ]);
-      const seatThread = (seat: string) =>
-        spawnThreadId({
-          providerSessionId: "session",
-          requestKey: crewSeatRequestKey("retry-1", seat),
-        });
-      // Filled after the first launch, so the failed spawn's own read of the created thread
-      // still succeeds and only the retry's read of the earlier seat is refused.
-      const unreadable = new Set<string>();
-      const layer = crewLaunchLayer.pipe(
-        Layer.provideMerge(
-          dependencies(commands, [codex], new Set([seatThread("critic")]), unreadable),
-        ),
-        Layer.provideMerge(Layer.succeedContext(context)),
-        Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-launch-" })),
-        Layer.provideMerge(NodeServices.layer),
-      );
-      yield* Effect.gen(function* () {
-        const launcher = yield* CrewLaunchService;
-        const crews = yield* AgentCrewInstanceService;
-        const seats = (second: string) => [
-          { name: "builder", agentId: "builder", reason: "Implements" },
-          { name: second, agentId: "critic", reason: "Reviews" },
-        ];
-        const launch = (second: string) =>
-          launcher.launch({
-            providerSessionId: "session",
-            requestKey: "retry-1",
-            captain,
-            displayName: "Review Pair",
-            seats: seats(second),
-            brief: "Ship the login fix.",
-          });
-        // The critic's thread is created, then its home registration fails: the record names both
-        // seats and the critic has a thread with no brief.
-        const failed = yield* launch("critic").pipe(Effect.flip);
-        assert.equal(failed._tag, "CrewLaunchOperationError");
-        const crewId = spawnCrewInstanceId({ providerSessionId: "session", requestKey: "retry-1" });
-        assert.sameMembers(
-          (yield* crews.read(crewId))!.members.map(({ seatName }) => seatName),
-          ["builder", "critic"],
-        );
-        assert.include(
-          (yield* Ref.get(commands))
-            .filter((command) => command.type === "thread.create")
-            .map((command) => command.threadId),
-          seatThread("critic"),
-        );
-
-        // The person renames the seat on the card and approves again. The first retry cannot
-        // read the critic's thread: it fails rather than dropping the row from under a thread
-        // that may be live, and the record still names the critic.
-        unreadable.add(seatThread("critic"));
-        const refused = yield* launch("reviewer").pipe(Effect.flip);
-        assert.equal(refused._tag, "CrewLaunchOperationError");
-        assert.include(refused.message, "reading the earlier seat critic");
-        assert.sameMembers(
-          (yield* crews.read(crewId))!.members.map(({ seatName }) => seatName),
-          ["builder", "critic"],
-        );
-        const instance = yield* launch("reviewer");
-        assert.deepStrictEqual(
-          instance.members.map(({ seatName }) => seatName),
-          ["builder", "reviewer"],
-        );
-        const archived = (yield* Ref.get(commands))
-          .filter((command) => command.type === "thread.archive")
-          .map((command) => command.threadId);
-        assert.deepStrictEqual(archived, [seatThread("critic")]);
-        const beforeRetry = (yield* Ref.get(commands)).length;
-        const retiredSeat = yield* launch("critic").pipe(Effect.flip);
-        assert.equal(retiredSeat._tag, "CrewLaunchOperationError");
-        assert.include(retiredSeat.message, "reusing a retired seat");
-        assert.equal((yield* Ref.get(commands)).length, beforeRetry);
-        assert.sameMembers(
-          (yield* crews.read(crewId))!.members.map((member) => member.seatName),
-          ["builder", "reviewer"],
-        );
-        assert.isNull(yield* crews.findMembership(participantIdForThread(seatThread("critic"))));
-        // Every seat that launches was briefed, and the roster in the brief is the one that launched.
-        const briefs = (yield* Ref.get(commands)).filter(
-          (command) => command.type === "message.dispatch",
-        );
-        assert.lengthOf(briefs, 2);
-        const reviewerBrief = briefs.at(-1);
-        if (reviewerBrief?.type === "message.dispatch") {
-          assert.include(reviewerBrief.text, "your_seat: reviewer");
-          assert.notInclude(reviewerBrief.text, "- critic:");
-        }
-      }).pipe(Effect.provide(layer));
-    }).pipe(Effect.scoped),
-);
-
-it.effect(
-  "a custom seat runs on the Captain's model and access with no saved agent behind it",
+  "a custom seat runs on the Captain's model in Full access with no saved agent behind it",
   () =>
     Effect.gen(function* () {
       const { context, commands, captain } = yield* fixture;
@@ -433,7 +351,7 @@ it.effect(
       );
       yield* Effect.gen(function* () {
         const launcher = yield* CrewLaunchService;
-        const instance = yield* launcher.launch({
+        const { instance } = yield* launcher.launch({
           providerSessionId: "session",
           requestKey: "launch-custom",
           captain,
@@ -462,10 +380,10 @@ it.effect(
         );
         assert.equal(created?.type, "thread.create");
         if (created?.type === "thread.create") {
-          // No definition to run as: the Captain's own route and access, and no persona assignment.
+          // No definition to run as: the Captain's own route, Full access, and no persona assignment.
           assert.isUndefined(created.agentPersonaAssignment);
           assert.deepStrictEqual(created.modelSelection, captain.thread.modelSelection);
-          assert.equal(created.runtimeMode, captain.thread.runtimeMode);
+          assert.equal(created.runtimeMode, "full-access");
         }
         const brief = captured.find(
           (command) =>
@@ -478,12 +396,13 @@ it.effect(
           assert.include(brief.text, "persona=custom");
         }
 
-        // A persona Captain stores the mode the person picked at launch (full-access here) but runs
-        // under its persona's policy; its custom seat takes that effective access, not the stored mode.
+        // A persona Captain runs under its persona's policy (workspace write, auto-accept-edits here)
+        // and has the person supervising it; its custom seat still defaults to Full access.
         const personaCaptain = {
           ...captain,
           thread: {
             ...captain.thread,
+            runtimeMode: "approval-required",
             agentPersonaAssignment: {
               personaId: "builder",
               definitionVersion: 1,
@@ -507,8 +426,8 @@ it.effect(
         );
         assert.equal(underPersona?.type, "thread.create");
         if (underPersona?.type === "thread.create") {
-          assert.equal(captain.thread.runtimeMode, "full-access");
-          assert.equal(underPersona.runtimeMode, "auto-accept-edits");
+          assert.equal(underPersona.runtimeMode, "full-access");
+          assert.isUndefined(underPersona.agentPersonaAssignment);
         }
       }).pipe(Effect.provide(layer));
     }).pipe(Effect.scoped),
@@ -589,7 +508,7 @@ it.effect("custom seats refuse unavailable providers before recording or spawnin
 );
 
 it.effect(
-  "previews actual routes and pins custom defaults; approved launches and retries keep that exact runtime",
+  "previews actual routes and pins custom defaults; approved launches keep that exact runtime",
   () =>
     Effect.gen(function* () {
       const { context, commands, captain } = yield* fixture;
@@ -678,23 +597,13 @@ it.effect(
             },
           })),
         };
-        const launched = yield* launcher.launch(input);
+        yield* launcher.launch(input);
         const create = (yield* Ref.get(commands)).find(
           (command) => command.type === "thread.create",
         );
         assert.equal(create?.type, "thread.create");
         if (create?.type === "thread.create")
           assert.deepStrictEqual(create.modelSelection, resolvedSeats[0]?.modelSelection);
-        const retried = yield* launcher.launch(input);
-        assert.equal(retried.id, launched.id);
-        const changedSeats = yield* launcher.resolveSeats(captain, seats);
-        assert.equal(changedSeats[0]?.runtime.reasoning, "Low");
-        const before = (yield* Ref.get(commands)).length;
-        const changed = yield* launcher
-          .launch({ ...input, resolvedSeats: changedSeats })
-          .pipe(Effect.flip);
-        assert.equal(changed._tag, "CrewLaunchSeatUnavailableError");
-        assert.lengthOf(yield* Ref.get(commands), before);
         const saved = yield* launcher.resolveSeats(captain, [
           { name: "builder", agentId: "builder", reason: "Build" },
         ]);
@@ -795,10 +704,10 @@ it.effect(
         assert.equal(resolved.runtimeMode, "approval-required");
         assert.equal(resolved.runtime.harness, "Claude Code");
         assert.equal(resolved.runtime.reasoning, "low");
-        assert.equal(resolved.runtime.access, "Approval required");
+        assert.equal(resolved.runtime.access, "Supervised");
         assert.deepStrictEqual(resolved.runtime.modelSelection, custom.modelSelection);
         assert.equal(resolved.runtime.runtimeMode, custom.runtimeMode);
-        const instance = yield* launcher.launch({
+        const { instance } = yield* launcher.launch({
           providerSessionId: "session",
           requestKey: "custom-override",
           captain,
@@ -862,7 +771,7 @@ it.effect(
           ])
           .pipe(Effect.flip);
         assert.equal(invalidAccess._tag, "CrewLaunchSeatUnavailableError");
-        assert.include(invalidAccess.message, "Choose Approval required or Full access");
+        assert.include(invalidAccess.message, "Choose Supervised or Full access");
         // Neither configured provider advertises Critic's saved model: the human override
         // still launches, preserving its snapshot and behavior on the selected harness.
         const personaSeat = {
@@ -989,36 +898,70 @@ it("runtime previews show advertised variant and boolean thinking choices", () =
   );
 });
 
-it.effect("rejects inherited ACP access that the harness cannot enforce", () =>
-  Effect.gen(function* () {
-    const { context, commands, captain } = yield* fixture;
-    const layer = crewLaunchLayer.pipe(
-      Layer.provideMerge(
-        dependencies(commands, [provider("acp", "acpRegistry", [{ slug: "model", options: [] }])]),
-      ),
-      Layer.provideMerge(Layer.succeedContext(context)),
-      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-inherited-acp-" })),
-      Layer.provideMerge(NodeServices.layer),
-    );
-    yield* Effect.gen(function* () {
-      const launcher = yield* CrewLaunchService;
-      for (const runtimeMode of ["auto", "auto-accept-edits"] as const) {
-        const failure = yield* launcher
-          .resolveSeats({ ...captain, thread: { ...captain.thread, runtimeMode } }, [
-            {
-              name: "reviewer",
-              agentId: null,
-              reason: "Review",
-              instructions: "Review",
-              modelSelection: { instanceId: ProviderInstanceId.make("acp"), model: "model" },
-            },
-          ])
-          .pipe(Effect.flip);
-        assert.equal(failure._tag, "CrewLaunchSeatUnavailableError");
-      }
-      assert.lengthOf(yield* Ref.get(commands), 0);
-    }).pipe(Effect.provide(layer));
-  }).pipe(Effect.scoped),
+it.effect(
+  "an unset custom seat resolves to Full access whatever the Captain runs; a persona seat keeps its policy and an explicit mode wins",
+  () =>
+    Effect.gen(function* () {
+      const { context, commands, captain } = yield* fixture;
+      const layer = crewLaunchLayer.pipe(
+        Layer.provideMerge(
+          dependencies(commands, [
+            provider("codex", "codex", [{ slug: "gpt-5.6-sol", options: ["high"] }]),
+            provider("acp", "acpRegistry", [{ slug: "model", options: [] }]),
+          ]),
+        ),
+        Layer.provideMerge(Layer.succeedContext(context)),
+        Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-custom-access-" })),
+        Layer.provideMerge(NodeServices.layer),
+      );
+      yield* Effect.gen(function* () {
+        const launcher = yield* CrewLaunchService;
+        const custom = {
+          name: "reviewer",
+          agentId: null,
+          reason: "Review",
+          instructions: "Review",
+        };
+        const acp = {
+          ...custom,
+          name: "acp-reviewer",
+          modelSelection: { instanceId: ProviderInstanceId.make("acp"), model: "model" },
+        };
+        for (const runtimeMode of ["approval-required", "auto", "auto-accept-edits"] as const) {
+          // Before #326 an ACP seat inherited Auto or Accept edits here and was refused; the
+          // Full access default is one the harness enforces, so it now launches.
+          const resolved = yield* launcher.resolveSeats(
+            { ...captain, thread: { ...captain.thread, runtimeMode } },
+            [custom, acp, { name: "builder", agentId: "builder", reason: "Build" }],
+          );
+          assert.deepStrictEqual(
+            resolved.map((seat) => [seat.seat.name, seat.runtimeMode, seat.runtime.access]),
+            [
+              ["reviewer", "full-access", "Full access"],
+              ["acp-reviewer", "full-access", "Full access"],
+              ["builder", "auto-accept-edits", "Repository write"],
+            ],
+          );
+        }
+        const explicit = yield* launcher.resolveSeats(captain, [
+          { ...custom, runtimeMode: "approval-required" },
+          { ...acp, runtimeMode: "approval-required" },
+        ]);
+        assert.deepStrictEqual(
+          explicit.map((seat) => seat.runtimeMode),
+          ["approval-required", "approval-required"],
+        );
+        // An explicit mode the ACP harness cannot enforce is still refused.
+        for (const runtimeMode of ["auto", "auto-accept-edits"] as const) {
+          const failure = yield* launcher
+            .resolveSeats(captain, [{ ...acp, runtimeMode }])
+            .pipe(Effect.flip);
+          assert.equal(failure._tag, "CrewLaunchSeatUnavailableError");
+          assert.include(failure.message, "cannot enforce the selected access mode");
+        }
+        assert.lengthOf(yield* Ref.get(commands), 0);
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
 );
 
 it.effect("refuses persona seats whose effective ACP access the harness cannot enforce", () =>
@@ -1111,152 +1054,557 @@ it.effect("pins non-reasoning provider defaults for persona seats without overri
   }).pipe(Effect.scoped),
 );
 
+const unitFixture = Effect.gen(function* () {
+  const { context, commands, captain } = yield* fixture;
+  const codex = provider("codex", "codex", [
+    { slug: "gpt-5.6-sol", options: ["high"] },
+    { slug: "gpt-5.6-terra", options: ["high"] },
+  ]);
+  const entered = yield* Queue.unbounded<string>();
+  const archivedSeats = yield* Ref.make<ReadonlyArray<ThreadId>>([]);
+  const factsRead = yield* Ref.make<ReadonlyArray<ThreadId>>([]);
+  const holdArchive = yield* Ref.make<Effect.Effect<void>>(Effect.void);
+  const holdDispatch = yield* Ref.make<
+    (command: OrchestrationV2Command) => Effect.Effect<void, OrchestratorDispatchError>
+  >(() => Effect.void);
+  const real = Context.get(context, AgentCrewInstanceService);
+  const crews = Layer.succeed(AgentCrewInstanceService, {
+    ...real,
+    serialize: (id, effect) =>
+      Queue.offer(entered, id).pipe(Effect.andThen(real.serialize(id, effect))),
+  });
+  const created = (threadId: ThreadId) =>
+    Ref.get(commands).pipe(
+      Effect.map((items) =>
+        items.some((command) => command.type === "thread.create" && command.threadId === threadId),
+      ),
+    );
+  const archiveAgent = Layer.mock(ArchiveAgentService)({
+    readFacts: (target) =>
+      Effect.gen(function* () {
+        yield* Ref.update(factsRead, (items) => [...items, target.threadId]);
+        if (!(yield* created(target.threadId))) return null;
+        const archived = (yield* Ref.get(archivedSeats)).includes(target.threadId);
+        return {
+          facts: { openExchanges: [], runningTurn: null },
+          threadArchived: archived,
+          retired: archived,
+        };
+      }),
+    archive: (input) =>
+      Effect.gen(function* () {
+        yield* Effect.flatten(Ref.get(holdArchive));
+        yield* Ref.update(archivedSeats, (items) => [...items, input.target.threadId]);
+        return "archived" as const;
+      }),
+  });
+  const layer = Layer.mergeAll(
+    crewLaunchLayer,
+    archiveCrewLayer.pipe(
+      Layer.provide(archiveAgent),
+      Layer.provide(playbookStoreLayer),
+      Layer.provide(
+        Layer.mock(ServerSecretStore)({
+          getOrCreateRandom: () => Effect.succeed(new Uint8Array(32).fill(7)),
+        }),
+      ),
+    ),
+  ).pipe(
+    Layer.provideMerge(crews),
+    Layer.provideMerge(
+      dependencies(commands, [codex], new Set(), new Set(), new Set(), true, new Set(), (command) =>
+        Ref.get(holdDispatch).pipe(Effect.flatMap((hold) => hold(command))),
+      ),
+    ),
+    Layer.provideMerge(Layer.succeedContext(context)),
+    Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-unit-" })),
+    Layer.provideMerge(NodeServices.layer),
+  );
+  const archiveInput = (crewInstanceId: string) => ({
+    providerSessionId: "session",
+    callerParticipantId: null,
+    squadronId: null,
+    crewInstanceId,
+    clientRequestKey: "archive-1",
+    confirmationSatisfied: true,
+    archivedAt: "2026-09-09T17:00:00.000Z",
+    commandIds: (seat: string) => ({
+      interruptCommandId: CommandId.make(`interrupt:${seat}`),
+      archiveCommandId: CommandId.make(`archive:${seat}`),
+    }),
+  });
+  const seatThread = (requestKey: string, seat: string) =>
+    spawnThreadId({
+      providerSessionId: "session",
+      requestKey: crewSeatRequestKey(requestKey, seat),
+    });
+  const launchPair = Effect.gen(function* () {
+    const launcher = yield* CrewLaunchService;
+    const { instance } = yield* launcher.launch({
+      providerSessionId: "session",
+      requestKey: "unit-1",
+      captain,
+      displayName: "Review Pair",
+      seats: [{ name: "builder", agentId: "builder", reason: "Implements" }],
+      brief: "Ship the login fix.",
+    });
+    return instance;
+  });
+  const addSentry = (instance: AgentCrewInstance) =>
+    Effect.gen(function* () {
+      const launcher = yield* CrewLaunchService;
+      const { instance: grown } = yield* launcher.addSeats({
+        providerSessionId: "session",
+        requestKey: "add-sentry",
+        captain,
+        instance,
+        seats: [{ name: "sentry", agentId: "sentry", reason: "Security pass" }],
+      });
+      return grown;
+    });
+  return {
+    layer,
+    commands,
+    entered,
+    archivedSeats,
+    factsRead,
+    holdArchive,
+    holdDispatch,
+    archiveInput,
+    seatThread,
+    launchPair,
+    addSentry,
+    captain,
+  };
+});
+
 it.effect(
-  "refuses edited instructions after a partial launch already dispatched that seat's brief",
+  "a roster whose middle seat fails to create launches the others, drops its row, and reports every seat",
   () =>
     Effect.gen(function* () {
-      const { context, commands, captain } = yield* fixture;
-      const stable = { providerSessionId: "session", requestKey: "partial-brief" };
-      const failedThread = spawnThreadId({
-        ...stable,
-        requestKey: crewSeatRequestKey(stable.requestKey, "second"),
-      });
-      const layer = crewLaunchLayer.pipe(
-        Layer.provideMerge(
-          dependencies(
-            commands,
-            [provider("codex", "codex", [{ slug: "gpt-5.6-sol", options: ["high"] }])],
-            new Set(),
-            new Set(),
-            new Set(),
-            true,
-            new Set([failedThread]),
-          ),
-        ),
-        Layer.provideMerge(Layer.succeedContext(context)),
-        Layer.provideMerge(
-          ServerConfig.layerTest(process.cwd(), { prefix: "j5-retry-instructions-" }),
-        ),
-        Layer.provideMerge(NodeServices.layer),
-      );
+      const unit = yield* unitFixture;
       yield* Effect.gen(function* () {
+        const crews = yield* AgentCrewInstanceService;
         const launcher = yield* CrewLaunchService;
-        const seats = ["first", "second"].map((name) => ({
-          name,
-          agentId: null,
-          reason: "Review",
-          instructions: "Original instructions",
-        }));
-        const input = {
-          ...stable,
-          captain,
-          seats,
-          displayName: "Review",
-          brief: "Review the change",
-          resolvedSeats: yield* launcher.resolveSeats(captain, seats),
-        };
-        yield* launcher.launch(input).pipe(Effect.flip);
-        const dispatched = (yield* Ref.get(commands)).filter(
-          (command) => command.type === "message.dispatch",
+        const critic = unit.seatThread("trio", "critic");
+        yield* Ref.set(unit.holdDispatch, (command) =>
+          command.type === "thread.create" && command.threadId === critic
+            ? Effect.fail(
+                new OrchestratorDispatchError({
+                  commandId: command.commandId,
+                  commandType: command.type,
+                }),
+              )
+            : Effect.void,
         );
-        assert.lengthOf(dispatched, 1);
-        const edited = seats.map((seat) =>
-          seat.name === "first" ? { ...seat, instructions: "New instructions" } : seat,
-        );
-        const rejected = yield* launcher
-          .launch({
-            ...input,
-            seats: edited,
-            resolvedSeats: yield* launcher.resolveSeats(captain, edited),
-          })
-          .pipe(Effect.flip);
-        assert.equal(rejected._tag, "CrewLaunchOperationError");
-        assert.include(rejected.message, "already dispatched a different brief");
+        const launched = yield* launcher.launch({
+          providerSessionId: "session",
+          requestKey: "trio",
+          captain: unit.captain,
+          displayName: "Trio",
+          seats: [
+            { name: "builder", agentId: "builder", reason: "Implements" },
+            { name: "critic", agentId: "critic", reason: "Reviews" },
+            { name: "sentry", agentId: "sentry", reason: "Security pass" },
+          ],
+          brief: "Ship the login fix.",
+        });
+        // The seat after the failure was still attempted.
         assert.deepStrictEqual(
-          (yield* Ref.get(commands)).filter((command) => command.type === "message.dispatch"),
-          dispatched,
+          launched.seats.map((outcome) => [outcome.seatName, outcome.kind]),
+          [
+            ["builder", "created"],
+            ["critic", "not_created"],
+            ["sentry", "created"],
+          ],
         );
-        yield* launcher.launch(input);
-        assert.isTrue(
-          (yield* Ref.get(commands)).some(
-            (command) => command.type === "message.dispatch" && command.threadId === failedThread,
-          ),
+        assert.deepStrictEqual(
+          launched.instance.members.map((member) => member.seatName),
+          ["builder", "sentry"],
         );
-      }).pipe(Effect.provide(layer));
+        assert.deepStrictEqual(
+          (yield* crews.read(launched.instance.id))!.members.map((member) => member.seatName),
+          ["builder", "sentry"],
+        );
+        // Only the seats that exist got a brief, and their roster names only each other.
+        const briefs = (yield* Ref.get(unit.commands)).flatMap((command) =>
+          command.type === "message.dispatch" ? [command] : [],
+        );
+        assert.sameMembers(
+          briefs.map((command) => command.threadId),
+          [unit.seatThread("trio", "builder"), unit.seatThread("trio", "sentry")],
+        );
+        for (const brief of briefs) {
+          assert.include(brief.text, "- builder");
+          assert.notInclude(brief.text, "- critic");
+        }
+      }).pipe(Effect.provide(unit.layer));
     }).pipe(Effect.scoped),
 );
 
-it.effect("a retry that drops the failed seat keeps the briefs the other seats already have", () =>
+it.effect(
+  "an addition approved while the unit archive runs is refused before any seat of it exists",
+  () =>
+    Effect.gen(function* () {
+      const unit = yield* unitFixture;
+      yield* Effect.gen(function* () {
+        const archive = yield* ArchiveCrewService;
+        const crews = yield* AgentCrewInstanceService;
+        const instance = yield* unit.launchPair;
+        yield* Queue.clear(unit.entered);
+
+        // The archive has read the roster and is retiring its first member when the addition,
+        // already past the gate's checks, asks to reserve its seat. This proves the outcome, not
+        // the lock: without it the addition may still happen to reserve after the stamp. The
+        // mid-spawn test below is the one that fails without the lock.
+        const archiving = yield* Deferred.make<void>();
+        const release = yield* Deferred.make<void>();
+        yield* Ref.set(
+          unit.holdArchive,
+          Deferred.succeed(archiving, undefined).pipe(Effect.andThen(Deferred.await(release))),
+        );
+        const archiveFiber = yield* archive
+          .archive(unit.archiveInput(instance.id))
+          .pipe(Effect.forkChild);
+        yield* Deferred.await(archiving);
+        const addFiber = yield* unit.addSentry(instance).pipe(Effect.flip, Effect.forkChild);
+        assert.deepStrictEqual(
+          [yield* Queue.take(unit.entered), yield* Queue.take(unit.entered)],
+          [instance.id, instance.id],
+        );
+        yield* Deferred.succeed(release, undefined);
+
+        const archived = yield* Fiber.join(archiveFiber);
+        assert.equal(archived.status, "archived");
+        assert.deepStrictEqual(
+          archived.members.map((member) => member.seatName),
+          ["builder"],
+        );
+        const refused = yield* Fiber.join(addFiber);
+        assert.equal(refused._tag, "CrewLaunchOperationError");
+        assert.include(refused.message, "is retired");
+
+        const sentry = unit.seatThread("add-sentry", "sentry");
+        const commands = yield* Ref.get(unit.commands);
+        assert.isFalse(
+          commands.some((command) => "threadId" in command && command.threadId === sentry),
+        );
+        const after = (yield* crews.read(instance.id))!;
+        assert.isNotNull(after.archivedAt);
+        assert.deepStrictEqual(
+          after.members.map((member) => member.seatName),
+          ["builder"],
+        );
+      }).pipe(Effect.provide(unit.layer));
+    }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "a unit archive that arrives while an addition spawns reads the roster after the seat exists and retires it",
+  () =>
+    Effect.gen(function* () {
+      const unit = yield* unitFixture;
+      yield* Effect.gen(function* () {
+        const archive = yield* ArchiveCrewService;
+        const crews = yield* AgentCrewInstanceService;
+        const instance = yield* unit.launchPair;
+        yield* Queue.clear(unit.entered);
+        const sentry = unit.seatThread("add-sentry", "sentry");
+
+        // The addition has reserved its row and its seat thread is being created.
+        const spawning = yield* Deferred.make<void>();
+        const release = yield* Deferred.make<void>();
+        yield* Ref.set(unit.holdDispatch, (command) =>
+          command.type === "thread.create" && command.threadId === sentry
+            ? Deferred.succeed(spawning, undefined).pipe(Effect.andThen(Deferred.await(release)))
+            : Effect.void,
+        );
+        const addFiber = yield* unit.addSentry(instance).pipe(Effect.forkChild);
+        yield* Deferred.await(spawning);
+        const reserved = (yield* crews.read(instance.id))!;
+        assert.deepStrictEqual(
+          reserved.members.map((member) => member.seatName),
+          ["builder", "sentry"],
+        );
+
+        const archiveFiber = yield* archive
+          .archive(unit.archiveInput(instance.id))
+          .pipe(Effect.forkChild);
+        assert.deepStrictEqual(
+          [yield* Queue.take(unit.entered), yield* Queue.take(unit.entered)],
+          [instance.id, instance.id],
+        );
+        // Waiting on the addition, the archive has not read a single seat.
+        assert.lengthOf(yield* Ref.get(unit.factsRead), 0);
+        yield* Deferred.succeed(release, undefined);
+
+        const grown = yield* Fiber.join(addFiber);
+        assert.deepStrictEqual(
+          grown.members.map((member) => member.seatName),
+          ["builder", "sentry"],
+        );
+        const archived = yield* Fiber.join(archiveFiber);
+        assert.equal(archived.status, "archived");
+        assert.deepStrictEqual(
+          archived.members.map((member) => [member.seatName, member.result]),
+          [
+            ["builder", "archived"],
+            ["sentry", "archived"],
+          ],
+        );
+        assert.include(yield* Ref.get(unit.archivedSeats), sentry);
+        assert.isNotNull((yield* crews.read(instance.id))!.archivedAt);
+      }).pipe(Effect.provide(unit.layer));
+    }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "an addition whose seat was never created drops its row, and a unit archive still finishes over a row a restart left",
+  () =>
+    Effect.gen(function* () {
+      const unit = yield* unitFixture;
+      yield* Effect.gen(function* () {
+        const archive = yield* ArchiveCrewService;
+        const crews = yield* AgentCrewInstanceService;
+        const instance = yield* unit.launchPair;
+        const sentry = unit.seatThread("add-sentry", "sentry");
+        yield* Ref.set(unit.holdDispatch, (command) =>
+          command.type === "thread.create" && command.threadId === sentry
+            ? Effect.fail(
+                new OrchestratorDispatchError({
+                  commandId: command.commandId,
+                  commandType: command.type,
+                }),
+              )
+            : Effect.void,
+        );
+        // Launch once: the failed create is reported, not raised, and its row is dropped.
+        const launcher = yield* CrewLaunchService;
+        const added = yield* launcher.addSeats({
+          providerSessionId: "session",
+          requestKey: "add-sentry",
+          captain: unit.captain,
+          instance,
+          seats: [{ name: "sentry", agentId: "sentry", reason: "Security pass" }],
+        });
+        assert.deepStrictEqual(
+          added.seats.map((outcome) => [outcome.seatName, outcome.kind]),
+          [["sentry", "not_created"]],
+        );
+        assert.deepStrictEqual(
+          (yield* crews.read(instance.id))!.members.map((member) => member.seatName),
+          ["builder"],
+        );
+
+        // A server that stopped between reserving the seat and dropping it leaves the row with no
+        // thread behind it; the unit archive still finishes and says the seat never ran.
+        yield* crews.addMembers(instance.id, [
+          {
+            seatName: "sentry",
+            agentId: "sentry",
+            participantId: participantIdForThread(sentry),
+            threadId: sentry,
+            reason: "Security pass",
+          },
+        ]);
+        const archived = yield* archive.archive(unit.archiveInput(instance.id));
+        assert.equal(archived.status, "archived");
+        assert.deepStrictEqual(
+          archived.members.map((member) => [member.seatName, member.result]),
+          [
+            ["builder", "archived"],
+            ["sentry", "never_created"],
+          ],
+        );
+        assert.notInclude(yield* Ref.get(unit.archivedSeats), sentry);
+        const retired = (yield* crews.read(instance.id))!;
+        assert.isNotNull(retired.archivedAt);
+        // The reserved row stays on the retired roster; the result says it never ran.
+        assert.deepStrictEqual(
+          retired.members.map((member) => member.seatName),
+          ["builder", "sentry"],
+        );
+      }).pipe(Effect.provide(unit.layer));
+    }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "an addition whose approval cannot be recorded releases its reservation and spawns nothing",
+  () =>
+    Effect.gen(function* () {
+      const unit = yield* unitFixture;
+      yield* Effect.gen(function* () {
+        const crews = yield* AgentCrewInstanceService;
+        const launcher = yield* CrewLaunchService;
+        const instance = yield* unit.launchPair;
+        const sentry = unit.seatThread("add-sentry", "sentry");
+        const created = yield* Ref.make<ReadonlyArray<string>>([]);
+        yield* Ref.set(unit.holdDispatch, (command) =>
+          command.type === "thread.create"
+            ? Ref.update(created, (ids) => [...ids, command.threadId])
+            : Effect.void,
+        );
+        const failed = yield* launcher
+          .addSeats({
+            providerSessionId: "session",
+            requestKey: "add-sentry",
+            captain: unit.captain,
+            instance,
+            seats: [{ name: "sentry", agentId: "sentry", reason: "Security pass" }],
+            onReserved: () =>
+              Effect.fail(
+                new CrewLaunchOperationError({
+                  phase: "approving proposal",
+                  seatName: null,
+                  createdSeats: [],
+                  cause: new Error("disk full"),
+                }),
+              ),
+          })
+          .pipe(Effect.flip);
+        assert.equal(failed._tag, "CrewLaunchOperationError");
+        assert.notInclude(yield* Ref.get(created), sentry);
+        assert.deepStrictEqual(
+          (yield* crews.read(instance.id))!.members.map((member) => member.seatName),
+          ["builder"],
+        );
+      }).pipe(Effect.provide(unit.layer));
+    }).pipe(Effect.scoped),
+);
+
+it.effect("records a playbook Crew's step owners and surfaces a taken step unwrapped", () =>
   Effect.gen(function* () {
     const { context, commands, captain } = yield* fixture;
-    const stable = { providerSessionId: "session", requestKey: "partial-drop" };
-    const failedThread = spawnThreadId({
-      ...stable,
-      requestKey: crewSeatRequestKey(stable.requestKey, "second"),
-    });
+    const codex = provider("codex", "codex", [{ slug: "gpt-5.6-sol", options: ["high"] }]);
     const layer = crewLaunchLayer.pipe(
-      Layer.provideMerge(
-        dependencies(
-          commands,
-          [provider("codex", "codex", [{ slug: "gpt-5.6-sol", options: ["high"] }])],
-          new Set(),
-          new Set(),
-          new Set(),
-          true,
-          new Set([failedThread]),
-        ),
-      ),
+      Layer.provideMerge(dependencies(commands, [codex])),
       Layer.provideMerge(Layer.succeedContext(context)),
-      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-retry-drop-" })),
+      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-steps-" })),
       Layer.provideMerge(NodeServices.layer),
     );
     yield* Effect.gen(function* () {
       const launcher = yield* CrewLaunchService;
       const crews = yield* AgentCrewInstanceService;
-      const seats = ["first", "second"].map((name) => ({
+      const playbook = {
+        name: "release",
+        definitionPath: "/repo/.j5/playbooks/release.yaml",
+        title: "Release",
+        steps: [
+          { id: "plan", title: "Plan the release" },
+          { id: "review", title: "Review" },
+        ],
+      };
+      const custom = (name: string, steps?: ReadonlyArray<string>) => ({
         name,
         agentId: null,
-        reason: "Review",
-        instructions: "Original instructions",
-      }));
-      const input = {
-        ...stable,
+        reason: `Seat ${name}`,
+        instructions: `Do the ${name} work.`,
+        ...(steps === undefined ? {} : { steps }),
+      });
+      const { instance } = yield* launcher.launch({
+        providerSessionId: "session",
+        requestKey: "playbook-crew",
         captain,
-        seats,
-        displayName: "Review",
-        brief: "Review the change",
-        resolvedSeats: yield* launcher.resolveSeats(captain, seats),
-      };
-      yield* launcher.launch(input).pipe(Effect.flip);
-      const dispatched = (yield* Ref.get(commands)).filter(
-        (command) => command.type === "message.dispatch",
-      );
-      assert.lengthOf(dispatched, 1);
-      // The person drops the failed seat and approves: first's roster block changes, its brief
-      // and instructions do not, so the retry converges instead of refusing.
-      const kept = seats.filter((seat) => seat.name === "first");
-      const instance = yield* launcher.launch({
-        ...input,
-        seats: kept,
-        resolvedSeats: yield* launcher.resolveSeats(captain, kept),
+        displayName: "Release Crew",
+        seats: [custom("planner", ["plan"]), custom("helper")],
+        brief: "Ship it.",
+        playbook,
+      });
+      assert.deepStrictEqual(instance.playbook, {
+        name: "release",
+        definitionPath: playbook.definitionPath,
       });
       assert.deepStrictEqual(
-        (yield* crews.read(instance.id))!.members.map(({ seatName }) => seatName),
-        ["first"],
+        instance.members.map(({ seatName, playbookStepIds }) => [seatName, playbookStepIds]),
+        [
+          ["planner", ["plan"]],
+          ["helper", []],
+        ],
       );
-      // The replayed brief carries first's stable message id, so the orchestrator drops it as a
-      // duplicate; nothing was started for the dropped seat.
-      const briefs = (yield* Ref.get(commands)).filter(
-        (command) => command.type === "message.dispatch",
+      const briefs = (yield* Ref.get(commands)).flatMap((command) =>
+        command.type === "message.dispatch" ? [command.text] : [],
       );
-      assert.isTrue(briefs.every((brief) => brief.threadId === dispatched[0]!.threadId));
-      assert.isTrue(
-        briefs.every(
-          (brief) =>
-            brief.type === "message.dispatch" && brief.messageId === dispatched[0]!.messageId,
-        ),
+      assert.include(briefs[0], "your_steps:\n- plan: Plan the release\n</seat_playbook>");
+      assert.include(briefs[1], "your_steps: none\n</seat_playbook>");
+
+      const sent = (yield* Ref.get(commands)).length;
+      const refused = yield* launcher
+        .addSeats({
+          providerSessionId: "session",
+          requestKey: "rival",
+          captain,
+          instance,
+          seats: [custom("rival", ["plan"])],
+          playbook,
+        })
+        .pipe(Effect.flip);
+      assert.equal(refused._tag, "CrewStepAlreadyOwnedError");
+      assert.lengthOf(yield* Ref.get(commands), sent);
+      assert.deepStrictEqual(
+        (yield* crews.read(instance.id))?.members.map(({ seatName }) => seatName),
+        ["planner", "helper"],
       );
-      assert.isFalse(briefs.some((brief) => brief.threadId === failedThread));
     }).pipe(Effect.provide(layer));
-  }).pipe(Effect.scoped),
+  }),
+);
+
+it.effect("a relaunch after a failed link stores the re-approved seat's steps", () =>
+  Effect.gen(function* () {
+    const { context, commands, captain } = yield* fixture;
+    const codex = provider("codex", "codex", [{ slug: "gpt-5.6-sol", options: ["high"] }]);
+    const layer = crewLaunchLayer.pipe(
+      Layer.provideMerge(dependencies(commands, [codex])),
+      Layer.provideMerge(Layer.succeedContext(context)),
+      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-relaunch-" })),
+      Layer.provideMerge(NodeServices.layer),
+    );
+    yield* Effect.gen(function* () {
+      const launcher = yield* CrewLaunchService;
+      const crews = yield* AgentCrewInstanceService;
+      const input = {
+        providerSessionId: "session",
+        requestKey: "relaunch",
+        captain,
+        displayName: "Release Crew",
+        brief: "Ship it.",
+        playbook: {
+          name: "release",
+          definitionPath: "/repo/.j5/playbooks/release.yaml",
+          title: "Release",
+          steps: [{ id: "plan", title: "Plan" }],
+        },
+      };
+      const seat = (steps?: ReadonlyArray<string>) => ({
+        name: "planner",
+        agentId: null,
+        reason: "Plans",
+        instructions: "Plan it.",
+        ...(steps === undefined ? {} : { steps }),
+      });
+      const failed = yield* launcher
+        .launch({
+          ...input,
+          seats: [seat(["plan"])],
+          onRecorded: () =>
+            Effect.fail(
+              new CrewLaunchOperationError({
+                phase: "linking the proposal",
+                seatName: null,
+                createdSeats: [],
+                cause: "disk I/O error",
+              }),
+            ),
+        })
+        .pipe(Effect.flip);
+      assert.equal(failed._tag, "CrewLaunchOperationError");
+      const { instance } = yield* launcher.launch({ ...input, seats: [seat()] });
+      assert.deepStrictEqual(
+        (yield* crews.read(instance.id))?.members.map(({ seatName, playbookStepIds }) => [
+          seatName,
+          playbookStepIds,
+        ]),
+        [["planner", []]],
+      );
+    }).pipe(Effect.provide(layer));
+  }),
 );

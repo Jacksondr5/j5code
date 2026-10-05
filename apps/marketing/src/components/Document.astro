@@ -1,0 +1,110 @@
+---
+import Layout from "../layouts/Layout.astro";
+
+interface Props {
+  title: string;
+  description: string;
+  /** ISO date the text last changed, shown under the heading. */
+  updated: string;
+}
+
+const { title, description, updated } = Astro.props;
+const updatedLabel = new Date(`${updated}T00:00:00Z`).toLocaleDateString("en-US", {
+  year: "numeric",
+  month: "long",
+  day: "numeric",
+  timeZone: "UTC",
+});
+---
+
+<Layout title={`${title} — J5 Code`} description={description}>
+  <article class="document">
+    <header>
+      <h1 class="display">{title}</h1>
+      <p class="updated">Last updated <time datetime={updated}>{updatedLabel}</time></p>
+    </header>
+    <div class="prose">
+      <slot />
+    </div>
+  </article>
+</Layout>
+
+<style>
+  .document {
+    width: 100%;
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 88px 32px 96px;
+  }
+
+  h1 {
+    font-size: clamp(32px, 4vw, 48px);
+    margin-bottom: 12px;
+  }
+
+  .updated {
+    font-size: 13px;
+    color: var(--fg-dim);
+    margin-bottom: 40px;
+  }
+
+  .prose {
+    color: var(--fg-muted);
+    font-size: 16px;
+    line-height: 1.7;
+  }
+
+  .prose :global(h2) {
+    font-family: var(--font-display);
+    font-weight: 500;
+    font-size: 24px;
+    letter-spacing: -0.01em;
+    line-height: 1.2;
+    color: var(--fg);
+    margin: 44px 0 12px;
+  }
+
+  .prose :global(p),
+  .prose :global(ul) {
+    margin-bottom: 16px;
+  }
+
+  .prose :global(ul) {
+    padding-left: 22px;
+  }
+
+  .prose :global(li) {
+    margin-bottom: 8px;
+  }
+
+  .prose :global(strong) {
+    color: var(--fg);
+    font-weight: 600;
+  }
+
+  .prose :global(a) {
+    color: var(--fg);
+    text-decoration: underline;
+    text-decoration-color: var(--border-strong);
+    text-underline-offset: 3px;
+  }
+
+  .prose :global(a:hover) {
+    text-decoration-color: currentColor;
+  }
+
+  .prose :global(code) {
+    font-family: var(--font-mono);
+    font-size: 0.875em;
+    padding: 2px 6px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow-wrap: anywhere;
+  }
+
+  @media (max-width: 820px) {
+    .document {
+      padding: 56px 20px 72px;
+    }
+  }
+</style>

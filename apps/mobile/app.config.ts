@@ -20,8 +20,7 @@ const IOS_BUNDLE_IDENTIFIER_PATTERN = /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/;
 
 const fromRepoRoot = (relativePath: string) => `../../${relativePath}`;
 // Android layers are rendered by scripts/export-android-icons.ts from the Icon Composer sources.
-// The wordmark sits inside the adaptive safe zone; the variant artwork is a full-bleed background.
-const androidAdaptiveForeground = "./assets/android-icon-foreground.png";
+// Each variant's boat sits inside the adaptive safe zone; its artwork is a full-bleed background.
 
 if (
   isIosPersonalTeamBuild &&
@@ -37,7 +36,7 @@ const DEVELOPMENT_ASSETS = {
   appIcon: fromRepoRoot(BRAND_ASSET_PATHS.developmentIosIconPng),
   iosIcon: fromRepoRoot(BRAND_ASSET_PATHS.developmentIconComposerProject),
   splashIcon: fromRepoRoot(BRAND_ASSET_PATHS.developmentIosIconPng),
-  androidAdaptiveForeground,
+  androidAdaptiveForeground: "./assets/android-icon-foreground-dev.png",
   androidAdaptiveBackgroundColor: "#347FF8",
   androidAdaptiveBackgroundImage: "./assets/android-icon-background-dev.png",
   androidSplashIcon: "./assets/android-splash-icon-dev.png",
@@ -50,7 +49,7 @@ const PREVIEW_ASSETS = {
   appIcon: fromRepoRoot(BRAND_ASSET_PATHS.nightlyIosIconPng),
   iosIcon: fromRepoRoot(BRAND_ASSET_PATHS.nightlyIconComposerProject),
   splashIcon: fromRepoRoot(BRAND_ASSET_PATHS.nightlyIosIconPng),
-  androidAdaptiveForeground,
+  androidAdaptiveForeground: "./assets/android-icon-foreground-nightly.png",
   androidAdaptiveBackgroundColor: "#111533",
   androidAdaptiveBackgroundImage: "./assets/android-icon-background-nightly.png",
   androidSplashIcon: "./assets/android-splash-icon-nightly.png",
@@ -63,9 +62,9 @@ const RELEASE_ASSETS = {
   appIcon: fromRepoRoot(BRAND_ASSET_PATHS.productionIosIconPng),
   iosIcon: fromRepoRoot(BRAND_ASSET_PATHS.productionIconComposerProject),
   splashIcon: fromRepoRoot(BRAND_ASSET_PATHS.productionIosIconPng),
-  androidAdaptiveForeground,
-  androidAdaptiveBackgroundColor: "#000000",
-  androidAdaptiveBackgroundImage: undefined,
+  androidAdaptiveForeground: "./assets/android-icon-foreground-prod.png",
+  androidAdaptiveBackgroundColor: "#1939A2",
+  androidAdaptiveBackgroundImage: "./assets/android-icon-background-prod.png",
   androidSplashIcon: "./assets/android-splash-icon-prod.png",
   androidMonochromeIcon: "./assets/android-icon-mark.png",
   androidNotificationIcon: "./assets/android-notification-icon.png",
@@ -134,6 +133,45 @@ const widgetsPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
     frequentUpdates: true,
     widgets: [
       {
+        name: "SubscriptionUsage",
+        displayName: "Subscription usage",
+        description: "Subscription quotas from your connected J5 Code environments.",
+        configuration: {
+          title: "Subscription usage",
+          description:
+            "Both shows Session and Weekly when available. The Lock Screen shows the tightest selected limit.",
+          parameters: {
+            codexPeriod: {
+              title: "Codex limits",
+              type: "enum",
+              default: "auto",
+              values: [
+                { name: "Both", value: "auto" },
+                { name: "Session", value: "session" },
+                { name: "Weekly", value: "weekly" },
+              ],
+            },
+            claudePeriod: {
+              title: "Claude limits",
+              type: "enum",
+              default: "auto",
+              values: [
+                { name: "Both", value: "auto" },
+                { name: "Session", value: "session" },
+                { name: "Weekly", value: "weekly" },
+              ],
+            },
+          },
+        },
+        supportedFamilies: [
+          "systemSmall",
+          "systemMedium",
+          "systemLarge",
+          "systemExtraLarge",
+          "accessoryRectangular",
+        ],
+      },
+      {
         name: "AgentActivity",
         displayName: "Agent Activity",
         description: "Shows the current state of active J5 Code agents.",
@@ -179,7 +217,7 @@ const config: ExpoConfig = {
   owner: J5_BRANDING.mobile.expoOwner,
   platforms: ["ios", "android"],
   scheme: variant.scheme,
-  version: "1.1.1",
+  version: "1.3.1",
   runtimeVersion: {
     // Development manifests resolve on every launch, so avoid fingerprint's
     // expensive native-project calculation there. Preview and production stay
@@ -377,6 +415,7 @@ const config: ExpoConfig = {
     "./plugins/withIosSceneLifecycle.cjs",
     "./plugins/withAndroidCleartextTraffic.cjs",
     "./plugins/withAndroidGradleHeap.cjs",
+    "./plugins/withAndroidInputBackground.cjs",
     "./plugins/withAndroidModernPopupMenu.cjs",
     "./plugins/withAndroidModernAlertDialog.cjs",
     "./plugins/withAndroidPredictiveBackCompat.cjs",

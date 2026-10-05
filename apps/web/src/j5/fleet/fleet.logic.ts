@@ -15,9 +15,42 @@ export interface FleetRow {
 export interface FleetCrewGroup {
   readonly crewInstanceId: string;
   readonly crewName: string;
+  /** The playbook the Crew follows, and the step ids each seat owns. */
+  readonly playbookName: string | null;
+  readonly stepsBySeat: ReadonlyMap<string, ReadonlyArray<string>>;
   /** Seats are nodes too: a helper an agent places under a seat renders beneath that seat. */
   readonly members: ReadonlyArray<FleetNode>;
+  /** The Crew's active playbook run, when it follows one. */
+  readonly playbookRun: FleetPlaybookRun | null;
 }
+
+export type FleetPlaybookRun = NonNullable<FleetCrew["playbookRun"]>;
+
+/**
+ * Who holds a Crew's current step. Only `captain` is the Captain; a hand-off still in progress
+ * never reads as the Captain's, even when it has no seat yet.
+ */
+export const playbookRunOwnerLabel = (run: Pick<FleetPlaybookRun, "state" | "seat">) =>
+  run.state === "delivered"
+    ? (run.seat ?? "Seat")
+    : run.state === "captain"
+      ? "Captain"
+      : run.seat === null
+        ? "handing off"
+        : `handing off to ${run.seat}`;
+
+/** The DOM id of a live Crew's group on the Fleet page, unique across environments. */
+export const fleetCrewAnchorId = (environmentId: string, crewInstanceId: string) =>
+  `fleet-crew:${environmentId}:${crewInstanceId}`;
+
+/**
+ * "Step N of M: <title> · <who holds it>" for a Crew's header, or "Step <id> · needs attention"
+ * when the live playbook can't place the recorded step.
+ */
+export const playbookRunHeader = (run: FleetPlaybookRun) =>
+  run.issue === undefined
+    ? `Step ${run.position} of ${run.total}: ${run.stepTitle} · ${playbookRunOwnerLabel(run)}`
+    : `Step ${run.stepId} · needs attention`;
 
 /** A tree node: an agent, its non-Crew children, and the Crews it commands as collapsible groups. */
 export interface FleetNode {
@@ -32,16 +65,17 @@ const byLabel = (left: FleetAgent, right: FleetAgent) =>
 /**
  * Placement tree grouped per Squadron: roots are agents whose parent is null or not in the
  * Squadron; Crew members are pulled out of the plain child list and grouped under their
- * Captain by Crew. Agents that sit in a Crew but whose Captain is gone still render at the root.
+ * Captain by Crew. A seat on the roster that is not placed yet (or never created: the read
+ * carries it with no thread) still hangs under its Captain, so a Crew's group always counts
+ * every seat. Agents that sit in a Crew but whose Captain is gone still render at the root.
  */
 export function buildFleetTree(squadron: FleetSquadron): ReadonlyArray<FleetNode> {
   const byId = new Map(squadron.agents.map((agent) => [agent.participantId, agent]));
+  const crewById = new Map(squadron.crews.map((crew) => [crew.crewInstanceId, crew]));
   const children = new Map<string | null, Array<FleetAgent>>();
   for (const agent of squadron.agents) {
-    const parent =
-      agent.placementParentId !== null && byId.has(agent.placementParentId)
-        ? agent.placementParentId
-        : null;
+    const placed = agent.placementParentId ?? agent.crew?.captainParticipantId ?? null;
+    const parent = placed !== null && byId.has(placed) ? placed : null;
     const siblings = children.get(parent) ?? [];
     siblings.push(agent);
     children.set(parent, siblings);
@@ -73,11 +107,21 @@ export function buildFleetTree(squadron: FleetSquadron): ReadonlyArray<FleetNode
     return {
       row: { agent, depth, crewInstanceId: null },
       children: plain,
-      crews: [...crewGroups.entries()].map(([crewInstanceId, group]) => ({
-        crewInstanceId,
-        crewName: group.name,
-        members: group.members,
-      })),
+      crews: [...crewGroups.entries()].map(([crewInstanceId, group]) => {
+        const crew = crewById.get(crewInstanceId);
+        return {
+          crewInstanceId,
+          crewName: group.name,
+          playbookName: crew?.playbook?.name ?? null,
+          stepsBySeat: new Map(
+            (crew?.roster ?? []).flatMap((seat) =>
+              seat.steps === undefined ? [] : [[seat.seat, seat.steps] as const],
+            ),
+          ),
+          members: group.members,
+          playbookRun: crew?.playbookRun ?? null,
+        };
+      }),
     };
   };
   const roots = (children.get(null) ?? [])

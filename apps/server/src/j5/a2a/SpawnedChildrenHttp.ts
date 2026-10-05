@@ -39,15 +39,29 @@ interface PlacementRow {
   readonly placement_parent_id: string;
 }
 
-/** Pure projection: placement rows keyed by parent, annotated with live Crew seats. Parents without children get no entry. */
+/** A roster seat's ledger row, when it has one: its membership and where it is placed. */
+export interface RecordedSeat {
+  readonly archived: boolean;
+  readonly placementParentId: string | null;
+}
+
+/**
+ * Pure projection: placement rows keyed by parent, annotated with live Crew seats. A Captain's
+ * row also carries every seat on its live rosters that no parent holds (reserved but never
+ * created, or registered and not yet placed), so a Crew never under-counts or vanishes while its
+ * seats are unknown; the client shows those as unknown. A seat whose membership was archived,
+ * or that is placed under another parent, is not added here. Parents without children get no
+ * entry.
+ */
 export const projectSpawnedChildren = (
   threadIds: ReadonlyArray<ThreadId>,
   rows: ReadonlyArray<PlacementRow>,
   crews: ReadonlyArray<AgentCrewInstance>,
+  recordedSeats: ReadonlyMap<string, RecordedSeat> = new Map(),
 ): SpawnedChildrenResponse => {
   const seats = new Map<string, NonNullable<typeof SpawnedChild.Type.seat>>();
-  for (const crew of crews) {
-    if (crew.archivedAt !== null) continue;
+  const live = crews.filter((crew) => crew.archivedAt === null);
+  for (const crew of live) {
     for (const member of crew.members)
       seats.set(member.participantId, {
         crewInstanceId: crew.id,
@@ -71,6 +85,21 @@ export const projectSpawnedChildren = (
             },
           ];
     });
+    const placed = new Set(children.map((child) => child.participantId as string));
+    for (const crew of live) {
+      if (crew.captainParticipantId !== parentId) continue;
+      for (const member of crew.members) {
+        if (placed.has(member.participantId)) continue;
+        const recorded = recordedSeats.get(member.participantId);
+        if (recorded !== undefined && (recorded.archived || recorded.placementParentId !== null))
+          continue;
+        children.push({
+          threadId: member.threadId,
+          participantId: member.participantId,
+          seat: seats.get(member.participantId) ?? null,
+        });
+      }
+    }
     if (children.length > 0) entries.push({ threadId, children });
   }
   return { entries };
@@ -115,11 +144,50 @@ export const makeSpawnedChildrenHttpRouteLayer = (path: HttpRouter.PathInput) =>
                 const id = threadIdForParticipant(row.participant_id);
                 return id === null ? [] : [id];
               });
+              // Crews the requested rows sit in or command: a Captain's roster may name seats
+              // that have no placement row yet.
               const involved = yield* crews.listInvolving({
                 threadIds: childThreadIds,
-                participantIds: [],
+                participantIds: parentIds,
               });
-              return projectSpawnedChildren(threadIds, rows, involved);
+              const rosterIds = [
+                ...new Set(
+                  involved
+                    .filter(
+                      (crew) =>
+                        crew.archivedAt === null && parentIds.includes(crew.captainParticipantId),
+                    )
+                    .flatMap((crew) => crew.members.map((member) => member.participantId)),
+                ),
+              ];
+              const recorded =
+                rosterIds.length === 0
+                  ? []
+                  : yield* sql<{
+                      readonly participant_id: string;
+                      readonly archived_at: string | null;
+                      readonly placement_parent_id: string | null;
+                    }>`
+                      SELECT m.participant_id, m.archived_at, p.placement_parent_id
+                      FROM j5_a2a_squadron_membership m
+                      LEFT JOIN j5_a2a_participant_placement p
+                        ON p.squadron_id = m.squadron_id AND p.participant_id = m.participant_id
+                      WHERE m.participant_id IN ${sql.in(rosterIds)}
+                    `;
+              return projectSpawnedChildren(
+                threadIds,
+                rows,
+                involved,
+                new Map(
+                  recorded.map((row) => [
+                    row.participant_id,
+                    {
+                      archived: row.archived_at !== null,
+                      placementParentId: row.placement_parent_id,
+                    },
+                  ]),
+                ),
+              );
             }).pipe(Effect.flatMap(encodeResponse)),
           );
           if (Result.isFailure(read)) {

@@ -1,5 +1,6 @@
 import { type ModelSelection } from "@t3tools/contracts";
 import { playbookHandlers } from "../../playbooks/mcp.ts";
+import { playbookWorkspaceRoot } from "../../playbooks/workspace.ts";
 import * as Crypto from "effect/Crypto";
 import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
@@ -36,7 +37,9 @@ import { CrewStopService } from "../CrewStopService.ts";
 import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
 import { A2AHomeRegistrar, participantIdForThread } from "../HomeRegistrar.ts";
 import { A2ALedger } from "../LedgerService.ts";
+import { PeerDirectory } from "../PeerDirectory.ts";
 import { ParticipantPlacementService } from "../PlacementService.ts";
+import { withDeliveryNotice } from "../receiverBacklog.ts";
 import { A2ASendService } from "../SendService.ts";
 import { SpawnCompositionService } from "../SpawnCompositionService.ts";
 import { SquadronJoinService } from "../SquadronJoinService.ts";
@@ -56,7 +59,12 @@ import {
 import { PlacementCommandId } from "../placementContracts.ts";
 import { CommCommandId, type ParticipantDirectoryRow, type SquadronId } from "../contracts.ts";
 import type { ParticipantProvenanceView } from "../placementContracts.ts";
-import { J5Toolkit, type J5ArchiveCrewFailure, type J5McpFailure } from "./tools.ts";
+import {
+  J5Toolkit,
+  type J5ArchiveCrewFailure,
+  type J5McpFailure,
+  type J5ProposeCrewInput,
+} from "./tools.ts";
 
 class J5AgentToolStateError extends Data.TaggedError("J5AgentToolStateError")<{
   readonly state: string;
@@ -410,7 +418,9 @@ const crewProposalNextStep = (error: CrewProposalError) =>
         ? "The crew is full. Work with the seats it has, or propose a new crew for the extra work."
         : error._tag === "CrewLaunchSeatConflictError"
           ? "Choose a seat name the crew does not already use, then retry."
-          : "Retry with the same client_request_id; recovery is forward-only.";
+          : error._tag === "CrewStepAlreadyOwnedError"
+            ? "Claim only steps no seat owns yet, then retry."
+            : "Retry with the same client_request_id; recovery is forward-only.";
 
 const projectCrewProposal = (outcome: CrewProposalOutcome) => ({
   proposal_id: outcome.proposal.id,
@@ -422,6 +432,33 @@ const projectCrewProposal = (outcome: CrewProposalOutcome) => ({
     participant_id: member.participantId,
     thread_id: member.threadId,
   })),
+  ...(outcome.playbook == null
+    ? {}
+    : {
+        playbook: {
+          name: outcome.playbook.name,
+          title: outcome.playbook.title,
+          unowned_steps: outcome.playbook.unownedSteps,
+          persona_swaps: outcome.playbook.swaps.map(({ seat, swap }) => ({
+            seat,
+            step_id: swap.stepId,
+            wanted_persona: swap.wanted,
+            seat_persona: swap.seatPersona,
+            wanted_problem: swap.wantedProblem,
+          })),
+        },
+      }),
+});
+
+/** One propose_crew seat as the proposal service takes it; unset fields stay unset. */
+export const crewSeatFromInput = (seat: J5ProposeCrewInput["seats"][number]) => ({
+  seat: seat.seat,
+  agentId: seat.persona ?? null,
+  reason: seat.reason,
+  ...(seat.instructions === undefined ? {} : { instructions: seat.instructions }),
+  ...(seat.model_selection === undefined ? {} : { modelSelection: seat.model_selection }),
+  ...(seat.runtime_mode === undefined ? {} : { runtimeMode: seat.runtime_mode }),
+  ...(seat.steps === undefined ? {} : { steps: seat.steps }),
 });
 
 const handlers = {
@@ -464,14 +501,17 @@ const handlers = {
         acceptedAt,
       });
       yield* worker.notify;
-      return result;
+      return yield* withDeliveryNotice(result, {
+        receiverId: input.to,
+        callerThreadId: scope.threadId,
+      });
     }).pipe(Effect.mapError(failure)),
   clear_own_ask: (input) =>
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext;
       const service = yield* A2ASendService;
       const acceptedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
-      return yield* service.clearOwnAsk({
+      const cleared = yield* service.clearOwnAsk({
         commandId: commandIdForRequest({
           toolName: "clear_own_ask",
           providerSessionId: scope.providerSessionId,
@@ -481,16 +521,29 @@ const handlers = {
         exchangeId: input.exchange_id,
         acceptedAt,
       });
+      // A withdrawal addressed to a peer is a pending delivery; wake the worker as a send does.
+      const { withdrawalQueued, ...result } = cleared;
+      if (withdrawalQueued) yield* (yield* A2ADeliveryWorker).notify;
+      return result;
     }).pipe(Effect.mapError(failure)),
   list_participants: (input) =>
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext;
       const service = yield* A2ASendService;
       const orchestrator = yield* OrchestratorV2;
-      const directory = yield* service.listParticipants(
-        scope.threadId,
-        input.include_archived ?? false,
+      const includeArchived = input.include_archived ?? false;
+      const directory = yield* service.listParticipants(scope.threadId, includeArchived);
+      // A Squadron's name beside its id is how an agent tells its own home from
+      // a peer's without any server being named. Names are enrichment: a read
+      // that fails leaves them null rather than taking the address book with it.
+      const squadronNames = new Map(
+        (yield* (yield* A2ALedger).listSquadrons().pipe(Effect.orElseSucceed(() => []))).map(
+          (squadron) => [squadron.id, squadron.name] as const,
+        ),
       );
+      // Agents homed on peer servers sit beside local ones, told apart only by
+      // their Squadron. A peer that did not answer is reported, never omitted.
+      const remote = yield* (yield* PeerDirectory).listAgents();
       const placements = yield* ParticipantPlacementService;
       const squadronIds = [...new Set(directory.map((row) => row.squadronId))];
       const placementRows = (yield* Effect.forEach(
@@ -509,45 +562,70 @@ const handlers = {
             [...threads, ...archivedThreads].map((thread) => [thread.id, thread.title] as const),
         }),
       );
+      const remoteRows = remote.agents
+        .filter((agent) => includeArchived || !agent.archived)
+        .map((agent) => ({
+          squadron_id: agent.squadronId,
+          squadron_name: agent.squadronName,
+          participant_id: agent.participantId,
+          participant: {
+            kind: "agent" as const,
+            id: agent.participantId,
+            thread_id: agent.threadId,
+          },
+          self: false,
+          archived: agent.archived,
+          can_receive_message: !agent.archived && agent.canReceiveMessage,
+          can_open_exchange: !agent.archived && agent.canReceiveMessage,
+          accepts_urgency: false,
+          thread_id: agent.threadId,
+          provenance: projectProvenance({ kind: "unrecorded" } as const),
+          placement_parent_id: null,
+          display_name: agent.displayName,
+        }));
       return {
-        participants: directory.map((row) => {
-          const placement = placementByParticipant.get(
-            `${row.squadronId}\u0000${row.participantId}`,
-          );
-          const self =
-            row.participant.kind === "agent" && row.participant.threadId === scope.threadId;
-          return {
-            squadron_id: row.squadronId,
-            participant_id: row.participantId,
-            participant:
-              row.participant.kind === "agent"
-                ? {
-                    kind: row.participant.kind,
-                    id: row.participant.id,
-                    thread_id: row.participant.threadId,
-                  }
-                : row.participant,
-            self,
-            archived: row.archived,
-            can_receive_message: !self && row.canReceiveMessage,
-            can_open_exchange: !self && row.canOpenExchange,
-            accepts_urgency: row.acceptsUrgency,
-            thread_id: row.participant.kind === "agent" ? row.participant.threadId : null,
-            provenance: projectProvenance(
-              placement?.provenance ??
-                (row.participant.kind !== "agent"
-                  ? ({ kind: "not-applicable" } as const)
-                  : ({ kind: "unrecorded" } as const)),
-            ),
-            placement_parent_id: placement?.placementParentId ?? null,
-            display_name:
-              row.participant.kind === "agent"
-                ? (titleByThreadId.get(row.participant.threadId) ?? null)
-                : row.participant.kind === "machine"
-                  ? row.participant.name
-                  : null,
-          };
-        }),
+        unread_peer_count: remote.unreadPeers.length,
+        participants: directory
+          .map((row) => {
+            const placement = placementByParticipant.get(
+              `${row.squadronId}\u0000${row.participantId}`,
+            );
+            const self =
+              row.participant.kind === "agent" && row.participant.threadId === scope.threadId;
+            return {
+              squadron_id: row.squadronId,
+              squadron_name: squadronNames.get(row.squadronId) ?? null,
+              participant_id: row.participantId,
+              participant:
+                row.participant.kind === "agent"
+                  ? {
+                      kind: row.participant.kind,
+                      id: row.participant.id,
+                      thread_id: row.participant.threadId,
+                    }
+                  : row.participant,
+              self,
+              archived: row.archived,
+              can_receive_message: !self && row.canReceiveMessage,
+              can_open_exchange: !self && row.canOpenExchange,
+              accepts_urgency: row.acceptsUrgency,
+              thread_id: row.participant.kind === "agent" ? row.participant.threadId : null,
+              provenance: projectProvenance(
+                placement?.provenance ??
+                  (row.participant.kind !== "agent"
+                    ? ({ kind: "not-applicable" } as const)
+                    : ({ kind: "unrecorded" } as const)),
+              ),
+              placement_parent_id: placement?.placementParentId ?? null,
+              display_name:
+                row.participant.kind === "agent"
+                  ? (titleByThreadId.get(row.participant.threadId) ?? null)
+                  : row.participant.kind === "machine"
+                    ? row.participant.name
+                    : null,
+            };
+          })
+          .concat(remoteRows),
       };
     }).pipe(Effect.mapError(failure)),
   list_squadrons: () =>
@@ -786,20 +864,29 @@ const handlers = {
       const crypto = yield* Crypto.Crypto;
       const captain = yield* preflightCrewCaptain(scope, "propose_crew");
       const requestKey = input.client_request_id ?? (yield* crypto.randomUUIDv4);
+      // The Captain's playbooks are the ones its own playbook_list shows.
+      const playbook =
+        input.playbook === undefined
+          ? undefined
+          : {
+              name: input.playbook,
+              workspaceRoot: yield* playbookWorkspaceRoot(captain.thread.id).pipe(
+                Effect.mapError((error) =>
+                  stateError(
+                    `Your playbook workspace could not be read: ${error.message}`,
+                    "Retry, or propose the crew without a playbook.",
+                  ),
+                ),
+              ),
+            };
       const outcome = yield* (yield* CrewProposalService)
         .propose({
           requestKey: `${scope.providerSessionId}:${requestKey}`,
           captain,
           displayName: input.name,
           brief: input.brief,
-          seats: input.seats.map((seat) => ({
-            seat: seat.seat,
-            agentId: seat.persona ?? null,
-            reason: seat.reason,
-            ...(seat.instructions === undefined ? {} : { instructions: seat.instructions }),
-            ...(seat.model_selection === undefined ? {} : { modelSelection: seat.model_selection }),
-            ...(seat.runtime_mode === undefined ? {} : { runtimeMode: seat.runtime_mode }),
-          })),
+          ...(playbook === undefined ? {} : { playbook }),
+          seats: input.seats.map(crewSeatFromInput),
         })
         .pipe(Effect.mapError((error) => stateError(error.message, crewProposalNextStep(error))));
       return projectCrewProposal(outcome);
@@ -824,6 +911,7 @@ const handlers = {
               ? {}
               : { modelSelection: input.model_selection }),
             ...(input.runtime_mode === undefined ? {} : { runtimeMode: input.runtime_mode }),
+            ...(input.steps === undefined ? {} : { steps: input.steps }),
           },
           brief: input.brief ?? null,
         })

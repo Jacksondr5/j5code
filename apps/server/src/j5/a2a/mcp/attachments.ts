@@ -5,6 +5,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Schema from "effect/Schema";
 import { Tool, Toolkit } from "effect/unstable/ai";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { ServerConfig } from "../../../config.ts";
 import { McpInvocationContext } from "../../../mcp/McpInvocationContext.ts";
@@ -15,6 +16,7 @@ import {
   claimPendingAttachments,
   releaseClaimedAttachments,
 } from "../../../orchestration-v2/AttachmentClaims.ts";
+import { OrchestratorV2 } from "../../../orchestration-v2/Orchestrator.ts";
 import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
 import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
 import {
@@ -28,6 +30,7 @@ import {
   A2AHumanAskOrReplyRequiredError,
 } from "../SendService.ts";
 import { CommCommandId, SendMessageResult } from "../contracts.ts";
+import { withDeliveryNotice } from "../receiverBacklog.ts";
 
 export const J5AttachmentSendToolkit = Toolkit.make(
   Tool.make("t3_thread_send_attachments", {
@@ -49,6 +52,9 @@ export const J5AttachmentSendToolkit = Toolkit.make(
       ThreadManagementService,
       A2ASendService,
       A2ADeliveryWorker,
+      // The receiver backlog read behind the result's deliveryNotice.
+      OrchestratorV2,
+      SqlClient.SqlClient,
       ServerConfig,
       FileSystem.FileSystem,
       Crypto.Crypto,
@@ -75,7 +81,7 @@ const isSendRefusal = Schema.is(
 export const J5AttachmentSendHandlersLive = J5AttachmentSendToolkit.toLayer({
   t3_thread_send_attachments: (input) =>
     Effect.gen(function* () {
-      const { scope, caller, projection } = yield* readWritableThread(input.threadId);
+      const { scope, caller, projection } = yield* readWritableThread(input.threadId, ["messages"]);
       if (input.threadId === caller.id)
         return yield* new OrchestratorMcpFailure({
           code: "invalid_request",
@@ -122,7 +128,13 @@ export const J5AttachmentSendHandlersLive = J5AttachmentSendToolkit.toLayer({
         );
       // Storage errors and defects leave acceptance uncertain; retain their claims.
       yield* (yield* A2ADeliveryWorker).notify;
-      return { threadId: input.threadId, ...result };
+      return {
+        threadId: input.threadId,
+        ...(yield* withDeliveryNotice(result, {
+          receiverId: target.participantId,
+          callerThreadId: scope.threadId,
+        })),
+      };
     }).pipe(
       Effect.mapError((cause) =>
         isMcpFailure(cause)

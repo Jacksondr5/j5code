@@ -14,6 +14,7 @@ import {
   crewModelSelection,
   crewReasoningDescriptor,
   crewSeatDraft,
+  crewSeatStopsForApprovals,
   resolvedCrewSeatDraft,
   setCrewReasoning,
 } from "./crewSeatRuntime";
@@ -115,7 +116,7 @@ describe("crew member edits", () => {
   });
 
   it.each(["auto", "auto-accept-edits"] as const)(
-    "switches unsupported ACP %s access to explicit Approval required",
+    "switches unsupported ACP %s access to explicit Supervised",
     (runtimeMode) => {
       const draft = { ...crewSeatDraft(seat), runtimeMode };
       const acp = {
@@ -189,5 +190,29 @@ describe("crew member edits", () => {
     const saved = addSeat([seat], { ...draft, agentId: "sentry" });
     expect(saved.seats[1]?.modelSelection).toEqual(runtime.modelSelection);
     expect(saved.seats[1]?.runtimeMode).toBe("full-access");
+  });
+});
+
+describe("crewSeatStopsForApprovals", () => {
+  const custom = { agentId: null } as const;
+  const persona = { agentId: "critic" } as const;
+  it("flags custom seats and overridden personas whose access is short of Full access", () => {
+    for (const runtimeMode of ["approval-required", "auto-accept-edits", "auto"] as const) {
+      expect(crewSeatStopsForApprovals(custom, { runtimeMode })).toBe(true);
+      expect(crewSeatStopsForApprovals({ ...persona, runtimeMode }, { runtimeMode })).toBe(true);
+    }
+    expect(crewSeatStopsForApprovals(custom, { runtimeMode: "full-access" })).toBe(false);
+    expect(
+      crewSeatStopsForApprovals(
+        { ...persona, runtimeMode: "full-access" },
+        { runtimeMode: "full-access" },
+      ),
+    ).toBe(false);
+  });
+
+  it("leaves persona defaults and unresolved runtimes quiet", () => {
+    // A read-only persona resolves to approval-required with approvals disabled: it never asks.
+    expect(crewSeatStopsForApprovals(persona, { runtimeMode: "approval-required" })).toBe(false);
+    expect(crewSeatStopsForApprovals(custom, undefined)).toBe(false);
   });
 });

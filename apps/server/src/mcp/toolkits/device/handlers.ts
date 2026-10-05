@@ -12,6 +12,7 @@ import * as Path from "effect/Path";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { ServerConfig } from "../../../config.ts";
 import { ensureAgentDeviceShim } from "../../../device/AgentDeviceShim.ts";
+import { nodeRuntimeUnavailableMessage } from "@t3tools/shared/nodeRuntime";
 
 import * as DeviceService from "../../../device/DeviceService.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
@@ -59,7 +60,7 @@ export function agentDeviceQuickStart(
     `  ${executable} install <app> <path-to-.app-or-.apk> ${target}`,
     `Prefer snapshot refs over coordinates. Run ${executable} help for workflow guides and ${executable} <command> --help for flags.`,
     "Do not call simctl, adb, xcrun, or serve-sim directly while these tools are attached; use agent-device.",
-    "For remote hosts, arrange builds, app installation, and any Metro reverse forwarding yourself. T3 provides discovery, streaming, and control only.",
+    "For remote hosts, arrange builds, app installation, and any Metro reverse forwarding yourself. J5 Code provides discovery, streaming, and control only.",
     "Keep the returned --config and --session flags on every command. Other hosts can be used concurrently; opening one does not switch these commands.",
     platformNotes,
   ].join("\n");
@@ -182,9 +183,13 @@ const handlers = {
         stateDir: config.stateDir,
       }).pipe(
         Effect.mapError(
-          () =>
+          (error) =>
             new DeviceToolUnavailableError({
-              reason: "Could not prepare the agent-device launcher.",
+              reason:
+                error._tag === "NodeRuntimeUnavailableError"
+                  ? nodeRuntimeUnavailableMessage("Device automation")
+                  : "Could not prepare the agent-device launcher.",
+              cause: error,
             }),
         ),
       );

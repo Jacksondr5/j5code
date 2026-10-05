@@ -60,6 +60,7 @@ describe("crew notices in the Captain's thread", () => {
       changes: null,
       failures: [],
       pendingSeats: [],
+      notCreated: [],
     });
     expect(participantIdsForCrewNotice(message)).toEqual(["agent:j5:a2a:b", "agent:j5:a2a:c"]);
     if (notice?.kind === "gate") expect(crewGateTitle(notice)).toBe("Crew launched");
@@ -74,6 +75,13 @@ describe("crew notices in the Captain's thread", () => {
         text: approvedGate.replace("thread_id=thread:c", "thread_id=thread:c tail=junk"),
       }),
     ).toBeNull();
+  });
+
+  it("still presents a launch notice that names the playbook its Crew follows", () => {
+    const text = approvedGate.replace("roster:", "playbook: review | Review a change\nroster:");
+    expect(presentCrewNotice({ role: "user", createdBy: "system", text })).toEqual(
+      presentCrewNotice({ role: "user", createdBy: "system", text: approvedGate }),
+    );
   });
 
   it("presents a launch report: what the person changed and how each seat's first turn went", () => {
@@ -123,6 +131,36 @@ describe("crew notices in the Captain's thread", () => {
     }
   });
 
+  it("presents approved seats whose thread was never created, off the roster", () => {
+    const report = [
+      "<j5_crew_gate>",
+      "proposal_id: crew:j5:a2a:mcp:s:proposal:r3",
+      "kind: roster",
+      "decision: approved",
+      "crew_name: Comedy",
+      "crew_instance_id: crew:3",
+      "crew_version: 1",
+      "changes: none",
+      "launch: 1 started, 0 failed, 1 not created, 0 start unconfirmed after 60s",
+      "seat_not_created: punchline | thread.create refused&#10;quota | retry later",
+      "roster:",
+      "- setup: participant_id=agent:j5:a2a:s persona=scout thread_id=thread:s start=started",
+      "</j5_crew_gate>",
+    ].join("\n");
+    const notice = presentCrewNotice({ role: "user", createdBy: "system", text: report });
+    expect(notice).toMatchObject({
+      kind: "gate",
+      notCreated: [{ seat: "punchline", detail: "thread.create refused\nquota | retry later" }],
+    });
+    expect(notice?.kind === "gate" && notice.roster.map((seat) => seat.seat)).toEqual(["setup"]);
+    if (notice?.kind === "gate") {
+      expect(crewGateTitle(notice)).toBe("Crew launched, 1 seat failed");
+      expect(crewGateFooter(notice)).toBe(
+        "1 seat was never created; the Captain can ask for it again.",
+      );
+    }
+  });
+
   it("presents an added seat as new and a decline with what was requested", () => {
     const addition = approvedGate
       .replace("kind: roster", "kind: addition")
@@ -154,6 +192,31 @@ describe("crew notices in the Captain's thread", () => {
         text: "<j5_crew_gate>\nkind: roster\n</j5_crew_gate>",
       }),
     ).toBeNull();
+  });
+
+  it("presents a handoff that can never be read, with the reason the notice gives", () => {
+    const notice = presentCrewNotice({
+      role: "user",
+      createdBy: "system",
+      text: [
+        "<j5_seat_finished>",
+        "seat: critic",
+        "participant_id: agent:j5:a2a:c",
+        "thread_id: thread:c",
+        "run_status: completed",
+        "handoff: unavailable (ReviewHandoff)",
+        "artifact: artifacts/handoffs/critic/ReviewHandoff-x.md",
+        "handoff_reason: not a regular file",
+        "</j5_seat_finished>",
+      ].join("\n"),
+    });
+    expect(notice?.kind === "seats" && notice.seats[0]?.handoff).toEqual({
+      status: "unavailable",
+      kind: "ReviewHandoff",
+      artifactPath: "artifacts/handoffs/critic/ReviewHandoff-x.md",
+      body: null,
+      reason: "not a regular file",
+    });
   });
 
   it("presents seat finishes, several per card when notices folded, with their handoffs", () => {
@@ -204,6 +267,7 @@ describe("crew notices in the Captain's thread", () => {
             status: "written",
             kind: "ReviewHandoff",
             artifactPath: "artifacts/handoffs/critic/ReviewHandoff-invoice-export.md",
+            reason: null,
             body: "# Review\nTwo findings.</handoff_body> stays text.\nQuoting <j5_seat_finished> is not a seat.",
           },
         },
@@ -238,6 +302,7 @@ describe("crew notices in the Captain's thread", () => {
       status: "missing",
       kind: "ReviewHandoff",
       artifactPath: "artifacts/handoffs/critic/ReviewHandoff-invoice-export.md",
+      reason: null,
       body: null,
     });
     expect(

@@ -24,6 +24,7 @@ import {
   ParticipantPlacementTransactionWriter,
   layer as placementLayer,
 } from "./PlacementService.ts";
+import { noneLayer as peerDirectoryNoneLayer } from "./PeerDirectory.ts";
 import { A2ASendService, layer as sendServiceLayer } from "./SendService.ts";
 import {
   SpawnCompositionService,
@@ -33,7 +34,7 @@ import { CommCommandId, ParticipantId, SquadronId } from "./contracts.ts";
 import { PlacementCommandId } from "./placementContracts.ts";
 
 const createdAt = "2026-08-30T16:00:00.000Z";
-const database = NodeSqliteClient.layerMemory();
+const database = NodeSqliteClient.layer({ filename: ":memory:" });
 const ledger = ledgerLayer.pipe(Layer.provide(database));
 const homes = homeRegistrarLayer.pipe(Layer.provide(ledger), Layer.provide(database));
 const homeTransactions = homeRegistrationTransactionLayer.pipe(
@@ -249,7 +250,7 @@ it.effect("rolls home registration back when placement fails afterward", () =>
 it.effect("waits for a DeliveryWorker ledger permit before entering the spawn transaction", () =>
   Effect.scoped(
     Effect.gen(function* () {
-      const databaseContext = yield* Layer.build(NodeSqliteClient.layerMemory());
+      const databaseContext = yield* Layer.build(NodeSqliteClient.layer({ filename: ":memory:" }));
       const sql = Context.get(databaseContext, SqlClient.SqlClient);
       const databaseLayer = Layer.succeed(SqlClient.SqlClient, sql);
       yield* runJ5A2AMigrations().pipe(Effect.provide(databaseLayer));
@@ -272,7 +273,10 @@ it.effect("waits for a DeliveryWorker ledger permit before entering the spawn tr
       );
       const homeTransaction = Context.get(homeTransactionContext, A2AHomeRegistrationTransaction);
       const sendContext = yield* Layer.build(
-        sendServiceLayer.pipe(Layer.provide(Layer.mergeAll(ledgerServices, databaseLayer))),
+        sendServiceLayer.pipe(
+          Layer.provide(peerDirectoryNoneLayer),
+          Layer.provide(Layer.mergeAll(ledgerServices, databaseLayer)),
+        ),
       );
       const sendService = Context.get(sendContext, A2ASendService);
 
@@ -322,6 +326,7 @@ it.effect("waits for a DeliveryWorker ledger permit before entering the spawn tr
       const transport: A2ADeliveryTransportShape = {
         deliverAgent: () => Effect.void,
         cancelAgent: () => Effect.succeed("cancelled" as const),
+        deliverPeer: () => Effect.die("peer delivery is not under test"),
         deliverHuman: () => Effect.void,
       };
       const workerContext = yield* Layer.build(

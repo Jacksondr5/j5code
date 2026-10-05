@@ -2,10 +2,24 @@ import * as Schema from "effect/Schema";
 import { Rpc, RpcGroup } from "effect/unstable/rpc";
 import { EnvironmentAuthorizationError } from "../auth.ts";
 import { ProjectId, ThreadId } from "../baseSchemas.ts";
+import { AgentPersonaId } from "./agentPersona.ts";
 
 export const PLAYBOOK_MAX_BYTES = 262144;
 export const PLAYBOOK_MAX_STEPS = 100;
-export const PLAYBOOK_NAME_PATTERN = /^[^/\\\p{Cc}]+$/u;
+/** A playbook's name is its file stem: lowercase words joined by hyphens, like persona ids. */
+export const PLAYBOOK_NAME_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
+
+/** The valid playbook name closest to a file stem such as "Release Plan", or null if none. */
+export function suggestPlaybookName(text: string): string | null {
+  const slug = text
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  if (!slug) return null;
+  return /^[a-z]/.test(slug) ? slug : `playbook-${slug}`;
+}
 
 export const J5_PLAYBOOK_WS_METHODS = {
   subscribeChanges: "j5.playbooks.subscribeChanges",
@@ -13,7 +27,14 @@ export const J5_PLAYBOOK_WS_METHODS = {
 } as const;
 
 const Text = Schema.String.check(Schema.isPattern(/\S/));
-export const PlaybookStep = Schema.Struct({ id: Text, title: Text, prompt: Text });
+/** `persona` names the library persona a step wants; a missing or disabled one is a warning. */
+export const PlaybookStep = Schema.Struct({
+  id: Text,
+  title: Text,
+  prompt: Text,
+  persona: Schema.optionalKey(AgentPersonaId),
+});
+export type PlaybookStep = typeof PlaybookStep.Type;
 export const PlaybookDefinition = Schema.Struct({
   title: Text,
   description: Text,
@@ -23,6 +44,15 @@ export const PlaybookDefinition = Schema.Struct({
   ),
 });
 export type PlaybookDefinition = typeof PlaybookDefinition.Type;
+
+/** Advisory findings about a valid definition; unlike `issue`, they never block starting. */
+export const PlaybookWarning = Schema.Struct({
+  code: Schema.Literals(["persona_missing", "persona_disabled", "persona_unverified"]),
+  stepId: Text,
+  persona: AgentPersonaId,
+  message: Schema.String,
+});
+export type PlaybookWarning = typeof PlaybookWarning.Type;
 
 export class PlaybookError extends Schema.TaggedError<PlaybookError>()("PlaybookError", {
   code: Schema.String,
@@ -38,8 +68,21 @@ export const PlaybookRun = Schema.Struct({
   status: Schema.Literals(["active", "completed", "cancelled"]),
   createdAt: Text,
   updatedAt: Text,
+  /** The Crew whose seats receive this run's steps; absent or null for an ordinary thread run. */
+  crewInstanceId: Schema.optionalKey(Schema.NullOr(Schema.String)),
 });
 export type PlaybookRun = typeof PlaybookRun.Type;
+
+/**
+ * Who holds a Crew-linked run's current step. Only `state: "captain"` means the Captain does it;
+ * `pending` means the hand-off hasn't finished and nobody should start the step yet.
+ */
+export const PlaybookStepDelivery = Schema.Struct({
+  state: Schema.Literals(["delivered", "captain", "pending"]),
+  seat: Schema.NullOr(Schema.String),
+  threadId: Schema.NullOr(Schema.String),
+});
+export type PlaybookStepDelivery = typeof PlaybookStepDelivery.Type;
 
 /** The board receives titles, never the other steps' prompt bodies. */
 export const PlaybookProgress = Schema.Struct({
@@ -56,6 +99,8 @@ export const PlaybookStepResponse = Schema.Struct({
   ...PlaybookProgress.fields,
   currentStep: Schema.NullOr(PlaybookStep),
   replayed: Schema.Boolean,
+  /** Set for Crew-linked runs' step tools; null on complete and cancel; absent for thread runs. */
+  delivery: Schema.optionalKey(Schema.NullOr(PlaybookStepDelivery)),
 });
 export type PlaybookStepResponse = typeof PlaybookStepResponse.Type;
 export const PlaybookDiscovery = Schema.Struct({
@@ -65,11 +110,24 @@ export const PlaybookDiscovery = Schema.Struct({
       title: Schema.String,
       description: Schema.String,
       stepCount: Schema.Int,
-      steps: Schema.Array(Schema.Struct({ id: Text, title: Text })),
+      steps: Schema.Array(
+        Schema.Struct({ id: Text, title: Text, persona: Schema.optionalKey(AgentPersonaId) }),
+      ),
       issue: Schema.NullOr(PlaybookError),
+      // Optional so a newer client still reads an older server; this server always sends it.
+      warnings: Schema.optionalKey(Schema.Array(PlaybookWarning)),
     }),
   ),
 });
+/** One playbook's live definition, read without starting or moving a run. */
+export const PlaybookReadResponse = Schema.Struct({
+  name: Text,
+  title: Text,
+  description: Text,
+  steps: Schema.Array(PlaybookStep),
+  warnings: Schema.Array(PlaybookWarning),
+});
+export type PlaybookReadResponse = typeof PlaybookReadResponse.Type;
 export const ThreadPlaybooksRequest = Schema.Struct({ threadId: ThreadId });
 export const ThreadPlaybooksResponse = Schema.Struct({ runs: Schema.Array(PlaybookProgress) });
 export const PLAYBOOK_PROGRESS_PATH = "/api/j5/playbooks/thread";

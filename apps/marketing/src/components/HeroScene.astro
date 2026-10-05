@@ -1,0 +1,263 @@
+---
+import Boat from "./Boat.astro";
+/**
+ * Three teasers around the hero copy, each on its own loop: agents trading
+ * asks and replies (flags turn orange when an agent sends, blue when one
+ * receives, green when one replies), a Captain leading its Crew around a
+ * circle, and an agent spawning two peers beside it, which each spawn one
+ * below. They sit in the flanks and scale with the viewport; on phones they
+ * give way to a few boats bobbing around the copy. Everything is transform,
+ * opacity, offset or a registered custom property, gated by --motion-state.
+ */
+---
+
+<div class="hs">
+  <svg class="hv hv--talk" viewBox="0 0 380 240" role="img" aria-label="Four agents exchanging asks and replies" data-motion>
+    <path class="hs-arc" d="M62 111 Q 110 40 190 31" />
+    <path class="hs-arc" d="M318 111 Q 270 170 190 151" />
+    <path class="hs-arc" d="M62 111 Q 190 -20 318 111" />
+    <path class="hs-arc" d="M190 31 Q 235 91 190 151" />
+
+    <g transform="translate(30 110)"><g class="bob" style="--bob-dur:4.6s"><use class="boat boat--dark flag flag-a" href="#j5-boat" /></g></g>
+    <g transform="translate(158 30)"><g class="bob" style="--bob-dur:5.2s;--bob-delay:-1.4s"><use class="boat boat--dark flag flag-b" href="#j5-boat" /></g></g>
+    <g transform="translate(286 110)"><g class="bob" style="--bob-dur:4.9s;--bob-delay:-2.8s"><use class="boat boat--dark flag flag-c" href="#j5-boat" /></g></g>
+    <g transform="translate(158 150)"><g class="bob" style="--bob-dur:5.5s;--bob-delay:-0.7s"><use class="boat boat--dark flag flag-d" href="#j5-boat" /></g></g>
+
+    <circle class="hs-dot hs-ask d1" r="4" />
+    <circle class="hs-dot hs-reply d2" r="4" />
+    <circle class="hs-dot hs-ask d3" r="4" />
+    <circle class="hs-dot hs-reply d4" r="4" />
+    <circle class="hs-dot hs-ask d5" r="4" />
+    <circle class="hs-dot hs-reply d6" r="4" />
+    <circle class="hs-dot hs-ask d7" r="4" />
+  </svg>
+
+  <svg class="hv hv--lead" viewBox="0 0 380 240" role="img" aria-label="A Captain leading three agents around a circle" data-motion>
+    <circle class="hs-ring" cx="190" cy="120" r="72" />
+    <g class="orbit orbit--captain"><g transform="translate(-38 -37) scale(1.2)"><g class="bob" style="--bob-dur:5s"><use class="boat boat--dark" href="#j5-captain" /></g></g></g>
+    <g class="orbit orbit--s1"><g transform="translate(-27 -26) scale(0.85)"><g class="bob" style="--bob-dur:4.7s;--bob-delay:-1s"><use class="boat boat--dark" href="#j5-boat" /></g></g></g>
+    <g class="orbit orbit--s2"><g transform="translate(-27 -26) scale(0.85)"><g class="bob" style="--bob-dur:5.3s;--bob-delay:-2s"><use class="boat boat--dark" href="#j5-boat" /></g></g></g>
+    <g class="orbit orbit--s3"><g transform="translate(-27 -26) scale(0.85)"><g class="bob" style="--bob-dur:4.4s;--bob-delay:-3s"><use class="boat boat--dark boat--waiting" href="#j5-boat" /></g></g></g>
+  </svg>
+
+  <svg class="hv hv--spawn" viewBox="0 0 380 240" role="img" aria-label="An agent spawning two peers beside it, which each spawn one more" data-motion>
+    <g transform="translate(152 60) scale(1.2)"><g class="bob" style="--bob-dur:5.4s"><use class="boat boat--dark" href="#j5-boat" /></g></g>
+    <g class="kids">
+      <g class="sp sp-1"><g transform="translate(-32 -30)"><g class="bob" style="--bob-dur:4.8s;--bob-delay:-1s"><use class="boat boat--dark" href="#j5-boat" /></g></g></g>
+      <g class="sp sp-2"><g transform="translate(-32 -30)"><g class="bob" style="--bob-dur:5.1s;--bob-delay:-2s"><use class="boat boat--dark" href="#j5-boat" /></g></g></g>
+      <g class="sp sp-3"><g transform="translate(-26 -24) scale(0.82)"><g class="bob" style="--bob-dur:4.5s;--bob-delay:-0.5s"><use class="boat boat--dark" href="#j5-boat" /></g></g></g>
+      <g class="sp sp-4"><g transform="translate(-26 -24) scale(0.82)"><g class="bob" style="--bob-dur:5.6s;--bob-delay:-2.5s"><use class="boat boat--dark boat--waiting" href="#j5-boat" /></g></g></g>
+    </g>
+  </svg>
+
+  <!-- Phones: no room for scenes, so a few boats keep the copy company. -->
+  <div class="hs-mobile" aria-hidden="true" data-motion>
+    <span class="hs-mb hs-mb-1"><Boat tone="dark" size={40} class="bob" style="--bob-dur:5.2s" /></span>
+    <span class="hs-mb hs-mb-2"><Boat captain tone="dark" size={52} class="bob" style="--bob-dur:6s;--bob-delay:-2s" /></span>
+    <span class="hs-mb hs-mb-3"><Boat tone="dark" status="waiting" size={36} class="bob" style="--bob-dur:4.8s;--bob-delay:-1s" /></span>
+    <span class="hs-mb hs-mb-4"><Boat tone="dark" status="settled" size={38} class="bob" style="--bob-dur:5.6s;--bob-delay:-3s" /></span>
+  </div>
+</div>
+
+<style>
+  /* The teasers live in the section's flanks at every width above phones. */
+  .hs {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 1;
+    /* The hero copy's width: the headline caps at 680px, the body at 52vw. */
+    --hero-copy: min(680px, 52vw);
+  }
+
+  /* Each teaser is centered in the flank between the copy's edge and the page
+     edge: the flank is (100% - copy) / 2 wide, so its center is a quarter in. */
+  .hv {
+    --hv-w: clamp(220px, 19vw, 320px);
+    position: absolute;
+    display: block;
+    width: var(--hv-w);
+    height: auto;
+    overflow: visible;
+    animation: hv-in 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) 520ms both;
+  }
+
+  @keyframes hv-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  /* Talking upper left, spawning lower left, the Captain's lap lower right and
+     larger. The compass rose already fills the upper right. */
+  .hv--talk { left: calc((100% - var(--hero-copy)) / 4 - var(--hv-w) / 2); top: 72px; }
+  .hv--spawn { left: calc((100% - var(--hero-copy)) / 4 - var(--hv-w) / 2); top: 330px; }
+  .hv--lead { --hv-w: clamp(280px, 25vw, 400px); right: calc((100% - var(--hero-copy)) / 4 - var(--hv-w) / 2); top: 300px; }
+
+  .hs-mobile {
+    display: none;
+  }
+
+  /* Laptops and tablets: same flanks, sized by the viewport so they stay clear
+     of the copy, which also narrows at these widths (see .hero-sub). */
+  @media (max-width: 1279px) and (min-width: 821px) {
+    .hv { --hv-w: 16vw; }
+    .hv--talk { top: 72px; }
+    .hv--spawn { top: 290px; }
+    .hv--lead { --hv-w: 21vw; top: 270px; }
+  }
+
+  @media (max-width: 820px) {
+    .hv {
+      display: none;
+    }
+
+    .hs-mobile {
+      display: block;
+      position: absolute;
+      inset: 0;
+    }
+
+    .hs-mb {
+      position: absolute;
+    }
+
+    .hs-mb .boat {
+      filter: drop-shadow(0 8px 12px rgba(0, 0, 0, 0.4));
+    }
+
+    .hs-mb-1 { left: 6%; top: 6px; }
+    .hs-mb-2 { right: 6%; top: 2px; }
+    .hs-mb-3 { left: 10%; bottom: 22px; }
+    .hs-mb-4 { right: 12%; bottom: 30px; }
+  }
+
+  .hs-arc,
+  .hs-ring {
+    fill: none;
+    stroke: var(--foam);
+    stroke-opacity: 0.22;
+    stroke-width: 1;
+    stroke-dasharray: 3 6;
+  }
+
+  /* Talking: seven hops on an 8s loop, under a second each. */
+  .hs-dot {
+    opacity: 0;
+    offset-rotate: 0deg;
+    animation-duration: 8s;
+    animation-timing-function: ease-in-out;
+    animation-iteration-count: infinite;
+    animation-play-state: var(--motion-state, paused);
+  }
+  .hs-ask { fill: var(--msg-ask); }
+  .hs-reply { fill: var(--msg-reply); }
+
+  .d1 { offset-path: path("M62 111 Q 110 40 190 31"); animation-name: hs-hop-1; }
+  .d2 { offset-path: path("M190 31 Q 110 40 62 111"); animation-name: hs-hop-2; }
+  .d3 { offset-path: path("M318 111 Q 270 170 190 151"); animation-name: hs-hop-3; }
+  .d4 { offset-path: path("M190 151 Q 270 170 318 111"); animation-name: hs-hop-4; }
+  .d5 { offset-path: path("M62 111 Q 190 -20 318 111"); animation-name: hs-hop-5; }
+  .d6 { offset-path: path("M318 111 Q 190 -20 62 111"); animation-name: hs-hop-6; }
+  .d7 { offset-path: path("M190 31 Q 235 91 190 151"); animation-name: hs-hop-7; }
+
+  @keyframes hs-hop-1 { 0%, 2% { offset-distance: 0%; opacity: 0; } 3% { opacity: 1; } 11% { opacity: 1; } 12%, 100% { offset-distance: 100%; opacity: 0; } }
+  @keyframes hs-hop-2 { 0%, 14% { offset-distance: 0%; opacity: 0; } 15% { opacity: 1; } 23% { opacity: 1; } 24%, 100% { offset-distance: 100%; opacity: 0; } }
+  @keyframes hs-hop-3 { 0%, 26% { offset-distance: 0%; opacity: 0; } 27% { opacity: 1; } 35% { opacity: 1; } 36%, 100% { offset-distance: 100%; opacity: 0; } }
+  @keyframes hs-hop-4 { 0%, 38% { offset-distance: 0%; opacity: 0; } 39% { opacity: 1; } 47% { opacity: 1; } 48%, 100% { offset-distance: 100%; opacity: 0; } }
+  @keyframes hs-hop-5 { 0%, 52% { offset-distance: 0%; opacity: 0; } 53% { opacity: 1; } 61% { opacity: 1; } 62%, 100% { offset-distance: 100%; opacity: 0; } }
+  @keyframes hs-hop-6 { 0%, 64% { offset-distance: 0%; opacity: 0; } 65% { opacity: 1; } 73% { opacity: 1; } 74%, 100% { offset-distance: 100%; opacity: 0; } }
+  @keyframes hs-hop-7 { 0%, 78% { offset-distance: 0%; opacity: 0; } 79% { opacity: 1; } 87% { opacity: 1; } 88%, 100% { offset-distance: 100%; opacity: 0; } }
+
+  /* Flags follow the hops on the same 8s clock: orange on send, blue on
+     receive, green on reply, and they keep that color until their next event.
+     Each boat starts the loop in the color it ends with, so nothing resets. */
+  .flag {
+    animation-duration: 8s;
+    animation-timing-function: ease-in-out;
+    animation-iteration-count: infinite;
+    animation-play-state: var(--motion-state, paused);
+  }
+  .flag-a { --pennant: var(--msg-receive); animation-name: flag-a; }
+  .flag-b { --pennant: var(--msg-ask); animation-name: flag-b; }
+  .flag-c { --pennant: var(--msg-reply); animation-name: flag-c; }
+  .flag-d { --pennant: var(--msg-receive); animation-name: flag-d; }
+
+  /* A: sends at 2, receives at 24, sends at 52, receives at 74. */
+  @keyframes flag-a {
+    0%, 1.5%, 24.5%, 51.5%, 74.5%, 100% { --pennant: var(--msg-receive); }
+    2.5%, 23.5%, 52.5%, 73.5% { --pennant: var(--msg-ask); }
+  }
+  /* B: receives at 12, replies at 14, sends at 78. */
+  @keyframes flag-b {
+    0%, 11.5%, 78.5%, 100% { --pennant: var(--msg-ask); }
+    12.5%, 13.5% { --pennant: var(--msg-receive); }
+    14.5%, 77.5% { --pennant: var(--msg-reply); }
+  }
+  /* C: sends at 26, receives at 48 and 62, replies at 64. */
+  @keyframes flag-c {
+    0%, 25.5%, 64.5%, 100% { --pennant: var(--msg-reply); }
+    26.5%, 47.5% { --pennant: var(--msg-ask); }
+    48.5%, 63.5% { --pennant: var(--msg-receive); }
+  }
+  /* D: receives at 36, replies at 38, receives at 88. */
+  @keyframes flag-d {
+    0%, 37.5%, 88.5%, 100% { --pennant: var(--msg-receive); }
+    38.5%, 87.5% { --pennant: var(--msg-reply); }
+  }
+
+  /* Leading: one lap every 14s. Each boat starts at its own point on the same
+     circle, Captain in front. */
+  .orbit {
+    offset-rotate: 0deg;
+    animation: lap 14s linear infinite;
+    animation-play-state: var(--motion-state, paused);
+  }
+  .orbit--captain { offset-path: path("M190 48 A 72 72 0 1 1 190 192 A 72 72 0 1 1 190 48"); }
+  .orbit--s1 { offset-path: path("M131.0 78.7 A 72 72 0 1 1 249.0 161.3 A 72 72 0 1 1 131.0 78.7"); }
+  .orbit--s2 { offset-path: path("M122.3 144.6 A 72 72 0 1 1 257.7 95.4 A 72 72 0 1 1 122.3 144.6"); }
+  .orbit--s3 { offset-path: path("M171.4 189.5 A 72 72 0 1 1 208.6 50.5 A 72 72 0 1 1 171.4 189.5"); }
+
+  @keyframes lap {
+    from { offset-distance: 0%; }
+    to { offset-distance: 100%; }
+  }
+
+  /* Spawning: two peers pop out beside the parent on the same row, then each
+     spawns one below itself. The brood fades so it can happen again. 10s loop. */
+  .kids {
+    animation: brood 10s ease-in-out infinite;
+    animation-play-state: var(--motion-state, paused);
+  }
+  @keyframes brood {
+    0%, 86% { opacity: 1; }
+    94%, 100% { opacity: 0; }
+  }
+
+  .sp {
+    transform-box: view-box;
+    transform-origin: 0 0;
+    animation-duration: 10s;
+    animation-timing-function: cubic-bezier(0.2, 0.7, 0.2, 1);
+    animation-iteration-count: infinite;
+    animation-play-state: var(--motion-state, paused);
+  }
+  .sp-1 { animation-name: sp-1; }
+  .sp-2 { animation-name: sp-2; }
+  .sp-3 { animation-name: sp-3; }
+  .sp-4 { animation-name: sp-4; }
+
+  @keyframes sp-1 { 0%, 12% { transform: translate(190px, 96px) scale(0); } 20%, 100% { transform: translate(88px, 96px) scale(1); } }
+  @keyframes sp-2 { 0%, 16% { transform: translate(190px, 96px) scale(0); } 24%, 100% { transform: translate(292px, 96px) scale(1); } }
+  @keyframes sp-3 { 0%, 44% { transform: translate(88px, 96px) scale(0); } 52%, 100% { transform: translate(88px, 178px) scale(1); } }
+  @keyframes sp-4 { 0%, 50% { transform: translate(292px, 96px) scale(0); } 58%, 100% { transform: translate(292px, 178px) scale(1); } }
+
+  @media (prefers-reduced-motion: reduce) {
+    .hv { animation: none; }
+    .hs-dot, .flag, .orbit, .kids, .sp { animation: none; }
+    .hs-dot { opacity: 0; }
+    .sp-1 { transform: translate(88px, 96px); }
+    .sp-2 { transform: translate(292px, 96px); }
+    .sp-3 { transform: translate(88px, 178px); }
+    .sp-4 { transform: translate(292px, 178px); }
+  }
+</style>

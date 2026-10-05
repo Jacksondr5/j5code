@@ -35,8 +35,10 @@ import {
 } from "../crew/crewState";
 import { stopCrew } from "../crew/crewStopClient";
 import {
+  fleetCrewAnchorId,
   originLabel,
   partitionFleet,
+  playbookRunHeader,
   retiredCrews,
   type FleetNode,
   type FleetRow,
@@ -70,6 +72,15 @@ const threadFor = (
       );
 
 const squadronKey = (squadron: ScopedFleetSquadron) => `${squadron.environmentId}:${squadron.id}`;
+
+/** A seat's badge, with the playbook step ids it owns when its Crew follows one. */
+const seatBadgeWithSteps = (
+  seat: string | null,
+  stepsBySeat: ReadonlyMap<string, ReadonlyArray<string>>,
+): string | null => {
+  const steps = seat === null ? undefined : stepsBySeat.get(seat);
+  return seat === null || steps === undefined ? seat : `${seat} · ${steps.join(", ")}`;
+};
 
 /**
  * The Roster (SB6): every agent in every Squadron on every connected environment in three
@@ -125,6 +136,32 @@ export function FleetPage() {
     [squadrons, threadsByKey],
   );
   const retired = useMemo(() => retiredCrews(squadrons), [squadrons]);
+  // Playbook runs name the Crew they follow from this read, and jump to its group.
+  const crewNames = useMemo(
+    () =>
+      new Map(
+        squadrons.flatMap((squadron) =>
+          squadron.crews.map(
+            (crew) =>
+              [
+                fleetCrewAnchorId(squadron.environmentId, crew.crewInstanceId),
+                crew.crewName,
+              ] as const,
+          ),
+        ),
+      ),
+    [squadrons],
+  );
+  // A Crew can sit inside the collapsed Settled or Retired sections, so every enclosing
+  // expander opens before the group scrolls into view.
+  const showCrew = useCallback((anchorId: string) => {
+    const group = document.getElementById(anchorId);
+    if (!(group instanceof HTMLDetailsElement)) return;
+    for (let node: Element | null = group; node !== null; node = node.parentElement)
+      if (node instanceof HTMLDetailsElement) node.open = true;
+    group.scrollIntoView({ block: "center" });
+    group.querySelector("summary")?.focus();
+  }, []);
   const openThread = useCallback(
     (environmentId: EnvironmentId, threadId: string) => {
       void navigate({
@@ -139,7 +176,7 @@ export function FleetPage() {
   const tableProps = { showEnvironment, threadsByKey, onOpenThread: openThread };
 
   return (
-    <SidebarInset className="h-dvh min-h-0 overflow-hidden bg-background text-foreground">
+    <SidebarInset className="h-dvh min-h-0 overflow-hidden">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <header
           className={cn(
@@ -206,7 +243,11 @@ export function FleetPage() {
                 <RetiredCrews retired={retired} {...tableProps} />
               </div>
             ) : null}
-            <PlaybookRunsSection />
+            <PlaybookRunsSection
+              crewNames={crewNames}
+              onShowCrew={showCrew}
+              onPlaybookChange={refreshFleet}
+            />
           </main>
         </ScrollArea>
       </div>
@@ -367,7 +408,10 @@ function FleetNodeRows(
       />
       {node.crews.map((crew) => (
         <li key={crew.crewInstanceId} className="bg-muted/20">
-          <details className="group/crew">
+          <details
+            className="group/crew"
+            id={fleetCrewAnchorId(environmentId, crew.crewInstanceId)}
+          >
             <summary
               className="flex cursor-pointer list-none items-center gap-2 px-3 py-1.5 text-xs font-medium text-muted-foreground outline-hidden marker:hidden hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden"
               style={{ paddingInlineStart: `${0.75 + (node.row.depth + 1) * 1.25}rem` }}
@@ -377,6 +421,9 @@ function FleetNodeRows(
                 className="size-3.5 transition-transform duration-150 group-open/crew:rotate-90"
               />
               <span>Crew · {crew.crewName}</span>
+              {crew.playbookName === null ? null : (
+                <span className="text-muted-foreground/70">Playbook: {crew.playbookName}</span>
+              )}
               {(() => {
                 const seats = crew.members.map((member) => member.row);
                 const state = crewState(seats);
@@ -387,6 +434,11 @@ function FleetNodeRows(
                       {crew.members.length} {crew.members.length === 1 ? "seat" : "seats"}
                       {summary === null ? "" : ` · ${summary}`}
                     </span>
+                    {crew.playbookRun === null ? null : (
+                      <span className="truncate text-foreground/80">
+                        {playbookRunHeader(crew.playbookRun)}
+                      </span>
+                    )}
                     <span className="ms-auto flex items-center gap-1.5">
                       {crewHasRunningSeat(state) ? (
                         <Button
@@ -426,7 +478,10 @@ function FleetNodeRows(
                 <FleetNodeRows
                   key={member.row.agent.participantId}
                   node={member}
-                  seatBadge={member.row.agent.crew?.seat ?? null}
+                  seatBadge={seatBadgeWithSteps(
+                    member.row.agent.crew?.seat ?? null,
+                    crew.stepsBySeat,
+                  )}
                   {...rows}
                 />
               ))}
@@ -444,9 +499,9 @@ function FleetNodeRows(
 /**
  * Retired Crews of every Squadron as one-line rows, each naming its Squadron, that open to the
  * brief and the approved roster with each seat's approval version and reason, so a successor can
- * be proposed from what was decided rather than from memory (Crews AC20). A retired Crew can
- * never be reactivated, so its row offers no action beyond naming its Captain, whose thread holds
- * the ledger; handoffs live on the Artifacts page.
+ * be proposed from what was decided rather than from memory (Crews AC20). A retired Crew comes
+ * back only with its Captain (AC17), so its row offers no action beyond naming its Captain, whose
+ * thread holds the ledger; handoffs live on the Artifacts page.
  */
 function RetiredCrews(
   props: FleetRowsProps & {
@@ -476,7 +531,10 @@ function RetiredCrewItem(props: FleetRowsProps & FleetSquadronCrew<ScopedFleetSq
   const seatCount = crew.roster.length;
   return (
     <li>
-      <details className="group/retired-crew">
+      <details
+        className="group/retired-crew"
+        id={fleetCrewAnchorId(squadron.environmentId, crew.crewInstanceId)}
+      >
         <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-1.5 text-sm outline-hidden marker:hidden hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
           <ChevronRightIcon
             aria-hidden
@@ -498,6 +556,9 @@ function RetiredCrewItem(props: FleetRowsProps & FleetSquadronCrew<ScopedFleetSq
         <div className="border-t border-border/40 px-3 py-2 ps-[2.125rem] text-xs">
           <RetiredCrewCaptain {...props} environmentId={squadron.environmentId} />
           <p className="mt-2 whitespace-pre-wrap break-words text-muted-foreground">{crew.brief}</p>
+          {crew.playbook == null ? null : (
+            <p className="mt-1 text-muted-foreground">Playbook: {crew.playbook.name}</p>
+          )}
           {crew.roster.length === 0 ? (
             <p className="mt-2 text-muted-foreground">No seats were approved.</p>
           ) : (
@@ -512,6 +573,9 @@ function RetiredCrewItem(props: FleetRowsProps & FleetSquadronCrew<ScopedFleetSq
                     approved at v{member.addedVersion}
                     {member.reason === null ? "" : ` · ${member.reason}`}
                   </span>
+                  {member.steps === undefined ? null : (
+                    <span className="text-muted-foreground">steps {member.steps.join(", ")}</span>
+                  )}
                 </li>
               ))}
             </ul>
@@ -611,7 +675,7 @@ function FleetRowItem(
             </span>
           )}
           {props.badge ? (
-            <Badge variant="outline" className="shrink-0 px-1.5 py-0 text-[10px]">
+            <Badge variant="outline" size="sm" className="shrink-0">
               {props.badge}
             </Badge>
           ) : null}

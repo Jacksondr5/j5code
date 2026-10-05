@@ -10,8 +10,10 @@ import { AgentEditorDialog } from "./AgentEditorDialog";
 import { AgentFolderPickerDialog } from "./AgentFolderPickerDialog";
 import {
   ChevronDownIcon,
-  EllipsisVerticalIcon,
+  CopyIcon,
+  DownloadIcon,
   ExternalLinkIcon,
+  MoreHorizontalIcon,
   PencilIcon,
   PlusIcon,
   Trash2Icon,
@@ -21,7 +23,6 @@ import {
   agentPersonaFolderNudges,
   agentPersonaFolderStatusLabel,
   agentPersonaUsageById,
-  prepareAgentPersonaImport,
   importAgentPersonasWithConfirmation,
   presentAgentPersonaCatalog,
   presentAgentPersonaUsage,
@@ -32,11 +33,12 @@ import type {
   AgentPersonaImportConflictError,
   EnvironmentId,
 } from "@t3tools/contracts";
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 
 import { useOpenInPreferredEditor } from "../../editorPreferences";
 import { useServerConfigs } from "../../state/entities";
 import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
+import { useSettingsScopeEnvironments } from "../settingsScopeEnvironment";
 import { agentPersonaEnvironment } from "./agentPersonaAtoms";
 import { PlaybookLibrarySettings } from "../playbooks/PlaybookLibrarySettings";
 import { useEnvironmentQuery } from "../../state/query";
@@ -46,6 +48,7 @@ import {
   Menu,
   MenuItem,
   MenuPopup,
+  MenuSeparator,
   MenuSub,
   MenuSubPopup,
   MenuSubTrigger,
@@ -80,14 +83,19 @@ export function AgentLibrarySettings() {
       }),
     [environments, primaryEnvironmentId],
   );
+  const {
+    candidates: pickerEnvironments,
+    pinnedEnvironmentId,
+    initialEnvironmentId,
+  } = useSettingsScopeEnvironments(orderedEnvironments, primaryEnvironmentId);
   const [selectedEnvironmentId, setSelectedEnvironmentId] = useState<EnvironmentId | null>(
-    primaryEnvironmentId,
+    initialEnvironmentId,
   );
-  const effectiveEnvironmentId = orderedEnvironments.some(
-    (environment) => environment.environmentId === selectedEnvironmentId,
-  )
-    ? selectedEnvironmentId
-    : (orderedEnvironments[0]?.environmentId ?? null);
+  const effectiveEnvironmentId =
+    pinnedEnvironmentId ??
+    (pickerEnvironments.some((environment) => environment.environmentId === selectedEnvironmentId)
+      ? selectedEnvironmentId
+      : (pickerEnvironments[0]?.environmentId ?? null));
   const selectedEnvironment = orderedEnvironments.find(
     (environment) => environment.environmentId === effectiveEnvironmentId,
   );
@@ -119,12 +127,13 @@ export function AgentLibrarySettings() {
   const setLibraryFolders = useAtomCommand(agentPersonaEnvironment.setLibraryFolders, {
     reportFailure: false,
   });
-  const [pickingFolder, setPickingFolder] = useState(false);
+  /** Which question the environment path picker is answering, if it is open. */
+  const [picking, setPicking] = useState<"library-folder" | "import-file" | "import-folder" | null>(
+    null,
+  );
   const otherEnvironments = orderedEnvironments.filter(
     (environment) => environment.environmentId !== effectiveEnvironmentId,
   );
-  const folderInput = useRef<HTMLInputElement>(null);
-  const fileInput = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [creating, setCreating] = useState<{ initial?: AgentPersonaCreateDraft } | null>(null);
   const [editing, setEditing] = useState<{
@@ -132,6 +141,9 @@ export function AgentLibrarySettings() {
     initial: Omit<AgentPersonaEditInput, "instructions">;
   } | null>(null);
   const importAgents = useAtomCommand(agentPersonaEnvironment.importAgentPersonas, {
+    reportFailure: false,
+  });
+  const readImportFiles = useAtomCommand(agentPersonaEnvironment.readImportFiles, {
     reportFailure: false,
   });
   const removeAgent = useAtomCommand(agentPersonaEnvironment.removeAgentPersona, {
@@ -234,20 +246,16 @@ export function AgentLibrarySettings() {
         description: "Sign in to an editor on this environment, or open the path shown above.",
       });
   }
-  async function importSelection(files: File[]) {
+  /** Imports a YAML file, or every YAML file under a folder, from the environment's machine. */
+  async function importFromPath(path: string) {
     if (effectiveEnvironmentId === null || busy) return;
     const environmentId = effectiveEnvironmentId;
     setBusy(true);
     try {
-      const definitions = await prepareAgentPersonaImport(
-        files.map((file) => ({
-          name: file.webkitRelativePath || file.name,
-          size: file.size,
-          text: () => file.text(),
-        })),
-      );
+      const read = await readImportFiles({ environmentId, input: { path } });
+      if (read._tag === "Failure") throw squashAtomCommandFailure(read);
       const result = await importAgentPersonasWithConfirmation(
-        definitions,
+        read.value.files,
         async (input) => {
           const response = await importAgents({ environmentId, input });
           if (response._tag === "Failure") throw squashAtomCommandFailure(response);
@@ -387,12 +395,8 @@ export function AgentLibrarySettings() {
 
   return (
     <SettingsPageContainer>
-      <SettingsSection title="Personas">
-        <SettingsRow
-          title="Persona library"
-          description="In a Codex or Claude conversation, type @persona:id, or @ and the start of a persona’s name, to run a persona as a subagent. Edit imported personas here."
-        />
-        {orderedEnvironments.length > 1 ? (
+      {pinnedEnvironmentId === null && pickerEnvironments.length > 1 ? (
+        <SettingsSection title="Environment">
           <SettingsRow
             title="Environment"
             description="Availability and model routing are resolved by the selected environment."
@@ -401,17 +405,21 @@ export function AgentLibrarySettings() {
                 disabled={busy}
                 value={effectiveEnvironmentId ?? undefined}
                 onValueChange={(value) => {
-                  const environment = orderedEnvironments.find(
+                  const environment = pickerEnvironments.find(
                     (candidate) => candidate.environmentId === value,
                   );
                   if (environment) setSelectedEnvironmentId(environment.environmentId);
                 }}
               >
-                <SelectTrigger className="w-full sm:w-56" aria-label="Persona environment">
+                <SelectTrigger
+                  size="sm"
+                  className="w-full sm:w-56"
+                  aria-label="Persona environment"
+                >
                   <SelectValue>{selectedEnvironment?.label}</SelectValue>
                 </SelectTrigger>
                 <SelectPopup align="end" alignItemWithTrigger={false}>
-                  {orderedEnvironments.map((environment) => (
+                  {pickerEnvironments.map((environment) => (
                     <SelectItem key={environment.environmentId} value={environment.environmentId}>
                       {environment.label}
                     </SelectItem>
@@ -420,64 +428,40 @@ export function AgentLibrarySettings() {
               </Select>
             }
           />
-        ) : null}
-        <input
-          ref={folderInput}
-          type="file"
-          hidden
-          multiple
-          {...{ webkitdirectory: "" }}
-          aria-label="Choose persona folder"
-          onChange={(event) => {
-            const files = Array.from(event.currentTarget.files ?? []);
-            event.currentTarget.value = "";
-            void importSelection(files);
-          }}
-        />
-        <input
-          ref={fileInput}
-          type="file"
-          hidden
-          accept=".yaml,.yml,application/yaml,text/yaml"
-          aria-label="Choose persona YAML file"
-          onChange={(event) => {
-            const files = Array.from(event.currentTarget.files ?? []);
-            event.currentTarget.value = "";
-            void importSelection(files);
-          }}
-        />
-      </SettingsSection>
+        </SettingsSection>
+      ) : null}
 
       <SettingsSection
-        title="Scoped personas"
+        title="Personas"
         headerAction={
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1">
             <Button
-              variant="outline"
+              size="xs"
+              variant="ghost-muted"
               disabled={busy || effectiveEnvironmentId === null}
               onClick={() => setCreating({})}
             >
-              <PlusIcon aria-hidden="true" className="size-4" />
+              <PlusIcon aria-hidden="true" className="size-3" />
               Create persona
             </Button>
             <Menu>
               <MenuTrigger
-                render={<Button variant="outline" />}
+                render={<Button size="xs" variant="ghost-muted" />}
                 disabled={busy || effectiveEnvironmentId === null}
               >
                 Import
-                <ChevronDownIcon aria-hidden="true" className="size-4" />
+                <ChevronDownIcon aria-hidden="true" className="size-3" />
               </MenuTrigger>
               <MenuPopup align="end">
                 <MenuItem
                   disabled={busy || effectiveEnvironmentId === null}
-                  onClick={() => fileInput.current?.click()}
+                  onClick={() => setPicking("import-file")}
                 >
                   Persona file
                 </MenuItem>
                 <MenuItem
                   disabled={busy || effectiveEnvironmentId === null}
-                  onClick={() => folderInput.current?.click()}
+                  onClick={() => setPicking("import-folder")}
                 >
                   Folder
                 </MenuItem>
@@ -498,181 +482,187 @@ export function AgentLibrarySettings() {
         ) : personas.length === 0 ? (
           <SettingsRow
             title="No personas"
-            description="This environment’s configured library is empty."
+            description="This environment’s library is empty. In a Codex or Claude conversation, type @persona:id, or @ and a persona’s name, to run one as a subagent."
           />
         ) : (
-          personas.map((persona) => (
-            <SettingsRow
-              key={persona.personaId}
-              title={
-                <span className="inline-flex flex-wrap items-center gap-2">
-                  <span>{persona.displayName}</span>
-                  {persona.blockedReasons.length > 0 ? (
-                    <Tooltip>
-                      <TooltipTrigger
-                        render={<Badge variant="warning">{persona.availabilityLabel}</Badge>}
-                      />
-                      <TooltipPopup className="max-w-sm">
-                        {persona.blockedReasons.map((reason) => (
-                          <span key={reason} className="block">
-                            {reason}
-                          </span>
-                        ))}
-                      </TooltipPopup>
-                    </Tooltip>
-                  ) : (
-                    <Badge variant={persona.availability === "available" ? "success" : "outline"}>
-                      {persona.availabilityLabel}
-                    </Badge>
-                  )}
-                  {persona.originLabel ? (
-                    persona.origin?.kind === "folder" ? (
+          personas.map((persona) => {
+            const usageEntry = usageById.get(persona.personaId);
+            const usageSummary =
+              usageEntry === undefined ? null : presentAgentPersonaUsage(usageEntry);
+            return (
+              <SettingsRow
+                key={persona.personaId}
+                title={persona.displayName}
+                description={persona.description}
+                status={
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    {persona.blockedReasons.length > 0 ? (
                       <Tooltip>
                         <TooltipTrigger
-                          render={<Badge variant="outline">{persona.originLabel}</Badge>}
+                          render={<Badge variant="warning">{persona.availabilityLabel}</Badge>}
                         />
-                        <TooltipPopup className="font-mono">{persona.origin.path}</TooltipPopup>
-                      </Tooltip>
-                    ) : (
-                      <Badge variant="outline">{persona.originLabel}</Badge>
-                    )
-                  ) : null}
-                </span>
-              }
-              description={
-                <>
-                  {persona.description}
-                  {(() => {
-                    const entry = usageById.get(persona.personaId);
-                    if (entry === undefined) return null;
-                    const summary = presentAgentPersonaUsage(entry);
-                    const line = (
-                      <span className="mt-1 block text-xs text-muted-foreground">
-                        {summary.line}
-                      </span>
-                    );
-                    return summary.routes.length === 0 ? (
-                      line
-                    ) : (
-                      <Tooltip>
-                        <TooltipTrigger render={line} />
-                        <TooltipPopup>
-                          {summary.routes.map((route) => (
-                            <span key={route} className="block">
-                              {route}
+                        <TooltipPopup className="max-w-sm">
+                          {persona.blockedReasons.map((reason) => (
+                            <span key={reason} className="block">
+                              {reason}
                             </span>
                           ))}
                         </TooltipPopup>
                       </Tooltip>
-                    );
-                  })()}
-                </>
-              }
-              control={
-                <div className="flex flex-wrap items-center gap-2">
-                  {persona.removed ? (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={busy}
-                      aria-label={`Restore ${persona.displayName}`}
-                      onClick={() => void restorePersona(persona.personaId)}
-                    >
-                      <Undo2Icon className="size-4" />
-                      Restore
-                    </Button>
-                  ) : (
-                    <>
+                    ) : (
+                      <Badge variant={persona.availability === "available" ? "success" : "outline"}>
+                        {persona.availabilityLabel}
+                      </Badge>
+                    )}
+                    {persona.originLabel ? (
+                      <>
+                        <span aria-hidden="true">·</span>
+                        {persona.origin?.kind === "folder" ? (
+                          <Tooltip>
+                            <TooltipTrigger render={<span>{persona.originLabel}</span>} />
+                            <TooltipPopup variant="code">{persona.origin.path}</TooltipPopup>
+                          </Tooltip>
+                        ) : (
+                          <span>{persona.originLabel}</span>
+                        )}
+                      </>
+                    ) : null}
+                    {usageSummary ? (
+                      usageSummary.routes.length === 0 ? (
+                        <span className="basis-full">{usageSummary.line}</span>
+                      ) : (
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={<span className="basis-full">{usageSummary.line}</span>}
+                          />
+                          <TooltipPopup>
+                            {usageSummary.routes.map((route) => (
+                              <span key={route} className="block">
+                                {route}
+                              </span>
+                            ))}
+                          </TooltipPopup>
+                        </Tooltip>
+                      )
+                    ) : null}
+                    {persona.edit === null && !persona.removed ? (
+                      <span className="basis-full">Duplicate this persona to edit a copy</span>
+                    ) : null}
+                  </div>
+                }
+                control={
+                  <>
+                    {persona.removed ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={busy}
+                        aria-label={`Restore ${persona.displayName}`}
+                        onClick={() => void restorePersona(persona.personaId)}
+                      >
+                        <Undo2Icon className="size-4" />
+                        Restore
+                      </Button>
+                    ) : (
                       <Switch
                         checked={persona.enabled}
                         disabled={busy}
                         aria-label={`Enable ${persona.displayName}`}
                         onCheckedChange={(enabled) => void toggleAgent(persona.personaId, enabled)}
                       />
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        disabled={busy || persona.edit === null}
-                        aria-label={`Edit ${persona.displayName}`}
-                        title={
-                          persona.edit
-                            ? `Edit ${persona.displayName}`
-                            : "Duplicate this persona to edit a copy"
-                        }
-                        onClick={() => {
-                          if (persona.edit && effectiveEnvironmentId)
-                            setEditing({
-                              environmentId: effectiveEnvironmentId,
-                              initial: persona.edit,
-                            });
-                        }}
+                    )}
+                    <Menu>
+                      <MenuTrigger
+                        disabled={busy}
+                        aria-label={`More actions for ${persona.displayName}`}
+                        render={<Button variant="ghost" size="icon-sm" />}
                       >
-                        <PencilIcon className="size-4" />
-                      </Button>
-                    </>
-                  )}
-                  <Menu>
-                    <MenuTrigger
-                      disabled={busy}
-                      aria-label={`More actions for ${persona.displayName}`}
-                      render={<Button variant="ghost" size="icon-sm" />}
-                    >
-                      <EllipsisVerticalIcon className="size-4" />
-                    </MenuTrigger>
-                    <MenuPopup align="end">
-                      <MenuItem onClick={() => void duplicatePersona(persona.personaId)}>
-                        Duplicate as personal persona
-                      </MenuItem>
-                      <MenuItem onClick={() => void exportPersona(persona.personaId)}>
-                        Export YAML
-                      </MenuItem>
-                      {otherEnvironments.length > 0 ? (
-                        <MenuSub>
-                          <MenuSubTrigger>Copy to environment</MenuSubTrigger>
-                          <MenuSubPopup>
-                            {otherEnvironments.map((environment) => (
-                              <MenuItem
-                                key={environment.environmentId}
-                                onClick={() =>
-                                  void copyPersona(persona.personaId, {
-                                    environmentId: environment.environmentId,
-                                    label: environment.label,
-                                  })
-                                }
-                              >
-                                {environment.label}
-                              </MenuItem>
-                            ))}
-                          </MenuSubPopup>
-                        </MenuSub>
-                      ) : null}
-                    </MenuPopup>
-                  </Menu>
-                  {persona.removed ? null : (
-                    <Button
-                      variant="destructive-outline"
-                      size="icon-sm"
-                      disabled={busy}
-                      aria-label={`Remove ${persona.displayName}`}
-                      title={`Remove ${persona.displayName}`}
-                      onClick={() => void removePersona(persona.personaId)}
-                    >
-                      <Trash2Icon className="size-4" />
-                    </Button>
-                  )}
-                </div>
-              }
-            />
-          ))
+                        <MoreHorizontalIcon className="size-4" />
+                      </MenuTrigger>
+                      <MenuPopup align="end">
+                        {persona.removed ? null : (
+                          <MenuItem
+                            disabled={busy || persona.edit === null}
+                            onClick={() => {
+                              if (persona.edit && effectiveEnvironmentId)
+                                setEditing({
+                                  environmentId: effectiveEnvironmentId,
+                                  initial: persona.edit,
+                                });
+                            }}
+                          >
+                            <PencilIcon />
+                            Edit
+                          </MenuItem>
+                        )}
+                        <MenuItem onClick={() => void duplicatePersona(persona.personaId)}>
+                          <CopyIcon />
+                          Duplicate as personal persona
+                        </MenuItem>
+                        <MenuItem onClick={() => void exportPersona(persona.personaId)}>
+                          <DownloadIcon />
+                          Export YAML
+                        </MenuItem>
+                        {otherEnvironments.length > 0 ? (
+                          <MenuSub>
+                            <MenuSubTrigger>Copy to environment</MenuSubTrigger>
+                            <MenuSubPopup>
+                              {otherEnvironments.map((environment) => (
+                                <MenuItem
+                                  key={environment.environmentId}
+                                  onClick={() =>
+                                    void copyPersona(persona.personaId, {
+                                      environmentId: environment.environmentId,
+                                      label: environment.label,
+                                    })
+                                  }
+                                >
+                                  {environment.label}
+                                </MenuItem>
+                              ))}
+                            </MenuSubPopup>
+                          </MenuSub>
+                        ) : null}
+                        {persona.removed ? null : (
+                          <>
+                            <MenuSeparator />
+                            <MenuItem
+                              variant="destructive"
+                              disabled={busy}
+                              onClick={() => void removePersona(persona.personaId)}
+                            >
+                              <Trash2Icon />
+                              Remove
+                            </MenuItem>
+                          </>
+                        )}
+                      </MenuPopup>
+                    </Menu>
+                  </>
+                }
+              />
+            );
+          })
         )}
       </SettingsSection>
 
       {effectiveEnvironmentId !== null ? (
-        <SettingsSection title="Library sources">
-          <SettingsRow
-            title="Source folders"
-            description="Folders this environment reads YAML definitions from. Paths are on the environment's machine; relative paths resolve from its state directory."
-          />
+        <SettingsSection
+          title="Library sources"
+          headerAction={
+            librarySources.data && !librarySources.isPending && !librarySources.error ? (
+              <Button
+                size="xs"
+                variant="ghost-muted"
+                disabled={busy}
+                onClick={() => setPicking("library-folder")}
+              >
+                <PlusIcon aria-hidden="true" className="size-3" />
+                Add folder
+              </Button>
+            ) : null
+          }
+        >
           {librarySources.isPending ? (
             <SettingsRow title="Loading folders" description="Reading the library configuration." />
           ) : librarySources.error ? (
@@ -687,93 +677,102 @@ export function AgentLibrarySettings() {
               ) : null}
               {librarySources.data.folders.map((folder) => {
                 const nudges = agentPersonaFolderNudges(folder.git);
+                const configured = librarySources.data?.configured;
+                const canOpen = folder.exists && availableEditors.length > 0;
                 return (
                   <SettingsRow
                     key={folder.configuredPath}
-                    title={
-                      <span className="inline-flex flex-wrap items-center gap-2">
-                        <span className="font-mono text-sm">{folder.configuredPath}</span>
-                        <Badge
-                          variant={
-                            folder.exists || !librarySources.data?.configured ? "outline" : "error"
-                          }
-                        >
-                          {agentPersonaFolderStatusLabel(folder, librarySources.data?.configured)}
-                        </Badge>
-                      </span>
-                    }
+                    title={<span className="font-mono text-sm">{folder.configuredPath}</span>}
                     description={
-                      <>
-                        {folder.path !== folder.configuredPath ? (
-                          <span className="block font-mono text-xs">{folder.path}</span>
-                        ) : null}
+                      folder.path !== folder.configuredPath || !configured ? (
+                        <>
+                          {folder.path !== folder.configuredPath ? (
+                            <span className="block font-mono text-xs">{folder.path}</span>
+                          ) : null}
+                          {configured ? null : (
+                            <span className="block">
+                              Adding a folder replaces the bundled examples.
+                            </span>
+                          )}
+                        </>
+                      ) : null
+                    }
+                    status={
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <Badge variant={folder.exists || !configured ? "outline" : "error"}>
+                          {agentPersonaFolderStatusLabel(folder, configured)}
+                        </Badge>
                         {nudges.map((nudge) => (
-                          <span key={nudge} className="block text-warning-foreground">
+                          <span key={nudge} className="text-warning-foreground">
                             {nudge}
                           </span>
                         ))}
-                      </>
+                      </div>
                     }
                     control={
-                      <div className="flex items-center gap-2">
-                        {folder.exists && availableEditors.length > 0 ? (
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            disabled={busy}
-                            aria-label={`Open ${folder.configuredPath} in editor`}
-                            title="Open in editor"
-                            onClick={() => void openFolder(folder.path)}
-                          >
-                            <ExternalLinkIcon className="size-4" />
-                          </Button>
-                        ) : null}
-                        <Button
-                          variant="destructive-outline"
-                          size="icon-sm"
+                      <Menu>
+                        <MenuTrigger
                           disabled={busy}
-                          aria-label={`Stop reading ${folder.configuredPath}`}
-                          title="Remove folder from the library"
-                          onClick={() =>
-                            void saveFolders(
-                              (librarySources.data?.folders ?? [])
-                                .map(({ configuredPath }) => configuredPath)
-                                .filter((candidate) => candidate !== folder.configuredPath),
-                            )
-                          }
+                          aria-label={`Actions for ${folder.configuredPath}`}
+                          render={<Button variant="ghost" size="icon-sm" />}
                         >
-                          <Trash2Icon className="size-4" />
-                        </Button>
-                      </div>
+                          <MoreHorizontalIcon className="size-4" />
+                        </MenuTrigger>
+                        <MenuPopup align="end">
+                          {canOpen ? (
+                            <>
+                              <MenuItem
+                                disabled={busy}
+                                onClick={() => void openFolder(folder.path)}
+                              >
+                                <ExternalLinkIcon />
+                                Open in editor
+                              </MenuItem>
+                              <MenuSeparator />
+                            </>
+                          ) : null}
+                          <MenuItem
+                            variant="destructive"
+                            disabled={busy}
+                            onClick={() =>
+                              void saveFolders(
+                                (librarySources.data?.folders ?? [])
+                                  .map(({ configuredPath }) => configuredPath)
+                                  .filter((candidate) => candidate !== folder.configuredPath),
+                              )
+                            }
+                          >
+                            <Trash2Icon />
+                            Stop reading folder
+                          </MenuItem>
+                        </MenuPopup>
+                      </Menu>
                     }
                   />
                 );
               })}
-              <SettingsRow
-                title="Add folder"
-                description={
-                  librarySources.data.configured
-                    ? "Files are read on every catalog request, so edits and git pulls apply without a restart."
-                    : "Bundled examples appear until a folder is configured or the default folder exists. Adding a folder writes agent-personas.json."
-                }
-                control={
-                  <Button variant="outline" disabled={busy} onClick={() => setPickingFolder(true)}>
-                    <PlusIcon aria-hidden="true" className="size-4" />
-                    Add folder
-                  </Button>
-                }
-              />
             </>
           ) : null}
         </SettingsSection>
       ) : null}
-      {pickingFolder && effectiveEnvironmentId ? (
+      {picking && effectiveEnvironmentId ? (
         <AgentFolderPickerDialog
+          key={picking}
           environmentId={effectiveEnvironmentId}
           environmentLabel={selectedEnvironment?.label ?? "this environment"}
-          onClose={() => setPickingFolder(false)}
+          mode={picking === "import-file" ? "file" : "folder"}
+          title={
+            picking === "library-folder"
+              ? "Choose a library folder"
+              : picking === "import-file"
+                ? "Import a persona file"
+                : "Import a persona folder"
+          }
+          confirmLabel={picking === "library-folder" ? "Choose folder" : "Import"}
+          onClose={() => setPicking(null)}
           onSelect={(path) => {
-            setPickingFolder(false);
+            setPicking(null);
+            if (picking !== "library-folder") return void importFromPath(path);
             void saveFolders([
               ...(librarySources.data?.folders ?? []).map(({ configuredPath }) => configuredPath),
               path,

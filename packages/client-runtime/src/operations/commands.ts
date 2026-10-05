@@ -1,3 +1,4 @@
+import { remapComposerContextAttachments } from "@t3tools/shared/composerContextReferences";
 import {
   type ThreadLinkedPullRequest,
   CommandId,
@@ -27,6 +28,7 @@ import {
   type UploadChatAttachment,
 } from "@t3tools/contracts";
 import { modelSelectionCommandType } from "@t3tools/shared/model";
+import { derivePendingBackgroundWork } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import * as Crypto from "effect/Crypto";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
@@ -121,6 +123,7 @@ export interface VisitThreadInput extends ThreadCommandInput {
 export type MarkThreadUnreadInput = ThreadCommandInput;
 
 export interface UpdateThreadMetadataInput extends ThreadCommandInput {
+  readonly limitRecovery?: import("@t3tools/contracts").OrchestrationV2LimitRecoveryUpdate | null;
   readonly title?: string;
   readonly modelSelection?: ModelSelection;
   readonly branch?: string | null;
@@ -152,6 +155,8 @@ interface StartThreadBootstrap {
     readonly agentPersona?: OrchestrationV2AgentPersonaRequest;
   };
   readonly prepareWorktree?: {
+    /** V2 worktree launches always fail rather than falling back to the project checkout. */
+    readonly requireWorktree?: boolean;
     readonly projectCwd: string;
     readonly baseBranch: string;
     readonly branch?: string;
@@ -176,6 +181,7 @@ export interface StartThreadTurnInput extends ThreadCommandInput {
     readonly role: "user";
     readonly text: string;
     readonly attachments: ReadonlyArray<ChatAttachment | UploadChatAttachment>;
+    readonly context?: import("@t3tools/contracts").OrchestrationMessageContext;
   };
   readonly modelSelection?: ModelSelection;
   readonly titleSeed?: string;
@@ -208,6 +214,7 @@ export interface DismissThreadUserInputInput extends ThreadCommandInput {
 }
 
 export interface RevertThreadCheckpointInput extends ThreadCommandInput {
+  readonly restoreFiles?: boolean;
   readonly checkpointId?: string;
   readonly scopeId?: string;
   readonly turnCount?: number;
@@ -254,6 +261,7 @@ export interface EditQueuedRunInput extends ThreadCommandInput {
   readonly edit?: {
     readonly messageId: MessageId;
     readonly attachments: ReadonlyArray<ChatAttachment | UploadChatAttachment>;
+    readonly context?: import("@t3tools/contracts").OrchestrationMessageContext;
   };
 }
 
@@ -284,7 +292,7 @@ const persistAttachments = Effect.fn("EnvironmentCommands.persistAttachments")(f
   attachments: ReadonlyArray<ChatAttachment | UploadChatAttachment>,
 ) {
   const stored = attachments.filter(
-    (attachment): attachment is ChatAttachment => "id" in attachment,
+    (attachment): attachment is ChatAttachment => !("dataUrl" in attachment),
   );
   const uploads = attachments.filter(
     (attachment): attachment is UploadChatAttachment => "dataUrl" in attachment,
@@ -300,7 +308,7 @@ const persistAttachments = Effect.fn("EnvironmentCommands.persistAttachments")(f
     uploads.map((attachment, index) => [attachment, result.attachments[index]]),
   );
   return attachments.flatMap((attachment) => {
-    if ("id" in attachment) return [attachment];
+    if (!("dataUrl" in attachment)) return [attachment];
     const persisted = byUpload.get(attachment);
     return persisted === undefined ? [] : [persisted];
   });
@@ -551,10 +559,12 @@ export const updateThreadMetadata = Effect.fn("EnvironmentCommands.updateThreadM
       input.branch !== undefined ||
       input.worktreePath !== undefined ||
       input.regenerateTitle !== undefined ||
-      input.linkedPullRequest !== undefined
+      input.linkedPullRequest !== undefined ||
+      input.limitRecovery !== undefined
     ) {
       result = yield* dispatch({
         type: "thread.metadata.update",
+        ...(input.limitRecovery === undefined ? {} : { limitRecovery: input.limitRecovery }),
         commandId,
         threadId: input.threadId,
         ...(input.title === undefined ? {} : { title: input.title }),
@@ -624,6 +634,11 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
     input.message.messageId,
     input.message.attachments,
   );
+  const context = remapComposerContextAttachments(
+    input.message.context,
+    input.message.attachments,
+    attachments,
+  );
   if (bootstrap !== undefined || prepareWorktree !== undefined) {
     const existingProjection =
       bootstrap === undefined ? yield* getProjection(input.threadId) : null;
@@ -670,6 +685,7 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
       initialMessage: {
         messageId: input.message.messageId,
         text: input.message.text,
+        ...(context ? { context } : {}),
         attachments,
       },
     });
@@ -685,6 +701,7 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
       threadId: input.threadId,
       messageId: input.message.messageId,
       text: input.message.text,
+      ...(context ? { context } : {}),
       attachments,
       ...(input.modelSelection === undefined ? {} : { modelSelection: input.modelSelection }),
       ...(input.sourceProposedPlan === undefined
@@ -745,6 +762,7 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
     threadId: input.threadId,
     messageId: input.message.messageId,
     text: input.message.text,
+    ...(context ? { context } : {}),
     attachments,
     ...(shouldSendTitleSeed ? { titleSeed: input.titleSeed } : {}),
     ...(input.modelSelection === undefined ? {} : { modelSelection: input.modelSelection }),
@@ -769,6 +787,20 @@ export const interruptThreadTurn = Effect.fn("EnvironmentCommands.interruptThrea
         run.status === "running" ||
         run.status === "waiting",
     )?.id;
+    if (runId === undefined) {
+      const latestRun = projection.runs.at(-1);
+      if (
+        derivePendingBackgroundWork({
+          latestRun,
+          providerThreads: projection.providerThreads,
+          turnItems: projection.turnItems,
+          activeProviderThreadId: projection.thread.activeProviderThreadId,
+          runs: projection.runs,
+        }).length > 0
+      ) {
+        runId = latestRun?.id;
+      }
+    }
   }
   if (runId === undefined) return { sequence: 0 };
   return yield* dispatch({
@@ -826,6 +858,7 @@ export const revertThreadCheckpoint = Effect.fn("EnvironmentCommands.revertThrea
     ) {
       return yield* dispatch({
         type: "checkpoint.rollback",
+        ...(input.restoreFiles === undefined ? {} : { restoreFiles: input.restoreFiles }),
         commandId: yield* allocateCommandId(input),
         threadId: input.threadId,
         scopeId: CheckpointScopeId.make(input.scopeId),
@@ -854,6 +887,7 @@ export const revertThreadCheckpoint = Effect.fn("EnvironmentCommands.revertThrea
     }
     return yield* dispatch({
       type: "checkpoint.rollback",
+      ...(input.restoreFiles === undefined ? {} : { restoreFiles: input.restoreFiles }),
       commandId: yield* allocateCommandId(input),
       threadId: input.threadId,
       scopeId: checkpoint.scopeId,
@@ -909,6 +943,16 @@ export const mergeThreadBack = Effect.fn("EnvironmentCommands.mergeThreadBack")(
   });
 });
 
+export const resumeThreadQueue = Effect.fn("EnvironmentCommands.resumeThreadQueue")(function* (
+  input: ThreadCommandInput,
+) {
+  return yield* dispatch({
+    type: "queue.resume",
+    commandId: yield* allocateCommandId(input),
+    threadId: input.threadId,
+  });
+});
+
 export const reorderQueuedRun = Effect.fn("EnvironmentCommands.reorderQueuedRun")(function* (
   input: ReorderQueuedRunInput,
 ) {
@@ -958,6 +1002,15 @@ export const editQueuedRun = Effect.fn("EnvironmentCommands.editQueuedRun")(func
     runId: input.runId,
     text: input.text,
     ...(attachments === undefined ? {} : { attachments }),
+    ...(input.edit?.context && attachments
+      ? {
+          context: remapComposerContextAttachments(
+            input.edit.context,
+            input.edit.attachments,
+            attachments,
+          ),
+        }
+      : {}),
   });
 });
 

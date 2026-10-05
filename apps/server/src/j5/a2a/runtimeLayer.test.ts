@@ -1,10 +1,12 @@
 import { DeviceService } from "../../device/DeviceService.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { EffectOutboxV2 } from "../../orchestration-v2/EffectOutbox.ts";
+import { EventSinkV2 } from "../../orchestration-v2/EventSink.ts";
 import { OrchestratorV2 } from "../../orchestration-v2/Orchestrator.ts";
 import { assert, it } from "@effect/vitest";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import { FetchHttpClient } from "effect/unstable/http";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -27,6 +29,7 @@ import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import { VcsProcess } from "../../vcs/VcsProcess.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { layer as outboxLayer } from "../../orchestration-v2/EffectOutbox.ts";
+import { ProviderAdapterRegistryV2 } from "../../orchestration-v2/ProviderAdapterRegistry.ts";
 import { A2ADeliveryTransport, live as deliveryTransportLayer } from "./DeliveryTransport.ts";
 import { j5AuthenticatedRoutesLayer } from "./J5AuthenticatedRoutes.ts";
 
@@ -43,6 +46,7 @@ import { ParticipantPlacementService } from "./PlacementService.ts";
 import { A2ASilenceDetector } from "./SilenceDetector.ts";
 import { ThreadHomesService } from "./ThreadHomesService.ts";
 import { SpawnCompositionService } from "./SpawnCompositionService.ts";
+import { PeerRegistryService } from "./PeerRegistryService.ts";
 import { makeJ5A2ARuntimeLayer } from "./runtimeLayer.ts";
 
 const archiveDependencies = Layer.mergeAll(
@@ -54,10 +58,13 @@ const archiveDependencies = Layer.mergeAll(
   }),
 );
 
+// The Crew and silence daemons read their start point from the event store; this one is empty.
+const emptyEventStore = Layer.mock(EventSinkV2)({ latestSequence: () => Effect.succeed(0) });
+
 const measureNestedRuntimeBuilds = (nested: "http" | "mcp") =>
   Effect.scoped(
     Effect.gen(function* () {
-      const databaseContext = yield* Layer.build(NodeSqliteClient.layerMemory());
+      const databaseContext = yield* Layer.build(NodeSqliteClient.layer({ filename: ":memory:" }));
       const database = Layer.succeed(
         SqlClient.SqlClient,
         Context.get(databaseContext, SqlClient.SqlClient),
@@ -84,10 +91,12 @@ const measureNestedRuntimeBuilds = (nested: "http" | "mcp") =>
         ).pipe(
           Layer.provide(runtime),
           Layer.provide(threadManagement),
+          Layer.provide(emptyEventStore),
           Layer.provide(Layer.mock(ProviderRegistry)({})),
           Layer.provide(Layer.mock(OrchestratorV2)({})),
           Layer.provide(Layer.mock(EffectOutboxV2)({ listByCommandId: () => Effect.succeed([]) })),
           Layer.provide(archiveDependencies),
+          Layer.provide(Layer.mock(EnvironmentAuth)({})),
           Layer.provide(
             ServerConfig.layerTest(process.cwd(), { prefix: "j5-a2a-runtime-layer-" }).pipe(
               Layer.provide(NodeServices.layer),
@@ -105,7 +114,7 @@ const measureNestedRuntimeBuilds = (nested: "http" | "mcp") =>
 it.effect("shares one runtime and outbox across the production HTTP and MCP registrations", () =>
   Effect.scoped(
     Effect.gen(function* () {
-      const databaseContext = yield* Layer.build(NodeSqliteClient.layerMemory());
+      const databaseContext = yield* Layer.build(NodeSqliteClient.layer({ filename: ":memory:" }));
       const database = Layer.succeed(
         SqlClient.SqlClient,
         Context.get(databaseContext, SqlClient.SqlClient),
@@ -140,6 +149,8 @@ it.effect("shares one runtime and outbox across the production HTTP and MCP regi
       const runtime = makeJ5A2ARuntimeLayer({
         ledger: countedLedger,
         deliveryTransport: deliveryTransportLayer.pipe(
+          Layer.provide(FetchHttpClient.layer),
+          Layer.provide(Layer.mock(PeerRegistryService)({})),
           Layer.tap((context) =>
             Effect.sync(() => transports.add(Context.get(context, A2ADeliveryTransport))),
           ),
@@ -161,6 +172,7 @@ it.effect("shares one runtime and outbox across the production HTTP and MCP regi
           ).pipe(
             Layer.provideMerge(runtime),
             Layer.provide(countedThreadManagement),
+            Layer.provide(emptyEventStore),
             Layer.provide(Layer.mock(DeviceService)({})),
             Layer.provide(Layer.mock(ProjectionSnapshotQuery)({})),
             Layer.provide(Layer.mock(OrchestratorV2)({})),
@@ -186,6 +198,7 @@ it.effect("shares one runtime and outbox across the production HTTP and MCP regi
                 Layer.mock(ProjectService)({}),
                 Layer.mock(ProjectSetupScriptRunner)({}),
                 Layer.mock(ProviderRegistry)({}),
+                Layer.mock(ProviderAdapterRegistryV2)({}),
                 Layer.mock(ScheduledTaskService)({}),
                 Layer.mock(GitWorkflowService)({}),
                 Layer.mock(VcsStatusBroadcaster)({}),

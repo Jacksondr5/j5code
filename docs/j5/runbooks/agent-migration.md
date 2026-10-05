@@ -277,8 +277,8 @@ refusal string is unmeasured; the row mismatch is the evidence.
 
 **The silent-fallback hazard, and the mandatory discriminators.** After the recall turn: (1) the
 provider thread's `nativeThreadRef.nativeId` had **changed** to a new uuid; (2) a context-transfer row
-with id `context-transfer:type:provider_resume_fallback:…` and a `full_thread_summary` handoff
-existed (summary text = the carrier's READY exchange only); (3) the swapped rollout **did not grow**
+with id `context-transfer:type:provider_resume_fallback:…` and a `full_thread_summary` context
+handoff existed (summary text = the carrier's READY exchange only); (3) the swapped rollout **did not grow**
 while a **new rollout** appeared; (4) the deep probe answered `NO-MEMORY` — and the run status was
 `completed`. A shallow probe would have called this a pass. **Never declare a Codex transplant
 resumed without all four**: native uuid unchanged, no `provider_resume_fallback` transfer, the

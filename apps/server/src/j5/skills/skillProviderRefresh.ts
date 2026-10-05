@@ -1,6 +1,5 @@
 import type { ProviderInstanceId, ServerProvider } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
-import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import type { ProviderRegistryShape } from "../../provider/Services/ProviderRegistry.ts";
 
@@ -56,23 +55,3 @@ export const refreshSkillProviders = Effect.fn("j5.skills.refreshProviders")(fun
   );
   return yield* registry.getProviders;
 });
-
-// Connections share a machine probe within this environment, never a workspace scan.
-const connectionRefreshes = new WeakMap<ProviderRegistryShape, Deferred.Deferred<void>>();
-export const refreshSkillsOnConnection = (registry: ProviderRegistryShape) =>
-  Effect.uninterruptibleMask((restore) =>
-    Effect.gen(function* () {
-      const pending = connectionRefreshes.get(registry);
-      if (pending) return yield* restore(Deferred.await(pending));
-      const ticket = yield* Deferred.make<void>();
-      connectionRefreshes.set(registry, ticket);
-      yield* restore(registry.refresh()).pipe(
-        Effect.ensuring(
-          Effect.gen(function* () {
-            connectionRefreshes.delete(registry);
-            yield* Deferred.succeed(ticket, undefined);
-          }),
-        ),
-      );
-    }),
-  );

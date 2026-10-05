@@ -22,6 +22,8 @@ import {
   type ExchangeId,
   MessageDeliveredPayload,
   MessageDeliveryFailedPayload,
+  type CommEvent,
+  MessageReceivedPayload,
   MessageSentPayload,
   type SquadronId,
   type LedgerCursor,
@@ -210,10 +212,54 @@ const decodeMessageCancelled = Schema.decodeUnknownEffect(
   Schema.Struct({ messageId: Schema.String, reason: Schema.String }),
 );
 const decodeMessageSent = Schema.decodeUnknownEffect(MessageSentPayload);
+const decodeMessageReceived = Schema.decodeUnknownEffect(MessageReceivedPayload);
 const decodeMessageDelivered = Schema.decodeUnknownEffect(MessageDeliveredPayload);
 const decodeMessageDeliveryFailed = Schema.decodeUnknownEffect(MessageDeliveryFailedPayload);
 const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json));
 const encodeJson = Schema.encodeEffect(Schema.fromJsonString(Schema.Json));
+// The one payload with optional keys has its own encoder, so every other caller keeps the Json check.
+const encodeReceivedPayload = Schema.encodeEffect(Schema.fromJsonString(MessageReceivedPayload));
+// Narrowing needs the discriminated union the caller submitted; the decided copy shares its payload.
+const encodeEventPayload = (event: CommEvent) =>
+  event.kind === "message.received"
+    ? encodeReceivedPayload(event.payload)
+    : encodeJson(event.payload);
+
+/** The pending delivery both a local send and a peer-received row project; origin columns are NULL for local sends. */
+const insertPendingDelivery = (
+  sql: SqlClient.SqlClient,
+  row: {
+    readonly squadronId: string;
+    readonly messageId: string;
+    readonly commandId: string;
+    readonly sentSeq: number;
+    readonly senderId: string;
+    readonly receiverId: string;
+    readonly receiverSquadronId: string;
+    readonly exchangeId: string | null;
+    readonly exchangeRole: string;
+    readonly envelopeChannel: string;
+    readonly correlationId: string | null;
+    readonly messageText: string;
+    readonly createdAt: string;
+    readonly originSquadronId: string | null;
+    readonly originEnvironmentId: string | null;
+    /** Set when the receiver is homed on a peer server; the worker hands such a row to the peer transport. */
+    readonly receiverEnvironmentId: string | null;
+  },
+) => sql`
+  INSERT INTO j5_a2a_delivery (
+    squadron_id, message_id, command_id, sent_seq, sender_id, receiver_id, receiver_squadron_id,
+    exchange_id, exchange_role, envelope_channel, correlation_id, message_text,
+    status, attempts, last_error, next_attempt_at, delivered_seq, created_at, updated_at,
+    origin_squadron_id, origin_environment_id, receiver_environment_id
+  ) VALUES (
+    ${row.squadronId}, ${row.messageId}, ${row.commandId}, ${row.sentSeq}, ${row.senderId}, ${row.receiverId}, ${row.receiverSquadronId},
+    ${row.exchangeId}, ${row.exchangeRole}, ${row.envelopeChannel}, ${row.correlationId}, ${row.messageText},
+    'pending', 0, NULL, NULL, NULL, ${row.createdAt}, ${row.createdAt},
+    ${row.originSquadronId}, ${row.originEnvironmentId}, ${row.receiverEnvironmentId}
+  )
+`;
 
 const preserveDomainError =
   (operation: string) =>
@@ -481,49 +527,24 @@ export const layer: Layer.Layer<
           if (event.sender === null || event.receiver === null || event.correlationId === null) {
             return yield* new A2AStorageError({ operation: "project sent message" });
           }
-          yield* sql`
-            INSERT INTO j5_a2a_delivery (
-              squadron_id,
-              message_id,
-              command_id,
-              sent_seq,
-              sender_id,
-              receiver_id,
-              receiver_squadron_id,
-              exchange_id,
-              exchange_role,
-              envelope_channel,
-              correlation_id,
-              message_text,
-              status,
-              attempts,
-              last_error,
-              next_attempt_at,
-              delivered_seq,
-              created_at,
-              updated_at
-            ) VALUES (
-              ${event.squadronId},
-              ${payload.messageId},
-              ${commandId},
-              ${event.seq},
-              ${event.sender},
-              ${event.receiver},
-              ${payload.receiverSquadronId},
-              ${event.exchangeId},
-              ${payload.exchangeRole},
-              ${payload.envelopeChannel},
-              ${event.correlationId},
-              ${payload.text},
-              'pending',
-              0,
-              NULL,
-              NULL,
-              NULL,
-              ${event.createdAt},
-              ${event.createdAt}
-            )
-          `;
+          yield* insertPendingDelivery(sql, {
+            squadronId: event.squadronId,
+            messageId: payload.messageId,
+            commandId,
+            sentSeq: event.seq,
+            senderId: event.sender,
+            receiverId: event.receiver,
+            receiverSquadronId: payload.receiverSquadronId,
+            exchangeId: event.exchangeId,
+            exchangeRole: payload.exchangeRole,
+            envelopeChannel: payload.envelopeChannel,
+            correlationId: event.correlationId,
+            messageText: payload.text,
+            createdAt: event.createdAt,
+            originSquadronId: null,
+            originEnvironmentId: null,
+            receiverEnvironmentId: payload.receiverEnvironmentId ?? null,
+          });
           return;
         }
         case "message.delivered": {
@@ -575,7 +596,37 @@ export const layer: Layer.Layer<
             WHERE squadron_id = ${event.squadronId} AND message_id = ${payload.messageId} AND status <> 'delivered'`;
           return;
         }
-        case "message.received":
+        case "message.received": {
+          // A row received from a peer server is the only sent-side fact this
+          // server has, so it projects the pending delivery a local send would.
+          const received = yield* decodeMessageReceived(event.payload);
+          if (received.originEnvironmentId === undefined) return;
+          // A withdrawal records its fact and wakes nobody, locally or across servers.
+          if (received.injection === "none") return;
+          const message = yield* decodeMessageSent(received.message);
+          if (event.sender === null || event.receiver === null) {
+            return yield* new A2AStorageError({ operation: "project peer-received message" });
+          }
+          yield* insertPendingDelivery(sql, {
+            squadronId: event.squadronId,
+            messageId: message.messageId,
+            commandId,
+            sentSeq: event.seq,
+            senderId: event.sender,
+            receiverId: event.receiver,
+            receiverSquadronId: event.squadronId,
+            exchangeId: event.exchangeId,
+            exchangeRole: message.exchangeRole,
+            envelopeChannel: message.envelopeChannel,
+            correlationId: event.correlationId,
+            messageText: message.text,
+            createdAt: event.createdAt,
+            originSquadronId: received.originSquadronId,
+            originEnvironmentId: received.originEnvironmentId,
+            receiverEnvironmentId: null,
+          });
+          return;
+        }
         case "silence.notice":
         case "participant.joined":
         case "participant.left":
@@ -707,7 +758,7 @@ export const layer: Layer.Layer<
           event: candidate,
         })[0];
         const seq = firstSeq + index;
-        const payload = yield* encodeJson(pending.payload);
+        const payload = yield* encodeEventPayload(candidate);
         yield* sql`
               INSERT INTO j5_a2a_comm_event (
                 seq,

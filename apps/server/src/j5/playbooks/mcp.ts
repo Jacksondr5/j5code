@@ -1,21 +1,31 @@
-import { PlaybookDiscovery, PlaybookError, PlaybookStepResponse } from "@t3tools/contracts/j5";
+import {
+  PlaybookDiscovery,
+  PlaybookError,
+  PlaybookReadResponse,
+  PlaybookStepResponse,
+} from "@t3tools/contracts/j5";
 import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { Tool } from "effect/unstable/ai";
 import { McpInvocationContext } from "../../mcp/McpInvocationContext.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { ProjectService } from "../../project/ProjectService.ts";
+import { PlaybookCrewRelay } from "./PlaybookCrewRelay.ts";
 import { PlaybookStore, playbookError, type PlaybookMutation } from "./PlaybookStore.ts";
+import { playbookWorkspaceRoot } from "./workspace.ts";
 
-const isPlaybookError = Schema.is(PlaybookError);
 const Text = Schema.String.check(Schema.isNonEmpty());
 const Mutation = Schema.Struct({ runId: Text, client_request_id: Text });
 const Movement = Schema.Struct({ ...Mutation.fields, expectedStepId: Text });
 const Reselection = Schema.Struct({ ...Movement.fields, stepId: Text });
-const Start = Schema.Struct({ name: Text, client_request_id: Text });
+const Start = Schema.Struct({
+  name: Text,
+  client_request_id: Text,
+  crew_instance_id: Schema.optional(Text),
+});
 const Current = Schema.Struct({ runId: Schema.optional(Text) });
-const dependencies = [McpInvocationContext, PlaybookStore];
+const Read = Schema.Struct({ name: Text });
+const dependencies = [McpInvocationContext, PlaybookStore, PlaybookCrewRelay];
 const workspaceDependencies = [...dependencies, ThreadManagementService, ProjectService];
 const common = {
   success: PlaybookStepResponse,
@@ -29,8 +39,17 @@ const mutationDescription =
 export const playbookTools = [
   Tool.make("playbook_list", {
     description:
-      "Discover live YAML playbooks in your thread workspace's .j5/playbooks directory. Invalid files include actionable errors.",
+      "Discover live YAML playbooks in your thread workspace's .j5/playbooks directory, with each step's persona. Invalid files include actionable errors; non-blocking warnings name steps whose persona is missing or turned off.",
     success: PlaybookDiscovery,
+    failure: PlaybookError,
+    failureMode: "return",
+    dependencies: workspaceDependencies,
+  }).annotate(Tool.Readonly, true),
+  Tool.make("playbook_read", {
+    description:
+      "Read a playbook's live definition, with every step's prompt and persona, without starting a run. Pass the same name as playbook_start. warnings name steps whose persona is missing or turned off; they never block starting.",
+    parameters: Read,
+    success: PlaybookReadResponse,
     failure: PlaybookError,
     failureMode: "return",
     dependencies: workspaceDependencies,
@@ -40,7 +59,7 @@ export const playbookTools = [
     dependencies: workspaceDependencies,
     parameters: Start,
     description:
-      "Start a named playbook in your own thread and retrieve its first live prompt. Only one run may be active. You perform the work and control advancement; the playbook never spawns or stops agents." +
+      "Start a named playbook in your own thread and retrieve its first live prompt. Only one run may be active. You perform the work and control advancement; the playbook never spawns or stops agents. As a Captain, pass crew_instance_id to run the playbook your Crew follows: each step then goes to the seat that owns it, and delivery says who holds it." +
       mutationDescription,
   }),
   Tool.make("playbook_current", {
@@ -97,24 +116,12 @@ const ownerScope = Effect.gen(function* () {
 });
 const workspace = Effect.gen(function* () {
   const scope = yield* ownerScope;
-  const threads = yield* ThreadManagementService;
-  const projects = yield* ProjectService;
-  const { thread } = yield* threads.getThreadProjection(scope.threadId);
-  if (thread.deletedAt !== null)
-    return yield* playbookError("thread_not_found", "The owner thread was deleted.");
-  const project = yield* projects.getById(thread.projectId);
-  if (Option.isNone(project))
-    return yield* playbookError("project_not_found", "The thread's project was not found.");
-  return { owner: scope.threadId, root: thread.worktreePath ?? project.value.workspaceRoot };
-}).pipe(
-  Effect.mapError((error) =>
-    isPlaybookError(error) ? error : playbookError("workspace_unavailable", error.message),
-  ),
-);
+  return { owner: scope.threadId, root: yield* playbookWorkspaceRoot(scope.threadId) };
+});
 
 const mutate = Effect.fn("PlaybookMcp.mutate")(function* (input: PlaybookMutation) {
   const scope = yield* ownerScope;
-  return yield* (yield* PlaybookStore).mutate(scope.threadId, input);
+  return yield* (yield* PlaybookCrewRelay).mutate(scope.threadId, input);
 });
 export const playbookHandlers = {
   playbook_list: () =>
@@ -122,15 +129,33 @@ export const playbookHandlers = {
       const { root } = yield* workspace;
       return yield* (yield* PlaybookStore).discover(root);
     }),
+  playbook_read: (input: typeof Read.Type) =>
+    Effect.gen(function* () {
+      const { root } = yield* workspace;
+      return yield* (yield* PlaybookStore).read(root, input.name);
+    }),
   playbook_start: (input: typeof Start.Type) =>
     Effect.gen(function* () {
       const { owner, root } = yield* workspace;
-      return yield* (yield* PlaybookStore).start(owner, root, input.name, input.client_request_id);
+      if (input.crew_instance_id === undefined)
+        return yield* (yield* PlaybookStore).start(
+          owner,
+          root,
+          input.name,
+          input.client_request_id,
+        );
+      return yield* (yield* PlaybookCrewRelay).start({
+        owner,
+        root,
+        name: input.name,
+        key: input.client_request_id,
+        crewInstanceId: input.crew_instance_id,
+      });
     }),
   playbook_current: (input: typeof Current.Type) =>
     Effect.gen(function* () {
       const scope = yield* ownerScope;
-      return yield* (yield* PlaybookStore).current(scope.threadId, input.runId);
+      return yield* (yield* PlaybookCrewRelay).current(scope.threadId, input.runId);
     }),
   playbook_next: (input: typeof Movement.Type) => mutate({ ...input, operation: "next" }),
   playbook_back: (input: typeof Movement.Type) => mutate({ ...input, operation: "back" }),

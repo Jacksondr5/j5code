@@ -13,6 +13,7 @@ import {
   translateAgentPersonaProviderPolicy,
 } from "./agentPersonaProviderPolicy.ts";
 import { agentPersonaArtifactInstructions } from "./agentPersonaArtifacts.ts";
+import { makeCrewSeatLookup, withCrewSeatQuestions } from "../a2a/crewSeatRuntime.ts";
 
 /**
  * Read-only personas run with shell approvals disabled ("approval policy never"). Models have read
@@ -91,16 +92,23 @@ export interface AgentPersonaRuntimePolicyInput {
 }
 
 /**
- * Resolver for the upstream RuntimePolicy layers: builds the library once and maps failures
- * through the caller-supplied error constructor, so the upstream file adds no persona logic.
+ * Resolver for the upstream RuntimePolicy layers: builds the library and the Crew seat lookup once
+ * and maps failures through the caller-supplied error constructor, so the upstream file adds no
+ * persona logic. A live Crew seat's policy is marked so adapters withhold native question tools.
  */
 export const makeAgentPersonaRuntimePolicyResolver = <E>(
   toError: (input: AgentPersonaRuntimePolicyInput, cause: unknown) => E,
 ) =>
   Effect.gen(function* () {
     const library = yield* makeAgentPersonaLibrary;
+    const isCrewSeat = yield* makeCrewSeatLookup;
     return (input: AgentPersonaRuntimePolicyInput) =>
       resolveAgentPersonaRuntimePolicy(input, library).pipe(
+        Effect.flatMap((policy) =>
+          isCrewSeat(input.thread).pipe(
+            Effect.map((seat) => (seat ? withCrewSeatQuestions(policy) : policy)),
+          ),
+        ),
         Effect.mapError((cause) => toError(input, cause)),
       );
   });

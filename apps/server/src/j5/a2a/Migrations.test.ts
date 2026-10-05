@@ -1,5 +1,6 @@
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as Migrator from "effect/unstable/sql/Migrator";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
@@ -9,6 +10,14 @@ import {
   migrationManifest as upstreamMigrationManifest,
   runMigrations,
 } from "../../persistence/Migrations.ts";
+import {
+  AgentCrewInstanceService,
+  layer as crewInstanceLayer,
+} from "./AgentCrewInstanceService.ts";
+import {
+  AgentCrewProposalService,
+  layer as proposalStoreLayer,
+} from "./AgentCrewProposalService.ts";
 import { J5_A2A_MIGRATIONS_TABLE, migrationEntries, runJ5A2AMigrations } from "./Migrations.ts";
 import Migration0005 from "./migrations/005_ImmutableThreadHome.ts";
 import Migration0008 from "./migrations/008_LifecycleClosure.ts";
@@ -60,6 +69,16 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
       { migration_id: 17, name: "EnsureCustomCrewSeats" },
       { migration_id: 18, name: "AgentLedPlaybooks" },
       { migration_id: 19, name: "PlaybookRunMaintenance" },
+      { migration_id: 20, name: "CrewAlertExchanges" },
+      { migration_id: 21, name: "CrewProposalsResolveOnce" },
+      { migration_id: 22, name: "CrewRetiredWithCaptain" },
+      { migration_id: 23, name: "Peers" },
+      { migration_id: 24, name: "PeerDeliveryOrigin" },
+      { migration_id: 25, name: "PeerDeliveryReceiver" },
+      { migration_id: 26, name: "PeerRouteIndexes" },
+      { migration_id: 27, name: "PeerSenderLabelRecency" },
+      { migration_id: 28, name: "CrewPlaybooks" },
+      { migration_id: 29, name: "CrewPlaybookRuns" },
     ]);
     assert.deepStrictEqual(
       migrationEntries.map(([id, name]) => [id, name]),
@@ -83,9 +102,19 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
         [17, "EnsureCustomCrewSeats"],
         [18, "AgentLedPlaybooks"],
         [19, "PlaybookRunMaintenance"],
+        [20, "CrewAlertExchanges"],
+        [21, "CrewProposalsResolveOnce"],
+        [22, "CrewRetiredWithCaptain"],
+        [23, "Peers"],
+        [24, "PeerDeliveryOrigin"],
+        [25, "PeerDeliveryReceiver"],
+        [26, "PeerRouteIndexes"],
+        [27, "PeerSenderLabelRecency"],
+        [28, "CrewPlaybooks"],
+        [29, "CrewPlaybookRuns"],
       ],
     );
-  }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+  }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );
 
 it.effect("adds playbooks after an environment has applied the Crew migrations", () =>
@@ -100,10 +129,125 @@ it.effect("adds playbooks after an environment has applied the Crew migrations",
     );
     assert.deepStrictEqual(
       yield* sql`SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'j5_playbook_%' ORDER BY name`,
-      [{ name: "j5_playbook_request" }, { name: "j5_playbook_run" }],
+      [
+        { name: "j5_playbook_request" },
+        { name: "j5_playbook_run" },
+        { name: "j5_playbook_step_delivery" },
+      ],
     );
     yield* runJ5A2AMigrations();
-  }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+  }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+);
+
+const crewStores = Layer.mergeAll(crewInstanceLayer, proposalStoreLayer).pipe(
+  Layer.provideMerge(NodeSqliteClient.layer({ filename: ":memory:" })),
+);
+
+it.effect("reads Crews recorded before playbooks as following none and owning no steps", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* runJ5A2AMigrations({ toMigrationInclusive: 27 });
+    yield* sql`
+      INSERT INTO j5_a2a_squadron (id, name, created_at)
+      VALUES ('squadron', 'Crew', '2026-09-25T00:00:00.000Z')
+    `;
+    yield* sql`
+      INSERT INTO j5_agent_crew_proposal (
+        id, squadron_id, captain_participant_id, captain_thread_id, crew_instance_id, kind,
+        status, brief, display_name, requested_seats, approved_seats, created_at, resolved_at
+      ) VALUES (
+        'p-old', 'squadron', 'agent:captain', 'thread:captain', 'crew-old', 'roster', 'approved',
+        'brief', 'Crew', '[{"seat":"helper","agentId":null,"reason":"Helps"}]', '[]',
+        '2026-09-25T00:00:00.000Z', '2026-09-25T00:01:00.000Z'
+      )
+    `;
+    yield* sql`
+      INSERT INTO j5_agent_crew_instance (
+        id, squadron_id, captain_participant_id, captain_thread_id, display_name, brief, version,
+        created_at, archived_at
+      ) VALUES (
+        'crew-old', 'squadron', 'agent:captain', 'thread:captain', 'Crew', 'brief', 1,
+        '2026-09-25T00:00:00.000Z', NULL
+      )
+    `;
+    yield* sql`
+      INSERT INTO j5_agent_crew_member (
+        crew_instance_id, seat_name, agent_id, participant_id, thread_id, ordinal, added_version,
+        reason
+      ) VALUES ('crew-old', 'helper', NULL, 'agent:helper', 'thread:helper', 0, 1, 'Helps')
+    `;
+    yield* runJ5A2AMigrations();
+    const proposal = yield* (yield* AgentCrewProposalService).read("p-old");
+    assert.isNull(proposal?.playbook);
+    assert.deepStrictEqual(proposal?.requestedSeats, [
+      { seat: "helper", agentId: null, reason: "Helps" },
+    ]);
+    const instance = yield* (yield* AgentCrewInstanceService).read("crew-old");
+    assert.isNull(instance?.playbook);
+    assert.deepStrictEqual(instance?.members[0]?.playbookStepIds, []);
+  }).pipe(Effect.provide(crewStores)),
+);
+
+it.effect("keeps existing playbook runs as thread runs when Crew links arrive", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* runJ5A2AMigrations({ toMigrationInclusive: 28 });
+    yield* sql`
+      INSERT INTO j5_playbook_run (
+        run_id, owner_thread_id, definition_path, current_step_id, status, created_at, updated_at
+      ) VALUES (
+        'run-1', 'thread:owner', '/w/.j5/playbooks/review.yaml', 'inspect', 'active',
+        '2026-09-29T00:00:00.000Z', '2026-09-29T00:00:00.000Z'
+      )
+    `;
+    yield* runJ5A2AMigrations();
+    assert.deepStrictEqual(yield* sql`SELECT run_id, crew_instance_id FROM j5_playbook_run`, [
+      { run_id: "run-1", crew_instance_id: null },
+    ]);
+    assert.deepStrictEqual(yield* sql`SELECT * FROM j5_playbook_step_delivery`, []);
+  }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+);
+
+it.effect("reopens crew proposals a claimed launch left mid-flight and keeps resolved ones", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* runJ5A2AMigrations({ toMigrationInclusive: 19 });
+    yield* sql`
+      INSERT INTO j5_a2a_squadron (id, name, created_at)
+      VALUES ('squadron', 'Crew', '2026-09-25T00:00:00.000Z')
+    `;
+    for (const [id, status] of [
+      ["p-approving", "approving"],
+      ["p-declining", "declining"],
+      ["p-approved", "approved"],
+      ["p-open", "open"],
+    ] as const)
+      yield* sql`
+        INSERT INTO j5_agent_crew_proposal (
+          id, squadron_id, captain_participant_id, captain_thread_id, crew_instance_id, kind,
+          status, brief, display_name, requested_seats, approved_seats, created_at, resolved_at
+        ) VALUES (
+          ${id}, 'squadron', 'agent:captain', 'thread:captain', NULL, 'roster', ${status}, 'brief',
+          'Crew', '[]', ${status === "open" ? null : "[]"}, '2026-09-25T00:00:00.000Z',
+          ${status === "open" ? null : "2026-09-25T00:01:00.000Z"}
+        )
+      `;
+    yield* runJ5A2AMigrations();
+    assert.deepStrictEqual(
+      yield* sql`SELECT id, status, approved_seats, resolved_at FROM j5_agent_crew_proposal ORDER BY id`,
+      [
+        {
+          id: "p-approved",
+          status: "approved",
+          approved_seats: "[]",
+          resolved_at: "2026-09-25T00:01:00.000Z",
+        },
+        { id: "p-approving", status: "open", approved_seats: null, resolved_at: null },
+        { id: "p-declining", status: "open", approved_seats: null, resolved_at: null },
+        { id: "p-open", status: "open", approved_seats: null, resolved_at: null },
+      ],
+    );
+  }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );
 
 it.effect("creates the exact namespaced ledger schema and receiver correlation constraint", () =>
@@ -322,7 +466,7 @@ it.effect("creates the exact namespaced ledger schema and receiver correlation c
       WHERE participant_id = 'human:forbidden-membership'
     `;
     assert.deepStrictEqual(forbiddenRows, [{ count: 0 }]);
-  }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+  }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );
 
 it.effect("requires a non-null, non-blank reparent actor subject", () =>
@@ -388,7 +532,7 @@ it.effect("requires a non-null, non-blank reparent actor subject", () =>
         actor_subject: "human:placement-owner",
       },
     ]);
-  }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+  }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );
 
 it.effect("adds lifecycle terminal state without mutating the A4 human inbox projection", () =>
@@ -641,7 +785,7 @@ it.effect("adds lifecycle terminal state without mutating the A4 human inbox pro
         '2026-08-23T00:01:00.000Z', 'lifecycle_notice'
       )
     `;
-  }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+  }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );
 
 it.effect("reports conflicting thread ids before creating the immutable-home index", () =>
@@ -756,7 +900,7 @@ it.effect("reports conflicting thread ids before creating the immutable-home ind
       WHERE type = 'index' AND name = 'j5_a2a_comm_event_agent_home_thread_idx'
     `;
     assert.deepStrictEqual(indexes, [{ count: 0 }]);
-  }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+  }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );
 
 it.effect(
@@ -1030,7 +1174,7 @@ it.effect(
       WHERE value = 'human:global'
     `;
       assert.deepStrictEqual(remainingGlobalReferences, [{ count: 0 }]);
-    }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );
 
 it.effect("renames existing Squadron data without changing ledger semantics", () =>
@@ -1154,7 +1298,7 @@ it.effect("renames existing Squadron data without changing ledger semantics", ()
         )
     `;
     assert.deepStrictEqual(legacySchema, []);
-  }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+  }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );
 
 it.effect("runs the J5 migration lane during normal SQLite setup", () =>
@@ -1208,7 +1352,7 @@ it.effect("recreates earlier-shaped crews tables when 14 runs over them", () =>
     `;
     assert.deepStrictEqual(
       applied.map((row) => row.migration_id),
-      [13, 14, 15, 16, 17, 18, 19],
+      [13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29],
     );
     const memberColumns = yield* sql<{ readonly name: string }>`
       SELECT name FROM pragma_table_info('j5_agent_crew_member') ORDER BY cid
@@ -1224,7 +1368,7 @@ it.effect("recreates earlier-shaped crews tables when 14 runs over them", () =>
       proposalColumns.map((column) => column.name),
       "runbook_declared",
     );
-  }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+  }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );
 
 it.effect(
@@ -1272,7 +1416,7 @@ it.effect(
         indexes.map((row) => row.name),
         "j5_agent_crew_proposal_open_idx",
       );
-    }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );
 
 for (const skipped15 of [false, true]) {
@@ -1317,7 +1461,7 @@ for (const skipped15 of [false, true]) {
           yield* sql`SELECT "notnull" FROM pragma_table_info('j5_agent_crew_member') WHERE name='agent_id'`;
         assert.deepStrictEqual(columns, [{ notnull: 0 }]);
         assert.lengthOf(yield* sql`SELECT * FROM j5_a2a_migrations WHERE migration_id=17`, 1);
-      }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+      }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 }
 
@@ -1340,7 +1484,14 @@ it.effect(
       }
       const before = yield* sql`SELECT * FROM j5_playbook_run ORDER BY run_id`;
       yield* runJ5A2AMigrations();
-      assert.deepStrictEqual(yield* sql`SELECT * FROM j5_playbook_run ORDER BY run_id`, before);
+      // Later migrations add the nullable Crew link; existing runs stay thread runs. The columns
+      // are named because the SQLite client caches statements by SQL text, and on Node 24.14 a
+      // `SELECT *` prepared before the ALTER keeps its old column list.
+      assert.deepStrictEqual(
+        yield* sql`SELECT run_id, owner_thread_id, definition_path, current_step_id, status,
+          created_at, updated_at, crew_instance_id FROM j5_playbook_run ORDER BY run_id`,
+        before.map((row) => ({ ...row, crew_instance_id: null })),
+      );
       assert.equal(
         (yield* sql`SELECT * FROM j5_playbook_request WHERE run_id = 'active'`).length,
         4,
@@ -1364,5 +1515,5 @@ it.effect(
         2,
       );
       yield* runJ5A2AMigrations();
-    }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );

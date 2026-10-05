@@ -5,6 +5,7 @@ import type {
   MessageId,
   OrchestrationProjectShell,
   OrchestrationV2RunStatus,
+  OrchestrationV2ProviderFailureClass,
   OrchestrationV2ThreadProjection,
   OrchestrationV2ThreadShell,
   PlanId,
@@ -14,6 +15,8 @@ import type {
   ThreadId,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
+
+import { formatSubagentDisplayTitle } from "./subagentDisplay.ts";
 
 export interface EnvironmentProject extends OrchestrationProjectShell {
   readonly environmentId: EnvironmentId;
@@ -51,6 +54,8 @@ export interface ThreadRuntimeSummary {
   readonly providerInstanceId: ProviderInstanceId;
   readonly providerName: string | null;
   readonly lastError: string | null;
+  readonly lastErrorClass?: OrchestrationV2ProviderFailureClass | null;
+  readonly usageLimitResetAt?: string | null;
   readonly updatedAt: string;
 }
 
@@ -119,6 +124,7 @@ export interface EnvironmentThreadShell {
   readonly unsettledAt: string | null;
   readonly snoozedUntil: string | null;
   readonly snoozedAt: string | null;
+  readonly limitRecovery?: import("@t3tools/contracts").OrchestrationV2LimitRecovery | null;
   readonly pinnedAt: string | null;
   /** Slot in the user-arranged pinned order; null for keyless (legacy) pins. */
   readonly pinOrderKey: string | null;
@@ -176,6 +182,8 @@ function shellRuntime(thread: OrchestrationV2ThreadShell): ThreadRuntimeSummary 
     providerInstanceId: thread.providerInstanceId,
     providerName: null,
     lastError: thread.lastError ?? null,
+    lastErrorClass: thread.lastErrorClass ?? null,
+    usageLimitResetAt: thread.usageLimitResetAt ?? null,
     updatedAt: iso(thread.updatedAt),
   };
 }
@@ -212,7 +220,10 @@ export function presentThreadShell(
     environmentId,
     id: thread.id,
     projectId: thread.projectId,
-    title: thread.title,
+    title:
+      thread.lineage.relationshipToParent === "subagent"
+        ? formatSubagentDisplayTitle(thread.title)
+        : thread.title,
     providerInstanceId: thread.providerInstanceId,
     modelSelection: thread.modelSelection,
     runtimeMode: thread.runtimeMode,
@@ -249,6 +260,7 @@ export function presentThreadShell(
     unsettledAt: nullableIso(thread.unsettledAt ?? null),
     snoozedUntil: nullableIso(thread.snoozedUntil ?? null),
     snoozedAt: nullableIso(thread.snoozedAt ?? null),
+    limitRecovery: thread.limitRecovery ?? null,
     pinnedAt: nullableIso(thread.pinnedAt ?? null),
     pinOrderKey: thread.pinOrderKey ?? null,
     activeOrderKey: thread.activeOrderKey ?? null,

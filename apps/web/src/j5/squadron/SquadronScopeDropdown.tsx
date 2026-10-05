@@ -15,37 +15,21 @@ import {
   MenuTrigger,
 } from "../../components/ui/menu";
 import { SidebarMenuButton } from "../../components/ui/sidebar";
+import { SidebarHeaderIconButton } from "../../components/sidebar/SidebarThreadHeader";
 import { resolveSquadronActionsState } from "./SquadronActions.logic";
 import { useSquadronDirectory } from "./SquadronDirectory";
 import { setAmbientSquadronScope, useSquadronAmbientScope } from "./SquadronDraftState";
-import { SquadronCreateDialog } from "./SquadronCreateDialog";
+import { openSquadronCreate } from "./SquadronCreateRequest";
 import { SquadronDeleteDialog } from "./SquadronDeleteDialog";
 import { SquadronRenameDialog, type SquadronActionTarget } from "./SquadronRenameDialog";
 import { resolveSquadronScope } from "./SquadronScope.logic";
 
-/** Sidebar-zone-only ambient context. It never selects a Squadron for a draft. */
-type SquadronScopeDropdownProps =
-  | {
-      readonly createOpen: boolean;
-      readonly onCreateOpenChange: (open: boolean) => void;
-    }
-  | {
-      readonly createOpen?: never;
-      readonly onCreateOpenChange?: never;
-    };
-
-function hasControlledCreateState(
-  props: SquadronScopeDropdownProps,
-): props is Extract<SquadronScopeDropdownProps, { readonly createOpen: boolean }> {
-  return "createOpen" in props;
-}
-
-export function SquadronScopeDropdown(props: SquadronScopeDropdownProps = {}) {
-  const [uncontrolledCreateOpen, setUncontrolledCreateOpen] = useState(false);
-  const createOpen = hasControlledCreateState(props) ? props.createOpen : uncontrolledCreateOpen;
-  const setCreateOpen = hasControlledCreateState(props)
-    ? props.onCreateOpenChange
-    : setUncontrolledCreateOpen;
+/**
+ * Sidebar-zone-only ambient context. It never selects a Squadron for a draft.
+ * `header` renders the compact trigger for upstream's SidebarThreadHeader scope
+ * slot: an icon while every Squadron is shown, plus the capped name once one is scoped.
+ */
+export function SquadronScopeDropdown(props: { readonly variant?: "row" | "header" } = {}) {
   // The dialogs keep their own target so a scope change mid-dialog cannot swap the Squadron.
   const [action, setAction] = useState<{
     readonly kind: "rename" | "delete";
@@ -76,20 +60,44 @@ export function SquadronScopeDropdown(props: SquadronScopeDropdownProps = {}) {
   return (
     <>
       <Menu>
-        <MenuTrigger
-          render={
-            <SidebarMenuButton
-              aria-label="Set ambient Squadron scope"
-              className="min-w-0 flex-1 ps-[calc(var(--sidebar-row-content-inset)-1px)] focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
-            />
-          }
+        {props.variant === "header" ? (
+          <MenuTrigger
+            render={
+              selected === null ? (
+                <SidebarHeaderIconButton label="Squadron scope: All Squadrons" />
+              ) : (
+                // The sidebar's own 28px text size keeps the neighbours' height and hover; the
+                // width cap leaves Search its label, and the tooltip carries the full name.
+                <SidebarHeaderIconButton
+                  label={`Squadron scope: ${selected.name}`}
+                  size="sm"
+                  className="w-auto max-w-22"
+                />
+              )
+            }
+          >
+            <RadioIcon />
+            {selected === null ? null : <span className="min-w-0 truncate">{selected.name}</span>}
+          </MenuTrigger>
+        ) : (
+          <MenuTrigger
+            render={
+              <SidebarMenuButton
+                aria-label="Set ambient Squadron scope"
+                className="min-w-0 flex-1"
+              />
+            }
+          >
+            <RadioIcon className="size-4 shrink-0" />
+            <span className="min-w-0 flex-1 truncate">
+              {status === "loading" ? "Loading Squadrons…" : (selected?.name ?? "Squadron scope")}
+            </span>
+          </MenuTrigger>
+        )}
+        <MenuPopup
+          align="start"
+          className={props.variant === "header" ? "min-w-56" : "w-(--anchor-width)"}
         >
-          <RadioIcon className="size-4 shrink-0" />
-          <span className="min-w-0 flex-1 truncate">
-            {status === "loading" ? "Loading Squadrons…" : (selected?.name ?? "Squadron scope")}
-          </span>
-        </MenuTrigger>
-        <MenuPopup align="start" className="w-(--anchor-width)">
           <MenuRadioGroup
             value={
               selected === null
@@ -161,7 +169,9 @@ export function SquadronScopeDropdown(props: SquadronScopeDropdownProps = {}) {
             <>
               <MenuSeparator />
               <MenuGroup>
-                <MenuGroupLabel className="truncate">{selected.name}</MenuGroupLabel>
+                <MenuGroupLabel>
+                  <span className="block truncate">{selected.name}</span>
+                </MenuGroupLabel>
                 <MenuItem
                   disabled={actionsState.kind === "disabled"}
                   onClick={() => openAction("rename")}
@@ -184,13 +194,12 @@ export function SquadronScopeDropdown(props: SquadronScopeDropdownProps = {}) {
             </>
           ) : null}
           <MenuSeparator />
-          <MenuItem onClick={() => setCreateOpen(true)}>
+          <MenuItem onClick={openSquadronCreate}>
             <PlusIcon />
             Create Squadron…
           </MenuItem>
         </MenuPopup>
       </Menu>
-      <SquadronCreateDialog open={createOpen} onOpenChange={setCreateOpen} />
       {action?.kind === "rename" ? (
         <SquadronRenameDialog
           open={actionOpen}

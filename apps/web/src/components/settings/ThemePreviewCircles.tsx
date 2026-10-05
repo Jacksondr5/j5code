@@ -58,7 +58,7 @@ const STANDARD_THEME_PREVIEW_COLORS: Record<
 export const STANDARD_THEME_CARDS: ReadonlyArray<ThemeCardDefinition> = [
   {
     id: "default",
-    label: "T3 Code",
+    label: "J5 Code",
     previews: (["light", "dark"] as const).map((mode) => ({
       mode,
       colors: STANDARD_THEME_PREVIEW_COLORS[mode],
@@ -131,14 +131,19 @@ function themePreviewEdgeShadow(mode: ThemeAppearance): string {
 export function ThemePreviewCircle({
   colors,
   mode,
+  className,
 }: {
   colors: ThemeCardPreviewColors;
   mode: ThemeAppearance;
+  className?: string;
 }) {
   return (
     <span
       aria-hidden
-      className="relative block size-14 shrink-0 overflow-hidden rounded-full border-2 border-background"
+      className={cn(
+        "relative block size-14 shrink-0 overflow-hidden rounded-full border-2 border-background",
+        className,
+      )}
       style={{ boxShadow: themePreviewEdgeShadow(mode) }}
     >
       <span

@@ -618,6 +618,30 @@ it.effect("preserves Bitbucket response body read failures as their immediate ca
   }).pipe(Effect.provide(layer));
 });
 
+it.effect("keeps the 429 retry time when the response body cannot be read", () => {
+  const { layer } = makeLayer({
+    response: () =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start: (controller) => controller.error(new Error("response stream failed")),
+        }),
+        { status: 429, headers: { "Retry-After": "120" } },
+      ),
+  });
+
+  return Effect.gen(function* () {
+    yield* TestClock.setTime(1_000);
+    const bitbucket = yield* BitbucketApi.BitbucketApi;
+    const error = yield* bitbucket
+      .request({ method: "GET", url: "/repositories/acme/web" })
+      .pipe(Effect.flip);
+
+    assert.instanceOf(error, BitbucketApi.BitbucketResponseBodyReadError);
+    assert.strictEqual(error.status, 429);
+    assert.strictEqual(error.retryAt, 121_000);
+  }).pipe(Effect.provide(layer));
+});
+
 it.effect("checks out same-repository pull requests with the existing Bitbucket remote", () => {
   const { git, layer } = makeLayer({
     response: () =>
@@ -761,17 +785,17 @@ it.effect("checks out fork pull requests through an ensured fork remote", () => 
       cwd: "/repo",
       remoteName: "octocat",
       remoteBranch: "main",
-      localBranch: "t3code/pr-42/main",
+      localBranch: "j5code/pr-42/main",
     });
     assert.deepStrictEqual(git.setBranchUpstream.mock.calls[0]?.[0], {
       cwd: "/repo",
-      branch: "t3code/pr-42/main",
+      branch: "j5code/pr-42/main",
       remoteName: "octocat",
       remoteBranch: "main",
     });
     assert.deepStrictEqual(git.switchRef.mock.calls[0]?.[0], {
       cwd: "/repo",
-      refName: "t3code/pr-42/main",
+      refName: "j5code/pr-42/main",
     });
   }).pipe(Effect.provide(layer));
 });

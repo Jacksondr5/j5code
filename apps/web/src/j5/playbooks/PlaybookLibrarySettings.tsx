@@ -5,17 +5,26 @@ import {
   ensurePlaybookAuthor,
   playbookAuthorLaunch,
   playbookAuthorSquadrons,
+  playbookStepLabel,
   playbookWorkspaces,
   samePlaybookWorkspaceInputs,
 } from "@t3tools/client-runtime/j5/playbooks";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { CommandId } from "@t3tools/contracts";
 import { Atom } from "effect/unstable/reactivity";
-import { DownloadIcon, PencilIcon, PlusIcon, RefreshCwIcon, Trash2Icon } from "lucide-react";
+import {
+  DownloadIcon,
+  MoreHorizontalIcon,
+  PencilIcon,
+  PlusIcon,
+  RefreshCwIcon,
+  Trash2Icon,
+} from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { SettingsRow, SettingsSection } from "../../components/settings/settingsLayout";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
+import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../../components/ui/menu";
 import {
   Select,
   SelectItem,
@@ -30,6 +39,8 @@ import { newMessageId, newThreadId, randomUUID } from "../../lib/utils";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { useServerConfigs } from "../../state/entities";
 import { useEnvironments } from "../../state/environments";
+import { useOptionalSettingsScope } from "../../components/settings/SettingsScopeContext";
+import { isProjectInSettingsScope } from "../settingsScopeEnvironment.logic";
 import { environmentProjects, projectEnvironment } from "../../state/projects";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -37,6 +48,7 @@ import { useAtomQueryRunner } from "../../state/use-atom-query-runner";
 import { environmentThreadShells, threadEnvironment } from "../../state/threads";
 import { waitForAtomValue } from "../../state/waitForAtomValue";
 import { buildThreadRouteParams } from "../../threadRoutes";
+import { AgentFolderPickerDialog } from "../agents/AgentFolderPickerDialog";
 import { agentPersonaEnvironment } from "../agents/agentPersonaAtoms";
 import { useSquadronDirectory } from "../squadron/SquadronDirectory";
 import { j5Environment } from "../state";
@@ -57,12 +69,25 @@ const playbookWorkspaceInputsAtom = Atom.withEquality(
 export function PlaybookLibrarySettings() {
   const { environments } = useEnvironments();
   const workspaceInputs = useAtomValue(playbookWorkspaceInputsAtom);
+  // The settings scope sentence narrows the workspaces and, when it names no
+  // environment, the representative environment's workspace comes first.
+  const settings = useOptionalSettingsScope();
+  const settingsScope = settings?.scope;
+  const representativeEnvironmentId = settings?.environment?.environmentId;
   const workspaces = useMemo(
-    () => playbookWorkspaces(workspaceInputs.projects, workspaceInputs.threads),
-    [workspaceInputs],
+    () =>
+      playbookWorkspaces(workspaceInputs.projects, workspaceInputs.threads).filter(
+        (entry) =>
+          settingsScope === undefined ||
+          isProjectInSettingsScope(settingsScope, entry.environmentId, entry.projectId),
+      ),
+    [settingsScope, workspaceInputs],
   );
   const [workspaceKey, setWorkspaceKey] = useState("");
-  const workspace = workspaces.find((entry) => entry.key === workspaceKey) ?? workspaces[0];
+  const workspace =
+    workspaces.find((entry) => entry.key === workspaceKey) ??
+    workspaces.find((entry) => entry.environmentId === representativeEnvironmentId) ??
+    workspaces[0];
   const workspaceItems = workspaces.map((entry) => ({
     value: entry.key,
     label:
@@ -124,7 +149,11 @@ export function PlaybookLibrarySettings() {
     workspaceKey: string;
     target: Parameters<typeof startTurn>[0];
   } | null>(null);
-  const fileInput = useRef<HTMLInputElement>(null);
+  const [picking, setPicking] = useState(false);
+  const readFile = useAtomQueryRunner(projectEnvironment.readFile, {
+    reportFailure: false,
+    refresh: true,
+  });
   const writeFile = useAtomCommand(projectEnvironment.writeFile, { reportFailure: false });
   const deletePlaybook = useAtomCommand(j5Environment.deletePlaybook, { reportFailure: false });
   const exportPlaybook = useAtomCommand(j5Environment.exportPlaybook, { reportFailure: false });
@@ -199,26 +228,32 @@ export function PlaybookLibrarySettings() {
       setBusy(false);
     }
   }
-  async function importFiles(files: File[]) {
-    if (!workspace || !query.data || busy || files.length === 0) return;
+  /** Copies a YAML file from the environment's machine into the workspace's playbook library. */
+  async function importFile(path: string) {
+    if (!workspace || !query.data || busy) return;
     setBusy(true);
     setError(null);
-    const names = new Set(query.data.playbooks.map((playbook) => playbook.name));
+    const { environmentId } = workspace;
+    const cwd = query.data.workspaceRoot;
     try {
-      for (const file of files) {
-        const name = playbookImportName(file.webkitRelativePath || file.name, file.size);
-        if (names.has(name) && !window.confirm(`Replace ${name}.yaml?`)) continue;
-        const result = await writeFile({
-          environmentId: workspace.environmentId,
-          input: {
-            cwd: query.data.workspaceRoot,
-            relativePath: `.j5/playbooks/${name}.yaml`,
-            contents: await file.text(),
-          },
-        });
-        if (result._tag === "Failure") throw squashAtomCommandFailure(result);
-        names.add(name);
-      }
+      // An absolute path reads the host file wherever it lives.
+      const read = await readFile({ environmentId, input: { cwd, relativePath: path } });
+      if (read._tag === "Failure") throw squashAtomCommandFailure(read);
+      const name = playbookImportName(path, read.value.byteLength);
+      if (
+        query.data.playbooks.some((playbook) => playbook.name === name) &&
+        !window.confirm(`Replace ${name}.yaml?`)
+      )
+        return;
+      const result = await writeFile({
+        environmentId,
+        input: {
+          cwd,
+          relativePath: `.j5/playbooks/${name}.yaml`,
+          contents: read.value.contents,
+        },
+      });
+      if (result._tag === "Failure") throw squashAtomCommandFailure(result);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not import playbook YAML files.");
     } finally {
@@ -227,7 +262,7 @@ export function PlaybookLibrarySettings() {
     }
   }
   async function removePlaybook(name: string) {
-    if (!workspace || !query.data || busy) return;
+    if (!workspace || !query.data || query.error || busy) return;
     if (!window.confirm(`Delete ${name}.yaml from ${workspace.title}?`)) return;
     setBusy(true);
     setError(null);
@@ -325,38 +360,44 @@ export function PlaybookLibrarySettings() {
   }
   return (
     <>
-      <input
-        ref={fileInput}
-        type="file"
-        hidden
-        multiple
-        accept=".yaml,.yml,application/yaml,text/yaml"
-        aria-label="Choose playbook YAML files"
-        onChange={(event) => {
-          const files = Array.from(event.currentTarget.files ?? []);
-          event.currentTarget.value = "";
-          void importFiles(files);
-        }}
-      />
+      {picking && workspace ? (
+        <AgentFolderPickerDialog
+          environmentId={workspace.environmentId}
+          environmentLabel={
+            environments.find((env) => env.environmentId === workspace.environmentId)?.label ??
+            "this environment"
+          }
+          mode="file"
+          title="Import a playbook file"
+          confirmLabel="Import"
+          onClose={() => setPicking(false)}
+          onSelect={(path) => {
+            setPicking(false);
+            void importFile(path);
+          }}
+        />
+      ) : null}
       <SettingsSection
         title="Playbooks"
         id="playbooks"
         headerAction={
-          <div className="flex flex-wrap items-center justify-end gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-1">
             <Button
-              variant="outline"
+              size="xs"
+              variant="ghost-muted"
               disabled={
                 !workspace || !authorSquadron?.available || busy || !query.data || !!query.error
               }
               onClick={() => void createPlaybook()}
             >
-              <PlusIcon aria-hidden="true" className="size-4" />
+              <PlusIcon aria-hidden="true" className="size-3" />
               Create playbook
             </Button>
             <Button
-              variant="outline"
+              size="xs"
+              variant="ghost-muted"
               disabled={!workspace || busy || !query.data || !!query.error}
-              onClick={() => fileInput.current?.click()}
+              onClick={() => setPicking(true)}
             >
               Import YAML
             </Button>
@@ -364,13 +405,13 @@ export function PlaybookLibrarySettings() {
               <TooltipTrigger
                 render={
                   <Button
-                    size="icon"
-                    variant="ghost"
+                    size="icon-xs"
+                    variant="ghost-muted"
                     aria-label="Refresh playbooks"
                     disabled={!workspace || busy || query.isPending}
                     onClick={refresh}
                   >
-                    <RefreshCwIcon aria-hidden="true" className="size-4" />
+                    <RefreshCwIcon aria-hidden="true" className="size-3.5" />
                   </Button>
                 }
               />
@@ -379,10 +420,6 @@ export function PlaybookLibrarySettings() {
           </div>
         }
       >
-        <SettingsRow
-          title="Playbook library"
-          description="Reusable prompts that guide an agent through ordered steps. Create and refine them in a conversation."
-        />
         <SettingsRow
           title="Workspace"
           description={
@@ -414,7 +451,7 @@ export function PlaybookLibrarySettings() {
                 setError(null);
               }}
             >
-              <SelectTrigger className="w-full sm:w-56" aria-label="Playbook workspace">
+              <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Playbook workspace">
                 <SelectValue placeholder="No projects available" />
               </SelectTrigger>
               <SelectPopup align="end" alignItemWithTrigger={false}>
@@ -427,42 +464,49 @@ export function PlaybookLibrarySettings() {
             </Select>
           }
         />
-        <SettingsRow
-          title="Authoring Squadron"
-          description="Where the Playbook Author chat starts."
-          control={
-            <Select
-              value={authorSquadron?.squadron.id ?? ""}
-              disabled={!workspace || busy}
-              onValueChange={(value) => {
-                if (value === null) return;
-                if (workspace) setAuthorScope({ workspaceKey: workspace.key, squadronId: value });
-                setError(null);
-              }}
-            >
-              <SelectTrigger className="w-full sm:w-56" aria-label="Playbook author Squadron">
-                <SelectValue>
-                  {authorSquadron
-                    ? `${authorSquadron.squadron.name}${authorSquadron.available ? "" : " (unavailable)"}`
-                    : authorSquadronPlaceholder}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                <SelectItem value="">{authorSquadronPlaceholder}</SelectItem>
-                {authorSquadrons.map((entry) => (
-                  <SelectItem
-                    key={entry.squadron.id}
-                    value={entry.squadron.id}
-                    disabled={!entry.available}
-                  >
-                    {entry.squadron.name}
-                    {entry.available ? "" : " (unavailable)"}
-                  </SelectItem>
-                ))}
-              </SelectPopup>
-            </Select>
-          }
-        />
+        {/* A sole available Squadron needs no choice; loading, zero, or a blocked one still explains why. */}
+        {authorSquadrons.length === 1 && authorSquadron?.available ? null : (
+          <SettingsRow
+            title="Authoring Squadron"
+            description="Where the Playbook Author chat starts."
+            control={
+              <Select
+                value={authorSquadron?.squadron.id ?? ""}
+                disabled={!workspace || busy}
+                onValueChange={(value) => {
+                  if (value === null) return;
+                  if (workspace) setAuthorScope({ workspaceKey: workspace.key, squadronId: value });
+                  setError(null);
+                }}
+              >
+                <SelectTrigger
+                  size="sm"
+                  className="w-full sm:w-56"
+                  aria-label="Playbook author Squadron"
+                >
+                  <SelectValue>
+                    {authorSquadron
+                      ? `${authorSquadron.squadron.name}${authorSquadron.available ? "" : " (unavailable)"}`
+                      : authorSquadronPlaceholder}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  <SelectItem value="">{authorSquadronPlaceholder}</SelectItem>
+                  {authorSquadrons.map((entry) => (
+                    <SelectItem
+                      key={entry.squadron.id}
+                      value={entry.squadron.id}
+                      disabled={!entry.available}
+                    >
+                      {entry.squadron.name}
+                      {entry.available ? "" : " (unavailable)"}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+            }
+          />
+        )}
         {(error || query.error) && !renameTarget && (
           <SettingsRow
             title={query.error ? "Playbooks unavailable" : "Playbook action failed"}
@@ -483,69 +527,98 @@ export function PlaybookLibrarySettings() {
         {query.data?.playbooks.length === 0 && (
           <SettingsRow
             title="No playbooks in this workspace yet"
-            description="Import a YAML file or create one with your agent."
+            description="Playbooks guide an agent through ordered steps. Import a YAML file or create one with your agent."
           />
         )}
         {query.data?.playbooks.map((playbook) => (
           <SettingsRow
             key={playbook.name}
             title={playbook.title}
-            description={
-              <>
-                {playbook.description}
-                <span className="mt-1 block text-xs">
-                  {playbook.name}.yaml · {playbook.stepCount} steps
-                </span>
-              </>
+            description={playbook.description}
+            status={
+              <div className="space-y-1">
+                <span className="block">{playbook.name}.yaml</span>
+                {playbook.issue ? (
+                  <p role="status" className="text-destructive">
+                    {playbook.issue.message}
+                  </p>
+                ) : (
+                  <>
+                    <ol
+                      className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground"
+                      aria-label={`${playbook.title} steps`}
+                    >
+                      {playbook.steps.map((step, index) => (
+                        <li key={step.id} className="min-w-0 break-words">
+                          {playbookStepLabel(step, index)}
+                        </li>
+                      ))}
+                    </ol>
+                    {(playbook.warnings ?? []).map((warning) => (
+                      <p
+                        key={`${warning.stepId}:${warning.code}`}
+                        role="status"
+                        className="text-xs text-warning"
+                      >
+                        {warning.message}
+                      </p>
+                    ))}
+                  </>
+                )}
+              </div>
             }
             control={
-              <div className="flex flex-wrap items-center gap-2">
+              <>
                 <Button
                   size="sm"
                   variant="outline"
                   disabled={busy || !!query.error || !!playbook.issue}
                   onClick={() => void openDraft(`Start playbook ${playbook.name}`)}
                 >
-                  Prepare playbook chat
+                  Prepare chat
                 </Button>
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  aria-label={`Export ${playbook.title} as YAML`}
-                  title={`Export ${playbook.title} as YAML`}
-                  disabled={busy || !!query.error || !!playbook.issue}
-                  onClick={() => void downloadPlaybook(playbook.name)}
-                >
-                  <DownloadIcon aria-hidden="true" className="size-4" />
-                </Button>
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  aria-label={`Rename ${playbook.title}`}
-                  title={`Rename ${playbook.title}`}
-                  disabled={busy || !!query.error || !!playbook.issue}
-                  onClick={() => {
-                    setError(null);
-                    setRenameTarget({ name: playbook.name, title: playbook.title });
-                  }}
-                >
-                  <PencilIcon aria-hidden="true" className="size-4" />
-                </Button>
-                <Button
-                  size="icon-sm"
-                  variant="destructive-outline"
-                  aria-label={`Delete ${playbook.title}`}
-                  title={`Delete ${playbook.title}`}
-                  disabled={busy || !!query.error}
-                  onClick={() => void removePlaybook(playbook.name)}
-                >
-                  <Trash2Icon aria-hidden="true" className="size-4" />
-                </Button>
-              </div>
+                <Menu>
+                  <MenuTrigger
+                    disabled={busy || !!query.error}
+                    aria-label={`More actions for ${playbook.title}`}
+                    render={<Button variant="ghost" size="icon-sm" />}
+                  >
+                    <MoreHorizontalIcon className="size-4" />
+                  </MenuTrigger>
+                  <MenuPopup align="end">
+                    <MenuItem
+                      disabled={busy || !!query.error || !!playbook.issue}
+                      onClick={() => void downloadPlaybook(playbook.name)}
+                    >
+                      <DownloadIcon />
+                      Export YAML
+                    </MenuItem>
+                    <MenuItem
+                      disabled={busy || !!query.error || !!playbook.issue}
+                      onClick={() => {
+                        setError(null);
+                        setRenameTarget({ name: playbook.name, title: playbook.title });
+                      }}
+                    >
+                      <PencilIcon />
+                      Rename
+                    </MenuItem>
+                    <MenuSeparator />
+                    <MenuItem
+                      variant="destructive"
+                      disabled={busy || !!query.error}
+                      onClick={() => void removePlaybook(playbook.name)}
+                    >
+                      <Trash2Icon />
+                      Delete
+                    </MenuItem>
+                  </MenuPopup>
+                </Menu>
+              </>
             }
           >
-            <div className="space-y-3 py-2">
-              {renameTarget?.name === playbook.name && (
+            {renameTarget?.name === playbook.name ? (
+              <div className="space-y-3 py-2">
                 <form
                   className="flex max-w-xl flex-wrap items-center gap-2"
                   onSubmit={(event) => {
@@ -581,29 +654,13 @@ export function PlaybookLibrarySettings() {
                     Cancel
                   </Button>
                 </form>
-              )}
-              {renameTarget?.name === playbook.name && (error || query.error) ? (
-                <p role="alert" className="text-sm text-destructive">
-                  {error ?? query.error}
-                </p>
-              ) : null}
-              {playbook.issue ? (
-                <p role="status" className="text-sm text-destructive">
-                  {playbook.issue.message}
-                </p>
-              ) : (
-                <ol
-                  className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground"
-                  aria-label={`${playbook.title} steps`}
-                >
-                  {playbook.steps.map((step, index) => (
-                    <li key={step.id} className="min-w-0 break-words">
-                      {index + 1}. {step.title}
-                    </li>
-                  ))}
-                </ol>
-              )}
-            </div>
+                {error || query.error ? (
+                  <p role="alert" className="text-sm text-destructive">
+                    {error ?? query.error}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
           </SettingsRow>
         ))}
       </SettingsSection>

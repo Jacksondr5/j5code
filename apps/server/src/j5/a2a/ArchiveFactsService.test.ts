@@ -43,7 +43,7 @@ const inboundCounterparty: AgentParticipant = {
 };
 
 const makeTestLayer = (placementFacts = placementFactsLayer) => {
-  const database = NodeSqliteClient.layerMemory();
+  const database = NodeSqliteClient.layer({ filename: ":memory:" });
   const ledger = ledgerLayer.pipe(Layer.provide(database));
   const placements = placementLayer.pipe(Layer.provide(ledger), Layer.provide(database));
   const facts = archiveFactsLayer.pipe(

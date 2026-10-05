@@ -5,6 +5,7 @@ import * as Layer from "effect/Layer";
 import { McpServer } from "effect/unstable/ai";
 
 import { OrchestratorV2 } from "../../../orchestration-v2/Orchestrator.ts";
+import { ProviderAdapterRegistryV2 } from "../../../orchestration-v2/ProviderAdapterRegistry.ts";
 import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
 import { ProviderRegistry } from "../../../provider/Services/ProviderRegistry.ts";
 import { ScheduledTaskService } from "../../../scheduledTasks/ScheduledTaskService.ts";
@@ -30,6 +31,7 @@ const Dependencies = Layer.mergeAll(
   Layer.mock(ThreadManagementService)({}),
   Layer.mock(OrchestratorV2)({}),
   Layer.mock(ProviderRegistry)({}),
+  Layer.mock(ProviderAdapterRegistryV2)({}),
   Layer.mock(ScheduledTaskService)({}),
   Layer.mock(A2ADeliveryWorker)({}),
   Layer.mock(A2AHomeRegistrar)({}),
@@ -71,6 +73,7 @@ it.effect("registers the exact composed production J5 orchestration surface", ()
       "playbook_current",
       "playbook_list",
       "playbook_next",
+      "playbook_read",
       "playbook_reselect",
       "playbook_start",
       "propose_crew",

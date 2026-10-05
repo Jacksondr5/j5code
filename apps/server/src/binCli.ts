@@ -16,6 +16,11 @@ import { hasCloudPublicConfig } from "./cloud/publicConfig.ts";
 import { sharedServerCommandFlags } from "./cli/config.ts";
 import { projectCommand } from "./cli/project.ts";
 import { runServerCommand, serveCommand, startCommand } from "./cli/server.ts";
+import { updateCommand } from "./cli/update.ts";
+import { uninstallCommand } from "./cli/uninstall.ts";
+import { serviceLauncherCommand } from "./cli/serviceLauncher.ts";
+import { claudeHistoryCommand } from "./cli/claudeHistory.ts";
+import { sshHelperCommand } from "./cli/sshHelper.ts";
 import { serviceCommand } from "./cli/service.ts";
 import { servicePreflightCommand } from "./cli/servicePreflight.ts";
 import { themeCommand } from "./cli/theme.ts";
@@ -34,7 +39,7 @@ class ConnectPublicConfigMissingError extends CliError.UserError {
 }
 
 const connectUnavailableCommand = Command.make("connect", {
-  command: Argument.string("command").pipe(Argument.variadic),
+  command: Argument.String("command").pipe(Argument.variadic),
 }).pipe(
   Command.withDescription("T3 Connect is unavailable in builds without public configuration."),
   Command.unlisted,
@@ -62,6 +67,12 @@ export const makeCli = ({ cloudEnabled = hasCloudPublicConfig } = {}) =>
       authCommand,
       projectCommand,
       serviceCommand,
+      updateCommand,
+      uninstallCommand,
+      serviceLauncherCommand,
+      claudeHistoryCommand,
+      sshHelperCommand,
+
       servicePreflightCommand,
       themeCommand,
       triageCommand,

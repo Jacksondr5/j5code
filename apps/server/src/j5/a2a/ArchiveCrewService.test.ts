@@ -21,6 +21,7 @@ import {
   layer as archiveCrewLayer,
   type ArchiveCrewInput,
 } from "./ArchiveCrewService.ts";
+import { PlaybookStore } from "../playbooks/PlaybookStore.ts";
 import { ExchangeId, ParticipantId, SquadronId } from "./contracts.ts";
 
 const squadronId = SquadronId.make("squadron:j5:archive-crew");
@@ -67,7 +68,8 @@ const openExchange = {
 };
 
 const fixture = Effect.gen(function* () {
-  const facts = yield* Ref.make<Record<string, ArchiveAgentTargetFacts>>({
+  // A null entry is a seat whose thread never came to exist.
+  const facts = yield* Ref.make<Record<string, ArchiveAgentTargetFacts | null>>({
     [builder]: {
       facts: { openExchanges: [openExchange], runningTurn: null },
       threadArchived: false,
@@ -81,14 +83,26 @@ const fixture = Effect.gen(function* () {
   });
   const archived = yield* Ref.make<ReadonlyArray<ArchiveAgentInput>>([]);
   const failSeat = yield* Ref.make<ParticipantId | null>(null);
+  // A seat whose facts the store cannot read at all.
+  const unreadableSeat = yield* Ref.make<ParticipantId | null>(null);
   const marked = yield* Ref.make<ReadonlyArray<string>>([]);
   const crewArchivedAt = yield* Ref.make<string | null>(null);
+  // The order of cancels and retired stamps, so a test can see the run ends before the stamp.
+  const lifecycle = yield* Ref.make<ReadonlyArray<string>>([]);
   const layer = archiveCrewLayer.pipe(
     Layer.provide(
       Layer.mergeAll(
         Layer.mock(ArchiveAgentService)({
           readFacts: (target) =>
-            Ref.get(facts).pipe(Effect.map((current) => current[target.participantId]!)),
+            Effect.gen(function* () {
+              if ((yield* Ref.get(unreadableSeat)) === target.participantId)
+                return yield* new ArchiveAgentOperationError({
+                  phase: "reading the target thread projection",
+                  cause: new Error("database is locked"),
+                });
+              const current = (yield* Ref.get(facts))[target.participantId];
+              return current === undefined ? yield* Effect.die("unknown seat") : current;
+            }),
           archive: (input) =>
             Effect.gen(function* () {
               // Mirrors the real service: a retired member replays as already archived.
@@ -112,13 +126,18 @@ const fixture = Effect.gen(function* () {
             }),
         }),
         Layer.mock(AgentCrewInstanceService)({
+          serialize: (_id, effect) => effect,
           read: (id) =>
             Ref.get(crewArchivedAt).pipe(
               Effect.map((archivedAt) => (id === instance.id ? { ...instance, archivedAt } : null)),
             ),
           markArchived: (id, archivedAt) =>
             Effect.all(
-              [Ref.update(marked, (items) => [...items, id]), Ref.set(crewArchivedAt, archivedAt)],
+              [
+                Ref.update(marked, (items) => [...items, id]),
+                Ref.update(lifecycle, (items) => [...items, `marked:${id}`]),
+                Ref.set(crewArchivedAt, archivedAt),
+              ],
               { discard: true },
             ),
           listForCaptain: (query) =>
@@ -127,6 +146,10 @@ const fixture = Effect.gen(function* () {
                 query.captainParticipantId === captain ? [{ ...instance, archivedAt }] : [],
               ),
             ),
+        }),
+        Layer.mock(PlaybookStore)({
+          cancelForCrew: (id) =>
+            Ref.update(lifecycle, (items) => [...items, `cancelled:${id}`]).pipe(Effect.as([])),
         }),
         Layer.mock(ServerSecretStore)({
           getOrCreateRandom: () => Effect.succeed(new Uint8Array(32).fill(7)),
@@ -147,7 +170,17 @@ const fixture = Effect.gen(function* () {
     }),
     ...overrides,
   });
-  return { layer, input, archived, failSeat, marked, facts };
+  return {
+    layer,
+    input,
+    archived,
+    failSeat,
+    unreadableSeat,
+    marked,
+    facts,
+    lifecycle,
+    crewArchivedAt,
+  };
 });
 
 it.effect("refuses until the captain confirms every member's facts, then retires the unit", () =>
@@ -212,6 +245,43 @@ it.effect("refuses until the captain confirms every member's facts, then retires
       );
       assert.equal(replay.status, "already_archived");
       assert.lengthOf(yield* Ref.get(archived), 2);
+    }).pipe(Effect.provide(layer));
+  }),
+);
+
+it.effect("cancels the Crew's playbook run before the retired stamp, and again on a retry", () =>
+  Effect.gen(function* () {
+    const { layer, input, lifecycle } = yield* fixture;
+    yield* Effect.gen(function* () {
+      const service = yield* ArchiveCrewService;
+      yield* service.archive(input({ confirmationSatisfied: true }));
+      assert.deepStrictEqual(yield* Ref.get(lifecycle), [
+        `cancelled:${instance.id}`,
+        `marked:${instance.id}`,
+      ]);
+      // A crash after the stamp but before a cancel landed is repaired by the retry.
+      const replay = yield* service.archive(input({ confirmationSatisfied: true }));
+      assert.equal(replay.status, "already_archived");
+      assert.deepStrictEqual(yield* Ref.get(lifecycle), [
+        `cancelled:${instance.id}`,
+        `marked:${instance.id}`,
+        `cancelled:${instance.id}`,
+      ]);
+    }).pipe(Effect.provide(layer));
+  }),
+);
+
+it.effect("the Captain cascade's archive cancels the Crew's playbook run too", () =>
+  Effect.gen(function* () {
+    const { layer, input, lifecycle } = yield* fixture;
+    yield* Effect.gen(function* () {
+      const service = yield* ArchiveCrewService;
+      // CrewCaptainArchiveCascade.retire archives each Crew through this door with withCaptain.
+      yield* service.archive(input({ confirmationSatisfied: true, withCaptain: true }));
+      assert.deepStrictEqual(yield* Ref.get(lifecycle), [
+        `cancelled:${instance.id}`,
+        `marked:${instance.id}`,
+      ]);
     }).pipe(Effect.provide(layer));
   }),
 );
@@ -335,4 +405,61 @@ it.effect("retires the unit for a person whose dialog already listed every seat'
       );
     }).pipe(Effect.provide(layer));
   }),
+);
+
+it.effect("retires the unit past a seat whose thread was never created, and says so", () =>
+  Effect.gen(function* () {
+    const { layer, input, archived, marked, facts } = yield* fixture;
+    yield* Ref.update(facts, (current) => ({ ...current, [critic]: null }));
+    yield* Effect.gen(function* () {
+      const service = yield* ArchiveCrewService;
+      const outcome = yield* service.archive(
+        input({ callerParticipantId: null, confirmationSatisfied: true }),
+      );
+      assert.deepStrictEqual(outcome, {
+        status: "archived",
+        members: [
+          { seatName: "builder", participantId: builder, result: "archived" },
+          { seatName: "critic", participantId: critic, result: "never_created" },
+        ],
+      });
+      assert.deepStrictEqual(
+        (yield* Ref.get(archived)).map((call) => call.target.participantId),
+        [builder],
+      );
+      assert.deepStrictEqual(yield* Ref.get(marked), [instance.id]);
+
+      const replay = yield* service.archive(
+        input({ callerParticipantId: null, confirmationSatisfied: true }),
+      );
+      assert.equal(replay.status, "already_archived");
+      assert.deepStrictEqual(
+        replay.members.map((member) => [member.seatName, member.result]),
+        [
+          ["builder", "already_archived"],
+          ["critic", "never_created"],
+        ],
+      );
+    }).pipe(Effect.provide(layer));
+  }),
+);
+
+it.effect(
+  "a seat whose facts cannot be read fails the unit instead of passing as never created",
+  () =>
+    Effect.gen(function* () {
+      const { layer, input, archived, marked, unreadableSeat } = yield* fixture;
+      yield* Ref.set(unreadableSeat, critic);
+      yield* Effect.gen(function* () {
+        const service = yield* ArchiveCrewService;
+        const failure = yield* service
+          .archive(input({ callerParticipantId: null, confirmationSatisfied: true }))
+          .pipe(Effect.flip);
+        assert.instanceOf(failure, ArchiveCrewPartialFailureError);
+        if (!(failure instanceof ArchiveCrewPartialFailureError)) return;
+        assert.equal(failure.failedSeat, "critic");
+        assert.lengthOf(yield* Ref.get(archived), 0);
+        assert.lengthOf(yield* Ref.get(marked), 0);
+      }).pipe(Effect.provide(layer));
+    }),
 );

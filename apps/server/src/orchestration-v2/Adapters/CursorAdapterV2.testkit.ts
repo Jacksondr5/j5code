@@ -1,4 +1,6 @@
-import { Agent, type InteractionUpdate, type RunResult } from "@cursor/sdk";
+import { DEFAULT_SIGNAL_EXPORT } from "@t3tools/shared/observability";
+import type { InteractionUpdate, RunResult } from "@cursor/sdk";
+import { Agent } from "../../provider/cursorSdk.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   ProviderReplayEntry,
@@ -231,6 +233,7 @@ export function makeCursorAgentSdkReplayRunner(
 
   const recordFailure = <Error extends CursorAgentSdkReplayError>(error: Error): Error => {
     failure = error;
+    cursorAdvanced.resolve();
     return error;
   };
 
@@ -561,7 +564,10 @@ function makeReplayServerConfig(
       traceMaxFiles: 10,
       otlpTracesUrl: undefined,
       otlpMetricsUrl: undefined,
-      otlpExportIntervalMs: 10_000,
+      otlpLogsUrl: undefined,
+      otlpTracesExport: DEFAULT_SIGNAL_EXPORT,
+      otlpMetricsExport: DEFAULT_SIGNAL_EXPORT,
+      otlpLogsExport: DEFAULT_SIGNAL_EXPORT,
       otlpServiceName: "t3-server",
       mode: "web",
       port: 0,

@@ -145,7 +145,8 @@ export function formatArchiveWarning(input: {
  * is refused here with the way out, as `archive_agent` refuses it for agents. A Captain is never
  * archived alone (AC17): the dialog shows the live Crews it commands, and once the archive
  * commits the server's lifecycle cascade retires them as units, whichever door the archive came
- * through, so nothing here has to run after the confirmation.
+ * through, so nothing here has to run after the confirmation. Upstream's Undo stays on every
+ * door: the Captain's unarchive brings back the Crews that retired with it (#312).
  */
 export async function archiveWithPreflight<Result>(input: {
   readonly threadRef: ScopedThreadRef;

@@ -21,13 +21,13 @@ export interface CrewSeatDraft {
 export const CREW_ACCESS_OPTIONS = [
   {
     value: "approval-required",
-    label: "Approval required",
+    label: "Supervised",
     description: "Ask before commands and file changes.",
   },
   {
     value: "auto-accept-edits",
-    label: "Accept edits",
-    description: "Approve edits; ask before other actions.",
+    label: "Auto-accept edits",
+    description: "Auto-approve edits, ask before other actions.",
   },
   {
     value: "auto",
@@ -40,6 +40,19 @@ export const CREW_ACCESS_OPTIONS = [
     description: "Allow commands and edits without prompts.",
   },
 ] as const;
+
+/**
+ * Whether a seat will pause for the person's approval in its own thread: any resolved access short
+ * of Full access. A saved persona on its own default policy is the exception; its sandbox refuses
+ * what it may not do instead of asking. A seat whose runtime has not resolved yet is not counted.
+ */
+export const crewSeatStopsForApprovals = (
+  seat: Pick<CrewProposalSeat, "agentId" | "runtimeMode">,
+  runtime: Pick<CrewProposalSeatRuntime, "runtimeMode"> | undefined,
+): boolean =>
+  runtime !== undefined &&
+  runtime.runtimeMode !== "full-access" &&
+  (seat.agentId === null || seat.runtimeMode !== undefined);
 
 export const crewSeatDraft = (seat: CrewProposalSeat): CrewSeatDraft => ({
   seat: seat.seat,
@@ -82,7 +95,7 @@ export const crewModelSelection = (
   return { instanceId: provider.instanceId, model: model.slug, ...(options ? { options } : {}) };
 };
 
-/** ACP cannot enforce Auto or Accept edits; a harness switch visibly chooses its supervised mode. */
+/** ACP cannot enforce Auto or Auto-accept edits; a harness switch visibly chooses its supervised mode. */
 export const chooseCrewHarness = (
   draft: CrewSeatDraft,
   provider: Pick<ServerProvider, "instanceId" | "driver">,
@@ -125,4 +138,5 @@ export const applyCrewSeatDraft = (
   ...(draft.instructions ? { instructions: draft.instructions } : {}),
   ...(draft.modelSelection ? { modelSelection: draft.modelSelection } : {}),
   ...(draft.runtimeMode ? { runtimeMode: draft.runtimeMode } : {}),
+  ...(seat.steps === undefined ? {} : { steps: seat.steps }),
 });

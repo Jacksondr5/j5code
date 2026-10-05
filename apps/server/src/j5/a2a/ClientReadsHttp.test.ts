@@ -21,6 +21,7 @@ import { AgentCrewProposalService } from "./AgentCrewProposalService.ts";
 import { CrewProposalService } from "./CrewProposalService.ts";
 import { ArchiveCrewService } from "./ArchiveCrewService.ts";
 import { CrewStopService } from "./CrewStopService.ts";
+import { CrewRuntimeRequestService } from "./CrewRuntimeRequestService.ts";
 import { ParticipantPlacementService } from "./PlacementService.ts";
 import { A2AArchiveFacts } from "./ArchiveFactsService.ts";
 import {
@@ -31,6 +32,8 @@ import {
 } from "./ClientReadsHttp.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { MachineParticipantService } from "./MachineParticipantService.ts";
+import { PeerInboundService } from "./PeerInboundService.ts";
+import { PeerRegistryService } from "./PeerRegistryService.ts";
 import { RosterService } from "./RosterService.ts";
 import { A2ASendService } from "./SendService.ts";
 import { A2AHumanPersonIdError } from "./HumanInboxService.ts";
@@ -42,6 +45,7 @@ import { A2AParticipantNotFoundError } from "./SendService.ts";
 import { SquadronProjectReferences } from "./SquadronProjectReferences.ts";
 import { ThreadHomesService } from "./ThreadHomesService.ts";
 import { ParticipantId, SquadronId } from "./contracts.ts";
+import { PlaybookCrewRelay } from "../playbooks/PlaybookCrewRelay.ts";
 
 const paths = {
   participantHome: "/raw-client-reads/home",
@@ -353,8 +357,12 @@ it("registers B6 client reads through the authenticated aggregate", async () => 
           Layer.mock(AgentCrewProposalService)({}),
           Layer.mock(CrewProposalService)({}),
           Layer.mock(CrewStopService)({}),
+          Layer.mock(CrewRuntimeRequestService)({}),
           Layer.mock(ArchiveCrewService)({}),
+          Layer.mock(PlaybookCrewRelay)({}),
           Layer.mock(ParticipantPlacementService)({}),
+          Layer.mock(PeerRegistryService)({}),
+          Layer.mock(PeerInboundService)({}),
         ),
       ),
       Layer.provide(Layer.mock(ProjectService.ProjectService)({})),
@@ -365,7 +373,7 @@ it("registers B6 client reads through the authenticated aggregate", async () => 
           Layer.provide(NodeServices.layer),
         ),
       ),
-      Layer.provide(NodeSqliteClient.layerMemory()),
+      Layer.provide(NodeSqliteClient.layer({ filename: ":memory:" })),
       Layer.provide(agentHandoffRefreshesLayer),
       Layer.provideMerge(auth),
     )

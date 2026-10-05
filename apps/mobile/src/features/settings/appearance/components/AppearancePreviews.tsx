@@ -5,7 +5,6 @@ import {
   resolveMarkdownFontSizes,
   resolveMobileCodeSurface,
 } from "../../../../lib/appearancePreferences";
-import { useUniwindTheme } from "../../../../lib/useUniwindTheme";
 import { getMobileTerminalTheme } from "../../../terminal/terminalTheme";
 import { useAppearancePreferences } from "../AppearancePreferencesProvider";
 
@@ -67,7 +66,7 @@ export function TerminalAppearancePreview(props: { readonly fontSize: number }) 
     <View className="p-4">
       <Text style={span(theme.foreground)}>
         <Text style={span(theme.palette[2])}>→ </Text>
-        <Text style={span(theme.palette[6])}>t3code </Text>
+        <Text style={span(theme.palette[6])}>j5code </Text>
         <Text style={span(theme.palette[4])}>git:(</Text>
         <Text style={span(theme.palette[1])}>main</Text>
         <Text style={span(theme.palette[4])}>)</Text>
@@ -138,16 +137,12 @@ export function CodeAppearancePreview(props: {
   readonly wordBreak: boolean;
 }) {
   const surface = resolveMobileCodeSurface(props.fontSize);
-  const theme = useUniwindTheme();
-  const lineNumberColor = theme["--color-icon-subtle"];
-  const keywordColor = theme["--color-md-link"];
 
   const lineNumber = (line: CodePreviewLine, index: number) => (
     <Text
-      className="text-right"
+      className="text-right text-icon-subtle"
       key={line.id}
       style={{
-        color: lineNumberColor,
         fontFamily: CODE_FONT_FAMILY,
         fontSize: surface.lineNumberFontSize,
         lineHeight: surface.rowHeight,
@@ -172,8 +167,8 @@ export function CodeAppearancePreview(props: {
       {line.tokens.map((token) => (
         <Text
           key={token.text}
+          className={token.keyword ? "text-md-link" : undefined}
           style={{
-            color: token.keyword ? keywordColor : undefined,
             fontFamily: CODE_FONT_FAMILY,
             fontSize: surface.fontSize,
             lineHeight: surface.rowHeight,

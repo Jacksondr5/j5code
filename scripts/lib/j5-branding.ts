@@ -7,7 +7,10 @@
  */
 export const J5_BRANDING = {
   cli: {
+    /** Historical npm package; releases ship as archives from 0.0.44 on. */
     packageName: "@jacksondr5/j5code",
+    /** The command on PATH, and the name of the archive's executable. */
+    command: "j5",
   },
   desktop: {
     baseName: "J5 Code",
@@ -43,3 +46,13 @@ export const J5_BRANDING = {
     },
   },
 } as const;
+
+/**
+ * The iOS project, scheme and `.app` name `expo prebuild` generates for a mobile
+ * app name, mirroring `@expo/config-plugins` `sanitizedName` (e.g. `J5CodeDev`).
+ */
+export const mobileNativeProjectName = (appName: string): string =>
+  appName
+    .replace(/[\W_]+/g, "")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "");

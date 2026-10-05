@@ -21,7 +21,7 @@ An agent learns what it can do from its tools, and it reads a tool's description
 
 ### `send_message`
 
-**Description:** "Send one durable message. To another agent, three uses: a **plain send** when you don't need a reply; an **ask** — set expect_reply=true with a one-line intent, opening an exchange the receiver owes a reply to; a **reply** — include the exchange_id from the ask you are answering, which closes that exchange. To the human, only an ask: a plain send to a person is refused — if nobody needs to act, say it in your own thread instead. Set urgency only when asking the human. Use this tool only for participants already returned by list_participants; when creating a Peer Agent, put any reply expectation in spawn_agent's brief instead of sending a follow-up ask. Returns once the message is committed; delivery continues asynchronously — carry on with your work, and the reply arrives later as an incoming message. A caller without a registered home is refused. Reuse client_request_id to retry the same send safely."
+**Description:** "Send one durable message. To another agent, three uses: a **plain send** when you don't need a reply; an **ask** — set expect_reply=true with a one-line intent, opening an exchange the receiver owes a reply to; a **reply** — include the exchange_id from the ask you are answering, which closes that exchange. To the human, only an ask: a plain send to a person is refused — if nobody needs to act, say it in your own thread instead. Set urgency only when asking the human. Use this tool only for participants already returned by list_participants; when creating a Peer Agent, put any reply expectation in spawn_agent's brief instead of sending a follow-up ask. Returns once the message is committed; delivery continues asynchronously — carry on with your work, and the reply arrives later as an incoming message. An agent that is busy usually handles each message as its own turn after its current one ends, so put related updates in one message rather than sending them one by one; the result's deliveryNotice says when your message will wait behind the receiver's current turn. A caller without a registered home is refused. Reuse client_request_id to retry the same send safely."
 
 | Input               | Type              | Required                             | Meaning                                                                         |
 | ------------------- | ----------------- | ------------------------------------ | ------------------------------------------------------------------------------- |
@@ -34,7 +34,7 @@ An agent learns what it can do from its tools, and it reads a tool's description
 | `exchange_id`       | ExchangeId        | no                                   | Marks this send as the reply that closes that Exchange                          |
 | `client_request_id` | string            | no                                   | Reuse to retry safely                                                           |
 
-**Result:** the message id and the Exchange's state.
+**Result:** the message id and the Exchange's state. When the receiver is an agent that is mid-turn and will not take the message into that turn, the result also carries a `deliveryNotice` stating how many messages are waiting for it, how many of them are the caller's, and that each will run as its own turn.
 
 **Rules.** A message to the caller itself is refused. A send to a person that is not an ask is refused; a person never opens an Exchange, so there is nothing for an agent to reply to. Between agents, a further ask to a peer that already holds an open Exchange from the caller joins it as a follow-up. To a person, a further ask opens a new Exchange and a new inbox item unless it names an open one in `regarding`, in which case it joins that Exchange and is shown beneath the original ask. An ask to a person without an urgency is refused.
 
@@ -44,7 +44,7 @@ An agent learns what it can do from its tools, and it reads a tool's description
 
 ### `list_participants`
 
-**Description:** "Your address book: the participants around you — agents and the human — with the display name to recognize them by, the participant_id to address them with, and what each accepts (messages, exchanges, urgency). When you're told to message someone by name or role, resolve them here first. Your own row is marked self=true; it cannot receive messages or open exchanges from you — use schedule_task if you need a future trigger for yourself. Native threads that never received a Squadron home do not appear here and cannot be messaged. Archived agents are hidden by default; set include_archived=true to see them with archived=true. They cannot receive messages or open Exchanges. The roster changes — after you spawn, archive, unarchive, or delete an agent, call this again instead of reusing a stale listing."
+**Description:** "Your address book: the participants around you — agents and the human — with the display name to recognize them by, the participant_id to address them with, the squadron_id and squadron_name that place them, and what each accepts (messages, exchanges, urgency). When you're told to message someone by name or role, resolve them here first. Your own row is marked self=true and its squadron_name is the Squadron you belong to; it cannot receive messages or open exchanges from you — use schedule_task if you need a future trigger for yourself. Native threads that never received a Squadron home do not appear here and cannot be messaged. Archived agents are hidden by default; set include_archived=true to see them with archived=true. They cannot receive messages or open Exchanges. The roster changes — after you spawn, archive, unarchive, or delete an agent, call this again instead of reusing a stale listing."
 
 | Input              | Type    | Required | Meaning                                                        |
 | ------------------ | ------- | -------- | -------------------------------------------------------------- |
@@ -52,7 +52,7 @@ An agent learns what it can do from its tools, and it reads a tool's description
 
 Read-only; no events.
 
-**Result rows:** `display_name` (the agent's thread title, or the Role name once Roles exist), `squadron_id`, `participant_id`, the participant kind, `self`, `archived`, `can_receive_message`, `can_open_exchange`, `accepts_urgency`, plus `provenance` (spawned by whom, forked from what, unrecorded, or not applicable for a person) and `placement_parent_id`. A person's row reports that it cannot receive a plain message and can be asked. A machine participant's row carries kind `machine`, its registered name as `display_name`, provenance `not-applicable`, and reports that it can receive nothing and open no Exchange. An archived agent's row, when requested, reports that it can receive nothing. Provenance and placement are carried for callers and the UI; they are not part of the description's pitch.
+**Result rows:** `display_name` (the agent's thread title, or the Role name once Roles exist), `squadron_id` and `squadron_name` (on the self row, the caller's own Squadron), `participant_id`, the participant kind, `self`, `archived`, `can_receive_message`, `can_open_exchange`, `accepts_urgency`, plus `provenance` (spawned by whom, forked from what, unrecorded, or not applicable for a person) and `placement_parent_id`. A person's row reports that it cannot receive a plain message and can be asked. A machine participant's row carries kind `machine`, its registered name as `display_name`, provenance `not-applicable`, and reports that it can receive nothing and open no Exchange. An archived agent's row, when requested, reports that it can receive nothing. Participants homed on peer servers appear beside local ones, told apart only by their Squadron; the result carries no server field, and a peer that could not be read is reported as unread in the result rather than omitted. Provenance and placement are carried for callers and the UI; they are not part of the description's pitch.
 
 ### `spawn_agent`
 
@@ -181,84 +181,125 @@ asked for.
 
 ### `propose_crew`
 
-**Description (contract):** "Propose the crew you need for the brief you were given. Use it when
-the user asks for a crew or the work splits into distinct responsibilities that should run at
-once. Call list_personas first and pick one persona per seat, or leave persona unset for a custom
-seat that runs on your own provider, model, and access mode with only its instructions (required) and the brief; name the crew
-for what it is for and give each seat a short lowercase-hyphen name like code-reviewer. The user reviews the roster in this
-thread, may remove or add seats, and approves or declines; you receive the decision and the roster
-as a message here. Approved seats run with their own persona's permissions, which may exceed yours.
-You become the crew's Captain and may command several crews at once; later requests, stops, and
-archives name the crew they mean. Reuse client_request_id to retry safely. This call is itself the
-human gate, so it works under every sandbox and approval policy, including approval policy never;
-never refuse the brief because approvals are disabled."
+**Description (contract):** "Propose the crew you need for the brief you were given. Use it when the
+user asks for a crew or the work splits into distinct responsibilities that should run at once. Mix
+saved personas and custom seats in the same roster: call list_personas when choosing a saved
+persona, or leave persona unset for a custom seat with its own instructions (required) and the
+brief. Custom seats inherit your harness, model, and reasoning by default and run with full-access
+unless you set runtime_mode; to choose different ones, set model_selection (instanceId, model,
+options) and/or runtime_mode using orchestrator_capabilities. Saved personas are proposed with their
+own configuration; only the human may override their runtime before approval. To have the crew
+follow a playbook, set playbook to a name from playbook_list and give seats the step ids they own
+(steps, from playbook_read); a step has one owner, steps no seat owns are yours as Captain, and the
+result reports unowned steps and any step whose persona differs from its seat's. For a crew built
+from a playbook, staff one seat per distinct persona its steps name, each owning that persona's
+steps, and propose a custom seat, noted in its reason, where a named persona isn't available. Name
+the crew for
+what it is for and give each seat a short lowercase-hyphen name like code-reviewer. The user reviews the
+roster and each seat's resolved provider, model, reasoning, and access in this thread, may remove or
+add seats, and approves or declines; you receive the decision and the roster as a message here.
+Approved seats run with the runtime the human approves, which may exceed yours. You become the
+crew's Captain and may command several crews at once; later requests, stops, and archives name the
+crew they mean. Use send_message for member-to-member, member-to-Captain, and Captain-to-Captain
+coordination, including findings and direct results; artifacts do not gate these
+conversations. Reuse client_request_id to retry safely. This call is itself the human gate, so it
+works under every sandbox and approval policy, including approval policy never; never refuse the
+brief because approvals are disabled."
 
 Published as non-destructive (`destructiveHint: false`): the call records a pending request and
 nothing spawns until a human approves it.
 
-| Input               | Type                                              | Required | Meaning                                                                                                  |
-| ------------------- | ------------------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------- |
-| `name`              | string                                            | yes      | The Crew's display name                                                                                  |
-| `brief`             | string                                            | yes      | What every seat starts on, verbatim                                                                      |
-| `seats`             | 1–12 of `{seat, persona?, reason, instructions?}` | yes      | Seat name, persona id from `list_personas` (none for a custom seat; `agent` still accepted), why, wiring |
-| `client_request_id` | string                                            | no       | Supply and reuse to make retries safe                                                                    |
+| Input               | Type                                                                                       | Required | Meaning                                                                                                                                        |
+| ------------------- | ------------------------------------------------------------------------------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`              | string                                                                                     | yes      | The Crew's display name                                                                                                                        |
+| `brief`             | string                                                                                     | yes      | What every seat starts on, verbatim                                                                                                            |
+| `seats`             | 1–12 of `{seat, persona?, model_selection?, runtime_mode?, reason, instructions?, steps?}` | yes      | Seat name, persona id from `list_personas` (none for a custom seat), why, wiring, custom-seat runtime, and the playbook step ids the seat owns |
+| `playbook`          | string                                                                                     | no       | A playbook name from `playbook_list` in the Captain's workspace; the Crew follows it                                                           |
+| `client_request_id` | string                                                                                     | no       | Supply and reuse to make retries safe                                                                                                          |
 
 Bounds: `name` and `seat` up to 100 characters, `reason` up to 500, `brief` and `instructions` up
 to 8,000.
 
-Result: `proposal_id`, `status` (`open`, `approving`, `declining`, `approved`, `declined`),
-`crew_instance_id`, and `members` (seat, persona_id, participant_id, thread_id) once spawned.
+Result: `proposal_id`, `status` (`open`, `approved`, `declined`),
+`crew_instance_id`, and `members` (seat, persona_id, participant_id, thread_id) once spawned. A
+proposal that follows a playbook adds `playbook`: `name`, `title`, `unowned_steps` (the Captain's),
+and `persona_swaps` (seat, step_id, wanted_persona, seat_persona, and wanted_problem `missing` or
+`disabled` when the wanted persona could not staff the step itself).
 Semantics: the caller must have a usable home and must not sit in a Crew (R20). Seats are validated
-against the library before anything is recorded: unknown or disabled agents, duplicate seat names,
-or more than twelve seats refuse with the next step. An open roster proposal waits for the human
-gate inline above the Captain's composer (additions wait in the Inbox); approval spawns the approved roster (the human may have edited it) as persona-backed Peer
-Agents under the caller, records the Crew snapshot with each member's approver and reason, and posts
-a `<j5_crew_gate>` launch report into the caller's thread once every seat has started or failed to start (or a minute has passed): the roster, what the user changed against the proposal, and per seat `start=started|failed|pending`, with a `seat_failed` line carrying the run's error. Declines post the decline at once.
-Human approval is the authority (Bryant, 2026-09-10): seats run with their own agent's runtime
-policy, so a read-only Captain may command writing seats once a person approved them; a seat's
-permissions never come from its Captain's.
+against the library before anything is recorded: unknown or disabled personas, duplicate seat names,
+or more than twelve seats refuse with the next step. With `playbook`, the live definition is read
+and each claimed step must exist and have one owner; an unknown or invalid playbook, an unknown step,
+a doubly claimed step, or `steps` without a playbook refuse the same way. A seat that claims no
+steps needs no readable definition, so a Crew whose playbook file is gone can still add one. The
+proposal records the playbook's definition path, and the Crew keeps it from approval on; each
+member records the step ids it owns, and each seat's first turn lists its steps by live title in a
+`<seat_playbook>` block. An open roster proposal waits for the human
+gate inline above the Captain's composer (additions wait in the Inbox); approval spawns the approved roster (the human may have edited it) as Peer Agents under the
+caller, persona-backed where a seat names one, records the Crew snapshot with each member's reason
+(the person approves every seat), and posts
+a `<j5_crew_gate>` launch report into the caller's thread once every seat has started or failed to start (or a minute has passed): the roster, what the user changed against the proposal, and per seat `start=started|failed|pending`, with a `seat_failed` line carrying the run's error (`not_started` when the seat's thread exists but its brief never went out) and a `seat_not_created` line for an approved seat whose thread was never created, which is left off the roster. A proposal resolves once: a seat that fails does not stop the others or reopen the gate. Declines post the decline at once.
+Human approval is the authority (Bryant, 2026-09-10): seats run with the runtime the person
+approved, their persona's policy when no override was chosen, so a read-only Captain may command
+writing seats once a person approved them; a seat's permissions never come from its Captain's.
 There is no auto-approval: the earlier `runbook_declared` column and `auto_approved` status were
 cut before shipping, since nothing wrote them and runbooks do not exist yet.
 
 ### `request_crew_member`
 
-**Description (contract):** "Ask the user to add one seat to a crew you command when the work
-needs one the roster lacks: seat name, persona id from list_personas (or none for a custom seat
-that runs on your provider and model), a one-line reason, and optionally instructions and a brief for
-the new seat. The user decides from their inbox; you receive the decision and the updated roster as
-a message here and can keep working meanwhile. Captain-only; a member escalates to its Captain.
-Reuse client_request_id to retry safely. Filing the request is the human gate itself and works
-under every approval policy, including approval policy never."
+**Description (contract):** "Ask the user to add one seat to a crew you command when the work needs
+one the roster lacks: seat name, persona id from list_personas (or none for a custom seat with
+required instructions and optional model_selection/runtime_mode overrides; an omitted
+model_selection inherits yours and an omitted runtime_mode is full-access; saved-persona runtime
+changes are made only by the human before approval), a clear reason identifying the concern and
+missing expertise or responsibility, and optionally instructions and a brief for the new seat. On a
+crew that follows a playbook, steps may claim step ids from playbook_read that no seat owns yet. The
+user decides from their inbox; you receive the decision and the updated roster as a message here.
+Continue the already-approved work and direct coordination while the addition is pending.
+Captain-only; a member sends the concern and needed expertise to its Captain with send_message.
+Reuse client_request_id to retry safely. Filing the request is the human gate itself and works under
+every approval policy, including approval policy never."
 
-| Input               | Type   | Required | Meaning                                                        |
-| ------------------- | ------ | -------- | -------------------------------------------------------------- |
-| `crew_instance_id`  | string | no       | Required only when the caller commands more than one live Crew |
-| `seat`, `persona`   | string | yes      | New seat name and persona id (none for a custom seat)          |
-| `reason`            | string | yes      | One line the human reads before approving                      |
-| `brief`             | string | no       | The new seat's brief; the Crew's brief when omitted            |
-| `instructions`      | string | no       | Seat wiring text, verbatim                                     |
-| `client_request_id` | string | no       | Supply and reuse to make retries safe                          |
+| Input                             | Type           | Required | Meaning                                                                     |
+| --------------------------------- | -------------- | -------- | --------------------------------------------------------------------------- |
+| `crew_instance_id`                | string         | no       | Required only when the caller commands more than one live Crew              |
+| `seat`, `persona`                 | string         | yes      | New seat name and persona id (none for a custom seat)                       |
+| `model_selection`, `runtime_mode` | object, string | no       | Custom seats only; omitted, the Captain's model selection and `full-access` |
+| `reason`                          | string         | yes      | One line the human reads before approving                                   |
+| `brief`                           | string         | no       | The new seat's brief; the Crew's brief when omitted                         |
+| `instructions`                    | string         | no       | Seat wiring text, verbatim                                                  |
+| `steps`                           | string[]       | no       | Playbook step ids no seat owns yet; only on a Crew that follows a playbook  |
+| `client_request_id`               | string         | no       | Supply and reuse to make retries safe                                       |
 
 Result: as `propose_crew`. Semantics: the caller must command the Crew; the seat name must be new;
 the cap counts current members plus seats in other open requests for the same Crew. Approval
-reserves the seat inside one store transaction (count, cap, version bump, and ordinal decided
-together under an optimistic version check, so two approvals landing at once cannot both pass),
-then spawns the seat under the Captain and posts the updated roster to the Captain. Seat ids are
-deterministic, so a retry after a failed spawn finds its reservation and converges.
+reserves the seat inside one store transaction (count, cap, step ownership, version bump, and
+ordinal decided together under an optimistic version check, so two approvals landing at once cannot
+both pass; the second one claiming a taken step is refused and stays open),
+then spawns the seat under the Captain and posts the updated roster to the Captain. If the approval
+cannot be recorded, the reservation is released and the request stays open; once the seat starts
+spawning the request is approved, and a seat that was never created is reported, not retried.
 
-### Handoffs in Crews
+### Handoff artifacts in Crews
 
 There is no Crew-specific artifact verb. A seat whose definition declares an output artifact writes
-it with the project `write_artifact` tool to the same handoff file every persona writes
+it with the project `write_artifact` tool to the same handoff artifact every persona writes
 (`handoffs/<agent>/<Artifact>-<task>.md`, see the [persona contract](../agent-personas/index.md));
 its first turn carries `<seat_obligation>` naming that exact path. The handoff gate checks for the
-file when a run ends and reminds the seat once. When a seat finishes, the seat finish notifier posts
-one platform-composed `<j5_seat_finished>` notice per finished run into the Captain's thread: the seat,
-its participant and thread ids, the run status (completed, failed, or cancelled), and the handoff
-as `written`, `missing`, or `none declared` with its path; a written handoff up to 4,000
-characters rides inline, longer ones name the path for the project `read_artifact` tool. Ids
+file when a run ends and reminds the seat once. When a seat's run fails, or completes while the seat owes
+no reply, the seat finish notifier posts one platform-composed `<j5_seat_finished>` notice into the
+Captain's thread: the run status (completed or failed, with the run's error when it failed), the
+seat, its Crew, its participant and thread ids, and the handoff artifact as `written`, `missing`, `unavailable`, or `none
+declared` with its path. `missing` means the file was checked and is not there; `unavailable` means
+something is at the path that can never be a handoff (a directory, or a link out of the artifacts
+directory) and carries the reason. Only a real read failure sends nothing, and the next finish or the
+boot sweep retries. A written handoff artifact up
+to 4,000 characters rides inline with its size and digest; longer ones name the path for the
+project `read_artifact` tool, and one over the artifact read limit is still `written`, named by path. A notice posts the first time a seat finishes and again only when
+its facts changed, and a notice that arrives while the Captain's turn runs folds into the one
+queued behind it. Interrupted and cancelled runs are not finishes: `stop_crew` interrupts seats so
+they can be briefed again, and nothing is reported then. Ids
 derive from the run, so a redelivered event cannot post twice. Read-only Codex and Claude personas have `write_artifact` pre-approved for this reason, and `delegate_task` with `task_status` and `task_cancel` beside it, because a Crew member refused `spawn_agent` is sent to provider-native Subagents and a verb the sandbox then rejects is no way out:
-handoffs live in application storage, never in the sandboxed workspace. (Withdrawn on 2026-09-14:
+handoff artifacts live in application storage, never in the sandboxed workspace. (Withdrawn on 2026-09-14:
 the 2026-09-10 `deliver_artifact` verb, its ledger table, and the crew-only `read_artifact` and
 `list_artifacts`, which collided with the project artifact toolkit's names.)
 
@@ -313,8 +354,28 @@ the job; new work on any seat makes it stale and yields a fresh token. Partial f
 seats retired so far and the seat that failed; retry with the same `client_request_id` and token.
 
 **Members are never archived one by one (R14):** `t3_thread_organize` refuses archiving an active Crew seat, just as client archive/delete does. Retire the unit through `archive_crew` or Archive crew on the Fleet page. Archiving its Captain retains the crew cascade. A member that finishes with nothing owed is
-reported to its Captain; the platform settles no seat, and settlement is not archive. `stop_agent` on a member is still allowed;
+reported to its Captain; the platform never settles a seat because its run finished, and settlement is not archive. `stop_agent` on a member is still allowed;
 stopping retires nothing.
+
+### Crew playbook runs
+
+A Captain runs the playbook its Crew follows with `playbook_start(name, client_request_id,
+crew_instance_id)`. The call is refused with `crew_not_linkable` unless the Crew is the caller's,
+is live, and follows that playbook. Each landing (start, next, back, reselect) hands the step's live
+prompt to the seat that owns it, once per landing, as a `<j5_playbook_step>` notice in the seat's
+thread. A step no live seat owns is the Captain's, and no notice is sent for it.
+
+Every step tool on a Crew-linked run returns `delivery`: `{ state, seat, thread_id }`, where `state`
+is `delivered` (the seat has the step), `captain` (the Captain does it from `currentStep.prompt`),
+or `pending` (the hand-off hasn't finished; nobody should start the step). Only `captain` means
+the Captain does it. `playbook_current` reports the same `delivery` without handing off again.
+While an earlier hand-off is still pending, `playbook_next`, `playbook_back`, `playbook_reselect`,
+and `playbook_complete` refuse with `delivery_pending` and don't move; retry the same call. Nothing
+retries a pending hand-off in the background, including after a restart: the Captain's next step
+call, or a retry of the same one, finishes it.
+`playbook_cancel` always works. The platform never advances on its own: the Captain calls
+`playbook_next` after the seat reports back. Archiving the Crew or its Captain cancels its active
+run; `stop_crew` doesn't, and unarchiving doesn't restart it.
 
 ### Kept upstream tools
 
@@ -343,9 +404,10 @@ stopping retires nothing.
 15. `list_squadrons` can be called by a thread with no Squadron home and returns every Squadron with its project ids and the caller's own project id.
 16. `join_squadron` establishes a home only for a thread that has none, only in a Squadron that references the thread's project, leaves the thread and its running work untouched, returns the existing registration when the thread is already homed there, and refuses a thread homed elsewhere, an archived or deleted thread, and a retired identity.
 17. `list_personas` returns every persona with its availability and route; `propose_crew` and `request_crew_member` file a human gate and refuse unknown, disabled, duplicate, or over-cap seats before anything is recorded; both succeed under every sandbox and approval policy, including Codex approval policy `never`.
-18. Approving a proposal spawns exactly once; a second approval finds it claimed; a spawn that fails after reserving its seats reopens the gate, and the retry converges on those seats.
+18. Approving a proposal spawns exactly once; a second approval finds it resolved; a seat that fails to spawn is reported by name in the launch report and the other seats still start.
 19. `archive_crew` is Captain-only, refuses with per-seat facts and a token when any seat has an open Exchange or a running turn, and finishes a partial archive on retry; `t3_thread_organize` refuses an active Crew member, while Captain archive retains the unit cascade.
 20. `stop_crew` is Captain-only, interrupts every seat with a running turn and reports each seat as interrupted, already idle, or archived; it settles, retires, and closes nothing, and a non-Captain or an archived Crew is refused naming the next step. The person's Stop crew control does the same through the operate scope.
+21. `list_participants` lists participants homed on peer servers with their Squadron and no server field and reports an unreadable peer in the result; `send_message` accepts their ids exactly as local ones.
 
 ## History
 
@@ -368,4 +430,10 @@ stopping retires nothing.
 - 2026-09-14 — `stop_crew`: the unit form of stop for the Captain over MCP and for the person as a Stop crew control; interrupts running seats only ([record](../../worklog/2026-09-14-crews-consolidation.md)).
 - 2026-09-14 — `delegate_task`, `task_status`, and `task_cancel` return to the J5 surface, with a saved-agent `agent` parameter on `delegate_task` replacing the J5-only `invoke_agent` ([review](https://github.com/Jacksondr5/j5code/pull/124#issuecomment-5663559782)).
 - 2026-09-15 — machine participants appear in `list_participants` as named senders that receive nothing (issue #74).
+- 2026-09-16 — participants homed on peer servers appear in the address book and are addressed like local ones; AC21 ([record](../../worklog/2026-09-16-cross-server-peering-session.md)).
 - 2026-09-17 — personas, not agents: `list_agents` becomes `list_personas`, the `agent` parameter on `spawn_agent`, `delegate_task`, and crew seats becomes `persona` (no alias: pre-dogfood, no legacy-compatibility code), crew results carry `persona_id`, and the mention is `@persona:ID`; "agent" keeps meaning a running participant (Bryant; [record](../../worklog/2026-09-16-crew-command-decoupling.md)).
+- 2026-09-24 — the `propose_crew` and `request_crew_member` contract strings match the shipped descriptions (custom-seat `model_selection` and `runtime_mode`, direct coordination); the snapshot keeps each member's reason, since the person approves every seat; seat finish notices post on change for completed and failed runs, and `missing` means the file was checked and is not there ([#229](https://github.com/Jacksondr5/j5code/issues/229), [#234](https://github.com/Jacksondr5/j5code/issues/234)).
+- 2026-09-24 — the J5 document is named "handoff artifact" to distinguish it from upstream's context handoffs.
+- 2026-09-24 — `list_participants` rows carry `squadron_name` beside `squadron_id`, so an agent tells its own Squadron from one on a peer server without any server being named (PR #198).
+- 2026-09-25 — a proposal resolves once (`open`, `approved`, `declined`); a seat that fails to spawn is reported in the launch report, not retried (Bryant; [#311](https://github.com/Jacksondr5/j5code/issues/311)).
+- 2026-09-26 — a custom seat's omitted `runtime_mode` is `full-access` rather than the Captain's access; the `propose_crew` and `request_crew_member` copies above are resynced with the shipped strings (Jackson; [#326](https://github.com/Jacksondr5/j5code/issues/326)).

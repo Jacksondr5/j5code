@@ -307,7 +307,7 @@ export function ArtifactsPage({
   return (
     <SidebarInset
       className={cn(
-        "min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground isolate",
+        "min-h-0 overflow-hidden overscroll-y-none isolate",
         embedded ? "h-full" : "h-dvh",
       )}
     >
@@ -327,7 +327,7 @@ export function ArtifactsPage({
             </WorkspaceBreadcrumb>
             <Button
               aria-label="Refresh artifacts"
-              className="no-drag ms-auto"
+              className="ms-auto"
               disabled={listState === "loading" || selectedProject === null}
               onClick={refresh}
               size="icon-xs"
@@ -350,42 +350,47 @@ export function ArtifactsPage({
           style={{ "--artifact-file-pane-width": `${filePane.width}px` } as CSSProperties}
         >
           {!embedded ? (
-            <ScrollArea className="min-h-0 border-b border-border md:border-e md:border-b-0">
-              <div className="p-2">
-                <p className="px-2 py-1.5 text-xs font-medium text-muted-foreground">Workspaces</p>
-                {projects.map((project) => {
-                  const selected =
-                    selectedProject !== null && projectKey(project) === projectKey(selectedProject);
-                  return (
-                    <button
-                      key={projectKey(project)}
-                      aria-pressed={selected}
-                      className={cn(
-                        "flex w-full cursor-pointer items-start gap-2 rounded-md px-2 py-2 text-left text-sm outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring",
-                        selected && "bg-muted",
-                      )}
-                      onClick={() => {
-                        setSelectedProjectKey(projectKey(project));
-                        setSelectedPath(null);
-                        setDeleteError(null);
-                      }}
-                      type="button"
-                    >
-                      <FolderArchiveIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-                      <span className="min-w-0">
-                        <span className="block truncate">{project.title}</span>
-                        <span className="block truncate text-xs text-muted-foreground">
-                          {environmentLabels.get(project.environmentId) ?? "Environment"}
+            <div className="min-h-0 border-b border-border md:border-e md:border-b-0">
+              <ScrollArea>
+                <div className="p-2">
+                  <p className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
+                    Workspaces
+                  </p>
+                  {projects.map((project) => {
+                    const selected =
+                      selectedProject !== null &&
+                      projectKey(project) === projectKey(selectedProject);
+                    return (
+                      <button
+                        key={projectKey(project)}
+                        aria-pressed={selected}
+                        className={cn(
+                          "flex w-full cursor-pointer items-start gap-2 rounded-md px-2 py-2 text-left text-sm outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring",
+                          selected && "bg-muted",
+                        )}
+                        onClick={() => {
+                          setSelectedProjectKey(projectKey(project));
+                          setSelectedPath(null);
+                          setDeleteError(null);
+                        }}
+                        type="button"
+                      >
+                        <FolderArchiveIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                        <span className="min-w-0">
+                          <span className="block truncate">{project.title}</span>
+                          <span className="block truncate text-xs text-muted-foreground">
+                            {environmentLabels.get(project.environmentId) ?? "Environment"}
+                          </span>
                         </span>
-                      </span>
-                    </button>
-                  );
-                })}
-                {projects.length === 0 ? (
-                  <p className="px-2 py-6 text-sm text-muted-foreground">No workspaces yet.</p>
-                ) : null}
-              </div>
-            </ScrollArea>
+                      </button>
+                    );
+                  })}
+                  {projects.length === 0 ? (
+                    <p className="px-2 py-6 text-sm text-muted-foreground">No workspaces yet.</p>
+                  ) : null}
+                </div>
+              </ScrollArea>
+            </div>
           ) : null}
 
           <div

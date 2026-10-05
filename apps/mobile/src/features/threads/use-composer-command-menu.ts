@@ -1,6 +1,26 @@
 import { useAgentMentionPicker } from "../../j5/agents/useAgentMentionPicker";
 import { agentMentionReplacement } from "@t3tools/shared/j5/agentMention";
-import type { EnvironmentId, ProviderInteractionMode, ServerProvider } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  ProjectId,
+  ProviderInteractionMode,
+  ServerProvider,
+  ThreadId,
+} from "@t3tools/contracts";
+import { matchComposerThreadItems } from "@t3tools/client-runtime/composerThreadItems";
+import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
+
+const EMPTY_THREAD_SHELLS: ReadonlyArray<EnvironmentThreadShell> = [];
+import { COMPOSER_CONTEXT_MAX_RECORDS } from "@t3tools/contracts";
+import { Alert } from "react-native";
+import { formatComposerContextReference } from "@t3tools/shared/composerContextReferences";
+import { pullRequestComposerContext, threadComposerContext } from "../../lib/composerContext";
+import { uuidv4 } from "../../lib/uuid";
+import {
+  getComposerDraftSnapshot,
+  readComposerDraftSelection,
+  setComposerDraftContext,
+} from "../../state/use-composer-drafts";
 import { USAGE_LIMITS_COMMAND } from "@t3tools/shared/usageLimits";
 import {
   detectComposerTrigger,
@@ -16,15 +36,24 @@ import {
 import {
   dedupeProviderSkillsByName,
   getProviderSkillsForSlashMenu,
+  getProviderSlashCommandsForSlashMenu,
   isProviderSkillUserInvocable,
   resolveProviderSkillsForCwd,
+  resolveProviderSlashCommandsForCwd,
 } from "@t3tools/client-runtime/providerSkills";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { ComposerEditorSelection } from "../../components/ComposerEditor";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { useComposerPathSearch } from "../../state/queries";
+import { useEnvironmentQuery } from "../../state/query";
+import { j5Environment } from "../../j5/state";
+import {
+  isPlaybookSlashCommandVisible,
+  playbookMenuItems,
+  playbookSelectionText,
+} from "@t3tools/client-runtime/j5/playbooks";
+import { useComposerPathSearch, useComposerPullRequestSearch } from "../../state/queries";
 import type { ComposerCommandItem } from "./ComposerCommandPopover";
 import { matchesSlashSkillQuery } from "./composerSlashSkillSearch";
 
@@ -83,6 +112,7 @@ export function buildComposerSlashCommandItems(input: {
   const items: ComposerCommandItem[] = builtIn.filter(
     (item) =>
       item.command.includes(query) &&
+      isPlaybookSlashCommandVisible(item.command, input.atMessageStart) &&
       (item.command === "model" || item.command === "playbook" || allowInteractionMode),
   );
 
@@ -145,7 +175,9 @@ export function resolveComposerCommandSelection(input: {
   } else if (item.type === "skill") {
     replacement = `$${item.skill.name} `;
   } else if (item.type === "slash-command") {
-    replacement = item.command === "playbook" ? "Start playbook " : `/${item.command} `;
+    replacement = `/${item.command} `;
+  } else if (item.type === "playbook") {
+    replacement = playbookSelectionText(draftMessage, trigger, item.name);
   } else if (item.type === "provider-slash-command") {
     replacement = `/${item.command.name} `;
   }
@@ -160,7 +192,13 @@ export function useComposerCommandMenu({
   draftMessage,
   ownerKey,
   environmentId,
+  projectId,
+  threadId,
+  threadShells = EMPTY_THREAD_SHELLS,
+  currentThreadId = null,
   projectCwd,
+  pullRequestProjectId = null,
+  pullRequestRepository = null,
   selectedProviderStatus,
   hasThread,
   hasCompactableConversation,
@@ -173,7 +211,15 @@ export function useComposerCommandMenu({
   readonly draftMessage: string;
   readonly ownerKey: string | null;
   readonly environmentId: EnvironmentId | null;
+  readonly projectId: ProjectId | null;
+  readonly threadId?: ThreadId | null;
+  /** Candidates for `@` thread suggestions; the caller reads them from the entity store. */
+  readonly threadShells?: ReadonlyArray<EnvironmentThreadShell>;
+  /** Left out of `@` thread suggestions: a thread is never context for itself. */
+  readonly currentThreadId?: ThreadId | null;
   readonly projectCwd: string | null;
+  readonly pullRequestProjectId?: ProjectId | null;
+  readonly pullRequestRepository?: string | null;
   readonly selectedProviderStatus: ServerProvider | null;
   readonly hasThread: boolean;
   readonly hasCompactableConversation: boolean;
@@ -191,6 +237,16 @@ export function useComposerCommandMenu({
     setSelection(nextSelection);
   }, []);
   useEffect(() => {
+    // An insert (attachment, terminal capture, review comment) rewrites the draft and records
+    // the caret that belongs after the new chip. Clamping alone would keep the old offset,
+    // which sits before it.
+    const inserted = ownerKey ? readComposerDraftSelection(ownerKey, draftMessage) : null;
+    if (inserted) {
+      setSelection((current) =>
+        current.start === inserted.start && current.end === inserted.end ? current : inserted,
+      );
+      return;
+    }
     const end = draftMessage.length;
     setSelection((current) => {
       const start = Math.min(current.start, end);
@@ -200,7 +256,7 @@ export function useComposerCommandMenu({
       }
       return { start, end: selectionEnd };
     });
-  }, [draftMessage.length]);
+  }, [draftMessage, ownerKey]);
   useEffect(() => {
     if (previousOwnerKeyRef.current === ownerKey) return;
     previousOwnerKeyRef.current = ownerKey;
@@ -283,14 +339,49 @@ export function useComposerCommandMenu({
     cwd: trigger?.kind === "path" ? projectCwd : null,
     query: trigger?.kind === "path" ? trigger.query : null,
   });
+  const playbookQuery = useEnvironmentQuery(
+    trigger?.kind === "slash-playbook" && environmentId && projectId
+      ? j5Environment.playbookLibrary({
+          environmentId,
+          input: { projectId, ...(threadId ? { threadId } : {}) },
+        })
+      : null,
+  );
+  const pullRequestSearch = useComposerPullRequestSearch({
+    environmentId,
+    projectId: pullRequestProjectId,
+    repository: pullRequestRepository,
+    query: trigger?.kind === "pull-request" ? trigger.query : null,
+  });
 
   const agentPicker = useAgentMentionPicker(environmentId, selectedProviderStatus?.driver, trigger);
   const items = useMemo<ComposerCommandItem[]>(() => {
     if (!trigger) return [];
     if (trigger.kind === "agent") return agentPicker.items;
+    if (trigger.kind === "slash-playbook")
+      return playbookMenuItems(playbookQuery.data?.playbooks ?? [], trigger, draftMessage);
+
+    if (trigger.kind === "pull-request") {
+      return pullRequestSearch.entries.map((entry) => ({
+        id: `pr:${entry.projectId}:${entry.repository}:${entry.number}`,
+        type: "pull-request",
+        pullRequest: {
+          number: entry.number,
+          title: entry.title,
+          url: entry.url,
+          headBranch: entry.headBranch,
+          baseBranch: entry.baseBranch,
+          state: entry.state,
+          isDraft: entry.isDraft,
+        },
+        label: `#${entry.number}`,
+        description: `${entry.isDraft ? "Draft" : entry.state} · ${entry.title}`,
+      }));
+    }
 
     if (trigger.kind === "slash-command") {
       const q = trigger.query.toLowerCase();
+      const visibleSkills = getProviderSkillsForSlashMenu(skills, true);
       const commandItems = buildComposerSlashCommandItems({
         query: q,
         atMessageStart: trigger.rangeStart === 0,
@@ -298,10 +389,18 @@ export function useComposerCommandMenu({
         hasCompactableConversation,
         offersUsageLimits,
         allowInteractionMode: onUpdateInteractionMode !== undefined,
-        selectedProviderStatus,
+        selectedProviderStatus: selectedProviderStatus
+          ? {
+              ...selectedProviderStatus,
+              slashCommands: getProviderSlashCommandsForSlashMenu(
+                resolveProviderSlashCommandsForCwd(selectedProviderStatus, projectCwd),
+                visibleSkills,
+              ),
+            }
+          : null,
       });
 
-      const skillItems = getProviderSkillsForSlashMenu(skills, true)
+      const skillItems = visibleSkills
         .filter((skill) => matchesSlashSkillQuery(skill, q))
         .map((skill) => ({
           id: `skill:${skill.name}`,
@@ -317,7 +416,7 @@ export function useComposerCommandMenu({
     if (trigger.kind === "skill") {
       const enabledSkills = dedupeProviderSkillsByName(skills.filter(isProviderSkillUserInvocable));
       const normalizedQuery = normalizeSearchQuery(trigger.query, {
-        trimLeadingPattern: /^\$+/,
+        trimLeadingPattern: /^\p{Sc}+/u,
       });
 
       if (!normalizedQuery) {
@@ -398,9 +497,18 @@ export function useComposerCommandMenu({
     }
 
     if (trigger.kind === "path") {
+      const threadItems = environmentId
+        ? matchComposerThreadItems({
+            shells: threadShells,
+            environmentId,
+            excludeThreadId: currentThreadId,
+            query: trigger.query,
+          })
+        : [];
       return [
-        // J5: personas whose id or name starts with the typed text lead the file results.
+        // J5: saved agents lead, then upstream thread references, then files.
         ...agentPicker.items,
+        ...threadItems,
         ...pathSearch.entries.map((entry) => {
           const parts = entry.path.split("/");
           return {
@@ -418,10 +526,17 @@ export function useComposerCommandMenu({
     return [];
   }, [
     agentPicker.items,
+    playbookQuery.data,
+    draftMessage,
+    currentThreadId,
+    environmentId,
+    threadShells,
     hasThread,
     hasCompactableConversation,
     onUpdateInteractionMode,
     pathSearch.entries,
+    pullRequestSearch.entries,
+    projectCwd,
     selectedProviderStatus,
     skills,
     trigger,
@@ -431,6 +546,74 @@ export function useComposerCommandMenu({
   const onSelect = useCallback(
     (item: ComposerCommandItem) => {
       if (!trigger) return;
+      if (item.type === "thread") {
+        if (!ownerKey || trigger.kind !== "path") return;
+        const shell = threadShells.find(
+          (candidate) =>
+            candidate.environmentId === item.thread.environmentId &&
+            candidate.id === item.thread.threadId,
+        );
+        if (!shell) return;
+        const record = threadComposerContext(item.thread, shell.title);
+        const existing = getComposerDraftSnapshot(ownerKey).context?.records ?? [];
+        const alreadyAttached = existing.some((entry) => entry.contextId === record.contextId);
+        if (!alreadyAttached && existing.length >= COMPOSER_CONTEXT_MAX_RECORDS) {
+          Alert.alert(
+            "Too many context items",
+            "Remove some context from the draft and try again.",
+          );
+          return;
+        }
+        const result = replaceTextRange(
+          draftMessage,
+          trigger.rangeStart,
+          trigger.rangeEnd,
+          `${formatComposerContextReference(record)} `,
+        );
+        onChangeDraftMessage(result.text);
+        if (!alreadyAttached) {
+          const draft = getComposerDraftSnapshot(ownerKey);
+          setComposerDraftContext(ownerKey, {
+            version: 1,
+            records: [...(draft.context?.records ?? []), record],
+          });
+        }
+        setSelection({ start: result.cursor, end: result.cursor });
+        return;
+      }
+      if (item.type === "pull-request") {
+        if (
+          !ownerKey ||
+          trigger.kind !== "pull-request" ||
+          !items.some((candidate) => candidate.id === item.id)
+        )
+          return;
+        const record = pullRequestComposerContext(item.pullRequest, uuidv4());
+        if (
+          (getComposerDraftSnapshot(ownerKey).context?.records.length ?? 0) >=
+          COMPOSER_CONTEXT_MAX_RECORDS
+        ) {
+          Alert.alert(
+            "Too many context items",
+            "Remove some context from the draft and try again.",
+          );
+          return;
+        }
+        const result = replaceTextRange(
+          draftMessage,
+          trigger.rangeStart,
+          trigger.rangeEnd,
+          `${formatComposerContextReference(record)} `,
+        );
+        onChangeDraftMessage(result.text);
+        const draft = getComposerDraftSnapshot(ownerKey);
+        setComposerDraftContext(ownerKey, {
+          version: 1,
+          records: [...(draft.context?.records ?? []), record],
+        });
+        setSelection({ start: result.cursor, end: result.cursor });
+        return;
+      }
 
       if (
         item.type === "provider-slash-command" &&
@@ -460,10 +643,13 @@ export function useComposerCommandMenu({
     },
     [
       draftMessage,
+      ownerKey,
+      items,
       onChangeDraftMessage,
       onUpdateInteractionMode,
       onUsageLimits,
       selectedProviderStatus?.showInteractionModeToggle,
+      threadShells,
       trigger,
     ],
   );
@@ -474,7 +660,22 @@ export function useComposerCommandMenu({
     trigger,
     items,
     skills,
-    isLoading: pathSearch.isPending || (trigger?.kind === "agent" && agentPicker.isPending),
+    isLoading:
+      trigger?.kind === "pull-request"
+        ? pullRequestSearch.isPending
+        : pathSearch.isPending ||
+          (trigger?.kind === "slash-playbook" && playbookQuery.isPending) ||
+          (trigger?.kind === "agent" && agentPicker.isPending),
+    error:
+      trigger?.kind === "pull-request"
+        ? pullRequestProjectId === null || pullRequestRepository === null
+          ? "Pull requests are unavailable for this project."
+          : pullRequestSearch.error
+        : trigger?.kind === "slash-playbook"
+          ? environmentId && projectId
+            ? playbookQuery.error
+            : "Choose a project to see its playbooks."
+          : null,
     onSelect,
   };
 }

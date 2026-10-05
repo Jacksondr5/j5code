@@ -14,6 +14,7 @@ import {
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import { ParticipantPlacementService, layer as placementLayer } from "./PlacementService.ts";
+import { noneLayer as peerDirectoryNoneLayer } from "./PeerDirectory.ts";
 import { A2ASendService, layer as sendServiceLayer } from "./SendService.ts";
 import { SquadronJoinService, layer as squadronJoinLayer } from "./SquadronJoinService.ts";
 import {
@@ -28,7 +29,7 @@ const joinedAt = "2026-09-12T10:05:00.000Z";
 const projectId = ProjectId.make("project:join:primary");
 const otherProjectId = ProjectId.make("project:join:other");
 
-const database = NodeSqliteClient.layerMemory();
+const database = NodeSqliteClient.layer({ filename: ":memory:" });
 const ledger = ledgerLayer.pipe(Layer.provide(database));
 const homes = homeRegistrarLayer.pipe(Layer.provide(ledger), Layer.provide(database));
 const homeTransactions = homeRegistrationTransactionLayer.pipe(
@@ -37,7 +38,11 @@ const homeTransactions = homeRegistrationTransactionLayer.pipe(
 );
 const placements = placementLayer.pipe(Layer.provide(ledger), Layer.provide(database));
 const references = squadronProjectReferencesLayer.pipe(Layer.provide(database));
-const sendService = sendServiceLayer.pipe(Layer.provide(ledger), Layer.provide(database));
+const sendService = sendServiceLayer.pipe(
+  Layer.provide(peerDirectoryNoneLayer),
+  Layer.provide(ledger),
+  Layer.provide(database),
+);
 const join = squadronJoinLayer.pipe(
   Layer.provide(homeTransactions),
   Layer.provide(ledger),

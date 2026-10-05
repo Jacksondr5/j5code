@@ -69,3 +69,5 @@ Jackson dogfooded a three-seat Crew with the Claude subscription signed out and 
 - **The refusal names its reason.** A seat whose provider is signed out, disabled, or missing was already refused at spawn by the persona route; the refusal now says "codex is signed out" rather than "unavailable". Jackson's puzzle, how signed-out seats spawned at all, most likely sits in a cached authenticated status with an expired token; the check itself was in place.
 
 Left for a later change: a bell or inbox entry when a launch failure is one only the person can fix, which needs a platform-authored ask and a sender for it; and the duplicate Setup joke, which only the ledger on Jackson's server can settle.
+
+_Later: the Inbox alert for a failure only the person can fix shipped in [#148](https://github.com/Jacksondr5/j5code/pull/148)._

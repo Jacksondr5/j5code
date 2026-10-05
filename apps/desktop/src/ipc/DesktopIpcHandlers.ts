@@ -1,12 +1,17 @@
 import * as Effect from "effect/Effect";
 
 import * as DesktopIpc from "./DesktopIpc.ts";
+import { installNotificationBadge } from "./methods/notificationBadge.ts";
 import { getClientSettings, setClientSettings } from "./methods/clientSettings.ts";
 import {
   clearConnectionCatalog,
   getConnectionCatalog,
   setConnectionCatalog,
 } from "./methods/connectionCatalog.ts";
+import {
+  getLocalEnvironmentEnabled,
+  setLocalEnvironmentEnabled,
+} from "./methods/localEnvironment.ts";
 import {
   getAdvertisedEndpoints,
   getServerExposureState,
@@ -39,6 +44,8 @@ import {
   getWindowFullscreenState,
   openExternal,
   openSystemSettings,
+  checkSystemPermission,
+  pasteAsText,
   probeRemoteEditors,
   pickFolder,
   pickProjectFavicon,
@@ -63,9 +70,11 @@ import {
 import * as PreviewIpc from "./methods/preview.ts";
 import * as AppActivationIpc from "./methods/appActivation.ts";
 import { getWslState, setWslBackendEnabled, setWslDistro, setWslOnly } from "./methods/wsl.ts";
+import { installJ5CommandMethod, uninstallJ5CommandMethod } from "../j5/desktopCliIpc.ts";
 
 export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers")(function* () {
   const ipc = yield* DesktopIpc.DesktopIpc;
+  yield* installNotificationBadge();
   yield* PreviewIpc.installPreviewEventForwarding();
 
   yield* ipc.handle(AppActivationIpc.setReady);
@@ -75,6 +84,8 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* ipc.handleSync(getSystemLocale);
   yield* ipc.handleSync(getWindowFullscreenState);
   yield* ipc.handleSync(getLocalEnvironmentBootstraps);
+  yield* ipc.handleSync(getLocalEnvironmentEnabled);
+  yield* ipc.handle(setLocalEnvironmentEnabled);
   yield* ipc.handle(getLocalEnvironmentBearerToken);
 
   yield* ipc.handle(getClientSettings);
@@ -115,6 +126,10 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* ipc.handle(setWslDistro);
   yield* ipc.handle(setWslOnly);
 
+  // J5 (FORK.md case 55)
+  yield* ipc.handle(installJ5CommandMethod);
+  yield* ipc.handle(uninstallJ5CommandMethod);
+
   yield* ipc.handle(pickFolder);
   yield* ipc.handle(pickProjectFavicon);
   yield* ipc.handle(pickThemeFiles);
@@ -122,6 +137,8 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* ipc.handle(showContextMenu);
   yield* ipc.handle(openExternal);
   yield* ipc.handle(openSystemSettings);
+  yield* ipc.handle(checkSystemPermission);
+  yield* ipc.handle(pasteAsText);
   yield* ipc.handle(probeRemoteEditors);
   yield* ipc.handle(getUpdateState);
   yield* ipc.handle(setUpdateChannel);

@@ -1,3 +1,5 @@
+import { isJ5MentionPath } from "./j5/agentMention.ts";
+
 export type ComposerInlineToken =
   | {
       readonly type: "mention";
@@ -26,7 +28,7 @@ export interface CollectComposerInlineTokensOptions {
  * contain at least one letter.
  */
 const SKILL_TOKEN_REGEX =
-  /(^|\s)\$(?![0-9][0-9_]*(?:[kKmMbBtT]|[eE][0-9]+)?(?:\s|$))(?=[a-zA-Z0-9:_-]*[a-zA-Z])([a-zA-Z0-9][a-zA-Z0-9:_-]*)(?=\s)/g;
+  /(^|\s)\p{Sc}(?![0-9][0-9_]*(?:[kKmMbBtT]|[eE][0-9]+)?(?:\s|$))(?=[a-zA-Z0-9:_-]*[a-zA-Z])([a-zA-Z0-9][a-zA-Z0-9:_-]*)(?=\s)/gu;
 const MENTION_TOKEN_REGEX = /(^|\s)@(?:"((?:\\.|[^"\\])*)"|([^\s@"]+))(?=\s)/g;
 /**
  * The label body is bounded rather than `*`. Unbounded, every whitespace in
@@ -88,7 +90,7 @@ function collectMentionTokens(text: string): ComposerInlineToken[] {
     if (
       !path ||
       (quotedPath === undefined &&
-        (path.startsWith("persona:") || SCOPED_PACKAGE_REFERENCE_REGEX.test(path)))
+        (isJ5MentionPath(path) || SCOPED_PACKAGE_REFERENCE_REGEX.test(path)))
     ) {
       continue;
     }

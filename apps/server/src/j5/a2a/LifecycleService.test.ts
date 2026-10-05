@@ -18,6 +18,7 @@ import {
 } from "./DeliveryTransport.ts";
 import { A2ADeliveryWorker, manualLayer as deliveryWorkerLayer } from "./DeliveryWorker.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
+import { noneLayer as peerDirectoryNoneLayer } from "./PeerDirectory.ts";
 import { A2ALifecycleService, manualLayer as lifecycleLayer } from "./LifecycleService.ts";
 import { resolveThreadHome } from "./HomeRegistrar.ts";
 import { ParticipantPlacementService, layer as placementLayer } from "./PlacementService.ts";
@@ -26,11 +27,14 @@ import { runJ5A2AMigrations } from "./Migrations.ts";
 import { A2AParticipantArchivedError, A2ASendService, layer as sendLayer } from "./SendService.ts";
 import {
   CommCommandId,
+  CorrelationId,
   ExchangeDroppedPayload,
   SquadronId,
   ParticipantId,
   type AgentParticipant,
   type HumanParticipant,
+  ExchangeId,
+  LedgerMessageId,
 } from "./contracts.ts";
 
 const openedAt = "2026-08-23T12:00:00.000Z";
@@ -64,10 +68,14 @@ const makeTestLayer = (
   storedEvents: Stream.Stream<OrchestrationV2StoredEvent> = Stream.never,
   failPeerDeliveries = false,
 ) => {
-  const database = NodeSqliteClient.layerMemory();
+  const database = NodeSqliteClient.layer({ filename: ":memory:" });
   const ledger = ledgerLayer.pipe(Layer.provide(database));
   const placements = placementLayer.pipe(Layer.provide(database));
-  const send = sendLayer.pipe(Layer.provide(ledger), Layer.provide(database));
+  const send = sendLayer.pipe(
+    Layer.provide(peerDirectoryNoneLayer),
+    Layer.provide(ledger),
+    Layer.provide(database),
+  );
   const transport = Layer.succeed(
     A2ADeliveryTransport,
     A2ADeliveryTransport.of({
@@ -81,6 +89,7 @@ const makeTestLayer = (
             )
           : Ref.update(notices, (current) => [...current, { channel: "agent" as const, input }]),
       cancelAgent: () => Effect.succeed("cancelled" as const),
+      deliverPeer: () => Effect.die("peer delivery is not under test"),
       deliverHuman: (input) =>
         Ref.update(notices, (current) => [...current, { channel: "human" as const, input }]),
     }),
@@ -898,3 +907,139 @@ for (const directFirst of [true, false]) {
       }),
   );
 }
+
+it.effect("addresses drop notices to a counterparty on a peer server in both directions", () =>
+  Effect.gen(function* () {
+    const notices = yield* Ref.make<ReadonlyArray<DeliveredNotice>>([]);
+    yield* Effect.gen(function* () {
+      yield* runJ5A2AMigrations();
+      const squadronId = SquadronId.make("squadron:lifecycle:peers");
+      yield* createSquadron(squadronId, "Peers");
+      yield* join(squadronId, sender, "peers:sender");
+      yield* join(squadronId, receiver, "peers:receiver");
+      const ledger = yield* A2ALedger;
+      const lifecycle = yield* A2ALifecycleService;
+      const sql = yield* SqlClient.SqlClient;
+      const remoteAsker = ParticipantId.make("agent:j5:a2a:thread:remote-asker");
+      const remoteAnswerer = ParticipantId.make("agent:j5:a2a:thread:remote-answerer");
+      const homeSquadron = SquadronId.make("squadron:home-support");
+
+      // Inbound: a peer's agent asked our receiver. Outbound: our sender asked a peer's agent.
+      const inboundExchange = ExchangeId.make("exchange:lifecycle:inbound");
+      yield* ledger.appendEvents({
+        commandId: CommCommandId.make("command:lifecycle:peers:inbound"),
+        squadronId,
+        acceptedAt: openedAt,
+        events: [
+          {
+            kind: "exchange.opened",
+            sender: remoteAsker,
+            receiver: receiver.id,
+            exchangeId: inboundExchange,
+            correlationId: CorrelationId.make("correlation:lifecycle:inbound"),
+            payload: { intent: "inbound", urgency: null },
+            createdAt: openedAt,
+          },
+          {
+            kind: "message.received",
+            sender: remoteAsker,
+            receiver: receiver.id,
+            exchangeId: inboundExchange,
+            correlationId: CorrelationId.make("correlation:lifecycle:inbound"),
+            payload: {
+              originSquadronId: homeSquadron,
+              originEnvironmentId: "environment-home",
+              message: {
+                messageId: LedgerMessageId.make("message:lifecycle:inbound"),
+                text: "inbound ask",
+                originSquadronId: homeSquadron,
+                receiverSquadronId: squadronId,
+                exchangeRole: "ask",
+                envelopeChannel: "peer",
+              },
+            },
+            createdAt: openedAt,
+          },
+        ],
+      });
+      const outboundExchange = ExchangeId.make("exchange:lifecycle:outbound");
+      yield* ledger.appendEvents({
+        commandId: CommCommandId.make("command:lifecycle:peers:outbound"),
+        squadronId,
+        acceptedAt: openedAt,
+        events: [
+          {
+            kind: "exchange.opened",
+            sender: sender.id,
+            receiver: remoteAnswerer,
+            exchangeId: outboundExchange,
+            correlationId: CorrelationId.make("correlation:lifecycle:outbound"),
+            payload: { intent: "outbound", urgency: null },
+            createdAt: openedAt,
+          },
+          {
+            kind: "message.sent",
+            sender: sender.id,
+            receiver: remoteAnswerer,
+            exchangeId: outboundExchange,
+            correlationId: CorrelationId.make("correlation:lifecycle:outbound"),
+            payload: {
+              messageId: LedgerMessageId.make("message:lifecycle:outbound"),
+              text: "outbound ask",
+              originSquadronId: squadronId,
+              receiverSquadronId: homeSquadron,
+              receiverEnvironmentId: "environment-home",
+              exchangeRole: "ask",
+              envelopeChannel: "peer",
+            },
+            createdAt: openedAt,
+          },
+        ],
+      });
+
+      const receiverGone = yield* lifecycle.archiveParticipant({
+        participantId: receiver.id,
+        archivedAt,
+      });
+      assert.deepStrictEqual(receiverGone.droppedExchangeIds, [inboundExchange]);
+      const senderGone = yield* lifecycle.archiveParticipant({
+        participantId: sender.id,
+        archivedAt,
+      });
+      assert.deepStrictEqual(senderGone.droppedExchangeIds, [outboundExchange]);
+
+      const noticesSent = yield* sql<{
+        readonly receiver: string;
+        readonly receiver_environment: string | null;
+        readonly receiver_squadron: string;
+      }>`
+        SELECT receiver,
+               json_extract(payload, '$.receiverEnvironmentId') AS receiver_environment,
+               json_extract(payload, '$.receiverSquadronId') AS receiver_squadron
+        FROM j5_a2a_comm_event
+        WHERE kind = 'message.sent' AND json_extract(payload, '$.envelopeChannel') = 'lifecycle_notice'
+        ORDER BY seq
+      `;
+      assert.deepStrictEqual(noticesSent, [
+        {
+          receiver: remoteAsker,
+          receiver_environment: "environment-home",
+          receiver_squadron: homeSquadron,
+        },
+        {
+          receiver: remoteAnswerer,
+          receiver_environment: "environment-home",
+          receiver_squadron: homeSquadron,
+        },
+      ]);
+      const pending = yield* sql<{ readonly receiver_environment_id: string | null }>`
+        SELECT receiver_environment_id FROM j5_a2a_delivery
+        WHERE exchange_role = 'terminal_notice' ORDER BY sent_seq
+      `;
+      assert.deepStrictEqual(pending, [
+        { receiver_environment_id: "environment-home" },
+        { receiver_environment_id: "environment-home" },
+      ]);
+    }).pipe(Effect.provide(makeTestLayer(notices)));
+  }),
+);

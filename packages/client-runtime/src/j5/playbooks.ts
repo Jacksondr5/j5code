@@ -1,6 +1,7 @@
 import {
   PLAYBOOK_MAX_BYTES,
   PLAYBOOK_MAX_STEPS,
+  PLAYBOOK_NAME_PATTERN,
   type PlaybookProgress,
 } from "@t3tools/contracts/j5";
 import type {
@@ -12,6 +13,10 @@ import type {
   ServerProvider,
   ThreadId,
 } from "@t3tools/contracts";
+import {
+  PLAYBOOK_MENTION_PREFIX,
+  playbookMentionReplacement,
+} from "@t3tools/shared/j5/agentMention";
 import { defaultAgentPersonaModelRoute } from "./agentPersonas.ts";
 import type { ScopedManagedSquadron } from "./squadrons.ts";
 import type { StartThreadTurnInput } from "../operations/commands.ts";
@@ -22,7 +27,7 @@ export const PLAYBOOK_AUTHOR_INSTRUCTIONS = `You are Playbook Author. Help the u
 
 1. Start by asking what the playbook should accomplish. Clarify the desired result, inputs, constraints, and evidence of success one focused question at a time. Use details already provided instead of asking again.
 2. Inspect existing .j5/playbooks definitions and relevant workspace guidance. Propose the smallest useful sequence of steps, then write or refine the definition once the user's intent is clear. Ask before replacing an unrelated existing definition; preserve stable step IDs when editing.
-3. Save .j5/playbooks/<name>.yaml relative to this thread's workspace. Use YAML 1.2 with title, description, and steps. Each step has a unique stable id, a title, and a non-empty prompt. Use 1–${PLAYBOOK_MAX_STEPS} steps, no YAML aliases, and at most ${PLAYBOOK_MAX_BYTES / 1024} KiB. For example:
+3. Save .j5/playbooks/<name>.yaml relative to this thread's workspace. The name must be lowercase letters, digits, and hyphens, starting with a letter, such as release-review; put the human-readable name in title. Use YAML 1.2 with title, description, and steps. Each step has a unique stable id, a title, and a non-empty prompt. A step may add persona, the id of the persona that should do it; call list_personas before writing one, and leave it off steps the user doesn't assign. Use 1–${PLAYBOOK_MAX_STEPS} steps, no YAML aliases, and at most ${PLAYBOOK_MAX_BYTES / 1024} KiB. For example:
 
 title: Review a change
 description: Inspect a change and report evidence.
@@ -32,10 +37,11 @@ steps:
     prompt: Read the change, check its intended behavior, and record findings with evidence.
   - id: report
     title: Report
+    persona: reviewer
     prompt: Summarize findings, checks performed, and remaining uncertainty.
 
 Each prompt tells the same agent what work to do, what evidence to retain, and when to advance.
-4. Call playbook_list in this thread after writing. Fix reported issues and repeat until the named definition is listed without an issue. If the tool is unavailable, state that runtime validation is still unverified.
+4. Call playbook_list in this thread after writing. Fix reported issues and repeat until the named definition is listed without an issue. Tell the user about any warnings, such as a persona that is missing or turned off. If the tool is unavailable, state that runtime validation is still unverified.
 5. Report the file path, purpose, and steps. Explain that the user can inspect it in Settings → Personas and send /playbook <name> when ready to run it.
 
 Stay within authoring and validation. Start a run only when the user explicitly asks. Make changes needed for the playbook; leave unrelated workspace files alone.`;
@@ -222,15 +228,96 @@ export function samePlaybookWorkspaceInputs(
   );
 }
 
-/** A composer text expansion. The ordinary agent-message path performs the work. */
+/**
+ * A composer text expansion for a message that starts with `/playbook`. The name is the next
+ * word, lowercased, without trailing punctuation or `.yaml`, so "/playbook release, then make a
+ * crew" names `release`; any text after it is kept as a separate paragraph. A word that isn't a
+ * valid playbook name leaves the message unchanged. The ordinary agent-message path performs
+ * the work.
+ */
 export function expandPlaybookPrompt(text: string): string {
-  return text.replace(
-    /^\s*\/playbook(?:[ \t]+([^\r\n]+))?\s*$/i,
-    (_match, name: string | undefined) =>
-      name?.trim()
-        ? `Start playbook ${name.trim()}`
-        : "List available playbooks and help me choose one to start.",
+  const command = /^\s*\/playbook(?!\S)[ \t]*/i.exec(text)?.[0];
+  if (command === undefined) return text;
+  const args = text.slice(command.length);
+  const word = /^\S*/.exec(args)?.[0] ?? "";
+  const name = word
+    .replace(/[,.;:!?)]+$/, "")
+    .replace(/\.ya?ml$/i, "")
+    .toLowerCase();
+  if (word && !PLAYBOOK_NAME_PATTERN.test(name)) return text;
+  const request = word
+    ? `Start playbook ${name}`
+    : "List available playbooks and help me choose one to start.";
+  const rest = args.slice(word.length).trim();
+  return rest ? `${request.replace(/\.?$/, ".")}\n\n${rest}` : request;
+}
+
+/** Offer the playbook command only where its name picker can open. */
+export function isPlaybookSlashCommandVisible(command: string, atMessageStart: boolean) {
+  return command !== "playbook" || atMessageStart;
+}
+
+/** `/playbook <query>` suggestions: exact name, then name prefix, then name or title substring. */
+export function matchPlaybookSuggestions(
+  playbooks: ReadonlyArray<PlaybookSuggestionInput>,
+  query: string,
+) {
+  const needle = query.trim().toLowerCase();
+  const rank = ({ name, title }: { name: string; title: string }) => {
+    const lower = name.toLowerCase();
+    if (lower === needle) return 0;
+    if (lower.startsWith(needle)) return 1;
+    return lower.includes(needle) || title.toLowerCase().includes(needle) ? 2 : null;
+  };
+  return playbooks
+    .flatMap((playbook) => {
+      const order = playbook.issue ? null : rank(playbook);
+      return order === null ? [] : [{ playbook, order }];
+    })
+    .sort((a, b) => a.order - b.order)
+    .map(({ playbook }) => ({
+      id: `playbook:${playbook.name}`,
+      type: "playbook" as const,
+      name: playbook.name,
+      label: playbook.name,
+      description: playbook.title,
+    }));
+}
+
+type PlaybookSuggestionInput = { name: string; title: string; issue: { message: string } | null };
+type PlaybookTriggerRange = { rangeStart: number; rangeEnd: number };
+
+/** `@playbook:` and `/playbook` share one trigger kind; the text at `rangeStart` tells them apart. */
+export const isPlaybookMention = (text: string, trigger: PlaybookTriggerRange) =>
+  text.startsWith(PLAYBOOK_MENTION_PREFIX, trigger.rangeStart);
+
+/**
+ * Picker rows for the shared playbook trigger. `/playbook` lists only valid playbooks. The
+ * `@playbook:` form also lists invalid ones after the valid ones, with the error as description,
+ * except a file whose name isn't a valid playbook name.
+ */
+export function playbookMenuItems(
+  playbooks: ReadonlyArray<PlaybookSuggestionInput>,
+  trigger: PlaybookTriggerRange & { query: string },
+  text: string,
+) {
+  if (!isPlaybookMention(text, trigger)) return matchPlaybookSuggestions(playbooks, trigger.query);
+  // A file whose name isn't a valid playbook name can't be mentioned, so it isn't offered.
+  const mentionable = playbooks.filter(({ name }) => PLAYBOOK_NAME_PATTERN.test(name));
+  // Rank invalid entries the same way by matching them as if valid, then show their error.
+  const errors = new Map(
+    mentionable.flatMap(({ name, issue }) => (issue ? [[name, issue.message] as const] : [])),
   );
+  const invalid = matchPlaybookSuggestions(
+    mentionable.flatMap((playbook) => (playbook.issue ? [{ ...playbook, issue: null }] : [])),
+    trigger.query,
+  ).map((item) => ({ ...item, description: errors.get(item.name) ?? "" }));
+  return [...matchPlaybookSuggestions(mentionable, trigger.query), ...invalid];
+}
+
+/** The text that replaces the trigger range when a playbook row is picked. */
+export function playbookSelectionText(text: string, trigger: PlaybookTriggerRange, name: string) {
+  return isPlaybookMention(text, trigger) ? playbookMentionReplacement(name) : `/playbook ${name} `;
 }
 
 export function presentPlaybook(run: PlaybookProgress) {
@@ -275,10 +362,15 @@ export function presentPlaybook(run: PlaybookProgress) {
 
 /** Prioritize active runs with issues within a fetched page without mutating the query's runs. */
 export function sortPlaybookRuns(runs: ReadonlyArray<PlaybookProgress>) {
-  return runs.toSorted(
+  return [...runs].sort(
     (a, b) =>
       Number(b.status === "active" && !!b.issue) - Number(a.status === "active" && !!a.issue) ||
       Number(b.status === "active") - Number(a.status === "active") ||
       Date.parse(b.updatedAt) - Date.parse(a.updatedAt),
   );
+}
+
+/** A step's list label, with its persona when it names one: "1. Plan · planner". */
+export function playbookStepLabel(step: { title: string; persona?: string }, index: number) {
+  return `${index + 1}. ${step.title}${step.persona ? ` · ${step.persona}` : ""}`;
 }

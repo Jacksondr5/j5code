@@ -18,7 +18,7 @@ import { runJ5A2AMigrations } from "./Migrations.ts";
 import { CommCommandId, ParticipantId, SquadronId } from "./contracts.ts";
 
 const createdAt = "2026-08-19T15:30:00.000Z";
-const database = NodeSqliteClient.layerMemory();
+const database = NodeSqliteClient.layer({ filename: ":memory:" });
 const ledger = ledgerLayer.pipe(Layer.provide(database));
 const registrar = homeRegistrarLayer.pipe(Layer.provide(ledger), Layer.provide(database));
 const testLayer = Layer.mergeAll(database, ledger, registrar);
@@ -305,7 +305,7 @@ it.effect("distinguishes no home and exact replay does not reactivate ended memb
 it.effect("recovers a conflicting home committed between precheck and append", () =>
   Effect.scoped(
     Effect.gen(function* () {
-      const databaseContext = yield* Layer.build(NodeSqliteClient.layerMemory());
+      const databaseContext = yield* Layer.build(NodeSqliteClient.layer({ filename: ":memory:" }));
       const sql = Context.get(databaseContext, SqlClient.SqlClient);
       const databaseLayer = Layer.succeed(SqlClient.SqlClient, sql);
       yield* runJ5A2AMigrations().pipe(Effect.provide(databaseLayer));

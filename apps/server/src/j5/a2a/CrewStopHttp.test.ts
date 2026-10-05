@@ -50,6 +50,11 @@ it("stops a crew for operators only and reports each seat", async () => {
                 participantId: ParticipantId.make("agent:j5:a2a:thread:critic"),
                 result: "already_idle" as const,
               },
+              {
+                seatName: "ghost",
+                participantId: ParticipantId.make("agent:j5:a2a:thread:ghost"),
+                result: "never_created" as const,
+              },
             ],
           })
         : Effect.fail(new CrewStopNotFoundError({ crewInstanceId: input.crewInstanceId }));
@@ -78,6 +83,7 @@ it("stops a crew for operators only and reports each seat", async () => {
     );
     assert.equal(stopped.status, 200);
     const body = (await stopped.json()) as { members: Array<{ seat: string; result: string }> };
+    // The never-created ghost seat is left out, so every client decodes the members it gets.
     assert.deepStrictEqual(
       body.members.map((member) => [member.seat, member.result]),
       [

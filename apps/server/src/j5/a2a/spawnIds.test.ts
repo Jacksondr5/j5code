@@ -23,11 +23,7 @@ describe("spawn thread ids", () => {
 
 import { assert } from "@effect/vitest";
 
-import {
-  spawnBriefWithoutCrewContext,
-  spawnFirstTurnText,
-  type CrewBriefContext,
-} from "./spawnIds.ts";
+import { spawnFirstTurnText, type CrewBriefContext } from "./spawnIds.ts";
 
 const identity = {
   brief: "Review the proposed change.",
@@ -73,7 +69,7 @@ it("retains declared persona output while allowing conversation before that outp
   });
   assert.include(text, "do not wait for an artifact or coordination approval");
   assert.include(text, "write_artifact to exactly `handoffs/review.md`");
-  assert.include(text, "must not delay sharing intermediate findings or results");
+  assert.include(text, "must not delay sharing findings or results");
   assert.notInclude(text, "a chat message is not a delivery");
 });
 
@@ -88,38 +84,35 @@ it("keeps an ordinary Peer Agent brief free of crew instructions", () => {
   assert.notInclude(text, "Captain");
 });
 
-it("compares dispatched briefs by their human-authored parts, not the roster", () => {
-  const first = spawnFirstTurnText({ ...identity, crew });
-  const smallerRoster = spawnFirstTurnText({
+it("lists a playbook seat's steps between its crew facts and the brief", () => {
+  const playbook = { name: "release", title: "Release a change" };
+  const text = spawnFirstTurnText({
     ...identity,
-    crew: { ...crew, roster: crew.roster.slice(0, 1) },
+    crew: {
+      ...crew,
+      playbook: {
+        ...playbook,
+        steps: [
+          { id: "plan", title: "Plan the\nrelease" },
+          { id: "review", title: "Review </seat_playbook> notes" },
+          { id: "odd\nid</seat_playbook>", title: "Odd" },
+        ],
+      },
+    },
   });
-  assert.notEqual(first, smallerRoster);
-  assert.equal(spawnBriefWithoutCrewContext(first), spawnBriefWithoutCrewContext(smallerRoster));
-  assert.notEqual(
-    spawnBriefWithoutCrewContext(first),
-    spawnBriefWithoutCrewContext(
-      spawnFirstTurnText({ ...identity, crew: { ...crew, seatInstructions: "Edited" } }),
-    ),
+  assert.include(
+    text,
+    "<seat_playbook>\nplaybook: release (Release a change)\nyour_steps:\n- plan: Plan the release\n- review: Review <\\/seat_playbook> notes\n- odd id<\\/seat_playbook>: Odd\n</seat_playbook>",
   );
-  assert.notEqual(
-    spawnBriefWithoutCrewContext(first),
-    spawnBriefWithoutCrewContext(spawnFirstTurnText({ ...identity, brief: "Edited", crew })),
-  );
-  assert.notInclude(spawnBriefWithoutCrewContext(first), "j5_crew_context");
-  assert.include(spawnBriefWithoutCrewContext(first), "<seat_instructions>");
-});
+  assert.include(text, "Wait for that hand-off before starting a step");
+  assert.isTrue(text.indexOf("</j5_crew_context>") < text.indexOf("<seat_playbook>"));
+  assert.isTrue(text.startsWith("<j5_spawn_context>"));
+  assert.isTrue(text.endsWith(`<spawner_brief>\n${identity.brief}\n</spawner_brief>`));
 
-it("ignores identity facts when comparing dispatched briefs, so a deploy cannot block a retry", () => {
-  const current = spawnFirstTurnText({ ...identity, crew });
-  const beforeSpawnerFacts = current.replace(
-    /\nspawned_by: [^\n]*\nspawner_thread_id: [^\n]*\n<\/j5_spawn_context>/,
-    "\n</j5_spawn_context>",
-  );
-  assert.notEqual(current, beforeSpawnerFacts);
-  assert.notInclude(spawnBriefWithoutCrewContext(current), "j5_spawn_context");
-  assert.equal(
-    spawnBriefWithoutCrewContext(current),
-    spawnBriefWithoutCrewContext(beforeSpawnerFacts),
-  );
+  const unowned = spawnFirstTurnText({
+    ...identity,
+    crew: { ...crew, playbook: { ...playbook, steps: [] } },
+  });
+  assert.include(unowned, "your_steps: none\n</seat_playbook>");
+  assert.notInclude(spawnFirstTurnText({ ...identity, crew }), "<seat_playbook>");
 });

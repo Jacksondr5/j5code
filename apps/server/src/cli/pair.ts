@@ -15,6 +15,7 @@ import {
   PortSchema,
 } from "@t3tools/contracts";
 import { resolveWorktreeT3Home } from "@t3tools/shared/devHome";
+import { DEFAULT_SIGNAL_EXPORT } from "@t3tools/shared/observability";
 import {
   buildTailscaleHttpsBaseUrl,
   DEFAULT_TAILSCALE_SERVE_PORT,
@@ -90,9 +91,9 @@ export class NoRunningServerError extends Schema.TaggedError<NoRunningServerErro
 ) {
   override get message(): string {
     return [
-      "No running T3 Code server found.",
+      "No running J5 Code server found.",
       ...this.checkedStatePaths.map((statePath) => `  checked ${statePath}`),
-      "Start one with `npx @jacksondr5/j5code serve`, or connect this machine with T3 Connect: `npx @jacksondr5/j5code connect`.",
+      "Start one with `j5 serve`, or connect this machine with T3 Connect: `j5 connect`.",
     ].join("\n");
   }
 }
@@ -144,7 +145,7 @@ export class ServesOtherEnvironmentError extends Schema.TaggedError<ServesOtherE
   { servePort: Schema.Number },
 ) {
   override get message(): string {
-    return `Tailscale Serve on HTTPS port ${String(this.servePort)} already fronts a different T3 Code server. Pass --tailscale-serve-port to publish this one on another port.`;
+    return `Tailscale Serve on HTTPS port ${String(this.servePort)} already fronts a different J5 Code server. Pass --tailscale-serve-port to publish this one on another port.`;
   }
 }
 
@@ -162,7 +163,7 @@ export class ServePortOccupiedError extends Schema.TaggedError<ServePortOccupied
   { servePort: Schema.Number },
 ) {
   override get message(): string {
-    return `HTTPS port ${String(this.servePort)} on the tailnet already serves something that is not a T3 Code server. Pass --tailscale-serve-port to publish this one on another port.`;
+    return `HTTPS port ${String(this.servePort)} on the tailnet already serves something that is not a J5 Code server. Pass --tailscale-serve-port to publish this one on another port.`;
   }
 }
 
@@ -355,7 +356,7 @@ const discoverPairTarget = Effect.fn("pair.discoverPairTarget")(function* (
     return yield* new WorktreePairingRefusedError({ worktreeHome });
   }
 
-  const envHome = yield* Config.string("J5CODE_HOME").pipe(Config.option);
+  const envHome = yield* Config.String("J5CODE_HOME").pipe(Config.option);
   const scan = yield* scanPairTargets([yield* resolveBaseDir(Option.getOrUndefined(envHome))]);
   if (scan.target !== undefined) {
     return scan.target;
@@ -393,7 +394,10 @@ const makePairServerConfig = Effect.fn(function* (input: {
     traceMaxFiles: 10,
     otlpTracesUrl: undefined,
     otlpMetricsUrl: undefined,
-    otlpExportIntervalMs: 10_000,
+    otlpLogsUrl: undefined,
+    otlpTracesExport: DEFAULT_SIGNAL_EXPORT,
+    otlpMetricsExport: DEFAULT_SIGNAL_EXPORT,
+    otlpLogsExport: DEFAULT_SIGNAL_EXPORT,
     otlpServiceName: "t3-server",
     mode: "web",
     port: state.port,
@@ -518,7 +522,7 @@ const mintPairingLink = Effect.fn("pair.mintPairingLink")(function* (input: {
   );
 });
 
-const ttlFlag = Flag.string("ttl").pipe(
+const ttlFlag = Flag.String("ttl").pipe(
   Flag.withSchema(DurationFromString),
   Flag.withDescription(
     "Token TTL, for example `5m`, `1h`, or `15 minutes`. Defaults to 5 minutes.",
@@ -526,19 +530,19 @@ const ttlFlag = Flag.string("ttl").pipe(
   Flag.optional,
 );
 
-const labelFlag = Flag.string("label").pipe(
+const labelFlag = Flag.String("label").pipe(
   Flag.withDescription("Optional label shown in the server's connections list."),
   Flag.optional,
 );
 
-const tailscaleFlag = Flag.boolean("tailscale").pipe(
+const tailscaleFlag = Flag.Boolean("tailscale").pipe(
   Flag.withDescription(
     "Publish the server over Tailscale Serve HTTPS and pair through the tailnet URL.",
   ),
   Flag.withDefault(false),
 );
 
-const tailscaleServePortFlag = Flag.integer("tailscale-serve-port").pipe(
+const tailscaleServePortFlag = Flag.Int("tailscale-serve-port").pipe(
   Flag.withSchema(PortSchema),
   Flag.withDescription("HTTPS port for Tailscale Serve when --tailscale is enabled."),
   Flag.withDefault(DEFAULT_TAILSCALE_SERVE_PORT),
@@ -552,7 +556,7 @@ export const pairCommand = Command.make("pair", {
   tailscaleServePort: tailscaleServePortFlag,
 }).pipe(
   Command.withDescription(
-    "Mint a pairing token for a running T3 Code server and print it as a QR code.",
+    "Mint a pairing token for a running J5 Code server and print it as a QR code.",
   ),
   Command.withHandler((flags) =>
     Effect.gen(function* () {
