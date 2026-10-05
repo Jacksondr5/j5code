@@ -39,6 +39,13 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
 - Background service and CLI copy (FORK.md case 41): `apps/server/src/cloud/bootService.ts` and
   `cloud/j5/legacyBootService.ts` (service names), and `apps/server/src/cli/update.ts`, `uninstall.ts`,
   `updateProgress.ts`, and `service.ts` (`j5` strings, cgroup `/j5code.service`, `j5.cmd`).
+- Triage (`j5 triage`): `apps/server/src/cli/triagePrompt.ts` and its byte-identical repo copy
+  `.github/triage/PLAYBOOK.md` name J5 Code, clone and search `Jacksondr5/j5code`, refresh the
+  playbook from `j5/main`, and file issues there with the `via-triage` template and label
+  (`.github/ISSUE_TEMPLATE/via-triage.yml`). Upstream's copies point at `pingdotgg/t3code` and
+  `main`; re-apply after an advance that touches them.
+- Security policy: `.github/SECURITY.md` is deleted. Upstream's file sends reports to T3 Tools'
+  address, and J5 has no private reporting channel yet. Keep it deleted when an advance changes it.
 - Desktop runtime identity and state: `DesktopEnvironment.ts`, `DesktopStatePaths.ts`,
   `DesktopEarlyElectronStartup.ts`, `DesktopAppIdentity.ts`, `DesktopUserData.ts` (profile names;
   never a T3 profile), `wsl/DesktopWslEnvironment.ts` (`~/.j5code/wsl-runtime`), and the user-visible
@@ -88,10 +95,22 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
 - Shared client copy: `packages/client-runtime` has no branding import, so its user-visible
   strings stay product-neutral instead of naming T3 Code: `connection/compatibility.ts` ("Update the
   server on …") and `state/pullRequestDiffHttp.ts` ("quit and reopen the app").
+- User-visible copy and marks (2026-10-04): every string a person or an agent reads names the
+  product "J5 Code" (bare "T3" becomes "J5"), across web, desktop, mobile, the server's CLI and
+  error messages, agent instructions and MCP tool titles, native capture helpers.
+  The compact mark on t3-code MCP tool rows and the mobile header is `J5Wordmark`
+  (`apps/web/src/j5/branding/`, `apps/mobile/src/j5/branding/`). These are literal edits in upstream
+  files, so after an advance run
+  `git grep -nE "T3 Code|\bT3\b" -- apps packages native` and rebrand new hits that are
+  not listed under the unchanged internals below.
+- Branch names: `WORKTREE_BRANCH_PREFIX` in `packages/shared/src/git.ts` and the
+  `branchNamePrefix` default in `packages/contracts/src/settings.ts` are `j5code`, and fork pull
+  requests check out as `j5code/pr-<n>/…` (`GitManager.ts`, `BitbucketApi.ts`). The temporary-branch
+  matcher still accepts `t3code/<hash>` so worktrees created before the rename can be renamed.
 - New upstream files: the list above names only known sites. On every advance, also grep the files
   upstream added since the old pin for `t3code`, `T3 Code`, `.t3`, `T3CODE_HOME`, `pingdotgg`,
-  `t3.codes/install`, and `npx t3`, then rebrand identity sites and leave deliberate internals and
-  general copy (below) unchanged.
+  `t3.codes/install`, and `npx t3`, then rebrand identity sites and user-visible copy, and leave the
+  deliberate internals below unchanged.
 
 ## Deliberately unchanged upstream internals
 
@@ -101,10 +120,18 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
   names (`T3CODE_CHANNEL`, `T3CODE_VERSION`, `T3CODE_INSTALL_BIN_DIR`, `T3CODE_RELEASE_BASE_URL`), the
   `T3_BOOT_SERVICE_UNIT` key, and the `__service-launcher` subcommand stay upstream's.
 - Database schema names, persisted mobile storage keys, internal CLI flags, and code identifiers.
-- General upstream product copy and documentation outside the identity sites above, including
-  settings copy naming "T3 Code"/"T3 Connect" (`LocalEnvironmentSetting`, `NotificationSettings`,
-  `EnvironmentRow`), mobile "About T3 Code"/"Update T3 Code…" and widget descriptions, and the
-  `T3Wordmark` icon on t3-code MCP tool rows.
+- Documentation, including `docs/user/`: it keeps upstream's "T3 Code" wording, which marks what
+  is upstream's and what is J5's for the agents that read it. Facts that J5 changes (paths, names,
+  defaults) are still corrected there.
+- "T3 Connect" and "T3 Account": upstream's hosted relay and sign-in, named as upstream names
+  them wherever they appear, along with `infra/relay`, `app.t3.codes`, and the mobile legal links
+  to `t3.codes`.
+- The `t3-code` MCP server key, its `T3 Code` MCP server name, and the Codex client info
+  (`t3code_desktop` / "T3 Code Desktop"): protocol identity that tool names, aliases
+  (`t3McpToolPresentation.ts`) and recorded provider fixtures depend on.
+- `t3.json`, its schema URL, the `refs/t3code/*` hidden refs, upstream's `README.md`,
+  `packaging/aur`, the Linux capture helper identities (#138), the iOS widget's `T3Mark` image
+  asset, and developer scripts under `scripts/` and `apps/server/scripts/`.
 
 ## Cloud and update posture
 
@@ -115,8 +142,12 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
   `scripts/lib/j5-branding.ts`. `apps/mobile/eas.json` targets Apple team `46A73QH3S8`
   and App Store Connect app `6809314460`; preserve these fork destinations during pin advances.
   See [iOS distribution](docs/operations/j5-mobile-distribution.md).
-- Clerk, relay, and telemetry remain optional and use the upstream `T3CODE_*` / `EXPO_PUBLIC_*`
-  configuration names. No J5 service endpoints are provisioned by the build setup.
+- Clerk and relay remain optional and use the upstream `T3CODE_*` / `EXPO_PUBLIC_*`
+  configuration names. No J5 relay or sign-in endpoints are provisioned by the build setup.
+- Product usage telemetry reports to J5's own PostHog project (US region): the default
+  `T3CODE_POSTHOG_KEY` in `apps/server/src/telemetry/AnalyticsService.ts` is J5's project token,
+  not upstream's. Events, identifier, host and the `T3CODE_TELEMETRY_ENABLED=false` opt-out are
+  upstream's, unchanged. Keep J5's token when an upstream advance touches that default.
 
 ## 2026-09-06 verification boundary
 

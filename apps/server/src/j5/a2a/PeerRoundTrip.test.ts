@@ -28,6 +28,7 @@ import {
   A2ADeliveryTransport,
   A2ADeliveryTransportError,
   type AgentDeliveryInput,
+  deliveryMessageId,
   type PeerDeliveryInput,
 } from "./DeliveryTransport.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
@@ -97,6 +98,8 @@ const remoteView = (server: Server, label: string): RemoteAgent => ({
 });
 
 /** One server's runtime; `peer` is the other server's inbound door, wired after both exist. */
+const roundTripRunId = (thread: ThreadId) => RunId.make(`run:roundtrip:${thread}`);
+
 const makeServer = (
   self: Server,
   other: Server,
@@ -188,6 +191,17 @@ const makeServer = (
     streamStoredEventsFrom: () => Stream.never,
     getThreadProjection: () =>
       Effect.succeed({ runs: [], turnItems: [] } as unknown as OrchestrationV2ThreadProjection),
+    // Every message delivered to an agent here belongs to its thread's one run (`runEnded`).
+    getThreadRecords: ((threadId: ThreadId) =>
+      Ref.get(delivered).pipe(
+        Effect.map((rows) => ({
+          runs: [{ id: roundTripRunId(threadId) }],
+          messages: rows.map((row) => ({
+            id: deliveryMessageId(row.messageId),
+            runId: roundTripRunId(threadId),
+          })),
+        })),
+      )) as never,
   });
   const lifecycle = lifecycleLayer.pipe(
     Layer.provide(ledger),
@@ -208,7 +222,7 @@ const makeServer = (
 
 /** The stored event for a run that ended on `thread`, as the silence detector reads it. */
 const runEnded = (thread: ThreadId, status: "completed" | "failed"): OrchestrationV2StoredEvent => {
-  const runId = RunId.make(`run:roundtrip:${thread}`);
+  const runId = roundTripRunId(thread);
   const at = DateTime.makeUnsafe("2026-09-16T12:00:03.000Z");
   return {
     sequence: 100,

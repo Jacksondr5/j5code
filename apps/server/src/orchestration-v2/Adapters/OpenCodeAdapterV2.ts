@@ -3107,12 +3107,12 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
               const response = yield* sdkCall(
                 "session.create",
                 {
-                  title: `T3 Code ${threadInput.threadId}`,
+                  title: `J5 Code ${threadInput.threadId}`,
                   permission: openCodePermissionRules(threadInput.runtimePolicy),
                 },
                 () =>
                   client.session.create({
-                    title: `T3 Code ${threadInput.threadId}`,
+                    title: `J5 Code ${threadInput.threadId}`,
                     permission: openCodePermissionRules(threadInput.runtimePolicy),
                   }),
               );

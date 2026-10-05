@@ -18,9 +18,13 @@ curl -fsSL https://github.com/Jacksondr5/j5code/releases/latest/download/install
 ```
 
 This puts `j5` in `~/.local/bin` and keeps downloaded versions and your data in
-`~/.j5code` (set `J5CODE_HOME` to use another directory). If your shell reports
-`command not found` afterwards, that directory is not on your `PATH` yet; the
-installer prints the line to add. Set `T3CODE_VERSION` to pin an exact version.
+`~/.j5code` (set `J5CODE_HOME` to use another directory). If `~/.local/bin` isn't
+on your `PATH`, the installer adds one line to your shell's startup file (zsh,
+bash, or fish) that puts the directory at the end of `PATH`, so `j5` works in new
+terminals. `j5 uninstall` removes that line. For other shells, add the directory
+yourself. To keep the installer away from your startup files, set
+`J5CODE_NO_MODIFY_PATH=1` when you run it; it prints the directory to add. Set `T3CODE_VERSION` to pin an exact
+version.
 
 Upgrading a server that was installed from npm (`@jacksondr5/j5code` 0.0.43 or
 earlier)? Follow [Migrating to release archives](./migrating-to-release-archives.md)
@@ -57,6 +61,15 @@ Download the macOS (Apple silicon) app from
 [GitHub Releases](https://github.com/Jacksondr5/j5code/releases). J5 Code
 publishes no desktop build for other platforms and no package-manager listing;
 `winget`, Homebrew, and AUR packages named T3 Code install upstream T3 Code.
+
+Agents and terminals the app runs can use the `j5` command without any setup: the
+app keeps the CLI built into it at `~/.j5code/bin/j5` and gives them that
+directory. The app doesn't change your own `PATH` or shell startup files unless
+you ask. To use `j5` in your own terminal, open the command palette and run
+**Install 'j5' command in PATH**. It links `~/.local/bin/j5` to the app's CLI and,
+if that directory isn't on your `PATH`, adds it at the end in your shell's
+startup file, then tells you what it changed. **Uninstall 'j5' command from
+PATH** undoes both.
 
 ### Windows Subsystem for Linux
 

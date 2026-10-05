@@ -3,7 +3,7 @@ import type { NativeStackNavigationOptions } from "@react-navigation/native-stac
 import { Platform, View } from "react-native";
 
 import { AppText as Text } from "./AppText";
-import { T3Wordmark } from "./T3Wordmark";
+import { J5Wordmark } from "../j5/branding/J5Wordmark";
 import { IPAD_HOME_TITLE_OFFSET } from "../lib/layoutMetrics";
 import { resolveMobileStageLabel } from "../lib/mobileBranding";
 
@@ -30,13 +30,13 @@ export function CompactBrandTitle(
   return (
     <View
       aria-level={1}
-      accessibilityLabel="T3 Code, Threads"
+      accessibilityLabel="J5 Code, Threads"
       accessible
       role="heading"
       className="flex-row items-center gap-1.5"
       style={{ marginLeft: titleOffset }}
     >
-      <T3Wordmark colorClassName="accent-icon" height={15} />
+      <J5Wordmark colorClassName="accent-icon" height={15} />
       <Text
         allowFontScaling={props.allowFontScaling}
         className="font-t3-medium text-[21px] tracking-[-0.5px] text-foreground-muted"

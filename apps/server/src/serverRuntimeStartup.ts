@@ -27,6 +27,7 @@ import * as Schema from "effect/Schema";
 
 import * as ServerConfig from "./config.ts";
 import * as ServiceLauncherClient from "./cloud/serviceLauncherClient.ts";
+import { repointCliLauncherToSelf } from "./j5/cli/launcherLink.ts";
 import * as Keybindings from "./keybindings.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import * as EffectWorker from "./orchestration-v2/EffectWorker.ts";
@@ -581,7 +582,7 @@ const make = (options?: StartupOptions) =>
             const startupBrowserTarget = yield* resolveStartupBrowserTarget;
             if (serverConfig.mode !== "desktop") {
               yield* Effect.logInfo(
-                "Authentication required. Open T3 Code using the pairing URL.",
+                "Authentication required. Open J5 Code using the pairing URL.",
               ).pipe(Effect.annotateLogs({ pairingUrl: startupBrowserTarget }));
             }
             yield* runStartupPhase("browser.open", maybeOpenBrowser(startupBrowserTarget));
@@ -597,6 +598,12 @@ const make = (options?: StartupOptions) =>
       );
 
       const updateOutcome = yield* launcher.prepareTrial;
+      // J5: the service's committed server points `j5` at itself (#398, FORK.md case 51).
+      if (launcher.managed) {
+        yield* repointCliLauncherToSelf(serverConfig.baseDir).pipe(
+          Effect.ignoreCause({ log: true }),
+        );
+      }
 
       yield* Effect.logDebug("startup phase: publishing welcome event", {
         environmentId: environment.environmentId,

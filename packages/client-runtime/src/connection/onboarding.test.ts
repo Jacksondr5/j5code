@@ -25,7 +25,7 @@ const CLIENT_PRESENTATION_LAYER = Layer.succeed(
   ClientPresentation,
   ClientPresentation.of({
     metadata: {
-      label: "T3 Code Test",
+      label: "J5 Code Test",
       deviceType: "desktop",
       os: "Test OS",
     },
@@ -162,7 +162,7 @@ describe("connection onboarding", () => {
       const tokenParams = new URLSearchParams(tokenBody);
       expect(tokenParams.get("subject_token")).toBe("pairing-token");
       expect(tokenParams.has("scope")).toBe(false);
-      expect(tokenParams.get("client_label")).toBe("T3 Code Test");
+      expect(tokenParams.get("client_label")).toBe("J5 Code Test");
     }),
   );
 

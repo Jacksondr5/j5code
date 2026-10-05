@@ -290,6 +290,30 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Decided:** Jackson, 2026-09-24 (#3, #3a). Recorded in FORK.md cases 40 and 41.
 
+#### D26. `j5 triage` investigates and files against J5's repository
+
+**Upstream:** `triage` hands a misbehaving install to the person's coding agent with a playbook that clones `pingdotgg/t3code` at the installed version, searches and files issues there, and replaces itself with the copy on upstream's `main` when the two differ.
+
+**J5:** the playbook clones, searches and files on `Jacksondr5/j5code`, refreshes from `j5/main`, and names the product J5 Code.
+
+**Why:** J5's release tags don't exist upstream, so diagnosis ran against the wrong source, and J5-only problems would have been filed in upstream's tracker.
+
+**Consequences:** `triagePrompt.ts`, `.github/triage/PLAYBOOK.md` and the `via-triage` issue template are edited in place, so each upstream advance merges upstream's playbook changes by hand. The repository needs the `via-triage` label. Releases installed before this change keep upstream's playbook.
+
+**Decided:** Jackson, 2026-10-04, PR #446. Recorded in `BRANDING.md`.
+
+#### D27. Usage telemetry reports to J5's PostHog project
+
+**Upstream:** the server sends product usage events to upstream's PostHog project by default, and `T3CODE_TELEMETRY_ENABLED=false` turns them off.
+
+**J5:** the same events, identifier and opt-out, sent to a PostHog project Jackson owns.
+
+**Why:** J5 servers were reporting their users' usage to T3 Tools, which J5 has no agreement with and whose data Jackson can't see or delete. He wants the usage data himself, and J5's privacy page has to name who receives it.
+
+**Consequences:** one default in `AnalyticsService.ts` differs, so each upstream advance checks the token is still J5's. Jackson is responsible for the data: the project discards client IP addresses, and J5's privacy page describes what is sent. Releases installed before this change keep reporting to upstream's project. There is no Settings toggle, only the environment variable.
+
+**Decided:** Jackson, 2026-10-04. Recorded in `BRANDING.md`.
+
 #### D21. Pair discovery stays inside a worktree
 
 **Upstream:** `pair` is the CLI command that mints a one-time link for connecting a browser or the mobile app to a running server. When it finds no server in the current worktree, it falls back to the default install.
@@ -301,6 +325,61 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 **Consequences:** the retry can be dropped if upstream gives the CLI a way to tell a server that is starting from one that isn't there. Each advance checks `pair`'s home resolution.
 
 **Decided:** introduced in PR #94 (2026-09-04). Jackson approved it on 2026-09-28, closing the carry-or-drop question FORK.md's 2026-09-06 review left open. Recorded in FORK.md's final upstream-file review ("Pair discovery isolation and activation retry") and its `pair.ts` rows.
+
+#### D25. The product is named J5 Code wherever a person or an agent reads it
+
+**Upstream:** the app, its CLI output, error messages, agent instructions and tool titles say "T3 Code", tool rows and the mobile header show the T3 mark, and new worktree branches start with `t3code/`.
+
+**J5:** all of that says "J5 Code" and shows the J5 mark, and new branches start with `j5code/`. Upstream's own services keep their names ("T3 Connect", "T3 Account"), as do protocol identifiers such as the `t3-code` MCP server. Documentation keeps upstream's wording.
+
+**Why:** J5 and T3 Code can be installed side by side, and a person should always be able to tell which one they are looking at. The old name kept reappearing because the branding rules left general copy alone.
+
+**Consequences:** these are literal edits in roughly 230 upstream files, so every upstream advance has to rebrand the strings upstream added or changed; the grep is in [Merging upstream](../process/upstream-merge.md) and `BRANDING.md` lists what stays. Temporary branches created under `t3code/` are still recognized.
+
+**Decided:** Jackson, 2026-10-04, PR #445. Recorded in `BRANDING.md`.
+
+#### D28. The `j5` command
+
+**Upstream:**
+
+- **The executable.** Each release archive's executable is `t3`, and the `t3` command on `PATH` links to it.
+- **Updates.** Only `t3 update` moves that link. An update from the app leaves the command on the old version.
+- **`PATH`.** When the link's directory isn't on `PATH`, the installer prints a line for the person to add.
+- **Agents.** Agents and terminals inherit the server's `PATH`, which has `t3` only if the person's shell provides it.
+- **The desktop app.** It installs no command, and its agents have `t3` only if the person's shell provides it.
+
+**J5:**
+
+- **The executable is `j5`.** The command, the file it runs, and the process are all `j5`. Archive file names keep upstream's `t3-<version>-<platform>` names.
+- **Existing servers are moved once, by hand.** The rename is launcher protocol 4. A server from before it is refused the update from the app with a message to run `j5 update` on its machine; that command installs the new version and replaces the service's launcher. Each archive carries a `t3` link to `j5` so those servers can run that check and that command.
+- **The command follows the service.** When the background service's server starts as the committed version, after an update or any restart, it repoints the installer's `~/.local/bin/j5` at itself.
+- **The installer puts it on `PATH`.** When `~/.local/bin` isn't on `PATH`, the installer adds one marked line to the shell's startup file (zsh, bash, or fish) that puts the directory last, and `j5 uninstall` removes it. A profile it can't write gets the printed hint instead, and `J5CODE_NO_MODIFY_PATH` skips the edit.
+- **Agents get the server's own `j5`.** A release server keeps `<home>/bin/j5` pointed at itself, and every server that finds a `j5` there puts `<home>/bin` first on the `PATH` its agents and terminals inherit.
+- **The Mac app gives its agents `j5` too.** At every launch it writes a script that runs its bundled CLI to `<home>/bin/j5`, which its server then puts first for its agents. It leaves the person's own `PATH` and shell startup files alone unless they ask: a command in the palette, "Install 'j5' command in PATH", links `~/.local/bin/j5` to that script and adds the installer's line when needed, and a matching command undoes it.
+
+**Why:**
+
+- **The name.** J5 shouldn't point at `t3` at all. With the old name, `~/.local/bin/j5` ran a file called `t3` and the server showed up as `t3`, which is confusing next to an installed T3 Code. Archive names stay, because existing servers download updates by those names and people never see them.
+- **The one-time step.** An update from the app never replaces the service's launcher, and an old launcher starts every new version as `t3`. Shipping a `t3` link indefinitely would leave the migration unfinished, and removing it later would break those servers. Refusing the update with a clear message moves each server and its launcher across together.
+- **Following updates.** On the dogfood box the command ran 0.0.44 while the service ran 0.0.47, so agents called a CLI three versions behind their server (#398). Upstream has the same gap with `t3`; the fix is in the give-back backlog (#276).
+- **The installer and `PATH`.** A stock macOS shell doesn't have `~/.local/bin` on `PATH`, so a fresh install's `j5` wasn't found until the person edited their profile (#397). Jackson chose a profile line over linking into `/usr/local/bin`, which needs an admin prompt and a root-owned file the server couldn't repoint.
+- **Agents.** An agent that can't find `j5` tends to work around it without saying so. Giving every agent its server's CLI, whatever the person's shell setup, removes that failure. The directory is J5's own and holds only `j5`, so it can go first without shadowing anything, including an installed T3 Code's `t3`.
+- **The Mac app.** Most desktop apps never edit shell startup files; the few that do have a record of bugs from it. Agents were the actual problem, and they don't need the person's shell changed. The person's own terminal gets `j5` from a command they run, as VS Code offers for `code`.
+
+**Consequences:**
+
+- **One visit per existing server.** Each server on 0.0.47 or earlier needs `j5 update` run on its machine. It keeps running its old version until then.
+- **The launcher reads protocol-3 state files.** The old CLI's `j5 update` writes one before starting the new launcher. This is a second line in upstream's `serviceProtocol.ts`.
+- **The `t3` link is temporary.** Removing it is tracked in #440. After that, a server still on 0.0.47 or earlier gets a generic install error and needs the installer and `j5 service install`.
+- **No downgrade across the rename.** Downgrading below the rename with `j5 update --allow-downgrade` isn't supported.
+- **Only the default link is repointed.** The repoint covers only the installer's default link, `~/.local/bin/j5`, and only when it already points into the home's runtime. A link placed elsewhere stays where it is.
+- **One `j5` per home for agents.** If two servers share a home, the last one started owns `<home>/bin/j5`.
+- **`j5 service status` asks for a repair after an update from the app.** The service's unit still names the launcher it was installed with, and the now-current `j5` reports that as needing `j5 service install`. That is accurate: running it replaces the launcher, with a restart. An agent that follows the suggestion restarts its own server. Keeping the launcher current is a separate improvement.
+- **`j5 uninstall` removes the `PATH` line only with its command.** The installer's link and its line go when the link belongs to the home being uninstalled, so uninstalling another home, such as an agent's scratch home, leaves them.
+- **A terminal can still find another `j5` first.** The directory is first for what the server starts directly. A shell that re-reads the person's profile can put their own directories, and a `j5` in them, ahead again.
+- **At each advance:** check new upstream code that locates the executable by name, upstream's `SERVICE_LAUNCHER_PROTOCOL` (J5's number must stay above it), and that the startup hook still runs after `prepareTrial`.
+
+**Decided:** Jackson, 2026-10-02 (#403), 2026-10-03 (the protocol bump and the `j5 update` step; #398; #397, including leaving the person's `PATH` alone in the Mac app) and 2026-10-04 (#441, in the command palette only). Recorded in FORK.md cases 50 to 55.
 
 ### Awaiting a decision
 
@@ -363,3 +442,6 @@ None yet.
 ## History
 
 - 2026-09-26 — created: the three zones, the decision protocol, and the register, seeded from FORK.md and the worklog records (Jackson, [#327](https://github.com/Jacksondr5/j5code/issues/327)).
+- 2026-10-04 — D25 added: user-visible copy, marks and branch names (PR #445).
+- 2026-10-04 — D26 added: `j5 triage` points at J5's repository (PR #446).
+- 2026-10-04 — D28 added: the `j5` command (PR #414).

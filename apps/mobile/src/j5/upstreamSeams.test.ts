@@ -133,6 +133,18 @@ const SEAMS: ReadonlyArray<Seam> = [
     from: "../../../../scripts/lib/j5-branding.ts",
     reaches: ["J5_BRANDING.mobile.production.scheme"],
   },
+  {
+    file: "components/CompactBrandTitle.tsx",
+    record: "BRANDING.md: user-visible copy and marks",
+    from: "../j5/branding/J5Wordmark",
+    reaches: ["<J5Wordmark "],
+  },
+  {
+    file: "features/threads/thread-work-log.tsx",
+    record: "BRANDING.md: user-visible copy and marks",
+    from: "../../j5/branding/J5Wordmark",
+    reaches: ["<J5Wordmark "],
+  },
 ];
 
 const readUpstream = (file: string) =>

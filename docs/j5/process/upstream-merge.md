@@ -19,6 +19,7 @@ How J5 advances to a new upstream T3 Code. FORK.md holds the rules this depends 
 - **Literal conflicts** at the pin base, then the **breaks that merge cleanly**, which cause most defects:
   - **J5-owned code** that imports or calls upstream APIs that changed (typecheck an approximate merge).
   - **New upstream files** that carry branding or `~/.t3` / `T3CODE_HOME` paths. BRANDING.md only lists files we already know.
+  - **New or changed user-visible copy** that says "T3 Code" or a bare "T3" (divergence D25). Run `git grep -nE "T3 Code|\bT3\b" -- apps packages native` on the candidate, rebrand what a person or an agent reads, and leave what BRANDING.md lists as unchanged. Docs keep upstream's wording.
   - **New ways to create or archive a thread**, which must carry a Squadron and run the archive preflight.
   - **Upstream behavior** that crosses a J5 policy, such as resume, Stop, queues or delivery.
   - **Migrations:** run `node scripts/j5/check-upstream-migrations.ts --base <pin> --candidate <candidate>`. A renumbering or insertion needs a bridge arm, a reviewed manifest, the checker's `--allow-reviewed-bridge`, and a rehearsal on a `VACUUM INTO` copy of real data.

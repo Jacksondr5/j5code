@@ -306,7 +306,7 @@ describe("j5 pair", () => {
         const rendered = String(
           typeof error === "object" && error !== null && "cause" in error ? error.cause : error,
         );
-        assert.include(rendered, "No running T3 Code server found.");
+        assert.include(rendered, "No running J5 Code server found.");
       }),
     ).pipe(Effect.provide(NodeServices.layer)),
   );
@@ -332,7 +332,7 @@ describe("j5 pair", () => {
       const rendered = String(
         typeof error === "object" && error !== null && "cause" in error ? error.cause : error,
       );
-      assert.include(rendered, "No running T3 Code server found.");
+      assert.include(rendered, "No running J5 Code server found.");
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 });
