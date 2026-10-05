@@ -408,7 +408,14 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const workspaceRoot = yield* projectRoot(caller.projectId);
       const cwd = caller.worktreePath ?? workspaceRoot;
-      const first = yield* git.listRefs({ cwd, refKind: "local", limit: BRANCH_PAGE });
+      // Refreshed, so a branch or worktree an agent's shell just made shows up once upstream's
+      // few-second refresh coalescing has passed rather than after its longer snapshot TTL.
+      const first = yield* git.listRefs({
+        cwd,
+        refKind: "local",
+        limit: BRANCH_PAGE,
+        refresh: true,
+      });
       if (!first.isRepo) return NO_WORKSPACE_OPTIONS;
       // Pages come from one cached snapshot per repository, so reading every worktree is cheap.
       const refs = [...first.refs];
