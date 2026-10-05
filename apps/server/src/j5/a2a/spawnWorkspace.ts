@@ -392,9 +392,9 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const workspaceRoot = yield* projectRoot(caller.projectId);
       const cwd = caller.worktreePath ?? workspaceRoot;
-      // Membership comes from upstream's ref snapshot, which coalesces refreshes for a few
-      // seconds, so a worktree an agent's shell created a moment ago may be refused once; retrying
-      // shortly after finds it. What a seat or spawn binds, its branch, is read live below.
+      // Membership comes from upstream's ref snapshot, which coalesces refreshes for 5 seconds,
+      // so a worktree an agent's shell created under 5s ago may be refused once; retrying shortly
+      // after finds it. What a seat or spawn binds, its branch, is read live below.
       const listed = yield* listWorktrees(cwd, workspaceRoot);
       if (listed === null) return yield* Effect.fail("the project is not a git repository");
       const wanted = new Set(caller.existingWorktreePaths.map(worktreePathKey));

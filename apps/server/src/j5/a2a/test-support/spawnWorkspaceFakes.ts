@@ -56,9 +56,9 @@ const fakeRefs = (checkout: FakeCheckout, workspaceRoot: string) => {
 export const fakeSpawnWorkspaceLayer = (options: {
   readonly checkout: FakeCheckout;
   /**
-   * When given, git reads this instead, as an agent's shell leaves it. A checkout's status and
-   * the other direct reads see it as it is now; `listRefs` keeps serving the snapshot from its
-   * first read, as upstream's cache does within its refresh coalescing window.
+   * When given, git reads this instead, as an agent's shell leaves it. The direct reads see it as
+   * it is now, and a checkout's status does once invalidated; `listRefs` keeps serving the
+   * snapshot from its first read, as upstream's cache does within its refresh coalescing window.
    */
   readonly liveCheckout?: Ref.Ref<FakeCheckout>;
   readonly workspaceRoot?: string;
@@ -67,6 +67,7 @@ export const fakeSpawnWorkspaceLayer = (options: {
   readonly accepted?: Effect.Effect<ReadonlyArray<CommandId>>;
 }) => {
   let cachedCheckout: FakeCheckout | undefined;
+  const cachedStatus = new Map<string, string | null>();
   const root = options.workspaceRoot ?? "/repo";
   const current =
     options.liveCheckout === undefined
@@ -99,20 +100,23 @@ export const fakeSpawnWorkspaceLayer = (options: {
             }),
           hasCommit: ({ refName }) =>
             current.pipe(Effect.map((checkout) => !(checkout.missingRefs ?? []).includes(refName))),
-          // A checkout's own status reads it as it is now, branch included.
-          invalidateLocalStatus: () => Effect.void,
+          // A checkout's status is cached per path until invalidated, as upstream's is, so only a
+          // read that invalidates first sees a branch switched since the last one.
+          invalidateLocalStatus: (cwd) => Effect.sync(() => void cachedStatus.delete(cwd)),
           localStatus: ({ cwd }) =>
-            current.pipe(
-              Effect.flatMap((checkout) => {
-                const branch =
-                  cwd === root
-                    ? checkout.refName
-                    : checkout.worktrees?.find((worktree) => worktree.path === cwd)?.branch;
-                return branch === undefined
-                  ? Effect.die(new Error(`no checkout at ${cwd}`))
-                  : Effect.succeed({ isRepo: true, refName: branch } as never);
-              }),
-            ),
+            Effect.gen(function* () {
+              const cached = cachedStatus.get(cwd);
+              if (cached !== undefined) return { isRepo: true, refName: cached } as never;
+              const checkout = yield* current;
+              const branch =
+                cwd === root
+                  ? checkout.refName
+                  : checkout.worktrees?.find((worktree) => worktree.path === cwd)?.branch;
+              if (branch === undefined)
+                return yield* Effect.die(new Error(`no checkout at ${cwd}`));
+              cachedStatus.set(cwd, branch);
+              return { isRepo: true, refName: branch } as never;
+            }),
           listLocalBranchNames: () =>
             current.pipe(Effect.map((checkout) => fakeRefs(checkout, root).map((ref) => ref.name))),
         }),
