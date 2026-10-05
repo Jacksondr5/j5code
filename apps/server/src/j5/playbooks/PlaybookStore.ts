@@ -292,6 +292,20 @@ export const makePlaybookStore = Effect.gen(function* () {
     }).pipe(permit.withPermits(1));
   }, Effect.mapError(storageError));
 
+  /** Returns the definition's YAML as a file a user can re-import. */
+  const exportDefinition = Effect.fn("PlaybookStore.exportDefinition")(function* (
+    workspaceRoot: string,
+    name: string,
+  ) {
+    if (!PLAYBOOK_NAME_PATTERN.test(name))
+      return yield* playbookError("invalid_name", "Choose a playbook in this workspace.");
+    const filename = path.resolve(workspaceRoot, ".j5/playbooks", `${name}.yaml`);
+    if (!(yield* fs.exists(filename)))
+      return yield* playbookError("not_found", "This playbook no longer exists.");
+    const { document } = yield* readDefinitionDocument(filename);
+    return { fileName: `${name}.yaml`, yaml: document.toString() };
+  }, Effect.mapError(storageError));
+
   const renameDefinition = Effect.fn("PlaybookStore.renameDefinition")(function* (
     workspaceRoot: string,
     name: string,
@@ -496,6 +510,7 @@ export const makePlaybookStore = Effect.gen(function* () {
     changes: SubscriptionRef.changes(revision),
     discover,
     removeDefinition,
+    exportDefinition,
     renameDefinition,
     start,
     current,

@@ -15,6 +15,7 @@ import {
 } from "@t3tools/contracts";
 import {
   PLAYBOOK_DELETE_PATH,
+  PLAYBOOK_EXPORT_PATH,
   PLAYBOOK_LIBRARY_PATH,
   PLAYBOOK_RENAME_PATH,
   PlaybookLibraryResponse,
@@ -231,6 +232,19 @@ const fixture = Effect.gen(function* () {
         }),
       ),
     );
+  const postExport = (body: Schema.Json, authorization: string | null = "Bearer read") =>
+    Effect.promise(() =>
+      handler(
+        new Request(`http://environment.test${PLAYBOOK_EXPORT_PATH}`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...(authorization === null ? {} : { authorization }),
+          },
+          body: encodeBody(body),
+        }),
+      ),
+    );
   const read = Effect.fn("test.playbooks.library.read")(function* (threadId?: ThreadId) {
     const response = yield* post({ projectId, ...(threadId === undefined ? {} : { threadId }) });
     assert.equal(response.status, 200);
@@ -245,6 +259,7 @@ const fixture = Effect.gen(function* () {
     post,
     postDelete,
     postRename,
+    postExport,
     read,
     handler,
     projectReads,
@@ -472,5 +487,27 @@ it.effect("rejects invalid rename inputs and invalid YAML", () =>
     }
     yield* fs.writeFileString(filename(projectRoot), "title: [broken");
     assert.equal((yield* postRename({ projectId, name: "demo", title: "Nope" })).status, 400);
+  }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+);
+
+it.effect("exports a playbook as YAML that imports back to the same definition", () =>
+  Effect.gen(function* () {
+    const { fs, filename, projectRoot, read, postExport } = yield* fixture;
+    const request = { projectId, name: "demo" };
+    assert.equal((yield* postExport(request, null)).status, 401);
+    const response = yield* postExport(request);
+    assert.equal(response.status, 200);
+    const exported = (yield* Effect.promise(() => response.json())) as {
+      fileName: string;
+      yaml: string;
+    };
+    assert.equal(exported.fileName, "demo.yaml");
+    const original = (yield* read()).playbooks[0];
+    // Import is a plain file write into .j5/playbooks under the exported name.
+    yield* fs.remove(filename(projectRoot));
+    yield* fs.writeFileString(filename(projectRoot), exported.yaml);
+    assert.deepStrictEqual((yield* read()).playbooks[0], original);
+    assert.equal((yield* postExport({ projectId, name: "missing" })).status, 404);
+    assert.equal((yield* postExport({ projectId, name: "../demo" })).status, 400);
   }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );

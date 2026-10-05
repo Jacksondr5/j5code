@@ -2,7 +2,10 @@ import {
   PLAYBOOK_DELETE_PATH,
   PlaybookDeleteResponse,
   type PlaybookDeleteRequest,
+  PLAYBOOK_EXPORT_PATH,
   PLAYBOOK_RENAME_PATH,
+  PlaybookExportResponse,
+  type PlaybookExportRequest,
   PlaybookRenameResponse,
   type PlaybookRenameRequest,
   PLAYBOOK_LIBRARY_PATH,
@@ -99,6 +102,17 @@ export const deletePlaybook = Effect.fn("j5.http.deletePlaybook")(function* (
   );
   const response = yield* executeJ5Request(prepared, request, WRITE_TIMEOUT_MS);
   return yield* HttpClientResponse.schemaBodyJson(PlaybookDeleteResponse)(response);
+});
+
+export const exportPlaybook = Effect.fn("j5.http.exportPlaybook")(function* (
+  prepared: PreparedConnection,
+  input: PlaybookExportRequest,
+) {
+  const request = yield* HttpClientRequest.post(PLAYBOOK_EXPORT_PATH).pipe(
+    HttpClientRequest.bodyJson(input),
+  );
+  const response = yield* executeJ5Request(prepared, request, READ_TIMEOUT_MS);
+  return yield* HttpClientResponse.schemaBodyJson(PlaybookExportResponse)(response);
 });
 
 export const renamePlaybook = Effect.fn("j5.http.renamePlaybook")(function* (

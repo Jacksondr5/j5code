@@ -1,10 +1,13 @@
 import {
   PLAYBOOK_DELETE_PATH,
+  PLAYBOOK_EXPORT_PATH,
   PLAYBOOK_LIBRARY_PATH,
   PLAYBOOK_RENAME_PATH,
   PlaybookDeleteRequest,
   PlaybookDeleteResponse,
   PlaybookError,
+  PlaybookExportRequest,
+  PlaybookExportResponse,
   PlaybookLibraryRequest,
   PlaybookLibraryResponse,
   PlaybookRenameRequest,
@@ -38,6 +41,8 @@ const decodeDeleteRequest = Schema.decodeUnknownEffect(PlaybookDeleteRequest);
 const encodeDeleteResponse = Schema.encodeEffect(PlaybookDeleteResponse);
 const decodeRenameRequest = Schema.decodeUnknownEffect(PlaybookRenameRequest);
 const encodeRenameResponse = Schema.encodeEffect(PlaybookRenameResponse);
+const decodeExportRequest = Schema.decodeUnknownEffect(PlaybookExportRequest);
+const encodeExportResponse = Schema.encodeEffect(PlaybookExportResponse);
 const isPlaybookError = Schema.is(PlaybookError);
 const isMissingThread = Schema.is(ProjectionStoreThreadNotFoundError);
 const missing = () =>
@@ -146,6 +151,30 @@ export const playbookLibraryHttpRouteLayer = Layer.unwrap(
         }),
       ),
     );
+    const exportRoute = HttpRouter.add(
+      "POST",
+      PLAYBOOK_EXPORT_PATH,
+      Effect.gen(function* () {
+        yield* annotateEnvironmentRequest("j5.playbooks.export");
+        const request = yield* HttpServerRequest.HttpServerRequest;
+        yield* authenticateClientRead;
+        const body = yield* Effect.result(request.json.pipe(Effect.flatMap(decodeExportRequest)));
+        if (Result.isFailure(body)) return invalidRequest("Select a playbook in this workspace.");
+        const root = yield* workspaceRoot(body.success);
+        if (root === null) return missing();
+        return yield* store.exportDefinition(root, body.success.name).pipe(
+          Effect.flatMap(encodeExportResponse),
+          Effect.map((data) => HttpServerResponse.jsonUnsafe(data)),
+          Effect.catch(mutationError),
+        );
+      }).pipe(
+        Effect.catchTags({
+          EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
+          EnvironmentInternalError: HttpServerRespondable.toResponse,
+          EnvironmentScopeRequiredError: HttpServerRespondable.toResponse,
+        }),
+      ),
+    );
     const renameRoute = HttpRouter.add(
       "POST",
       PLAYBOOK_RENAME_PATH,
@@ -171,6 +200,6 @@ export const playbookLibraryHttpRouteLayer = Layer.unwrap(
         }),
       ),
     );
-    return Layer.mergeAll(libraryRoute, deleteRoute, renameRoute);
+    return Layer.mergeAll(libraryRoute, exportRoute, deleteRoute, renameRoute);
   }),
 );

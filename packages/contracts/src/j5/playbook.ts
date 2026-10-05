@@ -117,3 +117,10 @@ export const PlaybookRenameRequest = Schema.Struct({
 export type PlaybookRenameRequest = typeof PlaybookRenameRequest.Type;
 export const PlaybookRenameResponse = Schema.Struct({ renamed: Schema.Boolean });
 export const PLAYBOOK_RENAME_PATH = "/api/j5/playbooks/rename";
+export const PlaybookExportRequest = Schema.Struct({
+  ...PlaybookLibraryRequest.fields,
+  name: Text,
+});
+export type PlaybookExportRequest = typeof PlaybookExportRequest.Type;
+export const PlaybookExportResponse = Schema.Struct({ fileName: Text, yaml: Schema.String });
+export const PLAYBOOK_EXPORT_PATH = "/api/j5/playbooks/export";
