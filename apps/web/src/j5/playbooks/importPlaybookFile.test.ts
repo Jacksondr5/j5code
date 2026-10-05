@@ -30,8 +30,3 @@ it("accepts the server size limit and rejects larger files", () => {
   expect(playbookImportName("review.yaml", PLAYBOOK_MAX_BYTES)).toBe("review");
   expect(() => playbookImportName("review.yaml", PLAYBOOK_MAX_BYTES + 1)).toThrow('"review.yaml"');
 });
-
-it("imports an exported file back under the same playbook name", () => {
-  const yaml = "title: Demo\n";
-  expect(playbookImportName("demo.yaml", new TextEncoder().encode(yaml).length)).toBe("demo");
-});

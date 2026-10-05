@@ -8,6 +8,7 @@ import {
   ProviderInstanceId,
   ThreadId,
 } from "@t3tools/contracts";
+import { requiredScopeForRpcMethod } from "../../auth/RpcAuthorization.ts";
 import { J5_PLAYBOOK_WS_METHODS } from "@t3tools/contracts/j5";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as DateTime from "effect/DateTime";
@@ -138,6 +139,10 @@ const fixture = Effect.gen(function* () {
 });
 
 it("requires read scope to export a playbook", () => {
+  assert.equal(
+    requiredScopeForRpcMethod(J5_PLAYBOOK_WS_METHODS.exportPlaybook),
+    AuthOrchestrationReadScope,
+  );
   assert.equal(
     PLAYBOOK_RPC_SCOPES[J5_PLAYBOOK_WS_METHODS.exportPlaybook],
     AuthOrchestrationReadScope,

@@ -225,7 +225,7 @@ export const PlaybookLibrarySettingsSection = memo(function PlaybookLibrarySetti
           import("expo-file-system/legacy"),
           import("expo-sharing"),
         ]);
-        const uri = `${FileSystem.cacheDirectory ?? ""}${fileName}`;
+        const uri = `${FileSystem.cacheDirectory ?? ""}${encodeURIComponent(fileName)}`;
         await FileSystem.writeAsStringAsync(uri, yaml);
         await Sharing.shareAsync(uri, { mimeType: "application/yaml", dialogTitle: fileName });
       }
