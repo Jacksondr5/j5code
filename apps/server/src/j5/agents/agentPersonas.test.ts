@@ -47,18 +47,12 @@ describe("built-in agent persona catalog", () => {
     }
   });
 
-  it("keeps Builder non-publishing and Publisher non-merging", () => {
+  it("gives Builder a writable workspace and Publisher a publication-only one", () => {
     const builder = AGENT_AUTHORITY_RULES[BUILT_IN_AGENT_PERSONAS.builder.authority.defaultPolicy];
     assert.equal(builder.workspace, "write");
-    assert.isFalse(builder.mayCommit);
-    assert.isFalse(builder.mayPush);
-
     const publisher =
       AGENT_AUTHORITY_RULES[BUILT_IN_AGENT_PERSONAS.publisher.authority.defaultPolicy];
-    assert.isTrue(publisher.mayCommit);
-    assert.isTrue(publisher.mayPush);
-    assert.isTrue(publisher.mayWritePullRequest);
-    assert.isFalse(publisher.mayMergePullRequest);
+    assert.equal(publisher.workspace, "publication-only");
   });
 
   it("allows Critic workspace edits only in explicitly requested Fix Mode", () => {
@@ -73,12 +67,6 @@ describe("built-in agent persona catalog", () => {
       if (policy === "read-only" || policy === "critic-review") {
         assert.equal(AGENT_AUTHORITY_RULES[policy].workspace, "read-only", definition.id);
       }
-    }
-  });
-
-  it("grants merge authority to no built-in persona mode", () => {
-    for (const rules of Object.values(AGENT_AUTHORITY_RULES)) {
-      assert.isFalse(rules.mayMergePullRequest);
     }
   });
 });

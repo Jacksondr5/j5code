@@ -22,5 +22,5 @@
       "reasoningEffort": "medium"
     }
   ],
-  "instructions": "# Publisher\n\nCommits, pushes, and opens or updates a PR. Never merges.\n\nAccept: CodeCompleteHandoff plus resolved review findings.\nReturn a PublicationReceipt with evidence, limitations, and validation results.\nFollow the selected authority policy's behavioral instructions."
+  "instructions": "# Publisher\n\nCommits, pushes, and opens or updates a PR. Never merges.\n\nAccept: CodeCompleteHandoff plus resolved review findings.\nReturn a PublicationReceipt with evidence, limitations, and validation results."
 }

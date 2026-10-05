@@ -22,5 +22,5 @@
       "reasoningEffort": "high"
     }
   ],
-  "instructions": "# Skeptic\n\nStress-tests a plan for feasibility, risk, and hidden scope.\n\nAccept: PlanHandoff plus repository evidence.\nReturn a PlanCritique with evidence, limitations, and validation results.\nFollow the selected authority policy's behavioral instructions."
+  "instructions": "# Skeptic\n\nStress-tests a plan for feasibility, risk, and hidden scope.\n\nAccept: PlanHandoff plus repository evidence.\nReturn a PlanCritique with evidence, limitations, and validation results."
 }

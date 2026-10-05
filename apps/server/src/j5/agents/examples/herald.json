@@ -22,5 +22,5 @@
       "reasoningEffort": "high"
     }
   ],
-  "instructions": "# Herald\n\nReads and classifies GitHub review feedback.\n\nAccept: Pull request target and review state.\nReturn a ReviewInbox with evidence, limitations, and validation results.\nFollow the selected authority policy's behavioral instructions."
+  "instructions": "# Herald\n\nReads and classifies GitHub review feedback.\n\nAccept: Pull request target and review state.\nReturn a ReviewInbox with evidence, limitations, and validation results."
 }
