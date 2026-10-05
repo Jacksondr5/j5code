@@ -148,6 +148,8 @@ const callerThread = (threadId: ThreadId) =>
 
 const spawnHarness = (input: {
   readonly checkout: FakeCheckout;
+  /** Git as an agent's shell leaves it, served through upstream-style cached refs. */
+  readonly liveCheckout?: Ref.Ref<FakeCheckout>;
   /** The durable command log; pass one from an earlier harness to model a restart. */
   readonly commands?: Ref.Ref<ReadonlyArray<OrchestrationV2Command>>;
   /** Runs inside each thread.create before it lands, so a test can hold a start open. */
@@ -276,6 +278,7 @@ const spawnHarness = (input: {
       Layer.provideMerge(
         fakeSpawnWorkspaceLayer({
           checkout: input.checkout,
+          ...(input.liveCheckout === undefined ? {} : { liveCheckout: input.liveCheckout }),
           launches,
           launch: () => Ref.update(log, (items) => [...items, "launch"]),
           // An accepted create leaves its receipt, as the orchestrator's does.
@@ -618,6 +621,44 @@ it.effect("spawns into an existing worktree on its branch, with no preparation",
         "Its worktrees: /repo-worktrees/builder",
       );
       assert.lengthOf(yield* Ref.get(commands), 2);
+    }).pipe(Effect.provide(layer));
+  }),
+);
+
+it.effect("reads git fresh for each spawn that binds a worktree", () =>
+  Effect.gen(function* () {
+    const live = yield* Ref.make<FakeCheckout>({
+      isRepo: true,
+      refName: "j5/main",
+      worktrees: [{ path: "/repo-worktrees/builder", branch: "fix/login" }],
+    });
+    const { layer, call, commands } = yield* spawnHarness({
+      checkout: { isRepo: false, refName: null },
+      liveCheckout: live,
+    });
+    yield* Effect.gen(function* () {
+      const first = yield* call({
+        ...spawnArgs,
+        workspace: { type: "existing_worktree", worktree_path: "/repo-worktrees/builder" },
+        client_request_id: "before",
+      });
+      assert.isFalse(first.isFailure);
+      // From its own shell, the builder switches branch; upstream's ref cache doesn't hear it.
+      yield* Ref.set(live, {
+        isRepo: true,
+        refName: "j5/main",
+        worktrees: [{ path: "/repo-worktrees/builder", branch: "fix/signup" }],
+      });
+      const second = yield* call({
+        ...spawnArgs,
+        workspace: { type: "existing_worktree", worktree_path: "/repo-worktrees/builder" },
+        client_request_id: "after",
+      });
+      assert.isFalse(second.isFailure);
+      const branches = (yield* Ref.get(commands)).flatMap((command) =>
+        command.type === "thread.create" ? [command.branch] : [],
+      );
+      assert.deepStrictEqual(branches, ["fix/login", "fix/signup"]);
     }).pipe(Effect.provide(layer));
   }),
 );

@@ -778,6 +778,7 @@ const handlers = {
               worktreePath: parent.thread.worktreePath,
               checkBranches,
               baseRefs: namedBaseRefs([choice]),
+              fresh: true,
             });
       const workspace = yield* Effect.fromResult(
         checkout === null

@@ -260,6 +260,12 @@ export interface SpawnWorkspaceServiceShape {
     readonly checkBranches: boolean;
     /** Base refs to check before anything is created (see `namedBaseRefs`). */
     readonly baseRefs: ReadonlyArray<SpawnBaseRef>;
+    /**
+     * Read git anew rather than upstream's cached snapshot, which changes made from an agent's
+     * own shell don't invalidate. Anything that binds a workspace asks for it; the card's lists
+     * don't.
+     */
+    readonly fresh: boolean;
   }) => Effect.Effect<SpawnCheckout>;
   /**
    * Runs one spawn's start (create, facts, brief), refusing it while another start for the same
@@ -319,13 +325,12 @@ const make = Effect.gen(function* () {
       if (project === null) return yield* Effect.fail("the project is not readable");
       const root = worktreePathKey(project.workspaceRoot);
       const cwd = caller.worktreePath ?? project.workspaceRoot;
-      // Agents change branches and worktrees from their own shells, which upstream's ref cache
-      // doesn't see, so every read starts fresh; the later pages come from that new snapshot.
+      // A fresh read rebuilds upstream's snapshot; the later pages come from that new one.
       const first = yield* git.listRefs({
         cwd,
         refKind: "local",
         limit: BRANCH_PAGE,
-        refresh: true,
+        refresh: caller.fresh,
       });
       if (!first.isRepo) return yield* Effect.fail("the project is not a git repository");
       // Pages come from one cached snapshot per repository, so reading every worktree is cheap.

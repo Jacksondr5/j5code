@@ -44,7 +44,7 @@ import {
 import { ArchiveAgentService } from "./ArchiveAgentService.ts";
 import { playbookStoreLayer } from "../playbooks/PlaybookStore.ts";
 import { ArchiveCrewService, layer as archiveCrewLayer } from "./ArchiveCrewService.ts";
-import { describeCrewSeatRuntime } from "./crewRuntimePreview.ts";
+import { crewApprovalToken, describeCrewSeatRuntime } from "./crewRuntimePreview.ts";
 import {
   CrewLaunchOperationError,
   CrewLaunchService,
@@ -1923,7 +1923,7 @@ it.effect("launches each seat in the workspace it names, and refuses one git can
   }),
 );
 
-it.effect("reads the Captain's repository fresh, after changes made from a shell", () =>
+it.effect("binds a seat's workspace from a fresh read, so a stale preview can't approve", () =>
   Effect.gen(function* () {
     const { context, commands, captain } = yield* fixture;
     const codex = provider("codex", "codex", [{ slug: "gpt-5.6-sol", options: ["high"] }]);
@@ -1957,14 +1957,21 @@ it.effect("reads the Captain's repository fresh, after changes made from a shell
       instructions: "Review it",
       workspace: { type: "existing_worktree" as const, worktreePath },
     });
+    const proposal = {
+      id: "proposal:fresh",
+      brief: "Review it.",
+      displayName: "Review",
+    } as unknown as Parameters<typeof crewApprovalToken>[0];
     yield* Effect.gen(function* () {
       const launcher = yield* CrewLaunchService;
-      // The preview reads the builder's worktree on fix/login, and the snapshot is cached.
-      assert.deepStrictEqual((yield* launcher.workspaceOptions(captain)).worktrees, [
-        { path: "/repo-worktrees/builder", branch: "fix/login" },
-      ]);
-      // From its own shell, the builder switches branch and adds a worktree, which upstream's
-      // ref cache never hears about.
+      // The preview binds the builder's worktree on fix/login.
+      const shown = yield* launcher.resolveSeats(captain, [reviewer("/repo-worktrees/builder")]);
+      assert.equal(
+        shown[0]?.workspace.type === "existing_worktree" && shown[0].workspace.branch,
+        "fix/login",
+      );
+      // From its own shell, the builder switches branch and adds a worktree; upstream's ref
+      // cache never hears about either.
       yield* Ref.set(live, {
         isRepo: true,
         refName: "j5/main",
@@ -1973,19 +1980,25 @@ it.effect("reads the Captain's repository fresh, after changes made from a shell
           { path: "/repo-worktrees/scout", branch: "spike" },
         ],
       });
-      const [resolved] = yield* launcher.resolveSeats(captain, [
+      // The card's lists may still be the cached ones; nothing is bound from them.
+      assert.deepStrictEqual((yield* launcher.workspaceOptions(captain)).worktrees, [
+        { path: "/repo-worktrees/builder", branch: "fix/login" },
+      ]);
+      // Approval resolves again from a fresh read: the new branch, and the new worktree.
+      const approving = yield* launcher.resolveSeats(captain, [
         reviewer("/repo-worktrees/builder"),
       ]);
-      assert.deepStrictEqual(resolved?.runtime.workspace, {
+      assert.deepStrictEqual(approving[0]?.runtime.workspace, {
         type: "existing_worktree",
         worktreePath: "/repo-worktrees/builder",
         branch: "fix/signup",
       });
       yield* launcher.resolveSeats(captain, [reviewer("/repo-worktrees/scout")]);
-      assert.deepStrictEqual((yield* launcher.workspaceOptions(captain)).worktrees, [
-        { path: "/repo-worktrees/builder", branch: "fix/signup" },
-        { path: "/repo-worktrees/scout", branch: "spike" },
-      ]);
+      // The token the stale preview showed no longer matches, so the gate asks for a fresh one.
+      assert.notEqual(
+        crewApprovalToken(proposal, captain, shown),
+        crewApprovalToken(proposal, captain, approving),
+      );
     }).pipe(Effect.provide(layer));
   }),
 );

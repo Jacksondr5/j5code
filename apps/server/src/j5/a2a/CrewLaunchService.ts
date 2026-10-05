@@ -276,6 +276,9 @@ export const layer = Layer.effect(
               (seat) => seat.workspace.type === "worktree" && seat.workspace.branch !== undefined,
             ),
             baseRefs: namedBaseRefs(seats.map((seat) => seat.workspace)),
+            // Binds each seat's workspace, at preview and again at approval, where the token
+            // refuses a launch whose fresh read no longer matches what was shown.
+            fresh: true,
           });
       const resolveWorkspace = (seat: CrewLaunchSeat) =>
         Effect.fromResult(
@@ -891,6 +894,8 @@ export const layer = Layer.effect(
           worktreePath: captain.thread.worktreePath,
           checkBranches: false,
           baseRefs: [],
+          // Only the card's select lists; whatever a seat binds is read fresh in resolveSeats.
+          fresh: false,
         })
         .pipe(
           Effect.map((checkout) =>
