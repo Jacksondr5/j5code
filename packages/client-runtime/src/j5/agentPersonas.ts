@@ -352,22 +352,52 @@ export function agentPersonaIdError(id: string): string | null {
 }
 
 /**
- * First advertised model per harness, so a new agent starts with a launchable route. Codex
- * and Claude come first because only they can enforce persona runtime policies today.
+ * First advertised model per harness, so a new agent starts with a launchable route. Drivers
+ * the server says sandbox the chosen policy come first.
  */
 export function defaultAgentPersonaModelRoute(
   providers: ReadonlyArray<ServerProvider>,
+  enforcingDrivers: ReadonlyArray<ProviderDriverKind> = [],
 ): [AgentPersonaModelTarget, AgentPersonaModelTarget] | null {
   const choices = agentPersonaModelChoices(providers, []).filter(({ available }) => available);
-  const enforceable = choices.filter(
-    ({ target }) => target.driver === "codex" || target.driver === "claudeAgent",
-  );
+  const enforceable = choices.filter(({ target }) => enforcingDrivers.includes(target.driver));
   const available = enforceable.length > 0 ? enforceable : choices;
   const primary = available[0];
   if (primary === undefined) return null;
   const fallback =
     available.find(({ target }) => target.driver !== primary.target.driver) ?? primary;
   return [primary.target, fallback.target];
+}
+
+/** Drivers the server says sandbox `policy`; undefined when the server predates the field. */
+export function agentPersonaPolicyDrivers(
+  catalog: OrchestrationV2AgentPersonaCatalog | null | undefined,
+  policy: AgentPersonaAuthorityPolicy,
+): ReadonlyArray<ProviderDriverKind> | undefined {
+  return catalog?.policyEnforcement?.find((entry) => entry.policy === policy)?.drivers;
+}
+
+function listLabels(drivers: ReadonlyArray<ProviderDriverKind>): string {
+  const labels = drivers.map(providerLabel);
+  return labels.length < 2
+    ? labels.join("")
+    : `${labels.slice(0, -1).join(", ")} and ${labels.at(-1)}`;
+}
+
+/** The editor's line under Runtime policy: where it is sandboxed and which chosen routes won't launch. */
+export function agentPersonaPolicyNote(
+  drivers: ReadonlyArray<ProviderDriverKind> | undefined,
+  modelRoute: ReadonlyArray<AgentPersonaModelTarget>,
+): string | null {
+  if (drivers === undefined) return null;
+  if (drivers.length === 0) return "No provider can sandbox this policy yet, so it won't launch.";
+  const outside = [...new Set(modelRoute.map(({ driver }) => driver))].filter(
+    (driver) => !drivers.includes(driver),
+  );
+  const where = `Sandboxed on ${listLabels(drivers)}.`;
+  return outside.length === 0
+    ? where
+    : `${where} ${listLabels(outside)} routes won't launch with this policy.`;
 }
 
 export interface AgentPersonaCreateDraft {

@@ -253,8 +253,17 @@ export class AgentPersonaCatalogError extends Schema.TaggedError<AgentPersonaCat
   { message: Schema.String },
 ) {}
 
+/** The provider drivers whose sandbox enforces one runtime policy; the editor shows these. */
+export const AgentPersonaPolicyEnforcement = Schema.Struct({
+  policy: AgentPersonaAuthorityPolicy,
+  drivers: Schema.Array(ProviderDriverKind),
+});
+export type AgentPersonaPolicyEnforcement = typeof AgentPersonaPolicyEnforcement.Type;
+
 export const OrchestrationV2AgentPersonaCatalog = Schema.Struct({
   personas: Schema.Array(OrchestrationV2AgentPersonaCatalogEntry),
+  /** Absent from servers that predate it. */
+  policyEnforcement: Schema.optional(Schema.Array(AgentPersonaPolicyEnforcement)),
 });
 export type OrchestrationV2AgentPersonaCatalog = typeof OrchestrationV2AgentPersonaCatalog.Type;
 

@@ -161,7 +161,7 @@ Handoff artifacts are files in the project's shared artifacts (see the Artifacts
 
 ## Behavioral instructions and runtime permissions
 
-A Role guides behavior. Its text does not grant permissions or guarantee compliance. The following matrix records the intended behavior of the supplied policy vocabulary; action restrictions such as no commit, no push, targeted edits only, or no merge are operating instructions unless a concrete runtime control is identified below.
+A Role guides behavior. Its text does not grant permissions or guarantee compliance. A runtime policy means only what the provider's sandbox enforces (Jackson, 2026-10-03, #439). The matrix below records what each policy is for; anything beyond the enforced control in the second table, such as no commit, no push, targeted edits only, or no merge, belongs in the persona's own instructions.
 
 | Policy            | Workspace                                              | Commands and tests                                                            | Git                             | Pull requests                     | External systems                       |
 | ----------------- | ------------------------------------------------------ | ----------------------------------------------------------------------------- | ------------------------------- | --------------------------------- | -------------------------------------- |
@@ -172,7 +172,7 @@ A Role guides behavior. Its text does not grant permissions or guarantee complia
 | `diagnostic`      | Product source must be unchanged at handoff            | May reproduce, build, test, debug, and create disposable diagnostic artifacts | Inspect only; no commit or push | Read only                         | Read only                              |
 | `publish-only`    | May read completed work; may not implement or refactor | Publication checks only                                                       | May commit and push             | May open or update; may not merge | Writes limited to publication actions  |
 
-No supplied persona is instructed to merge a pull request. The application appends the selected policy's behavioral instructions to the snapshotted definition when composing new persona sessions. This does not create an action-level enforcement guarantee.
+J5 does not append policy rules to a persona's instructions; they would be hidden from the person who wrote the persona and could override it. The only addition is a note that platform tools stay available under any sandbox. The persona editor shows which providers sandbox the selected policy, from the table the server sends with the catalog.
 
 | Runtime policy                  | Supported provider | Enforced control / activation status                                                                                              |
 | ------------------------------- | ------------------ | --------------------------------------------------------------------------------------------------------------------------------- |

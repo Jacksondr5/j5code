@@ -24,6 +24,8 @@ import {
   agentPersonaDuplicateDraft,
   agentPersonaIdError,
   agentPersonaIdFromName,
+  agentPersonaPolicyDrivers,
+  agentPersonaPolicyNote,
   defaultAgentPersonaModelRoute,
   agentPersonaModelChoices,
   agentPersonaModelGroups,
@@ -637,11 +639,52 @@ describe("personal agent authoring", () => {
     ]);
     const single = defaultAgentPersonaModelRoute([providers[0]!]);
     expect(single?.[0]).toEqual(single?.[1]);
-    const withCursor = defaultAgentPersonaModelRoute([
-      provider("cursor", "cursor", ["composer-2"], "reasoning"),
-      providers[0]!,
-    ]);
+    const cursor = provider("cursor", "cursor", ["composer-2"], "reasoning");
+    const withCursor = defaultAgentPersonaModelRoute(
+      [cursor, providers[0]!],
+      [ProviderDriverKind.make("codex")],
+    );
     expect(withCursor?.map(({ driver }) => String(driver))).toEqual(["codex", "codex"]);
+    // With no sandboxing driver signed in, any advertised model still makes a starting route.
+    expect(
+      defaultAgentPersonaModelRoute([cursor], [ProviderDriverKind.make("codex")])?.[0],
+    ).toEqual({
+      driver: ProviderDriverKind.make("cursor"),
+      model: "composer-2",
+      reasoningEffort: "high",
+    });
+  });
+
+  it("says where the selected policy is sandboxed and which routes won't launch", () => {
+    const catalog = {
+      personas: [],
+      policyEnforcement: [
+        {
+          policy: "read-only" as const,
+          drivers: [ProviderDriverKind.make("codex"), ProviderDriverKind.make("claudeAgent")],
+        },
+        { policy: "publish-only" as const, drivers: [] },
+      ],
+    };
+    const target = (driver: string) => ({
+      driver: ProviderDriverKind.make(driver),
+      model: "m",
+      reasoningEffort: "high",
+    });
+    const readOnly = agentPersonaPolicyDrivers(catalog, "read-only");
+    expect(agentPersonaPolicyNote(readOnly, [target("codex"), target("claudeAgent")])).toBe(
+      "Sandboxed on Codex and Claude.",
+    );
+    expect(agentPersonaPolicyNote(readOnly, [target("cursor"), target("codex")])).toBe(
+      "Sandboxed on Codex and Claude. Cursor routes won't launch with this policy.",
+    );
+    expect(
+      agentPersonaPolicyNote(agentPersonaPolicyDrivers(catalog, "publish-only"), [target("codex")]),
+    ).toBe("No provider can sandbox this policy yet, so it won't launch.");
+    // An older server sends no table; the editor says nothing rather than guessing.
+    expect(
+      agentPersonaPolicyNote(agentPersonaPolicyDrivers({ personas: [] }, "read-only"), []),
+    ).toBeNull();
   });
 });
 
