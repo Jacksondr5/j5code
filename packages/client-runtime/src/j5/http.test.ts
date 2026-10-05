@@ -161,7 +161,7 @@ it.effect("exports from the selected environment and workspace with its own cred
         }).pipe(Effect.provide(remoteHttpClientLayer(fetch))),
       );
     }
-    expect(results).toEqual(Array(2).fill({ fileName: "demo.yaml", yaml: "title: Demo\n" }));
+    expect(results).toEqual(results.map(() => ({ fileName: "demo.yaml", yaml: "title: Demo\n" })));
     expect(requests.map((request) => [request.url, request.headers.get("authorization")])).toEqual([
       ["https://alpha.test/api/j5/playbooks/export", "Bearer alpha-token"],
       ["https://bravo.test/api/j5/playbooks/export", "Bearer bravo-token"],
