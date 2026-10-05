@@ -1964,14 +1964,15 @@ it.effect("binds a seat's workspace from a fresh read, so a stale preview can't 
     } as unknown as Parameters<typeof crewApprovalToken>[0];
     yield* Effect.gen(function* () {
       const launcher = yield* CrewLaunchService;
-      // The preview binds the builder's worktree on fix/login.
+      // The preview binds the builder's worktree on fix/login and reads the card's lists.
       const shown = yield* launcher.resolveSeats(captain, [reviewer("/repo-worktrees/builder")]);
+      yield* launcher.workspaceOptions(captain);
       assert.equal(
         shown[0]?.workspace.type === "existing_worktree" && shown[0].workspace.branch,
         "fix/login",
       );
-      // From its own shell, the builder switches branch and adds a worktree; upstream's ref
-      // cache never hears about either.
+      // From its own shell, the builder switches branch and adds a worktree, within upstream's
+      // ref cache and refresh-coalescing window, which never hear about either.
       yield* Ref.set(live, {
         isRepo: true,
         refName: "j5/main",

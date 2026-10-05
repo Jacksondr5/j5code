@@ -276,9 +276,6 @@ export const layer = Layer.effect(
               (seat) => seat.workspace.type === "worktree" && seat.workspace.branch !== undefined,
             ),
             baseRefs: namedBaseRefs(seats.map((seat) => seat.workspace)),
-            // Binds each seat's workspace, at preview and again at approval, where the token
-            // refuses a launch whose fresh read no longer matches what was shown.
-            fresh: true,
           });
       const resolveWorkspace = (seat: CrewLaunchSeat) =>
         Effect.fromResult(
@@ -887,28 +884,13 @@ export const layer = Layer.effect(
         );
       }).pipe((addition) => crews.serialize(input.instance.id, addition));
 
+    // Only the card's select lists; every seat's workspace is bound from a fresh read above, at
+    // preview and again at approval, where the token refuses a launch that no longer matches.
     const workspaceOptions: CrewLaunchServiceShape["workspaceOptions"] = (captain) =>
-      spawnWorkspace
-        .inspect({
-          projectId: captain.thread.projectId,
-          worktreePath: captain.thread.worktreePath,
-          checkBranches: false,
-          baseRefs: [],
-          // Only the card's select lists; whatever a seat binds is read fresh in resolveSeats.
-          fresh: false,
-        })
-        .pipe(
-          Effect.map((checkout) =>
-            checkout.readable
-              ? {
-                  currentBranch: checkout.currentBranch,
-                  branches: checkout.branches,
-                  branchesTruncated: checkout.branchesTruncated,
-                  worktrees: checkout.worktrees,
-                }
-              : { currentBranch: null, branches: [], branchesTruncated: false, worktrees: [] },
-          ),
-        );
+      spawnWorkspace.workspaceOptions({
+        projectId: captain.thread.projectId,
+        worktreePath: captain.thread.worktreePath,
+      });
 
     return CrewLaunchService.of({ launch, addSeats, resolveSeats, workspaceOptions });
   }),

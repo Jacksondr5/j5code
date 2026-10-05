@@ -15,7 +15,9 @@ import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 
+import type { CrewWorkspaceOptions } from "@t3tools/contracts/j5";
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
+import { GitVcsDriver } from "../../vcs/GitVcsDriver.ts";
 import {
   CommandReceiptStoreV2,
   layerFromApplicationReceipts as commandReceiptStoreLayer,
@@ -107,11 +109,6 @@ export interface ProjectWorktree {
 export type SpawnCheckout =
   | {
       readonly readable: true;
-      /** The branch checked out where the caller works; null when detached. */
-      readonly currentBranch: string | null;
-      /** The first page of local branches; `branchesTruncated` says whether there are more. */
-      readonly branches: ReadonlyArray<string>;
-      readonly branchesTruncated: boolean;
       readonly worktrees: ReadonlyArray<ProjectWorktree>;
       /** Every local branch, read only when a choice names a new branch to check against. */
       readonly localBranchNames: ReadonlyArray<string>;
@@ -119,6 +116,40 @@ export type SpawnCheckout =
       readonly missingBaseRefs: ReadonlyArray<SpawnBaseRef>;
     }
   | { readonly readable: false; readonly problem: string };
+
+/**
+ * `git worktree list --porcelain -z`: the worktrees that have a branch checked out, skipping
+ * those git marks prunable (their directory is gone), with trailing separators dropped.
+ */
+export const parseWorktreeList = (stdout: string): ReadonlyArray<ProjectWorktree> => {
+  const worktrees: Array<ProjectWorktree> = [];
+  let path: string | null = null;
+  let branch: string | null = null;
+  let prunable = false;
+  const flush = () => {
+    if (path !== null && branch !== null && !prunable)
+      worktrees.push({ path: worktreePathKey(path), branch });
+    path = null;
+    branch = null;
+    prunable = false;
+  };
+  for (const field of stdout.split("\0")) {
+    if (field === "") flush();
+    else if (field.startsWith("worktree ")) path = field.slice("worktree ".length);
+    else if (field.startsWith("branch refs/heads/"))
+      branch = field.slice("branch refs/heads/".length);
+    else if (field === "prunable" || field.startsWith("prunable ")) prunable = true;
+  }
+  flush();
+  return worktrees;
+};
+
+const NO_WORKSPACE_OPTIONS: CrewWorkspaceOptions = {
+  currentBranch: null,
+  branches: [],
+  branchesTruncated: false,
+  worktrees: [],
+};
 
 export class SpawnWorkspaceError extends Data.TaggedError("SpawnWorkspaceError")<{
   readonly detail: string;
@@ -250,8 +281,9 @@ export interface StartSpawnBriefInput {
 
 export interface SpawnWorkspaceServiceShape {
   /**
-   * Reads the project's repository once, from where the caller works: its branches, its
-   * worktrees, and whether the named base refs exist. Shared choices don't need it.
+   * Reads the project's repository straight from git, from where the caller works: its
+   * worktrees, its local branches when asked, and whether the named base refs exist. Everything
+   * that binds a workspace uses this. Shared choices don't need it.
    */
   readonly inspect: (caller: {
     readonly projectId: ProjectId;
@@ -260,13 +292,16 @@ export interface SpawnWorkspaceServiceShape {
     readonly checkBranches: boolean;
     /** Base refs to check before anything is created (see `namedBaseRefs`). */
     readonly baseRefs: ReadonlyArray<SpawnBaseRef>;
-    /**
-     * Read git anew rather than upstream's cached snapshot, which changes made from an agent's
-     * own shell don't invalidate. Anything that binds a workspace asks for it; the card's lists
-     * don't.
-     */
-    readonly fresh: boolean;
   }) => Effect.Effect<SpawnCheckout>;
+  /**
+   * What the roster card offers: the caller's branch, the first page of local branches, and the
+   * project's worktrees. Read through upstream's ref cache, since nothing is bound from it; an
+   * unreadable repository offers none.
+   */
+  readonly workspaceOptions: (caller: {
+    readonly projectId: ProjectId;
+    readonly worktreePath: string | null;
+  }) => Effect.Effect<CrewWorkspaceOptions>;
   /**
    * Runs one spawn's start (create, facts, brief), refusing it while another start for the same
    * thread is in flight, and refusing a request key already accepted with the other workspace type.
@@ -312,6 +347,7 @@ const BRANCH_PAGE = 100;
 const make = Effect.gen(function* () {
   const projects = yield* ProjectService;
   const git = yield* GitWorkflowService;
+  const driver = yield* GitVcsDriver;
   const receipts = yield* CommandReceiptStoreV2;
   const launcher = yield* ThreadLaunchService;
   const threads = yield* ThreadManagementService;
@@ -319,27 +355,32 @@ const make = Effect.gen(function* () {
   // refused rather than queued: it would only replay the first, and retrying is safe.
   const startsInFlight = new Set<ThreadId>();
 
+  const projectRoot = (projectId: ProjectId) =>
+    projects
+      .getById(projectId)
+      .pipe(
+        Effect.flatMap((project) =>
+          Option.isSome(project)
+            ? Effect.succeed(project.value.workspaceRoot)
+            : Effect.fail("the project is not readable"),
+        ),
+      );
+
   const inspect: SpawnWorkspaceServiceShape["inspect"] = (caller) =>
     Effect.gen(function* () {
-      const project = Option.getOrNull(yield* projects.getById(caller.projectId));
-      if (project === null) return yield* Effect.fail("the project is not readable");
-      const root = worktreePathKey(project.workspaceRoot);
-      const cwd = caller.worktreePath ?? project.workspaceRoot;
-      // A fresh read rebuilds upstream's snapshot; the later pages come from that new one.
-      const first = yield* git.listRefs({
+      const workspaceRoot = yield* projectRoot(caller.projectId);
+      const cwd = caller.worktreePath ?? workspaceRoot;
+      // Straight from git, past upstream's ref cache and its refresh coalescing: an agent's own
+      // shell may have added, removed, or switched a worktree a moment ago.
+      const listed = yield* driver.execute({
+        operation: "j5.spawnWorkspace.worktreeList",
         cwd,
-        refKind: "local",
-        limit: BRANCH_PAGE,
-        refresh: caller.fresh,
+        args: ["worktree", "list", "--porcelain", "-z"],
+        allowNonZeroExit: true,
+        timeoutMs: 30_000,
       });
-      if (!first.isRepo) return yield* Effect.fail("the project is not a git repository");
-      // Pages come from one cached snapshot per repository, so reading every worktree is cheap.
-      const refs = [...first.refs];
-      for (let cursor = first.nextCursor; cursor !== null;) {
-        const page = yield* git.listRefs({ cwd, refKind: "local", cursor, limit: 200 });
-        refs.push(...page.refs);
-        cursor = page.nextCursor;
-      }
+      if (listed.exitCode !== 0) return yield* Effect.fail("the project is not a git repository");
+      const root = worktreePathKey(workspaceRoot);
       const missingBaseRefs = yield* Effect.filter(caller.baseRefs, (base) =>
         git.hasCommit({ cwd, refName: base.ref }).pipe(
           Effect.flatMap((found) =>
@@ -352,16 +393,9 @@ const make = Effect.gen(function* () {
       );
       return {
         readable: true,
-        currentBranch: first.refs.find((ref) => ref.current)?.name ?? null,
-        branches: first.refs.map((ref) => ref.name),
-        branchesTruncated: first.nextCursor !== null,
         // The main checkout is the person's own, not a worktree an agent is placed in.
-        worktrees: refs.flatMap((ref) =>
-          ref.worktreePath === null || worktreePathKey(ref.worktreePath) === root
-            ? []
-            : [{ path: worktreePathKey(ref.worktreePath), branch: ref.name }],
-        ),
-        localBranchNames: caller.checkBranches ? refs.map((ref) => ref.name) : [],
+        worktrees: parseWorktreeList(listed.stdout).filter((worktree) => worktree.path !== root),
+        localBranchNames: caller.checkBranches ? yield* git.listLocalBranchNames(cwd) : [],
         missingBaseRefs,
       } satisfies SpawnCheckout;
     }).pipe(
@@ -369,6 +403,32 @@ const make = Effect.gen(function* () {
         Effect.succeed({ readable: false, problem: detailOf(cause) } satisfies SpawnCheckout),
       ),
     );
+
+  const workspaceOptions: SpawnWorkspaceServiceShape["workspaceOptions"] = (caller) =>
+    Effect.gen(function* () {
+      const workspaceRoot = yield* projectRoot(caller.projectId);
+      const cwd = caller.worktreePath ?? workspaceRoot;
+      const first = yield* git.listRefs({ cwd, refKind: "local", limit: BRANCH_PAGE });
+      if (!first.isRepo) return NO_WORKSPACE_OPTIONS;
+      // Pages come from one cached snapshot per repository, so reading every worktree is cheap.
+      const refs = [...first.refs];
+      for (let cursor = first.nextCursor; cursor !== null;) {
+        const page = yield* git.listRefs({ cwd, refKind: "local", cursor, limit: 200 });
+        refs.push(...page.refs);
+        cursor = page.nextCursor;
+      }
+      const root = worktreePathKey(workspaceRoot);
+      return {
+        currentBranch: first.refs.find((ref) => ref.current)?.name ?? null,
+        branches: first.refs.map((ref) => ref.name),
+        branchesTruncated: first.nextCursor !== null,
+        worktrees: refs.flatMap((ref) =>
+          ref.worktreePath === null || worktreePathKey(ref.worktreePath) === root
+            ? []
+            : [{ path: worktreePathKey(ref.worktreePath), branch: ref.name }],
+        ),
+      };
+    }).pipe(Effect.catch(() => Effect.succeed(NO_WORKSPACE_OPTIONS)));
 
   const withSpawnStart: SpawnWorkspaceServiceShape["withSpawnStart"] = (input, effect) =>
     // The check, the add, and the releasing finalizer run with no interruptible gap, so an
@@ -461,7 +521,13 @@ const make = Effect.gen(function* () {
       ),
     );
 
-  return SpawnWorkspaceService.of({ inspect, withSpawnStart, startBrief, askedForWorktree });
+  return SpawnWorkspaceService.of({
+    inspect,
+    workspaceOptions,
+    withSpawnStart,
+    startBrief,
+    askedForWorktree,
+  });
 });
 
 /** Takes the receipt store from its caller; tests provide their own. */

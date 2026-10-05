@@ -6,6 +6,7 @@ import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 
 import { GitWorkflowService } from "../../../git/GitWorkflowService.ts";
+import { GitVcsDriver } from "../../../vcs/GitVcsDriver.ts";
 import { CommandReceiptStoreV2 } from "../../../orchestration-v2/CommandReceiptStore.ts";
 import {
   ThreadLaunchService,
@@ -56,8 +57,9 @@ const fakeRefs = (checkout: FakeCheckout, workspaceRoot: string) => {
 export const fakeSpawnWorkspaceLayer = (options: {
   readonly checkout: FakeCheckout;
   /**
-   * When given, git reads this instead, and refs are served like upstream's cache: the snapshot
-   * taken at the last `refresh` (or the first read) until the next one.
+   * When given, git reads this instead, as an agent's shell leaves it. Commands run against it
+   * directly, as `git worktree list` does; `listRefs` keeps serving the snapshot from its first
+   * read, as upstream's cache does within its refresh coalescing window.
    */
   readonly liveCheckout?: Ref.Ref<FakeCheckout>;
   readonly workspaceRoot?: string;
@@ -66,6 +68,11 @@ export const fakeSpawnWorkspaceLayer = (options: {
   readonly accepted?: Effect.Effect<ReadonlyArray<CommandId>>;
 }) => {
   let cachedCheckout: FakeCheckout | undefined;
+  const root = options.workspaceRoot ?? "/repo";
+  const current =
+    options.liveCheckout === undefined
+      ? Effect.succeed(options.checkout)
+      : Ref.get(options.liveCheckout);
   return layerFromReceiptStore.pipe(
     Layer.provide(
       Layer.mergeAll(
@@ -78,12 +85,8 @@ export const fakeSpawnWorkspaceLayer = (options: {
         Layer.mock(GitWorkflowService)({
           listRefs: (input) =>
             Effect.gen(function* () {
-              const checkout =
-                options.liveCheckout === undefined
-                  ? options.checkout
-                  : input.refresh === true || cachedCheckout === undefined
-                    ? (cachedCheckout = yield* Ref.get(options.liveCheckout))
-                    : cachedCheckout;
+              void input;
+              const checkout = cachedCheckout ?? (cachedCheckout = yield* current);
               const refs = checkout.isRepo
                 ? fakeRefs(checkout, options.workspaceRoot ?? "/repo")
                 : [];
@@ -96,7 +99,31 @@ export const fakeSpawnWorkspaceLayer = (options: {
               };
             }),
           hasCommit: ({ refName }) =>
-            Effect.succeed(!(options.checkout.missingRefs ?? []).includes(refName)),
+            current.pipe(Effect.map((checkout) => !(checkout.missingRefs ?? []).includes(refName))),
+          listLocalBranchNames: () =>
+            current.pipe(Effect.map((checkout) => fakeRefs(checkout, root).map((ref) => ref.name))),
+        }),
+        Layer.mock(GitVcsDriver)({
+          execute: (input) =>
+            current.pipe(
+              Effect.map((checkout) => ({
+                exitCode: (checkout.isRepo && input.args[0] === "worktree" ? 0 : 128) as never,
+                stdout: checkout.isRepo
+                  ? [
+                      ...(checkout.refName === null
+                        ? []
+                        : [`worktree ${root}\0branch refs/heads/${checkout.refName}\0`]),
+                      ...(checkout.worktrees ?? []).map(
+                        (worktree) =>
+                          `worktree ${worktree.path}\0HEAD abc\0branch refs/heads/${worktree.branch}\0`,
+                      ),
+                    ].join("\0")
+                  : "",
+                stderr: "",
+                stdoutTruncated: false,
+                stderrTruncated: false,
+              })),
+            ),
         }),
         Layer.mock(ThreadLaunchService)({
           launch: (input) =>

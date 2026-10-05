@@ -43,6 +43,7 @@ import { J5ToolkitHandlersLive } from "./mcp/handlers.ts";
 import { J5SpawnAgentInput, J5Toolkit } from "./mcp/tools.ts";
 import {
   SpawnWorkspaceChoice,
+  parseWorktreeList,
   resolveSpawnWorkspace,
   type SpawnCheckout,
 } from "./spawnWorkspace.ts";
@@ -52,9 +53,6 @@ const checkout = (
   overrides: Partial<Extract<SpawnCheckout, { readonly readable: true }>> = {},
 ): SpawnCheckout => ({
   readable: true,
-  currentBranch: "j5/main",
-  branches: ["j5/main", "taken"],
-  branchesTruncated: false,
   worktrees: [{ path: "/repo-worktrees/feature", branch: "fix/login" }],
   localBranchNames: ["j5/main", "taken"],
   missingBaseRefs: [],
@@ -662,3 +660,16 @@ it.effect("reads git fresh for each spawn that binds a worktree", () =>
     }).pipe(Effect.provide(layer));
   }),
 );
+
+it("reads git's worktree list, keeping worktrees on a branch whose directory exists", () => {
+  const stdout = [
+    "worktree /repo\0HEAD a1\0branch refs/heads/j5/main\0",
+    "worktree /repo-worktrees/builder/\0HEAD b2\0branch refs/heads/fix/login\0",
+    "worktree /repo-worktrees/detached\0HEAD c3\0detached\0",
+    "worktree /repo-worktrees/gone\0HEAD d4\0branch refs/heads/old\0prunable gitdir file points to non-existent location\0",
+  ].join("\0");
+  assert.deepStrictEqual(parseWorktreeList(stdout), [
+    { path: "/repo", branch: "j5/main" },
+    { path: "/repo-worktrees/builder", branch: "fix/login" },
+  ]);
+});
