@@ -6,7 +6,6 @@ import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
-import { GitVcsDriver } from "../../vcs/GitVcsDriver.ts";
 import type { SquadronThreadCreationInput } from "./SquadronThreadCreationService.ts";
 import { formatRunFailureField, runFailureDetail } from "./runFailures.ts";
 import { spawnMessageId, spawnThreadId } from "./spawnIds.ts";
@@ -24,12 +23,7 @@ const squadronId = "squadron:spawn-workspace";
 /** The J5 workspace service over a real orchestrator and ThreadLaunch, git and setup faked. */
 const spawnLayer = (harness: ReturnType<typeof makeHarness>) =>
   Layer.mergeAll(
-    layerFromReceiptStore.pipe(
-      Layer.provide(
-        // These tests start briefs; nothing here reads the worktree list.
-        Layer.mergeAll(harness.layer, harness.services, Layer.mock(GitVcsDriver)({})),
-      ),
-    ),
+    layerFromReceiptStore.pipe(Layer.provide(Layer.mergeAll(harness.layer, harness.services))),
     harness.layer,
   );
 

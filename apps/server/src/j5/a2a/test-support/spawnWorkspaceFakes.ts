@@ -6,7 +6,6 @@ import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 
 import { GitWorkflowService } from "../../../git/GitWorkflowService.ts";
-import { GitVcsDriver } from "../../../vcs/GitVcsDriver.ts";
 import { CommandReceiptStoreV2 } from "../../../orchestration-v2/CommandReceiptStore.ts";
 import {
   ThreadLaunchService,
@@ -57,9 +56,9 @@ const fakeRefs = (checkout: FakeCheckout, workspaceRoot: string) => {
 export const fakeSpawnWorkspaceLayer = (options: {
   readonly checkout: FakeCheckout;
   /**
-   * When given, git reads this instead, as an agent's shell leaves it. Commands run against it
-   * directly, as `git worktree list` does; `listRefs` keeps serving the snapshot from its first
-   * read, as upstream's cache does within its refresh coalescing window.
+   * When given, git reads this instead, as an agent's shell leaves it. A checkout's status and
+   * the other direct reads see it as it is now; `listRefs` keeps serving the snapshot from its
+   * first read, as upstream's cache does within its refresh coalescing window.
    */
   readonly liveCheckout?: Ref.Ref<FakeCheckout>;
   readonly workspaceRoot?: string;
@@ -100,30 +99,22 @@ export const fakeSpawnWorkspaceLayer = (options: {
             }),
           hasCommit: ({ refName }) =>
             current.pipe(Effect.map((checkout) => !(checkout.missingRefs ?? []).includes(refName))),
+          // A checkout's own status reads it as it is now, branch included.
+          invalidateLocalStatus: () => Effect.void,
+          localStatus: ({ cwd }) =>
+            current.pipe(
+              Effect.flatMap((checkout) => {
+                const branch =
+                  cwd === root
+                    ? checkout.refName
+                    : checkout.worktrees?.find((worktree) => worktree.path === cwd)?.branch;
+                return branch === undefined
+                  ? Effect.die(new Error(`no checkout at ${cwd}`))
+                  : Effect.succeed({ isRepo: true, refName: branch } as never);
+              }),
+            ),
           listLocalBranchNames: () =>
             current.pipe(Effect.map((checkout) => fakeRefs(checkout, root).map((ref) => ref.name))),
-        }),
-        Layer.mock(GitVcsDriver)({
-          execute: (input) =>
-            current.pipe(
-              Effect.map((checkout) => ({
-                exitCode: (checkout.isRepo && input.args[0] === "worktree" ? 0 : 128) as never,
-                stdout: checkout.isRepo
-                  ? [
-                      ...(checkout.refName === null
-                        ? []
-                        : [`worktree ${root}\0branch refs/heads/${checkout.refName}\0`]),
-                      ...(checkout.worktrees ?? []).map(
-                        (worktree) =>
-                          `worktree ${worktree.path}\0HEAD abc\0branch refs/heads/${worktree.branch}\0`,
-                      ),
-                    ].join("\0")
-                  : "",
-                stderr: "",
-                stdoutTruncated: false,
-                stderrTruncated: false,
-              })),
-            ),
         }),
         Layer.mock(ThreadLaunchService)({
           launch: (input) =>
