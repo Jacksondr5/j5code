@@ -360,7 +360,15 @@ const make = Effect.gen(function* () {
     cwd: string,
     workspaceRoot: string,
   ) {
-    const first = yield* git.listRefs({ cwd, refKind: "local", limit: BRANCH_PAGE });
+    // Refreshed, so changes from an agent's shell show up once upstream's few-second refresh
+    // coalescing has passed rather than after its longer snapshot TTL; the later pages come from
+    // that refreshed snapshot.
+    const first = yield* git.listRefs({
+      cwd,
+      refKind: "local",
+      limit: BRANCH_PAGE,
+      refresh: true,
+    });
     if (!first.isRepo) return null;
     // Pages come from one cached snapshot per repository, so reading every worktree is cheap.
     const refs = [...first.refs];
