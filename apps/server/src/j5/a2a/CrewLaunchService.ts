@@ -39,7 +39,6 @@ import {
   type SpawnWorkspaceChoice,
   SpawnWorkspaceService,
   namedBaseRefs,
-  namedWorktreePaths,
   resolveSpawnWorkspace,
   spawnCreateCommandId,
   spawnThreadCheckout,
@@ -277,7 +276,6 @@ export const layer = Layer.effect(
               (seat) => seat.workspace.type === "worktree" && seat.workspace.branch !== undefined,
             ),
             baseRefs: namedBaseRefs(seats.map((seat) => seat.workspace)),
-            existingWorktreePaths: namedWorktreePaths(seats.map((seat) => seat.workspace)),
           });
       const resolveWorkspace = (seat: CrewLaunchSeat) =>
         Effect.fromResult(

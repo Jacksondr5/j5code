@@ -46,7 +46,6 @@ import { SpawnCompositionService } from "../SpawnCompositionService.ts";
 import {
   SpawnWorkspaceService,
   namedBaseRefs,
-  namedWorktreePaths,
   resolveSpawnWorkspace,
   spawnCreateCommandId,
   spawnThreadCheckout,
@@ -779,7 +778,6 @@ const handlers = {
               worktreePath: parent.thread.worktreePath,
               checkBranches,
               baseRefs: namedBaseRefs([choice]),
-              existingWorktreePaths: namedWorktreePaths([choice]),
             });
       const workspace = yield* Effect.fromResult(
         checkout === null

@@ -17,6 +17,7 @@ import * as Schema from "effect/Schema";
 
 import type { CrewWorkspaceOptions } from "@t3tools/contracts/j5";
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
+import { GitVcsDriver } from "../../vcs/GitVcsDriver.ts";
 import {
   CommandReceiptStoreV2,
   layerFromApplicationReceipts as commandReceiptStoreLayer,
@@ -85,12 +86,6 @@ export interface SpawnBaseRef {
   readonly startFromOrigin: boolean;
 }
 
-/** The existing worktrees a set of choices name, for `inspect` to read live. */
-export const namedWorktreePaths = (
-  choices: ReadonlyArray<SpawnWorkspaceChoice>,
-): ReadonlyArray<string> =>
-  choices.flatMap((choice) => (choice.type === "existing_worktree" ? [choice.worktreePath] : []));
-
 /** The base refs a set of choices name, for `inspect` to verify. */
 export const namedBaseRefs = (
   choices: ReadonlyArray<SpawnWorkspaceChoice>,
@@ -101,13 +96,10 @@ export const namedBaseRefs = (
       : [],
   );
 
-/**
- * A worktree of the project other than its main checkout, with the branch git has there; null
- * when a live read found none (detached, or the directory is gone).
- */
+/** A worktree of the project other than its main checkout, with the branch git has there. */
 export interface ProjectWorktree {
   readonly path: string;
-  readonly branch: string | null;
+  readonly branch: string;
 }
 
 /**
@@ -124,6 +116,33 @@ export type SpawnCheckout =
       readonly missingBaseRefs: ReadonlyArray<SpawnBaseRef>;
     }
   | { readonly readable: false; readonly problem: string };
+
+/**
+ * `git worktree list --porcelain -z`: the worktrees that have a branch checked out, skipping
+ * those git marks prunable (their directory is gone), with trailing separators dropped.
+ */
+export const parseWorktreeList = (stdout: string): ReadonlyArray<ProjectWorktree> => {
+  const worktrees: Array<ProjectWorktree> = [];
+  let path: string | null = null;
+  let branch: string | null = null;
+  let prunable = false;
+  const flush = () => {
+    if (path !== null && branch !== null && !prunable)
+      worktrees.push({ path: worktreePathKey(path), branch });
+    path = null;
+    branch = null;
+    prunable = false;
+  };
+  for (const field of stdout.split("\0")) {
+    if (field === "") flush();
+    else if (field.startsWith("worktree ")) path = field.slice("worktree ".length);
+    else if (field.startsWith("branch refs/heads/"))
+      branch = field.slice("branch refs/heads/".length);
+    else if (field === "prunable" || field.startsWith("prunable ")) prunable = true;
+  }
+  flush();
+  return worktrees;
+};
 
 const NO_WORKSPACE_OPTIONS: CrewWorkspaceOptions = {
   currentBranch: null,
@@ -178,13 +197,6 @@ export const resolveSpawnWorkspace = (
         new SpawnWorkspaceError({
           detail: `'${choice.worktreePath}' isn't one of this project's worktrees on a branch.${checkout.worktrees.length === 0 ? " The project has none." : ` Its worktrees: ${checkout.worktrees.map((worktree) => worktree.path).join(", ")}.`}`,
           nextStep: "Name one of those paths for workspace.worktree_path.",
-        }),
-      );
-    if (found.branch === null)
-      return Result.fail(
-        new SpawnWorkspaceError({
-          detail: `'${found.path}' has no branch checked out now, or can't be read.`,
-          nextStep: "Check out a branch there, or name another worktree.",
         }),
       );
     return Result.succeed({
@@ -269,15 +281,13 @@ export interface StartSpawnBriefInput {
 
 export interface SpawnWorkspaceServiceShape {
   /**
-   * Reads the project's repository from where the caller works: its worktrees, the live branch
-   * of each existing worktree a choice names, its local branches when asked, and whether the
-   * named base refs exist. Everything that binds a workspace uses this. Shared choices don't.
+   * Reads the project's repository straight from git, from where the caller works: its
+   * worktrees, its local branches when asked, and whether the named base refs exist. Everything
+   * that binds a workspace uses this. Shared choices don't need it.
    */
   readonly inspect: (caller: {
     readonly projectId: ProjectId;
     readonly worktreePath: string | null;
-    /** Existing worktrees the choices name, whose branch is read live (see `namedWorktreePaths`). */
-    readonly existingWorktreePaths: ReadonlyArray<string>;
     /** Read every local branch, to refuse a new branch name that exists. */
     readonly checkBranches: boolean;
     /** Base refs to check before anything is created (see `namedBaseRefs`). */
@@ -337,6 +347,7 @@ const BRANCH_PAGE = 100;
 const make = Effect.gen(function* () {
   const projects = yield* ProjectService;
   const git = yield* GitWorkflowService;
+  const driver = yield* GitVcsDriver;
   const receipts = yield* CommandReceiptStoreV2;
   const launcher = yield* ThreadLaunchService;
   const threads = yield* ThreadManagementService;
@@ -355,60 +366,21 @@ const make = Effect.gen(function* () {
         ),
       );
 
-  /** Every worktree listRefs knows, other than the main checkout, with the branch it reports. */
-  const listWorktrees = Effect.fn("j5.spawnWorkspace.listWorktrees")(function* (
-    cwd: string,
-    workspaceRoot: string,
-  ) {
-    // Refreshed, so changes from an agent's shell show up once upstream's few-second refresh
-    // coalescing has passed rather than after its longer snapshot TTL; the later pages come from
-    // that refreshed snapshot.
-    const first = yield* git.listRefs({
-      cwd,
-      refKind: "local",
-      limit: BRANCH_PAGE,
-      refresh: true,
-    });
-    if (!first.isRepo) return null;
-    // Pages come from one cached snapshot per repository, so reading every worktree is cheap.
-    const refs = [...first.refs];
-    for (let cursor = first.nextCursor; cursor !== null;) {
-      const page = yield* git.listRefs({ cwd, refKind: "local", cursor, limit: 200 });
-      refs.push(...page.refs);
-      cursor = page.nextCursor;
-    }
-    const root = worktreePathKey(workspaceRoot);
-    return {
-      first,
-      worktrees: refs.flatMap((ref) =>
-        ref.worktreePath === null || worktreePathKey(ref.worktreePath) === root
-          ? []
-          : [{ path: worktreePathKey(ref.worktreePath), branch: ref.name }],
-      ),
-    };
-  });
-
   const inspect: SpawnWorkspaceServiceShape["inspect"] = (caller) =>
     Effect.gen(function* () {
       const workspaceRoot = yield* projectRoot(caller.projectId);
       const cwd = caller.worktreePath ?? workspaceRoot;
-      // Membership comes from upstream's ref snapshot, which coalesces refreshes for a few
-      // seconds, so a worktree an agent's shell created a moment ago may be refused once; retrying
-      // shortly after finds it. What a seat or spawn binds, its branch, is read live below.
-      const listed = yield* listWorktrees(cwd, workspaceRoot);
-      if (listed === null) return yield* Effect.fail("the project is not a git repository");
-      const wanted = new Set(caller.existingWorktreePaths.map(worktreePathKey));
-      const worktrees = yield* Effect.forEach(listed.worktrees, (worktree) =>
-        wanted.has(worktree.path)
-          ? // The checkout itself says which branch it is on now; its status cache is dropped
-            // first so a branch switched from a shell a moment ago is what gets bound.
-            git.invalidateLocalStatus(worktree.path).pipe(
-              Effect.andThen(git.localStatus({ cwd: worktree.path })),
-              Effect.map((status) => ({ path: worktree.path, branch: status.refName })),
-              Effect.catch(() => Effect.succeed({ path: worktree.path, branch: null })),
-            )
-          : Effect.succeed(worktree),
-      );
+      // Straight from git, past upstream's ref cache and its refresh coalescing: an agent's own
+      // shell may have added, removed, or switched a worktree a moment ago.
+      const listed = yield* driver.execute({
+        operation: "j5.spawnWorkspace.worktreeList",
+        cwd,
+        args: ["worktree", "list", "--porcelain", "-z"],
+        allowNonZeroExit: true,
+        timeoutMs: 30_000,
+      });
+      if (listed.exitCode !== 0) return yield* Effect.fail("the project is not a git repository");
+      const root = worktreePathKey(workspaceRoot);
       const missingBaseRefs = yield* Effect.filter(caller.baseRefs, (base) =>
         git.hasCommit({ cwd, refName: base.ref }).pipe(
           Effect.flatMap((found) =>
@@ -421,7 +393,8 @@ const make = Effect.gen(function* () {
       );
       return {
         readable: true,
-        worktrees,
+        // The main checkout is the person's own, not a worktree an agent is placed in.
+        worktrees: parseWorktreeList(listed.stdout).filter((worktree) => worktree.path !== root),
         localBranchNames: caller.checkBranches ? yield* git.listLocalBranchNames(cwd) : [],
         missingBaseRefs,
       } satisfies SpawnCheckout;
@@ -434,13 +407,26 @@ const make = Effect.gen(function* () {
   const workspaceOptions: SpawnWorkspaceServiceShape["workspaceOptions"] = (caller) =>
     Effect.gen(function* () {
       const workspaceRoot = yield* projectRoot(caller.projectId);
-      const listed = yield* listWorktrees(caller.worktreePath ?? workspaceRoot, workspaceRoot);
-      if (listed === null) return NO_WORKSPACE_OPTIONS;
+      const cwd = caller.worktreePath ?? workspaceRoot;
+      const first = yield* git.listRefs({ cwd, refKind: "local", limit: BRANCH_PAGE });
+      if (!first.isRepo) return NO_WORKSPACE_OPTIONS;
+      // Pages come from one cached snapshot per repository, so reading every worktree is cheap.
+      const refs = [...first.refs];
+      for (let cursor = first.nextCursor; cursor !== null;) {
+        const page = yield* git.listRefs({ cwd, refKind: "local", cursor, limit: 200 });
+        refs.push(...page.refs);
+        cursor = page.nextCursor;
+      }
+      const root = worktreePathKey(workspaceRoot);
       return {
-        currentBranch: listed.first.refs.find((ref) => ref.current)?.name ?? null,
-        branches: listed.first.refs.map((ref) => ref.name),
-        branchesTruncated: listed.first.nextCursor !== null,
-        worktrees: listed.worktrees,
+        currentBranch: first.refs.find((ref) => ref.current)?.name ?? null,
+        branches: first.refs.map((ref) => ref.name),
+        branchesTruncated: first.nextCursor !== null,
+        worktrees: refs.flatMap((ref) =>
+          ref.worktreePath === null || worktreePathKey(ref.worktreePath) === root
+            ? []
+            : [{ path: worktreePathKey(ref.worktreePath), branch: ref.name }],
+        ),
       };
     }).pipe(Effect.catch(() => Effect.succeed(NO_WORKSPACE_OPTIONS)));
 

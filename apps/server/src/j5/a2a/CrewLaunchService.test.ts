@@ -1923,7 +1923,7 @@ it.effect("launches each seat in the workspace it names, and refuses one git can
   }),
 );
 
-it.effect("binds an existing worktree's live branch, so a stale preview can't approve", () =>
+it.effect("binds a seat's workspace from a fresh read, so a stale preview can't approve", () =>
   Effect.gen(function* () {
     const { context, commands, captain } = yield* fixture;
     const codex = provider("codex", "codex", [{ slug: "gpt-5.6-sol", options: ["high"] }]);
@@ -1985,7 +1985,7 @@ it.effect("binds an existing worktree's live branch, so a stale preview can't ap
       assert.deepStrictEqual((yield* launcher.workspaceOptions(captain)).worktrees, [
         { path: "/repo-worktrees/builder", branch: "fix/login" },
       ]);
-      // Approval reads the worktree's branch live from the checkout, past the cached snapshot.
+      // Approval resolves again from a fresh read: the new branch, and the new worktree.
       const approving = yield* launcher.resolveSeats(captain, [
         reviewer("/repo-worktrees/builder"),
       ]);
@@ -1994,12 +1994,7 @@ it.effect("binds an existing worktree's live branch, so a stale preview can't ap
         worktreePath: "/repo-worktrees/builder",
         branch: "fix/signup",
       });
-      // Membership comes from the cached snapshot, so a worktree added inside its window is
-      // refused once; retrying after it refreshes finds it.
-      const tooNew = yield* launcher
-        .resolveSeats(captain, [reviewer("/repo-worktrees/scout")])
-        .pipe(Effect.flip);
-      assert.include(tooNew.message, "isn't one of this project's worktrees");
+      yield* launcher.resolveSeats(captain, [reviewer("/repo-worktrees/scout")]);
       // The token the stale preview showed no longer matches, so the gate asks for a fresh one.
       assert.notEqual(
         crewApprovalToken(proposal, captain, shown),
