@@ -240,7 +240,8 @@ export const CrewProposalSeatRuntime = Schema.Struct({
   access: Schema.String,
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
-  workspace: CrewSeatWorkspace,
+  /** Always sent by a current server; absent only from servers that predate seat workspaces. */
+  workspace: Schema.optionalKey(CrewSeatWorkspace),
   /** The seat's persona swaps as the edited roster would record them. */
   personaSwaps: Schema.optionalKey(Schema.Array(CrewPersonaSwap)),
 });
@@ -254,7 +255,11 @@ export const CrewProposalPreviewResponse = Schema.Struct({
   proposalId: Schema.String,
   approvalToken: Schema.String,
   seats: Schema.Array(CrewProposalSeatRuntime),
-  workspaceOptions: CrewWorkspaceOptions,
+  /**
+   * Always sent by a current server; absent only from one that predates seat workspaces, where the
+   * card shows the seats without the workspace control.
+   */
+  workspaceOptions: Schema.optionalKey(CrewWorkspaceOptions),
   /** The plan the approval token binds: the live playbook and the steps no seat owns. */
   playbook: Schema.optionalKey(Schema.NullOr(CrewProposalPlaybook)),
   unownedSteps: Schema.optionalKey(Schema.Array(Schema.String)),

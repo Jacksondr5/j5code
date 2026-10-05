@@ -116,10 +116,14 @@ export function CrewSeatEditor(props: CrewSeatEditorProps) {
   );
 }
 
-/** Where the seat works, with the choices the Captain's repository offers. */
+/**
+ * Where the seat works, with the choices the Captain's repository offers. A server that predates
+ * seat workspaces sends no options, and then there is nothing to choose.
+ */
 function CrewSeatWorkspaceField(props: CrewSeatEditorProps) {
   const workspace = props.value.workspace;
   const options = props.workspaceOptions;
+  if (options === undefined) return null;
   const label = props.value.seat || "New seat";
   // The current value stays selectable even when it isn't on the first page of branches.
   const branches =

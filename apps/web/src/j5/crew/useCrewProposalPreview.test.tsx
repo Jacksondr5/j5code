@@ -1,5 +1,6 @@
 import { EnvironmentId, ProviderInstanceId } from "@t3tools/contracts";
-import type { CrewProposalPreviewResponse, CrewProposalSeat } from "@t3tools/contracts/j5";
+import { CrewProposalPreviewResponse, type CrewProposalSeat } from "@t3tools/contracts/j5";
+import * as Schema from "effect/Schema";
 import { act, useEffect } from "react";
 import { create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
@@ -9,6 +10,7 @@ vi.mock("./crewProposalsClient", () => ({ previewCrewProposal }));
 import { useCrewProposalPreview } from "./useCrewProposalPreview";
 
 const environmentId = EnvironmentId.make("crew-preview");
+const decodePreviewResponse = Schema.decodeUnknownSync(CrewProposalPreviewResponse);
 const seats: ReadonlyArray<CrewProposalSeat> = [
   { seat: "reviewer", agentId: null, reason: "Review", instructions: "Review the patch" },
 ];
@@ -199,6 +201,22 @@ describe("crew runtime preview lifecycle", () => {
     });
     expect(result.runtimeSeats).toBeNull();
     expect(previewCrewProposal).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts a preview from a server that predates seat workspaces", async () => {
+    // An older server sends neither the card's workspace options nor a seat's workspace.
+    const { workspaceOptions: _options, ...withoutOptions } = response;
+    const older = decodePreviewResponse({
+      ...withoutOptions,
+      seats: response.seats.map(({ workspace: _workspace, ...row }) => row),
+    });
+    previewCrewProposal.mockResolvedValue(older);
+    await render();
+    expect(result.error).toBeNull();
+    expect(result.data?.seats.map((row) => row.seat)).toEqual(["reviewer"]);
+    expect(result.data?.seats[0]?.workspace).toBeUndefined();
+    // With no options, the card has no workspace to offer, so the control stays hidden.
+    expect(result.data?.workspaceOptions).toBeUndefined();
   });
 
   it("never accepts incomplete runtime rows or an unavailable environment", async () => {

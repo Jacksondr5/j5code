@@ -168,7 +168,9 @@ export function CrewProposalCard(props: {
                         runtime.model,
                         runtime.reasoning,
                         runtime.access,
-                        describeCrewSeatWorkspace(runtime.workspace),
+                        ...(runtime.workspace === undefined
+                          ? []
+                          : [describeCrewSeatWorkspace(runtime.workspace)]),
                       ].join(" · ")}
                       <span className="ml-2">Harness: {runtime.harness}</span>
                     </p>
