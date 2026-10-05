@@ -2,6 +2,7 @@ import {
   agentPersonaReasoningDescriptor,
   defaultInstanceIdForDriver,
   isProviderAvailable,
+  type AgentPersonaAuthorityPolicy,
   type AgentPersonaRouteFailureCode as ContractRouteFailureCode,
   type ModelSelection,
   type OrchestrationV2AgentPersonaCatalog,
@@ -47,6 +48,16 @@ export type AgentPersonaRouteResolution =
       readonly definitionVersion: number;
       readonly attempts: ReadonlyArray<AgentPersonaRouteAttempt>;
     };
+
+export function unavailableAgentPersonaReason(
+  resolution: Extract<AgentPersonaRouteResolution, { status: "unavailable" }>,
+): "routes-unavailable" | "authority-not-enforceable" {
+  return resolution.attempts.every(({ failures }) =>
+    failures.some(({ code }) => code === "authority-not-enforceable"),
+  )
+    ? "authority-not-enforceable"
+    : "routes-unavailable";
+}
 
 /** The launch selection for a target on a provider that already passed the availability check. */
 export function agentPersonaModelSelection(
@@ -109,14 +120,29 @@ export function resolveAgentPersonaRoute(input: {
   readonly personaId: AgentPersonaId;
   readonly definition?: AgentPersonaDefinition;
   readonly providers: ReadonlyArray<ServerProvider>;
+  readonly authorityPolicy?: AgentPersonaAuthorityPolicy;
 }): AgentPersonaRouteResolution {
   const definition = input.definition ?? getBuiltInAgentPersona(input.personaId);
+  const authorityPolicy = input.authorityPolicy ?? definition.authority.defaultPolicy;
   const rejectedTargets: Array<AgentPersonaRouteAttempt> = [];
 
   for (const [index, target] of definition.modelRoute.entries()) {
     const route = index === 0 ? "primary" : "fallback";
     const candidates = candidatesForTarget(input.providers, target);
     const failures: Array<AgentPersonaRouteFailure> = [];
+
+    if (!providerCanEnforceAgentPersonaAuthority(target.driver, authorityPolicy)) {
+      // Also name a missing provider, so a mistyped driver doesn't read as a policy gap alone.
+      rejectedTargets.push({
+        route,
+        target,
+        failures: [
+          { code: "authority-not-enforceable" },
+          ...(candidates.length === 0 ? [{ code: "provider-not-configured" as const }] : []),
+        ],
+      });
+      continue;
+    }
 
     if (candidates.length === 0) {
       failures.push({ code: "provider-not-configured" });
@@ -182,14 +208,10 @@ export function buildAgentPersonaCatalog(
                 resolvedRoute: resolution.route,
                 resolvedDriver: resolution.driver,
                 resolvedModelSelection: resolution.modelSelection,
-                sandboxed: providerCanEnforceAgentPersonaAuthority(
-                  resolution.driver,
-                  definition.authority.defaultPolicy,
-                ),
               }
             : {
                 status: "unavailable" as const,
-                reason: "routes-unavailable" as const,
+                reason: unavailableAgentPersonaReason(resolution),
                 // Settings shows these so a blocked badge names the missing model or provider.
                 attempts: resolution.attempts.map((attempt) => ({
                   route: attempt.route,

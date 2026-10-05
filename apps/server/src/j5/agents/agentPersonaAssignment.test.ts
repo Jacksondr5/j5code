@@ -36,14 +36,17 @@ describe("agent persona assignment", () => {
     });
   });
 
-  it("assigns Critic Fix Mode on a provider that cannot sandbox it", () => {
+  it("blocks Critic Fix Mode on a provider that cannot enforce workspace authority", () => {
     const result = buildAgentPersonaAssignment({
       resolution: criticRoute,
       authorityPolicy: "critic-fix",
     });
-    assert.equal(result.status, "assigned");
-    if (result.status !== "assigned") return;
-    assert.equal(result.assignment.authorityPolicy, "critic-fix");
+    assert.deepEqual(result, {
+      status: "authority-not-enforceable",
+      personaId: "critic",
+      requestedPolicy: "critic-fix",
+      driver: ProviderDriverKind.make("claudeAgent"),
+    });
   });
 
   it("rejects an authority policy outside the persona contract", () => {

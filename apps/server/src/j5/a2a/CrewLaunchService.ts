@@ -23,7 +23,10 @@ import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
 import { prepareAgentPersonaLaunch } from "../agents/agentPersonaLaunch.ts";
 import { agentHandoffArtifactPath } from "../agents/agentPersonaArtifacts.ts";
 import { makeAgentPersonaLibrary } from "../agents/agentPersonaLibrary.ts";
-import { translateAgentPersonaProviderPolicy } from "../agents/agentPersonaProviderPolicy.ts";
+import {
+  providerCanEnforceAgentPersonaAuthority,
+  translateAgentPersonaProviderPolicy,
+} from "../agents/agentPersonaProviderPolicy.ts";
 import {
   AgentCrewInstanceService,
   CrewStepAlreadyOwnedError,
@@ -349,6 +352,19 @@ export const layer = Layer.effect(
               seatName: seat.name,
               agentId,
               detail: "The selected persona is unknown or disabled in this environment.",
+            });
+          if (
+            seat.runtimeMode === undefined &&
+            !providerCanEnforceAgentPersonaAuthority(
+              provider.driver,
+              definition.authority.defaultPolicy,
+            )
+          )
+            return yield* new CrewLaunchSeatUnavailableError({
+              seatName: seat.name,
+              agentId,
+              detail:
+                "This harness cannot enforce the persona's default access. Select an explicit access mode.",
             });
           const definitionDigest = yield* agents.snapshot(definition);
           return {

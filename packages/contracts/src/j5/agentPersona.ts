@@ -101,7 +101,6 @@ export const AgentPersonaRouteFailureCode = Schema.Literals([
   "provider-unauthenticated",
   "model-not-advertised",
   "reasoning-effort-not-advertised",
-  /** Only sent by older servers; current ones launch unsandboxed instead of blocking. */
   "authority-not-enforceable",
 ]);
 export type AgentPersonaRouteFailureCode = typeof AgentPersonaRouteFailureCode.Type;
@@ -122,14 +121,11 @@ export const OrchestrationV2AgentPersonaAvailability = Schema.Union([
     resolvedRoute: Schema.Literals(["primary", "fallback"]),
     resolvedDriver: ProviderDriverKind,
     resolvedModelSelection: ModelSelection,
-    /** False when the provider can't sandbox the default policy and it runs as instructions only. */
-    sandboxed: Schema.optional(Schema.Boolean),
   }),
   Schema.Struct({
     status: Schema.Literal("unavailable"),
     reason: Schema.Literals([
       "routes-unavailable",
-      /** Only sent by older servers. */
       "authority-not-enforceable",
       "disabled",
       "removed",

@@ -964,7 +964,7 @@ it.effect(
     }).pipe(Effect.scoped),
 );
 
-it.effect("runs persona seats the ACP harness cannot sandbox in an access mode it enforces", () =>
+it.effect("refuses persona seats whose effective ACP access the harness cannot enforce", () =>
   Effect.gen(function* () {
     const { context, commands, captain } = yield* fixture;
     const layer = crewLaunchLayer.pipe(
@@ -983,10 +983,10 @@ it.effect("runs persona seats the ACP harness cannot sandbox in an access mode i
         reason: "Build",
         modelSelection: { instanceId: ProviderInstanceId.make("acp"), model: "model" },
       };
-      // A workspace-write persona with no override runs unsandboxed in the default mode.
-      const inherited = yield* launcher.resolveSeats(captain, [seat]);
-      assert.equal(inherited[0]?.runtimeMode, "full-access");
-      assert.equal(inherited[0]?.runtime.access, "Full access");
+      // A workspace-write persona with no override: the harness cannot enforce its default.
+      const inherited = yield* launcher.resolveSeats(captain, [seat]).pipe(Effect.flip);
+      assert.equal(inherited._tag, "CrewLaunchSeatUnavailableError");
+      assert.include(inherited.message, "cannot enforce the persona's default access");
       // An explicit auto mode is refused on the persona branch as it is for custom seats.
       for (const runtimeMode of ["auto", "auto-accept-edits"] as const) {
         const overridden = yield* launcher

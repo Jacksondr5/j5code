@@ -92,7 +92,7 @@ export const prepareAgentPersonaPeerSpawn = Effect.fn("j5.prepareAgentPersonaPee
   });
   if (result.status !== "assigned") {
     return yield* new AgentPersonaLibraryError({
-      message: `Agent ${request.personaId} does not allow its own default runtime policy ${definition.authority.defaultPolicy}.`,
+      message: `Agent ${request.personaId} cannot enforce its ${definition.authority.defaultPolicy} permissions on ${target.driver}.`,
     });
   }
   const definitionDigest = yield* library.snapshot(definition);

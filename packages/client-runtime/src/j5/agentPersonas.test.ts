@@ -106,25 +106,6 @@ describe("agent persona catalog presentation", () => {
     });
   });
 
-  it("marks an available route the provider can't sandbox", () => {
-    const persona = catalog.personas[0]!;
-    const unsandboxed = {
-      personas: [
-        {
-          ...persona,
-          availability: {
-            ...persona.availability,
-            sandboxed: false,
-          } as typeof persona.availability,
-        },
-      ],
-    };
-    expect(presentAgentPersonaCatalog(unsandboxed)[0]).toMatchObject({
-      availability: "available",
-      route: "Codex · server-selected-model · fallback · not sandboxed on this provider",
-    });
-  });
-
   it("presents unavailable personas as clearly blocked", () => {
     expect(presentAgentPersonaCatalog(catalog)[1]).toMatchObject({
       availability: "blocked",

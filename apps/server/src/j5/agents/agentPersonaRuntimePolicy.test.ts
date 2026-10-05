@@ -115,7 +115,7 @@ it.layer(TestLayer)("agent persona runtime policy", (it) => {
     }),
   );
 
-  it.effect("runs a policy the provider can't sandbox in the thread's own mode", () =>
+  it.effect("degrades an unsafe historical persona assignment to read-only", () =>
     Effect.gen(function* () {
       const policy = yield* RuntimePolicyV2;
       const now = yield* DateTime.now;
@@ -132,9 +132,13 @@ it.layer(TestLayer)("agent persona runtime policy", (it) => {
       } satisfies OrchestrationV2AppThread;
       const resolved = yield* policy.resolve({ thread, modelSelection });
 
-      assert.equal(resolved.runtimeMode, thread.runtimeMode);
-      assert.isUndefined(resolved.approvalPolicy);
-      assert.isUndefined(resolved.sandboxPolicy);
+      assert.equal(resolved.runtimeMode, "approval-required");
+      assert.equal(resolved.approvalPolicy, "never");
+      assert.deepEqual(resolved.sandboxPolicy, {
+        type: "readOnly",
+        access: { type: "fullAccess" },
+        networkAccess: false,
+      });
     }),
   );
 
