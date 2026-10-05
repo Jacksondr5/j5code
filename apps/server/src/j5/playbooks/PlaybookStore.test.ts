@@ -1066,3 +1066,15 @@ it.effect("exports a near-limit definition byte-for-byte so it stays importable"
     assert.isAtMost(Buffer.byteLength(exported.yaml), PLAYBOOK_MAX_BYTES);
   }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
 );
+
+it.effect("refuses to export a playbook symlinked outside the workspace", () =>
+  Effect.gen(function* () {
+    const { fs, path, store, workspaceRoot, filename } = yield* makeFixture;
+    const outside = yield* fs.makeTempDirectoryScoped({ prefix: "j5-playbook-outside-" });
+    const target = path.join(outside, "secret.yaml");
+    yield* fs.writeFileString(target, stringify(definition()));
+    yield* fs.symlink(target, filename("leak"));
+    const error = yield* store.exportDefinition(workspaceRoot, "leak").pipe(Effect.flip);
+    assert.equal((error as { code?: string }).code, "invalid_path");
+  }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
+);
