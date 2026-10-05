@@ -38,7 +38,7 @@ To invoke a persona in Codex or Claude, type **@** in the composer and select a 
 
 The selected persona runs as a subagent under the current conversation and returns its result there. It uses its saved instructions, primary/fallback model, reasoning, and runtime policy, even if its model uses a different provider from the parent. It cannot broaden the parent’s permissions. Running subagents keep their saved definition when the library changes. Crews and new-task crew launches are not part of persona invocation.
 
-An agent can also start a persona as a peer with its own top-level task by naming it in a spawn. The peer keeps the persona's instructions and runtime policy, and the spawning agent must choose one of the persona's declared provider, model, and reasoning combinations. The peer runs with its own persona's permissions, not the spawning agent's.
+An agent can also start a persona as a peer with its own top-level task by naming it in a spawn. The peer keeps the persona's instructions and runtime policy, and the spawning agent must choose one of the persona's declared provider, model, and reasoning combinations. The peer runs with its own persona's permissions, not the spawning agent's. Spawning is not limited by the spawning agent's own access, so a persona set to Full access can be started this way without a prompt; the library marks those personas.
 
 ## Crews
 
