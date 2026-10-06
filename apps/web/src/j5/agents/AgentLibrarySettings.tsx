@@ -546,9 +546,9 @@ export function AgentLibrarySettings() {
                         </Tooltip>
                       )
                     ) : null}
-                    {persona.edit === null &&
-                    !persona.removed &&
-                    persona.availability !== "unsupported" ? (
+                    {persona.availability === "unsupported" ? (
+                      <span className="basis-full">{persona.blockedReasons[0]}</span>
+                    ) : persona.edit === null && !persona.removed ? (
                       <span className="basis-full">Duplicate this persona to edit a copy</span>
                     ) : null}
                   </div>
