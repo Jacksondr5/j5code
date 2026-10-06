@@ -146,7 +146,7 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Why:** agents need a home in the ledger, and the ledger is still keyed by Squadron. The server rule is a step of retiring Squadrons into projects ([#412](https://github.com/Jacksondr5/j5code/issues/412)), where a thread's home is its project. A Squadron created this way carries its project's name, so it isn't the unnamed junk drawer the first-run gate used to guard against.
 
-**Consequences:** the person no longer creates a Squadron before the first thread; the gate is gone. Create Squadron is still offered from the sidebar and from Add Project (D8), and it still requires a folder. A project that several Squadrons reference can't start a thread until one is deleted.
+**Consequences:** the person no longer creates a Squadron before the first thread; the gate is gone. Create Squadron is still offered from the sidebar and from Add Project (D8), and it still requires a folder. A project that several Squadrons reference can't start a thread until one is deleted, and the server refuses to delete a Squadron that still has unarchived agents or live Crews, so those have to be archived first. Create Squadron does not check for an existing Squadron on the folder, so it can produce that state.
 
 **Decided:** Jackson, 2026-08-24 (SC2), for the original gate. The server rule and the gate's removal: Jackson, 2026-10-03, in the plan to retire Squadrons. Recorded in FORK.md cases 9 and 10.
 
