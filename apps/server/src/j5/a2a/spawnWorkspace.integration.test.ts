@@ -8,7 +8,14 @@ import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
-import type { SquadronThreadCreationInput } from "./SquadronThreadCreationService.ts";
+import { A2AHomeNotFoundError, A2AHomeRegistrar, participantIdForThread } from "./HomeRegistrar.ts";
+import { SquadronProjectReferences } from "./SquadronProjectReferences.ts";
+import {
+  SquadronThreadCreationService,
+  layer as squadronThreadCreationLayer,
+  type SquadronThreadCreationInput,
+} from "./SquadronThreadCreationService.ts";
+import { SquadronId } from "./contracts.ts";
 import { spawnMessageId, spawnThreadId } from "./spawnIds.ts";
 import {
   SpawnWorkspaceService,
@@ -139,13 +146,36 @@ it.effect("returns once the checkout is bound, without waiting for the setup scr
   return Effect.gen(function* () {
     const setupEntered = yield* Deferred.make<void>();
     const allowSetup = yield* Deferred.make<void>();
+    // ThreadLaunch calls the real creation service; the home writes it would make are recorded.
+    const homeWrites: Array<unknown> = [];
+    const real = yield* SquadronThreadCreationService.pipe(
+      Effect.provide(
+        squadronThreadCreationLayer.pipe(
+          Layer.provide(
+            Layer.mergeAll(
+              Layer.mock(A2AHomeRegistrar)({
+                registerAtCreation: (write) =>
+                  Effect.sync(() => {
+                    homeWrites.push(write);
+                    return {
+                      squadronId: SquadronId.make(squadronId),
+                      participantId: participantIdForThread(threadId),
+                    };
+                  }),
+                getHomeForThread: (id) => Effect.fail(new A2AHomeNotFoundError({ threadId: id })),
+              }),
+              Layer.mock(SquadronProjectReferences)({
+                listForSquadron: () => Effect.succeed([]),
+              }),
+            ),
+          ),
+        ),
+      ),
+    );
     const harness = makeHarness({
       registerAtDurableLaunch: (input) => {
         registrations.push(input);
-        return Effect.succeed({
-          squadronId: squadronId as never,
-          participantId: "agent:x" as never,
-        });
+        return real.registerAtDurableLaunch(input);
       },
       // The project's setup script is held open: the checkout is long done, the script is not.
       runSetup: () =>
@@ -170,6 +200,10 @@ it.effect("returns once the checkout is bound, without waiting for the setup scr
         afterSequence,
       });
       assert.deepStrictEqual(readiness, { ready: true });
+      // ThreadLaunch asked to register the peer, and nothing was written: the peer has no home,
+      // so it cannot be addressed, until spawn_agent registers it after this returns.
+      assert.lengthOf(registrations, 1);
+      assert.lengthOf(homeWrites, 0);
       const threads = yield* ThreadManagementService;
       const bound = yield* threads.getThreadProjection(threadId);
       assert.equal(bound.thread.worktreePath, "/repo-worktrees/feature");

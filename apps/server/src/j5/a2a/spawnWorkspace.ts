@@ -32,7 +32,7 @@ import type { OrchestratorV2Error } from "../../orchestration-v2/Orchestrator.ts
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { ProjectService } from "../../project/ProjectService.ts";
 import { WorktreeSetupTracker } from "../../project/WorktreeSetupTracker.ts";
-import { lifecycleCommandId, type SpawnStableInput } from "./spawnIds.ts";
+import { SPAWN_LAUNCH_OPERATION, lifecycleCommandId, type SpawnStableInput } from "./spawnIds.ts";
 import { runFailureDetail } from "./runFailures.ts";
 
 /**
@@ -530,7 +530,10 @@ const make = Effect.gen(function* () {
           .pipe(Effect.asVoid)
       : launcher
           .launch({
-            commandId: lifecycleCommandId({ ...input.stableInput, operation: "spawn-launch" }),
+            commandId: lifecycleCommandId({
+              ...input.stableInput,
+              operation: SPAWN_LAUNCH_OPERATION,
+            }),
             squadronId: input.squadronId,
             threadId: input.threadId,
             reuseExistingThread: true,
