@@ -345,6 +345,22 @@ it.effect("creates no Squadron for a project that is missing", () =>
   refusesUnavailableProject.pipe(Effect.provide(makeProjectRuleLayer({}))),
 );
 
+it.effect("registers nothing in the one Squadron of a deleted project", () =>
+  Effect.gen(function* () {
+    yield* runJ5A2AMigrations();
+    const existing = yield* createSquadronForProject("deleted-project");
+    const service = yield* SquadronThreadCreationService;
+
+    const error = yield* service
+      .registerAtDurableLaunch(launchWithoutSquadron("deleted-project"))
+      .pipe(Effect.flip);
+
+    assert.instanceOf(error, SquadronThreadCreationProjectUnavailableError);
+    const ledger = yield* A2ALedger;
+    assert.lengthOf(yield* ledger.listMembership(existing), 0);
+  }).pipe(Effect.provide(makeProjectRuleLayer({ [projectId]: "Alpha" }, { deleted: true }))),
+);
+
 it.effect("creates no Squadron for a deleted project", () =>
   refusesUnavailableProject.pipe(
     Effect.provide(makeProjectRuleLayer({ [projectId]: "Alpha" }, { deleted: true })),

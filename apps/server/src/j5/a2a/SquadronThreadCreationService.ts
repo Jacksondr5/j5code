@@ -56,7 +56,7 @@ export class SquadronThreadCreationProjectUnavailableError extends Schema.Tagged
   { projectId: Schema.String },
 ) {
   override get message(): string {
-    return `Project ${this.projectId} is missing or deleted, so no Squadron was created for it.`;
+    return `Project ${this.projectId} is missing or deleted, so the thread was not given a Squadron in it.`;
   }
 }
 
@@ -155,7 +155,6 @@ export const layer: Layer.Layer<
           squadronIds: references.map((reference) => reference.squadronId),
         });
       }
-      if (only !== undefined) return only.squadronId;
 
       const project = yield* projects.getById({ projectId: input.projectId });
       if (Option.isNone(project) || project.value.deletedAt !== null) {
@@ -163,6 +162,7 @@ export const layer: Layer.Layer<
           projectId: input.projectId,
         });
       }
+      if (only !== undefined) return only.squadronId;
       const createdAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
       const created = yield* ledger.createSquadron({
         squadron: {

@@ -182,9 +182,9 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **J5:** each thread gets the draft's Squadron, and fanning out is refused from a persona draft.
 
-**Why:** J5 refuses a thread start that has no Squadron. A persona pins one model, so fanning it out would run every thread on that same model.
+**Why:** the person chose a Squadron for the draft, so every thread it fans out to belongs there. A thread sent without one would join its project's Squadron instead, which need not be the one chosen, and is refused when several Squadrons share the project. A persona pins one model, so fanning it out would run every thread on that same model.
 
-**Consequences:** each advance checks that no fan-out path launches without a Squadron.
+**Consequences:** each advance checks that every fan-out path sends the draft's Squadron.
 
 **Decided:** 2026-09-24 (#7b), a merge-time decision made to let that day's advance proceed. How fan-out should really work in J5 is open (#338). Recorded in FORK.md case 19.
 
