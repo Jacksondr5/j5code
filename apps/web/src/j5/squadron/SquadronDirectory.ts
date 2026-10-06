@@ -22,7 +22,7 @@ const useDirectoryRefresh = createVisibleRefreshHook(() => {
   void refreshSquadronDirectory();
 }, 30_000);
 
-/** One registry-backed read per environment is shared by the gate and every scope control. */
+/** One registry-backed read per environment, shared by every J5 view that still reads Squadrons. */
 export function useSquadronDirectory() {
   const state = useAtomValue(directoryAtom);
   useDirectoryRefresh();
