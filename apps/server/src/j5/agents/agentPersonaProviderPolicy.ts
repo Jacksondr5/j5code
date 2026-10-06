@@ -91,6 +91,10 @@ export function translateAgentPersonaProviderPolicy(
   authorityPolicy: AgentPersonaAuthorityPolicy,
   driver: string,
 ): AgentPersonaProviderPolicy {
+  // Callers reject unknown policies first; one reaching here is a bug, never a quiet read-only run.
+  if (!isAgentPersonaAuthorityPolicy(authorityPolicy)) {
+    throw new Error(`Unknown agent persona authority policy: ${String(authorityPolicy)}`);
+  }
   if (!providerCanEnforceAgentPersonaAuthority(driver, authorityPolicy)) {
     return READ_ONLY_POLICY;
   }

@@ -86,12 +86,21 @@ describe("agent persona provider policy", () => {
     }
   });
 
-  it("never enforces a policy only a newer server knows", () => {
+  it("never enforces or translates a policy only a newer server knows", () => {
     assert.isFalse(
       providerCanEnforceAgentPersonaAuthority(
         ProviderDriverKind.make("codex"),
         "sandboxed-network",
       ),
+    );
+    assert.throws(
+      () =>
+        translateAgentPersonaProviderPolicy(
+          // @ts-expect-error a stored policy from a newer server, as an untyped caller would pass it
+          "sandboxed-network",
+          ProviderDriverKind.make("codex"),
+        ),
+      /sandboxed-network/,
     );
   });
 
