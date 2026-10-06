@@ -101,6 +101,14 @@ export const OrchestrationV2AgentPersonaAssignment = Schema.Struct({
 export type OrchestrationV2AgentPersonaAssignment =
   typeof OrchestrationV2AgentPersonaAssignment.Type;
 
+/** The assignment as the server issues it in commands, where only known policies are valid. */
+export const OrchestrationV2AgentPersonaCommandAssignment = Schema.Struct({
+  ...OrchestrationV2AgentPersonaAssignment.fields,
+  authorityPolicy: AgentPersonaAuthorityPolicy,
+});
+export type OrchestrationV2AgentPersonaCommandAssignment =
+  typeof OrchestrationV2AgentPersonaCommandAssignment.Type;
+
 /** Why one route of a definition could not be used in this environment. */
 export const AgentPersonaRouteFailureCode = Schema.Literals([
   "provider-not-configured",

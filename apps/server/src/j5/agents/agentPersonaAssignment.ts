@@ -1,6 +1,7 @@
 import {
   isAgentPersonaReasoningOptionId,
   type OrchestrationV2AgentPersonaAssignment,
+  type OrchestrationV2AgentPersonaCommandAssignment,
   ProviderDriverKind,
 } from "@t3tools/contracts";
 
@@ -15,15 +16,10 @@ import {
 
 type AvailableAgentPersonaRoute = Extract<AgentPersonaRouteResolution, { status: "available" }>;
 
-/** An assignment this server resolved itself, so its policy is one it knows how to enforce. */
-export type ResolvedAgentPersonaAssignment = OrchestrationV2AgentPersonaAssignment & {
-  readonly authorityPolicy: AgentAuthorityPolicyId;
-};
-
 export type AgentPersonaAssignmentResult =
   | {
       readonly status: "assigned";
-      readonly assignment: ResolvedAgentPersonaAssignment;
+      readonly assignment: OrchestrationV2AgentPersonaCommandAssignment;
     }
   | {
       readonly status: "invalid-authority-policy";

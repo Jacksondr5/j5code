@@ -116,4 +116,58 @@ describe("agent persona contracts", () => {
       "full-access",
     );
   });
+
+  it("keeps server-issued command assignments on known policies", () => {
+    const assignment = {
+      personaId: "operator",
+      definitionVersion: 1,
+      authorityPolicy: "full-access",
+      resolvedRoute: "primary",
+      resolvedDriver: "codex",
+      resolvedModelSelection: { instanceId: "codex", model: "gpt-5.6-terra" },
+    };
+    const create = {
+      type: "thread.create",
+      createdBy: "agent",
+      creationSource: "mcp",
+      commandId: "command-operator",
+      threadId: "thread-operator",
+      projectId: "project-operator",
+      title: "Operator",
+      modelSelection: { instanceId: "codex", model: "gpt-5.6-terra" },
+      runtimeMode: "approval-required",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      agentPersonaAssignment: assignment,
+    };
+    expect(decodeOrchestrationV2Command(create).type).toBe("thread.create");
+    expect(() =>
+      decodeOrchestrationV2Command({
+        ...create,
+        agentPersonaAssignment: { ...assignment, authorityPolicy: "root-access" },
+      }),
+    ).toThrow();
+    const delegated = {
+      type: "delegated_task.request",
+      createdBy: "agent",
+      creationSource: "mcp",
+      commandId: "command-delegate",
+      parentThreadId: "thread-parent",
+      parentRunId: "run-parent",
+      parentNodeId: "node-parent",
+      task: "Do it.",
+      modelSelection: { instanceId: "codex", model: "gpt-5.6-terra" },
+      runtimeMode: "approval-required",
+      interactionMode: "default",
+      agentPersonaAssignment: assignment,
+    };
+    expect(decodeOrchestrationV2Command(delegated).type).toBe("delegated_task.request");
+    expect(() =>
+      decodeOrchestrationV2Command({
+        ...delegated,
+        agentPersonaAssignment: { ...assignment, authorityPolicy: "root-access" },
+      }),
+    ).toThrow();
+  });
 });

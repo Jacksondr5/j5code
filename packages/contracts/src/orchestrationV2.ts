@@ -47,6 +47,7 @@ import {
 } from "./orchestration.ts";
 import {
   OrchestrationV2AgentPersonaAssignment,
+  OrchestrationV2AgentPersonaCommandAssignment,
   OrchestrationV2AgentPersonaRequest,
 } from "./j5/agentPersona.ts";
 import {
@@ -2250,7 +2251,7 @@ export const OrchestrationV2Command = Schema.Union([
     modelSelection: ModelSelection,
     runtimeMode: RuntimeMode,
     interactionMode: ProviderInteractionMode,
-    agentPersonaAssignment: Schema.optional(OrchestrationV2AgentPersonaAssignment),
+    agentPersonaAssignment: Schema.optional(OrchestrationV2AgentPersonaCommandAssignment),
     branch: Schema.NullOr(TrimmedNonEmptyString),
     worktreePath: Schema.NullOr(TrimmedNonEmptyString),
     importedNativeThread: Schema.optional(
@@ -2598,7 +2599,7 @@ export const OrchestrationV2Command = Schema.Union([
   }),
   Schema.Struct({
     type: Schema.Literal("delegated_task.request"),
-    agentPersonaAssignment: Schema.optional(OrchestrationV2AgentPersonaAssignment),
+    agentPersonaAssignment: Schema.optional(OrchestrationV2AgentPersonaCommandAssignment),
     ...OrchestrationV2CreationFields,
     commandId: CommandId,
     parentThreadId: ThreadId,
