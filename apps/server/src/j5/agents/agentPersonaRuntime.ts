@@ -36,7 +36,9 @@ export const resolveAgentPersonaRuntime = Effect.fn("resolveAgentPersonaRuntime"
   } else {
     const definition = yield* library.readSnapshot(assignment);
     if (
-      !definition.authority.allowedPolicies.includes(assignment.authorityPolicy) ||
+      !definition.authority.allowedPolicies.some(
+        (policy) => policy === assignment.authorityPolicy,
+      ) ||
       (assignment.runtimeModeOverride === undefined &&
         !providerCanEnforceAgentPersonaAuthority(
           assignment.resolvedDriver,

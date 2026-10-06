@@ -2,6 +2,7 @@ import * as Schema from "effect/Schema";
 import {
   AgentPersonaImportConflictError,
   agentPersonaReasoningDescriptor,
+  isAgentPersonaAuthorityPolicy,
   isAgentPersonaDefinitionFile,
   isAgentPersonaReasoningOptionId,
   PROVIDER_DISPLAY_NAMES,
@@ -40,6 +41,13 @@ const AUTHORITY_LABELS: Readonly<Record<AgentPersonaAuthorityPolicy, string>> = 
   "full-access": "Full access",
 };
 
+/** A policy name this app does not know (from a newer server) shows as unsupported, never as another policy. */
+const authorityLabel = (policy: string) =>
+  isAgentPersonaAuthorityPolicy(policy) ? AUTHORITY_LABELS[policy] : `${policy} (unsupported)`;
+
+const unsupportedPolicyReason = (policy: string) =>
+  `Runtime policy "${policy}" is not supported by this app version. Update the app to launch this persona.`;
+
 export interface AgentPersonaCatalogRow {
   readonly personaId: AgentPersonaId;
   readonly imported: boolean;
@@ -58,8 +66,9 @@ export interface AgentPersonaCatalogRow {
   readonly authority: string;
   /** The persona can run unsandboxed, so library rows flag it wherever it comes from. */
   readonly unsandboxed: boolean;
-  readonly availability: "available" | "blocked" | "disabled" | "removed";
-  readonly availabilityLabel: "Available" | "Blocked" | "Disabled" | "Removed";
+  /** Unsupported: the default policy is one this app does not know, so it cannot be launched or edited here. */
+  readonly availability: "available" | "blocked" | "disabled" | "removed" | "unsupported";
+  readonly availabilityLabel: "Available" | "Blocked" | "Disabled" | "Removed" | "Unsupported";
   readonly route: string;
   /** One line per rejected route explaining a Blocked badge; empty unless blocked. */
   readonly blockedReasons: ReadonlyArray<string>;
@@ -108,13 +117,16 @@ export function presentAgentPersonaCatalog(
       persona.availability.status === "unavailable" && persona.availability.reason === "disabled";
     const removed =
       persona.availability.status === "unavailable" && persona.availability.reason === "removed";
+    const unsupported = !isAgentPersonaAuthorityPolicy(persona.defaultAuthorityPolicy);
     return {
       personaId: persona.personaId,
       imported: persona.imported ?? false,
       removed,
       enabled: !disabled && !removed,
       edit:
-        persona.imported && persona.editable
+        persona.imported &&
+        persona.editable &&
+        isAgentPersonaAuthorityPolicy(persona.defaultAuthorityPolicy)
           ? {
               personaId: persona.personaId,
               expectedDigest: persona.editable.definitionDigest,
@@ -134,27 +146,35 @@ export function presentAgentPersonaCatalog(
       authority: persona.allowedAuthorityPolicies
         .map(
           (policy) =>
-            `${AUTHORITY_LABELS[policy]}${policy === persona.defaultAuthorityPolicy ? " (default)" : ""}`,
+            `${authorityLabel(policy)}${policy === persona.defaultAuthorityPolicy ? " (default)" : ""}`,
         )
         .join(", "),
       availability: removed
         ? "removed"
         : disabled
           ? "disabled"
-          : available
-            ? "available"
-            : "blocked",
+          : unsupported
+            ? "unsupported"
+            : available
+              ? "available"
+              : "blocked",
       availabilityLabel: removed
         ? "Removed"
         : disabled
           ? "Disabled"
-          : available
-            ? "Available"
-            : "Blocked",
+          : unsupported
+            ? "Unsupported"
+            : available
+              ? "Available"
+              : "Blocked",
       blockedReasons:
-        persona.availability.status === "unavailable" && !disabled && !removed
-          ? agentPersonaBlockedReasons(persona.availability.attempts ?? [])
-          : [],
+        disabled || removed
+          ? []
+          : unsupported
+            ? [unsupportedPolicyReason(persona.defaultAuthorityPolicy)]
+            : persona.availability.status === "unavailable"
+              ? agentPersonaBlockedReasons(persona.availability.attempts ?? [])
+              : [],
       route: available
         ? `${providerLabel(persona.availability.resolvedDriver)} · ${persona.availability.resolvedModelSelection.model} · ${persona.availability.resolvedRoute}`
         : persona.availability.reason === "authority-not-enforceable"
@@ -426,12 +446,15 @@ export interface AgentPersonaCreateDraft {
 export function agentPersonaDuplicateDraft(
   definition: AgentPersonaDefinitionView,
 ): AgentPersonaCreateDraft {
+  const authorityPolicy = definition.authority.defaultPolicy;
+  if (!isAgentPersonaAuthorityPolicy(authorityPolicy))
+    throw new Error(unsupportedPolicyReason(authorityPolicy));
   return {
     displayName: `${definition.displayName} copy`,
     id: agentPersonaIdFromName(`${definition.id}-copy`),
     description: definition.description,
     instructions: definition.instructions,
-    authorityPolicy: definition.authority.defaultPolicy,
+    authorityPolicy,
     modelRoute: definition.modelRoute,
   };
 }
@@ -555,7 +578,12 @@ export function draftAgentAssignmentPreview(
   catalog: OrchestrationV2AgentPersonaCatalog | null | undefined,
 ): OrchestrationV2AgentPersonaAssignment | null {
   const persona = catalog?.personas.find((candidate) => candidate.personaId === personaId);
-  if (persona === undefined || persona.availability.status !== "available") return null;
+  if (
+    persona === undefined ||
+    persona.availability.status !== "available" ||
+    !isAgentPersonaAuthorityPolicy(persona.defaultAuthorityPolicy)
+  )
+    return null;
   return {
     personaId: persona.personaId,
     definitionVersion: persona.definitionVersion,

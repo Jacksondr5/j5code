@@ -4,10 +4,14 @@ import {
   type AgentPersonaImportInput,
   ProviderDriverKind,
   ProviderInstanceId,
-  type OrchestrationV2AgentPersonaCatalog,
+  OrchestrationV2AgentPersonaCatalog,
+  OrchestrationV2ShellSnapshot,
   type ServerProvider,
 } from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
+
+import { agentPersonaMentionItems } from "./agentMentions.ts";
 
 import {
   prepareAgentPersonaImport,
@@ -777,6 +781,143 @@ it("labels the full-access policy and offers it in the editor", () => {
       ],
     }).authorityPolicy,
   ).toBe("full-access");
+});
+
+const decodeCatalogJson = Schema.decodeUnknownSync(
+  Schema.toCodecJson(OrchestrationV2AgentPersonaCatalog),
+);
+const decodeShellSnapshotJson = Schema.decodeUnknownSync(
+  Schema.toCodecJson(OrchestrationV2ShellSnapshot),
+);
+
+describe("a policy this app does not know", () => {
+  const invented = "sandboxed-network";
+  const route = {
+    status: "available",
+    resolvedRoute: "primary",
+    resolvedDriver: "codex",
+    resolvedModelSelection: { instanceId: "codex", model: "gpt-5.6-terra" },
+  };
+  const entry = (personaId: string, defaultAuthorityPolicy: string) => ({
+    personaId,
+    imported: true,
+    editable: {
+      definitionDigest: "a".repeat(64),
+      modelRoute: [
+        { driver: "codex", model: "gpt-5.6-terra", reasoningEffort: "high" },
+        { driver: "codex", model: "gpt-5.6-terra", reasoningEffort: "high" },
+      ],
+    },
+    definitionVersion: 1,
+    displayName: personaId,
+    description: `${personaId} description`,
+    defaultAuthorityPolicy,
+    allowedAuthorityPolicies: [defaultAuthorityPolicy, "read-only"],
+    availability: route,
+  });
+  const thread = (id: string, authorityPolicy: string) => ({
+    createdBy: "user",
+    creationSource: "web",
+    id,
+    projectId: "project-1",
+    title: id,
+    providerInstanceId: "codex",
+    modelSelection: { instanceId: "codex", model: "gpt-5.6-terra" },
+    runtimeMode: "approval-required",
+    interactionMode: "default",
+    agentPersonaAssignment: {
+      personaId: "scout",
+      definitionVersion: 1,
+      authorityPolicy,
+      resolvedRoute: "primary",
+      resolvedDriver: "codex",
+      resolvedModelSelection: { instanceId: "codex", model: "gpt-5.6-terra" },
+    },
+    branch: null,
+    worktreePath: null,
+    lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: id },
+    forkedFrom: null,
+    activeProviderThreadId: null,
+    latestRunId: null,
+    activeRunId: null,
+    status: "completed",
+    pendingRuntimeRequest: null,
+    latestVisibleMessage: null,
+    latestUserMessageAt: null,
+    hasActionableProposedPlan: false,
+    itemCount: 0,
+    visibleItemCount: 0,
+    createdAt: "2026-10-06T00:00:00.000Z",
+    updatedAt: "2026-10-06T00:00:00.000Z",
+    archivedAt: null,
+    settledOverride: null,
+    settledAt: null,
+    deletedAt: null,
+  });
+
+  it("costs one unsupported row, not the catalog or the shell snapshot", () => {
+    const decoded = decodeCatalogJson({
+      personas: [entry("scout", "read-only"), entry("future", invented)],
+      policyEnforcement: [
+        { policy: "read-only", drivers: ["codex"] },
+        { policy: invented, drivers: ["codex"] },
+      ],
+    });
+    const [known, future] = presentAgentPersonaCatalog(decoded);
+    expect(known).toMatchObject({ availability: "available", blockedReasons: [] });
+    expect(known?.edit?.authorityPolicy).toBe("read-only");
+    expect(future).toMatchObject({
+      availability: "unsupported",
+      availabilityLabel: "Unsupported",
+      edit: null,
+      authority: `${invented} (unsupported) (default), Read only`,
+      blockedReasons: [
+        `Runtime policy "${invented}" is not supported by this app version. Update the app to launch this persona.`,
+      ],
+    });
+    // Nothing offers it for launch, and nothing reads it as another policy.
+    expect(agentPersonaMentionItems(decoded, "").map(({ personaId }) => personaId)).toEqual([
+      "scout",
+    ]);
+    expect(draftAgentAssignmentPreview("future", decoded)).toBeNull();
+    expect(draftAgentAssignmentPreview("scout", decoded)?.authorityPolicy).toBe("read-only");
+    expect(agentPersonaPolicyDrivers(decoded, "read-only")).toEqual(["codex"]);
+
+    const shell = decodeShellSnapshotJson({
+      schemaVersion: 1,
+      snapshotSequence: 7,
+      projects: [],
+      threads: [thread("thread-known", "read-only"), thread("thread-future", invented)],
+      archivedThreads: [],
+    });
+    expect(
+      shell.threads.map(({ id, agentPersonaAssignment }) => [
+        id,
+        agentPersonaAssignment?.authorityPolicy,
+      ]),
+    ).toEqual([
+      ["thread-known", "read-only"],
+      ["thread-future", invented],
+    ]);
+  });
+
+  it("refuses to duplicate a definition into a policy the editor cannot offer", () => {
+    const modelRoute = [
+      { driver: ProviderDriverKind.make("codex"), model: "gpt-5.6-terra", reasoningEffort: "high" },
+      { driver: ProviderDriverKind.make("codex"), model: "gpt-5.6-terra", reasoningEffort: "high" },
+    ] as const;
+    expect(() =>
+      agentPersonaDuplicateDraft({
+        id: "future",
+        version: 1,
+        displayName: "Future",
+        description: "From a newer server.",
+        instructions: "# Future",
+        authority: { defaultPolicy: invented, allowedPolicies: [invented] },
+        modelRoute,
+      }),
+    ).toThrow(`Runtime policy "${invented}" is not supported by this app version.`);
+  });
 });
 
 it("reports drift only when both the snapshot and the current definition carry digests", () => {

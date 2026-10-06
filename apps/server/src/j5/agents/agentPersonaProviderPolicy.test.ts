@@ -67,6 +67,8 @@ describe("agent persona provider policy", () => {
       ["critic-fix", "claudeAgent"],
       ["diagnostic", "codex"],
       ["publish-only", "codex"],
+      // A policy only a newer server knows, read back from persisted state.
+      ["sandboxed-network", "codex"],
     ] as const) {
       assert.isFalse(
         providerCanEnforceAgentPersonaAuthority(ProviderDriverKind.make(driver), authorityPolicy),

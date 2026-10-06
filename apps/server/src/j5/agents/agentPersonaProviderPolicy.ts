@@ -1,7 +1,9 @@
 import {
+  isAgentPersonaAuthorityPolicy,
   ProviderDriverKind,
   type AgentPersonaAuthorityPolicy,
   type AgentPersonaPolicyEnforcement,
+  type AgentPersonaReportedAuthorityPolicy,
   type RuntimeMode,
 } from "@t3tools/contracts";
 
@@ -67,25 +69,32 @@ const ENFORCING_DRIVERS = {
   "full-access": FULL_ACCESS_DRIVERS,
 } as const satisfies Record<AgentPersonaAuthorityPolicy, ReadonlyArray<string>>;
 
+/** Policies this server does not know (persisted by a newer one) are never enforceable. */
 export function providerCanEnforceAgentPersonaAuthority(
   driver: string,
-  authorityPolicy: AgentPersonaAuthorityPolicy,
+  authorityPolicy: AgentPersonaReportedAuthorityPolicy,
 ): boolean {
-  return (ENFORCING_DRIVERS[authorityPolicy] as ReadonlyArray<string>).includes(driver);
+  return (
+    isAgentPersonaAuthorityPolicy(authorityPolicy) &&
+    (ENFORCING_DRIVERS[authorityPolicy] as ReadonlyArray<string>).includes(driver)
+  );
 }
 
 /** The catalog's copy of the table, so persona editors show it without a second client copy. */
 export const agentPersonaPolicyEnforcement = (): ReadonlyArray<AgentPersonaPolicyEnforcement> =>
   Object.entries(ENFORCING_DRIVERS).map(([policy, drivers]) => ({
-    policy: policy as AgentPersonaAuthorityPolicy,
+    policy,
     drivers: drivers.map((driver) => ProviderDriverKind.make(driver)),
   }));
 
 export function translateAgentPersonaProviderPolicy(
-  authorityPolicy: AgentPersonaAuthorityPolicy,
+  authorityPolicy: AgentPersonaReportedAuthorityPolicy,
   driver: string,
 ): AgentPersonaProviderPolicy {
-  if (!providerCanEnforceAgentPersonaAuthority(driver, authorityPolicy)) {
+  if (
+    !isAgentPersonaAuthorityPolicy(authorityPolicy) ||
+    !providerCanEnforceAgentPersonaAuthority(driver, authorityPolicy)
+  ) {
     return READ_ONLY_POLICY;
   }
 

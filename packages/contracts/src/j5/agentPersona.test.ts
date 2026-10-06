@@ -2,12 +2,19 @@ import { describe, expect, it } from "@effect/vitest";
 import * as Schema from "effect/Schema";
 
 import { OrchestrationV2Command, OrchestrationV2PublicCommand } from "../orchestrationV2.ts";
-import { AgentPersonaId, OrchestrationV2AgentPersonaAssignment } from "./agentPersona.ts";
+import {
+  AgentPersonaCreateInput,
+  AgentPersonaId,
+  OrchestrationV2AgentPersonaAssignment,
+  OrchestrationV2AgentPersonaRequest,
+} from "./agentPersona.ts";
 
 const decodeOrchestrationV2Command = Schema.decodeUnknownSync(OrchestrationV2Command);
 const decodeOrchestrationV2PublicCommand = Schema.decodeUnknownSync(OrchestrationV2PublicCommand);
 const decodePersonaId = Schema.decodeUnknownSync(AgentPersonaId);
 const decodePersonaAssignment = Schema.decodeUnknownSync(OrchestrationV2AgentPersonaAssignment);
+const decodePersonaRequest = Schema.decodeUnknownSync(OrchestrationV2AgentPersonaRequest);
+const decodePersonaCreate = Schema.decodeUnknownSync(AgentPersonaCreateInput);
 
 describe("agent persona contracts", () => {
   it("rejects server-owned persona assignments on the public command boundary", () => {
@@ -71,7 +78,7 @@ describe("agent persona contracts", () => {
     expect(decodePersonaAssignment(legacy).definitionDigest).toBeUndefined();
   });
 
-  it("decodes the full-access authority policy and rejects unknown ones", () => {
+  it("reads any reported policy but accepts only known ones from clients", () => {
     const assignment = {
       personaId: "operator",
       definitionVersion: 1,
@@ -81,8 +88,32 @@ describe("agent persona contracts", () => {
       resolvedModelSelection: { instanceId: "codex", model: "gpt-5.6-terra" },
     };
     expect(decodePersonaAssignment(assignment)).toEqual(assignment);
+    // A newer server's policy reaches older clients intact so they can show it as unsupported.
+    expect(decodePersonaAssignment({ ...assignment, authorityPolicy: "root-access" })).toEqual({
+      ...assignment,
+      authorityPolicy: "root-access",
+    });
+
+    expect(decodePersonaRequest({ personaId: "operator", authorityPolicy: "full-access" })).toEqual(
+      { personaId: "operator", authorityPolicy: "full-access" },
+    );
     expect(() =>
-      decodePersonaAssignment({ ...assignment, authorityPolicy: "root-access" }),
+      decodePersonaRequest({ personaId: "operator", authorityPolicy: "root-access" }),
     ).toThrow();
+    const create = {
+      id: "operator",
+      displayName: "Operator",
+      description: "Runs things.",
+      instructions: "Run things.",
+      authorityPolicy: "root-access",
+      modelRoute: [
+        { driver: "codex", model: "gpt-5.6-terra", reasoningEffort: "high" },
+        { driver: "codex", model: "gpt-5.6-terra", reasoningEffort: "high" },
+      ],
+    };
+    expect(() => decodePersonaCreate(create)).toThrow();
+    expect(decodePersonaCreate({ ...create, authorityPolicy: "full-access" }).authorityPolicy).toBe(
+      "full-access",
+    );
   });
 });

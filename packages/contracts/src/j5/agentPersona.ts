@@ -54,6 +54,15 @@ export const AgentPersonaAuthorityPolicy = Schema.Literals([
   "full-access",
 ]);
 export type AgentPersonaAuthorityPolicy = typeof AgentPersonaAuthorityPolicy.Type;
+export const isAgentPersonaAuthorityPolicy = Schema.is(AgentPersonaAuthorityPolicy);
+
+/**
+ * A policy as the server reports it. Read models accept any name so a policy added by a newer
+ * server costs one unsupported row instead of the whole payload; what clients send and what the
+ * server validates stay on the closed `AgentPersonaAuthorityPolicy`.
+ */
+export const AgentPersonaReportedAuthorityPolicy = Schema.String;
+export type AgentPersonaReportedAuthorityPolicy = typeof AgentPersonaReportedAuthorityPolicy.Type;
 
 export const BUILT_IN_AGENT_ARTIFACT_IDS = [
   "ContextBrief",
@@ -82,7 +91,7 @@ export const OrchestrationV2AgentPersonaAssignment = Schema.Struct({
   definitionVersion: PositiveInt,
   definitionDigest: Schema.optional(Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/))),
   displayName: Schema.optional(TrimmedNonEmptyString),
-  authorityPolicy: AgentPersonaAuthorityPolicy,
+  authorityPolicy: AgentPersonaReportedAuthorityPolicy,
   resolvedRoute: Schema.Literals(["primary", "fallback", "override"]),
   resolvedDriver: ProviderDriverKind,
   resolvedModelSelection: ModelSelection,
@@ -201,8 +210,8 @@ export const AgentPersonaDefinitionView = Schema.Struct({
   inputArtifacts: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   outputArtifact: Schema.optional(TrimmedNonEmptyString),
   authority: Schema.Struct({
-    defaultPolicy: AgentPersonaAuthorityPolicy,
-    allowedPolicies: Schema.Array(AgentPersonaAuthorityPolicy),
+    defaultPolicy: AgentPersonaReportedAuthorityPolicy,
+    allowedPolicies: Schema.Array(AgentPersonaReportedAuthorityPolicy),
   }),
   modelRoute: Schema.Tuple([AgentPersonaModelTarget, AgentPersonaModelTarget]),
 });
@@ -242,8 +251,8 @@ export const OrchestrationV2AgentPersonaCatalogEntry = Schema.Struct({
   description: TrimmedNonEmptyString,
   acceptedInput: Schema.optional(TrimmedNonEmptyString),
   outputArtifact: Schema.optional(TrimmedNonEmptyString),
-  defaultAuthorityPolicy: AgentPersonaAuthorityPolicy,
-  allowedAuthorityPolicies: Schema.Array(AgentPersonaAuthorityPolicy),
+  defaultAuthorityPolicy: AgentPersonaReportedAuthorityPolicy,
+  allowedAuthorityPolicies: Schema.Array(AgentPersonaReportedAuthorityPolicy),
   availability: OrchestrationV2AgentPersonaAvailability,
 });
 export type OrchestrationV2AgentPersonaCatalogEntry =
@@ -256,7 +265,7 @@ export class AgentPersonaCatalogError extends Schema.TaggedError<AgentPersonaCat
 
 /** The provider drivers whose sandbox enforces one runtime policy; the editor shows these. */
 export const AgentPersonaPolicyEnforcement = Schema.Struct({
-  policy: AgentPersonaAuthorityPolicy,
+  policy: AgentPersonaReportedAuthorityPolicy,
   drivers: Schema.Array(ProviderDriverKind),
 });
 export type AgentPersonaPolicyEnforcement = typeof AgentPersonaPolicyEnforcement.Type;
