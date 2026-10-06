@@ -20,7 +20,6 @@ import * as Schema from "effect/Schema";
 import * as Result from "effect/Result";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
-import * as TestClock from "effect/testing/TestClock";
 
 import { McpInvocationContext } from "../../mcp/McpInvocationContext.ts";
 import { OrchestratorMcpService } from "../../mcp/OrchestratorMcpService.ts";
@@ -32,7 +31,7 @@ import { ArchiveCrewService } from "./ArchiveCrewService.ts";
 import { CrewProposalService } from "./CrewProposalService.ts";
 import { CrewStopService } from "./CrewStopService.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
-import { A2AHomeRegistrar, participantIdForThread } from "./HomeRegistrar.ts";
+import { A2AHomeRegistrar } from "./HomeRegistrar.ts";
 import { A2ALedger } from "./LedgerService.ts";
 import { ParticipantPlacementService, PlacementStorageError } from "./PlacementService.ts";
 import { A2ASendService } from "./SendService.ts";
@@ -152,54 +151,12 @@ const spawnHarness = (input: {
   readonly commands?: Ref.Ref<ReadonlyArray<OrchestrationV2Command>>;
   /** Runs inside each thread.create before it lands, so a test can hold a start open. */
   readonly beforeCreate?: Effect.Effect<void>;
-  /**
-   * What ThreadLaunch's preparation comes to once the launch starts: the worktree is bound
-   * (default), the preparation fails, or it never settles.
-   */
-  readonly preparation?: "bound" | "failed" | "never";
 }) =>
   Effect.gen(function* () {
     const log = yield* Ref.make<ReadonlyArray<string>>([]);
     const commands = input.commands ?? (yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]));
     const launches = yield* Ref.make<ReadonlyArray<ThreadLaunchInput>>([]);
     const failFacts = yield* Ref.make(false);
-    const launched = yield* Ref.make(false);
-    const archived = yield* Ref.make(false);
-    const checkoutOutcome = input.preparation ?? "bound";
-    /** The spawned thread as upstream's projection shows it: bound, failed, or still preparing. */
-    const childThread = (threadId: ThreadId) =>
-      Effect.gen(function* () {
-        const base = callerThread(threadId);
-        const started = yield* Ref.get(launched);
-        const archivedAt = (yield* Ref.get(archived)) ? createdAt : null;
-        return {
-          ...base,
-          thread: {
-            ...base.thread,
-            archivedAt,
-            deletedAt: null,
-            worktreePath: started && checkoutOutcome === "bound" ? "/repo-worktrees/spawned" : null,
-          },
-          runs:
-            started && checkoutOutcome === "failed" ? [{ id: "run:prep", status: "failed" }] : [],
-          turnItems:
-            started && checkoutOutcome === "failed"
-              ? [
-                  {
-                    runId: "run:prep",
-                    type: "error",
-                    status: "failed",
-                    failure: {
-                      class: "validation_error",
-                      message: "Workspace preparation failed: no-such-ref",
-                      code: null,
-                      retryable: false,
-                    },
-                  },
-                ]
-              : [],
-        } as unknown as OrchestrationV2ThreadProjection;
-      });
     const callerRow = {
       squadronId,
       participantId: callerParticipantId,
@@ -249,18 +206,10 @@ const spawnHarness = (input: {
           }),
       }),
       Layer.mock(ThreadManagementService)({
-        getThreadProjection: (threadId) =>
-          threadId === invocation.threadId
-            ? Effect.succeed(callerThread(threadId))
-            : childThread(threadId),
+        getThreadProjection: (threadId) => Effect.succeed(callerThread(threadId)),
         getThreadShell: () => Effect.succeed(null),
-        getThreadEventSequence: () => Effect.succeed(0),
-        // Nothing the fake launch does is an event; the preparation's outcome is read from the
-        // projection, and a preparation that never settles has no events at all.
-        streamStoredEventsFrom: () => Stream.never,
         dispatch: (command) =>
           Effect.gen(function* () {
-            if (command.type === "thread.archive") yield* Ref.set(archived, true);
             if (command.type === "thread.create" && input.beforeCreate) yield* input.beforeCreate;
             yield* Ref.update(commands, (items) => [...items, command]);
             yield* Ref.update(log, (items) => [...items, command.type]);
@@ -328,10 +277,7 @@ const spawnHarness = (input: {
           checkout: input.checkout,
           ...(input.liveCheckout === undefined ? {} : { liveCheckout: input.liveCheckout }),
           launches,
-          launch: () =>
-            Ref.update(log, (items) => [...items, "launch"]).pipe(
-              Effect.andThen(Ref.set(launched, true)),
-            ),
+          launch: () => Ref.update(log, (items) => [...items, "launch"]),
           // An accepted create leaves its receipt, as the orchestrator's does.
           accepted: Ref.get(commands).pipe(
             Effect.map((all) =>
@@ -356,7 +302,7 @@ const spawnHarness = (input: {
             Effect.provideService(McpInvocationContext, invocation),
           );
       });
-    return { layer, call, log, commands, launches, failFacts, archived };
+    return { layer, call, log, commands, launches, failFacts };
   });
 
 const spawnArgs = {
@@ -389,8 +335,8 @@ it.effect("spawns into a new worktree from base_ref, keeping home, placement, an
           },
         },
       });
-      // The peer is registered only once its worktree is bound, after ThreadLaunch took the brief.
-      assert.deepStrictEqual(yield* Ref.get(log), ["thread.create", "launch", "facts"]);
+      // Home and placement are committed before ThreadLaunch claims the thread for its brief.
+      assert.deepStrictEqual(yield* Ref.get(log), ["thread.create", "facts", "launch"]);
       const [create] = yield* Ref.get(commands);
       assert.equal(create?.type, "thread.create");
       if (create?.type === "thread.create") {
@@ -408,60 +354,9 @@ it.effect("spawns into a new worktree from base_ref, keeping home, placement, an
         baseRef: "j5/main",
         startFromOrigin: false,
       });
-      assert.include(
-        launch?.initialMessage?.text,
-        `participant_id: ${participantIdForThread(result.thread_id)}`,
-      );
+      assert.include(launch?.initialMessage?.text, `participant_id: ${childParticipantId}`);
       assert.include(launch?.initialMessage?.text, spawnArgs.brief);
       assert.include(String(launch?.initialMessage?.messageId), "spawn-brief");
-    }).pipe(Effect.provide(layer));
-  }),
-);
-
-it.effect("a checkout that fails retires the peer and returns one ordinary error", () =>
-  Effect.gen(function* () {
-    const { layer, call, log, archived } = yield* spawnHarness({
-      checkout: { isRepo: true, refName: "j5/main" },
-      preparation: "failed",
-    });
-    yield* Effect.gen(function* () {
-      const failed = yield* call({ ...spawnArgs, client_request_id: "unready" });
-      assert.isTrue(failed.isFailure);
-      const message = (failed.result as { readonly message: string }).message;
-      assert.include(message, "no-such-ref");
-      assert.include(message, "nothing is left registered");
-      // The thread is archived and never registered: no home, no placement.
-      assert.deepStrictEqual(yield* Ref.get(log), ["thread.create", "launch", "thread.archive"]);
-      assert.isTrue(yield* Ref.get(archived));
-      // The same request replays the same refusal rather than registering the peer.
-      const replay = yield* call({ ...spawnArgs, client_request_id: "unready" });
-      assert.isTrue(replay.isFailure);
-      assert.notInclude(yield* Ref.get(log), "facts");
-    }).pipe(Effect.provide(layer));
-  }),
-);
-
-it.effect("a checkout still running after 60 seconds retires the peer", () =>
-  Effect.gen(function* () {
-    const { layer, call, log, archived } = yield* spawnHarness({
-      checkout: { isRepo: true, refName: "j5/main" },
-      preparation: "never",
-    });
-    yield* Effect.gen(function* () {
-      const spawning = yield* call({ ...spawnArgs, client_request_id: "slow" }).pipe(
-        Effect.forkChild,
-      );
-      yield* TestClock.adjust("59 seconds");
-      assert.isUndefined(spawning.pollUnsafe());
-      yield* TestClock.adjust("1 second");
-      const result = yield* Fiber.join(spawning);
-      assert.isTrue(result.isFailure);
-      assert.include(
-        (result.result as { readonly message: string }).message,
-        "timed out waiting 60s for the checkout",
-      );
-      assert.isTrue(yield* Ref.get(archived));
-      assert.notInclude(yield* Ref.get(log), "facts");
     }).pipe(Effect.provide(layer));
   }),
 );
@@ -492,7 +387,7 @@ it.effect("binds a client_request_id to its first workspace type, across a resta
   Effect.gen(function* () {
     const first = yield* spawnHarness({ checkout: { isRepo: true, refName: "j5/main" } });
     yield* Effect.gen(function* () {
-      // The worktree is made and bound, then the spawn stops before its home is recorded.
+      // The worktree create is accepted, then the spawn stops before its home is recorded.
       yield* Ref.set(first.failFacts, true);
       const halfDone = yield* first.call({
         ...spawnArgs,
@@ -521,8 +416,7 @@ it.effect("binds a client_request_id to its first workspace type, across a resta
       );
       assert.lengthOf(yield* Ref.get(restarted.commands), 1);
 
-      // The first attempt already launched; the retry's launch is the same command, which
-      // ThreadLaunch replays, so a different base here changes nothing.
+      // Options are not bound: nothing was provisioned yet, so the retry's base takes effect.
       const resumed = yield* restarted.call({
         ...spawnArgs,
         workspace: { type: "worktree", base_ref: "release" },
@@ -531,7 +425,12 @@ it.effect("binds a client_request_id to its first workspace type, across a resta
       assert.isFalse(resumed.isFailure);
       const [original, replay] = yield* Ref.get(restarted.commands);
       assert.equal(replay?.commandId, original?.commandId);
-      assert.lengthOf(yield* Ref.get(restarted.launches), 1);
+      const launches = yield* Ref.get(restarted.launches);
+      assert.lengthOf(launches, 1);
+      assert.equal(
+        launches[0]?.workspaceStrategy.type === "worktree" && launches[0].workspaceStrategy.baseRef,
+        "release",
+      );
     }).pipe(Effect.provide(restarted.layer));
   }),
 );

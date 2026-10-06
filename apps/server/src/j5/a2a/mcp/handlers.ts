@@ -827,139 +827,79 @@ const handlers = {
                   ),
                 ),
               );
-            const participantId = participantIdForThread(threadId);
-            const recordSpawnFacts = Effect.gen(function* () {
-              const facts = yield* (yield* SpawnCompositionService)
-                .recordFacts({
-                  homeCommandId: spawnHomeCommandId(stableInput),
-                  placementCommandId: spawnPlacementCommandId(stableInput),
-                  squadronId: caller.squadronId,
-                  threadId,
-                  provenance: {
-                    kind: "spawned-by",
-                    spawnedByParticipantId: caller.participantId,
-                    source: "j5_spawn",
-                  },
-                  createdAt: DateTime.formatIso(child.thread.createdAt),
-                })
-                .pipe(
-                  Effect.mapError((error) =>
-                    stateError(
-                      `Peer Agent thread ${threadId} exists as a visible orphan without committed home/placement facts: ${error.message}.`,
-                      "Retry spawn_agent with the same client_request_id only after repairing transient state; otherwise ask the human operator to retire or repair the orphan after A9 lifecycle support lands.",
-                    ),
-                  ),
-                );
-              if (
-                facts.placement.provenance.kind !== "spawned-by" ||
-                facts.placement.provenance.source !== "j5_spawn" ||
-                facts.placement.placementParentId === null
-              ) {
-                return yield* stateError(
-                  `Peer Agent ${facts.home.participantId} committed placement facts that do not satisfy the J5 spawn contract.`,
-                  "Call list_participants to inspect committed placement truth and ask the human operator to repair the inconsistent record.",
-                );
-              }
-              return {
-                participant_id: facts.home.participantId,
-                thread_id: threadId,
-                squadron_id: facts.home.squadronId,
-                placement: {
-                  placement_parent_id: facts.placement.placementParentId,
-                  provenance: {
-                    kind: "spawned-by" as const,
-                    spawned_by_participant_id: facts.placement.provenance.spawnedByParticipantId,
-                    source: facts.placement.provenance.source,
-                  },
+            const facts = yield* (yield* SpawnCompositionService)
+              .recordFacts({
+                homeCommandId: spawnHomeCommandId(stableInput),
+                placementCommandId: spawnPlacementCommandId(stableInput),
+                squadronId: caller.squadronId,
+                threadId,
+                provenance: {
+                  kind: "spawned-by",
+                  spawnedByParticipantId: caller.participantId,
+                  source: "j5_spawn",
                 },
-              };
-            });
-            const startBrief = (ids: {
-              readonly participantId: string;
-              readonly squadronId: string;
-            }) =>
-              spawnWorkspace
-                .startBrief({
-                  workspace,
-                  stableInput,
-                  squadronId: ids.squadronId,
-                  projectId: parent.thread.projectId,
-                  threadId,
-                  title: spawnTitle(input.brief, input.title),
-                  messageId: spawnMessageId(stableInput),
-                  text: spawnFirstTurnText({
-                    brief: input.brief,
-                    participantId: ids.participantId,
-                    squadronId: ids.squadronId,
-                    squadronName: caller.squadron.name,
-                    spawnedByParticipantId: caller.participantId,
-                    spawnerThreadId: scope.threadId,
-                  }),
-                  modelSelection,
-                  runtimeMode: persona?.runtimeMode ?? parent.thread.runtimeMode,
-                  interactionMode: parent.thread.interactionMode,
-                })
-                .pipe(
-                  Effect.mapError((error) =>
-                    stateError(
-                      `Peer Agent ${participantId} did not start: ${error.message}.`,
-                      "Retry spawn_agent with the same client_request_id to start the same brief safely.",
-                    ),
+                createdAt: DateTime.formatIso(child.thread.createdAt),
+              })
+              .pipe(
+                Effect.mapError((error) =>
+                  stateError(
+                    `Peer Agent thread ${threadId} exists as a visible orphan without committed home/placement facts or a started brief: ${error.message}.`,
+                    "Retry spawn_agent with the same client_request_id only after repairing transient state; otherwise ask the human operator to retire or repair the orphan after A9 lifecycle support lands.",
                   ),
-                );
-            // A new worktree is waited for before the peer is registered, so nothing can reach
-            // an agent that has nowhere to work. The sequence is read before the launch starts,
-            // so the binding event cannot be missed. A shared or existing checkout is bound at
-            // creation, so the peer is registered first, as before.
-            return yield* workspace.type !== "worktree"
-              ? recordSpawnFacts.pipe(
-                  Effect.tap((registered) =>
-                    startBrief({
-                      participantId: registered.participant_id,
-                      squadronId: registered.squadron_id,
-                    }),
+                ),
+              );
+            if (
+              facts.placement.provenance.kind !== "spawned-by" ||
+              facts.placement.provenance.source !== "j5_spawn" ||
+              facts.placement.placementParentId === null
+            ) {
+              return yield* stateError(
+                `Peer Agent ${facts.home.participantId} committed placement facts that do not satisfy the J5 spawn contract.`,
+                "Call list_participants to inspect committed placement truth and ask the human operator to repair the inconsistent record.",
+              );
+            }
+            yield* spawnWorkspace
+              .startBrief({
+                workspace,
+                stableInput,
+                squadronId: facts.home.squadronId,
+                projectId: parent.thread.projectId,
+                threadId,
+                title: spawnTitle(input.brief, input.title),
+                messageId: spawnMessageId(stableInput),
+                text: spawnFirstTurnText({
+                  brief: input.brief,
+                  participantId: facts.home.participantId,
+                  squadronId: facts.home.squadronId,
+                  squadronName: caller.squadron.name,
+                  spawnedByParticipantId: caller.participantId,
+                  spawnerThreadId: scope.threadId,
+                }),
+                modelSelection,
+                runtimeMode: persona?.runtimeMode ?? parent.thread.runtimeMode,
+                interactionMode: parent.thread.interactionMode,
+              })
+              .pipe(
+                Effect.mapError((error) =>
+                  stateError(
+                    `Peer Agent ${facts.home.participantId} is registered and addressable, but its brief did not start: ${error.message}.`,
+                    "Retry spawn_agent with the same client_request_id to start the same brief safely.",
                   ),
-                )
-              : Effect.gen(function* () {
-                  const afterSequence = yield* threadManagement
-                    .getThreadEventSequence(threadId)
-                    .pipe(
-                      Effect.mapError((error) =>
-                        stateError(
-                          `Peer Agent thread ${threadId} cannot be watched for its checkout: ${error.message}.`,
-                          "Retry spawn_agent with the same client_request_id.",
-                        ),
-                      ),
-                    );
-                  yield* startBrief({ participantId, squadronId: caller.squadronId });
-                  const readiness = yield* spawnWorkspace
-                    .awaitWorkspaceReady({ threadId, afterSequence })
-                    .pipe(
-                      Effect.mapError((error) =>
-                        stateError(
-                          `Peer Agent thread ${threadId} cannot be watched for its checkout: ${error.message}.`,
-                          "Retry spawn_agent with the same client_request_id.",
-                        ),
-                      ),
-                    );
-                  if (!readiness.ready) {
-                    yield* spawnWorkspace
-                      .retireUnready({ stableInput, threadId })
-                      .pipe(
-                        Effect.catch((error) =>
-                          Effect.logWarning(
-                            "J5 spawn_agent could not retire a peer with no worktree",
-                            { threadId, error },
-                          ),
-                        ),
-                      );
-                    return yield* stateError(
-                      `Peer Agent was not created: its worktree was not made (${readiness.detail}). The agent was retired and nothing is left registered.`,
-                      'Spawn again with a new client_request_id, or use workspace {"type":"shared"}.',
-                    );
-                  }
-                  return yield* recordSpawnFacts;
-                });
+                ),
+              );
+            return {
+              participant_id: facts.home.participantId,
+              thread_id: threadId,
+              squadron_id: facts.home.squadronId,
+              placement: {
+                placement_parent_id: facts.placement.placementParentId,
+                provenance: {
+                  kind: "spawned-by" as const,
+                  spawned_by_participant_id: facts.placement.provenance.spawnedByParticipantId,
+                  source: facts.placement.provenance.source,
+                },
+              },
+            };
           }),
         )
         .pipe(

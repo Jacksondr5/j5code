@@ -121,8 +121,8 @@ export const layer: Layer.Layer<
         }
         const squadronId = yield* decodeSquadronId(input.squadronId);
 
-        // A J5 spawn that needs a fresh worktree records its home and placement first, then hands
-        // the thread to ThreadLaunch, which lands here. That home was admitted by the spawn, which
+        // A J5 spawn or Crew seat in a new worktree records its home and placement first, then
+        // hands the thread to ThreadLaunch, which lands here. That home was admitted by the spawn, which
         // never required the one-project reference below, so it is returned as it stands; without
         // this, a second join would be appended under this creation's command id.
         const existing = yield* findRegisteredHome(input.threadId);

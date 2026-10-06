@@ -599,8 +599,11 @@ it.effect("posts one report once every seat has started or failed, with the run'
         userMessageId: brief("prosecutor"),
       });
       assert.isNull(yield* reporter.handleStoredEvent(queued));
-      // Nor is a first turn held as `preparing` while its worktree is being made: the seat is
-      // reported only once its agent is doing provider work.
+      // Nor is a first turn held as `preparing` while its worktree is being made, even though
+      // ThreadLaunch's own preparation item reads as activity.
+      yield* setSeat(id, "prosecutor", [
+        { status: "preparing", activity: true, userMessageId: brief("prosecutor") },
+      ]);
       const preparing = runEvent(crewSeatThreadId(id, "prosecutor"), {
         status: "preparing",
         userMessageId: brief("prosecutor"),

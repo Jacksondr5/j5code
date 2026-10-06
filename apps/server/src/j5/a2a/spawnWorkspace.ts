@@ -2,21 +2,18 @@ import type {
   CommandId,
   MessageId,
   ModelSelection,
-  OrchestrationV2ThreadProjection,
   ProjectId,
   ProviderInteractionMode,
   RuntimeMode,
   ThreadId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
-import * as Duration from "effect/Duration";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
-import * as Stream from "effect/Stream";
 
 import type { CrewWorkspaceOptions } from "@t3tools/contracts/j5";
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
@@ -31,9 +28,7 @@ import {
 import type { OrchestratorV2Error } from "../../orchestration-v2/Orchestrator.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { ProjectService } from "../../project/ProjectService.ts";
-import { WorktreeSetupTracker } from "../../project/WorktreeSetupTracker.ts";
 import { lifecycleCommandId, type SpawnStableInput } from "./spawnIds.ts";
-import { runFailureDetail } from "./runFailures.ts";
 
 /**
  * A branch or ref a caller names for a worktree. Git takes it as a positional argument, so a
@@ -323,33 +318,7 @@ export interface SpawnWorkspaceServiceShape {
   readonly startBrief: (
     input: StartSpawnBriefInput,
   ) => Effect.Effect<void, OrchestratorV2Error | ThreadLaunchError>;
-  /**
-   * Waits for a new worktree's checkout: ready once ThreadLaunch binds the thread to it, failed
-   * when the launch's run fails or the thread is archived first, or after `WORKSPACE_READY_TIMEOUT`.
-   * It waits on the thread's event stream from `afterSequence`, read before `startBrief`, so no
-   * event between the two is missed. The setup script is not waited for.
-   */
-  readonly awaitWorkspaceReady: (input: {
-    readonly threadId: ThreadId;
-    readonly afterSequence: number;
-  }) => Effect.Effect<WorkspaceReadiness, OrchestratorV2Error>;
-  /**
-   * Gives up on a thread whose worktree never became ready: stops a preparation still running
-   * (which removes the worktree it made), then archives the thread, so upstream refuses any turn
-   * queued on it instead of running it in the project's checkout.
-   */
-  readonly retireUnready: (input: {
-    readonly stableInput: SpawnStableInput;
-    readonly threadId: ThreadId;
-  }) => Effect.Effect<void, OrchestratorV2Error>;
 }
-
-/** How long a worktree spawn waits for its checkout. */
-export const WORKSPACE_READY_TIMEOUT = Duration.seconds(60);
-
-export type WorkspaceReadiness =
-  | { readonly ready: true }
-  | { readonly ready: false; readonly detail: string };
 
 export class SpawnWorkspaceService extends Context.Service<
   SpawnWorkspaceService,
@@ -367,7 +336,6 @@ const make = Effect.gen(function* () {
   const receipts = yield* CommandReceiptStoreV2;
   const launcher = yield* ThreadLaunchService;
   const threads = yield* ThreadManagementService;
-  const setupTracker = yield* WorktreeSetupTracker;
   // Spawn threads with a start running in this process. A second start for one of them is
   // refused rather than queued: it would only replay the first, and retrying is safe.
   const startsInFlight = new Set<ThreadId>();
@@ -551,70 +519,11 @@ const make = Effect.gen(function* () {
           })
           .pipe(Effect.asVoid);
 
-  /** What the thread's current state already says about its checkout, or null while it is open. */
-  const readiness = (projection: OrchestrationV2ThreadProjection): WorkspaceReadiness | null => {
-    if (projection.thread.worktreePath !== null) return { ready: true };
-    const failed = projection.runs.find((run) => run.status === "failed");
-    if (failed !== undefined)
-      return {
-        ready: false,
-        detail: runFailureDetail(projection, failed.id)?.message ?? "no error detail was recorded",
-      };
-    if (projection.thread.archivedAt !== null || projection.thread.deletedAt !== null)
-      return { ready: false, detail: "the thread was archived before its checkout finished" };
-    return null;
-  };
-
-  const awaitWorkspaceReady: SpawnWorkspaceServiceShape["awaitWorkspaceReady"] = (input) =>
-    Effect.gen(function* () {
-      const already = readiness(yield* threads.getThreadProjection(input.threadId));
-      if (already !== null) return already;
-      const settled = yield* threads
-        .streamStoredEventsFrom({ threadId: input.threadId, afterSequence: input.afterSequence })
-        .pipe(
-          Stream.filter(
-            (stored) =>
-              stored.event.type === "thread.metadata-updated" ||
-              stored.event.type === "thread.archived" ||
-              stored.event.type === "run.updated",
-          ),
-          Stream.mapEffect(() =>
-            threads.getThreadProjection(input.threadId).pipe(Effect.map(readiness)),
-          ),
-          Stream.filter((state) => state !== null),
-          Stream.runHead,
-          Effect.timeoutOption(WORKSPACE_READY_TIMEOUT),
-        );
-      return Option.isNone(settled) || Option.isNone(settled.value)
-        ? ({
-            ready: false,
-            detail: `timed out waiting ${Duration.toSeconds(WORKSPACE_READY_TIMEOUT)}s for the checkout`,
-          } as const)
-        : settled.value.value!;
-    });
-
-  const retireUnready: SpawnWorkspaceServiceShape["retireUnready"] = (input) =>
-    setupTracker.cancel(input.threadId).pipe(
-      Effect.andThen(
-        threads.dispatch({
-          type: "thread.archive",
-          commandId: lifecycleCommandId({
-            ...input.stableInput,
-            operation: "spawn-archive-unready",
-          }),
-          threadId: input.threadId,
-        }),
-      ),
-      Effect.asVoid,
-    );
-
   return SpawnWorkspaceService.of({
     inspect,
     workspaceOptions,
     withSpawnStart,
     startBrief,
-    awaitWorkspaceReady,
-    retireUnready,
   });
 });
 
