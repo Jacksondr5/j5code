@@ -15,10 +15,15 @@ import {
 
 type AvailableAgentPersonaRoute = Extract<AgentPersonaRouteResolution, { status: "available" }>;
 
+/** An assignment this server resolved itself, so its policy is one it knows how to enforce. */
+export type ResolvedAgentPersonaAssignment = OrchestrationV2AgentPersonaAssignment & {
+  readonly authorityPolicy: AgentAuthorityPolicyId;
+};
+
 export type AgentPersonaAssignmentResult =
   | {
       readonly status: "assigned";
-      readonly assignment: OrchestrationV2AgentPersonaAssignment;
+      readonly assignment: ResolvedAgentPersonaAssignment;
     }
   | {
       readonly status: "invalid-authority-policy";

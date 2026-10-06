@@ -142,6 +142,28 @@ it.layer(TestLayer)("agent persona runtime policy", (it) => {
     }),
   );
 
+  it.effect("refuses a stored policy this server does not know instead of running another", () =>
+    Effect.gen(function* () {
+      const policy = yield* RuntimePolicyV2;
+      const now = yield* DateTime.now;
+      const thread = {
+        ...makeThread({ now, worktreePath: "/project-worktree" }),
+        agentPersonaAssignment: {
+          personaId: "scout",
+          definitionVersion: 1,
+          authorityPolicy: "sandboxed-network",
+          resolvedRoute: "primary",
+          resolvedDriver: ProviderDriverKind.make("codex"),
+          resolvedModelSelection: modelSelection,
+        },
+      } satisfies OrchestrationV2AppThread;
+
+      const error = yield* Effect.flip(policy.resolve({ thread, modelSelection }));
+
+      assert.include(String(error.cause), "sandboxed-network is not supported");
+    }),
+  );
+
   it.effect("adds the versioned Builder instructions to its runtime policy", () =>
     Effect.gen(function* () {
       const policy = yield* RuntimePolicyV2;

@@ -1,11 +1,10 @@
-import type {
-  OrchestrationV2AgentPersonaAssignment,
-  ProviderInstanceId,
-  ServerProvider,
-} from "@t3tools/contracts";
+import type { ProviderInstanceId, ServerProvider } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 
-import { buildAgentPersonaAssignment } from "./agentPersonaAssignment.ts";
+import {
+  buildAgentPersonaAssignment,
+  type ResolvedAgentPersonaAssignment,
+} from "./agentPersonaAssignment.ts";
 import { AgentPersonaLibraryError, type createAgentPersonaLibrary } from "./agentPersonaLibrary.ts";
 import {
   agentPersonaModelSelection,
@@ -96,7 +95,7 @@ export const prepareAgentPersonaPeerSpawn = Effect.fn("j5.prepareAgentPersonaPee
     });
   }
   const definitionDigest = yield* library.snapshot(definition);
-  const assignment: OrchestrationV2AgentPersonaAssignment = {
+  const assignment: ResolvedAgentPersonaAssignment = {
     ...result.assignment,
     ...(definitionDigest === undefined
       ? {}

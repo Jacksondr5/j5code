@@ -88,13 +88,10 @@ export const agentPersonaPolicyEnforcement = (): ReadonlyArray<AgentPersonaPolic
   }));
 
 export function translateAgentPersonaProviderPolicy(
-  authorityPolicy: AgentPersonaReportedAuthorityPolicy,
+  authorityPolicy: AgentPersonaAuthorityPolicy,
   driver: string,
 ): AgentPersonaProviderPolicy {
-  if (
-    !isAgentPersonaAuthorityPolicy(authorityPolicy) ||
-    !providerCanEnforceAgentPersonaAuthority(driver, authorityPolicy)
-  ) {
+  if (!providerCanEnforceAgentPersonaAuthority(driver, authorityPolicy)) {
     return READ_ONLY_POLICY;
   }
 

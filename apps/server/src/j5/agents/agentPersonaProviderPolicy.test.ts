@@ -67,8 +67,6 @@ describe("agent persona provider policy", () => {
       ["critic-fix", "claudeAgent"],
       ["diagnostic", "codex"],
       ["publish-only", "codex"],
-      // A policy only a newer server knows, read back from persisted state.
-      ["sandboxed-network", "codex"],
     ] as const) {
       assert.isFalse(
         providerCanEnforceAgentPersonaAuthority(ProviderDriverKind.make(driver), authorityPolicy),
@@ -86,6 +84,15 @@ describe("agent persona provider policy", () => {
         },
       );
     }
+  });
+
+  it("never enforces a policy only a newer server knows", () => {
+    assert.isFalse(
+      providerCanEnforceAgentPersonaAuthority(
+        ProviderDriverKind.make("codex"),
+        "sandboxed-network",
+      ),
+    );
   });
 
   it.effect("compiles the canonical policies into Codex turn settings", () =>
