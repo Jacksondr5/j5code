@@ -155,7 +155,8 @@ export interface CrewAddSeatsInput {
 /**
  * How one approved seat's launch went: `created` when its thread, home, and brief all went out;
  * `not_created` when its thread was never created, so its row is dropped and nothing can message
- * it; `not_started` when the thread exists but its home or its brief did not go through.
+ * it; `not_started` when the thread exists but its home or its brief did not go through,
+ * including a seat retired because its new worktree was never made.
  */
 export type CrewSeatLaunchOutcome =
   | { readonly seatName: string; readonly kind: "created" }
@@ -511,7 +512,30 @@ export const layer = Layer.effect(
 
     const detailOf = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
 
-    /** Create one seat's thread and commit its home and placement. */
+    /** Commit a seat's home and placement, which makes it addressable. */
+    const recordSeatFacts = (
+      captain: CrewCaptain,
+      member: Planned,
+      createdAt: OrchestrationV2AppThread["createdAt"],
+    ) =>
+      composition.recordFacts({
+        homeCommandId: spawnHomeCommandId(member.stableInput),
+        placementCommandId: spawnPlacementCommandId(member.stableInput),
+        squadronId: captain.squadronId,
+        threadId: member.threadId,
+        provenance: {
+          kind: "spawned-by",
+          spawnedByParticipantId: captain.participantId,
+          source: "j5_spawn",
+        },
+        createdAt: DateTime.formatIso(createdAt),
+      });
+
+    /**
+     * Create one seat's thread and commit its home and placement. A seat in a new worktree is
+     * registered only once its checkout is done (see `startBriefs`), as `spawn_agent` does, so
+     * nothing can reach it before it has somewhere to work.
+     */
     const startSeat = (captain: CrewCaptain, member: Planned) =>
       Effect.gen(function* () {
         const seatName = member.seat.name;
@@ -549,19 +573,10 @@ export const layer = Layer.effect(
               ? detailOf(create.failure)
               : "the thread did not appear after it was created",
           } satisfies CrewSeatLaunchOutcome;
+        if (member.workspace.type === "worktree")
+          return { seatName, kind: "created" } satisfies CrewSeatLaunchOutcome;
         const facts = yield* Effect.result(
-          composition.recordFacts({
-            homeCommandId: spawnHomeCommandId(member.stableInput),
-            placementCommandId: spawnPlacementCommandId(member.stableInput),
-            squadronId: captain.squadronId,
-            threadId: member.threadId,
-            provenance: {
-              kind: "spawned-by",
-              spawnedByParticipantId: captain.participantId,
-              source: "j5_spawn",
-            },
-            createdAt: DateTime.formatIso(child.success.thread.createdAt),
-          }),
+          recordSeatFacts(captain, member, child.success.thread.createdAt),
         );
         if (Result.isFailure(facts))
           return {
@@ -609,7 +624,11 @@ export const layer = Layer.effect(
       return { outcomes, created };
     });
 
-    /** Brief every created seat, carrying on past one whose brief did not go out. */
+    /**
+     * Brief every created seat, carrying on past one whose brief did not go out. Seats in a new
+     * worktree are then waited for together, as `spawn_agent` waits for one: a seat whose checkout
+     * is done is registered, and one whose checkout failed or timed out is retired.
+     */
     const startBriefs = Effect.fn("j5.a2a.crewLaunch.startBriefs")(function* (
       captain: CrewCaptain,
       instance: AgentCrewInstance,
@@ -626,6 +645,7 @@ export const layer = Layer.effect(
           "custom",
       }));
       const failed = new Map<string, string>();
+      const checkouts: Array<{ readonly member: Planned; readonly afterSequence: number }> = [];
       for (const member of planned) {
         const text = spawnFirstTurnText({
           brief,
@@ -662,6 +682,18 @@ export const layer = Layer.effect(
                   },
           },
         });
+        // Read before the brief starts, so the checkout's binding can't be missed.
+        const afterSequence =
+          member.workspace.type === "worktree"
+            ? yield* Effect.result(threadManagement.getThreadEventSequence(member.threadId))
+            : null;
+        if (afterSequence !== null && Result.isFailure(afterSequence)) {
+          failed.set(
+            member.seat.name,
+            `watching for its checkout failed: ${detailOf(afterSequence.failure)}`,
+          );
+          continue;
+        }
         const dispatched = yield* Effect.result(
           spawnWorkspace.withSpawnStart(
             {
@@ -689,7 +721,55 @@ export const layer = Layer.effect(
             member.seat.name,
             `starting its brief failed: ${detailOf(dispatched.failure)}`,
           );
+        else if (afterSequence !== null)
+          checkouts.push({ member, afterSequence: afterSequence.success });
       }
+      yield* Effect.forEach(
+        checkouts,
+        ({ member, afterSequence }) =>
+          Effect.gen(function* () {
+            const readiness = yield* Effect.result(
+              spawnWorkspace.awaitWorkspaceReady({ threadId: member.threadId, afterSequence }),
+            );
+            const unready = Result.isFailure(readiness)
+              ? detailOf(readiness.failure)
+              : readiness.success.ready
+                ? null
+                : readiness.success.detail;
+            if (unready === null) {
+              const facts = yield* Effect.result(
+                threadManagement
+                  .getThreadProjection(member.threadId)
+                  .pipe(
+                    Effect.flatMap((child) =>
+                      recordSeatFacts(captain, member, child.thread.createdAt),
+                    ),
+                  ),
+              );
+              if (Result.isFailure(facts))
+                failed.set(
+                  member.seat.name,
+                  `recording its home and placement failed: ${detailOf(facts.failure)}`,
+                );
+              return;
+            }
+            yield* spawnWorkspace
+              .retireUnready({ stableInput: member.stableInput, threadId: member.threadId })
+              .pipe(
+                Effect.catch((error) =>
+                  Effect.logWarning("J5 crew launch could not retire a seat with no worktree", {
+                    threadId: member.threadId,
+                    error,
+                  }),
+                ),
+              );
+            failed.set(
+              member.seat.name,
+              `its worktree was not made (${unready}), so the seat was retired`,
+            );
+          }),
+        { concurrency: "unbounded", discard: true },
+      );
       return failed;
     });
 
