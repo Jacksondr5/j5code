@@ -122,8 +122,7 @@ const fakeWorkspace = (seat: CrewLaunchSeat): ResolvedSpawnWorkspace =>
 /** What the fake launcher offers the card: the Captain on main, with one worktree. */
 const fakeWorkspaceOptions = {
   currentBranch: "main",
-  branches: ["main", "release"],
-  branchesTruncated: false,
+  cwd: "/repo",
   worktrees: [{ path: "/repo-worktrees/feature", branch: "fix/login" }],
 };
 
@@ -1183,7 +1182,7 @@ it.effect(
         });
         assert.deepStrictEqual((yield* store.read(open.proposal.id))?.requestedSeats, proposed);
         const first = yield* gate.preview({ proposalId: open.proposal.id });
-        // Every preview carries what the card offers: the Captain's branch, branches, worktrees.
+        // Every preview carries what the card offers: the Captain's branch, where it works, worktrees.
         assert.deepStrictEqual(first.workspaceOptions, fakeWorkspaceOptions);
         assert.deepStrictEqual(first.seats[0]?.workspace, {
           type: "worktree",

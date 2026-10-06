@@ -4,6 +4,7 @@ import type { CrewProposalSeatRuntime, CrewWorkspaceOptions } from "@t3tools/con
 import { getProviderOptionCurrentValue } from "@t3tools/shared/model";
 
 import { Input } from "../../components/ui/input";
+import { WorktreeBaseBranchPicker } from "../../components/WorktreeBaseBranchPicker";
 import {
   Select,
   SelectItem,
@@ -21,6 +22,7 @@ import {
   chooseCrewSeatPersona,
   chooseCrewSeatWorkspace,
   setCrewSeatBaseRef,
+  setCrewSeatStartFromOrigin,
   setCrewSeatWorktree,
   chooseCrewHarness,
   crewModelSelection,
@@ -125,11 +127,6 @@ function CrewSeatWorkspaceField(props: CrewSeatEditorProps) {
   const options = props.workspaceOptions;
   if (options === undefined) return null;
   const label = props.value.seat || "New seat";
-  // The current value stays selectable even when it isn't on the first page of branches.
-  const branches =
-    workspace?.type === "worktree" && !(options?.branches ?? []).includes(workspace.baseRef)
-      ? [workspace.baseRef, ...(options?.branches ?? [])].filter((branch) => branch.length > 0)
-      : (options?.branches ?? []);
   return (
     <div className="grid gap-3 sm:grid-cols-2">
       <div className="grid min-w-0 gap-1 text-xs text-muted-foreground">
@@ -164,27 +161,20 @@ function CrewSeatWorkspaceField(props: CrewSeatEditorProps) {
       {workspace?.type === "worktree" ? (
         <div className="grid min-w-0 gap-1 text-xs text-muted-foreground">
           <span>Base branch</span>
-          <Select
-            value={workspace.baseRef || null}
-            disabled={props.disabled || branches.length === 0}
-            onValueChange={(next) => {
-              if (next) props.onChange(setCrewSeatBaseRef(props.value, next));
-            }}
-          >
-            <SelectTrigger aria-label={`${label} base branch`}>
-              <SelectValue>{workspace.baseRef || "Choose branch"}</SelectValue>
-            </SelectTrigger>
-            <SelectPopup alignItemWithTrigger={false}>
-              {branches.map((branch) => (
-                <SelectItem key={branch} value={branch}>
-                  {branch}
-                </SelectItem>
-              ))}
-            </SelectPopup>
-          </Select>
-          {options?.branchesTruncated ? (
-            <span>Showing the first {options.branches.length} local branches.</span>
-          ) : null}
+          {props.environmentId === null ? null : (
+            <WorktreeBaseBranchPicker
+              id={`${label}-base-branch`}
+              environmentId={props.environmentId}
+              cwd={options.cwd ?? null}
+              value={workspace.baseRef}
+              onValueChange={(next) => props.onChange(setCrewSeatBaseRef(props.value, next))}
+              startFromOrigin={workspace.startFromOrigin ?? false}
+              onStartFromOriginChange={(checked) =>
+                props.onChange(setCrewSeatStartFromOrigin(props.value, checked))
+              }
+              disabled={props.disabled}
+            />
+          )}
         </div>
       ) : null}
       {workspace?.type === "existing_worktree" ? (

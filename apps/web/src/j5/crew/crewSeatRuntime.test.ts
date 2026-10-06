@@ -14,6 +14,7 @@ import {
   chooseCrewHarness,
   describeCrewSeatWorkspace,
   setCrewSeatBaseRef,
+  setCrewSeatStartFromOrigin,
   setCrewSeatWorktree,
   crewModelSelection,
   crewReasoningDescriptor,
@@ -226,8 +227,7 @@ describe("crewSeatStopsForApprovals", () => {
 describe("crew seat workspace", () => {
   const options = {
     currentBranch: "j5/main",
-    branches: ["j5/main", "release"],
-    branchesTruncated: false,
+    cwd: "/repo",
     worktrees: [{ path: "/repo-worktrees/builder", branch: "fix/login" }],
   };
 
@@ -253,6 +253,13 @@ describe("crew seat workspace", () => {
       type: "worktree",
       baseRef: "release",
     });
+    // Starting from origin is a separate choice that keeps the base.
+    expect(setCrewSeatStartFromOrigin(worktree, true).workspace).toEqual({
+      type: "worktree",
+      baseRef: "j5/main",
+      startFromOrigin: true,
+    });
+    expect(setCrewSeatStartFromOrigin(draft, true)).toBe(draft);
     const existing = chooseCrewSeatWorkspace(draft, "existing_worktree", options);
     expect(existing.workspace).toEqual({
       type: "existing_worktree",

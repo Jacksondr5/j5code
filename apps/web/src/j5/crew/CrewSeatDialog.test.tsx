@@ -237,8 +237,7 @@ describe("crew member dialog draft lifecycle", () => {
       pending[0]!({
         workspaceOptions: {
           currentBranch: "main",
-          branches: ["main"],
-          branchesTruncated: false,
+          cwd: "/repo",
           worktrees: [],
         },
         proposalId: "proposal:1",
@@ -251,8 +250,7 @@ describe("crew member dialog draft lifecycle", () => {
       pending[1]!({
         workspaceOptions: {
           currentBranch: "main",
-          branches: ["main"],
-          branchesTruncated: false,
+          cwd: "/repo",
           worktrees: [],
         },
         proposalId: "proposal:1",

@@ -1826,8 +1826,7 @@ it.effect("launches each seat in the workspace it names, and refuses one git can
       assert.lengthOf(yield* Ref.get(commands), 0);
       assert.deepStrictEqual(yield* launcher.workspaceOptions(captain), {
         currentBranch: null,
-        branches: [],
-        branchesTruncated: false,
+        cwd: null,
         worktrees: [],
       });
     }).pipe(Effect.provide(layerFor({ isRepo: false, refName: null })));
@@ -1850,8 +1849,8 @@ it.effect("launches each seat in the workspace it names, and refuses one git can
       assert.include(unknown.message, "/repo-worktrees/feature");
       assert.deepStrictEqual(yield* launcher.workspaceOptions(captain), {
         currentBranch: "j5/main",
-        branches: ["j5/main", "release", "fix/login"],
-        branchesTruncated: false,
+        // The branch picker searches where the Captain works; no list travels with the preview.
+        cwd: "/repo",
         worktrees: [{ path: "/repo-worktrees/feature", branch: "fix/login" }],
       });
 

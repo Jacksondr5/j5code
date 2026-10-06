@@ -162,9 +162,11 @@ export type CrewSeatWorkspace = typeof CrewSeatWorkspace.Type;
 export const CrewWorkspaceOptions = Schema.Struct({
   /** The branch checked out where the Captain works, to prefill a new worktree's base. */
   currentBranch: Schema.NullOr(Schema.String),
-  /** The first page of local branches; `branchesTruncated` says there are more. */
-  branches: Schema.Array(Schema.String),
-  branchesTruncated: Schema.Boolean,
+  /**
+   * Where the Captain works: the directory the base-branch picker searches. Absent from servers
+   * that sent a fixed branch list instead.
+   */
+  cwd: Schema.optionalKey(Schema.NullOr(Schema.String)),
   /** The project's worktrees other than its main checkout, each with its branch. */
   worktrees: Schema.Array(Schema.Struct({ path: Schema.String, branch: Schema.String })),
 });

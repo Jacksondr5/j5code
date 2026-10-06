@@ -115,7 +115,7 @@ export const chooseCrewSeatWorkspace = (
     type === "shared"
       ? { type }
       : type === "worktree"
-        ? { type, baseRef: options?.currentBranch ?? options?.branches[0] ?? "" }
+        ? { type, baseRef: options?.currentBranch ?? "" }
         : { type, worktreePath: options?.worktrees[0]?.path ?? "" },
 });
 
@@ -124,6 +124,15 @@ export const setCrewSeatBaseRef = (draft: CrewSeatDraft, baseRef: string): CrewS
   draft.workspace?.type === "worktree"
     ? { ...draft, workspace: { ...draft.workspace, baseRef } }
     : { ...draft, workspace: { type: "worktree", baseRef } };
+
+/** Whether a new worktree starts from the fetched origin copy of its base branch. */
+export const setCrewSeatStartFromOrigin = (
+  draft: CrewSeatDraft,
+  startFromOrigin: boolean,
+): CrewSeatDraft =>
+  draft.workspace?.type === "worktree"
+    ? { ...draft, workspace: { ...draft.workspace, startFromOrigin } }
+    : draft;
 
 export const setCrewSeatWorktree = (draft: CrewSeatDraft, worktreePath: string): CrewSeatDraft => ({
   ...draft,

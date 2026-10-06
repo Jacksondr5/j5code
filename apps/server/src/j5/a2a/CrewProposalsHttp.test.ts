@@ -92,8 +92,7 @@ it("lists open proposals for readers and resolves them only for operators", asyn
         approvalToken: "runtime-token",
         workspaceOptions: {
           currentBranch: null,
-          branches: [],
-          branchesTruncated: false,
+          cwd: "/repo",
           worktrees: [],
         },
         seats: [
@@ -170,8 +169,7 @@ it("lists open proposals for readers and resolves them only for operators", asyn
       approvalToken: "runtime-token",
       workspaceOptions: {
         currentBranch: null,
-        branches: [],
-        branchesTruncated: false,
+        cwd: "/repo",
         worktrees: [],
       },
       seats: [

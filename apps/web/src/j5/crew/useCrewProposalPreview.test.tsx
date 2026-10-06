@@ -18,8 +18,7 @@ const response: CrewProposalPreviewResponse = {
   proposalId: "proposal:1",
   workspaceOptions: {
     currentBranch: "main",
-    branches: ["main"],
-    branchesTruncated: false,
+    cwd: "/repo",
     worktrees: [],
   },
   approvalToken: "preview:1",

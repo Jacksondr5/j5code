@@ -131,8 +131,7 @@ export type SpawnCheckout =
 
 const NO_WORKSPACE_OPTIONS: CrewWorkspaceOptions = {
   currentBranch: null,
-  branches: [],
-  branchesTruncated: false,
+  cwd: null,
   worktrees: [],
 };
 
@@ -288,8 +287,8 @@ export interface SpawnWorkspaceServiceShape {
     readonly baseRefs: ReadonlyArray<SpawnBaseRef>;
   }) => Effect.Effect<SpawnCheckout>;
   /**
-   * What the roster card offers: the caller's branch, the first page of local branches, and the
-   * project's worktrees. Read through upstream's ref cache, since nothing is bound from it; an
+   * What the roster card offers: the caller's branch, the directory its branch picker searches,
+   * and the project's worktrees. Read through upstream's ref cache, since nothing is bound from it; an
    * unreadable repository offers none.
    */
   readonly workspaceOptions: (caller: {
@@ -359,7 +358,7 @@ export class SpawnWorkspaceService extends Context.Service<
 
 const detailOf = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
 
-/** Local branches a preview lists; more are summarized as truncated. */
+/** Refs read per page when listing the repository's worktrees. */
 const BRANCH_PAGE = 100;
 
 const make = Effect.gen(function* () {
@@ -463,12 +462,12 @@ const make = Effect.gen(function* () {
   const workspaceOptions: SpawnWorkspaceServiceShape["workspaceOptions"] = (caller) =>
     Effect.gen(function* () {
       const workspaceRoot = yield* projectRoot(caller.projectId);
-      const listed = yield* listWorktrees(caller.worktreePath ?? workspaceRoot, workspaceRoot);
+      const cwd = caller.worktreePath ?? workspaceRoot;
+      const listed = yield* listWorktrees(cwd, workspaceRoot);
       if (listed === null) return NO_WORKSPACE_OPTIONS;
       return {
         currentBranch: listed.first.refs.find((ref) => ref.current)?.name ?? null,
-        branches: listed.first.refs.map((ref) => ref.name),
-        branchesTruncated: listed.first.nextCursor !== null,
+        cwd,
         worktrees: listed.worktrees,
       };
     }).pipe(Effect.catch(() => Effect.succeed(NO_WORKSPACE_OPTIONS)));
