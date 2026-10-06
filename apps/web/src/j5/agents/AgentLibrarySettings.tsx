@@ -598,7 +598,10 @@ export function AgentLibrarySettings() {
                             Edit
                           </MenuItem>
                         )}
-                        <MenuItem onClick={() => void duplicatePersona(persona.personaId)}>
+                        <MenuItem
+                          disabled={persona.availability === "unsupported"}
+                          onClick={() => void duplicatePersona(persona.personaId)}
+                        >
                           <CopyIcon />
                           Duplicate as personal persona
                         </MenuItem>

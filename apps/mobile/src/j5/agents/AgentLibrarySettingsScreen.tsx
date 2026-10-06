@@ -551,7 +551,9 @@ export function AgentLibrarySettingsScreen() {
                             {
                               id: "duplicate",
                               title: "Duplicate as personal persona",
-                              attributes: { disabled: busy },
+                              attributes: {
+                                disabled: busy || persona.availability === "unsupported",
+                              },
                             },
                             { id: "export", title: "Export YAML", attributes: { disabled: busy } },
                             ...(otherEnvironments.length === 0
