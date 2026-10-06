@@ -1,4 +1,9 @@
-import type { AgentPersonaAuthorityPolicy, RuntimeMode } from "@t3tools/contracts";
+import {
+  ProviderDriverKind,
+  type AgentPersonaAuthorityPolicy,
+  type AgentPersonaPolicyEnforcement,
+  type RuntimeMode,
+} from "@t3tools/contracts";
 
 import { getAgentAuthorityRules } from "./agentPersonas.ts";
 
@@ -30,23 +35,29 @@ const WORKSPACE_WRITE_POLICY = {
   sandboxPolicy: { type: "workspaceWrite", networkAccess: false },
 } as const satisfies AgentPersonaProviderPolicy;
 
-/** Tests the supported sandbox/tool policy, not prose promises such as no-commit or targeted edits. */
+/** Drivers whose sandbox enforces each policy's workspace boundary; nothing else is promised. */
+const ENFORCING_DRIVERS = {
+  "read-only": ["codex", "claudeAgent"],
+  "critic-review": ["codex", "claudeAgent"],
+  "workspace-write": ["codex"],
+  "critic-fix": ["codex"],
+  diagnostic: [],
+  "publish-only": [],
+} as const satisfies Record<AgentPersonaAuthorityPolicy, ReadonlyArray<string>>;
+
 export function providerCanEnforceAgentPersonaAuthority(
   driver: string,
   authorityPolicy: AgentPersonaAuthorityPolicy,
 ): boolean {
-  switch (authorityPolicy) {
-    case "read-only":
-    case "critic-review":
-      return driver === "codex" || driver === "claudeAgent";
-    case "workspace-write":
-    case "critic-fix":
-      return driver === "codex";
-    case "diagnostic":
-    case "publish-only":
-      return false;
-  }
+  return (ENFORCING_DRIVERS[authorityPolicy] as ReadonlyArray<string>).includes(driver);
 }
+
+/** The catalog's copy of the table, so persona editors show it without a second client copy. */
+export const agentPersonaPolicyEnforcement = (): ReadonlyArray<AgentPersonaPolicyEnforcement> =>
+  Object.entries(ENFORCING_DRIVERS).map(([policy, drivers]) => ({
+    policy: policy as AgentPersonaAuthorityPolicy,
+    drivers: drivers.map((driver) => ProviderDriverKind.make(driver)),
+  }));
 
 export function translateAgentPersonaProviderPolicy(
   authorityPolicy: AgentPersonaAuthorityPolicy,

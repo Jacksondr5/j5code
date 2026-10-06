@@ -1,4 +1,8 @@
-import { type OrchestrationV2AgentPersonaAssignment, ProviderDriverKind } from "@t3tools/contracts";
+import {
+  isAgentPersonaReasoningOptionId,
+  type OrchestrationV2AgentPersonaAssignment,
+  ProviderDriverKind,
+} from "@t3tools/contracts";
 
 import type { AgentPersonaRouteResolution } from "./agentPersonaRouting.ts";
 import { providerCanEnforceAgentPersonaAuthority } from "./agentPersonaProviderPolicy.ts";
@@ -90,14 +94,15 @@ export function validateAgentPersonaAssignment(
       : undefined;
   }
   const target = definition.modelRoute[assignment.resolvedRoute === "primary" ? 0 : 1];
-  const optionId = target.driver === "codex" ? "reasoningEffort" : "effort";
-  const selectedEffort = assignment.resolvedModelSelection.options?.find(
-    (option) => option.id === optionId,
-  )?.value;
+  // Launches carry exactly one reasoning option; a second one would leave the provider's choice ambiguous.
+  const reasoningOptions = (assignment.resolvedModelSelection.options ?? []).filter(({ id }) =>
+    isAgentPersonaReasoningOptionId(id),
+  );
   if (
     assignment.resolvedDriver !== target.driver ||
     assignment.resolvedModelSelection.model !== target.model ||
-    selectedEffort !== target.reasoningEffort
+    reasoningOptions.length !== 1 ||
+    reasoningOptions[0]?.value !== target.reasoningEffort
   ) {
     return "Persona assignment does not match its declared model route.";
   }

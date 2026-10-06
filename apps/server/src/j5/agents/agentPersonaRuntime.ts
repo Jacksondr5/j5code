@@ -7,7 +7,6 @@ import {
   makeAgentPersonaLibrary,
   type createAgentPersonaLibrary,
 } from "./agentPersonaLibrary.ts";
-import { getAgentAuthorityRules } from "./agentPersonas.ts";
 import {
   providerCanEnforceAgentPersonaAuthority,
   translateAgentPersonaProviderPolicy,
@@ -48,16 +47,8 @@ export const resolveAgentPersonaRuntime = Effect.fn("resolveAgentPersonaRuntime"
         message: "The assigned persona runtime permissions are unsupported.",
       });
     }
-    const rules = getAgentAuthorityRules(assignment.authorityPolicy);
-    instructions = `${definition.instructions}\n\n## Selected behavior: ${assignment.authorityPolicy}\nThese are operating instructions, not additional sandbox guarantees.\n${
-      rules.mayCommit
-        ? "Commit and push only within the authorized publication scope."
-        : "Never commit or push."
-    }\n${rules.mayWritePullRequest ? "Open or update pull requests only within the authorized scope." : "Do not mutate pull requests."}\nNever merge a pull request.\n${
-      assignment.authorityPolicy === "critic-fix"
-        ? "Edit only to address the requested review findings.\n"
-        : ""
-    }${PLATFORM_TOOLS_NOTE}`;
+    // The persona's own text is the whole behavior contract; J5 appends no hidden rules (#439).
+    instructions = `${definition.instructions}\n\n${PLATFORM_TOOLS_NOTE}`;
     // Declared handoffs bind to the shared artifacts system; the section names the exact path.
     const artifactSection =
       thread.id === undefined ? undefined : agentPersonaArtifactInstructions(definition, thread.id);

@@ -1,7 +1,7 @@
 import {
+  agentPersonaReasoningDescriptor,
   defaultInstanceIdForDriver,
   isProviderAvailable,
-  ProviderDriverKind,
   type AgentPersonaAuthorityPolicy,
   type AgentPersonaRouteFailureCode as ContractRouteFailureCode,
   type ModelSelection,
@@ -52,17 +52,32 @@ export type AgentPersonaRouteResolution =
 export function unavailableAgentPersonaReason(
   resolution: Extract<AgentPersonaRouteResolution, { status: "unavailable" }>,
 ): "routes-unavailable" | "authority-not-enforceable" {
-  return resolution.attempts.every(
-    ({ failures }) =>
-      failures.length > 0 && failures.every(({ code }) => code === "authority-not-enforceable"),
+  return resolution.attempts.every(({ failures }) =>
+    failures.some(({ code }) => code === "authority-not-enforceable"),
   )
     ? "authority-not-enforceable"
     : "routes-unavailable";
 }
 
-/** Codex advertises reasoning as `reasoningEffort`; every other supported driver uses `effort`. */
-export const agentPersonaReasoningOptionId = (driver: AgentModelTarget["driver"]) =>
-  driver === "codex" ? "reasoningEffort" : "effort";
+/** The launch selection for a target on a provider that already passed the availability check. */
+export function agentPersonaModelSelection(
+  provider: ServerProvider,
+  target: AgentModelTarget,
+): ModelSelection {
+  const descriptor = agentPersonaReasoningDescriptor(
+    provider.models.find((model) => model.slug === target.model),
+  );
+  if (descriptor === undefined) {
+    throw new Error(
+      `Model ${target.model} on ${provider.instanceId} advertises no reasoning option; check availability first.`,
+    );
+  }
+  return {
+    instanceId: provider.instanceId,
+    model: target.model,
+    options: [{ id: descriptor.id, value: target.reasoningEffort }],
+  };
+}
 
 /** Why one provider instance cannot serve one declared route target right now. */
 export function agentPersonaTargetUnavailableReason(
@@ -77,14 +92,8 @@ export function agentPersonaTargetUnavailableReason(
   const model = provider.models.find((candidate) => candidate.slug === target.model);
   if (model === undefined) return "model-not-advertised";
 
-  const optionId = agentPersonaReasoningOptionId(target.driver);
-  const descriptor = model.capabilities?.optionDescriptors?.find(
-    (candidate) => candidate.id === optionId,
-  );
-  if (
-    descriptor?.type !== "select" ||
-    !descriptor.options.some((option) => option.id === target.reasoningEffort)
-  ) {
+  const descriptor = agentPersonaReasoningDescriptor(model);
+  if (!descriptor?.options.some((option) => option.id === target.reasoningEffort)) {
     return "reasoning-effort-not-advertised";
   }
   return undefined;
@@ -123,10 +132,14 @@ export function resolveAgentPersonaRoute(input: {
     const failures: Array<AgentPersonaRouteFailure> = [];
 
     if (!providerCanEnforceAgentPersonaAuthority(target.driver, authorityPolicy)) {
+      // Also name a missing provider, so a mistyped driver doesn't read as a policy gap alone.
       rejectedTargets.push({
         route,
         target,
-        failures: [{ code: "authority-not-enforceable" }],
+        failures: [
+          { code: "authority-not-enforceable" },
+          ...(candidates.length === 0 ? [{ code: "provider-not-configured" as const }] : []),
+        ],
       });
       continue;
     }
@@ -142,18 +155,13 @@ export function resolveAgentPersonaRoute(input: {
         continue;
       }
 
-      const optionId = agentPersonaReasoningOptionId(target.driver);
       return {
         status: "available",
         personaId: definition.id,
         definitionVersion: definition.version,
         route,
         driver: target.driver,
-        modelSelection: {
-          instanceId: provider.instanceId,
-          model: target.model,
-          options: [{ id: optionId, value: target.reasoningEffort }],
-        },
+        modelSelection: agentPersonaModelSelection(provider, target),
         rejectedTargets,
       };
     }
@@ -198,7 +206,7 @@ export function buildAgentPersonaCatalog(
             ? {
                 status: "available" as const,
                 resolvedRoute: resolution.route,
-                resolvedDriver: ProviderDriverKind.make(resolution.driver),
+                resolvedDriver: resolution.driver,
                 resolvedModelSelection: resolution.modelSelection,
               }
             : {

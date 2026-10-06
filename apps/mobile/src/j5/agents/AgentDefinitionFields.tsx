@@ -1,9 +1,11 @@
 import { useAtomValue } from "@effect/atom-react";
 import {
-  AGENT_PERSONA_HARNESSES,
   AGENT_PERSONA_POLICY_OPTIONS,
   agentPersonaModelChoiceId,
   agentPersonaModelChoices,
+  agentPersonaModelGroups,
+  agentPersonaPolicyDrivers,
+  agentPersonaPolicyNote,
 } from "@t3tools/client-runtime/j5/agent-personas";
 import type {
   AgentPersonaAuthorityPolicy,
@@ -15,7 +17,9 @@ import { Pressable, ScrollView, View } from "react-native";
 
 import { AppText as Text } from "../../components/AppText";
 import { ControlPillMenu } from "../../components/ControlPill";
+import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
+import { agentPersonaEnvironment } from "./agentPersonaAtoms";
 
 export interface AgentRoutePolicyValue {
   readonly authorityPolicy: AgentPersonaAuthorityPolicy;
@@ -94,12 +98,14 @@ export function AgentRoutePolicyFields(props: {
     ...(props.retainRoute ?? []),
     ...value.modelRoute,
   ]);
-  const modelGroups = AGENT_PERSONA_HARNESSES.map((harness) => ({
-    ...harness,
-    models: choices.filter(
-      ({ target, available }) => available && target.driver === harness.driver,
-    ),
-  })).filter(({ models }) => models.length > 0);
+  const modelGroups = agentPersonaModelGroups(choices);
+  const catalog = useEnvironmentQuery(
+    agentPersonaEnvironment.catalog({ environmentId: props.environmentId, input: {} }),
+  );
+  const policyNote = agentPersonaPolicyNote(
+    agentPersonaPolicyDrivers(catalog.data, value.authorityPolicy),
+    value.modelRoute,
+  );
   return (
     <>
       <EditorChoice
@@ -112,6 +118,9 @@ export function AgentRoutePolicyFields(props: {
           if (policy) props.onChange({ ...value, authorityPolicy: policy.value });
         }}
       />
+      {policyNote === null ? null : (
+        <Text className="text-xs text-foreground-muted">{policyNote}</Text>
+      )}
       {value.modelRoute.map((target, index) => {
         const label = index === 0 ? "Primary model" : "Fallback model";
         const selected = choices.find(({ id }) => id === agentPersonaModelChoiceId(target));

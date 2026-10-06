@@ -27,55 +27,27 @@ export type AgentAuthorityPolicyId = AgentPersonaAuthorityPolicy;
 
 export interface AgentAuthorityRules {
   readonly workspace: "read-only" | "write" | "diagnostic-write" | "publication-only";
-  readonly mayCommit: boolean;
-  readonly mayPush: boolean;
-  readonly mayWritePullRequest: boolean;
-  readonly mayMergePullRequest: false;
 }
 
-/** Behavioral expectations; provider policy translation separately defines enforceable controls. */
+/** The workspace access each policy asks a provider sandbox for. */
 export const AGENT_AUTHORITY_RULES = {
   "read-only": {
     workspace: "read-only",
-    mayCommit: false,
-    mayPush: false,
-    mayWritePullRequest: false,
-    mayMergePullRequest: false,
   },
   "workspace-write": {
     workspace: "write",
-    mayCommit: false,
-    mayPush: false,
-    mayWritePullRequest: false,
-    mayMergePullRequest: false,
   },
   "critic-review": {
     workspace: "read-only",
-    mayCommit: false,
-    mayPush: false,
-    mayWritePullRequest: false,
-    mayMergePullRequest: false,
   },
   "critic-fix": {
     workspace: "write",
-    mayCommit: false,
-    mayPush: false,
-    mayWritePullRequest: false,
-    mayMergePullRequest: false,
   },
   diagnostic: {
     workspace: "diagnostic-write",
-    mayCommit: false,
-    mayPush: false,
-    mayWritePullRequest: false,
-    mayMergePullRequest: false,
   },
   "publish-only": {
     workspace: "publication-only",
-    mayCommit: true,
-    mayPush: true,
-    mayWritePullRequest: true,
-    mayMergePullRequest: false,
   },
 } as const satisfies Record<AgentAuthorityPolicyId, AgentAuthorityRules>;
 

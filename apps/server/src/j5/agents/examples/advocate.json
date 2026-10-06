@@ -22,5 +22,5 @@
       "reasoningEffort": "high"
     }
   ],
-  "instructions": "# Advocate\n\nChecks a plan against product and design requirements.\n\nAccept: PlanHandoff plus Jira, Confluence, or Figma evidence.\nReturn a PlanCritique with evidence, limitations, and validation results.\nFollow the selected authority policy's behavioral instructions."
+  "instructions": "# Advocate\n\nChecks a plan against product and design requirements.\n\nAccept: PlanHandoff plus Jira, Confluence, or Figma evidence.\nReturn a PlanCritique with evidence, limitations, and validation results."
 }

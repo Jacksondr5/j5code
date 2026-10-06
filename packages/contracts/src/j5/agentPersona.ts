@@ -11,9 +11,11 @@ import {
   ThreadId,
   TrimmedNonEmptyString,
 } from "../baseSchemas.ts";
+import type { SelectProviderOptionDescriptor } from "../model.ts";
 import { ModelSelection } from "../modelSelection.ts";
 import { RuntimeMode } from "../providerPolicy.ts";
 import { ProviderDriverKind } from "../providerInstance.ts";
+import type { ServerProviderModel } from "../server.ts";
 
 /**
  * J5-owned agent persona wire schemas. Upstream orchestration structs reference only
@@ -106,7 +108,7 @@ export type AgentPersonaRouteFailureCode = typeof AgentPersonaRouteFailureCode.T
 /** One rejected route with the reasons every candidate provider gave. */
 export const AgentPersonaRouteAttempt = Schema.Struct({
   route: Schema.Literals(["primary", "fallback"]),
-  driver: Schema.Literals(["codex", "claudeAgent"]),
+  driver: ProviderDriverKind,
   model: TrimmedNonEmptyString,
   reasoningEffort: TrimmedNonEmptyString,
   failures: Schema.Array(AgentPersonaRouteFailureCode),
@@ -135,12 +137,37 @@ export const OrchestrationV2AgentPersonaAvailability = Schema.Union([
 export type OrchestrationV2AgentPersonaAvailability =
   typeof OrchestrationV2AgentPersonaAvailability.Type;
 
+/** Any provider driver; launch checks whether a signed-in instance advertises the model. */
 export const AgentPersonaModelTarget = Schema.Struct({
-  driver: Schema.Literals(["codex", "claudeAgent"]),
+  driver: ProviderDriverKind,
   model: TrimmedNonEmptyString,
   reasoningEffort: TrimmedNonEmptyString,
 });
 export type AgentPersonaModelTarget = typeof AgentPersonaModelTarget.Type;
+
+/**
+ * The select option that carries a model's reasoning level. Providers name it differently:
+ * Codex and Grok `reasoningEffort`, Claude and Cursor `effort` or `reasoning`, OpenCode
+ * `variant`, Pi `thinking`.
+ */
+export function agentPersonaReasoningDescriptor(
+  model: Pick<ServerProviderModel, "capabilities"> | undefined,
+): SelectProviderOptionDescriptor | undefined {
+  for (const descriptor of model?.capabilities?.optionDescriptors ?? []) {
+    if (descriptor.type === "select" && isAgentPersonaReasoningOptionId(descriptor.id))
+      return descriptor;
+  }
+  return undefined;
+}
+const AGENT_PERSONA_REASONING_OPTION_IDS = new Set([
+  "reasoningEffort",
+  "effort",
+  "reasoning",
+  "variant",
+  "thinking",
+]);
+export const isAgentPersonaReasoningOptionId = (id: string) =>
+  AGENT_PERSONA_REASONING_OPTION_IDS.has(id);
 export const AgentPersonaEditableDetails = Schema.Struct({
   definitionDigest: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
   modelRoute: Schema.Tuple([AgentPersonaModelTarget, AgentPersonaModelTarget]),
@@ -226,8 +253,17 @@ export class AgentPersonaCatalogError extends Schema.TaggedError<AgentPersonaCat
   { message: Schema.String },
 ) {}
 
+/** The provider drivers whose sandbox enforces one runtime policy; the editor shows these. */
+export const AgentPersonaPolicyEnforcement = Schema.Struct({
+  policy: AgentPersonaAuthorityPolicy,
+  drivers: Schema.Array(ProviderDriverKind),
+});
+export type AgentPersonaPolicyEnforcement = typeof AgentPersonaPolicyEnforcement.Type;
+
 export const OrchestrationV2AgentPersonaCatalog = Schema.Struct({
   personas: Schema.Array(OrchestrationV2AgentPersonaCatalogEntry),
+  /** Absent from servers that predate it. */
+  policyEnforcement: Schema.optional(Schema.Array(AgentPersonaPolicyEnforcement)),
 });
 export type OrchestrationV2AgentPersonaCatalog = typeof OrchestrationV2AgentPersonaCatalog.Type;
 

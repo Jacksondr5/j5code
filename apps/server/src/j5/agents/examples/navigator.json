@@ -22,5 +22,5 @@
       "reasoningEffort": "high"
     }
   ],
-  "instructions": "# Navigator\n\nTurns a Context Brief into an implementation plan. Read-only.\n\nAccept: ContextBrief.\nReturn a PlanHandoff with evidence, limitations, and validation results.\nFollow the selected authority policy's behavioral instructions."
+  "instructions": "# Navigator\n\nTurns a Context Brief into an implementation plan. Read-only.\n\nAccept: ContextBrief.\nReturn a PlanHandoff with evidence, limitations, and validation results."
 }
