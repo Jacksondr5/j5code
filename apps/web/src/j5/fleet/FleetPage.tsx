@@ -44,6 +44,7 @@ import {
   originLabel,
   partitionFleet,
   playbookRunHeader,
+  resolveFleetRowProject,
   retiredCrews,
   type FleetNode,
   type FleetRow,
@@ -137,16 +138,16 @@ export function FleetPage() {
   // Each machine's ledger still answers per Squadron. A row with a thread names its project
   // itself; a machine sender, or a retired Crew, takes the project its Squadron references.
   const projectOf = useCallback(
-    (squadron: ScopedFleetSquadron, agent: FleetAgent | null) => {
-      const thread =
-        agent === null ? undefined : threadFor(threadsByKey, squadron.environmentId, agent);
-      return (
-        (thread === undefined
-          ? undefined
-          : projects.ofProject(squadron.environmentId, thread.projectId)) ??
-        projects.ofSquadron(squadron.environmentId, squadron.id)
-      );
-    },
+    (squadron: ScopedFleetSquadron, agent: FleetAgent | null) =>
+      resolveFleetRowProject({
+        squadron,
+        agent,
+        threadProjectId: (environmentId, threadId) =>
+          threadsByKey.get(scopedThreadKey(scopeThreadRef(environmentId, ThreadId.make(threadId))))
+            ?.projectId,
+        ofProject: projects.ofProject,
+        ofSquadron: projects.ofSquadron,
+      }),
     [projects, threadsByKey],
   );
   const sections = useMemo(() => {

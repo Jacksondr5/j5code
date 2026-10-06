@@ -8,7 +8,7 @@ import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 
 import { runtime } from "../../lib/runtime";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
-import { threadReadConnectionsAtom } from "../threads/useThreadRowReads";
+import { threadReadConnectionsAtom, type KeyedThreadRefs } from "../threads/useThreadRowReads";
 
 export type { ThreadHome, ThreadHomeEntry } from "@t3tools/contracts/j5";
 export type { ThreadHomesScopeReadState } from "@t3tools/client-runtime/j5/threadHomes";
@@ -44,11 +44,12 @@ export function useThreadHomesScopeReadState(scope: ScopedSquadronRef | null = n
 
 /** Incremental home reads follow the thread's environment; existing shared thread state is unchanged. */
 export function useThreadHomes(
-  refs: ReadonlyArray<ScopedThreadRef>,
+  refs: ReadonlyArray<ScopedThreadRef> | KeyedThreadRefs,
   scope: ScopedSquadronRef | null = null,
   scopeSelectionGeneration = 0,
 ) {
-  const key = JSON.stringify(refs);
+  // A caller that already holds a keyed row set (the sidebar) is not serialized again.
+  const key = "key" in refs ? refs.key : JSON.stringify(refs);
   const requested = useMemo(() => JSON.parse(key) as ReadonlyArray<ScopedThreadRef>, [key]);
   const requestedRef = useRef(requested);
   requestedRef.current = requested;

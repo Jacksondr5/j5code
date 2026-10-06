@@ -1,5 +1,10 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { ThreadId, type EnvironmentId, type ScopedThreadRef } from "@t3tools/contracts";
+import {
+  ThreadId,
+  type EnvironmentId,
+  type ProjectId,
+  type ScopedThreadRef,
+} from "@t3tools/contracts";
 
 import { classifyCrewSeat, type CrewSeatState, type CrewSeatThread } from "../crew/crewState";
 import type { FleetAgent, FleetCrew, FleetSquadron } from "./fleetClient";
@@ -240,6 +245,32 @@ export function partitionFleet<S extends FleetSquadron & { readonly environmentI
 export interface FleetProject {
   readonly projectKey: string;
   readonly displayName: string;
+}
+
+/**
+ * The logical project a Fleet row belongs to. Each machine's ledger still answers per Squadron:
+ * a row with a thread the client holds names its project itself; a machine sender, a retired
+ * Crew (`agent` is null) or a thread the client does not hold takes the project its Squadron
+ * references. Undefined when neither resolves, and the caller shows the Squadron name.
+ */
+export function resolveFleetRowProject<Project>(input: {
+  readonly squadron: { readonly environmentId: EnvironmentId; readonly id: string };
+  readonly agent: Pick<FleetAgent, "threadId"> | null;
+  readonly threadProjectId: (
+    environmentId: EnvironmentId,
+    threadId: string,
+  ) => ProjectId | undefined;
+  readonly ofProject: (environmentId: EnvironmentId, projectId: ProjectId) => Project | undefined;
+  readonly ofSquadron: (environmentId: EnvironmentId, squadronId: string) => Project | undefined;
+}): Project | undefined {
+  const { squadron, agent } = input;
+  const threadId = agent?.threadId ?? null;
+  const projectId =
+    threadId === null ? undefined : input.threadProjectId(squadron.environmentId, threadId);
+  return (
+    (projectId === undefined ? undefined : input.ofProject(squadron.environmentId, projectId)) ??
+    input.ofSquadron(squadron.environmentId, squadron.id)
+  );
 }
 
 /** The label a root row sorts under: its project, or its Squadron's name while that is unresolved. */

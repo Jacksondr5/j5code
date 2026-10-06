@@ -225,7 +225,7 @@ import {
 } from "../j5/squadron/ThreadHomesClient";
 import { SpawnedChildren } from "../j5/threads/SpawnedChildren";
 import { ThreadCardIdentity } from "../j5/threads/ThreadCardIdentity";
-import { useThreadRowReads } from "../j5/threads/useThreadRowReads";
+import { useKeyedThreadRefs, useThreadRowReads } from "../j5/threads/useThreadRowReads";
 import {
   createSidebarCollisionDetection,
   createSidebarSortingStrategy,
@@ -2447,7 +2447,9 @@ export default function Sidebar() {
       ),
     [squadronScopeId, squadrons],
   );
-  const threadRefs = threads.map((thread) => scopeThreadRef(thread.environmentId, thread.id));
+  const threadRefs = useKeyedThreadRefs(
+    threads.map((thread) => scopeThreadRef(thread.environmentId, thread.id)),
+  );
   const threadHomes = useThreadHomes(threadRefs, squadronScopeId, squadronScopeSelectionGeneration);
   useThreadRowReads(threadRefs);
   const openProjectSettings = useCallback(
