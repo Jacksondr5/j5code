@@ -198,17 +198,20 @@ it.effect("a guarded later migration gets its own snapshot and leaves the earlie
   ),
 );
 
-it.effect("replaces an older snapshot and a partial file left by a crashed attempt", () =>
+it.effect("replaces an older snapshot and leaves no partial file behind", () =>
   withDatabasePath(({ dbPath, snapshotPath }) =>
     Effect.gen(function* () {
+      const path = yield* Path.Path;
       createLedgerDatabase(dbPath, 29);
       NodeFS.writeFileSync(snapshotPath, "an older snapshot");
-      NodeFS.writeFileSync(`${snapshotPath}.${process.pid}.partial`, "half a backup");
 
       yield* snapshotBeforeJ5LedgerMigration(dbPath, STAND_IN);
 
       assert.deepStrictEqual(readContent(snapshotPath), readContent(dbPath));
-      assert.isFalse(NodeFS.existsSync(`${snapshotPath}.${process.pid}.partial`));
+      assert.deepStrictEqual(
+        NodeFS.readdirSync(path.dirname(dbPath)).filter((name) => name.endsWith(".partial")),
+        [],
+      );
     }),
   ),
 );
@@ -241,6 +244,7 @@ it.effect("includes rows still in the WAL while another connection holds the dat
 it.effect("fails, and publishes nothing, when the snapshot cannot be written", () =>
   withDatabasePath(({ dbPath, snapshotPath }) =>
     Effect.gen(function* () {
+      const path = yield* Path.Path;
       createLedgerDatabase(dbPath, 29);
       const before = readContent(dbPath);
       // A non-empty directory under the snapshot's name cannot be replaced by the rename.
@@ -253,7 +257,10 @@ it.effect("fails, and publishes nothing, when the snapshot cannot be written", (
       assert.strictEqual(error.migrationId, 30);
       assert.include(error.message, snapshotPath);
       assert.include(error.message, "The migration has not run.");
-      assert.isFalse(NodeFS.existsSync(`${snapshotPath}.${process.pid}.partial`));
+      assert.deepStrictEqual(
+        NodeFS.readdirSync(path.dirname(dbPath)).filter((name) => name.endsWith(".partial")),
+        [],
+      );
       assert.deepStrictEqual(readContent(dbPath), before);
     }),
   ),
