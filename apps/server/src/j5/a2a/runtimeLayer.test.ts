@@ -39,6 +39,7 @@ import { runMigrations } from "../../persistence/Migrations.ts";
 import { ThreadLifecycleService } from "../../orchestration-v2/ThreadLifecycleService.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { ThreadLaunchService } from "../../orchestration-v2/ThreadLaunchService.ts";
+import { WorktreeSetupTracker } from "../../project/WorktreeSetupTracker.ts";
 import { OrchestrationCommandReceiptRepository } from "../../persistence/Services/OrchestrationCommandReceipts.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { A2AArchiveFacts } from "./ArchiveFactsService.ts";
@@ -55,6 +56,7 @@ import { makeJ5A2ARuntimeLayer } from "./runtimeLayer.ts";
 const archiveDependencies = Layer.mergeAll(
   // spawn_agent and Crew seats prepare worktrees through upstream's launch and receipts.
   Layer.mock(ThreadLaunchService)({}),
+  Layer.mock(WorktreeSetupTracker)({}),
   Layer.mock(OrchestrationCommandReceiptRepository)({}),
   Layer.mock(ServerSecretStore)({
     getOrCreateRandom: () => Effect.succeed(new Uint8Array(32).fill(7)),

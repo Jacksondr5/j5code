@@ -28,12 +28,9 @@ import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewIns
 import { CrewLaunchReporter } from "./CrewLaunchReporter.ts";
 import { CrewCaptainArchiveCascade } from "./CrewCaptainArchiveCascade.ts";
 import { readEventStoreHighWater } from "./eventStoreHighWater.ts";
-import { getThreadProjectionIfPresent } from "./threadProjectionReads.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
 import { formatRunFailureField, runFailureDetail } from "./runFailures.ts";
 import { lifecycleCommandId, lifecycleId } from "./spawnIds.ts";
-import { threadIdForParticipant } from "./SpawnedChildrenHttp.ts";
-import { SpawnWorkspaceService } from "./spawnWorkspace.ts";
 
 /**
  * A seat tells its Captain when it finishes: when a member's run ends and it owes no reply to
@@ -210,18 +207,6 @@ export const seatFinishedNoticeText = (input: {
     : `${head}\n\nRead it with read_artifact (path: ${input.handoff.path}).`;
 };
 
-/**
- * What a spawner hears when the Peer Agent it spawned into a worktree of its own never got one.
- * The agent stays registered, but it takes no turns until it has a worktree, so the spawner is
- * the one who has to act.
- */
-export const spawnWorkspaceFailedNoticeText = (input: {
-  readonly participantId: string;
-  readonly threadId: string;
-  readonly failure: OrchestrationV2ProviderFailure | null;
-}) =>
-  `<j5_spawn_workspace_failed>\nfailure: ${formatRunFailureField(input.failure)}\nparticipant_id: ${input.participantId}\nthread_id: ${input.threadId}\n</j5_spawn_workspace_failed>\n\nThe Peer Agent you spawned asked for its own worktree, and preparing it failed, so the agent has no workspace and takes no turns; messages to it are refused. Fix the cause, then spawn a fresh agent with a new client_request_id, or use workspace {"type":"shared"}.`;
-
 const makeLayer = (daemon: boolean) =>
   Layer.effect(
     CrewSeatFinishNotifier,
@@ -234,69 +219,6 @@ const makeLayer = (daemon: boolean) =>
       const workspace = yield* ArtifactWorkspace;
       const agents = yield* makeAgentPersonaLibrary;
       const sql = yield* SqlClient.SqlClient;
-      const spawnWorkspace = yield* SpawnWorkspaceService;
-
-      /**
-       * A Peer Agent outside a Crew whose worktree preparation failed tells its spawner, once per
-       * failed run. A Crew seat's Captain hears the same failure from the launch report or the
-       * seat's finish notice instead.
-       */
-      const notifySpawnerOfMissingWorktree = Effect.fn(
-        "j5.a2a.crewSeatFinish.notifySpawnerOfMissingWorktree",
-      )(
-        function* (threadId: ThreadId, run: OrchestrationV2Run) {
-          if (run.status !== "failed") return null;
-          const projection = yield* threads.getThreadProjection(threadId);
-          if (projection.thread.worktreePath !== null || projection.thread.archivedAt !== null)
-            return null;
-          if (!(yield* spawnWorkspace.askedForWorktree(threadId))) return null;
-          const participantId = participantIdForThread(threadId);
-          const spawnedBy = (yield* sql<{ readonly provenance_participant_id: string | null }>`
-          SELECT provenance_participant_id FROM j5_a2a_participant_placement
-          WHERE participant_id = ${participantId}
-            AND provenance_kind = 'spawned-by' AND provenance_source = 'j5_spawn'
-          LIMIT 1
-        `)[0]?.provenance_participant_id;
-          const spawnerThreadId =
-            spawnedBy === undefined || spawnedBy === null
-              ? null
-              : threadIdForParticipant(spawnedBy);
-          if (spawnerThreadId === null) return null;
-          const spawner = yield* getThreadProjectionIfPresent(threads, spawnerThreadId);
-          if (spawner === null || spawner.thread.archivedAt !== null) return null;
-          const stable = { providerSessionId: FINISH_SESSION, requestKey: `${threadId}:${run.id}` };
-          yield* threads.dispatch({
-            type: "message.dispatch",
-            createdBy: "system",
-            creationSource: "server",
-            commandId: lifecycleCommandId({ ...stable, operation: "spawn-workspace-failed" }),
-            threadId: spawnerThreadId,
-            messageId: MessageId.make(
-              lifecycleId({ ...stable, kind: "message", operation: "spawn-workspace-failed" }),
-            ),
-            text: spawnWorkspaceFailedNoticeText({
-              participantId,
-              threadId,
-              failure: runFailureDetail(projection, run.id),
-            }),
-            attachments: [],
-            modelSelection: spawner.thread.modelSelection,
-            dispatchMode: { type: "start_immediately" },
-          });
-          return threadId;
-        },
-        (notice, threadId) =>
-          // A courtesy notice never holds up the stream every Crew reaction shares: a spawner that
-          // can't be read or told is logged and skipped, since the turn guard refuses either way.
-          notice.pipe(
-            Effect.catchCause((cause) =>
-              Effect.logWarning("J5 spawn workspace failure notice skipped", {
-                threadId,
-                cause,
-              }).pipe(Effect.as(null)),
-            ),
-          ),
-      );
 
       const owedReplies = Effect.fn("j5.a2a.crewSeatFinish.owedReplies")(function* (
         participantId: string,
@@ -418,7 +340,7 @@ const makeLayer = (daemon: boolean) =>
       ) {
         const participantId = participantIdForThread(threadId);
         const membership = yield* crews.findMembership(participantId);
-        if (membership === null) return yield* notifySpawnerOfMissingWorktree(threadId, run);
+        if (membership === null) return null;
         const instance = yield* crews.read(membership.crewInstanceId);
         if (instance === null || instance.archivedAt !== null) return null;
         const projection = yield* threads.getThreadProjection(threadId);

@@ -12,6 +12,7 @@ import {
   type ThreadLaunchInput,
 } from "../../../orchestration-v2/ThreadLaunchService.ts";
 import { ProjectService } from "../../../project/ProjectService.ts";
+import * as WorktreeSetupTracker from "../../../project/WorktreeSetupTracker.ts";
 import { layerFromReceiptStore } from "../spawnWorkspace.ts";
 
 export interface FakeCheckout {
@@ -76,6 +77,7 @@ export const fakeSpawnWorkspaceLayer = (options: {
   return layerFromReceiptStore.pipe(
     Layer.provide(
       Layer.mergeAll(
+        WorktreeSetupTracker.layer,
         Layer.mock(ProjectService)({
           getById: (id) =>
             Effect.succeed(

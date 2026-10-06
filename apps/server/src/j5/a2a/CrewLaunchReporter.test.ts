@@ -53,12 +53,6 @@ import { participantIdForThread } from "./HomeRegistrar.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import { ParticipantId, SquadronId } from "./contracts.ts";
-import { SpawnWorkspaceService } from "./spawnWorkspace.ts";
-
-/** None of these threads was spawned for a worktree of its own. */
-const notSpawnedForWorktree = Layer.mock(SpawnWorkspaceService)({
-  askedForWorktree: () => Effect.succeed(false),
-});
 
 const squadronId = SquadronId.make("squadron:launch-report");
 const captainThread = ThreadId.make("thread:captain");
@@ -129,12 +123,7 @@ const runEvent = (threadId: ThreadId, facts: RunFacts): OrchestrationV2StoredEve
     },
   }) as unknown as OrchestrationV2StoredEvent;
 
-const seat = (name: string, agentId: string) => ({
-  workspace: { type: "shared" as const },
-  seat: name,
-  agentId,
-  reason: `${name} works`,
-});
+const seat = (name: string, agentId: string) => ({ seat: name, agentId, reason: `${name} works` });
 
 /**
  * With `daemon`, the production layer runs its sweep and stream against these reads. With
@@ -426,7 +415,6 @@ it.effect(
 const reseated = (name: string) => {
   const threadId = ThreadId.make(`thread:reseated:${name}`);
   return {
-    workspace: { type: "shared" as const },
     seatName: name,
     agentId: "scout",
     participantId: participantIdForThread(threadId),
@@ -611,6 +599,14 @@ it.effect("posts one report once every seat has started or failed, with the run'
         userMessageId: brief("prosecutor"),
       });
       assert.isNull(yield* reporter.handleStoredEvent(queued));
+      // Nor is a first turn held as `preparing` while its worktree is being made: the seat is
+      // reported only once its agent is doing provider work.
+      const preparing = runEvent(crewSeatThreadId(id, "prosecutor"), {
+        status: "preparing",
+        userMessageId: brief("prosecutor"),
+      });
+      assert.isNull(yield* reporter.handleStoredEvent(preparing));
+      assert.deepStrictEqual(yield* reports(), []);
       const punchlineRun = {
         id: RunId.make(`run:${crewSeatThreadId(id, "punchline")}:0`),
         threadId: crewSeatThreadId(id, "punchline"),
@@ -891,7 +887,6 @@ it.effect(
       yield* setSeat(id, "first", [facts]);
       const event = runEvent(threadId, facts);
       const integrated = notifierLayer.pipe(
-        Layer.provideMerge(notSpawnedForWorktree),
         Layer.provideMerge(layer),
         Layer.provideMerge(Layer.mock(CrewCaptainArchiveCascade)({})),
         Layer.provideMerge(Layer.mock(ArtifactWorkspace)({})),
