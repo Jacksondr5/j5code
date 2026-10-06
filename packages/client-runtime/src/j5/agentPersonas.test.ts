@@ -899,6 +899,13 @@ describe("a policy this app does not know", () => {
       ["thread-known", "read-only"],
       ["thread-future", invented],
     ]);
+    expect(
+      shell.threads.map(({ agentPersonaAssignment }) =>
+        agentPersonaAssignment
+          ? presentAgentPersonaAssignment(agentPersonaAssignment).personaLabel
+          : null,
+      ),
+    ).toEqual(["Scout", `Scout · ${invented} (unsupported)`]);
   });
 
   it("refuses to duplicate a definition into a policy the editor cannot offer", () => {

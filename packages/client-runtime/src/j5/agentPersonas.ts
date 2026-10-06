@@ -89,8 +89,9 @@ export function presentAgentPersonaAssignment(
   const name =
     assignment.displayName ??
     `${assignment.personaId[0]?.toUpperCase()}${assignment.personaId.slice(1)}`;
-  const mode =
-    assignment.authorityPolicy === "critic-fix"
+  const mode = !isAgentPersonaAuthorityPolicy(assignment.authorityPolicy)
+    ? ` · ${authorityLabel(assignment.authorityPolicy)}`
+    : assignment.authorityPolicy === "critic-fix"
       ? " · Fix"
       : assignment.personaId === "critic"
         ? " · Review"
