@@ -23,16 +23,8 @@ export function suggestPlaybookName(text: string): string | null {
 
 export const J5_PLAYBOOK_WS_METHODS = {
   subscribeChanges: "j5.playbooks.subscribeChanges",
+  exportPlaybook: "j5.playbooks.export",
 } as const;
-
-export const J5PlaybookRpcGroup = RpcGroup.make(
-  Rpc.make(J5_PLAYBOOK_WS_METHODS.subscribeChanges, {
-    payload: Schema.Struct({}),
-    success: Schema.Int,
-    error: EnvironmentAuthorizationError,
-    stream: true,
-  }),
-);
 
 const Text = Schema.String.check(Schema.isPattern(/\S/));
 /** `persona` names the library persona a step wants; a missing or disabled one is a warning. */
@@ -175,3 +167,24 @@ export const PlaybookRenameRequest = Schema.Struct({
 export type PlaybookRenameRequest = typeof PlaybookRenameRequest.Type;
 export const PlaybookRenameResponse = Schema.Struct({ renamed: Schema.Boolean });
 export const PLAYBOOK_RENAME_PATH = "/api/j5/playbooks/rename";
+export const PlaybookExportRequest = Schema.Struct({
+  ...PlaybookLibraryRequest.fields,
+  name: Text,
+});
+export type PlaybookExportRequest = typeof PlaybookExportRequest.Type;
+export const PlaybookExportResponse = Schema.Struct({ fileName: Text, yaml: Schema.String });
+export type PlaybookExportResponse = typeof PlaybookExportResponse.Type;
+
+export const J5PlaybookRpcGroup = RpcGroup.make(
+  Rpc.make(J5_PLAYBOOK_WS_METHODS.subscribeChanges, {
+    payload: Schema.Struct({}),
+    success: Schema.Int,
+    error: EnvironmentAuthorizationError,
+    stream: true,
+  }),
+  Rpc.make(J5_PLAYBOOK_WS_METHODS.exportPlaybook, {
+    payload: PlaybookExportRequest,
+    success: PlaybookExportResponse,
+    error: Schema.Union([PlaybookError, EnvironmentAuthorizationError]),
+  }),
+);

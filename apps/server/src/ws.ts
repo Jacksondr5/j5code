@@ -1766,7 +1766,11 @@ const makeWsRpcLayer = (
             Effect.mapError((cause) => new SkillLinkError({ message: String(cause) })),
           ),
       });
-      const playbookRpcHandlers = makePlaybookRpcHandlers(yield* PlaybookStore, observeRpcStream);
+      const playbookRpcHandlers = yield* makePlaybookRpcHandlers({
+        store: yield* PlaybookStore,
+        observeStream: observeRpcStream,
+        observe: observeRpcEffect,
+      });
       const handlers = ServerWsRpcGroup.of({
         [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command) =>
           observeRpcEffect(
