@@ -240,8 +240,8 @@ export interface CrewLaunchServiceShape {
   /** Spawn approved additional seats under the Captain of an existing Crew, the same way. */
   readonly addSeats: (input: CrewAddSeatsInput) => Effect.Effect<CrewLaunchResult, CrewLaunchError>;
   /**
-   * What the roster card can offer a seat's workspace: the Captain's branch, the first page of
-   * local branches, and the project's worktrees. An unreadable repository offers none.
+   * What the roster card can offer a seat's workspace: the Captain's branch, the directory
+   * its base-branch picker searches, and the project's worktrees. An unreadable repository offers none.
    */
   readonly workspaceOptions: (captain: CrewCaptain) => Effect.Effect<CrewWorkspaceOptions>;
 }
