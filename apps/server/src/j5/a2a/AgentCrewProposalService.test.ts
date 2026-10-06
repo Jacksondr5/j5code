@@ -2,6 +2,7 @@ import { assert, it } from "@effect/vitest";
 import { ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import { AgentCrewInstanceService, layer as crewLayer } from "./AgentCrewInstanceService.ts";
@@ -177,6 +178,40 @@ it.effect("a proposal resolves once: the second resolution finds it closed", () 
     assert.deepStrictEqual(
       yield* proposals.admit(addition("proposal:next", crewId, ["q"]), { maxSeats: 1 }),
       { status: "cap-exceeded", held: 1, adding: 1 },
+    );
+  }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("a stored seat workspace this version can't read costs that seat its workspace", () =>
+  Effect.gen(function* () {
+    yield* runJ5A2AMigrations();
+    yield* (yield* A2ALedger).createSquadron({
+      squadron: { id: squadronId, name: "Proposal Squadron", createdAt },
+    });
+    const proposals = yield* AgentCrewProposalService;
+    yield* proposals.create({
+      ...addition("proposal:stored", "crew:stored", ["a", "b"]),
+      kind: "roster",
+      crewInstanceId: null,
+    });
+    // Written by another version: a new worktree with no base, and a type this one doesn't know.
+    const sql = yield* SqlClient.SqlClient;
+    const stored = `[
+      {"seat":"a","agentId":"scout","reason":"Holds a seat","workspace":{"type":"worktree"}},
+      {"seat":"b","agentId":"scout","reason":"Holds a seat","workspace":{"type":"sandbox"}},
+      {"seat":"c","agentId":"scout","reason":"Holds a seat","workspace":{"type":"shared"}}
+    ]`;
+    yield* sql`UPDATE j5_agent_crew_proposal SET requested_seats = ${stored} WHERE id = 'proposal:stored'`;
+    const open = yield* proposals.listOpen();
+    assert.deepStrictEqual(
+      open.map((proposal) => proposal.requestedSeats.map((seat) => [seat.seat, seat.workspace])),
+      [
+        [
+          ["a", undefined],
+          ["b", undefined],
+          ["c", { type: "shared" }],
+        ],
+      ],
     );
   }).pipe(Effect.provide(testLayer)),
 );

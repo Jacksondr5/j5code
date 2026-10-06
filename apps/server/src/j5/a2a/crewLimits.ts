@@ -51,15 +51,16 @@ export const crewSeatShapeProblem = (seat: {
       field: "instructions",
       detail: `Seat instructions are 1 to ${CREW_TEXT_MAX_CHARS} characters.`,
     };
-  // A custom seat has no definition behind it, so its instructions are all it runs on; the card
-  // requires them and so does every other door.
-  // Every seat names where it works; only a seat recorded before that was required lacks it.
+  // Every seat names where it works; only a seat stored without a workspace this version can read
+  // lacks it.
   if (seat.workspace === undefined)
     return {
       field: "workspace",
       detail:
         "A seat needs a workspace: the Captain's checkout, a new worktree, or an existing worktree.",
     };
+  // A custom seat has no definition behind it, so its instructions are all it runs on; the card
+  // requires them and so does every other door.
   if (seat.agentId === null && seat.instructions === undefined)
     return {
       field: "instructions",

@@ -35,9 +35,13 @@ export const CrewProposalSeat = Schema.Struct({
   ),
   /**
    * Where the seat works, as the Captain or the person chose it. Required at every door that
-   * files or approves a seat; absent only on seats recorded before it was, which stay readable.
+   * files or approves a seat. A stored one this version can't read, such as one written by another
+   * version, reads as none: the seat stays listed and is refused at preview until one is chosen,
+   * rather than one seat failing every read of the table.
    */
-  workspace: Schema.optionalKey(SpawnWorkspaceChoice),
+  workspace: Schema.optionalKey(
+    SpawnWorkspaceChoice.pipe(Schema.catchDecoding(() => Effect.succeedNone)),
+  ),
   /** Recomputed by the server whenever the seats are validated; never taken from a client. */
   personaSwaps: Schema.optionalKey(Schema.Array(CrewPersonaSwap)),
 });
