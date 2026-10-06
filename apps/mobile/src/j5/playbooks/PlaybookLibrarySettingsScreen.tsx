@@ -14,6 +14,7 @@ import { Alert, Platform, Pressable, Share, View } from "react-native";
 import { AppText as Text, AppTextInput as TextInput } from "../../components/AppText";
 import { ControlPillMenu } from "../../components/ControlPill";
 import { makeTurnCommandMetadata } from "../../lib/commandMetadata";
+import { beginForegroundHandoff } from "../../lib/foreground-handoff";
 import { useServerConfigs } from "../../state/entities";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -228,7 +229,13 @@ export const PlaybookLibrarySettingsSection = memo(function PlaybookLibrarySetti
         ]);
         const uri = `${FileSystem.cacheDirectory ?? ""}${encodeURIComponent(fileName)}`;
         await FileSystem.writeAsStringAsync(uri, yaml);
-        await Sharing.shareAsync(uri, { mimeType: "application/yaml", dialogTitle: fileName });
+        // The share sheet can background the app; keep a pending update from reloading it.
+        const endHandoff = beginForegroundHandoff();
+        try {
+          await Sharing.shareAsync(uri, { mimeType: "application/yaml", dialogTitle: fileName });
+        } finally {
+          endHandoff();
+        }
       }
     } catch (cause) {
       Alert.alert(

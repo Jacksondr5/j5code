@@ -157,8 +157,9 @@ export const makePlaybookStore = Effect.gen(function* () {
   const permit = yield* Semaphore.make(1);
   const now = DateTime.now.pipe(Effect.map(DateTime.formatIso));
 
+  /** `unreadable` replaces the default read-failure message, which names the file's absolute path. */
   const readDefinitionDocument = Effect.fn("PlaybookStore.readDefinitionDocument")(
-    function* (definitionPath: string) {
+    function* (definitionPath: string, _unreadable?: string) {
       const root = path.resolve(definitionPath, "../../..");
       const realRoot = yield* fs.realPath(root);
       const realFile = yield* fs.realPath(definitionPath);
@@ -194,14 +195,16 @@ export const makePlaybookStore = Effect.gen(function* () {
       }
       return { definition, document, text };
     },
-    Effect.mapError((error) =>
-      isPlaybookError(error)
-        ? error
-        : playbookError(
-            "invalid_definition",
-            `Cannot read the live playbook. Restore or fix its YAML and retry; cancellation remains available. ${error instanceof Error ? error.message : String(error)}`,
-          ),
-    ),
+    (effect, _definitionPath: string, unreadable?: string) =>
+      Effect.mapError(effect, (error) =>
+        isPlaybookError(error)
+          ? error
+          : playbookError(
+              "invalid_definition",
+              unreadable ??
+                `Cannot read the live playbook. Restore or fix its YAML and retry; cancellation remains available. ${error instanceof Error ? error.message : String(error)}`,
+            ),
+      ),
   );
   const readDefinition = Effect.fn("PlaybookStore.readDefinition")(function* (
     definitionPath: string,
@@ -460,8 +463,11 @@ export const makePlaybookStore = Effect.gen(function* () {
     const filename = path.resolve(workspaceRoot, ".j5/playbooks", `${name}.yaml`);
     if (!(yield* fs.exists(filename)))
       return yield* playbookError("not_found", "This playbook no longer exists.");
-    // Export the validated source bytes: re-rendering can grow the file past the import limit.
-    const { text } = yield* readDefinitionDocument(filename);
+    // Export the validated source text (less any BOM): re-rendering can grow the file past the import limit.
+    const { text } = yield* readDefinitionDocument(
+      filename,
+      "Cannot read this playbook. Fix its YAML in the library and retry.",
+    );
     return { fileName: `${name}.yaml`, yaml: text };
   }, Effect.mapError(storageError));
 

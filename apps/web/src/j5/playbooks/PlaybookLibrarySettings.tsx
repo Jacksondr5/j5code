@@ -303,7 +303,8 @@ export function PlaybookLibrarySettings() {
       anchor.href = url;
       anchor.download = fileName;
       anchor.click();
-      URL.revokeObjectURL(url);
+      // Revoking synchronously can abort the download in some browsers.
+      setTimeout(() => URL.revokeObjectURL(url), 30_000);
       toastManager.add({ type: "success", title: `Exported ${fileName}` });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not export playbook.");

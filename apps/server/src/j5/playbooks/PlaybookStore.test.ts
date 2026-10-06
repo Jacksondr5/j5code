@@ -1080,6 +1080,17 @@ it.effect("rejects exports of missing, misnamed, and invalid definitions", () =>
   }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
 );
 
+it.effect("keeps the workspace path out of export read failures", () =>
+  Effect.gen(function* () {
+    const { fs, store, workspaceRoot, filename } = yield* makeFixture;
+    yield* fs.writeFileString(filename("broken"), "title: [broken");
+    const error = yield* store.exportDefinition(workspaceRoot, "broken").pipe(Effect.flip);
+    assert.equal((error as { code?: string }).code, "invalid_definition");
+    assert.notInclude(error.message, workspaceRoot);
+    assert.notInclude(error.message, "cancellation");
+  }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
+);
+
 it.effect("exports a near-limit definition byte-for-byte so it stays importable", () =>
   Effect.gen(function* () {
     const { fs, store, workspaceRoot, filename } = yield* makeFixture;
