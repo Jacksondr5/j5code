@@ -1,4 +1,6 @@
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
+import * as Struct from "effect/Struct";
 export * from "./j5/playbook.ts";
 
 import { ModelSelection } from "./modelSelection.ts";
@@ -158,6 +160,15 @@ export const CrewSeatWorkspace = Schema.Union([
 ]);
 export type CrewSeatWorkspace = typeof CrewSeatWorkspace.Type;
 
+/**
+ * A seat's workspace as it is read. One this version can't decode, such as a type from a newer
+ * server, reads as absent: it costs that seat its workspace, never the whole proposal list. The
+ * server refuses a seat without a workspace, so nothing launches on a guess.
+ */
+const CrewSeatWorkspaceField = Schema.optionalKey(
+  CrewSeatWorkspace.pipe(Schema.catchDecoding(() => Effect.succeedNone)),
+);
+
 /** What the roster card offers when a seat's workspace is edited, read from the Captain's repo. */
 export const CrewWorkspaceOptions = Schema.Struct({
   /** The branch checked out where the Captain works, to prefill a new worktree's base. */
@@ -187,14 +198,22 @@ export const CrewProposalSeat = Schema.Struct({
   /** Ids of the playbook steps this seat owns; only on a Crew that follows a playbook. */
   steps: Schema.optionalKey(Schema.Array(Schema.String)),
   /**
-   * Every seat proposed now names one; only seats recorded before workspaces were required lack
-   * it, and the server refuses to launch those until one is chosen.
+   * Every seat proposed now names one; only seats recorded before workspaces were required, or
+   * with one this version can't read, lack it, and the server refuses those until one is chosen.
    */
-  workspace: Schema.optionalKey(CrewSeatWorkspace),
+  workspace: CrewSeatWorkspaceField,
   /** Computed by the server at propose and approve; a client's value is ignored. */
   personaSwaps: Schema.optionalKey(Schema.Array(CrewPersonaSwap)),
 });
 export type CrewProposalSeat = typeof CrewProposalSeat.Type;
+
+/**
+ * A seat the human's card submits for preview or approval. Its workspace is decoded strictly: the
+ * lenient read above is for what a client shows, not what it asks the server to launch.
+ */
+const CrewProposalSeatRequest = CrewProposalSeat.mapFields(
+  Struct.assign({ workspace: Schema.optionalKey(CrewSeatWorkspace) }),
+);
 
 /** The playbook a proposal follows, read live from its YAML; `issue` says why it cannot be read. */
 export const CrewProposalPlaybook = Schema.Struct({
@@ -243,14 +262,16 @@ export const CrewProposalSeatRuntime = Schema.Struct({
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
   /** Always sent by a current server; absent only from servers that predate seat workspaces. */
-  workspace: Schema.optionalKey(CrewSeatWorkspace),
+  workspace: CrewSeatWorkspaceField,
   /** The seat's persona swaps as the edited roster would record them. */
   personaSwaps: Schema.optionalKey(Schema.Array(CrewPersonaSwap)),
 });
 export type CrewProposalSeatRuntime = typeof CrewProposalSeatRuntime.Type;
 export const CrewProposalPreviewRequest = Schema.Struct({
   proposalId: Schema.String,
-  seats: Schema.optional(Schema.Array(CrewProposalSeat).check(Schema.isMaxLength(CREW_SEAT_CAP))),
+  seats: Schema.optional(
+    Schema.Array(CrewProposalSeatRequest).check(Schema.isMaxLength(CREW_SEAT_CAP)),
+  ),
 });
 export type CrewProposalPreviewRequest = typeof CrewProposalPreviewRequest.Type;
 export const CrewProposalPreviewResponse = Schema.Struct({
@@ -258,10 +279,13 @@ export const CrewProposalPreviewResponse = Schema.Struct({
   approvalToken: Schema.String,
   seats: Schema.Array(CrewProposalSeatRuntime),
   /**
-   * Always sent by a current server; absent only from one that predates seat workspaces, where the
-   * card shows the seats without the workspace control.
+   * Always sent by a current server; absent from one that predates seat workspaces, or read as
+   * absent when this version can't decode it, and then the card shows the seats without the
+   * workspace control.
    */
-  workspaceOptions: Schema.optionalKey(CrewWorkspaceOptions),
+  workspaceOptions: Schema.optionalKey(
+    CrewWorkspaceOptions.pipe(Schema.catchDecoding(() => Effect.succeedNone)),
+  ),
   /** The plan the approval token binds: the live playbook and the steps no seat owns. */
   playbook: Schema.optionalKey(Schema.NullOr(CrewProposalPlaybook)),
   unownedSteps: Schema.optionalKey(Schema.Array(Schema.String)),
@@ -273,7 +297,9 @@ export const CrewProposalResolveRequest = Schema.Union([
     proposalId: Schema.String,
     decision: Schema.Literal("approve"),
     approvalToken: Schema.String,
-    seats: Schema.optional(Schema.Array(CrewProposalSeat).check(Schema.isMaxLength(CREW_SEAT_CAP))),
+    seats: Schema.optional(
+      Schema.Array(CrewProposalSeatRequest).check(Schema.isMaxLength(CREW_SEAT_CAP)),
+    ),
   }),
   Schema.Struct({
     proposalId: Schema.String,
