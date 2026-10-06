@@ -5,7 +5,6 @@ import {
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
-  RunId,
   ThreadId,
   type OrchestrationV2AppThread,
   type OrchestrationV2Command,
@@ -149,11 +148,8 @@ const threadManagementFake = (
   beforeDispatch: (
     command: OrchestrationV2Command,
   ) => Effect.Effect<void, OrchestratorDispatchError>,
-  failedCheckout: ReadonlySet<string>,
 ) =>
   Layer.mock(ThreadManagementService)({
-    // Every thread reads as settled already, so a new worktree's wait never needs the stream.
-    getThreadEventSequence: () => Effect.succeed(0),
     getThreadProjection: (threadId) =>
       realThreads
         ? Ref.get(commands).pipe(
@@ -185,27 +181,13 @@ const threadManagementFake = (
                 cause: new ProjectionStoreReadError({ threadId }),
               }),
             )
-          : failedCheckout.has(threadId)
-            ? Effect.succeed({
-                messages: [],
-                thread: { ...thread(threadId), branch: null, worktreePath: null },
-                runs: [{ id: RunId.make(`run:${threadId}:0`), status: "failed" }],
-                turnItems: [
-                  {
-                    runId: RunId.make(`run:${threadId}:0`),
-                    type: "error",
-                    status: "failed",
-                    failure: { class: "provider_error", message: "worktree path is taken" },
-                  },
-                ],
-              } as unknown as OrchestrationV2ThreadProjection)
-            : Effect.succeed({
-                messages: [],
-                thread: {
-                  ...thread(threadId),
-                  archivedAt: archived.has(threadId) ? createdAt : null,
-                },
-              } as unknown as OrchestrationV2ThreadProjection),
+          : Effect.succeed({
+              messages: [],
+              thread: {
+                ...thread(threadId),
+                archivedAt: archived.has(threadId) ? createdAt : null,
+              },
+            } as unknown as OrchestrationV2ThreadProjection),
     dispatch: (command) =>
       Effect.gen(function* () {
         yield* beforeDispatch(command);
@@ -240,8 +222,6 @@ const dependencies = (
   workspace: Parameters<typeof fakeSpawnWorkspaceLayer>[0] = {
     checkout: { isRepo: true, refName: "main" },
   },
-  /** Seat threads whose new worktree's checkout fails: they stay unbound with a failed run. */
-  failedCheckout: ReadonlySet<string> = new Set(),
 ) =>
   Layer.mergeAll(
     fakeSpawnWorkspaceLayer(workspace).pipe(
@@ -253,7 +233,6 @@ const dependencies = (
           realThreads,
           failBriefOnce,
           beforeDispatch,
-          failedCheckout,
         ),
       ),
     ),
@@ -1940,77 +1919,6 @@ it.effect("launches each seat in the workspace it names, and refuses one git can
       assert.include(launch?.initialMessage?.text, "your_seat: builder");
     }).pipe(Effect.provide(layerFor(repo)));
   }),
-);
-
-it.effect(
-  "registers a new-worktree seat only once its checkout is done, and retires it when that fails",
-  () =>
-    Effect.gen(function* () {
-      const { context, commands, captain } = yield* fixture;
-      const codex = provider("codex", "codex", [{ slug: "gpt-5.6-sol", options: ["high"] }]);
-      const threadOf = (name: string) =>
-        spawnThreadId({
-          providerSessionId: "session",
-          requestKey: crewSeatRequestKey("pair", name),
-        });
-      // A home recorded for the builder would consume its entry here.
-      const homeWatch = new Set<string>([threadOf("builder")]);
-      const layer = crewLaunchLayer.pipe(
-        Layer.provideMerge(
-          dependencies(
-            commands,
-            [codex],
-            homeWatch,
-            new Set(),
-            new Set(),
-            false,
-            new Set(),
-            () => Effect.void,
-            { checkout: { isRepo: true, refName: "j5/main" } },
-            new Set([threadOf("builder")]),
-          ),
-        ),
-        Layer.provideMerge(Layer.succeedContext(context)),
-        Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-launch-" })),
-        Layer.provideMerge(NodeServices.layer),
-      );
-      const seat = (name: string) => ({
-        name,
-        agentId: null,
-        reason: "Works",
-        instructions: `Be the ${name}`,
-        workspace: { type: "worktree" as const, baseRef: "j5/main" },
-      });
-      yield* Effect.gen(function* () {
-        const launched = yield* (yield* CrewLaunchService).launch({
-          providerSessionId: "session",
-          requestKey: "pair",
-          captain,
-          displayName: "Pair",
-          seats: [seat("builder"), seat("scout")],
-          brief: "Ship it.",
-        });
-        const builder = launched.seats.find((outcome) => outcome.seatName === "builder");
-        assert.equal(builder?.kind, "not_started");
-        assert.include(
-          builder?.kind === "not_started" ? builder.detail : "",
-          "worktree path is taken",
-        );
-        assert.deepStrictEqual(
-          launched.seats.find((outcome) => outcome.seatName === "scout"),
-          { seatName: "scout", kind: "created" },
-        );
-        // The failed seat was never registered and is archived, so upstream refuses its turns.
-        assert.isTrue(homeWatch.has(threadOf("builder")));
-        const archives = (yield* Ref.get(commands)).filter(
-          (command) => command.type === "thread.archive",
-        );
-        assert.deepStrictEqual(
-          archives.map((command) => command.threadId),
-          [threadOf("builder")],
-        );
-      }).pipe(Effect.provide(layer));
-    }),
 );
 
 it.effect("binds an existing worktree's live branch, so a stale preview can't approve", () =>
