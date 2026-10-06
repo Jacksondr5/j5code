@@ -10,10 +10,11 @@ import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime"
 import { CommandId, MessageId, ThreadId } from "@t3tools/contracts";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { memo, useCallback, useMemo, useRef, useState } from "react";
-import { Alert, Pressable, View } from "react-native";
+import { Alert, Platform, Pressable, Share, View } from "react-native";
 import { AppText as Text, AppTextInput as TextInput } from "../../components/AppText";
 import { ControlPillMenu } from "../../components/ControlPill";
 import { makeTurnCommandMetadata } from "../../lib/commandMetadata";
+import { beginForegroundHandoff } from "../../lib/foreground-handoff";
 import { useServerConfigs } from "../../state/entities";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -37,6 +38,7 @@ export const PlaybookLibrarySettingsSection = memo(function PlaybookLibrarySetti
   const [deleting, setDeleting] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [renameTarget, setRenameTarget] = useState<{ name: string; title: string } | null>(null);
   const workspace = workspaces.find((entry) => entry.key === workspaceKey) ?? workspaces[0];
   const squadronQuery = useEnvironmentQuery(
@@ -78,6 +80,7 @@ export const PlaybookLibrarySettingsSection = memo(function PlaybookLibrarySetti
   );
   const { refresh } = query;
   const deletePlaybook = useAtomCommand(j5Environment.deletePlaybook, { reportFailure: false });
+  const exportPlaybook = useAtomCommand(j5Environment.exportPlaybook, { reportFailure: false });
   const renamePlaybook = useAtomCommand(j5Environment.renamePlaybook, { reportFailure: false });
   const serverConfigs = useServerConfigs();
   const readCatalog = useAtomQueryRunner(agentPersonaEnvironment.catalog, {
@@ -202,6 +205,47 @@ export const PlaybookLibrarySettingsSection = memo(function PlaybookLibrarySetti
       },
     ]);
   }
+  /** Native platforms share a real .yaml file; the web build falls back to sharing the text. */
+  async function sharePlaybook(name: string) {
+    if (!workspace || exporting) return;
+    setExporting(true);
+    try {
+      const result = await exportPlaybook({
+        environmentId: workspace.environmentId,
+        input: {
+          projectId: workspace.projectId,
+          ...(workspace.threadId ? { threadId: workspace.threadId } : {}),
+          name,
+        },
+      });
+      if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+      const { fileName, yaml } = result.value;
+      if (Platform.OS === "web") {
+        await Share.share({ title: fileName, message: yaml });
+      } else {
+        const [FileSystem, Sharing] = await Promise.all([
+          import("expo-file-system/legacy"),
+          import("expo-sharing"),
+        ]);
+        const uri = `${FileSystem.cacheDirectory ?? ""}${encodeURIComponent(fileName)}`;
+        await FileSystem.writeAsStringAsync(uri, yaml);
+        // The share sheet can background the app; keep a pending update from reloading it.
+        const endHandoff = beginForegroundHandoff();
+        try {
+          await Sharing.shareAsync(uri, { mimeType: "application/yaml", dialogTitle: fileName });
+        } finally {
+          endHandoff();
+        }
+      }
+    } catch (cause) {
+      Alert.alert(
+        "Could not export playbook",
+        cause instanceof Error ? cause.message : "Try again.",
+      );
+    } finally {
+      setExporting(false);
+    }
+  }
   async function submitRename() {
     if (!workspace || !renameTarget || renaming) return;
     const title = renameTarget.title.trim();
@@ -234,7 +278,8 @@ export const PlaybookLibrarySettingsSection = memo(function PlaybookLibrarySetti
       setRenaming(false);
     }
   }
-  const disabled = !workspace || !query.data || !!query.error || deleting || renaming || creating;
+  const disabled =
+    !workspace || !query.data || !!query.error || deleting || renaming || creating || exporting;
   return (
     <View className="gap-4 p-4">
       <Text className="text-sm text-muted-foreground">
@@ -394,6 +439,15 @@ export const PlaybookLibrarySettingsSection = memo(function PlaybookLibrarySetti
               ))}
             </>
           )}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Export ${playbook.name} playbook as YAML`}
+            disabled={disabled || !!playbook.issue}
+            onPress={() => void sharePlaybook(playbook.name)}
+            className="self-start rounded-lg border border-border px-3 py-2 disabled:opacity-40"
+          >
+            <Text className="text-foreground">Export YAML</Text>
+          </Pressable>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`Rename ${playbook.name} playbook`}

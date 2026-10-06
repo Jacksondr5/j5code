@@ -19,6 +19,9 @@ Importing a file with an existing name asks before replacing it. Changes also ap
 using that definition. An active run must be completed or cancelled before its
 definition can be deleted; completed run history remains.
 
+**Export YAML** downloads `<name>.yaml` on web and desktop and shares the YAML from mobile.
+Web and desktop can import it back into another workspace or environment.
+
 On web and desktop, open **Fleet** and use its **Playbook runs** section to follow
 runs across your connected environments. The overview shows
 each run's owner thread, agent activity, and current step. Select a run to open

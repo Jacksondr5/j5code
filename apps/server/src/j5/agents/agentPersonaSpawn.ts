@@ -1,5 +1,4 @@
 import type {
-  ModelSelection,
   OrchestrationV2AgentPersonaAssignment,
   ProviderInstanceId,
   ServerProvider,
@@ -9,7 +8,7 @@ import * as Effect from "effect/Effect";
 import { buildAgentPersonaAssignment } from "./agentPersonaAssignment.ts";
 import { AgentPersonaLibraryError, type createAgentPersonaLibrary } from "./agentPersonaLibrary.ts";
 import {
-  agentPersonaReasoningOptionId,
+  agentPersonaModelSelection,
   agentPersonaTargetUnavailableReason,
 } from "./agentPersonaRouting.ts";
 import type { AgentModelTarget, AgentPersonaId } from "./agentPersonas.ts";
@@ -78,11 +77,7 @@ export const prepareAgentPersonaPeerSpawn = Effect.fn("j5.prepareAgentPersonaPee
       message: `Agent ${request.personaId} route ${describeTarget(target)} is unavailable on provider ${request.instanceId}: ${unavailable}.`,
     });
   }
-  const modelSelection: ModelSelection = {
-    instanceId: request.instanceId,
-    model: target.model,
-    options: [{ id: agentPersonaReasoningOptionId(target.driver), value: target.reasoningEffort }],
-  };
+  const modelSelection = agentPersonaModelSelection(provider, target);
   const result = buildAgentPersonaAssignment({
     definition,
     resolution: {

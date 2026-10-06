@@ -2,6 +2,7 @@ import { useAtomValue } from "@effect/atom-react";
 import {
   agentPersonaIdError,
   agentPersonaIdFromName,
+  agentPersonaPolicyDrivers,
   defaultAgentPersonaModelRoute,
   type AgentPersonaCreateDraft,
 } from "@t3tools/client-runtime/j5/agent-personas";
@@ -16,6 +17,7 @@ import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, View } fr
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { AppText as Text, AppTextInput as TextInput } from "../../components/AppText";
+import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { AgentRoutePolicyFields } from "./AgentDefinitionFields";
@@ -30,7 +32,14 @@ export function AgentCreateModal(props: {
   onCreated: (displayName: string) => void;
 }) {
   const providers = useAtomValue(serverEnvironment.providersValueAtom(props.environmentId));
-  const defaultRoute = defaultAgentPersonaModelRoute(providers ?? []);
+  const catalog = useEnvironmentQuery(
+    agentPersonaEnvironment.catalog({ environmentId: props.environmentId, input: {} }),
+  );
+  // New personas start on read-only, so prefer a provider that sandboxes it.
+  const defaultRoute = defaultAgentPersonaModelRoute(
+    providers ?? [],
+    agentPersonaPolicyDrivers(catalog.data, "read-only"),
+  );
   const [draft, setDraft] = useState<{
     displayName: string;
     id: string;

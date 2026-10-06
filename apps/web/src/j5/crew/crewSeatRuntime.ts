@@ -5,6 +5,7 @@ import type {
   ServerProvider,
   ServerProviderModel,
 } from "@t3tools/contracts";
+import { isAgentPersonaReasoningOptionId } from "@t3tools/contracts";
 import type {
   CrewProposalSeat,
   CrewProposalSeatRuntime,
@@ -174,9 +175,7 @@ export const chooseCrewHarness = (
 export const crewReasoningDescriptor = (
   model: ServerProviderModel | undefined,
 ): ProviderOptionDescriptor | undefined =>
-  model?.capabilities?.optionDescriptors?.find(({ id }) =>
-    ["reasoningEffort", "effort", "variant", "thinking"].includes(id),
-  );
+  model?.capabilities?.optionDescriptors?.find(({ id }) => isAgentPersonaReasoningOptionId(id));
 
 export const setCrewReasoning = (
   selection: ModelSelection,

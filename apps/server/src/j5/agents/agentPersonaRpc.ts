@@ -18,6 +18,7 @@ import { definitionDigest, makeAgentPersonaLibrary } from "./agentPersonaLibrary
 import { AgentHandoffRefreshes, agentHandoffRefreshChanges } from "./agentHandoffRefreshes.ts";
 import { makeAgentHandoffStore } from "./agentHandoffStore.ts";
 import { agentPersonaFolderGitStatus } from "./agentPersonaLibraryGit.ts";
+import { agentPersonaPolicyEnforcement } from "./agentPersonaProviderPolicy.ts";
 import { buildAgentPersonaCatalog } from "./agentPersonaRouting.ts";
 import { agentPersonaUsage } from "./agentPersonaUsage.ts";
 
@@ -141,6 +142,7 @@ export const makeAgentPersonaRpcHandlers = Effect.fn("j5.makeAgentPersonaRpcHand
                   availability: { status: "unavailable" as const, reason: "removed" as const },
                 })),
               ],
+              policyEnforcement: agentPersonaPolicyEnforcement(),
             };
           }),
           TRACE,

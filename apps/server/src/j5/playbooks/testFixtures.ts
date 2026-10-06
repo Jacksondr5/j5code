@@ -1,3 +1,4 @@
+import { ProviderDriverKind } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -36,8 +37,12 @@ export const seedPersonas = Effect.fn(function* (
       instructions: `You are ${id}.`,
       authorityPolicy: "read-only",
       modelRoute: [
-        { driver: "codex", model: "gpt-5.5", reasoningEffort: "high" },
-        { driver: "claudeAgent", model: "claude-opus-5-5", reasoningEffort: "high" },
+        { driver: ProviderDriverKind.make("codex"), model: "gpt-5.5", reasoningEffort: "high" },
+        {
+          driver: ProviderDriverKind.make("claudeAgent"),
+          model: "claude-opus-5-5",
+          reasoningEffort: "high",
+        },
       ],
     });
     if (!enabled) yield* library.setEnabled(id, false);

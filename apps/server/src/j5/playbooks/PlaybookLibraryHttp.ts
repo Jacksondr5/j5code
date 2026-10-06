@@ -12,7 +12,6 @@ import {
 } from "@t3tools/contracts/j5";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import {
@@ -29,8 +28,8 @@ import {
 } from "../a2a/ClientReadsHttp.ts";
 import { ProjectService } from "../../project/ProjectService.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
-import { ProjectionStoreThreadNotFoundError } from "../../orchestration-v2/ProjectionStore.ts";
 import { PlaybookStore } from "./PlaybookStore.ts";
+import { resolvePlaybookWorkspaceRoot } from "./workspaceRoot.ts";
 
 const decodeRequest = Schema.decodeUnknownEffect(PlaybookLibraryRequest);
 const encodeResponse = Schema.encodeEffect(PlaybookLibraryResponse);
@@ -39,7 +38,6 @@ const encodeDeleteResponse = Schema.encodeEffect(PlaybookDeleteResponse);
 const decodeRenameRequest = Schema.decodeUnknownEffect(PlaybookRenameRequest);
 const encodeRenameResponse = Schema.encodeEffect(PlaybookRenameResponse);
 const isPlaybookError = Schema.is(PlaybookError);
-const isMissingThread = Schema.is(ProjectionStoreThreadNotFoundError);
 const missing = () =>
   HttpServerResponse.jsonUnsafe(
     {
@@ -74,29 +72,9 @@ export const playbookLibraryHttpRouteLayer = Layer.unwrap(
     const projects = yield* ProjectService;
     const threads = yield* ThreadManagementService;
     const workspaceRoot = (input: PlaybookLibraryRequest) =>
-      Effect.gen(function* () {
-        const project = yield* projects
-          .getById(input.projectId)
-          .pipe(Effect.catch((error) => failEnvironmentInternal("internal_error", error)));
-        if (Option.isNone(project) || project.value.deletedAt !== null) return null;
-        let root = project.value.workspaceRoot;
-        if (input.threadId !== undefined) {
-          const projection = yield* threads.getThreadProjection(input.threadId).pipe(
-            Effect.catchTag("OrchestratorProjectionError", (error) =>
-              isMissingThread(error.cause) ? Effect.succeed(null) : Effect.fail(error),
-            ),
-            Effect.catch((error) => failEnvironmentInternal("internal_error", error)),
-          );
-          if (
-            !projection ||
-            projection.thread.deletedAt !== null ||
-            projection.thread.projectId !== project.value.id
-          )
-            return null;
-          root = projection.thread.worktreePath ?? root;
-        }
-        return root;
-      });
+      resolvePlaybookWorkspaceRoot(projects, threads, input).pipe(
+        Effect.catch((error) => failEnvironmentInternal("internal_error", error)),
+      );
     const libraryRoute = HttpRouter.add(
       "POST",
       PLAYBOOK_LIBRARY_PATH,

@@ -20,9 +20,11 @@ import * as Queue from "effect/Queue";
 import * as Result from "effect/Result";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as Stream from "effect/Stream";
-import { stringify } from "yaml";
+import { parse, stringify } from "yaml";
 
 import { ServerConfig } from "../../config.ts";
+import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
+import { ProjectService } from "../../project/ProjectService.ts";
 import { runJ5A2AMigrations } from "../a2a/Migrations.ts";
 import { makePlaybookStore, type PlaybookMutation } from "./PlaybookStore.ts";
 import { makePlaybookRpcHandlers, PLAYBOOK_RPC_SCOPES } from "./playbookRpc.ts";
@@ -78,7 +80,15 @@ it.effect(
         revision: number;
         runs: ReadonlyArray<PlaybookProgress>;
       }>();
-      const handlers = makePlaybookRpcHandlers(store, (_method, stream) => stream);
+      const handlers = yield* makePlaybookRpcHandlers({
+        store,
+        observeStream: (_method, stream) => stream,
+        observe: (_method, effect) => effect,
+      }).pipe(
+        Effect.provide(
+          Layer.merge(Layer.mock(ProjectService)({}), Layer.mock(ThreadManagementService)({})),
+        ),
+      );
       assert.equal(
         PLAYBOOK_RPC_SCOPES[J5_PLAYBOOK_WS_METHODS.subscribeChanges],
         AuthOrchestrationReadScope,
@@ -1012,6 +1022,96 @@ it.effect("enforces the shared byte and step limits at their boundaries", () =>
       (yield* Effect.flip(store.start(owner, workspaceRoot, "demo", "bytes"))).code,
       "invalid_definition",
     );
+  }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
+);
+
+it.effect("exports the stem file name and a YAML body that imports back unchanged", () =>
+  Effect.gen(function* () {
+    const { fs, store, workspaceRoot, filename, write } = yield* makeFixture;
+    const original: PlaybookDefinition = {
+      title: "Title that is not the file name",
+      description: "Colons: quotes \" and 'apostrophes' # not a comment",
+      steps: [
+        { id: "b-first", title: "Second alphabetically", prompt: "  leading and trailing  \n" },
+        { id: "a-second", title: "Multiline", prompt: "Line one\n\nLine three: yes\n- not a list" },
+      ],
+    };
+    yield* write("stem", original);
+    const exported = yield* store.exportDefinition(workspaceRoot, "stem");
+    assert.equal(exported.fileName, "stem.yaml");
+    assert.notInclude(exported.fileName, "Title");
+    // Importing writes the exported bytes under the file's stem, so the copy must decode identically.
+    yield* fs.writeFileString(filename("copy"), exported.yaml);
+    assert.deepStrictEqual(parse(exported.yaml), original);
+    assert.deepStrictEqual(
+      parse(yield* fs.readFileString(filename("copy"))),
+      parse(yield* fs.readFileString(filename("stem"))),
+    );
+    const copy = (yield* store.discover(workspaceRoot)).playbooks.find(
+      ({ name }) => name === "copy",
+    );
+    assert.isNull(copy?.issue);
+    assert.deepStrictEqual(
+      copy?.steps.map(({ id }) => id),
+      ["b-first", "a-second"],
+    );
+  }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
+);
+
+it.effect("rejects exports of missing, misnamed, and invalid definitions", () =>
+  Effect.gen(function* () {
+    const { fs, store, workspaceRoot, filename } = yield* makeFixture;
+    const code = (name: string) =>
+      store.exportDefinition(workspaceRoot, name).pipe(
+        Effect.flip,
+        Effect.map((error) => (error as { code?: string }).code),
+      );
+    assert.equal(yield* code("missing"), "not_found");
+    assert.equal(yield* code("../demo"), "invalid_name");
+    yield* fs.writeFileString(filename("broken"), "title: [broken");
+    assert.equal(yield* code("broken"), "invalid_definition");
+    yield* fs.writeFileString(
+      filename("dupes"),
+      stringify({
+        ...definition(["same", "same"]),
+      }),
+    );
+    assert.equal(yield* code("dupes"), "invalid_definition");
+  }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
+);
+
+it.effect("keeps the workspace path out of export read failures", () =>
+  Effect.gen(function* () {
+    const { fs, store, workspaceRoot, filename } = yield* makeFixture;
+    yield* fs.writeFileString(filename("broken"), "title: [broken");
+    const error = yield* store.exportDefinition(workspaceRoot, "broken").pipe(Effect.flip);
+    assert.equal((error as { code?: string }).code, "invalid_definition");
+    assert.notInclude(error.message, workspaceRoot);
+    assert.notInclude(error.message, "cancellation");
+  }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
+);
+
+it.effect("exports a near-limit definition byte-for-byte so it stays importable", () =>
+  Effect.gen(function* () {
+    const { fs, store, workspaceRoot, filename } = yield* makeFixture;
+    const source = `title: Demo\ndescription: Demo\nsteps:\n- id: one\n  title: One\n  prompt: "${"word ".repeat(50000)}end"\n`;
+    assert.isBelow(Buffer.byteLength(source), PLAYBOOK_MAX_BYTES);
+    yield* fs.writeFileString(filename("big"), source);
+    const exported = yield* store.exportDefinition(workspaceRoot, "big");
+    assert.equal(exported.yaml, source);
+    assert.isAtMost(Buffer.byteLength(exported.yaml), PLAYBOOK_MAX_BYTES);
+  }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
+);
+
+it.effect("refuses to export a playbook symlinked outside the workspace", () =>
+  Effect.gen(function* () {
+    const { fs, path, store, workspaceRoot, filename } = yield* makeFixture;
+    const outside = yield* fs.makeTempDirectoryScoped({ prefix: "j5-playbook-outside-" });
+    const target = path.join(outside, "secret.yaml");
+    yield* fs.writeFileString(target, stringify(definition()));
+    yield* fs.symlink(target, filename("leak"));
+    const error = yield* store.exportDefinition(workspaceRoot, "leak").pipe(Effect.flip);
+    assert.equal((error as { code?: string }).code, "invalid_path");
   }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
 );
 

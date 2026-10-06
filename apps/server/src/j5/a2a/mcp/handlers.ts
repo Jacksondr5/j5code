@@ -1,4 +1,4 @@
-import { type ModelSelection } from "@t3tools/contracts";
+import { isAgentPersonaReasoningOptionId, type ModelSelection } from "@t3tools/contracts";
 import { playbookHandlers } from "../../playbooks/mcp.ts";
 import { playbookWorkspaceRoot } from "../../playbooks/workspace.ts";
 import * as Crypto from "effect/Crypto";
@@ -309,9 +309,7 @@ const selectSpawnModel = Effect.fn("j5.a2a.mcp.selectSpawnModel")(function* (
     );
   }
   const reasoningDescriptor = model.options?.find(
-    (descriptor) =>
-      descriptor.type === "select" &&
-      ["reasoningEffort", "effort", "variant"].includes(descriptor.id),
+    (descriptor) => descriptor.type === "select" && isAgentPersonaReasoningOptionId(descriptor.id),
   );
   if (reasoningDescriptor === undefined || reasoningDescriptor.type !== "select") {
     return yield* stateError(

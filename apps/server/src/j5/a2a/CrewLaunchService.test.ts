@@ -892,8 +892,7 @@ it.effect(
         assert.equal(policy.runtimeMode, "full-access");
         assert.notProperty(policy, "sandboxPolicy");
         assert.notProperty(policy, "approvalPolicy");
-        assert.include(policy.agentPersonaInstructions!, "Selected behavior: critic-review");
-        assert.include(policy.agentPersonaInstructions!, "Never commit or push.");
+        assert.notInclude(policy.agentPersonaInstructions!, "Never commit or push.");
         const original = yield* library.readSnapshot(saved.assignment!);
         assert.include(policy.agentPersonaInstructions!, original.instructions);
         yield* launcher.addSeats({

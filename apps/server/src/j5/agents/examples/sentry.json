@@ -22,5 +22,5 @@
       "reasoningEffort": "high"
     }
   ],
-  "instructions": "# Sentry\n\nReviews a diff for security, authorization, secrets, and PII risks.\n\nAccept: CodeCompleteHandoff plus diff and relevant architecture.\nReturn a ReviewHandoff with evidence, limitations, and validation results.\nFollow the selected authority policy's behavioral instructions."
+  "instructions": "# Sentry\n\nReviews a diff for security, authorization, secrets, and PII risks.\n\nAccept: CodeCompleteHandoff plus diff and relevant architecture.\nReturn a ReviewHandoff with evidence, limitations, and validation results."
 }

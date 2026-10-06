@@ -1,7 +1,10 @@
 import * as Schema from "effect/Schema";
 import {
   AgentPersonaImportConflictError,
+  agentPersonaReasoningDescriptor,
   isAgentPersonaDefinitionFile,
+  isAgentPersonaReasoningOptionId,
+  PROVIDER_DISPLAY_NAMES,
   AGENT_PERSONA_IMPORT_MAX_BYTES,
   AGENT_PERSONA_IMPORT_MAX_FILES,
 } from "@t3tools/contracts";
@@ -20,6 +23,7 @@ import type {
   AgentPersonaDefinitionView,
   AgentPersonaEditInput,
   AgentPersonaModelTarget,
+  ProviderDriverKind,
   ServerProvider,
   AgentPersonaId,
   OrchestrationV2AgentPersonaAssignment,
@@ -63,8 +67,8 @@ export interface AgentPersonaAssignmentPresentation {
   readonly routeLabel: string;
 }
 
-function providerLabel(driver: string): string {
-  return driver === "claudeAgent" ? "Claude" : "Codex";
+function providerLabel(driver: ProviderDriverKind): string {
+  return PROVIDER_DISPLAY_NAMES[driver] ?? driver;
 }
 
 export function presentAgentPersonaAssignment(
@@ -80,8 +84,8 @@ export function presentAgentPersonaAssignment(
         ? " · Review"
         : "";
   const provider = providerLabel(assignment.resolvedDriver);
-  const effort = assignment.resolvedModelSelection.options?.find(
-    ({ id }) => id === "reasoningEffort" || id === "effort",
+  const effort = assignment.resolvedModelSelection.options?.find(({ id }) =>
+    isAgentPersonaReasoningOptionId(id),
   )?.value;
 
   return {
@@ -218,10 +222,17 @@ export const AGENT_PERSONA_POLICY_OPTIONS = [
 export const agentPersonaModelChoiceId = (target: AgentPersonaModelTarget) =>
   JSON.stringify([target.driver, target.model]);
 
-export const AGENT_PERSONA_HARNESSES = [
-  { driver: "codex", label: "Codex" },
-  { driver: "claudeAgent", label: "Claude" },
-] as const;
+/** Signed-in harnesses with their selectable models, in picker order. */
+export function agentPersonaModelGroups(choices: ReturnType<typeof agentPersonaModelChoices>) {
+  const groups = new Map<ProviderDriverKind, typeof choices>();
+  for (const choice of choices) {
+    if (!choice.available) continue;
+    groups.set(choice.target.driver, [...(groups.get(choice.target.driver) ?? []), choice]);
+  }
+  return [...groups]
+    .map(([driver, models]) => ({ driver, label: providerLabel(driver), models }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
 
 /** Retain configured models while limiting new selections to supported reasoning levels. */
 export function agentPersonaModelChoices(
@@ -242,13 +253,10 @@ export function agentPersonaModelChoices(
   for (const provider of providers) {
     if (!provider.enabled || !provider.installed || provider.auth.status !== "authenticated")
       continue;
-    if (provider.driver !== "codex" && provider.driver !== "claudeAgent") continue;
-    const driver = provider.driver === "codex" ? "codex" : "claudeAgent";
+    const driver = provider.driver;
     for (const model of provider.models) {
-      const descriptor = model.capabilities?.optionDescriptors?.find(
-        ({ id }) => id === (driver === "codex" ? "reasoningEffort" : "effort"),
-      );
-      if (descriptor?.type !== "select" || descriptor.options.length === 0) continue;
+      const descriptor = agentPersonaReasoningDescriptor(model);
+      if (descriptor === undefined || descriptor.options.length === 0) continue;
       const efforts = descriptor.options.map(({ id }) => id);
       const target = {
         driver,
@@ -259,7 +267,7 @@ export function agentPersonaModelChoices(
       const previous = choices.get(id);
       choices.set(id, {
         id,
-        label: `${driver === "codex" ? "Codex" : "Claude"} · ${model.slug}`,
+        label: `${providerLabel(driver)} · ${model.slug}`,
         modelLabel: model.slug,
         available: true,
         target,
@@ -275,7 +283,7 @@ export function agentPersonaModelChoices(
     const efforts = [...new Set([...(previous?.efforts ?? []), target.reasoningEffort])];
     choices.set(id, {
       id,
-      label: `${target.driver === "codex" ? "Codex" : "Claude"} · ${target.model} (not advertised)`,
+      label: `${providerLabel(target.driver)} · ${target.model} (not advertised)`,
       modelLabel: `${target.model} (not advertised)`,
       available: false,
       target,
@@ -343,16 +351,53 @@ export function agentPersonaIdError(id: string): string | null {
   return null;
 }
 
-/** First advertised model per harness, so a new agent starts with a launchable route. */
+/**
+ * First advertised model per harness, so a new agent starts with a launchable route. Drivers
+ * the server says sandbox the chosen policy come first.
+ */
 export function defaultAgentPersonaModelRoute(
   providers: ReadonlyArray<ServerProvider>,
+  enforcingDrivers: ReadonlyArray<ProviderDriverKind> = [],
 ): [AgentPersonaModelTarget, AgentPersonaModelTarget] | null {
-  const available = agentPersonaModelChoices(providers, []).filter(({ available }) => available);
+  const choices = agentPersonaModelChoices(providers, []).filter(({ available }) => available);
+  const enforceable = choices.filter(({ target }) => enforcingDrivers.includes(target.driver));
+  const available = enforceable.length > 0 ? enforceable : choices;
   const primary = available[0];
   if (primary === undefined) return null;
   const fallback =
     available.find(({ target }) => target.driver !== primary.target.driver) ?? primary;
   return [primary.target, fallback.target];
+}
+
+/** Drivers the server says sandbox `policy`; undefined when the server predates the field. */
+export function agentPersonaPolicyDrivers(
+  catalog: OrchestrationV2AgentPersonaCatalog | null | undefined,
+  policy: AgentPersonaAuthorityPolicy,
+): ReadonlyArray<ProviderDriverKind> | undefined {
+  return catalog?.policyEnforcement?.find((entry) => entry.policy === policy)?.drivers;
+}
+
+function listLabels(drivers: ReadonlyArray<ProviderDriverKind>): string {
+  const labels = drivers.map(providerLabel);
+  return labels.length < 2
+    ? labels.join("")
+    : `${labels.slice(0, -1).join(", ")} and ${labels.at(-1)}`;
+}
+
+/** The editor's line under Runtime policy: where it is sandboxed and which chosen routes won't launch. */
+export function agentPersonaPolicyNote(
+  drivers: ReadonlyArray<ProviderDriverKind> | undefined,
+  modelRoute: ReadonlyArray<AgentPersonaModelTarget>,
+): string | null {
+  if (drivers === undefined) return null;
+  if (drivers.length === 0) return "No provider can sandbox this policy yet, so it won't launch.";
+  const outside = [...new Set(modelRoute.map(({ driver }) => driver))].filter(
+    (driver) => !drivers.includes(driver),
+  );
+  const where = `Sandboxed on ${listLabels(drivers)}.`;
+  return outside.length === 0
+    ? where
+    : `${where} ${listLabels(outside)} routes won't launch with this policy.`;
 }
 
 export interface AgentPersonaCreateDraft {

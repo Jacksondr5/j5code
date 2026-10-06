@@ -12,7 +12,14 @@ import {
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { CommandId } from "@t3tools/contracts";
 import { Atom } from "effect/unstable/reactivity";
-import { MoreHorizontalIcon, PencilIcon, PlusIcon, RefreshCwIcon, Trash2Icon } from "lucide-react";
+import {
+  DownloadIcon,
+  MoreHorizontalIcon,
+  PencilIcon,
+  PlusIcon,
+  RefreshCwIcon,
+  Trash2Icon,
+} from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { SettingsRow, SettingsSection } from "../../components/settings/settingsLayout";
 import { Button } from "../../components/ui/button";
@@ -149,6 +156,7 @@ export function PlaybookLibrarySettings() {
   });
   const writeFile = useAtomCommand(projectEnvironment.writeFile, { reportFailure: false });
   const deletePlaybook = useAtomCommand(j5Environment.deletePlaybook, { reportFailure: false });
+  const exportPlaybook = useAtomCommand(j5Environment.exportPlaybook, { reportFailure: false });
   const renamePlaybook = useAtomCommand(j5Environment.renamePlaybook, { reportFailure: false });
   const [renameTarget, setRenameTarget] = useState<{ name: string; title: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -271,6 +279,35 @@ export function PlaybookLibrarySettings() {
       refresh();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not delete playbook.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function downloadPlaybook(name: string) {
+    if (!workspace || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await exportPlaybook({
+        environmentId: workspace.environmentId,
+        input: {
+          projectId: workspace.projectId,
+          ...(workspace.threadId ? { threadId: workspace.threadId } : {}),
+          name,
+        },
+      });
+      if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+      const { fileName, yaml } = result.value;
+      const url = URL.createObjectURL(new Blob([yaml], { type: "application/yaml" }));
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = fileName;
+      anchor.click();
+      // Revoking synchronously can abort the download in some browsers.
+      setTimeout(() => URL.revokeObjectURL(url), 30_000);
+      toastManager.add({ type: "success", title: `Exported ${fileName}` });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not export playbook.");
     } finally {
       setBusy(false);
     }
@@ -550,6 +587,13 @@ export function PlaybookLibrarySettings() {
                     <MoreHorizontalIcon className="size-4" />
                   </MenuTrigger>
                   <MenuPopup align="end">
+                    <MenuItem
+                      disabled={busy || !!query.error || !!playbook.issue}
+                      onClick={() => void downloadPlaybook(playbook.name)}
+                    >
+                      <DownloadIcon />
+                      Export YAML
+                    </MenuItem>
                     <MenuItem
                       disabled={busy || !!query.error || !!playbook.issue}
                       onClick={() => {
