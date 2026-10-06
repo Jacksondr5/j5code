@@ -11,9 +11,7 @@ import {
   type A2AHomeLookupError,
   A2AHomeNotFoundError,
   type RegisteredThreadHome,
-  participantIdForThread,
 } from "./HomeRegistrar.ts";
-import { isSpawnLaunchCommandId } from "./spawnIds.ts";
 import { CommCommandId, SquadronId } from "./contracts.ts";
 import {
   SquadronProjectReferences,
@@ -136,12 +134,6 @@ export const layer: Layer.Layer<
             requestedSquadronId: squadronId,
           });
         }
-
-        // A J5 spawn into a new worktree registers its home itself once its checkout is done
-        // (spawn_agent), so the peer cannot be addressed before it has somewhere to work. Launch
-        // is handed the home it will then have.
-        if (isSpawnLaunchCommandId(input.commandId))
-          return { squadronId, participantId: participantIdForThread(input.threadId) };
 
         const references = yield* projectReferences.listForSquadron(squadronId);
         const referencedProjectIds = references.map((reference) => reference.projectId);

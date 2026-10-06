@@ -32,18 +32,6 @@ export const lifecycleId = (
     stablePart(input.requestKey),
   ].join(":");
 
-/** The operation of the command that launches a spawn's brief; see `isSpawnLaunchCommandId`. */
-export const SPAWN_LAUNCH_OPERATION = "spawn-launch";
-
-/**
- * Whether a ThreadLaunch command id is a J5 spawn's launch. A spawn into a new worktree registers
- * its home itself once the checkout is done, so ThreadLaunch's own registration must not make the
- * peer addressable first.
- */
-export const isSpawnLaunchCommandId = (commandId: string) =>
-  commandId.startsWith("command:j5:a2a:mcp:") &&
-  commandId.split(":")[5] === stablePart(SPAWN_LAUNCH_OPERATION);
-
 export const lifecycleCommandId = (input: SpawnStableInput & { readonly operation: string }) =>
   CommandId.make(lifecycleId({ kind: "command", ...input }));
 

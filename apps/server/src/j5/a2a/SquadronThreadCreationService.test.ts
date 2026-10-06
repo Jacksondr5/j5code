@@ -3,8 +3,7 @@ import { CommandId, ProjectId, ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
-import { A2AHomeNotFoundError, A2AHomeRegistrar, participantIdForThread } from "./HomeRegistrar.ts";
-import { lifecycleCommandId } from "./spawnIds.ts";
+import { A2AHomeNotFoundError, A2AHomeRegistrar } from "./HomeRegistrar.ts";
 import {
   SquadronThreadCreationMissingSquadronError,
   SquadronThreadCreationProjectReferenceError,
@@ -159,37 +158,3 @@ it.effect(
     );
   },
 );
-
-it.effect("leaves a new-worktree spawn unregistered until spawn_agent registers it", () => {
-  const registrations: Array<unknown> = [];
-  return Effect.gen(function* () {
-    const service = yield* SquadronThreadCreationService;
-    const spawnLaunch = CommandId.make(
-      lifecycleCommandId({
-        providerSessionId: "session:1",
-        requestKey: "k",
-        operation: "spawn-launch",
-      }),
-    );
-    // The launch is told the home the peer will have, but nothing is written, so the peer is
-    // not addressable while its worktree is still being made.
-    assert.deepStrictEqual(
-      yield* service.registerAtDurableLaunch({ ...input, commandId: spawnLaunch }),
-      { squadronId, participantId: participantIdForThread(threadId) },
-    );
-    assert.lengthOf(registrations, 0);
-    // Any other creation still registers at launch.
-    yield* service.registerAtDurableLaunch(input);
-    assert.lengthOf(registrations, 1);
-  }).pipe(
-    Effect.provide(
-      makeLayer({
-        references: [projectId],
-        register: (registration) => {
-          registrations.push(registration);
-          return Effect.succeed({ squadronId, participantId: participantIdForThread(threadId) });
-        },
-      }),
-    ),
-  );
-});
