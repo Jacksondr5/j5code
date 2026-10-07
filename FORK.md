@@ -632,6 +632,7 @@ indicate approval. The deleted hook remains explicitly marked.
 | `apps/server/src/environment/ServerEnvironment.ts`                                                         | N       | 34                                            |
 | `apps/server/src/http.ts`                                                                                  | R       | B                                             |
 | `apps/server/src/mcp/McpHttpServer.ts`                                                                     | R       | 2                                             |
+| `apps/server/src/mcp/OrchestratorMcpService.ts`                                                            | A       | Saved-agent mentions                          |
 | `apps/server/src/mcp/toolkits/worktree/registration.test.ts`                                               | A       | 4, 45                                         |
 | `apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts`                                        | A       | 8, 47, Saved-agent mentions                   |
 | `apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts`                                             | N       | 47, Saved-agent mentions                      |
