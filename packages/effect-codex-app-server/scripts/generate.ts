@@ -161,10 +161,7 @@ const CodexErrorInfoCompatibilityExports = new Set([
   "V2TurnCompletedNotification",
 ]);
 
-// Codex adds plan slugs between releases, and a closed enum turns a valid
-// signed-in account into a decode failure. Plan names are display metadata.
-// Only an all-strings enum is opened, so a differently shaped `PlanType` upstream
-// keeps its own schema instead of being silently loosened.
+/** Opens a closed string-enum `PlanType` so new Codex plans still decode; other shapes are kept. */
 function openPlanTypeDefinition(
   definitionName: string,
   definitionSchema: Schema.Json,
