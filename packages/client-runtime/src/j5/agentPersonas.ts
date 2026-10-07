@@ -150,32 +150,33 @@ export function presentAgentPersonaCatalog(
             `${authorityLabel(policy)}${policy === persona.defaultAuthorityPolicy ? " (default)" : ""}`,
         )
         .join(", "),
-      availability: removed
-        ? "removed"
-        : disabled
-          ? "disabled"
-          : unsupported
-            ? "unsupported"
+      // Unsupported wins over Removed and Disabled: those states can be undone, and the row must
+      // keep saying why it cannot be duplicated or launched once they are.
+      availability: unsupported
+        ? "unsupported"
+        : removed
+          ? "removed"
+          : disabled
+            ? "disabled"
             : available
               ? "available"
               : "blocked",
-      availabilityLabel: removed
-        ? "Removed"
-        : disabled
-          ? "Disabled"
-          : unsupported
-            ? "Unsupported"
+      availabilityLabel: unsupported
+        ? "Unsupported"
+        : removed
+          ? "Removed"
+          : disabled
+            ? "Disabled"
             : available
               ? "Available"
               : "Blocked",
-      blockedReasons:
-        disabled || removed
+      blockedReasons: unsupported
+        ? [unsupportedPolicyReason(persona.defaultAuthorityPolicy)]
+        : disabled || removed
           ? []
-          : unsupported
-            ? [unsupportedPolicyReason(persona.defaultAuthorityPolicy)]
-            : persona.availability.status === "unavailable"
-              ? agentPersonaBlockedReasons(persona.availability.attempts ?? [])
-              : [],
+          : persona.availability.status === "unavailable"
+            ? agentPersonaBlockedReasons(persona.availability.attempts ?? [])
+            : [],
       route: available
         ? `${providerLabel(persona.availability.resolvedDriver)} · ${persona.availability.resolvedModelSelection.model} · ${persona.availability.resolvedRoute}`
         : persona.availability.reason === "authority-not-enforceable"

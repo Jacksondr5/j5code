@@ -908,6 +908,36 @@ describe("a policy this app does not know", () => {
     ).toEqual(["Scout", `Scout · ${invented} (unsupported)`]);
   });
 
+  it("keeps an unsupported row unsupported when it is turned off or removed", () => {
+    const rows = presentAgentPersonaCatalog(
+      decodeCatalogJson({
+        personas: [
+          {
+            ...entry("off", invented),
+            availability: { status: "unavailable", reason: "disabled" },
+          },
+          {
+            ...entry("gone", invented),
+            availability: { status: "unavailable", reason: "removed" },
+          },
+        ],
+        policyEnforcement: [],
+      }),
+    );
+    for (const row of rows) {
+      expect(row).toMatchObject({
+        availability: "unsupported",
+        blockedReasons: [
+          `Runtime policy "${invented}" is not supported by this app version. Update the app to launch this persona.`,
+        ],
+      });
+    }
+    expect(rows.map(({ enabled, removed }) => [enabled, removed])).toEqual([
+      [false, false],
+      [false, true],
+    ]);
+  });
+
   it("refuses to duplicate a definition into a policy the editor cannot offer", () => {
     const modelRoute = [
       { driver: ProviderDriverKind.make("codex"), model: "gpt-5.6-terra", reasoningEffort: "high" },
