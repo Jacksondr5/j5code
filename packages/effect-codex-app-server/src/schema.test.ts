@@ -7,6 +7,9 @@ const decodeElicitation = Schema.decodeUnknownSync(CodexSchema.McpServerElicitat
 const isElicitation = Schema.is(CodexSchema.McpServerElicitationRequestParams);
 
 const isGetAccountResponse = Schema.is(CodexSchema.V2GetAccountResponse);
+const isRateLimitsResponse = Schema.is(CodexSchema.V2GetAccountRateLimitsResponse);
+const isRateLimitsUpdated = Schema.is(CodexSchema.V2AccountRateLimitsUpdatedNotification);
+const isAccountUpdated = Schema.is(CodexSchema.V2AccountUpdatedNotification);
 const isThreadReadResponse = Schema.is(CodexSchema.V2ThreadReadResponse);
 const isThreadResumeResponse = Schema.is(CodexSchema.V2ThreadResumeResponse);
 const isThreadRollbackResponse = Schema.is(CodexSchema.V2ThreadRollbackResponse);
@@ -211,27 +214,40 @@ it("accepts Codex misalignment policy errors for thread responses", () => {
   );
 });
 
-it("accepts Codex 0.150 account plan values", () => {
-  const planTypes = [
+it("accepts known and future plan names in every account and rate-limit payload", () => {
+  for (const planType of [
     "self_serve_business_prolite",
     "ent26",
-    "enterprise_cbp_automation",
-    "edu_plus",
     "edu_pro",
-  ];
-
-  for (const planType of planTypes) {
-    const accountResponse = {
-      account: {
-        email: "user@example.com",
-        planType,
-        type: "chatgpt",
-      },
-      requiresOpenaiAuth: true,
-    };
-
-    assert.equal(isGetAccountResponse(accountResponse), true);
+    "future_subscription_plan",
+  ]) {
+    const rateLimits = { primary: null, secondary: null, planType };
+    assert.isTrue(
+      isGetAccountResponse({
+        account: { type: "chatgpt", email: "user@example.com", planType },
+        requiresOpenaiAuth: true,
+      }),
+      planType,
+    );
+    assert.isTrue(isRateLimitsResponse({ rateLimits }), planType);
+    assert.isTrue(isRateLimitsUpdated({ rateLimits }), planType);
+    assert.isTrue(isAccountUpdated({ authMode: "chatgpt", planType }), planType);
   }
+});
+
+it("still rejects non-string plans and malformed account fields", () => {
+  const account = { type: "chatgpt", email: "user@example.com", planType: "plus" };
+  const response = (overrides: object) =>
+    isGetAccountResponse({ account: { ...account, ...overrides }, requiresOpenaiAuth: true });
+
+  assert.isTrue(response({}));
+  assert.isFalse(response({ planType: 5 }));
+  assert.isFalse(response({ planType: null }));
+  assert.isFalse(response({ email: 5 }));
+  assert.isFalse(response({ type: "unknown_account_type" }));
+  assert.isFalse(
+    isRateLimitsUpdated({ rateLimits: { primary: null, secondary: null, planType: 5 } }),
+  );
 });
 
 it("preserves elicitation identity and mode-specific fields after schema generation", () => {

@@ -161,6 +161,35 @@ const CodexErrorInfoCompatibilityExports = new Set([
   "V2TurnCompletedNotification",
 ]);
 
+// Codex adds plan slugs between releases, and a closed enum turns a valid
+// signed-in account into a decode failure. Plan names are display metadata.
+// Only an all-strings enum is opened, so a differently shaped `PlanType` upstream
+// keeps its own schema instead of being silently loosened.
+function openPlanTypeDefinition(
+  definitionName: string,
+  definitionSchema: Schema.Json,
+): Schema.Json {
+  if (definitionName !== "PlanType" || typeof definitionSchema !== "object") {
+    return definitionSchema;
+  }
+  const { enum: values, oneOf } = definitionSchema as {
+    readonly enum?: unknown;
+    readonly oneOf?: unknown;
+  };
+  const isStringEnum = (candidate: unknown) =>
+    Array.isArray(candidate) && candidate.every((value) => typeof value === "string");
+  const isClosedStringEnum =
+    isStringEnum(values) ||
+    (Array.isArray(oneOf) &&
+      oneOf.every(
+        (branch) =>
+          branch !== null &&
+          typeof branch === "object" &&
+          isStringEnum((branch as { readonly enum?: unknown }).enum),
+      ));
+  return isClosedStringEnum ? { type: "string" } : definitionSchema;
+}
+
 function applyCodex0151DefinitionCompatibility(
   exportName: string,
   definitionName: string,
@@ -734,10 +763,9 @@ const generateFiles = Effect.fn("generateFiles")(function* () {
     );
 
     for (const [definitionName, definitionSchema] of Object.entries(parsed.definitions ?? {})) {
-      const compatibleDefinitionSchema = applyCodex0151DefinitionCompatibility(
-        file.exportName,
+      const compatibleDefinitionSchema = openPlanTypeDefinition(
         definitionName,
-        definitionSchema,
+        applyCodex0151DefinitionCompatibility(file.exportName, definitionName, definitionSchema),
       );
       aggregateSchemas[localDefinitionNames.get(definitionName)!] = stripNullDefaults(
         normalizeNullableTypes(

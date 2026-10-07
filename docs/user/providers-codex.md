@@ -4,6 +4,12 @@ For one account, use the default Codex provider with your normal Codex login.
 [Provider setup](./install.md#providers) covers installation, Settings > Providers,
 and custom binaries or environment variables.
 
+## Plan label
+
+The provider shows your ChatGPT plan, such as **ChatGPT Plus Subscription**. If
+Codex reports a plan T3 Code has no name for, the account still works and shows
+**ChatGPT Subscription**.
+
 ## Use multiple accounts
 
 A shared Codex home with a shadow home lets work and personal accounts continue

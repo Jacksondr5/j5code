@@ -131,10 +131,9 @@ export function codexPlanLabel(planType: string | null | undefined): string | un
     case "edu_plus":
     case "edu_pro":
       return "ChatGPT Edu Subscription";
-    case "unknown":
-      return "ChatGPT Subscription";
     default:
-      return undefined;
+      // Plans newer than this list still get a generic label; no plan reported gets none.
+      return planType?.trim() ? "ChatGPT Subscription" : undefined;
   }
 }
 

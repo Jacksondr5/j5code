@@ -38,7 +38,11 @@ import { deepMerge } from "@t3tools/shared/Struct";
 import { createModelCapabilities } from "@t3tools/shared/model";
 import { applyServerSettingsPatch } from "@t3tools/shared/serverSettings";
 
-import { checkCodexProviderStatus, type CodexAppServerProviderSnapshot } from "./CodexProvider.ts";
+import {
+  checkCodexProviderStatus,
+  codexPlanLabel,
+  type CodexAppServerProviderSnapshot,
+} from "./CodexProvider.ts";
 import { checkClaudeProviderStatus } from "./ClaudeProvider.ts";
 import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
 import { AntigravityInstallation } from "../AntigravityInstallation.ts";
@@ -442,6 +446,35 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
               input: { hint: "Describe the issue (optional)" },
             },
           ]);
+        }),
+      );
+
+      it.effect("keeps accounts ready and labels plans by name, with a generic fallback", () =>
+        Effect.gen(function* () {
+          const expectedLabels = [
+            ["self_serve_business_prolite", "ChatGPT Business Subscription"],
+            ["prolite", "ChatGPT Pro 5x Subscription"],
+            ["future_subscription_plan", "ChatGPT Subscription"],
+          ] as const;
+          for (const [planType, label] of expectedLabels) {
+            const status = yield* checkCodexProviderStatus(defaultCodexSettings, () =>
+              Effect.succeed(
+                makeCodexProbeSnapshot({
+                  account: {
+                    account: { type: "chatgpt", email: "test@example.com", planType },
+                    requiresOpenaiAuth: true,
+                  },
+                }),
+              ),
+            );
+            assert.strictEqual(status.status, "ready");
+            assert.strictEqual(status.auth.status, "authenticated");
+            assert.strictEqual(status.auth.label, label);
+          }
+          assert.strictEqual(codexPlanLabel(undefined), undefined);
+          assert.strictEqual(codexPlanLabel(null), undefined);
+          assert.strictEqual(codexPlanLabel(""), undefined);
+          assert.strictEqual(codexPlanLabel("  "), undefined);
         }),
       );
 
