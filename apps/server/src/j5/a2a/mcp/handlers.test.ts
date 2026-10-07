@@ -1,3 +1,7 @@
+import { stringify as toYaml } from "yaml";
+import { makeAgentPersonaLibrary } from "../../agents/agentPersonaLibrary.ts";
+import { resolveAgentPersonaRuntime } from "../../agents/agentPersonaRuntime.ts";
+import { BUILT_IN_AGENT_PERSONAS } from "../../agents/agentPersonas.ts";
 import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { SqlitePersistenceMemory } from "../../../persistence/Layers/Sqlite.ts";
@@ -1385,6 +1389,43 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
       assert.isTrue(unknown.isFailure);
       assert.include(failureMessage(unknown), "Unknown agent nobody");
       assert.lengthOf(yield* Ref.get(commands), commandCount);
+
+      // A persona that declares full access spawns with the ordinary full-access mode.
+      const library = yield* makeAgentPersonaLibrary;
+      yield* library.importFiles({
+        files: [
+          {
+            name: "operator.yaml",
+            content: toYaml({
+              ...BUILT_IN_AGENT_PERSONAS.scout,
+              id: "operator",
+              displayName: "Operator",
+              authority: { defaultPolicy: "full-access", allowedPolicies: ["full-access"] },
+              modelRoute: BUILT_IN_AGENT_PERSONAS.scout.modelRoute.map((target) => ({ ...target })),
+            }),
+          },
+        ],
+        replaceExisting: false,
+      });
+      const operator = yield* call({
+        ...scout,
+        persona: "operator",
+        client_request_id: "spawn-persona-full-access",
+      });
+      assert.isFalse(operator.isFailure, failureMessage(operator));
+      const operatorCreate = (yield* createdThreads()).at(-1)!;
+      assert.equal(operatorCreate.agentPersonaAssignment?.authorityPolicy, "full-access");
+      assert.equal(operatorCreate.runtimeMode, "full-access");
+      const operatorPolicy = yield* resolveAgentPersonaRuntime(
+        {
+          agentPersonaAssignment: operatorCreate.agentPersonaAssignment!,
+          runtimeMode: operatorCreate.runtimeMode,
+        },
+        library,
+      );
+      assert.equal(operatorPolicy.runtimeMode, "full-access");
+      assert.notProperty(operatorPolicy, "sandboxPolicy");
+      assert.notProperty(operatorPolicy, "approvalPolicy");
     }).pipe(Effect.provide(layer));
   }),
 );

@@ -2,6 +2,7 @@ import type {
   CommandId,
   ModelSelection,
   OrchestrationV2AgentPersonaAssignment,
+  OrchestrationV2AgentPersonaCommandAssignment,
   OrchestrationV2AgentPersonaRequest,
   OrchestrationV2AppThread,
   OrchestrationV2Command,
@@ -84,7 +85,7 @@ export const agentPersonaModelMismatchError = (
 
 export interface AgentPersonaLaunch {
   readonly modelSelection: ModelSelection;
-  readonly agentPersonaAssignment?: OrchestrationV2AgentPersonaAssignment;
+  readonly agentPersonaAssignment?: OrchestrationV2AgentPersonaCommandAssignment;
 }
 
 /**

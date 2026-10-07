@@ -4,10 +4,14 @@ import {
   type AgentPersonaImportInput,
   ProviderDriverKind,
   ProviderInstanceId,
-  type OrchestrationV2AgentPersonaCatalog,
+  OrchestrationV2AgentPersonaCatalog,
+  OrchestrationV2ShellSnapshot,
   type ServerProvider,
 } from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
+
+import { agentPersonaMentionItems } from "./agentMentions.ts";
 
 import {
   prepareAgentPersonaImport,
@@ -25,6 +29,7 @@ import {
   agentPersonaIdError,
   agentPersonaIdFromName,
   agentPersonaPolicyDrivers,
+  AGENT_PERSONA_POLICY_OPTIONS,
   agentPersonaPolicyNote,
   defaultAgentPersonaModelRoute,
   agentPersonaModelChoices,
@@ -681,6 +686,24 @@ describe("personal agent authoring", () => {
     expect(
       agentPersonaPolicyNote(agentPersonaPolicyDrivers(catalog, "publish-only"), [target("codex")]),
     ).toBe("No provider can sandbox this policy yet, so it won't launch.");
+    const fullAccess = agentPersonaPolicyDrivers(
+      {
+        personas: [],
+        policyEnforcement: [
+          {
+            policy: "full-access" as const,
+            drivers: [ProviderDriverKind.make("codex"), ProviderDriverKind.make("cursor")],
+          },
+        ],
+      },
+      "full-access",
+    );
+    expect(agentPersonaPolicyNote(fullAccess, [target("codex")], "full-access")).toBe(
+      "Unsandboxed: runs with full access on Codex and Cursor.",
+    );
+    expect(agentPersonaPolicyNote(fullAccess, [target("claudeAgent")], "full-access")).toBe(
+      "Unsandboxed: runs with full access on Codex and Cursor. Claude routes won't launch with this policy.",
+    );
     // An older server sends no table; the editor says nothing rather than guessing.
     expect(
       agentPersonaPolicyNote(agentPersonaPolicyDrivers({ personas: [] }, "read-only"), []),
@@ -724,6 +747,213 @@ it("prefills a duplicate with the source content and a fresh name and ID", () =>
         reasoningEffort: "high",
       },
     ],
+  });
+});
+
+it("labels the full-access policy and offers it in the editor", () => {
+  expect(AGENT_PERSONA_POLICY_OPTIONS.find(({ value }) => value === "full-access")).toEqual({
+    value: "full-access",
+    label: "Full access (unsandboxed)",
+  });
+  const row = presentAgentPersonaCatalog({
+    personas: [
+      {
+        ...catalog.personas[0]!,
+        defaultAuthorityPolicy: "read-only",
+        allowedAuthorityPolicies: ["read-only", "full-access"],
+      },
+    ],
+  })[0];
+  expect(row?.authority).toBe("Read only (default), Full access");
+  expect(row?.unsandboxed).toBe(true);
+  expect(presentAgentPersonaCatalog(catalog)[0]?.unsandboxed).toBe(false);
+  expect(
+    agentPersonaDuplicateDraft({
+      id: "operator",
+      version: 1,
+      displayName: "Operator",
+      description: "Operates.",
+      instructions: "# Operator",
+      authority: { defaultPolicy: "full-access", allowedPolicies: ["full-access"] },
+      modelRoute: [
+        { driver: ProviderDriverKind.make("codex"), model: "m", reasoningEffort: "high" },
+        { driver: ProviderDriverKind.make("cursor"), model: "m", reasoningEffort: "high" },
+      ],
+    }).authorityPolicy,
+  ).toBe("full-access");
+});
+
+const decodeCatalogJson = Schema.decodeUnknownSync(
+  Schema.toCodecJson(OrchestrationV2AgentPersonaCatalog),
+);
+const decodeShellSnapshotJson = Schema.decodeUnknownSync(
+  Schema.toCodecJson(OrchestrationV2ShellSnapshot),
+);
+
+describe("a policy this app does not know", () => {
+  const invented = "sandboxed-network";
+  const route = {
+    status: "available",
+    resolvedRoute: "primary",
+    resolvedDriver: "codex",
+    resolvedModelSelection: { instanceId: "codex", model: "gpt-5.6-terra" },
+  };
+  const entry = (personaId: string, defaultAuthorityPolicy: string) => ({
+    personaId,
+    imported: true,
+    editable: {
+      definitionDigest: "a".repeat(64),
+      modelRoute: [
+        { driver: "codex", model: "gpt-5.6-terra", reasoningEffort: "high" },
+        { driver: "codex", model: "gpt-5.6-terra", reasoningEffort: "high" },
+      ],
+    },
+    definitionVersion: 1,
+    displayName: personaId,
+    description: `${personaId} description`,
+    defaultAuthorityPolicy,
+    allowedAuthorityPolicies: [defaultAuthorityPolicy, "read-only"],
+    availability: route,
+  });
+  const thread = (id: string, authorityPolicy: string) => ({
+    createdBy: "user",
+    creationSource: "web",
+    id,
+    projectId: "project-1",
+    title: id,
+    providerInstanceId: "codex",
+    modelSelection: { instanceId: "codex", model: "gpt-5.6-terra" },
+    runtimeMode: "approval-required",
+    interactionMode: "default",
+    agentPersonaAssignment: {
+      personaId: "scout",
+      definitionVersion: 1,
+      authorityPolicy,
+      resolvedRoute: "primary",
+      resolvedDriver: "codex",
+      resolvedModelSelection: { instanceId: "codex", model: "gpt-5.6-terra" },
+    },
+    branch: null,
+    worktreePath: null,
+    lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: id },
+    forkedFrom: null,
+    activeProviderThreadId: null,
+    latestRunId: null,
+    activeRunId: null,
+    status: "completed",
+    pendingRuntimeRequest: null,
+    latestVisibleMessage: null,
+    latestUserMessageAt: null,
+    hasActionableProposedPlan: false,
+    itemCount: 0,
+    visibleItemCount: 0,
+    createdAt: "2026-10-06T00:00:00.000Z",
+    updatedAt: "2026-10-06T00:00:00.000Z",
+    archivedAt: null,
+    settledOverride: null,
+    settledAt: null,
+    deletedAt: null,
+  });
+
+  it("costs one unsupported row, not the catalog or the shell snapshot", () => {
+    const decoded = decodeCatalogJson({
+      personas: [entry("scout", "read-only"), entry("future", invented)],
+      policyEnforcement: [
+        { policy: "read-only", drivers: ["codex"] },
+        { policy: invented, drivers: ["codex"] },
+      ],
+    });
+    const [known, future] = presentAgentPersonaCatalog(decoded);
+    expect(known).toMatchObject({ availability: "available", blockedReasons: [] });
+    expect(known?.edit?.authorityPolicy).toBe("read-only");
+    expect(future).toMatchObject({
+      availability: "unsupported",
+      availabilityLabel: "Unsupported",
+      edit: null,
+      authority: `${invented} (unsupported) (default), Read only`,
+      blockedReasons: [
+        `Runtime policy "${invented}" is not supported by this app version. Update the app to launch this persona.`,
+      ],
+    });
+    // Nothing offers it for launch, and nothing reads it as another policy.
+    expect(agentPersonaMentionItems(decoded, "").map(({ personaId }) => personaId)).toEqual([
+      "scout",
+    ]);
+    expect(draftAgentAssignmentPreview("future", decoded)).toBeNull();
+    expect(draftAgentAssignmentPreview("scout", decoded)?.authorityPolicy).toBe("read-only");
+    expect(agentPersonaPolicyDrivers(decoded, "read-only")).toEqual(["codex"]);
+
+    const shell = decodeShellSnapshotJson({
+      schemaVersion: 1,
+      snapshotSequence: 7,
+      projects: [],
+      threads: [thread("thread-known", "read-only"), thread("thread-future", invented)],
+      archivedThreads: [],
+    });
+    expect(
+      shell.threads.map(({ id, agentPersonaAssignment }) => [
+        id,
+        agentPersonaAssignment?.authorityPolicy,
+      ]),
+    ).toEqual([
+      ["thread-known", "read-only"],
+      ["thread-future", invented],
+    ]);
+    expect(
+      shell.threads.map(({ agentPersonaAssignment }) =>
+        agentPersonaAssignment
+          ? presentAgentPersonaAssignment(agentPersonaAssignment).personaLabel
+          : null,
+      ),
+    ).toEqual(["Scout", `Scout · ${invented} (unsupported)`]);
+  });
+
+  it("keeps an unsupported row unsupported when it is turned off or removed", () => {
+    const rows = presentAgentPersonaCatalog(
+      decodeCatalogJson({
+        personas: [
+          {
+            ...entry("off", invented),
+            availability: { status: "unavailable", reason: "disabled" },
+          },
+          {
+            ...entry("gone", invented),
+            availability: { status: "unavailable", reason: "removed" },
+          },
+        ],
+        policyEnforcement: [],
+      }),
+    );
+    for (const row of rows) {
+      expect(row).toMatchObject({
+        availability: "unsupported",
+        blockedReasons: [
+          `Runtime policy "${invented}" is not supported by this app version. Update the app to launch this persona.`,
+        ],
+      });
+    }
+    expect(rows.map(({ enabled, removed }) => [enabled, removed])).toEqual([
+      [false, false],
+      [false, true],
+    ]);
+  });
+
+  it("refuses to duplicate a definition into a policy the editor cannot offer", () => {
+    const modelRoute = [
+      { driver: ProviderDriverKind.make("codex"), model: "gpt-5.6-terra", reasoningEffort: "high" },
+      { driver: ProviderDriverKind.make("codex"), model: "gpt-5.6-terra", reasoningEffort: "high" },
+    ] as const;
+    expect(() =>
+      agentPersonaDuplicateDraft({
+        id: "future",
+        version: 1,
+        displayName: "Future",
+        description: "From a newer server.",
+        instructions: "# Future",
+        authority: { defaultPolicy: invented, allowedPolicies: [invented] },
+        modelRoute,
+      }),
+    ).toThrow(`Runtime policy "${invented}" is not supported by this app version.`);
   });
 });
 

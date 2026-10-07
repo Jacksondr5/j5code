@@ -514,6 +514,7 @@ export function AgentLibrarySettings() {
                         {persona.availabilityLabel}
                       </Badge>
                     )}
+                    {persona.unsandboxed ? <Badge variant="warning">Full access</Badge> : null}
                     {persona.originLabel ? (
                       <>
                         <span aria-hidden="true">·</span>
@@ -545,7 +546,9 @@ export function AgentLibrarySettings() {
                         </Tooltip>
                       )
                     ) : null}
-                    {persona.edit === null && !persona.removed ? (
+                    {persona.availability === "unsupported" ? (
+                      <span className="basis-full">{persona.blockedReasons[0]}</span>
+                    ) : persona.edit === null && !persona.removed ? (
                       <span className="basis-full">Duplicate this persona to edit a copy</span>
                     ) : null}
                   </div>
@@ -595,7 +598,10 @@ export function AgentLibrarySettings() {
                             Edit
                           </MenuItem>
                         )}
-                        <MenuItem onClick={() => void duplicatePersona(persona.personaId)}>
+                        <MenuItem
+                          disabled={persona.availability === "unsupported"}
+                          onClick={() => void duplicatePersona(persona.personaId)}
+                        >
                           <CopyIcon />
                           Duplicate as personal persona
                         </MenuItem>

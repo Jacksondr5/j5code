@@ -7,7 +7,7 @@ import type { CrewProposalSeatRuntime } from "@t3tools/contracts/j5";
 import { isProviderAvailable } from "@t3tools/contracts";
 import type {
   ModelSelection,
-  OrchestrationV2AgentPersonaAssignment,
+  OrchestrationV2AgentPersonaCommandAssignment,
   OrchestrationV2AppThread,
   RuntimeMode,
 } from "@t3tools/contracts";
@@ -93,7 +93,7 @@ export interface CrewCaptain {
 /** One immutable resolution shared by preview, approval validation, and thread creation. */
 export interface ResolvedCrewLaunchSeat {
   readonly seat: CrewLaunchSeat;
-  readonly assignment: OrchestrationV2AgentPersonaAssignment | null;
+  readonly assignment: OrchestrationV2AgentPersonaCommandAssignment | null;
   readonly modelSelection: ModelSelection;
   readonly runtimeMode: RuntimeMode;
   readonly outputArtifact: string | null;

@@ -1,4 +1,4 @@
-import type { OrchestrationV2AgentPersonaAssignment } from "@t3tools/contracts";
+import type { OrchestrationV2AgentPersonaCommandAssignment } from "@t3tools/contracts";
 import {
   CommandId,
   type RunId,
@@ -103,7 +103,7 @@ export interface OrchestratorMcpServiceShape {
   readonly delegateTask: (
     scope: McpInvocationScope,
     input: OrchestratorMcpDelegateTaskInput & {
-      readonly agentPersonaAssignment?: OrchestrationV2AgentPersonaAssignment;
+      readonly agentPersonaAssignment?: OrchestrationV2AgentPersonaCommandAssignment;
     },
   ) => Effect.Effect<OrchestratorMcpDelegateTaskResult, OrchestratorMcpFailure>;
   readonly taskStatus: (

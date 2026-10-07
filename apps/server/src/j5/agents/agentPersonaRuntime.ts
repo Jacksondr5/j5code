@@ -1,5 +1,5 @@
 import * as Effect from "effect/Effect";
-import type { OrchestrationV2AppThread } from "@t3tools/contracts";
+import { isAgentPersonaAuthorityPolicy, type OrchestrationV2AppThread } from "@t3tools/contracts";
 import { ProviderAdapterV2RuntimePolicy } from "../../orchestration-v2/ProviderAdapter.ts";
 import { getBuiltInAgentPersonaInstructions } from "./agentPersonaPrompts.ts";
 import {
@@ -30,13 +30,20 @@ export const resolveAgentPersonaRuntime = Effect.fn("resolveAgentPersonaRuntime"
 ) {
   const assignment = thread.agentPersonaAssignment;
   if (assignment === undefined) return { runtimeMode: thread.runtimeMode };
+  // A policy only a newer server knows fails here on every path, never as some other policy.
+  if (!isAgentPersonaAuthorityPolicy(assignment.authorityPolicy))
+    return yield* new AgentPersonaLibraryError({
+      message: `The assigned persona runtime policy ${assignment.authorityPolicy} is not supported by this server.`,
+    });
   let instructions: string | undefined;
   if (assignment.definitionDigest === undefined) {
     instructions = getBuiltInAgentPersonaInstructions(assignment);
   } else {
     const definition = yield* library.readSnapshot(assignment);
     if (
-      !definition.authority.allowedPolicies.includes(assignment.authorityPolicy) ||
+      !definition.authority.allowedPolicies.some(
+        (policy) => policy === assignment.authorityPolicy,
+      ) ||
       (assignment.runtimeModeOverride === undefined &&
         !providerCanEnforceAgentPersonaAuthority(
           assignment.resolvedDriver,

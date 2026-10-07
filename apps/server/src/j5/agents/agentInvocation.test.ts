@@ -18,11 +18,11 @@ import * as Schema from "effect/Schema";
 import { stringify as yaml } from "yaml";
 import { ServerConfig } from "../../config.ts";
 import { McpInvocationContext } from "../../mcp/McpInvocationContext.ts";
-import { OrchestratorMcpService } from "../../mcp/OrchestratorMcpService.ts";
+import { OrchestratorMcpService, resolveRuntimeMode } from "../../mcp/OrchestratorMcpService.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { emptyProjection } from "../../orchestration-v2/ProjectionStore.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
-import { invokeAgent } from "./agentInvocation.ts";
+import { InvokeAgentInput, invokeAgent } from "./agentInvocation.ts";
 import { makeAgentPersonaLibrary } from "./agentPersonaLibrary.ts";
 import { BUILT_IN_AGENT_PERSONAS } from "./agentPersonas.ts";
 import { resolveAgentPersonaRuntime } from "./agentPersonaRuntime.ts";
@@ -36,6 +36,7 @@ const definition = {
 };
 const definitionYaml = yaml(definition);
 const isPublicCommand = Schema.is(OrchestrationV2PublicCommand);
+const decodeInvokeAgentInput = Schema.decodeUnknownSync(InvokeAgentInput);
 const providers: ServerProvider[] = definition.modelRoute.map((target) => ({
   instanceId: ProviderInstanceId.make(target.driver),
   driver: ProviderDriverKind.make(target.driver),
@@ -125,27 +126,31 @@ const fixture = Effect.gen(function* () {
           }),
           Layer.mock(ProviderRegistry)({ getProviders: Effect.succeed(available) }),
           Layer.mock(OrchestratorMcpService)({
-            delegateTask: (_, input) => {
-              calls.push(input);
-              return Effect.succeed({
-                taskId: NodeId.make("child-task"),
-                childThreadId: ThreadId.make("child"),
-                childRunId: null,
-                childNodeId: NodeId.make("child-node"),
-                status: "running" as const,
-                workState: "working" as const,
-                hasPendingChildRuns: true,
-                latestTerminalRunId: null,
-                latestTerminalStatus: null,
-                latestTerminalSummary: null,
-                latestTerminalResultContextTransferId: null,
-                providerInstanceId: input.target!.providerInstanceId!,
-                model: input.target!.model!,
-                summary: null,
-                resultContextTransferId: null,
-                waitTimedOut: false,
-              });
-            },
+            delegateTask: (_, input) =>
+              // The real delegation guard compares the request with the parent's stored mode.
+              resolveRuntimeMode(parent.thread.runtimeMode, input.runtimeMode).pipe(
+                Effect.andThen(() => {
+                  calls.push(input);
+                  return Effect.succeed({
+                    taskId: NodeId.make("child-task"),
+                    childThreadId: ThreadId.make("child"),
+                    childRunId: null,
+                    childNodeId: NodeId.make("child-node"),
+                    status: "running" as const,
+                    workState: "working" as const,
+                    hasPendingChildRuns: true,
+                    latestTerminalRunId: null,
+                    latestTerminalStatus: null,
+                    latestTerminalSummary: null,
+                    latestTerminalResultContextTransferId: null,
+                    providerInstanceId: input.target!.providerInstanceId!,
+                    model: input.target!.model!,
+                    summary: null,
+                    resultContextTransferId: null,
+                    waitTimedOut: false,
+                  });
+                }),
+              ),
           }),
         ),
       ),
@@ -241,6 +246,102 @@ describe("saved agent subagent invocation", () => {
       assert.lengthOf(calls, 0);
     }).pipe(Effect.provide(testLayer)),
   );
+  it.effect(
+    "judges delegation by the parent's effective persona permissions and runs the child unrestricted",
+    () =>
+      Effect.gen(function* () {
+        const { library, calls, invoke, parent } = yield* fixture;
+        const unrestricted = {
+          ...definition,
+          id: "team-operator",
+          authority: { defaultPolicy: "full-access", allowedPolicies: ["full-access"] },
+        };
+        yield* library.importFiles({
+          files: [
+            { name: "operator.yaml", content: yaml(unrestricted) },
+            {
+              name: "writer.yaml",
+              content: yaml({
+                ...definition,
+                id: "team-writer",
+                authority: {
+                  defaultPolicy: "workspace-write",
+                  allowedPolicies: ["workspace-write"],
+                },
+              }),
+            },
+          ],
+          replaceExisting: false,
+        });
+        const effective = (call: (typeof calls)[number]) =>
+          resolveAgentPersonaRuntime(
+            {
+              agentPersonaAssignment: call.agentPersonaAssignment!,
+              runtimeMode: parent.thread.runtimeMode,
+            },
+            library,
+          );
+
+        // A plain full-access parent delegates it directly.
+        yield* invoke("team-operator");
+        assert.lengthOf(calls, 1);
+        assert.equal(calls[0]?.runtimeMode, "full-access");
+        const child = calls[0]!;
+        const childPolicy = yield* effective(child);
+        assert.equal(childPolicy.runtimeMode, "full-access");
+        assert.notProperty(childPolicy, "sandboxPolicy");
+        assert.notProperty(childPolicy, "approvalPolicy");
+
+        // A full-access persona parent whose stored thread mode is narrower (a composer launch)
+        // may still delegate; the child inherits the stored mode but runs on its snapshot.
+        for (const runtimeMode of ["approval-required", "auto-accept-edits"] as const) {
+          parent.thread = {
+            ...parent.thread,
+            runtimeMode,
+            agentPersonaAssignment: child.agentPersonaAssignment,
+          };
+          yield* invoke("team-operator");
+          const delegated = calls.at(-1)!;
+          assert.equal(delegated.runtimeMode, "inherit");
+          const inherited = yield* effective(delegated);
+          assert.equal(inherited.runtimeMode, "full-access");
+          assert.notProperty(inherited, "sandboxPolicy");
+          assert.notProperty(inherited, "approvalPolicy");
+        }
+        assert.lengthOf(calls, 3);
+
+        // A workspace-write persona parent may not delegate broader access, even when its
+        // stored thread mode (the composer's) is full-access.
+        yield* invoke("team-writer");
+        const writer = calls.pop()!;
+        parent.thread = {
+          ...parent.thread,
+          runtimeMode: "full-access",
+          agentPersonaAssignment: writer.agentPersonaAssignment,
+        };
+        calls.length = 0;
+        assert.isTrue((yield* invoke("team-operator"))._tag === "Failure");
+        assert.lengthOf(calls, 0);
+
+        // Nor may a read-only persona parent.
+        yield* invoke();
+        parent.thread = {
+          ...parent.thread,
+          agentPersonaAssignment: calls.pop()!.agentPersonaAssignment,
+        };
+        assert.isTrue((yield* invoke("team-operator"))._tag === "Failure");
+        assert.lengthOf(calls, 0);
+      }).pipe(Effect.provide(testLayer)),
+  );
+  it("drops a caller-provided runtime mode before delegating", () => {
+    const decoded = decodeInvokeAgentInput({
+      personaId: "team-operator",
+      task: "x",
+      clientRequestId: "r",
+      runtimeMode: "full-access",
+    });
+    assert.notProperty(decoded, "runtimeMode");
+  });
   it.effect("rejects a forged child assignment on the public command boundary", () =>
     Effect.gen(function* () {
       const { calls, invoke } = yield* fixture;

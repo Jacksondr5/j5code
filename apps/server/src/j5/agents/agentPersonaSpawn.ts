@@ -1,5 +1,5 @@
 import type {
-  OrchestrationV2AgentPersonaAssignment,
+  OrchestrationV2AgentPersonaCommandAssignment,
   ProviderInstanceId,
   ServerProvider,
 } from "@t3tools/contracts";
@@ -96,7 +96,7 @@ export const prepareAgentPersonaPeerSpawn = Effect.fn("j5.prepareAgentPersonaPee
     });
   }
   const definitionDigest = yield* library.snapshot(definition);
-  const assignment: OrchestrationV2AgentPersonaAssignment = {
+  const assignment: OrchestrationV2AgentPersonaCommandAssignment = {
     ...result.assignment,
     ...(definitionDigest === undefined
       ? {}

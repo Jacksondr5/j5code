@@ -121,9 +121,11 @@ export function describeCrewSeatRuntime(
         : "Provider default";
   const access =
     assignment !== null && assignment.runtimeModeOverride === undefined
-      ? mode === "approval-required"
-        ? "Read only"
-        : "Repository write"
+      ? mode === "full-access"
+        ? "Full access"
+        : mode === "approval-required"
+          ? "Read only"
+          : "Repository write"
       : mode === "full-access"
         ? "Full access"
         : mode === "auto"

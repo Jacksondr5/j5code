@@ -517,6 +517,109 @@ it.effect(
   },
 );
 
+it.effect(
+  "launches a full-access persona unrestricted, replays it after the source is removed, and round-trips its export",
+  () => {
+    const definition = {
+      ...BUILT_IN_AGENT_PERSONAS.scout,
+      id: "unrestricted-builder",
+      displayName: "Unrestricted Builder",
+      version: 1,
+      authority: {
+        defaultPolicy: "full-access",
+        allowedPolicies: ["full-access"],
+      } as const,
+    };
+    const harness = makeHarness({
+      providers: [
+        {
+          instanceId: ProviderInstanceId.make("codex"),
+          driver: ProviderDriverKind.make("codex"),
+          enabled: true,
+          installed: true,
+          version: null,
+          status: "ready",
+          auth: { status: "authenticated" },
+          checkedAt: "2026-10-05T00:00:00.000Z",
+          availability: "available",
+          slashCommands: [],
+          skills: [],
+          models: [
+            {
+              slug: definition.modelRoute[0].model,
+              name: "Research model",
+              isCustom: false,
+              capabilities: {
+                optionDescriptors: [
+                  {
+                    id: "reasoningEffort",
+                    label: "Reasoning",
+                    type: "select",
+                    options: [{ id: "high", label: "High" }],
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    });
+    const environment = ServerConfig.layerTest("/repo", { prefix: "j5-persona-full-access-" });
+    return Effect.gen(function* () {
+      const config = yield* ServerConfig.ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const folder = path.join(config.stateDir, "personas");
+      yield* fs.makeDirectory(folder, { recursive: true });
+      yield* fs.writeFileString(path.join(folder, "builder.yaml"), yamlPersonaFixture(definition));
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      const threads = yield* ThreadManagement.ThreadManagementService;
+      const input = {
+        ...launchInput({ command: "command:full-access", thread: "thread:full-access" }),
+        agentPersona: { personaId: definition.id },
+      };
+      const launched = yield* launches.launch(input);
+      const projection = yield* threads.getThreadProjection(launched.threadId);
+      assert.equal(projection.thread.agentPersonaAssignment?.authorityPolicy, "full-access");
+      const library = yield* makeAgentPersonaLibrary;
+      // The effective provider policy comes from the persona snapshot, not the stored thread mode.
+      const policy = yield* resolveAgentPersonaRuntime(
+        { ...projection.thread, runtimeMode: "approval-required" },
+        library,
+      );
+      assert.equal(policy.runtimeMode, "full-access");
+      assert.notProperty(policy, "sandboxPolicy");
+      assert.notProperty(policy, "approvalPolicy");
+
+      // Export and re-import keep the policy.
+      yield* library.importFiles({
+        files: [{ name: "agent.yaml", content: yamlPersonaFixture(definition) }],
+        replaceExisting: true,
+      });
+      const exported = yield* library.read(definition.id);
+      assert.deepEqual(exported.authority, definition.authority);
+      yield* library.importFiles({
+        files: [{ name: "agent.yaml", content: yamlPersonaFixture(exported) }],
+        replaceExisting: true,
+      });
+      assert.deepEqual((yield* library.read(definition.id)).authority, definition.authority);
+
+      // Replay after the source disappears still resolves the persisted snapshot.
+      yield* library.removeImported(definition.id);
+      yield* fs.remove(folder, { recursive: true });
+      assert.equal((yield* launches.launch(input)).threadId, launched.threadId);
+      const replayed = yield* resolveAgentPersonaRuntime(projection.thread, library);
+      assert.equal(replayed.runtimeMode, "full-access");
+      assert.notProperty(replayed, "sandboxPolicy");
+    }).pipe(
+      Effect.provide(
+        harness.layer.pipe(Layer.provideMerge(environment), Layer.provideMerge(NodeServices.layer)),
+      ),
+      Effect.scoped,
+    );
+  },
+);
+
 it.effect("releases claimed uploads when persona resolution refuses a launch", () => {
   const harness = makeHarness({ providers: [] });
   const environment = ServerConfig.layerTest("/repo", { prefix: "j5-persona-intake-" });

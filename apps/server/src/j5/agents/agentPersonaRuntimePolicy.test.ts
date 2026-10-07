@@ -142,6 +142,28 @@ it.layer(TestLayer)("agent persona runtime policy", (it) => {
     }),
   );
 
+  it.effect("refuses a stored policy this server does not know instead of running another", () =>
+    Effect.gen(function* () {
+      const policy = yield* RuntimePolicyV2;
+      const now = yield* DateTime.now;
+      const thread = {
+        ...makeThread({ now, worktreePath: "/project-worktree" }),
+        agentPersonaAssignment: {
+          personaId: "scout",
+          definitionVersion: 1,
+          authorityPolicy: "sandboxed-network",
+          resolvedRoute: "primary",
+          resolvedDriver: ProviderDriverKind.make("codex"),
+          resolvedModelSelection: modelSelection,
+        },
+      } satisfies OrchestrationV2AppThread;
+
+      const error = yield* Effect.flip(policy.resolve({ thread, modelSelection }));
+
+      assert.include(String(error.cause), "sandboxed-network is not supported");
+    }),
+  );
+
   it.effect("adds the versioned Builder instructions to its runtime policy", () =>
     Effect.gen(function* () {
       const policy = yield* RuntimePolicyV2;
@@ -161,6 +183,31 @@ it.layer(TestLayer)("agent persona runtime policy", (it) => {
       const resolved = yield* policy.resolve({ thread, modelSelection });
 
       assert.equal(resolved.agentPersonaInstructions, BUILDER_AGENT_PERSONA_INSTRUCTIONS_V1);
+    }),
+  );
+
+  it.effect("runs a full-access persona unrestricted regardless of the thread runtime mode", () =>
+    Effect.gen(function* () {
+      const policy = yield* RuntimePolicyV2;
+      const now = yield* DateTime.now;
+      const thread = {
+        ...makeThread({ now, worktreePath: "/project-worktree" }),
+        runtimeMode: "approval-required",
+        agentPersonaAssignment: {
+          personaId: "builder",
+          definitionVersion: 1,
+          authorityPolicy: "full-access",
+          resolvedRoute: "primary",
+          resolvedDriver: ProviderDriverKind.make("codex"),
+          resolvedModelSelection: modelSelection,
+        },
+      } satisfies OrchestrationV2AppThread;
+
+      const resolved = yield* policy.resolve({ thread, modelSelection });
+
+      assert.equal(resolved.runtimeMode, "full-access");
+      assert.isUndefined(resolved.approvalPolicy);
+      assert.isUndefined(resolved.sandboxPolicy);
     }),
   );
 });

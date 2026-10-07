@@ -1,6 +1,7 @@
 import {
   isAgentPersonaReasoningOptionId,
   type OrchestrationV2AgentPersonaAssignment,
+  type OrchestrationV2AgentPersonaCommandAssignment,
   ProviderDriverKind,
 } from "@t3tools/contracts";
 
@@ -18,7 +19,7 @@ type AvailableAgentPersonaRoute = Extract<AgentPersonaRouteResolution, { status:
 export type AgentPersonaAssignmentResult =
   | {
       readonly status: "assigned";
-      readonly assignment: OrchestrationV2AgentPersonaAssignment;
+      readonly assignment: OrchestrationV2AgentPersonaCommandAssignment;
     }
   | {
       readonly status: "invalid-authority-policy";

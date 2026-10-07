@@ -26,7 +26,12 @@ export type AgentArtifactId = string;
 export type AgentAuthorityPolicyId = AgentPersonaAuthorityPolicy;
 
 export interface AgentAuthorityRules {
-  readonly workspace: "read-only" | "write" | "diagnostic-write" | "publication-only";
+  readonly workspace:
+    | "read-only"
+    | "write"
+    | "diagnostic-write"
+    | "publication-only"
+    | "unrestricted";
 }
 
 /** The workspace access each policy asks a provider sandbox for. */
@@ -48,6 +53,10 @@ export const AGENT_AUTHORITY_RULES = {
   },
   "publish-only": {
     workspace: "publication-only",
+  },
+  // No J5 restriction: each driver applies its native full-access behavior.
+  "full-access": {
+    workspace: "unrestricted",
   },
 } as const satisfies Record<AgentAuthorityPolicyId, AgentAuthorityRules>;
 
