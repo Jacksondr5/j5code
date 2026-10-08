@@ -33,6 +33,9 @@ const withDatabasePath = <A, E>(
     return yield* body({ dbPath, snapshotPath: ledgerMigrationSnapshotPath(path, dbPath, 30) });
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
 
+/** No shipped migration is guarded, so these tests guard 030 themselves. */
+const guarding030 = { guardedMigrationIds: [30] };
+
 /** A database with a J5 ledger whose latest applied migration is `latestApplied`. */
 const seedLedger = (database: NodeSqlite.DatabaseSync, latestApplied: number) => {
   database.exec(`
@@ -85,7 +88,7 @@ it.effect("snapshots once, before migration 030, and not again after it applied"
   withDatabasePath(({ dbPath, snapshotPath }) =>
     Effect.gen(function* () {
       const atDatabase = Effect.provide(NodeSqliteClient.layer({ filename: dbPath }));
-      // The real migrator, the real migrations and the real guarded list: 030 is pending.
+      // The real migrator and the real migrations: 030 is pending.
       assert.isTrue(snapshotPath.endsWith("statev2.pre-j5-030.sqlite"));
 
       yield* Effect.gen(function* () {
@@ -97,14 +100,26 @@ it.effect("snapshots once, before migration 030, and not again after it applied"
       }).pipe(atDatabase);
       const beforeMigration = readContent(dbPath);
 
-      yield* snapshotBeforeJ5LedgerMigration(dbPath);
+      yield* snapshotBeforeJ5LedgerMigration(dbPath, guarding030);
       assert.deepStrictEqual(readContent(snapshotPath), beforeMigration);
 
       yield* runJ5A2AMigrations().pipe(atDatabase);
       assert.notDeepEqual(readContent(dbPath), beforeMigration);
       NodeFS.rmSync(snapshotPath);
-      yield* snapshotBeforeJ5LedgerMigration(dbPath);
+      yield* snapshotBeforeJ5LedgerMigration(dbPath, guarding030);
       assert.isFalse(NodeFS.existsSync(snapshotPath));
+    }),
+  ),
+);
+
+it.effect("takes no snapshot before migration 030 with the shipped guarded list", () =>
+  withDatabasePath(({ dbPath }) =>
+    Effect.gen(function* () {
+      const path = yield* Path.Path;
+      createLedgerDatabase(dbPath, 29);
+      // 030 is pending and is the newest migration this build knows.
+      yield* snapshotBeforeJ5LedgerMigration(dbPath, { migrationIds: [29, 30] });
+      assert.deepStrictEqual(NodeFS.readdirSync(path.dirname(dbPath)), ["statev2.sqlite"]);
     }),
   ),
 );
@@ -112,7 +127,7 @@ it.effect("snapshots once, before migration 030, and not again after it applied"
 it.effect("takes no snapshot when the database does not exist", () =>
   withDatabasePath(({ dbPath, snapshotPath }) =>
     Effect.gen(function* () {
-      yield* snapshotBeforeJ5LedgerMigration(dbPath);
+      yield* snapshotBeforeJ5LedgerMigration(dbPath, guarding030);
       assert.isFalse(NodeFS.existsSync(snapshotPath));
       // A read-only check must not create the database either.
       assert.isFalse(NodeFS.existsSync(dbPath));
@@ -126,7 +141,7 @@ it.effect("takes no snapshot of a database that has no J5 ledger yet", () =>
       const database = new NodeSqlite.DatabaseSync(dbPath);
       database.exec("CREATE TABLE projection_projects (project_id TEXT PRIMARY KEY)");
       database.close();
-      yield* snapshotBeforeJ5LedgerMigration(dbPath);
+      yield* snapshotBeforeJ5LedgerMigration(dbPath, guarding030);
       assert.isFalse(NodeFS.existsSync(snapshotPath));
     }),
   ),
@@ -198,7 +213,7 @@ it.effect("replaces an older snapshot and leaves no partial file behind", () =>
       createLedgerDatabase(dbPath, 29);
       NodeFS.writeFileSync(snapshotPath, "an older snapshot");
 
-      yield* snapshotBeforeJ5LedgerMigration(dbPath);
+      yield* snapshotBeforeJ5LedgerMigration(dbPath, guarding030);
 
       assert.deepStrictEqual(readContent(snapshotPath), readContent(dbPath));
       assert.deepStrictEqual(
@@ -221,7 +236,7 @@ it.effect("includes rows still in the WAL while another connection holds the dat
       assert.isAbove(NodeFS.statSync(`${dbPath}-wal`).size, 0);
       const mainFileBefore = NodeFS.readFileSync(dbPath);
 
-      yield* snapshotBeforeJ5LedgerMigration(dbPath);
+      yield* snapshotBeforeJ5LedgerMigration(dbPath, guarding030);
 
       const content = readContent(snapshotPath);
       assert.deepStrictEqual(content, readContent(dbPath));
@@ -244,7 +259,7 @@ it.effect("fails, and publishes nothing, when the snapshot cannot be written", (
       NodeFS.mkdirSync(snapshotPath);
       NodeFS.writeFileSync(`${snapshotPath}/occupied`, "");
 
-      const error = yield* Effect.flip(snapshotBeforeJ5LedgerMigration(dbPath));
+      const error = yield* Effect.flip(snapshotBeforeJ5LedgerMigration(dbPath, guarding030));
 
       assert.instanceOf(error, LedgerMigrationSnapshotError);
       assert.strictEqual(error.migrationId, 30);
@@ -263,7 +278,7 @@ it.effect("fails when the database cannot be read", () =>
   withDatabasePath(({ dbPath, snapshotPath }) =>
     Effect.gen(function* () {
       NodeFS.writeFileSync(dbPath, "this is not a SQLite database, and is long enough to say so");
-      const error = yield* Effect.flip(snapshotBeforeJ5LedgerMigration(dbPath));
+      const error = yield* Effect.flip(snapshotBeforeJ5LedgerMigration(dbPath, guarding030));
       assert.instanceOf(error, LedgerMigrationSnapshotError);
       assert.isFalse(NodeFS.existsSync(snapshotPath));
     }),
