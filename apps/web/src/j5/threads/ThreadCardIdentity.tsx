@@ -8,29 +8,26 @@ import type {
 import { Badge } from "../../components/ui/badge";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip";
 import { AgentIdentityChip } from "../agents/AgentIdentityChip";
-import { CaptainMark } from "./CaptainMark";
+import { CaptainMark } from "../crew/CaptainMark";
 import {
   presentCrewMembership,
   useCrewMembership,
   type ThreadCrewMembership,
-} from "./CrewMembershipsClient";
-import type { ThreadHome } from "./ThreadHomesClient";
+} from "../crew/CrewMembershipsClient";
 
 /**
- * Thread cards identify registered work by its immutable Registrar Squadron.
- * Native threads have no Registrar home, so their existing folder label stays
- * as the honest fallback rather than inventing a Squadron. A thread launched as
- * a persona shows that persona beside its home; a Crew member adds a seat chip
- * and a Captain adds the anchor mark. The list itself stays flat by recency, and
- * the grouped org tree belongs to the Roster.
+ * Thread cards name the thread's project, as upstream's do. A thread launched as
+ * a persona shows that persona beside it; a Crew member adds a seat chip and a
+ * Captain adds the anchor mark. The list itself stays flat by recency, and the
+ * grouped org tree belongs to the Roster.
  */
 export function ThreadCardIdentity(props: {
   readonly threadId?: ThreadId;
   /** With `threadId`, names the environment the Crew chip is read from. */
   readonly environmentId?: EnvironmentId;
-  readonly home: ThreadHome | undefined;
-  readonly fallbackFolder: string | null;
-  /** Threads launched as a persona show the persona beside their home. */
+  /** The project's display name, as upstream's card shows it. */
+  readonly projectName: string | null;
+  /** Threads launched as a persona show the persona beside their project. */
   readonly agentPersonaAssignment?: OrchestrationV2AgentPersonaAssignment | undefined;
 }) {
   const membership = useCrewMembership(
@@ -40,8 +37,7 @@ export function ThreadCardIdentity(props: {
   );
   return (
     <ThreadCardIdentityView
-      home={props.home}
-      fallbackFolder={props.fallbackFolder}
+      projectName={props.projectName}
       agentPersonaAssignment={props.agentPersonaAssignment}
       membership={membership}
     />
@@ -49,12 +45,11 @@ export function ThreadCardIdentity(props: {
 }
 
 export function ThreadCardIdentityView(props: {
-  readonly home: ThreadHome | undefined;
-  readonly fallbackFolder: string | null;
+  readonly projectName: string | null;
   readonly agentPersonaAssignment?: OrchestrationV2AgentPersonaAssignment | undefined;
   readonly membership: ThreadCrewMembership | undefined;
 }) {
-  const label = props.home?.kind === "known" ? props.home.squadron.name : props.fallbackFolder;
+  const label = props.projectName;
   const chip = presentCrewMembership(props.membership);
   const agent = <AgentIdentityChip assignment={props.agentPersonaAssignment} />;
   if (label === null && chip === null)

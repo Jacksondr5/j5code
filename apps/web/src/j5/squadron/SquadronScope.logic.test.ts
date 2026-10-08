@@ -12,7 +12,6 @@ import {
   resolveSquadronScope,
   selectSquadronForDraft,
   shouldShowSquadronDraftChip,
-  isSidebarMember,
 } from "./SquadronScope.logic";
 
 const environmentId = EnvironmentId.make("remote");
@@ -200,14 +199,6 @@ describe("SB5 sidebar membership", () => {
     ...(origin === undefined ? {} : { origin }),
   });
   const key = (id: string) => scopedThreadKey(scopeThreadRef(environmentId, ThreadId.make(id)));
-  it("hides agent-spawned peers unless pinned and keeps human, unknown, and silent homes", () => {
-    expect(isSidebarMember({ pinnedAt: null }, known("s", "agent"))).toBe(false);
-    expect(isSidebarMember({ pinnedAt: "2026-09-09T00:00:00Z" }, known("s", "agent"))).toBe(true);
-    expect(isSidebarMember({ pinnedAt: null }, known("s", "human"))).toBe(true);
-    expect(isSidebarMember({ pinnedAt: null }, known("s"))).toBe(true);
-    expect(isSidebarMember({ pinnedAt: null }, { kind: "unknown" })).toBe(true);
-    expect(isSidebarMember({ pinnedAt: null }, undefined)).toBe(true);
-  });
   it("applies membership before the squadron scope, including when zoomed out", () => {
     const homes = new Map([
       [key("captain"), known("alpha", "human")],

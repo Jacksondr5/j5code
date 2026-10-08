@@ -3,8 +3,8 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import type { FleetResponse, FleetSquadron } from "@t3tools/contracts/j5";
 
 import { appAtomRegistry } from "../../rpc/atomRegistry";
-import { refreshCrewMembershipRows } from "../squadron/CrewMembershipsClient";
-import { refreshSpawnedChildrenRows } from "../squadron/SpawnedChildrenClient";
+import { refreshCrewMembershipRows } from "../crew/CrewMembershipsClient";
+import { refreshSpawnedChildrenRows } from "../threads/SpawnedChildrenClient";
 import {
   fleetDetailQueryAtom,
   fleetDetailSourcesAtom,

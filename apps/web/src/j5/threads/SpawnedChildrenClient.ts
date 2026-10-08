@@ -1,7 +1,7 @@
 import type { PreparedConnection } from "@t3tools/client-runtime/connection";
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { listSpawnedChildren } from "@t3tools/client-runtime/j5/http";
-import { createScopedThreadReadStore } from "@t3tools/client-runtime/j5/threadHomes";
+import { createScopedThreadReadStore } from "@t3tools/client-runtime/j5/scopedThreadReadStore";
 import type { EnvironmentId, ScopedThreadRef, ThreadId } from "@t3tools/contracts";
 import type { SpawnedChild, SpawnedChildrenEntry } from "@t3tools/contracts/j5";
 import { useSyncExternalStore } from "react";
@@ -30,10 +30,7 @@ const store = createScopedThreadReadStore<ReadonlyArray<SpawnedChild>, SpawnedCh
   replace: replaceSpawnedChildren,
 });
 
-/**
- * Incremental beside the thread-home read; `refreshSpawnedChildren` re-reads every requested row
- * after a launch or decision on this device, the Fleet poll only the involved ones.
- */
+/** Incremental, from `useThreadRowReads`; the Fleet poll re-reads the involved rows. */
 export const requestSpawnedChildren = (
   refs: ReadonlyArray<ScopedThreadRef>,
   connections: ReadonlyMap<EnvironmentId, PreparedConnection | null>,
@@ -43,7 +40,6 @@ export const requestSpawnedChildren = (
   store.request(refs, force);
 };
 
-export const refreshSpawnedChildren = () => store.refreshRequested();
 /**
  * The Fleet poll's re-read: the rows the roster says have placed children or sit in a Crew, plus
  * every row still showing children, so a parent whose children all archived loses them.

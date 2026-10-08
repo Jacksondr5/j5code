@@ -2,6 +2,8 @@ import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environ
 import { ThreadId, type EnvironmentId } from "@t3tools/contracts";
 import type { ScopedSquadronRef } from "@t3tools/contracts/j5";
 
+import { isSidebarMember } from "../threads/sidebarMembership";
+
 export interface SquadronChoice {
   readonly environmentId: EnvironmentId;
   readonly id: string;
@@ -31,15 +33,6 @@ export type SidebarThreadHome =
       readonly origin?: "human" | "agent" | undefined;
     }
   | { readonly kind: "unknown" };
-
-/**
- * SB5 sidebar membership: human-created agents show; agent-spawned Peer Agents (Crew members
- * included) are roster-only unless the user pinned them. Unknown provenance shows, never guesses.
- */
-export const isSidebarMember = (
-  thread: { readonly pinnedAt?: string | null | undefined },
-  home: SidebarThreadHome | undefined,
-) => !(home?.kind === "known" && home.origin === "agent" && thread.pinnedAt == null);
 
 /**
  * SB5 membership first, then the selected scope, which admits only that Squadron's immutable,

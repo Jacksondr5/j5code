@@ -55,6 +55,7 @@ import {
   openInboxSourcesAtom,
   refreshJ5Sources,
 } from "../state";
+import { useSquadronProjects } from "../useSquadronProjects";
 import { createVisibleRefreshHook } from "../useVisibleRefresh";
 import { notifyHumanInboxChanged } from "./humanInboxRefresh";
 
@@ -65,6 +66,8 @@ interface HumanInboxAnswerAttempt {
 
 type HumanInboxAnswers = Readonly<Record<string, string>>;
 type SenderLabels = ReadonlyMap<EnvironmentId, ReadonlyMap<string, string>>;
+/** The project an item's Squadron references, by display name. */
+type ProjectNameOf = (item: HumanInboxItem) => string;
 
 const noLabels: ReadonlyMap<string, string> = new Map();
 
@@ -208,11 +211,13 @@ function OpenInboxItem({
   setAnswers,
   onOpenThread,
   senderLabels,
+  projectNameOf,
   showEnvironment,
 }: {
   readonly item: HumanInboxItem;
   readonly answer: (item: HumanInboxItem) => void;
   readonly senderLabels: SenderLabels;
+  readonly projectNameOf: ProjectNameOf;
   readonly answerText: string;
   readonly pendingExchangeId: string | null;
   readonly showEnvironment: boolean;
@@ -236,7 +241,7 @@ function OpenInboxItem({
                 senderLabels={senderLabels}
               />
               <span aria-hidden>·</span>
-              <span className="truncate">{item.squadronName}</span>
+              <span className="truncate">{projectNameOf(item)}</span>
               {showEnvironment || !item.connected ? (
                 <>
                   <span aria-hidden>·</span>
@@ -308,11 +313,13 @@ function AnsweredShelf({
   items,
   onOpenThread,
   senderLabels,
+  projectNameOf,
   showEnvironment,
 }: {
   readonly items: ReadonlyArray<HumanInboxItem>;
   readonly onOpenThread: (item: HumanInboxItem) => void;
   readonly senderLabels: SenderLabels;
+  readonly projectNameOf: ProjectNameOf;
   readonly showEnvironment: boolean;
 }) {
   if (items.length === 0) return null;
@@ -337,7 +344,7 @@ function AnsweredShelf({
               <div className="min-w-0 flex-1">
                 <p className="break-words text-sm font-medium text-foreground/80">{item.intent}</p>
                 <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                  <SenderName item={item} senderLabels={senderLabels} /> · {item.squadronName}
+                  <SenderName item={item} senderLabels={senderLabels} /> · {projectNameOf(item)}
                   {showEnvironment ? ` · ${item.environmentLabel}` : ""}
                   {` · ${formatAnsweredAgeLabel(answeredDuration)}`}
                 </p>
@@ -382,6 +389,14 @@ export function HumanInboxPage() {
       participantId: item.senderId,
       connected: item.connected,
     })),
+  );
+  // The ledger still keys an item by Squadron; the person sees the project it references. The
+  // Squadron name the read carries stands in until the project resolves.
+  const projects = useSquadronProjects();
+  const projectNameOf = useCallback(
+    (item: HumanInboxItem) =>
+      projects.ofSquadron(item.environmentId, item.squadronId)?.displayName ?? item.squadronName,
+    [projects],
   );
   const [answers, setAnswers] = useState<HumanInboxAnswers>({});
   const [pendingExchangeId, setPendingExchangeId] = useState<string | null>(null);
@@ -668,6 +683,7 @@ export function HumanInboxPage() {
                     onOpenThread={openThread}
                     pendingExchangeId={pendingExchangeId}
                     senderLabels={senderLabels}
+                    projectNameOf={projectNameOf}
                     setAnswers={setAnswers}
                     showEnvironment={showEnvironment}
                   />
@@ -679,6 +695,7 @@ export function HumanInboxPage() {
               items={answeredItems}
               onOpenThread={openThread}
               senderLabels={senderLabels}
+              projectNameOf={projectNameOf}
               showEnvironment={showEnvironment}
             />
           </main>

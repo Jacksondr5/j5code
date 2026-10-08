@@ -222,10 +222,10 @@ import {
   retryScopedThreadHomes,
   useThreadHomes,
   useThreadHomesScopeReadState,
-  type ThreadHome,
 } from "../j5/squadron/ThreadHomesClient";
-import { SpawnedChildren } from "../j5/squadron/SpawnedChildren";
-import { ThreadCardIdentity } from "../j5/squadron/ThreadCardIdentity";
+import { SpawnedChildren } from "../j5/threads/SpawnedChildren";
+import { ThreadCardIdentity } from "../j5/threads/ThreadCardIdentity";
+import { useKeyedThreadRefs, useThreadRowReads } from "../j5/threads/useThreadRowReads";
 import {
   createSidebarCollisionDetection,
   createSidebarSortingStrategy,
@@ -1071,7 +1071,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   environmentLabel: string | null;
   environmentMachine: EnvironmentMachineKind;
   project: EnvironmentProject | null;
-  threadHome: ThreadHome | undefined;
   projectDisplayName: string | null;
   providerEntryByInstanceId: ReadonlyMap<string, ProviderInstanceEntry>;
   timestampFormat: TimestampFormat;
@@ -1852,8 +1851,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 <ThreadCardIdentity
                   threadId={thread.id}
                   environmentId={thread.environmentId}
-                  home={props.threadHome}
-                  fallbackFolder={props.projectDisplayName}
+                  projectName={props.projectDisplayName}
                   agentPersonaAssignment={thread.agentPersonaAssignment}
                 />
               </span>
@@ -2449,11 +2447,11 @@ export default function Sidebar() {
       ),
     [squadronScopeId, squadrons],
   );
-  const threadHomes = useThreadHomes(
+  const threadRefs = useKeyedThreadRefs(
     threads.map((thread) => scopeThreadRef(thread.environmentId, thread.id)),
-    squadronScopeId,
-    squadronScopeSelectionGeneration,
   );
+  const threadHomes = useThreadHomes(threadRefs, squadronScopeId, squadronScopeSelectionGeneration);
+  useThreadRowReads(threadRefs);
   const openProjectSettings = useCallback(
     (projectGroup: SidebarProjectSnapshot) => {
       if (isMobile) setOpenMobile(false);
@@ -4611,7 +4609,6 @@ export default function Sidebar() {
                             // sortable wrapper keeps its identity during a drag.
                             key={`${threadKey}:${rowVariant}`}
                             thread={thread}
-                            threadHome={threadHomes.get(threadKey)}
                             variant={rowVariant}
                             // Snoozed rows wake, settled rows un-settle, and cards settle.
                             variantAction={
