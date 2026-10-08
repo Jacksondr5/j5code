@@ -40,6 +40,7 @@ import { annotateEnvironmentRequest } from "../../auth/http.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { PeerInboundService, peerDeliveryRefusal } from "./PeerInboundService.ts";
 import { PeerRegistryService } from "./PeerRegistryService.ts";
+import { PeerRemovalService } from "./PeerRemovalService.ts";
 import { PeerStoreService } from "./PeerStoreService.ts";
 import { RosterService } from "./RosterService.ts";
 import { peerAddressOrigins } from "./peerReachability.ts";
@@ -144,6 +145,7 @@ export const peerHttpRouteLayer = Layer.unwrap(
     const worker = yield* A2ADeliveryWorker;
     const roster = yield* RosterService;
     const store = yield* PeerStoreService;
+    const removal = yield* PeerRemovalService;
     const config = yield* ServerConfig;
     const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
 
@@ -399,14 +401,16 @@ export const peerHttpRouteLayer = Layer.unwrap(
         if (Result.isFailure(body)) return requestFailure("The request body must be JSON.");
         const decoded = yield* Effect.result(decodeRemoveRequest(body.success));
         if (Result.isFailure(decoded)) return requestFailure("environmentId is required.");
-        // Both directions end here: our record of the peer, and the session it held for us.
+        // Both directions end here: the session it held for us, first, so it
+        // cannot deliver or poll during the wipe, then our record of the peer,
+        // with everything still waiting on it.
         const outcome = yield* Effect.result(
           rotationPermit.withPermit(
             Effect.all({
-              removed: peers.remove(decoded.success.environmentId),
               revokedSessions: revokeAllSessionsForSubject(
                 peerSubjectForEnvironment(decoded.success.environmentId),
               ),
+              removed: removal.remove(decoded.success.environmentId),
             }),
           ),
         );

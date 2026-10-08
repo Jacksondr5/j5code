@@ -28,6 +28,7 @@ import { A2AArchiveFacts } from "./ArchiveFactsService.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { MachineParticipantService } from "./MachineParticipantService.ts";
 import { PeerInboundService } from "./PeerInboundService.ts";
+import { PeerRemovalService } from "./PeerRemovalService.ts";
 import { PeerStoreService } from "./PeerStoreService.ts";
 import { PeerRegistryService } from "./PeerRegistryService.ts";
 import { RosterService } from "./RosterService.ts";
@@ -138,6 +139,7 @@ it("wires the authenticated aggregate's thread-homes path without a parallel rou
           Layer.mock(PeerRegistryService)({}),
           Layer.mock(PeerInboundService)({}),
           Layer.mock(PeerStoreService)({}),
+          Layer.mock(PeerRemovalService)({}),
         ),
       ),
       Layer.provide(Layer.mock(ProjectService.ProjectService)({})),

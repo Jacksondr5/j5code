@@ -130,7 +130,16 @@ export const J5ParticipantDirectoryRow = Schema.Struct({
   placement_parent_id: Schema.NullOr(ParticipantId),
   display_name: Schema.NullOr(Schema.String),
   /** Where the participant lives, by the server's own name; present once this server has a peer. */
-  server: Schema.optionalKey(Schema.Struct({ name: Schema.String, local: Schema.Boolean })),
+  server: Schema.optionalKey(
+    Schema.Struct({
+      name: Schema.String,
+      local: Schema.Boolean,
+      /** Only on a peer server that polls this one: whether it is online; while it is not, its messages wait. */
+      available: Schema.optionalKey(Schema.Boolean),
+      /** When that server last polled, once it has. */
+      last_available_at: Schema.optionalKey(Schema.String),
+    }),
+  ),
 });
 export type J5ParticipantDirectoryRow = typeof J5ParticipantDirectoryRow.Type;
 

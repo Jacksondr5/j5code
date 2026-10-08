@@ -16,7 +16,7 @@ import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import { EffectOutboxV2 } from "../../orchestration-v2/EffectOutbox.ts";
 import { OrchestratorV2 } from "../../orchestration-v2/Orchestrator.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
-import { A2ADeliveryTransport, live as deliveryTransportLive } from "./DeliveryTransport.ts";
+import { live as deliveryTransportLive } from "./DeliveryTransport.ts";
 import {
   A2ADeliveryHooks,
   A2ADeliveryWorker,
@@ -75,6 +75,8 @@ const supportOnHome: RemoteAgent = {
   displayName: "Support triage",
   archived: false,
   canReceiveMessage: true,
+  available: true,
+  lastAvailableAt: null,
 };
 
 const directoryLayer = (agents: ReadonlyArray<RemoteAgent>, unreadPeers: ReadonlyArray<string>) =>
@@ -102,11 +104,14 @@ const directoryLayer = (agents: ReadonlyArray<RemoteAgent>, unreadPeers: Readonl
           selfName: "Work",
         }),
       snapshotAgent: () => Effect.succeed(null),
-      serverName: (environmentId) =>
-        Effect.succeed(
-          agents.find((agent) => agent.environmentId === environmentId)?.environmentLabel ??
+      serverStatus: (environmentId) =>
+        Effect.succeed({
+          name:
+            agents.find((agent) => agent.environmentId === environmentId)?.environmentLabel ??
             environmentId,
-        ),
+          available: true,
+          lastAvailableAt: null,
+        }),
     }),
   );
 
@@ -134,6 +139,11 @@ const seedLocal = Effect.fn("test.j5.a2a.peer.outbound.seed")(function* () {
   });
   // The sender's thread title is the label the peer's people will see.
   const sql = yield* SqlClient.SqlClient;
+  // Home as this server records it, for what reads the record directly, such as a notice's name for it.
+  yield* sql`
+    INSERT INTO j5_a2a_peer (environment_id, label, link_mode, origin, credential, created_at, updated_at)
+    VALUES (${homePeer.environmentId}, ${homePeer.label}, 'push', ${homePeer.origin}, 'home-token', ${timestamp}, ${timestamp})
+  `;
   yield* sql`
     INSERT INTO orchestration_v2_projection_threads (
       thread_id, project_id, title, default_provider, runtime_mode,
@@ -464,27 +474,135 @@ it.effect(
     }),
 );
 
-it.effect("turns a peer's refusal into a delivery failure the worker retries and alarms on", () =>
+it.effect(
+  "takes a peer's refusal as final: the ask's Exchange drops and its sender is told why",
+  () =>
+    Effect.gen(function* () {
+      const posted: Array<PostedRequest> = [];
+      yield* Effect.gen(function* () {
+        const { sent, deliver } = yield* crossingAsk();
+        assert.equal((yield* deliver)?.state, "alarmed", "no retry can change the peer's answer");
+        const sql = yield* SqlClient.SqlClient;
+        const [ask] = yield* sql<{ readonly last_error: string | null }>`
+          SELECT last_error FROM j5_a2a_delivery WHERE message_id = ${sent.messageId}
+        `;
+        assert.equal(ask?.last_error, "recipient_not_found: No active agent");
+        const [exchange] = yield* sql<{ readonly status: string }>`
+          SELECT status FROM j5_a2a_exchange WHERE exchange_id = ${sent.exchangeId}
+        `;
+        assert.equal(exchange?.status, "dropped", "the asker owes nothing and waits for nothing");
+        const notices = yield* sql<{ readonly receiver_id: string; readonly message_text: string }>`
+          SELECT receiver_id, message_text FROM j5_a2a_delivery
+          WHERE envelope_channel = 'lifecycle_notice'
+        `;
+        assert.equal(notices.length, 1, "one notice");
+        assert.equal(notices[0]!.receiver_id, billing.id);
+        assert.include(
+          notices[0]!.message_text,
+          `Your message to ${remoteSupport} on Home was not delivered: Home has no active participant with that id.`,
+        );
+        assert.include(
+          notices[0]!.message_text,
+          "The exchange is closed; nothing is owed and nothing will answer it.",
+        );
+        assert.include(notices[0]!.message_text, `exchangeId=${sent.exchangeId}`);
+        assert.notInclude(notices[0]!.message_text, "retired", "nothing claims an archive");
+        const [dropped] = yield* sql<{ readonly cause: string }>`
+          SELECT json_extract(payload, '$.cause.kind') AS cause FROM j5_a2a_comm_event
+          WHERE kind = 'exchange.dropped'
+        `;
+        assert.equal(dropped?.cause, "delivery-refused");
+        assert.equal(posted.length, 1, "the refused ask was posted once");
+      }).pipe(
+        Effect.provide(
+          makeTransportLayer(
+            { status: 404, body: { error: "recipient_not_found", message: "No active agent" } },
+            posted,
+          ),
+        ),
+      );
+    }),
+);
+
+it.effect("never takes a 2xx answer as a refusal, whatever its body says", () =>
   Effect.gen(function* () {
     const posted: Array<PostedRequest> = [];
-    const outcome = yield* Effect.gen(function* () {
-      const { deliver } = yield* crossingAsk();
-      const milestone = yield* deliver;
+    yield* Effect.gen(function* () {
+      const { sent, deliver } = yield* crossingAsk();
+      assert.equal((yield* deliver)?.state, "retry_scheduled");
       const sql = yield* SqlClient.SqlClient;
-      const [row] = yield* sql<{ readonly last_error: string | null }>`
-        SELECT last_error FROM j5_a2a_delivery
+      const [exchange] = yield* sql<{ readonly status: string }>`
+        SELECT status FROM j5_a2a_exchange WHERE exchange_id = ${sent.exchangeId}
       `;
-      return { state: milestone?.state, lastError: row?.last_error ?? "" };
+      assert.equal(exchange?.status, "open", "the ask is not dropped");
     }).pipe(
       Effect.provide(
         makeTransportLayer(
-          { status: 404, body: { error: "recipient_not_found", message: "No active agent" } },
+          { status: 202, body: { error: "recipient_not_found", message: "No active agent" } },
           posted,
         ),
       ),
     );
-    assert.equal(outcome.state, "retry_scheduled");
-    assert.include(outcome.lastError, "refused the delivery (HTTP 404)");
+  }),
+);
+
+it.effect("retries a bare 403 or 404 that is not the peer's refusal, as any failure", () =>
+  Effect.gen(function* () {
+    const posted: Array<PostedRequest> = [];
+    yield* Effect.gen(function* () {
+      const { deliver } = yield* crossingAsk();
+      // Such as an older server without the route, or a proxy's page.
+      assert.equal((yield* deliver)?.state, "retry_scheduled");
+      const sql = yield* SqlClient.SqlClient;
+      const notices = yield* sql`
+        SELECT 1 FROM j5_a2a_delivery WHERE envelope_channel = 'lifecycle_notice'
+      `;
+      assert.equal(notices.length, 0, "nothing is final, so nobody is told");
+    }).pipe(
+      Effect.provide(makeTransportLayer({ status: 404, body: { error: "not_found" } }, posted)),
+    );
+  }),
+);
+
+it.effect("tells the sender of a plain message the peer refused, naming the server and why", () =>
+  Effect.gen(function* () {
+    const posted: Array<PostedRequest> = [];
+    yield* Effect.gen(function* () {
+      yield* seedLocal();
+      const send = yield* A2ASendService;
+      yield* send.send({
+        commandId: CommCommandId.make("command:peer-outbound:refused-plain"),
+        senderThreadId: billing.threadId,
+        to: remoteSupport,
+        message: "FYI: the incident is closed.",
+        acceptedAt: timestamp,
+      });
+      const worker = yield* A2ADeliveryWorker;
+      assert.equal((yield* worker.runOnce)?.state, "alarmed");
+      const sql = yield* SqlClient.SqlClient;
+      const notices = yield* sql<{ readonly receiver_id: string; readonly message_text: string }>`
+        SELECT receiver_id, message_text FROM j5_a2a_delivery
+        WHERE envelope_channel = 'lifecycle_notice'
+      `;
+      assert.equal(notices.length, 1);
+      assert.equal(notices[0]!.receiver_id, billing.id);
+      assert.include(
+        notices[0]!.message_text,
+        `Your message to ${remoteSupport} on Home was not delivered: Home refused it; the recipient is archived or does not accept messages from this sender.`,
+      );
+      assert.notInclude(
+        notices[0]!.message_text,
+        "exchange is closed",
+        "a plain message has no Exchange",
+      );
+    }).pipe(
+      Effect.provide(
+        makeTransportLayer(
+          { status: 403, body: { error: "policy_refused", message: "Archived" } },
+          posted,
+        ),
+      ),
+    );
   }),
 );
 
@@ -793,7 +911,8 @@ it.effect(
                     ? { ...supportOnHome, archived: true, canReceiveMessage: false }
                     : null,
                 ),
-              serverName: () => Effect.succeed(homePeer.label),
+              serverStatus: () =>
+                Effect.succeed({ name: homePeer.label, available: true, lastAvailableAt: null }),
             }),
           ),
         ),

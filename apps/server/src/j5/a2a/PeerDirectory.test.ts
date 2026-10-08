@@ -179,8 +179,8 @@ it.effect("names no server without peers, and names a peer by its recorded name"
     assert.isNull(lonely.selfName, "a server with no peers names no server");
     const named = yield* Effect.flatMap(PeerDirectory, (directory) =>
       Effect.all([
-        directory.serverName(homePeer.environmentId),
-        directory.serverName("environment-removed"),
+        directory.serverStatus(homePeer.environmentId).pipe(Effect.map((status) => status.name)),
+        directory.serverStatus("environment-removed").pipe(Effect.map((status) => status.name)),
       ]),
     ).pipe(Effect.provide(makeTestLayer([homePeer], [])));
     assert.deepStrictEqual(named, [homePeer.label, "environment-removed"]);

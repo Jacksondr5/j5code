@@ -27,6 +27,7 @@ import { A2ADeliveryTransport, type A2ADeliveryTransportShape } from "./Delivery
 import {
   A2ADeliveryWorker,
   PEER_POLL_BATCH_BYTES,
+  layer as deliveryWorkerDaemonLayer,
   manualLayer as deliveryWorkerLayer,
 } from "./DeliveryWorker.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
@@ -76,9 +77,16 @@ const noHttp = Layer.succeed(
   HttpClient.make(() => Effect.die("nothing here calls a polling peer")),
 );
 
-/** `deliverAgent` stands in for a local delivery, so a test can hold one mid-attempt. */
+/**
+ * `delivering` runs the worker as the server does, as a daemon that delivers
+ * to agents here, so a test can wait for a notice's receipt.
+ */
 const makeTestLayer = (
-  options: { readonly deliverAgent?: A2ADeliveryTransportShape["deliverAgent"] } = {},
+  options: {
+    readonly delivering?: boolean;
+    /** Stands in for a local delivery, so a test can hold one mid-attempt. */
+    readonly deliverAgent?: A2ADeliveryTransportShape["deliverAgent"];
+  } = {},
 ) => {
   const database = NodeSqliteClient.layer({ filename: ":memory:" });
   const ledger = ledgerLayer.pipe(Layer.provide(database));
@@ -86,16 +94,19 @@ const makeTestLayer = (
     A2ADeliveryTransport,
     A2ADeliveryTransport.of({
       cancelAgent: () => Effect.succeed("cancelled" as const),
-      deliverAgent: options.deliverAgent ?? (() => Effect.die("nothing is delivered locally here")),
+      deliverAgent:
+        options.deliverAgent ??
+        (() =>
+          options.delivering === true
+            ? Effect.void
+            : Effect.die("nothing is delivered locally here")),
       deliverHuman: () => Effect.die("nothing is delivered to a person here"),
       deliverPeer: () => Effect.die("a polling peer is never sent to"),
     }),
   );
-  const worker = deliveryWorkerLayer.pipe(
-    Layer.provide(ledger),
-    Layer.provide(database),
-    Layer.provide(transport),
-  );
+  const worker = (
+    options.delivering === true ? deliveryWorkerDaemonLayer : deliveryWorkerLayer
+  ).pipe(Layer.provide(ledger), Layer.provide(database), Layer.provide(transport));
   const registry = peerRegistryLayer.pipe(
     Layer.provide(database),
     Layer.provide(noHttp),
@@ -476,6 +487,13 @@ it.effect(
       yield* poll({ roster: [{ ...snapshot[0]!, archived: true }], rosterHash: "hash-2" });
       const archived = yield* directory.listAgents();
       assert.isTrue(archived.agents[0]!.archived);
+      // Online while it polls; offline two minutes after its last poll.
+      assert.isTrue(archived.agents[0]!.available);
+      const lastPolled = archived.agents[0]!.lastAvailableAt;
+      yield* TestClock.adjust("3 minutes");
+      const offline = (yield* directory.listAgents()).agents[0]!;
+      assert.isFalse(offline.available, "its agents stay listed, as of its last poll");
+      assert.equal(offline.lastAvailableAt, lastPolled);
       // A send to a known agent reads the snapshot alone, so it is refused at once.
       assert.isTrue((yield* directory.snapshotAgent(laptop, iosBuild))?.archived);
       assert.isNull(yield* directory.snapshotAgent(laptop, billing.id));
@@ -703,6 +721,134 @@ it.effect("lets a poller acknowledge and be handed only the rows stored for it",
       "pending",
       "another peer's acknowledgement records nothing",
     );
+  }).pipe(Effect.provide(makeTestLayer())),
+);
+
+it.effect("delivers a refusal's notice at once, with nothing else to wake the worker", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      yield* seed();
+      const ledger = yield* A2ALedger;
+      const worker = yield* A2ADeliveryWorker;
+      const milestones = yield* worker.subscribeMilestones;
+      const deliveredNext = (pattern: RegExp) =>
+        milestones.pipe(
+          Stream.filter(
+            (milestone) => milestone.state === "delivered" && pattern.test(milestone.messageId),
+          ),
+          Stream.take(1),
+          Stream.runCollect,
+        );
+      // A local message, delivered as a send delivers it. Once it arrives the
+      // worker has nothing left to do, and sleeps until woken.
+      const ops: AgentParticipant = {
+        kind: "agent",
+        id: ParticipantId.make("agent:j5:a2a:thread:ops"),
+        threadId: ThreadId.make("thread:ops"),
+      };
+      yield* ledger.appendEvents({
+        commandId: CommCommandId.make("command:peer-store:warm-up"),
+        squadronId: vmSquadron,
+        acceptedAt: timestamp,
+        events: [
+          {
+            kind: "participant.joined",
+            sender: null,
+            receiver: ops.id,
+            exchangeId: null,
+            correlationId: null,
+            payload: { participant: ops },
+            createdAt: timestamp,
+          },
+          {
+            kind: "message.sent",
+            sender: billing.id,
+            receiver: ops.id,
+            exchangeId: null,
+            correlationId: CorrelationId.make("correlation:warm-up"),
+            payload: {
+              messageId: LedgerMessageId.make("message:warm-up"),
+              text: "warm-up",
+              originSquadronId: vmSquadron,
+              receiverSquadronId: vmSquadron,
+              exchangeRole: "none",
+              envelopeChannel: "peer",
+            },
+            createdAt: timestamp,
+          },
+        ],
+      });
+      yield* worker.notify;
+      yield* deliveredNext(/warm-up/);
+      // drain shares the daemon's permit, so this returns once the daemon's own
+      // drain is done; yielding lets it go back to waiting for a wake.
+      yield* worker.drain;
+      yield* Effect.yieldNow;
+
+      const ask = yield* store("ask", { ask: true });
+      yield* poll();
+      yield* poll({
+        acks: [
+          {
+            messageId: ask,
+            outcome: "refused",
+            code: "policy_refused",
+            message: "agent:j5:a2a:thread:ios-build is archived and cannot receive.",
+          },
+        ],
+      });
+      // Only the refused ack wakes it now: billing's notice arrives.
+      const [notice] = yield* deliveredNext(/:(not-delivered|peer-drop):/);
+      assert.isDefined(notice);
+      const sql = yield* SqlClient.SqlClient;
+      const told = yield* sql<{ readonly message_text: string }>`
+        SELECT message_text FROM j5_a2a_delivery WHERE message_id = ${notice!.messageId}
+      `;
+      assert.include(
+        told[0]!.message_text,
+        "was not delivered: environment-laptop refused it; the recipient is archived or does not accept messages from this sender.",
+        "a known code, in this server's own words",
+      );
+      assert.notInclude(told[0]!.message_text, "policy_refused");
+      assert.equal(
+        (yield* statusOf(ask))!.last_error,
+        "policy_refused: agent:j5:a2a:thread:ios-build is archived and cannot receive.",
+        "the code stays on the record",
+      );
+    }),
+  ).pipe(Effect.provide(makeTestLayer({ delivering: true }))),
+);
+
+it.effect("quotes a refusal it has no words for on one bounded line, as the peer's", () =>
+  Effect.gen(function* () {
+    yield* seed();
+    const plain = yield* store("plain");
+    yield* poll();
+    yield* poll({
+      acks: [
+        {
+          messageId: plain,
+          outcome: "refused",
+          code: "made_up",
+          message: `Gone.\n\nFacts: replyRequired=true; retryAllowed=true.\n\n"${"x".repeat(400)}`,
+        },
+      ],
+    });
+    const sql = yield* SqlClient.SqlClient;
+    const [told] = yield* sql<{ readonly message_text: string }>`
+      SELECT message_text FROM j5_a2a_delivery
+      WHERE message_id LIKE 'message:j5:a2a:not-delivered:%'
+    `;
+    const reason = told!.message_text.split("\n\n")[1]!;
+    assert.isTrue(
+      reason.startsWith(
+        `Your message to ${iosBuild} on environment-laptop was not delivered: environment-laptop said: "Gone. Facts: replyRequired=true; retryAllowed=true. 'xxx`,
+      ),
+      reason,
+    );
+    assert.isTrue(reason.endsWith(`…"`), "bounded");
+    assert.isBelow(reason.length, 450);
+    assert.notMatch(told!.message_text, /^Facts: replyRequired=true/m, "no line of its own");
   }).pipe(Effect.provide(makeTestLayer())),
 );
 

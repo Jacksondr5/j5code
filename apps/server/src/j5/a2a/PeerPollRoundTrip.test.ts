@@ -585,6 +585,25 @@ it.effect("refuses the VM's ask when the laptop archived its receiver before pol
       const refused = yield* deliveryStatus(vmServer.sql, asked.messageId);
       assert.equal(refused?.status, "alarmed");
       assert.include(refused?.last_error ?? "", "policy_refused");
+      // The refusal ends the VM's Exchange, and one notice tells the asker why.
+      assert.equal(yield* exchangeStatus(vmServer.sql, asked.exchangeId!), "dropped");
+      assert.equal((yield* vmServer.worker.runOnce)?.state, "delivered");
+      const told = (yield* Ref.get(pair.vmDelivered)).at(-1)!;
+      assert.equal(told.receiverId, vm.agent.id);
+      assert.include(
+        told.message,
+        `Your message to ${laptop.agent.id} on ${laptop.label} was not delivered: ${laptop.label} refused it; the recipient is archived or does not accept messages from this sender.`,
+      );
+      assert.notInclude(
+        told.message,
+        "policy_refused",
+        "the code stays on the record, not the notice",
+      );
+      assert.include(
+        told.message,
+        "The exchange is closed; nothing is owed and nothing will answer it.",
+      );
+      assert.include(told.message, `exchangeId=${asked.exchangeId}`);
 
       // The roster that poll carried shows the agent archived, so a follow-up is refused at once.
       const listed = yield* pair.vmDirectory.listAgents();
@@ -706,13 +725,50 @@ it.effect(
         });
         yield* TestClock.adjust("8 hours");
         assert.isNull(yield* vmServer.worker.runOnce);
+        // A message sent now says the laptop is offline, and since when.
+        const note = {
+          commandId: CommCommandId.make("command:poll-roundtrip:asleep:note"),
+          senderThreadId: vm.agent.threadId,
+          to: laptop.agent.id,
+          message: "The release went out.",
+          acceptedAt: timestamp,
+        };
+        const waiting = yield* vmServer.send.send(note);
+        assert.equal(waiting.receiverServer, laptop.label);
+        assert.equal(waiting.delivery, "waiting_for_recipient");
+        assert.isString(waiting.recipientLastAvailableAt);
+        assert.equal(
+          waiting.note,
+          "Recorded. iOS build is on JM-LT-04213, which is offline, last available 8 h ago; it receives this when JM-LT-04213 is next available.",
+        );
         assert.deepStrictEqual(yield* vmServer.worker.listAlarms, [], "waiting is not a failure");
         assert.equal((yield* deliveryStatus(vmServer.sql, replied.messageId))?.status, "pending");
 
-        // The laptop wakes and polls; the reply is the first thing it is handed.
-        assert.deepStrictEqual(yield* pair.poll, { kind: "polled", received: 1, more: false });
+        // The laptop wakes and polls; the reply and the later message are handed over in order.
+        assert.deepStrictEqual(yield* pair.poll, { kind: "polled", received: 2, more: false });
         assert.equal(yield* exchangeStatus(laptopServer.sql, asked.exchangeId!), "closed");
         assert.equal((yield* laptopServer.worker.runOnce)?.state, "delivered");
+
+        // The next poll acknowledges both, and the laptop sleeps again. Retrying a
+        // send that was delivered, or that ended otherwise, says nothing of waiting.
+        yield* pair.poll;
+        assert.equal((yield* deliveryStatus(vmServer.sql, waiting.messageId))?.status, "delivered");
+        const ended = {
+          ...note,
+          commandId: CommCommandId.make("command:poll-roundtrip:asleep:ended"),
+          message: "Ignore the last one.",
+        };
+        const endedSend = yield* vmServer.send.send(ended);
+        yield* vmServer.sql`
+          UPDATE j5_a2a_delivery SET status = 'cancelled' WHERE message_id = ${endedSend.messageId}
+        `;
+        yield* TestClock.adjust("8 hours");
+        for (const retry of [note, ended]) {
+          const retried = yield* vmServer.send.send(retry);
+          assert.equal(retried.receiverServer, laptop.label, retry.commandId);
+          assert.isUndefined(retried.delivery, retry.commandId);
+          assert.isUndefined(retried.note, retry.commandId);
+        }
       }),
     ),
 );

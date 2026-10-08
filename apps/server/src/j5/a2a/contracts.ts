@@ -286,8 +286,17 @@ export type ExchangeDropDisposition = typeof ExchangeDropDisposition.Type;
 
 export const ExchangeDroppedPayload = Schema.Struct({
   disposition: ExchangeDropDisposition,
+  /**
+   * What ended it, and the party it was about. A peer server's refusal of the
+   * ask, or the removal of the peer, names the party on that server.
+   */
   cause: Schema.Struct({
-    kind: Schema.Literals(["participant-archived", "participant-deleted"]),
+    kind: Schema.Literals([
+      "participant-archived",
+      "participant-deleted",
+      "delivery-refused",
+      "peer-removed",
+    ]),
     participantId: ParticipantId,
     squadronId: SquadronId,
   }),
@@ -349,6 +358,12 @@ export const SendMessageResult = Schema.Struct({
   deliveryNotice: Schema.optional(Schema.String),
   /** The name of the peer server the receiver lives on; absent for a receiver on this server. */
   receiverServer: Schema.optionalKey(Schema.String),
+  /** Present when the receiver's server polls this one and is offline: the message waits for it. */
+  delivery: Schema.optionalKey(Schema.Literal("waiting_for_recipient")),
+  /** When that server was last available: its last poll. */
+  recipientLastAvailableAt: Schema.optionalKey(Schema.String),
+  /** The same facts in one sentence an agent reads at a glance. */
+  note: Schema.optionalKey(Schema.String),
 });
 export type SendMessageResult = typeof SendMessageResult.Type;
 

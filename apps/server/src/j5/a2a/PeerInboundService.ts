@@ -45,6 +45,15 @@ export interface PeerInboundResult {
   readonly replay: boolean;
 }
 
+/** The codes a refusal answers with; a sender takes only these as final. */
+export const PeerDeliveryRefusalCode = Schema.Literals([
+  "recipient_not_found",
+  "policy_refused",
+  "invalid_request",
+  "message_id_conflict",
+]);
+export type PeerDeliveryRefusalCode = typeof PeerDeliveryRefusalCode.Type;
+
 /**
  * How a refused delivery from a peer is answered, the same whether it came to
  * the deliver route or was handed to this server by a poll and is refused in
@@ -55,7 +64,7 @@ export const peerDeliveryRefusal = (
   error: unknown,
 ): {
   readonly status: number;
-  readonly code: string;
+  readonly code: PeerDeliveryRefusalCode;
   readonly message: string;
   readonly reason?: string;
 } | null => {

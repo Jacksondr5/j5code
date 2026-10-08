@@ -9,6 +9,7 @@ import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
 import * as Semaphore from "effect/Semaphore";
@@ -22,9 +23,11 @@ import { reportedLabel } from "./peerLabel.ts";
 import config from "./delivery-config.v1.json" with { type: "json" };
 import {
   type A2ADeliveryHeldError,
+  type A2ADeliveryRefusedError,
   A2ADeliveryTransport,
   A2ADeliveryTransportError,
   isHeldError,
+  isRefusedError,
 } from "./DeliveryTransport.ts";
 import {
   CommCommandId,
@@ -41,6 +44,15 @@ import {
   type DeliveryMilestone,
 } from "./contracts.ts";
 import { A2ALedgerTransactionWriter, A2ALedger, type A2ALedgerError } from "./LedgerService.ts";
+import {
+  canBeNotified,
+  type DroppedExchange,
+  formatNotDeliveredNotice,
+  notDeliveredNoticeEvent,
+  notDeliveredNoticeMessageId,
+  peerDropEvents,
+  peerRefusalReason,
+} from "./deliveryNotices.ts";
 import { buildPeerDeliveryBody } from "./peerDeliveryBody.ts";
 
 export const A2A_DELIVERY_CONFIG_VERSION = config.version;
@@ -86,6 +98,8 @@ export interface A2ADeliveryHooksShape {
   readonly afterTransportSuccess: (
     attempt: DeliveryAttempt,
   ) => Effect.Effect<void, A2ADeliveryHookError>;
+  /** Told when a removed peer's direct rows wait for an attempt that holds the drain. */
+  readonly peerCancelWaitsForDrain?: Effect.Effect<void>;
 }
 
 export class A2ADeliveryHookError extends Schema.TaggedError<A2ADeliveryHookError>()(
@@ -127,8 +141,26 @@ export interface A2ADeliveryWorkerShape {
     environmentId: string,
     acks: ReadonlyArray<PeerPollAck>,
   ) => Effect.Effect<void, A2ADeliveryWorkerError>;
+  /** Cancels every message still waiting to reach a peer being removed; returns how many. */
+  readonly cancelPeerDeliveries: (
+    removal: PeerDeliveriesRemoval,
+  ) => Effect.Effect<number, A2ADeliveryWorkerError>;
   readonly subscribeMilestones: Effect.Effect<Stream.Stream<DeliveryMilestone>, never, Scope.Scope>;
 }
+
+export interface PeerDeliveriesRemoval {
+  readonly environmentId: string;
+  /** The peer's name, for each sender's notice. */
+  readonly serverName: string;
+  /** Why, completing "… was not delivered: …". */
+  readonly reason: string;
+  /** Exchanges this removal dropped, as `squadronId exchangeId`: their drop notice told the sender. */
+  readonly droppedExchanges: ReadonlySet<string>;
+}
+
+/** An Exchange's key in `PeerDeliveriesRemoval.droppedExchanges`. */
+export const droppedExchangeKey = (squadronId: string, exchangeId: string) =>
+  `${squadronId} ${exchangeId}`;
 
 export class A2ADeliveryWorker extends Context.Service<A2ADeliveryWorker, A2ADeliveryWorkerShape>()(
   "t3/j5/a2a/DeliveryWorker/A2ADeliveryWorker",
@@ -137,6 +169,7 @@ export class A2ADeliveryWorker extends Context.Service<A2ADeliveryWorker, A2ADel
 type A2ADeliveryAttemptError =
   | A2ALedgerError
   | A2ADeliveryTransportError
+  | A2ADeliveryRefusedError
   | A2ADeliveryHeldError
   | A2ADeliveryHookError
   | SqlError;
@@ -158,6 +191,20 @@ export const heldQueueRecheckMs = (attempt: number) =>
 const heldError = (cause: Cause.Cause<A2ADeliveryAttemptError>) => {
   const error = Cause.findErrorOption(cause);
   return error._tag === "Some" && isHeldError(error.value) ? error.value : undefined;
+};
+
+/** A peer server's refusal: its code, and its own sentence for why. */
+interface PeerRefusal {
+  readonly code: string;
+  readonly message: string;
+}
+
+/** A peer server's refusal of a direct send: as final as a polling peer's refusing ack. */
+const refusalOf = (cause: Cause.Cause<A2ADeliveryAttemptError>): PeerRefusal | undefined => {
+  const error = Cause.findErrorOption(cause);
+  return error._tag === "Some" && isRefusedError(error.value)
+    ? { code: error.value.code, message: error.value.refusal }
+    : undefined;
 };
 
 const backoffMs = (attempt: number) =>
@@ -376,8 +423,8 @@ const makeLayer = (daemon: boolean) =>
         row: DeliveryRow,
         attempt: number,
         cause: Cause.Cause<A2ADeliveryAttemptError>,
-        /** A polling peer refused the message: permanent, with the peer's own reason. */
-        refusal?: string,
+        /** The peer server refused the message: permanent, with the peer's own reason. */
+        refusal?: PeerRefusal,
       ) {
         const failedAtDate = yield* DateTime.now;
         const failedAt = DateTime.formatIso(failedAtDate);
@@ -396,9 +443,11 @@ const makeLayer = (daemon: boolean) =>
         const outcome = yield* writer.withPermit(
           sql.withTransaction(
             Effect.gen(function* () {
-              // A polling peer that refused a row it was handed already decided it;
-              // a sender retired since cannot take that back, as with a receipt.
+              // A peer server that refused the message already decided it; a
+              // sender retired since cannot take that back, as with a receipt.
               if (yield* deliveryUnavailable(row, refusal !== undefined)) return null;
+              const told =
+                refusal === undefined ? [] : yield* refusalNotices(row, refusal, failedAt);
               return yield* writer.appendEventsInTransaction({
                 commandId: commandId("failed", messageId, attempt),
                 squadronId: SquadronId.make(row.squadron_id),
@@ -413,12 +462,16 @@ const makeLayer = (daemon: boolean) =>
                     payload: {
                       messageId,
                       attempt,
-                      error: refusal ?? held?.message ?? errorText(cause),
+                      error:
+                        refusal === undefined
+                          ? (held?.message ?? errorText(cause))
+                          : `${refusal.code}: ${refusal.message}`,
                       nextAttemptAt,
                       alarmed,
                     },
                     createdAt: failedAt,
                   },
+                  ...told,
                 ],
               });
             }),
@@ -432,6 +485,54 @@ const makeLayer = (daemon: boolean) =>
           state: alarmed ? ("alarmed" as const) : ("retry_scheduled" as const),
           attempt,
         } satisfies DeliveryMilestone;
+      });
+
+      /**
+       * What the sender is told of a peer server's refusal: one not-delivered
+       * notice. A refused ask's notice also closes its Exchange, which is
+       * dropped as refused.
+       */
+      const refusalNotices = Effect.fn("j5.a2a.delivery.refusalNotices")(function* (
+        row: DeliveryRow,
+        refusal: PeerRefusal,
+        createdAt: string,
+      ) {
+        if (row.receiver_environment_id === null) return [];
+        const serverName =
+          reportedLabel(
+            (yield* sql<{ readonly label: string }>`
+              SELECT label FROM j5_a2a_peer WHERE environment_id = ${row.receiver_environment_id}
+            `)[0]?.label,
+          ) ?? row.receiver_environment_id;
+        const reason = peerRefusalReason({ serverName, ...refusal });
+        if (row.exchange_role === "ask" && row.exchange_id !== null) {
+          const exchange = (yield* sql<DroppedExchange>`
+            SELECT squadron_id, exchange_id, sender_id, receiver_id FROM j5_a2a_exchange
+            WHERE squadron_id = ${row.squadron_id} AND exchange_id = ${row.exchange_id}
+              AND status = 'open'
+          `)[0];
+          if (exchange !== undefined) {
+            return peerDropEvents({
+              exchange,
+              disposition: "receiver-retired",
+              cause: {
+                kind: "delivery-refused",
+                participantId: ParticipantId.make(row.receiver_id),
+                squadronId: SquadronId.make(row.receiver_squadron_id),
+              },
+              localSquadronId: row.squadron_id,
+              noticeText: formatNotDeliveredNotice({
+                receiverId: row.receiver_id,
+                serverName,
+                reason,
+                exchangeId: exchange.exchange_id,
+              }),
+              createdAt,
+            });
+          }
+        }
+        if (!canBeNotified(row.sender_id)) return [];
+        return [notDeliveredNoticeEvent({ message: row, serverName, reason, createdAt })];
       });
 
       const deliveryUnavailable = Effect.fn("j5.a2a.delivery.unavailable")(function* (
@@ -555,7 +656,9 @@ const makeLayer = (daemon: boolean) =>
         }
         const exit = yield* Effect.exit(attemptDelivery(row, attempt));
         const milestone =
-          exit._tag === "Success" ? exit.value : yield* recordFailure(row, attempt, exit.cause);
+          exit._tag === "Success"
+            ? exit.value
+            : yield* recordFailure(row, attempt, exit.cause, refusalOf(exit.cause));
         yield* PubSub.publish(milestones, milestone);
         return milestone;
       });
@@ -652,6 +755,104 @@ const makeLayer = (daemon: boolean) =>
         );
       });
       /**
+       * A removed peer's waiting rows, each cancelled with its sender's notice in
+       * one write that rechecks the row first. The caller holds the permit the
+       * rows' receipts take, so no receipt is in flight: a row delivered since
+       * it was read stays delivered, and its sender is told nothing. A row
+       * handed out to a polling peer may already be in the peer's thread, so its
+       * sender is told it may not have been delivered.
+       */
+      const cancelPeerRows = Effect.fn("j5.a2a.delivery.cancelPeerRows")(function* (
+        rows: ReadonlyArray<DeliveryRow>,
+        removal: PeerDeliveriesRemoval,
+      ) {
+        let cancelled = 0;
+        for (const row of rows) {
+          const now = DateTime.formatIso(yield* DateTime.now);
+          const messageId = LedgerMessageId.make(row.message_id);
+          const outcome = yield* writer.withPermit(
+            sql.withTransaction(
+              Effect.gen(function* () {
+                const current = (yield* sql<{
+                  readonly status: string;
+                  readonly handed_out_at: string | null;
+                }>`SELECT status, handed_out_at FROM j5_a2a_delivery
+                  WHERE squadron_id = ${row.squadron_id} AND message_id = ${row.message_id}`)[0];
+                if (
+                  current === undefined ||
+                  !["pending", "retry_scheduled", "alarmed"].includes(current.status)
+                ) {
+                  return null;
+                }
+                // A refusal already told the sender, and an ask's sender, or one
+                // on an Exchange this removal dropped, is told by the drop.
+                const alreadyTold =
+                  (yield* sql`SELECT 1 FROM j5_a2a_delivery
+                    WHERE squadron_id = ${row.squadron_id}
+                      AND message_id = ${notDeliveredNoticeMessageId(row)}`).length > 0;
+                const dropped =
+                  row.exchange_id !== null &&
+                  removal.droppedExchanges.has(
+                    droppedExchangeKey(row.squadron_id, row.exchange_id),
+                  );
+                const tell =
+                  row.exchange_role !== "ask" &&
+                  !dropped &&
+                  canBeNotified(row.sender_id) &&
+                  !alreadyTold;
+                return yield* writer.appendEventsInTransaction({
+                  commandId: CommCommandId.make(
+                    `command:j5:a2a:peer-removed:cancel:${encodeURIComponent(row.squadron_id)}:${encodeURIComponent(row.message_id)}`,
+                  ),
+                  squadronId: SquadronId.make(row.squadron_id),
+                  acceptedAt: now,
+                  events: [
+                    {
+                      kind: "message.cancelled",
+                      sender: ParticipantId.make(row.sender_id),
+                      receiver: ParticipantId.make(row.receiver_id),
+                      exchangeId:
+                        row.exchange_id === null ? null : ExchangeId.make(row.exchange_id),
+                      correlationId: CorrelationId.make(row.correlation_id),
+                      payload: { messageId, reason: removal.reason },
+                      createdAt: now,
+                    },
+                    ...(tell
+                      ? [
+                          notDeliveredNoticeEvent({
+                            message: row,
+                            serverName: removal.serverName,
+                            reason: removal.reason,
+                            createdAt: now,
+                            handedOut: current.handed_out_at !== null,
+                          }),
+                        ]
+                      : []),
+                  ],
+                });
+              }),
+            ),
+          );
+          if (outcome === null) continue;
+          if (outcome.committed) yield* writer.publishCommitted(outcome.events);
+          yield* PubSub.publish(milestones, {
+            squadronId: SquadronId.make(row.squadron_id),
+            messageId,
+            state: "cancelled",
+            attempt: row.attempts + 1,
+          } satisfies DeliveryMilestone);
+          cancelled += 1;
+        }
+        // The notices are queued here, outside the drain: wake it.
+        if (cancelled > 0) yield* Queue.offer(wakeups, undefined);
+        return cancelled;
+      });
+      const waitingForPeer = (environmentId: string) => sql`
+        receiver_environment_id = ${environmentId}
+        AND status IN ('pending', 'retry_scheduled', 'alarmed')
+      `;
+
+      /**
        * A polling peer's waiting rows, oldest first, up to the batch limit, each
        * stamped the first time it is handed out. A row not acknowledged is
        * handed out again next time; the peer records each idempotently by its
@@ -719,13 +920,13 @@ const makeLayer = (daemon: boolean) =>
           const milestone =
             ack.outcome === "received"
               ? yield* recordDelivered(row, row.attempts + 1)
-              : yield* recordFailure(
-                  row,
-                  row.attempts + 1,
-                  Cause.empty,
-                  `${ack.code}: ${ack.message}`,
-                );
+              : yield* recordFailure(row, row.attempts + 1, Cause.empty, {
+                  code: ack.code,
+                  message: ack.message,
+                });
           yield* PubSub.publish(milestones, milestone);
+          // A refusal queues its notice here, outside the drain: wake it.
+          if (ack.outcome !== "received") yield* Queue.offer(wakeups, undefined);
         }
       });
 
@@ -749,6 +950,38 @@ const makeLayer = (daemon: boolean) =>
           storePermit
             .withPermit(acknowledgePeer(environmentId, acks))
             .pipe(Effect.mapError(workerError("record a polling peer's acknowledgements"))),
+        // Direct rows under the drain permit their attempts hold, stored rows
+        // under the store permit their acks take, side by side.
+        cancelPeerDeliveries: (removal) =>
+          Effect.gen(function* () {
+            const direct = yield* sql<DeliveryRow>`SELECT * FROM j5_a2a_delivery
+              WHERE ${waitingForPeer(removal.environmentId)} AND ${notStoredForPollingPeer}
+              ORDER BY sent_seq, squadron_id, message_id`;
+            const stored = yield* sql<DeliveryRow>`SELECT * FROM j5_a2a_delivery
+              WHERE ${waitingForPeer(removal.environmentId)} AND ${storedForPollingPeer}
+              ORDER BY sent_seq, squadron_id, message_id`;
+            const cancelDirect = cancelPeerRows(direct, removal);
+            const [directCount, storedCount] = yield* Effect.all(
+              [
+                drainPermit
+                  .withPermitsIfAvailable(1)(cancelDirect)
+                  .pipe(
+                    Effect.flatMap(
+                      Option.match({
+                        onSome: Effect.succeed,
+                        onNone: () =>
+                          (hooks.peerCancelWaitsForDrain ?? Effect.void).pipe(
+                            Effect.andThen(drainPermit.withPermit(cancelDirect)),
+                          ),
+                      }),
+                    ),
+                  ),
+                storePermit.withPermit(cancelPeerRows(stored, removal)),
+              ],
+              { concurrency: "unbounded" },
+            );
+            return directCount + storedCount;
+          }).pipe(Effect.mapError(workerError("cancel a removed peer's deliveries"))),
         runOnce,
         drain,
         listAlarms: sql<{

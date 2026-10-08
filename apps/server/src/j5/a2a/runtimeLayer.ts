@@ -33,6 +33,7 @@ import { layer as peerDirectoryLayer } from "./PeerDirectory.ts";
 import { layer as peerInboundLayer } from "./PeerInboundService.ts";
 import { layer as peerStoreLayer } from "./PeerStoreService.ts";
 import { layer as peerPollerLayer } from "./PeerPoller.ts";
+import { layer as peerRemovalLayer } from "./PeerRemovalService.ts";
 import { layer as peerRegistryLayer } from "./PeerRegistryService.ts";
 import { layer as rosterLayer } from "./RosterService.ts";
 import { layer as sendServiceLayer } from "./SendService.ts";
@@ -119,6 +120,7 @@ export const makeJ5A2AAuxiliaryLayer = (
   );
   // A polling peer's messages are handed out by the worker that owns their rows.
   const peerStoreProvided = peerStoreLayer.pipe(Layer.provideMerge(deliveryWorkerProvided));
+  const peerRemovalProvided = peerRemovalLayer.pipe(Layer.provideMerge(deliveryWorkerProvided));
   // A peer this server polls is polled from the moment the server starts.
   const peerPollerProvided = peerPollerLayer.pipe(
     Layer.provideMerge(deliveryWorkerProvided),
@@ -204,6 +206,7 @@ export const makeJ5A2AAuxiliaryLayer = (
     peerInboundLayer,
     peerStoreProvided,
     peerPollerProvided,
+    peerRemovalProvided,
     rosterLayer,
     sendServiceProvided,
     deliveryWorkerProvided,
