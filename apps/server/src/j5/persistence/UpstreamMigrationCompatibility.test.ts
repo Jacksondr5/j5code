@@ -115,11 +115,11 @@ it.effect("upgrades legacy history without rerunning V2 SQL or changing J5/nativ
     const sql = yield* SqlClient.SqlClient;
     yield* installLegacy();
     yield* runJ5A2AMigrations();
-    yield* sql`INSERT INTO j5_a2a_squadron (id, name, created_at)
-      VALUES ('squadron:keep', 'Keep', '2026-08-15T12:00:00Z')`;
+    yield* sql`INSERT INTO j5_a2a_project_ledger (project_id, created_at)
+      VALUES ('project-keep', '2026-08-15T12:00:00Z')`;
     yield* sql`INSERT INTO j5_a2a_exchange
-      (squadron_id, exchange_id, sender_id, receiver_id, status, intent, opened_seq, created_at, updated_at)
-      VALUES ('squadron:keep', 'exchange:keep', 'agent:sender', 'human:receiver', 'open',
+      (project_id, exchange_id, sender_id, receiver_id, status, intent, opened_seq, created_at, updated_at)
+      VALUES ('project-keep', 'exchange:keep', 'agent:sender', 'human:receiver', 'open',
         'Preserve this obligation', 1, '2026-08-15T12:00:00Z', '2026-08-15T12:00:00Z')`;
     yield* sql`INSERT INTO orchestration_v2_projection_provider_threads
       (provider_thread_id, thread_id, provider, status, updated_at, payload_json, driver, provider_instance_id)
@@ -499,11 +499,11 @@ const freshSchema = () =>
 const seedJ5AndV2State = Effect.fn("seedJ5AndV2State")(function* () {
   const sql = yield* SqlClient.SqlClient;
   yield* runJ5A2AMigrations();
-  yield* sql`INSERT INTO j5_a2a_squadron (id, name, created_at)
-    VALUES ('squadron:keep', 'Keep', '2026-09-10T12:00:00Z')`;
+  yield* sql`INSERT INTO j5_a2a_project_ledger (project_id, created_at)
+    VALUES ('project-keep', '2026-09-10T12:00:00Z')`;
   yield* sql`INSERT INTO j5_a2a_exchange
-    (squadron_id, exchange_id, sender_id, receiver_id, status, intent, opened_seq, created_at, updated_at)
-    VALUES ('squadron:keep', 'exchange:keep', 'agent:sender', 'human:receiver', 'open',
+    (project_id, exchange_id, sender_id, receiver_id, status, intent, opened_seq, created_at, updated_at)
+    VALUES ('project-keep', 'exchange:keep', 'agent:sender', 'human:receiver', 'open',
       'Preserve this obligation', 1, '2026-09-10T12:00:00Z', '2026-09-10T12:00:00Z')`;
   yield* sql`INSERT INTO orchestration_v2_projection_provider_threads
     (provider_thread_id, thread_id, provider, status, updated_at, payload_json, driver, provider_instance_id)
@@ -517,7 +517,7 @@ const seedJ5AndV2State = Effect.fn("seedJ5AndV2State")(function* () {
 const snapshotRows = Effect.fn("snapshotRows")(function* () {
   const sql = yield* SqlClient.SqlClient;
   return {
-    squadrons: yield* sql`SELECT * FROM j5_a2a_squadron ORDER BY id`,
+    ledgers: yield* sql`SELECT * FROM j5_a2a_project_ledger ORDER BY project_id`,
     exchanges: yield* sql`SELECT * FROM j5_a2a_exchange ORDER BY exchange_id`,
     j5Migrations: yield* sql`SELECT * FROM j5_a2a_migrations ORDER BY migration_id`,
     nativeThreads: yield* sql`SELECT * FROM orchestration_v2_projection_provider_threads`,

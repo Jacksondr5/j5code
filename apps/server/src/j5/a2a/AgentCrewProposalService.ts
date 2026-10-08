@@ -159,7 +159,7 @@ export class AgentCrewProposalService extends Context.Service<
 
 interface Row {
   readonly id: string;
-  readonly squadron_id: string;
+  readonly project_id: string;
   readonly captain_participant_id: string;
   readonly captain_thread_id: string;
   readonly crew_instance_id: string | null;
@@ -178,7 +178,7 @@ interface Row {
 
 const fromRow = (row: Row): CrewProposal => ({
   id: row.id,
-  squadronId: SquadronId.make(row.squadron_id),
+  squadronId: SquadronId.make(row.project_id),
   captainParticipantId: ParticipantId.make(row.captain_participant_id),
   captainThreadId: ThreadId.make(row.captain_thread_id),
   crewInstanceId: row.crew_instance_id,
@@ -215,7 +215,7 @@ export const layer: Layer.Layer<AgentCrewProposalService, never, SqlClient.SqlCl
       ) {
         yield* sql`
           INSERT OR IGNORE INTO j5_agent_crew_proposal (
-            id, squadron_id, captain_participant_id, captain_thread_id, crew_instance_id, kind,
+            id, project_id, captain_participant_id, captain_thread_id, crew_instance_id, kind,
             status, brief, display_name, requested_seats, approved_seats, created_at, resolved_at,
             reported_at, playbook_name, playbook_definition_path
           ) VALUES (

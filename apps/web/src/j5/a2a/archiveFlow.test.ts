@@ -15,7 +15,7 @@ const registered = (overrides: Partial<client.PreArchiveFacts> = {}): client.Arc
   facts: {
     state: "registered",
     threadId: ThreadId.make("thread:archive-flow"),
-    squadronId: "squadron:archive-flow",
+    projectId: "project:archive-flow",
     participantId: "agent:archive-flow",
     retired: false,
     openExchanges: [],
@@ -59,7 +59,7 @@ describe("archive flow", () => {
     const preflight = registered({
       openExchanges: [
         {
-          squadronId: "squadron:archive-flow",
+          projectId: "project:archive-flow",
           exchangeId: "exchange:inbound",
           direction: "inbound",
           replyObligation: "participant-owes-reply",
@@ -69,7 +69,7 @@ describe("archive flow", () => {
           openedAt: inboundOpenedAt,
         },
         {
-          squadronId: "squadron:archive-flow",
+          projectId: "project:archive-flow",
           exchangeId: "exchange:outbound",
           direction: "outbound",
           replyObligation: "counterparty-owes-reply",
@@ -194,7 +194,7 @@ describe("archive flow", () => {
     const preflight = registered({
       openExchanges: [
         {
-          squadronId: "squadron:archive-flow",
+          projectId: "project:archive-flow",
           exchangeId: "exchange:unknown",
           direction: "inbound",
           replyObligation: "participant-owes-reply",
@@ -218,7 +218,7 @@ describe("archive flow", () => {
     const preflight = registered({
       openExchanges: [
         {
-          squadronId: "squadron:archive-flow",
+          projectId: "project:archive-flow",
           exchangeId: "exchange:human",
           direction: "outbound",
           replyObligation: "counterparty-owes-reply",
@@ -343,7 +343,7 @@ describe("archive flow", () => {
       return registered({
         openExchanges: [
           {
-            squadronId: "squadron:archive-flow",
+            projectId: "project:archive-flow",
             exchangeId: "exchange:remote-inbound",
             direction: "inbound",
             replyObligation: "participant-owes-reply",

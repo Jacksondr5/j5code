@@ -125,7 +125,7 @@ export class A2AArchiveFacts extends Context.Service<A2AArchiveFacts, A2AArchive
 ) {}
 
 interface ExchangeRow {
-  readonly squadron_id: string;
+  readonly project_id: string;
   readonly exchange_id: string;
   readonly sender_id: string;
   readonly receiver_id: string;
@@ -160,7 +160,7 @@ export const layer = Layer.effect(
         const participantId = resolution.home.participantId;
         const rows = yield* sql<ExchangeRow>`
           SELECT
-            squadron_id,
+            project_id,
             exchange_id,
             sender_id,
             receiver_id,
@@ -170,12 +170,12 @@ export const layer = Layer.effect(
           FROM j5_a2a_exchange
           WHERE status = 'open'
             AND (sender_id = ${participantId} OR receiver_id = ${participantId})
-          ORDER BY created_at, squadron_id, exchange_id
+          ORDER BY created_at, project_id, exchange_id
         `;
         const openExchanges = rows.map((row): OpenExchangeArchiveFact => {
           const inbound = row.receiver_id === participantId;
           return {
-            squadronId: SquadronId.make(row.squadron_id),
+            squadronId: SquadronId.make(row.project_id),
             exchangeId: ExchangeId.make(row.exchange_id),
             direction: inbound ? "inbound" : "outbound",
             replyObligation: inbound ? "participant-owes-reply" : "counterparty-owes-reply",
@@ -207,7 +207,7 @@ export const layer = Layer.effect(
           archived:
             (yield* sql<{
               readonly archived_at: string | null;
-            }>`SELECT archived_at FROM j5_a2a_squadron_membership WHERE participant_id = ${participantId}`)[0]
+            }>`SELECT archived_at FROM j5_a2a_membership WHERE participant_id = ${participantId}`)[0]
               ?.archived_at != null,
           openExchanges,
           placementSubtree,

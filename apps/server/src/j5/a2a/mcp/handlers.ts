@@ -51,12 +51,10 @@ import {
   spawnCreateCommandId,
   spawnThreadCheckout,
 } from "../spawnWorkspace.ts";
-import { SquadronJoinService } from "../SquadronJoinService.ts";
-import { SquadronProjectReferences } from "../SquadronProjectReferences.ts";
+import { ThreadRegistration } from "../ThreadRegistration.ts";
 import {
   crewSeatRequestKey,
   lifecycleCommandId,
-  lifecycleId,
   spawnFirstTurnText,
   spawnHomeCommandId,
   spawnMessageId,
@@ -65,8 +63,7 @@ import {
   spawnTitle,
   stablePart,
 } from "../spawnIds.ts";
-import { PlacementCommandId } from "../placementContracts.ts";
-import { CommCommandId, type ParticipantDirectoryRow, type SquadronId } from "../contracts.ts";
+import { CommCommandId, type ParticipantDirectoryRow } from "../contracts.ts";
 import type { ParticipantProvenanceView } from "../placementContracts.ts";
 import {
   J5Toolkit,
@@ -159,17 +156,6 @@ const projectProvenance = (provenance: ParticipantProvenanceView) => {
   }
 };
 
-const joinHomeCommandId = (input: {
-  readonly providerSessionId: string;
-  readonly requestKey: string;
-}) => CommCommandId.make(lifecycleId({ kind: "command", operation: "join-home", ...input }));
-
-const joinPlacementCommandId = (input: {
-  readonly providerSessionId: string;
-  readonly requestKey: string;
-}) =>
-  PlacementCommandId.make(lifecycleId({ kind: "command", operation: "join-placement", ...input }));
-
 export const commandIdForRequest = (input: {
   readonly toolName: "send_message" | "clear_own_ask";
   readonly providerSessionId: string;
@@ -195,8 +181,8 @@ const resolveCallerMembership = Effect.fn("j5.a2a.mcp.resolveCallerMembership")(
     .pipe(
       Effect.mapError((error) =>
         stateError(
-          `Caller thread ${scope.threadId} has no usable current Squadron membership: ${error instanceof Error ? error.message : String(error)}.`,
-          "Call list_participants to inspect current Squadron membership before retrying.",
+          `Caller thread ${scope.threadId} has no usable membership in its project: ${error instanceof Error ? error.message : String(error)}.`,
+          "Call list_participants to inspect current membership before retrying.",
         ),
       ),
     );
@@ -207,13 +193,13 @@ const resolveCallerMembership = Effect.fn("j5.a2a.mcp.resolveCallerMembership")(
   if (memberships.length === 0) {
     return yield* stateError(
       `Caller membership is missing for thread ${scope.threadId}.`,
-      "Call list_participants to inspect current Squadron membership before retrying.",
+      "Call list_participants to inspect current membership before retrying.",
     );
   }
   if (memberships.length !== 1) {
     return yield* stateError(
-      `Caller membership for thread ${scope.threadId} is ambiguous across Squadrons ${memberships.map((row) => row.squadronId).join(", ")}.`,
-      "Call list_participants to inspect current Squadron membership before retrying.",
+      `Caller membership for thread ${scope.threadId} is ambiguous across projects ${memberships.map((row) => row.squadronId).join(", ")}.`,
+      "Call list_participants to inspect current membership before retrying.",
     );
   }
   return memberships[0]!;
@@ -222,25 +208,31 @@ const resolveCallerMembership = Effect.fn("j5.a2a.mcp.resolveCallerMembership")(
 const preflightSpawnCaller = Effect.fn("j5.a2a.mcp.preflightSpawnCaller")(function* (
   scope: McpInvocationScope,
 ) {
-  const homes = yield* A2AHomeRegistrar;
   const ledger = yield* A2ALedger;
-  const home = yield* homes
-    .getHomeForThread(scope.threadId)
+  // A thread from before every thread registered at creation registers here, on its first call.
+  const home = yield* (yield* ThreadRegistration)
+    .ensureRegistered(scope.threadId)
     .pipe(
       Effect.mapError((error) =>
         stateError(
-          `Caller thread ${scope.threadId} has no usable immutable Squadron home: ${error instanceof Error ? error.message : String(error)}.`,
-          "Call list_participants to inspect current membership, then ask the human to restore a sanctioned home before retrying spawn_agent.",
+          `Caller thread ${scope.threadId} could not be registered in its project: ${error instanceof Error ? error.message : String(error)}.`,
+          "Retry spawn_agent; if it keeps failing, tell the human.",
         ),
       ),
     );
+  if (home === null) {
+    return yield* stateError(
+      `Caller thread ${scope.threadId} is a Subagent and is not an agent-to-agent participant.`,
+      "Return your result to the agent that started you; it can spawn agents.",
+    );
+  }
   const squadron = yield* ledger
     .readSquadron(home.squadronId)
     .pipe(
       Effect.mapError((error) =>
         stateError(
-          `Caller thread ${scope.threadId} names home Squadron ${home.squadronId}, but that Squadron is unavailable: ${error instanceof Error ? error.message : String(error)}.`,
-          "Ask the human to repair the caller's Squadron home before retrying spawn_agent.",
+          `Caller thread ${scope.threadId} is registered in project ${home.squadronId}, but that project's ledger is unavailable: ${error instanceof Error ? error.message : String(error)}.`,
+          "Tell the human before retrying spawn_agent.",
         ),
       ),
     );
@@ -250,26 +242,11 @@ const preflightSpawnCaller = Effect.fn("j5.a2a.mcp.preflightSpawnCaller")(functi
     membership.participantId !== home.participantId
   ) {
     return yield* stateError(
-      `Caller thread ${scope.threadId} has immutable home ${home.squadronId}/${home.participantId}, but its current membership is ${membership.squadronId}/${membership.participantId}.`,
+      `Caller thread ${scope.threadId} is registered as ${home.squadronId}/${home.participantId}, but its current membership is ${membership.squadronId}/${membership.participantId}.`,
       "Call list_participants to inspect current membership, then ask the human to repair the mismatch before retrying spawn_agent.",
     );
   }
   return { ...membership, squadron };
-});
-
-const requireCallerSquadron = Effect.fn("j5.a2a.mcp.requireCallerSquadron")(function* (
-  scope: McpInvocationScope,
-  squadronId: SquadronId,
-  command: "stop_agent" | "archive_crew" | "stop_crew",
-) {
-  const caller = yield* resolveCallerMembership(scope);
-  if (caller.squadronId !== squadronId) {
-    return yield* stateError(
-      `Caller thread ${scope.threadId} is currently in Squadron ${caller.squadronId}, but ${command} targeted ${squadronId}.`,
-      `Retry ${command} with squadron_id=${caller.squadronId}.`,
-    );
-  }
-  return caller;
 });
 
 const selectSpawnModel = Effect.fn("j5.a2a.mcp.selectSpawnModel")(function* (
@@ -475,14 +452,15 @@ const handlers = {
   send_message: (input) =>
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext;
-      const registrar = yield* A2AHomeRegistrar;
-      const callerParticipantId = yield* registrar.getHomeForThread(scope.threadId).pipe(
-        Effect.map((home) => home.participantId),
-        // Preserve the ordinary send-path error for a thread with no home.
-        Effect.catchTag("A2AHomeNotFoundError", () =>
-          Effect.succeed(participantIdForThread(scope.threadId)),
-        ),
-      );
+      // The send below registers a caller that has no home yet and refuses a Subagent.
+      const callerParticipantId = yield* (yield* A2AHomeRegistrar)
+        .getHomeForThread(scope.threadId)
+        .pipe(
+          Effect.map((home) => home.participantId),
+          Effect.catchTag("A2AHomeNotFoundError", () =>
+            Effect.succeed(participantIdForThread(scope.threadId)),
+          ),
+        );
       if (input.to === callerParticipantId) {
         return yield* stateError(
           `send_message cannot target your own participant_id ${callerParticipantId}; self-messaging is not supported.`,
@@ -542,7 +520,7 @@ const handlers = {
       const orchestrator = yield* OrchestratorV2;
       const includeArchived = input.include_archived ?? false;
       const directory = yield* service.listParticipants(scope.threadId, includeArchived);
-      // A Squadron's name beside its id places a participant. Names are
+      // A project's title beside its id places a participant. Titles are
       // enrichment: a read that fails leaves them null rather than taking the
       // address book with it.
       const squadronNames = new Map(
@@ -550,7 +528,7 @@ const handlers = {
           (squadron) => [squadron.id, squadron.name] as const,
         ),
       );
-      // Agents homed on peer servers sit beside local ones. Once this server has
+      // Agents on peer servers sit beside local ones. Once this server has
       // a peer, every row names the server it lives on; with none, no row does.
       // A peer that did not answer is reported, never omitted.
       const remote = yield* (yield* PeerDirectory).listAgents();
@@ -577,8 +555,8 @@ const handlers = {
       const remoteRows = remote.agents
         .filter((agent) => includeArchived || !agent.archived)
         .map((agent) => ({
-          squadron_id: agent.squadronId,
-          squadron_name: agent.squadronName,
+          project_id: agent.squadronId,
+          project_title: agent.squadronName,
           participant_id: agent.participantId,
           participant: {
             kind: "agent" as const,
@@ -614,8 +592,8 @@ const handlers = {
             const self =
               row.participant.kind === "agent" && row.participant.threadId === scope.threadId;
             return {
-              squadron_id: row.squadronId,
-              squadron_name: squadronNames.get(row.squadronId) ?? null,
+              project_id: row.squadronId,
+              project_title: squadronNames.get(row.squadronId) ?? null,
               participant_id: row.participantId,
               participant:
                 row.participant.kind === "agent"
@@ -648,80 +626,6 @@ const handlers = {
             };
           })
           .concat(remoteRows),
-      };
-    }).pipe(Effect.mapError(failure)),
-  list_squadrons: () =>
-    Effect.gen(function* () {
-      const scope = yield* McpInvocationContext;
-      const ledger = yield* A2ALedger;
-      const references = yield* SquadronProjectReferences;
-      const threadManagement = yield* ThreadManagementService;
-      const callerProjectId = yield* threadManagement.getThreadProjection(scope.threadId).pipe(
-        Effect.map((projection) => projection.thread.projectId),
-        Effect.option,
-        Effect.map(Option.getOrNull),
-      );
-      const squadrons = yield* ledger.listSquadrons();
-      const rows = yield* Effect.forEach(
-        squadrons,
-        (squadron) =>
-          references.listForSquadron(squadron.id).pipe(
-            Effect.map((projectReferences) => ({
-              squadron_id: squadron.id,
-              name: squadron.name,
-              project_ids: projectReferences.map((reference) => reference.projectId),
-            })),
-          ),
-        { concurrency: 1 },
-      );
-      return { caller_project_id: callerProjectId, squadrons: rows };
-    }).pipe(Effect.mapError(failure)),
-  join_squadron: (input) =>
-    Effect.gen(function* () {
-      const scope = yield* McpInvocationContext;
-      const crypto = yield* Crypto.Crypto;
-      const threadManagement = yield* ThreadManagementService;
-      const projection = yield* threadManagement
-        .getThreadProjection(scope.threadId)
-        .pipe(
-          Effect.mapError((error) =>
-            stateError(
-              `Caller thread ${scope.threadId} cannot be read for join_squadron: ${error.message}.`,
-              "Retry join_squadron once the caller thread is readable.",
-            ),
-          ),
-        );
-      if (projection.thread.deletedAt !== null) {
-        return yield* stateError(
-          `Caller thread ${scope.threadId} is deleted and cannot join a Squadron.`,
-          "The operation is refused.",
-        );
-      }
-      if (projection.thread.archivedAt !== null) {
-        return yield* stateError(
-          `Caller thread ${scope.threadId} is archived and cannot join a Squadron.`,
-          "Ask the human to unarchive the thread, then retry join_squadron.",
-        );
-      }
-      const requestKey = input.client_request_id ?? (yield* crypto.randomUUIDv4);
-      const stableInput = { providerSessionId: scope.providerSessionId, requestKey };
-      const joinedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
-      const joined = yield* (yield* SquadronJoinService).joinExistingThread({
-        homeCommandId: joinHomeCommandId(stableInput),
-        placementCommandId: joinPlacementCommandId(stableInput),
-        squadronId: input.squadron_id,
-        threadId: scope.threadId,
-        projectId: projection.thread.projectId,
-        joinedAt,
-      });
-      return {
-        squadron_id: joined.home.squadronId,
-        participant_id: joined.home.participantId,
-        thread_id: scope.threadId,
-        placement: {
-          placement_parent_id: joined.placement.placementParentId,
-          provenance: projectProvenance(joined.placement.provenance),
-        },
       };
     }).pipe(Effect.mapError(failure)),
   spawn_agent: (input) =>
@@ -903,7 +807,8 @@ const handlers = {
             return {
               participant_id: facts.home.participantId,
               thread_id: threadId,
-              squadron_id: facts.home.squadronId,
+              project_id: facts.home.squadronId,
+              project_title: caller.squadron.name,
               placement: {
                 placement_parent_id: facts.placement.placementParentId,
                 provenance: {
@@ -1028,21 +933,22 @@ const handlers = {
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext;
       const crypto = yield* Crypto.Crypto;
-      yield* requireCallerSquadron(scope, input.squadron_id, "stop_agent");
+      // Upstream's rule: an agent acts on agents in its own project.
+      const caller = yield* resolveCallerMembership(scope);
       const placements = yield* ParticipantPlacementService;
-      const matches = (yield* placements.listParticipants(input.squadron_id)).filter(
+      const matches = (yield* placements.listParticipants(caller.squadronId)).filter(
         (row) => row.participantId === input.participant_id,
       );
       if (matches.length !== 1) {
         return yield* stateError(
-          `Squadron ${input.squadron_id} has ${matches.length === 0 ? "no" : "ambiguous"} participant ${input.participant_id}.`,
+          `Your project has ${matches.length === 0 ? "no" : "an ambiguous"} participant ${input.participant_id}.`,
           "Call list_participants and retry stop_agent with exactly one listed agent participant_id.",
         );
       }
       const target = matches[0]!;
       if (target.participant.kind !== "agent" || target.threadId === null) {
         return yield* stateError(
-          `Participant ${input.participant_id} in Squadron ${input.squadron_id} is not an agent with a thread and cannot be stopped.`,
+          `Participant ${input.participant_id} is not an agent with a thread and cannot be stopped.`,
           "Call list_participants and retry stop_agent with an agent participant_id.",
         );
       }
@@ -1084,12 +990,12 @@ const handlers = {
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext;
       const crypto = yield* Crypto.Crypto;
-      const caller = yield* requireCallerSquadron(scope, input.squadron_id, "stop_crew");
+      const caller = yield* resolveCallerMembership(scope);
       const requestKey = input.client_request_id ?? (yield* crypto.randomUUIDv4);
       const outcome = yield* (yield* CrewStopService)
         .stop({
           callerParticipantId: caller.participantId,
-          squadronId: input.squadron_id,
+          squadronId: caller.squadronId,
           crewInstanceId: input.crew_instance_id,
           commandIds: (seatName) => ({
             interruptCommandId: lifecycleCommandId({
@@ -1124,13 +1030,13 @@ const handlers = {
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext;
       const crypto = yield* Crypto.Crypto;
-      const caller = yield* requireCallerSquadron(scope, input.squadron_id, "archive_crew");
+      const caller = yield* resolveCallerMembership(scope);
       const requestKey = input.client_request_id ?? (yield* crypto.randomUUIDv4);
       const archivedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
       const outcome = yield* (yield* ArchiveCrewService).archive({
         providerSessionId: scope.providerSessionId,
         callerParticipantId: caller.participantId,
-        squadronId: input.squadron_id,
+        squadronId: caller.squadronId,
         crewInstanceId: input.crew_instance_id,
         clientRequestKey: requestKey,
         ...(input.confirmation_token === undefined

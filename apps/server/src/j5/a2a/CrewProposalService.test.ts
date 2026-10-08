@@ -70,6 +70,7 @@ import {
 } from "./CrewProposalService.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
+import { runMigrations } from "../../persistence/Migrations.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import { SpawnCompositionService } from "./SpawnCompositionService.ts";
 import type { ResolvedSpawnWorkspace } from "./spawnWorkspace.ts";
@@ -297,15 +298,13 @@ const fixture = Effect.gen(function* () {
   );
   const context = yield* Layer.build(storage);
   const crews = Context.get(context, AgentCrewInstanceService);
+  yield* runMigrations().pipe(Effect.provide(context));
   yield* runJ5A2AMigrations().pipe(Effect.provide(context));
   yield* Effect.provide(
     Effect.gen(function* () {
-      yield* (yield* A2ALedger).createSquadron({
-        squadron: {
-          id: squadronId,
-          name: "Proposal Squadron",
-          createdAt: DateTime.formatIso(createdAt),
-        },
+      yield* (yield* A2ALedger).ensureProject({
+        projectId: squadronId,
+        createdAt: DateTime.formatIso(createdAt),
       });
     }),
     context,
@@ -1606,12 +1605,9 @@ const playbookFixture = Effect.gen(function* () {
     Effect.gen(function* () {
       yield* runJ5A2AMigrations();
       yield* seedPlaybookOwners([captainThread]);
-      yield* (yield* A2ALedger).createSquadron({
-        squadron: {
-          id: squadronId,
-          name: "Proposal Squadron",
-          createdAt: DateTime.formatIso(createdAt),
-        },
+      yield* (yield* A2ALedger).ensureProject({
+        projectId: squadronId,
+        createdAt: DateTime.formatIso(createdAt),
       });
     }),
     context,
@@ -2211,7 +2207,7 @@ it.effect(
         // 2) Propose: the tool JSON the Captain sends, through the tool schema and the handler's
         // seat mapping.
         const input = yield* decodeProposeCrew({
-          squadron_id: squadronId,
+          project_id: squadronId,
           name: "Ship Crew",
           brief: "Implement what we discussed. Ship: plan, build, review, and release a change.",
           playbook: "ship",

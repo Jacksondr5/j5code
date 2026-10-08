@@ -32,7 +32,6 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
-import { refuseScheduledLaunchIntoSharedProject } from "../j5/a2a/SquadronLaunchPolicy.ts";
 import { isMissedFixedTimeRun, isSameSchedule, nextScheduledRunAt } from "./Schedule.ts";
 
 const decodeTask = Schema.decodeUnknownEffect(ScheduledTask);
@@ -519,29 +518,23 @@ export const layer = Layer.effect(
         const result =
           active.threadId === null
             ? yield* Effect.exit(
-                // J5: the new thread joins its project's Squadron, so refuse
-                // before creating one when the project has several.
-                refuseScheduledLaunchIntoSharedProject(sql, active.projectId).pipe(
-                  Effect.andThen(
-                    threadLaunch.launch({
-                      commandId,
-                      projectId: active.projectId,
-                      title: active.title,
-                      modelSelection: active.modelSelection,
-                      runtimeMode: active.runtimeMode,
-                      interactionMode: active.interactionMode,
-                      workspaceStrategy: active.workspaceStrategy,
-                      initialMessage: {
-                        messageId,
-                        scheduledTaskId: active.id,
-                        text: prompt,
-                        attachments: [],
-                      },
-                      createdBy: active.createdBy,
-                      creationSource: active.creationSource,
-                    }),
-                  ),
-                ),
+                threadLaunch.launch({
+                  commandId,
+                  projectId: active.projectId,
+                  title: active.title,
+                  modelSelection: active.modelSelection,
+                  runtimeMode: active.runtimeMode,
+                  interactionMode: active.interactionMode,
+                  workspaceStrategy: active.workspaceStrategy,
+                  initialMessage: {
+                    messageId,
+                    scheduledTaskId: active.id,
+                    text: prompt,
+                    attachments: [],
+                  },
+                  createdBy: active.createdBy,
+                  creationSource: active.creationSource,
+                }),
               )
             : yield* Effect.exit(
                 threadManagement.sendToThread({

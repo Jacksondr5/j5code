@@ -43,8 +43,8 @@ const currentRaw = [
   "<j5_spawn_context>",
   "Platform-provided identity facts:",
   "participant_id: agent:reviewer",
-  "squadron_id: squadron:prod",
-  "squadron_name: Production Monitoring",
+  "project_id: project-prod",
+  "project_title: Production Monitoring",
   "spawned_by: agent:director",
   "spawner_thread_id: thread-director",
   "</j5_spawn_context>",
@@ -53,6 +53,11 @@ const currentRaw = [
   brief,
   "</spawner_brief>",
 ].join("\n");
+
+// Stored history keeps the identity lines briefs carried before Squadrons were retired.
+const preFoldRaw = currentRaw
+  .replace("project_id: project-prod", "squadron_id: squadron:prod")
+  .replace("project_title: ", "squadron_name: ");
 
 const legacyRaw = [
   "<j5_spawn_context>",
@@ -68,12 +73,22 @@ const legacyRaw = [
 ].join("\n");
 
 describe("presentSpawnBrief", () => {
+  it("still reads a brief stored before Squadrons were retired", () => {
+    expect(preFoldRaw).toContain(
+      "squadron_id: squadron:prod\nsquadron_name: Production Monitoring",
+    );
+    expect(presentSpawnBrief(message({ text: preFoldRaw }))).toEqual({
+      brief,
+      participantId: "agent:reviewer",
+      spawnedBy: "agent:director",
+      spawnerThreadId: "thread-director",
+    });
+  });
+
   it("separates the brief from the platform facts and names the spawner", () => {
     expect(presentSpawnBrief(message({ text: currentRaw }))).toEqual({
       brief,
       participantId: "agent:reviewer",
-      squadronId: "squadron:prod",
-      squadronName: "Production Monitoring",
       spawnedBy: "agent:director",
       spawnerThreadId: "thread-director",
     });
@@ -134,7 +149,7 @@ describe("presentSpawnBrief", () => {
   it("returns null for an unrecognized template so the raw text stays visible", () => {
     expect(presentSpawnBrief(message({ text: "Just a brief with no wrapper." }))).toBeNull();
     expect(
-      presentSpawnBrief(message({ text: currentRaw.replace("squadron_name: ", "name: ") })),
+      presentSpawnBrief(message({ text: currentRaw.replace("project_title: ", "name: ") })),
     ).toBeNull();
     expect(presentSpawnBrief(message({ text: currentRaw.slice(0, -5) }))).toBeNull();
     // A mangled opening tag with an intact closing tag must not hide the identity block.

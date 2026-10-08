@@ -15,9 +15,6 @@ import {
   ThreadPlaybooksResponse,
   AddPeerResponse,
   AnswerHumanExchangeResponse,
-  AssignImportedThreadsResponse,
-  type AssignImportedThreadsRequest,
-  CreateSquadronResponse,
   CrewMembershipsResponse,
   CrewProposalResolveResponse,
   CrewProposalPreviewResponse,
@@ -26,19 +23,15 @@ import {
   CrewRuntimeRequestsResponse,
   CrewArchiveResponse,
   CrewStopResponse,
-  DeleteSquadronResponse,
   FleetResponse,
   HumanInboxResponse,
   IssuePeerCredentialResponse,
   J5_API_PATHS,
   J5_PEER_API_PATHS,
   OpenInboxCountResponse,
-  RenameSquadronResponse,
   SpawnedChildrenResponse,
   PeerListResponse,
   RemovePeerResponse,
-  SquadronListResponse,
-  ThreadHomesResponse,
   type AddPeerRequest,
   type AnswerHumanExchangeRequest,
   type CrewProposalResolveRequest,
@@ -47,14 +40,13 @@ import {
   type CrewStopRequest,
   type CrewRuntimeRequestRespondRequest,
   type FleetReadRequest,
-  j5SquadronActionPath,
   type IssuePeerCredentialRequest,
   PeerAddressesResponse,
   PeerProbeResponse,
   type PeerProbeRequest,
   type RemovePeerRequest,
 } from "@t3tools/contracts/j5";
-import type { ProjectId, ThreadId } from "@t3tools/contracts";
+import type { ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -197,73 +189,6 @@ export const executeJ5Request = Effect.fn("j5.http.executeRequest")(function* (
   });
 });
 
-export const listSquadrons = Effect.fn("j5.http.listSquadrons")(function* (
-  prepared: PreparedConnection,
-) {
-  const response = yield* executeJ5Request(
-    prepared,
-    HttpClientRequest.get(J5_API_PATHS.squadrons),
-    READ_TIMEOUT_MS,
-  );
-  return (yield* HttpClientResponse.schemaBodyJson(SquadronListResponse)(response)).squadrons;
-});
-
-export const createSquadron = Effect.fn("j5.http.createSquadron")(function* (
-  prepared: PreparedConnection,
-  input: { readonly name: string; readonly projectId: ProjectId },
-) {
-  const request = yield* HttpClientRequest.post(J5_API_PATHS.squadrons).pipe(
-    HttpClientRequest.bodyJson(input),
-  );
-  const response = yield* executeJ5Request(prepared, request, WRITE_TIMEOUT_MS);
-  return (yield* HttpClientResponse.schemaBodyJson(CreateSquadronResponse)(response)).squadron;
-});
-
-export const renameSquadron = Effect.fn("j5.http.renameSquadron")(function* (
-  prepared: PreparedConnection,
-  input: { readonly squadronId: string; readonly name: string },
-) {
-  const request = yield* HttpClientRequest.post(
-    j5SquadronActionPath(input.squadronId, "rename"),
-  ).pipe(HttpClientRequest.bodyJson({ name: input.name }));
-  const response = yield* executeJ5Request(prepared, request, WRITE_TIMEOUT_MS);
-  return (yield* HttpClientResponse.schemaBodyJson(RenameSquadronResponse)(response)).squadron;
-});
-
-export const deleteSquadron = Effect.fn("j5.http.deleteSquadron")(function* (
-  prepared: PreparedConnection,
-  input: { readonly squadronId: string },
-) {
-  const response = yield* executeJ5Request(
-    prepared,
-    HttpClientRequest.post(j5SquadronActionPath(input.squadronId, "delete")),
-    WRITE_TIMEOUT_MS,
-  );
-  yield* HttpClientResponse.schemaBodyJson(DeleteSquadronResponse)(response);
-});
-
-export const assignImportedThreads = Effect.fn("j5.http.assignImportedThreads")(function* (
-  prepared: PreparedConnection,
-  input: AssignImportedThreadsRequest,
-) {
-  const request = yield* HttpClientRequest.post(J5_API_PATHS.assignImportedThreads).pipe(
-    HttpClientRequest.bodyJson(input),
-  );
-  const response = yield* executeJ5Request(prepared, request, WRITE_TIMEOUT_MS);
-  return yield* HttpClientResponse.schemaBodyJson(AssignImportedThreadsResponse)(response);
-});
-
-export const listThreadHomes = Effect.fn("j5.http.listThreadHomes")(function* (
-  prepared: PreparedConnection,
-  threadIds: ReadonlyArray<ThreadId>,
-) {
-  const request = yield* HttpClientRequest.post(J5_API_PATHS.threadHomes).pipe(
-    HttpClientRequest.bodyJson({ threadIds: [...new Set(threadIds)] }),
-  );
-  const response = yield* executeJ5Request(prepared, request, READ_TIMEOUT_MS);
-  return (yield* HttpClientResponse.schemaBodyJson(ThreadHomesResponse)(response)).entries;
-});
-
 export const listHumanInbox = Effect.fn("j5.http.listHumanInbox")(function* (
   prepared: PreparedConnection,
   status: "open" | "answered",
@@ -363,7 +288,7 @@ export const listSpawnedChildren = Effect.fn("j5.http.listSpawnedChildren")(func
     HttpClientRequest.bodyJson({ threadIds: [...new Set(threadIds)] }),
   );
   const response = yield* executeJ5Request(prepared, request, READ_TIMEOUT_MS);
-  return (yield* HttpClientResponse.schemaBodyJson(SpawnedChildrenResponse)(response)).entries;
+  return yield* HttpClientResponse.schemaBodyJson(SpawnedChildrenResponse)(response);
 });
 
 export const archiveCrew = Effect.fn("j5.http.archiveCrew")(function* (

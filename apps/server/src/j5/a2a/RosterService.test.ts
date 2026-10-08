@@ -7,6 +7,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import { OrchestratorV2 } from "../../orchestration-v2/Orchestrator.ts";
+import { runMigrations } from "../../persistence/Migrations.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import { RosterService, layer as rosterLayer, livenessForShellThread } from "./RosterService.ts";
@@ -85,12 +86,16 @@ const makeTestLayer = () => {
 };
 
 const setup = Effect.fn("test.j5.a2a.roster.setup")(function* () {
+  yield* runMigrations();
   yield* runJ5A2AMigrations();
   const ledger = yield* A2ALedger;
   const sql = yield* SqlClient.SqlClient;
-  yield* ledger.createSquadron({
-    squadron: { id: squadronId, name: "Monitoring", createdAt: timestamp },
-  });
+  yield* sql`
+    INSERT INTO projection_projects (
+      project_id, title, workspace_root, scripts_json, created_at, updated_at, deleted_at
+    ) VALUES (${squadronId}, 'Monitoring', '/tmp/monitoring', '[]', ${timestamp}, ${timestamp}, NULL)
+  `;
+  yield* ledger.ensureProject({ projectId: squadronId, createdAt: timestamp });
   for (const [index, participant] of [sentinel, twinOne, twinTwo, watchdog].entries()) {
     yield* ledger.append({
       commandId: CommCommandId.make(`command:join:${String(index)}`),
@@ -148,7 +153,7 @@ it.effect(
       const sentinelRow = byId.get(sentinel.id)!;
       assert.equal(sentinelRow.kind, "agent");
       assert.equal(sentinelRow.displayName, "obs-sentinel");
-      assert.equal(sentinelRow.squadronName, "Monitoring");
+      assert.equal(sentinelRow.projectTitle, "Monitoring");
       assert.isTrue(sentinelRow.canReceiveMessage);
       assert.equal(sentinelRow.liveness?.state, "active");
       assert.equal(byId.get(twinTwo.id)?.liveness?.state, "errored");

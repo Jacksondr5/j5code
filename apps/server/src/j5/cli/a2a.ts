@@ -379,14 +379,14 @@ const formatRosterLine = (entry: A2ARosterEntry) =>
     entry.kind,
     entry.participantId,
     entry.displayName ?? "-",
-    entry.squadronName ?? "-",
+    entry.projectTitle ?? "-",
     entry.liveness === null ? "-" : `${entry.liveness.state}/${entry.liveness.runStatus}`,
     entry.archived ? "archived" : entry.canReceiveMessage ? "reachable" : "no-receive",
   ].join("\t");
 
 const listCommand = Command.make("list", connectionFlags).pipe(
   Command.withDescription(
-    "List every participant with its measured liveness: kind, id, display name, Squadron, run state, reachability.",
+    "List every participant with its measured liveness: kind, id, display name, project, run state, reachability.",
   ),
   Command.withHandler((flags) =>
     runOutcome(
@@ -414,7 +414,7 @@ const listCommand = Command.make("list", connectionFlags).pipe(
 
 const whoamiCommand = Command.make("whoami", connectionFlags).pipe(
   Command.withDescription(
-    "Show the machine participant this token is bound to, its Squadron, and the server version.",
+    "Show the machine participant this token is bound to, its project, and the server version.",
   ),
   Command.withHandler((flags) =>
     runOutcome(
@@ -433,7 +433,7 @@ const whoamiCommand = Command.make("whoami", connectionFlags).pipe(
         const identity = yield* decodeReply(MachineWhoamiResponse, reply.body);
         return {
           json: { ...identity, origin },
-          text: `${identity.participant.participantId} in Squadron ${identity.participant.squadronName} (${identity.participant.squadronId}) — server v${identity.server.version} at ${origin}`,
+          text: `${identity.participant.participantId} in project ${identity.participant.projectTitle} (${identity.participant.projectId}) — server v${identity.server.version} at ${origin}`,
         } satisfies Outcome;
       }),
     ),
@@ -484,8 +484,8 @@ const withAdminToken = <A, E, R>(
 
 const participantCreateCommand = Command.make("create", {
   ...connectionFlags,
-  squadron: Flag.String("squadron").pipe(
-    Flag.withDescription("The Squadron id that becomes the machine's immutable home."),
+  project: Flag.String("project").pipe(
+    Flag.withDescription("The id of the project the machine sends from. It never changes."),
     Flag.optional,
   ),
   name: Flag.String("name").pipe(
@@ -496,13 +496,13 @@ const participantCreateCommand = Command.make("create", {
   ),
 }).pipe(
   Command.withDescription(
-    "Register a machine participant in a Squadron. Needs an orchestration:operate token, or runs on the server host with a temporary local admin session.",
+    "Register a machine participant in a project. Needs an orchestration:operate token, or runs on the server host with a temporary local admin session.",
   ),
   Command.withHandler((flags) =>
     runOutcome(
       flags.json,
       Effect.gen(function* () {
-        const squadronId = yield* requireFlag(flags.squadron, "--squadron");
+        const projectId = yield* requireFlag(flags.project, "--project");
         const name = yield* requireFlag(flags.name, "--name");
         const origin = yield* resolveOrigin(flags);
         const register = (token: string) =>
@@ -512,7 +512,7 @@ const participantCreateCommand = Command.make("create", {
               token,
               method: "POST",
               path: J5_MACHINE_API_PATHS.machineParticipants,
-              body: { squadronId, name },
+              body: { projectId, name },
               timeoutMs: flags.timeoutMs,
             });
             if (reply.status !== 200 && reply.status !== 201) {
@@ -521,7 +521,7 @@ const participantCreateCommand = Command.make("create", {
             const registered = yield* decodeReply(RegisterMachineParticipantResponse, reply.body);
             return {
               json: { ...registered },
-              text: `${registered.created ? "Registered" : "Already registered"} ${registered.participant.participantId} in Squadron ${registered.participant.squadronName}. Next: j5 a2a token issue --participant ${registered.participant.name}`,
+              text: `${registered.created ? "Registered" : "Already registered"} ${registered.participant.participantId} in project ${registered.participant.projectTitle}. Next: j5 a2a token issue --participant ${registered.participant.name}`,
             } satisfies Outcome;
           });
         return yield* withAdminToken(flags, "j5 a2a participant create", register);

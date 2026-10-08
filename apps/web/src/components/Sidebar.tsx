@@ -211,8 +211,8 @@ import {
 import { resolveLocalCheckoutBranchMismatch } from "./BranchToolbar.logic";
 import { archiveWithPreflight } from "../j5/a2a/archiveFlow";
 import { SpawnedChildren } from "../j5/threads/SpawnedChildren";
+import { useAgentSpawnedThreadKeys } from "../j5/threads/SpawnedChildrenClient";
 import { ThreadCardIdentity } from "../j5/threads/ThreadCardIdentity";
-import { useThreadHomes } from "../j5/squadron/ThreadHomesClient";
 import { isSidebarMember } from "../j5/threads/sidebarMembership";
 import { useKeyedThreadRefs, useThreadRowReads } from "../j5/threads/useThreadRowReads";
 import {
@@ -2427,13 +2427,13 @@ export default function Sidebar() {
   // fresh clock whenever it recomputes.
   const [snoozeWakeTick, bumpSnoozeWakeTick] = useState(0);
 
-  // J5 (case 23): Crew chips and spawned children for the listed rows, and each row's Squadron
-  // home, whose `origin` decides sidebar membership (register D22).
+  // J5 (case 23): Crew chips and spawned children for the listed rows. The same read says which
+  // rows an agent spawned, which decides sidebar membership (register D22).
   const threadRefs = useKeyedThreadRefs(
     threads.map((thread) => scopeThreadRef(thread.environmentId, thread.id)),
   );
   useThreadRowReads(threadRefs);
-  const threadHomes = useThreadHomes(threadRefs);
+  const agentSpawnedThreadKeys = useAgentSpawnedThreadKeys();
   // Project scope: one menu above the list. Scoping filters the list without
   // making the header width depend on the number or length of project names.
   // The selection lives in the persisted UI store next to the other sidebar
@@ -2620,7 +2620,9 @@ export default function Sidebar() {
     const visible = filterSidebarV2VisibleThreads(threads, scopedProjectKeys).filter((thread) =>
       isSidebarMember(
         thread,
-        threadHomes.get(scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))),
+        agentSpawnedThreadKeys.has(
+          scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+        ),
       ),
     );
     const pinned: EnvironmentThreadShell[] = [];
@@ -2718,7 +2720,7 @@ export default function Sidebar() {
     scopedProjectKeys,
     serverConfigs,
     snoozeWakeTick,
-    threadHomes,
+    agentSpawnedThreadKeys,
     threads,
   ]);
 

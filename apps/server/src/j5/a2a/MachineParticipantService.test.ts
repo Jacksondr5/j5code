@@ -1,6 +1,7 @@
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
@@ -8,6 +9,7 @@ import {
   MachineParticipantService,
   layer as machineParticipantLayer,
 } from "./MachineParticipantService.ts";
+import { runMigrations } from "../../persistence/Migrations.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import { CommCommandId, ParticipantId, SquadronId } from "./contracts.ts";
 
@@ -23,18 +25,25 @@ const makeTestLayer = () => {
 };
 
 const setup = Effect.fn("test.j5.a2a.machine.setup")(function* () {
+  yield* runMigrations();
   yield* runJ5A2AMigrations();
+  const sql = yield* SqlClient.SqlClient;
   const ledger = yield* A2ALedger;
   for (const [id, name] of [
     [monitoring, "Monitoring"],
     [support, "L2 Support Rotation"],
   ] as const) {
-    yield* ledger.createSquadron({ squadron: { id, name, createdAt: timestamp } });
+    yield* sql`
+      INSERT INTO projection_projects (
+        project_id, title, workspace_root, scripts_json, created_at, updated_at, deleted_at
+      ) VALUES (${id}, ${name}, ${`/tmp/${id}`}, '[]', ${timestamp}, ${timestamp}, NULL)
+    `;
+    yield* ledger.ensureProject({ projectId: id, createdAt: timestamp });
   }
 });
 
 it.effect(
-  "registers a machine once per name, replaying the same Squadron and refusing another",
+  "registers a machine once per name, replaying the same project and refusing another",
   () =>
     Effect.gen(function* () {
       yield* setup();
@@ -80,7 +89,7 @@ it.effect(
     }).pipe(Effect.provide(makeTestLayer())),
 );
 
-it.effect("refuses invalid names, unknown Squadrons, and unknown machines by name", () =>
+it.effect("refuses invalid names, unknown projects, and unknown machines by name", () =>
   Effect.gen(function* () {
     yield* setup();
     const machines = yield* MachineParticipantService;
@@ -103,7 +112,7 @@ it.effect("refuses invalid names, unknown Squadrons, and unknown machines by nam
         acceptedAt: timestamp,
       }),
     );
-    assert.equal(missingSquadron._tag, "SquadronNotFoundError");
+    assert.equal(missingSquadron._tag, "MachineParticipantProjectNotFoundError");
 
     const unknown = yield* Effect.flip(machines.resolve(ParticipantId.make("machine:ghost")));
     assert.equal(unknown._tag, "MachineParticipantNotFoundError");

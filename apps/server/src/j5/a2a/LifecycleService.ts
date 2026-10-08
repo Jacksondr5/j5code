@@ -1,4 +1,4 @@
-import type { OrchestrationV2StoredEvent } from "@t3tools/contracts";
+import { type OrchestrationV2StoredEvent, ThreadId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
@@ -27,7 +27,11 @@ import {
   Participant,
   ParticipantId,
 } from "./contracts.ts";
-import { resolveThreadHome } from "./HomeRegistrar.ts";
+import { type A2AHomeRegistrationError, resolveThreadHome } from "./HomeRegistrar.ts";
+import {
+  selfContainedLayer as threadRegistrationLayer,
+  ThreadRegistration,
+} from "./ThreadRegistration.ts";
 import { A2ALedger, type A2ALedgerError } from "./LedgerService.ts";
 import { findPeerCounterparty } from "./peerCounterparty.ts";
 
@@ -57,7 +61,7 @@ export class A2ALifecycleCounterpartyStateError extends Schema.TaggedError<A2ALi
   },
 ) {
   override get message(): string {
-    return `Cannot close exchange ${this.exchangeId}: affected participant ${this.participantId} has no readable Squadron projection.`;
+    return `Cannot close exchange ${this.exchangeId}: affected participant ${this.participantId} has no readable membership.`;
   }
 }
 
@@ -69,7 +73,7 @@ export class A2ALifecycleParticipantHomeStateError extends Schema.TaggedError<A2
   },
 ) {
   override get message(): string {
-    return `Participant ${this.participantId} has ambiguous immutable home history (${this.squadronIds.join(", ")}). Repair history before lifecycle retirement resumes.`;
+    return `Participant ${this.participantId} is registered in more than one project (${this.squadronIds.join(", ")}). Repair its history before lifecycle retirement resumes.`;
   }
 }
 
@@ -81,6 +85,7 @@ export class A2ALifecycleBridgeError extends Schema.TaggedError<A2ALifecycleBrid
 export type A2ALifecycleError =
   | A2ADeliveryWorkerError
   | A2ALedgerError
+  | A2AHomeRegistrationError
   | Schema.SchemaError
   | SqlError
   | A2ALifecycleParticipantNotFoundError
@@ -97,6 +102,12 @@ export interface A2ALifecycleServiceShape {
     event: OrchestrationV2StoredEvent,
   ) => Effect.Effect<boolean, A2ALifecycleBridgeError>;
   readonly replayCommittedEvents: Effect.Effect<void, A2ALifecycleBridgeError>;
+  /**
+   * Registers every thread that should be a participant and is not one yet, and returns how many
+   * it registered. The daemon runs it at start, which is how threads from before every thread
+   * registered at creation (mobile, imported, system-started) become participants.
+   */
+  readonly registerExistingThreads: Effect.Effect<number, A2ALifecycleBridgeError>;
 }
 
 export class A2ALifecycleService extends Context.Service<
@@ -105,20 +116,20 @@ export class A2ALifecycleService extends Context.Service<
 >()("t3/j5/a2a/LifecycleService/A2ALifecycleService") {}
 
 interface MembershipRow {
-  readonly squadron_id: string;
+  readonly project_id: string;
   readonly participant_id: string;
   readonly participant_kind: "agent" | "human";
   readonly payload: string;
 }
 
 interface HistoricalParticipantRow {
-  readonly squadron_id: string;
+  readonly project_id: string;
   readonly payload: string;
   readonly retired: number;
 }
 
 interface ExchangeRow {
-  readonly squadron_id: string;
+  readonly project_id: string;
   readonly exchange_id: string;
   readonly sender_id: string;
   readonly receiver_id: string;
@@ -131,7 +142,7 @@ interface CursorRow {
 const stablePart = (value: string) => encodeURIComponent(value);
 
 const lifecycleKey = (exchange: ExchangeRow, disposition: ExchangeDropDisposition) =>
-  `${stablePart(exchange.squadron_id)}:${stablePart(exchange.exchange_id)}:${disposition}`;
+  `${stablePart(exchange.project_id)}:${stablePart(exchange.exchange_id)}:${disposition}`;
 
 const dropCommandId = (exchange: ExchangeRow, disposition: ExchangeDropDisposition) =>
   CommCommandId.make(`command:j5:a2a:lifecycle:drop:${lifecycleKey(exchange, disposition)}`);
@@ -178,6 +189,7 @@ const makeLayer = (daemon: boolean) =>
       const ledger = yield* A2ALedger;
       const worker = yield* A2ADeliveryWorker;
       const threads = yield* ThreadManagement.ThreadManagementService;
+      const registration = yield* ThreadRegistration;
       const sql = yield* SqlClient.SqlClient;
       const lifecyclePermit = yield* Semaphore.make(1);
 
@@ -185,10 +197,10 @@ const makeLayer = (daemon: boolean) =>
         participantId: ParticipantId,
       ) {
         return yield* sql<MembershipRow>`
-          SELECT squadron_id, participant_id, participant_kind, payload
-          FROM j5_a2a_squadron_membership
+          SELECT project_id, participant_id, participant_kind, payload
+          FROM j5_a2a_membership
           WHERE participant_id = ${participantId}
-          ORDER BY squadron_id
+          ORDER BY project_id
         `;
       });
 
@@ -196,12 +208,12 @@ const makeLayer = (daemon: boolean) =>
         function* (participantId: ParticipantId) {
           return yield* sql<HistoricalParticipantRow>`
           SELECT
-            joined.squadron_id,
+            joined.project_id,
             json_extract(joined.payload, '$.participant') AS payload,
             EXISTS (
               SELECT 1
               FROM j5_a2a_comm_event AS retirement
-              WHERE retirement.squadron_id = joined.squadron_id
+              WHERE retirement.project_id = joined.project_id
                 AND retirement.seq > joined.seq
                 AND retirement.kind IN ('participant.left', 'participant.deleted')
                 AND json_extract(retirement.payload, '$.participant.kind') = 'agent'
@@ -227,23 +239,23 @@ const makeLayer = (daemon: boolean) =>
         SqlError | A2ALifecycleCounterpartyStateError
       > {
         if (isHumanParticipantId(participantId)) {
-          return { squadronId: SquadronId.make(exchange.squadron_id), environmentId: null };
+          return { squadronId: SquadronId.make(exchange.project_id), environmentId: null };
         }
         const rows = yield* membershipRows(participantId);
         const row =
-          rows.find((candidate) => candidate.squadron_id === exchange.squadron_id) ?? rows[0];
+          rows.find((candidate) => candidate.project_id === exchange.project_id) ?? rows[0];
         if (row !== undefined) {
-          return { squadronId: SquadronId.make(row.squadron_id), environmentId: null };
+          return { squadronId: SquadronId.make(row.project_id), environmentId: null };
         }
         const remote = yield* findPeerCounterparty(sql, {
-          squadronId: SquadronId.make(exchange.squadron_id),
+          squadronId: SquadronId.make(exchange.project_id),
           exchangeId: ExchangeId.make(exchange.exchange_id),
           participantId,
         });
         if (remote !== null) return remote;
         const historical = yield* historicalParticipantRows(participantId);
         const historicalRow =
-          historical.find((candidate) => candidate.squadron_id === exchange.squadron_id) ??
+          historical.find((candidate) => candidate.project_id === exchange.project_id) ??
           historical[0];
         if (historicalRow === undefined) {
           return yield* new A2ALifecycleCounterpartyStateError({
@@ -251,7 +263,7 @@ const makeLayer = (daemon: boolean) =>
             exchangeId: exchange.exchange_id,
           });
         }
-        return { squadronId: SquadronId.make(historicalRow.squadron_id), environmentId: null };
+        return { squadronId: SquadronId.make(historicalRow.project_id), environmentId: null };
       });
 
       const dropParticipantExchanges = Effect.fn("j5.a2a.lifecycle.dropParticipantExchanges")(
@@ -262,11 +274,11 @@ const makeLayer = (daemon: boolean) =>
           readonly operation: "archived" | "deleted";
         }) {
           const exchanges = yield* sql<ExchangeRow>`
-          SELECT squadron_id, exchange_id, sender_id, receiver_id
+          SELECT project_id, exchange_id, sender_id, receiver_id
           FROM j5_a2a_exchange
           WHERE status = 'open'
             AND (sender_id = ${input.participantId} OR receiver_id = ${input.participantId})
-          ORDER BY squadron_id, opened_seq, exchange_id
+          ORDER BY project_id, opened_seq, exchange_id
         `;
           const dropped: Array<ExchangeId> = [];
           for (const exchange of exchanges) {
@@ -288,7 +300,7 @@ const makeLayer = (daemon: boolean) =>
               disposition === "sender-retired" &&
               (yield* sql`
                 SELECT 1 FROM j5_a2a_delivery
-                WHERE squadron_id = ${exchange.squadron_id}
+                WHERE project_id = ${exchange.project_id}
                   AND exchange_id = ${exchange.exchange_id}
                   AND receiver_id = ${affectedParticipantId}
                   AND receiver_environment_id = ${receiver.environmentId}
@@ -310,8 +322,8 @@ const makeLayer = (daemon: boolean) =>
                   operation: input.operation,
                   disposition,
                 }),
-                originSquadronId: SquadronId.make(exchange.squadron_id),
-                receiverSquadronId: receiver.squadronId,
+                originProjectId: SquadronId.make(exchange.project_id),
+                receiverProjectId: receiver.squadronId,
                 ...(receiver.environmentId === null
                   ? {}
                   : {
@@ -324,7 +336,7 @@ const makeLayer = (daemon: boolean) =>
                               ? ("participant-deleted" as const)
                               : ("participant-archived" as const),
                           participantId: input.participantId,
-                          squadronId: input.squadronId,
+                          projectId: input.squadronId,
                         },
                       },
                     }),
@@ -335,7 +347,7 @@ const makeLayer = (daemon: boolean) =>
             };
             yield* ledger.appendEvents({
               commandId: dropCommandId(exchange, disposition),
-              squadronId: SquadronId.make(exchange.squadron_id),
+              squadronId: SquadronId.make(exchange.project_id),
               acceptedAt: input.archivedAt,
               events: [
                 {
@@ -352,7 +364,7 @@ const makeLayer = (daemon: boolean) =>
                           ? "participant-deleted"
                           : "participant-archived",
                       participantId: input.participantId,
-                      squadronId: input.squadronId,
+                      projectId: input.squadronId,
                     },
                     facts: {
                       replyRequired: false,
@@ -386,11 +398,11 @@ const makeLayer = (daemon: boolean) =>
           if (rows.length !== 1) {
             return yield* new A2ALifecycleParticipantHomeStateError({
               participantId: input.participantId,
-              squadronIds: rows.map((row) => row.squadron_id),
+              squadronIds: rows.map((row) => row.project_id),
             });
           }
           const row = rows[0]!;
-          const squadronId = SquadronId.make(row.squadron_id);
+          const squadronId = SquadronId.make(row.project_id);
           const participant = yield* decodeParticipant(row.payload);
           if (participant.kind !== "agent") {
             return yield* new A2ALifecycleHumanArchiveNotAllowedError({
@@ -401,8 +413,8 @@ const makeLayer = (daemon: boolean) =>
             readonly archived_at: string | null;
             readonly updated_seq: number;
           }>`
-            SELECT archived_at, updated_seq FROM j5_a2a_squadron_membership
-            WHERE squadron_id = ${squadronId} AND participant_id = ${input.participantId}
+            SELECT archived_at, updated_seq FROM j5_a2a_membership
+            WHERE project_id = ${squadronId} AND participant_id = ${input.participantId}
           `;
           const membership = memberships[0];
           // A historical departure is permanent. Unarchive must never recreate a
@@ -468,9 +480,52 @@ const makeLayer = (daemon: boolean) =>
       const archiveParticipant: A2ALifecycleServiceShape["archiveParticipant"] = (input) =>
         lifecyclePermit.withPermit(archiveParticipantRaw(input));
 
+      /**
+       * Registers one thread in its project. Registration records a thread that is already
+       * archived as archived, so the result does not depend on whether its archive event was seen
+       * first.
+       */
+      const registerThread = Effect.fn("j5.a2a.lifecycle.registerThread")(function* (
+        threadId: OrchestrationV2StoredEvent["event"]["threadId"],
+      ) {
+        return (yield* registration.ensureRegistered(threadId)) !== null;
+      });
+
+      const registerExistingThreadsRaw = Effect.fn("j5.a2a.lifecycle.registerExistingThreads")(
+        function* () {
+          const unregistered = yield* sql<{ readonly thread_id: string }>`
+            SELECT thread.thread_id
+            FROM orchestration_v2_projection_threads AS thread
+            WHERE thread.deleted_at IS NULL
+              AND COALESCE(
+                json_extract(thread.payload_json, '$.lineage.relationshipToParent'), ''
+              ) <> 'subagent'
+              AND NOT EXISTS (
+                SELECT 1 FROM j5_a2a_comm_event AS joined
+                WHERE joined.kind = 'participant.joined'
+                  AND json_extract(joined.payload, '$.participant.kind') = 'agent'
+                  AND json_extract(joined.payload, '$.participant.threadId') = thread.thread_id
+              )
+            ORDER BY thread.created_at, thread.thread_id
+          `;
+          let registered = 0;
+          for (const row of unregistered) {
+            if (yield* lifecyclePermit.withPermit(registerThread(ThreadId.make(row.thread_id)))) {
+              registered += 1;
+            }
+          }
+          return registered;
+        },
+      );
+
       const handleStoredEventInternal = Effect.fn("j5.a2a.lifecycle.handleStoredEvent")(function* (
         stored: OrchestrationV2StoredEvent,
       ) {
+        // Every way a thread comes to exist writes this event, including the importers that
+        // bypass the thread.create command.
+        if (stored.event.type === "thread.created") {
+          return yield* registerThread(stored.event.threadId);
+        }
         if (
           stored.event.type !== "thread.archived" &&
           stored.event.type !== "thread.deleted" &&
@@ -549,11 +604,23 @@ const makeLayer = (daemon: boolean) =>
         handleStoredEventRaw(event).pipe(Effect.mapError(bridgeError("handle thread retirement")));
       const replayCommittedEvents: A2ALifecycleServiceShape["replayCommittedEvents"] =
         replayCommittedEventsRaw().pipe(Effect.mapError(bridgeError("replay thread retirements")));
+      const registerExistingThreads: A2ALifecycleServiceShape["registerExistingThreads"] =
+        registerExistingThreadsRaw().pipe(
+          Effect.mapError(bridgeError("register existing threads")),
+        );
 
       if (daemon) {
         let retryDelayMs = 250;
         const run = Effect.forever(
-          replayCommittedEventsRaw().pipe(
+          registerExistingThreadsRaw().pipe(
+            Effect.tap((registered) =>
+              registered === 0
+                ? Effect.void
+                : Effect.logInfo("J5 A2A registered existing threads in their projects", {
+                    registered,
+                  }),
+            ),
+            Effect.andThen(replayCommittedEventsRaw()),
             Effect.andThen(Effect.die("J5 A2A lifecycle retirement stream ended")),
             Effect.catchCause((cause) => {
               const delayMs = retryDelayMs;
@@ -572,9 +639,10 @@ const makeLayer = (daemon: boolean) =>
         archiveParticipant,
         handleStoredEvent,
         replayCommittedEvents,
+        registerExistingThreads,
       });
     }),
   );
 
-export const manualLayer = makeLayer(false);
-export const layer = makeLayer(true);
+export const manualLayer = makeLayer(false).pipe(Layer.provide(threadRegistrationLayer));
+export const layer = makeLayer(true).pipe(Layer.provide(threadRegistrationLayer));

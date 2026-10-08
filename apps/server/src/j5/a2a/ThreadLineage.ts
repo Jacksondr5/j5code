@@ -6,9 +6,8 @@ import * as Schema from "effect/Schema";
 
 import { OrchestratorDispatchError } from "../../orchestration-v2/Orchestrator.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
-import { A2AHomeRegistrar } from "./HomeRegistrar.ts";
 import { SpawnCompositionService } from "./SpawnCompositionService.ts";
-import { registrationCommandIdForCreation } from "./SquadronThreadCreationService.ts";
+import { registrationCommandId, ThreadRegistration } from "./ThreadRegistration.ts";
 import { PlacementCommandId } from "./placementContracts.ts";
 
 // Preserve the upstream dispatch error contract while exposing the repair action
@@ -27,18 +26,13 @@ export const layer = Layer.effect(
   ThreadManagementService,
   Effect.gen(function* () {
     const inner = yield* ThreadManagementService;
-    const homes = yield* A2AHomeRegistrar;
+    const registration = yield* ThreadRegistration;
     const composition = yield* SpawnCompositionService;
-    const homeFor = (threadId: Parameters<typeof homes.getHomeForThread>[0]) =>
-      homes
-        .getHomeForThread(threadId)
-        .pipe(Effect.catchTag("A2AHomeNotFoundError", () => Effect.succeed(null)));
+    // Merge-back needs nothing from J5: upstream scopes it to the calling project.
     const dispatch = Effect.fn("J5ThreadLineage.dispatch")(function* (
       command: OrchestrationV2Command,
     ) {
-      if (command.type !== "thread.fork" && command.type !== "thread.merge_back") {
-        return yield* inner.dispatch(command);
-      }
+      if (command.type !== "thread.fork") return yield* inner.dispatch(command);
       const failure = (cause: unknown, phase: "admission" | "registration" = "admission") =>
         new J5ThreadLineageError({
           commandId: command.commandId,
@@ -46,29 +40,16 @@ export const layer = Layer.effect(
           cause,
           phase,
         });
-      const source = yield* homeFor(command.sourceThreadId).pipe(
-        Effect.mapError((cause) => failure(cause)),
-      );
-      if (command.type === "thread.merge_back") {
-        const target = yield* homeFor(command.targetThreadId).pipe(
-          Effect.mapError((cause) => failure(cause)),
-        );
-        if (source?.squadronId !== target?.squadronId) {
-          return yield* failure(
-            new Error(
-              "Merge-back requires both threads to share a registered Squadron, or both to be native. Repair missing fork registration by replaying its original fork command; do not infer a home from the project.",
-            ),
-          );
-        }
-        return yield* inner.dispatch(command);
-      }
+      // Null for a Subagent, which is not a participant: its fork registers like any new thread.
+      const source = yield* registration
+        .ensureRegistered(command.sourceThreadId)
+        .pipe(Effect.mapError((cause) => failure(cause)));
       const result = yield* inner.dispatch(command);
-      // A native source stays native, regardless of which client requested it.
       if (source === null) return result;
       yield* Effect.gen(function* () {
         const target = yield* inner.getThreadProjection(command.targetThreadId);
         yield* composition.recordFacts({
-          homeCommandId: registrationCommandIdForCreation(command.commandId),
+          homeCommandId: registrationCommandId(command.targetThreadId),
           placementCommandId: PlacementCommandId.make(
             `command:j5:a2a:thread-fork-placement:${encodeURIComponent(command.commandId)}`,
           ),
@@ -85,7 +66,7 @@ export const layer = Layer.effect(
         Effect.mapError((cause) =>
           failure(
             new Error(
-              `Fork ${command.targetThreadId} exists but its Squadron registration could not complete. Replay command ${command.commandId} after repairing the cause; a new tool call creates another fork. ${cause.message}`,
+              `Fork ${command.targetThreadId} exists but its placement under its source could not be recorded. Replay command ${command.commandId} after repairing the cause; a new tool call creates another fork. ${cause.message}`,
             ),
             "registration",
           ),

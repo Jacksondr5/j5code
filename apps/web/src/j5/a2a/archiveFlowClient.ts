@@ -22,7 +22,7 @@ import { readPreparedConnection } from "../../state/session";
 
 const Urgency = Schema.NullOr(Schema.Literals(["blocking", "soon", "fyi"]));
 const OpenExchange = Schema.Struct({
-  squadronId: Schema.String,
+  projectId: Schema.String,
   exchangeId: Schema.String,
   direction: Schema.Literals(["inbound", "outbound"]),
   replyObligation: Schema.Literals(["participant-owes-reply", "counterparty-owes-reply"]),
@@ -58,7 +58,7 @@ const PreArchiveFacts = Schema.Union([
   Schema.Struct({
     state: Schema.Literal("registered"),
     threadId: ThreadId,
-    squadronId: Schema.String,
+    projectId: Schema.String,
     participantId: Schema.String,
     retired: Schema.Boolean,
     openExchanges: Schema.Array(OpenExchange),

@@ -48,7 +48,6 @@ describe("T3 orchestration provider instructions", () => {
       T3_CODE_ORCHESTRATION_INSTRUCTIONS,
       "set `bindToCurrentThread=false` only when the user wants a fresh thread for every run",
     );
-    assert.notInclude(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "explicit Squadron selection");
   });
 
   it("creates mixed crews from chat and keeps coordination independent of approvals and artifacts", () => {

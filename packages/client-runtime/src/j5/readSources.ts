@@ -79,7 +79,7 @@ export function resolveJ5ReadSource<A>(input: {
 /** Merge read models through the existing catalog; each source keeps its own data and failure state. */
 export function createJ5ReadSourcesAtom<A>(input: {
   readonly label: string;
-  readonly capability: "j5Squadrons" | "j5HumanInbox";
+  readonly capability: "j5ProjectLedger";
   readonly catalogValueAtom: Atom.Atom<EnvironmentCatalogState>;
   readonly stateAtom: (
     id: EnvironmentId,

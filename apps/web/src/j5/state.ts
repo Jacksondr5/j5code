@@ -25,8 +25,6 @@ const sourcesInput = {
   sessionStateValueAtom: environmentSession.sessionStateValueAtom,
 };
 
-export const squadronQueryAtom = (environmentId: EnvironmentId) =>
-  j5Environment.squadrons({ environmentId, input: {} });
 export const openInboxQueryAtom = (environmentId: EnvironmentId) =>
   j5Environment.inbox({ environmentId, input: { status: "open" } });
 export const answeredInboxQueryAtom = (environmentId: EnvironmentId) =>
@@ -44,28 +42,22 @@ export const fleetDetailQueryAtom = (environmentId: EnvironmentId) =>
 export const peersQueryAtom = (environmentId: EnvironmentId) =>
   j5Environment.peers({ environmentId, input: {} });
 
-export const squadronSourcesAtom = createJ5ReadSourcesAtom({
-  ...sourcesInput,
-  label: "web-j5:squadron-sources",
-  capability: "j5Squadrons",
-  queryAtom: squadronQueryAtom,
-});
 export const openInboxSourcesAtom = createJ5ReadSourcesAtom({
   ...sourcesInput,
   label: "web-j5:inbox-sources",
-  capability: "j5HumanInbox",
+  capability: "j5ProjectLedger",
   queryAtom: openInboxQueryAtom,
 });
 export const answeredInboxSourcesAtom = createJ5ReadSourcesAtom({
   ...sourcesInput,
   label: "web-j5:answered-inbox-sources",
-  capability: "j5HumanInbox",
+  capability: "j5ProjectLedger",
   queryAtom: answeredInboxQueryAtom,
 });
 export const crewProposalSourcesAtom = createJ5ReadSourcesAtom({
   ...sourcesInput,
   label: "web-j5:crew-proposal-sources",
-  capability: "j5HumanInbox",
+  capability: "j5ProjectLedger",
   queryAtom: crewProposalsQueryAtom,
 });
 let lastCrewApprovalPoll: CrewApprovalPollPlan = { key: "", environmentIds: [] };
@@ -89,25 +81,25 @@ const polledCrewRuntimeRequestsAtom = Atom.family((environmentId: EnvironmentId)
 export const crewRuntimeRequestSourcesAtom = createJ5ReadSourcesAtom({
   ...sourcesInput,
   label: "web-j5:crew-runtime-request-sources",
-  capability: "j5HumanInbox",
+  capability: "j5ProjectLedger",
   queryAtom: polledCrewRuntimeRequestsAtom,
 });
 export const fleetSourcesAtom = createJ5ReadSourcesAtom({
   ...sourcesInput,
   label: "web-j5:fleet-sources",
-  capability: "j5Squadrons",
+  capability: "j5ProjectLedger",
   queryAtom: fleetQueryAtom,
 });
 export const fleetDetailSourcesAtom = createJ5ReadSourcesAtom({
   ...sourcesInput,
   label: "web-j5:fleet-detail-sources",
-  capability: "j5Squadrons",
+  capability: "j5ProjectLedger",
   queryAtom: fleetDetailQueryAtom,
 });
 export const inboxCountSourcesAtom = createJ5ReadSourcesAtom({
   ...sourcesInput,
   label: "web-j5:inbox-count-sources",
-  capability: "j5HumanInbox",
+  capability: "j5ProjectLedger",
   queryAtom: inboxCountQueryAtom,
 });
 

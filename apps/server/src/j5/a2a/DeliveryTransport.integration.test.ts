@@ -132,7 +132,16 @@ import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { readReceiverBacklog } from "./receiverBacklog.ts";
 import { noneLayer as peerDirectoryNoneLayer } from "./PeerDirectory.ts";
 import { A2ALifecycleService, manualLayer as lifecycleServiceLayer } from "./LifecycleService.ts";
-import { A2ASenderRetiredError, A2ASendService, layer as sendServiceLayer } from "./SendService.ts";
+import {
+  selfContainedLayer as threadRegistrationLayer,
+  ThreadRegistration,
+} from "./ThreadRegistration.ts";
+import {
+  A2ASenderNotJoinedError,
+  A2ASenderRetiredError,
+  A2ASendService,
+  layer as sendServiceLayer,
+} from "./SendService.ts";
 import {
   CommCommandId,
   SquadronId,
@@ -414,7 +423,8 @@ const makeLifecycleTestLayer = (harness: DeliveryHarness) => {
   const worker = deliveryWorkerLayer.pipe(Layer.provide(base));
   const lifecycle = lifecycleServiceLayer.pipe(Layer.provide(worker), Layer.provide(base));
   const threadLifecycle = threadLifecycleServiceLayer.pipe(Layer.provide(base));
-  return Layer.mergeAll(base, send, worker, lifecycle, threadLifecycle);
+  const registration = threadRegistrationLayer.pipe(Layer.provide(base));
+  return Layer.mergeAll(base, send, worker, lifecycle, threadLifecycle, registration);
 };
 
 const makeHarness = Effect.gen(function* () {
@@ -470,9 +480,7 @@ const seedTarget = (
       worktreePath: workspace,
     });
     if (existingSquadronId === undefined) {
-      yield* ledger.createSquadron({
-        squadron: { id: squadronId, name: `J5 A2A ${suffix} delivery`, createdAt },
-      });
+      yield* ledger.ensureProject({ projectId: squadronId, createdAt });
     }
     if (registrar === undefined) {
       yield* ledger.appendEvents({
@@ -512,8 +520,8 @@ const seedTarget = (
       messageId,
       message,
       delivery: {
-        originSquadronId: squadronId,
-        receiverSquadronId: squadronId,
+        originProjectId: squadronId,
+        receiverProjectId: squadronId,
         messageId,
         senderId,
         receiverId,
@@ -549,7 +557,7 @@ for (const idleModel of ["gpt-5.4", "gpt-6-astra"]) {
             deliveredMessages[0]?.text,
             formatPeerEnvelope({
               senderId: target.senderId,
-              originSquadronId: target.squadronId,
+              originProjectId: target.squadronId,
               exchangeId: target.exchangeId,
               message: target.message,
             }),
@@ -1128,7 +1136,7 @@ it.effect(
           deliveredMessages[0]?.text,
           formatPeerEnvelope({
             senderId: target.senderId,
-            originSquadronId: target.squadronId,
+            originProjectId: target.squadronId,
             exchangeId: target.exchangeId,
             message: target.message,
           }),
@@ -1341,9 +1349,7 @@ it.effect("routes real archive and delete commands through lifecycle closure exa
           worktreePath: null,
         });
       }
-      yield* ledger.createSquadron({
-        squadron: { id: squadronId, name: "Lifecycle command path", createdAt },
-      });
+      yield* ledger.ensureProject({ projectId: squadronId, createdAt });
       for (const [index, participant] of [sender, receiver].entries()) {
         yield* ledger.append({
           commandId: CommCommandId.make(`command:j5-a2a-lifecycle-command-path-join:${index}`),
@@ -1763,7 +1769,7 @@ for (const refusal of ["wrong home", "unavailable participant"] as const) {
           .deliverAgent({
             ...target.delivery,
             ...(refusal === "wrong home"
-              ? { receiverSquadronId: SquadronId.make("squadron:unrelated") }
+              ? { receiverProjectId: SquadronId.make("squadron:unrelated") }
               : { receiverId: ParticipantId.make("agent:unavailable") }),
           })
           .pipe(Effect.flip);
@@ -1882,10 +1888,10 @@ for (const crossSquadron of [false, true]) {
             1,
           );
           assert.deepStrictEqual(
-            yield* sql<{ readonly squadron_id: string; readonly status: string }>`
-        SELECT squadron_id, status FROM j5_a2a_exchange WHERE exchange_id = ${accepted.exchangeId}
+            yield* sql<{ readonly project_id: string; readonly status: string }>`
+        SELECT project_id, status FROM j5_a2a_exchange WHERE exchange_id = ${accepted.exchangeId}
       `,
-            [{ squadron_id: sender.squadronId, status: "closed" }],
+            [{ project_id: sender.squadronId, status: "closed" }],
           );
           assert.deepStrictEqual(yield* send.send(ask), accepted);
           assert.deepStrictEqual(yield* send.send(replyInput), reply);
@@ -2463,7 +2469,7 @@ for (const archiveSender of [false, true]) {
           // A real dispatch receipt exists, but the process has not yet committed its A2A outcome.
           yield* (yield* A2ADeliveryTransport).deliverAgent({
             ...target.delivery,
-            originSquadronId: source.squadronId,
+            originProjectId: source.squadronId,
             senderId: source.receiverId,
             messageId: sent.messageId,
             exchangeId: null,
@@ -2531,7 +2537,7 @@ it.effect(
         });
         yield* (yield* A2ADeliveryTransport).deliverAgent({
           ...target.delivery,
-          originSquadronId: source.squadronId,
+          originProjectId: source.squadronId,
           senderId: source.receiverId,
           messageId: sent.messageId,
           exchangeId: null,
@@ -2814,7 +2820,10 @@ it.effect(
         assert.isTrue(mcpFailure.isFailure);
         const repair = yield* decodeToolFailure(mcpFailure.result);
         assert.equal(repair.code, "orchestration_error");
-        assert.include(repair.message, "exists but its Squadron registration could not complete");
+        assert.include(
+          repair.message,
+          "exists but its placement under its source could not be recorded",
+        );
         assert.include(repair.message, "Replay command mcp:");
         yield* sql`DROP TRIGGER fail_mcp_fork_placement`;
         const output = yield* invokeFork;
@@ -2835,9 +2844,10 @@ it.effect(
           targetThreadId: mismatch.threadId,
         };
         const before = yield* threads.getThreadProjection(source.threadId);
-        assert.include(
+        // J5 adds no merge-back rule: another project's thread is refused by upstream alone.
+        assert.notInclude(
           (yield* dispatchIntakeCommand(merge).pipe(Effect.flip)).message,
-          "share a registered Squadron",
+          "J5 thread lineage",
         );
         assert.deepEqual(
           (yield* threads.getThreadProjection(source.threadId)).contextTransfers,
@@ -2898,171 +2908,160 @@ it.effect(
           sourcePoint: { type: "run" as const, runId: nativeRun.run.id },
         };
         yield* dispatchIntakeCommand(nativeFork);
-        assert.equal(
-          (yield* registrar.getHomeForThread(nativeFork.targetThreadId).pipe(Effect.flip))._tag,
-          "A2AHomeNotFoundError",
-        );
-        assert.include(
-          (yield* threads
-            .dispatch({
-              ...merge,
-              commandId: CommandId.make("command:native-to-registered"),
-              sourceThreadId: nativeFork.targetThreadId,
-              targetThreadId: source.threadId,
-            })
-            .pipe(Effect.flip)).message,
-          "share a registered Squadron",
+        // A source with no home yet registers in its project when it forks, and so does its fork.
+        const nativeHome = yield* registrar.getHomeForThread(native.threadId);
+        assert.equal(nativeHome.squadronId, SquadronId.make(native.projectId));
+        const nativeForkHome = yield* registrar.getHomeForThread(nativeFork.targetThreadId);
+        assert.equal(nativeForkHome.squadronId, SquadronId.make(native.projectId));
+        assert.deepEqual(
+          (yield* (yield* ParticipantPlacementService).readPlacement(nativeForkHome))?.provenance,
+          {
+            kind: "forked-from",
+            sourceParticipantId: nativeHome.participantId,
+            source: "upstream_lineage",
+          },
         );
       }).pipe(Effect.provide(J5AdaptedThreadHandlersLive.pipe(Layer.provideMerge(base))));
     }),
 );
 
-it.effect(
-  "organize enforces Squadron archive authority and applies reversible lifecycle once",
-  () =>
-    Effect.gen(function* () {
-      const harness = yield* makeHarness;
-      const base = crewInstanceLayer.pipe(
-        Layer.provideMerge(makeMessageLifecycleLayer(harness)),
-        Layer.provideMerge(serverConfigLayer),
-        Layer.provideMerge(NodeServices.layer),
+it.effect("organize enforces project archive authority and applies reversible lifecycle once", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    const base = crewInstanceLayer.pipe(
+      Layer.provideMerge(makeMessageLifecycleLayer(harness)),
+      Layer.provideMerge(serverConfigLayer),
+      Layer.provideMerge(NodeServices.layer),
+    );
+    yield* Effect.gen(function* () {
+      const registrar = yield* A2AHomeRegistrar;
+      const source = yield* seedTarget("organize-source", modelSelection.model, registrar);
+      const target = yield* seedTarget(
+        "organize-target",
+        modelSelection.model,
+        registrar,
+        source.squadronId,
+        source.projectId,
       );
-      yield* Effect.gen(function* () {
-        const registrar = yield* A2AHomeRegistrar;
-        const source = yield* seedTarget("organize-source", modelSelection.model, registrar);
-        const target = yield* seedTarget(
-          "organize-target",
-          modelSelection.model,
-          registrar,
-          source.squadronId,
-          source.projectId,
+      // Another project's thread: upstream's same-project rule is the only archive authority.
+      const other = yield* seedTarget("organize-other", modelSelection.model, registrar);
+      const threads = yield* ThreadManagementService;
+      yield* threads.sendToThread({
+        commandId: CommandId.make("command:organize-start"),
+        projectId: source.projectId,
+        threadId: source.threadId,
+        messageId: MessageId.make("message:organize-start"),
+        text: "Organize agents",
+        attachments: [],
+        mode: "queue",
+        createdBy: "user",
+        creationSource: "web",
+      });
+      yield* startPendingTestTurn(source.threadId);
+      const toolkit = yield* J5AdaptedThreadToolkit;
+      const call = (threadId: ThreadId, action: "archive" | "unarchive") =>
+        toolkit.handle("t3_thread_organize", { threadId, action }).pipe(
+          Stream.unwrap,
+          Stream.run(Sink.last()),
+          Effect.flatMap(Effect.fromOption),
+          Effect.provideService(McpInvocationContext, {
+            environmentId: EnvironmentId.make("environment:organize-test"),
+            threadId: source.threadId,
+            providerSessionId: "organize-test",
+            providerInstanceId: modelSelection.instanceId,
+            capabilities: new Set(["orchestration"] as const),
+            issuedAt: 1,
+          }),
         );
-        const other = yield* seedTarget(
-          "organize-other",
-          modelSelection.model,
-          registrar,
-          undefined,
-          source.projectId,
+      for (const action of ["archive", "unarchive"] as const) {
+        const denied = yield* call(other.threadId, action);
+        assert.isTrue(denied.isFailure);
+        assert.equal((denied.result as { code: string }).code, "thread_not_found");
+      }
+      assert.isNull((yield* threads.getThreadProjection(other.threadId)).thread.archivedAt);
+      const member = yield* seedTarget(
+        "organize-member",
+        modelSelection.model,
+        registrar,
+        source.squadronId,
+        source.projectId,
+      );
+      yield* (yield* AgentCrewInstanceService).record({
+        id: "crew:organize-guard",
+        squadronId: source.squadronId,
+        captainParticipantId: source.receiverId,
+        captainThreadId: source.threadId,
+        displayName: "Organize crew",
+        brief: "Protect the member",
+        createdAt: "2026-08-17T12:00:00.000Z",
+        members: [
+          {
+            seatName: "builder",
+            agentId: null,
+            participantId: member.receiverId,
+            threadId: member.threadId,
+            reason: null,
+          },
+        ],
+      });
+      const memberArchive = yield* call(member.threadId, "archive");
+      assert.isTrue(memberArchive.isFailure);
+      assert.include(
+        (memberArchive.result as { message: string }).message,
+        "never archived one by one",
+      );
+      assert.isNull((yield* threads.getThreadProjection(member.threadId)).thread.archivedAt);
+      const send = yield* A2ASendService;
+      const opened = yield* send.send({
+        commandId: CommCommandId.make("command:organize-ask"),
+        senderThreadId: source.threadId,
+        to: target.receiverId,
+        message: "Please answer",
+        expectReply: true,
+        intent: "Check lifecycle",
+        acceptedAt: "2026-08-17T12:00:00.000Z",
+      });
+      const lifecycle = yield* A2ALifecycleService;
+      for (const action of ["archive", "unarchive"] as const) {
+        const event = yield* threads.streamStoredEventsFrom().pipe(
+          Stream.filter(
+            (stored) =>
+              stored.event.threadId === target.threadId &&
+              stored.event.type ===
+                (action === "archive" ? "thread.archived" : "thread.unarchived"),
+          ),
+          Stream.runHead,
+          Effect.forkChild({ startImmediately: true }),
         );
-        const threads = yield* ThreadManagementService;
-        yield* threads.sendToThread({
-          commandId: CommandId.make("command:organize-start"),
-          projectId: source.projectId,
-          threadId: source.threadId,
-          messageId: MessageId.make("message:organize-start"),
-          text: "Organize agents",
-          attachments: [],
-          mode: "queue",
-          createdBy: "user",
-          creationSource: "web",
-        });
-        yield* startPendingTestTurn(source.threadId);
-        const toolkit = yield* J5AdaptedThreadToolkit;
-        const call = (threadId: ThreadId, action: "archive" | "unarchive") =>
-          toolkit.handle("t3_thread_organize", { threadId, action }).pipe(
-            Stream.unwrap,
-            Stream.run(Sink.last()),
-            Effect.flatMap(Effect.fromOption),
-            Effect.provideService(McpInvocationContext, {
-              environmentId: EnvironmentId.make("environment:organize-test"),
-              threadId: source.threadId,
-              providerSessionId: "organize-test",
-              providerInstanceId: modelSelection.instanceId,
-              capabilities: new Set(["orchestration"] as const),
-              issuedAt: 1,
-            }),
-          );
-        for (const action of ["archive", "unarchive"] as const) {
-          const denied = yield* call(other.threadId, action);
-          assert.isTrue(denied.isFailure);
-          assert.equal((denied.result as { code: string }).code, "capability_denied");
-        }
-        assert.isNull((yield* threads.getThreadProjection(other.threadId)).thread.archivedAt);
-        const member = yield* seedTarget(
-          "organize-member",
-          modelSelection.model,
-          registrar,
-          source.squadronId,
-          source.projectId,
+        assert.isFalse((yield* call(target.threadId, action)).isFailure);
+        const stored = yield* Fiber.join(event).pipe(Effect.flatMap(Effect.fromOption));
+        yield* lifecycle.handleStoredEvent(stored);
+        yield* lifecycle.handleStoredEvent(stored);
+        const directory = yield* send.listParticipants(source.threadId);
+        assert.equal(
+          directory.some((row) => row.participantId === target.receiverId && row.canReceiveMessage),
+          action === "unarchive",
         );
-        yield* (yield* AgentCrewInstanceService).record({
-          id: "crew:organize-guard",
+        const inclusive = yield* send.listParticipants(source.threadId, true);
+        assert.equal(
+          inclusive.find((row) => row.participantId === target.receiverId)?.archived,
+          action === "archive",
+        );
+        assert.deepEqual(yield* registrar.getHomeForThread(target.threadId), {
           squadronId: source.squadronId,
-          captainParticipantId: source.receiverId,
-          captainThreadId: source.threadId,
-          displayName: "Organize crew",
-          brief: "Protect the member",
-          createdAt: "2026-08-17T12:00:00.000Z",
-          members: [
-            {
-              seatName: "builder",
-              agentId: null,
-              participantId: member.receiverId,
-              threadId: member.threadId,
-              reason: null,
-            },
-          ],
+          participantId: target.receiverId,
         });
-        const memberArchive = yield* call(member.threadId, "archive");
-        assert.isTrue(memberArchive.isFailure);
-        assert.include(
-          (memberArchive.result as { message: string }).message,
-          "never archived one by one",
-        );
-        assert.isNull((yield* threads.getThreadProjection(member.threadId)).thread.archivedAt);
-        const send = yield* A2ASendService;
-        const opened = yield* send.send({
-          commandId: CommCommandId.make("command:organize-ask"),
-          senderThreadId: source.threadId,
-          to: target.receiverId,
-          message: "Please answer",
-          expectReply: true,
-          intent: "Check lifecycle",
-          acceptedAt: "2026-08-17T12:00:00.000Z",
-        });
-        const lifecycle = yield* A2ALifecycleService;
-        for (const action of ["archive", "unarchive"] as const) {
-          const event = yield* threads.streamStoredEventsFrom().pipe(
-            Stream.filter(
-              (stored) =>
-                stored.event.threadId === target.threadId &&
-                stored.event.type ===
-                  (action === "archive" ? "thread.archived" : "thread.unarchived"),
-            ),
-            Stream.runHead,
-            Effect.forkChild({ startImmediately: true }),
-          );
-          assert.isFalse((yield* call(target.threadId, action)).isFailure);
-          const stored = yield* Fiber.join(event).pipe(Effect.flatMap(Effect.fromOption));
-          yield* lifecycle.handleStoredEvent(stored);
-          yield* lifecycle.handleStoredEvent(stored);
-          const directory = yield* send.listParticipants(source.threadId);
-          assert.equal(
-            directory.some(
-              (row) => row.participantId === target.receiverId && row.canReceiveMessage,
-            ),
-            action === "unarchive",
-          );
-          const inclusive = yield* send.listParticipants(source.threadId, true);
-          assert.equal(
-            inclusive.find((row) => row.participantId === target.receiverId)?.archived,
-            action === "archive",
-          );
-          assert.deepEqual(yield* registrar.getHomeForThread(target.threadId), {
-            squadronId: source.squadronId,
-            participantId: target.receiverId,
-          });
-        }
-        const sql = yield* SqlClient.SqlClient;
-        const counts = yield* sql<{ readonly dropped: number; readonly notices: number }>`SELECT
+      }
+      const sql = yield* SqlClient.SqlClient;
+      const counts = yield* sql<{ readonly dropped: number; readonly notices: number }>`SELECT
         (SELECT COUNT(*) FROM j5_a2a_comm_event WHERE kind = 'exchange.dropped' AND exchange_id = ${opened.exchangeId}) AS dropped,
         (SELECT COUNT(*) FROM j5_a2a_delivery WHERE exchange_role = 'terminal_notice' AND exchange_id = ${opened.exchangeId}) AS notices`;
-        assert.deepEqual(counts, [{ dropped: 1, notices: 1 }]);
-        // Self-archive adopts upstream semantics and does not acquire a second confirmation protocol.
-        assert.isFalse((yield* call(source.threadId, "archive")).isFailure);
-        assert.isNotNull((yield* threads.getThreadProjection(source.threadId)).thread.archivedAt);
-      }).pipe(Effect.provide(J5AdaptedThreadHandlersLive.pipe(Layer.provideMerge(base))));
-    }),
+      assert.deepEqual(counts, [{ dropped: 1, notices: 1 }]);
+      // Self-archive adopts upstream semantics and does not acquire a second confirmation protocol.
+      assert.isFalse((yield* call(source.threadId, "archive")).isFailure);
+      assert.isNotNull((yield* threads.getThreadProjection(source.threadId)).thread.archivedAt);
+    }).pipe(Effect.provide(J5AdaptedThreadHandlersLive.pipe(Layer.provideMerge(base))));
+  }),
 );
 
 it.effect("rejects a stale Astra steer after Stop commits before admission", () =>
@@ -3331,6 +3330,248 @@ it.effect("settles a held peer delivery once after resume without alarming", () 
       assert.lengthOf(messages, 1);
       // Upstream links the peer message to its sending thread.
       assert.equal(messages[0]?.senderThreadId, source.threadId);
+    }).pipe(Effect.provide(makeLifecycleTestLayer(harness)));
+  }),
+);
+
+// Registration: a thread becomes a participant in its project however it came to exist.
+const registrationFixture = Effect.fn("A2AIntegration.registrationFixture")(function* (
+  prefix: string,
+) {
+  const orchestrator = yield* OrchestratorV2;
+  const threads = yield* ThreadManagementService;
+  const sink = yield* EventSinkV2;
+  const projectId = ProjectId.make(`project:${prefix}`);
+  const threadId = (name: string) => ThreadId.make(`thread:${prefix}:${name}`);
+  const create = (
+    name: string,
+    createdBy: "user" | "system",
+    creationSource: "web" | "mobile" | "server",
+  ) =>
+    orchestrator.dispatch({
+      type: "thread.create",
+      createdBy,
+      creationSource,
+      commandId: CommandId.make(`command:${prefix}:create:${name}`),
+      threadId: threadId(name),
+      projectId,
+      title: `Registration ${name}`,
+      modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+    });
+  yield* create("web", "user", "web");
+  yield* create("mobile", "user", "mobile");
+  yield* create("system-start", "system", "server");
+  const template = (yield* threads.getThreadProjection(threadId("web"))).thread;
+  // Both importers write `thread.created` straight to the event sink, past the command path.
+  const write = (name: string, thread: typeof template) =>
+    sink.write({
+      events: [
+        {
+          id: EventId.make(`event:${prefix}:${name}:created`),
+          type: "thread.created",
+          threadId: thread.id,
+          providerInstanceId: thread.providerInstanceId,
+          occurredAt: thread.createdAt,
+          payload: thread,
+        },
+      ],
+    });
+  yield* write("imported", {
+    ...template,
+    id: threadId("imported"),
+    createdBy: "system",
+    creationSource: "server",
+    historyOrigin: "v1_import",
+    lineage: {
+      parentThreadId: null,
+      relationshipToParent: null,
+      rootThreadId: threadId("imported"),
+    },
+  });
+  yield* write("subagent", {
+    ...template,
+    id: threadId("subagent"),
+    lineage: {
+      parentThreadId: threadId("web"),
+      relationshipToParent: "subagent",
+      rootThreadId: threadId("web"),
+    },
+  });
+  return { projectId, threadId };
+});
+
+const registeredProjects = Effect.fn("A2AIntegration.registeredProjects")(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  return yield* sql<{
+    readonly thread_id: string;
+    readonly project_id: string;
+    readonly archived: number;
+  }>`
+    SELECT
+      json_extract(joined.payload, '$.participant.threadId') AS thread_id,
+      joined.project_id,
+      COALESCE((
+        SELECT membership.archived_at IS NOT NULL FROM j5_a2a_membership AS membership
+        WHERE membership.thread_id = json_extract(joined.payload, '$.participant.threadId')
+      ), 0) AS archived
+    FROM j5_a2a_comm_event AS joined
+    WHERE joined.kind = 'participant.joined'
+    ORDER BY thread_id
+  `;
+});
+
+const eventStoreHead = Effect.fn("A2AIntegration.eventStoreHead")(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const rows = yield* sql<{ readonly head: number }>`
+    SELECT COALESCE(MAX(sequence), 0) AS head FROM orchestration_events
+  `;
+  return rows[0]?.head ?? 0;
+});
+
+it.effect("registers a thread in its project however it was created, and never a Subagent", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const { projectId, threadId } = yield* registrationFixture("registration-created");
+      const threadLifecycle = yield* ThreadLifecycleService;
+      // Archived before the daemon reaches its creation: it must still register, as archived.
+      yield* threadLifecycle.archive({
+        commandId: CommandId.make("command:registration-created:archive"),
+        threadId: threadId("mobile"),
+      });
+
+      yield* replayLifecycleThrough(yield* eventStoreHead());
+
+      assert.deepStrictEqual(yield* registeredProjects(), [
+        { thread_id: threadId("imported"), project_id: projectId, archived: 0 },
+        { thread_id: threadId("mobile"), project_id: projectId, archived: 1 },
+        { thread_id: threadId("system-start"), project_id: projectId, archived: 0 },
+        { thread_id: threadId("web"), project_id: projectId, archived: 0 },
+      ]);
+      // Reading the same events again registers nobody twice.
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`UPDATE j5_a2a_lifecycle_cursor SET after_sequence = 0`;
+      yield* replayLifecycleThrough(yield* eventStoreHead());
+      assert.lengthOf(yield* registeredProjects(), 4);
+    }).pipe(Effect.provide(makeLifecycleTestLayer(harness)));
+  }),
+);
+
+it.effect(
+  "registers the threads an upgrade finds without a home, and leaves Subagents and deleted threads out",
+  () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness;
+      yield* Effect.gen(function* () {
+        const { projectId, threadId } = yield* registrationFixture("registration-existing");
+        const threadLifecycle = yield* ThreadLifecycleService;
+        const lifecycle = yield* A2ALifecycleService;
+        const send = yield* A2ASendService;
+        const sql = yield* SqlClient.SqlClient;
+        yield* threadLifecycle.archive({
+          commandId: CommandId.make("command:registration-existing:archive"),
+          threadId: threadId("mobile"),
+        });
+        yield* threadLifecycle.delete({
+          commandId: CommandId.make("command:registration-existing:delete"),
+          threadId: threadId("system-start"),
+        });
+        // A server from before the upgrade read past these events without registering anyone.
+        yield* sql`UPDATE j5_a2a_lifecycle_cursor SET after_sequence = ${yield* eventStoreHead()}`;
+        assert.deepStrictEqual(yield* registeredProjects(), []);
+
+        assert.strictEqual(yield* lifecycle.registerExistingThreads, 3);
+
+        assert.deepStrictEqual(yield* registeredProjects(), [
+          { thread_id: threadId("imported"), project_id: projectId, archived: 0 },
+          { thread_id: threadId("mobile"), project_id: projectId, archived: 1 },
+          { thread_id: threadId("web"), project_id: projectId, archived: 0 },
+        ]);
+        assert.strictEqual(yield* lifecycle.registerExistingThreads, 0);
+        // A Subagent that calls a tool is told what it is, and is still not registered.
+        const refused = yield* Effect.flip(send.listParticipants(threadId("subagent")));
+        assert.instanceOf(refused, A2ASenderNotJoinedError);
+        assert.include(refused.message, "Subagents are not participants");
+        assert.lengthOf(yield* registeredProjects(), 3);
+      }).pipe(Effect.provide(makeLifecycleTestLayer(harness)));
+    }),
+);
+
+it.effect("registers an older thread on its first agent-to-agent call", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const { projectId, threadId } = yield* registrationFixture("registration-lazy");
+      const send = yield* A2ASendService;
+      assert.deepStrictEqual(yield* registeredProjects(), []);
+
+      const directory = yield* send.listParticipants(threadId("web"));
+
+      assert.deepStrictEqual(
+        directory.map((row) => [row.squadronId, row.participantId]),
+        [[SquadronId.make(projectId), participantIdForThread(threadId("web"))]],
+      );
+      assert.deepStrictEqual(yield* registeredProjects(), [
+        { thread_id: threadId("web"), project_id: projectId, archived: 0 },
+      ]);
+    }).pipe(Effect.provide(makeLifecycleTestLayer(harness)));
+  }),
+);
+
+it.effect("registers an archived older thread as archived, in one step or not at all", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const { projectId, threadId } = yield* registrationFixture("registration-archived");
+      const threadLifecycle = yield* ThreadLifecycleService;
+      const lifecycle = yield* A2ALifecycleService;
+      const registration = yield* ThreadRegistration;
+      const sql = yield* SqlClient.SqlClient;
+      for (const archived of ["mobile", "web"]) {
+        yield* threadLifecycle.archive({
+          commandId: CommandId.make(`command:registration-archived:archive-${archived}`),
+          threadId: threadId(archived),
+        });
+      }
+      // A server from before the upgrade read past these events without registering anyone.
+      yield* sql`UPDATE j5_a2a_lifecycle_cursor SET after_sequence = ${yield* eventStoreHead()}`;
+
+      // Something other than the lifecycle service registers it: a fork, or a tool call.
+      yield* registration.ensureRegistered(threadId("mobile"));
+
+      assert.deepStrictEqual(yield* registeredProjects(), [
+        { thread_id: threadId("mobile"), project_id: projectId, archived: 1 },
+      ]);
+
+      // The archive fails after the join was written: the join must not be left behind.
+      yield* sql`
+        CREATE TRIGGER fail_archive_fact BEFORE INSERT ON j5_a2a_comm_event
+        WHEN NEW.kind = 'participant.archived'
+        BEGIN SELECT RAISE(ABORT, 'injected failure'); END
+      `;
+      yield* Effect.flip(registration.ensureRegistered(threadId("web")));
+      yield* sql`DROP TRIGGER fail_archive_fact`;
+
+      assert.lengthOf(yield* registeredProjects(), 1);
+      assert.deepStrictEqual(
+        yield* sql`SELECT 1 FROM j5_a2a_membership WHERE thread_id = ${threadId("web")}`,
+        [],
+      );
+
+      // The next start registers it, archived, with the two nobody had registered yet.
+      assert.strictEqual(yield* lifecycle.registerExistingThreads, 3);
+
+      assert.deepStrictEqual(yield* registeredProjects(), [
+        { thread_id: threadId("imported"), project_id: projectId, archived: 0 },
+        { thread_id: threadId("mobile"), project_id: projectId, archived: 1 },
+        { thread_id: threadId("system-start"), project_id: projectId, archived: 0 },
+        { thread_id: threadId("web"), project_id: projectId, archived: 1 },
+      ]);
+      assert.strictEqual(yield* lifecycle.registerExistingThreads, 0);
     }).pipe(Effect.provide(makeLifecycleTestLayer(harness)));
   }),
 );

@@ -26,9 +26,7 @@ it.effect("records a crew once, exposes membership, and lists by captain", () =>
   Effect.gen(function* () {
     yield* runJ5A2AMigrations();
     const squadronId = SquadronId.make("squadron:crew-instances");
-    yield* (yield* A2ALedger).createSquadron({
-      squadron: { id: squadronId, name: "Crew Squadron", createdAt },
-    });
+    yield* (yield* A2ALedger).ensureProject({ projectId: squadronId, createdAt });
     const service = yield* AgentCrewInstanceService;
     const captain = ParticipantId.make("agent:j5:a2a:captain");
     const input = {
@@ -115,9 +113,7 @@ it.effect("decides concurrent additions inside one transaction so the cap holds"
   Effect.gen(function* () {
     yield* runJ5A2AMigrations();
     const squadronId = SquadronId.make("squadron:crew-cap");
-    yield* (yield* A2ALedger).createSquadron({
-      squadron: { id: squadronId, name: "Cap Squadron", createdAt },
-    });
+    yield* (yield* A2ALedger).ensureProject({ projectId: squadronId, createdAt });
     const service = yield* AgentCrewInstanceService;
     const seat = (name: string) => ({
       seatName: name,
@@ -171,9 +167,7 @@ it.effect("refuses a same-name seat under a different identity, and any seat onc
   Effect.gen(function* () {
     yield* runJ5A2AMigrations();
     const squadronId = SquadronId.make("squadron:crew-conflict");
-    yield* (yield* A2ALedger).createSquadron({
-      squadron: { id: squadronId, name: "Conflict Squadron", createdAt },
-    });
+    yield* (yield* A2ALedger).ensureProject({ projectId: squadronId, createdAt });
     const service = yield* AgentCrewInstanceService;
     const seat = (name: string, identity: string) => ({
       seatName: name,
@@ -212,9 +206,7 @@ it.effect("brings back only a Crew that retired with its Captain", () =>
   Effect.gen(function* () {
     yield* runJ5A2AMigrations();
     const squadronId = SquadronId.make("squadron:crew-restore");
-    yield* (yield* A2ALedger).createSquadron({
-      squadron: { id: squadronId, name: "Restore Squadron", createdAt },
-    });
+    yield* (yield* A2ALedger).ensureProject({ projectId: squadronId, createdAt });
     const service = yield* AgentCrewInstanceService;
     const captainThreadId = ThreadId.make("thread:restore-captain");
     const record = (id: string) =>
@@ -259,9 +251,7 @@ it.effect(
     Effect.gen(function* () {
       yield* runJ5A2AMigrations();
       const squadronId = SquadronId.make("squadron:crew-steps");
-      yield* (yield* A2ALedger).createSquadron({
-        squadron: { id: squadronId, name: "Step Squadron", createdAt },
-      });
+      yield* (yield* A2ALedger).ensureProject({ projectId: squadronId, createdAt });
       const service = yield* AgentCrewInstanceService;
       const member = (seatName: string, playbookStepIds?: ReadonlyArray<string>) => ({
         seatName,
@@ -335,9 +325,7 @@ it.effect("stores the step owners the person approved last when a record is repl
   Effect.gen(function* () {
     yield* runJ5A2AMigrations();
     const squadronId = SquadronId.make("squadron:crew-replay");
-    yield* (yield* A2ALedger).createSquadron({
-      squadron: { id: squadronId, name: "Replay Squadron", createdAt },
-    });
+    yield* (yield* A2ALedger).ensureProject({ projectId: squadronId, createdAt });
     const service = yield* AgentCrewInstanceService;
     // Participant ids are unique across Crews, so each seat's id carries its Crew.
     let crew = "";

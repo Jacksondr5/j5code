@@ -33,7 +33,7 @@ export class PlacementSquadronNotFoundError extends Schema.TaggedError<Placement
   { squadronId: SquadronId },
 ) {
   override get message(): string {
-    return `Placement squadron state is missing for ${this.squadronId}. Create the squadron before placing participants.`;
+    return `Project ${this.squadronId} has no agent-to-agent ledger yet, so nothing can be placed in it.`;
   }
 }
 
@@ -42,7 +42,7 @@ export class PlacementParticipantNotFoundError extends Schema.TaggedError<Placem
   { squadronId: SquadronId, participantId: ParticipantId },
 ) {
   override get message(): string {
-    return `Placement participant state is missing for ${this.participantId} in squadron ${this.squadronId}. Join the participant before changing placement.`;
+    return `Placement participant state is missing for ${this.participantId} in project ${this.squadronId}. Join the participant before changing placement.`;
   }
 }
 
@@ -51,7 +51,7 @@ export class PlacementParentNotFoundError extends Schema.TaggedError<PlacementPa
   { squadronId: SquadronId, parentParticipantId: ParticipantId },
 ) {
   override get message(): string {
-    return `Placement parent state is missing for ${this.parentParticipantId} in squadron ${this.squadronId}. Choose an active participant or root.`;
+    return `Placement parent state is missing for ${this.parentParticipantId} in project ${this.squadronId}. Choose an active participant or root.`;
   }
 }
 
@@ -60,7 +60,7 @@ export class PlacementParentIneligibleError extends Schema.TaggedError<Placement
   { squadronId: SquadronId, parentParticipantId: ParticipantId },
 ) {
   override get message(): string {
-    return `Placement parent state is ineligible-non-agent for ${this.parentParticipantId} in squadron ${this.squadronId}. Placement parents are agent-only; choose an agent participant or root.`;
+    return `Placement parent state is ineligible-non-agent for ${this.parentParticipantId} in project ${this.squadronId}. Placement parents are agent-only; choose an agent participant or root.`;
   }
 }
 
@@ -69,7 +69,7 @@ export class PlacementAlreadyExistsError extends Schema.TaggedError<PlacementAlr
   { squadronId: SquadronId, participantId: ParticipantId },
 ) {
   override get message(): string {
-    return `Placement state already exists for ${this.participantId} in squadron ${this.squadronId}; creation cannot rewrite immutable provenance.`;
+    return `Placement state already exists for ${this.participantId} in project ${this.squadronId}; creation cannot rewrite immutable provenance.`;
   }
 }
 
@@ -82,7 +82,7 @@ export class PlacementHumanTargetError extends Schema.TaggedError<PlacementHuman
   },
 ) {
   override get message(): string {
-    return `Placement participant state is immutable-human for ${this.participantId} in squadron ${this.squadronId}; ${this.operation} only accepts agent participants.`;
+    return `Placement participant state is immutable-human for ${this.participantId} in project ${this.squadronId}; ${this.operation} only accepts agent participants.`;
   }
 }
 
@@ -104,7 +104,7 @@ export class PlacementGraphCorruptError extends Schema.TaggedError<PlacementGrap
   { squadronId: SquadronId, path: Schema.Array(ParticipantId) },
 ) {
   override get message(): string {
-    return `Placement graph state is already cyclic or exceeds its placement bound in squadron ${this.squadronId}: ${this.path.join(" -> ")}. Repair the placement projection before retrying.`;
+    return `Placement graph state is already cyclic or exceeds its placement bound in project ${this.squadronId}: ${this.path.join(" -> ")}. Repair the placement projection before retrying.`;
   }
 }
 
@@ -195,7 +195,7 @@ interface EventRow {
   readonly seq: number;
   readonly command_id: string;
   readonly request_fingerprint: string;
-  readonly squadron_id: string;
+  readonly project_id: string;
   readonly participant_id: string;
   readonly kind: "participant.placement_created" | "participant.reparented";
   readonly actor: "human" | "agent" | "platform";
@@ -211,7 +211,7 @@ interface EventRow {
 }
 
 interface PlacementRow {
-  readonly squadron_id: string;
+  readonly project_id: string;
   readonly participant_id: string;
   readonly provenance_kind: "spawned-by" | "forked-from" | "unknown";
   readonly provenance_participant_id: string | null;
@@ -223,7 +223,7 @@ interface PlacementRow {
 
 interface ParticipantRow {
   readonly payload: string;
-  readonly squadron_id: string;
+  readonly project_id: string;
   readonly participant_id: string;
   readonly provenance_kind: "spawned-by" | "forked-from" | "unknown" | null;
   readonly provenance_participant_id: string | null;
@@ -263,7 +263,7 @@ const provenanceFromRow = (row: {
 
 const placementFromRow = (row: PlacementRow) =>
   decodePlacement({
-    squadronId: row.squadron_id,
+    squadronId: row.project_id,
     participantId: row.participant_id,
     provenance: provenanceFromRow(row),
     placementParentId: row.placement_parent_id,
@@ -283,7 +283,7 @@ const eventFromRow = (row: EventRow) =>
       ? {
           seq: row.seq,
           commandId: row.command_id,
-          squadronId: row.squadron_id,
+          squadronId: row.project_id,
           participantId: row.participant_id,
           kind: row.kind,
           actor: row.actor,
@@ -300,7 +300,7 @@ const eventFromRow = (row: EventRow) =>
           // Reparent identity fields are non-null by the event-table CHECK.
           seq: row.seq,
           commandId: row.command_id,
-          squadronId: row.squadron_id,
+          squadronId: row.project_id,
           participantId: row.participant_id,
           kind: row.kind,
           actor: "human",
@@ -340,7 +340,9 @@ const creationFingerprint = (input: RecordParticipantPlacementInput): string => 
           };
   return JSON.stringify({
     type: "record_creation",
-    squadronId: input.squadronId,
+    // Stored and compared as text on replay, so this key and its position are fixed; migration
+    // 031 rewrote older rows to match.
+    projectId: input.squadronId,
     participantId: input.participantId,
     actor: input.actor,
     ...provenanceFields,
@@ -361,7 +363,7 @@ export const layer: Layer.Layer<
       squadronId: SquadronId,
     ) {
       const rows = yield* sql<{ readonly id: string }>`
-          SELECT id FROM j5_a2a_squadron WHERE id = ${squadronId} LIMIT 1
+          SELECT project_id AS id FROM j5_a2a_project_ledger WHERE project_id = ${squadronId} LIMIT 1
         `;
       if (rows[0] === undefined) return yield* new PlacementSquadronNotFoundError({ squadronId });
     });
@@ -372,8 +374,8 @@ export const layer: Layer.Layer<
     ) {
       const rows = yield* sql<{ readonly participant_id: string }>`
           SELECT participant_id
-          FROM j5_a2a_squadron_membership
-          WHERE squadron_id = ${squadronId} AND participant_id = ${participantId}
+          FROM j5_a2a_membership
+          WHERE project_id = ${squadronId} AND participant_id = ${participantId}
           LIMIT 1
         `;
       if (rows[0] === undefined) {
@@ -386,7 +388,7 @@ export const layer: Layer.Layer<
         const rows = yield* sql<{ readonly participant_id: string }>`
           SELECT json_extract(payload, '$.participant.id') AS participant_id
           FROM j5_a2a_comm_event
-          WHERE squadron_id = ${squadronId}
+          WHERE project_id = ${squadronId}
             AND kind = 'participant.joined'
             AND json_extract(payload, '$.participant.id') = ${participantId}
           LIMIT 1
@@ -410,8 +412,8 @@ export const layer: Layer.Layer<
       }
       const rows = yield* sql<{ readonly participant_id: string }>`
           SELECT participant_id
-          FROM j5_a2a_squadron_membership
-          WHERE squadron_id = ${squadronId} AND participant_id = ${parentParticipantId}
+          FROM j5_a2a_membership
+          WHERE project_id = ${squadronId} AND participant_id = ${parentParticipantId}
           LIMIT 1
         `;
       if (rows[0] === undefined) {
@@ -425,8 +427,8 @@ export const layer: Layer.Layer<
     ) {
       const rows = yield* sql<{ readonly participant_id: string }>`
             SELECT participant_id
-            FROM j5_a2a_squadron_membership
-            WHERE squadron_id = ${squadronId} AND participant_id = ${participantId}
+            FROM j5_a2a_membership
+            WHERE project_id = ${squadronId} AND participant_id = ${participantId}
             LIMIT 1
           `;
       return rows[0] !== undefined;
@@ -438,7 +440,7 @@ export const layer: Layer.Layer<
     ) {
       const rows = yield* sql<PlacementRow>`
           SELECT
-            squadron_id,
+            project_id,
             participant_id,
             provenance_kind,
             provenance_participant_id,
@@ -447,7 +449,7 @@ export const layer: Layer.Layer<
             created_event_seq,
             updated_event_seq
           FROM j5_a2a_participant_placement
-          WHERE squadron_id = ${squadronId} AND participant_id = ${participantId}
+          WHERE project_id = ${squadronId} AND participant_id = ${participantId}
           LIMIT 1
         `;
       return rows[0] === undefined ? null : yield* placementFromRow(rows[0]);
@@ -461,7 +463,7 @@ export const layer: Layer.Layer<
               seq,
               command_id,
               request_fingerprint,
-              squadron_id,
+              project_id,
               participant_id,
               kind,
               actor,
@@ -494,7 +496,7 @@ export const layer: Layer.Layer<
         });
       }
       const placement = yield* selectPlacement(
-        SquadronId.make(row.squadron_id),
+        SquadronId.make(row.project_id),
         ParticipantId.make(row.participant_id),
       );
       if (placement === null) {
@@ -513,7 +515,7 @@ export const layer: Layer.Layer<
       const rows = yield* sql<{ readonly next_seq: number }>`
           SELECT COALESCE(MAX(seq), 0) + 1 AS next_seq
           FROM j5_a2a_placement_event
-          WHERE squadron_id = ${squadronId}
+          WHERE project_id = ${squadronId}
         `;
       const seq = rows[0]?.next_seq;
       if (seq === undefined) {
@@ -555,7 +557,7 @@ export const layer: Layer.Layer<
     }) {
       if (input.requestedParentId === null) return;
       const countRows = yield* sql<{ readonly count: number }>`
-          SELECT COUNT(*) AS count FROM j5_a2a_participant_placement WHERE squadron_id = ${input.squadronId}
+          SELECT COUNT(*) AS count FROM j5_a2a_participant_placement WHERE project_id = ${input.squadronId}
         `;
       const placementBound = (countRows[0]?.count ?? 0) + 1;
       const visited = new Set<ParticipantId>();
@@ -636,7 +638,7 @@ export const layer: Layer.Layer<
               seq,
               command_id,
               request_fingerprint,
-              squadron_id,
+              project_id,
               participant_id,
               kind,
               actor,
@@ -670,7 +672,7 @@ export const layer: Layer.Layer<
           `;
       yield* sql`
             INSERT INTO j5_a2a_participant_placement (
-              squadron_id,
+              project_id,
               participant_id,
               provenance_kind,
               provenance_participant_id,
@@ -693,7 +695,7 @@ export const layer: Layer.Layer<
         seq,
         command_id: input.commandId,
         request_fingerprint: fingerprint,
-        squadron_id: input.squadronId,
+        project_id: input.squadronId,
         participant_id: input.participantId,
         kind: "participant.placement_created",
         actor: input.actor,
@@ -727,19 +729,19 @@ export const layer: Layer.Layer<
       const rows = yield* sql<ParticipantRow>`
             SELECT
               m.payload,
-              m.squadron_id,
+              m.project_id,
               m.participant_id,
               m.archived_at,
               p.provenance_kind,
               p.provenance_participant_id,
               p.provenance_source,
-              CASE WHEN EXISTS (SELECT 1 FROM j5_a2a_squadron_membership parent
-                WHERE parent.squadron_id = m.squadron_id AND parent.participant_id = p.placement_parent_id)
+              CASE WHEN EXISTS (SELECT 1 FROM j5_a2a_membership parent
+                WHERE parent.project_id = m.project_id AND parent.participant_id = p.placement_parent_id)
                 THEN p.placement_parent_id ELSE NULL END AS placement_parent_id
-            FROM j5_a2a_squadron_membership m
+            FROM j5_a2a_membership m
             LEFT JOIN j5_a2a_participant_placement p
-              ON p.squadron_id = m.squadron_id AND p.participant_id = m.participant_id
-            WHERE m.squadron_id = ${squadronId}
+              ON p.project_id = m.project_id AND p.participant_id = m.participant_id
+            WHERE m.project_id = ${squadronId}
             ORDER BY m.participant_id
           `;
       return yield* Effect.forEach(

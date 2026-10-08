@@ -29,7 +29,6 @@ export type {
   A2AHomeRegistrationError,
   RegisteredThreadHome,
   RegisterAtCreationInput,
-  ThreadHomeLookup,
 } from "./HomeRegistrar.ts";
 export * from "./LedgerService.ts";
 export {
@@ -57,56 +56,11 @@ export {
   type PlacementError,
 } from "./PlacementService.ts";
 export {
-  DuplicateSquadronProjectReferenceError,
-  SquadronProjectReferenceSquadronNotFoundError,
-  SquadronProjectReferences,
-  layer as squadronProjectReferencesLayer,
-} from "./SquadronProjectReferences.ts";
-export type {
-  ReplaceSquadronProjectReferencesInput,
-  SquadronProjectReference,
-  SquadronProjectReferenceError,
-  SquadronProjectReferencesShape,
-} from "./SquadronProjectReferences.ts";
-export {
-  registrationCommandIdForCreation,
-  SquadronThreadCreationAmbiguousProjectError,
-  SquadronThreadCreationProjectReferenceError,
-  SquadronThreadCreationProjectUnavailableError,
-  SquadronThreadCreationService,
-  layer as squadronThreadCreationServiceLayer,
-} from "./SquadronThreadCreationService.ts";
-export {
-  SquadronJoinHomeStateError,
-  SquadronJoinProjectReferenceError,
-  SquadronJoinRetiredError,
-  SquadronJoinService,
-  layer as squadronJoinServiceLayer,
-} from "./SquadronJoinService.ts";
-export type {
-  JoinSquadronInput,
-  JoinSquadronResult,
-  SquadronJoinError,
-  SquadronJoinServiceShape,
-} from "./SquadronJoinService.ts";
-export {
-  SquadronManagementService,
-  SquadronNameRequiredError,
-  SquadronProjectNotFoundError,
-  layer as squadronManagementServiceLayer,
-} from "./SquadronManagementService.ts";
-export type {
-  CreateSquadronInput,
-  ManagedSquadron,
-  SquadronManagementError,
-  SquadronManagementServiceShape,
-} from "./SquadronManagementService.ts";
-export type {
-  SquadronThreadCreationError,
-  SquadronThreadCreationInput,
-  SquadronThreadCreationResult,
-  SquadronThreadCreationServiceShape,
-} from "./SquadronThreadCreationService.ts";
+  ThreadRegistration,
+  layer as threadRegistrationLayer,
+  registrationCommandId,
+} from "./ThreadRegistration.ts";
+export type { RegistrableThread, ThreadRegistrationShape } from "./ThreadRegistration.ts";
 export {
   A2ASilenceDetector,
   A2ASilenceDetectorError,

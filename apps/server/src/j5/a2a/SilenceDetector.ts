@@ -120,12 +120,12 @@ export class A2ASilenceDetector extends Context.Service<
 >()("t3/j5/a2a/SilenceDetector/A2ASilenceDetector") {}
 
 interface MembershipRow {
-  readonly squadron_id: string;
+  readonly project_id: string;
   readonly participant_id: string;
 }
 
 interface ExchangeRow {
-  readonly squadron_id: string;
+  readonly project_id: string;
   readonly exchange_id: string;
   readonly sender_id: string;
   readonly receiver_id: string;
@@ -272,10 +272,10 @@ const makeLayer = (daemon: boolean) =>
         base: SilenceNoticeBase,
       ) {
         const outbound = yield* sql<ExchangeRow>`
-          SELECT squadron_id, exchange_id, sender_id, receiver_id, created_at
+          SELECT project_id, exchange_id, sender_id, receiver_id, created_at
           FROM j5_a2a_exchange
           WHERE sender_id = ${base.subjectId} AND status = 'open'
-          ORDER BY created_at DESC, squadron_id, exchange_id
+          ORDER BY created_at DESC, project_id, exchange_id
         `;
         for (const exchange of outbound) {
           const exchangeId = ExchangeId.make(exchange.exchange_id);
@@ -290,7 +290,7 @@ const makeLayer = (daemon: boolean) =>
           const inbox = yield* sql<{ readonly count: number }>`
             SELECT COUNT(*) AS count
             FROM j5_a2a_human_inbox_data
-            WHERE origin_squadron_id = ${exchange.squadron_id}
+            WHERE origin_project_id = ${exchange.project_id}
               AND exchange_id = ${exchange.exchange_id}
           `;
           if ((inbox[0]?.count ?? 0) > 0) {
@@ -304,7 +304,7 @@ const makeLayer = (daemon: boolean) =>
           const states = yield* sql<DeliveryStateRow>`
             SELECT status
             FROM j5_a2a_delivery
-            WHERE squadron_id = ${exchange.squadron_id}
+            WHERE project_id = ${exchange.project_id}
               AND exchange_id = ${exchange.exchange_id}
             ORDER BY sent_seq DESC
             LIMIT 1
@@ -378,7 +378,7 @@ const makeLayer = (daemon: boolean) =>
         const prior = yield* sql<{ readonly count: number }>`
           SELECT COUNT(*) AS count
           FROM j5_a2a_comm_event
-          WHERE squadron_id = ${exchange.squadron_id}
+          WHERE project_id = ${exchange.project_id}
             AND kind = 'silence.notice'
             AND exchange_id = ${exchange.exchange_id}
             AND json_extract(payload, '$.deliveryMessageId') = ${messageId}
@@ -398,28 +398,28 @@ const makeLayer = (daemon: boolean) =>
         const exchangeId = ExchangeId.make(exchange.exchange_id);
         // The waiter may be on a peer server; the notice then travels the peer path back.
         const remoteWaiter = yield* findPeerCounterparty(sql, {
-          squadronId: SquadronId.make(exchange.squadron_id),
+          squadronId: SquadronId.make(exchange.project_id),
           exchangeId,
           participantId: ParticipantId.make(exchange.sender_id),
         });
         const messageId = messageIdFor(
-          exchange.squadron_id,
+          exchange.project_id,
           exchange.exchange_id,
           payload.deliveryMessageId,
         );
         const correlationId = correlationIdFor(
-          exchange.squadron_id,
+          exchange.project_id,
           exchange.exchange_id,
           payload.deliveryMessageId,
         );
         const result = yield* ledger.appendEventsIfExchangeOpen(
           {
             commandId: commandIdFor(
-              exchange.squadron_id,
+              exchange.project_id,
               exchange.exchange_id,
               payload.deliveryMessageId,
             ),
-            squadronId: SquadronId.make(exchange.squadron_id),
+            squadronId: SquadronId.make(exchange.project_id),
             acceptedAt: payload.observedAt,
             events: [
               {
@@ -443,9 +443,9 @@ const makeLayer = (daemon: boolean) =>
                     noticeType: payload.state,
                     message: noticeMessage(payload, exchangeId),
                   }),
-                  originSquadronId: SquadronId.make(exchange.squadron_id),
-                  receiverSquadronId:
-                    remoteWaiter?.squadronId ?? SquadronId.make(exchange.squadron_id),
+                  originProjectId: SquadronId.make(exchange.project_id),
+                  receiverProjectId:
+                    remoteWaiter?.squadronId ?? SquadronId.make(exchange.project_id),
                   ...(remoteWaiter === null
                     ? {}
                     : { receiverEnvironmentId: remoteWaiter.environmentId }),
@@ -503,7 +503,7 @@ const makeLayer = (daemon: boolean) =>
         const payload = yield* decodeMessageDelivered(event.payload);
         const rows = yield* sql<OpenDeliveryRow>`
           SELECT
-            exchange.squadron_id,
+            exchange.project_id,
             exchange.exchange_id,
             exchange.sender_id,
             exchange.receiver_id,
@@ -513,11 +513,11 @@ const makeLayer = (daemon: boolean) =>
             ${event.createdAt} AS delivered_at
           FROM j5_a2a_delivery AS delivery
           JOIN j5_a2a_exchange AS exchange
-            ON exchange.squadron_id = delivery.squadron_id
+            ON exchange.project_id = delivery.project_id
            AND exchange.exchange_id = delivery.exchange_id
-          JOIN j5_a2a_squadron_membership AS membership
+          JOIN j5_a2a_membership AS membership
             ON membership.participant_id = exchange.receiver_id
-          WHERE delivery.squadron_id = ${event.squadronId}
+          WHERE delivery.project_id = ${event.squadronId}
             AND delivery.message_id = ${payload.messageId}
             AND delivery.envelope_channel = 'peer'
             AND exchange.status = 'open'
@@ -533,7 +533,7 @@ const makeLayer = (daemon: boolean) =>
         function* () {
           const rows = yield* sql<OpenDeliveryRow>`
             SELECT
-              exchange.squadron_id,
+              exchange.project_id,
               exchange.exchange_id,
               exchange.sender_id,
               exchange.receiver_id,
@@ -542,14 +542,14 @@ const makeLayer = (daemon: boolean) =>
               json_extract(delivered.payload, '$.messageId') AS message_id,
               delivered.created_at AS delivered_at
             FROM j5_a2a_exchange AS exchange
-            JOIN j5_a2a_squadron_membership AS membership
+            JOIN j5_a2a_membership AS membership
               ON membership.participant_id = exchange.receiver_id
             JOIN j5_a2a_comm_event AS delivered
-              ON delivered.squadron_id = exchange.squadron_id
+              ON delivered.project_id = exchange.project_id
              AND delivered.exchange_id = exchange.exchange_id
              AND delivered.kind = 'message.delivered'
             JOIN j5_a2a_delivery AS delivery
-              ON delivery.squadron_id = exchange.squadron_id
+              ON delivery.project_id = exchange.project_id
              AND delivery.message_id = json_extract(delivered.payload, '$.messageId')
              AND delivery.envelope_channel = 'peer'
             WHERE exchange.status = 'open'
@@ -557,11 +557,11 @@ const makeLayer = (daemon: boolean) =>
               AND delivered.seq = (
                 SELECT MAX(candidate.seq)
                 FROM j5_a2a_comm_event AS candidate
-                WHERE candidate.squadron_id = exchange.squadron_id
+                WHERE candidate.project_id = exchange.project_id
                   AND candidate.exchange_id = exchange.exchange_id
                   AND candidate.kind = 'message.delivered'
               )
-            ORDER BY delivered.created_at, exchange.squadron_id, exchange.exchange_id
+            ORDER BY delivered.created_at, exchange.project_id, exchange.exchange_id
           `;
           const appended: Array<StoredCommEvent> = [];
           for (const row of rows) {
@@ -578,19 +578,19 @@ const makeLayer = (daemon: boolean) =>
         const run = terminalRun(stored);
         if (run === undefined || run.completedAt === null) return [];
         const memberships = yield* sql<MembershipRow>`
-          SELECT squadron_id, participant_id
-          FROM j5_a2a_squadron_membership
+          SELECT project_id, participant_id
+          FROM j5_a2a_membership
           WHERE thread_id = ${stored.event.threadId}
-          ORDER BY squadron_id, participant_id
+          ORDER BY project_id, participant_id
           LIMIT 2
         `;
         if (memberships.length !== 1) return [];
         const subjectId = ParticipantId.make(memberships[0]!.participant_id);
         const inbound = yield* sql<ExchangeRow>`
-          SELECT squadron_id, exchange_id, sender_id, receiver_id, created_at
+          SELECT project_id, exchange_id, sender_id, receiver_id, created_at
           FROM j5_a2a_exchange
           WHERE receiver_id = ${subjectId} AND status = 'open'
-          ORDER BY created_at, squadron_id, exchange_id
+          ORDER BY created_at, project_id, exchange_id
         `;
         const appended: Array<StoredCommEvent> = [];
         let thread: Pick<OrchestrationV2ThreadProjection, "runs" | "messages"> | undefined;
@@ -600,7 +600,7 @@ const makeLayer = (daemon: boolean) =>
               json_extract(payload, '$.messageId') AS message_id,
               created_at AS delivered_at
             FROM j5_a2a_comm_event
-            WHERE squadron_id = ${exchange.squadron_id}
+            WHERE project_id = ${exchange.project_id}
               AND kind = 'message.delivered'
               AND exchange_id = ${exchange.exchange_id}
               AND receiver = ${subjectId}

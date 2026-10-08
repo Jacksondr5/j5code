@@ -57,7 +57,6 @@ export type ThreadA2ADeliveryPresentation =
       readonly senderId: string;
       readonly senderLabel: string;
       readonly senderTooltipParticipantId: string | null;
-      readonly squadronId: string;
       readonly body: string;
       readonly exchange: "expects-reply" | "plain" | "closed";
       /** Kept as a pairing fact only; protocol identifiers never render. */
@@ -119,14 +118,23 @@ function parseKnownInstruction(input: {
   return { exchange: "expects-reply", exchangeId: exchangeIdAndSuffix.slice(0, separatorIndex) };
 }
 
+// A header names the sender and where it works. Messages stored before Squadrons were retired
+// say "in squadron <id>"; newer ones say "in project <id>" with the project's title after it.
+// Stored history keeps the old wording, so both are read. The sender group is lazy because a
+// project title may itself contain " in project ".
+const ENVELOPE_ORIGIN = "in (?:project|squadron) [^\\]\\n]+";
+const PEER_HEADER = new RegExp(
+  `^\\[Cross-agent message from ([^\\]\\n]+?) ${ENVELOPE_ORIGIN}\\]\\n\\n`,
+);
+const MACHINE_HEADER = new RegExp(
+  `^\\[Message from automation ([^\\]\\n]+?) ${ENVELOPE_ORIGIN}\\]\\n\\n`,
+);
+
 function parsePeerEnvelope(rawEnvelope: string) {
-  const header = /^\[Cross-agent message from ([^\]\n]+) in squadron ([^\]\n]+)\]\n\n/.exec(
-    rawEnvelope,
-  );
+  const header = PEER_HEADER.exec(rawEnvelope);
   if (!header) return null;
 
   const senderId = header[1]!;
-  const squadronId = header[2]!;
   const content = rawEnvelope.slice(header[0].length);
   const divider = content.lastIndexOf("\n\n");
   if (divider <= 0) return null;
@@ -137,21 +145,18 @@ function parsePeerEnvelope(rawEnvelope: string) {
   });
   return instruction === null
     ? null
-    : { senderId, squadronId, body, automated: false as const, ...instruction };
+    : { senderId, body, automated: false as const, ...instruction };
 }
 
 /** The machine template: a plain send from a registered script, never an exchange. */
 function parseMachineEnvelope(rawEnvelope: string) {
-  const header = /^\[Message from automation ([^\]\n]+) in squadron ([^\]\n]+)\]\n\n/.exec(
-    rawEnvelope,
-  );
+  const header = MACHINE_HEADER.exec(rawEnvelope);
   if (!header) return null;
   const content = rawEnvelope.slice(header[0].length);
   const divider = content.lastIndexOf("\n\n");
   if (divider <= 0 || content.slice(divider + 2) !== MACHINE_DELIVERY_INSTRUCTION) return null;
   return {
     senderId: header[1]!,
-    squadronId: header[2]!,
     body: content.slice(0, divider),
     exchange: "plain" as const,
     exchangeId: null,
@@ -273,7 +278,6 @@ export function presentThreadA2ADelivery(
         senderId: peer.senderId,
         senderLabel: sender.label,
         senderTooltipParticipantId: sender.tooltipParticipantId,
-        squadronId: peer.squadronId,
         body: peer.body,
         exchange: peer.exchange,
         exchangeId: peer.exchangeId,

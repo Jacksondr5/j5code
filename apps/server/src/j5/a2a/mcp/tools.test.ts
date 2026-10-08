@@ -50,7 +50,7 @@ it("publishes the ratified single-target lifecycle contracts fail-closed", () =>
     [...(spawnSchema.required ?? [])],
     ["brief", "provider", "model", "reasoning", "workspace"],
   );
-  assert.sameMembers([...(stopSchema.required ?? [])], ["squadron_id", "participant_id"]);
+  assert.sameMembers([...(stopSchema.required ?? [])], ["participant_id"]);
   assert.property(spawnSchema.properties ?? {}, "client_request_id");
   assert.property(spawnSchema.properties ?? {}, "persona");
   // No pre-dogfood compatibility spelling: `persona` is the only name the model sees.
@@ -77,8 +77,6 @@ it("publishes the ratified single-target lifecycle contracts fail-closed", () =>
     "stop_crew",
     "archive_crew",
     "clear_own_ask",
-    "list_squadrons",
-    "join_squadron",
   ]);
   assert.include(J5ArchiveCrewTool.description ?? "", "only as a unit");
   assert.include(J5ArchiveCrewTool.description ?? "", "confirmation_token");

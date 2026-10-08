@@ -79,9 +79,7 @@ const makeTestLayer = (delivered: Ref.Ref<Array<AgentDeliveryInput>>) => {
 const setup = Effect.fn("test.j5.a2a.peer.inbound.setup")(function* () {
   yield* runJ5A2AMigrations();
   const ledger = yield* A2ALedger;
-  yield* ledger.createSquadron({
-    squadron: { id: localSquadron, name: "Billing Migration", createdAt: timestamp },
-  });
+  yield* ledger.ensureProject({ projectId: localSquadron, createdAt: timestamp });
   yield* ledger.append({
     commandId: CommCommandId.make("command:peer-inbound:join:triage"),
     squadronId: localSquadron,
@@ -119,7 +117,7 @@ const localMessageId = (messageId: string) =>
   `message:j5:a2a:peer:${homeEnvironment}:${encodeURIComponent(messageId)}`;
 
 it.effect(
-  "records a peer's ask as a received row plus a local Exchange, delivers it naming the remote Squadron, and replays a retry",
+  "records a peer's ask as a received row plus a local Exchange, delivers it naming the remote project, and replays a retry",
   () =>
     Effect.gen(function* () {
       const delivered = yield* Ref.make<Array<AgentDeliveryInput>>([]);
@@ -141,7 +139,7 @@ it.effect(
         }>`
           SELECT kind, json_extract(payload, '$.originEnvironmentId') AS origin_environment
           FROM j5_a2a_comm_event
-          WHERE squadron_id = ${localSquadron} AND kind IN ('exchange.opened', 'message.received')
+          WHERE project_id = ${localSquadron} AND kind IN ('exchange.opened', 'message.received')
           ORDER BY seq
         `;
         assert.deepStrictEqual(rows, [
@@ -151,7 +149,7 @@ it.effect(
         const names = yield* sql<{ readonly sender_label: string | null }>`
           SELECT json_extract(payload, '$.senderLabel') AS sender_label
           FROM j5_a2a_comm_event
-          WHERE squadron_id = ${localSquadron} AND kind = 'message.received'
+          WHERE project_id = ${localSquadron} AND kind = 'message.received'
         `;
         assert.deepStrictEqual(
           names,
@@ -168,13 +166,13 @@ it.effect(
         ]);
         const pending = yield* sql<{
           readonly status: string;
-          readonly origin_squadron_id: string;
+          readonly origin_project_id: string;
           readonly origin_environment_id: string;
-        }>`SELECT status, origin_squadron_id, origin_environment_id FROM j5_a2a_delivery WHERE message_id = ${localMessageId(ask.messageId)}`;
+        }>`SELECT status, origin_project_id, origin_environment_id FROM j5_a2a_delivery WHERE message_id = ${localMessageId(ask.messageId)}`;
         assert.deepStrictEqual(pending, [
           {
             status: "pending",
-            origin_squadron_id: homeSquadron,
+            origin_project_id: homeSquadron,
             origin_environment_id: homeEnvironment,
           },
         ]);
@@ -184,22 +182,22 @@ it.effect(
         assert.equal(milestone?.squadronId, localSquadron);
         const attempts = yield* Ref.get(delivered);
         assert.equal(attempts.length, 1);
-        assert.equal(attempts[0]!.originSquadronId, homeSquadron, "the envelope names the origin");
-        assert.equal(attempts[0]!.receiverSquadronId, localSquadron);
+        assert.equal(attempts[0]!.originProjectId, homeSquadron, "the envelope names the origin");
+        assert.equal(attempts[0]!.receiverProjectId, localSquadron);
         assert.equal(attempts[0]!.senderId, remoteAsker);
         assert.equal(attempts[0]!.exchangeRole, "ask");
         assert.isNull(yield* worker.runOnce, "nothing else to deliver");
 
         const received = yield* sql<{ readonly count: number }>`
           SELECT COUNT(*) AS count FROM j5_a2a_comm_event
-          WHERE squadron_id = ${localSquadron} AND kind = 'message.received'
+          WHERE project_id = ${localSquadron} AND kind = 'message.received'
         `;
         assert.deepStrictEqual(received, [{ count: 1 }], "the worker adds no second received row");
       }).pipe(Effect.provide(makeTestLayer(delivered)));
     }),
 );
 
-it.effect("lets the local agent reply to a peer's ask as an ordinary same-Squadron reply", () =>
+it.effect("lets the local agent reply to a peer's ask as an ordinary same-project reply", () =>
   Effect.gen(function* () {
     const delivered = yield* Ref.make<Array<AgentDeliveryInput>>([]);
     yield* Effect.gen(function* () {
@@ -220,7 +218,7 @@ it.effect("lets the local agent reply to a peer's ask as an ordinary same-Squadr
         })
         .pipe(Effect.result);
       // The remote asker resolves through the route its ask recorded, so the
-      // reply is an ordinary same-Squadron reply headed back to that peer.
+      // reply is an ordinary same-project reply headed back to that peer.
       assert.equal(reply._tag, "Success");
       const exchange = yield* sql<{ readonly status: string }>`
         SELECT status FROM j5_a2a_exchange WHERE exchange_id = ${ask.exchangeId}
@@ -260,8 +258,8 @@ const recordLocalAsk = Effect.fn("test.j5.a2a.peer.inbound.recordLocalAsk")(func
         payload: {
           messageId: LedgerMessageId.make("message:j5:a2a:local-ask"),
           text: "Which schema version do we target?",
-          originSquadronId: localSquadron,
-          receiverSquadronId: homeSquadron,
+          originProjectId: localSquadron,
+          receiverProjectId: homeSquadron,
           receiverEnvironmentId: homeEnvironment,
           exchangeRole: "ask",
           envelopeChannel: "peer",

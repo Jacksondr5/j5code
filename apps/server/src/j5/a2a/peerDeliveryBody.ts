@@ -10,7 +10,7 @@ const decodeSentPayload = Schema.decodeUnknownEffect(Schema.fromJsonString(Messa
 
 /** The delivery row columns a peer delivery is built from. */
 export interface PeerBodyRow {
-  readonly squadron_id: string;
+  readonly project_id: string;
   readonly message_id: string;
   readonly sent_seq: number;
   readonly sender_id: string;
@@ -21,7 +21,7 @@ export interface PeerBodyRow {
   readonly correlation_id: string;
   readonly message_text: string;
   readonly created_at: string;
-  readonly origin_squadron_id: string | null;
+  readonly origin_project_id: string | null;
 }
 
 /**
@@ -55,7 +55,7 @@ export const buildPeerDeliveryBody = Effect.fn("j5.a2a.peer.deliveryBody")(funct
     exchangeRole: row.exchange_role,
     envelopeChannel: row.envelope_channel,
     text: row.message_text,
-    originSquadronId: row.origin_squadron_id ?? row.squadron_id,
+    originSquadronId: row.origin_project_id ?? row.project_id,
     ...(yield* exchangeFacts(sql, row)),
     ...(senderLabel.length === 0 ? {} : { senderLabel }),
     createdAt: row.created_at,
@@ -71,10 +71,10 @@ const exchangeFacts = Effect.fn("j5.a2a.peer.deliveryBody.exchangeFacts")(functi
       SELECT notice.exchange_id
       FROM j5_a2a_comm_event AS sent
       JOIN j5_a2a_comm_event AS notice
-        ON notice.squadron_id = sent.squadron_id
+        ON notice.project_id = sent.project_id
        AND notice.command_id = sent.command_id
        AND notice.kind = 'silence.notice'
-      WHERE sent.squadron_id = ${row.squadron_id} AND sent.seq = ${row.sent_seq}
+      WHERE sent.project_id = ${row.project_id} AND sent.seq = ${row.sent_seq}
       LIMIT 1
     `;
     const exchangeId = regarding[0]?.exchange_id;
@@ -84,7 +84,7 @@ const exchangeFacts = Effect.fn("j5.a2a.peer.deliveryBody.exchangeFacts")(functi
   if (row.exchange_role === "ask") {
     const intent = yield* sql<{ readonly intent: string }>`
       SELECT intent FROM j5_a2a_exchange
-      WHERE squadron_id = ${row.squadron_id} AND exchange_id = ${row.exchange_id}
+      WHERE project_id = ${row.project_id} AND exchange_id = ${row.exchange_id}
       LIMIT 1
     `;
     return intent[0] === undefined ? {} : { intent: intent[0].intent };
@@ -92,12 +92,27 @@ const exchangeFacts = Effect.fn("j5.a2a.peer.deliveryBody.exchangeFacts")(functi
   if (row.exchange_role === "terminal_notice") {
     const sent = yield* sql<{ readonly payload: string }>`
       SELECT payload FROM j5_a2a_comm_event
-      WHERE squadron_id = ${row.squadron_id} AND seq = ${row.sent_seq}
+      WHERE project_id = ${row.project_id} AND seq = ${row.sent_seq}
       LIMIT 1
     `;
     if (sent[0] === undefined) return {};
     const payload = yield* decodeSentPayload(sent[0].payload);
-    return payload.terminal === undefined ? {} : { terminal: payload.terminal };
+    const terminal = payload.terminal;
+    if (terminal === undefined) return {};
+    // The peer wire still names the project a Squadron.
+    return {
+      terminal:
+        terminal.kind === "dropped"
+          ? {
+              kind: terminal.kind,
+              cause: {
+                kind: terminal.cause.kind,
+                participantId: terminal.cause.participantId,
+                squadronId: terminal.cause.projectId,
+              },
+            }
+          : terminal,
+    };
   }
   return {};
 });

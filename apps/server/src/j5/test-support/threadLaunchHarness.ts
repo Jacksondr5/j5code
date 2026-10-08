@@ -30,7 +30,6 @@ import * as ProjectSetupScriptRunner from "../../project/ProjectSetupScriptRunne
 import { makeProviderRegistryLayer } from "../../provider/testUtils/providerRegistryMock.ts";
 import * as ServerSettings from "../../serverSettings.ts";
 import * as TextGeneration from "../../textGeneration/TextGeneration.ts";
-import { SquadronThreadCreationService } from "../a2a/SquadronThreadCreationService.ts";
 
 /**
  * A real ThreadLaunch over a real orchestrator, with git, setup, and Squadron registration faked.
@@ -73,8 +72,6 @@ export interface HarnessOptions {
   readonly generateBranchName?: TextGeneration.TextGeneration["Service"]["generateBranchName"];
   readonly serverSettings?: Parameters<typeof ServerSettings.layerTest>[0];
   readonly providers?: ReadonlyArray<ServerProvider>;
-  readonly registerAtDurableLaunch?: SquadronThreadCreationService["Service"]["registerAtDurableLaunch"];
-  readonly findRegisteredHome?: SquadronThreadCreationService["Service"]["findRegisteredHome"];
 }
 
 export function makeHarness(options: HarnessOptions = {}) {
@@ -141,24 +138,7 @@ export function makeHarness(options: HarnessOptions = {}) {
     makeProviderRegistryLayer(options.providers),
   );
   const launch = ThreadLaunch.layer.pipe(
-    Layer.provide(
-      Layer.mergeAll(
-        externalServices,
-        threadManagement,
-        receipts,
-        IdAllocator.layer,
-        Layer.mock(SquadronThreadCreationService)({
-          registerAtDurableLaunch:
-            options.registerAtDurableLaunch ??
-            (() =>
-              Effect.succeed({
-                squadronId: "squadron:launch-test" as never,
-                participantId: "agent:launch-test" as never,
-              })),
-          findRegisteredHome: options.findRegisteredHome ?? (() => Effect.succeed(null)),
-        }),
-      ),
-    ),
+    Layer.provide(Layer.mergeAll(externalServices, threadManagement, receipts, IdAllocator.layer)),
   );
   const projectedProjects = Layer.mock(ProjectionProjectRepository)({
     getById: ({ projectId: requestedProjectId }) =>

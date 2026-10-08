@@ -1,7 +1,6 @@
 import { PlaybookStore } from "../playbooks/PlaybookStore.ts";
 import { A2AHomeRegistrar } from "./HomeRegistrar.ts";
-import { SquadronJoinService } from "./SquadronJoinService.ts";
-import { AuthOrchestrationReadScope, AuthSessionId, ThreadId } from "@t3tools/contracts";
+import { AuthOrchestrationReadScope, AuthSessionId } from "@t3tools/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -26,7 +25,6 @@ import { ParticipantPlacementService } from "./PlacementService.ts";
 import { A2AArchiveFacts } from "./ArchiveFactsService.ts";
 import {
   CLIENT_READS_OPEN_COUNT_PATH,
-  CLIENT_READS_PARTICIPANT_HOMES_PATH,
   CLIENT_READS_PARTICIPANT_IDENTITIES_PATH,
   makeClientReadsHttpRouteLayer,
 } from "./ClientReadsHttp.ts";
@@ -44,13 +42,10 @@ import { A2ALocalOperatorNotFoundError } from "./HumanPersonRegistry.ts";
 import { j5AuthenticatedRoutesLayer } from "./J5AuthenticatedRoutes.ts";
 import { A2ALedger } from "./LedgerService.ts";
 import { A2AParticipantNotFoundError } from "./SendService.ts";
-import { SquadronProjectReferences } from "./SquadronProjectReferences.ts";
-import { ThreadHomesService } from "./ThreadHomesService.ts";
-import { ParticipantId, SquadronId } from "./contracts.ts";
+import { ParticipantId } from "./contracts.ts";
 import { PlaybookCrewRelay } from "../playbooks/PlaybookCrewRelay.ts";
 
 const paths = {
-  participantHome: "/raw-client-reads/home",
   participantIdentities: "/raw-client-reads/identities",
   openInboxCount: "/raw-client-reads/open-count",
 } as const;
@@ -59,20 +54,7 @@ it("keeps B3 identity requests exact, ordered, and total before aggregate regist
   const alpha = ParticipantId.make("agent:client-reads:alpha");
   const unknown = ParticipantId.make("agent:client-reads:unknown");
   const received: Array<ReadonlyArray<ParticipantId>> = [];
-  const homesReceived: Array<ReadonlyArray<ThreadId>> = [];
   const clientReads = Layer.mock(ClientReadsService)({
-    threadHomes: (threadIds) => {
-      homesReceived.push(threadIds);
-      return Effect.succeed(
-        Array.from(new Set(threadIds)).map((threadId) => ({
-          threadId,
-          home: {
-            kind: "known" as const,
-            squadron: { id: SquadronId.make("squadron:client-reads"), name: "Client Reads" },
-          },
-        })),
-      );
-    },
     participantIdentities: ({ participantIds }) => {
       received.push(participantIds);
       return Effect.succeed({
@@ -116,39 +98,6 @@ it("keeps B3 identity requests exact, ordered, and total before aggregate regist
         { participantId: alpha, identity: { kind: "known", displayName: "Alpha" } },
       ],
     });
-    const homes = await handler(
-      new Request(`http://environment.test${paths.participantHome}`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ threadIds: ["thread:unknown", "thread:alpha", "thread:unknown"] }),
-      }),
-    );
-    assert.equal(homes.status, 200);
-    assert.deepStrictEqual(homesReceived, [
-      [
-        ThreadId.make("thread:unknown"),
-        ThreadId.make("thread:alpha"),
-        ThreadId.make("thread:unknown"),
-      ],
-    ]);
-    assert.deepStrictEqual(await homes.json(), {
-      entries: [
-        {
-          threadId: "thread:unknown",
-          home: {
-            kind: "known",
-            squadron: { id: "squadron:client-reads", name: "Client Reads" },
-          },
-        },
-        {
-          threadId: "thread:alpha",
-          home: {
-            kind: "known",
-            squadron: { id: "squadron:client-reads", name: "Client Reads" },
-          },
-        },
-      ],
-    });
     const count = await handler(
       new Request(`http://environment.test${paths.openInboxCount}`, {
         method: "POST",
@@ -167,7 +116,6 @@ it("maps A4 resolver failures without treating a bad person selection as a serve
   const invalidPerson = ParticipantId.make("agent:client-reads:not-human");
   const missingPerson = ParticipantId.make("human:client-reads:missing");
   const clientReads = Layer.mock(ClientReadsService)({
-    threadHomes: () => Effect.succeed([]),
     participantIdentities: () => Effect.succeed({ entries: [] }),
     openInboxCount: (personId) => {
       if (personId === invalidPerson) {
@@ -226,55 +174,6 @@ it("maps A4 resolver failures without treating a bad person selection as a serve
   }
 });
 
-it("executes home response validation before serializing a malformed Squadron name", async () => {
-  const participantId = ParticipantId.make("agent:client-reads:bad-squadron");
-  const clientReads = Layer.mock(ClientReadsService)({
-    threadHomes: () =>
-      Effect.succeed([
-        {
-          threadId: ThreadId.make("thread:client-reads:bad-squadron"),
-          home: {
-            kind: "known" as const,
-            squadron: { id: SquadronId.make("squadron:client-reads:bad"), name: "   " },
-          },
-        },
-      ]),
-    participantIdentities: () => Effect.succeed({ entries: [] }),
-    openInboxCount: () => Effect.succeed({ personId: participantId, count: 0 }),
-  });
-  const auth = Layer.mock(EnvironmentAuth.EnvironmentAuth)({
-    authenticateHttpRequest: () =>
-      Effect.succeed({
-        sessionId: AuthSessionId.make("auth-session:client-reads-malformed"),
-        subject: "client-reads-malformed-test",
-        method: "bearer-access-token",
-        scopes: [AuthOrchestrationReadScope],
-      }),
-  });
-  const routes = makeClientReadsHttpRouteLayer(paths)
-    .pipe(Layer.provide(clientReads), Layer.provideMerge(auth))
-    .pipe(Layer.provide(HttpServer.layerServices));
-  const { dispose, handler } = HttpRouter.toWebHandler(routes, { disableLogger: true });
-  try {
-    const response = await handler(
-      new Request(`http://environment.test${paths.participantHome}`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ threadIds: ["thread:malformed"] }),
-      }),
-    );
-    assert.equal(response.status, 500);
-    const malformedBody = (await response.json()) as {
-      readonly error: string;
-      readonly message: string;
-    };
-    assert.equal(malformedBody.error, "SchemaError");
-    assert.equal(malformedBody.message, "Client read failed.");
-  } finally {
-    await dispose();
-  }
-});
-
 it("registers B6 client reads through the authenticated aggregate", async () => {
   const known = ParticipantId.make("agent:client-reads:aggregate-known");
   const unknown = ParticipantId.make("agent:client-reads:aggregate-unknown");
@@ -282,22 +181,6 @@ it("registers B6 client reads through the authenticated aggregate", async () => 
   const calls: Array<ReadonlyArray<ParticipantId>> = [];
   let authMode: "missing" | "missing-read-scope" | "read" = "missing";
   const clientReads = Layer.mock(ClientReadsService)({
-    threadHomes: (threadIds) =>
-      Effect.succeed(
-        Array.from(new Set(threadIds)).map((threadId) => ({
-          threadId,
-          home:
-            threadId === ThreadId.make("thread:client-reads:aggregate-unknown")
-              ? { kind: "unknown" as const }
-              : {
-                  kind: "known" as const,
-                  squadron: {
-                    id: SquadronId.make("squadron:client-reads:aggregate"),
-                    name: "Aggregate Squadron",
-                  },
-                },
-        })),
-      ),
     participantIdentities: ({ participantIds }) => {
       calls.push(participantIds);
       return Effect.succeed({
@@ -341,9 +224,6 @@ it("registers B6 client reads through the authenticated aggregate", async () => 
             }),
         }),
       ),
-      Layer.provide(
-        Layer.mock(ThreadHomesService)({ threadHomes: () => Effect.succeed({ entries: [] }) }),
-      ),
       Layer.provide(Layer.mock(A2AHumanInbox)({})),
       Layer.provide(Layer.mock(A2ADeliveryWorker)({})),
       Layer.provide(Layer.mock(A2ASendService)({})),
@@ -351,8 +231,6 @@ it("registers B6 client reads through the authenticated aggregate", async () => 
       Layer.provide(Layer.mock(RosterService)({})),
       Layer.provide(Layer.mock(A2ALedger)({})),
       Layer.provide(Layer.mock(A2AHomeRegistrar)({})),
-      Layer.provide(Layer.mock(SquadronJoinService)({})),
-      Layer.provide(Layer.mock(SquadronProjectReferences)({})),
       Layer.provide(
         Layer.mergeAll(
           Layer.mock(AgentCrewInstanceService)({}),
@@ -409,26 +287,6 @@ it("registers B6 client reads through the authenticated aggregate", async () => 
         {
           participantId: known,
           identity: { kind: "known", displayName: "Aggregate Known" },
-        },
-      ],
-    });
-
-    const homes = await request(CLIENT_READS_PARTICIPANT_HOMES_PATH, {
-      threadIds: ["thread:client-reads:aggregate-unknown", "thread:client-reads:aggregate-known"],
-    });
-    assert.equal(homes.status, 200);
-    assert.deepStrictEqual(await homes.json(), {
-      entries: [
-        { threadId: "thread:client-reads:aggregate-unknown", home: { kind: "unknown" } },
-        {
-          threadId: "thread:client-reads:aggregate-known",
-          home: {
-            kind: "known",
-            squadron: {
-              id: "squadron:client-reads:aggregate",
-              name: "Aggregate Squadron",
-            },
-          },
         },
       ],
     });

@@ -386,8 +386,8 @@ const vmRosterAgent: PeerRosterAgent = {
 const laptopRosterEntry = (archived: boolean): A2ARosterEntry => ({
   participantId: laptop.agent.id,
   kind: "agent",
-  squadronId: laptop.squadronId,
-  squadronName: "iOS",
+  projectId: laptop.squadronId,
+  projectTitle: "iOS",
   displayName: "iOS build",
   threadId: laptop.agent.threadId,
   archived,
@@ -396,16 +396,11 @@ const laptopRosterEntry = (archived: boolean): A2ARosterEntry => ({
   liveness: null,
 });
 
-const seed = Effect.fn("test.j5.a2a.peer.pollRoundTrip.seed")(function* (
-  self: Server,
-  squadronName: string,
-) {
+const seed = Effect.fn("test.j5.a2a.peer.pollRoundTrip.seed")(function* (self: Server) {
   yield* runMigrations();
   yield* runJ5A2AMigrations();
   const ledger = yield* A2ALedger;
-  yield* ledger.createSquadron({
-    squadron: { id: self.squadronId, name: squadronName, createdAt: timestamp },
-  });
+  yield* ledger.ensureProject({ projectId: self.squadronId, createdAt: timestamp });
   yield* ledger.append({
     commandId: CommCommandId.make(`command:poll-roundtrip:join:${self.agent.id}`),
     squadronId: self.squadronId,
@@ -442,8 +437,8 @@ const pollPair = Effect.fn("test.j5.a2a.peer.pollRoundTrip.pair")(function* () {
   const laptopContext = yield* Layer.build(
     makeLaptop({ delivered: laptopDelivered, vmDoor, vmStore: vmStoreRef, roster }),
   );
-  const vmServer = yield* seed(vm, "Billing Migration").pipe(Effect.provide(vmContext));
-  const laptopServer = yield* seed(laptop, "iOS").pipe(Effect.provide(laptopContext));
+  const vmServer = yield* seed(vm).pipe(Effect.provide(vmContext));
+  const laptopServer = yield* seed(laptop).pipe(Effect.provide(laptopContext));
   // The VM recorded the laptop when it first presented its store credential; the laptop records the VM to poll.
   yield* vmServer.sql`
     INSERT INTO j5_a2a_peer (environment_id, label, link_mode, created_at, updated_at)

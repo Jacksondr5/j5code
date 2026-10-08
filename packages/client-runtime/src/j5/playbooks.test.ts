@@ -17,7 +17,6 @@ import { PlaybookError, type PlaybookProgress } from "@t3tools/contracts/j5";
 import {
   ensurePlaybookAuthor,
   playbookAuthorLaunch,
-  playbookAuthorSquadrons,
   expandPlaybookPrompt,
   isPlaybookSlashCommandVisible,
   matchPlaybookSuggestions,
@@ -78,7 +77,7 @@ const codex: ServerProvider = {
 };
 const decodePersonaCreate = Schema.decodeUnknownSync(AgentPersonaCreateInput);
 
-describe("Playbook Author Squadron ownership", () => {
+describe("Playbook Author launch", () => {
   const workspace = {
     key: "remote-project",
     environmentId: EnvironmentId.make("remote"),
@@ -88,33 +87,14 @@ describe("Playbook Author Squadron ownership", () => {
     workspaceRoot: "/remote/project",
     branch: null,
   };
-  const squadron = {
-    environmentId: workspace.environmentId,
-    environmentLabel: "Remote",
-    available: true,
-    squadron: { id: "squadron:author", name: "Authoring", createdAt: "2026-09-21T00:00:00Z" },
-    projectIds: [workspace.projectId],
-  };
   const launch = {
     workspace,
-    squadron,
     commandId: CommandId.make("create-author"),
     threadId: ThreadId.make("new-author"),
     messageId: MessageId.make("first-message"),
     createdAt: "2026-09-21T00:00:00Z",
     modelSelection: { instanceId: codex.instanceId, model: "my-model" },
   };
-
-  it("offers only Squadrons with exactly this environment-local project", () => {
-    expect(
-      playbookAuthorSquadrons(workspace, [
-        squadron,
-        { ...squadron, environmentId: EnvironmentId.make("local") },
-        { ...squadron, projectIds: [ProjectId.make("another-project")] },
-        { ...squadron, projectIds: [workspace.projectId, ProjectId.make("another-project")] },
-      ]),
-    ).toEqual([squadron]);
-  });
 
   it.each([
     { threadId: null, workspaceRoot: "/remote/project", branch: null },
@@ -123,14 +103,14 @@ describe("Playbook Author Squadron ownership", () => {
       workspaceRoot: "/remote/feature",
       branch: "feature",
     },
-  ])("launches the author in the selected workspace with Squadron ownership", (selection) => {
+  ])("launches the author in the selected workspace's project", (selection) => {
     const target = playbookAuthorLaunch({
       ...launch,
       workspace: { ...workspace, ...selection },
     });
     expect(target.environmentId).toBe(workspace.environmentId);
+    expect(target.input).not.toHaveProperty("squadronId");
     expect(target.input).toMatchObject({
-      squadronId: squadron.squadron.id,
       bootstrap: {
         createThread: {
           projectId: workspace.projectId,
@@ -143,17 +123,6 @@ describe("Playbook Author Squadron ownership", () => {
         text: "Help me create a playbook in this workspace. Start by asking what I want it to accomplish.",
       },
     });
-  });
-
-  it.each([
-    undefined,
-    { ...squadron, available: false },
-    { ...squadron, environmentId: EnvironmentId.make("local") },
-    { ...squadron, projectIds: [ProjectId.make("another-project")] },
-  ])("blocks a missing or invalid home before a durable thread can be created", (invalid) => {
-    expect(() => playbookAuthorLaunch({ ...launch, squadron: invalid })).toThrow(
-      "Choose an available Squadron for this workspace",
-    );
   });
 });
 

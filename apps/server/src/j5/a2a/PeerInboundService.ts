@@ -242,7 +242,7 @@ const assertSenderShape = (input: PeerInboundInput) => {
 };
 
 interface MembershipRow {
-  readonly squadron_id: string;
+  readonly project_id: string;
   readonly payload: string;
   readonly archived_at: string | null;
 }
@@ -279,8 +279,8 @@ export const layer: Layer.Layer<PeerInboundService, never, A2ALedger | SqlClient
           });
         }
         const rows = yield* sql<MembershipRow>`
-          SELECT squadron_id, payload, archived_at
-          FROM j5_a2a_squadron_membership
+          SELECT project_id, payload, archived_at
+          FROM j5_a2a_membership
           WHERE participant_id = ${id}
           LIMIT 2
         `;
@@ -297,7 +297,7 @@ export const layer: Layer.Layer<PeerInboundService, never, A2ALedger | SqlClient
         if (participant.kind !== "agent") {
           return yield* new A2APeerReceiverNotFoundError({ participantId: id });
         }
-        return { squadronId: SquadronId.make(row.squadron_id), participant };
+        return { squadronId: SquadronId.make(row.project_id), participant };
       });
 
       /**
@@ -327,7 +327,7 @@ export const layer: Layer.Layer<PeerInboundService, never, A2ALedger | SqlClient
         originEnvironmentId: string,
       ) {
         const local = yield* sql<{ readonly one: number }>`
-          SELECT 1 AS one FROM j5_a2a_squadron_membership WHERE participant_id = ${senderId} LIMIT 1
+          SELECT 1 AS one FROM j5_a2a_membership WHERE participant_id = ${senderId} LIMIT 1
         `;
         const owned =
           local[0] === undefined && !(yield* isRoutedElsewhere(sql, senderId, originEnvironmentId));
@@ -355,7 +355,7 @@ export const layer: Layer.Layer<PeerInboundService, never, A2ALedger | SqlClient
           const exchangeId = input.exchangeId === null ? null : ExchangeId.make(input.exchangeId);
           const correlationId = CorrelationId.make(input.correlationId);
           const messageId = localMessageIdFor(input);
-          const originSquadronId = SquadronId.make(input.originSquadronId);
+          const originProjectId = SquadronId.make(input.originSquadronId);
           // This ledger's clock stamps what happened here; the origin's time is kept for display.
           const receivedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
           const events: Array<CommEvent> = [];
@@ -391,7 +391,7 @@ export const layer: Layer.Layer<PeerInboundService, never, A2ALedger | SqlClient
             exchangeId,
             correlationId,
             payload: {
-              originSquadronId,
+              originProjectId,
               originEnvironmentId: input.originEnvironmentId,
               originMessageId: input.messageId,
               originCreatedAt: input.createdAt,
@@ -401,8 +401,8 @@ export const layer: Layer.Layer<PeerInboundService, never, A2ALedger | SqlClient
               message: {
                 messageId,
                 text: input.text,
-                originSquadronId,
-                receiverSquadronId: receiver.squadronId,
+                originProjectId,
+                receiverProjectId: receiver.squadronId,
                 exchangeRole: input.exchangeRole,
                 envelopeChannel: input.envelopeChannel,
               },
@@ -421,7 +421,7 @@ export const layer: Layer.Layer<PeerInboundService, never, A2ALedger | SqlClient
             const rows = yield* sql<ExchangeRow>`
                 SELECT exchange_id, sender_id, receiver_id, status
                 FROM j5_a2a_exchange
-                WHERE squadron_id = ${receiver.squadronId}
+                WHERE project_id = ${receiver.squadronId}
                   AND exchange_id = ${id}
                   AND (sender_id = ${receiverId} OR receiver_id = ${receiverId})
                 LIMIT 1
@@ -497,7 +497,7 @@ export const layer: Layer.Layer<PeerInboundService, never, A2ALedger | SqlClient
                   cause: {
                     kind: input.terminal.cause.kind,
                     participantId: otherParty,
-                    squadronId: SquadronId.make(input.terminal.cause.squadronId),
+                    projectId: SquadronId.make(input.terminal.cause.squadronId),
                   },
                   facts: {
                     replyRequired: false,

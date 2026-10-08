@@ -1,10 +1,10 @@
 import { ChatAttachment, ThreadId } from "@t3tools/contracts";
-import { PeerSenderLabel, PeerTerminalFact } from "@t3tools/contracts/j5";
+import { PeerSenderLabel } from "@t3tools/contracts/j5";
 import * as Schema from "effect/Schema";
 
 const Identifier = Schema.String.check(Schema.isNonEmpty());
 const SquadronName = Schema.String.check(
-  Schema.makeFilter((name) => name.trim().length > 0 || "Squadron name must not be blank."),
+  Schema.makeFilter((name) => name.trim().length > 0 || "A project title must not be blank."),
 );
 const PositiveInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
 const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
@@ -150,7 +150,7 @@ const NonMembershipCommEvent = Schema.Struct({
  * the fact this server delivers from, since no `message.sent` exists here.
  */
 export const MessageReceivedPayload = Schema.Struct({
-  originSquadronId: SquadronId,
+  originProjectId: SquadronId,
   originEnvironmentId: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
   /** The id and clock the origin used; this ledger keys and stamps the message itself. */
   originMessageId: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
@@ -208,10 +208,11 @@ export const StoredCommEvent = Schema.Union([
 ]);
 export type StoredCommEvent = typeof StoredCommEvent.Type;
 
-export const CreateSquadronCommand = Schema.Struct({
-  squadron: Squadron,
+export const EnsureProjectCommand = Schema.Struct({
+  projectId: SquadronId,
+  createdAt: Schema.String,
 });
-export type CreateSquadronCommand = typeof CreateSquadronCommand.Type;
+export type EnsureProjectCommand = typeof EnsureProjectCommand.Type;
 
 export const AppendCommEventCommand = Schema.Struct({
   commandId: CommCommandId,
@@ -244,14 +245,31 @@ export const ExchangeOpenedPayload = Schema.Struct({
 });
 export type ExchangeOpenedPayload = typeof ExchangeOpenedPayload.Type;
 
+/**
+ * Why an Exchange ended, as a terminal notice carries it to the other party. A fact that came
+ * from a peer server names that server's project.
+ */
+export const TerminalFact = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("dropped"),
+    cause: Schema.Struct({
+      kind: Schema.Literals(["participant-archived", "participant-deleted"]),
+      participantId: Schema.String,
+      projectId: Schema.String,
+    }),
+  }),
+  Schema.Struct({ kind: Schema.Literal("sender-cleared") }),
+]);
+export type TerminalFact = typeof TerminalFact.Type;
+
 export const MessageSentPayload = Schema.Struct({
   attachments: Schema.optional(Schema.Array(ChatAttachment)),
   /** Present on a terminal notice headed to a peer server: the fact it carries, fixed when the notice is written. */
-  terminal: Schema.optional(PeerTerminalFact),
+  terminal: Schema.optional(TerminalFact),
   messageId: LedgerMessageId,
   text: Schema.String.check(Schema.isNonEmpty()),
-  originSquadronId: SquadronId,
-  receiverSquadronId: SquadronId,
+  originProjectId: SquadronId,
+  receiverProjectId: SquadronId,
   /** Present when the receiver's Squadron lives on a peer server. */
   receiverEnvironmentId: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
   exchangeRole: Schema.Literals(["none", "ask", "followup", "reply", "terminal_notice"]),
@@ -298,7 +316,7 @@ export const ExchangeDroppedPayload = Schema.Struct({
       "peer-removed",
     ]),
     participantId: ParticipantId,
-    squadronId: SquadronId,
+    projectId: SquadronId,
   }),
   facts: Schema.Struct({
     replyRequired: Schema.Literal(false),
@@ -424,8 +442,8 @@ export type Membership = typeof Membership.Type;
 
 export const HumanInboxItem = Schema.Struct({
   personId: ParticipantId,
-  squadronId: SquadronId,
-  squadronName: SquadronName,
+  projectId: SquadronId,
+  projectTitle: Schema.String,
   exchangeId: ExchangeId,
   senderId: ParticipantId,
   senderThreadId: Schema.NullOr(ThreadId),

@@ -12,7 +12,6 @@ import {
   type OrchestrationV2CreationSource,
   type OrchestrationV2ProviderThreadNativeMetadata,
   type OrchestrationV2ThreadProjection,
-  type PlanId,
   type ProviderDriverKind,
   type ProviderInteractionMode,
   ProjectId,
@@ -23,20 +22,16 @@ import {
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
-import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
-import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import { buildTemporaryWorktreeBranchName, isTemporaryWorktreeBranch } from "@t3tools/shared/git";
 
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
-import { SquadronThreadCreationService } from "../j5/a2a/SquadronThreadCreationService.ts";
-import { resolveSquadronLaunchPolicy } from "../j5/a2a/SquadronLaunchPolicy.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as ProviderRegistry from "../provider/Services/ProviderRegistry.ts";
@@ -78,7 +73,6 @@ export interface ThreadLaunchInitialMessage {
 
 export interface ThreadLaunchInput {
   readonly commandId: CommandId;
-  readonly squadronId?: string;
   readonly threadId?: ThreadId;
   readonly reuseExistingThread?: boolean;
   readonly projectId: ProjectId;
@@ -90,8 +84,6 @@ export interface ThreadLaunchInput {
   readonly agentPersona?: OrchestrationV2AgentPersonaRequest;
   readonly workspaceStrategy: ThreadLaunchWorkspaceStrategy;
   readonly initialMessage?: ThreadLaunchInitialMessage;
-  /** Generic provenance for a child created from a proposed plan. */
-  readonly sourcePlanRef?: { readonly threadId: ThreadId; readonly planId: PlanId };
   readonly importedNativeThread?: {
     readonly ref: {
       readonly driver: ProviderDriverKind;
@@ -125,7 +117,6 @@ export class ThreadLaunchError extends Schema.TaggedError<ThreadLaunchError>()(
       "dispatch-message",
       "release-run",
       "fail-run",
-      "register-squadron",
     ]),
     commandId: CommandId,
     projectId: ProjectId,
@@ -134,9 +125,6 @@ export class ThreadLaunchError extends Schema.TaggedError<ThreadLaunchError>()(
   },
 ) {
   override get message(): string {
-    if (this.operation === "register-squadron" && this.threadId !== undefined) {
-      return `Thread ${this.threadId} was created but could not be assigned its required Squadron home. Replay the same creation command to retry registration; the durable thread was not deleted.`;
-    }
     if (this.operation === "resolve-agent-persona") {
       return this.cause instanceof Error ? this.cause.message : String(this.cause);
     }
@@ -178,7 +166,6 @@ export const make = Effect.gen(function* () {
   const receipts = yield* CommandReceiptStore.CommandReceiptStoreV2;
   const ids = yield* IdAllocator.IdAllocatorV2;
   const threads = yield* ThreadManagement.ThreadManagementService;
-  const squadronCreation = yield* SquadronThreadCreationService;
   const preparationScope = yield* Scope.make("sequential");
   const scheduledLaunches = yield* Ref.make<ReadonlySet<CommandId>>(new Set());
   yield* Effect.addFinalizer(() => Scope.close(preparationScope, Exit.void));
@@ -800,51 +787,6 @@ export const make = Effect.gen(function* () {
         const projection = yield* threads
           .getThreadProjection(threadId)
           .pipe(Effect.mapError(mapError(input, "create-thread", threadId)));
-        const parentHomeResult =
-          input.sourcePlanRef === undefined
-            ? null
-            : yield* Effect.result(
-                squadronCreation.findRegisteredHome(input.sourcePlanRef.threadId),
-              );
-        if (parentHomeResult !== null && Result.isFailure(parentHomeResult)) {
-          return yield* failPreparedRun(input, threadId, runId, parentHomeResult.failure).pipe(
-            Effect.andThen(() =>
-              Effect.fail(mapError(input, "register-squadron", threadId)(parentHomeResult.failure)),
-            ),
-          );
-        }
-        const inheritedSquadronId =
-          parentHomeResult === null || Result.isFailure(parentHomeResult)
-            ? undefined
-            : (parentHomeResult.success?.squadronId ?? undefined);
-        const squadronPolicy = resolveSquadronLaunchPolicy({
-          createdBy: input.createdBy,
-          creationSource: input.creationSource,
-          hasInitialMessage: input.initialMessage !== undefined,
-          sourcePlanHasRegisteredHome:
-            input.sourcePlanRef === undefined ? null : inheritedSquadronId !== undefined,
-        });
-        if (squadronPolicy.kind === "require-squadron") {
-          const squadronCreationInput = {
-            ...(inheritedSquadronId === undefined && input.squadronId === undefined
-              ? {}
-              : { squadronId: inheritedSquadronId ?? input.squadronId }),
-            commandId: input.commandId,
-            threadId,
-            projectId: input.projectId,
-            createdAt: DateTime.formatIso(projection.thread.createdAt),
-          };
-          const registration = yield* Effect.result(
-            squadronCreation.registerAtDurableLaunch(squadronCreationInput),
-          );
-          if (Result.isFailure(registration)) {
-            return yield* failPreparedRun(input, threadId, runId, registration.failure).pipe(
-              Effect.andThen(() =>
-                Effect.fail(mapError(input, "register-squadron", threadId)(registration.failure)),
-              ),
-            );
-          }
-        }
         const runIsPreparing =
           runId !== null &&
           projection.runs.some((run) => run.id === runId && run.status === "preparing");

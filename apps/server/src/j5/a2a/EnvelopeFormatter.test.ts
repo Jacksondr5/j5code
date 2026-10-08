@@ -45,12 +45,12 @@ const readDocumentedSendToolDescription = Effect.fn("readDocumentedSendToolDescr
 it("renders the versioned peer envelope with exact reply semantics", () => {
   const rendered = formatPeerEnvelope({
     senderId: ParticipantId.make("agent:sender"),
-    originSquadronId: SquadronId.make("squadron:origin"),
+    originProjectId: SquadronId.make("squadron:origin"),
     exchangeId: ExchangeId.make("exchange:one"),
     message: "Please verify the worker.",
   });
 
-  assert.equal(A2A_ENVELOPE_VERSION, 21);
+  assert.equal(A2A_ENVELOPE_VERSION, 22);
   assert.include(rendered, "Cross-agent message");
   assert.notMatch(rendered, /\b(?:J5|A2A)\b/);
   assert.include(rendered, "agent:sender");
@@ -64,7 +64,7 @@ it("renders the versioned peer envelope with exact reply semantics", () => {
 it("names a remote sender's server in its sender line and leaves a local one unchanged", () => {
   const sender = {
     senderId: ParticipantId.make("agent:sender"),
-    originSquadronId: SquadronId.make("squadron:origin"),
+    originProjectId: SquadronId.make("project-origin"),
     message: "Build the iOS target.",
   };
   const remote = formatPeerEnvelope({ ...sender, exchangeId: null, senderServerName: "Work VM" });
@@ -73,13 +73,13 @@ it("names a remote sender's server in its sender line and leaves a local one unc
 
   assert.include(
     remote,
-    "[Cross-agent message from agent:sender in squadron squadron:origin, on Work VM]",
+    "[Cross-agent message from agent:sender in project project-origin, on Work VM]",
   );
   assert.include(
     closed,
-    "[Cross-agent message from agent:sender in squadron squadron:origin, on Work VM]",
+    "[Cross-agent message from agent:sender in project project-origin, on Work VM]",
   );
-  assert.include(local, "[Cross-agent message from agent:sender in squadron squadron:origin]");
+  assert.include(local, "[Cross-agent message from agent:sender in project project-origin]");
   for (const rendered of [remote, local, closed]) assert.notInclude(rendered, "{{");
 });
 
@@ -94,7 +94,7 @@ it("renders reply closures without another reply instruction for either channel"
   const humanMessage = "  Human reply bytes\nremain exact. ";
   const peer = formatClosedPeerEnvelope({
     senderId: ParticipantId.make("agent:replying-peer"),
-    originSquadronId: SquadronId.make("squadron:replying-peer"),
+    originProjectId: SquadronId.make("squadron:replying-peer"),
     message: peerMessage,
   });
   const human = formatClosedHumanEnvelope({
@@ -129,7 +129,7 @@ it("does not interpret caller text as an envelope template", () => {
   const message = "Preserve this literal token: {{exchangeInstruction}}";
   const rendered = formatPeerEnvelope({
     senderId: ParticipantId.make("agent:sender"),
-    originSquadronId: SquadronId.make("squadron:origin"),
+    originProjectId: SquadronId.make("squadron:origin"),
     exchangeId: ExchangeId.make("exchange:one"),
     message,
   });
@@ -155,7 +155,7 @@ it("renders the receiver backlog notice with its measured counts", () => {
 it("keeps the tool descriptions on their documented contracts", () => {
   assert.equal(
     A2A_SEND_TOOL_DESCRIPTION,
-    "Send one durable message. To another agent, three uses: a **plain send** when you don't need a reply; an **ask** — set expect_reply=true with a one-line intent, opening an exchange the receiver owes a reply to; a **reply** — include the exchange_id from the ask you are answering, which closes that exchange. To the human, only an ask: a plain send to a person is refused — if nobody needs to act, say it in your own thread instead. Set urgency only when asking the human. Use this tool only for participants already returned by list_participants; when creating a Peer Agent, put any reply expectation in spawn_agent's brief instead of sending a follow-up ask. Returns once the message is committed; delivery continues asynchronously — carry on with your work, and the reply arrives later as an incoming message. An agent that is busy usually handles each message as its own turn after its current one ends, so put related updates in one message rather than sending them one by one; the result's deliveryNotice says when your message will wait behind the receiver's current turn. A caller without a registered home is refused. Reuse client_request_id to retry the same send safely.",
+    "Send one durable message. To another agent, three uses: a **plain send** when you don't need a reply; an **ask** — set expect_reply=true with a one-line intent, opening an exchange the receiver owes a reply to; a **reply** — include the exchange_id from the ask you are answering, which closes that exchange. To the human, only an ask: a plain send to a person is refused — if nobody needs to act, say it in your own thread instead. Set urgency only when asking the human. Use this tool only for participants already returned by list_participants; when creating a Peer Agent, put any reply expectation in spawn_agent's brief instead of sending a follow-up ask. Returns once the message is committed; delivery continues asynchronously — carry on with your work, and the reply arrives later as an incoming message. An agent that is busy usually handles each message as its own turn after its current one ends, so put related updates in one message rather than sending them one by one; the result's deliveryNotice says when your message will wait behind the receiver's current turn. A provider Subagent is not a participant and is refused. Reuse client_request_id to retry the same send safely.",
   );
   assert.include(
     A2A_SEND_TOOL_DESCRIPTION,
@@ -166,18 +166,21 @@ it("keeps the tool descriptions on their documented contracts", () => {
   assert.include(A2A_CLEAR_OWN_ASK_TOOL_DESCRIPTION, "client_request_id");
   assert.equal(
     A2A_LIST_TOOL_DESCRIPTION,
-    "Your address book: the participants around you — agents and the human — with the display name to recognize them by, the participant_id to address them with, the squadron_id and squadron_name that place them, and what each accepts (messages, exchanges, urgency). Once this server is peered with others, each row also carries `server`: the name of the server the participant lives on, and whether it is this one (`local`), so you can choose a participant by the machine it runs on. When you're told to message someone by name or role, resolve them here first. Your own row is marked self=true and its squadron_name is the Squadron you belong to; it cannot receive messages or open exchanges from you — use schedule_task if you need a future trigger for yourself. Native threads that never received a Squadron home do not appear here and cannot be messaged. Archived agents are hidden by default; set include_archived=true to see them with archived=true. They cannot receive messages or open Exchanges. The roster changes — after you spawn, archive, unarchive, or delete an agent, call this again instead of reusing a stale listing.",
+    "Your address book: the participants around you — agents and the human — with the display name to recognize them by, the participant_id to address them with, the project_id and project_title that place them, and what each accepts (messages, exchanges, urgency). Once this server is peered with others, each row also carries `server`: the name of the server the participant lives on, and whether it is this one (`local`), so you can choose a participant by the machine it runs on. When you're told to message someone by name or role, resolve them here first. Your own row is marked self=true and its project_title is the project you work in; it cannot receive messages or open exchanges from you — use schedule_task if you need a future trigger for yourself. Provider Subagents are not participants: they do not appear here and cannot be messaged. Archived agents are hidden by default; set include_archived=true to see them with archived=true. They cannot receive messages or open Exchanges. The roster changes — after you spawn, archive, unarchive, or delete an agent, call this again instead of reusing a stale listing.",
   );
   for (const clause of [
     "Your own row is marked self=true",
     "each row also carries `server`",
     "use schedule_task if you need a future trigger for yourself",
-    "Native threads that never received a Squadron home do not appear here and cannot be messaged.",
+    "Provider Subagents are not participants: they do not appear here and cannot be messaged.",
     "Archived agents are hidden by default; set include_archived=true to see them with archived=true. They cannot receive messages or open Exchanges. The roster changes — after you spawn, archive, unarchive, or delete an agent, call this again instead of reusing a stale listing.",
   ]) {
     assert.include(A2A_LIST_TOOL_DESCRIPTION, clause);
   }
-  assert.include(A2A_SEND_TOOL_DESCRIPTION, "A caller without a registered home is refused.");
+  assert.include(
+    A2A_SEND_TOOL_DESCRIPTION,
+    "A provider Subagent is not a participant and is refused.",
+  );
   for (const description of [A2A_SEND_TOOL_DESCRIPTION, A2A_LIST_TOOL_DESCRIPTION]) {
     assert.notInclude(description, "wrapper-spawned");
   }
@@ -193,13 +196,13 @@ it("keeps the tool descriptions on their documented contracts", () => {
 it("renders the machine envelope as a plain send that names the sender as automation", () => {
   const rendered = formatMachineEnvelope({
     senderId: ParticipantId.make("machine:watchdog"),
-    originSquadronId: SquadronId.make("squadron:monitoring"),
+    originProjectId: SquadronId.make("squadron:monitoring"),
     message: "canary 42",
   });
 
   assert.match(
     rendered,
-    /^\[Message from automation machine:watchdog in squadron squadron:monitoring\]\n\n/,
+    /^\[Message from automation machine:watchdog in project squadron:monitoring\]\n\n/,
   );
   assert.include(rendered, "canary 42");
   assert.include(rendered, "cannot receive a reply");

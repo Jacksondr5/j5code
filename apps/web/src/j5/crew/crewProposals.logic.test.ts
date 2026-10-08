@@ -5,7 +5,7 @@ import type { CrewProposal } from "./crewProposalsClient";
 
 const proposal = (overrides: Partial<CrewProposal>): CrewProposal => ({
   id: "proposal:1",
-  squadronId: "squadron:1",
+  projectId: "project:1",
   captainParticipantId: "agent:j5:a2a:thread:captain",
   captainThreadId: "thread:captain",
   crewInstanceId: null,

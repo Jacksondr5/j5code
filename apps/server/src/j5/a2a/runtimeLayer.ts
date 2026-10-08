@@ -1,6 +1,5 @@
 import * as Layer from "effect/Layer";
 import { OrchestrationV2EventSinkLayerLive } from "../../orchestration-v2/runtimeLayer.ts";
-import { ProjectionProjectRepositoryLive } from "../../persistence/Layers/ProjectionProjects.ts";
 import { layer as playbookCrewRelayLayer } from "../playbooks/PlaybookCrewRelay.ts";
 import { playbookStoreLayer } from "../playbooks/PlaybookStore.ts";
 import { FetchHttpClient } from "effect/unstable/http";
@@ -40,33 +39,26 @@ import { layer as sendServiceLayer } from "./SendService.ts";
 import { layer as silenceDetectorLayer } from "./SilenceDetector.ts";
 import { layer as humanInboxLayer } from "./HumanInboxService.ts";
 import { layer as clientReadsLayer } from "./ClientReadsService.ts";
-import { layer as squadronProjectReferencesLayer } from "./SquadronProjectReferences.ts";
-import { layer as squadronThreadCreationServiceLayer } from "./SquadronThreadCreationService.ts";
-import { layer as threadHomesServiceLayer } from "./ThreadHomesService.ts";
+import { layer as threadRegistrationLayer } from "./ThreadRegistration.ts";
 import { layer as spawnCompositionLayer } from "./SpawnCompositionService.ts";
 import { layer as spawnWorkspaceLayer } from "./spawnWorkspace.ts";
-import { layer as squadronJoinLayer } from "./SquadronJoinService.ts";
 import { layer as agentHandoffNudgeQueueLayer } from "../agents/agentHandoffNudgeQueue.ts";
 import { layer as agentHandoffNudgeWorkerLayer } from "../agents/agentHandoffNudgeWorker.ts";
 import { layer as agentHandoffRefreshesLayer } from "../agents/agentHandoffRefreshes.ts";
 
 /**
- * The durable launch engine needs this subset before it can start preparing a
- * worktree. It has no ThreadManagement dependency, so production can provide
- * it to ThreadLaunch once and the authenticated route graph can reuse it.
+ * Registration, homes and placement. This subset has no ThreadManagement dependency, so
+ * production provides it once to the V2 runtime (which `ThreadLineage` decorates) and the
+ * authenticated route graph reuses it.
  */
 export const makeJ5SquadronCreationLayer = (
   options: { readonly ledger?: typeof ledgerLayer } = {},
 ) => {
   const ledgerProvided = options.ledger ?? ledgerLayer;
-  const registrarAndReferences = Layer.mergeAll(homeRegistrarLayer, squadronProjectReferencesLayer);
-  return Layer.merge(
-    squadronThreadCreationServiceLayer.pipe(Layer.provide(ProjectionProjectRepositoryLive)),
-    spawnCompositionLayer,
-  ).pipe(
+  return Layer.merge(threadRegistrationLayer, spawnCompositionLayer).pipe(
     Layer.provideMerge(homeRegistrationTransactionLayer),
     Layer.provideMerge(participantPlacementLayer),
-    Layer.provideMerge(registrarAndReferences),
+    Layer.provideMerge(homeRegistrarLayer),
     Layer.provideMerge(ledgerProvided),
   );
 };
@@ -129,9 +121,6 @@ export const makeJ5A2AAuxiliaryLayer = (
     Layer.provide(peerHttpClient),
   );
   const archiveFactsProvided = archiveFactsLayer.pipe(Layer.provide(placementFactsLayer));
-  const squadronJoinProvided = squadronJoinLayer.pipe(
-    Layer.provideMerge(homeRegistrationTransactionLayer),
-  );
   // The saved-agent handoff worker drains the queue the run-finalization observer fills; the
   // queue layer is the same instance server.ts provides to that observer.
   const agentHandoffNudgeWorkerProvided = agentHandoffNudgeWorkerLayer.pipe(
@@ -214,9 +203,7 @@ export const makeJ5A2AAuxiliaryLayer = (
     humanInboxLayer,
     lifecycleServiceProvided,
     archiveFactsProvided,
-    threadHomesServiceLayer,
     spawnWorkspaceProvided,
-    squadronJoinProvided,
     agentCrewInstanceLayer,
     archiveCrewProvided,
     crewProposalProvided,

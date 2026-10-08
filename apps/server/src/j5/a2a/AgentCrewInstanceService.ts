@@ -169,7 +169,7 @@ export class AgentCrewInstanceService extends Context.Service<
 
 interface InstanceRow {
   readonly id: string;
-  readonly squadron_id: string;
+  readonly project_id: string;
   readonly captain_participant_id: string;
   readonly captain_thread_id: string;
   readonly display_name: string;
@@ -242,7 +242,7 @@ const instanceFromRows = (
   members: ReadonlyArray<MemberRow>,
 ): AgentCrewInstance => ({
   id: row.id,
-  squadronId: row.squadron_id as SquadronId,
+  squadronId: row.project_id as SquadronId,
   captainParticipantId: ParticipantId.make(row.captain_participant_id),
   captainThreadId: ThreadId.make(row.captain_thread_id),
   displayName: row.display_name,
@@ -325,7 +325,7 @@ export const layer: Layer.Layer<AgentCrewInstanceService, never, SqlClient.SqlCl
             if (conflict !== null) return yield* conflict;
             yield* sql`
               INSERT OR IGNORE INTO j5_agent_crew_instance (
-                id, squadron_id, captain_participant_id, captain_thread_id, display_name, brief,
+                id, project_id, captain_participant_id, captain_thread_id, display_name, brief,
                 version, created_at, archived_at, playbook_name, playbook_definition_path
               ) VALUES (
                 ${input.id}, ${input.squadronId}, ${input.captainParticipantId},
@@ -423,7 +423,7 @@ export const layer: Layer.Layer<AgentCrewInstanceService, never, SqlClient.SqlCl
         }) {
           const rows = yield* sql<InstanceRow>`
           SELECT * FROM j5_agent_crew_instance
-          WHERE squadron_id = ${input.squadronId}
+          WHERE project_id = ${input.squadronId}
             AND captain_participant_id = ${input.captainParticipantId}
           ORDER BY created_at, id
         `;
@@ -435,7 +435,7 @@ export const layer: Layer.Layer<AgentCrewInstanceService, never, SqlClient.SqlCl
         squadronId: SquadronId,
       ) {
         const rows = yield* sql<InstanceRow>`
-          SELECT * FROM j5_agent_crew_instance WHERE squadron_id = ${squadronId}
+          SELECT * FROM j5_agent_crew_instance WHERE project_id = ${squadronId}
           ORDER BY created_at, id
         `;
         return yield* readMany(rows);

@@ -106,7 +106,7 @@ export class ArchiveCrewSquadronMismatchError extends Data.TaggedError(
   readonly expected: SquadronId;
 }> {
   override get message(): string {
-    return `Crew ${this.crewInstanceId} lives in Squadron ${this.expected}, but archive_crew named ${this.squadronId}. Retry with squadron_id=${this.expected}.`;
+    return `Crew ${this.crewInstanceId} lives in project ${this.expected}, and the caller is in project ${this.squadronId}. A Captain archives a Crew from the Crew's own project.`;
   }
 }
 
@@ -176,7 +176,7 @@ const TokenPayload = Schema.Struct({
   version: Schema.Literal(TOKEN_VERSION),
   provider_session_id: Schema.String,
   caller_participant_id: Schema.NullOr(ParticipantId),
-  squadron_id: Schema.NullOr(SquadronId),
+  project_id: Schema.NullOr(SquadronId),
   crew_instance_id: Schema.String,
   members: Schema.Array(TokenMember),
 });
@@ -190,7 +190,7 @@ const payloadFor = (input: ArchiveCrewInput, facts: ArchiveCrewConsequenceFacts)
   version: TOKEN_VERSION,
   provider_session_id: input.providerSessionId,
   caller_participant_id: input.callerParticipantId,
-  squadron_id: input.squadronId,
+  project_id: input.squadronId,
   crew_instance_id: input.crewInstanceId,
   members: facts.members.map((member) => ({
     seat: member.seatName,
@@ -213,7 +213,7 @@ const isForwardOnlyRecovery = (confirmed: TokenPayload, current: TokenPayload): 
   if (
     confirmed.provider_session_id !== current.provider_session_id ||
     confirmed.caller_participant_id !== current.caller_participant_id ||
-    confirmed.squadron_id !== current.squadron_id ||
+    confirmed.project_id !== current.project_id ||
     confirmed.crew_instance_id !== current.crew_instance_id
   ) {
     return false;

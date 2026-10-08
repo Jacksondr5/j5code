@@ -143,7 +143,7 @@ const makeHarness = (options: HarnessOptions = {}) => {
         correlationId,
         payload: {
           disposition: "sender-retired",
-          cause: { kind: "participant-archived", participantId, squadronId },
+          cause: { kind: "participant-archived", participantId, projectId: squadronId },
           facts: {
             replyRequired: false,
             retryAllowed: false,
@@ -164,8 +164,8 @@ const makeHarness = (options: HarnessOptions = {}) => {
         payload: {
           messageId: noticeMessageId,
           text: "Lifecycle terminal notice",
-          originSquadronId: owningExchangeSquadronId,
-          receiverSquadronId: squadronId,
+          originProjectId: owningExchangeSquadronId,
+          receiverProjectId: squadronId,
           exchangeRole: "terminal_notice",
           envelopeChannel: "lifecycle_notice",
         },
@@ -302,7 +302,7 @@ it.effect("archives a clean exact target and proves terminal ledger facts on rep
   }).pipe(Effect.provide(harness.layer));
 });
 
-it.effect("closes cross-Squadron consequences before returning archived", () => {
+it.effect("closes cross-project consequences before returning archived", () => {
   const harness = makeHarness({
     openExchange: true,
     exchangeSquadronId,

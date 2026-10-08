@@ -20,7 +20,7 @@ export type CrewSeatStopResult =
 export interface StopCrewInput {
   /** The Captain calling over MCP, or null when a person stops the Crew from the app. */
   readonly callerParticipantId: ParticipantId | null;
-  /** The caller's Squadron when an agent calls; the Crew must live there. */
+  /** The caller's project when an agent calls; the Crew must live there. */
   readonly squadronId: SquadronId | null;
   readonly crewInstanceId: string;
   /** Deterministic per seat so a retried stop cannot interrupt twice. */
@@ -125,8 +125,8 @@ export const layer = Layer.effect(
           return yield* new CrewStopNotFoundError({ crewInstanceId: input.crewInstanceId });
         if (input.squadronId !== null && instance.squadronId !== input.squadronId)
           return yield* new CrewStopRequestError({
-            detail: `Crew ${instance.id} lives in Squadron ${instance.squadronId}, not ${input.squadronId}.`,
-            nextStep: `Retry with squadron_id=${instance.squadronId}.`,
+            detail: `Crew ${instance.id} lives in project ${instance.squadronId}, and the caller is in project ${input.squadronId}.`,
+            nextStep: "A Captain stops a Crew from the Crew's own project.",
           });
         if (
           input.callerParticipantId !== null &&

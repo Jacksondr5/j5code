@@ -79,14 +79,12 @@ it.effect(
                 ? Response.json({ error: "not_found", message: "Not found" }, { status: 404 })
                 : Response.json({ runs: [] })
               : Response.json({
-                  squadrons: [
+                  projects: [
                     {
-                      squadron: {
-                        id: "squadron:shared",
-                        name: request.headers.authorization,
-                        createdAt: "2026-09-08T00:00:00Z",
-                      },
-                      projectIds: [],
+                      id: "project:shared",
+                      title: request.headers.authorization,
+                      agents: [],
+                      crews: [],
                     },
                   ],
                 }),
@@ -112,18 +110,15 @@ it.effect(
         (registry) => Effect.sync(() => registry.dispose()),
       );
       const alphaId = EnvironmentId.make("alpha");
-      const alpha = atoms.squadrons({ environmentId: alphaId, input: {} });
-      const bravo = atoms.squadrons({ environmentId: EnvironmentId.make("bravo"), input: {} });
+      const alpha = atoms.fleet({ environmentId: alphaId, input: {} });
+      const bravo = atoms.fleet({ environmentId: EnvironmentId.make("bravo"), input: {} });
       yield* AtomRegistry.mount(registry, alpha);
       yield* AtomRegistry.mount(registry, bravo);
       const first = yield* AtomRegistry.getResult(registry, alpha);
       const second = yield* AtomRegistry.getResult(registry, bravo);
-      expect(first[0]?.squadron.name).toBe("Bearer alpha-1");
-      expect(second[0]?.squadron.name).toBe("Bearer bravo-1");
-      yield* AtomRegistry.getResult(
-        registry,
-        atoms.squadrons({ environmentId: alphaId, input: {} }),
-      );
+      expect(first.projects[0]?.title).toBe("Bearer alpha-1");
+      expect(second.projects[0]?.title).toBe("Bearer bravo-1");
+      yield* AtomRegistry.getResult(registry, atoms.fleet({ environmentId: alphaId, input: {} }));
       expect(calls).toHaveLength(2);
 
       const alphaChanges = atoms.playbookChanges({ environmentId: alphaId, input: {} });
@@ -169,7 +164,7 @@ it.effect(
       const refreshed = yield* AtomRegistry.toStream(registry, alpha).pipe(
         Stream.filter(
           (result) =>
-            AsyncResult.isSuccess(result) && result.value[0]?.squadron.name === "Bearer alpha-2",
+            AsyncResult.isSuccess(result) && result.value.projects[0]?.title === "Bearer alpha-2",
         ),
         Stream.runHead,
       );
@@ -179,7 +174,7 @@ it.effect(
         Stream.runHead,
       );
       expect(Option.isSome(recoveredThread)).toBe(true);
-      expect(calls.filter((url) => url.endsWith("/squadrons"))).toHaveLength(3);
+      expect(calls.filter((url) => url.endsWith("/client-reads/fleet"))).toHaveLength(3);
       expect(calls.filter((url) => url.endsWith("/playbooks/thread"))).toHaveLength(3);
     }).pipe(Effect.scoped),
 );

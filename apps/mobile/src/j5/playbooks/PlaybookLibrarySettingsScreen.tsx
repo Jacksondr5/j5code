@@ -1,7 +1,6 @@
 import {
   ensurePlaybookAuthor,
   playbookAuthorLaunch,
-  playbookAuthorSquadrons,
   playbookStepLabel,
   playbookWorkspaces,
 } from "@t3tools/client-runtime/j5/playbooks";
@@ -41,32 +40,6 @@ export const PlaybookLibrarySettingsSection = memo(function PlaybookLibrarySetti
   const [exporting, setExporting] = useState(false);
   const [renameTarget, setRenameTarget] = useState<{ name: string; title: string } | null>(null);
   const workspace = workspaces.find((entry) => entry.key === workspaceKey) ?? workspaces[0];
-  const squadronQuery = useEnvironmentQuery(
-    workspace
-      ? j5Environment.squadrons({ environmentId: workspace.environmentId, input: {} })
-      : null,
-  );
-  const authorSquadrons = workspace
-    ? playbookAuthorSquadrons(
-        workspace,
-        (squadronQuery.data ?? []).map((entry) => ({
-          ...entry,
-          environmentId: workspace.environmentId,
-          environmentLabel: "",
-          available: true,
-        })),
-      )
-    : [];
-  const [authorScope, setAuthorScope] = useState<{
-    workspaceKey: string;
-    squadronId: string;
-  } | null>(null);
-  const authorSquadron =
-    authorScope !== null && authorScope.workspaceKey === workspace?.key
-      ? authorSquadrons.find(({ squadron }) => squadron.id === authorScope.squadronId)
-      : authorSquadrons.length === 1
-        ? authorSquadrons[0]
-        : undefined;
   const query = useEnvironmentQuery(
     workspace
       ? j5Environment.playbookLibrary({
@@ -115,16 +88,12 @@ export const PlaybookLibrarySettingsSection = memo(function PlaybookLibrarySetti
     });
   }
   async function createPlaybook() {
-    if (!workspace || !query.data || !authorSquadron || creating || authorStarting.current) return;
+    if (!workspace || !query.data || creating || authorStarting.current) return;
     authorStarting.current = true;
     setCreating(true);
     try {
       const environmentId = workspace.environmentId;
-      const workspaceKey = JSON.stringify([
-        workspace.key,
-        query.data.workspaceRoot,
-        authorSquadron.squadron.id,
-      ]);
+      const workspaceKey = JSON.stringify([workspace.key, query.data.workspaceRoot]);
       if (authorLaunch.current?.workspaceKey !== workspaceKey) {
         const modelSelection = await ensurePlaybookAuthor({
           providers: serverConfigs.get(environmentId)?.providers ?? [],
@@ -143,7 +112,6 @@ export const PlaybookLibrarySettingsSection = memo(function PlaybookLibrarySetti
           workspaceKey,
           target: playbookAuthorLaunch({
             workspace: { ...workspace, workspaceRoot: query.data.workspaceRoot },
-            squadron: authorSquadron,
             modelSelection,
             commandId: CommandId.make(metadata.commandId),
             threadId: ThreadId.make(metadata.threadId),
@@ -310,38 +278,10 @@ export const PlaybookLibrarySettingsSection = memo(function PlaybookLibrarySetti
           {query.data?.workspaceRoot ?? workspace.workspaceRoot}/.j5/playbooks
         </Text>
       )}
-      {workspace && (
-        <ControlPillMenu
-          actions={authorSquadrons.map((entry) => ({
-            id: entry.squadron.id,
-            title: entry.squadron.name,
-            state:
-              entry.squadron.id === authorSquadron?.squadron.id
-                ? ("on" as const)
-                : ("off" as const),
-          }))}
-          onPressAction={({ nativeEvent }) =>
-            setAuthorScope({ workspaceKey: workspace.key, squadronId: nativeEvent.event })
-          }
-        >
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Playbook author Squadron"
-            className="rounded-lg border border-border p-3"
-          >
-            <Text className="text-foreground">
-              {authorSquadron?.squadron.name ??
-                (authorSquadrons.length === 0
-                  ? "No authoring Squadron for this project"
-                  : "Choose authoring Squadron")}
-            </Text>
-          </Pressable>
-        </ControlPillMenu>
-      )}
       <View className="flex-row gap-3">
         <Pressable
           accessibilityRole="button"
-          disabled={disabled || !authorSquadron}
+          disabled={disabled}
           onPress={() => void createPlaybook()}
           className="rounded-lg border border-border p-3 disabled:opacity-40"
         >
@@ -359,11 +299,6 @@ export const PlaybookLibrarySettingsSection = memo(function PlaybookLibrarySetti
       {query.error && (
         <Text accessibilityRole="alert" className="text-destructive">
           {query.error}
-        </Text>
-      )}
-      {squadronQuery.error && (
-        <Text accessibilityRole="alert" className="text-destructive">
-          {squadronQuery.error}
         </Text>
       )}
       {!workspace && (

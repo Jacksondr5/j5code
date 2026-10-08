@@ -72,8 +72,8 @@ export const machineRegisterCommandId = (input: {
 
 const wireRecord = (record: MachineParticipantRecord): MachineParticipantWire => ({
   participantId: record.participantId,
-  squadronId: record.squadronId,
-  squadronName: record.squadronName,
+  projectId: record.squadronId,
+  projectTitle: record.squadronName,
   name: record.name,
   createdAt: record.createdAt,
 });
@@ -112,8 +112,8 @@ const sendFailure = (error: unknown): Effect.Effect<HttpServerResponse.HttpServe
 const registerFailure = (error: unknown): Effect.Effect<HttpServerResponse.HttpServerResponse> => {
   const tag = tagOf(error);
   const message = messageOf(error, "Registration failed.");
-  if (tag === "SquadronNotFoundError") {
-    return Effect.succeed(jsonError(404, "squadron_not_found", message));
+  if (tag === "MachineParticipantProjectNotFoundError") {
+    return Effect.succeed(jsonError(404, "project_not_found", message));
   }
   if (tag === "MachineParticipantNameTakenError") {
     return Effect.succeed(jsonError(409, "name_taken", message));
@@ -171,14 +171,17 @@ export const machineSenderHttpRouteLayer = Layer.unwrap(
         const decoded = yield* Effect.result(decodeRegisterRequest(body.success));
         if (Result.isFailure(decoded)) {
           return requestFailure(
-            "squadronId and a name of 1-64 lowercase letters, digits, or hyphens are required.",
+            "projectId and a name of 1-64 lowercase letters, digits, or hyphens are required.",
           );
         }
         const acceptedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
         const result = yield* Effect.result(
           machines.register({
-            commandId: machineRegisterCommandId(decoded.success),
-            squadronId: decoded.success.squadronId as MachineParticipantRecord["squadronId"],
+            commandId: machineRegisterCommandId({
+              squadronId: decoded.success.projectId,
+              name: decoded.success.name,
+            }),
+            squadronId: decoded.success.projectId as MachineParticipantRecord["squadronId"],
             name: decoded.success.name,
             acceptedAt,
           }),
@@ -228,7 +231,7 @@ export const machineSenderHttpRouteLayer = Layer.unwrap(
                 participantId: candidate.participantId,
                 threadId: candidate.threadId,
                 displayName: candidate.displayName,
-                squadronName: candidate.squadronName,
+                projectTitle: candidate.projectTitle,
               })),
             },
           );

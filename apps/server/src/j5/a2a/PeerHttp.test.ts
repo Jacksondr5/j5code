@@ -277,8 +277,8 @@ const makeHandler = (input: {
             {
               participantId: "agent:j5:a2a:thread:local-triage",
               kind: "agent" as const,
-              squadronId: "squadron:work-billing",
-              squadronName: "Billing Migration",
+              projectId: "squadron:work-billing",
+              projectTitle: "Billing Migration",
               displayName: "Local triage",
               threadId: ThreadId.make("thread:local-triage"),
               archived: false,
@@ -289,8 +289,8 @@ const makeHandler = (input: {
             {
               participantId: "human:jackson",
               kind: "human" as const,
-              squadronId: null,
-              squadronName: null,
+              projectId: null,
+              projectTitle: null,
               displayName: "Jackson",
               threadId: null,
               archived: false,
@@ -301,8 +301,8 @@ const makeHandler = (input: {
             {
               participantId: "machine:watchdog",
               kind: "machine" as const,
-              squadronId: "squadron:work-billing",
-              squadronName: "Billing Migration",
+              projectId: "squadron:work-billing",
+              projectTitle: "Billing Migration",
               displayName: "watchdog",
               threadId: null,
               archived: false,

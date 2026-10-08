@@ -208,8 +208,9 @@ it.effect("tells the Captain how each finished seat ended, and settles nothing",
     const context = yield* Layer.build(storage);
     yield* runJ5A2AMigrations().pipe(Effect.provide(context));
     const sql = Context.get(context, SqlClient.SqlClient);
-    yield* Context.get(context, A2ALedger).createSquadron({
-      squadron: { id: squadronId, name: "Finish", createdAt: DateTime.formatIso(createdAt) },
+    yield* Context.get(context, A2ALedger).ensureProject({
+      projectId: squadronId,
+      createdAt: DateTime.formatIso(createdAt),
     });
     const captain = participantIdForThread(captainThread);
     const builder = participantIdForThread(builderThread);
@@ -249,7 +250,7 @@ it.effect("tells the Captain how each finished seat ended, and settles nothing",
     // The critic still owes the captain a reply.
     yield* sql`
       INSERT INTO j5_a2a_exchange (
-        squadron_id, exchange_id, sender_id, receiver_id, status, intent, urgency,
+        project_id, exchange_id, sender_id, receiver_id, status, intent, urgency,
         opened_seq, closed_seq, created_at, updated_at
       ) VALUES (
         ${squadronId}, 'exchange:review', ${captain}, ${critic}, 'open', 'Review it', NULL,
@@ -419,8 +420,9 @@ it.effect(
       );
       const context = yield* Layer.build(storage);
       yield* runJ5A2AMigrations().pipe(Effect.provide(context));
-      yield* Context.get(context, A2ALedger).createSquadron({
-        squadron: { id: squadronId, name: "Fold", createdAt: DateTime.formatIso(createdAt) },
+      yield* Context.get(context, A2ALedger).ensureProject({
+        projectId: squadronId,
+        createdAt: DateTime.formatIso(createdAt),
       });
       const scout = participantIdForThread(scoutThread);
       const scoutNotice = seatFinishedNoticeText({
@@ -590,8 +592,9 @@ it.effect(
       );
       const context = yield* Layer.build(storage);
       yield* runJ5A2AMigrations().pipe(Effect.provide(context));
-      yield* Context.get(context, A2ALedger).createSquadron({
-        squadron: { id: squadronId, name: "Retry", createdAt: DateTime.formatIso(createdAt) },
+      yield* Context.get(context, A2ALedger).ensureProject({
+        projectId: squadronId,
+        createdAt: DateTime.formatIso(createdAt),
       });
       yield* Context.get(context, AgentCrewInstanceService).record({
         id: "crew:retry",
@@ -668,8 +671,9 @@ it.effect(
       );
       const context = yield* Layer.build(storage);
       yield* runJ5A2AMigrations().pipe(Effect.provide(context));
-      yield* Context.get(context, A2ALedger).createSquadron({
-        squadron: { id: squadronId, name: "Unreadable", createdAt: DateTime.formatIso(createdAt) },
+      yield* Context.get(context, A2ALedger).ensureProject({
+        projectId: squadronId,
+        createdAt: DateTime.formatIso(createdAt),
       });
       yield* Context.get(context, AgentCrewInstanceService).record({
         id: "crew:unreadable",
@@ -822,8 +826,9 @@ it.effect("the boot sweep tells the Captain about a finished seat nothing report
     );
     const context = yield* Layer.build(storage);
     yield* runJ5A2AMigrations().pipe(Effect.provide(context));
-    yield* Context.get(context, A2ALedger).createSquadron({
-      squadron: { id: squadronId, name: "Sweep", createdAt: DateTime.formatIso(createdAt) },
+    yield* Context.get(context, A2ALedger).ensureProject({
+      projectId: squadronId,
+      createdAt: DateTime.formatIso(createdAt),
     });
     yield* Context.get(context, AgentCrewInstanceService).record({
       id: "crew:sweep",
@@ -934,8 +939,9 @@ it.effect(
       );
       const context = yield* Layer.build(storage);
       yield* runJ5A2AMigrations().pipe(Effect.provide(context));
-      yield* Context.get(context, A2ALedger).createSquadron({
-        squadron: { id: squadronId, name: "Oversized", createdAt: DateTime.formatIso(createdAt) },
+      yield* Context.get(context, A2ALedger).ensureProject({
+        projectId: squadronId,
+        createdAt: DateTime.formatIso(createdAt),
       });
       yield* Context.get(context, AgentCrewInstanceService).record({
         id: "crew:oversized",

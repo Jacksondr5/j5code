@@ -144,9 +144,7 @@ const seed = Effect.fn("test.j5.a2a.peer.removal.seed")(function* () {
   yield* runJ5A2AMigrations();
   const ledger = yield* A2ALedger;
   const sql = yield* SqlClient.SqlClient;
-  yield* ledger.createSquadron({
-    squadron: { id: vmSquadron, name: "Billing Migration", createdAt: timestamp },
-  });
+  yield* ledger.ensureProject({ projectId: vmSquadron, createdAt: timestamp });
   yield* ledger.append({
     commandId: CommCommandId.make("command:peer-removal:join"),
     squadronId: vmSquadron,
@@ -217,8 +215,8 @@ const sendFromBilling = (
           payload: {
             messageId: LedgerMessageId.make(`message:${name}`),
             text: `${name} text`,
-            originSquadronId: vmSquadron,
-            receiverSquadronId: laptopSquadron,
+            originProjectId: vmSquadron,
+            receiverProjectId: laptopSquadron,
             receiverEnvironmentId: options.environmentId ?? laptop,
             exchangeRole: exchangeId === null ? "none" : "ask",
             envelopeChannel: "peer",
@@ -333,11 +331,11 @@ it.effect(
         [
           {
             exchangeId: ask.exchangeId!,
-            cause: { kind: "peer-removed", participantId: iosBuild, squadronId: laptopSquadron },
+            cause: { kind: "peer-removed", participantId: iosBuild, projectId: laptopSquadron },
           },
           {
             exchangeId: "exchange:from-laptop",
-            cause: { kind: "peer-removed", participantId: iosBuild, squadronId: laptopSquadron },
+            cause: { kind: "peer-removed", participantId: iosBuild, projectId: laptopSquadron },
           },
         ],
         "each drop names the party on the removed peer",
@@ -448,8 +446,8 @@ it.effect("tells the sender of a follow-up on a dropped Exchange once, by the dr
           payload: {
             messageId: LedgerMessageId.make("message:followup"),
             text: "One more detail.",
-            originSquadronId: vmSquadron,
-            receiverSquadronId: laptopSquadron,
+            originProjectId: vmSquadron,
+            receiverProjectId: laptopSquadron,
             receiverEnvironmentId: laptop,
             exchangeRole: "followup",
             envelopeChannel: "peer",
@@ -603,8 +601,8 @@ it.effect("sends no notice back for a platform message the peer refuses or remov
           payload: {
             messageId: LedgerMessageId.make(`message:platform:${name}`),
             text: `${name} notice`,
-            originSquadronId: vmSquadron,
-            receiverSquadronId: laptopSquadron,
+            originProjectId: vmSquadron,
+            receiverProjectId: laptopSquadron,
             receiverEnvironmentId: laptop,
             exchangeRole: "none",
             envelopeChannel: "lifecycle_notice",

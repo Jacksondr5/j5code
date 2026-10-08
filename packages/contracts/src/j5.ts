@@ -11,75 +11,14 @@ import {
   ProviderRequestKind,
   RuntimeMode,
 } from "./providerPolicy.ts";
-import { EnvironmentId, ProjectId, RuntimeRequestId, ThreadId } from "./baseSchemas.ts";
+import { EnvironmentId, RuntimeRequestId, ThreadId } from "./baseSchemas.ts";
 import { AgentPersonaId } from "./j5/agentPersona.ts";
-
-export const ScopedSquadronRef = Schema.Struct({
-  environmentId: EnvironmentId,
-  squadronId: Schema.String,
-});
-export type ScopedSquadronRef = typeof ScopedSquadronRef.Type;
-
-export const scopedSquadronKey = (ref: ScopedSquadronRef): string =>
-  JSON.stringify([ref.environmentId, ref.squadronId]);
-
-export const ManagedSquadron = Schema.Struct({
-  squadron: Schema.Struct({ id: Schema.String, name: Schema.String, createdAt: Schema.String }),
-  projectIds: Schema.Array(ProjectId),
-});
-export type ManagedSquadron = typeof ManagedSquadron.Type;
-
-export const SquadronListResponse = Schema.Struct({ squadrons: Schema.Array(ManagedSquadron) });
-export const CreateSquadronRequest = Schema.Struct({ name: Schema.String, projectId: ProjectId });
-export const CreateSquadronResponse = Schema.Struct({ squadron: ManagedSquadron });
-export const RenameSquadronRequest = Schema.Struct({ name: Schema.String });
-export const RenameSquadronResponse = Schema.Struct({ squadron: ManagedSquadron });
-export const DeleteSquadronResponse = Schema.Struct({
-  deleted: Schema.Literal(true),
-  squadronId: Schema.String,
-});
-
-export const AssignImportedThreadsRequest = Schema.Struct({
-  squadronId: Schema.String.check(Schema.isNonEmpty()),
-  projectId: ProjectId,
-});
-export type AssignImportedThreadsRequest = typeof AssignImportedThreadsRequest.Type;
-export const AssignImportedThreadsResponse = Schema.Struct({
-  entries: Schema.Array(
-    Schema.Struct({
-      threadId: ThreadId,
-      status: Schema.Literals([
-        "assigned",
-        "already_assigned",
-        "kept_elsewhere",
-        "kept_retired",
-        "kept_archived",
-        "failed",
-      ]),
-    }),
-  ),
-});
-export type AssignImportedThreadsResponse = typeof AssignImportedThreadsResponse.Type;
-
-export const ThreadHome = Schema.Union([
-  Schema.Struct({
-    kind: Schema.Literal("known"),
-    squadron: Schema.Struct({ id: Schema.String, name: Schema.String }),
-    /** SB5: `agent` means another agent spawned this thread, so it is roster-only unless pinned. */
-    origin: Schema.optional(Schema.Literals(["human", "agent"])),
-  }),
-  Schema.Struct({ kind: Schema.Literal("unknown") }),
-]);
-export type ThreadHome = typeof ThreadHome.Type;
-export const ThreadHomeEntry = Schema.Struct({ threadId: ThreadId, home: ThreadHome });
-export type ThreadHomeEntry = typeof ThreadHomeEntry.Type;
-export const ThreadHomesRequest = Schema.Struct({ threadIds: Schema.Array(ThreadId) });
-export const ThreadHomesResponse = Schema.Struct({ entries: Schema.Array(ThreadHomeEntry) });
 
 export const HumanInboxItem = Schema.Struct({
   personId: Schema.String,
-  squadronId: Schema.String,
-  squadronName: Schema.String,
+  /** The asking agent's project, which keys its ledger. */
+  projectId: Schema.String,
+  projectTitle: Schema.String,
   exchangeId: Schema.String,
   senderId: Schema.String,
   senderThreadId: Schema.NullOr(Schema.String),
@@ -94,7 +33,7 @@ export type HumanInboxItem = typeof HumanInboxItem.Type;
 export type ScopedHumanInboxItem = HumanInboxItem & { readonly environmentId: EnvironmentId };
 
 export const scopedInboxItemKey = (item: ScopedHumanInboxItem): string =>
-  JSON.stringify([item.environmentId, item.personId, item.squadronId, item.exchangeId]);
+  JSON.stringify([item.environmentId, item.personId, item.projectId, item.exchangeId]);
 
 export const HumanInboxResponse = Schema.Struct({
   personId: Schema.String,
@@ -234,7 +173,7 @@ export type CrewProposalPlaybook = typeof CrewProposalPlaybook.Type;
 /** The human gate for one Crew request: a roster to launch or a seat to add to a live Crew. */
 export const CrewProposal = Schema.Struct({
   id: Schema.String,
-  squadronId: Schema.String,
+  projectId: Schema.String,
   captainParticipantId: Schema.String,
   captainThreadId: Schema.String,
   crewInstanceId: Schema.NullOr(Schema.String),
@@ -351,6 +290,8 @@ export const SpawnedChildrenEntry = Schema.Struct({
 export type SpawnedChildrenEntry = typeof SpawnedChildrenEntry.Type;
 export const SpawnedChildrenResponse = Schema.Struct({
   entries: Schema.Array(SpawnedChildrenEntry),
+  /** The requested threads an agent spawned: these leave the sidebar's top level unless pinned. */
+  spawnedByAgent: Schema.Array(ThreadId),
 });
 
 /**
@@ -423,17 +364,18 @@ export const FleetAgent = Schema.Struct({
   openAsks: Schema.Number,
 });
 export type FleetAgent = typeof FleetAgent.Type;
-export const FleetSquadron = Schema.Struct({
+/** One project's agents and Crews. `title` is the server's, for a project the client cannot find. */
+export const FleetProject = Schema.Struct({
   id: Schema.String,
-  name: Schema.String,
+  title: Schema.String,
   agents: Schema.Array(FleetAgent),
   crews: Schema.Array(FleetCrew),
 });
-export type FleetSquadron = typeof FleetSquadron.Type;
+export type FleetProject = typeof FleetProject.Type;
 /** The rail badge reads the live roster only; the Fleet page asks for retired Crews as well. */
 export const FleetReadRequest = Schema.Struct({ includeRetired: Schema.optional(Schema.Boolean) });
 export type FleetReadRequest = typeof FleetReadRequest.Type;
-export const FleetResponse = Schema.Struct({ squadrons: Schema.Array(FleetSquadron) });
+export const FleetResponse = Schema.Struct({ projects: Schema.Array(FleetProject) });
 export type FleetResponse = typeof FleetResponse.Type;
 
 /** A person stopping a Crew from the app: every running seat is interrupted, nothing is retired. */
@@ -492,10 +434,19 @@ export const CrewArchiveResponse = Schema.Struct({
 });
 export type CrewArchiveResponse = typeof CrewArchiveResponse.Type;
 
+/**
+ * What a J5 server reports about its ledger. Every J5 read is gated on `j5ProjectLedger`. The two
+ * older keys are reported `false`, not left out: a client from before the ledger was re-keyed
+ * gates its J5 reads on them, shows a `false` one as unsupported without calling its route, and
+ * would probe a missing one, reading a route whose shape has changed.
+ */
+export const J5_LEDGER_CAPABILITIES = {
+  j5ProjectLedger: true,
+  j5Squadrons: false,
+  j5HumanInbox: false,
+} as const;
+
 export const J5_API_PATHS = {
-  squadrons: "/api/j5/squadrons",
-  assignImportedThreads: "/api/j5/squadrons/assign-imported",
-  threadHomes: "/api/j5/a2a/client-reads/participant-homes",
   inbox: "/api/j5/a2a/inbox",
   answer: "/api/j5/a2a/inbox/answer",
   openCount: "/api/j5/a2a/client-reads/open-count",
@@ -512,15 +463,8 @@ export const J5_API_PATHS = {
 } as const;
 
 /**
- * Action path for one Squadron; ids carry a colon so they are encoded. Both
- * actions are POST so cross-origin browser clients pass the CORS allowlist.
- */
-export const j5SquadronActionPath = (squadronId: string, action: "rename" | "delete"): string =>
-  `${J5_API_PATHS.squadrons}/${encodeURIComponent(squadronId)}/${action}`;
-
-/**
  * Machine participants: registered non-agent senders (cron jobs, watchdogs,
- * shell scripts) that send plain messages into a Squadron and never receive.
+ * shell scripts) that send plain messages from a project and never receive.
  * Their ids are `machine:<name>`; the name is server-unique.
  */
 export const MACHINE_PARTICIPANT_ID_PREFIX = "machine:" as const;
@@ -533,15 +477,15 @@ export const machineParticipantIdForName = (name: string): string =>
 
 export const MachineParticipantRecord = Schema.Struct({
   participantId: Schema.String,
-  squadronId: Schema.String,
-  squadronName: Schema.String,
+  projectId: Schema.String,
+  projectTitle: Schema.String,
   name: Schema.String,
   createdAt: Schema.String,
 });
 export type MachineParticipantRecord = typeof MachineParticipantRecord.Type;
 
 export const RegisterMachineParticipantRequest = Schema.Struct({
-  squadronId: Schema.String.check(Schema.isNonEmpty()),
+  projectId: Schema.String.check(Schema.isNonEmpty()),
   name: MachineParticipantName,
 });
 export type RegisterMachineParticipantRequest = typeof RegisterMachineParticipantRequest.Type;
@@ -585,8 +529,8 @@ export type A2ARosterLiveness = typeof A2ARosterLiveness.Type;
 export const A2ARosterEntry = Schema.Struct({
   participantId: Schema.String,
   kind: Schema.Literals(["agent", "human", "machine"]),
-  squadronId: Schema.NullOr(Schema.String),
-  squadronName: Schema.NullOr(Schema.String),
+  projectId: Schema.NullOr(Schema.String),
+  projectTitle: Schema.NullOr(Schema.String),
   displayName: Schema.NullOr(Schema.String),
   threadId: Schema.NullOr(ThreadId),
   archived: Schema.Boolean,
@@ -624,7 +568,7 @@ export const CrewRuntimeRequestItem = Schema.Struct({
   requestId: RuntimeRequestId,
   crewInstanceId: Schema.String,
   crewName: Schema.String,
-  squadronId: Schema.String,
+  projectId: Schema.String,
   seat: Schema.String,
   threadTitle: Schema.String,
   createdAt: Schema.String,

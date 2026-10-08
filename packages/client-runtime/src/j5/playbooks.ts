@@ -18,7 +18,6 @@ import {
   playbookMentionReplacement,
 } from "@t3tools/shared/j5/agentMention";
 import { defaultAgentPersonaModelRoute } from "./agentPersonas.ts";
-import type { ScopedManagedSquadron } from "./squadrons.ts";
 import type { StartThreadTurnInput } from "../operations/commands.ts";
 import type { EnvironmentProject, EnvironmentThreadShell } from "../state/shell.ts";
 
@@ -91,38 +90,22 @@ export async function ensurePlaybookAuthor(input: {
   return persona.availability.resolvedModelSelection;
 }
 
-export function playbookAuthorSquadrons(
-  workspace: ReturnType<typeof playbookWorkspaces>[number],
-  squadrons: ReadonlyArray<ScopedManagedSquadron>,
-) {
-  return squadrons.filter(
-    (entry) =>
-      entry.environmentId === workspace.environmentId &&
-      entry.projectIds.length === 1 &&
-      entry.projectIds[0] === workspace.projectId,
-  );
-}
-
-/** Keep the persona, workspace, and explicit Squadron together through the durable launch. */
+/** Keep the persona and workspace together through the durable launch. */
 export function playbookAuthorLaunch(input: {
   workspace: ReturnType<typeof playbookWorkspaces>[number];
-  squadron: ScopedManagedSquadron | undefined;
   modelSelection: ModelSelection;
   commandId: CommandId;
   threadId: ThreadId;
   messageId: MessageId;
   createdAt: string;
 }) {
-  const { workspace, squadron, modelSelection, commandId, threadId, messageId, createdAt } = input;
-  if (!squadron?.available || playbookAuthorSquadrons(workspace, [squadron]).length === 0)
-    throw new Error("Choose an available Squadron for this workspace before creating a playbook.");
+  const { workspace, modelSelection, commandId, threadId, messageId, createdAt } = input;
   return {
     environmentId: workspace.environmentId,
     input: {
       commandId,
       threadId,
       createdAt,
-      squadronId: squadron.squadron.id,
       message: {
         messageId,
         role: "user",

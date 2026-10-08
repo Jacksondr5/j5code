@@ -67,9 +67,7 @@ it.effect(
   () =>
     Effect.gen(function* () {
       yield* runJ5A2AMigrations();
-      yield* (yield* A2ALedger).createSquadron({
-        squadron: { id: squadronId, name: "Proposal Squadron", createdAt },
-      });
+      yield* (yield* A2ALedger).ensureProject({ projectId: squadronId, createdAt });
       const crews = yield* AgentCrewInstanceService;
       const proposals = yield* AgentCrewProposalService;
       const crewId = "crew:counted";
@@ -129,9 +127,7 @@ it.effect(
 it.effect("a proposal resolves once: the second resolution finds it closed", () =>
   Effect.gen(function* () {
     yield* runJ5A2AMigrations();
-    yield* (yield* A2ALedger).createSquadron({
-      squadron: { id: squadronId, name: "Proposal Squadron", createdAt },
-    });
+    yield* (yield* A2ALedger).ensureProject({ projectId: squadronId, createdAt });
     const crews = yield* AgentCrewInstanceService;
     const proposals = yield* AgentCrewProposalService;
     const crewId = "crew:resolve-once";
@@ -185,9 +181,7 @@ it.effect("a proposal resolves once: the second resolution finds it closed", () 
 it.effect("a stored seat workspace this version can't read costs that seat its workspace", () =>
   Effect.gen(function* () {
     yield* runJ5A2AMigrations();
-    yield* (yield* A2ALedger).createSquadron({
-      squadron: { id: squadronId, name: "Proposal Squadron", createdAt },
-    });
+    yield* (yield* A2ALedger).ensureProject({ projectId: squadronId, createdAt });
     const proposals = yield* AgentCrewProposalService;
     yield* proposals.create({
       ...addition("proposal:stored", "crew:stored", ["a", "b"]),

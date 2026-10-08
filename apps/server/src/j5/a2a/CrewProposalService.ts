@@ -454,7 +454,7 @@ export const layer = Layer.effect(
         });
       const squadron = yield* ledger
         .readSquadron(proposal.squadronId)
-        .pipe(Effect.mapError(operationError("reading the Squadron")));
+        .pipe(Effect.mapError(operationError("reading the project")));
       return {
         squadronId: proposal.squadronId,
         squadronName: squadron.name,

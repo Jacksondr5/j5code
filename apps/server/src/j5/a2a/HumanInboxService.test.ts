@@ -19,6 +19,7 @@ import {
 import { A2AHumanInbox, layer as humanInboxLayer } from "./HumanInboxService.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { noneLayer as peerDirectoryNoneLayer } from "./PeerDirectory.ts";
+import { runMigrations } from "../../persistence/Migrations.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import { PeerRegistryService } from "./PeerRegistryService.ts";
 import { A2ASendService, layer as sendLayer } from "./SendService.ts";
@@ -78,11 +79,12 @@ const makeTestLayer = (deliveries: Ref.Ref<ReadonlyArray<AgentDeliveryInput>>) =
 };
 
 it.effect(
-  "ranks open cross-Squadron exchanges and projects a second person's answer into A4-owned history",
+  "ranks open cross-project exchanges and projects a second person's answer into A4-owned history",
   () =>
     Effect.gen(function* () {
       const deliveries = yield* Ref.make<ReadonlyArray<AgentDeliveryInput>>([]);
       yield* Effect.gen(function* () {
+        yield* runMigrations();
         yield* runJ5A2AMigrations();
         const ledger = yield* A2ALedger;
         const send = yield* A2ASendService;
@@ -115,13 +117,7 @@ it.effect(
             id: ParticipantId.make(`agent:human-inbox:${input.suffix}`),
             threadId: ThreadId.make(`thread:human-inbox:${input.suffix}`),
           };
-          yield* ledger.createSquadron({
-            squadron: {
-              id: squadronId,
-              name: `Squadron ${input.suffix}`,
-              createdAt: input.openedAt,
-            },
-          });
+          yield* ledger.ensureProject({ projectId: squadronId, createdAt: input.openedAt });
           yield* ledger.appendEvents({
             commandId: CommCommandId.make(`command:human-inbox:join:${input.suffix}`),
             squadronId,
@@ -190,7 +186,7 @@ it.effect(
 
         const humanMemberships = yield* sql<{ readonly count: number }>`
           SELECT COUNT(*) AS count
-          FROM j5_a2a_squadron_membership
+          FROM j5_a2a_membership
           WHERE participant_kind = 'human' OR participant_id LIKE 'human:%'
         `;
         assert.deepStrictEqual(humanMemberships, [{ count: 0 }]);
@@ -200,7 +196,7 @@ it.effect(
           firstInbox.map((item) => item.intent),
           ["Older blocking request", "Newer blocking request", "Soon request", "Old FYI persists"],
         );
-        assert.deepStrictEqual(new Set(firstInbox.map((item) => item.squadronId)).size, 4);
+        assert.deepStrictEqual(new Set(firstInbox.map((item) => item.projectId)).size, 4);
         assert.deepStrictEqual(
           firstInbox.map((item) => item.senderThreadId),
           [
@@ -378,7 +374,7 @@ it.effect(
           SELECT delivery.message_text, inbox.status, inbox.terminal_disposition
           FROM j5_a2a_delivery AS delivery
           JOIN j5_a2a_human_inbox AS inbox
-            ON inbox.squadron_id = delivery.squadron_id
+            ON inbox.project_id = delivery.project_id
            AND inbox.exchange_id = delivery.exchange_id
           WHERE delivery.message_id = ${answered.messageId}
         `;
@@ -420,8 +416,8 @@ it.effect(
               payload: {
                 messageId: answered.messageId,
                 text: exactAnswer,
-                originSquadronId: second.squadronId,
-                receiverSquadronId: second.squadronId,
+                originProjectId: second.squadronId,
+                receiverProjectId: second.squadronId,
                 exchangeRole: "reply",
                 envelopeChannel: "peer",
               },

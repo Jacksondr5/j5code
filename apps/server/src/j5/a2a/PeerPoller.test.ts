@@ -134,8 +134,8 @@ const delivery = (
 const rosterEntry = (archived: boolean): A2ARosterEntry => ({
   participantId: "agent:j5:a2a:thread:ios-build",
   kind: "agent",
-  squadronId: "squadron:laptop-ios",
-  squadronName: "iOS",
+  projectId: "squadron:laptop-ios",
+  projectTitle: "iOS",
   displayName: "iOS build",
   threadId: ThreadId.make("thread:ios-build"),
   archived,

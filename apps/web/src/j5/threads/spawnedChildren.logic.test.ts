@@ -3,7 +3,7 @@ import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environ
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 
 import type { SpawnedChild } from "./SpawnedChildrenClient";
-import { replaceSpawnedChildren } from "./SpawnedChildrenClient";
+import { replaceSpawnedChildren, spawnedChildrenRows } from "./SpawnedChildrenClient";
 import {
   groupSpawnedChildren,
   readExpandedSpawnParents,
@@ -145,17 +145,43 @@ describe("spawned children under a sidebar row", () => {
   it("treats the visible rows as the whole truth for their children", () => {
     const environmentId = EnvironmentId.make("env:a");
     const key = (id: string) => scopedThreadKey(scopeThreadRef(environmentId, ThreadId.make(id)));
+    const row = (children: ReadonlyArray<ReturnType<typeof child>>, spawnedByAgent = false) => ({
+      children,
+      spawnedByAgent,
+    });
     const previous = new Map([
-      [key("captain"), [child("builder", "builder")]],
-      [key("other"), [child("x", null)]],
+      [key("captain"), row([child("builder", "builder")])],
+      [key("other"), row([child("x", null)])],
     ]);
     const next = replaceSpawnedChildren(
       previous,
       environmentId,
       [ThreadId.make("captain"), ThreadId.make("solo")],
-      [{ threadId: ThreadId.make("solo"), children: [child("y", null)] }],
+      [{ threadId: ThreadId.make("solo"), ...row([child("y", null)]) }],
     );
     expect([...next.keys()].toSorted()).toEqual([key("other"), key("solo")].toSorted());
+  });
+
+  it("answers for a row an agent spawned even when nothing is placed under it", () => {
+    expect(
+      spawnedChildrenRows({
+        entries: [{ threadId: ThreadId.make("captain"), children: [child("builder", "builder")] }],
+        spawnedByAgent: [ThreadId.make("builder"), ThreadId.make("captain")],
+      }),
+    ).toEqual([
+      {
+        threadId: "captain",
+        children: [child("builder", "builder")],
+        spawnedByAgent: true,
+      },
+      { threadId: "builder", children: [], spawnedByAgent: true },
+    ]);
+    expect(
+      spawnedChildrenRows({
+        entries: [{ threadId: ThreadId.make("solo"), children: [child("y", null)] }],
+        spawnedByAgent: [],
+      }),
+    ).toEqual([{ threadId: "solo", children: [child("y", null)], spawnedByAgent: false }]);
   });
 
   it("keeps a Crew seat with no thread as unknown, and measures it once its thread arrives", () => {

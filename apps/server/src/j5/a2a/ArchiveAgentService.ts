@@ -198,7 +198,7 @@ const TokenPayload = Schema.Struct({
   version: Schema.Literal(TOKEN_VERSION),
   provider_session_id: Schema.String,
   caller_participant_id: ParticipantId,
-  squadron_id: SquadronId,
+  project_id: SquadronId,
   target_participant_id: ParticipantId,
   thread_id: ThreadId,
   thread_archived: Schema.Boolean,
@@ -259,7 +259,7 @@ const tokenPayload = (input: {
   version: TOKEN_VERSION,
   provider_session_id: input.providerSessionId,
   caller_participant_id: input.callerParticipantId,
-  squadron_id: input.target.squadronId,
+  project_id: input.target.squadronId,
   target_participant_id: input.target.participantId,
   thread_id: input.target.threadId,
   thread_archived: input.state.projection.thread.archivedAt !== null,
@@ -294,7 +294,7 @@ const isForwardOnlyRecovery = (confirmed: TokenPayload, current: TokenPayload): 
   if (
     confirmed.provider_session_id !== current.provider_session_id ||
     confirmed.caller_participant_id !== current.caller_participant_id ||
-    confirmed.squadron_id !== current.squadron_id ||
+    confirmed.project_id !== current.project_id ||
     confirmed.target_participant_id !== current.target_participant_id ||
     confirmed.thread_id !== current.thread_id
   ) {
@@ -467,7 +467,7 @@ export const layer = Layer.effect(
     const readLifecycleEvents = Effect.fn("j5.a2a.archiveAgent.readLifecycleEvents")(function* () {
       const squadrons = yield* ledger
         .listSquadrons()
-        .pipe(Effect.mapError(operationError("listing lifecycle evidence Squadrons")));
+        .pipe(Effect.mapError(operationError("listing lifecycle evidence projects")));
       const events: Array<StoredCommEvent> = [];
       for (const squadron of squadrons) {
         events.push(...(yield* readLedgerEvents(squadron.id)));

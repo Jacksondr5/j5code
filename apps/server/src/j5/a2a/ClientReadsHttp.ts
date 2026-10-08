@@ -22,22 +22,17 @@ import {
   type ClientReadsError,
   ParticipantIdentitiesRequest,
   ParticipantIdentitiesResponse,
-  ThreadHomesRequest,
-  ThreadHomesResponse,
   OpenInboxCount,
 } from "./ClientReadsService.ts";
 import { ParticipantId } from "./contracts.ts";
 
-export const CLIENT_READS_PARTICIPANT_HOMES_PATH = "/api/j5/a2a/client-reads/participant-homes";
 export const CLIENT_READS_PARTICIPANT_IDENTITIES_PATH =
   "/api/j5/a2a/client-reads/participant-identities";
 export const CLIENT_READS_OPEN_COUNT_PATH = "/api/j5/a2a/client-reads/open-count";
 
 const OpenInboxCountRequest = Schema.Struct({ personId: Schema.optionalKey(ParticipantId) });
-const decodeThreadHomesRequest = Schema.decodeUnknownEffect(ThreadHomesRequest);
 const decodeParticipantIdentitiesRequest = Schema.decodeUnknownEffect(ParticipantIdentitiesRequest);
 const decodeOpenInboxCountRequest = Schema.decodeUnknownEffect(OpenInboxCountRequest);
-const encodeThreadHomesResponse = Schema.encodeEffect(ThreadHomesResponse);
 const encodeParticipantIdentitiesResponse = Schema.encodeEffect(ParticipantIdentitiesResponse);
 const encodeOpenInboxCount = Schema.encodeEffect(OpenInboxCount);
 
@@ -47,7 +42,6 @@ const encodeOpenInboxCount = Schema.encodeEffect(OpenInboxCount);
  * parallel composition seam.
  */
 export interface ClientReadsHttpPaths {
-  readonly participantHome: HttpRouter.PathInput;
   readonly participantIdentities: HttpRouter.PathInput;
   readonly openInboxCount: HttpRouter.PathInput;
 }
@@ -115,13 +109,6 @@ export const jsonBody = Effect.gen(function* () {
   return yield* Effect.result(request.json);
 });
 
-const respondHomes = (effect: Effect.Effect<ThreadHomesResponse, ClientReadsError>) =>
-  Effect.flatMap(Effect.result(effect.pipe(Effect.flatMap(encodeThreadHomesResponse))), (result) =>
-    Result.isSuccess(result)
-      ? Effect.succeed(HttpServerResponse.jsonUnsafe(result.success))
-      : operationFailure(result.failure),
-  );
-
 const respondIdentities = (
   effect: Effect.Effect<ParticipantIdentitiesResponse, ClientReadsError>,
 ) =>
@@ -148,29 +135,6 @@ export const makeClientReadsHttpRouteLayer = (paths: ClientReadsHttpPaths) =>
   Layer.unwrap(
     Effect.gen(function* () {
       const clientReads = yield* ClientReadsService;
-      const homeRoute = HttpRouter.add(
-        "POST",
-        paths.participantHome,
-        Effect.gen(function* () {
-          yield* annotateEnvironmentRequest("j5.a2a.clientReads.participantHome");
-          yield* authenticateClientRead;
-          const body = yield* jsonBody;
-          if (Result.isFailure(body)) return invalidRequest("The request body must be JSON.");
-          const decoded = yield* Effect.result(decodeThreadHomesRequest(body.success));
-          if (Result.isFailure(decoded)) return invalidRequest("threadIds must be an array.");
-          return yield* respondHomes(
-            clientReads
-              .threadHomes(decoded.success.threadIds)
-              .pipe(Effect.map((entries) => ({ entries }))),
-          );
-        }).pipe(
-          Effect.catchTags({
-            EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
-            EnvironmentInternalError: HttpServerRespondable.toResponse,
-            EnvironmentScopeRequiredError: HttpServerRespondable.toResponse,
-          }),
-        ),
-      );
       const identitiesRoute = HttpRouter.add(
         "POST",
         paths.participantIdentities,
@@ -211,6 +175,6 @@ export const makeClientReadsHttpRouteLayer = (paths: ClientReadsHttpPaths) =>
           }),
         ),
       );
-      return Layer.mergeAll(homeRoute, identitiesRoute, countRoute);
+      return Layer.mergeAll(identitiesRoute, countRoute);
     }),
   );

@@ -103,7 +103,7 @@ export const spawnFirstTurnText = (input: {
   readonly spawnerThreadId: string;
   readonly crew?: CrewBriefContext;
 }) => {
-  const identity = `<j5_spawn_context>\nPlatform-provided identity facts:\nparticipant_id: ${input.participantId}\nsquadron_id: ${input.squadronId}\nsquadron_name: ${input.squadronName}\nspawned_by: ${input.spawnedByParticipantId}\nspawner_thread_id: ${input.spawnerThreadId}\n</j5_spawn_context>`;
+  const identity = `<j5_spawn_context>\nPlatform-provided identity facts:\nparticipant_id: ${input.participantId}\nproject_id: ${input.squadronId}\nproject_title: ${input.squadronName}\nspawned_by: ${input.spawnedByParticipantId}\nspawner_thread_id: ${input.spawnerThreadId}\n</j5_spawn_context>`;
   const brief = `<spawner_brief>\n${input.brief}\n</spawner_brief>`;
   if (input.crew === undefined) return `${identity}\n\n${brief}`;
   const crew = input.crew;

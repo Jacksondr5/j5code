@@ -85,9 +85,7 @@ const fixture = Effect.gen(function* () {
 
   const storage = yield* Layer.build(Layer.mergeAll(ledgerLayer, crewInstanceLayer));
   const crews = Context.get(storage, AgentCrewInstanceService);
-  yield* Context.get(storage, A2ALedger).createSquadron({
-    squadron: { id: squadronId, name: "Relay", createdAt },
-  });
+  yield* Context.get(storage, A2ALedger).ensureProject({ projectId: squadronId, createdAt });
   const seat = (name: string, threadId: ThreadId, steps: ReadonlyArray<string>) => ({
     seatName: name,
     agentId: null,

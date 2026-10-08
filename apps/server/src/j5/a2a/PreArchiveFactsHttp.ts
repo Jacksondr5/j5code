@@ -102,9 +102,19 @@ export const preArchiveFactsHttpRouteLayer = Layer.unwrap(
           seat: membership.seatName,
         };
       }).pipe(Effect.orElseSucceed(() => null));
+    // What the client reads: each fact names its project.
+    const wireFacts = (facts: ThreadPreArchiveFacts) => {
+      const openExchanges = facts.openExchanges.map(({ squadronId, ...exchange }) => ({
+        ...exchange,
+        projectId: squadronId,
+      }));
+      if (facts.state !== "registered") return { ...facts, openExchanges };
+      const { squadronId, ...registered } = facts;
+      return { ...registered, projectId: squadronId, openExchanges };
+    };
     const withLiveCrews = (facts: ThreadPreArchiveFacts): Effect.Effect<object> =>
       facts.state !== "registered"
-        ? Effect.succeed(facts)
+        ? Effect.succeed(wireFacts(facts))
         : Effect.all({
             liveCrews: archiveCrews
               .readCaptainFacts({
@@ -120,7 +130,7 @@ export const preArchiveFactsHttpRouteLayer = Layer.unwrap(
                 ),
               ),
             crewSeat: readCrewSeat(facts.participantId),
-          }).pipe(Effect.map((crewFacts) => ({ ...facts, ...crewFacts })));
+          }).pipe(Effect.map((crewFacts) => ({ ...wireFacts(facts), ...crewFacts })));
     const route = HttpRouter.add(
       "POST",
       PRE_ARCHIVE_FACTS_PATH,

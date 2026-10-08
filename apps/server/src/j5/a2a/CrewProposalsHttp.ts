@@ -82,9 +82,11 @@ export const makeCrewProposalsHttpRouteLayer = (paths: {
        */
       const projectProposal = ({
         playbook,
-        ...proposal
-      }: CrewProposal): Effect.Effect<J5Contracts.CrewProposal> =>
-        playbook == null
+        squadronId: projectId,
+        ...stored
+      }: CrewProposal): Effect.Effect<J5Contracts.CrewProposal> => {
+        const proposal = { ...stored, projectId };
+        return playbook == null
           ? Effect.succeed({ ...proposal, playbook: null })
           : playbooks.readPath(playbook.definitionPath).pipe(
               Effect.map((definition) => {
@@ -115,6 +117,7 @@ export const makeCrewProposalsHttpRouteLayer = (paths: {
                 }),
               ),
             );
+      };
       const listRoute = HttpRouter.add(
         "POST",
         paths.list,

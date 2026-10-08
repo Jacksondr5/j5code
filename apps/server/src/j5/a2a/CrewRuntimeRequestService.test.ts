@@ -202,8 +202,9 @@ const setup = Effect.gen(function* () {
   );
   const context = yield* Layer.build(storage);
   yield* runJ5A2AMigrations().pipe(Effect.provide(context));
-  yield* Context.get(context, A2ALedger).createSquadron({
-    squadron: { id: squadronId, name: "Requests", createdAt: DateTime.formatIso(at) },
+  yield* Context.get(context, A2ALedger).ensureProject({
+    projectId: squadronId,
+    createdAt: DateTime.formatIso(at),
   });
   const instances = Context.get(context, AgentCrewInstanceService);
   yield* instances.record({

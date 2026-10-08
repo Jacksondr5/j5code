@@ -150,9 +150,7 @@ const makeFixture = Effect.fn("test.j5.crewLaunchReporter.fixture")(function* (
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       yield* sql`INSERT INTO j5_a2a_human_person (person_id, is_local_operator, created_at) VALUES ('human:operator', 1, ${at})`;
-      yield* (yield* A2ALedger).createSquadron({
-        squadron: { id: squadronId, name: "Launch Report Squadron", createdAt: at },
-      });
+      yield* (yield* A2ALedger).ensureProject({ projectId: squadronId, createdAt: at });
     }),
     context,
   );

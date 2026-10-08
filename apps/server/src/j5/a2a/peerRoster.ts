@@ -4,21 +4,22 @@ import type { A2ARosterEntry, PeerRosterAgent } from "@t3tools/contracts/j5";
 
 /**
  * The one thing a peer may read of this server: the agents it could address,
- * by Squadron, and nothing about people, machines or liveness. The roster
+ * by project, and nothing about people, machines or liveness. The roster
  * route answers with it, and a poller sends it to the server that stores its
  * messages whenever it changes.
  */
 export const toPeerRoster = (entries: ReadonlyArray<A2ARosterEntry>): Array<PeerRosterAgent> =>
   entries.flatMap((entry) =>
     entry.kind === "agent" &&
-    entry.squadronId !== null &&
-    entry.squadronName !== null &&
+    entry.projectId !== null &&
+    entry.projectTitle !== null &&
     entry.threadId !== null
       ? [
           {
             participantId: entry.participantId,
-            squadronId: entry.squadronId,
-            squadronName: entry.squadronName,
+            // The peer wire still names the project a Squadron.
+            squadronId: entry.projectId,
+            squadronName: entry.projectTitle,
             threadId: entry.threadId,
             displayName: entry.displayName,
             archived: entry.archived,

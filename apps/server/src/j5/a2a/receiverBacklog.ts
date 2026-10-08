@@ -41,7 +41,7 @@ export const readReceiverBacklog = Effect.fn("j5.a2a.readReceiverBacklog")(
     const sql = yield* SqlClient.SqlClient;
     const orchestrator = yield* OrchestratorV2;
     const rows = yield* sql<{ readonly payload: string }>`
-      SELECT payload FROM j5_a2a_squadron_membership
+      SELECT payload FROM j5_a2a_membership
       WHERE participant_id = ${input.receiverId} AND archived_at IS NULL
       LIMIT 1
     `;

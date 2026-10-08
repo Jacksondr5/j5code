@@ -121,12 +121,9 @@ const fixture = Effect.gen(function* () {
   yield* runJ5A2AMigrations().pipe(Effect.provide(context));
   yield* Effect.provide(
     Effect.gen(function* () {
-      yield* (yield* A2ALedger).createSquadron({
-        squadron: {
-          id: squadronId,
-          name: "Launch Squadron",
-          createdAt: DateTime.formatIso(createdAt),
-        },
+      yield* (yield* A2ALedger).ensureProject({
+        projectId: squadronId,
+        createdAt: DateTime.formatIso(createdAt),
       });
     }),
     context,

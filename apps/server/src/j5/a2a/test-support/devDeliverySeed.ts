@@ -453,13 +453,7 @@ const assertTargetServerStopped = (input: {
     yield* sql
       .withTransaction(
         ledger
-          .createSquadron({
-            squadron: {
-              id: input.squadronId,
-              name: `J5 disposable server-off preflight ${input.squadronId}`,
-              createdAt: input.createdAt,
-            },
-          })
+          .ensureProject({ projectId: input.squadronId, createdAt: input.createdAt })
           .pipe(Effect.andThen(Effect.fail(new DevDeliverySeedPreflightRollback()))),
       )
       .pipe(
@@ -525,7 +519,8 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
     const receiverThreadId = ThreadId.make(`thread:${runId}:receiver`);
     const senderId = ParticipantId.make(`agent:${runId}:sender`);
     const receiverId = ParticipantId.make(`agent:${runId}:receiver`);
-    const squadronId = SquadronId.make(`squadron:${runId}`);
+    // A thread's home is its project, so the ledger is keyed by the project's id.
+    const squadronId = SquadronId.make(projectId);
     const runtime = makeRuntimeLayer(databasePathFor(path, baseDir), baseDir);
 
     const seed = Effect.gen(function* () {
@@ -543,7 +538,7 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
         createdAt: now,
       });
       // This is the production host-local registry bootstrap, deliberately outside
-      // a scenario transaction: it has no Squadron or thread state and must exist
+      // a scenario transaction: it has no project or thread state and must exist
       // before the real HumanInbox send/answer scenario can address a person.
       const localOperatorPersonId = yield* ensureLocalOperatorHumanPerson(
         yield* SqlClient.SqlClient,
@@ -552,6 +547,15 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
       yield* atomicScenario(
         "bootstrap",
         Effect.gen(function* () {
+          // The seed runs no project commands, so it writes the project row the ledger reads
+          // titles from and a machine registration requires.
+          yield* (yield* SqlClient.SqlClient)`
+            INSERT INTO projection_projects (
+              project_id, title, workspace_root, scripts_json, created_at, updated_at, deleted_at
+            ) VALUES (
+              ${projectId}, 'J5 disposable A2A seed', ${process.cwd()}, '[]', ${now}, ${now}, NULL
+            )
+          `;
           yield* threads.dispatch({
             type: "thread.create",
             commandId: CommandId.make(seededId(runId, "bootstrap:sender-thread")),
@@ -580,9 +584,7 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
             createdBy: "system",
             creationSource: "server",
           });
-          yield* ledger.createSquadron({
-            squadron: { id: squadronId, name: `J5 disposable A2A ${runId}`, createdAt: now },
-          });
+          yield* ledger.ensureProject({ projectId: squadronId, createdAt: now });
           yield* joinScenarioAgents({
             squadronId,
             senderId,
@@ -754,8 +756,8 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
           const { participant } = yield* machines.register({
             commandId: CommCommandId.make(seededId(runId, "machine:register")),
             squadronId,
-            // Machine names are unique across Squadrons, and every run makes a
-            // new Squadron, so a reused home needs a per-run name.
+            // Machine names are unique across projects, and every run makes a
+            // new project, so a reused home needs a per-run name.
             name: `seed-watchdog-${runId.slice(-12)}`,
             acceptedAt: now,
           });
@@ -799,8 +801,8 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
                 payload: {
                   messageId,
                   text: "[Cross-agent messaging system notice: template-v999]\n\nThis deliberately future/unrecognized envelope must render as raw text.\n\nNo current renderer template owns this body.",
-                  originSquadronId: squadronId,
-                  receiverSquadronId: squadronId,
+                  originProjectId: squadronId,
+                  receiverProjectId: squadronId,
                   exchangeRole: "none",
                   envelopeChannel: "silence_notice",
                 },
@@ -950,9 +952,7 @@ export const verifyDevDeliverySeedRollback = (requestedBaseDir: string) =>
         atomicScenario(
           "controlled-mid-scenario-failure",
           Effect.gen(function* () {
-            yield* ledger.createSquadron({
-              squadron: { id: squadronId, name: `J5 rollback ${runId}`, createdAt },
-            });
+            yield* ledger.ensureProject({ projectId: squadronId, createdAt });
             yield* ledger.appendEvents({
               commandId: CommCommandId.make(seededId(runId, "membership")),
               squadronId,

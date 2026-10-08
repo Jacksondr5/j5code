@@ -29,12 +29,12 @@ it.effect("reads consequential archive facts from the thread's non-primary envir
           Response.json({
             state: "registered",
             threadId: remoteThreadRef.threadId,
-            squadronId: "squadron:remote",
+            projectId: "project:remote",
             participantId: "agent:remote",
             retired: false,
             openExchanges: [
               {
-                squadronId: "squadron:remote",
+                projectId: "project:remote",
                 exchangeId: "exchange:remote-waiter",
                 direction: "inbound",
                 replyObligation: "participant-owes-reply",
@@ -93,7 +93,7 @@ it.effect("resolves preflight from the scoped thread environment rather than the
           Response.json({
             state: "registered",
             threadId: remoteThreadRef.threadId,
-            squadronId: "squadron:remote",
+            projectId: "project:remote",
             participantId: "agent:remote",
             retired: false,
             openExchanges: [],

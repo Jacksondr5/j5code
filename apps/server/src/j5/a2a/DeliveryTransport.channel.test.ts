@@ -5,8 +5,8 @@ import { formatSilenceNoticeEnvelope } from "./EnvelopeFormatter.ts";
 import { SquadronId, ExchangeId, LedgerMessageId, ParticipantId } from "./contracts.ts";
 
 const delivery = {
-  originSquadronId: SquadronId.make("squadron:channel"),
-  receiverSquadronId: SquadronId.make("squadron:channel"),
+  originProjectId: SquadronId.make("squadron:channel"),
+  receiverProjectId: SquadronId.make("squadron:channel"),
   messageId: LedgerMessageId.make("message:channel"),
   senderId: ParticipantId.make("agent:channel:sender"),
   receiverId: ParticipantId.make("agent:channel:receiver"),

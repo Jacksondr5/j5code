@@ -36,8 +36,7 @@ import { A2ALedger } from "./LedgerService.ts";
 import { ParticipantPlacementService, PlacementStorageError } from "./PlacementService.ts";
 import { A2ASendService } from "./SendService.ts";
 import { SpawnCompositionService } from "./SpawnCompositionService.ts";
-import { SquadronJoinService } from "./SquadronJoinService.ts";
-import { SquadronProjectReferences } from "./SquadronProjectReferences.ts";
+import { ThreadRegistration } from "./ThreadRegistration.ts";
 import { ParticipantId, SquadronId, type ParticipantDirectoryRow } from "./contracts.ts";
 import { J5ToolkitHandlersLive } from "./mcp/handlers.ts";
 import { J5SpawnAgentInput, J5Toolkit } from "./mcp/tools.ts";
@@ -267,8 +266,9 @@ const spawnHarness = (input: {
       Layer.mock(ArchiveCrewService)({}),
       Layer.mock(CrewStopService)({}),
       Layer.mock(CrewProposalService)({}),
-      Layer.mock(SquadronJoinService)({}),
-      Layer.mock(SquadronProjectReferences)({}),
+      Layer.mock(ThreadRegistration)({
+        ensureRegistered: () => Effect.succeed({ squadronId, participantId: callerParticipantId }),
+      }),
       NodeServices.layer,
     );
     const layer = J5ToolkitHandlersLive.pipe(
@@ -325,7 +325,8 @@ it.effect("spawns into a new worktree from base_ref, keeping home, placement, an
       assert.deepStrictEqual(spawned.result, {
         participant_id: childParticipantId,
         thread_id: result.thread_id,
-        squadron_id: squadronId,
+        project_id: squadronId,
+        project_title: "Workspace",
         placement: {
           placement_parent_id: callerParticipantId,
           provenance: {
@@ -347,7 +348,6 @@ it.effect("spawns into a new worktree from base_ref, keeping home, placement, an
       const [launch] = yield* Ref.get(launches);
       assert.equal(launch?.threadId, result.thread_id);
       assert.isTrue(launch?.reuseExistingThread);
-      assert.equal(launch?.squadronId, squadronId);
       assert.equal(launch?.projectId, projectId);
       assert.deepStrictEqual(launch?.workspaceStrategy, {
         type: "worktree",
