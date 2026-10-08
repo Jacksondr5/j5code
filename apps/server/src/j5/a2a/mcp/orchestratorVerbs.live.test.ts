@@ -1,3 +1,5 @@
+import { ThreadLaunchService } from "../../../orchestration-v2/ThreadLaunchService.ts";
+import { OrchestrationCommandReceiptRepositoryLive } from "../../../persistence/Layers/OrchestrationCommandReceipts.ts";
 import { J5SquadronCreationLayer } from "../runtimeLayer.ts";
 import { AntigravityInstallation } from "../../../provider/AntigravityInstallation.ts";
 import * as ModelManifest from "../../../provider/ModelManifest.ts";
@@ -171,6 +173,9 @@ const liveLayer = Layer.mergeAll(
   handlersLayer,
 ).pipe(
   Layer.provide(Layer.mock(GitWorkflow.GitWorkflowService)({})),
+  // The project is unreadable here, so every spawn shares the caller's checkout.
+  Layer.provide(Layer.mock(ThreadLaunchService)({})),
+  Layer.provide(OrchestrationCommandReceiptRepositoryLive),
   Layer.provide(
     Layer.mock(SourceControlProviderRegistry)({
       resolveLink: () => Effect.die("unused title link"),
@@ -330,6 +335,7 @@ describe.runIf(process.env.T3_J5_LUNA_LIVE_ORCHESTRATOR === "1")(
           const brief =
             "Do not edit files. Confirm that you are running in the isolated workspace, then wait for further direction before replying.";
           const spawned = yield* callSpawn({
+            workspace: { type: "shared" as const },
             brief,
             title: "Luna verb E2E peer",
             provider: codexInstanceId,
@@ -351,6 +357,7 @@ describe.runIf(process.env.T3_J5_LUNA_LIVE_ORCHESTRATOR === "1")(
           assert.equal(terminal.status, "interrupted");
 
           const replay = yield* callSpawn({
+            workspace: { type: "shared" as const },
             brief:
               "A conflicting retry must not replace the first committed spawn context or brief.",
             title: "Luna verb E2E peer",

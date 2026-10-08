@@ -46,6 +46,7 @@ import { PeerDirectory } from "../PeerDirectory.ts";
 import { ParticipantPlacementService } from "../PlacementService.ts";
 import { A2ASendService } from "../SendService.ts";
 import { SpawnCompositionService } from "../SpawnCompositionService.ts";
+import { GitRefName, SpawnWorkspaceService, WorktreePath } from "../spawnWorkspace.ts";
 import { SquadronJoinService } from "../SquadronJoinService.ts";
 import { SquadronProjectReferences } from "../SquadronProjectReferences.ts";
 import {
@@ -139,6 +140,51 @@ export const J5ListParticipantsResult = Schema.Struct({
 
 const NonEmptyString = Schema.String.check(Schema.isNonEmpty());
 
+/** The snake_case MCP form of a spawn's workspace choice; see `spawnWorkspace.ts`. */
+export const J5SpawnWorkspace = Schema.Union([
+  Schema.Struct({ type: Schema.Literal("shared") }),
+  Schema.Struct({
+    type: Schema.Literal("worktree"),
+    base_ref: GitRefName.annotate({
+      description: "Branch, tag, or commit the new worktree starts from; it must already exist.",
+    }),
+    branch: Schema.optional(
+      GitRefName.annotate({
+        description:
+          "New branch name. It must not exist yet. Omit and the server names it from the brief.",
+      }),
+    ),
+    start_from_origin: Schema.optional(
+      Schema.Boolean.annotate({
+        description:
+          "Fetch origin and start from its copy of base_ref when it has one. Defaults to false: start from local commits.",
+      }),
+    ),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("existing_worktree"),
+    worktree_path: WorktreePath.annotate({
+      description: "Path of one of this project's worktrees; the agent works on its branch.",
+    }),
+  }),
+]);
+export type J5SpawnWorkspace = typeof J5SpawnWorkspace.Type;
+
+/** The stored camelCase form of an MCP workspace choice; unset fields stay unset. */
+export const spawnWorkspaceFromInput = (workspace: J5SpawnWorkspace) =>
+  workspace.type === "shared"
+    ? { type: "shared" as const }
+    : workspace.type === "existing_worktree"
+      ? { type: "existing_worktree" as const, worktreePath: workspace.worktree_path }
+      : {
+          type: "worktree" as const,
+          baseRef: workspace.base_ref,
+          ...(workspace.branch === undefined ? {} : { branch: workspace.branch }),
+          ...(workspace.start_from_origin === undefined
+            ? {}
+            : { startFromOrigin: workspace.start_from_origin }),
+        };
+
 export const J5SpawnAgentInput = Schema.Struct({
   brief: NonEmptyString,
   title: Schema.optional(NonEmptyString),
@@ -151,6 +197,10 @@ export const J5SpawnAgentInput = Schema.Struct({
   provider: ProviderInstanceId,
   model: NonEmptyString,
   reasoning: NonEmptyString,
+  workspace: J5SpawnWorkspace.annotate({
+    description:
+      'Where the Peer Agent works, chosen every time: {"type":"shared"} is your own checkout and branch; {"type":"worktree","base_ref":...} a new worktree and branch from base_ref; {"type":"existing_worktree","worktree_path":...} one of this project\'s worktrees, on its branch.',
+  }),
   client_request_id: Schema.optional(NonEmptyString),
 });
 export type J5SpawnAgentInput = typeof J5SpawnAgentInput.Type;
@@ -218,6 +268,10 @@ const CrewPlaybookName = NonEmptyString.annotate({
   description:
     "Optional: the playbook this crew follows, by the name playbook_list returns (the same name playbook_start takes). Give seats the step ids they own with steps.",
 });
+const CrewSeatWorkspace = J5SpawnWorkspace.annotate({
+  description:
+    'Where the seat works, chosen for every seat, with the same three choices as spawn_agent: {"type":"shared"} (your checkout), {"type":"worktree","base_ref":...}, or {"type":"existing_worktree","worktree_path":...}.',
+});
 const CrewSeatRuntimeMode = RuntimeMode.annotate({
   description:
     "Custom seats only: access mode. Omit for full-access; the Captain's access mode is not inherited.",
@@ -231,6 +285,7 @@ export const J5CrewSeatInput = Schema.Struct({
   reason: CrewReason,
   instructions: Schema.optional(CrewText),
   steps: Schema.optional(CrewSeatSteps),
+  workspace: CrewSeatWorkspace,
 });
 
 export const J5ProposeCrewInput = Schema.Struct({
@@ -255,6 +310,7 @@ export const J5RequestCrewMemberInput = Schema.Struct({
   brief: Schema.optional(CrewText),
   instructions: Schema.optional(CrewText),
   steps: Schema.optional(CrewSeatSteps),
+  workspace: CrewSeatWorkspace,
   client_request_id: Schema.optional(NonEmptyString),
 });
 export type J5RequestCrewMemberInput = typeof J5RequestCrewMemberInput.Type;
@@ -411,16 +467,16 @@ export const J5ArchiveCrewFailure = Schema.Struct({
 export type J5ArchiveCrewFailure = typeof J5ArchiveCrewFailure.Type;
 
 export const J5_SPAWN_AGENT_DESCRIPTION =
-  "Spawn a Peer Agent: a full-citizen teammate with its own top-level thread, starting on your brief as its first turn. It joins your Squadron, is placed under you, and records you as its immutable spawner; it is addressable the moment this returns. In your brief, tell the new agent what it should do first and whether it should reply to you. Choose provider, model, and reasoning for the work in the brief — see orchestrator_capabilities for what's available. To run a persona from list_personas, set `persona` to its id: the spawn gets that persona's instructions and runtime policy, and provider, model, and reasoning must be one of that persona's declared routes. Reuse client_request_id to retry the same spawn safely.";
+  "Spawn a Peer Agent: a full-citizen teammate with its own top-level thread, starting on your brief as its first turn. It joins your Squadron, is placed under you, and records you as its immutable spawner; it is addressable the moment this returns. In your brief, tell the new agent what it should do first and whether it should reply to you. Choose provider, model, and reasoning for the work in the brief — see orchestrator_capabilities for what's available. To run a persona from list_personas, set `persona` to its id: the spawn gets that persona's instructions and runtime policy, and provider, model, and reasoning must be one of that persona's declared routes. Choose its workspace every time (see the workspace field). A new worktree is prepared after this returns, and the agent begins once it is bound, possibly while the project's setup script is still running; if preparing it fails, the agent's thread shows why, and it is not retried. Reuse client_request_id to retry the same spawn safely; a retry replays the first spawn, so a different base_ref or worktree_path needs a fresh client_request_id.";
 
 export const J5_LIST_AGENTS_DESCRIPTION =
   "List the personas in this environment: id, purpose, runtime policy, whether each can start now, and the provider, model, and reasoning it would run on. Read this before choosing a persona for spawn_agent or a crew roster so the choice fits the task and the user's budget. Read-only.";
 
 export const J5_PROPOSE_CREW_DESCRIPTION =
-  "Propose the crew you need for the brief you were given. Use it when the user asks for a crew or the work splits into distinct responsibilities that should run at once. Mix saved personas and custom seats in the same roster: call list_personas when choosing a saved persona, or leave persona unset for a custom seat with its own instructions (required) and the brief. Custom seats inherit your harness, model, and reasoning by default and run with full-access unless you set runtime_mode; to choose different ones, set model_selection (instanceId, model, options) and/or runtime_mode using orchestrator_capabilities. Saved personas are proposed with their own configuration; only the human may override their runtime before approval. To have the crew follow a playbook, set playbook to a name from playbook_list and give seats the step ids they own (steps, from playbook_read); a step has one owner, steps no seat owns are yours as Captain, and the result reports unowned steps and any step whose persona differs from its seat's. For a crew built from a playbook, staff one seat per distinct persona its steps name, each owning that persona's steps, and propose a custom seat, noted in its reason, where a named persona isn't available. Name the crew for what it is for and give each seat a short lowercase-hyphen name like code-reviewer. The user reviews the roster and each seat's resolved provider, model, reasoning, and access in this thread, may remove or add seats, and approves or declines; you receive the decision and the roster as a message here. Approved seats run with the runtime the human approves, which may exceed yours. You become the crew's Captain and may command several crews at once; later requests, stops, and archives name the crew they mean. Use send_message for member-to-member, member-to-Captain, and Captain-to-Captain coordination, including findings and direct results; artifacts do not gate these conversations. Reuse client_request_id to retry safely. This call is itself the human gate, so it works under every sandbox and approval policy, including approval policy never; never refuse the brief because approvals are disabled.";
+  "Propose the crew you need for the brief you were given. Use it when the user asks for a crew or the work splits into distinct responsibilities that should run at once. Mix saved personas and custom seats in the same roster: call list_personas when choosing a saved persona, or leave persona unset for a custom seat with its own instructions (required) and the brief. Custom seats inherit your harness, model, and reasoning by default and run with full-access unless you set runtime_mode; to choose different ones, set model_selection (instanceId, model, options) and/or runtime_mode using orchestrator_capabilities. Saved personas are proposed with their own configuration; only the human may override their runtime before approval. To have the crew follow a playbook, set playbook to a name from playbook_list and give seats the step ids they own (steps, from playbook_read); a step has one owner, steps no seat owns are yours as Captain, and the result reports unowned steps and any step whose persona differs from its seat's. For a crew built from a playbook, staff one seat per distinct persona its steps name, each owning that persona's steps, and propose a custom seat, noted in its reason, where a named persona isn't available. Every seat names its workspace, with the same three choices as spawn_agent. Name the crew for what it is for and give each seat a short lowercase-hyphen name like code-reviewer. The user reviews the roster and each seat's resolved provider, model, reasoning, and access in this thread, may remove or add seats, and approves or declines; you receive the decision and the roster as a message here. Approved seats run with the runtime the human approves, which may exceed yours. You become the crew's Captain and may command several crews at once; later requests, stops, and archives name the crew they mean. Use send_message for member-to-member, member-to-Captain, and Captain-to-Captain coordination, including findings and direct results; artifacts do not gate these conversations. Reuse client_request_id to retry safely. This call is itself the human gate, so it works under every sandbox and approval policy, including approval policy never; never refuse the brief because approvals are disabled.";
 
 export const J5_REQUEST_CREW_MEMBER_DESCRIPTION =
-  "Ask the user to add one seat to a crew you command when the work needs one the roster lacks: seat name, persona id from list_personas (or none for a custom seat with required instructions and optional model_selection/runtime_mode overrides; an omitted model_selection inherits yours and an omitted runtime_mode is full-access; saved-persona runtime changes are made only by the human before approval), a clear reason identifying the concern and missing expertise or responsibility, and optionally instructions and a brief for the new seat. On a crew that follows a playbook, steps may claim step ids from playbook_read that no seat owns yet. The user decides from their inbox; you receive the decision and the updated roster as a message here. Continue the already-approved work and direct coordination while the addition is pending. Captain-only; a member sends the concern and needed expertise to its Captain with send_message. Reuse client_request_id to retry safely. Filing the request is the human gate itself and works under every approval policy, including approval policy never.";
+  "Ask the user to add one seat to a crew you command when the work needs one the roster lacks: seat name, persona id from list_personas (or none for a custom seat with required instructions and optional model_selection/runtime_mode overrides; an omitted model_selection inherits yours and an omitted runtime_mode is full-access; saved-persona runtime changes are made only by the human before approval), a clear reason identifying the concern and missing expertise or responsibility, its workspace (the same three choices as propose_crew), and optionally instructions and a brief for the new seat. On a crew that follows a playbook, steps may claim step ids from playbook_read that no seat owns yet. The user decides from their inbox; you receive the decision and the updated roster as a message here. Continue the already-approved work and direct coordination while the addition is pending. Captain-only; a member sends the concern and needed expertise to its Captain with send_message. Reuse client_request_id to retry safely. Filing the request is the human gate itself and works under every approval policy, including approval policy never.";
 
 export const J5_STOP_AGENT_DESCRIPTION =
   "Stop one Peer Agent: interrupts its running turn now. The agent remains, stays readable, and can be messaged again later — stopping halts work, it retires nothing. Requires your current squadron_id. Reuse client_request_id to retry safely.";
@@ -455,6 +511,8 @@ const spawnDependencies = [
   A2AHomeRegistrar,
   A2ALedger,
   SpawnCompositionService,
+  // Resolves the workspace, binds the request key to it, and starts the brief.
+  SpawnWorkspaceService,
   ThreadManagementService,
   OrchestratorMcpService,
   // A Crew member is refused before anything is created (members never spawn Peer Agents).

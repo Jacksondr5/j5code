@@ -7,6 +7,7 @@ import { crewLaunchReportText, crewRosterChanges } from "./crewGateNotice.ts";
 import { ParticipantId, SquadronId } from "./contracts.ts";
 
 const seat = (name: string, agentId: string, reason = `${name} does its part`) => ({
+  workspace: { type: "shared" as const },
   seat: name,
   agentId,
   reason,
@@ -103,6 +104,7 @@ describe("crew launch report", () => {
     reportedAt: null,
   };
   const member = (name: string, agentId: string) => ({
+    workspace: { type: "shared" as const },
     seatName: name,
     agentId,
     participantId: ParticipantId.make(`agent:${name}`),
@@ -237,6 +239,7 @@ describe("crew launch report", () => {
 
   it("tells the Captain when the human pins a custom seat to a different runtime", () => {
     const requested = {
+      workspace: { type: "shared" as const },
       seat: "reviewer",
       agentId: null,
       reason: "Reviews",

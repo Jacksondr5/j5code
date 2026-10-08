@@ -56,16 +56,18 @@ Read-only; no events.
 
 ### `spawn_agent`
 
-**Description:** "Spawn a Peer Agent: a full-citizen teammate with its own top-level thread, starting on your brief as its first turn. It joins your Squadron, is placed under you, and records you as its immutable spawner; it is addressable the moment this returns. In your brief, tell the new agent what it should do first and whether it should reply to you. Choose provider, model, and reasoning for the work in the brief — see orchestrator_capabilities for what's available. Reuse client_request_id to retry the same spawn safely."
-
 **Description (contract):** "Spawn a Peer Agent: a full-citizen teammate with its own top-level
 thread, starting on your brief as its first turn. It joins your Squadron, is placed under you, and
-records you as its immutable spawner; it is addressable the moment this returns. In your brief,
-tell the new agent what it should do first and whether it should reply to you. Choose provider,
-model, and reasoning for the work in the brief — see orchestrator_capabilities for what's
-available. To run a persona from list_personas, set `persona` to its id: the spawn gets that
-persona's instructions and runtime policy, and provider, model, and reasoning must be one of that
-persona's declared routes. Reuse client_request_id to retry the same spawn safely."
+records you as its immutable spawner; it is addressable the moment this returns. In your brief, tell
+the new agent what it should do first and whether it should reply to you. Choose provider, model,
+and reasoning for the work in the brief — see orchestrator_capabilities for what's available. To run
+a persona from list_personas, set `persona` to its id: the spawn gets that persona's instructions
+and runtime policy, and provider, model, and reasoning must be one of that persona's declared
+routes. Choose its workspace every time (see the workspace field). A new worktree is prepared after
+this returns, and the agent begins once it is bound, possibly while the project's setup script is
+still running; if preparing it fails, the agent's thread shows why, and it is not retried. Reuse
+client_request_id to retry the same spawn safely; a retry replays the first spawn, so a different
+base_ref or worktree_path needs a fresh client_request_id."
 
 | Input               | Type                                 | Required | Meaning                                           |
 | ------------------- | ------------------------------------ | -------- | ------------------------------------------------- |
@@ -77,11 +79,17 @@ persona's declared routes. Reuse client_request_id to retry the same spawn safel
 |                     |                                      |          | 2026-08-29: inheriting is wrong more than right)  |
 | `model`             | id from `orchestrator_capabilities`  | yes      | Chosen per task                                   |
 | `reasoning`         | option from capabilities descriptors | yes      | Chosen per task                                   |
+| `workspace`         | `{type: "shared"}`, `{type:          | yes      | Where the agent works; see Workspace below        |
+|                     | "worktree", base_ref, branch?,       |          |                                                   |
+|                     | start_from_origin?}`, or `{type:     |          |                                                   |
+|                     | "existing_worktree", worktree_path}` |          |                                                   |
 | `client_request_id` | string, non-empty                    | no       | Supply and reuse to make retries safe             |
 
-**Rules.** The new agent is an ordinary root-lineage thread created through upstream's creation seam, never through delegation. Its Squadron home is the caller's, registered before creation and fail-closed if the caller's home no longer names an existing Squadron. Placement and provenance are recorded atomically with creation; then the first turn starts with the brief. The new agent's first turn also states its own participant id and Squadron as platform-provided facts, beside the brief and never inside it. Provider, model and reasoning are required and explicit even when a Role is given: a Role's allowlist constrains the choice and an out-of-list pick is an error naming the Role, never a silent default. The brief carries the task and the reply expectation; the spawner does not follow a spawn with a reply-expected `send_message` — that form is for later work owed by an existing participant. Selection guidance and brief-writing conventions live in the [Spawning Guide](../features/spawning-guide.md).
+**Rules.** The new agent is an ordinary root-lineage thread created through upstream's creation seam, never through delegation. Its Squadron home is the caller's, registered before creation and fail-closed if the caller's home no longer names an existing Squadron. Placement and provenance are recorded atomically with creation; then the brief starts as the first turn. The new agent's first turn also states its own participant id and Squadron as platform-provided facts, beside the brief and never inside it. Provider, model and reasoning are required and explicit even when a Role is given: a Role's allowlist constrains the choice and an out-of-list pick is an error naming the Role, never a silent default. The brief carries the task and the reply expectation; the spawner does not follow a spawn with a reply-expected `send_message` — that form is for later work owed by an existing participant. Selection guidance and brief-writing conventions live in the [Spawning Guide](../features/spawning-guide.md).
 
-**Errors**, each naming state and next command: the caller's membership is missing or ambiguous; the caller's home no longer exists; the caller sits in a Crew (naming its Captain as the escalation and `delegate_task` for its own subagents; only a Captain grows a Crew, through the gate); creation failed.
+**Workspace.** The spawner chooses where a Peer Agent works every time; there is no default, because the spawner knows whether it is starting a reviewer that must see uncommitted work, a builder that must not collide, or a scout that can't collide at all (Jackson, 2026-10-03). `{type: "shared"}` is the caller's own checkout and branch, and asks nothing of git. `{type: "worktree"}` is a new worktree from `base_ref`, which is required and must resolve to a commit (with `start_from_origin`, its fetched origin copy counts); a `branch` that already exists is refused. `{type: "existing_worktree"}` is one of the project's git worktrees other than its main checkout, named by path; the agent works on the branch git has checked out there, and any other path is refused with the valid ones listed. A choice that needs git is refused when the repository can't be read, before anything is created. A new worktree's thread is created unbound, with its home and placement committed, so `spawn_agent` returns as soon as the agent is registered and its brief accepted, not once the worktree is ready. Upstream's ThreadLaunch then creates the worktree, names a temporary `j5code/<hash>` branch and renames it from the brief in the background, and holds the brief as a preparing run until the worktree is bound and the project's setup script has started. The setup script is awaited first only when it is set to finish before the agent starts (`async: false`); otherwise the agent may begin while it is still running. If preparation fails, the agent's thread shows the failed preparation, as any upstream launch does; it is not retried or retired, and the spawner is not told. The agent is then unbound, which upstream reads as the project's checkout, so a later message to it runs there, where every Peer Agent worked before workspaces existed. J5 doesn't guard this upstream behaviour: in Jackson's install, 3 of 61 preparations failed, all on the first day, and none was messaged again (Jackson, 2026-10-06). A shared checkout or an existing worktree binds at creation, so its brief starts at once. A `client_request_id` stays bound to the workspace type it was first accepted with: a retry that asks for another type is refused before anything is dispatched, even after a restart, since the type is encoded in the create command's durable receipt. A retry with the same type replays the first spawn, so a different `base_ref` or `worktree_path` has no effect, for an existing worktree too; changing them needs a fresh `client_request_id`. A second start for the same thread while one is in flight is refused with a retry instruction, so two concurrent retries cannot both create it. An existing worktree is looked up in upstream's ref listing, which refreshes every few seconds, so one created moments ago may be refused once; retry in a moment. Closing or archiving a Peer Agent never removes its worktree.
+
+**Errors**, each naming state and next command: the caller's membership is missing or ambiguous; the caller's home no longer exists; the caller sits in a Crew (naming its Captain as the escalation and `delegate_task` for its own subagents; only a Captain grows a Crew, through the gate); the chosen workspace can't be used (a path that isn't one of the project's worktrees, a `base_ref` that doesn't resolve, a `branch` that exists, an unreadable repository); the `client_request_id` is bound to another workspace type, or a start for it is already in flight; creation failed.
 
 **Events:** participant joined, home registered, placement created.
 
@@ -193,29 +201,29 @@ follow a playbook, set playbook to a name from playbook_list and give seats the 
 (steps, from playbook_read); a step has one owner, steps no seat owns are yours as Captain, and the
 result reports unowned steps and any step whose persona differs from its seat's. For a crew built
 from a playbook, staff one seat per distinct persona its steps name, each owning that persona's
-steps, and propose a custom seat, noted in its reason, where a named persona isn't available. Name
-the crew for
-what it is for and give each seat a short lowercase-hyphen name like code-reviewer. The user reviews the
-roster and each seat's resolved provider, model, reasoning, and access in this thread, may remove or
-add seats, and approves or declines; you receive the decision and the roster as a message here.
-Approved seats run with the runtime the human approves, which may exceed yours. You become the
-crew's Captain and may command several crews at once; later requests, stops, and archives name the
-crew they mean. Use send_message for member-to-member, member-to-Captain, and Captain-to-Captain
-coordination, including findings and direct results; artifacts do not gate these
-conversations. Reuse client_request_id to retry safely. This call is itself the human gate, so it
-works under every sandbox and approval policy, including approval policy never; never refuse the
-brief because approvals are disabled."
+steps, and propose a custom seat, noted in its reason, where a named persona isn't available. Every
+seat names its workspace, with the same three choices as spawn_agent. Name the crew for what it is
+for and give each seat a short lowercase-hyphen name like code-reviewer. The user reviews the roster
+and each seat's resolved provider, model, reasoning, and access in this thread, may remove or add
+seats, and approves or declines; you receive the decision and the roster as a message here. Approved
+seats run with the runtime the human approves, which may exceed yours. You become the crew's Captain
+and may command several crews at once; later requests, stops, and archives name the crew they mean.
+Use send_message for member-to-member, member-to-Captain, and Captain-to-Captain coordination,
+including findings and direct results; artifacts do not gate these conversations. Reuse
+client_request_id to retry safely. This call is itself the human gate, so it works under every
+sandbox and approval policy, including approval policy never; never refuse the brief because
+approvals are disabled."
 
 Published as non-destructive (`destructiveHint: false`): the call records a pending request and
 nothing spawns until a human approves it.
 
-| Input               | Type                                                                                       | Required | Meaning                                                                                                                                        |
-| ------------------- | ------------------------------------------------------------------------------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `name`              | string                                                                                     | yes      | The Crew's display name                                                                                                                        |
-| `brief`             | string                                                                                     | yes      | What every seat starts on, verbatim                                                                                                            |
-| `seats`             | 1–12 of `{seat, persona?, model_selection?, runtime_mode?, reason, instructions?, steps?}` | yes      | Seat name, persona id from `list_personas` (none for a custom seat), why, wiring, custom-seat runtime, and the playbook step ids the seat owns |
-| `playbook`          | string                                                                                     | no       | A playbook name from `playbook_list` in the Captain's workspace; the Crew follows it                                                           |
-| `client_request_id` | string                                                                                     | no       | Supply and reuse to make retries safe                                                                                                          |
+| Input               | Type                                                                                                  | Required | Meaning                                                                                                                                                                                            |
+| ------------------- | ----------------------------------------------------------------------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`              | string                                                                                                | yes      | The Crew's display name                                                                                                                                                                            |
+| `brief`             | string                                                                                                | yes      | What every seat starts on, verbatim                                                                                                                                                                |
+| `seats`             | 1–12 of `{seat, persona?, model_selection?, runtime_mode?, reason, instructions?, steps?, workspace}` | yes      | Seat name, persona id from `list_personas` (none for a custom seat), why, wiring, custom-seat runtime, the playbook step ids the seat owns, and where it works (the `spawn_agent` workspace shape) |
+| `playbook`          | string                                                                                                | no       | A playbook name from `playbook_list` in the Captain's workspace; the Crew follows it                                                                                                               |
+| `client_request_id` | string                                                                                                | no       | Supply and reuse to make retries safe                                                                                                                                                              |
 
 Bounds: `name` and `seat` up to 100 characters, `reason` up to 500, `brief` and `instructions` up
 to 8,000.
@@ -238,6 +246,7 @@ gate inline above the Captain's composer (additions wait in the Inbox); approval
 caller, persona-backed where a seat names one, records the Crew snapshot with each member's reason
 (the person approves every seat), and posts
 a `<j5_crew_gate>` launch report into the caller's thread once every seat has started or failed to start (or a minute has passed): the roster, what the user changed against the proposal, and per seat `start=started|failed|pending`, with a `seat_failed` line carrying the run's error (`not_started` when the seat's thread exists but its brief never went out) and a `seat_not_created` line for an approved seat whose thread was never created, which is left off the roster. A proposal resolves once: a seat that fails does not stop the others or reopen the gate. Declines post the decline at once.
+Every seat names its workspace, with the same three choices as `spawn_agent`, so there is no Captain-aware default (Jackson, 2026-10-03). Each seat's workspace resolves at preview against the Captain's repository, and the approval token binds it, as it binds the Captain's branch and worktree. Every preview also carries the Captain's current branch, the directory its branch picker searches, and its worktrees, for the roster card's editor; the branches themselves are searched live, so no list is capped. A seat the person adds starts in the Captain's checkout. A seat recorded before workspaces were required stays readable but is refused at preview and approval until one is chosen. A new-worktree seat's brief starts once ThreadLaunch has prepared it, as for `spawn_agent`, so the launch report may read `pending` for a seat whose setup outlasts the report's minute, and a failed preparation arrives as that seat's failure.
 Human approval is the authority (Bryant, 2026-09-10): seats run with the runtime the person
 approved, their persona's policy when no override was chosen, so a read-only Captain may command
 writing seats once a person approved them; a seat's permissions never come from its Captain's.
@@ -251,13 +260,14 @@ one the roster lacks: seat name, persona id from list_personas (or none for a cu
 required instructions and optional model_selection/runtime_mode overrides; an omitted
 model_selection inherits yours and an omitted runtime_mode is full-access; saved-persona runtime
 changes are made only by the human before approval), a clear reason identifying the concern and
-missing expertise or responsibility, and optionally instructions and a brief for the new seat. On a
-crew that follows a playbook, steps may claim step ids from playbook_read that no seat owns yet. The
-user decides from their inbox; you receive the decision and the updated roster as a message here.
-Continue the already-approved work and direct coordination while the addition is pending.
-Captain-only; a member sends the concern and needed expertise to its Captain with send_message.
-Reuse client_request_id to retry safely. Filing the request is the human gate itself and works under
-every approval policy, including approval policy never."
+missing expertise or responsibility, its workspace (the same three choices as propose_crew), and
+optionally instructions and a brief for the new seat. On a crew that follows a playbook, steps may
+claim step ids from playbook_read that no seat owns yet. The user decides from their inbox; you
+receive the decision and the updated roster as a message here. Continue the already-approved work
+and direct coordination while the addition is pending. Captain-only; a member sends the concern and
+needed expertise to its Captain with send_message. Reuse client_request_id to retry safely. Filing
+the request is the human gate itself and works under every approval policy, including approval
+policy never."
 
 | Input                             | Type           | Required | Meaning                                                                     |
 | --------------------------------- | -------------- | -------- | --------------------------------------------------------------------------- |
@@ -268,6 +278,7 @@ every approval policy, including approval policy never."
 | `brief`                           | string         | no       | The new seat's brief; the Crew's brief when omitted                         |
 | `instructions`                    | string         | no       | Seat wiring text, verbatim                                                  |
 | `steps`                           | string[]       | no       | Playbook step ids no seat owns yet; only on a Crew that follows a playbook  |
+| `workspace`                       | object         | yes      | Where the seat works; the same three choices as `propose_crew`              |
 | `client_request_id`               | string         | no       | Supply and reuse to make retries safe                                       |
 
 Result: as `propose_crew`. Semantics: the caller must command the Crew; the seat name must be new;
@@ -437,3 +448,5 @@ run; `stop_crew` doesn't, and unarchiving doesn't restart it.
 - 2026-09-24 — `list_participants` rows carry `squadron_name` beside `squadron_id`, so an agent tells its own Squadron from one on a peer server without any server being named (PR #198).
 - 2026-09-25 — a proposal resolves once (`open`, `approved`, `declined`); a seat that fails to spawn is reported in the launch report, not retried (Bryant; [#311](https://github.com/Jacksondr5/j5code/issues/311)).
 - 2026-09-26 — a custom seat's omitted `runtime_mode` is `full-access` rather than the Captain's access; the `propose_crew` and `request_crew_member` copies above are resynced with the shipped strings (Jackson; [#326](https://github.com/Jacksondr5/j5code/issues/326)).
+- 2026-10-03 — `spawn_agent`, `propose_crew` seats and `request_crew_member` require a `workspace`, with no default: the caller's checkout, a new worktree from a required `base_ref` prepared by upstream's ThreadLaunch, or an existing worktree of the project. (Jackson; [#274](https://github.com/Jacksondr5/j5code/issues/274)).
+- 2026-10-06 — a peer whose new worktree fails to prepare is left as upstream leaves any failed launch: its thread shows the failure, and it is not retried, retired, or guarded, and its spawner is not told. Upstream reads an unbound thread as the project's checkout, but in practice no turn has landed there, and each guard tried (a turn guard, then waiting for the checkout and retiring the peer) raised a new edge case. The turn guard and the `<j5_spawn_workspace_failed>` notice are removed, and `spawn_agent` returns once the peer is registered (Jackson on [#396](https://github.com/Jacksondr5/j5code/pull/396)).

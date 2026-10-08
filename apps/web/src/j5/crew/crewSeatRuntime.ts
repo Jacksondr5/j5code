@@ -6,7 +6,12 @@ import type {
   ServerProviderModel,
 } from "@t3tools/contracts";
 import { isAgentPersonaReasoningOptionId } from "@t3tools/contracts";
-import type { CrewProposalSeat, CrewProposalSeatRuntime } from "@t3tools/contracts/j5";
+import type {
+  CrewProposalSeat,
+  CrewProposalSeatRuntime,
+  CrewSeatWorkspace,
+  CrewWorkspaceOptions,
+} from "@t3tools/contracts/j5";
 import { buildProviderOptionSelectionsFromDescriptors } from "@t3tools/shared/model";
 
 import { CUSTOM_AGENT } from "./crewProposalDraft";
@@ -17,6 +22,7 @@ export interface CrewSeatDraft {
   readonly instructions: string;
   readonly modelSelection?: ModelSelection;
   readonly runtimeMode?: RuntimeMode;
+  readonly workspace?: CrewSeatWorkspace;
 }
 
 export const CREW_ACCESS_OPTIONS = [
@@ -61,6 +67,7 @@ export const crewSeatDraft = (seat: CrewProposalSeat): CrewSeatDraft => ({
   instructions: seat.instructions ?? "",
   ...(seat.modelSelection === undefined ? {} : { modelSelection: seat.modelSelection }),
   ...(seat.runtimeMode === undefined ? {} : { runtimeMode: seat.runtimeMode }),
+  ...(seat.workspace === undefined ? {} : { workspace: seat.workspace }),
 });
 
 /** Freeze the resolved runtime before changing one field, so unrelated settings stay put. */
@@ -78,12 +85,67 @@ export const resolvedCrewSeatDraft = (
   };
 };
 
-/** A newly selected persona starts from its own defaults; overrides belong to the previous member. */
+/**
+ * A newly selected persona starts from its own runtime defaults; those overrides belong to the
+ * previous member. Where the seat works is about the seat, so it stays.
+ */
 export const chooseCrewSeatPersona = (draft: CrewSeatDraft, agentId: string): CrewSeatDraft => ({
   seat: draft.seat,
   instructions: draft.instructions,
   agentId,
+  ...(draft.workspace === undefined ? {} : { workspace: draft.workspace }),
 });
+
+export const CREW_WORKSPACE_OPTIONS = [
+  { value: "shared", label: "Captain's checkout" },
+  { value: "worktree", label: "New worktree" },
+  { value: "existing_worktree", label: "Existing worktree" },
+] as const;
+
+/**
+ * A new type starts from what the Captain's repository offers: a new worktree from the Captain's
+ * current branch, an existing worktree at the first one listed. The server checks both again.
+ */
+export const chooseCrewSeatWorkspace = (
+  draft: CrewSeatDraft,
+  type: CrewSeatWorkspace["type"],
+  options: CrewWorkspaceOptions | undefined,
+): CrewSeatDraft => ({
+  ...draft,
+  workspace:
+    type === "shared"
+      ? { type }
+      : type === "worktree"
+        ? { type, baseRef: options?.currentBranch ?? "" }
+        : { type, worktreePath: options?.worktrees[0]?.path ?? "" },
+});
+
+/** A new worktree's base branch; other fields of the choice stay as they were. */
+export const setCrewSeatBaseRef = (draft: CrewSeatDraft, baseRef: string): CrewSeatDraft =>
+  draft.workspace?.type === "worktree"
+    ? { ...draft, workspace: { ...draft.workspace, baseRef } }
+    : { ...draft, workspace: { type: "worktree", baseRef } };
+
+/** Whether a new worktree starts from the fetched origin copy of its base branch. */
+export const setCrewSeatStartFromOrigin = (
+  draft: CrewSeatDraft,
+  startFromOrigin: boolean,
+): CrewSeatDraft =>
+  draft.workspace?.type === "worktree"
+    ? { ...draft, workspace: { ...draft.workspace, startFromOrigin } }
+    : draft;
+
+export const setCrewSeatWorktree = (draft: CrewSeatDraft, worktreePath: string): CrewSeatDraft => ({
+  ...draft,
+  workspace: { type: "existing_worktree", worktreePath },
+});
+
+export const describeCrewSeatWorkspace = (workspace: CrewSeatWorkspace): string =>
+  workspace.type === "shared"
+    ? "Captain's checkout"
+    : workspace.type === "worktree"
+      ? `New worktree from ${workspace.baseRef}`
+      : `Existing worktree on ${workspace.branch ?? workspace.worktreePath}`;
 
 /** A different model starts with its own advertised defaults, never options from another model. */
 export const crewModelSelection = (
@@ -137,5 +199,6 @@ export const applyCrewSeatDraft = (
   ...(draft.instructions ? { instructions: draft.instructions } : {}),
   ...(draft.modelSelection ? { modelSelection: draft.modelSelection } : {}),
   ...(draft.runtimeMode ? { runtimeMode: draft.runtimeMode } : {}),
+  ...(draft.workspace ? { workspace: draft.workspace } : {}),
   ...(seat.steps === undefined ? {} : { steps: seat.steps }),
 });

@@ -3,7 +3,7 @@ import {
   materializeCrewModelSelection,
   crewModelSelectionProblem,
 } from "./crewRuntimePreview.ts";
-import type { CrewProposalSeatRuntime } from "@t3tools/contracts/j5";
+import type { CrewProposalSeatRuntime, CrewWorkspaceOptions } from "@t3tools/contracts/j5";
 import { isProviderAvailable } from "@t3tools/contracts";
 import type {
   ModelSelection,
@@ -34,12 +34,21 @@ import {
 } from "./AgentCrewInstanceService.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
 import { SpawnCompositionService } from "./SpawnCompositionService.ts";
+import {
+  type ResolvedSpawnWorkspace,
+  type SpawnWorkspaceChoice,
+  SpawnWorkspaceService,
+  namedBaseRefs,
+  namedWorktreePaths,
+  resolveSpawnWorkspace,
+  spawnCreateCommandId,
+  spawnThreadCheckout,
+} from "./spawnWorkspace.ts";
 import { getThreadProjectionIfPresent } from "./threadProjectionReads.ts";
 import { CREW_SEAT_CAP } from "./crewLimits.ts";
 import type { ParticipantId, SquadronId } from "./contracts.ts";
 import {
   crewSeatRequestKey,
-  lifecycleCommandId,
   spawnCrewInstanceId,
   spawnFirstTurnText,
   spawnHomeCommandId,
@@ -63,6 +72,8 @@ export interface CrewLaunchSeat {
   readonly runtimeMode?: RuntimeMode | undefined;
   /** Ids of the playbook steps the seat owns; recorded on its member row. */
   readonly steps?: ReadonlyArray<string> | undefined;
+  /** Where the seat works, chosen for every seat. */
+  readonly workspace: SpawnWorkspaceChoice;
 }
 
 /**
@@ -98,6 +109,7 @@ export interface ResolvedCrewLaunchSeat {
   readonly runtimeMode: RuntimeMode;
   readonly outputArtifact: string | null;
   readonly agentDisplayName: string;
+  readonly workspace: ResolvedSpawnWorkspace;
   readonly runtime: CrewProposalSeatRuntime;
 }
 
@@ -227,6 +239,11 @@ export interface CrewLaunchServiceShape {
   readonly launch: (input: CrewLaunchInput) => Effect.Effect<CrewLaunchResult, CrewLaunchError>;
   /** Spawn approved additional seats under the Captain of an existing Crew, the same way. */
   readonly addSeats: (input: CrewAddSeatsInput) => Effect.Effect<CrewLaunchResult, CrewLaunchError>;
+  /**
+   * What the roster card can offer a seat's workspace: the Captain's branch, the directory
+   * its base-branch picker searches, and the project's worktrees. An unreadable repository offers none.
+   */
+  readonly workspaceOptions: (captain: CrewCaptain) => Effect.Effect<CrewWorkspaceOptions>;
 }
 
 export class CrewLaunchService extends Context.Service<CrewLaunchService, CrewLaunchServiceShape>()(
@@ -241,6 +258,7 @@ export const layer = Layer.effect(
     const crews = yield* AgentCrewInstanceService;
     const registry = yield* ProviderRegistry;
     const agents = yield* makeAgentPersonaLibrary;
+    const spawnWorkspace = yield* SpawnWorkspaceService;
 
     // Resolve every seat before creating anything: a Crew launches whole or not at all.
     const resolveSeats = Effect.fn("j5.a2a.crewLaunch.resolveSeats")(function* (
@@ -248,6 +266,34 @@ export const layer = Layer.effect(
       seats: ReadonlyArray<CrewLaunchSeat>,
     ) {
       const providers = yield* registry.getProviders;
+      // Every seat's workspace resolves against one read of the Captain's repository, here at
+      // preview, so the approval token binds what each seat will get. Shared seats need none.
+      const checkout = seats.every((seat) => seat.workspace.type === "shared")
+        ? null
+        : yield* spawnWorkspace.inspect({
+            projectId: captain.thread.projectId,
+            worktreePath: captain.thread.worktreePath,
+            checkBranches: seats.some(
+              (seat) => seat.workspace.type === "worktree" && seat.workspace.branch !== undefined,
+            ),
+            baseRefs: namedBaseRefs(seats.map((seat) => seat.workspace)),
+            existingWorktreePaths: namedWorktreePaths(seats.map((seat) => seat.workspace)),
+          });
+      const resolveWorkspace = (seat: CrewLaunchSeat) =>
+        Effect.fromResult(
+          checkout === null
+            ? Result.succeed({ type: "shared" } as const)
+            : resolveSpawnWorkspace(checkout, seat.workspace),
+        ).pipe(
+          Effect.mapError(
+            (error) =>
+              new CrewLaunchSeatUnavailableError({
+                seatName: seat.name,
+                agentId: seat.agentId ?? "custom seat",
+                detail: `${error.detail} ${error.nextStep}`,
+              }),
+          ),
+        );
       const resolved: Array<ResolvedCrewLaunchSeat> = [];
       const resolveSelection = Effect.fn("j5.a2a.crewLaunch.resolveSelection")(function* (
         seat: CrewLaunchSeat,
@@ -311,17 +357,16 @@ export const layer = Layer.effect(
                 "This ACP harness cannot enforce the selected access mode. Choose Supervised or Full access.",
             });
           // Custom seats carry the selected access mode, without a persona sandbox assignment.
+          const workspace = yield* resolveWorkspace(seat);
           resolved.push({
             seat,
             assignment: null,
             modelSelection,
-            runtime: describeCrewSeatRuntime(
-              seat.name,
-              modelSelection,
-              provider!,
-              runtimeMode,
-              null,
-            ),
+            workspace,
+            runtime: {
+              ...describeCrewSeatRuntime(seat.name, modelSelection, provider!, runtimeMode, null),
+              workspace,
+            },
             runtimeMode,
             outputArtifact: null,
             agentDisplayName: "custom",
@@ -418,19 +463,24 @@ export const layer = Layer.effect(
               }),
           ),
         );
+        const workspace = yield* resolveWorkspace(seat);
         resolved.push({
           seat,
           assignment,
           modelSelection: assignment.resolvedModelSelection,
-          runtime: describeCrewSeatRuntime(
-            seat.name,
-            assignment.resolvedModelSelection,
-            providers.find(
-              (provider) => provider.instanceId === assignment.resolvedModelSelection.instanceId,
-            )!,
-            runtimeMode,
-            assignment,
-          ),
+          workspace,
+          runtime: {
+            ...describeCrewSeatRuntime(
+              seat.name,
+              assignment.resolvedModelSelection,
+              providers.find(
+                (provider) => provider.instanceId === assignment.resolvedModelSelection.instanceId,
+              )!,
+              runtimeMode,
+              assignment,
+            ),
+            workspace,
+          },
           runtimeMode,
           outputArtifact: definition.outputArtifact ?? null,
           agentDisplayName: assignment.displayName ?? agentId,
@@ -461,25 +511,16 @@ export const layer = Layer.effect(
 
     const detailOf = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
 
-    /**
-     * Create each seat's thread and commit its home and placement, carrying on past a seat that
-     * fails. A failed create is checked against the store: only a thread that never came to exist
-     * is `not_created`; one that exists without its home is `not_started`.
-     */
-    const spawnSeats = Effect.fn("j5.a2a.crewLaunch.spawnSeats")(function* (
-      captain: CrewCaptain,
-      planned: ReadonlyArray<Planned>,
-    ) {
-      const outcomes: Array<CrewSeatLaunchOutcome> = [];
-      const created: Array<Planned> = [];
-      for (const member of planned) {
+    /** Create one seat's thread and commit its home and placement. */
+    const startSeat = (captain: CrewCaptain, member: Planned) =>
+      Effect.gen(function* () {
         const seatName = member.seat.name;
         const create = yield* Effect.result(
           threadManagement.dispatch({
             type: "thread.create",
             createdBy: "agent",
             creationSource: "mcp",
-            commandId: lifecycleCommandId({ ...member.stableInput, operation: "spawn-create" }),
+            commandId: spawnCreateCommandId(member.stableInput, member.workspace.type),
             threadId: member.threadId,
             projectId: captain.thread.projectId,
             // The seat's name alone: the sidebar group and the Crew chip already say which Crew.
@@ -488,31 +529,26 @@ export const layer = Layer.effect(
             runtimeMode: member.runtimeMode,
             interactionMode: captain.thread.interactionMode,
             ...(member.assignment === null ? {} : { agentPersonaAssignment: member.assignment }),
-            branch: captain.thread.branch,
-            worktreePath: captain.thread.worktreePath,
+            ...spawnThreadCheckout(member.workspace, captain.thread),
           }),
         );
         const child = yield* Effect.result(
           getThreadProjectionIfPresent(threadManagement, member.threadId),
         );
-        if (Result.isFailure(child)) {
-          outcomes.push({
+        if (Result.isFailure(child))
+          return {
             seatName,
             kind: "not_started",
             detail: `reading the seat thread failed: ${detailOf(child.failure)}`,
-          });
-          continue;
-        }
-        if (child.success === null) {
-          outcomes.push({
+          } satisfies CrewSeatLaunchOutcome;
+        if (child.success === null)
+          return {
             seatName,
             kind: "not_created",
             detail: Result.isFailure(create)
               ? detailOf(create.failure)
               : "the thread did not appear after it was created",
-          });
-          continue;
-        }
+          } satisfies CrewSeatLaunchOutcome;
         const facts = yield* Effect.result(
           composition.recordFacts({
             homeCommandId: spawnHomeCommandId(member.stableInput),
@@ -527,16 +563,48 @@ export const layer = Layer.effect(
             createdAt: DateTime.formatIso(child.success.thread.createdAt),
           }),
         );
-        if (Result.isFailure(facts)) {
-          outcomes.push({
+        if (Result.isFailure(facts))
+          return {
             seatName,
             kind: "not_started",
             detail: `recording its home and placement failed: ${detailOf(facts.failure)}`,
-          });
+          } satisfies CrewSeatLaunchOutcome;
+        return { seatName, kind: "created" } satisfies CrewSeatLaunchOutcome;
+      });
+
+    /**
+     * Create each seat's thread and commit its home and placement, carrying on past a seat that
+     * fails. A failed create is checked against the store: only a thread that never came to exist
+     * is `not_created`; one that exists without its home is `not_started`.
+     */
+    const spawnSeats = Effect.fn("j5.a2a.crewLaunch.spawnSeats")(function* (
+      captain: CrewCaptain,
+      planned: ReadonlyArray<Planned>,
+    ) {
+      const outcomes: Array<CrewSeatLaunchOutcome> = [];
+      const created: Array<Planned> = [];
+      for (const member of planned) {
+        const seatName = member.seat.name;
+        // Seats go through the same start guard as spawn_agent (see `withSpawnStart`), so every
+        // door that creates a spawn thread keeps its invariant. A Crew's launches are already
+        // serialized and its approval binds each seat's workspace type, so neither refusal is
+        // expected here; the brief takes the guard again once every seat exists.
+        const started = yield* Effect.result(
+          spawnWorkspace.withSpawnStart(
+            {
+              stableInput: member.stableInput,
+              threadId: member.threadId,
+              workspace: member.workspace,
+            },
+            startSeat(captain, member),
+          ),
+        );
+        if (Result.isFailure(started)) {
+          outcomes.push({ seatName, kind: "not_started", detail: detailOf(started.failure) });
           continue;
         }
-        outcomes.push({ seatName, kind: "created" });
-        created.push(member);
+        outcomes.push(started.success);
+        if (started.success.kind === "created") created.push(member);
       }
       return { outcomes, created };
     });
@@ -595,18 +663,26 @@ export const layer = Layer.effect(
           },
         });
         const dispatched = yield* Effect.result(
-          threadManagement.dispatch({
-            type: "message.dispatch",
-            createdBy: "agent",
-            creationSource: "mcp",
-            commandId: lifecycleCommandId({ ...member.stableInput, operation: "spawn-brief" }),
-            threadId: member.threadId,
-            messageId: spawnMessageId(member.stableInput),
-            text,
-            attachments: [],
-            modelSelection: member.modelSelection,
-            dispatchMode: { type: "start_immediately" },
-          }),
+          spawnWorkspace.withSpawnStart(
+            {
+              stableInput: member.stableInput,
+              threadId: member.threadId,
+              workspace: member.workspace,
+            },
+            spawnWorkspace.startBrief({
+              workspace: member.workspace,
+              stableInput: member.stableInput,
+              squadronId: captain.squadronId,
+              projectId: captain.thread.projectId,
+              threadId: member.threadId,
+              title: spawnTitle(member.seat.name, undefined),
+              messageId: spawnMessageId(member.stableInput),
+              text,
+              modelSelection: member.modelSelection,
+              runtimeMode: member.runtimeMode,
+              interactionMode: captain.thread.interactionMode,
+            }),
+          ),
         );
         if (Result.isFailure(dispatched))
           failed.set(
@@ -810,6 +886,14 @@ export const layer = Layer.effect(
         );
       }).pipe((addition) => crews.serialize(input.instance.id, addition));
 
-    return CrewLaunchService.of({ launch, addSeats, resolveSeats });
+    // Only the card's select lists; every seat's workspace is bound from a fresh read above, at
+    // preview and again at approval, where the token refuses a launch that no longer matches.
+    const workspaceOptions: CrewLaunchServiceShape["workspaceOptions"] = (captain) =>
+      spawnWorkspace.workspaceOptions({
+        projectId: captain.thread.projectId,
+        worktreePath: captain.thread.worktreePath,
+      });
+
+    return CrewLaunchService.of({ launch, addSeats, resolveSeats, workspaceOptions });
   }),
 );

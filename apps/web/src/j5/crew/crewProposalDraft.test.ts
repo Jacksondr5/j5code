@@ -22,6 +22,7 @@ describe("crew proposal roster edits", () => {
       seat: "security-pass",
       agentId: "sentry",
       reason: "Added by the user",
+      workspace: { type: "shared" },
     });
     const briefed = addSeat(seats, {
       seat: "eyes",
@@ -56,6 +57,7 @@ describe("crew proposal roster edits", () => {
       agentId: null,
       reason: "Added by the user",
       instructions: "Keep the running notes.",
+      workspace: { type: "shared" },
     });
   });
 

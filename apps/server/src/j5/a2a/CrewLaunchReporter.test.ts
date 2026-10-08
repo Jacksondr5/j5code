@@ -599,6 +599,17 @@ it.effect("posts one report once every seat has started or failed, with the run'
         userMessageId: brief("prosecutor"),
       });
       assert.isNull(yield* reporter.handleStoredEvent(queued));
+      // Nor is a first turn held as `preparing` while its worktree is being made, even though
+      // ThreadLaunch's own preparation item reads as activity.
+      yield* setSeat(id, "prosecutor", [
+        { status: "preparing", activity: true, userMessageId: brief("prosecutor") },
+      ]);
+      const preparing = runEvent(crewSeatThreadId(id, "prosecutor"), {
+        status: "preparing",
+        userMessageId: brief("prosecutor"),
+      });
+      assert.isNull(yield* reporter.handleStoredEvent(preparing));
+      assert.deepStrictEqual(yield* reports(), []);
       const punchlineRun = {
         id: RunId.make(`run:${crewSeatThreadId(id, "punchline")}:0`),
         threadId: crewSeatThreadId(id, "punchline"),

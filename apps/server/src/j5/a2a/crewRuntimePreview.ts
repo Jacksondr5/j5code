@@ -98,7 +98,7 @@ export function describeCrewSeatRuntime(
   provider: ServerProvider,
   mode: RuntimeMode,
   assignment: OrchestrationV2AgentPersonaAssignment | null,
-): CrewProposalSeatRuntime {
+): Omit<CrewProposalSeatRuntime, "workspace"> {
   const model = provider.models.find((candidate) => candidate.slug === selection.model);
   const resolved = materializeCrewModelSelection(selection, provider);
   const descriptor = model?.capabilities?.optionDescriptors?.find((option) =>

@@ -44,6 +44,7 @@ import { layer as squadronProjectReferencesLayer } from "./SquadronProjectRefere
 import { layer as squadronThreadCreationServiceLayer } from "./SquadronThreadCreationService.ts";
 import { layer as threadHomesServiceLayer } from "./ThreadHomesService.ts";
 import { layer as spawnCompositionLayer } from "./SpawnCompositionService.ts";
+import { layer as spawnWorkspaceLayer } from "./spawnWorkspace.ts";
 import { layer as squadronJoinLayer } from "./SquadronJoinService.ts";
 import { layer as agentHandoffNudgeQueueLayer } from "../agents/agentHandoffNudgeQueue.ts";
 import { layer as agentHandoffNudgeWorkerLayer } from "../agents/agentHandoffNudgeWorker.ts";
@@ -99,9 +100,15 @@ const deliveryTransportWithPeers = deliveryTransportLayer.pipe(
 );
 
 export const makeJ5A2AAuxiliaryLayer = (
-  options: { readonly deliveryTransport?: typeof deliveryTransportWithPeers } = {},
+  options: {
+    readonly deliveryTransport?: typeof deliveryTransportWithPeers;
+    readonly spawnWorkspace?: typeof spawnWorkspaceLayer;
+  } = {},
 ) => {
   const deliveryTransportProvided = options.deliveryTransport ?? deliveryTransportWithPeers;
+  // One instance for spawn_agent (the MCP handlers read it from this graph) and CrewLaunch: its
+  // in-flight start guard is in-process, so a second build would reopen the race it closes.
+  const spawnWorkspaceProvided = options.spawnWorkspace ?? spawnWorkspaceLayer;
   const sendServiceProvided = sendServiceLayer.pipe(Layer.provide(peerDirectoryProvided));
   const deliveryWorkerProvided = deliveryWorkerLayer.pipe(
     Layer.provideMerge(deliveryTransportProvided),
@@ -140,7 +147,10 @@ export const makeJ5A2AAuxiliaryLayer = (
     Layer.provideMerge(agentCrewInstanceLayer),
     Layer.provideMerge(playbookStoreLayer),
   );
-  const crewLaunchProvided = crewLaunchLayer.pipe(Layer.provideMerge(agentCrewInstanceLayer));
+  const crewLaunchProvided = crewLaunchLayer.pipe(
+    Layer.provideMerge(agentCrewInstanceLayer),
+    Layer.provideMerge(spawnWorkspaceProvided),
+  );
   // The report watches the seats an approval launched and tells the Captain how they started; the
   // finish notifier's stream feeds it, so one stream serves every Crew reaction.
   // Both Crew reactions raise failure alerts, which wake the one delivery worker after committing.
@@ -195,6 +205,7 @@ export const makeJ5A2AAuxiliaryLayer = (
     lifecycleServiceProvided,
     archiveFactsProvided,
     threadHomesServiceLayer,
+    spawnWorkspaceProvided,
     squadronJoinProvided,
     agentCrewInstanceLayer,
     archiveCrewProvided,
@@ -210,14 +221,18 @@ export const makeJ5A2ARuntimeLayer = (
   options: {
     readonly ledger?: typeof ledgerLayer;
     readonly deliveryTransport?: typeof deliveryTransportWithPeers;
+    readonly spawnWorkspace?: typeof spawnWorkspaceLayer;
   } = {},
 ) => {
   const squadronCreationProvided = makeJ5SquadronCreationLayer(
     options.ledger === undefined ? {} : { ledger: options.ledger },
   );
-  return makeJ5A2AAuxiliaryLayer(
-    options.deliveryTransport === undefined ? {} : { deliveryTransport: options.deliveryTransport },
-  ).pipe(Layer.provideMerge(squadronCreationProvided));
+  return makeJ5A2AAuxiliaryLayer({
+    ...(options.deliveryTransport === undefined
+      ? {}
+      : { deliveryTransport: options.deliveryTransport }),
+    ...(options.spawnWorkspace === undefined ? {} : { spawnWorkspace: options.spawnWorkspace }),
+  }).pipe(Layer.provideMerge(squadronCreationProvided));
 };
 
 /**

@@ -35,6 +35,7 @@ const seat = {
   instructions: "Review the patch",
 };
 const runtime: CrewProposalSeatRuntime = {
+  workspace: { type: "shared" },
   seat: "reviewer",
   provider: "OpenAI",
   harness: "Codex",
@@ -234,6 +235,11 @@ describe("crew member dialog draft lifecycle", () => {
     );
     await act(async () =>
       pending[0]!({
+        workspaceOptions: {
+          currentBranch: "main",
+          cwd: "/repo",
+          worktrees: [],
+        },
         proposalId: "proposal:1",
         approvalToken: "old",
         seats: [{ ...runtime, model: "Wrong custom default" }],
@@ -241,7 +247,16 @@ describe("crew member dialog draft lifecycle", () => {
     );
     expect(editor().runtime).toBeUndefined();
     await act(async () =>
-      pending[1]!({ proposalId: "proposal:1", approvalToken: "new", seats: [runtime] }),
+      pending[1]!({
+        workspaceOptions: {
+          currentBranch: "main",
+          cwd: "/repo",
+          worktrees: [],
+        },
+        proposalId: "proposal:1",
+        approvalToken: "new",
+        seats: [runtime],
+      }),
     );
     expect(editor().runtime).toEqual(runtime);
     await act(async () =>

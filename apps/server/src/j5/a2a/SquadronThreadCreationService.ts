@@ -11,6 +11,7 @@ import { randomUuidV4 } from "../../orchestration-v2/RandomUuid.ts";
 import type { ProjectionRepositoryError } from "../../persistence/Errors.ts";
 import { ProjectionProjectRepository } from "../../persistence/Services/ProjectionProjects.ts";
 import {
+  A2AHomeConflictError,
   A2AHomeRegistrar,
   type A2AHomeRegistrationError,
   type A2AHomeLookupError,
@@ -109,6 +110,8 @@ export class SquadronThreadCreationService extends Context.Service<
   SquadronThreadCreationServiceShape
 >()("t3/j5/a2a/SquadronThreadCreationService") {}
 
+const decodeSquadronId = Schema.decodeUnknownEffect(SquadronId);
+
 export const registrationCommandIdForCreation = (commandId: string) =>
   CommCommandId.make(`command:j5:a2a:thread-creation:${encodeURIComponent(commandId)}`);
 
@@ -181,6 +184,13 @@ export const layer: Layer.Layer<
       return created.id;
     });
 
+    const findRegisteredHome: SquadronThreadCreationServiceShape["findRegisteredHome"] = (
+      threadId,
+    ) =>
+      registrar
+        .getHomeForThread(threadId)
+        .pipe(Effect.catchTag("A2AHomeNotFoundError", () => Effect.succeed(null)));
+
     const registerAtDurableLaunch: SquadronThreadCreationServiceShape["registerAtDurableLaunch"] = (
       input,
     ) =>
@@ -204,7 +214,21 @@ export const layer: Layer.Layer<
           // through the create route at the same moment can still produce two.
           return yield* register(yield* sql.withTransaction(resolveProjectSquadron(input)));
         }
-        const squadronId = yield* Schema.decodeUnknownEffect(SquadronId)(input.squadronId);
+        const squadronId = yield* decodeSquadronId(input.squadronId);
+
+        // A J5 spawn or Crew seat in a new worktree records its home and placement first, then
+        // hands the thread to ThreadLaunch, which lands here. That home was admitted by the spawn, which
+        // never required the one-project reference below, so it is returned as it stands; without
+        // this, a second join would be appended under this creation's command id.
+        const existing = yield* findRegisteredHome(input.threadId);
+        if (existing !== null) {
+          if (existing.squadronId === squadronId) return existing;
+          return yield* new A2AHomeConflictError({
+            threadId: input.threadId,
+            existingSquadronId: existing.squadronId,
+            requestedSquadronId: squadronId,
+          });
+        }
 
         const references = yield* projectReferences.listForSquadron(squadronId);
         const referencedProjectIds = references.map((reference) => reference.projectId);

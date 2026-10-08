@@ -31,6 +31,7 @@ import {
   type CrewCaptain,
   type CrewLaunchError,
   type CrewLaunchPlaybook,
+  type CrewLaunchSeat,
   type ResolvedCrewLaunchSeat,
 } from "./CrewLaunchService.ts";
 import { planCrewPlaybook, withPersonaSwaps, type CrewPlaybookPlan } from "./crewPlaybookPlan.ts";
@@ -46,6 +47,25 @@ import { getThreadProjectionIfPresent } from "./threadProjectionReads.ts";
 export { CREW_SEAT_CAP } from "./CrewLaunchService.ts";
 
 const PROPOSAL_SESSION = CREW_PROPOSAL_SESSION;
+
+/**
+ * A proposal seat as the launcher takes it. `validateSeats` refuses a seat with no workspace before
+ * any preview or launch, so one reaching here without it is a bug, not a request.
+ */
+const launchSeatOf = (seat: CrewProposalSeat): CrewLaunchSeat => {
+  if (seat.workspace === undefined)
+    throw new Error(`Seat ${seat.seat} reached the launcher without a workspace.`);
+  return {
+    name: seat.seat,
+    agentId: seat.agentId,
+    reason: seat.reason,
+    instructions: seat.instructions,
+    modelSelection: seat.modelSelection,
+    runtimeMode: seat.runtimeMode,
+    steps: seat.steps,
+    workspace: seat.workspace,
+  };
+};
 
 export class CrewProposalRequestError extends Data.TaggedError("CrewProposalRequestError")<{
   readonly detail: string;
@@ -484,15 +504,7 @@ export const layer = Layer.effect(
       resolvedSeats: ReadonlyArray<ResolvedCrewLaunchSeat>,
       playbook: CrewLaunchPlaybook | null,
     ) {
-      const launchSeats = seats.map((seat) => ({
-        name: seat.seat,
-        agentId: seat.agentId,
-        reason: seat.reason,
-        instructions: seat.instructions,
-        modelSelection: seat.modelSelection,
-        runtimeMode: seat.runtimeMode,
-        steps: seat.steps,
-      }));
+      const launchSeats = seats.map(launchSeatOf);
       if (proposal.kind === "roster") {
         return yield* launcher.launch({
           providerSessionId: PROPOSAL_SESSION,
@@ -700,18 +712,7 @@ export const layer = Layer.effect(
     });
 
     const resolveRuntime = (captain: CrewCaptain, seats: ReadonlyArray<CrewProposalSeat>) =>
-      launcher.resolveSeats(
-        captain,
-        seats.map((seat) => ({
-          name: seat.seat,
-          agentId: seat.agentId,
-          reason: seat.reason,
-          instructions: seat.instructions,
-          modelSelection: seat.modelSelection,
-          runtimeMode: seat.runtimeMode,
-          steps: seat.steps,
-        })),
-      );
+      launcher.resolveSeats(captain, seats.map(launchSeatOf));
 
     /** Preview and approval consult the same live roster and the same live playbook. */
     const validateProposalSeats = Effect.fn("j5.a2a.crewProposal.validateProposalSeats")(function* (
@@ -775,6 +776,7 @@ export const layer = Layer.effect(
         const resolved = yield* resolveRuntime(captain, seats);
         return {
           proposalId: proposal.id,
+          workspaceOptions: yield* launcher.workspaceOptions(captain),
           approvalToken: crewApprovalToken(
             proposal,
             captain,
@@ -836,7 +838,7 @@ export const layer = Layer.effect(
           )
             return yield* new CrewProposalRequestError({
               detail:
-                "The crew runtime preview is missing or has changed since it was shown: the roster, a seat's runtime, the playbook plan, or the Captain's branch or worktree may have changed.",
+                "The crew runtime preview is missing or has changed since it was shown: the roster, a seat's runtime, the playbook plan, a seat's workspace, or the Captain's branch or worktree may have changed.",
               nextStep: "Refresh the preview and review the current settings before approving.",
             });
           const launched = yield* fulfil(

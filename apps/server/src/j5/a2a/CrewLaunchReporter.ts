@@ -139,6 +139,10 @@ const verdictFor = (
   switch (run.status) {
     case "completed":
       return { kind: "started" };
+    // A new worktree's first turn waits here while ThreadLaunch prepares it, and that
+    // preparation's own items are not the seat's agent at work.
+    case "preparing":
+      return { kind: "pending" };
     case "failed":
     case "interrupted":
     case "cancelled":

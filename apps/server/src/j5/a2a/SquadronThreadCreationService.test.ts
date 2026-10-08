@@ -68,13 +68,9 @@ const makeLayer = (input: {
           squadronId,
           participantId: ParticipantId.make(`agent:${threadId}`),
         })),
+    // A thread being launched has no home until this service registers one.
     getHomeForThread:
-      input.getHomeForThread ??
-      (() =>
-        Effect.succeed({
-          squadronId,
-          participantId: ParticipantId.make(`agent:${threadId}`),
-        })),
+      input.getHomeForThread ?? ((threadId) => Effect.fail(new A2AHomeNotFoundError({ threadId }))),
   });
   return squadronThreadCreationServiceLayer.pipe(
     Layer.provideMerge(references),
@@ -111,40 +107,62 @@ it.effect("refuses unreferenced and ambiguous project selections without inferen
   }).pipe(Effect.provide(makeLayer({ references: [projectId] }))),
 );
 
+it.effect("registers a launch once and returns that home on a replay without joining again", () => {
+  const registrations: Array<Parameters<A2AHomeRegistrar["Service"]["registerAtCreation"]>[0]> = [];
+  const home = { squadronId, participantId: ParticipantId.make(`agent:${threadId}`) };
+  return Effect.gen(function* () {
+    const service = yield* SquadronThreadCreationService;
+    assert.deepStrictEqual(yield* service.registerAtDurableLaunch(input), home);
+    assert.deepStrictEqual(yield* service.registerAtDurableLaunch(input), home);
+    assert.deepStrictEqual(registrations, [
+      {
+        squadronId,
+        threadId,
+        createdAt,
+        commandId: "command:j5:a2a:thread-creation:command%3Acreation",
+      },
+    ]);
+  }).pipe(
+    Effect.provide(
+      makeLayer({
+        references: [projectId],
+        register: (registration) => {
+          registrations.push(registration);
+          return Effect.succeed(home);
+        },
+        getHomeForThread: (threadId) =>
+          registrations.length > 0
+            ? Effect.succeed(home)
+            : Effect.fail(new A2AHomeNotFoundError({ threadId })),
+      }),
+    ),
+  );
+});
+
 it.effect(
-  "replays the exact durable registration inputs without launching or preparing again",
+  "keeps a home a J5 spawn already recorded, without the one-project guard or a second join",
   () => {
-    const registrations: Array<Parameters<A2AHomeRegistrar["Service"]["registerAtCreation"]>[0]> =
-      [];
+    const registrations: Array<unknown> = [];
+    const home = { squadronId, participantId: ParticipantId.make(`agent:${threadId}`) };
     return Effect.gen(function* () {
       const service = yield* SquadronThreadCreationService;
-      yield* service.registerAtDurableLaunch(input);
-      yield* service.registerAtDurableLaunch(input);
-      assert.deepStrictEqual(registrations, [
-        {
-          squadronId,
-          threadId,
-          createdAt,
-          commandId: "command:j5:a2a:thread-creation:command%3Acreation",
-        },
-        {
-          squadronId,
-          threadId,
-          createdAt,
-          commandId: "command:j5:a2a:thread-creation:command%3Acreation",
-        },
-      ]);
+      // This Squadron references two projects, which would refuse creating a new home here.
+      assert.deepStrictEqual(yield* service.registerAtDurableLaunch(input), home);
+      assert.lengthOf(registrations, 0);
+      const conflict = yield* service
+        .registerAtDurableLaunch({ ...input, squadronId: "squadron:elsewhere" })
+        .pipe(Effect.flip);
+      assert.equal(conflict._tag, "A2AHomeConflictError");
+      assert.lengthOf(registrations, 0);
     }).pipe(
       Effect.provide(
         makeLayer({
-          references: [projectId],
+          references: [projectId, otherProjectId],
           register: (registration) => {
             registrations.push(registration);
-            return Effect.succeed({
-              squadronId,
-              participantId: ParticipantId.make(`agent:${threadId}`),
-            });
+            return Effect.succeed(home);
           },
+          getHomeForThread: () => Effect.succeed(home),
         }),
       ),
     );

@@ -1,7 +1,17 @@
 import { expect, it } from "@effect/vitest";
 import * as Schema from "effect/Schema";
 
-import { CrewProposalResolveRequest } from "../j5.ts";
+import {
+  CrewProposalPreviewRequest,
+  CrewProposalPreviewResponse,
+  CrewProposalResolveRequest,
+  CrewProposalsResponse,
+} from "../j5.ts";
+
+const decodeList = Schema.decodeUnknownSync(CrewProposalsResponse);
+const decodePreviewResponse = Schema.decodeUnknownSync(CrewProposalPreviewResponse);
+const decodePreviewRequest = Schema.decodeUnknownSync(CrewProposalPreviewRequest);
+const decodeResolve = Schema.decodeUnknownSync(CrewProposalResolveRequest);
 
 it("requires a runtime preview token for approval, while a decline needs no preview", () => {
   const decode = Schema.decodeUnknownSync(CrewProposalResolveRequest);
@@ -13,4 +23,64 @@ it("requires a runtime preview token for approval, while a decline needs no prev
     proposalId: "proposal",
     decision: "decline",
   });
+});
+
+it("reads a seat workspace it can't decode as absent, keeping the rest of the list", () => {
+  const seat = { seat: "reviewer", agentId: null, reason: "Review" };
+  const proposal = {
+    id: "proposal",
+    squadronId: "squadron",
+    captainParticipantId: "captain",
+    captainThreadId: "thread",
+    crewInstanceId: null,
+    kind: "roster",
+    status: "open",
+    brief: "Brief",
+    displayName: "Crew",
+    approvedSeats: null,
+    createdAt: "2026-10-06T00:00:00.000Z",
+    resolvedAt: null,
+  };
+  const decoded = decodeList({
+    proposals: [
+      {
+        ...proposal,
+        requestedSeats: [
+          { ...seat, workspace: { type: "sandbox" } },
+          { ...seat, seat: "builder", workspace: { type: "worktree" } },
+          { ...seat, seat: "scout", workspace: { type: "shared" } },
+        ],
+      },
+    ],
+  });
+  expect(decoded.proposals[0]!.requestedSeats).toEqual([
+    seat,
+    { ...seat, seat: "builder" },
+    { ...seat, seat: "scout", workspace: { type: "shared" } },
+  ]);
+});
+
+it("reads a preview's workspace options it can't decode as absent, keeping the preview", () => {
+  const decoded = decodePreviewResponse({
+    proposalId: "proposal",
+    approvalToken: "token",
+    seats: [],
+    workspaceOptions: { currentBranch: "main", worktrees: [{ path: "/repo-worktrees/a" }] },
+  });
+  expect(decoded).toEqual({ proposalId: "proposal", approvalToken: "token", seats: [] });
+});
+
+it("still refuses a seat workspace it can't decode in a preview or an approval", () => {
+  const seats = [
+    { seat: "reviewer", agentId: null, reason: "Review", workspace: { type: "worktree" } },
+  ];
+  expect(() => decodePreviewRequest({ proposalId: "proposal", seats })).toThrow();
+  expect(() =>
+    decodeResolve({
+      proposalId: "proposal",
+      decision: "approve",
+      approvalToken: "token",
+      seats: [{ ...seats[0], workspace: { type: "sandbox" } }],
+    }),
+  ).toThrow();
 });

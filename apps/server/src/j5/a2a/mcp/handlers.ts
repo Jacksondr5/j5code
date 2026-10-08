@@ -6,6 +6,7 @@ import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
+import * as Result from "effect/Result";
 
 import {
   McpInvocationContext,
@@ -42,6 +43,14 @@ import { ParticipantPlacementService } from "../PlacementService.ts";
 import { withDeliveryNotice } from "../receiverBacklog.ts";
 import { A2ASendService } from "../SendService.ts";
 import { SpawnCompositionService } from "../SpawnCompositionService.ts";
+import {
+  SpawnWorkspaceService,
+  namedBaseRefs,
+  namedWorktreePaths,
+  resolveSpawnWorkspace,
+  spawnCreateCommandId,
+  spawnThreadCheckout,
+} from "../spawnWorkspace.ts";
 import { SquadronJoinService } from "../SquadronJoinService.ts";
 import { SquadronProjectReferences } from "../SquadronProjectReferences.ts";
 import {
@@ -64,6 +73,7 @@ import {
   type J5ArchiveCrewFailure,
   type J5McpFailure,
   type J5ProposeCrewInput,
+  spawnWorkspaceFromInput,
 } from "./tools.ts";
 
 class J5AgentToolStateError extends Data.TaggedError("J5AgentToolStateError")<{
@@ -457,6 +467,7 @@ export const crewSeatFromInput = (seat: J5ProposeCrewInput["seats"][number]) => 
   ...(seat.model_selection === undefined ? {} : { modelSelection: seat.model_selection }),
   ...(seat.runtime_mode === undefined ? {} : { runtimeMode: seat.runtime_mode }),
   ...(seat.steps === undefined ? {} : { steps: seat.steps }),
+  workspace: spawnWorkspaceFromInput(seat.workspace),
 });
 
 const handlers = {
@@ -747,114 +758,155 @@ const handlers = {
         requestKey,
       };
       const threadId = spawnThreadId(stableInput);
-      yield* threadManagement
-        .dispatch({
-          type: "thread.create",
-          createdBy: "agent",
-          creationSource: "mcp",
-          commandId: lifecycleCommandId({ ...stableInput, operation: "spawn-create" }),
-          threadId,
-          projectId: parent.thread.projectId,
-          title: spawnTitle(input.brief, input.title),
-          modelSelection,
-          runtimeMode: persona?.runtimeMode ?? parent.thread.runtimeMode,
-          interactionMode: parent.thread.interactionMode,
-          ...(persona === undefined ? {} : { agentPersonaAssignment: persona.assignment }),
-          branch: parent.thread.branch,
-          worktreePath: parent.thread.worktreePath,
-        })
-        .pipe(
-          Effect.mapError((error) =>
-            stateError(
-              `Peer Agent thread ${threadId} could not be created: ${error.message}.`,
-              error._tag === "OrchestratorCommandPreviouslyRejectedError"
-                ? "Inspect the rejection, correct the request, and retry spawn_agent with a fresh client_request_id; the rejected key is permanently bound."
-                : "Inspect the caller thread and provider state, then retry spawn_agent with the same client_request_id.",
-            ),
-          ),
-        );
-      const child = yield* threadManagement
-        .getThreadProjection(threadId)
-        .pipe(
-          Effect.mapError((error) =>
-            stateError(
-              `Created Peer Agent thread ${threadId} is not readable: ${error.message}.`,
-              "Retry spawn_agent with the same client_request_id so registration can continue safely.",
-            ),
-          ),
-        );
-      const facts = yield* (yield* SpawnCompositionService)
-        .recordFacts({
-          homeCommandId: spawnHomeCommandId(stableInput),
-          placementCommandId: spawnPlacementCommandId(stableInput),
-          squadronId: caller.squadronId,
-          threadId,
-          provenance: {
-            kind: "spawned-by",
-            spawnedByParticipantId: caller.participantId,
-            source: "j5_spawn",
-          },
-          createdAt: DateTime.formatIso(child.thread.createdAt),
-        })
-        .pipe(
-          Effect.mapError((error) =>
-            stateError(
-              `Peer Agent thread ${threadId} exists as a visible orphan without committed home/placement facts or a started brief: ${error.message}.`,
-              "Retry spawn_agent with the same client_request_id only after repairing transient state; otherwise ask the human operator to retire or repair the orphan after A9 lifecycle support lands.",
-            ),
-          ),
-        );
-      if (
-        facts.placement.provenance.kind !== "spawned-by" ||
-        facts.placement.provenance.source !== "j5_spawn" ||
-        facts.placement.placementParentId === null
-      ) {
-        return yield* stateError(
-          `Peer Agent ${facts.home.participantId} committed placement facts that do not satisfy the J5 spawn contract.`,
-          "Call list_participants to inspect committed placement truth and ask the human operator to repair the inconsistent record.",
-        );
-      }
-      yield* threadManagement
-        .dispatch({
-          type: "message.dispatch",
-          createdBy: "agent",
-          creationSource: "mcp",
-          commandId: lifecycleCommandId({ ...stableInput, operation: "spawn-brief" }),
-          threadId,
-          messageId: spawnMessageId(stableInput),
-          text: spawnFirstTurnText({
-            brief: input.brief,
-            participantId: facts.home.participantId,
-            squadronId: facts.home.squadronId,
-            squadronName: caller.squadron.name,
-            spawnedByParticipantId: caller.participantId,
-            spawnerThreadId: scope.threadId,
+      const spawnWorkspace = yield* SpawnWorkspaceService;
+      const choice = spawnWorkspaceFromInput(input.workspace);
+      // A replay must not refuse the branch its own first attempt created, so a named branch is
+      // checked for only before the thread exists.
+      const checkBranches =
+        choice.type === "worktree" &&
+        choice.branch !== undefined &&
+        (yield* threadManagement
+          .getThreadShell(threadId)
+          .pipe(Effect.orElseSucceed(() => null))) === null;
+      // Sharing the caller's checkout asks nothing of git.
+      const checkout =
+        choice.type === "shared"
+          ? null
+          : yield* spawnWorkspace.inspect({
+              projectId: parent.thread.projectId,
+              worktreePath: parent.thread.worktreePath,
+              checkBranches,
+              baseRefs: namedBaseRefs([choice]),
+              existingWorktreePaths: namedWorktreePaths([choice]),
+            });
+      const workspace = yield* Effect.fromResult(
+        checkout === null
+          ? Result.succeed({ type: "shared" } as const)
+          : resolveSpawnWorkspace(checkout, choice),
+      ).pipe(
+        Effect.mapError((error) =>
+          stateError(`Peer Agent was not created: ${error.detail}`, error.nextStep),
+        ),
+      );
+      return yield* spawnWorkspace
+        .withSpawnStart(
+          { stableInput, threadId, workspace },
+          Effect.gen(function* () {
+            yield* threadManagement
+              .dispatch({
+                type: "thread.create",
+                createdBy: "agent",
+                creationSource: "mcp",
+                commandId: spawnCreateCommandId(stableInput, workspace.type),
+                threadId,
+                projectId: parent.thread.projectId,
+                title: spawnTitle(input.brief, input.title),
+                modelSelection,
+                runtimeMode: persona?.runtimeMode ?? parent.thread.runtimeMode,
+                interactionMode: parent.thread.interactionMode,
+                ...(persona === undefined ? {} : { agentPersonaAssignment: persona.assignment }),
+                ...spawnThreadCheckout(workspace, parent.thread),
+              })
+              .pipe(
+                Effect.mapError((error) =>
+                  stateError(
+                    `Peer Agent thread ${threadId} could not be created: ${error.message}.`,
+                    error._tag === "OrchestratorCommandPreviouslyRejectedError"
+                      ? "Inspect the rejection, correct the request, and retry spawn_agent with a fresh client_request_id; the rejected key is permanently bound."
+                      : "Inspect the caller thread and provider state, then retry spawn_agent with the same client_request_id.",
+                  ),
+                ),
+              );
+            const child = yield* threadManagement
+              .getThreadProjection(threadId)
+              .pipe(
+                Effect.mapError((error) =>
+                  stateError(
+                    `Created Peer Agent thread ${threadId} is not readable: ${error.message}.`,
+                    "Retry spawn_agent with the same client_request_id so registration can continue safely.",
+                  ),
+                ),
+              );
+            const facts = yield* (yield* SpawnCompositionService)
+              .recordFacts({
+                homeCommandId: spawnHomeCommandId(stableInput),
+                placementCommandId: spawnPlacementCommandId(stableInput),
+                squadronId: caller.squadronId,
+                threadId,
+                provenance: {
+                  kind: "spawned-by",
+                  spawnedByParticipantId: caller.participantId,
+                  source: "j5_spawn",
+                },
+                createdAt: DateTime.formatIso(child.thread.createdAt),
+              })
+              .pipe(
+                Effect.mapError((error) =>
+                  stateError(
+                    `Peer Agent thread ${threadId} exists as a visible orphan without committed home/placement facts or a started brief: ${error.message}.`,
+                    "Retry spawn_agent with the same client_request_id only after repairing transient state; otherwise ask the human operator to retire or repair the orphan after A9 lifecycle support lands.",
+                  ),
+                ),
+              );
+            if (
+              facts.placement.provenance.kind !== "spawned-by" ||
+              facts.placement.provenance.source !== "j5_spawn" ||
+              facts.placement.placementParentId === null
+            ) {
+              return yield* stateError(
+                `Peer Agent ${facts.home.participantId} committed placement facts that do not satisfy the J5 spawn contract.`,
+                "Call list_participants to inspect committed placement truth and ask the human operator to repair the inconsistent record.",
+              );
+            }
+            yield* spawnWorkspace
+              .startBrief({
+                workspace,
+                stableInput,
+                squadronId: facts.home.squadronId,
+                projectId: parent.thread.projectId,
+                threadId,
+                title: spawnTitle(input.brief, input.title),
+                messageId: spawnMessageId(stableInput),
+                text: spawnFirstTurnText({
+                  brief: input.brief,
+                  participantId: facts.home.participantId,
+                  squadronId: facts.home.squadronId,
+                  squadronName: caller.squadron.name,
+                  spawnedByParticipantId: caller.participantId,
+                  spawnerThreadId: scope.threadId,
+                }),
+                modelSelection,
+                runtimeMode: persona?.runtimeMode ?? parent.thread.runtimeMode,
+                interactionMode: parent.thread.interactionMode,
+              })
+              .pipe(
+                Effect.mapError((error) =>
+                  stateError(
+                    `Peer Agent ${facts.home.participantId} is registered and addressable, but its brief did not start: ${error.message}.`,
+                    "Retry spawn_agent with the same client_request_id to start the same brief safely.",
+                  ),
+                ),
+              );
+            return {
+              participant_id: facts.home.participantId,
+              thread_id: threadId,
+              squadron_id: facts.home.squadronId,
+              placement: {
+                placement_parent_id: facts.placement.placementParentId,
+                provenance: {
+                  kind: "spawned-by" as const,
+                  spawned_by_participant_id: facts.placement.provenance.spawnedByParticipantId,
+                  source: facts.placement.provenance.source,
+                },
+              },
+            };
           }),
-          attachments: [],
-          modelSelection,
-          dispatchMode: { type: "start_immediately" },
-        })
+        )
         .pipe(
-          Effect.mapError((error) =>
-            stateError(
-              `Peer Agent ${facts.home.participantId} is registered and addressable, but its brief did not start: ${error.message}.`,
-              "Retry spawn_agent with the same client_request_id to start the same brief safely.",
-            ),
+          Effect.catchTag("SpawnWorkspaceError", (error) =>
+            Effect.fail(stateError(`Peer Agent was not created: ${error.detail}`, error.nextStep)),
           ),
         );
-      return {
-        participant_id: facts.home.participantId,
-        thread_id: threadId,
-        squadron_id: facts.home.squadronId,
-        placement: {
-          placement_parent_id: facts.placement.placementParentId,
-          provenance: {
-            kind: "spawned-by" as const,
-            spawned_by_participant_id: facts.placement.provenance.spawnedByParticipantId,
-            source: facts.placement.provenance.source,
-          },
-        },
-      };
     }).pipe(Effect.mapError(failure)),
   propose_crew: (input) =>
     Effect.gen(function* () {
@@ -910,6 +962,7 @@ const handlers = {
               : { modelSelection: input.model_selection }),
             ...(input.runtime_mode === undefined ? {} : { runtimeMode: input.runtime_mode }),
             ...(input.steps === undefined ? {} : { steps: input.steps }),
+            workspace: spawnWorkspaceFromInput(input.workspace),
           },
           brief: input.brief ?? null,
         })

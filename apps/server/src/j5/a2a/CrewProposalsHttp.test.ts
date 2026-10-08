@@ -31,7 +31,14 @@ const proposal: CrewProposal = {
   status: "open",
   brief: "Fix the flaky login test.",
   displayName: "Login Fix Crew",
-  requestedSeats: [{ seat: "builder", agentId: "builder", reason: "Implements the fix" }],
+  requestedSeats: [
+    {
+      workspace: { type: "shared" as const },
+      seat: "builder",
+      agentId: "builder",
+      reason: "Implements the fix",
+    },
+  ],
   approvedSeats: null,
   createdAt: "2026-09-09T16:00:00.000Z",
   resolvedAt: null,
@@ -39,6 +46,7 @@ const proposal: CrewProposal = {
 };
 
 const customSeat = {
+  workspace: { type: "shared" as const },
   seat: "critic",
   agentId: null,
   reason: "Human added review",
@@ -82,6 +90,11 @@ it("lists open proposals for readers and resolves them only for operators", asyn
       return Effect.succeed({
         proposalId: input.proposalId,
         approvalToken: "runtime-token",
+        workspaceOptions: {
+          currentBranch: null,
+          cwd: "/repo",
+          worktrees: [],
+        },
         seats: [
           {
             seat: "critic",
@@ -92,6 +105,7 @@ it("lists open proposals for readers and resolves them only for operators", asyn
             access: "Supervised",
             modelSelection: customSeat.modelSelection,
             runtimeMode: customSeat.runtimeMode,
+            workspace: { type: "shared" as const },
           },
         ],
       });
@@ -153,6 +167,11 @@ it("lists open proposals for readers and resolves them only for operators", asyn
     assert.deepStrictEqual(await preview.json(), {
       proposalId: proposal.id,
       approvalToken: "runtime-token",
+      workspaceOptions: {
+        currentBranch: null,
+        cwd: "/repo",
+        worktrees: [],
+      },
       seats: [
         {
           seat: "critic",
@@ -163,6 +182,7 @@ it("lists open proposals for readers and resolves them only for operators", asyn
           access: "Supervised",
           modelSelection: customSeat.modelSelection,
           runtimeMode: customSeat.runtimeMode,
+          workspace: { type: "shared" },
         },
       ],
     });
@@ -243,7 +263,15 @@ it.effect(
       ): CrewProposal => ({
         ...proposal,
         id,
-        requestedSeats: [{ seat: "planner", agentId: null, reason: "Plans", steps }],
+        requestedSeats: [
+          {
+            workspace: { type: "shared" as const },
+            seat: "planner",
+            agentId: null,
+            reason: "Plans",
+            steps,
+          },
+        ],
         playbook: { name, definitionPath: path.join(root, ".j5/playbooks", `${name}.yaml`) },
       });
       const store = Layer.mock(AgentCrewProposalService)({
