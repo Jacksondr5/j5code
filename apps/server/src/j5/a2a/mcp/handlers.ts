@@ -198,7 +198,7 @@ const resolveCallerMembership = Effect.fn("j5.a2a.mcp.resolveCallerMembership")(
   }
   if (memberships.length !== 1) {
     return yield* stateError(
-      `Caller membership for thread ${scope.threadId} is ambiguous across projects ${memberships.map((row) => row.squadronId).join(", ")}.`,
+      `Caller membership for thread ${scope.threadId} is ambiguous across projects ${memberships.map((row) => row.projectId).join(", ")}.`,
       "Call list_participants to inspect current membership before retrying.",
     );
   }
@@ -226,27 +226,24 @@ const preflightSpawnCaller = Effect.fn("j5.a2a.mcp.preflightSpawnCaller")(functi
       "Return your result to the agent that started you; it can spawn agents.",
     );
   }
-  const squadron = yield* ledger
-    .readSquadron(home.squadronId)
+  const project = yield* ledger
+    .readProjectLedger(home.projectId)
     .pipe(
       Effect.mapError((error) =>
         stateError(
-          `Caller thread ${scope.threadId} is registered in project ${home.squadronId}, but that project's ledger is unavailable: ${error instanceof Error ? error.message : String(error)}.`,
+          `Caller thread ${scope.threadId} is registered in project ${home.projectId}, but that project's ledger is unavailable: ${error instanceof Error ? error.message : String(error)}.`,
           "Tell the human before retrying spawn_agent.",
         ),
       ),
     );
   const membership = yield* resolveCallerMembership(scope);
-  if (
-    membership.squadronId !== home.squadronId ||
-    membership.participantId !== home.participantId
-  ) {
+  if (membership.projectId !== home.projectId || membership.participantId !== home.participantId) {
     return yield* stateError(
-      `Caller thread ${scope.threadId} is registered as ${home.squadronId}/${home.participantId}, but its current membership is ${membership.squadronId}/${membership.participantId}.`,
+      `Caller thread ${scope.threadId} is registered as ${home.projectId}/${home.participantId}, but its current membership is ${membership.projectId}/${membership.participantId}.`,
       "Call list_participants to inspect current membership, then ask the human to repair the mismatch before retrying spawn_agent.",
     );
   }
-  return { ...membership, squadron };
+  return { ...membership, project };
 });
 
 const selectSpawnModel = Effect.fn("j5.a2a.mcp.selectSpawnModel")(function* (
@@ -387,8 +384,8 @@ const preflightCrewCaptain = Effect.fn("j5.a2a.mcp.preflightCrewCaptain")(functi
       ),
     );
   return {
-    squadronId: caller.squadronId,
-    squadronName: caller.squadron.name,
+    projectId: caller.projectId,
+    projectTitle: caller.project.name,
     participantId: caller.participantId,
     thread: parent.thread,
   };
@@ -523,9 +520,9 @@ const handlers = {
       // A project's title beside its id places a participant. Titles are
       // enrichment: a read that fails leaves them null rather than taking the
       // address book with it.
-      const squadronNames = new Map(
-        (yield* (yield* A2ALedger).listSquadrons().pipe(Effect.orElseSucceed(() => []))).map(
-          (squadron) => [squadron.id, squadron.name] as const,
+      const projectTitles = new Map(
+        (yield* (yield* A2ALedger).listProjectLedgers().pipe(Effect.orElseSucceed(() => []))).map(
+          (project) => [project.id, project.name] as const,
         ),
       );
       // Agents on peer servers sit beside local ones. Once this server has
@@ -535,14 +532,14 @@ const handlers = {
       const localServer =
         remote.selfName === null ? {} : { server: { name: remote.selfName, local: true } };
       const placements = yield* ParticipantPlacementService;
-      const squadronIds = [...new Set(directory.map((row) => row.squadronId))];
+      const projectIds = [...new Set(directory.map((row) => row.projectId))];
       const placementRows = (yield* Effect.forEach(
-        squadronIds,
-        (squadronId) => placements.listParticipants(squadronId),
+        projectIds,
+        (projectId) => placements.listParticipants(projectId),
         { concurrency: 1 },
       )).flat();
       const placementByParticipant = new Map(
-        placementRows.map((row) => [`${row.squadronId}\u0000${row.participantId}`, row] as const),
+        placementRows.map((row) => [`${row.projectId}\u0000${row.participantId}`, row] as const),
       );
       const snapshot = yield* Effect.option(orchestrator.getShellSnapshot());
       const titleByThreadId = new Map(
@@ -555,8 +552,8 @@ const handlers = {
       const remoteRows = remote.agents
         .filter((agent) => includeArchived || !agent.archived)
         .map((agent) => ({
-          project_id: agent.squadronId,
-          project_title: agent.squadronName,
+          project_id: agent.projectId,
+          project_title: agent.projectTitle,
           participant_id: agent.participantId,
           participant: {
             kind: "agent" as const,
@@ -587,13 +584,13 @@ const handlers = {
         participants: directory
           .map((row) => {
             const placement = placementByParticipant.get(
-              `${row.squadronId}\u0000${row.participantId}`,
+              `${row.projectId}\u0000${row.participantId}`,
             );
             const self =
               row.participant.kind === "agent" && row.participant.threadId === scope.threadId;
             return {
-              project_id: row.squadronId,
-              project_title: squadronNames.get(row.squadronId) ?? null,
+              project_id: row.projectId,
+              project_title: projectTitles.get(row.projectId) ?? null,
               participant_id: row.participantId,
               participant:
                 row.participant.kind === "agent"
@@ -748,7 +745,7 @@ const handlers = {
               .recordFacts({
                 homeCommandId: spawnHomeCommandId(stableInput),
                 placementCommandId: spawnPlacementCommandId(stableInput),
-                squadronId: caller.squadronId,
+                projectId: caller.projectId,
                 threadId,
                 provenance: {
                   kind: "spawned-by",
@@ -779,7 +776,7 @@ const handlers = {
               .startBrief({
                 workspace,
                 stableInput,
-                squadronId: facts.home.squadronId,
+                ledgerProjectId: facts.home.projectId,
                 projectId: parent.thread.projectId,
                 threadId,
                 title: spawnTitle(input.brief, input.title),
@@ -787,8 +784,8 @@ const handlers = {
                 text: spawnFirstTurnText({
                   brief: input.brief,
                   participantId: facts.home.participantId,
-                  squadronId: facts.home.squadronId,
-                  squadronName: caller.squadron.name,
+                  projectId: facts.home.projectId,
+                  projectTitle: caller.project.name,
                   spawnedByParticipantId: caller.participantId,
                   spawnerThreadId: scope.threadId,
                 }),
@@ -807,8 +804,8 @@ const handlers = {
             return {
               participant_id: facts.home.participantId,
               thread_id: threadId,
-              project_id: facts.home.squadronId,
-              project_title: caller.squadron.name,
+              project_id: facts.home.projectId,
+              project_title: caller.project.name,
               placement: {
                 placement_parent_id: facts.placement.placementParentId,
                 provenance: {
@@ -936,7 +933,7 @@ const handlers = {
       // Upstream's rule: an agent acts on agents in its own project.
       const caller = yield* resolveCallerMembership(scope);
       const placements = yield* ParticipantPlacementService;
-      const matches = (yield* placements.listParticipants(caller.squadronId)).filter(
+      const matches = (yield* placements.listParticipants(caller.projectId)).filter(
         (row) => row.participantId === input.participant_id,
       );
       if (matches.length !== 1) {
@@ -995,7 +992,7 @@ const handlers = {
       const outcome = yield* (yield* CrewStopService)
         .stop({
           callerParticipantId: caller.participantId,
-          squadronId: caller.squadronId,
+          projectId: caller.projectId,
           crewInstanceId: input.crew_instance_id,
           commandIds: (seatName) => ({
             interruptCommandId: lifecycleCommandId({
@@ -1036,7 +1033,7 @@ const handlers = {
       const outcome = yield* (yield* ArchiveCrewService).archive({
         providerSessionId: scope.providerSessionId,
         callerParticipantId: caller.participantId,
-        squadronId: caller.squadronId,
+        projectId: caller.projectId,
         crewInstanceId: input.crew_instance_id,
         clientRequestKey: requestKey,
         ...(input.confirmation_token === undefined

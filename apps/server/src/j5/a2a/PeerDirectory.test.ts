@@ -47,7 +47,7 @@ const homeRoster: PeerRosterResponse = {
   agents: [
     {
       participantId: "agent:j5:a2a:thread:support-triage",
-      squadronId: "squadron:home-support",
+      squadronId: "project:home-support",
       squadronName: "L2 Support Rotation",
       displayName: "Support triage",
       threadId: ThreadId.make("thread:support-triage"),
@@ -56,7 +56,7 @@ const homeRoster: PeerRosterResponse = {
     },
     {
       participantId: "agent:j5:a2a:thread:retired",
-      squadronId: "squadron:home-support",
+      squadronId: "project:home-support",
       squadronName: "L2 Support Rotation",
       displayName: "Retired",
       threadId: ThreadId.make("thread:retired"),
@@ -124,7 +124,7 @@ const makeTestLayer = (
 };
 
 it.effect(
-  "lists only agents from readable peers, by Squadron, and names the peers it could not read",
+  "lists only agents from readable peers, by project, and names the peers it could not read",
   () =>
     Effect.gen(function* () {
       const seen: Array<{ url: string; authorization: string | undefined }> = [];
@@ -132,7 +132,7 @@ it.effect(
         directory.listAgents(),
       ).pipe(Effect.provide(makeTestLayer([homePeer, macPeer], seen)));
       assert.deepStrictEqual(
-        reading.agents.map((agent) => [agent.participantId, agent.squadronName, agent.archived]),
+        reading.agents.map((agent) => [agent.participantId, agent.projectTitle, agent.archived]),
         [
           ["agent:j5:a2a:thread:support-triage", "L2 Support Rotation", false],
           ["agent:j5:a2a:thread:retired", "L2 Support Rotation", true],
@@ -164,7 +164,7 @@ it.effect("resolves one participant id to the agents that carry it and nothing e
       ParticipantId.make("agent:j5:a2a:thread:support-triage"),
     );
     assert.equal(found.agents.length, 1);
-    assert.equal(found.agents[0]!.squadronId, "squadron:home-support");
+    assert.equal(found.agents[0]!.projectId, "project:home-support");
     const missing = yield* directory.resolveAgent(ParticipantId.make("agent:j5:a2a:thread:nobody"));
     assert.deepStrictEqual(missing.agents, []);
     assert.deepStrictEqual(missing.unreadPeers, []);

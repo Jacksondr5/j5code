@@ -82,7 +82,7 @@ export const makeCrewProposalsHttpRouteLayer = (paths: {
        */
       const projectProposal = ({
         playbook,
-        squadronId: projectId,
+        projectId: projectId,
         ...stored
       }: CrewProposal): Effect.Effect<J5Contracts.CrewProposal> => {
         const proposal = { ...stored, projectId };

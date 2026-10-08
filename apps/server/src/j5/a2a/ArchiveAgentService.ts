@@ -39,7 +39,7 @@ import {
   type LedgerCursor,
   MessageSentPayload,
   ParticipantId,
-  SquadronId,
+  LedgerProjectId,
   type StoredCommEvent,
   Urgency,
 } from "./contracts.ts";
@@ -69,7 +69,7 @@ export interface ArchiveAgentConsequenceFacts {
 }
 
 export interface ArchiveAgentTarget {
-  readonly squadronId: SquadronId;
+  readonly projectId: LedgerProjectId;
   readonly participantId: ParticipantId;
   readonly threadId: ThreadId;
 }
@@ -135,7 +135,7 @@ export class ArchiveAgentTargetMismatchError extends Data.TaggedError(
   readonly observed: string;
 }> {
   override get message(): string {
-    return `The archive operation selected ${this.expected.squadronId}/${this.expected.participantId}/${this.expected.threadId}, but the durable target reads resolve ${this.observed}. No archive side effect was attempted.`;
+    return `The archive operation selected ${this.expected.projectId}/${this.expected.participantId}/${this.expected.threadId}, but the durable target reads resolve ${this.observed}. No archive side effect was attempted.`;
   }
 }
 
@@ -198,7 +198,7 @@ const TokenPayload = Schema.Struct({
   version: Schema.Literal(TOKEN_VERSION),
   provider_session_id: Schema.String,
   caller_participant_id: ParticipantId,
-  project_id: SquadronId,
+  project_id: LedgerProjectId,
   target_participant_id: ParticipantId,
   thread_id: ThreadId,
   thread_archived: Schema.Boolean,
@@ -259,7 +259,7 @@ const tokenPayload = (input: {
   version: TOKEN_VERSION,
   provider_session_id: input.providerSessionId,
   caller_participant_id: input.callerParticipantId,
-  project_id: input.target.squadronId,
+  project_id: input.target.projectId,
   target_participant_id: input.target.participantId,
   thread_id: input.target.threadId,
   thread_archived: input.state.projection.thread.archivedAt !== null,
@@ -372,13 +372,13 @@ export const layer = Layer.effect(
         .pipe(Effect.mapError(operationError("reading the target thread projection")));
       if (
         facts.state !== "registered" ||
-        facts.squadronId !== target.squadronId ||
+        facts.projectId !== target.projectId ||
         facts.participantId !== target.participantId ||
         projection.thread.id !== target.threadId
       ) {
         const observed =
           facts.state === "registered"
-            ? `${facts.squadronId}/${facts.participantId}/${projection.thread.id}`
+            ? `${facts.projectId}/${facts.participantId}/${projection.thread.id}`
             : `${facts.state}/${projection.thread.id}`;
         return yield* new ArchiveAgentTargetMismatchError({ expected: target, observed });
       }
@@ -450,13 +450,13 @@ export const layer = Layer.effect(
     });
 
     const readLedgerEvents = Effect.fn("j5.a2a.archiveAgent.readLedgerEvents")(function* (
-      squadronId: SquadronId,
+      projectId: LedgerProjectId,
     ) {
       const events: Array<StoredCommEvent> = [];
       let cursor: LedgerCursor = { afterSeq: 0 };
       while (true) {
         const page = yield* ledger
-          .readEvents({ squadronId, cursor, limit: 500 })
+          .readEvents({ projectId, cursor, limit: 500 })
           .pipe(Effect.mapError(operationError("reading durable lifecycle evidence")));
         events.push(...page.events);
         if (page.complete) return events;
@@ -465,12 +465,12 @@ export const layer = Layer.effect(
     });
 
     const readLifecycleEvents = Effect.fn("j5.a2a.archiveAgent.readLifecycleEvents")(function* () {
-      const squadrons = yield* ledger
-        .listSquadrons()
+      const projects = yield* ledger
+        .listProjectLedgers()
         .pipe(Effect.mapError(operationError("listing lifecycle evidence projects")));
       const events: Array<StoredCommEvent> = [];
-      for (const squadron of squadrons) {
-        events.push(...(yield* readLedgerEvents(squadron.id)));
+      for (const project of projects) {
+        events.push(...(yield* readLedgerEvents(project.id)));
       }
       return events;
     });
@@ -481,8 +481,8 @@ export const layer = Layer.effect(
     ) {
       const post = yield* readState(target);
       // A9 writes each dropped Exchange and its terminal notice to that
-      // Exchange's owning Squadron, which can differ from the retired agent's
-      // immutable home. Completion therefore scans every durable Squadron and
+      // Exchange's owning project, which can differ from the retired agent's
+      // immutable home. Completion therefore scans every durable project and
       // filters to this exact participant below.
       const events = yield* readLifecycleEvents();
       const participantLeftAt =

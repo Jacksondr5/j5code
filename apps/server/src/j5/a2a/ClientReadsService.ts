@@ -120,8 +120,8 @@ export const openInboxCountStatement = (sql: SqlClient.SqlClient, personId: Part
  * The label a peer sent with the delivery this server recorded last, for each
  * sender asked about. "Last" is by the time this server recorded the row: the
  * receiver stamps received rows with its own clock, so the origin cannot date
- * one into the future, and the stamp orders rows across Squadrons, which `seq`
- * (allocated per Squadron) does not; Squadron id, then seq, break ties so one
+ * one into the future, and the stamp orders rows across projects, which `seq`
+ * (allocated per project) does not; project id, then seq, break ties so one
  * row wins. A sender id belongs to one peer (the inbound ownership check refuses
  * a second origin), so its latest labeled row is that peer's latest label. Each
  * id is one backward seek on migration 27's index, so the cost follows the ids

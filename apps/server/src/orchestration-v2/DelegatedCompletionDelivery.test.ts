@@ -1,5 +1,5 @@
 import { SourceControlProviderRegistry } from "../sourceControl/SourceControlProviderRegistry.ts";
-import { J5SquadronCreationLayer } from "../j5/a2a/runtimeLayer.ts";
+import { J5ThreadRegistrationLayer } from "../j5/a2a/runtimeLayer.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
@@ -48,7 +48,7 @@ const PlatformTestLayer = Layer.merge(
 );
 
 const OrchestrationV2LayerLive = UpstreamOrchestrationV2LayerLive.pipe(
-  Layer.provideMerge(J5SquadronCreationLayer),
+  Layer.provideMerge(J5ThreadRegistrationLayer),
 );
 
 const ServerConfigLayer = ServerConfig.layerTest(process.cwd(), {

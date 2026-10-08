@@ -20,12 +20,12 @@ import {
   CommCommandId,
   ExchangeId,
   ParticipantId,
-  SquadronId,
+  LedgerProjectId,
   type AgentParticipant,
 } from "./contracts.ts";
 
 const timestamp = "2026-08-29T12:00:00.000Z";
-const squadronId = SquadronId.make("squadron:archive-facts");
+const projectId = LedgerProjectId.make("project:archive-facts");
 const participant: AgentParticipant = {
   kind: "agent",
   id: ParticipantId.make("agent:archive-facts:subject"),
@@ -57,7 +57,7 @@ const makeTestLayer = (placementFacts = placementFactsLayer) => {
 const seed = Effect.gen(function* () {
   yield* runJ5A2AMigrations();
   const ledger = yield* A2ALedger;
-  yield* ledger.ensureProject({ projectId: squadronId, createdAt: timestamp });
+  yield* ledger.ensureProject({ projectId: projectId, createdAt: timestamp });
   for (const [index, candidate] of [
     participant,
     outboundCounterparty,
@@ -65,7 +65,7 @@ const seed = Effect.gen(function* () {
   ].entries()) {
     yield* ledger.append({
       commandId: CommCommandId.make(`command:archive-facts:join:${index}`),
-      squadronId,
+      projectId,
       acceptedAt: timestamp,
       event: {
         kind: "participant.joined",
@@ -80,7 +80,7 @@ const seed = Effect.gen(function* () {
   }
   yield* ledger.append({
     commandId: CommCommandId.make("command:archive-facts:outbound"),
-    squadronId,
+    projectId,
     acceptedAt: timestamp,
     event: {
       kind: "exchange.opened",
@@ -94,7 +94,7 @@ const seed = Effect.gen(function* () {
   });
   yield* ledger.append({
     commandId: CommCommandId.make("command:archive-facts:inbound"),
-    squadronId,
+    projectId,
     acceptedAt: timestamp,
     event: {
       kind: "exchange.opened",
@@ -108,7 +108,7 @@ const seed = Effect.gen(function* () {
   });
   yield* ledger.append({
     commandId: CommCommandId.make("command:archive-facts:unrelated"),
-    squadronId,
+    projectId,
     acceptedAt: timestamp,
     event: {
       kind: "exchange.opened",
@@ -169,7 +169,7 @@ it.effect("reports real placement descendants without including the archived roo
     const placements = yield* ParticipantPlacementService;
     yield* placements.recordCreation({
       commandId: PlacementCommandId.make("command:archive-facts:placement:subject"),
-      squadronId,
+      projectId,
       participantId: participant.id,
       actor: "platform",
       provenance: { kind: "unknown", source: "native_or_unobserved" },
@@ -177,7 +177,7 @@ it.effect("reports real placement descendants without including the archived roo
     });
     yield* placements.recordCreation({
       commandId: PlacementCommandId.make("command:archive-facts:placement:inbound"),
-      squadronId,
+      projectId,
       participantId: inboundCounterparty.id,
       actor: "platform",
       provenance: {
@@ -205,7 +205,7 @@ it.effect("leaves already archived descendants out and keeps their live children
     // subject -> inbound (archived) -> outbound (live)
     yield* placements.recordCreation({
       commandId: PlacementCommandId.make("command:archive-facts:placement:subject"),
-      squadronId,
+      projectId,
       participantId: participant.id,
       actor: "platform",
       provenance: { kind: "unknown", source: "native_or_unobserved" },
@@ -217,7 +217,7 @@ it.effect("leaves already archived descendants out and keeps their live children
     ] as const) {
       yield* placements.recordCreation({
         commandId: PlacementCommandId.make(`command:archive-facts:placement:${child.id}`),
-        squadronId,
+        projectId,
         participantId: child.id,
         actor: "platform",
         provenance: {
@@ -230,7 +230,7 @@ it.effect("leaves already archived descendants out and keeps their live children
     }
     yield* ledger.append({
       commandId: CommCommandId.make("command:archive-facts:archive-inbound"),
-      squadronId,
+      projectId,
       acceptedAt: timestamp,
       event: {
         kind: "participant.archived",

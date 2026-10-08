@@ -12,7 +12,7 @@ import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewIns
 import { authenticateClientRead, jsonBody } from "./ClientReadsHttp.ts";
 import { A2ALedger } from "./LedgerService.ts";
 import { ParticipantPlacementService } from "./PlacementService.ts";
-import { SquadronId } from "./contracts.ts";
+import { LedgerProjectId } from "./contracts.ts";
 import type { ParticipantPlacementView } from "./placementContracts.ts";
 
 export const CLIENT_READS_FLEET_PATH = "/api/j5/a2a/client-reads/fleet";
@@ -29,8 +29,8 @@ const encodeResponse = Schema.encodeEffect(FleetResponse);
 const decodeRequest = Schema.decodeUnknownEffect(J5Contracts.FleetReadRequest);
 
 /** Pure projection from placement rows, live Crews, and open-ask counts to one project. */
-export const projectFleetSquadron = (input: {
-  readonly squadron: { readonly id: SquadronId; readonly name: string };
+export const projectFleetProject = (input: {
+  readonly project: { readonly id: LedgerProjectId; readonly name: string };
   readonly participants: ReadonlyArray<ParticipantPlacementView>;
   readonly crews: ReadonlyArray<AgentCrewInstance>;
   readonly openAsks: ReadonlyMap<string, number>;
@@ -74,8 +74,8 @@ export const projectFleetSquadron = (input: {
           })),
   );
   return {
-    id: input.squadron.id,
-    title: input.squadron.name,
+    id: input.project.id,
+    title: input.project.name,
     agents: [
       ...agents.map((row): FleetAgent => ({
         participantId: row.participantId,
@@ -84,8 +84,8 @@ export const projectFleetSquadron = (input: {
           "displayName" in row.participant && typeof row.participant.displayName === "string"
             ? row.participant.displayName
             : null,
-        // Every agent-created path (spawn_agent, Crew seats, join_squadron) records a placement
-        // at creation, so an agent with a Squadron home and no placement row is one a person
+        // Every agent-created path (spawn_agent, Crew seats, a fork) records a placement
+        // at creation, so an agent with a project home and no placement row is one a person
         // launched through the composer: `unrecorded` is that measured fact, not a guess. Recorded
         // `unknown` (a native thread that joined later) stays `?`.
         origin:
@@ -129,7 +129,7 @@ export const projectFleetSquadron = (input: {
 };
 
 /**
- * The Roster read (SB6): every Squadron with its active agents, placement parents, Crew seats,
+ * The Roster read (SB6): every project with its active agents, placement parents, Crew seats,
  * and the count of open asks each agent owes. Status and last activity come from the client's
  * thread state, so this read carries only what the ledger knows. Unknowns stay unknown.
  */
@@ -143,10 +143,10 @@ export const makeFleetReadsHttpRouteLayer = (path: HttpRouter.PathInput) =>
       const sql = yield* SqlClient.SqlClient;
       const readFleet = (includeRetired: boolean) =>
         Effect.gen(function* () {
-          const squadrons = yield* ledger.listSquadrons();
+          const projects = yield* ledger.listProjectLedgers();
           const result: Array<FleetResponse["projects"][number]> = [];
-          for (const squadron of squadrons) {
-            const participants = yield* placements.listParticipants(squadron.id);
+          for (const project of projects) {
+            const participants = yield* placements.listParticipants(project.id);
             const agentIds = participants
               .filter((row) => row.participant.kind === "agent")
               .map((row) => row.participantId);
@@ -160,19 +160,19 @@ export const makeFleetReadsHttpRouteLayer = (path: HttpRouter.PathInput) =>
               for (const row of rows) openAsks.set(row.receiver_id, Number(row.count));
             }
             // Retired Crews carry rosters and briefs; only the page that shows them pays for them.
-            const squadronCrews = (yield* crews.listForSquadron(squadron.id)).filter(
+            const projectCrews = (yield* crews.listForProject(project.id)).filter(
               (crew) => includeRetired || crew.archivedAt === null,
             );
             // Archiving a Crew cancels its run, so only live Crews can have one.
             const playbookRuns = new Map<string, J5Contracts.FleetCrew["playbookRun"]>();
-            for (const crew of squadronCrews)
+            for (const crew of projectCrews)
               if (crew.archivedAt === null)
                 playbookRuns.set(crew.id, yield* relay.fleetRun(crew.id));
             result.push(
-              projectFleetSquadron({
-                squadron,
+              projectFleetProject({
+                project,
                 participants,
-                crews: squadronCrews,
+                crews: projectCrews,
                 openAsks,
                 playbookRuns,
               }),

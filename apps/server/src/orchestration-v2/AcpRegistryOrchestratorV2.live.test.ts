@@ -1,6 +1,6 @@
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import { SourceControlProviderRegistry } from "../sourceControl/SourceControlProviderRegistry.ts";
-import { J5SquadronCreationLayer } from "../j5/a2a/runtimeLayer.ts";
+import { J5ThreadRegistrationLayer } from "../j5/a2a/runtimeLayer.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
@@ -52,7 +52,7 @@ const PlatformTestLayer = Layer.merge(
 );
 
 const OrchestrationV2LayerLive = UpstreamOrchestrationV2LayerLive.pipe(
-  Layer.provideMerge(J5SquadronCreationLayer),
+  Layer.provideMerge(J5ThreadRegistrationLayer),
 );
 
 const runAntigravityFixture = process.env.T3_ACP_ANTIGRAVITY_LIVE === "1";

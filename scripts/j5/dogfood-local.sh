@@ -19,7 +19,7 @@
 # server; state persists. Rerunning updates to the current j5/main tip (snapshot first) and
 # restarts. Restarts cancel in-flight agent turns, so update when the fleet is quiet.
 #
-# The Squadron's folder is your normal repo clone (e.g. ~/repos/jacksondr5/j5code); agents get
+# The project's folder is your normal repo clone (e.g. ~/repos/jacksondr5/j5code); agents get
 # per-thread worktrees from there. The runtime checkout above is only what the server runs from.
 set -euo pipefail
 

@@ -55,7 +55,7 @@ import {
   MachineParticipant,
   ParticipantId,
   SendMessageResult,
-  SquadronId,
+  LedgerProjectId,
   Urgency,
 } from "../contracts.ts";
 import {
@@ -113,7 +113,7 @@ export const J5ParticipantProvenanceView = Schema.Union([
 export type J5ParticipantProvenanceView = typeof J5ParticipantProvenanceView.Type;
 
 export const J5ParticipantDirectoryRow = Schema.Struct({
-  project_id: SquadronId,
+  project_id: LedgerProjectId,
   /** The project's title beside its id; on the self row, the caller's own project. */
   project_title: Schema.NullOr(Schema.String),
   participant_id: ParticipantId,
@@ -217,7 +217,7 @@ export type J5SpawnAgentInput = typeof J5SpawnAgentInput.Type;
 export const J5SpawnAgentResult = Schema.Struct({
   participant_id: ParticipantId,
   thread_id: ThreadId,
-  project_id: SquadronId,
+  project_id: LedgerProjectId,
   project_title: Schema.String,
   placement: Schema.Struct({
     placement_parent_id: ParticipantId,

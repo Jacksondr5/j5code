@@ -11,11 +11,11 @@ import {
 } from "./MachineParticipantService.ts";
 import { runMigrations } from "../../persistence/Migrations.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
-import { CommCommandId, ParticipantId, SquadronId } from "./contracts.ts";
+import { CommCommandId, ParticipantId, LedgerProjectId } from "./contracts.ts";
 
 const timestamp = "2026-09-15T12:00:00.000Z";
-const monitoring = SquadronId.make("squadron:monitoring");
-const support = SquadronId.make("squadron:support");
+const monitoring = LedgerProjectId.make("project:monitoring");
+const support = LedgerProjectId.make("project:support");
 
 const makeTestLayer = () => {
   const database = NodeSqliteClient.layer({ filename: ":memory:" });
@@ -51,17 +51,17 @@ it.effect(
 
       const first = yield* machines.register({
         commandId: CommCommandId.make("command:machine:register:watchdog"),
-        squadronId: monitoring,
+        projectId: monitoring,
         name: "watchdog",
         acceptedAt: timestamp,
       });
       assert.isTrue(first.created);
       assert.equal(first.participant.participantId, "machine:watchdog");
-      assert.equal(first.participant.squadronName, "Monitoring");
+      assert.equal(first.participant.projectTitle, "Monitoring");
 
       const again = yield* machines.register({
         commandId: CommCommandId.make("command:machine:register:watchdog:again"),
-        squadronId: monitoring,
+        projectId: monitoring,
         name: "watchdog",
         acceptedAt: timestamp,
       });
@@ -71,7 +71,7 @@ it.effect(
       const elsewhere = yield* Effect.flip(
         machines.register({
           commandId: CommCommandId.make("command:machine:register:watchdog:support"),
-          squadronId: support,
+          projectId: support,
           name: "watchdog",
           acceptedAt: timestamp,
         }),
@@ -83,7 +83,7 @@ it.effect(
         ["machine:watchdog"],
       );
       assert.equal(
-        (yield* machines.resolve(ParticipantId.make("machine:watchdog"))).squadronId,
+        (yield* machines.resolve(ParticipantId.make("machine:watchdog"))).projectId,
         monitoring,
       );
     }).pipe(Effect.provide(makeTestLayer())),
@@ -97,22 +97,22 @@ it.effect("refuses invalid names, unknown projects, and unknown machines by name
     const invalid = yield* Effect.flip(
       machines.register({
         commandId: CommCommandId.make("command:machine:register:bad"),
-        squadronId: monitoring,
+        projectId: monitoring,
         name: "Watch Dog",
         acceptedAt: timestamp,
       }),
     );
     assert.equal(invalid._tag, "MachineParticipantInvalidNameError");
 
-    const missingSquadron = yield* Effect.flip(
+    const missingProject = yield* Effect.flip(
       machines.register({
         commandId: CommCommandId.make("command:machine:register:nowhere"),
-        squadronId: SquadronId.make("squadron:nowhere"),
+        projectId: LedgerProjectId.make("project:nowhere"),
         name: "watchdog",
         acceptedAt: timestamp,
       }),
     );
-    assert.equal(missingSquadron._tag, "MachineParticipantProjectNotFoundError");
+    assert.equal(missingProject._tag, "MachineParticipantProjectNotFoundError");
 
     const unknown = yield* Effect.flip(machines.resolve(ParticipantId.make("machine:ghost")));
     assert.equal(unknown._tag, "MachineParticipantNotFoundError");

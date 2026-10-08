@@ -37,7 +37,7 @@ export class RosterService extends Context.Service<RosterService, RosterServiceS
 
 interface AgentRow {
   readonly project_id: string;
-  readonly squadron_name: string;
+  readonly project_title: string;
   readonly participant_id: string;
   readonly thread_id: string;
   readonly archived_at: string | null;
@@ -45,7 +45,7 @@ interface AgentRow {
 
 interface MachineRow {
   readonly project_id: string;
-  readonly squadron_name: string;
+  readonly project_title: string;
   readonly participant_id: string;
   readonly name: string;
 }
@@ -88,23 +88,23 @@ export const layer: Layer.Layer<RosterService, never, SqlClient.SqlClient | Orch
           const agents = yield* sql<AgentRow>`
             SELECT
               membership.project_id,
-              COALESCE(project.title, squadron.project_id) AS squadron_name,
+              COALESCE(project.title, ledger.project_id) AS project_title,
               membership.participant_id,
               membership.thread_id,
               membership.archived_at
             FROM j5_a2a_membership AS membership
-            JOIN j5_a2a_project_ledger AS squadron ON squadron.project_id = membership.project_id
+            JOIN j5_a2a_project_ledger AS ledger ON ledger.project_id = membership.project_id
             LEFT JOIN projection_projects AS project ON project.project_id = membership.project_id
             ORDER BY membership.project_id, membership.participant_id
           `;
           const machines = yield* sql<MachineRow>`
             SELECT
               machine.project_id,
-              COALESCE(project.title, squadron.project_id) AS squadron_name,
+              COALESCE(project.title, ledger.project_id) AS project_title,
               machine.participant_id,
               machine.name
             FROM j5_a2a_machine_participant AS machine
-            JOIN j5_a2a_project_ledger AS squadron ON squadron.project_id = machine.project_id
+            JOIN j5_a2a_project_ledger AS ledger ON ledger.project_id = machine.project_id
             LEFT JOIN projection_projects AS project ON project.project_id = machine.project_id
             ORDER BY machine.project_id, machine.participant_id
           `;
@@ -131,7 +131,7 @@ export const layer: Layer.Layer<RosterService, never, SqlClient.SqlClient | Orch
                 participantId: row.participant_id,
                 kind: "agent",
                 projectId: row.project_id,
-                projectTitle: row.squadron_name,
+                projectTitle: row.project_title,
                 displayName: shell?.title ?? null,
                 threadId: ThreadId.make(row.thread_id),
                 archived: row.archived_at !== null,
@@ -157,7 +157,7 @@ export const layer: Layer.Layer<RosterService, never, SqlClient.SqlClient | Orch
               participantId: row.participant_id,
               kind: "machine",
               projectId: row.project_id,
-              projectTitle: row.squadron_name,
+              projectTitle: row.project_title,
               displayName: row.name,
               threadId: null,
               archived: false,

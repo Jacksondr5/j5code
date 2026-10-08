@@ -17,7 +17,7 @@ import {
   CommCommandId,
   type CommEvent,
   CorrelationId,
-  SquadronId,
+  LedgerProjectId,
   ExchangeId,
   type ExchangeDropDisposition,
   isHumanParticipantId,
@@ -69,11 +69,11 @@ export class A2ALifecycleParticipantHomeStateError extends Schema.TaggedError<A2
   "A2ALifecycleParticipantHomeStateError",
   {
     participantId: Schema.String,
-    squadronIds: Schema.Array(Schema.String),
+    projectIds: Schema.Array(Schema.String),
   },
 ) {
   override get message(): string {
-    return `Participant ${this.participantId} is registered in more than one project (${this.squadronIds.join(", ")}). Repair its history before lifecycle retirement resumes.`;
+    return `Participant ${this.participantId} is registered in more than one project (${this.projectIds.join(", ")}). Repair its history before lifecycle retirement resumes.`;
   }
 }
 
@@ -153,9 +153,9 @@ const noticeMessageId = (exchange: ExchangeRow, disposition: ExchangeDropDisposi
 const noticeCorrelationId = (exchange: ExchangeRow, disposition: ExchangeDropDisposition) =>
   CorrelationId.make(`correlation:j5:a2a:lifecycle:drop:${lifecycleKey(exchange, disposition)}`);
 
-const participantArchiveCommandId = (squadronId: SquadronId, participantId: ParticipantId) =>
+const participantArchiveCommandId = (projectId: LedgerProjectId, participantId: ParticipantId) =>
   CommCommandId.make(
-    `command:j5:a2a:lifecycle:participant:${stablePart(squadronId)}:${stablePart(participantId)}`,
+    `command:j5:a2a:lifecycle:participant:${stablePart(projectId)}:${stablePart(participantId)}`,
   );
 
 export const formatLifecycleNotice = (input: {
@@ -230,25 +230,25 @@ const makeLayer = (daemon: boolean) =>
         },
       );
 
-      /** Where the notice about a dropped Exchange goes: a Squadron here, or one on a peer server. */
+      /** Where the notice about a dropped Exchange goes: a project here, or one on a peer server. */
       const counterparty = Effect.fn("j5.a2a.lifecycle.counterparty")(function* (
         participantId: ParticipantId,
         exchange: ExchangeRow,
       ): Effect.fn.Return<
-        { readonly squadronId: SquadronId; readonly environmentId: string | null },
+        { readonly projectId: LedgerProjectId; readonly environmentId: string | null },
         SqlError | A2ALifecycleCounterpartyStateError
       > {
         if (isHumanParticipantId(participantId)) {
-          return { squadronId: SquadronId.make(exchange.project_id), environmentId: null };
+          return { projectId: LedgerProjectId.make(exchange.project_id), environmentId: null };
         }
         const rows = yield* membershipRows(participantId);
         const row =
           rows.find((candidate) => candidate.project_id === exchange.project_id) ?? rows[0];
         if (row !== undefined) {
-          return { squadronId: SquadronId.make(row.project_id), environmentId: null };
+          return { projectId: LedgerProjectId.make(row.project_id), environmentId: null };
         }
         const remote = yield* findPeerCounterparty(sql, {
-          squadronId: SquadronId.make(exchange.project_id),
+          projectId: LedgerProjectId.make(exchange.project_id),
           exchangeId: ExchangeId.make(exchange.exchange_id),
           participantId,
         });
@@ -263,13 +263,13 @@ const makeLayer = (daemon: boolean) =>
             exchangeId: exchange.exchange_id,
           });
         }
-        return { squadronId: SquadronId.make(historicalRow.project_id), environmentId: null };
+        return { projectId: LedgerProjectId.make(historicalRow.project_id), environmentId: null };
       });
 
       const dropParticipantExchanges = Effect.fn("j5.a2a.lifecycle.dropParticipantExchanges")(
         function* (input: {
           readonly participantId: ParticipantId;
-          readonly squadronId: SquadronId;
+          readonly projectId: LedgerProjectId;
           readonly archivedAt: string;
           readonly operation: "archived" | "deleted";
         }) {
@@ -322,8 +322,8 @@ const makeLayer = (daemon: boolean) =>
                   operation: input.operation,
                   disposition,
                 }),
-                originProjectId: SquadronId.make(exchange.project_id),
-                receiverProjectId: receiver.squadronId,
+                originProjectId: LedgerProjectId.make(exchange.project_id),
+                receiverProjectId: receiver.projectId,
                 ...(receiver.environmentId === null
                   ? {}
                   : {
@@ -336,7 +336,7 @@ const makeLayer = (daemon: boolean) =>
                               ? ("participant-deleted" as const)
                               : ("participant-archived" as const),
                           participantId: input.participantId,
-                          projectId: input.squadronId,
+                          projectId: input.projectId,
                         },
                       },
                     }),
@@ -347,7 +347,7 @@ const makeLayer = (daemon: boolean) =>
             };
             yield* ledger.appendEvents({
               commandId: dropCommandId(exchange, disposition),
-              squadronId: SquadronId.make(exchange.project_id),
+              projectId: LedgerProjectId.make(exchange.project_id),
               acceptedAt: input.archivedAt,
               events: [
                 {
@@ -364,7 +364,7 @@ const makeLayer = (daemon: boolean) =>
                           ? "participant-deleted"
                           : "participant-archived",
                       participantId: input.participantId,
-                      projectId: input.squadronId,
+                      projectId: input.projectId,
                     },
                     facts: {
                       replyRequired: false,
@@ -398,11 +398,11 @@ const makeLayer = (daemon: boolean) =>
           if (rows.length !== 1) {
             return yield* new A2ALifecycleParticipantHomeStateError({
               participantId: input.participantId,
-              squadronIds: rows.map((row) => row.project_id),
+              projectIds: rows.map((row) => row.project_id),
             });
           }
           const row = rows[0]!;
-          const squadronId = SquadronId.make(row.project_id);
+          const projectId = LedgerProjectId.make(row.project_id);
           const participant = yield* decodeParticipant(row.payload);
           if (participant.kind !== "agent") {
             return yield* new A2ALifecycleHumanArchiveNotAllowedError({
@@ -414,7 +414,7 @@ const makeLayer = (daemon: boolean) =>
             readonly updated_seq: number;
           }>`
             SELECT archived_at, updated_seq FROM j5_a2a_membership
-            WHERE project_id = ${squadronId} AND participant_id = ${input.participantId}
+            WHERE project_id = ${projectId} AND participant_id = ${input.participantId}
           `;
           const membership = memberships[0];
           // A historical departure is permanent. Unarchive must never recreate a
@@ -436,9 +436,9 @@ const makeLayer = (daemon: boolean) =>
           if (changesState) {
             yield* ledger.append({
               commandId: CommCommandId.make(
-                `${participantArchiveCommandId(squadronId, input.participantId)}:${operation}:${membership?.updated_seq ?? "absent"}`,
+                `${participantArchiveCommandId(projectId, input.participantId)}:${operation}:${membership?.updated_seq ?? "absent"}`,
               ),
-              squadronId,
+              projectId,
               acceptedAt: input.archivedAt,
               event: {
                 kind:
@@ -462,7 +462,7 @@ const makeLayer = (daemon: boolean) =>
           yield* worker.cancelParticipantDeliveries(input.participantId);
           const droppedExchangeIds = yield* dropParticipantExchanges({
             participantId: input.participantId,
-            squadronId,
+            projectId,
             archivedAt: input.archivedAt,
             operation,
           });

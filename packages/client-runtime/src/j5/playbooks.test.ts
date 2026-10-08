@@ -109,7 +109,7 @@ describe("Playbook Author launch", () => {
       workspace: { ...workspace, ...selection },
     });
     expect(target.environmentId).toBe(workspace.environmentId);
-    expect(target.input).not.toHaveProperty("squadronId");
+    expect(target.input).not.toHaveProperty("projectId");
     expect(target.input).toMatchObject({
       bootstrap: {
         createThread: {

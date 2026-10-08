@@ -15,15 +15,15 @@ import {
   PlacementParentIneligibleError,
   PlacementParentNotFoundError,
   PlacementParticipantNotFoundError,
-  PlacementSquadronNotFoundError,
+  PlacementProjectNotFoundError,
   ParticipantPlacementService,
   layer as placementLayer,
 } from "./PlacementService.ts";
-import { CommCommandId, SquadronId, ParticipantId, type Participant } from "./contracts.ts";
+import { CommCommandId, LedgerProjectId, ParticipantId, type Participant } from "./contracts.ts";
 import { PlacementCommandId, type ParticipantProvenance } from "./placementContracts.ts";
 
 const timestamp = "2026-08-16T16:00:00.000Z";
-const squadronId = SquadronId.make("squadron:placement");
+const projectId = LedgerProjectId.make("project:placement");
 const legacyGlobalHumanId = ParticipantId.make("human:global");
 const isCycle = Schema.is(PlacementCycleError);
 const isGraphCorrupt = Schema.is(PlacementGraphCorruptError);
@@ -31,7 +31,7 @@ const isHumanTarget = Schema.is(PlacementHumanTargetError);
 const isParentIneligible = Schema.is(PlacementParentIneligibleError);
 const isParentNotFound = Schema.is(PlacementParentNotFoundError);
 const isParticipantNotFound = Schema.is(PlacementParticipantNotFoundError);
-const isSquadronNotFound = Schema.is(PlacementSquadronNotFoundError);
+const isProjectLedgerNotFound = Schema.is(PlacementProjectNotFoundError);
 const TestLayer = Layer.merge(ledgerLayer, placementLayer).pipe(
   Layer.provideMerge(NodeSqliteClient.layer({ filename: ":memory:" })),
 );
@@ -54,7 +54,7 @@ const joinParticipant = (index: number, participant: Participant) =>
     const ledger = yield* A2ALedger;
     yield* ledger.append({
       commandId: CommCommandId.make(`membership:${index}`),
-      squadronId,
+      projectId,
       acceptedAt: timestamp,
       event: {
         kind: "participant.joined",
@@ -72,7 +72,7 @@ const prepare = (participants: ReadonlyArray<Participant>) =>
   Effect.gen(function* () {
     yield* runJ5A2AMigrations();
     const ledger = yield* A2ALedger;
-    yield* ledger.ensureProject({ projectId: squadronId, createdAt: timestamp });
+    yield* ledger.ensureProject({ projectId: projectId, createdAt: timestamp });
     for (const [index, participant] of participants.entries()) {
       yield* joinParticipant(index + 1, participant);
     }
@@ -87,7 +87,7 @@ const record = (input: {
     const placements = yield* ParticipantPlacementService;
     return yield* placements.recordCreation({
       commandId: PlacementCommandId.make(`placement:${input.index}`),
-      squadronId,
+      projectId,
       participantId: input.participant.id,
       actor: "platform",
       provenance: input.provenance,
@@ -138,7 +138,7 @@ it.effect("places through retained departed ancestors using the placement-row sa
     for (const participant of [root, first, second]) {
       yield* ledger.append({
         commandId: CommCommandId.make(`membership:${participant.id}:left`),
-        squadronId,
+        projectId,
         acceptedAt: timestamp,
         event: {
           kind: "participant.left",
@@ -204,7 +204,7 @@ it.effect(
       yield* sql`
         UPDATE j5_a2a_participant_placement
         SET placement_parent_id = ${group.id}
-        WHERE project_id = ${squadronId} AND participant_id = ${source.id}
+        WHERE project_id = ${projectId} AND participant_id = ${source.id}
       `;
       const nestedForkResult = yield* record({
         index: 4,
@@ -220,10 +220,10 @@ it.effect(
       yield* sql`
         UPDATE j5_a2a_participant_placement
         SET placement_parent_id = NULL
-        WHERE project_id = ${squadronId} AND participant_id = ${source.id}
+        WHERE project_id = ${projectId} AND participant_id = ${source.id}
       `;
       assert.equal(
-        (yield* placements.readPlacement({ squadronId, participantId: nestedFork.id }))
+        (yield* placements.readPlacement({ projectId, participantId: nestedFork.id }))
           ?.placementParentId,
         group.id,
       );
@@ -244,7 +244,7 @@ it.effect(
       });
       const placements = yield* ParticipantPlacementService;
 
-      const rows = yield* placements.listParticipants(squadronId);
+      const rows = yield* placements.listParticipants(projectId);
       const nativeRow = rows.find((row) => row.participantId === native.id);
       const unrecordedRow = rows.find((row) => row.participantId === unrecorded.id);
       assert.deepStrictEqual(nativeRow?.provenance, {
@@ -272,7 +272,7 @@ it.effect("roots departed lineage backfill while refusing a participant id that 
     });
     yield* (yield* A2ALedger).append({
       commandId: CommCommandId.make("membership:departed-parent:left"),
-      squadronId,
+      projectId,
       acceptedAt: timestamp,
       event: {
         kind: "participant.left",
@@ -316,7 +316,7 @@ it.effect("roots departed lineage backfill while refusing a participant id that 
     assert.include(wrapperError.message, departedParent.id);
     assert.equal(
       yield* (yield* ParticipantPlacementService).readPlacement({
-        squadronId,
+        projectId,
         participantId: wrapperChild.id,
       }),
       null,
@@ -337,7 +337,7 @@ it.effect("roots departed lineage backfill while refusing a participant id that 
     assert.include(fabricatedError.message, fabricatedSource.id);
     assert.equal(
       yield* (yield* ParticipantPlacementService).readPlacement({
-        squadronId,
+        projectId,
         participantId: fabricatedTarget.id,
       }),
       null,
@@ -358,7 +358,7 @@ it.effect("replays placement creation without changing immutable provenance", ()
     const placements = yield* ParticipantPlacementService;
     const input = {
       commandId: PlacementCommandId.make("placement:replay"),
-      squadronId,
+      projectId,
       participantId: child.id,
       actor: "agent" as const,
       provenance: spawnedBy(parent),
@@ -395,7 +395,7 @@ it.effect("refuses self-provenance as a placement cycle without writing placemen
     assert.isTrue(isCycle(error));
     assert.include(error.message, participant.id);
     assert.equal(
-      yield* placements.readPlacement({ squadronId, participantId: participant.id }),
+      yield* placements.readPlacement({ projectId, participantId: participant.id }),
       null,
     );
   }).pipe(Effect.provide(TestLayer)),
@@ -414,7 +414,7 @@ it.effect("refuses both human participant id shapes as immutable placement targe
       const creationError = yield* Effect.flip(
         placements.recordCreation({
           commandId: PlacementCommandId.make(`placement:human-target-refused:${index}`),
-          squadronId,
+          projectId,
           participantId: personId,
           actor: "platform",
           provenance: { kind: "unknown", source: "native_or_unobserved" },
@@ -453,7 +453,7 @@ it.effect("refuses both retained human id shapes as j5_spawn provenance parents"
           created_at
         ) VALUES (
           ${100 + index},
-          ${squadronId},
+          ${projectId},
           'participant.joined',
           NULL,
           NULL,
@@ -478,7 +478,7 @@ it.effect("refuses both retained human id shapes as j5_spawn provenance parents"
       assert.isTrue(isParentIneligible(error));
       assert.include(error.message, "ineligible-non-agent");
       assert.include(error.message, personId);
-      assert.equal(yield* placements.readPlacement({ squadronId, participantId: child.id }), null);
+      assert.equal(yield* placements.readPlacement({ projectId, participantId: child.id }), null);
     }
   }).pipe(Effect.provide(TestLayer)),
 );
@@ -506,7 +506,7 @@ it.effect("detects corrupt stored cycles in creation and subtree traversal", () 
         WHEN ${first.id} THEN ${second.id}
         WHEN ${second.id} THEN ${first.id}
       END
-      WHERE project_id = ${squadronId} AND participant_id IN (${first.id}, ${second.id})
+      WHERE project_id = ${projectId} AND participant_id IN (${first.id}, ${second.id})
     `;
     const placements = yield* ParticipantPlacementService;
 
@@ -516,37 +516,37 @@ it.effect("detects corrupt stored cycles in creation and subtree traversal", () 
     assert.isTrue(isGraphCorrupt(mutationError));
     assert.include(mutationError.message, "Placement graph state");
     assert.include(mutationError.message, "placement bound");
-    assert.equal(yield* placements.readPlacement({ squadronId, participantId: child.id }), null);
+    assert.equal(yield* placements.readPlacement({ projectId, participantId: child.id }), null);
 
     const traversalError = yield* Effect.flip(
-      placements.listSubtree({ squadronId, participantId: first.id }),
+      placements.listSubtree({ projectId, participantId: first.id }),
     );
     assert.isTrue(isGraphCorrupt(traversalError));
     assert.include(traversalError.message, "Placement graph state");
   }).pipe(Effect.provide(TestLayer)),
 );
 
-it.effect("distinguishes missing Squadron state from a missing subtree participant", () =>
+it.effect("distinguishes missing project state from a missing subtree participant", () =>
   Effect.gen(function* () {
-    const missingSquadronId = SquadronId.make("squadron:placement-missing");
+    const missingProjectId = LedgerProjectId.make("project:placement-missing");
     const missingParticipantId = ParticipantId.make("agent:placement-missing");
     yield* prepare([]);
     const placements = yield* ParticipantPlacementService;
 
-    const squadronError = yield* Effect.flip(
+    const projectError = yield* Effect.flip(
       placements.listSubtree({
-        squadronId: missingSquadronId,
+        projectId: missingProjectId,
         participantId: missingParticipantId,
       }),
     );
-    assert.isTrue(isSquadronNotFound(squadronError));
-    assert.include(squadronError.message, missingSquadronId);
+    assert.isTrue(isProjectLedgerNotFound(projectError));
+    assert.include(projectError.message, missingProjectId);
 
     const participantError = yield* Effect.flip(
-      placements.listSubtree({ squadronId, participantId: missingParticipantId }),
+      placements.listSubtree({ projectId, participantId: missingParticipantId }),
     );
     assert.isTrue(isParticipantNotFound(participantError));
-    assert.include(participantError.message, squadronId);
+    assert.include(participantError.message, projectId);
     assert.include(participantError.message, missingParticipantId);
   }).pipe(Effect.provide(TestLayer)),
 );
@@ -589,16 +589,16 @@ it.effect("walks the mutable placement subtree leaves-first rather than followin
         WHEN ${movedToFirst.id} THEN ${firstRoot.id}
         ELSE placement_parent_id
       END
-      WHERE project_id = ${squadronId}
+      WHERE project_id = ${projectId}
         AND participant_id IN (${movedToSecond.id}, ${movedToFirst.id})
     `;
 
     const firstSubtree = yield* placements.listSubtree({
-      squadronId,
+      projectId,
       participantId: firstRoot.id,
     });
     const secondSubtree = yield* placements.listSubtree({
-      squadronId,
+      projectId,
       participantId: secondRoot.id,
     });
 

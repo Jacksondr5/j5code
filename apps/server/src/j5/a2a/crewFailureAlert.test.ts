@@ -32,14 +32,14 @@ import { A2ASendService, layer as sendLayer } from "./SendService.ts";
 import {
   CommCommandId,
   ParticipantId,
-  SquadronId,
+  LedgerProjectId,
   type AgentParticipant,
   type HumanParticipant,
 } from "./contracts.ts";
 
 const person: HumanParticipant = { kind: "human", id: ParticipantId.make("human:person-one") };
 const at = "2026-09-18T12:00:00.000Z";
-const squadronId = SquadronId.make("squadron:alerts");
+const projectId = LedgerProjectId.make("project:alerts");
 const captain: AgentParticipant = {
   kind: "agent",
   id: ParticipantId.make("agent:captain"),
@@ -86,17 +86,17 @@ const makeTestLayer = (
   return Layer.mergeAll(database, ledger, send, inbox, worker);
 };
 
-/** A Squadron holding the Captain, with the local person registered. */
+/** A project holding the Captain, with the local person registered. */
 const seed = Effect.gen(function* () {
   yield* runMigrations();
   yield* runJ5A2AMigrations();
   const sql = yield* SqlClient.SqlClient;
   const ledger = yield* A2ALedger;
   yield* sql`INSERT INTO j5_a2a_human_person (person_id, is_local_operator, created_at) VALUES (${person.id}, 1, ${at})`;
-  yield* ledger.ensureProject({ projectId: squadronId, createdAt: at });
+  yield* ledger.ensureProject({ projectId: projectId, createdAt: at });
   yield* ledger.appendEvents({
     commandId: CommCommandId.make("join:alerts"),
-    squadronId,
+    projectId,
     acceptedAt: at,
     events: [
       {
@@ -120,7 +120,7 @@ const failure = {
 };
 const reviewCrew = {
   id: "crew:review",
-  squadronId,
+  projectId,
   captainParticipantId: captain.id,
   displayName: "Review",
 };

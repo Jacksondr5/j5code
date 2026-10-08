@@ -23,7 +23,7 @@ import { CREW_SEAT_QUESTION_INSTRUCTIONS } from "./crewSeatQuestions.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
-import { SquadronId } from "./contracts.ts";
+import { LedgerProjectId } from "./contracts.ts";
 
 const projectId = ProjectId.make("project:crew-seat-runtime");
 const modelSelection = {
@@ -82,11 +82,11 @@ const captainThreadId = "thread:j5:a2a:captain";
 
 const recordCrew = (id: string, seatThread: string) =>
   Effect.gen(function* () {
-    const squadronId = SquadronId.make(`squadron:${id}`);
-    yield* (yield* A2ALedger).ensureProject({ projectId: squadronId, createdAt });
+    const ledgerProjectId = LedgerProjectId.make(`project:${id}`);
+    yield* (yield* A2ALedger).ensureProject({ projectId: ledgerProjectId, createdAt });
     return yield* (yield* AgentCrewInstanceService).record({
       id,
-      squadronId,
+      projectId: ledgerProjectId,
       captainParticipantId: participantIdForThread(ThreadId.make(captainThreadId)),
       captainThreadId: ThreadId.make(captainThreadId),
       displayName: "Review",

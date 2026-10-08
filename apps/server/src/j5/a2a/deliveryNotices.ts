@@ -7,7 +7,7 @@ import {
   LIFECYCLE_PARTICIPANT_ID,
   LedgerMessageId,
   ParticipantId,
-  SquadronId,
+  LedgerProjectId,
 } from "./contracts.ts";
 
 /**
@@ -113,7 +113,7 @@ const notDeliveredKey = (message: UndeliveredMessage) =>
 export const notDeliveredNoticeMessageId = (message: UndeliveredMessage) =>
   LedgerMessageId.make(`message:j5:a2a:not-delivered:${notDeliveredKey(message)}`);
 
-/** A not-delivered notice to the message's sender, in the sender's Squadron. */
+/** A not-delivered notice to the message's sender, in the sender's project. */
 export const notDeliveredNoticeEvent = (input: {
   readonly message: UndeliveredMessage;
   readonly serverName: string;
@@ -136,8 +136,8 @@ export const notDeliveredNoticeEvent = (input: {
         reason: input.reason,
         ...(input.handedOut === true ? { handedOut: true } : {}),
       }),
-      originProjectId: SquadronId.make(input.message.project_id),
-      receiverProjectId: SquadronId.make(input.message.project_id),
+      originProjectId: LedgerProjectId.make(input.message.project_id),
+      receiverProjectId: LedgerProjectId.make(input.message.project_id),
       exchangeRole: "none",
       envelopeChannel: "lifecycle_notice",
     },
@@ -162,8 +162,8 @@ export const peerDropEvents = (input: {
   readonly disposition: ExchangeDropDisposition;
   /** What ended it, naming the party on the peer server. */
   readonly cause: ExchangeDroppedPayload["cause"];
-  /** The local party's Squadron, where the notice is delivered. */
-  readonly localSquadronId: string;
+  /** The local party's project, where the notice is delivered. */
+  readonly localProjectId: string;
   readonly noticeText: string;
   readonly createdAt: string;
 }): ReadonlyArray<CommEvent> => {
@@ -201,8 +201,8 @@ export const peerDropEvents = (input: {
             payload: {
               messageId,
               text: input.noticeText,
-              originProjectId: SquadronId.make(input.exchange.project_id),
-              receiverProjectId: SquadronId.make(input.localSquadronId),
+              originProjectId: LedgerProjectId.make(input.exchange.project_id),
+              receiverProjectId: LedgerProjectId.make(input.localProjectId),
               exchangeRole: "terminal_notice",
               envelopeChannel: "lifecycle_notice",
             },

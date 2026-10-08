@@ -39,12 +39,12 @@ import {
   ExchangeId,
   LedgerMessageId,
   ParticipantId,
-  SquadronId,
+  LedgerProjectId,
   type StoredCommEvent,
 } from "./contracts.ts";
 
-const squadronId = SquadronId.make("squadron:archive-agent");
-const exchangeSquadronId = SquadronId.make("squadron:archive-agent:counterparty");
+const ledgerProjectId = LedgerProjectId.make("ledger:archive-agent");
+const exchangeProjectId = LedgerProjectId.make("project:archive-agent:counterparty");
 const participantId = ParticipantId.make("agent:archive-agent:target");
 const counterpartyId = ParticipantId.make("agent:archive-agent:counterparty");
 const callerParticipantId = ParticipantId.make("agent:archive-agent:caller");
@@ -56,7 +56,7 @@ const now = "2026-08-31T18:00:00.000Z";
 const nowUtc = DateTime.makeUnsafe(now);
 const signingSecret = new Uint8Array(32).fill(19);
 
-const target = { squadronId, participantId, threadId } as const;
+const target = { projectId: ledgerProjectId, participantId, threadId } as const;
 
 const archiveInput = (confirmationToken?: string): ArchiveAgentInput => ({
   providerSessionId: "provider-session:archive-agent",
@@ -71,7 +71,7 @@ const archiveInput = (confirmationToken?: string): ArchiveAgentInput => ({
 
 interface HarnessOptions {
   readonly openExchange?: boolean;
-  readonly exchangeSquadronId?: SquadronId;
+  readonly exchangeProjectId?: LedgerProjectId;
   readonly runStatus?: OrchestrationV2RunStatus;
   readonly mismatchParticipantId?: ParticipantId;
   readonly failLifecycleOnce?: boolean;
@@ -85,11 +85,11 @@ const makeHarness = (options: HarnessOptions = {}) => {
   let lifecycleCalls = 0;
   let archiveCalls = 0;
   let factReads = 0;
-  const owningExchangeSquadronId = options.exchangeSquadronId ?? squadronId;
+  const owningExchangeProjectId = options.exchangeProjectId ?? ledgerProjectId;
   const order: Array<string> = [];
   const events: Array<StoredCommEvent> = [];
-  const nextSeq = (eventSquadronId: SquadronId) =>
-    events.filter((event) => event.squadronId === eventSquadronId).length + 1;
+  const nextSeq = (eventProjectId: LedgerProjectId) =>
+    events.filter((event) => event.projectId === eventProjectId).length + 1;
 
   const projection = (): OrchestrationV2ThreadProjection =>
     ({
@@ -114,8 +114,8 @@ const makeHarness = (options: HarnessOptions = {}) => {
   const appendParticipantLeft = () => {
     if (events.some((event) => event.kind === "participant.archived")) return;
     events.push({
-      seq: nextSeq(squadronId),
-      squadronId,
+      seq: nextSeq(ledgerProjectId),
+      projectId: ledgerProjectId,
       kind: "participant.archived",
       sender: null,
       receiver: participantId,
@@ -131,11 +131,11 @@ const makeHarness = (options: HarnessOptions = {}) => {
     if (!open) return;
     const correlationId = CorrelationId.make("correlation:archive-agent:open");
     const noticeMessageId = LedgerMessageId.make("message:archive-agent:terminal");
-    const firstSeq = nextSeq(owningExchangeSquadronId);
+    const firstSeq = nextSeq(owningExchangeProjectId);
     events.push(
       {
         seq: firstSeq,
-        squadronId: owningExchangeSquadronId,
+        projectId: owningExchangeProjectId,
         kind: "exchange.dropped",
         sender: participantId,
         receiver: counterpartyId,
@@ -143,7 +143,7 @@ const makeHarness = (options: HarnessOptions = {}) => {
         correlationId,
         payload: {
           disposition: "sender-retired",
-          cause: { kind: "participant-archived", participantId, projectId: squadronId },
+          cause: { kind: "participant-archived", participantId, projectId: ledgerProjectId },
           facts: {
             replyRequired: false,
             retryAllowed: false,
@@ -155,7 +155,7 @@ const makeHarness = (options: HarnessOptions = {}) => {
       },
       {
         seq: firstSeq + 1,
-        squadronId: owningExchangeSquadronId,
+        projectId: owningExchangeProjectId,
         kind: "message.sent",
         sender: ParticipantId.make("agent:platform:lifecycle"),
         receiver: counterpartyId,
@@ -164,8 +164,8 @@ const makeHarness = (options: HarnessOptions = {}) => {
         payload: {
           messageId: noticeMessageId,
           text: "Lifecycle terminal notice",
-          originProjectId: owningExchangeSquadronId,
-          receiverProjectId: squadronId,
+          originProjectId: owningExchangeProjectId,
+          receiverProjectId: ledgerProjectId,
           exchangeRole: "terminal_notice",
           envelopeChannel: "lifecycle_notice",
         },
@@ -184,14 +184,14 @@ const makeHarness = (options: HarnessOptions = {}) => {
           return Effect.succeed({
             state: "registered",
             threadId,
-            squadronId,
+            projectId: ledgerProjectId,
             participantId: options.mismatchParticipantId ?? participantId,
             retired: false,
             archived: participantArchived,
             openExchanges: open
               ? [
                   {
-                    squadronId: owningExchangeSquadronId,
+                    projectId: owningExchangeProjectId,
                     exchangeId,
                     direction: "outbound",
                     replyObligation: "counterparty-owes-reply",
@@ -208,16 +208,16 @@ const makeHarness = (options: HarnessOptions = {}) => {
       }),
     ),
     Layer.mock(A2ALedger)({
-      listSquadrons: () =>
+      listProjectLedgers: () =>
         Effect.succeed(
-          [...new Set([squadronId, owningExchangeSquadronId])].map((id) => ({
+          [...new Set([ledgerProjectId, owningExchangeProjectId])].map((id) => ({
             id,
             name: id,
             createdAt: now,
           })),
         ),
-      readEvents: ({ squadronId: requestedSquadronId }) => {
-        const matching = events.filter((event) => event.squadronId === requestedSquadronId);
+      readEvents: ({ projectId: requestedProjectId }) => {
+        const matching = events.filter((event) => event.projectId === requestedProjectId);
         return Effect.succeed({
           events: matching,
           nextCursor: { afterSeq: matching.length, snapshotEnd: matching.length },
@@ -305,7 +305,7 @@ it.effect("archives a clean exact target and proves terminal ledger facts on rep
 it.effect("closes cross-project consequences before returning archived", () => {
   const harness = makeHarness({
     openExchange: true,
-    exchangeSquadronId,
+    exchangeProjectId,
     runStatus: "running",
   });
   return Effect.gen(function* () {
@@ -470,7 +470,7 @@ const readFactsFor = (home: "none" | "registered", thread: "missing" | "unreadab
                     : {
                         state: "registered",
                         threadId,
-                        squadronId,
+                        projectId: ledgerProjectId,
                         participantId,
                         retired: false,
                         archived: false,

@@ -4,7 +4,7 @@ import { ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import type { AgentCrewInstance } from "./AgentCrewInstanceService.ts";
 import type { CrewProposal } from "./AgentCrewProposalService.ts";
 import { crewLaunchReportText, crewRosterChanges } from "./crewGateNotice.ts";
-import { ParticipantId, SquadronId } from "./contracts.ts";
+import { ParticipantId, LedgerProjectId } from "./contracts.ts";
 
 const seat = (name: string, agentId: string, reason = `${name} does its part`) => ({
   workspace: { type: "shared" as const },
@@ -85,7 +85,7 @@ describe("crew roster changes", () => {
 describe("crew launch report", () => {
   const proposal: CrewProposal = {
     id: "proposal:1",
-    squadronId: SquadronId.make("squadron:1"),
+    projectId: LedgerProjectId.make("project:1"),
     captainParticipantId: ParticipantId.make("agent:captain"),
     captainThreadId: ThreadId.make("thread:captain"),
     crewInstanceId: "crew:1",
@@ -114,7 +114,7 @@ describe("crew launch report", () => {
   });
   const instance = {
     id: "crew:1",
-    squadronId: SquadronId.make("squadron:1"),
+    projectId: LedgerProjectId.make("project:1"),
     captainParticipantId: ParticipantId.make("agent:captain"),
     captainThreadId: ThreadId.make("thread:captain"),
     displayName: "Comedy",

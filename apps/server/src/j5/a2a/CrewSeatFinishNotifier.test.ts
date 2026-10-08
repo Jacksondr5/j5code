@@ -47,7 +47,7 @@ import { CrewCaptainArchiveCascade } from "./CrewCaptainArchiveCascade.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
-import { SquadronId } from "./contracts.ts";
+import { LedgerProjectId } from "./contracts.ts";
 
 it("provider errors cannot split a finish digest or replace participant fields", () => {
   const text = seatFinishedNoticeText({
@@ -76,7 +76,7 @@ it("provider errors cannot split a finish digest or replace participant fields",
   );
 });
 
-const squadronId = SquadronId.make("squadron:crew-finish");
+const projectId = LedgerProjectId.make("ledger:crew-finish");
 const captainThread = ThreadId.make("thread:captain");
 const builderThread = ThreadId.make("thread:builder");
 const criticThread = ThreadId.make("thread:critic");
@@ -209,7 +209,7 @@ it.effect("tells the Captain how each finished seat ended, and settles nothing",
     yield* runJ5A2AMigrations().pipe(Effect.provide(context));
     const sql = Context.get(context, SqlClient.SqlClient);
     yield* Context.get(context, A2ALedger).ensureProject({
-      projectId: squadronId,
+      projectId: projectId,
       createdAt: DateTime.formatIso(createdAt),
     });
     const captain = participantIdForThread(captainThread);
@@ -217,7 +217,7 @@ it.effect("tells the Captain how each finished seat ended, and settles nothing",
     const critic = participantIdForThread(criticThread);
     yield* Context.get(context, AgentCrewInstanceService).record({
       id: "crew:finish",
-      squadronId,
+      projectId,
       captainParticipantId: captain,
       captainThreadId: captainThread,
       displayName: "Finish Crew",
@@ -253,7 +253,7 @@ it.effect("tells the Captain how each finished seat ended, and settles nothing",
         project_id, exchange_id, sender_id, receiver_id, status, intent, urgency,
         opened_seq, closed_seq, created_at, updated_at
       ) VALUES (
-        ${squadronId}, 'exchange:review', ${captain}, ${critic}, 'open', 'Review it', NULL,
+        ${projectId}, 'exchange:review', ${captain}, ${critic}, 'open', 'Review it', NULL,
         1, NULL, ${DateTime.formatIso(createdAt)}, ${DateTime.formatIso(createdAt)}
       )
     `;
@@ -421,7 +421,7 @@ it.effect(
       const context = yield* Layer.build(storage);
       yield* runJ5A2AMigrations().pipe(Effect.provide(context));
       yield* Context.get(context, A2ALedger).ensureProject({
-        projectId: squadronId,
+        projectId: projectId,
         createdAt: DateTime.formatIso(createdAt),
       });
       const scout = participantIdForThread(scoutThread);
@@ -436,7 +436,7 @@ it.effect(
       });
       yield* Context.get(context, AgentCrewInstanceService).record({
         id: "crew:fold",
-        squadronId,
+        projectId,
         captainParticipantId: participantIdForThread(captainThread),
         captainThreadId: captainThread,
         displayName: "Fold Crew",
@@ -593,12 +593,12 @@ it.effect(
       const context = yield* Layer.build(storage);
       yield* runJ5A2AMigrations().pipe(Effect.provide(context));
       yield* Context.get(context, A2ALedger).ensureProject({
-        projectId: squadronId,
+        projectId: projectId,
         createdAt: DateTime.formatIso(createdAt),
       });
       yield* Context.get(context, AgentCrewInstanceService).record({
         id: "crew:retry",
-        squadronId,
+        projectId,
         captainParticipantId: participantIdForThread(captainThread),
         captainThreadId: captainThread,
         displayName: "Retry Crew",
@@ -672,12 +672,12 @@ it.effect(
       const context = yield* Layer.build(storage);
       yield* runJ5A2AMigrations().pipe(Effect.provide(context));
       yield* Context.get(context, A2ALedger).ensureProject({
-        projectId: squadronId,
+        projectId: projectId,
         createdAt: DateTime.formatIso(createdAt),
       });
       yield* Context.get(context, AgentCrewInstanceService).record({
         id: "crew:unreadable",
-        squadronId,
+        projectId,
         captainParticipantId: participantIdForThread(captainThread),
         captainThreadId: captainThread,
         displayName: "Unreadable Crew",
@@ -827,12 +827,12 @@ it.effect("the boot sweep tells the Captain about a finished seat nothing report
     const context = yield* Layer.build(storage);
     yield* runJ5A2AMigrations().pipe(Effect.provide(context));
     yield* Context.get(context, A2ALedger).ensureProject({
-      projectId: squadronId,
+      projectId: projectId,
       createdAt: DateTime.formatIso(createdAt),
     });
     yield* Context.get(context, AgentCrewInstanceService).record({
       id: "crew:sweep",
-      squadronId,
+      projectId,
       captainParticipantId: participantIdForThread(captainThread),
       captainThreadId: captainThread,
       displayName: "Sweep Crew",
@@ -940,12 +940,12 @@ it.effect(
       const context = yield* Layer.build(storage);
       yield* runJ5A2AMigrations().pipe(Effect.provide(context));
       yield* Context.get(context, A2ALedger).ensureProject({
-        projectId: squadronId,
+        projectId: projectId,
         createdAt: DateTime.formatIso(createdAt),
       });
       yield* Context.get(context, AgentCrewInstanceService).record({
         id: "crew:oversized",
-        squadronId,
+        projectId,
         captainParticipantId: participantIdForThread(captainThread),
         captainThreadId: captainThread,
         displayName: "Oversized Crew",

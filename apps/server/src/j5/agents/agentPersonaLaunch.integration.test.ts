@@ -29,13 +29,9 @@ function launchInput(input: {
   readonly thread: string;
   readonly message?: string;
   readonly workspace?: ThreadLaunch.ThreadLaunchWorkspaceStrategy;
-  readonly squadronId?: string | null;
 }) {
   return {
     commandId: CommandId.make(input.command),
-    ...(input.squadronId === null
-      ? {}
-      : { squadronId: input.squadronId ?? "squadron:launch-test" }),
     threadId: ThreadId.make(input.thread),
     projectId,
     title: "New thread",

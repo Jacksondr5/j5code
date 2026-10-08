@@ -10,12 +10,12 @@ import {
   type CommCommandId,
   machineParticipantIdForName,
   ParticipantId,
-  SquadronId,
+  LedgerProjectId,
 } from "./contracts.ts";
 
 /**
  * Registered machine senders: cron jobs, watchdogs and scripts that talk to the
- * fleet from outside any agent session. A machine has one immutable Squadron
+ * fleet from outside any agent session. A machine has one immutable project
  * home like an agent, but no thread: it sends plain messages and never
  * receives. Its `participant.joined` event is the ledger fact; the table read
  * here is that fact's projection.
@@ -26,15 +26,15 @@ export const MACHINE_PARTICIPANT_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 export interface MachineParticipantRecord {
   readonly participantId: ParticipantId;
-  readonly squadronId: SquadronId;
-  readonly squadronName: string;
+  readonly projectId: LedgerProjectId;
+  readonly projectTitle: string;
   readonly name: string;
   readonly createdAt: string;
 }
 
 export interface RegisterMachineParticipantInput {
   readonly commandId: CommCommandId;
-  readonly squadronId: SquadronId;
+  readonly projectId: LedgerProjectId;
   readonly name: string;
   readonly acceptedAt: string;
 }
@@ -52,12 +52,12 @@ export class MachineParticipantNameTakenError extends Schema.TaggedError<Machine
   "MachineParticipantNameTakenError",
   {
     participantId: Schema.String,
-    existingSquadronId: Schema.String,
-    requestedSquadronId: Schema.String,
+    existingProjectId: Schema.String,
+    requestedProjectId: Schema.String,
   },
 ) {
   override get message(): string {
-    return `Machine participant ${this.participantId} is already registered in project ${this.existingSquadronId}; registration requested ${this.requestedSquadronId}. Choose another name, or reuse the existing participant.`;
+    return `Machine participant ${this.participantId} is already registered in project ${this.existingProjectId}; registration requested ${this.requestedProjectId}. Choose another name, or reuse the existing participant.`;
   }
 }
 
@@ -109,15 +109,15 @@ export class MachineParticipantService extends Context.Service<
 interface MachineRow {
   readonly participant_id: string;
   readonly project_id: string;
-  readonly squadron_name: string;
+  readonly project_title: string;
   readonly name: string;
   readonly created_at: string;
 }
 
 const recordFromRow = (row: MachineRow): MachineParticipantRecord => ({
   participantId: ParticipantId.make(row.participant_id),
-  squadronId: SquadronId.make(row.project_id),
-  squadronName: row.squadron_name,
+  projectId: LedgerProjectId.make(row.project_id),
+  projectTitle: row.project_title,
   name: row.name,
   createdAt: row.created_at,
 });
@@ -134,11 +134,11 @@ export const layer: Layer.Layer<MachineParticipantService, never, A2ALedger | Sq
           SELECT
             machine.participant_id,
             machine.project_id,
-            COALESCE(project.title, squadron.project_id) AS squadron_name,
+            COALESCE(project.title, ledger.project_id) AS project_title,
             machine.name,
             machine.created_at
           FROM j5_a2a_machine_participant AS machine
-          JOIN j5_a2a_project_ledger AS squadron ON squadron.project_id = machine.project_id
+          JOIN j5_a2a_project_ledger AS ledger ON ledger.project_id = machine.project_id
           LEFT JOIN projection_projects AS project ON project.project_id = machine.project_id
           WHERE machine.participant_id = ${participantId}
           LIMIT 1
@@ -154,28 +154,28 @@ export const layer: Layer.Layer<MachineParticipantService, never, A2ALedger | Sq
           const participantId = machineParticipantIdForName(input.name);
           const projects = yield* sql<{ readonly project_id: string }>`
             SELECT project_id FROM projection_projects
-            WHERE project_id = ${input.squadronId} AND deleted_at IS NULL
+            WHERE project_id = ${input.projectId} AND deleted_at IS NULL
           `;
           if (projects.length === 0) {
             return yield* new MachineParticipantProjectNotFoundError({
-              projectId: input.squadronId,
+              projectId: input.projectId,
             });
           }
           // A machine can be a project's first participant.
-          yield* ledger.ensureProject({ projectId: input.squadronId, createdAt: input.acceptedAt });
+          yield* ledger.ensureProject({ projectId: input.projectId, createdAt: input.acceptedAt });
           const existing = yield* readRow(participantId);
-          if (existing !== null && existing.squadronId !== input.squadronId) {
+          if (existing !== null && existing.projectId !== input.projectId) {
             return yield* new MachineParticipantNameTakenError({
               participantId,
-              existingSquadronId: existing.squadronId,
-              requestedSquadronId: input.squadronId,
+              existingProjectId: existing.projectId,
+              requestedProjectId: input.projectId,
             });
           }
           if (existing !== null) return { participant: existing, created: false };
 
           const appended = yield* ledger.append({
             commandId: input.commandId,
-            squadronId: input.squadronId,
+            projectId: input.projectId,
             acceptedAt: input.acceptedAt,
             event: {
               kind: "participant.joined",
@@ -206,11 +206,11 @@ export const layer: Layer.Layer<MachineParticipantService, never, A2ALedger | Sq
           SELECT
             machine.participant_id,
             machine.project_id,
-            COALESCE(project.title, squadron.project_id) AS squadron_name,
+            COALESCE(project.title, ledger.project_id) AS project_title,
             machine.name,
             machine.created_at
           FROM j5_a2a_machine_participant AS machine
-          JOIN j5_a2a_project_ledger AS squadron ON squadron.project_id = machine.project_id
+          JOIN j5_a2a_project_ledger AS ledger ON ledger.project_id = machine.project_id
           LEFT JOIN projection_projects AS project ON project.project_id = machine.project_id
           ORDER BY machine.project_id, machine.participant_id
         `.pipe(Effect.map((rows) => rows.map(recordFromRow)));

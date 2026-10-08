@@ -27,13 +27,13 @@ it.effect("mints one opaque local operator once without project ledger state", (
     const domainCounts = yield* sql<{
       readonly events: number;
       readonly memberships: number;
-      readonly squadrons: number;
+      readonly projects: number;
     }>`
       SELECT
-        (SELECT COUNT(*) FROM j5_a2a_project_ledger) AS squadrons,
+        (SELECT COUNT(*) FROM j5_a2a_project_ledger) AS projects,
         (SELECT COUNT(*) FROM j5_a2a_membership) AS memberships,
         (SELECT COUNT(*) FROM j5_a2a_comm_event) AS events
     `;
-    assert.deepStrictEqual(domainCounts, [{ squadrons: 0, memberships: 0, events: 0 }]);
+    assert.deepStrictEqual(domainCounts, [{ projects: 0, memberships: 0, events: 0 }]);
   }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );

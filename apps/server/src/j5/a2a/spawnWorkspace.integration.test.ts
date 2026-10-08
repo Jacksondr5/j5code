@@ -17,7 +17,7 @@ import { makeHarness, modelSelection, projectId } from "../test-support/threadLa
 
 const stableInput = { providerSessionId: "provider-session:spawn", requestKey: "builder" };
 const threadId = spawnThreadId(stableInput);
-const squadronId = "squadron:spawn-workspace";
+const ledgerProjectId = "project:spawn-workspace";
 
 /** The J5 workspace service over a real orchestrator and ThreadLaunch, git and setup faked. */
 const spawnLayer = (harness: ReturnType<typeof makeHarness>) =>
@@ -46,7 +46,7 @@ const startWorktreeSpawn = Effect.gen(function* () {
   yield* (yield* SpawnWorkspaceService).startBrief({
     workspace: { type: "worktree", baseRef: "main", startFromOrigin: false },
     stableInput,
-    squadronId,
+    ledgerProjectId: ledgerProjectId,
     projectId,
     threadId,
     title: "Builder",

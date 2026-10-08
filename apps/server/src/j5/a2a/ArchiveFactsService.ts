@@ -7,7 +7,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { resolveThreadHome } from "./HomeRegistrar.ts";
 import { ParticipantPlacementService } from "./PlacementService.ts";
-import { ExchangeId, ParticipantId, SquadronId, type Urgency } from "./contracts.ts";
+import { ExchangeId, ParticipantId, LedgerProjectId, type Urgency } from "./contracts.ts";
 
 export type ArchivePlacementSubtree =
   | {
@@ -27,7 +27,7 @@ export class A2AArchivePlacementFactsProviderError extends Schema.TaggedError<A2
 
 export interface A2AArchivePlacementFactsProviderShape {
   readonly readSubtree: (input: {
-    readonly squadronId: SquadronId;
+    readonly projectId: LedgerProjectId;
     readonly participantId: ParticipantId;
   }) => Effect.Effect<ArchivePlacementSubtree, A2AArchivePlacementFactsProviderError>;
 }
@@ -77,7 +77,7 @@ export const placementFactsLayer = Layer.effect(
 );
 
 export interface OpenExchangeArchiveFact {
-  readonly squadronId: SquadronId;
+  readonly projectId: LedgerProjectId;
   readonly exchangeId: ExchangeId;
   readonly direction: "inbound" | "outbound";
   readonly replyObligation: "participant-owes-reply" | "counterparty-owes-reply";
@@ -97,7 +97,7 @@ export type ThreadPreArchiveFacts =
   | {
       readonly state: "registered";
       readonly threadId: ThreadId;
-      readonly squadronId: SquadronId;
+      readonly projectId: LedgerProjectId;
       readonly participantId: ParticipantId;
       readonly retired: boolean;
       readonly archived: boolean;
@@ -175,7 +175,7 @@ export const layer = Layer.effect(
         const openExchanges = rows.map((row): OpenExchangeArchiveFact => {
           const inbound = row.receiver_id === participantId;
           return {
-            squadronId: SquadronId.make(row.project_id),
+            projectId: LedgerProjectId.make(row.project_id),
             exchangeId: ExchangeId.make(row.exchange_id),
             direction: inbound ? "inbound" : "outbound",
             replyObligation: inbound ? "participant-owes-reply" : "counterparty-owes-reply",
@@ -187,7 +187,7 @@ export const layer = Layer.effect(
         });
         const placementSubtree = yield* placement
           .readSubtree({
-            squadronId: resolution.home.squadronId,
+            projectId: resolution.home.projectId,
             participantId,
           })
           .pipe(
@@ -201,7 +201,7 @@ export const layer = Layer.effect(
         return {
           state: "registered",
           threadId,
-          squadronId: resolution.home.squadronId,
+          projectId: resolution.home.projectId,
           participantId,
           retired: resolution.retired,
           archived:

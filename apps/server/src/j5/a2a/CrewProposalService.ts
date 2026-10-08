@@ -452,12 +452,12 @@ export const layer = Layer.effect(
           detail: `Captain ${projection.thread.title} is archived, so this crew has no one to command it.`,
           nextStep: "Unarchive the Captain to approve it, or decline this proposal.",
         });
-      const squadron = yield* ledger
-        .readSquadron(proposal.squadronId)
+      const project = yield* ledger
+        .readProjectLedger(proposal.projectId)
         .pipe(Effect.mapError(operationError("reading the project")));
       return {
-        squadronId: proposal.squadronId,
-        squadronName: squadron.name,
+        projectId: proposal.projectId,
+        projectTitle: project.name,
         participantId: proposal.captainParticipantId,
         thread: projection.thread,
       } satisfies CrewCaptain;
@@ -583,7 +583,7 @@ export const layer = Layer.effect(
               providerSessionId: PROPOSAL_SESSION,
               requestKey: input.requestKey,
             }),
-            squadronId: input.captain.squadronId,
+            projectId: input.captain.projectId,
             captainParticipantId: input.captain.participantId,
             captainThreadId: input.captain.thread.id,
             crewInstanceId: null,
@@ -609,7 +609,7 @@ export const layer = Layer.effect(
       Effect.gen(function* () {
         const commanded = yield* crews
           .listForCaptain({
-            squadronId: input.captain.squadronId,
+            projectId: input.captain.projectId,
             captainParticipantId: input.captain.participantId,
           })
           .pipe(
@@ -661,7 +661,7 @@ export const layer = Layer.effect(
           .admit(
             {
               id: proposalId,
-              squadronId: input.captain.squadronId,
+              projectId: input.captain.projectId,
               captainParticipantId: input.captain.participantId,
               captainThreadId: input.captain.thread.id,
               crewInstanceId: instance.id,

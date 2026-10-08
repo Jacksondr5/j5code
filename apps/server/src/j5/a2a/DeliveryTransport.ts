@@ -31,7 +31,7 @@ import { PeerRegistryService } from "./PeerRegistryService.ts";
 import { peerProtocolHeaders, peerProtocolMismatch, statedPeerProtocol } from "./peerProtocol.ts";
 import {
   type DeliveryEnvelopeChannel,
-  SquadronId,
+  LedgerProjectId,
   ExchangeId,
   isHumanParticipantId,
   isMachineParticipantId,
@@ -98,8 +98,8 @@ export class A2ADeliveryRefusedError extends Schema.TaggedError<A2ADeliveryRefus
 export const isRefusedError = Schema.is(A2ADeliveryRefusedError);
 
 export interface AgentDeliveryInput {
-  readonly originProjectId: SquadronId;
-  readonly receiverProjectId: SquadronId;
+  readonly originProjectId: LedgerProjectId;
+  readonly receiverProjectId: LedgerProjectId;
   readonly messageId: LedgerMessageId;
   readonly senderId: ParticipantId;
   readonly receiverId: ParticipantId;
@@ -299,15 +299,15 @@ export const live: Layer.Layer<
       }
     });
     const sql = yield* SqlClient.SqlClient;
-    // An agent sender is homed in the delivery's origin Squadron, so its thread
+    // An agent sender is homed in the delivery's origin project, so its thread
     // is one primary-key read on the (agent-only) membership projection.
     const agentThreadId = Effect.fn("j5.a2a.delivery.agentThreadId")(function* (
-      squadronId: SquadronId,
+      projectId: LedgerProjectId,
       participantId: ParticipantId,
     ) {
       const rows = yield* sql<{ readonly thread_id: string }>`SELECT thread_id
         FROM j5_a2a_membership
-        WHERE project_id = ${squadronId} AND participant_id = ${participantId}`;
+        WHERE project_id = ${projectId} AND participant_id = ${participantId}`;
       return rows[0] === undefined ? undefined : ThreadId.make(rows[0].thread_id);
     });
 

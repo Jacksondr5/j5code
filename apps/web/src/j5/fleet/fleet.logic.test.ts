@@ -15,7 +15,7 @@ import {
   playbookRunOwnerLabel,
   retiredCrews,
 } from "./fleet.logic";
-import type { FleetAgent, FleetCrew, FleetSquadron } from "./fleetClient";
+import type { FleetAgent, FleetCrew, FleetLedgerProject } from "./fleetClient";
 
 const agent = (participantId: string, overrides: Partial<FleetAgent> = {}): FleetAgent => ({
   participantId,
@@ -35,7 +35,7 @@ const seat = (seatName: string, captain: string) => ({
 });
 
 describe("fleet tree", () => {
-  const squadron: FleetSquadron = {
+  const project: FleetLedgerProject = {
     id: "project-alpha",
     title: "Alpha",
     crews: [],
@@ -60,7 +60,7 @@ describe("fleet tree", () => {
   };
 
   it("groups crew members under their captain and keeps other children as plain rows", () => {
-    const roots = buildFleetTree(squadron);
+    const roots = buildFleetTree(project);
     expect(roots.map((node) => node.row.agent.participantId)).toEqual(["captain", "orphan", "zed"]);
     const captain = roots[0]!;
     expect(captain.crews).toHaveLength(1);
@@ -83,13 +83,13 @@ describe("fleet tree", () => {
   });
 
   it("never loops on a cyclic placement and counts alerts from owed asks only", () => {
-    const cyclic: FleetSquadron = {
-      ...squadron,
+    const cyclic: FleetLedgerProject = {
+      ...project,
       agents: [agent("a", { placementParentId: "b" }), agent("b", { placementParentId: "a" })],
     };
     const roots = buildFleetTree(cyclic);
     expect(roots.map((node) => node.row.agent.participantId).length).toBeGreaterThan(0);
-    expect(countFleetAlerts([squadron])).toBe(1);
+    expect(countFleetAlerts([project])).toBe(1);
     expect(originLabel("unknown")).toBe("?");
   });
 });
@@ -185,7 +185,7 @@ const crew = (id: string, archivedAt: string | null): FleetCrew => ({
 
 describe("retired crews", () => {
   it("lists archived Crews of every project, newest retirement first, each naming its project", () => {
-    const alpha: FleetSquadron = {
+    const alpha: FleetLedgerProject = {
       id: "project-alpha",
       title: "Alpha",
       agents: [],
@@ -195,14 +195,14 @@ describe("retired crews", () => {
         crew("newest", "2026-09-14T14:00:00.000Z"),
       ],
     };
-    const beta: FleetSquadron = {
+    const beta: FleetLedgerProject = {
       id: "project-beta",
       title: "Beta",
       agents: [],
       crews: [crew("newer", "2026-09-14T12:00:00.000Z")],
     };
     expect(
-      retiredCrews([alpha, beta]).map((entry) => [entry.crew.crewInstanceId, entry.squadron.title]),
+      retiredCrews([alpha, beta]).map((entry) => [entry.crew.crewInstanceId, entry.project.title]),
     ).toEqual([
       ["newest", "Alpha"],
       ["newer", "Beta"],
@@ -230,7 +230,7 @@ describe("fleet sections", () => {
   const lookupFrom =
     (shells: Record<string, CrewSeatThread | undefined>) => (_: EnvironmentId, threadId: string) =>
       shells[threadId.replace(/^thread:/, "")];
-  const squadron = (id: string, agents: ReadonlyArray<FleetAgent>) => ({
+  const project = (id: string, agents: ReadonlyArray<FleetAgent>) => ({
     id: `project-${id}`,
     title: id,
     crews: [],
@@ -238,11 +238,11 @@ describe("fleet sections", () => {
     environmentId,
   });
   const roots = (rows: ReturnType<typeof partitionFleet>["active"]) =>
-    rows.map(({ squadron: s, node }) => `${s.title}/${node.row.agent.participantId}`);
+    rows.map(({ project: s, node }) => `${s.title}/${node.row.agent.participantId}`);
 
   it("places a settled agent under Settled and an idle or unknown one under Active", () => {
     const sections = partitionFleet(
-      [squadron("Alpha", [agent("done"), agent("quiet"), agent("unseen"), agent("busy")])],
+      [project("Alpha", [agent("done"), agent("quiet"), agent("unseen"), agent("busy")])],
       lookupFrom({ done: settled, quiet: idle, busy: running }),
     );
     expect(roots(sections.active)).toEqual(["Alpha/busy", "Alpha/quiet", "Alpha/unseen"]);
@@ -254,7 +254,7 @@ describe("fleet sections", () => {
   it("places the child of a retired agent at the root in its own section", () => {
     // The roster read leaves the retired parent out; its child keeps the parent id.
     const sections = partitionFleet(
-      [squadron("Alpha", [agent("child", { placementParentId: "gone" }), agent("done")])],
+      [project("Alpha", [agent("child", { placementParentId: "gone" }), agent("done")])],
       lookupFrom({ child: running, done: settled }),
     );
     expect(roots(sections.active)).toEqual(["Alpha/child"]);
@@ -266,7 +266,7 @@ describe("fleet sections", () => {
   it("moves a Crew as one unit when its Captain and every seat are settled", () => {
     const sections = partitionFleet(
       [
-        squadron("Alpha", [
+        project("Alpha", [
           agent("captain"),
           agent("builder", { placementParentId: "captain", crew: seat("builder", "captain") }),
           agent("critic", { placementParentId: "captain", crew: seat("critic", "captain") }),
@@ -291,20 +291,20 @@ describe("fleet sections", () => {
       agent("helper", { placementParentId: "captain" }),
     ];
     const seatWorking = partitionFleet(
-      [squadron("Alpha", agents)],
+      [project("Alpha", agents)],
       lookupFrom({ captain: settled, builder: settled, critic: running, helper: settled }),
     );
     expect(roots(seatWorking.active)).toEqual(["Alpha/captain"]);
     expect(seatWorking.settled).toEqual([]);
     expect(seatWorking.settledAgentCount).toBe(0);
     const childIdle = partitionFleet(
-      [squadron("Alpha", agents)],
+      [project("Alpha", agents)],
       lookupFrom({ captain: settled, builder: settled, critic: settled, helper: idle }),
     );
     expect(roots(childIdle.active)).toEqual(["Alpha/captain"]);
     // A seat the client cannot see is not assumed done either.
     const seatUnknown = partitionFleet(
-      [squadron("Alpha", agents)],
+      [project("Alpha", agents)],
       lookupFrom({ captain: settled, builder: settled, helper: settled }),
     );
     expect(roots(seatUnknown.active)).toEqual(["Alpha/captain"]);
@@ -313,8 +313,8 @@ describe("fleet sections", () => {
   it("merges every project in source order and never re-sorts by state", () => {
     const sections = partitionFleet(
       [
-        squadron("Alpha", [agent("a-done"), agent("a-busy")]),
-        squadron("Beta", [agent("b-busy"), agent("b-done")]),
+        project("Alpha", [agent("a-done"), agent("a-busy")]),
+        project("Beta", [agent("b-busy"), agent("b-done")]),
       ],
       lookupFrom({ "a-done": settled, "a-busy": idle, "b-busy": running, "b-done": settled }),
     );
@@ -326,7 +326,7 @@ describe("fleet sections", () => {
 describe("roster seats without thread facts", () => {
   const environmentId = EnvironmentId.make("env:a");
   // The read carries a never-created seat with no thread, and a recorded seat may not be placed yet.
-  const squadron: FleetSquadron = {
+  const project: FleetLedgerProject = {
     id: "project-roster",
     title: "Roster",
     crews: [],
@@ -347,7 +347,7 @@ describe("roster seats without thread facts", () => {
   };
 
   it("hangs every roster seat under its Captain, placed or not, and counts the unknown ones", () => {
-    const [captain, ...rest] = buildFleetTree(squadron);
+    const [captain, ...rest] = buildFleetTree(project);
     expect(rest).toEqual([]);
     const members = captain!.crews[0]!.members.map((node) => node.row.agent);
     expect(members.map((member) => member.participantId)).toEqual(["builder", "critic", "scout"]);
@@ -361,7 +361,7 @@ describe("roster seats without thread facts", () => {
 
   it("keeps a Crew with no placed seat as a named group with its count", () => {
     const [captain] = buildFleetTree({
-      ...squadron,
+      ...project,
       agents: [
         agent("captain"),
         agent("critic", { threadId: null, origin: "agent", crew: seat("critic", "captain") }),
@@ -383,23 +383,23 @@ describe("roster seats without thread facts", () => {
       (env, threadId) =>
         env === environmentId && threadId === "thread:x" ? settledShell : undefined,
     );
-    expect(sections.settled.map((row) => row.squadron.environmentId)).toEqual([environmentId]);
-    expect(sections.active.map((row) => row.squadron.environmentId)).toEqual([other]);
+    expect(sections.settled.map((row) => row.project.environmentId)).toEqual([environmentId]);
+    expect(sections.active.map((row) => row.project.environmentId)).toEqual([other]);
   });
 });
 
 describe("fleet rows by project", () => {
   const laptop = EnvironmentId.make("laptop");
   const server = EnvironmentId.make("server");
-  const squadron = (environmentId: EnvironmentId, id: string, title: string) => ({
+  const project = (environmentId: EnvironmentId, id: string, title: string) => ({
     id,
     title,
     crews: [],
     agents: [],
     environmentId,
   });
-  const row = (owner: ReturnType<typeof squadron>, participantId: string, threadId?: null) => ({
-    squadron: owner,
+  const row = (owner: ReturnType<typeof project>, participantId: string, threadId?: null) => ({
+    project: owner,
     node: {
       row: {
         agent: agent(participantId, threadId === null ? { threadId: null } : {}),
@@ -410,14 +410,14 @@ describe("fleet rows by project", () => {
       crews: [],
     },
   });
-  const zeta = squadron(laptop, "project-zeta", "Zeta");
-  const appHere = squadron(laptop, "project-app", "App here");
-  const appThere = squadron(server, "project-app-remote", "App on the server");
-  const orphan = squadron(laptop, "project-orphan", "Mango");
+  const zeta = project(laptop, "project-zeta", "Zeta");
+  const appHere = project(laptop, "project-app", "App here");
+  const appThere = project(server, "project-app-remote", "App on the server");
+  const orphan = project(laptop, "project-orphan", "Mango");
   const app = { projectKey: "repo:app", displayName: "App" };
   const zebra = { projectKey: "laptop:zebra", displayName: "Zebra" };
   // Both machines' copies of the app resolve to one logical project; `orphan` resolves to none.
-  const projectOf = (owner: ReturnType<typeof squadron>) =>
+  const projectOf = (owner: ReturnType<typeof project>) =>
     owner === orphan ? undefined : owner === zeta ? zebra : app;
   const rows = [
     row(zeta, "z-agent"),

@@ -61,7 +61,7 @@ import {
   ExchangeId,
   LedgerMessageId,
   ParticipantId,
-  SquadronId,
+  LedgerProjectId,
   type ParticipantDirectoryRow,
   type SendMessageInput,
 } from "../contracts.ts";
@@ -88,7 +88,7 @@ const hasKey = (value: unknown, key: string): boolean => {
   return key in record || Object.values(record).some((item) => hasKey(item, key));
 };
 const forbiddenCamelCaseKeys = [
-  "squadronId",
+  "projectId",
   "participantId",
   "threadId",
   "placementParentId",
@@ -134,10 +134,10 @@ const unusedLifecycleDependencies = Layer.mergeAll(
     getHomeForThread: (threadId) => Effect.fail(new A2AHomeNotFoundError({ threadId })),
   }),
   Layer.mock(A2ALedger)({
-    listSquadrons: () =>
+    listProjectLedgers: () =>
       Effect.succeed([
         {
-          id: SquadronId.make("squadron:j5:mcp-directory"),
+          id: LedgerProjectId.make("ledger:j5:mcp-directory"),
           name: "Directory project",
           createdAt: DateTime.formatIso(createdAt),
         },
@@ -193,9 +193,9 @@ it.effect("namespaces mutating-tool idempotency and sender identity from authent
             ? Effect.fail(
                 new A2AHomeMembershipStateError({
                   threadId: invocation.threadId,
-                  expectedSquadronId: "squadron:j5:mcp-home",
+                  expectedProjectId: "project:j5:mcp-home",
                   expectedParticipantId: callerParticipantId,
-                  activeHomes: ["squadron:j5:mcp-home", "squadron:j5:mcp-extra"],
+                  activeHomes: ["project:j5:mcp-home", "project:j5:mcp-extra"],
                 }),
               )
             : Ref.update(sends, (items) => [...items, input]).pipe(
@@ -333,7 +333,7 @@ it.effect("namespaces mutating-tool idempotency and sender identity from authent
 );
 it.effect("keeps participant listing placement-read-only", () =>
   Effect.gen(function* () {
-    const squadronId = SquadronId.make("squadron:j5:mcp-placement-handler");
+    const ledgerProjectId = LedgerProjectId.make("project:j5:mcp-placement-handler");
     const callerParticipantId = ParticipantId.make("agent:j5:mcp-placement-caller");
     const forkedParticipantId = ParticipantId.make("agent:j5:mcp-placement-forked");
     const personParticipantId = ParticipantId.make("human:placement-person");
@@ -341,7 +341,7 @@ it.effect("keeps participant listing placement-read-only", () =>
     const forkSourceId = ParticipantId.make("agent:j5:mcp-fork-source");
     const placementWrites = yield* Ref.make(0);
     const callerRow = {
-      squadronId,
+      projectId: ledgerProjectId,
       participantId: callerParticipantId,
       participant: {
         kind: "agent" as const,
@@ -354,7 +354,7 @@ it.effect("keeps participant listing placement-read-only", () =>
       acceptsUrgency: false,
     } satisfies ParticipantDirectoryRow;
     const forkedRow = {
-      squadronId,
+      projectId: ledgerProjectId,
       participantId: forkedParticipantId,
       participant: {
         kind: "agent" as const,
@@ -367,7 +367,7 @@ it.effect("keeps participant listing placement-read-only", () =>
       acceptsUrgency: false,
     } satisfies ParticipantDirectoryRow;
     const humanRow = {
-      squadronId,
+      projectId: ledgerProjectId,
       participantId: personParticipantId,
       participant: { kind: "human" as const, id: personParticipantId },
       archived: false,
@@ -392,7 +392,7 @@ it.effect("keeps participant listing placement-read-only", () =>
       listParticipants: () =>
         Effect.succeed([
           {
-            squadronId,
+            projectId: ledgerProjectId,
             participantId: callerParticipantId,
             participant: callerRow.participant,
             threadId: invocation.threadId,
@@ -404,7 +404,7 @@ it.effect("keeps participant listing placement-read-only", () =>
             placementParentId: displayParentId,
           },
           {
-            squadronId,
+            projectId: ledgerProjectId,
             participantId: forkedParticipantId,
             participant: forkedRow.participant,
             threadId: forkedRow.participant.threadId,
@@ -475,7 +475,7 @@ it.effect("keeps participant listing placement-read-only", () =>
 
 it.effect("lists active and archived agent titles with one ambient shell snapshot", () =>
   Effect.gen(function* () {
-    const squadronId = SquadronId.make("squadron:j5:mcp-directory");
+    const ledgerProjectId = LedgerProjectId.make("ledger:j5:mcp-directory");
     const activeThreadId = ThreadId.make("thread:j5:mcp-directory:active");
     const archivedThreadId = ThreadId.make("thread:j5:mcp-directory:archived");
     const missingThreadId = ThreadId.make("thread:j5:mcp-directory:missing");
@@ -484,7 +484,7 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
     const missingParticipantId = ParticipantId.make("agent:j5:mcp-directory:missing");
     const humanParticipantId = ParticipantId.make("human:j5:mcp-directory");
     const row = (participant: ParticipantDirectoryRow["participant"]): ParticipantDirectoryRow => ({
-      squadronId,
+      projectId: ledgerProjectId,
       participantId: participant.id,
       participant,
       archived: false,
@@ -605,7 +605,7 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
 
     assert.deepStrictEqual(directory.participants, [
       {
-        project_id: squadronId,
+        project_id: ledgerProjectId,
         project_title: "Directory project",
         participant_id: activeParticipantId,
         participant: { kind: "agent", id: activeParticipantId, thread_id: activeThreadId },
@@ -620,7 +620,7 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
         display_name: "Release reviewer",
       },
       {
-        project_id: squadronId,
+        project_id: ledgerProjectId,
         project_title: "Directory project",
         participant_id: archivedParticipantId,
         participant: { kind: "agent", id: archivedParticipantId, thread_id: archivedThreadId },
@@ -635,7 +635,7 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
         display_name: "Archived researcher",
       },
       {
-        project_id: squadronId,
+        project_id: ledgerProjectId,
         project_title: "Directory project",
         participant_id: missingParticipantId,
         participant: { kind: "agent", id: missingParticipantId, thread_id: missingThreadId },
@@ -650,7 +650,7 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
         display_name: null,
       },
       {
-        project_id: squadronId,
+        project_id: ledgerProjectId,
         project_title: "Directory project",
         participant_id: humanParticipantId,
         participant: { kind: "human", id: humanParticipantId },
@@ -673,12 +673,12 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
 
 it.effect("returns null display names when the ambient shell snapshot fails", () =>
   Effect.gen(function* () {
-    const squadronId = SquadronId.make("squadron:j5:mcp-directory:snapshot-failure");
+    const ledgerProjectId = LedgerProjectId.make("project:j5:mcp-directory:snapshot-failure");
     const agentParticipantId = ParticipantId.make("agent:j5:mcp-directory:snapshot-failure");
     const humanParticipantId = ParticipantId.make("human:j5:mcp-directory:snapshot-failure");
     const rows: ReadonlyArray<ParticipantDirectoryRow> = [
       {
-        squadronId,
+        projectId: ledgerProjectId,
         participantId: agentParticipantId,
         participant: {
           kind: "agent",
@@ -691,7 +691,7 @@ it.effect("returns null display names when the ambient shell snapshot fails", ()
         acceptsUrgency: false,
       },
       {
-        squadronId,
+        projectId: ledgerProjectId,
         participantId: humanParticipantId,
         participant: { kind: "human", id: humanParticipantId },
         archived: false,
@@ -756,8 +756,8 @@ it.effect("returns null display names when the ambient shell snapshot fails", ()
 
 it.effect("preflights home before creation and records facts before the one stable brief", () =>
   Effect.gen(function* () {
-    const squadronId = SquadronId.make("squadron:j5:mcp-spawn");
-    const squadronName = "Release proof project";
+    const ledgerProjectId = LedgerProjectId.make("project:j5:mcp-spawn");
+    const projectTitle = "Release proof project";
     const callerParticipantId = ParticipantId.make("agent:j5:mcp-spawn-caller");
     const childParticipantId = ParticipantId.make("agent:j5:mcp-spawn-child");
     const failFacts = yield* Ref.make(false);
@@ -772,7 +772,7 @@ it.effect("preflights home before creation and records facts before the one stab
       }>
     >([]);
     const callerRow = {
-      squadronId,
+      projectId: ledgerProjectId,
       participantId: callerParticipantId,
       participant: {
         kind: "agent" as const,
@@ -794,13 +794,14 @@ it.effect("preflights home before creation and records facts before the one stab
       }),
     );
     const homeService = Layer.mock(A2AHomeRegistrar)({
-      getHomeForThread: () => Effect.succeed({ squadronId, participantId: callerParticipantId }),
+      getHomeForThread: () =>
+        Effect.succeed({ projectId: ledgerProjectId, participantId: callerParticipantId }),
     });
     const ledger = Layer.mock(A2ALedger)({
-      readSquadron: () =>
+      readProjectLedger: () =>
         Effect.succeed({
-          id: squadronId,
-          name: squadronName,
+          id: ledgerProjectId,
+          name: projectTitle,
           createdAt: DateTime.formatIso(createdAt),
         }),
     });
@@ -834,9 +835,9 @@ it.effect("preflights home before creation and records facts before the one stab
                   { discard: true },
                 ).pipe(
                   Effect.as({
-                    home: { squadronId, participantId: childParticipantId },
+                    home: { projectId: ledgerProjectId, participantId: childParticipantId },
                     placement: {
-                      squadronId,
+                      projectId: ledgerProjectId,
                       participantId: childParticipantId,
                       provenance: {
                         kind: "spawned-by" as const,
@@ -938,7 +939,8 @@ it.effect("preflights home before creation and records facts before the one stab
       Layer.mock(CrewProposalService)({}),
 
       Layer.mock(ThreadRegistration)({
-        ensureRegistered: () => Effect.succeed({ squadronId, participantId: callerParticipantId }),
+        ensureRegistered: () =>
+          Effect.succeed({ projectId: ledgerProjectId, participantId: callerParticipantId }),
       }),
       NodeServices.layer,
     );
@@ -973,8 +975,8 @@ it.effect("preflights home before creation and records facts before the one stab
       assert.deepStrictEqual(first.result, {
         participant_id: childParticipantId,
         thread_id: (first.result as { readonly thread_id: ThreadId }).thread_id,
-        project_id: squadronId,
-        project_title: squadronName,
+        project_id: ledgerProjectId,
+        project_title: projectTitle,
         placement: {
           placement_parent_id: callerParticipantId,
           provenance: {
@@ -1012,7 +1014,7 @@ it.effect("preflights home before creation and records facts before the one stab
       if (firstTurn?.type === "message.dispatch") {
         assert.equal(
           firstTurn.text,
-          `<j5_spawn_context>\nPlatform-provided identity facts:\nparticipant_id: ${childParticipantId}\nproject_id: ${squadronId}\nproject_title: ${squadronName}\nspawned_by: ${callerParticipantId}\nspawner_thread_id: ${invocation.threadId}\n</j5_spawn_context>\n\n<spawner_brief>\n${args.brief}\n</spawner_brief>`,
+          `<j5_spawn_context>\nPlatform-provided identity facts:\nparticipant_id: ${childParticipantId}\nproject_id: ${ledgerProjectId}\nproject_title: ${projectTitle}\nspawned_by: ${callerParticipantId}\nspawner_thread_id: ${invocation.threadId}\n</j5_spawn_context>\n\n<spawner_brief>\n${args.brief}\n</spawner_brief>`,
         );
       }
       const replayTurn = capturedCommands[3];
@@ -1184,7 +1186,7 @@ const personaCapabilityProvider = (provider: ServerProvider) => ({
 
 it.effect("spawns a saved agent as a Peer Agent only within its declared routes", () =>
   Effect.gen(function* () {
-    const squadronId = SquadronId.make("squadron:j5:mcp-spawn-persona");
+    const ledgerProjectId = LedgerProjectId.make("project:j5:mcp-spawn-persona");
     const callerParticipantId = ParticipantId.make("agent:j5:mcp-spawn-persona-caller");
     const childParticipantId = ParticipantId.make("agent:j5:mcp-spawn-persona-child");
     const commands = yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]);
@@ -1196,7 +1198,7 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
       { slug: "claude-opus-5", options: ["high"] },
     ]);
     const callerRow = {
-      squadronId,
+      projectId: ledgerProjectId,
       participantId: callerParticipantId,
       participant: {
         kind: "agent" as const,
@@ -1211,12 +1213,13 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
     const dependencies = Layer.mergeAll(
       Layer.mock(A2ASendService)({ listParticipants: () => Effect.succeed([callerRow]) }),
       Layer.mock(A2AHomeRegistrar)({
-        getHomeForThread: () => Effect.succeed({ squadronId, participantId: callerParticipantId }),
+        getHomeForThread: () =>
+          Effect.succeed({ projectId: ledgerProjectId, participantId: callerParticipantId }),
       }),
       Layer.mock(A2ALedger)({
-        readSquadron: () =>
+        readProjectLedger: () =>
           Effect.succeed({
-            id: squadronId,
+            id: ledgerProjectId,
             name: "Persona",
             createdAt: DateTime.formatIso(createdAt),
           }),
@@ -1224,9 +1227,9 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
       Layer.mock(SpawnCompositionService)({
         recordFacts: (input) =>
           Effect.succeed({
-            home: { squadronId, participantId: childParticipantId },
+            home: { projectId: ledgerProjectId, participantId: childParticipantId },
             placement: {
-              squadronId,
+              projectId: ledgerProjectId,
               participantId: childParticipantId,
               provenance: input.provenance,
               placementParentId:
@@ -1274,7 +1277,8 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
       Layer.mock(CrewStopService)({}),
       Layer.mock(CrewProposalService)({}),
       Layer.mock(ThreadRegistration)({
-        ensureRegistered: () => Effect.succeed({ squadronId, participantId: callerParticipantId }),
+        ensureRegistered: () =>
+          Effect.succeed({ projectId: ledgerProjectId, participantId: callerParticipantId }),
       }),
 
       ServerConfig.layerTest(process.cwd(), { prefix: "j5-mcp-spawn-persona-" }),
@@ -1445,12 +1449,12 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
 
 it.effect("archives a crew only as a unit through its captain with one confirmation", () =>
   Effect.gen(function* () {
-    const squadronId = SquadronId.make("squadron:j5:mcp-archive-crew");
+    const ledgerProjectId = LedgerProjectId.make("project:j5:mcp-archive-crew");
     const callerParticipantId = ParticipantId.make("agent:j5:mcp-archive-crew-captain");
     const memberParticipantId = ParticipantId.make("agent:j5:mcp-archive-crew-member");
     const archiveCalls = yield* Ref.make<ReadonlyArray<ArchiveCrewInput>>([]);
     const callerRow = {
-      squadronId,
+      projectId: ledgerProjectId,
       participantId: callerParticipantId,
       participant: {
         kind: "agent" as const,
@@ -1463,7 +1467,7 @@ it.effect("archives a crew only as a unit through its captain with one confirmat
       acceptsUrgency: false,
     } satisfies ParticipantDirectoryRow;
     const memberRow = {
-      squadronId,
+      projectId: ledgerProjectId,
       participantId: memberParticipantId,
       participant: {
         kind: "agent" as const,
@@ -1604,8 +1608,8 @@ it.effect("archives a crew only as a unit through its captain with one confirmat
       assert.lengthOf(calls, 2);
       assert.equal(calls[1]?.callerParticipantId, callerParticipantId);
       assert.equal(
-        calls[1]?.squadronId,
-        squadronId,
+        calls[1]?.projectId,
+        ledgerProjectId,
         "the Crew is archived in the caller's project",
       );
       assert.equal(calls[1]?.clientRequestKey, "archive-crew-1");
@@ -1678,14 +1682,14 @@ it.effect("lists saved agents with purpose, policy, availability, and route", ()
 
 it.effect("routes crew proposals through a captain that is not itself a crew member", () =>
   Effect.gen(function* () {
-    const squadronId = SquadronId.make("squadron:j5:mcp-propose");
+    const ledgerProjectId = LedgerProjectId.make("project:j5:mcp-propose");
     const callerParticipantId = ParticipantId.make("agent:j5:mcp-propose-captain");
     const proposals = yield* Ref.make<ReadonlyArray<string>>([]);
     const proposedSeats = yield* Ref.make<ReadonlyArray<CrewProposalSeat>>([]);
     const addedSeats = yield* Ref.make<ReadonlyArray<CrewProposalSeat>>([]);
     const membership = yield* Ref.make<{ crewInstanceId: string; seatName: string } | null>(null);
     const callerRow = {
-      squadronId,
+      projectId: ledgerProjectId,
       participantId: callerParticipantId,
       participant: {
         kind: "agent" as const,
@@ -1699,7 +1703,7 @@ it.effect("routes crew proposals through a captain that is not itself a crew mem
     } satisfies ParticipantDirectoryRow;
     const proposal = (requestKey: string, kind: "roster" | "addition"): CrewProposal => ({
       id: `proposal:${requestKey}`,
-      squadronId,
+      projectId: ledgerProjectId,
       captainParticipantId: callerParticipantId,
       captainThreadId: invocation.threadId,
       crewInstanceId: kind === "addition" ? "crew:1" : null,
@@ -1723,12 +1727,13 @@ it.effect("routes crew proposals through a captain that is not itself a crew mem
     const dependencies = Layer.mergeAll(
       Layer.mock(A2ASendService)({ listParticipants: () => Effect.succeed([callerRow]) }),
       Layer.mock(A2AHomeRegistrar)({
-        getHomeForThread: () => Effect.succeed({ squadronId, participantId: callerParticipantId }),
+        getHomeForThread: () =>
+          Effect.succeed({ projectId: ledgerProjectId, participantId: callerParticipantId }),
       }),
       Layer.mock(A2ALedger)({
-        readSquadron: () =>
+        readProjectLedger: () =>
           Effect.succeed({
-            id: squadronId,
+            id: ledgerProjectId,
             name: "Propose",
             createdAt: DateTime.formatIso(createdAt),
           }),
@@ -1762,7 +1767,7 @@ it.effect("routes crew proposals through a captain that is not itself a crew mem
               },
               instance: {
                 id: "crew:1",
-                squadronId,
+                projectId: ledgerProjectId,
                 captainParticipantId: callerParticipantId,
                 captainThreadId: invocation.threadId,
                 displayName: "Login Fix Crew",
@@ -1787,7 +1792,8 @@ it.effect("routes crew proposals through a captain that is not itself a crew mem
       Layer.mock(ParticipantPlacementService)({}),
       Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
       Layer.mock(ThreadRegistration)({
-        ensureRegistered: () => Effect.succeed({ squadronId, participantId: callerParticipantId }),
+        ensureRegistered: () =>
+          Effect.succeed({ projectId: ledgerProjectId, participantId: callerParticipantId }),
       }),
 
       Layer.mock(ArchiveCrewService)({}),
@@ -1944,7 +1950,7 @@ it.effect("routes crew proposals through a captain that is not itself a crew mem
 
 it.effect("stops exactly one placed agent without consulting or touching descendants", () =>
   Effect.gen(function* () {
-    const squadronId = SquadronId.make("squadron:j5:mcp-stop");
+    const ledgerProjectId = LedgerProjectId.make("project:j5:mcp-stop");
     const callerParticipantId = ParticipantId.make("agent:j5:mcp-stop-caller");
     const targetParticipantId = ParticipantId.make("agent:j5:mcp-stop-target");
     const siblingParticipantId = ParticipantId.make("agent:j5:mcp-stop-sibling");
@@ -1961,7 +1967,7 @@ it.effect("stops exactly one placed agent without consulting or touching descend
       }>
     >([]);
     const callerRow = {
-      squadronId,
+      projectId: ledgerProjectId,
       participantId: callerParticipantId,
       participant: {
         kind: "agent" as const,
@@ -1974,7 +1980,7 @@ it.effect("stops exactly one placed agent without consulting or touching descend
       acceptsUrgency: false,
     } satisfies ParticipantDirectoryRow;
     const agentRow = (participantId: ParticipantId, threadId: ThreadId, parent: ParticipantId) => ({
-      squadronId,
+      projectId: ledgerProjectId,
       participantId,
       participant: { kind: "agent" as const, id: participantId, threadId },
       threadId,
@@ -2102,12 +2108,12 @@ it.effect(
   "lists agents homed on peer servers beside local ones and reports the peers it could not read",
   () =>
     Effect.gen(function* () {
-      const squadronId = SquadronId.make("squadron:j5:mcp-peer-list");
+      const ledgerProjectId = LedgerProjectId.make("project:j5:mcp-peer-list");
       const callerParticipantId = ParticipantId.make("agent:j5:mcp-peer-caller");
       const remoteParticipantId = ParticipantId.make("agent:j5:a2a:thread:support");
       const archivedRemoteId = ParticipantId.make("agent:j5:a2a:thread:retired");
       const callerRow = {
-        squadronId,
+        projectId: ledgerProjectId,
         participantId: callerParticipantId,
         participant: {
           kind: "agent" as const,
@@ -2122,8 +2128,8 @@ it.effect(
       const remoteAgent = {
         environmentId: "environment-home",
         environmentLabel: "Home",
-        squadronId: SquadronId.make("squadron:home-support"),
-        squadronName: "L2 Support Rotation",
+        projectId: LedgerProjectId.make("project:home-support"),
+        projectTitle: "L2 Support Rotation",
         participantId: remoteParticipantId,
         threadId: ThreadId.make("thread:support"),
         displayName: "Support triage",
@@ -2178,7 +2184,7 @@ it.effect(
             Effect.fail(new OrchestratorProjectionError({ threadId: invocation.threadId })),
         }),
         Layer.mock(A2AHomeRegistrar)({}),
-        Layer.mock(A2ALedger)({ listSquadrons: () => Effect.succeed([]) }),
+        Layer.mock(A2ALedger)({ listProjectLedgers: () => Effect.succeed([]) }),
         Layer.mock(SpawnCompositionService)({}),
         Layer.mock(ThreadManagementService)({}),
         Layer.mock(OrchestratorMcpService)({}),
@@ -2211,8 +2217,8 @@ it.effect(
         assert.deepStrictEqual(
           listed.participants.map((row) => [row.participant_id, row.project_id]),
           [
-            [callerParticipantId, squadronId],
-            [remoteParticipantId, "squadron:home-support"],
+            [callerParticipantId, ledgerProjectId],
+            [remoteParticipantId, "project:home-support"],
           ],
           "an archived remote agent is hidden until asked for, like a local one",
         );

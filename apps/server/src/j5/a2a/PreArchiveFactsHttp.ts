@@ -104,13 +104,13 @@ export const preArchiveFactsHttpRouteLayer = Layer.unwrap(
       }).pipe(Effect.orElseSucceed(() => null));
     // What the client reads: each fact names its project.
     const wireFacts = (facts: ThreadPreArchiveFacts) => {
-      const openExchanges = facts.openExchanges.map(({ squadronId, ...exchange }) => ({
+      const openExchanges = facts.openExchanges.map(({ projectId, ...exchange }) => ({
         ...exchange,
-        projectId: squadronId,
+        projectId: projectId,
       }));
       if (facts.state !== "registered") return { ...facts, openExchanges };
-      const { squadronId, ...registered } = facts;
-      return { ...registered, projectId: squadronId, openExchanges };
+      const { projectId, ...registered } = facts;
+      return { ...registered, projectId: projectId, openExchanges };
     };
     const withLiveCrews = (facts: ThreadPreArchiveFacts): Effect.Effect<object> =>
       facts.state !== "registered"
@@ -118,7 +118,7 @@ export const preArchiveFactsHttpRouteLayer = Layer.unwrap(
         : Effect.all({
             liveCrews: archiveCrews
               .readCaptainFacts({
-                squadronId: facts.squadronId,
+                projectId: facts.projectId,
                 captainParticipantId: facts.participantId,
               })
               .pipe(

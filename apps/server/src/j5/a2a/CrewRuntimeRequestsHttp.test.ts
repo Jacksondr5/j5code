@@ -43,7 +43,7 @@ it("lists for readers, answers approvals for operators, and maps refusals to 404
         requestId: RuntimeRequestId.make("req:1"),
         crewInstanceId: "crew:1",
         crewName: "Release Crew",
-        projectId: "squadron:1",
+        projectId: "project:1",
         seat: "builder",
         threadTitle: "builder",
         createdAt: "2026-09-24T12:00:00.000Z",

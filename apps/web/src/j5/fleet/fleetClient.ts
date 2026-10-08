@@ -17,12 +17,12 @@ import { fleetInvolvedThreadRefs } from "./fleet.logic";
 
 export type { FleetAgent, FleetCrew, FleetResponse } from "@t3tools/contracts/j5";
 /** One project's agents and Crews, as one machine's ledger answers for it. */
-export type FleetSquadron = FleetProject;
+export type FleetLedgerProject = FleetProject;
 
 /** The roster changes on the scale of turns, not keystrokes; poll rarely and only while visible. */
 export const FLEET_POLL_INTERVAL_MS = 30_000;
 
-export type ScopedFleetSquadron = FleetSquadron & {
+export type ScopedFleetLedgerProject = FleetLedgerProject & {
   readonly environmentId: EnvironmentId;
   readonly environmentLabel: string;
 };
@@ -30,10 +30,10 @@ export type ScopedFleetSquadron = FleetSquadron & {
 /** Every connected environment's projects, each tagged with the environment its threads live on. */
 export const mergeFleetSources = (
   sources: J5ReadSources<FleetResponse>,
-): ReadonlyArray<ScopedFleetSquadron> =>
+): ReadonlyArray<ScopedFleetLedgerProject> =>
   sources.sources.flatMap((source) =>
-    (source.data?.projects ?? []).map((squadron) => ({
-      ...squadron,
+    (source.data?.projects ?? []).map((project) => ({
+      ...project,
       environmentId: source.environmentId,
       environmentLabel: source.environmentLabel,
     })),

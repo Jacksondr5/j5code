@@ -46,8 +46,8 @@ import {
 import { participantIdForThread } from "../a2a/HomeRegistrar.ts";
 import { A2ALedger, layer as ledgerLayer } from "../a2a/LedgerService.ts";
 import { runJ5A2AMigrations } from "../a2a/Migrations.ts";
-import { J5SquadronCreationLayer } from "../a2a/runtimeLayer.ts";
-import { SquadronId } from "../a2a/contracts.ts";
+import { J5ThreadRegistrationLayer } from "../a2a/runtimeLayer.ts";
+import { LedgerProjectId } from "../a2a/contracts.ts";
 import { makePlaybookCrewRelay } from "./PlaybookCrewRelay.ts";
 import { makePlaybookStore, playbookError, PlaybookStore } from "./PlaybookStore.ts";
 
@@ -85,7 +85,7 @@ const providerInstance = {
 } satisfies ProviderInstance;
 const TestLayer = Layer.mergeAll(
   OrchestrationLayerLive,
-  UpstreamOrchestrationV2LayerLive.pipe(Layer.provideMerge(J5SquadronCreationLayer)),
+  UpstreamOrchestrationV2LayerLive.pipe(Layer.provideMerge(J5ThreadRegistrationLayer)),
   OrchestrationV2EventSinkLayerLive,
 ).pipe(
   Layer.provide(worktreeRepairDependenciesTestLayer),
@@ -140,7 +140,7 @@ const TestLayer = Layer.mergeAll(
 const projectId = ProjectId.make("project:playbook-relay");
 const captainThread = ThreadId.make("thread:playbook-relay:captain");
 const seatThread = ThreadId.make("thread:playbook-relay:seat");
-const squadronId = SquadronId.make("squadron:playbook-relay");
+const ledgerProjectId = LedgerProjectId.make("ledger:playbook-relay");
 
 it.layer(TestLayer)("Crew playbook hand-off through the real orchestrator", (it) => {
   it.effect("a crash between the dispatch and its record replays one notice, never two", () =>
@@ -192,10 +192,10 @@ it.layer(TestLayer)("Crew playbook hand-off through the real orchestrator", (it)
           branch: null,
           worktreePath: null,
         });
-      yield* (yield* A2ALedger).ensureProject({ projectId: squadronId, createdAt: now });
+      yield* (yield* A2ALedger).ensureProject({ projectId: ledgerProjectId, createdAt: now });
       yield* crews.record({
         id: "crew:playbook-relay",
-        squadronId,
+        projectId: ledgerProjectId,
         captainParticipantId: participantIdForThread(captainThread),
         captainThreadId: captainThread,
         displayName: "Relay Crew",

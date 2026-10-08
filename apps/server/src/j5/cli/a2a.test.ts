@@ -260,7 +260,7 @@ it.live("lists the roster as one line per participant and answers whoami", () =>
       {
         participantId: "agent:j5:a2a:thread:sentinel",
         kind: "agent",
-        projectId: "squadron:monitoring",
+        projectId: "project:monitoring",
         projectTitle: "Monitoring",
         displayName: "obs-sentinel",
         threadId: "thread:sentinel",
@@ -278,7 +278,7 @@ it.live("lists the roster as one line per participant and answers whoami", () =>
       {
         participantId: "machine:watchdog",
         kind: "machine",
-        projectId: "squadron:monitoring",
+        projectId: "project:monitoring",
         projectTitle: "Monitoring",
         displayName: "watchdog",
         threadId: null,
@@ -292,7 +292,7 @@ it.live("lists the roster as one line per participant and answers whoami", () =>
   const whoami = {
     participant: {
       participantId: "machine:watchdog",
-      projectId: "squadron:monitoring",
+      projectId: "project:monitoring",
       projectTitle: "Monitoring",
       name: "watchdog",
       createdAt: "2026-09-15T00:00:00.000Z",

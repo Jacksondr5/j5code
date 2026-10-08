@@ -127,14 +127,14 @@ const delivery = (
   exchangeRole: "none",
   envelopeChannel: "peer",
   text: `${name} text`,
-  originSquadronId: "squadron:vm-billing",
+  originSquadronId: "project:vm-billing",
   createdAt: "2026-10-02T12:00:00.000Z",
 });
 
 const rosterEntry = (archived: boolean): A2ARosterEntry => ({
   participantId: "agent:j5:a2a:thread:ios-build",
   kind: "agent",
-  projectId: "squadron:laptop-ios",
+  projectId: "project:laptop-ios",
   projectTitle: "iOS",
   displayName: "iOS build",
   threadId: ThreadId.make("thread:ios-build"),

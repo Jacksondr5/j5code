@@ -51,7 +51,7 @@ import { layer as agentHandoffRefreshesLayer } from "../agents/agentHandoffRefre
  * production provides it once to the V2 runtime (which `ThreadLineage` decorates) and the
  * authenticated route graph reuses it.
  */
-export const makeJ5SquadronCreationLayer = (
+export const makeJ5ThreadRegistrationLayer = (
   options: { readonly ledger?: typeof ledgerLayer } = {},
 ) => {
   const ledgerProvided = options.ledger ?? ledgerLayer;
@@ -63,7 +63,7 @@ export const makeJ5SquadronCreationLayer = (
   );
 };
 
-export const J5SquadronCreationLayer = makeJ5SquadronCreationLayer();
+export const J5ThreadRegistrationLayer = makeJ5ThreadRegistrationLayer();
 
 // Peering reaches other servers, so its layers carry their own HTTP client.
 // This server's identity and name come from the server's own environment
@@ -221,7 +221,7 @@ export const makeJ5A2ARuntimeLayer = (
     readonly spawnWorkspace?: typeof spawnWorkspaceLayer;
   } = {},
 ) => {
-  const squadronCreationProvided = makeJ5SquadronCreationLayer(
+  const threadRegistrationProvided = makeJ5ThreadRegistrationLayer(
     options.ledger === undefined ? {} : { ledger: options.ledger },
   );
   return makeJ5A2AAuxiliaryLayer({
@@ -229,7 +229,7 @@ export const makeJ5A2ARuntimeLayer = (
       ? {}
       : { deliveryTransport: options.deliveryTransport }),
     ...(options.spawnWorkspace === undefined ? {} : { spawnWorkspace: options.spawnWorkspace }),
-  }).pipe(Layer.provideMerge(squadronCreationProvided));
+  }).pipe(Layer.provideMerge(threadRegistrationProvided));
 };
 
 /**

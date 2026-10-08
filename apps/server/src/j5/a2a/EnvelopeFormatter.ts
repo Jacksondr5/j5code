@@ -1,6 +1,6 @@
 import config from "./envelopes.v1.json" with { type: "json" };
 
-import type { SquadronId, ExchangeId, ParticipantId } from "./contracts.ts";
+import type { LedgerProjectId, ExchangeId, ParticipantId } from "./contracts.ts";
 
 export const A2A_ENVELOPE_VERSION = config.version;
 export const A2A_SEND_TOOL_DESCRIPTION = config.sendToolDescription;
@@ -15,7 +15,7 @@ const render = (template: string, values: Readonly<Record<string, string>>): str
  * knows one. The title is kept on the header's one line and clear of its closing bracket.
  */
 const originLabel = (input: {
-  readonly originProjectId: SquadronId;
+  readonly originProjectId: LedgerProjectId;
   readonly originProjectTitle?: string | undefined;
 }) => {
   const title = input.originProjectTitle?.replace(/[\]\s]+/g, " ").trim() ?? "";
@@ -39,7 +39,7 @@ const senderServer = (serverName: string | undefined) =>
 
 export const formatPeerEnvelope = (input: {
   readonly senderId: ParticipantId;
-  readonly originProjectId: SquadronId;
+  readonly originProjectId: LedgerProjectId;
   readonly originProjectTitle?: string | undefined;
   readonly exchangeId: ExchangeId | null;
   readonly message: string;
@@ -56,7 +56,7 @@ export const formatPeerEnvelope = (input: {
 /** A machine sender never opens an exchange, so its envelope carries no reply instruction. */
 export const formatMachineEnvelope = (input: {
   readonly senderId: ParticipantId;
-  readonly originProjectId: SquadronId;
+  readonly originProjectId: LedgerProjectId;
   readonly originProjectTitle?: string | undefined;
   readonly message: string;
 }): string =>
@@ -69,7 +69,7 @@ export const formatMachineEnvelope = (input: {
 
 export const formatClosedPeerEnvelope = (input: {
   readonly senderId: ParticipantId;
-  readonly originProjectId: SquadronId;
+  readonly originProjectId: LedgerProjectId;
   readonly originProjectTitle?: string | undefined;
   readonly message: string;
   readonly senderServerName?: string;

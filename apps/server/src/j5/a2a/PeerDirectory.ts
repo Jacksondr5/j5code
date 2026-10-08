@@ -20,7 +20,7 @@ import {
   type PeerRegistryServiceShape,
   type PeerSessionReadError,
 } from "./PeerRegistryService.ts";
-import { ParticipantId, SquadronId } from "./contracts.ts";
+import { ParticipantId, LedgerProjectId } from "./contracts.ts";
 import { peerProtocolHeaders, peerProtocolMismatch, statedPeerProtocol } from "./peerProtocol.ts";
 
 /**
@@ -64,8 +64,8 @@ const PEER_ROSTER_TIMEOUT = Duration.seconds(5);
 export interface RemoteAgent {
   readonly environmentId: string;
   readonly environmentLabel: string;
-  readonly squadronId: SquadronId;
-  readonly squadronName: string;
+  readonly projectId: LedgerProjectId;
+  readonly projectTitle: string;
   readonly participantId: ParticipantId;
   readonly threadId: ThreadId;
   readonly displayName: string | null;
@@ -180,8 +180,8 @@ const remoteAgents = (
     ...availability,
     environmentId: peer.environmentId,
     environmentLabel: label,
-    squadronId: SquadronId.make(entry.squadronId),
-    squadronName: entry.squadronName,
+    projectId: LedgerProjectId.make(entry.squadronId),
+    projectTitle: entry.squadronName,
     participantId: ParticipantId.make(entry.participantId),
     threadId: entry.threadId,
     displayName: entry.displayName,

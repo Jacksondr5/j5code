@@ -48,7 +48,7 @@ import {
   type FleetNode,
   type FleetRow,
   type FleetSectionRow,
-  type FleetSquadronCrew,
+  type FleetProjectCrew,
 } from "./fleet.logic";
 import {
   mergeFleetSources,
@@ -56,7 +56,7 @@ import {
   useFleetDetailRefresh,
   type FleetAgent,
   type FleetCrew,
-  type ScopedFleetSquadron,
+  type ScopedFleetLedgerProject,
 } from "./fleetClient";
 
 /** Header and rows share one template so the Project, Status, asks, and activity columns line up. */
@@ -76,7 +76,8 @@ const threadFor = (
         scopedThreadKey(scopeThreadRef(environmentId, ThreadId.make(agent.threadId))),
       );
 
-const squadronKey = (squadron: ScopedFleetSquadron) => `${squadron.environmentId}:${squadron.id}`;
+const projectKey = (ledgerProject: ScopedFleetLedgerProject) =>
+  `${ledgerProject.environmentId}:${ledgerProject.id}`;
 
 /** A seat's badge, with the playbook step ids it owns when its Crew follows one. */
 const seatBadgeWithSteps = (
@@ -102,8 +103,8 @@ export function FleetPage() {
   const sources = useAtomValue(fleetDetailSourcesAtom);
   useFleetDetailRefresh();
   const [refreshing, setRefreshing] = useState(false);
-  const squadrons = useMemo(() => mergeFleetSources(sources), [sources]);
-  const showEnvironment = spansMultipleEnvironments(squadrons);
+  const projects = useMemo(() => mergeFleetSources(sources), [sources]);
+  const showEnvironment = spansMultipleEnvironments(projects);
   const loading = !sources.isReady || sources.sources.some((source) => source.status === "loading");
   const notices = [
     ...new Set(
@@ -136,11 +137,12 @@ export function FleetPage() {
   // Each machine's ledger answers per project, so every row under it shares that project.
   const logicalProjectOf = useLogicalProjects();
   const projectOf = useCallback(
-    (squadron: ScopedFleetSquadron) => logicalProjectOf(squadron.environmentId, squadron.id),
+    (ledgerProject: ScopedFleetLedgerProject) =>
+      logicalProjectOf(ledgerProject.environmentId, ledgerProject.id),
     [logicalProjectOf],
   );
   const sections = useMemo(() => {
-    const partitioned = partitionFleet(squadrons, (environmentId, threadId) =>
+    const partitioned = partitionFleet(projects, (environmentId, threadId) =>
       threadsByKey.get(scopedThreadKey(scopeThreadRef(environmentId, ThreadId.make(threadId)))),
     );
     return {
@@ -148,27 +150,27 @@ export function FleetPage() {
       active: orderFleetRowsByProject(partitioned.active, projectOf),
       settled: orderFleetRowsByProject(partitioned.settled, projectOf),
     };
-  }, [projectOf, squadrons, threadsByKey]);
+  }, [projectOf, projects, threadsByKey]);
   const projectCount = useMemo(
     () => countFleetProjects([...sections.active, ...sections.settled], projectOf),
     [projectOf, sections],
   );
-  const retired = useMemo(() => retiredCrews(squadrons), [squadrons]);
+  const retired = useMemo(() => retiredCrews(projects), [projects]);
   // Playbook runs name the Crew they follow from this read, and jump to its group.
   const crewNames = useMemo(
     () =>
       new Map(
-        squadrons.flatMap((squadron) =>
-          squadron.crews.map(
+        projects.flatMap((ledgerProject) =>
+          ledgerProject.crews.map(
             (crew) =>
               [
-                fleetCrewAnchorId(squadron.environmentId, crew.crewInstanceId),
+                fleetCrewAnchorId(ledgerProject.environmentId, crew.crewInstanceId),
                 crew.crewName,
               ] as const,
           ),
         ),
       ),
-    [squadrons],
+    [projects],
   );
   // A Crew can sit inside the collapsed Settled or Retired sections, so every enclosing
   // expander opens before the group scrolls into view.
@@ -213,7 +215,7 @@ export function FleetPage() {
               <div>
                 <h1 className="text-balance text-2xl font-semibold tracking-tight">Fleet</h1>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  {loading && squadrons.length === 0
+                  {loading && projects.length === 0
                     ? "Reading the roster…"
                     : `${agentCount} ${agentCount === 1 ? "agent" : "agents"} across ${projectCount} ${projectCount === 1 ? "project" : "projects"}`}
                 </p>
@@ -236,12 +238,12 @@ export function FleetPage() {
                 ))}
               </ul>
             ) : null}
-            {!loading && squadrons.length === 0 ? (
+            {!loading && projects.length === 0 ? (
               <p className="mt-6 text-sm text-muted-foreground">
                 No agents yet. They appear here once a thread starts in a project.
               </p>
             ) : null}
-            {squadrons.length > 0 ? (
+            {projects.length > 0 ? (
               <div className="mt-8">
                 <section aria-label="Active">
                   <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
@@ -294,11 +296,15 @@ interface FleetRowsProps {
   readonly threadsByKey: ThreadLookup;
   readonly onOpenThread: (environmentId: EnvironmentId, threadId: string) => void;
   /** Upstream's logical project for one machine's project ledger. */
-  readonly projectOf: (squadron: ScopedFleetSquadron) => SidebarProjectSnapshot | undefined;
+  readonly projectOf: (
+    ledgerProject: ScopedFleetLedgerProject,
+  ) => SidebarProjectSnapshot | undefined;
 }
 
 function FleetTable(
-  props: FleetRowsProps & { readonly rows: ReadonlyArray<FleetSectionRow<ScopedFleetSquadron>> },
+  props: FleetRowsProps & {
+    readonly rows: ReadonlyArray<FleetSectionRow<ScopedFleetLedgerProject>>;
+  },
 ) {
   const { rows, ...shared } = props;
   return (
@@ -316,10 +322,10 @@ function FleetTable(
         <span className="text-right">Last activity</span>
       </div>
       <ul className="divide-y divide-border/60">
-        {rows.map(({ squadron, node }) => (
+        {rows.map(({ project: ledgerProject, node }) => (
           <FleetNodeRows
-            key={`${squadronKey(squadron)}:${node.row.agent.participantId}`}
-            squadron={squadron}
+            key={`${projectKey(ledgerProject)}:${node.row.agent.participantId}`}
+            project={ledgerProject}
             node={node}
             {...shared}
           />
@@ -331,14 +337,14 @@ function FleetTable(
 
 function FleetNodeRows(
   props: FleetRowsProps & {
-    readonly squadron: ScopedFleetSquadron;
+    readonly project: ScopedFleetLedgerProject;
     readonly node: FleetNode;
     readonly seatBadge?: string | null;
   },
 ) {
   const { node, seatBadge, ...rows } = props;
-  const { squadron } = rows;
-  const { environmentId } = squadron;
+  const { project: ledgerProject } = rows;
+  const { environmentId } = ledgerProject;
   // "What is the state of this Crew?" from the seats' measured facts, no Playbook required.
   const crewState = (members: ReadonlyArray<FleetRow>) =>
     summarizeCrewState(
@@ -525,7 +531,7 @@ function FleetNodeRows(
  */
 function RetiredCrews(
   props: FleetRowsProps & {
-    readonly retired: ReadonlyArray<FleetSquadronCrew<ScopedFleetSquadron>>;
+    readonly retired: ReadonlyArray<FleetProjectCrew<ScopedFleetLedgerProject>>;
   },
 ) {
   const { retired, ...shared } = props;
@@ -533,10 +539,10 @@ function RetiredCrews(
   return (
     <FleetSectionExpander label={`Retired crews (${retired.length})`}>
       <ul className="divide-y divide-border/60 overflow-hidden rounded-md border border-border/60">
-        {retired.map(({ squadron, crew }) => (
+        {retired.map(({ project: ledgerProject, crew }) => (
           <RetiredCrewItem
-            key={`${squadronKey(squadron)}:${crew.crewInstanceId}`}
-            squadron={squadron}
+            key={`${projectKey(ledgerProject)}:${crew.crewInstanceId}`}
+            project={ledgerProject}
             crew={crew}
             {...shared}
           />
@@ -546,14 +552,14 @@ function RetiredCrews(
   );
 }
 
-function RetiredCrewItem(props: FleetRowsProps & FleetSquadronCrew<ScopedFleetSquadron>) {
-  const { crew, squadron } = props;
+function RetiredCrewItem(props: FleetRowsProps & FleetProjectCrew<ScopedFleetLedgerProject>) {
+  const { crew, project: ledgerProject } = props;
   const seatCount = crew.roster.length;
   return (
     <li>
       <details
         className="group/retired-crew"
-        id={fleetCrewAnchorId(squadron.environmentId, crew.crewInstanceId)}
+        id={fleetCrewAnchorId(ledgerProject.environmentId, crew.crewInstanceId)}
       >
         <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-1.5 text-sm outline-hidden marker:hidden hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
           <ChevronRightIcon
@@ -574,7 +580,7 @@ function RetiredCrewItem(props: FleetRowsProps & FleetSquadronCrew<ScopedFleetSq
           </span>
         </summary>
         <div className="border-t border-border/40 px-3 py-2 ps-[2.125rem] text-xs">
-          <RetiredCrewCaptain {...props} environmentId={squadron.environmentId} />
+          <RetiredCrewCaptain {...props} environmentId={ledgerProject.environmentId} />
           <p className="mt-2 whitespace-pre-wrap break-words text-muted-foreground">{crew.brief}</p>
           {crew.playbook == null ? null : (
             <p className="mt-1 text-muted-foreground">Playbook: {crew.playbook.name}</p>
@@ -649,18 +655,18 @@ function RetiredCrewCaptain(
  */
 function ProjectLabel(
   props: Pick<FleetRowsProps, "projectOf" | "showEnvironment"> & {
-    readonly squadron: ScopedFleetSquadron;
+    readonly project: ScopedFleetLedgerProject;
     readonly agent: FleetAgent | null;
   },
 ) {
-  const project = props.projectOf(props.squadron);
+  const project = props.projectOf(props.project);
   return (
     <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
       {project === undefined ? null : <ProjectFavicon project={project} className="size-3.5" />}
       <span className="min-w-0 truncate">
-        {project?.displayName ?? props.squadron.title}
+        {project?.displayName ?? props.project.title}
         {props.showEnvironment ? (
-          <span className="text-muted-foreground/70"> · {props.squadron.environmentLabel}</span>
+          <span className="text-muted-foreground/70"> · {props.project.environmentLabel}</span>
         ) : null}
       </span>
     </span>
@@ -669,7 +675,7 @@ function ProjectLabel(
 
 function FleetRowItem(
   props: FleetRowsProps & {
-    readonly squadron: ScopedFleetSquadron;
+    readonly project: ScopedFleetLedgerProject;
     readonly row: FleetRow;
     readonly badge: string | null;
     /** Names of the live Crews this row commands; non-empty rows carry the Captain mark. */
@@ -677,7 +683,7 @@ function FleetRowItem(
   },
 ) {
   const { agent } = props.row;
-  const { environmentId } = props.squadron;
+  const { environmentId } = props.project;
   const thread = threadFor(props.threadsByKey, environmentId, agent);
   const status = thread === undefined ? null : resolveThreadStatusPill({ thread });
   const title = thread?.title ?? agent.displayName ?? agent.participantId;

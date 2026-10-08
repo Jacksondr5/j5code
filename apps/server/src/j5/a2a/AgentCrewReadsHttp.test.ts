@@ -8,14 +8,14 @@ import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
 import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewInstanceService.ts";
 import { makeAgentCrewReadsHttpRouteLayer, projectCrewMemberships } from "./AgentCrewReadsHttp.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
-import { ParticipantId, SquadronId } from "./contracts.ts";
+import { ParticipantId, LedgerProjectId } from "./contracts.ts";
 
 const captainThread = ThreadId.make("thread:captain");
 const builderThread = ThreadId.make("thread:builder");
 const criticThread = ThreadId.make("thread:critic");
 const instance = (id: string, archivedAt: string | null): AgentCrewInstance => ({
   id,
-  squadronId: SquadronId.make("squadron:crew-reads"),
+  projectId: LedgerProjectId.make("project:crew-reads"),
   captainParticipantId: participantIdForThread(captainThread),
   captainThreadId: captainThread,
   brief: "Implement and review the login fix.",

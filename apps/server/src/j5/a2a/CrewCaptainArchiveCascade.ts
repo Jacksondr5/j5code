@@ -87,7 +87,7 @@ export const layer = Layer.effect(
       const outcome = yield* archives.archive({
         providerSessionId: CASCADE_SESSION,
         callerParticipantId: null,
-        squadronId: instance.squadronId,
+        projectId: instance.projectId,
         crewInstanceId: instance.id,
         clientRequestKey: requestKey,
         confirmationSatisfied: true,

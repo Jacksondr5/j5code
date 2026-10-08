@@ -254,7 +254,7 @@ export const spawnThreadCheckout = (
 export interface StartSpawnBriefInput {
   readonly workspace: ResolvedSpawnWorkspace;
   readonly stableInput: SpawnStableInput;
-  readonly squadronId: string;
+  readonly ledgerProjectId: string;
   readonly projectId: ProjectId;
   readonly threadId: ThreadId;
   readonly title: string;

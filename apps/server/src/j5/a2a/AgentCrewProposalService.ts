@@ -8,7 +8,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 
 import { CREW_NAME_MAX_CHARS, CREW_REASON_MAX_CHARS, CREW_TEXT_MAX_CHARS } from "./crewLimits.ts";
-import { ParticipantId, SquadronId } from "./contracts.ts";
+import { ParticipantId, LedgerProjectId } from "./contracts.ts";
 import { SpawnWorkspaceChoice } from "./spawnWorkspace.ts";
 
 // The same bounds as the MCP verbs: the human's card edits arrive over HTTP and must not be the
@@ -74,7 +74,7 @@ const finalStatus = (decision: CrewProposalDecision) =>
 
 export interface CrewProposal {
   readonly id: string;
-  readonly squadronId: SquadronId;
+  readonly projectId: LedgerProjectId;
   readonly captainParticipantId: ParticipantId;
   readonly captainThreadId: ThreadId;
   readonly crewInstanceId: string | null;
@@ -94,7 +94,7 @@ export interface CrewProposal {
 
 export interface CreateCrewProposalInput {
   readonly id: string;
-  readonly squadronId: SquadronId;
+  readonly projectId: LedgerProjectId;
   readonly captainParticipantId: ParticipantId;
   readonly captainThreadId: ThreadId;
   readonly crewInstanceId: string | null;
@@ -178,7 +178,7 @@ interface Row {
 
 const fromRow = (row: Row): CrewProposal => ({
   id: row.id,
-  squadronId: SquadronId.make(row.project_id),
+  projectId: LedgerProjectId.make(row.project_id),
   captainParticipantId: ParticipantId.make(row.captain_participant_id),
   captainThreadId: ThreadId.make(row.captain_thread_id),
   crewInstanceId: row.crew_instance_id,
@@ -219,7 +219,7 @@ export const layer: Layer.Layer<AgentCrewProposalService, never, SqlClient.SqlCl
             status, brief, display_name, requested_seats, approved_seats, created_at, resolved_at,
             reported_at, playbook_name, playbook_definition_path
           ) VALUES (
-            ${input.id}, ${input.squadronId}, ${input.captainParticipantId},
+            ${input.id}, ${input.projectId}, ${input.captainParticipantId},
             ${input.captainThreadId}, ${input.crewInstanceId}, ${input.kind}, 'open',
             ${input.brief}, ${input.displayName}, ${encodeSeats(input.requestedSeats)}, NULL,
             ${input.createdAt}, NULL, NULL, ${input.playbook?.name ?? null},

@@ -60,9 +60,9 @@ import { SpawnCompositionService } from "./SpawnCompositionService.ts";
 import { type FakeCheckout, fakeSpawnWorkspaceLayer } from "./test-support/spawnWorkspaceFakes.ts";
 import type { ThreadLaunchInput } from "../../orchestration-v2/ThreadLaunchService.ts";
 import type { SpawnWorkspaceChoice } from "./spawnWorkspace.ts";
-import { ParticipantId, SquadronId } from "./contracts.ts";
+import { ParticipantId, LedgerProjectId } from "./contracts.ts";
 
-const squadronId = SquadronId.make("squadron:crew-launch");
+const projectId = LedgerProjectId.make("ledger:crew-launch");
 const captainThread = ThreadId.make("thread:captain");
 const captainId = ParticipantId.make("agent:captain");
 const createdAt = DateTime.makeUnsafe("2026-09-09T16:00:00.000Z");
@@ -122,7 +122,7 @@ const fixture = Effect.gen(function* () {
   yield* Effect.provide(
     Effect.gen(function* () {
       yield* (yield* A2ALedger).ensureProject({
-        projectId: squadronId,
+        projectId: projectId,
         createdAt: DateTime.formatIso(createdAt),
       });
     }),
@@ -130,8 +130,8 @@ const fixture = Effect.gen(function* () {
   );
   const commands = yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]);
   const captain = {
-    squadronId,
-    squadronName: "Launch Squadron",
+    projectId,
+    projectTitle: "Launch project",
     participantId: captainId,
     thread: thread(captainThread),
   };
@@ -241,14 +241,14 @@ const dependencies = (
           ? Effect.fail(
               new A2AHomeConflictError({
                 threadId: input.threadId,
-                existingSquadronId: "squadron:elsewhere",
-                requestedSquadronId: input.squadronId,
+                existingProjectId: "project:elsewhere",
+                requestedProjectId: input.projectId,
               }),
             )
           : Effect.succeed({
-              home: { squadronId, participantId: participantIdForThread(input.threadId) },
+              home: { projectId, participantId: participantIdForThread(input.threadId) },
               placement: {
-                squadronId,
+                projectId,
                 participantId: participantIdForThread(input.threadId),
                 provenance: input.provenance,
                 placementParentId:
@@ -1315,7 +1315,7 @@ const unitFixture = Effect.gen(function* () {
   const archiveInput = (crewInstanceId: string) => ({
     providerSessionId: "session",
     callerParticipantId: null,
-    squadronId: null,
+    projectId: null,
     crewInstanceId,
     clientRequestKey: "archive-1",
     confirmationSatisfied: true,

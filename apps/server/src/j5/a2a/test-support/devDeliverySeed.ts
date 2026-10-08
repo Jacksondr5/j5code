@@ -1,4 +1,4 @@
-import { J5SquadronCreationLayer } from "../runtimeLayer.ts";
+import { J5ThreadRegistrationLayer } from "../runtimeLayer.ts";
 import { SourceControlProviderRegistry } from "../../../sourceControl/SourceControlProviderRegistry.ts";
 import * as GitWorkflow from "../../../git/GitWorkflowService.ts";
 import * as ProjectService from "../../../project/ProjectService.ts";
@@ -87,11 +87,11 @@ import {
   LedgerMessageId,
   ParticipantId,
   SILENCE_DETECTOR_PARTICIPANT_ID,
-  SquadronId,
+  LedgerProjectId,
 } from "../contracts.ts";
 
 const OrchestrationV2LayerLive = UpstreamOrchestrationV2LayerLive.pipe(
-  Layer.provideMerge(J5SquadronCreationLayer),
+  Layer.provideMerge(J5ThreadRegistrationLayer),
 );
 
 const fakeProviderInstanceId = ProviderInstanceId.make("j5-dev-seed-unavailable");
@@ -377,14 +377,18 @@ const makeRuntimeLayer = (databasePath: string, baseDir: string) => {
   return Layer.mergeAll(orchestration, a2a, exposedOutbox);
 };
 
-const readAllEvents = (squadronId: SquadronId) =>
+const readAllEvents = (ledgerProjectId: LedgerProjectId) =>
   Effect.gen(function* () {
     const ledger = yield* A2ALedger;
-    return (yield* ledger.readEvents({ squadronId, cursor: { afterSeq: 0 }, limit: 1_000 })).events;
+    return (yield* ledger.readEvents({
+      projectId: ledgerProjectId,
+      cursor: { afterSeq: 0 },
+      limit: 1_000,
+    })).events;
   });
 
-const deliveredEventFor = (squadronId: SquadronId, messageId: LedgerMessageId) =>
-  readAllEvents(squadronId).pipe(
+const deliveredEventFor = (ledgerProjectId: LedgerProjectId, messageId: LedgerMessageId) =>
+  readAllEvents(ledgerProjectId).pipe(
     Effect.flatMap((events) => {
       const delivered = events.find(
         (event) =>
@@ -444,7 +448,7 @@ const atomicScenario = <A, E, R>(name: string, effect: Effect.Effect<A, E, R>) =
  * A busy DB reaches the caller as a clear server-off precondition failure.
  */
 const assertTargetServerStopped = (input: {
-  readonly squadronId: SquadronId;
+  readonly projectId: LedgerProjectId;
   readonly createdAt: string;
 }) =>
   Effect.gen(function* () {
@@ -453,7 +457,7 @@ const assertTargetServerStopped = (input: {
     yield* sql
       .withTransaction(
         ledger
-          .ensureProject({ projectId: input.squadronId, createdAt: input.createdAt })
+          .ensureProject({ projectId: input.projectId, createdAt: input.createdAt })
           .pipe(Effect.andThen(Effect.fail(new DevDeliverySeedPreflightRollback()))),
       )
       .pipe(
@@ -466,7 +470,7 @@ const assertTargetServerStopped = (input: {
   });
 
 const joinScenarioAgents = (input: {
-  readonly squadronId: SquadronId;
+  readonly projectId: LedgerProjectId;
   readonly senderId: ParticipantId;
   readonly senderThreadId: ThreadId;
   readonly receiverId: ParticipantId;
@@ -478,7 +482,7 @@ const joinScenarioAgents = (input: {
     const ledger = yield* A2ALedger;
     yield* ledger.appendEvents({
       commandId: input.commandId,
-      squadronId: input.squadronId,
+      projectId: input.projectId,
       acceptedAt: input.acceptedAt,
       events: [
         {
@@ -520,7 +524,7 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
     const senderId = ParticipantId.make(`agent:${runId}:sender`);
     const receiverId = ParticipantId.make(`agent:${runId}:receiver`);
     // A thread's home is its project, so the ledger is keyed by the project's id.
-    const squadronId = SquadronId.make(projectId);
+    const ledgerProjectId = LedgerProjectId.make(projectId);
     const runtime = makeRuntimeLayer(databasePathFor(path, baseDir), baseDir);
 
     const seed = Effect.gen(function* () {
@@ -534,7 +538,7 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
       const outbox = yield* EffectOutboxV2;
 
       yield* assertTargetServerStopped({
-        squadronId: SquadronId.make(seededId(runId, "server-off-preflight")),
+        projectId: LedgerProjectId.make(seededId(runId, "server-off-preflight")),
         createdAt: now,
       });
       // This is the production host-local registry bootstrap, deliberately outside
@@ -584,9 +588,9 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
             createdBy: "system",
             creationSource: "server",
           });
-          yield* ledger.ensureProject({ projectId: squadronId, createdAt: now });
+          yield* ledger.ensureProject({ projectId: ledgerProjectId, createdAt: now });
           yield* joinScenarioAgents({
-            squadronId,
+            projectId: ledgerProjectId,
             senderId,
             senderThreadId,
             receiverId,
@@ -725,14 +729,14 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
             threadId: receiverThreadId,
             commandId: CommandId.make(seededId(runId, "ta3:cancel-provider-start")),
           });
-          const delivered = yield* deliveredEventFor(squadronId, source.messageId);
+          const delivered = yield* deliveredEventFor(ledgerProjectId, source.messageId);
           const notices = yield* silence.handleDeliveryEvent(delivered);
           const notice = notices[0];
           if (notice?.kind !== "silence.notice") {
             return yield* Effect.die("TA3 seed did not produce a silence notice.");
           }
           const noticeMessageId = LedgerMessageId.make(
-            `message:j5:a2a:silence:${encodeURIComponent(squadronId)}:${encodeURIComponent(source.exchangeId)}:${encodeURIComponent(source.messageId)}`,
+            `message:j5:a2a:silence:${encodeURIComponent(ledgerProjectId)}:${encodeURIComponent(source.exchangeId)}:${encodeURIComponent(source.messageId)}`,
           );
           yield* deliveries.drain;
           yield* interruptActiveSeedRun({
@@ -755,7 +759,7 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
         Effect.gen(function* () {
           const { participant } = yield* machines.register({
             commandId: CommCommandId.make(seededId(runId, "machine:register")),
-            squadronId,
+            projectId: ledgerProjectId,
             // Machine names are unique across projects, and every run makes a
             // new project, so a reused home needs a per-run name.
             name: `seed-watchdog-${runId.slice(-12)}`,
@@ -789,7 +793,7 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
           const messageId = LedgerMessageId.make(seededId(runId, "raw:future-envelope"));
           yield* ledger.appendEvents({
             commandId: CommCommandId.make(seededId(runId, "raw:future-envelope")),
-            squadronId,
+            projectId: ledgerProjectId,
             acceptedAt: now,
             events: [
               {
@@ -801,8 +805,8 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
                 payload: {
                   messageId,
                   text: "[Cross-agent messaging system notice: template-v999]\n\nThis deliberately future/unrecognized envelope must render as raw text.\n\nNo current renderer template owns this body.",
-                  originProjectId: squadronId,
-                  receiverProjectId: squadronId,
+                  originProjectId: ledgerProjectId,
+                  receiverProjectId: ledgerProjectId,
                   exchangeRole: "none",
                   envelopeChannel: "silence_notice",
                 },
@@ -941,7 +945,7 @@ export const verifyDevDeliverySeedRollback = (requestedBaseDir: string) =>
     const path = yield* Path.Path;
     const crypto = yield* Crypto.Crypto;
     const runId = `j5-a2a-rollback-${yield* crypto.randomUUIDv4}`;
-    const squadronId = SquadronId.make(`squadron:${runId}`);
+    const ledgerProjectId = LedgerProjectId.make(`ledger:${runId}`);
     const senderId = ParticipantId.make(`agent:${runId}:sender`);
     const senderThreadId = ThreadId.make(`thread:${runId}:sender`);
     const createdAt = DateTime.formatIso(yield* DateTime.now);
@@ -952,10 +956,10 @@ export const verifyDevDeliverySeedRollback = (requestedBaseDir: string) =>
         atomicScenario(
           "controlled-mid-scenario-failure",
           Effect.gen(function* () {
-            yield* ledger.ensureProject({ projectId: squadronId, createdAt });
+            yield* ledger.ensureProject({ projectId: ledgerProjectId, createdAt });
             yield* ledger.appendEvents({
               commandId: CommCommandId.make(seededId(runId, "membership")),
-              squadronId,
+              projectId: ledgerProjectId,
               acceptedAt: createdAt,
               events: [
                 {
@@ -978,8 +982,8 @@ export const verifyDevDeliverySeedRollback = (requestedBaseDir: string) =>
       if (failedScenario._tag !== "Failure") {
         return yield* Effect.die("Controlled rollback scenario unexpectedly committed.");
       }
-      const squads = yield* ledger.listSquadrons();
-      if (squads.some((squadron) => squadron.id === squadronId)) {
+      const squads = yield* ledger.listProjectLedgers();
+      if (squads.some((project) => project.id === ledgerProjectId)) {
         return yield* Effect.die("Controlled rollback left durable A2A state behind.");
       }
     }).pipe(Effect.provide(runtime));

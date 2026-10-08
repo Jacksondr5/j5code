@@ -23,8 +23,8 @@ import {
   CommCommandId,
   CorrelationId,
   MessageSentPayload,
-  Squadron,
-  SquadronId,
+  ProjectLedger,
+  LedgerProjectId,
   LedgerMessageId,
   ParticipantId,
   type AppendCommEventCommand,
@@ -33,7 +33,7 @@ import {
 } from "./contracts.ts";
 
 const timestamp = "2026-08-16T12:00:00.000Z";
-const isSquadron = Schema.is(Squadron);
+const isProject = Schema.is(ProjectLedger);
 const decodeMessageSentPayload = Schema.decodeUnknownSync(MessageSentPayload);
 const isLedgerGapError = Schema.is(LedgerGapError);
 const isA2AStorageError = Schema.is(A2AStorageError);
@@ -59,13 +59,13 @@ it.effect("routes single-event append through command ids and A2 projections", (
     yield* runJ5A2AMigrations();
     const ledger = yield* A2ALedger;
     const sql = yield* SqlClient.SqlClient;
-    const squadronId = SquadronId.make("squadron:single-append-projection");
+    const projectId = LedgerProjectId.make("project:single-append-projection");
     const commandId = CommCommandId.make("command:single-append-projection");
     const messageId = LedgerMessageId.make("message:single-append-projection");
-    yield* ledger.ensureProject({ projectId: squadronId, createdAt: timestamp });
+    yield* ledger.ensureProject({ projectId: projectId, createdAt: timestamp });
     yield* ledger.append({
       commandId,
-      squadronId,
+      projectId,
       acceptedAt: timestamp,
       event: {
         kind: "message.sent",
@@ -76,8 +76,8 @@ it.effect("routes single-event append through command ids and A2 projections", (
         payload: {
           messageId,
           text: "Single append remains deliverable.",
-          originProjectId: squadronId,
-          receiverProjectId: squadronId,
+          originProjectId: projectId,
+          receiverProjectId: projectId,
           exchangeRole: "none",
           envelopeChannel: "peer",
         },
@@ -101,12 +101,12 @@ it.effect("routes single-event append through command ids and A2 projections", (
 );
 
 const appendCommand = (
-  squadronId: SquadronId,
+  projectId: LedgerProjectId,
   index: number,
   event: CommEvent = messageEvent(index),
 ): AppendCommEventCommand => ({
-  commandId: CommCommandId.make(`command:${squadronId}:${index}`),
-  squadronId,
+  commandId: CommCommandId.make(`command:${projectId}:${index}`),
+  projectId,
   acceptedAt: timestamp,
   event,
 });
@@ -118,14 +118,14 @@ it.effect("ensures, lists, and reads project ledgers under their project titles"
     const ledger = yield* A2ALedger;
     const sql = yield* SqlClient.SqlClient;
     const first = {
-      id: SquadronId.make("squadron:first"),
+      id: LedgerProjectId.make("project:first"),
       name: "First project",
       createdAt: timestamp,
     };
     // No upstream project row: the read falls back to the project id.
     const second = {
-      id: SquadronId.make("squadron:second"),
-      name: "squadron:second",
+      id: LedgerProjectId.make("project:second"),
+      name: "project:second",
       createdAt: "2026-08-16T12:00:01.000Z",
     };
     yield* sql`
@@ -139,16 +139,16 @@ it.effect("ensures, lists, and reads project ledgers under their project titles"
     // Ensuring an existing ledger keeps its original row.
     yield* ledger.ensureProject({ projectId: first.id, createdAt: "2026-08-16T12:00:02.000Z" });
 
-    assert.deepStrictEqual(yield* ledger.readSquadron(first.id), first);
-    assert.deepStrictEqual(yield* ledger.readSquadron(second.id), second);
-    assert.deepStrictEqual(yield* ledger.listSquadrons(), [first, second]);
+    assert.deepStrictEqual(yield* ledger.readProjectLedger(first.id), first);
+    assert.deepStrictEqual(yield* ledger.readProjectLedger(second.id), second);
+    assert.deepStrictEqual(yield* ledger.listProjectLedgers(), [first, second]);
   }).pipe(Effect.provide(memoryLedgerLayer())),
 );
 
-it("rejects a whitespace-only squadron name during contract validation", () => {
+it("rejects a whitespace-only project name during contract validation", () => {
   assert.isFalse(
-    isSquadron({
-      id: SquadronId.make("squadron:blank-name"),
+    isProject({
+      id: LedgerProjectId.make("project:blank-name"),
       name: "   ",
       createdAt: timestamp,
     }),
@@ -160,8 +160,8 @@ it("requires an explicit envelope channel on every sent-message payload", () => 
     decodeMessageSentPayload({
       messageId: LedgerMessageId.make("message:missing-envelope-channel"),
       text: "An implicit peer channel is not valid.",
-      originProjectId: SquadronId.make("squadron:origin"),
-      receiverProjectId: SquadronId.make("squadron:receiver"),
+      originProjectId: LedgerProjectId.make("project:origin"),
+      receiverProjectId: LedgerProjectId.make("project:receiver"),
       exchangeRole: "none",
     }),
   );
@@ -171,14 +171,14 @@ it.effect("replays an append command from its durable receipt without adding a r
   Effect.gen(function* () {
     yield* runJ5A2AMigrations();
     const ledger = yield* A2ALedger;
-    const squadronId = SquadronId.make("squadron:idempotency");
-    yield* ledger.ensureProject({ projectId: squadronId, createdAt: timestamp });
-    const command = appendCommand(squadronId, 1);
+    const projectId = LedgerProjectId.make("project:idempotency");
+    yield* ledger.ensureProject({ projectId: projectId, createdAt: timestamp });
+    const command = appendCommand(projectId, 1);
 
     const first = yield* ledger.append(command);
     const replay = yield* ledger.append(command);
     const page = yield* ledger.readEvents({
-      squadronId,
+      projectId,
       cursor: { afterSeq: 0 },
       limit: 10,
     });
@@ -191,12 +191,12 @@ it.effect("replays an append command from its durable receipt without adding a r
   }).pipe(Effect.provide(memoryLedgerLayer())),
 );
 
-it.effect("publishes committed events in their per-squadron sequence order", () =>
+it.effect("publishes committed events in their per-project sequence order", () =>
   Effect.gen(function* () {
     yield* runJ5A2AMigrations();
     const ledger = yield* A2ALedger;
-    const squadronId = SquadronId.make("squadron:published-order");
-    yield* ledger.ensureProject({ projectId: squadronId, createdAt: timestamp });
+    const projectId = LedgerProjectId.make("project:published-order");
+    yield* ledger.ensureProject({ projectId: projectId, createdAt: timestamp });
     const committed = yield* ledger.subscribeCommitted;
     const observedFiber = yield* committed.pipe(
       Stream.take(3),
@@ -205,7 +205,7 @@ it.effect("publishes committed events in their per-squadron sequence order", () 
     );
 
     yield* Effect.all(
-      [1, 2, 3].map((index) => ledger.append(appendCommand(squadronId, index))),
+      [1, 2, 3].map((index) => ledger.append(appendCommand(projectId, index))),
       { concurrency: "unbounded" },
     );
     const observed = yield* Fiber.join(observedFiber);
@@ -227,17 +227,17 @@ it.effect.prop(
     Effect.gen(function* () {
       yield* runJ5A2AMigrations();
       const ledger = yield* A2ALedger;
-      const squadronId = SquadronId.make("squadron:property");
-      yield* ledger.ensureProject({ projectId: squadronId, createdAt: timestamp });
+      const projectId = LedgerProjectId.make("project:property");
+      yield* ledger.ensureProject({ projectId: projectId, createdAt: timestamp });
       for (let index = 1; index <= eventCount; index += 1) {
-        yield* ledger.append(appendCommand(squadronId, index));
+        yield* ledger.append(appendCommand(projectId, index));
       }
 
       const sequences: Array<number> = [];
       let cursor: LedgerCursor = { afterSeq: 0 };
       let complete = false;
       while (!complete) {
-        const page = yield* ledger.readEvents({ squadronId, cursor, limit: pageSize });
+        const page = yield* ledger.readEvents({ projectId, cursor, limit: pageSize });
         sequences.push(...page.events.map((event) => event.seq));
         cursor = page.nextCursor;
         complete = page.complete;
@@ -257,15 +257,15 @@ it.effect("negative control: a deleted ledger row fails the gap-free read", () =
     yield* runJ5A2AMigrations();
     const ledger = yield* A2ALedger;
     const sql = yield* SqlClient.SqlClient;
-    const squadronId = SquadronId.make("squadron:gap-negative-control");
-    yield* ledger.ensureProject({ projectId: squadronId, createdAt: timestamp });
+    const projectId = LedgerProjectId.make("project:gap-negative-control");
+    yield* ledger.ensureProject({ projectId: projectId, createdAt: timestamp });
     for (let index = 1; index <= 3; index += 1) {
-      yield* ledger.append(appendCommand(squadronId, index));
+      yield* ledger.append(appendCommand(projectId, index));
     }
 
-    yield* sql`DELETE FROM j5_a2a_comm_event WHERE project_id = ${squadronId} AND seq = 2`;
+    yield* sql`DELETE FROM j5_a2a_comm_event WHERE project_id = ${projectId} AND seq = 2`;
     const error = yield* Effect.flip(
-      ledger.readEvents({ squadronId, cursor: { afterSeq: 0 }, limit: 10 }),
+      ledger.readEvents({ projectId, cursor: { afterSeq: 0 }, limit: 10 }),
     );
 
     assert.isTrue(isLedgerGapError(error));
@@ -281,8 +281,8 @@ it.effect("rebuilds the active membership projection byte-equivalently from the 
     yield* runJ5A2AMigrations();
     const ledger = yield* A2ALedger;
     const sql = yield* SqlClient.SqlClient;
-    const squadronId = SquadronId.make("squadron:membership");
-    yield* ledger.ensureProject({ projectId: squadronId, createdAt: timestamp });
+    const projectId = LedgerProjectId.make("project:membership");
+    yield* ledger.ensureProject({ projectId: projectId, createdAt: timestamp });
     const firstAgent = {
       kind: "agent" as const,
       id: ParticipantId.make("agent:first"),
@@ -327,7 +327,7 @@ it.effect("rebuilds the active membership projection byte-equivalently from the 
       },
     ];
     for (const [index, event] of membershipEvents.entries()) {
-      yield* ledger.append(appendCommand(squadronId, index + 1, event));
+      yield* ledger.append(appendCommand(projectId, index + 1, event));
     }
     // Upgraded databases retain readable human membership history, but rebuilds
     // never project it into the now agent-only membership table.
@@ -345,7 +345,7 @@ it.effect("rebuilds the active membership projection byte-equivalently from the 
         command_id
       ) VALUES (
         4,
-        ${squadronId},
+        ${projectId},
         'participant.joined',
         NULL,
         ${person.id},
@@ -359,40 +359,40 @@ it.effect("rebuilds the active membership projection byte-equivalently from the 
 
     const expected = [
       {
-        squadronId,
+        projectId,
         participant: secondAgent,
         joinedSeq: 2,
         updatedSeq: 2,
       },
     ];
-    const before = yield* ledger.listMembership(squadronId);
+    const before = yield* ledger.listMembership(projectId);
     assert.deepStrictEqual(before, expected);
     assert.equal(
       yield* ledger.findHistoricalAgentParticipantId({
-        squadronId,
+        projectId,
         threadId: firstAgent.threadId,
       }),
       firstAgent.id,
     );
     assert.equal(
       yield* ledger.findHistoricalAgentParticipantId({
-        squadronId,
+        projectId,
         threadId: ThreadId.make("thread:never-joined"),
       }),
       null,
     );
 
-    yield* sql`DELETE FROM j5_a2a_membership WHERE project_id = ${squadronId}`;
-    const corrupted = yield* ledger.listMembership(squadronId);
+    yield* sql`DELETE FROM j5_a2a_membership WHERE project_id = ${projectId}`;
+    const corrupted = yield* ledger.listMembership(projectId);
     assert.deepStrictEqual(corrupted, []);
     assert.notEqual(corrupted.length, expected.length);
 
-    const rebuilt = yield* ledger.rebuildMembership(squadronId);
+    const rebuilt = yield* ledger.rebuildMembership(projectId);
     assert.deepStrictEqual(rebuilt, expected);
     const encode = Schema.encodeEffect(Schema.fromJsonString(Schema.Json));
     assert.equal(yield* encode(rebuilt), yield* encode(before));
     const history = yield* ledger.readEvents({
-      squadronId,
+      projectId,
       cursor: { afterSeq: 3 },
       limit: 1,
     });
@@ -400,7 +400,7 @@ it.effect("rebuilds the active membership projection byte-equivalently from the 
 
     const forbidden = yield* Effect.flip(
       ledger.append(
-        appendCommand(squadronId, 5, {
+        appendCommand(projectId, 5, {
           kind: "participant.joined",
           sender: null,
           receiver: person.id,
@@ -420,9 +420,9 @@ it.effect("rejects a malformed stored historical participant id", () =>
     yield* runJ5A2AMigrations();
     const ledger = yield* A2ALedger;
     const sql = yield* SqlClient.SqlClient;
-    const squadronId = SquadronId.make("squadron:malformed-historical-participant");
+    const projectId = LedgerProjectId.make("project:malformed-historical-participant");
     const threadId = ThreadId.make("thread:malformed-historical-participant");
-    yield* ledger.ensureProject({ projectId: squadronId, createdAt: timestamp });
+    yield* ledger.ensureProject({ projectId: projectId, createdAt: timestamp });
     yield* sql`
       INSERT INTO j5_a2a_comm_event (
         seq,
@@ -437,7 +437,7 @@ it.effect("rejects a malformed stored historical participant id", () =>
         command_id
       ) VALUES (
         1,
-        ${squadronId},
+        ${projectId},
         'participant.joined',
         NULL,
         NULL,
@@ -453,7 +453,7 @@ it.effect("rejects a malformed stored historical participant id", () =>
     `;
 
     const error = yield* Effect.flip(
-      ledger.findHistoricalAgentParticipantId({ squadronId, threadId }),
+      ledger.findHistoricalAgentParticipantId({ projectId, threadId }),
     );
     assert.isTrue(isA2AStorageError(error));
     if (isA2AStorageError(error)) {
@@ -469,8 +469,8 @@ it.effect("persists project ledgers, events, and receipts across a database rest
       const path = yield* Path.Path;
       const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "j5-a2a-ledger-" });
       const filename = path.join(directory, "state.sqlite");
-      const squadronId = SquadronId.make("squadron:restart");
-      const command = appendCommand(squadronId, 1);
+      const projectId = LedgerProjectId.make("project:restart");
+      const command = appendCommand(projectId, 1);
       const firstProcess = Effect.gen(function* () {
         yield* runMigrations();
         yield* runJ5A2AMigrations();
@@ -479,9 +479,9 @@ it.effect("persists project ledgers, events, and receipts across a database rest
         yield* sql`
           INSERT INTO projection_projects (
             project_id, title, workspace_root, scripts_json, created_at, updated_at, deleted_at
-          ) VALUES (${squadronId}, 'Restart', '/tmp/restart', '[]', ${timestamp}, ${timestamp}, NULL)
+          ) VALUES (${projectId}, 'Restart', '/tmp/restart', '[]', ${timestamp}, ${timestamp}, NULL)
         `;
-        yield* ledger.ensureProject({ projectId: squadronId, createdAt: timestamp });
+        yield* ledger.ensureProject({ projectId: projectId, createdAt: timestamp });
         const result = yield* ledger.append(command);
         assert.isTrue(result.committed);
       }).pipe(Effect.provide(fileLedgerLayer(filename)));
@@ -489,11 +489,11 @@ it.effect("persists project ledgers, events, and receipts across a database rest
         yield* runMigrations();
         yield* runJ5A2AMigrations();
         const ledger = yield* A2ALedger;
-        assert.equal((yield* ledger.readSquadron(squadronId)).name, "Restart");
+        assert.equal((yield* ledger.readProjectLedger(projectId)).name, "Restart");
         const replay = yield* ledger.append(command);
         assert.isFalse(replay.committed);
         const page = yield* ledger.readEvents({
-          squadronId,
+          projectId,
           cursor: { afterSeq: 0 },
           limit: 10,
         });
@@ -508,14 +508,14 @@ it.effect("persists project ledgers, events, and receipts across a database rest
   ).pipe(Effect.provide(NodeServices.layer)),
 );
 
-it.effect("enforces one message.received correlation per receiver squadron", () =>
+it.effect("enforces one message.received correlation per receiver project", () =>
   Effect.gen(function* () {
     yield* runJ5A2AMigrations();
     const ledger = yield* A2ALedger;
     const sql = yield* SqlClient.SqlClient;
-    const squadronId = SquadronId.make("squadron:receiver");
+    const projectId = LedgerProjectId.make("project:receiver");
     const correlationId = CorrelationId.make("correlation:shared");
-    yield* ledger.ensureProject({ projectId: squadronId, createdAt: timestamp });
+    yield* ledger.ensureProject({ projectId: projectId, createdAt: timestamp });
     const receivedEvent: CommEvent = {
       kind: "message.received",
       sender: ParticipantId.make("agent:external"),
@@ -523,17 +523,17 @@ it.effect("enforces one message.received correlation per receiver squadron", () 
       exchangeId: null,
       correlationId,
       payload: {
-        originProjectId: SquadronId.make("squadron:origin"),
+        originProjectId: LedgerProjectId.make("project:origin"),
         message: "hello",
       },
       createdAt: timestamp,
     };
-    yield* ledger.append(appendCommand(squadronId, 1, receivedEvent));
-    const failedCommand = CommCommandId.make(`command:${squadronId}:2`);
+    yield* ledger.append(appendCommand(projectId, 1, receivedEvent));
+    const failedCommand = CommCommandId.make(`command:${projectId}:2`);
     const error = yield* Effect.flip(
       ledger.appendEvents({
         commandId: failedCommand,
-        squadronId,
+        projectId,
         acceptedAt: timestamp,
         events: [receivedEvent],
       }),
@@ -542,7 +542,7 @@ it.effect("enforces one message.received correlation per receiver squadron", () 
     const rows = yield* sql<{ readonly count: number }>`
       SELECT COUNT(*) AS count
       FROM j5_a2a_comm_event
-      WHERE project_id = ${squadronId} AND kind = 'message.received'
+      WHERE project_id = ${projectId} AND kind = 'message.received'
     `;
     assert.equal(rows[0]?.count, 1);
 
@@ -555,7 +555,7 @@ it.effect("enforces one message.received correlation per receiver squadron", () 
 
     const retried = yield* ledger.appendEvents({
       commandId: failedCommand,
-      squadronId,
+      projectId,
       acceptedAt: timestamp,
       events: [
         {
@@ -573,8 +573,8 @@ it.effect("rejects delivery transitions without a projected message row", () =>
     yield* runJ5A2AMigrations();
     const ledger = yield* A2ALedger;
     const sql = yield* SqlClient.SqlClient;
-    const squadronId = SquadronId.make("squadron:missing-delivery-projection");
-    yield* ledger.ensureProject({ projectId: squadronId, createdAt: timestamp });
+    const projectId = LedgerProjectId.make("project:missing-delivery-projection");
+    yield* ledger.ensureProject({ projectId: projectId, createdAt: timestamp });
     const transitions: ReadonlyArray<{ readonly name: string; readonly event: CommEvent }> = [
       {
         name: "delivered",
@@ -617,7 +617,7 @@ it.effect("rejects delivery transitions without a projected message row", () =>
       const error = yield* Effect.flip(
         ledger.appendEvents({
           commandId,
-          squadronId,
+          projectId,
           acceptedAt: timestamp,
           events: [transition.event],
         }),
@@ -626,7 +626,7 @@ it.effect("rejects delivery transitions without a projected message row", () =>
 
       const retried = yield* ledger.appendEvents({
         commandId,
-        squadronId,
+        projectId,
         acceptedAt: timestamp,
         events: [messageEvent(index + 100)],
       });
@@ -636,7 +636,7 @@ it.effect("rejects delivery transitions without a projected message row", () =>
     const transitionRows = yield* sql<{ readonly count: number }>`
       SELECT COUNT(*) AS count
       FROM j5_a2a_comm_event
-      WHERE project_id = ${squadronId}
+      WHERE project_id = ${projectId}
         AND kind IN ('message.delivered', 'message.delivery_failed')
     `;
     assert.equal(transitionRows[0]?.count, 0);

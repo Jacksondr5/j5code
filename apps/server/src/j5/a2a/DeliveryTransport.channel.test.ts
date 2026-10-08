@@ -2,11 +2,11 @@ import { assert, it } from "@effect/vitest";
 
 import { type AgentDeliveryInput, formatAgentDeliveryEnvelope } from "./DeliveryTransport.ts";
 import { formatSilenceNoticeEnvelope } from "./EnvelopeFormatter.ts";
-import { SquadronId, ExchangeId, LedgerMessageId, ParticipantId } from "./contracts.ts";
+import { LedgerProjectId, ExchangeId, LedgerMessageId, ParticipantId } from "./contracts.ts";
 
 const delivery = {
-  originProjectId: SquadronId.make("squadron:channel"),
-  receiverProjectId: SquadronId.make("squadron:channel"),
+  originProjectId: LedgerProjectId.make("project:channel"),
+  receiverProjectId: LedgerProjectId.make("project:channel"),
   messageId: LedgerMessageId.make("message:channel"),
   senderId: ParticipantId.make("agent:channel:sender"),
   receiverId: ParticipantId.make("agent:channel:receiver"),

@@ -6,7 +6,7 @@ import { PlacementCommandId } from "./placementContracts.ts";
 import { dispatchCommand as dispatchIntakeCommand } from "../../orchestration-v2/ThreadMessageIntake.ts";
 import { J5AdaptedThreadToolkit, J5AdaptedThreadHandlersLive } from "./mcp/threadTools.ts";
 import { ParticipantPlacementService } from "./PlacementService.ts";
-import { J5SquadronCreationLayer } from "./runtimeLayer.ts";
+import { J5ThreadRegistrationLayer } from "./runtimeLayer.ts";
 import { ChatAttachmentId, EnvironmentId } from "@t3tools/contracts";
 import * as Sink from "effect/Sink";
 import * as Schema from "effect/Schema";
@@ -144,7 +144,7 @@ import {
 } from "./SendService.ts";
 import {
   CommCommandId,
-  SquadronId,
+  LedgerProjectId,
   ExchangeId,
   LedgerMessageId,
   ParticipantId,
@@ -159,7 +159,7 @@ const decodeToolFailure = Schema.decodeUnknownEffect(
 const decodeForkResult = Schema.decodeUnknownEffect(Schema.Struct({ targetThreadId: ThreadId }));
 
 const OrchestrationV2LayerLive = UpstreamOrchestrationV2LayerLive.pipe(
-  Layer.provideMerge(J5SquadronCreationLayer),
+  Layer.provideMerge(J5ThreadRegistrationLayer),
 );
 
 const serverConfigLayer = ServerConfig.layerTest(process.cwd(), {
@@ -443,7 +443,7 @@ const seedTarget = (
   suffix: string,
   model = modelSelection.model,
   registrar?: A2AHomeRegistrar["Service"],
-  existingSquadronId?: SquadronId,
+  existingLedgerProjectId?: LedgerProjectId,
   existingProjectId?: ProjectId,
 ) =>
   Effect.gen(function* () {
@@ -451,7 +451,8 @@ const seedTarget = (
     const ledger = yield* A2ALedger;
     const threadId = ThreadId.make(`thread:j5-a2a-delivery-${suffix}`);
     const projectId = existingProjectId ?? ProjectId.make(`project:j5-a2a-delivery-${suffix}`);
-    const squadronId = existingSquadronId ?? SquadronId.make(`squadron:j5-a2a-delivery-${suffix}`);
+    const ledgerProjectId =
+      existingLedgerProjectId ?? LedgerProjectId.make(`ledger:j5-a2a-delivery-${suffix}`);
     const senderId = ParticipantId.make(`agent:j5-a2a-delivery-${suffix}-sender`);
     const receiverId =
       registrar === undefined
@@ -479,13 +480,13 @@ const seedTarget = (
       branch: null,
       worktreePath: workspace,
     });
-    if (existingSquadronId === undefined) {
-      yield* ledger.ensureProject({ projectId: squadronId, createdAt });
+    if (existingLedgerProjectId === undefined) {
+      yield* ledger.ensureProject({ projectId: ledgerProjectId, createdAt });
     }
     if (registrar === undefined) {
       yield* ledger.appendEvents({
         commandId: CommCommandId.make(`command:j5-a2a-delivery-${suffix}-join-target`),
-        squadronId,
+        projectId: ledgerProjectId,
         acceptedAt: createdAt,
         events: [
           {
@@ -504,7 +505,7 @@ const seedTarget = (
     } else {
       yield* registrar.registerAtCreation({
         commandId: CommCommandId.make(`command:j5-a2a-delivery-${suffix}-register`),
-        squadronId,
+        projectId: ledgerProjectId,
         threadId,
         createdAt,
       });
@@ -513,15 +514,15 @@ const seedTarget = (
     return {
       threadId,
       projectId,
-      squadronId,
+      ledgerProjectId: ledgerProjectId,
       senderId,
       receiverId,
       exchangeId,
       messageId,
       message,
       delivery: {
-        originProjectId: squadronId,
-        receiverProjectId: squadronId,
+        originProjectId: ledgerProjectId,
+        receiverProjectId: ledgerProjectId,
         messageId,
         senderId,
         receiverId,
@@ -557,7 +558,7 @@ for (const idleModel of ["gpt-5.4", "gpt-6-astra"]) {
             deliveredMessages[0]?.text,
             formatPeerEnvelope({
               senderId: target.senderId,
-              originProjectId: target.squadronId,
+              originProjectId: target.ledgerProjectId,
               exchangeId: target.exchangeId,
               message: target.message,
             }),
@@ -925,13 +926,13 @@ it.effect("measures the backlog a send waits behind on a busy receiver", () =>
         "backlog-other",
         modelSelection.model,
         undefined,
-        caller.squadronId,
+        caller.ledgerProjectId,
       );
       const target = yield* seedTarget(
         "backlog",
         modelSelection.model,
         undefined,
-        caller.squadronId,
+        caller.ledgerProjectId,
       );
       let sequence = 0;
       const sendInput = (from: typeof caller, name: string) => ({
@@ -1136,7 +1137,7 @@ it.effect(
           deliveredMessages[0]?.text,
           formatPeerEnvelope({
             senderId: target.senderId,
-            originProjectId: target.squadronId,
+            originProjectId: target.ledgerProjectId,
             exchangeId: target.exchangeId,
             message: target.message,
           }),
@@ -1320,7 +1321,7 @@ it.effect("routes real archive and delete commands through lifecycle closure exa
       const send = yield* A2ASendService;
       const lifecycle = yield* A2ALifecycleService;
       const sql = yield* SqlClient.SqlClient;
-      const squadronId = SquadronId.make("squadron:j5-a2a-lifecycle-command-path");
+      const ledgerProjectId = LedgerProjectId.make("project:j5-a2a-lifecycle-command-path");
       const sender: AgentParticipant = {
         kind: "agent",
         id: ParticipantId.make("agent:j5-a2a-lifecycle-command-path-sender"),
@@ -1349,11 +1350,11 @@ it.effect("routes real archive and delete commands through lifecycle closure exa
           worktreePath: null,
         });
       }
-      yield* ledger.ensureProject({ projectId: squadronId, createdAt });
+      yield* ledger.ensureProject({ projectId: ledgerProjectId, createdAt });
       for (const [index, participant] of [sender, receiver].entries()) {
         yield* ledger.append({
           commandId: CommCommandId.make(`command:j5-a2a-lifecycle-command-path-join:${index}`),
-          squadronId,
+          projectId: ledgerProjectId,
           acceptedAt: createdAt,
           event: {
             kind: "participant.joined",
@@ -1439,9 +1440,9 @@ it.effect("routes real archive and delete commands through lifecycle closure exa
           participant_deleted_events: 1,
         },
       ]);
-      assert.deepStrictEqual(yield* ledger.listMembership(squadronId), [
+      assert.deepStrictEqual(yield* ledger.listMembership(ledgerProjectId), [
         {
-          squadronId,
+          projectId: ledgerProjectId,
           participant: sender,
           joinedSeq: 1,
           updatedSeq: 1,
@@ -1663,7 +1664,7 @@ it.effect(
         const createdAt = DateTime.formatIso(yield* DateTime.now);
         const target = yield* seedTarget("human-roundtrip", modelSelection.model, registrar);
         const home = yield* registrar.getHomeForThread(target.threadId);
-        assert.equal(home.squadronId, target.squadronId);
+        assert.equal(home.projectId, target.ledgerProjectId);
         assert.equal(home.participantId, target.receiverId);
         const personId = ParticipantId.make("human:joined-message-path");
         yield* sql`
@@ -1745,7 +1746,7 @@ it.effect(
         assert.deepStrictEqual(yield* send.send(ask), accepted);
         assert.deepStrictEqual(yield* inbox.answer(answer), replied);
         const facts = yield* ledger.readEvents({
-          squadronId: target.squadronId,
+          projectId: target.ledgerProjectId,
           cursor: { afterSeq: 0 },
           limit: 100,
         });
@@ -1769,7 +1770,7 @@ for (const refusal of ["wrong home", "unavailable participant"] as const) {
           .deliverAgent({
             ...target.delivery,
             ...(refusal === "wrong home"
-              ? { receiverProjectId: SquadronId.make("squadron:unrelated") }
+              ? { receiverProjectId: LedgerProjectId.make("project:unrelated") }
               : { receiverId: ParticipantId.make("agent:unavailable") }),
           })
           .pipe(Effect.flip);
@@ -1793,11 +1794,11 @@ for (const refusal of ["wrong home", "unavailable participant"] as const) {
   );
 }
 
-for (const crossSquadron of [false, true]) {
+for (const crossProject of [false, true]) {
   it.effect(
-    crossSquadron
-      ? "dispatches a cross-Squadron peer ask and reply once, closing the asker's Exchange"
-      : "dispatches a same-Squadron peer ask and reply once through the accepted ledger operation",
+    crossProject
+      ? "dispatches a cross-project peer ask and reply once, closing the asker's Exchange"
+      : "dispatches a same-project peer ask and reply once through the accepted ledger operation",
     () =>
       Effect.gen(function* () {
         const harness = yield* makeHarness;
@@ -1814,7 +1815,7 @@ for (const crossSquadron of [false, true]) {
             "joined-receiver",
             modelSelection.model,
             registrar,
-            crossSquadron ? undefined : sender.squadronId,
+            crossProject ? undefined : sender.ledgerProjectId,
           );
           const send = yield* A2ASendService;
           const delivery = yield* A2ADeliveryWorker;
@@ -1823,12 +1824,12 @@ for (const crossSquadron of [false, true]) {
           const sink = yield* EventSinkV2;
           const sql = yield* SqlClient.SqlClient;
           const ask = {
-            commandId: CommCommandId.make("command:cross-squadron:joined-ask"),
+            commandId: CommCommandId.make("command:cross-project:joined-ask"),
             senderThreadId: sender.threadId,
             to: receiver.receiverId,
-            message: "Confirm receipt from your own Squadron.",
+            message: "Confirm receipt from your own project.",
             expectReply: true,
-            intent: "Check cross-Squadron delivery",
+            intent: "Check cross-project delivery",
             acceptedAt: DateTime.formatIso(yield* DateTime.now),
           };
           const accepted = yield* send.send(ask);
@@ -1865,11 +1866,11 @@ for (const crossSquadron of [false, true]) {
           assert.equal(inputs[0]?.message.messageId, deliveryMessageId(accepted.messageId));
           assert.include(inputs[0]!.message.text, ask.message);
           const replyInput = {
-            commandId: CommCommandId.make("command:cross-squadron:joined-reply"),
+            commandId: CommCommandId.make("command:cross-project:joined-reply"),
             senderThreadId: receiver.threadId,
             to: sender.receiverId,
             exchangeId: accepted.exchangeId!,
-            message: "Confirmed from the recipient's Squadron.",
+            message: "Confirmed from the recipient's project.",
             acceptedAt: ask.acceptedAt,
           };
           const reply = yield* send.send(replyInput);
@@ -1891,7 +1892,7 @@ for (const crossSquadron of [false, true]) {
             yield* sql<{ readonly project_id: string; readonly status: string }>`
         SELECT project_id, status FROM j5_a2a_exchange WHERE exchange_id = ${accepted.exchangeId}
       `,
-            [{ project_id: sender.squadronId, status: "closed" }],
+            [{ project_id: sender.ledgerProjectId, status: "closed" }],
           );
           assert.deepStrictEqual(yield* send.send(ask), accepted);
           assert.deepStrictEqual(yield* send.send(replyInput), reply);
@@ -2268,14 +2269,14 @@ it.effect(
           "project-remove-second",
           modelSelection.model,
           registrar,
-          first.squadronId,
+          first.ledgerProjectId,
           first.projectId,
         );
         const survivor = yield* seedTarget(
           "project-remove-survivor",
           modelSelection.model,
           registrar,
-          first.squadronId,
+          first.ledgerProjectId,
         );
         const projectService = yield* ProjectService.ProjectService;
         const filesystem = yield* FileSystem.FileSystem;
@@ -2353,7 +2354,7 @@ it.effect(
         assert.equal(retry._tag, "ProjectNotFoundError");
         yield* delivery.drain;
         assert.deepStrictEqual(yield* delivery.drain, []);
-        const memberships = yield* (yield* A2ALedger).listMembership(first.squadronId);
+        const memberships = yield* (yield* A2ALedger).listMembership(first.ledgerProjectId);
         assert.deepStrictEqual(
           memberships.map((membership) => membership.participant.id),
           [survivor.receiverId],
@@ -2469,7 +2470,7 @@ for (const archiveSender of [false, true]) {
           // A real dispatch receipt exists, but the process has not yet committed its A2A outcome.
           yield* (yield* A2ADeliveryTransport).deliverAgent({
             ...target.delivery,
-            originProjectId: source.squadronId,
+            originProjectId: source.ledgerProjectId,
             senderId: source.receiverId,
             messageId: sent.messageId,
             exchangeId: null,
@@ -2537,7 +2538,7 @@ it.effect(
         });
         yield* (yield* A2ADeliveryTransport).deliverAgent({
           ...target.delivery,
-          originProjectId: source.squadronId,
+          originProjectId: source.ledgerProjectId,
           senderId: source.receiverId,
           messageId: sent.messageId,
           exchangeId: null,
@@ -2594,7 +2595,7 @@ it.effect("delivers attachment-tool claims from the ledger after the pending upl
         "attachment-target",
         modelSelection.model,
         registrar,
-        sender.squadronId,
+        sender.ledgerProjectId,
         sender.projectId,
       );
       const threads = yield* ThreadManagementService;
@@ -2767,7 +2768,7 @@ it.effect(
         const replay = yield* dispatchIntakeCommand(fork);
         assert.equal(repaired.sequence, replay.sequence);
         const home = yield* registrar.getHomeForThread(fork.targetThreadId);
-        assert.equal(home.squadronId, source.squadronId);
+        assert.equal(home.projectId, source.ledgerProjectId);
         const placement = yield* (yield* ParticipantPlacementService).readPlacement(home);
         assert.deepEqual(placement?.provenance, {
           kind: "forked-from",
@@ -2783,12 +2784,12 @@ it.effect(
           "fork-group",
           modelSelection.model,
           registrar,
-          source.squadronId,
+          source.ledgerProjectId,
           source.projectId,
         );
         yield* (yield* ParticipantPlacementService).recordCreation({
           commandId: PlacementCommandId.make("command:fork-source-placement"),
-          squadronId: source.squadronId,
+          projectId: source.ledgerProjectId,
           participantId: source.receiverId,
           actor: "agent",
           createdAt: "2026-08-17T12:00:00.000Z",
@@ -2831,12 +2832,12 @@ it.effect(
         const mcpFork = yield* decodeForkResult(output.result);
         assert.notEqual(mcpFork.targetThreadId, fork.targetThreadId);
         const mcpHome = yield* registrar.getHomeForThread(mcpFork.targetThreadId);
-        assert.equal(mcpHome.squadronId, source.squadronId);
+        assert.equal(mcpHome.projectId, source.ledgerProjectId);
         assert.equal(
           (yield* (yield* ParticipantPlacementService).readPlacement(mcpHome))?.placementParentId,
           group.receiverId,
         );
-        const mismatch = yield* seedTarget("fork-other-squadron", modelSelection.model, registrar);
+        const mismatch = yield* seedTarget("fork-other-project", modelSelection.model, registrar);
         const merge = {
           ...fork,
           type: "thread.merge_back" as const,
@@ -2858,7 +2859,7 @@ it.effect(
           "fork-unrelated-same-home",
           modelSelection.model,
           registrar,
-          source.squadronId,
+          source.ledgerProjectId,
           source.projectId,
         );
         const rejected = yield* threads
@@ -2910,9 +2911,9 @@ it.effect(
         yield* dispatchIntakeCommand(nativeFork);
         // A source with no home yet registers in its project when it forks, and so does its fork.
         const nativeHome = yield* registrar.getHomeForThread(native.threadId);
-        assert.equal(nativeHome.squadronId, SquadronId.make(native.projectId));
+        assert.equal(nativeHome.projectId, LedgerProjectId.make(native.projectId));
         const nativeForkHome = yield* registrar.getHomeForThread(nativeFork.targetThreadId);
-        assert.equal(nativeForkHome.squadronId, SquadronId.make(native.projectId));
+        assert.equal(nativeForkHome.projectId, LedgerProjectId.make(native.projectId));
         assert.deepEqual(
           (yield* (yield* ParticipantPlacementService).readPlacement(nativeForkHome))?.provenance,
           {
@@ -2940,7 +2941,7 @@ it.effect("organize enforces project archive authority and applies reversible li
         "organize-target",
         modelSelection.model,
         registrar,
-        source.squadronId,
+        source.ledgerProjectId,
         source.projectId,
       );
       // Another project's thread: upstream's same-project rule is the only archive authority.
@@ -2983,12 +2984,12 @@ it.effect("organize enforces project archive authority and applies reversible li
         "organize-member",
         modelSelection.model,
         registrar,
-        source.squadronId,
+        source.ledgerProjectId,
         source.projectId,
       );
       yield* (yield* AgentCrewInstanceService).record({
         id: "crew:organize-guard",
-        squadronId: source.squadronId,
+        projectId: source.ledgerProjectId,
         captainParticipantId: source.receiverId,
         captainThreadId: source.threadId,
         displayName: "Organize crew",
@@ -3048,7 +3049,7 @@ it.effect("organize enforces project archive authority and applies reversible li
           action === "archive",
         );
         assert.deepEqual(yield* registrar.getHomeForThread(target.threadId), {
-          squadronId: source.squadronId,
+          projectId: source.ledgerProjectId,
           participantId: target.receiverId,
         });
       }
@@ -3291,7 +3292,7 @@ it.effect("settles a held peer delivery once after resume without alarming", () 
         "held-worker-target",
         modelSelection.model,
         undefined,
-        source.squadronId,
+        source.ledgerProjectId,
       );
       const threads = yield* ThreadManagementService;
       const worker = yield* A2ADeliveryWorker;
@@ -3512,8 +3513,8 @@ it.effect("registers an older thread on its first agent-to-agent call", () =>
       const directory = yield* send.listParticipants(threadId("web"));
 
       assert.deepStrictEqual(
-        directory.map((row) => [row.squadronId, row.participantId]),
-        [[SquadronId.make(projectId), participantIdForThread(threadId("web"))]],
+        directory.map((row) => [row.projectId, row.participantId]),
+        [[LedgerProjectId.make(projectId), participantIdForThread(threadId("web"))]],
       );
       assert.deepStrictEqual(yield* registeredProjects(), [
         { thread_id: threadId("web"), project_id: projectId, archived: 0 },

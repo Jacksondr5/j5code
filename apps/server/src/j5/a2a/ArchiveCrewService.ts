@@ -21,7 +21,7 @@ import {
   type ArchiveAgentError,
   type ArchiveAgentResult,
 } from "./ArchiveAgentService.ts";
-import { ParticipantId, SquadronId } from "./contracts.ts";
+import { ParticipantId, LedgerProjectId } from "./contracts.ts";
 
 const TOKEN_VERSION = "j5-crew-archive-confirmation/v1" as const;
 const TOKEN_SECRET_NAME = "j5-a2a-archive-confirmation-v1";
@@ -49,8 +49,8 @@ export interface ArchiveCrewInput {
   readonly providerSessionId: string;
   /** The Captain calling over MCP, or null when a person archives the Crew from the app. */
   readonly callerParticipantId: ParticipantId | null;
-  /** The Squadron the caller named; null when the person's route only knows the Crew. */
-  readonly squadronId: SquadronId | null;
+  /** The project the caller named; null when the person's route only knows the Crew. */
+  readonly projectId: LedgerProjectId | null;
   readonly crewInstanceId: string;
   readonly clientRequestKey: string;
   readonly confirmationToken?: string;
@@ -98,15 +98,15 @@ export class ArchiveCrewNotCaptainError extends Data.TaggedError("ArchiveCrewNot
   }
 }
 
-export class ArchiveCrewSquadronMismatchError extends Data.TaggedError(
-  "ArchiveCrewSquadronMismatchError",
+export class ArchiveCrewProjectMismatchError extends Data.TaggedError(
+  "ArchiveCrewProjectMismatchError",
 )<{
   readonly crewInstanceId: string;
-  readonly squadronId: SquadronId;
-  readonly expected: SquadronId;
+  readonly projectId: LedgerProjectId;
+  readonly expected: LedgerProjectId;
 }> {
   override get message(): string {
-    return `Crew ${this.crewInstanceId} lives in project ${this.expected}, and the caller is in project ${this.squadronId}. A Captain archives a Crew from the Crew's own project.`;
+    return `Crew ${this.crewInstanceId} lives in project ${this.expected}, and the caller is in project ${this.projectId}. A Captain archives a Crew from the Crew's own project.`;
   }
 }
 
@@ -160,7 +160,7 @@ export class ArchiveCrewPartialFailureError extends Data.TaggedError(
 export type ArchiveCrewError =
   | ArchiveCrewNotFoundError
   | ArchiveCrewNotCaptainError
-  | ArchiveCrewSquadronMismatchError
+  | ArchiveCrewProjectMismatchError
   | ArchiveCrewConfirmationRequiredError
   | ArchiveCrewConfirmationStaleError
   | ArchiveCrewConfirmationTokenError
@@ -176,7 +176,7 @@ const TokenPayload = Schema.Struct({
   version: Schema.Literal(TOKEN_VERSION),
   provider_session_id: Schema.String,
   caller_participant_id: Schema.NullOr(ParticipantId),
-  project_id: Schema.NullOr(SquadronId),
+  project_id: Schema.NullOr(LedgerProjectId),
   crew_instance_id: Schema.String,
   members: Schema.Array(TokenMember),
 });
@@ -190,7 +190,7 @@ const payloadFor = (input: ArchiveCrewInput, facts: ArchiveCrewConsequenceFacts)
   version: TOKEN_VERSION,
   provider_session_id: input.providerSessionId,
   caller_participant_id: input.callerParticipantId,
-  project_id: input.squadronId,
+  project_id: input.projectId,
   crew_instance_id: input.crewInstanceId,
   members: facts.members.map((member) => ({
     seat: member.seatName,
@@ -245,7 +245,7 @@ export interface ArchiveCrewServiceShape {
    * archive dialog shows these before the Crews retire ahead of their Captain.
    */
   readonly readCaptainFacts: (input: {
-    readonly squadronId: SquadronId;
+    readonly projectId: LedgerProjectId;
     readonly captainParticipantId: ParticipantId;
   }) => Effect.Effect<ReadonlyArray<ArchiveCrewCaptainFacts>, ArchiveCrewPartialFailureError>;
 }
@@ -318,7 +318,7 @@ export const layer = Layer.effect(
       for (const member of instance.members) {
         const state = yield* archiveAgent
           .readFacts({
-            squadronId: instance.squadronId,
+            projectId: instance.projectId,
             participantId: member.participantId,
             threadId: member.threadId,
           })
@@ -357,11 +357,11 @@ export const layer = Layer.effect(
         const instance = yield* crews.read(input.crewInstanceId).pipe(Effect.orDie);
         if (instance === null)
           return yield* new ArchiveCrewNotFoundError({ crewInstanceId: input.crewInstanceId });
-        if (input.squadronId !== null && instance.squadronId !== input.squadronId)
-          return yield* new ArchiveCrewSquadronMismatchError({
+        if (input.projectId !== null && instance.projectId !== input.projectId)
+          return yield* new ArchiveCrewProjectMismatchError({
             crewInstanceId: instance.id,
-            squadronId: input.squadronId,
-            expected: instance.squadronId,
+            projectId: input.projectId,
+            expected: instance.projectId,
           });
         // A person is not a participant and holds the authority the gate gave them; only an
         // agent caller has to be the Captain (R19).
@@ -438,7 +438,7 @@ export const layer = Layer.effect(
               // Captain's identity because the unit retires as the Captain's Crew.
               callerParticipantId: input.callerParticipantId ?? instance.captainParticipantId,
               target: {
-                squadronId: instance.squadronId,
+                projectId: instance.projectId,
                 participantId: member.participantId,
                 threadId: member.threadId,
               },

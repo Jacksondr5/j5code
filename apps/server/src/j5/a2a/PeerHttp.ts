@@ -461,7 +461,7 @@ export const peerHttpRouteLayer = Layer.unwrap(
     );
 
     // A peer resolves receivers here, and sees only what it could address:
-    // agents by Squadron. People, machine participants and liveness stay home.
+    // agents by project. People, machine participants and liveness stay home.
     const rosterRoute = HttpRouter.add(
       "GET",
       J5_PEER_API_PATHS.roster,

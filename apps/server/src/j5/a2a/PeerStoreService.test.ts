@@ -41,7 +41,7 @@ import {
   ExchangeId,
   LedgerMessageId,
   ParticipantId,
-  SquadronId,
+  LedgerProjectId,
   type AgentParticipant,
 } from "./contracts.ts";
 
@@ -53,14 +53,14 @@ import {
 
 const timestamp = "2026-10-02T12:00:00.000Z";
 const laptop = "environment-laptop";
-const vmSquadron = SquadronId.make("squadron:work-billing");
+const vmProject = LedgerProjectId.make("project:work-billing");
 const billing: AgentParticipant = {
   kind: "agent",
   id: ParticipantId.make("agent:j5:a2a:thread:billing"),
   threadId: ThreadId.make("thread:billing"),
 };
 const iosBuild = ParticipantId.make("agent:j5:a2a:thread:ios-build");
-const laptopSquadron = SquadronId.make("squadron:laptop-ios");
+const laptopProject = LedgerProjectId.make("project:laptop-ios");
 
 const workDescriptor = Schema.decodeUnknownSync(ExecutionEnvironmentDescriptor)({
   environmentId: "environment-work",
@@ -152,10 +152,10 @@ const seed = Effect.fn("test.j5.a2a.peer.store.seed")(function* () {
   yield* runJ5A2AMigrations();
   const ledger = yield* A2ALedger;
   const sql = yield* SqlClient.SqlClient;
-  yield* ledger.ensureProject({ projectId: vmSquadron, createdAt: timestamp });
+  yield* ledger.ensureProject({ projectId: vmProject, createdAt: timestamp });
   yield* ledger.append({
     commandId: CommCommandId.make("command:peer-store:join"),
-    squadronId: vmSquadron,
+    projectId: vmProject,
     acceptedAt: timestamp,
     event: {
       kind: "participant.joined",
@@ -184,7 +184,7 @@ const store = (
     const correlationId = CorrelationId.make(`correlation:${name}`);
     yield* ledger.appendEvents({
       commandId: CommCommandId.make(`command:peer-store:${name}`),
-      squadronId: vmSquadron,
+      projectId: vmProject,
       acceptedAt: timestamp,
       events: [
         ...(exchangeId === null
@@ -209,8 +209,8 @@ const store = (
           payload: {
             messageId: LedgerMessageId.make(`message:${name}`),
             text: `${name} text`,
-            originProjectId: vmSquadron,
-            receiverProjectId: laptopSquadron,
+            originProjectId: vmProject,
+            receiverProjectId: laptopProject,
             receiverEnvironmentId: options.environmentId ?? laptop,
             exchangeRole: exchangeId === null ? "none" : "ask",
             envelopeChannel: "peer",
@@ -227,7 +227,7 @@ const archiveBilling = Effect.gen(function* () {
   const ledger = yield* A2ALedger;
   yield* ledger.append({
     commandId: CommCommandId.make("command:peer-store:archive-billing"),
-    squadronId: vmSquadron,
+    projectId: vmProject,
     acceptedAt: timestamp,
     event: {
       kind: "participant.archived",
@@ -322,7 +322,7 @@ it.effect(
       // The body is exactly what a direct send would carry, intent included.
       assert.equal(handed.deliveries[0]!.intent, "first intent");
       assert.equal(handed.deliveries[0]!.exchangeRole, "ask");
-      assert.equal(handed.deliveries[0]!.originSquadronId, vmSquadron);
+      assert.equal(handed.deliveries[0]!.originSquadronId, vmProject);
       const stamped = (yield* statusOf(first))!.handed_out_at;
       assert.isNotNull(stamped);
 
@@ -458,7 +458,7 @@ it.effect(
       const snapshot = [
         {
           participantId: iosBuild,
-          squadronId: laptopSquadron,
+          squadronId: laptopProject,
           squadronName: "iOS",
           threadId: ThreadId.make("thread:ios-build"),
           displayName: "iOS build",
@@ -562,7 +562,7 @@ it.effect("bounds a batch by its UTF-8 bytes on the wire and by count, oldest fi
     const sendText = (name: string, text: string) =>
       ledger.append({
         commandId: CommCommandId.make(`command:peer-store:bytes:${name}`),
-        squadronId: vmSquadron,
+        projectId: vmProject,
         acceptedAt: timestamp,
         event: {
           kind: "message.sent",
@@ -573,8 +573,8 @@ it.effect("bounds a batch by its UTF-8 bytes on the wire and by count, oldest fi
           payload: {
             messageId: LedgerMessageId.make(`message:bytes:${name}`),
             text,
-            originProjectId: vmSquadron,
-            receiverProjectId: laptopSquadron,
+            originProjectId: vmProject,
+            receiverProjectId: laptopProject,
             receiverEnvironmentId: laptop,
             exchangeRole: "none",
             envelopeChannel: "peer",
@@ -609,7 +609,7 @@ it.effect(
       const sendText = (name: string, text: string) =>
         ledger.append({
           commandId: CommCommandId.make(`command:peer-store:edge:${name}`),
-          squadronId: vmSquadron,
+          projectId: vmProject,
           acceptedAt: timestamp,
           event: {
             kind: "message.sent",
@@ -620,8 +620,8 @@ it.effect(
             payload: {
               messageId: LedgerMessageId.make(`message:edge:${name}`),
               text,
-              originProjectId: vmSquadron,
-              receiverProjectId: laptopSquadron,
+              originProjectId: vmProject,
+              receiverProjectId: laptopProject,
               receiverEnvironmentId: laptop,
               exchangeRole: "none",
               envelopeChannel: "peer",
@@ -746,7 +746,7 @@ it.effect("delivers a refusal's notice at once, with nothing else to wake the wo
       };
       yield* ledger.appendEvents({
         commandId: CommCommandId.make("command:peer-store:warm-up"),
-        squadronId: vmSquadron,
+        projectId: vmProject,
         acceptedAt: timestamp,
         events: [
           {
@@ -767,8 +767,8 @@ it.effect("delivers a refusal's notice at once, with nothing else to wake the wo
             payload: {
               messageId: LedgerMessageId.make("message:warm-up"),
               text: "warm-up",
-              originProjectId: vmSquadron,
-              receiverProjectId: vmSquadron,
+              originProjectId: vmProject,
+              receiverProjectId: vmProject,
               exchangeRole: "none",
               envelopeChannel: "peer",
             },
@@ -859,7 +859,7 @@ it.effect("cancels a stored message whose sender left before it was handed out",
     // Billing is archived, but the archive has not cancelled its deliveries yet.
     yield* ledger.append({
       commandId: CommCommandId.make("command:peer-store:archive-billing-only"),
-      squadronId: vmSquadron,
+      projectId: vmProject,
       acceptedAt: timestamp,
       event: {
         kind: "participant.archived",
@@ -894,7 +894,7 @@ it.effect("hands out and records acks while a slow local delivery holds the drai
       };
       yield* ledger.appendEvents({
         commandId: CommCommandId.make("command:peer-store:slow-local"),
-        squadronId: vmSquadron,
+        projectId: vmProject,
         acceptedAt: timestamp,
         events: [
           {
@@ -915,8 +915,8 @@ it.effect("hands out and records acks while a slow local delivery holds the drai
             payload: {
               messageId: LedgerMessageId.make("message:slow-local"),
               text: "slow local",
-              originProjectId: vmSquadron,
-              receiverProjectId: vmSquadron,
+              originProjectId: vmProject,
+              receiverProjectId: vmProject,
               exchangeRole: "none",
               envelopeChannel: "peer",
             },

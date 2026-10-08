@@ -12,7 +12,7 @@ import {
 } from "./AgentCrewInstanceService.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
-import { ParticipantId, SquadronId } from "./contracts.ts";
+import { ParticipantId, LedgerProjectId } from "./contracts.ts";
 
 const database = NodeSqliteClient.layer({ filename: ":memory:" });
 const testLayer = Layer.mergeAll(
@@ -25,13 +25,13 @@ const createdAt = "2026-09-09T16:00:00.000Z";
 it.effect("records a crew once, exposes membership, and lists by captain", () =>
   Effect.gen(function* () {
     yield* runJ5A2AMigrations();
-    const squadronId = SquadronId.make("squadron:crew-instances");
-    yield* (yield* A2ALedger).ensureProject({ projectId: squadronId, createdAt });
+    const projectId = LedgerProjectId.make("project:crew-instances");
+    yield* (yield* A2ALedger).ensureProject({ projectId: projectId, createdAt });
     const service = yield* AgentCrewInstanceService;
     const captain = ParticipantId.make("agent:j5:a2a:captain");
     const input = {
       id: "crew:j5:a2a:mcp:session:spawn-crew:req",
-      squadronId,
+      projectId,
       captainParticipantId: captain,
       captainThreadId: ThreadId.make("thread:captain"),
       displayName: "Review Pair",
@@ -71,12 +71,12 @@ it.effect("records a crew once, exposes membership, and lists by captain", () =>
     assert.deepStrictEqual(yield* service.read(input.id), first);
     assert.isNull(yield* service.read("missing"));
     assert.deepStrictEqual(
-      yield* service.listForCaptain({ squadronId, captainParticipantId: captain }),
+      yield* service.listForCaptain({ projectId, captainParticipantId: captain }),
       [first],
     );
     assert.deepStrictEqual(
       yield* service.listForCaptain({
-        squadronId,
+        projectId,
         captainParticipantId: ParticipantId.make("agent:j5:a2a:other"),
       }),
       [],
@@ -112,8 +112,8 @@ it.effect("records a crew once, exposes membership, and lists by captain", () =>
 it.effect("decides concurrent additions inside one transaction so the cap holds", () =>
   Effect.gen(function* () {
     yield* runJ5A2AMigrations();
-    const squadronId = SquadronId.make("squadron:crew-cap");
-    yield* (yield* A2ALedger).ensureProject({ projectId: squadronId, createdAt });
+    const projectId = LedgerProjectId.make("project:crew-cap");
+    yield* (yield* A2ALedger).ensureProject({ projectId: projectId, createdAt });
     const service = yield* AgentCrewInstanceService;
     const seat = (name: string) => ({
       seatName: name,
@@ -124,7 +124,7 @@ it.effect("decides concurrent additions inside one transaction so the cap holds"
     });
     const instance = yield* service.record({
       id: "crew:cap",
-      squadronId,
+      projectId,
       captainParticipantId: ParticipantId.make("agent:j5:a2a:captain-cap"),
       captainThreadId: ThreadId.make("thread:captain-cap"),
       displayName: "Nearly Full",
@@ -166,8 +166,8 @@ it.effect("decides concurrent additions inside one transaction so the cap holds"
 it.effect("refuses a same-name seat under a different identity, and any seat once retired", () =>
   Effect.gen(function* () {
     yield* runJ5A2AMigrations();
-    const squadronId = SquadronId.make("squadron:crew-conflict");
-    yield* (yield* A2ALedger).ensureProject({ projectId: squadronId, createdAt });
+    const projectId = LedgerProjectId.make("project:crew-conflict");
+    yield* (yield* A2ALedger).ensureProject({ projectId: projectId, createdAt });
     const service = yield* AgentCrewInstanceService;
     const seat = (name: string, identity: string) => ({
       seatName: name,
@@ -178,7 +178,7 @@ it.effect("refuses a same-name seat under a different identity, and any seat onc
     });
     yield* service.record({
       id: "crew:conflict",
-      squadronId,
+      projectId,
       captainParticipantId: ParticipantId.make("agent:j5:a2a:captain-conflict"),
       captainThreadId: ThreadId.make("thread:captain-conflict"),
       displayName: "Contested",
@@ -205,14 +205,14 @@ it.effect("refuses a same-name seat under a different identity, and any seat onc
 it.effect("brings back only a Crew that retired with its Captain", () =>
   Effect.gen(function* () {
     yield* runJ5A2AMigrations();
-    const squadronId = SquadronId.make("squadron:crew-restore");
-    yield* (yield* A2ALedger).ensureProject({ projectId: squadronId, createdAt });
+    const projectId = LedgerProjectId.make("project:crew-restore");
+    yield* (yield* A2ALedger).ensureProject({ projectId: projectId, createdAt });
     const service = yield* AgentCrewInstanceService;
     const captainThreadId = ThreadId.make("thread:restore-captain");
     const record = (id: string) =>
       service.record({
         id,
-        squadronId,
+        projectId,
         captainParticipantId: ParticipantId.make("agent:j5:a2a:restore-captain"),
         captainThreadId,
         displayName: id,
@@ -250,8 +250,8 @@ it.effect(
   () =>
     Effect.gen(function* () {
       yield* runJ5A2AMigrations();
-      const squadronId = SquadronId.make("squadron:crew-steps");
-      yield* (yield* A2ALedger).ensureProject({ projectId: squadronId, createdAt });
+      const projectId = LedgerProjectId.make("project:crew-steps");
+      yield* (yield* A2ALedger).ensureProject({ projectId: projectId, createdAt });
       const service = yield* AgentCrewInstanceService;
       const member = (seatName: string, playbookStepIds?: ReadonlyArray<string>) => ({
         seatName,
@@ -263,7 +263,7 @@ it.effect(
       });
       const input = {
         id: "crew:steps",
-        squadronId,
+        projectId,
         captainParticipantId: ParticipantId.make("agent:j5:a2a:captain"),
         captainThreadId: ThreadId.make("thread:captain"),
         displayName: "Release Crew",
@@ -324,8 +324,8 @@ it.effect(
 it.effect("stores the step owners the person approved last when a record is replayed", () =>
   Effect.gen(function* () {
     yield* runJ5A2AMigrations();
-    const squadronId = SquadronId.make("squadron:crew-replay");
-    yield* (yield* A2ALedger).ensureProject({ projectId: squadronId, createdAt });
+    const projectId = LedgerProjectId.make("project:crew-replay");
+    yield* (yield* A2ALedger).ensureProject({ projectId: projectId, createdAt });
     const service = yield* AgentCrewInstanceService;
     // Participant ids are unique across Crews, so each seat's id carries its Crew.
     let crew = "";
@@ -340,7 +340,7 @@ it.effect("stores the step owners the person approved last when a record is repl
     const record = (id: string, members: ReadonlyArray<ReturnType<typeof member>>) =>
       service.record({
         id,
-        squadronId,
+        projectId,
         captainParticipantId: ParticipantId.make("agent:j5:a2a:captain"),
         captainThreadId: ThreadId.make("thread:captain"),
         displayName: "Replay Crew",
