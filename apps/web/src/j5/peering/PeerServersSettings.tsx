@@ -1,4 +1,4 @@
-import { AuthAccessWriteScope, EnvironmentId } from "@t3tools/contracts";
+import { AuthAccessWriteScope, type EnvironmentId } from "@t3tools/contracts";
 import { PlusIcon } from "lucide-react";
 import { useState } from "react";
 
@@ -17,6 +17,7 @@ import {
   peerPollState,
   peerPollStoppedReason,
 } from "@t3tools/contracts/j5";
+import { removalConfirmation } from "@t3tools/client-runtime/j5/peering";
 import { useNowMinute } from "../../hooks/useNowMinute";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 
@@ -24,8 +25,8 @@ import { formatRelativeTimeLabel } from "../../timestampFormat";
  * The servers this environment exchanges agent messages with. A peer is also
  * an authorized session in the list above; this section is where the pairing
  * is made and where it is taken apart. Removal is mutual when this client can
- * manage the other server too, as the introduction was; otherwise it says what
- * is left to do there.
+ * manage the other server too, as the introduction was; removing one side only
+ * is a choice the person is warned about, never an accident.
  */
 export function PeerServersSettings({
   primaryEnvironmentId,
@@ -41,10 +42,7 @@ export function PeerServersSettings({
   const [dialogOpen, setDialogOpen] = useState(false);
   // Each opening mounts a fresh dialog, so a previous introduction's fields and steps never carry over.
   const [dialogGeneration, setDialogGeneration] = useState(0);
-  // Peering a pair again starts the dialog with that pair's remote server chosen.
-  const [dialogOther, setDialogOther] = useState<EnvironmentId | null>(null);
-  const openDialog = (otherEnvironmentId: EnvironmentId | null) => {
-    setDialogOther(otherEnvironmentId);
+  const openDialog = () => {
     setDialogGeneration((generation) => generation + 1);
     setDialogOpen(true);
   };
@@ -56,12 +54,7 @@ export function PeerServersSettings({
     <SettingsSection
       title="Peer servers"
       headerAction={
-        <Button
-          size="xs"
-          variant="ghost-muted"
-          aria-label="Add peer"
-          onClick={() => openDialog(null)}
-        >
+        <Button size="xs" variant="ghost-muted" aria-label="Add peer" onClick={openDialog}>
           <PlusIcon className="size-3" />
           <span>Add peer</span>
         </Button>
@@ -72,7 +65,6 @@ export function PeerServersSettings({
           key={peer.environmentId}
           peer={peer}
           primaryEnvironmentId={primaryEnvironmentId}
-          onPeerAgain={() => openDialog(EnvironmentId.make(peer.environmentId))}
           otherEnvironmentId={
             environments.find(
               (environment) =>
@@ -96,7 +88,6 @@ export function PeerServersSettings({
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         primaryEnvironmentId={primaryEnvironmentId}
-        initialOtherEnvironmentId={dialogOther}
         onPeered={(otherEnvironmentId) => {
           refreshPeers(primaryEnvironmentId);
           refreshPeers(otherEnvironmentId);
@@ -109,12 +100,10 @@ export function PeerServersSettings({
 function PeerRow({
   peer,
   primaryEnvironmentId,
-  onPeerAgain,
   otherEnvironmentId,
 }: {
   readonly peer: PeerRecord;
   readonly primaryEnvironmentId: EnvironmentId;
-  readonly onPeerAgain: () => void;
   /** The peer as one of this client's connected environments, when it is one. */
   readonly otherEnvironmentId: EnvironmentId | null;
 }) {
@@ -126,14 +115,43 @@ function PeerRow({
     (otherSession.data.scopes?.includes(AuthAccessWriteScope) ?? false);
   const [removing, setRemoving] = useState(false);
 
+  const confirmation = removalConfirmation({
+    otherManageable,
+    ended: isPeerCredentialRejected(peer),
+  });
+
   const remove = async () => {
-    const confirmed = await (requestConfirmDialog(
-      otherManageable
-        ? `Remove ${peer.label} as a peer? Both servers drop their record of the other and revoke the credential they issued. Agents on the two servers will no longer be able to message each other; messages still waiting are cancelled and open Exchanges between them are dropped, and each agent involved is told.`
-        : `Remove ${peer.label} as a peer? This server drops its record of ${peer.label} and revokes the credential ${peer.label} holds here. ${peer.label} keeps its own record of this server until you remove it there, and agents on the two servers will no longer be able to message each other. Messages still waiting for ${peer.label} are cancelled and open Exchanges with its agents are dropped, and each agent here that was involved is told.`,
-      { variant: "destructive" },
-      { confirmLabel: "Remove peer" },
-    ) ?? Promise.resolve(false));
+    const confirmed = await ((confirmation === "both"
+      ? requestConfirmDialog(
+          `Remove ${peer.label} as a peer? Both servers drop their record of the other and revoke the credential they issued. Agents on the two servers will no longer be able to message each other; messages still waiting are cancelled and open Exchanges between them are dropped, and each agent involved is told.`,
+          { variant: "destructive" },
+          { confirmLabel: "Remove peer" },
+        )
+      : confirmation === "ended"
+        ? requestConfirmDialog(
+            `Remove ${peer.label} as a peer? ${peer.label} already ended this peering. This server drops its record of ${peer.label}; messages still waiting for it are cancelled and open Exchanges with its agents are dropped, and each agent here that was involved is told.`,
+            { variant: "destructive" },
+            { confirmLabel: "Remove peer" },
+          )
+        : requestConfirmDialog(
+            `Remove ${peer.label} here only?`,
+            { variant: "destructive" },
+            {
+              confirmLabel: "Remove here only",
+              content: (
+                <span className="flex flex-col gap-2">
+                  <span className="font-medium text-foreground">
+                    {peer.label} will keep its side of this peering.
+                  </span>
+                  <span>
+                    This client can't reach {peer.label} to remove it there. Until you remove it on{" "}
+                    {peer.label} too, {peer.label} will keep trying to reach this server, and its
+                    messages to this server's agents will fail.
+                  </span>
+                </span>
+              ),
+            },
+          )) ?? Promise.resolve(false));
     if (!confirmed) return;
     setRemoving(true);
     try {
@@ -148,7 +166,7 @@ function PeerRow({
       setRemoving(false);
       return;
     }
-    if (otherManageable && otherEnvironmentId !== null) {
+    if (confirmation === "both" && otherEnvironmentId !== null) {
       try {
         await removePeer(otherEnvironmentId, primaryEnvironmentId);
         refreshPeers(otherEnvironmentId);
@@ -168,17 +186,9 @@ function PeerRow({
       title={peer.label}
       description={<PeerStatus peer={peer} />}
       control={
-        <span className="flex gap-2">
-          {/* Only peering again fixes a rejected credential; a mismatch needs an update instead. */}
-          {isPeerCredentialRejected(peer) ? (
-            <Button size="sm" variant="outline" disabled={removing} onClick={onPeerAgain}>
-              Peer again
-            </Button>
-          ) : null}
-          <Button size="sm" variant="ghost" disabled={removing} onClick={() => void remove()}>
-            {removing ? "Removing…" : "Remove"}
-          </Button>
-        </span>
+        <Button size="sm" variant="ghost" disabled={removing} onClick={() => void remove()}>
+          {removing ? "Removing…" : "Remove"}
+        </Button>
       }
     />
   );
@@ -197,13 +207,14 @@ function PeerStatus({ peer }: { readonly peer: PeerRecord }) {
       : peer.linkMode === "poll"
         ? `${peer.origin ?? ""} · this server polls it for A2A messages`
         : `${peer.origin ?? ""} · sends directly both ways`;
-  const rejected = isPeerCredentialRejected(peer);
+  // The other server removed this one: nothing else on the row matters now.
+  const ended = isPeerCredentialRejected(peer);
   // Once polling stopped, the last poll that worked says nothing about the peer.
   const stoppedReason = peerPollStoppedReason(peer);
-  const stopped = stoppedReason !== null;
-  const health = rejected
-    ? `Polling stopped · ${peer.label} rejected the credential`
-    : stopped
+  const stopped = ended || stoppedReason !== null;
+  const health = ended
+    ? `${peer.label} ended this peering`
+    : stoppedReason !== null
       ? "Polling stopped"
       : state === null
         ? peer.inboundSession === "active"
@@ -227,8 +238,8 @@ function PeerStatus({ peer }: { readonly peer: PeerRecord }) {
             ? " · 0 waiting"
             : ""}
       </span>
-      {rejected ? (
-        <span>Peer again to issue a new one.</span>
+      {ended ? (
+        <span>Remove it here. To peer again, use Add peer.</span>
       ) : peer.lastError !== null ? (
         <span className="text-destructive">{stoppedReason ?? peer.lastError}</span>
       ) : null}

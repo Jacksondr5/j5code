@@ -361,66 +361,38 @@ export const recommendPeering = (input: {
   return { kind: "no-route" };
 };
 
-/** One server's record of the other, as its peer list reports it. */
-export interface RecordedPeering {
-  readonly linkMode: "push" | "poll" | "store";
-  /** Where this server reaches the other; none for a peer that polls it. */
-  readonly origin: string | null;
-}
-
-/** A record of the remote with this link mode means this server connects, the remote does, or both. */
-const CONNECTIONS_RECORDED_HERE = {
-  poll: "local-only",
-  store: "remote-only",
-  push: "both",
-} as const;
-const CONNECTIONS_RECORDED_THERE = {
-  poll: "remote-only",
-  store: "local-only",
-  push: "both",
-} as const;
-
 /**
- * The setup a pair already has, from each server's record of the other, so
- * peering it again keeps how messages travel and where, and only issues new
- * credentials. Changing how they travel is removing the peer and peering
- * again. This server's record decides when it has one. Null when neither
- * server records the other.
+ * What the two servers record about a pair before it is peered. A record here
+ * is a peering this server still holds, removed under Peer servers first; a
+ * record held only by the other server is a leftover, such as one a removal
+ * made on this side only left behind, cleared there before pairing. Both
+ * lists must have been read: one that failed says nothing about that server.
  */
-export const recordedPeeringChoice = (input: {
-  readonly local: RecordedPeering | null;
-  readonly remote: RecordedPeering | null;
-}): PeeringChoice | null => {
-  const connections =
-    input.local !== null
-      ? CONNECTIONS_RECORDED_HERE[input.local.linkMode]
-      : input.remote !== null
-        ? CONNECTIONS_RECORDED_THERE[input.remote.linkMode]
-        : null;
-  if (connections === null) return null;
-  return {
-    connections,
-    localOrigin: input.remote?.origin ?? "",
-    remoteOrigin: input.local?.origin ?? "",
-  };
+export const peeringRecords = (input: {
+  readonly thisServer: string;
+  readonly otherServer: string;
+  /** This server's peers, and the other server's. */
+  readonly here: ReadonlyArray<{ readonly environmentId: string }>;
+  readonly there: ReadonlyArray<{ readonly environmentId: string }>;
+}) => {
+  const heldHere = input.here.some((peer) => peer.environmentId === input.otherServer);
+  const leftover = !heldHere && input.there.some((peer) => peer.environmentId === input.thisServer);
+  return { heldHere, leftover };
 };
 
 /**
- * Peering a recorded pair again: its way and its addresses stand, and an edit
- * only fills an address neither record holds.
+ * How removing a peer is confirmed. `both`: this client removes both sides.
+ * `ended`: the other server already removed its side, so this is the whole
+ * break. `here-only`: the other server keeps its side, a choice the person is
+ * warned about.
  */
-export const repeeringChoice = (
-  recorded: PeeringChoice,
-  edits: Partial<Pick<PeeringChoice, "localOrigin" | "remoteOrigin">>,
-): PeeringChoice => {
-  const origin = (field: "localOrigin" | "remoteOrigin", used: boolean) =>
-    recorded[field].length > 0 || !used ? recorded[field] : (edits[field] ?? "");
-  return {
-    connections: recorded.connections,
-    localOrigin: origin("localOrigin", recorded.connections !== "local-only"),
-    remoteOrigin: origin("remoteOrigin", recorded.connections !== "remote-only"),
-  };
-};
+export const removalConfirmation = (input: {
+  /** This client can manage the other server now. */
+  readonly otherManageable: boolean;
+  /** The other server rejects the credential it issued: it ended the peering. */
+  readonly ended: boolean;
+}): "both" | "ended" | "here-only" =>
+  input.otherManageable ? "both" : input.ended ? "ended" : "here-only";
 
 /** How messages will travel, in the plain lines the dialog shows; they update as the choice changes. */
 export const peeringLines = (

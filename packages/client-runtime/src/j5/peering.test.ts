@@ -10,10 +10,10 @@ import {
   peeringChoiceReady,
   peeringLines,
   peeringReachFrom,
+  peeringRecords,
   peeringRunMode,
   recommendPeering,
-  recordedPeeringChoice,
-  repeeringChoice,
+  removalConfirmation,
   resolvePeeringReadiness,
   type PeeringReach,
   type PeeringServer,
@@ -337,93 +337,42 @@ describe("recommendPeering", () => {
   });
 });
 
-describe("recordedPeeringChoice", () => {
-  // Two desktop servers, peered from Home Mac with the default: Laptop polls Home Mac.
-  const homeMac = { ...laptop, label: "Home Mac", runMode: "desktop" as const };
-  const desktop = {
-    ...vm,
-    environmentId: EnvironmentId.make("environment-laptop"),
-    label: "Laptop",
-    runMode: "desktop" as const,
-  };
-  const homeMacOrigin = "https://home-mac.tail1234.ts.net:3773";
-  const laptopTailnetOrigin = "https://laptop.tail1234.ts.net:3773";
-  const laptopRecord = { linkMode: "poll", origin: homeMacOrigin } as const;
-  const homeMacRecord = { linkMode: "store", origin: null } as const;
-
-  it("peers a recorded pair again the way it is set up, from either side", () => {
-    const setUp = recommendPeering({
-      local: homeMac,
-      remote: desktop,
-      localToRemote: reached(laptopTailnetOrigin),
-      remoteToLocal: reached(homeMacOrigin),
-    });
-    expect(setUp.kind === "setup" && setUp.choice.connections).toBe("remote-only");
-
-    // From Laptop, whose credential was rejected, a fresh check would turn it around.
-    const fresh = recommendPeering({
-      local: desktop,
-      remote: homeMac,
-      localToRemote: reached(homeMacOrigin),
-      remoteToLocal: reached(laptopTailnetOrigin),
-    });
-    expect(fresh.kind === "setup" && fresh.choice.connections).toBe("remote-only");
-    const fromLaptop = recordedPeeringChoice({ local: laptopRecord, remote: homeMacRecord });
-    expect(fromLaptop).toEqual({
-      connections: "local-only",
-      localOrigin: "",
-      remoteOrigin: homeMacOrigin,
-    });
-    expect(peeringLines(fromLaptop!, desktop, homeMac)[1]).toBe(
-      "Home Mac stores A2A messages for Laptop and waits for Laptop to poll for them.",
-    );
-
-    // From Home Mac, the same pairing: Laptop polls it at the same address.
-    const fromHomeMac = recordedPeeringChoice({ local: homeMacRecord, remote: laptopRecord });
-    expect(fromHomeMac).toEqual({
-      connections: "remote-only",
-      localOrigin: homeMacOrigin,
-      remoteOrigin: "",
-    });
-    expect(peeringChoiceReady(fromHomeMac!)).toBe(true);
-
-    // An edit made while peering again cannot move the recorded address, or the way.
-    const edits = { localOrigin: "https://elsewhere.example:3773", remoteOrigin: "https://x:1" };
-    expect(repeeringChoice(fromLaptop!, edits)).toEqual(fromLaptop);
-    expect(repeeringChoice(fromHomeMac!, edits)).toEqual(fromHomeMac);
-  });
-
-  it("lets an edit fill only an address neither record holds", () => {
-    // Home Mac stores for Laptop, but Laptop's own record could not be read.
-    const partial = recordedPeeringChoice({ local: homeMacRecord, remote: null })!;
-    expect(peeringChoiceReady(partial)).toBe(false);
-    const filled = repeeringChoice(partial, {
-      localOrigin: homeMacOrigin,
-      remoteOrigin: "https://ignored.example:3773",
-    });
-    expect(filled).toEqual({
-      connections: "remote-only",
-      localOrigin: homeMacOrigin,
-      remoteOrigin: "",
-    });
-    expect(peeringChoiceReady(filled)).toBe(true);
-  });
-
-  it("keeps both addresses of a pair that sends directly, and has nothing for a new pair", () => {
+describe("peeringRecords", () => {
+  const home = "environment-home";
+  const laptop = "environment-laptop";
+  it("tells a pairing held here from a leftover held only by the other server", () => {
+    // Home removed its side only: the laptop still records Home.
     expect(
-      recordedPeeringChoice({
-        local: { linkMode: "push", origin: laptopTailnetOrigin },
-        remote: { linkMode: "push", origin: homeMacOrigin },
+      peeringRecords({
+        thisServer: home,
+        otherServer: laptop,
+        here: [],
+        there: [{ environmentId: home }],
       }),
-    ).toEqual({
-      connections: "both",
-      localOrigin: homeMacOrigin,
-      remoteOrigin: laptopTailnetOrigin,
+    ).toEqual({ heldHere: false, leftover: true });
+    // Home still records the laptop: that is removed here first, whatever the laptop holds.
+    expect(
+      peeringRecords({
+        thisServer: home,
+        otherServer: laptop,
+        here: [{ environmentId: laptop }],
+        there: [{ environmentId: home }],
+      }),
+    ).toEqual({ heldHere: true, leftover: false });
+    expect(peeringRecords({ thisServer: home, otherServer: laptop, here: [], there: [] })).toEqual({
+      heldHere: false,
+      leftover: false,
     });
-    expect(recordedPeeringChoice({ local: null, remote: laptopRecord })?.connections).toBe(
-      "remote-only",
-    );
-    expect(recordedPeeringChoice({ local: null, remote: null })).toBeNull();
+  });
+});
+
+describe("removalConfirmation", () => {
+  it("removes both sides when it can, and warns before removing only this one", () => {
+    expect(removalConfirmation({ otherManageable: true, ended: false })).toBe("both");
+    expect(removalConfirmation({ otherManageable: true, ended: true })).toBe("both");
+    expect(removalConfirmation({ otherManageable: false, ended: false })).toBe("here-only");
+    // Nothing is left on the other side to warn about.
+    expect(removalConfirmation({ otherManageable: false, ended: true })).toBe("ended");
   });
 });
 

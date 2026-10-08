@@ -2,6 +2,7 @@ import { ThreadId } from "@t3tools/contracts";
 import {
   J5_PEER_API_PATHS,
   PEER_PROTOCOL_VERSION,
+  peerCredentialRejectedReason,
   type PeerRosterResponse,
 } from "@t3tools/contracts/j5";
 import { assert, it } from "@effect/vitest";
@@ -243,6 +244,43 @@ it.effect("refreshes a peer's name from each roster read, so a renamed server is
       "the rows carry the name the peer just reported",
     );
   }),
+);
+
+it.effect(
+  "records that the peer ended the peering when its roster read rejects the credential",
+  () =>
+    Effect.gen(function* () {
+      const lastErrors: Array<string | null> = [];
+      const http = Layer.succeed(
+        HttpClient.HttpClient,
+        HttpClient.make((request) =>
+          Effect.succeed(
+            HttpClientResponse.fromWeb(
+              request,
+              new Response(encodeJson({ error: "invalid_token" }), {
+                status: 401,
+                headers: { "content-type": "application/json", "x-j5-peer-protocol": "2" },
+              }),
+            ),
+          ),
+        ),
+      );
+      const registry = Layer.mock(PeerRegistryService)({
+        connections: () => Effect.succeed([homePeer]),
+        selfLabel: Effect.succeed("Work VM"),
+        recordLastError: (_environmentId, error) =>
+          Effect.sync(() => {
+            lastErrors.push(error);
+          }),
+      });
+      yield* Effect.gen(function* () {
+        const read = yield* (yield* PeerDirectory).listAgents();
+        assert.equal(read.unreadPeers.length, 1, "still reported as unread, never omitted");
+        assert.deepStrictEqual(lastErrors, [peerCredentialRejectedReason(homePeer.label)]);
+      }).pipe(
+        Effect.provide(peerDirectoryLayer.pipe(Layer.provide(http), Layer.provide(registry))),
+      );
+    }),
 );
 
 it.effect(

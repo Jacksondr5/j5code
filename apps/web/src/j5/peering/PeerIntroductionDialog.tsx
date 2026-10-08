@@ -5,11 +5,10 @@ import {
   peerOriginWarning,
   peeringChoiceReady,
   peeringLines,
+  peeringRecords,
   peeringStepTitle,
   pollPeeringStepTitle,
   recommendPeering,
-  recordedPeeringChoice,
-  repeeringChoice,
   type PeeringChoice,
   type PeeringQuestion,
   type PeeringRecommendation,
@@ -54,7 +53,7 @@ import {
   runPeeringCheck,
   type PeeringCheck,
 } from "./peeringCheck";
-import { addPeer, issuePeerCredential } from "./peeringClient";
+import { addPeer, issuePeerCredential, removePeer } from "./peeringClient";
 
 /** Where "How does this work?" goes: the explainer for sending directly and polling. */
 const EXPLAINER_URL = "https://j5.codes/peering";
@@ -71,21 +70,19 @@ interface StepReport {
  * run. The dialog then shows one setup built from what the check found, in
  * plain lines saying how messages travel each way, and asks only what the
  * check could not settle. "Set up differently" opens the manual form. A server
- * too old for poll mode gets only "update J5 there" and Close. A pair already
- * peered is peered again the way it is set up, with new credentials only.
+ * too old for poll mode gets only "update J5 there" and Close. A pair this
+ * server already records is removed under Peer servers before it is peered
+ * again; an old record of this server left on the other one is cleared first.
  */
 export function PeerIntroductionDialog({
   open,
   onOpenChange,
   primaryEnvironmentId,
-  initialOtherEnvironmentId = null,
   onPeered,
 }: {
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
   readonly primaryEnvironmentId: EnvironmentId;
-  /** The remote server to start with, as when peering a pair again. */
-  readonly initialOtherEnvironmentId?: EnvironmentId | null;
   readonly onPeered: (otherEnvironmentId: EnvironmentId) => void;
 }) {
   const { environments } = useEnvironments();
@@ -97,7 +94,7 @@ export function PeerIntroductionDialog({
         .toSorted((left, right) => left.label.localeCompare(right.label)),
     [environments, primaryEnvironmentId],
   );
-  const [otherId, setOtherId] = useState<EnvironmentId | null>(initialOtherEnvironmentId);
+  const [otherId, setOtherId] = useState<EnvironmentId | null>(null);
   const other = candidates.find((environment) => environment.environmentId === otherId) ?? null;
   const primaryBaseUrl = useEnvironmentHttpBaseUrl(primaryEnvironmentId);
   const otherBaseUrl = useEnvironmentHttpBaseUrl(otherId);
@@ -116,23 +113,36 @@ export function PeerIntroductionDialog({
   const described =
     (primary?.serverConfig ?? null) !== null && (other?.serverConfig ?? null) !== null;
 
-  // Each server's record of the other: a pair already peered keeps how messages
-  // travel and where, so peering it again cannot turn it around.
-  const localPeers = useEnvironmentQuery(otherReady ? peersQueryAtom(primaryEnvironmentId) : null);
-  const remotePeers = useEnvironmentQuery(
-    otherReady && otherId !== null ? peersQueryAtom(otherId) : null,
+  // Each server's record of the other. One here is a peering this server still
+  // holds: it is removed under Peer servers first. One held only by the other
+  // server is a leftover, such as from a removal made on this side only.
+  const otherConnected = other !== null && other.connection.phase === "connected";
+  // Both are read while the remote is connected, even unmanaged, so a leftover can name where to clear it.
+  const localPeers = useEnvironmentQuery(
+    otherConnected ? peersQueryAtom(primaryEnvironmentId) : null,
   );
-  const recordsRead =
-    otherReady &&
-    (localPeers.data !== null || localPeers.error !== null) &&
-    (remotePeers.data !== null || remotePeers.error !== null);
-  const recorded = recordsRead
-    ? recordedPeeringChoice({
-        local: localPeers.data?.find((peer) => peer.environmentId === otherId) ?? null,
-        remote:
-          remotePeers.data?.find((peer) => peer.environmentId === primaryEnvironmentId) ?? null,
-      })
-    : null;
+  const remotePeers = useEnvironmentQuery(
+    otherConnected && otherId !== null ? peersQueryAtom(otherId) : null,
+  );
+  // A list that failed to read says nothing about what that server records, so nothing is decided from it.
+  const herePeers = localPeers.error === null ? localPeers.data : null;
+  const therePeers = remotePeers.error === null ? remotePeers.data : null;
+  const recordsRead = otherReady && herePeers !== null && therePeers !== null;
+  const { heldHere, leftover } =
+    herePeers !== null && therePeers !== null
+      ? peeringRecords({
+          thisServer: primaryEnvironmentId,
+          otherServer: otherId ?? "",
+          here: herePeers,
+          there: therePeers,
+        })
+      : { heldHere: false, leftover: false };
+  const recordsError =
+    localPeers.error !== null
+      ? { server: local?.label ?? primaryEnvironmentId, error: localPeers.error }
+      : remotePeers.error !== null
+        ? { server: remote?.label ?? otherId, error: remotePeers.error }
+        : null;
 
   // The check's result, kept with the pair it was run for.
   const [checked, setChecked] = useState<{
@@ -154,9 +164,9 @@ export function PeerIntroductionDialog({
   };
 
   // The check runs once the remote can be managed, both servers support it, and
-  // the pair is not already peered.
+  // this server does not already record it.
   const checkKey =
-    local !== null && remote !== null && recordsRead && recorded === null && bothSupportPoll
+    local !== null && remote !== null && recordsRead && !heldHere && bothSupportPoll
       ? `${local.environmentId}|${remote.environmentId}`
       : null;
   useEffect(() => {
@@ -176,20 +186,18 @@ export function PeerIntroductionDialog({
   const check = checked !== null && checked.key === checkKey ? checked.result : null;
 
   const recommendation: PeeringRecommendation | null =
-    local === null || remote === null || !described || (otherReady && !recordsRead)
+    local === null || remote === null || !described || (otherReady && !recordsRead) || heldHere
       ? null
-      : recorded !== null
-        ? { kind: "setup", choice: recorded, question: null }
-        : !bothSupportPoll
-          ? recommendPeering({
-              local,
-              remote,
-              localToRemote: { kind: "untested", error: null },
-              remoteToLocal: { kind: "untested", error: null },
-            })
-          : check === null
-            ? null
-            : recommendPeering({ local, remote, ...check });
+      : !bothSupportPoll
+        ? recommendPeering({
+            local,
+            remote,
+            localToRemote: { kind: "untested", error: null },
+            remoteToLocal: { kind: "untested", error: null },
+          })
+        : check === null
+          ? null
+          : recommendPeering({ local, remote, ...check });
 
   const question =
     recommendation?.kind === "setup" && manual === null ? recommendation.question : null;
@@ -201,18 +209,36 @@ export function PeerIntroductionDialog({
           ? question.directChoice
           : question.storeChoice
       : null;
-  // A recorded pair's way and addresses stand; edits only fill what neither record holds.
   const choice: PeeringChoice | null =
-    recorded !== null && recommended !== null
-      ? repeeringChoice(recorded, originEdits)
-      : (manual ?? (recommended === null ? null : { ...recommended, ...originEdits }));
-  const ready = choice !== null && peeringChoiceReady(choice) && !busy;
+    manual ?? (recommended === null ? null : { ...recommended, ...originEdits });
+  // Peering needs the remote manageable, both records read and no record of it here,
+  // whichever setup is chosen: a saved manual one outlives any of them changing.
+  const peerable = otherReady && recordsRead && !heldHere;
+  const ready = peerable && choice !== null && peeringChoiceReady(choice) && !busy;
 
   const peer = async () => {
-    if (choice === null || local === null || remote === null) return;
+    if (!peerable || choice === null || local === null || remote === null) return;
     setBusy(true);
     setReport(null);
     try {
+      // An old record of this server on the other one is cleared first, so the pairing starts clean.
+      const cleared: Array<StepReport> = [];
+      if (leftover) {
+        const title = `Clear ${remote.label}'s old record of ${local.label}`;
+        try {
+          await removePeer(remote.environmentId, local.environmentId);
+          cleared.push({ title, status: "done", detail: null });
+        } catch (cause) {
+          setReport([
+            {
+              title,
+              status: "failed",
+              detail: cause instanceof Error ? cause.message : String(cause),
+            },
+          ]);
+          return;
+        }
+      }
       const localSide: PeeringSide = {
         environmentId: local.environmentId,
         label: local.label,
@@ -237,13 +263,14 @@ export function PeerIntroductionDialog({
             addPeer(recorder.environmentId, { origin: target.origin, credential }),
         });
         ok = outcome.ok;
-        setReport(
-          outcome.steps.map((step) => ({
+        setReport([
+          ...cleared,
+          ...outcome.steps.map((step) => ({
             title: peeringStepTitle(step.step, localSide, remoteSide),
             status: step.status,
             detail: step.detail,
           })),
-        );
+        ]);
       } else {
         const [poller, storer] =
           choice.connections === "local-only" ? [localSide, remoteSide] : [remoteSide, localSide];
@@ -260,13 +287,14 @@ export function PeerIntroductionDialog({
             addPeer(recorder.environmentId, { origin: target.origin, credential, poll: true }),
         });
         ok = outcome.ok;
-        setReport(
-          outcome.steps.map((step) => ({
+        setReport([
+          ...cleared,
+          ...outcome.steps.map((step) => ({
             title: pollPeeringStepTitle(step.step, poller, storer),
             status: step.status,
             detail: step.detail,
           })),
-        );
+        ]);
       }
       if (ok) {
         onPeered(remote.environmentId);
@@ -351,16 +379,29 @@ export function PeerIntroductionDialog({
               </Alert>
             ) : null}
 
-            {recorded !== null && remote !== null ? (
+            {recordsError !== null ? (
+              <p className="text-xs text-destructive">
+                Could not read {recordsError.server}'s peers: {recordsError.error}
+              </p>
+            ) : null}
+
+            {heldHere && remote !== null ? (
               <p className="text-xs text-muted-foreground">
-                {remote.label} is already a peer. Peering again keeps how messages travel and issues
-                new credentials. To change how they travel, remove the peer, then peer again.
+                {remote.label} is already a peer of this server. Remove it under Peer servers first,
+                then peer them again.
+              </p>
+            ) : leftover && remote !== null && local !== null ? (
+              <p className="text-xs text-muted-foreground">
+                {remote.label} still has an old record of this server.{" "}
+                {otherReady
+                  ? "Peering clears it there first."
+                  : `Remove ${local.label} under Peer servers on ${remote.label} first.`}
               </p>
             ) : null}
 
             {otherReady &&
             bothSupportPoll &&
-            recorded === null &&
+            !heldHere &&
             local !== null &&
             remote !== null &&
             manual === null ? (
@@ -412,7 +453,6 @@ export function PeerIntroductionDialog({
                 remote={remote}
                 question={question}
                 answer={answer}
-                recorded={recorded}
                 onChange={(edit) => setOriginEdits((edits) => ({ ...edits, ...edit }))}
                 disabled={busy}
               />
@@ -438,10 +478,7 @@ export function PeerIntroductionDialog({
                 <Button variant="ghost" disabled={busy} onClick={() => setManual(null)}>
                   Back to the recommended setup
                 </Button>
-              ) : recommendation !== null &&
-                recorded === null &&
-                local !== null &&
-                remote !== null ? (
+              ) : recommendation !== null && local !== null && remote !== null ? (
                 <Button
                   variant="ghost"
                   disabled={busy}
@@ -636,18 +673,13 @@ function ConnectionQuestion({
   );
 }
 
-/**
- * Only the address that will be used: the one a poller polls at, or one the
- * check could not prove. Peering a recorded pair again shows its addresses as
- * they stand, and asks only for one neither record holds.
- */
+/** Only the address that will be used: the one a poller polls at, or one the check could not prove. */
 function UsedAddress({
   choice,
   local,
   remote,
   question,
   answer,
-  recorded,
   onChange,
   disabled,
 }: {
@@ -656,32 +688,9 @@ function UsedAddress({
   readonly remote: PeeringServer;
   readonly question: PeeringQuestion | null;
   readonly answer: "store" | "direct";
-  readonly recorded: PeeringChoice | null;
   readonly onChange: (edit: Partial<PeeringChoice>) => void;
   readonly disabled: boolean;
 }) {
-  const fixed = (field: "localOrigin" | "remoteOrigin") =>
-    recorded !== null && recorded[field].length > 0;
-  if (choice.connections === "both" && recorded !== null) {
-    return (
-      <>
-        {(
-          [
-            [local, remote, "remoteOrigin"],
-            [remote, local, "localOrigin"],
-          ] as const
-        ).map(([from, to, field]) => (
-          <OriginField
-            key={field}
-            title={`${from.label} reaches ${to.label} at`}
-            value={choice[field]}
-            onChange={(value) => onChange({ [field]: value })}
-            disabled={disabled || fixed(field)}
-          />
-        ))}
-      </>
-    );
-  }
   if (choice.connections === "both") {
     if (question === null || !question.directNeedsAddress || answer !== "direct") return null;
     const [to, from] = question.toward === "local" ? [local, remote] : [remote, local];
@@ -704,7 +713,7 @@ function UsedAddress({
       title={`${poller.label} reaches ${storer.label} at`}
       value={choice[field]}
       onChange={(value) => onChange({ [field]: value })}
-      disabled={disabled || fixed(field)}
+      disabled={disabled}
     />
   );
 }

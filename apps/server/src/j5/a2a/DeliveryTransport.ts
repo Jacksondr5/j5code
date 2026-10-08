@@ -6,7 +6,11 @@ import {
   type OrchestrationV2ThreadProjection,
   ThreadId,
 } from "@t3tools/contracts";
-import { J5_PEER_API_PATHS, type PeerDeliveryRequest } from "@t3tools/contracts/j5";
+import {
+  J5_PEER_API_PATHS,
+  peerCredentialRejectedReason,
+  type PeerDeliveryRequest,
+} from "@t3tools/contracts/j5";
 import { normalizeModelSlug } from "@t3tools/shared/model";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
@@ -549,6 +553,14 @@ export const live: Layer.Layer<
           if (response.status === 200 || response.status === 201) {
             yield* peers.recordLastError(peer.environmentId, null);
             return;
+          }
+          // A peer rejects the credential it issued only once it removed this
+          // server: the row says it ended the peering. The send retries and alarms.
+          if (response.status === 401) {
+            yield* peers.recordLastError(
+              peer.environmentId,
+              peerCredentialRejectedReason(peer.label),
+            );
           }
           const text = yield* response.text;
           // Only an error answer that is the peer's own refusal, with its code
