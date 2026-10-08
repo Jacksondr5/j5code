@@ -7,7 +7,7 @@ Earlier steps describe position, not a guarantee that their work passed validati
 
 Open **Settings → Personas → Playbooks** and select a project or thread worktree to see
 its definitions and steps. Playbook Author runs on Codex in the selected workspace.
-Choose an authoring Squadron if the project has more than one. It helps shape the
+It helps shape the
 steps, writes the YAML, and checks the definition without starting a run. You can
 customize the persona in Settings → Personas. Invalid definitions remain visible
 with their errors.

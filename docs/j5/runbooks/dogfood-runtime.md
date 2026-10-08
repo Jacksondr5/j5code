@@ -18,7 +18,7 @@ exact source and verification limits.
 
 ## Shape and rationale
 
-- **One server, one Squadron.** A Squadron lives entirely on one server by design, so the dogfood
+- **One server.** A project and its ledger live entirely on one server by design, so the dogfood
   fleet is single-server. The Linux box is that server.
 - **The browser is the dogfood client.** The server serves its own web bundle, built from the same
   commit as the server itself (`apps/server/src/config.ts` resolves `dist/client`, the HTTP
@@ -114,7 +114,7 @@ As `j5dev` (Ansible reconciles all of this):
    git -C ~/src/j5code remote add upstream https://github.com/pingdotgg/t3code.git
    ```
 
-   Select `~/src/j5code` when creating the J5 development Squadron. Other initiatives get their
+   Add `~/src/j5code` as the J5 development project. Other initiatives get their
    own clones under `~/src`. Development servers use their worktrees' isolated homes.
 
 3. **Unit.** `~/.config/systemd/user/j5code.service`:

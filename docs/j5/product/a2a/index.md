@@ -27,7 +27,7 @@ J5 carries a message by using upstream's thread injection: the message becomes t
 
 ### The ledger
 
-Every Squadron has a **communication ledger**: an append-only record of everything that happens in communication — every message sent, every delivery outcome, every Exchange opened and closed, every silence notice, every participant joining or leaving.
+Every project has a **communication ledger**: an append-only record of everything that happens in communication — every message sent, every delivery outcome, every Exchange opened and closed, every silence notice, every participant joining or leaving.
 
 The ledger is the source of truth. Nothing in it is ever edited or deleted, and every message in it is delivered. The ledger survives restarts, so a question asked before the server went down is still open when it comes back.
 
@@ -57,15 +57,15 @@ There are three kinds of message.
 
 ## Participants
 
-A participant is anything that takes part over the ledger: an agent with a Squadron home, a person, or a machine participant. People are global — one person id, known across every Squadron on the server — and nothing anywhere may assume there is exactly one of them. Provider-native Subagents are never participants.
+A participant is anything that takes part over the ledger: an agent, a person, or a machine participant. Every thread that is not a provider-native Subagent is an agent participant in the ledger of its project, from the moment the thread exists. A thread's project is fixed when upstream creates the thread, so a participant never moves between ledgers. People are global — one person id, known across every project on the server — and nothing anywhere may assume there is exactly one of them. Provider-native Subagents are never participants.
 
-A **machine participant** is a registered non-agent sender — a scheduled scraper, a watchdog, a shell script — and is how machine events enter the fleet as first-class work sources. Like an agent it has one immutable Squadron home and a server-unique name; unlike an agent it has no thread. It sends plain messages only, and nothing can be delivered to it, so no Exchange is ever open with it and no silence is measured about it. It acts only through a token bound to its own participant id; nothing else can send as it.
+A **machine participant** is a registered non-agent sender — a scheduled scraper, a watchdog, a shell script — and is how machine events enter the fleet as first-class work sources. Like an agent it belongs to one project, which never changes; it has a server-unique name and, unlike an agent, no thread. It sends plain messages only, and nothing can be delivered to it, so no Exchange is ever open with it and no silence is measured about it. It acts only through a token bound to its own participant id; nothing else can send as it.
 
-Every participant can message every other participant that can receive: an agent receives from anyone, a person receives only asks, and a machine participant receives nothing. No Squadron, no placement in a tree and no Role restricts who may talk to whom; the hierarchy carries decisions, never messages, and a Captain commands its Crews by briefing them, never by routing their messages. An agent cannot message itself. A participant's Squadron may live on a peer server; the sender addresses it by the same id, the address book names the server it lives on, and the platform carries the message across as defined in [cross-device](../cross-device.md). The platform states identity facts wherever it speaks: the envelope names the sender, the address book marks the caller's own row, and a spawned agent's first turn tells it who it is.
+Every participant can message every other participant that can receive: an agent receives from anyone, a person receives only asks, and a machine participant receives nothing. No project, no placement in a tree and no Role restricts who may talk to whom; the hierarchy carries decisions, never messages, and a Captain commands its Crews by briefing them, never by routing their messages. An agent cannot message itself. A participant may live on a peer server; the sender addresses it by the same id, the address book names the server it lives on, and the platform carries the message across as defined in [cross-device](../cross-device.md). The platform states identity facts wherever it speaks: the envelope names the sender, the address book marks the caller's own row, and a spawned agent's first turn tells it who it is.
 
 ## Delivery
 
-Delivery is **log-first**: the ledger row is the act, and delivery is an attempt recorded against it. A successful attempt is a **delivery receipt**; a failed one is retried; a failure past the retry limit is a **delivery alarm** — a visible fact attributed to the sender, never a silent loss, and never assumed repaired because time passed or a later message got through. "Was it delivered" and "was it answered" are independent facts. When the receiver's Squadron lives on a peer server, the attempt crosses to that server, which records its own received row before delivering. Across servers the receipt means the peer server accepted the message; delivering it into the thread is that server's own delivery, which retries and alarms there, attributed to the sender. Failure to reach a peer server the sender's server sends to directly retries and alarms on the sender's server; a message for a peer server that polls is stored until it polls, and its acknowledgement is the receipt. A message the peer server refuses, or one cancelled before it was delivered, is reported to its sender in a not-delivered notice. "Peer" in this definition means another agent; another server is a **peer server**, defined in [cross-device](../cross-device.md).
+Delivery is **log-first**: the ledger row is the act, and delivery is an attempt recorded against it. A successful attempt is a **delivery receipt**; a failed one is retried; a failure past the retry limit is a **delivery alarm** — a visible fact attributed to the sender, never a silent loss, and never assumed repaired because time passed or a later message got through. "Was it delivered" and "was it answered" are independent facts. When the receiver lives on a peer server, the attempt crosses to that server, which records its own received row before delivering. Across servers the receipt means the peer server accepted the message; delivering it into the thread is that server's own delivery, which retries and alarms there, attributed to the sender. Failure to reach a peer server the sender's server sends to directly retries and alarms on the sender's server; a message for a peer server that polls is stored until it polls, and its acknowledgement is the receipt. A message the peer server refuses, or one cancelled before it was delivered, is reported to its sender in a not-delivered notice. "Peer" in this definition means another agent; another server is a **peer server**, defined in [cross-device](../cross-device.md).
 
 Two policies govern what happens when a message reaches an agent whose turn is running, and they are independent of each other.
 
@@ -79,7 +79,7 @@ The **person-side policy** is upstream's: whether the person's own send steers o
 
 A person takes part in the same protocol as an agent, with two differences that follow from being a person.
 
-Delivery is the **inbox**, not a conversation. An ask to a person lands in their inbox, gathered across every Squadron on the server. The person's answer, exactly as written, is the reply that closes the Exchange and reaches the asker — no relay, no summary. A person receives only asks; a plain message to a person is refused, because a plain message carries nothing the sender's own thread does not already show, and if the person must see something then seeing it _is_ the obligation. The person never opens an ask through the platform: their channel to an agent is that agent's thread, which they can open at any time, and their only act on the ledger is the answer that closes an Exchange.
+Delivery is the **inbox**, not a conversation. An ask to a person lands in their inbox, gathered across every project on the server. The person's answer, exactly as written, is the reply that closes the Exchange and reaches the asker — no relay, no summary. A person receives only asks; a plain message to a person is refused, because a plain message carries nothing the sender's own thread does not already show, and if the person must see something then seeing it _is_ the obligation. The person never opens an ask through the platform: their channel to an agent is that agent's thread, which they can open at any time, and their only act on the ledger is the answer that closes an Exchange.
 
 Silence is **never measured about a person**. A person has no turn that ends. How long their open asks have waited is a fact the inbox and the Fleet page show; nothing nags.
 
@@ -91,19 +91,19 @@ The platform names five kinds of silence: the turn ended without the owed reply;
 
 ## Envelopes
 
-Every delivered message is wrapped in an **envelope**: the platform's wrapper that tells the receiving agent who sent this and from which Squadron — and, for a sender on a peer server, which server — what it now owes and how to discharge it, and the measured time. A machine participant's envelope says that the sender is automated and cannot receive a reply, so the agent acts on the message directly and takes any question to a person or a peer. Envelope wording is versioned configuration rendered from one place, so the channels never drift, and it is written in plain words for an agent reading it in the middle of its work. People reading the app see the letter, not the envelope.
+Every delivered message is wrapped in an **envelope**: the platform's wrapper that tells the receiving agent who sent this and from which project — and, for a sender on a peer server, which server — what it now owes and how to discharge it, and the measured time. A machine participant's envelope says that the sender is automated and cannot receive a reply, so the agent acts on the message directly and takes any question to a person or a peer. Envelope wording is versioned configuration rendered from one place, so the channels never drift, and it is written in plain words for an agent reading it in the middle of its work. People reading the app see the letter, not the envelope.
 
 ## Vocabulary this definition owns
 
-message, ask, reply, plain message, Exchange, intent, urgency, obligation, envelope, communication ledger, projection, delivery receipt, delivery alarm, silence notice, queue and steer, machine participant. The [glossary](../glossary.md) points here for each of them. Provenance and placement are Squadron concepts and live in the [Squadron definition](../features/squadron.md).
+message, ask, reply, plain message, Exchange, intent, urgency, obligation, envelope, communication ledger, projection, delivery receipt, delivery alarm, silence notice, queue and steer, machine participant. The [glossary](../glossary.md) points here for each of them. Provenance and placement are organization, not communication, and are defined with the [Fleet page](../features/fleet-page.md).
 
 ## Acceptance criteria
 
 ### The ledger
 
-1. Every message an agent or person sends through the platform is recorded in the sender's Squadron ledger before the sender's call returns.
+1. Every message an agent or person sends through the platform is recorded in the ledger of the sender's project before the sender's call returns.
 2. Nothing in a ledger is ever edited or deleted, and every recorded message is delivered; a server restart loses nothing.
-3. A message crossing Squadrons appears in both Squadrons' ledgers with a shared correlation id, and a crash between the two writes leaves the sender's row visible rather than losing the message.
+3. A message between participants in different projects appears in both projects' ledgers with a shared correlation id, and a crash between the two writes leaves the sender's row visible rather than losing the message.
 4. Every projection can be rebuilt from the ledger to an identical result, and a mutated projection row fails the equivalence check.
 
 ### Exchanges
@@ -114,7 +114,7 @@ message, ask, reply, plain message, Exchange, intent, urgency, obligation, envel
 8. A follow-up to an open ask to a person references that Exchange by its id, joins it, and is shown beneath the original ask in the inbox.
 9. One reply naming the Exchange closes it, together with every follow-up that joined it; the sender may withdraw its own ask; the receiver's retirement closes it with a notice to the sender; nothing else closes it.
 10. A message from an agent to itself is refused with an error naming the caller's own id.
-11. No Squadron, placement, or Role restricts which participants may message each other.
+11. No project, placement, or Role restricts which participants may message each other.
 
 ### Delivery
 
@@ -126,7 +126,7 @@ message, ask, reply, plain message, Exchange, intent, urgency, obligation, envel
 ### The person
 
 16. An agent-to-person send that is not an ask is refused with an error naming the legal move; a person cannot open an ask through the platform.
-17. An ask to a person appears in that person's inbox regardless of which Squadron it came from.
+17. An ask to a person appears in that person's inbox regardless of which project it came from.
 18. A person's answer to an ask is delivered to the asker exactly as written, as the reply that closes the Exchange.
 19. No silence notice is ever written about a person.
 
@@ -137,12 +137,12 @@ message, ask, reply, plain message, Exchange, intent, urgency, obligation, envel
 
 ### Envelopes
 
-22. Every delivered message carries an envelope naming the sender, the sender's Squadron, the sender's server when it is a peer server, what is owed, and the measured time.
+22. Every delivered message carries an envelope naming the sender, the sender's project by its id with its title beside it, the sender's server when it is a peer server, what is owed, and the measured time.
 23. The answer a person gives in the inbox reaches the agent wrapped in an envelope that says the Exchange is closed and no further reply is owed.
 
 ### Machine participants
 
-24. A machine participant is registered in exactly one Squadron under a server-unique name, its id is `machine:` followed by that name, and registering the same name again returns the existing participant rather than a second one.
+24. A machine participant is registered in exactly one project under a server-unique name, its id is `machine:` followed by that name, and registering the same name again returns the existing participant rather than a second one.
 25. A machine participant sends plain messages only, through the same command path and replay rules as an agent's send; a send from an unregistered machine is refused with an error naming the registration command.
 26. A message addressed to a machine participant is refused with an error naming the legal move, and the address book lists every machine participant as unable to receive a message or open an Exchange.
 27. A machine participant's message is delivered wrapped in an envelope that names the sender as automated and states that no reply can reach it; the thread view attributes the card to the machine's name and marks it as automation.
@@ -158,7 +158,7 @@ message, ask, reply, plain message, Exchange, intent, urgency, obligation, envel
 - **Two questions for the user.** The same agent asks the user "merge now or after the audit?" with urgency _soon_, and separately "may I delete the old branch?". Both appear as inbox items. The agent then learns something relevant to the first question and follows up on it by name; the follow-up appears under that item. The user answers each; each Exchange closes with the exact text delivered to the agent. (AC5, AC7, AC8, AC18)
 - **A busy receiver.** An agent in Website Redesign sends a plain message to a peer whose turn is running a long shell command. The message queues; the peer's turn finishes normally; the message starts its next turn. The user, watching the peer, chooses to steer instead — the control says "Steer now" on this provider — and their text is injected into the running turn. (AC13, AC14)
 - **A failed delivery.** An agent asks a peer that has been archived. The delivery fails, the alarm is attributed to the asker and shown on its Fleet page row; the asker withdraws its ask; the alarm remains a fact but no longer counts as a problem. (AC9, AC12)
-- **Across Squadrons.** An agent in Billing Migration asks an agent in Support Rotation for an incident's status; both Squadrons' ledgers carry the Exchange under one correlation id; the Fleet page of either Squadron shows it as an open ask. The same holds when Support Rotation is homed on a peer server; the address book names that server, and the asker addresses the agent by id all the same. (AC3)
+- **Across projects.** An agent in Billing Migration asks an agent in Support Rotation for an incident's status; both projects' ledgers carry the Exchange under one correlation id, and the Fleet page shows it as an open ask on both agents' rows. The same holds when the Support Rotation agent lives on a peer server; the address book names that server, and the asker addresses the agent by id all the same. (AC3)
 - **A scraper wakes an agent.** The observability scraper of L2 Support Rotation, registered as the machine participant `machine:watchdog`, runs on a schedule and sends "canary 42" to the triage agent from a shell script with a client request id. The agent's thread shows a card from watchdog marked as automation; the agent acts on it and cannot reply to the watchdog. The script retries with the same id after a network blip and gets the original receipt back; nothing is delivered twice. (AC24, AC25, AC26, AC27)
 
 ## History
@@ -177,3 +177,4 @@ message, ask, reply, plain message, Exchange, intent, urgency, obligation, envel
 - 2026-09-16 — a receiver's Squadron may live on a peer server; addressing, envelopes and delivery facts are unchanged, and peering itself is defined in cross-device ([record](../../worklog/2026-09-16-cross-server-peering-session.md)).
 - 2026-10-02 — a receiver on a peer server is no longer hidden: the address book names its server, the envelope of a message from a peer server names that server (AC22), and a message to a peer server that polls is stored until it polls; refused and cancelled deliveries reach the sender as not-delivered notices. Peering itself, and poll mode, are defined in cross-device ([record](../../worklog/2026-10-02-peering-poll-mode-session.md)).
 - 2026-10-03 — a sender whose message will wait behind a busy receiver is told the measured backlog when it sends; AC29 (issue #424). Merging queued messages and refusing past a limit were rejected; receivers on peer servers are issue #425.
+- 2026-10-07 — Squadrons retired: a thread's home is its project, which upstream fixes when the thread is created, and the ledger is keyed by project (Jackson, 2026-10-05; [#412](https://github.com/Jacksondr5/j5code/issues/412)).

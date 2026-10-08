@@ -130,7 +130,7 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Consequences:** each advance checks that no fan-out path carries a persona.
 
-**Decided:** 2026-09-24 (#7b), a merge-time decision made to let that day's advance proceed. How fan-out should really work in J5 is open (#338). The fan-out threads no longer carry a Squadron (2026-10-04, [#412](https://github.com/Jacksondr5/j5code/issues/412)). Recorded in FORK.md case 19.
+**Decided:** 2026-09-24 (#7b), a merge-time decision made to let that day's advance proceed. How fan-out should really work in J5 is open (#338). Recorded in FORK.md case 19.
 
 ### Archive and lifecycle
 
@@ -403,7 +403,7 @@ On top of upstream's same-project rule, J5 required a shared Squadron to archive
 
 #### D9. A thread's Squadron is created for it
 
-A thread launched without a Squadron registered into its project's Squadron, which the server created when the project had none (Jackson, 2026-10-03). Retired 2026-10-07 ([#412](https://github.com/Jacksondr5/j5code/issues/412)): there are no Squadrons. Every thread except a provider Subagent is a participant in its own project's ledger from the moment it exists, and a server that upgrades registers the threads it already has.
+A thread launched without a Squadron registered into its project's Squadron, which the server created when the project had none (Jackson, 2026-10-03). Retired 2026-10-07 ([#412](https://github.com/Jacksondr5/j5code/issues/412)): there are no Squadrons. Every thread except a provider Subagent is a participant in its own project's ledger from the moment it exists, and a server that upgrades registers the threads it already has. A rule the Squadron definition held beside this entry, that the platform never creates an unnamed default container ("no junk drawer"), is reversed by name: J5 accepts upstream's "No project" project as upstream ships it, one per environment for threads started without a project (Jackson, 2026-10-05). It arrives with the next upstream advance and is no divergence.
 
 #### D11. A scheduled task can't start a thread in a project that several Squadrons share
 
@@ -416,3 +416,4 @@ A scheduled run was refused before creating a thread when several Squadrons refe
 - 2026-10-04 — D26 added: `j5 triage` points at J5's repository (PR #446).
 - 2026-10-04 — D28 added: the `j5` command (PR #414).
 - 2026-10-07 — D8, D9 and D11 retired and D29 added: the ledger re-keyed to projects ([#412](https://github.com/Jacksondr5/j5code/issues/412)).
+- 2026-10-08 — D9 records the accepted reversal of "no junk drawer": upstream's "No project" project is taken as upstream ships it (Jackson, 2026-10-05; [#412](https://github.com/Jacksondr5/j5code/issues/412)).

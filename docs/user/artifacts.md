@@ -31,7 +31,7 @@ thread. The `artifacts/` prefix shown in chat is a logical path and does not cre
 the repository, so no Git ignore rule is needed.
 
 Artifacts are local to the environment and project where they were generated. They are
-not synced between machines or treated as shared Squadron documents.
+not synced between machines.
 
 Handoff artifacts from personas, including crew members, land here too, under `handoffs/`,
 one file per agent task. A rewritten handoff artifact adds its new version at the top of the same

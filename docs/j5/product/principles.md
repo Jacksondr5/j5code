@@ -69,7 +69,7 @@ Each principle states its rule, what it stands on (beliefs and lenses above), it
 
 **Jurisdiction:** communication topology and command structure — who may talk to whom, who spawns and briefs whom.
 
-**Cases:** any-to-any messaging is a platform invariant and Captains are never routers ([agent-to-agent communication](./a2a/index.md), [Crews](./features/crews.md)); "you command what you brief" — placement equals the spawner, and spawning-and-briefing a Crew for someone else is proxy management ([Squadron](./features/squadron.md), [Crews](./features/crews.md)); lateral-coordination norms are Role content, never permission checks ([Roles](./features/roles.md)).
+**Cases:** any-to-any messaging is a platform invariant and Captains are never routers ([agent-to-agent communication](./a2a/index.md), [Crews](./features/crews.md)); "you command what you brief" — placement equals the spawner, and spawning-and-briefing a Crew for someone else is proxy management ([Fleet page](./features/fleet-page.md), [Crews](./features/crews.md)); lateral-coordination norms are Role content, never permission checks ([Roles](./features/roles.md)).
 
 ## Prompting problems are not platform problems
 
@@ -109,7 +109,7 @@ Each principle states its rule, what it stands on (beliefs and lenses above), it
 
 **Jurisdiction:** what the human must do to learn the fleet's state.
 
-**Cases:** the Fleet page exists so "how's it going" is a read ([Fleet page](./features/fleet-page.md)); cost rolls up per Squadron on a surface, nothing between ([Fleet page](./features/fleet-page.md)); chattiness is a measured metric, not a vibe.
+**Cases:** the Fleet page exists so "how's it going" is a read ([Fleet page](./features/fleet-page.md)); cost rolls up per project on a surface, nothing between ([Fleet page](./features/fleet-page.md)); chattiness is a measured metric, not a vibe.
 
 ## Never guess — a plausible fake is worse than a visible gap
 
@@ -129,7 +129,7 @@ Each principle states its rule, what it stands on (beliefs and lenses above), it
 
 **Jurisdiction:** lifecycle transitions, terminations, and failures.
 
-**Cases:** archiving a participant ends its obligations with notices to every waiter ([archive flow](./features/archive-flow.md)); an undelivered message is a visible alarm, never a silent loss ([agent-to-agent communication](./a2a/index.md)); membership changes are lifecycle events ([Squadron](./features/squadron.md)); archiving an agent with open Memos warns first ([Memos](./features/memos.md)).
+**Cases:** archiving a participant ends its obligations with notices to every waiter ([archive flow](./features/archive-flow.md)); an undelivered message is a visible alarm, never a silent loss ([agent-to-agent communication](./a2a/index.md)); membership changes are ledger events ([agent-to-agent communication](./a2a/index.md)); archiving an agent with open Memos warns first ([Memos](./features/memos.md)).
 
 ## Simple tools at the frontier
 

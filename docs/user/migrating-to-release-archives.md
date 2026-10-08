@@ -177,7 +177,7 @@ old unit was recreated), and step 1 showed the unit is J5's, run
 - The logs in `~/.j5code/userdata/logs/` show no migration errors. A migration
   failure keeps the server from starting; it does not damage data. Go to
   Rollback.
-- Connect from a client and confirm that threads, Squadrons, and agents appear.
+- Connect from a client and confirm that projects, threads, and agents appear.
 
 ## 6. Report the upgrade (final step)
 

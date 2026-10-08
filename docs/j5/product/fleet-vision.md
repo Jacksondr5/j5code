@@ -66,7 +66,7 @@ The human sits at the top of a management hierarchy, not at the center of a hub-
 2. **Machine events are first-class fleet inputs.** The Dynatrace fleet is _driven by a cron job_, not by a human prompt. Work enters the fleet from schedules, alerts, PR comments, CI results. The platform needs non-human triggers as real citizens — and the communication graph should show them as sources (the "external systems as nodes" door we left open).
 3. **Fleets are long-lived organizations, not task executions.** Leads and their Crews persist for weeks. This validates: durable communication log, idle-as-real-state, stall detection over completion tracking.
 4. **The hierarchy is deep — attention must aggregate.** Jackson ↔ Director ↔ leads ↔ PR Groups is 3+ levels. Escalations bubble through middle managers, so the Fleet page must make _the whole tree's_ state legible, not just the top edge. (The inbox itself stays pure — only asks deliberately sent to the person; the tree-wide view is the Fleet page's job, not the inbox's.)
-5. **Cost is a product surface.** One lead exists specifically to keep the fleet within budget. Cost rollups belong on the Fleet page, not in a settings page — per Squadron, with the agents beneath it.
+5. **Cost is a product surface.** One lead exists specifically to keep the fleet within budget. Cost rollups belong on the Fleet page, not in a settings page — per project, with the agents beneath it.
 6. **Beyond-coding is the bar.** Every design should pass the test: "does this work for the monitoring fleet, or only for coding fleets?" (E.g. PR panes are one instantiation of a more general "external artifact an agent team is responsible for" — incidents and dashboards are others.)
 
 ## History
