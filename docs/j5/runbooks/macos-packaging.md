@@ -135,7 +135,8 @@ create a GitHub Release. The workflow uses the Apple signing secrets and
 `APPLE_TEAM_ID` repository variable; it converts the P12 export to a Keychain-compatible format.
 Clerk passkey provisioning is only required when Clerk/passkey configuration is supplied.
 
-- `J5 CI` runs formatting, lint, typecheck, and unit-test gates on every `j5/**` push and PR.
+- `J5 CI` runs formatting, lint, typecheck, and unit-test gates on every PR into `j5/**`, and on
+  pushes to `j5/main`, `j5/release-<version>`, and `j5/preview-<x.y.z>-<n>`.
 - `J5 Weekly Full Build` runs Mondays at 08:23 UTC and on manual dispatch. It runs the full suite,
   full build, produces the ad-hoc signed Apple Silicon DMG/ZIP, verifies the mounted app, and uploads
   the artifacts for 30 days.
