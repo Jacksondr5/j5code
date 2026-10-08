@@ -7,7 +7,6 @@ J5 Code is a tracking fork of [T3 Code](https://t3.codes). Everything T3 Code do
 - **Agent-to-agent messaging.** Agents message each other to get work done, through the same platform that manages them.
 - **Personas.** Pick the right model for the job, give it a personality, and share it with your team.
 - **Playbooks.** Keep agents on track during long-running work, and see how the work is going at a glance.
-- **Squadrons.** Groups of agents, used to organize work within and across projects.
 - **Crews.** Spawn a group of agents with a single goal and talk to its Captain.
 - **Inbox.** Agents send you messages when they need you; reply from one place.
 - **Fleet page.** See what all your agents are doing, including the stalled and stuck ones.
@@ -68,7 +67,7 @@ For understanding J5:
 
 - [J5 documentation](./docs/j5/README.md): where everything is, and a reading order
 - [Overview](./docs/j5/product/overview.md): what J5 adds to T3 Code
-- [Glossary](./docs/j5/product/glossary.md): Squadron, Crew, Captain, Exchange, and the rest
+- [Glossary](./docs/j5/product/glossary.md): Crew, Captain, Exchange, and the rest
 - [Feature definitions](./docs/j5/product/features): each feature, with acceptance criteria
 - [J5 and upstream](./docs/j5/product/upstream.md): where J5 differs from T3 Code, and why
 

@@ -65,8 +65,8 @@ changing the machine's global Xcode selection.
 EAS Update remains disabled. No J5 relay, Clerk, or push delivery service is
 configured by this distribution setup. Direct server pairing is the initial
 connection path. Mobile feature parity is tracked in J5 issue #40; remote
-Squadron/inbox routing is tracked separately in #105. A signed build is not
+inbox routing is tracked separately in #105. A signed build is not
 evidence that those feature gaps are resolved.
 
 Desktop distribution uses the existing manual `J5 Weekly Full Build` workflow
-or the [local macOS packaging procedure](../j5/macos-packaging.md).
+or the [local macOS packaging procedure](../j5/runbooks/macos-packaging.md).

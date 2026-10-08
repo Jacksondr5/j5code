@@ -37,7 +37,7 @@ Every feature definition has the same sections, in this order:
 4. **Scenarios** — concrete situations written as user stories or worked examples, each naming the criteria it exercises.
 5. **History** — one line per amendment: date, what changed, and a link to the record.
 
-Scenarios use one shared example fleet so a reader recognizes it from doc to doc, and never a real project: Squadrons **Billing Migration**, **Website Redesign**, and **L2 Support Rotation** (a non-development Squadron); repositories **the app repository** and **the infrastructure repository**; the person is simply **the user**.
+Scenarios use one shared example fleet so a reader recognizes it from doc to doc, and never a real one: projects **Billing Migration**, **Website Redesign**, and **L2 Support Rotation** (a non-development project), each rooted at its own folder; the person is simply **the user**.
 
 Core definitions (`overview.md`, `upstream.md`, `principles.md`, `problems.md`, `glossary.md`, `use-cases.md`, `fleet-vision.md`, `cross-device.md`) keep their own shapes but follow the same rule: rewritten, never appended; cited by name.
 
@@ -47,13 +47,13 @@ Core definitions (`overview.md`, `upstream.md`, `principles.md`, `problems.md`, 
 
 There are two kinds of identifier, and both carry the name of the thing they belong to, so a human can read them without a lookup table:
 
-- **An acceptance criterion, numbered within its feature** — written as the feature name plus the number: "Fleet page AC3", "Squadron AC1". It always links to the criterion. Numbers are never reused within a feature; a retired criterion keeps its number and is marked retired in History.
+- **An acceptance criterion, numbered within its feature** — written as the feature name plus the number: "Fleet page AC3", "Inbox AC1". It always links to the criterion. Numbers are never reused within a feature; a retired criterion keeps its number and is marked retired in History.
 - **A divergence, numbered within the [register of divergences](../product/upstream.md)** — written "divergence D7". A divergence carries a number, unlike principles, because each one is a standing decision that FORK.md, issues, and reviews refer to for years, often long after anyone remembers its title. Numbers are never reused; a retired divergence keeps its number and says so.
 
 Nothing else is numbered:
 
 - **Principles and lenses are cited by name** ("never guess", "the human-contact spectrum"), never by position — positions have changed and will change again.
-- **Glossary terms are cited by name**, in Title Case for named product concepts (Squadron, Crew, Captain, Role, Playbook, Memo, Exchange, Peer Agent, Subagent, Spawning Guide, Fleet page) and lowercase for descriptive words (fleet, agent, participant, inbox, ledger, dashboard).
+- **Glossary terms are cited by name**, in Title Case for named product concepts (Crew, Captain, Role, Playbook, Memo, Exchange, Peer Agent, Subagent, Spawning Guide, Fleet page) and lowercase for descriptive words (fleet, agent, participant, inbox, ledger, dashboard).
 - **Work items are GitHub issues** ("#28") and nothing else. No document assigns a letter-number to a piece of work.
 - **Milestones are GitHub milestones**, cited by name ("Crews").
 

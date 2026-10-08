@@ -5,20 +5,20 @@ kind: runbook
 
 # Machine senders
 
-How a cron job, a watchdog, or any shell script sends an agent-to-agent message into a Squadron without an agent session. The behavior is defined in [agent-to-agent communication](../product/a2a/index.md) (machine participants); this page tells an operator what to type.
+How a cron job, a watchdog, or any shell script sends an agent-to-agent message to an agent without an agent session. The behavior is defined in [agent-to-agent communication](../product/a2a/index.md) (machine participants); this page tells an operator what to type.
 
-A machine participant has a Squadron home and a server-unique name, sends plain messages only, and never receives. Everything below runs through `j5 a2a`, which talks to the server over HTTP with a bearer token.
+A machine participant belongs to one project, which never changes, has a server-unique name, sends plain messages only, and never receives. Everything below runs through `j5 a2a`, which talks to the server over HTTP with a bearer token.
 
 ## One-time setup, on the server host
 
-1. Find the Squadron id: `j5 a2a list --json | jq -r '.participants[] | select(.kind=="agent") | [.squadronId, .squadronName] | @tsv' | sort -u`, or read it from the Squadron scope in the web app. (`list` needs any token with `orchestration:read`; `j5 auth session issue --token-only` mints one.)
-2. Register the machine in that Squadron. Names are 1–64 lowercase letters, digits, or hyphens, and unique across the server; the participant id becomes `machine:<name>`.
+1. Find the project id: `j5 a2a list --json | jq -r '.participants[] | select(.kind=="agent") | [.projectId, .projectTitle] | @tsv' | sort -u`. (`list` needs any token with `orchestration:read`; `j5 auth session issue --token-only` mints one.)
+2. Register the machine in that project. Names are 1–64 lowercase letters, digits, or hyphens, and unique across the server; the participant id becomes `machine:<name>`.
 
    ```sh
-   j5 a2a participant create --squadron squadron:… --name watchdog
+   j5 a2a participant create --project <project id> --name watchdog
    ```
 
-   Run on the server host this needs no token: it mints and revokes a temporary local admin session. From elsewhere, pass `--token` with an `orchestration:operate` token. Registering the same name in the same Squadron again is a no-op.
+   Run on the server host this needs no token: it mints and revokes a temporary local admin session. From elsewhere, pass `--token` with an `orchestration:operate` token. Registering the same name in the same project again is a no-op.
 
 3. Mint the machine's token. It carries only the `a2a:send` scope and is bound to the participant by its subject, so it can send as that machine, read the roster, and answer `whoami`, and nothing else on the server accepts it.
 
@@ -44,8 +44,8 @@ j5 a2a send --to obs-sentinel --message "canary 42" --client-request-id "canary-
 
 ## Preflight and inspection
 
-- `j5 a2a whoami` proves the token: it prints the machine participant, its Squadron, and the server version. Exit 3 means the token is missing, invalid, not bound to a machine, or the machine is not registered.
-- `j5 a2a list` prints one line per participant: kind, participant id, display name, Squadron, liveness (`idle`, `active`, or `errored` with the measured run status), and reachability. `--json` adds the last run's start and end times and the last error, for scripts that gate a wake on the recipient's state.
+- `j5 a2a whoami` proves the token: it prints the machine participant, its project, and the server version. Exit 3 means the token is missing, invalid, not bound to a machine, or the machine is not registered.
+- `j5 a2a list` prints one line per participant: kind, participant id, display name, project, liveness (`idle`, `active`, or `errored` with the measured run status), and reachability. `--json` adds the last run's start and end times and the last error, for scripts that gate a wake on the recipient's state.
 
 ## Exit codes
 

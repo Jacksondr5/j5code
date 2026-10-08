@@ -1,23 +1,23 @@
 ---
-title: "Shared Squadrons"
+title: "Shared server"
 kind: definition
 ---
 
-# Shared Squadrons
+# Shared server
 
 ## Problem
 
-As agents do more of the work, the need to share them between people grows. A level-2 support team hands a Squadron from one shift to the next and wants **no context transfer**. Two developers already relay agent output to each other over chat — one asks their agent, pastes the answer to the other — and would rather stand in front of the same agent together ([problems](../problems.md): Shared Squadrons; [use cases](../use-cases.md)).
+As agents do more of the work, the need to share them between people grows. A level-2 support team hands its agents from one shift to the next and wants **no context transfer**. Two developers already relay agent output to each other over chat — one asks their agent, pastes the answer to the other — and would rather stand in front of the same agent together ([problems](../problems.md): Shared server; [use cases](../use-cases.md)).
 
 ## Definition
 
-**Shared Squadrons** is several people on one server sharing the same Squadrons and the same agents. It is one of three distinct capabilities in the multi-machine, multi-person space, and the only one where no state crosses machines and no server peers with another:
+**Shared server** is several people on one server sharing the same projects and the same agents. It is one of three distinct capabilities in the multi-machine, multi-person space, and the only one where no state crosses machines and no server peers with another:
 
-| Capability           | Shape                                                            | Defined in                         |
-| -------------------- | ---------------------------------------------------------------- | ---------------------------------- |
-| Cross-device         | one person, several servers; views merge in the client           | [cross-device](../cross-device.md) |
-| Federation           | two people's servers exchange messages through the peer registry | [cross-device](../cross-device.md) |
-| **Shared Squadrons** | **several people on one server, sharing Squadrons and agents**   | this document                      |
+| Capability        | Shape                                                            | Defined in                         |
+| ----------------- | ---------------------------------------------------------------- | ---------------------------------- |
+| Cross-device      | one person, several servers; views merge in the client           | [cross-device](../cross-device.md) |
+| Federation        | two people's servers exchange messages through the peer registry | [cross-device](../cross-device.md) |
+| **Shared server** | **several people on one server, sharing projects and agents**    | this document                      |
 
 Two constraints are in force **now**, on everything built, because retrofitting multiple people onto single-person assumptions is the expensive path this avoids:
 
@@ -36,9 +36,10 @@ Doors deliberately left open and undesigned: addressing a _duty_ rather than a p
 
 ## Scenarios
 
-- **Shift handoff.** The on-shift engineer for Support Rotation goes home; the next engineer opens the same server, sees the same Squadron, the same agents, and the same open asks in their own inbox, and continues without a handover conversation. (AC1, AC3)
+- **Shift handoff.** The on-shift engineer for Support Rotation goes home; the next engineer opens the same server, sees the same project, the same agents, and the same open asks in their own inbox, and continues without a handover conversation. (AC1, AC3)
 
 ## History
 
 - 2026-08-22 — the multi-person invariant and person ids ruled binding now; the capability defined and set apart from cross-device and federation; former R9, R29, and the cross-device position ([record](../../worklog/2026-08-21-design-review.md)).
 - 2026-09-08 — rewritten into the definition shape. Former identifiers: R9 → AC2, AC4; R29 → AC1, AC3. The architecture session this capability needs before any build — how several authenticated people attach to one server, attribution and read state in shared surfaces, what "every person" delivery means for the inbox — is that session's agenda, not this definition's.
+- 2026-10-07 — Squadrons retired: what several people share on one server is its projects and agents, and the capability is renamed from "Shared Squadrons" to "Shared server" (Jackson, 2026-10-05; [#412](https://github.com/Jacksondr5/j5code/issues/412)).

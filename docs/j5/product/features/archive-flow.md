@@ -19,11 +19,11 @@ Before the dialog appears, the platform reads the facts: the agent's open asks i
 
 Afterwards, waiters receive a platform notice that the Exchange ended, the person's inbox items from this agent leave immediately (the dialog was the loud moment), the agent leaves the active sidebar, the Fleet page and the agents' address book, it can no longer be messaged, and its ledger and conversation stay readable forever.
 
-**Unarchiving** is the way back. It restores the same agent — the same participant id, Squadron home, placement and provenance — and makes it addressable again. It does not undo what archiving ended: the Exchanges that closed stay closed, and deliveries that were cancelled are not replayed. An agent may be archived and unarchived any number of times.
+**Unarchiving** is the way back. It restores the same agent — the same participant id, placement and provenance — and makes it addressable again. It does not undo what archiving ended: the Exchanges that closed stay closed, and deliveries that were cancelled are not replayed. An agent may be archived and unarchived any number of times.
 
 **Deleting** is a different act, permanent, and only a person performs it. It removes the agent's membership and placement, offers to clean up the worktree, and leaves the agents beneath it, the historical provenance, and the ledger intact. When Memos exist, the agent's open Memos appear as a third section of the dialog.
 
-The flow is reached from the agent's thread and from its Fleet page row. Crews archive only as a unit, through their own flow; a Squadron is not archived through this flow.
+The flow is reached from the agent's thread and from its Fleet page row. Crews archive only as a unit, through their own flow.
 
 Archiving is **not** deleting, **not** a way to archive a single Crew member, and **not** a place for platform judgment.
 
@@ -54,7 +54,7 @@ Archiving is **not** deleting, **not** a way to archive a single Crew member, an
 
 ### Unarchiving and deleting
 
-12. Unarchiving restores the same participant id, Squadron home, placement and provenance and makes the agent addressable again; the Exchanges that archiving closed stay closed and no cancelled delivery is replayed.
+12. Unarchiving restores the same participant id, placement and provenance and makes the agent addressable again; the Exchanges that archiving closed stay closed and no cancelled delivery is replayed.
 13. Deleting is permanent, is performed only by a person, removes the agent's membership and placement, and leaves the agents beneath it, historical provenance and the ledger intact; it is the only flow that offers worktree cleanup.
 
 ## Scenarios
@@ -72,3 +72,4 @@ Archiving is **not** deleting, **not** a way to archive a single Crew member, an
 - 2026-09-12 — archiving becomes reversible; unarchive defined; deletion separated as the permanent act (PR #132); AC12–AC13 added.
 - 2026-09-08 — rewritten into the definition shape. Former identifiers: AR1 → AC11; AR2 → AC1; AR3 → AC2–AC5; AR4 → AC6–AC9; AR5 → AC3–AC4; J1–J3 → AC3, AC5. Build sequencing that lived here (the dialog shipping ahead of waiter notices) is history.
 - 2026-09-22 — an archive touches one agent: the dialog names the agents beneath it as ones that keep running, not as ones it archives (#254, option A; Bryant).
+- 2026-10-07 — Squadrons retired: an agent's project is upstream's and never changes, so unarchiving has no home to restore, and there is no Squadron to archive (Jackson, 2026-10-05; [#412](https://github.com/Jacksondr5/j5code/issues/412)).

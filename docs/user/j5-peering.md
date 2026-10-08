@@ -10,7 +10,7 @@ Only peer servers you trust. Peering lets the other server see this server's age
 2. In **Settings → Connections → Peer servers**, choose **Add peer** and pick the other server.
 3. J5 checks which way each server can reach the other and proposes a setup. It says, in plain lines, how messages will travel in each direction, and asks only what it couldn't work out. Confirm it, or choose **Set up differently** to pick the direction and addresses yourself. Use an https address, or one on a private network such as Tailscale.
 
-Both servers need a version of J5 that supports peering. If one doesn't, the dialog names the server to update.
+Both servers need a version of J5 that supports peering. If one doesn't, the dialog names the server to update. Update peered servers together: while one is behind, no message crosses between them, and messages already sent wait until both are up to date.
 
 If no one client can connect to both servers, run `j5 a2a peer` on each server instead; `j5 a2a peer --help` lists the steps.
 

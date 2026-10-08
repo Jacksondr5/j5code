@@ -1,6 +1,6 @@
 # J5 Code
 
-J5 Code is a fork of [T3 Code](https://github.com/pingdotgg/t3code), a minimal GUI for coding agents. T3 Code's Node WebSocket server wraps provider CLIs and agents (Codex, Claude Code, Cursor, Grok, OpenCode, Antigravity) and serves web, desktop, and mobile clients. J5 builds on that base to run a **fleet**: many agents working at once, grouped into Squadrons, coordinating with each other, and reaching the person only when they need to.
+J5 Code is a fork of [T3 Code](https://github.com/pingdotgg/t3code), a minimal GUI for coding agents. T3 Code's Node WebSocket server wraps provider CLIs and agents (Codex, Claude Code, Cursor, Grok, OpenCode, Antigravity) and serves web, desktop, and mobile clients. J5 builds on that base to run a **fleet**: many agents working at once, coordinating with each other, and reaching the person only when they need to.
 
 ## Know which zone you are in
 
@@ -56,7 +56,7 @@ Of note: Most J5 Code contributions will come from J5 Code itself, often control
 - **turn** means one user-to-agent cycle, including follow-up work such as checkpointing.
 - **J5 home** means the base data directory, `~/.j5code` (`J5CODE_HOME`). Runtime state normally lives below its `userdata` directory.
 
-J5's own product vocabulary (Squadron, Crew, Captain, Exchange, and so on) is in the [J5 glossary](docs/j5/product/glossary.md).
+J5's own product vocabulary (Crew, Captain, Exchange, and so on) is in the [J5 glossary](docs/j5/product/glossary.md).
 
 ## The four ways to hurt yourself
 
@@ -153,7 +153,7 @@ Most code changes do not need a documentation change. Agents can read the code.
 
 Clients send typed WebSocket requests. The server turns them into _commands_, a pure _decider_ turns commands into persisted _events_, and a _projector_ derives the read model the UI renders. Provider CLIs run as subprocesses; per-provider _adapters_ translate their native protocols into orchestration events. Side effects run in queue-backed _reactors_ that emit _receipts_ when milestones land. Each turn ends with a _checkpoint_, a hidden git ref, so the app can diff and restore.
 
-J5 adds its own layer on top: a Squadron ledger with its own migrations, agent-to-agent delivery, and an MCP toolkit that agents call. The [J5 overview](docs/j5/product/overview.md) maps it.
+J5 adds its own layer on top: a communication ledger for each project, with its own migrations, agent-to-agent delivery, and an MCP toolkit that agents call. The [J5 overview](docs/j5/product/overview.md) maps it.
 
 Upstream's glossary with file links: `docs/internals/glossary.md`
 
