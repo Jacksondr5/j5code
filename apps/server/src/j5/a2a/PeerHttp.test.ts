@@ -327,10 +327,13 @@ const makeHandler = (input: {
 const post = (path: string, body: unknown) =>
   new Request(`http://environment.test${path}`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...currentProtocol },
     body: JSON.stringify(body),
   });
-const get = (path: string) => new Request(`http://environment.test${path}`);
+const get = (path: string) =>
+  new Request(`http://environment.test${path}`, { headers: currentProtocol });
+// A peer request states its sender's protocol; one that states nothing is version 1.
+const currentProtocol = { "x-j5-peer-protocol": String(PEER_PROTOCOL_VERSION) };
 
 it("answers hello with this environment and the credential's subject, and completes a rotation", async () => {
   const revoked: Array<string> = [];
@@ -573,7 +576,7 @@ const delivery = {
   exchangeRole: "ask",
   envelopeChannel: "peer",
   text: "What is the incident status?",
-  originSquadronId: "project:home-support",
+  originProjectId: "project:home-support",
   intent: "incident status",
   createdAt: "2026-09-16T10:00:00.000Z",
 } as const;
@@ -617,9 +620,9 @@ it("refuses a peer on another protocol before reading its request, and states it
   };
   try {
     for (const request of [
-      withProtocol(get(J5_PEER_API_PATHS.hello), "2"),
-      withProtocol(get(J5_PEER_API_PATHS.roster), "2"),
-      withProtocol(post(J5_PEER_API_PATHS.deliver, delivery), "2"),
+      withProtocol(get(J5_PEER_API_PATHS.hello), "3"),
+      withProtocol(get(J5_PEER_API_PATHS.roster), "3"),
+      withProtocol(post(J5_PEER_API_PATHS.deliver, delivery), "3"),
     ]) {
       const refused = await handler(request);
       assert.equal(refused.status, 409);
@@ -628,16 +631,23 @@ it("refuses a peer on another protocol before reading its request, and states it
       assert.equal(body.error, "peer_protocol_mismatch");
       assert.equal(
         body.message,
-        `Peer ${home} runs peer protocol 2 and this server runs 1. Update J5 on this server, then try again.`,
+        `Peer ${home} runs peer protocol 3 and this server runs 2. Update J5 on this server, then try again.`,
       );
     }
     assert.deepStrictEqual(received, [], "a mismatched delivery is never recorded");
 
-    // A server from before versioning states nothing and counts as version 1.
-    const unversioned = await handler(post(J5_PEER_API_PATHS.deliver, delivery));
-    assert.equal(unversioned.status, 201);
+    // A server from before versioning states nothing, counts as version 1, and is told to update.
+    const silent = post(J5_PEER_API_PATHS.deliver, delivery);
+    silent.headers.delete("x-j5-peer-protocol");
+    const unversioned = await handler(silent);
+    assert.equal(unversioned.status, 409);
     assert.equal(unversioned.headers.get("x-j5-peer-protocol"), String(PEER_PROTOCOL_VERSION));
-    const matching = await handler(withProtocol(get(J5_PEER_API_PATHS.hello), "1"));
+    assert.equal(
+      ((await unversioned.json()) as { message: string }).message,
+      `Peer ${home} runs peer protocol 1 and this server runs 2. Update J5 there, then try again.`,
+    );
+    assert.deepStrictEqual(received, [], "an older peer's delivery is never recorded");
+    const matching = await handler(withProtocol(get(J5_PEER_API_PATHS.hello), "2"));
     assert.equal(matching.status, 200);
     assert.equal(matching.headers.get("x-j5-peer-protocol"), String(PEER_PROTOCOL_VERSION));
   } finally {
@@ -705,8 +715,8 @@ it("shows a recorded peer only the agents it could address, and nobody else the 
       agents: [
         {
           participantId: "agent:j5:a2a:thread:local-triage",
-          squadronId: "project:work-billing",
-          squadronName: "Billing Migration",
+          projectId: "project:work-billing",
+          projectTitle: "Billing Migration",
           threadId: "thread:local-triage",
           displayName: "Local triage",
           archived: false,
@@ -756,7 +766,11 @@ it("hands a storing peer's poll to the store, and refuses a poll from a peer thi
     });
     assert.equal(polls.length, 1);
     assert.equal(polls[0]!.environmentId, laptop, "the poller is the credential's subject");
-    assert.equal(polls[0]!.protocolVersion, 1, "a poll without the header states version 1");
+    assert.equal(
+      polls[0]!.protocolVersion,
+      PEER_PROTOCOL_VERSION,
+      "the store is told the version the poll stated",
+    );
     assert.equal(polls[0]!.request.acks.length, 1);
 
     const malformed = await laptopHandler.handler(post(J5_PEER_API_PATHS.poll, { acks: "no" }));
@@ -771,8 +785,8 @@ it("hands a storing peer's poll to the store, and refuses a poll from a peer thi
     });
     const agent = (index: number) => ({
       participantId: `agent:j5:a2a:thread:${String(index)}`,
-      squadronId: "project:laptop",
-      squadronName: "Laptop",
+      projectId: "project:laptop",
+      projectTitle: "Laptop",
       threadId: `thread:${String(index)}`,
       displayName: null,
       archived: false,
@@ -858,7 +872,7 @@ it("refuses a poll without the peer scope, from a stranger, or on another protoc
       name: "the laptop on another protocol",
       subject: `peer:${laptop}`,
       scopes: [AuthA2APeerScope],
-      protocol: "2",
+      protocol: "3",
       status: 409,
       error: "peer_protocol_mismatch",
     },

@@ -17,9 +17,8 @@ export const toPeerRoster = (entries: ReadonlyArray<A2ARosterEntry>): Array<Peer
       ? [
           {
             participantId: entry.participantId,
-            // The peer wire still names the project a Squadron.
-            squadronId: entry.projectId,
-            squadronName: entry.projectTitle,
+            projectId: entry.projectId,
+            projectTitle: entry.projectTitle,
             threadId: entry.threadId,
             displayName: entry.displayName,
             archived: entry.archived,
@@ -40,8 +39,8 @@ export const peerRosterHash = (agents: ReadonlyArray<PeerRosterAgent>): string =
         agents
           .map((agent) => [
             agent.participantId,
-            agent.squadronId,
-            agent.squadronName,
+            agent.projectId,
+            agent.projectTitle,
             agent.threadId,
             agent.displayName,
             agent.archived,

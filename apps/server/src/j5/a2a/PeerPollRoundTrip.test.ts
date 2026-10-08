@@ -294,7 +294,7 @@ const makeLaptop = (input: {
             request,
             Response.json(
               { agents: [vmRosterAgent], label: vm.label } satisfies PeerRosterResponse,
-              { headers: { "x-j5-peer-protocol": "1" } },
+              { headers: { "x-j5-peer-protocol": "2" } },
             ),
           );
         }
@@ -318,7 +318,7 @@ const makeLaptop = (input: {
           request,
           new Response(answer, {
             status: 200,
-            headers: { "content-type": "application/json", "x-j5-peer-protocol": "1" },
+            headers: { "content-type": "application/json", "x-j5-peer-protocol": "2" },
           }),
         );
       }),
@@ -374,8 +374,8 @@ const makeLaptop = (input: {
 };
 
 const vmRosterAgent: PeerRosterAgent = {
-  squadronId: vm.projectId,
-  squadronName: "Billing Migration",
+  projectId: vm.projectId,
+  projectTitle: "Billing Migration",
   participantId: vm.agent.id,
   threadId: vm.agent.threadId,
   displayName: "Billing agent",

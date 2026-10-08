@@ -535,7 +535,7 @@ it.effect(
           cause: {
             kind: "participant-archived",
             participantId: work.agent.id,
-            squadronId: work.projectId,
+            projectId: work.projectId,
           },
         });
 

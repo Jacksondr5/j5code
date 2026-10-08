@@ -4,15 +4,20 @@ import { describe, expect, it } from "vite-plus/test";
 import { peerProtocolMismatch } from "./peerProtocol.ts";
 
 describe("peerProtocolMismatch", () => {
-  it("accepts this server's version, stated or implied", () => {
-    expect(peerProtocolMismatch({ stated: undefined, peer: "Home" })).toBeNull();
+  it("accepts this server's version, as text or as a number", () => {
     expect(
       peerProtocolMismatch({ stated: String(PEER_PROTOCOL_VERSION), peer: "Home" }),
     ).toBeNull();
     expect(peerProtocolMismatch({ stated: PEER_PROTOCOL_VERSION, peer: "Home" })).toBeNull();
   });
 
-  it("names the older server to update", () => {
+  it("counts a server that states nothing as version 1, and names it as the one to update", () => {
+    expect(peerProtocolMismatch({ stated: undefined, peer: "Home" })).toBe(
+      `Home runs peer protocol 1 and this server runs ${String(PEER_PROTOCOL_VERSION)}. Update J5 there, then try again.`,
+    );
+  });
+
+  it("names this server when it is the older one", () => {
     expect(peerProtocolMismatch({ stated: String(PEER_PROTOCOL_VERSION + 1), peer: "Home" })).toBe(
       `Home runs peer protocol ${String(PEER_PROTOCOL_VERSION + 1)} and this server runs ${String(PEER_PROTOCOL_VERSION)}. Update J5 on this server, then try again.`,
     );

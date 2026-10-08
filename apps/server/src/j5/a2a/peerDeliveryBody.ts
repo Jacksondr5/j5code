@@ -55,7 +55,7 @@ export const buildPeerDeliveryBody = Effect.fn("j5.a2a.peer.deliveryBody")(funct
     exchangeRole: row.exchange_role,
     envelopeChannel: row.envelope_channel,
     text: row.message_text,
-    originSquadronId: row.origin_project_id ?? row.project_id,
+    originProjectId: row.origin_project_id ?? row.project_id,
     ...(yield* exchangeFacts(sql, row)),
     ...(senderLabel.length === 0 ? {} : { senderLabel }),
     createdAt: row.created_at,
@@ -97,22 +97,7 @@ const exchangeFacts = Effect.fn("j5.a2a.peer.deliveryBody.exchangeFacts")(functi
     `;
     if (sent[0] === undefined) return {};
     const payload = yield* decodeSentPayload(sent[0].payload);
-    const terminal = payload.terminal;
-    if (terminal === undefined) return {};
-    // The peer wire still names the project a Squadron.
-    return {
-      terminal:
-        terminal.kind === "dropped"
-          ? {
-              kind: terminal.kind,
-              cause: {
-                kind: terminal.cause.kind,
-                participantId: terminal.cause.participantId,
-                squadronId: terminal.cause.projectId,
-              },
-            }
-          : terminal,
-    };
+    return payload.terminal === undefined ? {} : { terminal: payload.terminal };
   }
   return {};
 });

@@ -38,7 +38,7 @@ describe("isPeerCredentialRejected", () => {
       isPeerCredentialRejected(
         poller(
           peerPollStoppedError(
-            "Work VM runs peer protocol 2 and this server runs 1. Update J5 on this server, then try again.",
+            "Work VM runs peer protocol 3 and this server runs 2. Update J5 on this server, then try again.",
           ),
         ),
       ),
