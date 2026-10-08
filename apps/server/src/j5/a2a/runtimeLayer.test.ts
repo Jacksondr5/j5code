@@ -1,3 +1,5 @@
+// @effect-diagnostics nodeBuiltinImport:off - the redirect test needs a real HTTP server.
+import * as NodeHttp from "node:http";
 import { DeviceService } from "../../device/DeviceService.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { EffectOutboxV2 } from "../../orchestration-v2/EffectOutbox.ts";
@@ -6,7 +8,7 @@ import { OrchestratorV2 } from "../../orchestration-v2/Orchestrator.ts";
 import { assert, it } from "@effect/vitest";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
-import { FetchHttpClient } from "effect/unstable/http";
+import { FetchHttpClient, HttpClient } from "effect/unstable/http";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -50,7 +52,7 @@ import { ThreadHomesService } from "./ThreadHomesService.ts";
 import { SpawnCompositionService } from "./SpawnCompositionService.ts";
 import { SpawnWorkspaceService, layer as spawnWorkspaceLayer } from "./spawnWorkspace.ts";
 import { PeerRegistryService } from "./PeerRegistryService.ts";
-import { makeJ5A2ARuntimeLayer } from "./runtimeLayer.ts";
+import { makeJ5A2ARuntimeLayer, peerHttpClient } from "./runtimeLayer.ts";
 
 const archiveDependencies = Layer.mergeAll(
   // spawn_agent and Crew seats prepare worktrees through upstream's launch and receipts.
@@ -288,4 +290,35 @@ it.effect("detects a fresh nested HTTP or MCP runtime as a distinct ledger insta
     assert.equal(yield* measureNestedRuntimeBuilds("http"), 2);
     assert.equal(yield* measureNestedRuntimeBuilds("mcp"), 2);
   }),
+);
+
+it.live("the peer HTTP client never follows a redirect", () =>
+  Effect.gen(function* () {
+    // A real server and the real fetch client, since following is fetch's own behavior.
+    const hits: Array<string> = [];
+    const server = NodeHttp.createServer((request, response) => {
+      hits.push(request.url ?? "");
+      if (request.url === "/api/j5/peer/poll") {
+        response.writeHead(307, { location: "/elsewhere" }).end();
+        return;
+      }
+      response.writeHead(200).end();
+    });
+    const port = yield* Effect.acquireRelease(
+      Effect.callback<number>((resume) => {
+        server.listen(0, "127.0.0.1", () => {
+          const address = server.address();
+          resume(
+            Effect.succeed(typeof address === "object" && address !== null ? address.port : 0),
+          );
+        });
+      }),
+      () => Effect.callback<void>((resume) => void server.close(() => resume(Effect.void))),
+    );
+    const response = yield* HttpClient.post(
+      `http://127.0.0.1:${String(port)}/api/j5/peer/poll`,
+    ).pipe(Effect.provide(peerHttpClient));
+    assert.equal(response.status, 307);
+    assert.deepStrictEqual(hits, ["/api/j5/peer/poll"], "the redirect is not followed");
+  }).pipe(Effect.scoped),
 );

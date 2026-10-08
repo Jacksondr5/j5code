@@ -296,3 +296,15 @@ it.effect(
       );
     }),
 );
+
+it.effect("reads a peer this server polls live, though that peer holds no session here", () =>
+  Effect.gen(function* () {
+    // This server polls the VM, so the VM never presents a credential here.
+    const polled: PeerConnection = { ...homePeer, linkMode: "poll", inboundSession: "missing" };
+    const reading = yield* Effect.flatMap(PeerDirectory, (directory) =>
+      directory.listAgents(),
+    ).pipe(Effect.provide(makeTestLayer([polled], [])));
+    assert.equal(reading.agents.length, 2);
+    assert.deepStrictEqual(reading.unreadPeers, []);
+  }),
+);

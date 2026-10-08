@@ -95,6 +95,7 @@ afterEach(() => {
 });
 
 const lastJson = () => JSON.parse(logged.at(-1) ?? "null") as Record<string, unknown>;
+const lastText = () => logged.at(-1) ?? "";
 
 const sendArgs = (origin: string, extra: ReadonlyArray<string> = ["--token", "t"]) => [
   "a2a",
@@ -415,6 +416,69 @@ it.live("issues a peer credential, adds, lists, and removes a peer through the a
         });
       }),
   ),
+);
+
+it.live(
+  "issues a store credential and adds a peer to poll, for a server that cannot be reached",
+  () =>
+    withStub(
+      (request) =>
+        request.url === "/api/j5/a2a/peers/credentials"
+          ? {
+              status: 201,
+              body: {
+                environmentId: "environment-vm",
+                credential: "laptop-will-present-this",
+                sessionId: "auth-session:peer",
+                subject: "peer:environment-laptop",
+                expiresAt: "2036-10-02T00:00:00.000Z",
+              },
+            }
+          : {
+              status: 201,
+              body: {
+                peer: { ...homePeerDecoded, label: "Work VM", linkMode: "poll" },
+                created: true,
+              },
+            },
+      (stub) =>
+        Effect.gen(function* () {
+          const common = ["--origin", stub.origin, "--token", "admin"];
+          yield* runCli([
+            "a2a",
+            "peer",
+            "credential",
+            "--for",
+            "environment-laptop",
+            "--store",
+            ...common,
+          ]);
+          assert.deepStrictEqual(stub.requests[0]!.body, {
+            environmentId: "environment-laptop",
+            store: true,
+          });
+          assert.include(lastText(), "--poll", "the next step says to poll");
+
+          yield* runCli([
+            "a2a",
+            "peer",
+            "add",
+            "--peer-origin",
+            "https://vm.example:3773",
+            "--credential",
+            "issued-by-vm",
+            "--poll",
+            ...common,
+          ]);
+          assert.equal(process.exitCode, undefined);
+          assert.deepStrictEqual(stub.requests[1]!.body, {
+            origin: "https://vm.example:3773",
+            credential: "issued-by-vm",
+            poll: true,
+          });
+          assert.include(lastText(), "This server polls it for its messages");
+        }),
+    ),
 );
 
 it.live("maps peer-add refusals: unreachable origin exits 6, a foreign credential exits 5", () =>

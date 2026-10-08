@@ -621,6 +621,12 @@ const peerCredentialCommand = Command.make("credential", {
     Flag.withDescription("Print only the credential."),
     Flag.withDefault(false),
   ),
+  store: Flag.Boolean("store").pipe(
+    Flag.withDescription(
+      "The holder cannot be reached and will poll this server, which stores its messages until it does. It is recorded as a peer when it first presents the credential.",
+    ),
+    Flag.withDefault(false),
+  ),
 }).pipe(
   Command.withDescription(
     "Issue the credential another server presents when it delivers here: subject peer:<its environment id>, scope a2a:peer only. Issuing again for the same environment revokes the earlier credential. Needs an access:write token, or runs on the server host with a temporary local admin session.",
@@ -641,6 +647,7 @@ const peerCredentialCommand = Command.make("credential", {
               body: {
                 environmentId,
                 ...(Option.isSome(flags.label) ? { label: flags.label.value } : {}),
+                ...(flags.store ? { store: true } : {}),
               },
               timeoutMs: flags.timeoutMs,
             });
@@ -654,7 +661,7 @@ const peerCredentialCommand = Command.make("credential", {
                     `Issued peer credential ${issued.sessionId} for ${issued.subject}; this server is environment ${issued.environmentId}.`,
                     `Credential: ${issued.credential}`,
                     `Expires at: ${issued.expiresAt}`,
-                    `Next, on the other server: j5 a2a peer add --peer-origin ${origin} --credential <the credential above>`,
+                    `Next, on the other server: j5 a2a peer add --peer-origin ${origin} --credential <the credential above>${flags.store ? " --poll" : ""}`,
                   ].join("\n"),
             } satisfies Outcome;
           }),
@@ -688,6 +695,12 @@ const peerAddCommand = Command.make("add", {
     ),
     Flag.withDefault(false),
   ),
+  poll: Flag.Boolean("poll").pipe(
+    Flag.withDescription(
+      "This server cannot be reached, so it polls the peer for its messages. The peer must have issued the credential with --store.",
+    ),
+    Flag.withDefault(false),
+  ),
 }).pipe(
   Command.withDescription(
     "Record a peer after proving the credential at its origin. Re-adding a known peer rotates its credential; a different origin needs --replace-origin. Needs an access:write token, or runs on the server host with a temporary local admin session.",
@@ -713,6 +726,7 @@ const peerAddCommand = Command.make("add", {
                 origin: peerOrigin,
                 credential,
                 ...(flags.replaceOrigin ? { replaceOrigin: true } : {}),
+                ...(flags.poll ? { poll: true } : {}),
               },
               timeoutMs: Math.max(flags.timeoutMs, 10_000),
             });
@@ -722,7 +736,10 @@ const peerAddCommand = Command.make("add", {
             const added = yield* decodeReply(AddPeerResponse, reply.body);
             return {
               json: { ...added },
-              text: `${added.created ? "Recorded" : "Updated"} peer ${added.peer.label} (${added.peer.environmentId}) at ${added.peer.origin}. Peering is mutual: run the matching \`peer credential\` and \`peer add\` on that server too.`,
+              text:
+                added.peer.linkMode === "poll"
+                  ? `${added.created ? "Recorded" : "Updated"} peer ${added.peer.label} (${added.peer.environmentId}) at ${added.peer.origin}. This server polls it for its messages and sends to it directly; nothing more to run on that server.`
+                  : `${added.created ? "Recorded" : "Updated"} peer ${added.peer.label} (${added.peer.environmentId}) at ${added.peer.origin}. Peering is mutual: run the matching \`peer credential\` and \`peer add\` on that server too.`,
             } satisfies Outcome;
           }),
         );
