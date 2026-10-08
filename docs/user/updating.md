@@ -36,11 +36,6 @@ refused rather than running half-upgraded:
 
 Update the side the notice names, then reconnect.
 
-Some updates change what both sides rely on. Then every server, desktop app, and mobile app has to
-be updated together, and open browser tabs reloaded. Until they are, an updated app refuses a
-server that is behind with an update notice, and an app that is behind does not show Fleet, Inbox,
-or crews for an updated server.
-
 ## Update a connected server
 
 The offered action depends on how the server runs:
