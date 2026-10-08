@@ -322,7 +322,7 @@ it.effect(
       // The body is exactly what a direct send would carry, intent included.
       assert.equal(handed.deliveries[0]!.intent, "first intent");
       assert.equal(handed.deliveries[0]!.exchangeRole, "ask");
-      assert.equal(handed.deliveries[0]!.originSquadronId, vmProject);
+      assert.equal(handed.deliveries[0]!.originProjectId, vmProject);
       const stamped = (yield* statusOf(first))!.handed_out_at;
       assert.isNotNull(stamped);
 
@@ -458,8 +458,8 @@ it.effect(
       const snapshot = [
         {
           participantId: iosBuild,
-          squadronId: laptopProject,
-          squadronName: "iOS",
+          projectId: laptopProject,
+          projectTitle: "iOS",
           threadId: ThreadId.make("thread:ios-build"),
           displayName: "iOS build",
           archived: false,

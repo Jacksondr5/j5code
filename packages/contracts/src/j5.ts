@@ -718,7 +718,7 @@ export type RemovePeerResponse = typeof RemovePeerResponse.Type;
  * optional field or a capability and never bumps it. A server from before
  * versioning omits both and counts as version 1 with no capabilities.
  */
-export const PEER_PROTOCOL_VERSION = 1;
+export const PEER_PROTOCOL_VERSION = 2;
 /** Every peer request and response states its sender's version here; a server from before versioning sends none. */
 export const PEER_PROTOCOL_HEADER = "x-j5-peer-protocol";
 export const PeerCapabilities = Schema.Struct({
@@ -758,7 +758,7 @@ export const PeerTerminalFact = Schema.Union([
     cause: Schema.Struct({
       kind: Schema.Literals(["participant-archived", "participant-deleted"]),
       participantId: Schema.String,
-      squadronId: Schema.String,
+      projectId: Schema.String,
     }),
   }),
   Schema.Struct({ kind: Schema.Literal("sender-cleared") }),
@@ -783,7 +783,7 @@ export const PeerDeliveryRequest = Schema.Struct({
   exchangeRole: Schema.Literals(["none", "ask", "followup", "reply", "terminal_notice"]),
   envelopeChannel: Schema.Literals(["peer", "silence_notice", "lifecycle_notice"]),
   text: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(A2A_MESSAGE_TEXT_MAX_CHARS)),
-  originSquadronId: Schema.String.check(Schema.isNonEmpty()),
+  originProjectId: Schema.String.check(Schema.isNonEmpty()),
   /**
    * The sender's display name (its thread title) for the receiving side's
    * people, so a timeline names a remote sender as it names a local one.
@@ -815,8 +815,8 @@ export type PeerDeliveryRequest = typeof PeerDeliveryRequest.Type;
 /** The one thing a peer may read here: the agents it could address, and nothing about people or machines. */
 export const PeerRosterAgent = Schema.Struct({
   participantId: Schema.String,
-  squadronId: Schema.String,
-  squadronName: Schema.String,
+  projectId: Schema.String,
+  projectTitle: Schema.String,
   threadId: ThreadId,
   displayName: Schema.NullOr(Schema.String),
   archived: Schema.Boolean,

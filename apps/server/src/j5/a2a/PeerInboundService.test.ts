@@ -105,7 +105,7 @@ const ask: PeerInboundInput = {
   exchangeRole: "ask",
   envelopeChannel: "peer",
   text: "What is the incident status?",
-  originSquadronId: homeProject,
+  originProjectId: homeProject,
   senderLabel: "Incident asker",
   intent: "incident status",
   createdAt: timestamp,
@@ -534,7 +534,7 @@ it.effect(
             cause: {
               kind: "participant-archived",
               participantId: remoteAsker,
-              squadronId: homeProject,
+              projectId: homeProject,
             },
           },
         });
@@ -619,7 +619,7 @@ it.effect("lets a peer speak only for agents it owns, and end only Exchanges it 
           cause: {
             kind: "participant-archived",
             participantId: "agent:j5:a2a:thread:somebody-else",
-            squadronId: homeProject,
+            projectId: homeProject,
           },
         },
       });

@@ -1,5 +1,9 @@
 import { ThreadId } from "@t3tools/contracts";
-import { J5_PEER_API_PATHS, type PeerRosterResponse } from "@t3tools/contracts/j5";
+import {
+  J5_PEER_API_PATHS,
+  PEER_PROTOCOL_VERSION,
+  type PeerRosterResponse,
+} from "@t3tools/contracts/j5";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -47,8 +51,8 @@ const homeRoster: PeerRosterResponse = {
   agents: [
     {
       participantId: "agent:j5:a2a:thread:support-triage",
-      squadronId: "project:home-support",
-      squadronName: "L2 Support Rotation",
+      projectId: "project:home-support",
+      projectTitle: "L2 Support Rotation",
       displayName: "Support triage",
       threadId: ThreadId.make("thread:support-triage"),
       archived: false,
@@ -56,8 +60,8 @@ const homeRoster: PeerRosterResponse = {
     },
     {
       participantId: "agent:j5:a2a:thread:retired",
-      squadronId: "project:home-support",
-      squadronName: "L2 Support Rotation",
+      projectId: "project:home-support",
+      projectTitle: "L2 Support Rotation",
       displayName: "Retired",
       threadId: ThreadId.make("thread:retired"),
       archived: true,
@@ -69,8 +73,8 @@ const homeRoster: PeerRosterResponse = {
 const makeTestLayer = (
   peers: ReadonlyArray<PeerConnection>,
   seen: Array<{ url: string; authorization: string | undefined; protocol?: string | undefined }>,
-  /** The protocol header the roster answers state, if any. */
-  answeredProtocol?: string,
+  /** The protocol header the roster answers state. */
+  answeredProtocol: string = String(PEER_PROTOCOL_VERSION),
   /** The name the roster answer reports for its server, and where recorded names go. */
   naming?: { readonly answered: string; readonly recorded: Array<[string, string | undefined]> },
 ) => {
@@ -98,9 +102,7 @@ const makeTestLayer = (
               status: 200,
               headers: {
                 "content-type": "application/json",
-                ...(answeredProtocol === undefined
-                  ? {}
-                  : { "x-j5-peer-protocol": answeredProtocol }),
+                "x-j5-peer-protocol": answeredProtocol,
               },
             },
           ),
@@ -207,21 +209,21 @@ it.effect("reads no agents from a peer whose roster answer states another protoc
     const seen: Array<{ url: string; authorization: string | undefined; protocol?: string }> = [];
     const reading = yield* Effect.flatMap(PeerDirectory, (directory) =>
       directory.listAgents(),
-    ).pipe(Effect.provide(makeTestLayer([homePeer], seen, "2")));
+    ).pipe(Effect.provide(makeTestLayer([homePeer], seen, "3")));
     assert.deepStrictEqual(reading.agents, [], "a roster read on another protocol is not trusted");
     assert.deepStrictEqual(reading.unreadPeers, [
       {
         environmentId: homePeer.environmentId,
         label: "Home",
         reason:
-          "Home runs peer protocol 2 and this server runs 1. Update J5 on this server, then try again.",
+          "Home runs peer protocol 3 and this server runs 2. Update J5 on this server, then try again.",
       },
     ]);
-    assert.equal(seen[0]!.protocol, "1", "the read states this server's protocol");
+    assert.equal(seen[0]!.protocol, "2", "the read states this server's protocol");
 
     const matching = yield* Effect.flatMap(PeerDirectory, (directory) =>
       directory.listAgents(),
-    ).pipe(Effect.provide(makeTestLayer([homePeer], [], "1")));
+    ).pipe(Effect.provide(makeTestLayer([homePeer], [], "2")));
     assert.equal(matching.agents.length, 2, "a peer that states the same version is read");
   }),
 );
@@ -249,9 +251,9 @@ it.effect(
     Effect.gen(function* () {
       const lastErrors: Array<string | null> = [];
       const answers: Array<{ readonly status: number; readonly protocol: string }> = [
+        { status: 200, protocol: "3" },
+        { status: 500, protocol: "2" },
         { status: 200, protocol: "2" },
-        { status: 500, protocol: "1" },
-        { status: 200, protocol: "1" },
       ];
       const http = Layer.succeed(
         HttpClient.HttpClient,
@@ -283,7 +285,7 @@ it.effect(
         const directory = yield* PeerDirectory;
         yield* directory.listAgents();
         assert.equal(lastErrors.length, 1);
-        assert.include(lastErrors[0] ?? "", "runs peer protocol 2");
+        assert.include(lastErrors[0] ?? "", "runs peer protocol 3");
         // The same version answers, but with an error: the request failed, so the mismatch stands.
         const failed = yield* directory.listAgents();
         assert.equal(failed.unreadPeers.length, 1);

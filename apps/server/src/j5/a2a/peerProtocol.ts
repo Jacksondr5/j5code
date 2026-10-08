@@ -36,8 +36,9 @@ export const peerProtocolMismatch = (input: {
     return `${input.peer} sent an unreadable peer protocol version. Update J5 on ${input.peer}, then try again.`;
   }
   if (version === PEER_PROTOCOL_VERSION) return null;
-  const older = version < PEER_PROTOCOL_VERSION ? input.peer : "this server";
-  return `${input.peer} runs peer protocol ${String(version)} and this server runs ${String(PEER_PROTOCOL_VERSION)}. Update J5 on ${older}, then try again.`;
+  // The other server is named at the start of the sentence only: some callers name it with a phrase.
+  const where = version < PEER_PROTOCOL_VERSION ? "there" : "on this server";
+  return `${input.peer} runs peer protocol ${String(version)} and this server runs ${String(PEER_PROTOCOL_VERSION)}. Update J5 ${where}, then try again.`;
 };
 
 /** The version a peer request or response states in its header. */

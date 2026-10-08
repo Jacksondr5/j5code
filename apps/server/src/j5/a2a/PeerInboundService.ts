@@ -355,7 +355,7 @@ export const layer: Layer.Layer<PeerInboundService, never, A2ALedger | SqlClient
           const exchangeId = input.exchangeId === null ? null : ExchangeId.make(input.exchangeId);
           const correlationId = CorrelationId.make(input.correlationId);
           const messageId = localMessageIdFor(input);
-          const originProjectId = LedgerProjectId.make(input.originSquadronId);
+          const originProjectId = LedgerProjectId.make(input.originProjectId);
           // This ledger's clock stamps what happened here; the origin's time is kept for display.
           const receivedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
           const events: Array<CommEvent> = [];
@@ -497,7 +497,7 @@ export const layer: Layer.Layer<PeerInboundService, never, A2ALedger | SqlClient
                   cause: {
                     kind: input.terminal.cause.kind,
                     participantId: otherParty,
-                    projectId: LedgerProjectId.make(input.terminal.cause.squadronId),
+                    projectId: LedgerProjectId.make(input.terminal.cause.projectId),
                   },
                   facts: {
                     replyRequired: false,

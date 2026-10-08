@@ -334,7 +334,11 @@ const makeTransportLayer = (
           request,
           new Response(encodeJson(reply.body), {
             status: reply.status,
-            headers: { "content-type": "application/json", ...reply.headers },
+            headers: {
+              "content-type": "application/json",
+              "x-j5-peer-protocol": String(PEER_PROTOCOL_VERSION),
+              ...reply.headers,
+            },
           }),
         );
       }),
@@ -412,7 +416,7 @@ it.effect(
         assert.equal(body.exchangeId, sent.exchangeId);
         assert.equal(body.exchangeRole, "ask");
         assert.equal(body.intent, "incident status");
-        assert.equal(body.originSquadronId, localProject);
+        assert.equal(body.originProjectId, localProject);
         assert.equal(body.senderLabel, "Billing agent");
         assert.match(body.correlationId, /^correlation:j5:a2a:/);
       }).pipe(
@@ -448,7 +452,7 @@ it.effect(
               // A newer peer that misread the body still answers 201; its stated version gives it away.
               status: 201,
               body: { accepted: true, receivedSeq: 3, replay: false },
-              headers: { "x-j5-peer-protocol": "2" },
+              headers: { "x-j5-peer-protocol": "3" },
             },
             posted,
             lastErrors,
@@ -458,14 +462,62 @@ it.effect(
       assert.deepStrictEqual(
         lastErrors,
         [
-          "Home runs peer protocol 2 and this server runs 1. Update J5 on this server, then try again.",
+          "Home runs peer protocol 3 and this server runs 2. Update J5 on this server, then try again.",
         ],
         "the peer's row shows the mismatch until a later delivery succeeds",
       );
       assert.notEqual(outcome.state, "delivered");
       assert.include(
         outcome.lastError,
-        "Home runs peer protocol 2 and this server runs 1. Update J5 on this server",
+        "Home runs peer protocol 3 and this server runs 2. Update J5 on this server",
+      );
+    }),
+);
+
+it.effect(
+  "keeps a message for an older peer queued, and names that peer as the one to update",
+  () =>
+    Effect.gen(function* () {
+      const posted: Array<PostedRequest> = [];
+      const lastErrors: Array<string | null> = [];
+      const outcome = yield* Effect.gen(function* () {
+        const { deliver } = yield* crossingAsk();
+        const milestone = yield* deliver;
+        const sql = yield* SqlClient.SqlClient;
+        const rows = yield* sql<{ readonly status: string; readonly last_error: string | null }>`
+          SELECT status, last_error FROM j5_a2a_delivery
+        `;
+        const exchanges = yield* sql<{ readonly status: string }>`
+          SELECT status FROM j5_a2a_exchange
+        `;
+        return { milestone: milestone?.state, rows, exchanges };
+      }).pipe(
+        Effect.provide(
+          makeTransportLayer(
+            {
+              // What a server on protocol 1 answers: its own refusal of this server's version.
+              status: 409,
+              body: { error: "peer_protocol_mismatch", message: "Update J5." },
+              headers: { "x-j5-peer-protocol": "1" },
+            },
+            posted,
+            lastErrors,
+          ),
+        ),
+      );
+      const reason =
+        "Home runs peer protocol 1 and this server runs 2. Update J5 there, then try again.";
+      assert.deepStrictEqual(lastErrors, [reason], "the peer's row says which server to update");
+      assert.equal(outcome.milestone, "retry_scheduled", "the refusal is not final: it is retried");
+      assert.deepStrictEqual(
+        outcome.rows.map((row) => row.status),
+        ["retry_scheduled"],
+      );
+      assert.include(outcome.rows[0]?.last_error ?? "", reason);
+      assert.deepStrictEqual(
+        outcome.exchanges,
+        [{ status: "open" }],
+        "the ask's Exchange stays open",
       );
     }),
 );
@@ -743,15 +795,7 @@ it.effect(
         const body = posted.at(-1)!.body as PeerDeliveryRequest;
         assert.equal(body.messageId, noticeMessageId);
         assert.equal(body.exchangeRole, "terminal_notice");
-        // The stored cause names the project; the peer wire still calls it a Squadron.
-        assert.deepStrictEqual(body.terminal, {
-          kind: "dropped",
-          cause: {
-            kind: cause.kind,
-            participantId: cause.participantId,
-            squadronId: cause.projectId,
-          },
-        });
+        assert.deepStrictEqual(body.terminal, { kind: "dropped", cause });
         assert.isUndefined(body.intent);
       }).pipe(
         Effect.provide(
@@ -825,7 +869,7 @@ it.effect("keeps a protocol mismatch on the peer's record until a delivery to it
       const { deliver } = yield* crossingAsk();
       yield* deliver;
       assert.equal(lastErrors.length, 1);
-      assert.include(lastErrors[0] ?? "", "runs peer protocol 2");
+      assert.include(lastErrors[0] ?? "", "runs peer protocol 3");
       // The retry reaches a server on the same version that fails anyway: the mismatch stands.
       yield* TestClock.adjust("1 minute");
       yield* deliver;
@@ -837,7 +881,7 @@ it.effect("keeps a protocol mismatch on the peer's record until a delivery to it
       Effect.provide(
         makeTransportLayer(
           [
-            { status: 201, body: {}, headers: { "x-j5-peer-protocol": "2" } },
+            { status: 201, body: {}, headers: { "x-j5-peer-protocol": "3" } },
             { status: 500, body: { error: "internal" } },
             { status: 201, body: { accepted: true, receivedSeq: 3, replay: false } },
           ],

@@ -307,7 +307,7 @@ it.effect(
         intent: "schema status",
         envelopeChannel: "peer",
         text: "Is the billing schema migrated?",
-        originSquadronId: laptopProject,
+        originProjectId: laptopProject,
         createdAt: timestamp,
         originEnvironmentId: laptop,
       });
@@ -544,7 +544,7 @@ it.effect("starts empty when the pair is peered again, in every mode", () =>
           intent: "schema status",
           envelopeChannel: "peer",
           text: "Is the billing schema migrated?",
-          originSquadronId: laptopProject,
+          originProjectId: laptopProject,
           createdAt: timestamp,
           originEnvironmentId: laptop,
         });
@@ -688,7 +688,7 @@ it.effect("delivers removal's notices at once, with nothing else to wake the wor
         intent: "schema status",
         envelopeChannel: "peer",
         text: "Is the billing schema migrated?",
-        originSquadronId: laptopProject,
+        originProjectId: laptopProject,
         createdAt: timestamp,
         originEnvironmentId: laptop,
       });

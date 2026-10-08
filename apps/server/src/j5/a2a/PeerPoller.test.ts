@@ -6,6 +6,7 @@ import {
   type A2ARosterEntry,
   type PeerDeliveryRequest,
   type PeerPollResponse,
+  PEER_PROTOCOL_VERSION,
 } from "@t3tools/contracts/j5";
 import { assert, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
@@ -127,7 +128,7 @@ const delivery = (
   exchangeRole: "none",
   envelopeChannel: "peer",
   text: `${name} text`,
-  originSquadronId: "project:vm-billing",
+  originProjectId: "project:vm-billing",
   createdAt: "2026-10-02T12:00:00.000Z",
 });
 
@@ -212,7 +213,7 @@ const respond = (
           status: answer.status,
           headers: {
             "content-type": "application/json",
-            ...(answer.protocol === undefined ? {} : { "x-j5-peer-protocol": answer.protocol }),
+            "x-j5-peer-protocol": answer.protocol ?? String(PEER_PROTOCOL_VERSION),
           },
         }),
       );
@@ -231,7 +232,13 @@ const respond = (
       });
       return HttpClientResponse.fromWeb(
         request,
-        new Response(body, { status: 200, headers: { "content-type": "application/json" } }),
+        new Response(body, {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+            "x-j5-peer-protocol": String(PEER_PROTOCOL_VERSION),
+          },
+        }),
       );
     }
     if ("answer" in answer) {
@@ -258,7 +265,7 @@ const respond = (
         status: answer.status,
         headers: {
           "content-type": "application/json",
-          ...(answer.protocol === undefined ? {} : { "x-j5-peer-protocol": answer.protocol }),
+          "x-j5-peer-protocol": answer.protocol ?? String(PEER_PROTOCOL_VERSION),
         },
       }),
     );
@@ -468,13 +475,23 @@ it.effect("stops on a rejected credential, sets a protocol mismatch aside, and s
       assert.include(harness.lastErrors.at(-1) ?? "", "rejected this server's credential");
       assert.include(harness.lastErrors.at(-1) ?? "", "Peer again");
 
-      harness.answers.push({ ...pollAnswer(), protocol: "2" } as Answer);
+      harness.answers.push({ ...pollAnswer(), protocol: "3" } as Answer);
       const mismatched = yield* pollOnce;
       assert.equal(mismatched.kind, "mismatched");
       assert.equal(
         harness.lastErrors.at(-1),
         peerPollStoppedError(
-          "Work VM runs peer protocol 2 and this server runs 1. Update J5 on this server, then try again.",
+          "Work VM runs peer protocol 3 and this server runs 2. Update J5 on this server, then try again.",
+        ),
+      );
+
+      // A storing server from before the wire named projects is the one to update.
+      harness.answers.push({ ...pollAnswer(), protocol: "1" } as Answer);
+      assert.equal((yield* pollOnce).kind, "mismatched");
+      assert.equal(
+        harness.lastErrors.at(-1),
+        peerPollStoppedError(
+          "Work VM runs peer protocol 1 and this server runs 2. Update J5 there, then try again.",
         ),
       );
       assert.isEmpty(harness.polls, "neither is a heartbeat");
@@ -587,9 +604,9 @@ it.effect("reads a mismatch or a rejected credential even when the answer is not
   Effect.gen(function* () {
     const harness = yield* makeHarness;
     yield* Effect.gen(function* () {
-      harness.answers.push({ status: 502, body: null, raw: "<html>proxy</html>", protocol: "2" });
+      harness.answers.push({ status: 502, body: null, raw: "<html>proxy</html>", protocol: "3" });
       assert.equal((yield* pollOnce).kind, "mismatched", "the version is read before the body");
-      assert.include(harness.lastErrors.at(-1) ?? "", "runs peer protocol 2");
+      assert.include(harness.lastErrors.at(-1) ?? "", "runs peer protocol 3");
       harness.answers.push({ status: 401, body: null, raw: "Unauthorized" });
       const rejected = yield* pollOnce;
       assert.equal(rejected.kind, "stopped");
@@ -743,7 +760,7 @@ it.effect("backs off while a delivery keeps failing to be recorded here", () =>
 it.effect("retries a protocol mismatch once a minute, and polls normally once it is fixed", () =>
   Effect.gen(function* () {
     const harness = yield* makeHarness;
-    const mismatch = { ...pollAnswer(), protocol: "2" } as Answer;
+    const mismatch = { ...pollAnswer(), protocol: "3" } as Answer;
     harness.answers.push(mismatch, mismatch, pollAnswer());
     yield* Effect.gen(function* () {
       yield* PeerPoller;
@@ -751,7 +768,7 @@ it.effect("retries a protocol mismatch once a minute, and polls normally once it
       yield* TestClock.adjust("1 minute");
       yield* Queue.take(harness.sent);
       assert.equal(yield* Queue.size(harness.heartbeats), 0, "a mismatch is no heartbeat");
-      assert.include(harness.lastErrors.at(-1) ?? "", "runs peer protocol 2");
+      assert.include(harness.lastErrors.at(-1) ?? "", "runs peer protocol 3");
       // Work VM is updated: the next retry is answered and clears the error with its heartbeat.
       yield* TestClock.adjust("1 minute");
       yield* Queue.take(harness.sent);
@@ -809,7 +826,7 @@ it.effect(
       yield* Effect.gen(function* () {
         // The headers decide; a stalled body is given only two seconds to word the reason.
         const answers: ReadonlyArray<readonly [string, Answer, PeerPollOutcome["kind"]]> = [
-          ["a protocol mismatch", { status: 200, stalledBody: true, protocol: "2" }, "mismatched"],
+          ["a protocol mismatch", { status: 200, stalledBody: true, protocol: "3" }, "mismatched"],
           ["HTTP 401", { status: 401, stalledBody: true }, "stopped"],
           ["HTTP 403", { status: 403, stalledBody: true }, "stopped"],
           ["HTTP 409", { status: 409, stalledBody: true }, "stopped"],
@@ -821,7 +838,7 @@ it.effect(
           yield* TestClock.adjust("2 seconds");
           assert.equal((yield* Fiber.join(fiber)).kind, kind, name);
         }
-        assert.include(harness.lastErrors[0] ?? "", "runs peer protocol 2");
+        assert.include(harness.lastErrors[0] ?? "", "runs peer protocol 3");
         assert.include(harness.lastErrors.at(-1) ?? "", "answered the poll with HTTP 502");
         // Every stop reads as stopped wherever peers are shown; the retried 502 does not.
         assert.deepStrictEqual(

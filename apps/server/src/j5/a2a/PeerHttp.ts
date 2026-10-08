@@ -441,7 +441,7 @@ export const peerHttpRouteLayer = Layer.unwrap(
         const decoded = yield* Effect.result(decodeDeliveryRequest(body.success));
         if (Result.isFailure(decoded)) {
           return requestFailure(
-            "messageId, senderId, receiverId, exchangeId, correlationId, exchangeRole, envelopeChannel, text, originSquadronId, and createdAt are required.",
+            "messageId, senderId, receiverId, exchangeId, correlationId, exchangeRole, envelopeChannel, text, originProjectId, and createdAt are required.",
           );
         }
         const received = yield* Effect.result(
