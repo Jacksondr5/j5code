@@ -50,7 +50,7 @@ it("renders the versioned peer envelope with exact reply semantics", () => {
     message: "Please verify the worker.",
   });
 
-  assert.equal(A2A_ENVELOPE_VERSION, 20);
+  assert.equal(A2A_ENVELOPE_VERSION, 21);
   assert.include(rendered, "Cross-agent message");
   assert.notMatch(rendered, /\b(?:J5|A2A)\b/);
   assert.include(rendered, "agent:sender");
@@ -59,6 +59,28 @@ it("renders the versioned peer envelope with exact reply semantics", () => {
   assert.include(rendered, 'send_message(to="agent:sender", exchange_id="exchange:one"');
   assert.include(rendered, "Reply once");
   assert.notInclude(rendered, "{{");
+});
+
+it("names a remote sender's server in its sender line and leaves a local one unchanged", () => {
+  const sender = {
+    senderId: ParticipantId.make("agent:sender"),
+    originSquadronId: SquadronId.make("squadron:origin"),
+    message: "Build the iOS target.",
+  };
+  const remote = formatPeerEnvelope({ ...sender, exchangeId: null, senderServerName: "Work VM" });
+  const local = formatPeerEnvelope({ ...sender, exchangeId: null });
+  const closed = formatClosedPeerEnvelope({ ...sender, senderServerName: "Work VM" });
+
+  assert.include(
+    remote,
+    "[Cross-agent message from agent:sender in squadron squadron:origin, on Work VM]",
+  );
+  assert.include(
+    closed,
+    "[Cross-agent message from agent:sender in squadron squadron:origin, on Work VM]",
+  );
+  assert.include(local, "[Cross-agent message from agent:sender in squadron squadron:origin]");
+  for (const rendered of [remote, local, closed]) assert.notInclude(rendered, "{{");
 });
 
 it.effect("keeps the send_message runtime description byte-equal to its documented contract", () =>
@@ -144,10 +166,11 @@ it("keeps the tool descriptions on their documented contracts", () => {
   assert.include(A2A_CLEAR_OWN_ASK_TOOL_DESCRIPTION, "client_request_id");
   assert.equal(
     A2A_LIST_TOOL_DESCRIPTION,
-    "Your address book: the participants around you — agents and the human — with the display name to recognize them by, the participant_id to address them with, the squadron_id and squadron_name that place them, and what each accepts (messages, exchanges, urgency). When you're told to message someone by name or role, resolve them here first. Your own row is marked self=true and its squadron_name is the Squadron you belong to; it cannot receive messages or open exchanges from you — use schedule_task if you need a future trigger for yourself. Native threads that never received a Squadron home do not appear here and cannot be messaged. Archived agents are hidden by default; set include_archived=true to see them with archived=true. They cannot receive messages or open Exchanges. The roster changes — after you spawn, archive, unarchive, or delete an agent, call this again instead of reusing a stale listing.",
+    "Your address book: the participants around you — agents and the human — with the display name to recognize them by, the participant_id to address them with, the squadron_id and squadron_name that place them, and what each accepts (messages, exchanges, urgency). Once this server is peered with others, each row also carries `server`: the name of the server the participant lives on, and whether it is this one (`local`), so you can choose a participant by the machine it runs on. When you're told to message someone by name or role, resolve them here first. Your own row is marked self=true and its squadron_name is the Squadron you belong to; it cannot receive messages or open exchanges from you — use schedule_task if you need a future trigger for yourself. Native threads that never received a Squadron home do not appear here and cannot be messaged. Archived agents are hidden by default; set include_archived=true to see them with archived=true. They cannot receive messages or open Exchanges. The roster changes — after you spawn, archive, unarchive, or delete an agent, call this again instead of reusing a stale listing.",
   );
   for (const clause of [
     "Your own row is marked self=true",
+    "each row also carries `server`",
     "use schedule_task if you need a future trigger for yourself",
     "Native threads that never received a Squadron home do not appear here and cannot be messaged.",
     "Archived agents are hidden by default; set include_archived=true to see them with archived=true. They cannot receive messages or open Exchanges. The roster changes — after you spawn, archive, unarchive, or delete an agent, call this again instead of reusing a stale listing.",

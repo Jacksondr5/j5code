@@ -964,6 +964,29 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
         } satisfies SendMessageResult;
       });
 
+      /**
+       * A receiver on a peer server is named by where it lives; the recorded row
+       * says which, on a replay too. The send is already committed, so a name
+       * this server cannot read never turns it into a failure.
+       */
+      const withReceiverServer = (result: SendMessageResult) =>
+        Effect.gen(function* () {
+          const rows = yield* sql<{ readonly receiver_environment_id: string | null }>`
+            SELECT receiver_environment_id FROM j5_a2a_delivery
+            WHERE message_id = ${result.messageId}
+            LIMIT 1
+          `;
+          const environmentId = rows[0]?.receiver_environment_id ?? null;
+          if (environmentId === null) return result;
+          const receiverServer = yield* peers
+            .serverName(environmentId)
+            .pipe(Effect.orElseSucceed(() => environmentId));
+          return { ...result, receiverServer };
+        }).pipe(
+          Effect.orElseSucceed(() => result),
+          Effect.withSpan("j5.a2a.send.withReceiverServer"),
+        );
+
       const send: A2ASendServiceShape["send"] = (input) =>
         Effect.gen(function* () {
           const committed: Array<StoredCommEvent> = [];
@@ -985,7 +1008,7 @@ export const layer: Layer.Layer<A2ASendService, never, A2ASendServiceLayerDepend
             ),
           );
           yield* writer.publishCommitted(committed);
-          return result;
+          return yield* withReceiverServer(result);
         });
 
       const sendAsMachine: A2ASendServiceShape["sendAsMachine"] = (input) =>

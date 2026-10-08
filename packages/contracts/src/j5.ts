@@ -688,6 +688,7 @@ export type PeerOrigin = typeof PeerOrigin.Type;
 
 export const PeerRecord = Schema.Struct({
   environmentId: Schema.String,
+  /** The peer server's own name, as it last reported it; its environment id until it reports one. */
   label: Schema.String,
   origin: Schema.String,
   /** When the credential the peer issued to this server expires, as the peer reported it at hello. */
@@ -703,6 +704,11 @@ export type PeerListResponse = typeof PeerListResponse.Type;
 /** Mint a credential the named environment will present when it delivers to this server. */
 export const IssuePeerCredentialRequest = Schema.Struct({
   environmentId: Schema.String.check(Schema.isNonEmpty()),
+  /**
+   * Names the issued session in Settings → Connections only. The client fills
+   * it from the holder's own descriptor label; the peer record's name always
+   * comes from what the peer reports at hello.
+   */
   label: Schema.optional(Schema.String),
 });
 export type IssuePeerCredentialRequest = typeof IssuePeerCredentialRequest.Type;
@@ -720,7 +726,6 @@ export type IssuePeerCredentialResponse = typeof IssuePeerCredentialResponse.Typ
 export const AddPeerRequest = Schema.Struct({
   origin: PeerOrigin,
   credential: Schema.String.check(Schema.isNonEmpty()),
-  label: Schema.optional(Schema.String),
   /** A known peer keeps its recorded origin unless the caller says to move it. */
   replaceOrigin: Schema.optional(Schema.Boolean),
 });
@@ -760,6 +765,8 @@ export const PeerHelloResponse = Schema.Struct({
   /** When the credential used for this hello expires; null when the session never expires. */
   credentialExpiresAt: Schema.optional(Schema.NullOr(Schema.String)),
   server: Schema.Struct({ version: Schema.String }),
+  /** The answering server's own name, the label its environment descriptor publishes. */
+  label: Schema.optional(Schema.String),
   peerProtocolVersion: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
   capabilities: Schema.optional(PeerCapabilities),
 });
@@ -847,7 +854,11 @@ export const PeerRosterAgent = Schema.Struct({
   canReceiveMessage: Schema.Boolean,
 });
 export type PeerRosterAgent = typeof PeerRosterAgent.Type;
-export const PeerRosterResponse = Schema.Struct({ agents: Schema.Array(PeerRosterAgent) });
+export const PeerRosterResponse = Schema.Struct({
+  agents: Schema.Array(PeerRosterAgent),
+  /** The answering server's own name, so a peer that reads the roster keeps its name current. */
+  label: Schema.optional(Schema.String),
+});
 export type PeerRosterResponse = typeof PeerRosterResponse.Type;
 export const PeerDeliveryResponse = Schema.Struct({
   accepted: Schema.Literal(true),

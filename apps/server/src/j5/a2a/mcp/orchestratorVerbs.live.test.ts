@@ -32,6 +32,7 @@ import * as HostPowerMonitor from "../../../background/HostPowerMonitor.ts";
 import * as CheckpointStore from "../../../checkpointing/CheckpointStore.ts";
 import { ServerConfig } from "../../../config.ts";
 import { EnvironmentAuth } from "../../../auth/EnvironmentAuth.ts";
+import { ServerEnvironment } from "../../../environment/ServerEnvironment.ts";
 import * as ServerSecretStore from "../../../auth/ServerSecretStore.ts";
 import { layer as mcpSessionRegistryTestLayer } from "../../../mcp/McpSessionRegistry.testkit.ts";
 import { McpInvocationContext } from "../../../mcp/McpInvocationContext.ts";
@@ -160,6 +161,11 @@ const j5Layer = J5A2ARuntimeLayer.pipe(
   Layer.provide(secretStoreLayer),
   // The peer registry checks which peer sessions are live; this test has no peers.
   Layer.provide(Layer.mock(EnvironmentAuth)({ listSessions: () => Effect.succeed([]) })),
+  Layer.provide(
+    Layer.mock(ServerEnvironment)({
+      getEnvironmentId: Effect.succeed(EnvironmentId.make("environment:j5:luna-verb-e2e")),
+    }),
+  ),
 );
 const handlersLayer = J5ToolkitHandlersLive.pipe(
   Layer.provideMerge(j5Layer),

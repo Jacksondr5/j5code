@@ -134,7 +134,7 @@ peer_one_way() { # <issuer state> <issuer origin> <issuer label> <holder id> <ho
   credential=$(j5 a2a peer credential --base-dir "$1" --origin "$2" --for "$4" --label "$7" --credential-only \
     2>"$errors") \
     || { echo "== $3 could not issue a peer credential for $7 ==" >&2; tag "${C_PEER}[peer]${C_OFF}" "" < "$errors"; return 1; }
-  j5 a2a peer add --base-dir "$5" --origin "$6" --peer-origin "$2" --credential "$credential" --label "$3" \
+  j5 a2a peer add --base-dir "$5" --origin "$6" --peer-origin "$2" --credential "$credential" \
     2>&1 | tag "${C_PEER}[peer]${C_OFF}" "" \
     || { echo "== $7 could not record $3 at $2 ==" >&2; return 1; }
 }
