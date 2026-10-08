@@ -69,4 +69,4 @@ inbox routing is tracked separately in #105. A signed build is not
 evidence that those feature gaps are resolved.
 
 Desktop distribution uses the existing manual `J5 Weekly Full Build` workflow
-or the [local macOS packaging procedure](../j5/macos-packaging.md).
+or the [local macOS packaging procedure](../j5/runbooks/macos-packaging.md).

@@ -144,7 +144,7 @@ Use `action: "unarchive"` to restore the same identity. Old Exchanges remain clo
 | Input               | Type       | Required                                        |
 | ------------------- | ---------- | ----------------------------------------------- |
 | `exchange_id`       | ExchangeId | yes — an Exchange the caller opened, still open |
-| `client_request_id` | string     | no                                              |
+| `client_request_id` | string     | yes                                             |
 
 **Result:** the closed Exchange's state — id, closure kind `sender-cleared`, closed-at.
 

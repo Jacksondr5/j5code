@@ -17,7 +17,7 @@ A person's attention splits across three surfaces, each with one job:
 - The **inbox** holds what needs the person: open asks, and nothing else ([inbox](inbox.md)).
 - The **Fleet page** holds the health of everything else: every agent, with facts the platform measured, whether or not anyone is talking to it.
 
-**The sidebar** is upstream's sidebar, with its project grouping and its mechanics for snoozing, settling and pinning untouched. Each row names the agent's project as upstream shows it, with the title and a status label. Nothing is hidden from the sidebar by how an agent came to exist; a person who asks one agent to spawn most of the agents they talk with still finds them there. Which agents a person is expected not to talk to is a question for [Crews](crews.md), not for a filter.
+**The sidebar** is upstream's sidebar, with its project grouping and its mechanics for snoozing, settling and pinning untouched. Each row names the agent's project as upstream shows it, with the title and a status label. An agent that another agent spawned sits in the expander under its spawner, and at the top level only when pinned. No agent leaves the sidebar because of how it came to exist; a person who asks one agent to spawn most of the agents they talk with still finds them there, under that agent. Which agents a person is expected not to talk to is a question for [Crews](crews.md), not for a filter.
 
 **The Fleet page** is a full-width page in the main view, reached from an entry at the foot of the rail that carries a badge, and from the command palette. It shows **every project of every connected environment on one page**, in three sections that answer three different questions. The sidebar stays as it was; the page does not replace it.
 
@@ -54,7 +54,7 @@ The Fleet page is **not** the inbox: it never demands a reply. It is **not** a p
 
 1. Retired (see History).
 2. A sidebar row shows the agent's project and a relative time on its first line, the title on its second, and the status label with the provider icon on its third; worktree and branch live in the hover tooltip, which also carries a measured status line.
-3. No agent thread is hidden from the sidebar on account of how it was created; snooze, settle and pin behave as upstream defines them.
+3. No agent thread leaves the sidebar on account of how it was created: an agent-spawned agent appears in the expander under its spawner, and at the top level when pinned. Snooze, settle and pin behave as upstream defines them.
 
 ### Entering the page
 
