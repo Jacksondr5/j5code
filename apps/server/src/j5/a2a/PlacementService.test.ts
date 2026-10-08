@@ -72,9 +72,7 @@ const prepare = (participants: ReadonlyArray<Participant>) =>
   Effect.gen(function* () {
     yield* runJ5A2AMigrations();
     const ledger = yield* A2ALedger;
-    yield* ledger.createSquadron({
-      squadron: { id: squadronId, name: "Placement tests", createdAt: timestamp },
-    });
+    yield* ledger.ensureProject({ projectId: squadronId, createdAt: timestamp });
     for (const [index, participant] of participants.entries()) {
       yield* joinParticipant(index + 1, participant);
     }
@@ -206,7 +204,7 @@ it.effect(
       yield* sql`
         UPDATE j5_a2a_participant_placement
         SET placement_parent_id = ${group.id}
-        WHERE squadron_id = ${squadronId} AND participant_id = ${source.id}
+        WHERE project_id = ${squadronId} AND participant_id = ${source.id}
       `;
       const nestedForkResult = yield* record({
         index: 4,
@@ -222,7 +220,7 @@ it.effect(
       yield* sql`
         UPDATE j5_a2a_participant_placement
         SET placement_parent_id = NULL
-        WHERE squadron_id = ${squadronId} AND participant_id = ${source.id}
+        WHERE project_id = ${squadronId} AND participant_id = ${source.id}
       `;
       assert.equal(
         (yield* placements.readPlacement({ squadronId, participantId: nestedFork.id }))
@@ -445,7 +443,7 @@ it.effect("refuses both retained human id shapes as j5_spawn provenance parents"
       yield* sql`
         INSERT INTO j5_a2a_comm_event (
           seq,
-          squadron_id,
+          project_id,
           kind,
           sender,
           receiver,
@@ -508,7 +506,7 @@ it.effect("detects corrupt stored cycles in creation and subtree traversal", () 
         WHEN ${first.id} THEN ${second.id}
         WHEN ${second.id} THEN ${first.id}
       END
-      WHERE squadron_id = ${squadronId} AND participant_id IN (${first.id}, ${second.id})
+      WHERE project_id = ${squadronId} AND participant_id IN (${first.id}, ${second.id})
     `;
     const placements = yield* ParticipantPlacementService;
 
@@ -591,7 +589,7 @@ it.effect("walks the mutable placement subtree leaves-first rather than followin
         WHEN ${movedToFirst.id} THEN ${firstRoot.id}
         ELSE placement_parent_id
       END
-      WHERE squadron_id = ${squadronId}
+      WHERE project_id = ${squadronId}
         AND participant_id IN (${movedToSecond.id}, ${movedToFirst.id})
     `;
 

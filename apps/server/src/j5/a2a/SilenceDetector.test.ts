@@ -237,9 +237,7 @@ const seed = Effect.fn("test.j5.a2a.silence.seed")(function* () {
     INSERT INTO j5_a2a_human_person (person_id, is_local_operator, created_at)
     VALUES (${person.id}, 1, ${iso(0)})
   `;
-  yield* ledger.createSquadron({
-    squadron: { id: squadronId, name: "Silence detector", createdAt: iso(0) },
-  });
+  yield* ledger.ensureProject({ projectId: squadronId, createdAt: iso(0) });
   yield* join(waiter, "waiter");
   yield* join(subject, "subject");
   yield* join(peer, "peer");
@@ -354,8 +352,8 @@ const silenceAppendCommand = (
         payload: {
           messageId: LedgerMessageId.make(`message:silence:serialization:${suffix}`),
           text: "Serialization seam silence notice",
-          originSquadronId: squadronId,
-          receiverSquadronId: squadronId,
+          originProjectId: squadronId,
+          receiverProjectId: squadronId,
           exchangeRole: "none" as const,
           envelopeChannel: "silence_notice" as const,
         },
@@ -384,7 +382,7 @@ const dropExchange = Effect.fn("test.j5.a2a.silence.dropExchange")(function* (
         cause: {
           kind: "participant-archived",
           participantId: subject.id,
-          squadronId,
+          projectId: squadronId,
         },
         facts: {
           replyRequired: false,
@@ -978,7 +976,7 @@ it.effect("emits awaiting-human with human-knows when the inbox row exists", () 
     const sql = yield* SqlClient.SqlClient;
     yield* sql`
       INSERT INTO j5_a2a_human_inbox_data (
-        origin_squadron_id, message_id, exchange_id, sender_id, receiver_id, payload, created_at
+        origin_project_id, message_id, exchange_id, sender_id, receiver_id, payload, created_at
       ) VALUES (
         ${squadronId}, ${outbound.messageId}, ${outbound.exchangeId}, ${subject.id},
         ${person.id}, 'Human request', ${iso(1)}
@@ -1056,12 +1054,8 @@ it.effect(
       yield* runJ5A2AMigrations();
       const ledger = yield* A2ALedger;
       const subjectSquadronId = SquadronId.make("squadron:silence-test:subject");
-      yield* ledger.createSquadron({
-        squadron: { id: squadronId, name: "Silence waiter", createdAt: iso(0) },
-      });
-      yield* ledger.createSquadron({
-        squadron: { id: subjectSquadronId, name: "Silence subject", createdAt: iso(0) },
-      });
+      yield* ledger.ensureProject({ projectId: squadronId, createdAt: iso(0) });
+      yield* ledger.ensureProject({ projectId: subjectSquadronId, createdAt: iso(0) });
       yield* join(waiter, "waiter");
       yield* ledger.append({
         commandId: CommCommandId.make("command:silence:join:cross-subject"),
@@ -1149,13 +1143,13 @@ it.effect("addresses a silence notice to a waiter on a peer server through the p
           exchangeId,
           correlationId,
           payload: {
-            originSquadronId: SquadronId.make("squadron:home-support"),
+            originProjectId: SquadronId.make("squadron:home-support"),
             originEnvironmentId: "environment-home",
             message: {
               messageId,
               text: "What is the incident status?",
-              originSquadronId: "squadron:home-support",
-              receiverSquadronId: squadronId,
+              originProjectId: "squadron:home-support",
+              receiverProjectId: squadronId,
               exchangeRole: "ask",
               envelopeChannel: "peer",
             },
@@ -1182,7 +1176,7 @@ it.effect("addresses a silence notice to a waiter on a peer server through the p
     assert.equal(sent[0]!.receiver, remoteAsker);
     const payload = yield* decodeMessageSentPayload(sent[0]!.payload);
     assert.equal(payload.receiverEnvironmentId, "environment-home");
-    assert.equal(payload.receiverSquadronId, "squadron:home-support");
+    assert.equal(payload.receiverProjectId, "squadron:home-support");
     const row = yield* sql<{ readonly receiver_environment_id: string | null }>`
       SELECT receiver_environment_id FROM j5_a2a_delivery WHERE message_id = ${payload.messageId}
     `;

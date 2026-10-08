@@ -105,7 +105,7 @@ it("returns the pre-archive facts without turning a failed read into a clean arc
     assert.deepStrictEqual(await success.json(), {
       state: "registered",
       threadId,
-      squadronId: "squadron:pre-archive-http",
+      projectId: "squadron:pre-archive-http",
       participantId: "agent:pre-archive-http",
       retired: false,
       archived: false,

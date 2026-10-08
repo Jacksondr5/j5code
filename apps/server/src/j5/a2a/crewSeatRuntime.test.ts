@@ -83,9 +83,7 @@ const captainThreadId = "thread:j5:a2a:captain";
 const recordCrew = (id: string, seatThread: string) =>
   Effect.gen(function* () {
     const squadronId = SquadronId.make(`squadron:${id}`);
-    yield* (yield* A2ALedger).createSquadron({
-      squadron: { id: squadronId, name: id, createdAt },
-    });
+    yield* (yield* A2ALedger).ensureProject({ projectId: squadronId, createdAt });
     return yield* (yield* AgentCrewInstanceService).record({
       id,
       squadronId,

@@ -55,7 +55,7 @@ import {
   openInboxSourcesAtom,
   refreshJ5Sources,
 } from "../state";
-import { useSquadronProjects } from "../useSquadronProjects";
+import { useLogicalProjects } from "../logicalProjects";
 import { createVisibleRefreshHook } from "../useVisibleRefresh";
 import { notifyHumanInboxChanged } from "./humanInboxRefresh";
 
@@ -66,7 +66,7 @@ interface HumanInboxAnswerAttempt {
 
 type HumanInboxAnswers = Readonly<Record<string, string>>;
 type SenderLabels = ReadonlyMap<EnvironmentId, ReadonlyMap<string, string>>;
-/** The project an item's Squadron references, by display name. */
+/** An item's project, by display name. */
 type ProjectNameOf = (item: HumanInboxItem) => string;
 
 const noLabels: ReadonlyMap<string, string> = new Map();
@@ -390,13 +390,12 @@ export function HumanInboxPage() {
       connected: item.connected,
     })),
   );
-  // The ledger still keys an item by Squadron; the person sees the project it references. The
-  // Squadron name the read carries stands in until the project resolves.
-  const projects = useSquadronProjects();
+  // The title the read carries stands in until the client's own project resolves.
+  const projectOf = useLogicalProjects();
   const projectNameOf = useCallback(
     (item: HumanInboxItem) =>
-      projects.ofSquadron(item.environmentId, item.squadronId)?.displayName ?? item.squadronName,
-    [projects],
+      projectOf(item.environmentId, item.projectId)?.displayName ?? item.projectTitle,
+    [projectOf],
   );
   const [answers, setAnswers] = useState<HumanInboxAnswers>({});
   const [pendingExchangeId, setPendingExchangeId] = useState<string | null>(null);

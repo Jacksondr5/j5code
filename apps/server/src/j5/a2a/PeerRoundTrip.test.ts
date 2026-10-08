@@ -246,12 +246,10 @@ const runEnded = (thread: ThreadId, status: "completed" | "failed"): Orchestrati
   } as OrchestrationV2StoredEvent;
 };
 
-const seed = Effect.fn("test.j5.a2a.peer.roundtrip.seed")(function* (self: Server, name: string) {
+const seed = Effect.fn("test.j5.a2a.peer.roundtrip.seed")(function* (self: Server) {
   yield* runJ5A2AMigrations();
   const ledger = yield* A2ALedger;
-  yield* ledger.createSquadron({
-    squadron: { id: self.squadronId, name, createdAt: timestamp },
-  });
+  yield* ledger.ensureProject({ projectId: self.squadronId, createdAt: timestamp });
   yield* ledger.append({
     commandId: CommCommandId.make(`command:roundtrip:join:${self.agent.id}`),
     squadronId: self.squadronId,
@@ -291,8 +289,8 @@ const pairWithOpenAsk = Effect.fn("test.j5.a2a.peer.roundtrip.pairWithOpenAsk")(
   const homeContext = yield* Layer.build(
     makeServer(home, work, "Work", workDoor, homeDelivered, crossed),
   );
-  const workServer = yield* seed(work, "Billing Migration").pipe(Effect.provide(workContext));
-  const homeServer = yield* seed(home, "L2 Support Rotation").pipe(Effect.provide(homeContext));
+  const workServer = yield* seed(work).pipe(Effect.provide(workContext));
+  const homeServer = yield* seed(home).pipe(Effect.provide(homeContext));
   yield* Ref.set(workDoor, workServer.inbound);
   yield* Ref.set(homeDoor, homeServer.inbound);
   const asked = yield* workServer.send.send({
@@ -341,10 +339,8 @@ it.effect(
         const homeContext = yield* Layer.build(
           makeServer(home, work, "Work", workDoor, homeDelivered, homeCrossed),
         );
-        const workServer = yield* seed(work, "Billing Migration").pipe(Effect.provide(workContext));
-        const homeServer = yield* seed(home, "L2 Support Rotation").pipe(
-          Effect.provide(homeContext),
-        );
+        const workServer = yield* seed(work).pipe(Effect.provide(workContext));
+        const homeServer = yield* seed(home).pipe(Effect.provide(homeContext));
         yield* Ref.set(workDoor, workServer.inbound);
         yield* Ref.set(homeDoor, homeServer.inbound);
         // Home's record of Work carries the name Work reported for itself at hello.
@@ -367,10 +363,10 @@ it.effect(
         assert.equal(asked.receiverServer, "Home", "the send names where the receiver lives");
         const askRow = yield* workServer.sql<{
           readonly receiver_environment_id: string | null;
-          readonly receiver_squadron_id: string;
-        }>`SELECT receiver_environment_id, receiver_squadron_id FROM j5_a2a_delivery WHERE message_id = ${asked.messageId}`;
+          readonly receiver_project_id: string;
+        }>`SELECT receiver_environment_id, receiver_project_id FROM j5_a2a_delivery WHERE message_id = ${asked.messageId}`;
         assert.deepStrictEqual(askRow, [
-          { receiver_environment_id: home.environmentId, receiver_squadron_id: home.squadronId },
+          { receiver_environment_id: home.environmentId, receiver_project_id: home.squadronId },
         ]);
 
         // Work's worker crosses; Home records its own row and delivers locally.
@@ -392,9 +388,9 @@ it.effect(
         const homeInjected = yield* Ref.get(homeDelivered);
         assert.equal(homeInjected.length, 1);
         assert.equal(
-          homeInjected[0]!.originSquadronId,
+          homeInjected[0]!.originProjectId,
           work.squadronId,
-          "the envelope names Work's Squadron",
+          "the envelope names Work's project",
         );
         assert.equal(homeInjected[0]!.senderId, work.agent.id);
         assert.equal(homeInjected[0]!.senderServerName, "Work VM", "and the server it came from");
@@ -441,7 +437,7 @@ it.effect(
         const context = yield* Layer.build(
           makeServer(work, home, "Home", noDoor, delivered, crossed),
         );
-        const server = yield* seed(work, "Billing Migration").pipe(Effect.provide(context));
+        const server = yield* seed(work).pipe(Effect.provide(context));
         const sent = yield* server.send.send({
           commandId: CommCommandId.make("command:roundtrip:dark"),
           senderThreadId: work.agent.threadId,

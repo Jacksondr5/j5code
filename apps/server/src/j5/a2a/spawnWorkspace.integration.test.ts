@@ -6,7 +6,6 @@ import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
-import type { SquadronThreadCreationInput } from "./SquadronThreadCreationService.ts";
 import { formatRunFailureField, runFailureDetail } from "./runFailures.ts";
 import { spawnMessageId, spawnThreadId } from "./spawnIds.ts";
 import {
@@ -93,13 +92,7 @@ const firstRunReaches = (id: ThreadId, statuses: ReadonlySet<string>) =>
   });
 
 it.effect("holds a worktree spawn's brief as preparing until ThreadLaunch releases it", () => {
-  const registrations: Array<SquadronThreadCreationInput> = [];
-  const harness = makeHarness({
-    registerAtDurableLaunch: (input) => {
-      registrations.push(input);
-      return Effect.succeed({ squadronId: squadronId as never, participantId: "agent:x" as never });
-    },
-  });
+  const harness = makeHarness();
   return Effect.gen(function* () {
     yield* startWorktreeSpawn;
     const projection = yield* firstRunReaches(threadId, new Set(["starting"]));
@@ -112,11 +105,6 @@ it.effect("holds a worktree spawn's brief as preparing until ThreadLaunch releas
     assert.equal(harness.createWorktree.mock.calls[0]?.[0]?.baseRefName, "main");
     // Once its worktree is bound, the peer takes ordinary messages again.
     yield* ordinaryMessage("bound", threadId, { createdBy: "user", creationSource: "web" });
-    // The launch registers into the spawn's Squadron, where the spawn's home already is.
-    assert.deepStrictEqual(
-      registrations.map((registration) => [registration.squadronId, registration.threadId]),
-      [[squadronId, threadId]],
-    );
   }).pipe(Effect.provide(spawnLayer(harness)));
 });
 

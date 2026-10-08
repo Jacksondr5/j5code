@@ -18,7 +18,7 @@ const item = (requestId: string, threadId = seatThread): CrewRuntimeRequestItem 
   requestId: RuntimeRequestId.make(requestId),
   crewInstanceId: "crew:1",
   crewName: "Release Crew",
-  squadronId: "squadron:1",
+  projectId: "project:1",
   seat: "builder",
   threadTitle: "builder",
   createdAt: "2026-09-24T12:00:00.000Z",

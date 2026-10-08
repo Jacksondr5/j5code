@@ -4,29 +4,52 @@ import { listSpawnedChildren } from "@t3tools/client-runtime/j5/http";
 import { createScopedThreadReadStore } from "@t3tools/client-runtime/j5/scopedThreadReadStore";
 import type { EnvironmentId, ScopedThreadRef, ThreadId } from "@t3tools/contracts";
 import type { SpawnedChild, SpawnedChildrenEntry } from "@t3tools/contracts/j5";
-import { useSyncExternalStore } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 
 import { runtime } from "../../lib/runtime";
 
 export type { SpawnedChild, SpawnedChildrenEntry } from "@t3tools/contracts/j5";
 
+/** What the read says about one visible row: the agents placed under it, and how it came to be. */
+export interface SpawnedChildrenRow {
+  readonly children: ReadonlyArray<SpawnedChild>;
+  /** An agent spawned this thread, so it shows under its spawner (register D22). */
+  readonly spawnedByAgent: boolean;
+}
+type RowEntry = SpawnedChildrenRow & { readonly threadId: ThreadId };
+
+/** One entry per requested row the read has something to say about. */
+export const spawnedChildrenRows = (response: {
+  readonly entries: ReadonlyArray<SpawnedChildrenEntry>;
+  readonly spawnedByAgent: ReadonlyArray<ThreadId>;
+}): ReadonlyArray<RowEntry> => {
+  const children = new Map(response.entries.map((entry) => [entry.threadId, entry.children]));
+  const spawned = new Set(response.spawnedByAgent);
+  return [...new Set([...children.keys(), ...spawned])].map((threadId) => ({
+    threadId,
+    children: children.get(threadId) ?? [],
+    spawnedByAgent: spawned.has(threadId),
+  }));
+};
+
 /** The visible rows are the whole truth for their children; parents that lost all children lose their entry. */
 export const replaceSpawnedChildren = (
-  previous: ReadonlyMap<string, ReadonlyArray<SpawnedChild>>,
+  previous: ReadonlyMap<string, SpawnedChildrenRow>,
   environmentId: EnvironmentId,
   requested: ReadonlyArray<ThreadId>,
-  entries: ReadonlyArray<SpawnedChildrenEntry>,
+  entries: ReadonlyArray<RowEntry>,
 ) => {
   const next = new Map(previous);
   for (const threadId of requested)
     next.delete(scopedThreadKey(scopeThreadRef(environmentId, threadId)));
-  for (const entry of entries)
-    next.set(scopedThreadKey(scopeThreadRef(environmentId, entry.threadId)), entry.children);
+  for (const { threadId, ...row } of entries)
+    next.set(scopedThreadKey(scopeThreadRef(environmentId, threadId)), row);
   return next;
 };
 
-const store = createScopedThreadReadStore<ReadonlyArray<SpawnedChild>, SpawnedChildrenEntry>({
-  load: (prepared, threadIds) => runtime.runPromise(listSpawnedChildren(prepared, threadIds)),
+const store = createScopedThreadReadStore<SpawnedChildrenRow, RowEntry>({
+  load: (prepared, threadIds) =>
+    runtime.runPromise(listSpawnedChildren(prepared, threadIds)).then(spawnedChildrenRows),
   replace: replaceSpawnedChildren,
 });
 
@@ -51,5 +74,14 @@ const EMPTY: ReadonlyArray<SpawnedChild> = [];
 
 export function useSpawnedChildren(ref: ScopedThreadRef): ReadonlyArray<SpawnedChild> {
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
-  return snapshot.get(scopedThreadKey(ref)) ?? EMPTY;
+  return snapshot.get(scopedThreadKey(ref))?.children ?? EMPTY;
+}
+
+/** The scoped keys of the rows an agent spawned, for the sidebar's membership rule. */
+export function useAgentSpawnedThreadKeys(): ReadonlySet<string> {
+  const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
+  return useMemo(
+    () => new Set([...snapshot].flatMap(([key, row]) => (row.spawnedByAgent ? [key] : []))),
+    [snapshot],
+  );
 }

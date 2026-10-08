@@ -63,9 +63,7 @@ const seedSquadronAndSpawner = Effect.fn("test.j5.spawn.seedSquadronAndSpawner")
 ) {
   const ledgerService = yield* A2ALedger;
   const spawnerId = participantIdForThread(spawnerThreadId);
-  yield* ledgerService.createSquadron({
-    squadron: { id: squadronId, name: "Spawn composition", createdAt },
-  });
+  yield* ledgerService.ensureProject({ projectId: squadronId, createdAt });
   yield* ledgerService.append({
     commandId: CommCommandId.make(`command:seed:${spawnerId}`),
     squadronId,
@@ -206,7 +204,7 @@ it.effect("rolls home registration back when placement fails afterward", () =>
         (SELECT COUNT(*) FROM j5_a2a_comm_event
           WHERE kind = 'participant.joined'
             AND json_extract(payload, '$.participant.threadId') = ${childThreadId}) AS events,
-        (SELECT COUNT(*) FROM j5_a2a_squadron_membership
+        (SELECT COUNT(*) FROM j5_a2a_membership
           WHERE participant_id = ${childId}) AS memberships,
         (SELECT COUNT(*) FROM j5_a2a_participant_placement
           WHERE participant_id = ${childId}) AS placements

@@ -65,12 +65,12 @@ const decodeSentPayload = Schema.decodeUnknownEffect(Schema.fromJsonString(Messa
 const encodeDeliveryBody = Schema.encodeSync(Schema.fromJsonString(PeerDeliveryRequest));
 
 interface DeliveryRow {
-  readonly squadron_id: string;
+  readonly project_id: string;
   readonly message_id: string;
   readonly sent_seq: number;
   readonly sender_id: string;
   readonly receiver_id: string;
-  readonly receiver_squadron_id: string;
+  readonly receiver_project_id: string;
   readonly exchange_id: string | null;
   readonly exchange_role: "none" | "ask" | "followup" | "reply" | "terminal_notice";
   readonly envelope_channel: "peer" | "silence_notice" | "lifecycle_notice";
@@ -79,8 +79,8 @@ interface DeliveryRow {
   readonly status: "pending" | "retry_scheduled" | "delivered" | "alarmed";
   readonly attempts: number;
   readonly created_at: string;
-  /** Set when the row came in from a peer server; NULL means the origin is `squadron_id` here. */
-  readonly origin_squadron_id: string | null;
+  /** Set when the row came in from a peer server; NULL means the origin is `project_id` here. */
+  readonly origin_project_id: string | null;
   readonly origin_environment_id: string | null;
   /** Set when the receiver is homed on a peer server, which writes its own received row. */
   readonly receiver_environment_id: string | null;
@@ -247,9 +247,9 @@ const makeLayer = (daemon: boolean) =>
       const appendReceiverEntry = Effect.fn("j5.a2a.delivery.appendReceiverEntry")(function* (
         row: DeliveryRow,
       ) {
-        if (row.squadron_id === row.receiver_squadron_id) return;
-        const originSquadronId = SquadronId.make(row.squadron_id);
-        const receiverSquadronId = SquadronId.make(row.receiver_squadron_id);
+        if (row.project_id === row.receiver_project_id) return;
+        const originProjectId = SquadronId.make(row.project_id);
+        const receiverProjectId = SquadronId.make(row.receiver_project_id);
         const exchangeId = row.exchange_id === null ? null : ExchangeId.make(row.exchange_id);
         const receivedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
         // A reply's Exchange was closed in this ledger when the reply was accepted.
@@ -261,12 +261,12 @@ const makeLayer = (daemon: boolean) =>
             exchangeId,
             correlationId: CorrelationId.make(row.correlation_id),
             payload: {
-              originSquadronId,
+              originProjectId,
               message: {
                 messageId: row.message_id,
                 text: row.message_text,
-                originSquadronId,
-                receiverSquadronId,
+                originProjectId,
+                receiverProjectId,
                 exchangeRole: row.exchange_role,
                 envelopeChannel: row.envelope_channel,
               },
@@ -276,7 +276,7 @@ const makeLayer = (daemon: boolean) =>
         ];
         yield* ledger.appendEvents({
           commandId: commandId("receive", LedgerMessageId.make(row.message_id)),
-          squadronId: receiverSquadronId,
+          squadronId: receiverProjectId,
           acceptedAt: receivedAt,
           events,
         });
@@ -288,9 +288,9 @@ const makeLayer = (daemon: boolean) =>
       ) {
         // The ledger that owns the row records the outcome; the envelope names
         // the origin, which differs only for rows received from a peer server.
-        const ledgerSquadronId = SquadronId.make(row.squadron_id);
-        const originSquadronId = SquadronId.make(row.origin_squadron_id ?? row.squadron_id);
-        const receiverSquadronId = SquadronId.make(row.receiver_squadron_id);
+        const ledgerSquadronId = SquadronId.make(row.project_id);
+        const originProjectId = SquadronId.make(row.origin_project_id ?? row.project_id);
+        const receiverProjectId = SquadronId.make(row.receiver_project_id);
         const messageId = LedgerMessageId.make(row.message_id);
         const senderId = ParticipantId.make(row.sender_id);
         const receiverId = ParticipantId.make(row.receiver_id);
@@ -308,8 +308,8 @@ const makeLayer = (daemon: boolean) =>
         } else if (isHumanParticipantId(receiverId)) {
           yield* appendReceiverEntry(row);
           yield* transport.deliverHuman({
-            originSquadronId,
-            receiverSquadronId,
+            originProjectId,
+            receiverProjectId,
             messageId,
             senderId,
             receiverId,
@@ -325,7 +325,7 @@ const makeLayer = (daemon: boolean) =>
           // indexed row avoids a second projection and a schema migration.
           const sent = yield* sql<{ readonly kind: string; readonly payload: string }>`
             SELECT kind, payload FROM j5_a2a_comm_event
-            WHERE squadron_id = ${row.squadron_id} AND seq = ${row.sent_seq}
+            WHERE project_id = ${row.project_id} AND seq = ${row.sent_seq}
           `;
           const payload =
             sent[0]?.kind === "message.sent"
@@ -350,8 +350,8 @@ const makeLayer = (daemon: boolean) =>
                   `)[0]?.label,
                 ) ?? row.origin_environment_id);
           yield* transport.deliverAgent({
-            originSquadronId,
-            receiverSquadronId,
+            originProjectId,
+            receiverProjectId,
             messageId,
             senderId,
             receiverId,
@@ -372,7 +372,7 @@ const makeLayer = (daemon: boolean) =>
         row: DeliveryRow,
         attempt: number,
       ) {
-        const ledgerSquadronId = SquadronId.make(row.squadron_id);
+        const ledgerSquadronId = SquadronId.make(row.project_id);
         const messageId = LedgerMessageId.make(row.message_id);
         const senderId = ParticipantId.make(row.sender_id);
         const receiverId = ParticipantId.make(row.receiver_id);
@@ -450,7 +450,7 @@ const makeLayer = (daemon: boolean) =>
                 refusal === undefined ? [] : yield* refusalNotices(row, refusal, failedAt);
               return yield* writer.appendEventsInTransaction({
                 commandId: commandId("failed", messageId, attempt),
-                squadronId: SquadronId.make(row.squadron_id),
+                squadronId: SquadronId.make(row.project_id),
                 acceptedAt: failedAt,
                 events: [
                   {
@@ -480,7 +480,7 @@ const makeLayer = (daemon: boolean) =>
         if (outcome === null) return yield* cancelDelivery(row, attempt);
         if (outcome.committed) yield* writer.publishCommitted(outcome.events);
         return {
-          squadronId: SquadronId.make(row.squadron_id),
+          squadronId: SquadronId.make(row.project_id),
           messageId,
           state: alarmed ? ("alarmed" as const) : ("retry_scheduled" as const),
           attempt,
@@ -507,8 +507,8 @@ const makeLayer = (daemon: boolean) =>
         const reason = peerRefusalReason({ serverName, ...refusal });
         if (row.exchange_role === "ask" && row.exchange_id !== null) {
           const exchange = (yield* sql<DroppedExchange>`
-            SELECT squadron_id, exchange_id, sender_id, receiver_id FROM j5_a2a_exchange
-            WHERE squadron_id = ${row.squadron_id} AND exchange_id = ${row.exchange_id}
+            SELECT project_id, exchange_id, sender_id, receiver_id FROM j5_a2a_exchange
+            WHERE project_id = ${row.project_id} AND exchange_id = ${row.exchange_id}
               AND status = 'open'
           `)[0];
           if (exchange !== undefined) {
@@ -518,9 +518,9 @@ const makeLayer = (daemon: boolean) =>
               cause: {
                 kind: "delivery-refused",
                 participantId: ParticipantId.make(row.receiver_id),
-                squadronId: SquadronId.make(row.receiver_squadron_id),
+                projectId: SquadronId.make(row.receiver_project_id),
               },
-              localSquadronId: row.squadron_id,
+              localSquadronId: row.project_id,
               noticeText: formatNotDeliveredNotice({
                 receiverId: row.receiver_id,
                 serverName,
@@ -541,7 +541,7 @@ const makeLayer = (daemon: boolean) =>
         accepted = false,
       ) {
         const state = yield* sql<{ readonly status: string }>`SELECT status FROM j5_a2a_delivery
-          WHERE squadron_id = ${row.squadron_id} AND message_id = ${row.message_id}`;
+          WHERE project_id = ${row.project_id} AND message_id = ${row.message_id}`;
         if (state[0]?.status === "cancelled") return true;
         if (state[0]?.status === "delivered") return false;
         if (accepted) return false;
@@ -560,7 +560,7 @@ const makeLayer = (daemon: boolean) =>
             continue;
           }
           const membership =
-            yield* sql`SELECT 1 FROM j5_a2a_squadron_membership WHERE participant_id = ${id} AND archived_at IS NULL`;
+            yield* sql`SELECT 1 FROM j5_a2a_membership WHERE participant_id = ${id} AND archived_at IS NULL`;
           if (membership.length !== 1) return true;
         }
         return false;
@@ -571,10 +571,10 @@ const makeLayer = (daemon: boolean) =>
       ) {
         const current = yield* sql<{
           readonly status: string;
-        }>`SELECT status FROM j5_a2a_delivery WHERE squadron_id = ${row.squadron_id} AND message_id = ${row.message_id}`;
+        }>`SELECT status FROM j5_a2a_delivery WHERE project_id = ${row.project_id} AND message_id = ${row.message_id}`;
         if (current[0]?.status === "cancelled" || current[0]?.status === "delivered") {
           return {
-            squadronId: SquadronId.make(row.squadron_id),
+            squadronId: SquadronId.make(row.project_id),
             messageId: LedgerMessageId.make(row.message_id),
             state: current[0].status,
             attempt,
@@ -591,7 +591,7 @@ const makeLayer = (daemon: boolean) =>
         const now = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
         yield* ledger.append({
           commandId: commandId(state, LedgerMessageId.make(row.message_id)),
-          squadronId: SquadronId.make(row.squadron_id),
+          squadronId: SquadronId.make(row.project_id),
           acceptedAt: now,
           event: {
             kind: state === "cancelled" ? "message.cancelled" : "message.delivered",
@@ -611,7 +611,7 @@ const makeLayer = (daemon: boolean) =>
           },
         });
         return {
-          squadronId: SquadronId.make(row.squadron_id),
+          squadronId: SquadronId.make(row.project_id),
           messageId: LedgerMessageId.make(row.message_id),
           state,
           attempt,
@@ -622,12 +622,12 @@ const makeLayer = (daemon: boolean) =>
         const now = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
         const rows = yield* sql<DeliveryRow>`
           SELECT
-            squadron_id,
+            project_id,
             message_id,
             sent_seq,
             sender_id,
             receiver_id,
-            receiver_squadron_id,
+            receiver_project_id,
             exchange_id,
             exchange_role,
             envelope_channel,
@@ -636,14 +636,14 @@ const makeLayer = (daemon: boolean) =>
             status,
             attempts,
             created_at,
-            origin_squadron_id,
+            origin_project_id,
             origin_environment_id,
             receiver_environment_id
           FROM j5_a2a_delivery
           WHERE status IN ('pending', 'retry_scheduled')
             AND (next_attempt_at IS NULL OR next_attempt_at <= ${now})
             AND ${notStoredForPollingPeer}
-          ORDER BY sent_seq, squadron_id, message_id
+          ORDER BY sent_seq, project_id, message_id
           LIMIT 1
         `;
         const row = rows[0];
@@ -777,7 +777,7 @@ const makeLayer = (daemon: boolean) =>
                   readonly status: string;
                   readonly handed_out_at: string | null;
                 }>`SELECT status, handed_out_at FROM j5_a2a_delivery
-                  WHERE squadron_id = ${row.squadron_id} AND message_id = ${row.message_id}`)[0];
+                  WHERE project_id = ${row.project_id} AND message_id = ${row.message_id}`)[0];
                 if (
                   current === undefined ||
                   !["pending", "retry_scheduled", "alarmed"].includes(current.status)
@@ -788,13 +788,11 @@ const makeLayer = (daemon: boolean) =>
                 // on an Exchange this removal dropped, is told by the drop.
                 const alreadyTold =
                   (yield* sql`SELECT 1 FROM j5_a2a_delivery
-                    WHERE squadron_id = ${row.squadron_id}
+                    WHERE project_id = ${row.project_id}
                       AND message_id = ${notDeliveredNoticeMessageId(row)}`).length > 0;
                 const dropped =
                   row.exchange_id !== null &&
-                  removal.droppedExchanges.has(
-                    droppedExchangeKey(row.squadron_id, row.exchange_id),
-                  );
+                  removal.droppedExchanges.has(droppedExchangeKey(row.project_id, row.exchange_id));
                 const tell =
                   row.exchange_role !== "ask" &&
                   !dropped &&
@@ -802,9 +800,9 @@ const makeLayer = (daemon: boolean) =>
                   !alreadyTold;
                 return yield* writer.appendEventsInTransaction({
                   commandId: CommCommandId.make(
-                    `command:j5:a2a:peer-removed:cancel:${encodeURIComponent(row.squadron_id)}:${encodeURIComponent(row.message_id)}`,
+                    `command:j5:a2a:peer-removed:cancel:${encodeURIComponent(row.project_id)}:${encodeURIComponent(row.message_id)}`,
                   ),
-                  squadronId: SquadronId.make(row.squadron_id),
+                  squadronId: SquadronId.make(row.project_id),
                   acceptedAt: now,
                   events: [
                     {
@@ -836,7 +834,7 @@ const makeLayer = (daemon: boolean) =>
           if (outcome === null) continue;
           if (outcome.committed) yield* writer.publishCommitted(outcome.events);
           yield* PubSub.publish(milestones, {
-            squadronId: SquadronId.make(row.squadron_id),
+            squadronId: SquadronId.make(row.project_id),
             messageId,
             state: "cancelled",
             attempt: row.attempts + 1,
@@ -869,7 +867,7 @@ const makeLayer = (daemon: boolean) =>
           SELECT * FROM j5_a2a_delivery
           WHERE receiver_environment_id = ${environmentId}
             AND status IN ('pending', 'retry_scheduled')
-          ORDER BY sent_seq, squadron_id, message_id
+          ORDER BY sent_seq, project_id, message_id
           LIMIT ${PEER_POLL_BATCH_COUNT + 1}
         `;
         // The bound is on what goes over the wire: each body as UTF-8 JSON.
@@ -956,10 +954,10 @@ const makeLayer = (daemon: boolean) =>
           Effect.gen(function* () {
             const direct = yield* sql<DeliveryRow>`SELECT * FROM j5_a2a_delivery
               WHERE ${waitingForPeer(removal.environmentId)} AND ${notStoredForPollingPeer}
-              ORDER BY sent_seq, squadron_id, message_id`;
+              ORDER BY sent_seq, project_id, message_id`;
             const stored = yield* sql<DeliveryRow>`SELECT * FROM j5_a2a_delivery
               WHERE ${waitingForPeer(removal.environmentId)} AND ${storedForPollingPeer}
-              ORDER BY sent_seq, squadron_id, message_id`;
+              ORDER BY sent_seq, project_id, message_id`;
             const cancelDirect = cancelPeerRows(direct, removal);
             const [directCount, storedCount] = yield* Effect.all(
               [
@@ -985,19 +983,19 @@ const makeLayer = (daemon: boolean) =>
         runOnce,
         drain,
         listAlarms: sql<{
-          readonly squadron_id: string;
+          readonly project_id: string;
           readonly message_id: string;
           readonly attempts: number;
           readonly last_error: string;
         }>`
-          SELECT squadron_id, message_id, attempts, last_error
+          SELECT project_id, message_id, attempts, last_error
           FROM j5_a2a_delivery
           WHERE status = 'alarmed'
-          ORDER BY updated_at, squadron_id, message_id
+          ORDER BY updated_at, project_id, message_id
         `.pipe(
           Effect.map((rows) =>
             rows.map((row) => ({
-              squadronId: SquadronId.make(row.squadron_id),
+              squadronId: SquadronId.make(row.project_id),
               messageId: LedgerMessageId.make(row.message_id),
               attempts: row.attempts,
               lastError: row.last_error,

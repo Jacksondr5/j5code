@@ -10,7 +10,7 @@ import {
 } from "./HumanPersonRegistry.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 
-it.effect("mints one opaque local operator once without Squadron state", () =>
+it.effect("mints one opaque local operator once without project ledger state", () =>
   Effect.gen(function* () {
     yield* runJ5A2AMigrations();
     const sql = yield* SqlClient.SqlClient;
@@ -30,8 +30,8 @@ it.effect("mints one opaque local operator once without Squadron state", () =>
       readonly squadrons: number;
     }>`
       SELECT
-        (SELECT COUNT(*) FROM j5_a2a_squadron) AS squadrons,
-        (SELECT COUNT(*) FROM j5_a2a_squadron_membership) AS memberships,
+        (SELECT COUNT(*) FROM j5_a2a_project_ledger) AS squadrons,
+        (SELECT COUNT(*) FROM j5_a2a_membership) AS memberships,
         (SELECT COUNT(*) FROM j5_a2a_comm_event) AS events
     `;
     assert.deepStrictEqual(domainCounts, [{ squadrons: 0, memberships: 0, events: 0 }]);

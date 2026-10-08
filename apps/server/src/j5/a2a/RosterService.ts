@@ -36,7 +36,7 @@ export class RosterService extends Context.Service<RosterService, RosterServiceS
 ) {}
 
 interface AgentRow {
-  readonly squadron_id: string;
+  readonly project_id: string;
   readonly squadron_name: string;
   readonly participant_id: string;
   readonly thread_id: string;
@@ -44,7 +44,7 @@ interface AgentRow {
 }
 
 interface MachineRow {
-  readonly squadron_id: string;
+  readonly project_id: string;
   readonly squadron_name: string;
   readonly participant_id: string;
   readonly name: string;
@@ -87,24 +87,26 @@ export const layer: Layer.Layer<RosterService, never, SqlClient.SqlClient | Orch
         Effect.gen(function* () {
           const agents = yield* sql<AgentRow>`
             SELECT
-              membership.squadron_id,
-              squadron.name AS squadron_name,
+              membership.project_id,
+              COALESCE(project.title, squadron.project_id) AS squadron_name,
               membership.participant_id,
               membership.thread_id,
               membership.archived_at
-            FROM j5_a2a_squadron_membership AS membership
-            JOIN j5_a2a_squadron AS squadron ON squadron.id = membership.squadron_id
-            ORDER BY membership.squadron_id, membership.participant_id
+            FROM j5_a2a_membership AS membership
+            JOIN j5_a2a_project_ledger AS squadron ON squadron.project_id = membership.project_id
+            LEFT JOIN projection_projects AS project ON project.project_id = membership.project_id
+            ORDER BY membership.project_id, membership.participant_id
           `;
           const machines = yield* sql<MachineRow>`
             SELECT
-              machine.squadron_id,
-              squadron.name AS squadron_name,
+              machine.project_id,
+              COALESCE(project.title, squadron.project_id) AS squadron_name,
               machine.participant_id,
               machine.name
             FROM j5_a2a_machine_participant AS machine
-            JOIN j5_a2a_squadron AS squadron ON squadron.id = machine.squadron_id
-            ORDER BY machine.squadron_id, machine.participant_id
+            JOIN j5_a2a_project_ledger AS squadron ON squadron.project_id = machine.project_id
+            LEFT JOIN projection_projects AS project ON project.project_id = machine.project_id
+            ORDER BY machine.project_id, machine.participant_id
           `;
           const people = yield* listRegisteredHumanPersonIds(sql);
           const snapshot = yield* Effect.option(orchestrator.getShellSnapshot());
@@ -128,8 +130,8 @@ export const layer: Layer.Layer<RosterService, never, SqlClient.SqlClient | Orch
               return {
                 participantId: row.participant_id,
                 kind: "agent",
-                squadronId: row.squadron_id,
-                squadronName: row.squadron_name,
+                projectId: row.project_id,
+                projectTitle: row.squadron_name,
                 displayName: shell?.title ?? null,
                 threadId: ThreadId.make(row.thread_id),
                 archived: row.archived_at !== null,
@@ -142,8 +144,8 @@ export const layer: Layer.Layer<RosterService, never, SqlClient.SqlClient | Orch
             ...people.map((personId): A2ARosterEntry => ({
               participantId: personId,
               kind: "human",
-              squadronId: null,
-              squadronName: null,
+              projectId: null,
+              projectTitle: null,
               displayName: null,
               threadId: null,
               archived: false,
@@ -154,8 +156,8 @@ export const layer: Layer.Layer<RosterService, never, SqlClient.SqlClient | Orch
             ...machines.map((row): A2ARosterEntry => ({
               participantId: row.participant_id,
               kind: "machine",
-              squadronId: row.squadron_id,
-              squadronName: row.squadron_name,
+              projectId: row.project_id,
+              projectTitle: row.squadron_name,
               displayName: row.name,
               threadId: null,
               archived: false,

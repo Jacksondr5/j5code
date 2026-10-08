@@ -15,7 +15,7 @@ import { J5_A2A_MIGRATIONS_TABLE, migrationEntries } from "../a2a/Migrations.ts"
  * ordinary migration must not cost a full copy of the database. Never list an id ahead of its
  * migration: another migration can take the number first.
  */
-export const J5_LEDGER_SNAPSHOT_MIGRATIONS: ReadonlyArray<number> = [];
+export const J5_LEDGER_SNAPSHOT_MIGRATIONS: ReadonlyArray<number> = [31];
 
 const describeCause = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
 

@@ -28,80 +28,75 @@ const makeTestLayer = () => {
   return Layer.mergeAll(database, ledger, inbox, clientReads);
 };
 
-it.effect(
-  "reads immutable homes and total batched identities without participant-id normalization",
-  () =>
-    Effect.gen(function* () {
-      yield* runMigrations();
-      yield* runJ5A2AMigrations();
-      const ledger = yield* A2ALedger;
-      const reads = yield* ClientReadsService;
-      const sql = yield* SqlClient.SqlClient;
+it.effect("reads total batched identities without participant-id normalization", () =>
+  Effect.gen(function* () {
+    yield* runMigrations();
+    yield* runJ5A2AMigrations();
+    const ledger = yield* A2ALedger;
+    const reads = yield* ClientReadsService;
+    const sql = yield* SqlClient.SqlClient;
 
-      const alpha: AgentParticipant = {
-        kind: "agent",
-        id: ParticipantId.make("agent:j5:a2a:thread:client-reads:alpha"),
-        threadId: ThreadId.make("thread:client-reads:alpha"),
-      };
-      const beta: AgentParticipant = {
-        kind: "agent",
-        id: ParticipantId.make("agent:j5:a2a:thread%3Aclient-reads%3Abeta"),
-        threadId: ThreadId.make("thread:client-reads:beta"),
-      };
-      const alphaSquadron = SquadronId.make("squadron:client-reads:alpha");
-      const betaSquadron = SquadronId.make("squadron:client-reads:beta");
-      const createdAt = "2026-08-29T00:00:00.000Z";
-      const earlierDuplicateJoinAt = "2026-08-28T00:00:00.000Z";
-      const laterDuplicateJoinAt = "2026-08-30T00:00:00.000Z";
+    const alpha: AgentParticipant = {
+      kind: "agent",
+      id: ParticipantId.make("agent:j5:a2a:thread:client-reads:alpha"),
+      threadId: ThreadId.make("thread:client-reads:alpha"),
+    };
+    const beta: AgentParticipant = {
+      kind: "agent",
+      id: ParticipantId.make("agent:j5:a2a:thread%3Aclient-reads%3Abeta"),
+      threadId: ThreadId.make("thread:client-reads:beta"),
+    };
+    const alphaSquadron = SquadronId.make("squadron:client-reads:alpha");
+    const betaSquadron = SquadronId.make("squadron:client-reads:beta");
+    const createdAt = "2026-08-29T00:00:00.000Z";
+    const earlierDuplicateJoinAt = "2026-08-28T00:00:00.000Z";
+    const laterDuplicateJoinAt = "2026-08-30T00:00:00.000Z";
 
-      const join = Effect.fn("test.j5.a2a.clientReads.join")(function* (input: {
-        readonly squadronId: SquadronId;
-        readonly name: string;
-        readonly agent: AgentParticipant;
-      }) {
-        yield* ledger.createSquadron({
-          squadron: { id: input.squadronId, name: input.name, createdAt },
-        });
-        yield* ledger.appendEvents({
-          commandId: CommCommandId.make(`command:client-reads:join:${input.agent.id}`),
-          squadronId: input.squadronId,
-          acceptedAt: createdAt,
-          events: [
-            {
-              kind: "participant.joined",
-              sender: null,
-              receiver: input.agent.id,
-              exchangeId: null,
-              correlationId: null,
-              payload: { participant: input.agent },
-              createdAt,
-            },
-          ],
-        });
-      });
-      yield* join({ squadronId: alphaSquadron, name: "Alpha Squadron", agent: alpha });
-      yield* join({ squadronId: betaSquadron, name: "Beta Squadron", agent: beta });
+    const join = Effect.fn("test.j5.a2a.clientReads.join")(function* (input: {
+      readonly squadronId: SquadronId;
+      readonly agent: AgentParticipant;
+    }) {
+      yield* ledger.ensureProject({ projectId: input.squadronId, createdAt });
       yield* ledger.appendEvents({
-        commandId: CommCommandId.make("command:client-reads:leave:beta"),
-        squadronId: betaSquadron,
+        commandId: CommCommandId.make(`command:client-reads:join:${input.agent.id}`),
+        squadronId: input.squadronId,
         acceptedAt: createdAt,
         events: [
           {
-            kind: "participant.left",
+            kind: "participant.joined",
             sender: null,
-            receiver: beta.id,
+            receiver: input.agent.id,
             exchangeId: null,
             correlationId: null,
-            payload: { participant: beta },
+            payload: { participant: input.agent },
             createdAt,
           },
         ],
       });
-      const legacyHuman = ParticipantId.make("human:legacy-history");
-      const duplicateHistory = ParticipantId.make("agent:client-reads:duplicate-history");
-      yield* sql`
+    });
+    yield* join({ squadronId: alphaSquadron, agent: alpha });
+    yield* join({ squadronId: betaSquadron, agent: beta });
+    yield* ledger.appendEvents({
+      commandId: CommCommandId.make("command:client-reads:leave:beta"),
+      squadronId: betaSquadron,
+      acceptedAt: createdAt,
+      events: [
+        {
+          kind: "participant.left",
+          sender: null,
+          receiver: beta.id,
+          exchangeId: null,
+          correlationId: null,
+          payload: { participant: beta },
+          createdAt,
+        },
+      ],
+    });
+    const legacyHuman = ParticipantId.make("human:legacy-history");
+    const duplicateHistory = ParticipantId.make("agent:client-reads:duplicate-history");
+    yield* sql`
         INSERT INTO j5_a2a_comm_event (
-          seq, squadron_id, kind, sender, receiver, exchange_id, correlation_id,
+          seq, project_id, kind, sender, receiver, exchange_id, correlation_id,
           payload, created_at, command_id
         ) VALUES (
           2, ${alphaSquadron}, 'participant.joined', NULL, ${duplicateHistory}, NULL, NULL,
@@ -116,9 +111,9 @@ it.effect(
           ${laterDuplicateJoinAt}, NULL
         )
       `;
-      yield* sql`
+    yield* sql`
         INSERT INTO j5_a2a_comm_event (
-          seq, squadron_id, kind, sender, receiver, exchange_id, correlation_id,
+          seq, project_id, kind, sender, receiver, exchange_id, correlation_id,
           payload, created_at, command_id
         ) VALUES (
           3, ${betaSquadron}, 'participant.joined', NULL, ${duplicateHistory}, NULL, NULL,
@@ -133,9 +128,9 @@ it.effect(
           ${earlierDuplicateJoinAt}, NULL
         )
       `;
-      yield* sql`
+    yield* sql`
         INSERT INTO j5_a2a_comm_event (
-          seq, squadron_id, kind, sender, receiver, exchange_id, correlation_id,
+          seq, project_id, kind, sender, receiver, exchange_id, correlation_id,
           payload, created_at, command_id
         ) VALUES (
           3, ${alphaSquadron}, 'participant.joined', NULL, ${legacyHuman}, NULL, NULL,
@@ -143,7 +138,7 @@ it.effect(
           ${createdAt}, NULL
         )
       `;
-      yield* sql`
+    yield* sql`
         INSERT INTO orchestration_v2_projection_threads (
           thread_id, project_id, title, default_provider, runtime_mode,
           interaction_mode, active_provider_thread_id, created_at, updated_at,
@@ -153,7 +148,7 @@ it.effect(
           'default', NULL, ${createdAt}, ${createdAt}, NULL, NULL, '{}'
         )
       `;
-      yield* sql`
+    yield* sql`
         INSERT INTO orchestration_v2_projection_threads (
           thread_id, project_id, title, default_provider, runtime_mode,
           interaction_mode, active_provider_thread_id, created_at, updated_at,
@@ -164,7 +159,7 @@ it.effect(
           'default', NULL, ${createdAt}, ${createdAt}, NULL, NULL, '{}'
         )
       `;
-      yield* sql`
+    yield* sql`
         INSERT INTO orchestration_v2_projection_threads (
           thread_id, project_id, title, default_provider, runtime_mode,
           interaction_mode, active_provider_thread_id, created_at, updated_at,
@@ -175,49 +170,25 @@ it.effect(
         )
       `;
 
-      const missing = ParticipantId.make("agent:client-reads:missing");
-      const missingThread = ThreadId.make("thread:client-reads:missing");
-      const homes = yield* reads.threadHomes([
-        beta.threadId,
-        ThreadId.make("thread:client-reads:duplicate-history:second"),
-        missingThread,
-        alpha.threadId,
-        beta.threadId,
-      ]);
-      assert.deepStrictEqual(homes, [
+    const missing = ParticipantId.make("agent:client-reads:missing");
+    const identities = yield* reads.participantIdentities({
+      participantIds: [beta.id, duplicateHistory, missing, alpha.id, beta.id],
+    });
+    assert.deepStrictEqual(identities, {
+      entries: [
+        { participantId: beta.id, identity: { kind: "unknown" } },
         {
-          threadId: beta.threadId,
-          home: { kind: "known", squadron: { id: betaSquadron, name: "Beta Squadron" } },
+          participantId: duplicateHistory,
+          identity: { kind: "known", displayName: "Earlier Duplicate Thread" },
         },
-        {
-          threadId: ThreadId.make("thread:client-reads:duplicate-history:second"),
-          home: { kind: "known", squadron: { id: betaSquadron, name: "Beta Squadron" } },
-        },
-        { threadId: missingThread, home: { kind: "unknown" } },
-        {
-          threadId: alpha.threadId,
-          home: { kind: "known", squadron: { id: alphaSquadron, name: "Alpha Squadron" } },
-        },
-      ]);
-
-      const identities = yield* reads.participantIdentities({
-        participantIds: [beta.id, duplicateHistory, missing, alpha.id, beta.id],
-      });
-      assert.deepStrictEqual(identities, {
-        entries: [
-          { participantId: beta.id, identity: { kind: "unknown" } },
-          {
-            participantId: duplicateHistory,
-            identity: { kind: "known", displayName: "Earlier Duplicate Thread" },
-          },
-          { participantId: missing, identity: { kind: "unknown" } },
-          { participantId: alpha.id, identity: { kind: "known", displayName: "Alpha Thread" } },
-        ],
-      });
-      assert.deepStrictEqual(yield* reads.participantIdentities({ participantIds: [] }), {
-        entries: [],
-      });
-    }).pipe(Effect.provide(makeTestLayer())),
+        { participantId: missing, identity: { kind: "unknown" } },
+        { participantId: alpha.id, identity: { kind: "known", displayName: "Alpha Thread" } },
+      ],
+    });
+    assert.deepStrictEqual(yield* reads.participantIdentities({ participantIds: [] }), {
+      entries: [],
+    });
+  }).pipe(Effect.provide(makeTestLayer())),
 );
 
 it.effect(
@@ -232,8 +203,8 @@ it.effect(
       const squadronId = SquadronId.make("squadron:client-reads:count");
       const createdAt = "2026-08-29T00:00:00.000Z";
       yield* sql`
-        INSERT INTO j5_a2a_squadron (id, name, created_at)
-        VALUES (${squadronId}, 'Count Squadron', ${createdAt})
+        INSERT INTO j5_a2a_project_ledger (project_id, created_at)
+        VALUES (${squadronId}, ${createdAt})
       `;
       yield* sql`
         INSERT INTO j5_a2a_human_person (person_id, is_local_operator, created_at)
@@ -250,7 +221,7 @@ it.effect(
         const senderId = `agent:client-reads:sender:${input.id}`;
         yield* sql`
           INSERT INTO j5_a2a_exchange (
-            squadron_id, exchange_id, sender_id, receiver_id, status, intent, urgency,
+            project_id, exchange_id, sender_id, receiver_id, status, intent, urgency,
             opened_seq, closed_seq, created_at, updated_at
           ) VALUES (
             ${squadronId}, ${exchangeId}, ${senderId}, ${input.personId},
@@ -260,7 +231,7 @@ it.effect(
         `;
         yield* sql`
           INSERT INTO j5_a2a_human_inbox (
-            person_id, squadron_id, exchange_id, sender_id, intent, urgency,
+            person_id, project_id, exchange_id, sender_id, intent, urgency,
             latest_message_id, latest_message, opened_seq, opened_at, status,
             terminal_seq, terminal_at, terminal_disposition, terminal_cause,
             terminal_facts, terminal_notice_message_id
@@ -336,7 +307,7 @@ it.effect("names a sender homed on a peer by the label its server sent, after an
       threadId: ThreadId.make("thread:client-reads:local"),
     };
     const createdAt = "2026-09-21T00:00:00.000Z";
-    yield* ledger.createSquadron({ squadron: { id: squadron, name: "Peer Reads", createdAt } });
+    yield* ledger.ensureProject({ projectId: squadron, createdAt });
     yield* ledger.appendEvents({
       commandId: CommCommandId.make("command:client-reads:peer:join"),
       squadronId: squadron,
@@ -357,16 +328,16 @@ it.effect("names a sender homed on a peer by the label its server sent, after an
     // numbers its own rows, so the renamed sender's latest label sits at a
     // lower seq than an older one; the time this server recorded each wins.
     const other = SquadronId.make("squadron:client-reads:peer:other");
-    yield* ledger.createSquadron({ squadron: { id: other, name: "Other Reads", createdAt } });
+    yield* ledger.ensureProject({ projectId: other, createdAt });
     const received = (inSquadron: SquadronId, seq: number, label: string, at: string) => sql`
       INSERT INTO j5_a2a_comm_event (
-        seq, squadron_id, kind, sender, receiver, exchange_id, correlation_id,
+        seq, project_id, kind, sender, receiver, exchange_id, correlation_id,
         payload, created_at, command_id
       ) VALUES (
         ${seq}, ${inSquadron}, 'message.received', ${remoteSender}, ${local.id}, NULL,
         ${`correlation:client-reads:peer:${inSquadron}:${String(seq)}`},
         ${JSON.stringify({
-          originSquadronId: "squadron:home",
+          originProjectId: "squadron:home",
           originEnvironmentId: "environment-home",
           senderLabel: label,
           message: {},

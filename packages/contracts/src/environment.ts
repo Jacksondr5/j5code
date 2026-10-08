@@ -89,9 +89,15 @@ export const ServerSelfUpdateCapability = Schema.Literals([
 export type ServerSelfUpdateCapability = typeof ServerSelfUpdateCapability.Type;
 
 export const ExecutionEnvironmentCapabilities = Schema.Struct({
-  /** J5 read and creation routes. Missing on older servers; clients may probe the read route. */
+  /** The J5 ledger is keyed by project. Absent on a server without J5's ledger. */
+  j5ProjectLedger: Schema.optionalKey(Schema.Boolean),
+  /**
+   * The two keys a J5 server reported while its ledger was keyed by Squadron, naming the Fleet
+   * routes and the Inbox and Crew request routes as they were then. A server keyed by project
+   * reports both `false` (see `J5_LEDGER_CAPABILITIES`), and a client reads `j5Squadrons` only to
+   * tell an older J5 server apart and ask for an update.
+   */
   j5Squadrons: Schema.optionalKey(Schema.Boolean),
-  /** J5 person-scoped inbox, count, and answer routes. */
   j5HumanInbox: Schema.optionalKey(Schema.Boolean),
   /** J5 peering poll mode: the poll and reachability routes and the link-mode peer fields. */
   j5PeerPoll: Schema.optionalKey(Schema.Boolean),

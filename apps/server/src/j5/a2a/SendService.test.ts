@@ -9,6 +9,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { noneLayer as peerDirectoryNoneLayer } from "./PeerDirectory.ts";
+import { runMigrations } from "../../persistence/Migrations.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import { A2ASendService, layer as sendLayer } from "./SendService.ts";
 import {
@@ -60,9 +61,7 @@ const setupSameSquadron = Effect.fn("test.j5.a2a.setupSameSquadron")(function* (
   yield* runJ5A2AMigrations();
   const ledgerService = yield* A2ALedger;
   const squadronId = SquadronId.make("squadron:exchange");
-  yield* ledgerService.createSquadron({
-    squadron: { id: squadronId, name: "Exchange", createdAt: timestamp },
-  });
+  yield* ledgerService.ensureProject({ projectId: squadronId, createdAt: timestamp });
   for (const [index, participant] of [sender, receiver].entries()) {
     yield* ledgerService.append({
       commandId: CommCommandId.make(`command:join:${index}`),
@@ -158,7 +157,7 @@ it.effect("opens once per sender-receiver pair, joins follow-ups, and one reply 
     const rows = yield* sql<{ readonly kind: string; readonly count: number }>`
       SELECT kind, COUNT(*) AS count
       FROM j5_a2a_comm_event
-      WHERE squadron_id = ${squadronId}
+      WHERE project_id = ${squadronId}
         AND kind IN ('exchange.opened', 'message.sent', 'exchange.closed')
       GROUP BY kind
       ORDER BY kind
@@ -244,9 +243,7 @@ const setupTwoSquadrons = Effect.fn("test.j5.a2a.setupTwoSquadrons")(function* (
     [askerSquadronId, sender],
     [replierSquadronId, receiver],
   ] as const) {
-    yield* ledgerService.createSquadron({
-      squadron: { id: squadronId, name: squadronId, createdAt: timestamp },
-    });
+    yield* ledgerService.ensureProject({ projectId: squadronId, createdAt: timestamp });
     yield* ledgerService.append({
       commandId: CommCommandId.make(`command:join:${participant.id}`),
       squadronId,
@@ -333,23 +330,23 @@ it.effect("one reply from another Squadron closes the asker's Exchange in the as
     assert.equal(reply.durableAtSeq, 2);
     assert.deepStrictEqual(
       yield* sql<{
-        readonly squadron_id: string;
+        readonly project_id: string;
         readonly status: string;
         readonly closed_seq: number;
       }>`
-        SELECT squadron_id, status, closed_seq
+        SELECT project_id, status, closed_seq
         FROM j5_a2a_exchange
         WHERE exchange_id = ${opened.exchangeId}
       `,
-      [{ squadron_id: askerSquadronId, status: "closed", closed_seq: 5 }],
+      [{ project_id: askerSquadronId, status: "closed", closed_seq: 5 }],
     );
     assert.deepStrictEqual(
-      yield* sql<{ readonly squadron_id: string; readonly receiver_squadron_id: string }>`
-        SELECT squadron_id, receiver_squadron_id
+      yield* sql<{ readonly project_id: string; readonly receiver_project_id: string }>`
+        SELECT project_id, receiver_project_id
         FROM j5_a2a_delivery
         WHERE exchange_id = ${opened.exchangeId} AND exchange_role = 'reply'
       `,
-      [{ squadron_id: replierSquadronId, receiver_squadron_id: askerSquadronId }],
+      [{ project_id: replierSquadronId, receiver_project_id: askerSquadronId }],
     );
 
     const secondReply = yield* Effect.flip(
@@ -684,36 +681,48 @@ it.effect("rolls back the send receipt when its projection write fails", () =>
   }).pipe(Effect.provide(testLayer)),
 );
 
-it.effect("fails closed when a native thread has no provisioned squadron membership", () =>
+it.effect("fails closed for a caller that is not a registrable thread", () =>
   Effect.gen(function* () {
+    yield* runMigrations();
     yield* runJ5A2AMigrations();
     const service = yield* A2ASendService;
     const sql = yield* SqlClient.SqlClient;
-    const nativeThreadId = ThreadId.make("thread:native-without-home-squadron");
+    const unknownThreadId = ThreadId.make("thread:native-without-home-squadron");
+    const subagentThreadId = ThreadId.make("thread:subagent-without-home");
+    yield* sql`
+      INSERT INTO orchestration_v2_projection_threads (
+        thread_id, project_id, title, default_provider, runtime_mode,
+        interaction_mode, active_provider_thread_id, created_at, updated_at,
+        archived_at, deleted_at, payload_json
+      ) VALUES (
+        ${subagentThreadId}, 'project:send-service', 'Subagent', 'codex', 'full-access',
+        'default', NULL, ${timestamp}, ${timestamp}, NULL, NULL,
+        '{"lineage":{"relationshipToParent":"subagent"}}'
+      )
+    `;
 
-    const listError = yield* Effect.flip(service.listParticipants(nativeThreadId));
-    assert.equal(listError._tag, "A2ASenderNotJoinedError");
-    assert.include(listError.message, "native thread");
-    assert.include(listError.message, "no registered home squadron");
-    assert.include(listError.message, "list_squadrons");
-    assert.include(listError.message, "join_squadron");
-    assert.include(listError.message, "stop this messaging attempt");
-    assert.notMatch(listError.message, /ask the user|product workflow|list_participants again/i);
+    for (const threadId of [unknownThreadId, subagentThreadId]) {
+      const listError = yield* Effect.flip(service.listParticipants(threadId));
+      assert.equal(listError._tag, "A2ASenderNotJoinedError");
+      assert.include(listError.message, "it is a Subagent, and Subagents are not participants");
+      assert.include(listError.message, "Return your result to the agent that started you");
+      assert.notMatch(listError.message, /ask the user|product workflow|list_participants again/i);
 
-    const sendError = yield* Effect.flip(
-      service.send({
-        commandId: CommCommandId.make("command:native-without-home-squadron"),
-        senderThreadId: nativeThreadId,
-        to: receiver.id,
-        message: "This must fail without provisioning.",
-        acceptedAt: timestamp,
-      }),
-    );
-    assert.equal(sendError._tag, "A2ASenderNotJoinedError");
+      const sendError = yield* Effect.flip(
+        service.send({
+          commandId: CommCommandId.make(`command:not-registrable:${threadId}`),
+          senderThreadId: threadId,
+          to: receiver.id,
+          message: "This must fail without provisioning.",
+          acceptedAt: timestamp,
+        }),
+      );
+      assert.equal(sendError._tag, "A2ASenderNotJoinedError");
+    }
 
     const state = yield* sql<{ readonly squadrons: number; readonly events: number }>`
       SELECT
-        (SELECT COUNT(*) FROM j5_a2a_squadron) AS squadrons,
+        (SELECT COUNT(*) FROM j5_a2a_project_ledger) AS squadrons,
         (SELECT COUNT(*) FROM j5_a2a_comm_event) AS events
     `;
     assert.deepStrictEqual(state, [{ squadrons: 0, events: 0 }]);
@@ -727,17 +736,11 @@ it.effect("fails loudly when active membership diverges from the immutable home"
     const ledgerService = yield* A2ALedger;
     const sql = yield* SqlClient.SqlClient;
     const corruptedSquadronId = SquadronId.make("squadron:corrupted-projection");
-    yield* ledgerService.createSquadron({
-      squadron: {
-        id: corruptedSquadronId,
-        name: "Corrupted projection",
-        createdAt: timestamp,
-      },
-    });
+    yield* ledgerService.ensureProject({ projectId: corruptedSquadronId, createdAt: timestamp });
     yield* sql`
-      UPDATE j5_a2a_squadron_membership
-      SET squadron_id = ${corruptedSquadronId}
-      WHERE squadron_id = ${homeSquadronId}
+      UPDATE j5_a2a_membership
+      SET project_id = ${corruptedSquadronId}
+      WHERE project_id = ${homeSquadronId}
         AND participant_id = ${sender.id}
     `;
 
@@ -748,9 +751,9 @@ it.effect("fails loudly when active membership diverges from the immutable home"
       assert.equal(error.expectedSquadronId, homeSquadronId);
       assert.equal(error.expectedParticipantId, sender.id);
       assert.deepStrictEqual(error.activeHomes, [`${corruptedSquadronId}:${sender.id}`]);
-      assert.include(error.message, "immutable home");
-      assert.include(error.message, "Repair the projection");
-      assert.include(error.message, "do not register a new home");
+      assert.include(error.message, `is registered as ${homeSquadronId}:${sender.id}`);
+      assert.include(error.message, `its active membership is ${corruptedSquadronId}:${sender.id}`);
+      assert.include(error.message, "Tell the human; do not retry");
       assert.notInclude(error.message, "no registered home squadron");
     }
   }).pipe(Effect.provide(testLayer)),
@@ -763,16 +766,10 @@ it.effect("fails closed when an extra active membership accompanies the correct 
     const ledgerService = yield* A2ALedger;
     const sql = yield* SqlClient.SqlClient;
     const extraSquadronId = SquadronId.make("squadron:additive-projection-corruption");
-    yield* ledgerService.createSquadron({
-      squadron: {
-        id: extraSquadronId,
-        name: "Additive projection corruption",
-        createdAt: timestamp,
-      },
-    });
+    yield* ledgerService.ensureProject({ projectId: extraSquadronId, createdAt: timestamp });
     yield* sql`
-      INSERT INTO j5_a2a_squadron_membership (
-        squadron_id,
+      INSERT INTO j5_a2a_membership (
+        project_id,
         participant_id,
         participant_kind,
         thread_id,
@@ -788,8 +785,8 @@ it.effect("fails closed when an extra active membership accompanies the correct 
         joined_seq,
         updated_seq,
         payload
-      FROM j5_a2a_squadron_membership
-      WHERE squadron_id = ${homeSquadronId}
+      FROM j5_a2a_membership
+      WHERE project_id = ${homeSquadronId}
         AND participant_id = ${sender.id}
     `;
 
@@ -848,7 +845,7 @@ it.effect("reports a legitimately retired sender without prescribing projection 
       assert.equal(error.threadId, sender.threadId);
       assert.equal(error.squadronId, squadronId);
       assert.equal(error.participantId, sender.id);
-      assert.include(error.message, "retired from immutable home");
+      assert.include(error.message, `was retired from ${squadronId}:${sender.id}`);
       assert.include(error.message, "participant.left");
       assert.include(error.message, "cannot send cross-agent messages");
       assert.include(error.message, "Do not repair the projection");
@@ -874,16 +871,8 @@ it.effect("ignores left events that do not identify a later retirement of the ex
     const sql = yield* SqlClient.SqlClient;
     const homeSquadronId = SquadronId.make("squadron:retirement-decoys:home");
     const foreignSquadronId = SquadronId.make("squadron:retirement-decoys:foreign");
-    yield* ledgerService.createSquadron({
-      squadron: { id: homeSquadronId, name: "Retirement decoy home", createdAt: timestamp },
-    });
-    yield* ledgerService.createSquadron({
-      squadron: {
-        id: foreignSquadronId,
-        name: "Retirement decoy foreign",
-        createdAt: timestamp,
-      },
-    });
+    yield* ledgerService.ensureProject({ projectId: homeSquadronId, createdAt: timestamp });
+    yield* ledgerService.ensureProject({ projectId: foreignSquadronId, createdAt: timestamp });
     const appendAgentEvent = (
       squadronId: SquadronId,
       commandId: string,
@@ -962,13 +951,13 @@ it.effect("ignores left events that do not identify a later retirement of the ex
     const sequenceRows = yield* sql<{ readonly next_seq: number }>`
       SELECT COALESCE(MAX(seq), 0) + 1 AS next_seq
       FROM j5_a2a_comm_event
-      WHERE squadron_id = ${homeSquadronId}
+      WHERE project_id = ${homeSquadronId}
     `;
     const decoySeq = sequenceRows[0]!.next_seq;
     yield* sql`
       INSERT INTO j5_a2a_comm_event (
         seq,
-        squadron_id,
+        project_id,
         kind,
         sender,
         receiver,
@@ -1061,9 +1050,7 @@ it.effect("marks duplicate participant identities unavailable before send", () =
       ...receiver,
       threadId: ThreadId.make("thread:receiver:duplicate-identity"),
     };
-    yield* ledgerService.createSquadron({
-      squadron: { id: duplicateSquadronId, name: "Duplicate receiver", createdAt: timestamp },
-    });
+    yield* ledgerService.ensureProject({ projectId: duplicateSquadronId, createdAt: timestamp });
     yield* ledgerService.appendEvents({
       commandId: CommCommandId.make("command:join:duplicate-receiver"),
       squadronId: duplicateSquadronId,
@@ -1099,6 +1086,6 @@ it.effect("marks duplicate participant identities unavailable before send", () =
     );
     assert.equal(error._tag, "A2AAmbiguousParticipantError");
     assert.include(error.message, "choose a participantId with canReceiveMessage=true");
-    assert.include(error.message, "ask the human");
+    assert.include(error.message, "tell the human");
   }).pipe(Effect.provide(testLayer)),
 );

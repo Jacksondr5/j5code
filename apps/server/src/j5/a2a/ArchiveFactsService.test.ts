@@ -57,9 +57,7 @@ const makeTestLayer = (placementFacts = placementFactsLayer) => {
 const seed = Effect.gen(function* () {
   yield* runJ5A2AMigrations();
   const ledger = yield* A2ALedger;
-  yield* ledger.createSquadron({
-    squadron: { id: squadronId, name: "Archive facts", createdAt: timestamp },
-  });
+  yield* ledger.ensureProject({ projectId: squadronId, createdAt: timestamp });
   for (const [index, candidate] of [
     participant,
     outboundCounterparty,

@@ -11,18 +11,13 @@ import { fleetReadsHttpRouteLayer } from "./FleetReadsHttp.ts";
 import { spawnedChildrenHttpRouteLayer } from "./SpawnedChildrenHttp.ts";
 import {
   CLIENT_READS_OPEN_COUNT_PATH,
-  CLIENT_READS_PARTICIPANT_HOMES_PATH,
   CLIENT_READS_PARTICIPANT_IDENTITIES_PATH,
   makeClientReadsHttpRouteLayer,
 } from "./ClientReadsHttp.ts";
 import { humanInboxHttpRouteLayer } from "./HumanInboxHttp.ts";
-import { importedThreadsHttpRouteLayer } from "./ImportedThreadsHttp.ts";
 import { machineSenderHttpRouteLayer } from "./MachineSenderHttp.ts";
 import { peerHttpRouteLayer } from "./PeerHttp.ts";
 import { preArchiveFactsHttpRouteLayer } from "./PreArchiveFactsHttp.ts";
-import { layer as squadronManagementServiceLayer } from "./SquadronManagementService.ts";
-import { squadronHttpRouteLayer } from "./SquadronHttp.ts";
-import { threadHomesHttpRouteLayer } from "./ThreadHomesHttp.ts";
 import { layer as agentHandoffArtifactDeleteLayer } from "../agents/agentHandoffArtifactDelete.ts";
 import { artifactHttpRouteLayer } from "../artifacts/ArtifactHttp.ts";
 import { layer as artifactWorkspaceLayer } from "../artifacts/ArtifactWorkspace.ts";
@@ -43,19 +38,11 @@ export const j5AuthenticatedRoutesLayer = Layer.mergeAll(
   playbookLibraryHttpRouteLayer,
   artifactHttpRouteLayer,
   humanInboxHttpRouteLayer,
-  importedThreadsHttpRouteLayer,
   machineSenderHttpRouteLayer,
   peerHttpRouteLayer,
   preArchiveFactsHttpRouteLayer,
-  squadronHttpRouteLayer,
-  threadHomesHttpRouteLayer,
   makeClientReadsHttpRouteLayer({
-    participantHome: CLIENT_READS_PARTICIPANT_HOMES_PATH,
     participantIdentities: CLIENT_READS_PARTICIPANT_IDENTITIES_PATH,
     openInboxCount: CLIENT_READS_OPEN_COUNT_PATH,
   }),
-).pipe(
-  Layer.provide(artifactWorkspaceLayer),
-  Layer.provide(agentHandoffArtifactDeleteLayer),
-  Layer.provide(squadronManagementServiceLayer),
-);
+).pipe(Layer.provide(artifactWorkspaceLayer), Layer.provide(agentHandoffArtifactDeleteLayer));

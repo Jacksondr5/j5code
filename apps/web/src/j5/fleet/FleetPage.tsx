@@ -26,7 +26,7 @@ import { CaptainMark } from "../crew/CaptainMark";
 import { PlaybookRunsSection } from "../playbooks/PlaybookRunsSection";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "../../workspaceTitlebar";
 import { fleetDetailSourcesAtom } from "../state";
-import { useSquadronProjects } from "../useSquadronProjects";
+import { useLogicalProjects } from "../logicalProjects";
 import { requestConfirmDialog } from "../../confirmDialog";
 import { ArchiveWarningCrewSeats, type ArchiveWarningCrew } from "../a2a/ArchiveWarningContent";
 import { archiveCrew } from "../crew/crewArchiveClient";
@@ -44,7 +44,6 @@ import {
   originLabel,
   partitionFleet,
   playbookRunHeader,
-  resolveFleetRowProject,
   retiredCrews,
   type FleetNode,
   type FleetRow,
@@ -134,21 +133,11 @@ export function FleetPage() {
       ),
     [threads],
   );
-  const projects = useSquadronProjects();
-  // Each machine's ledger still answers per Squadron. A row with a thread names its project
-  // itself; a machine sender, or a retired Crew, takes the project its Squadron references.
+  // Each machine's ledger answers per project, so every row under it shares that project.
+  const logicalProjectOf = useLogicalProjects();
   const projectOf = useCallback(
-    (squadron: ScopedFleetSquadron, agent: FleetAgent | null) =>
-      resolveFleetRowProject({
-        squadron,
-        agent,
-        threadProjectId: (environmentId, threadId) =>
-          threadsByKey.get(scopedThreadKey(scopeThreadRef(environmentId, ThreadId.make(threadId))))
-            ?.projectId,
-        ofProject: projects.ofProject,
-        ofSquadron: projects.ofSquadron,
-      }),
-    [projects, threadsByKey],
+    (squadron: ScopedFleetSquadron) => logicalProjectOf(squadron.environmentId, squadron.id),
+    [logicalProjectOf],
   );
   const sections = useMemo(() => {
     const partitioned = partitionFleet(squadrons, (environmentId, threadId) =>
@@ -304,11 +293,8 @@ interface FleetRowsProps {
   readonly showEnvironment: boolean;
   readonly threadsByKey: ThreadLookup;
   readonly onOpenThread: (environmentId: EnvironmentId, threadId: string) => void;
-  /** The logical project of a Squadron's row; `null` asks for the Squadron's own project. */
-  readonly projectOf: (
-    squadron: ScopedFleetSquadron,
-    agent: FleetAgent | null,
-  ) => SidebarProjectSnapshot | undefined;
+  /** Upstream's logical project for one machine's project ledger. */
+  readonly projectOf: (squadron: ScopedFleetSquadron) => SidebarProjectSnapshot | undefined;
 }
 
 function FleetTable(
@@ -659,7 +645,7 @@ function RetiredCrewCaptain(
 /**
  * The project a row belongs to, with upstream's icon and display name. The row's own machine
  * follows once several are connected, since each machine keeps its own ledger. While the project
- * is unresolved the Squadron name the read carries stands in.
+ * is unresolved the title the read carries stands in.
  */
 function ProjectLabel(
   props: Pick<FleetRowsProps, "projectOf" | "showEnvironment"> & {
@@ -667,12 +653,12 @@ function ProjectLabel(
     readonly agent: FleetAgent | null;
   },
 ) {
-  const project = props.projectOf(props.squadron, props.agent);
+  const project = props.projectOf(props.squadron);
   return (
     <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
       {project === undefined ? null : <ProjectFavicon project={project} className="size-3.5" />}
       <span className="min-w-0 truncate">
-        {project?.displayName ?? props.squadron.name}
+        {project?.displayName ?? props.squadron.title}
         {props.showEnvironment ? (
           <span className="text-muted-foreground/70"> · {props.squadron.environmentLabel}</span>
         ) : null}

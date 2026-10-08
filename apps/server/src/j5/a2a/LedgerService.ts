@@ -14,7 +14,7 @@ import {
   CommCommandReceipt,
   type AppendCommEventCommand,
   type CommEventPage,
-  type CreateSquadronCommand,
+  type EnsureProjectCommand,
   Squadron,
   ExchangeClosedPayload,
   ExchangeDroppedPayload,
@@ -44,7 +44,7 @@ export class SquadronNotFoundError extends Schema.TaggedError<SquadronNotFoundEr
   { squadronId: Schema.String },
 ) {
   override get message(): string {
-    return `Squadron ${this.squadronId} does not exist.`;
+    return `Project ${this.squadronId} has no agent-to-agent ledger yet.`;
   }
 }
 
@@ -102,17 +102,10 @@ export interface AppendEventsResult {
 }
 
 export interface A2ALedgerShape {
-  readonly createSquadron: (
-    command: CreateSquadronCommand,
-  ) => Effect.Effect<Squadron, A2ALedgerError>;
+  /** Makes the project a ledger if it is not one yet. Every append needs its ledger to exist. */
+  readonly ensureProject: (command: EnsureProjectCommand) => Effect.Effect<void, A2ALedgerError>;
   readonly listSquadrons: () => Effect.Effect<ReadonlyArray<Squadron>, A2ALedgerError>;
   readonly readSquadron: (squadronId: SquadronId) => Effect.Effect<Squadron, A2ALedgerError>;
-  readonly renameSquadron: (input: {
-    readonly squadronId: SquadronId;
-    readonly name: string;
-  }) => Effect.Effect<Squadron, A2ALedgerError>;
-  /** Removes the Squadron row; foreign keys cascade or restrict per the migrations. */
-  readonly deleteSquadron: (squadronId: SquadronId) => Effect.Effect<void, A2ALedgerError>;
   readonly append: (command: AppendCommEventCommand) => Effect.Effect<AppendResult, A2ALedgerError>;
   readonly appendEvents: (
     command: AppendCommEventsCommand,
@@ -175,7 +168,7 @@ interface SquadronRow {
 
 interface EventRow {
   readonly seq: number;
-  readonly squadron_id: string;
+  readonly project_id: string;
   readonly kind: string;
   readonly sender: string | null;
   readonly receiver: string | null;
@@ -187,14 +180,14 @@ interface EventRow {
 
 interface ReceiptRow {
   readonly command_id: string;
-  readonly squadron_id: string;
+  readonly project_id: string;
   readonly command_type: string;
   readonly accepted_at: string;
   readonly result_seq: number;
 }
 
 interface MembershipRow {
-  readonly squadron_id: string;
+  readonly project_id: string;
   readonly joined_seq: number;
   readonly updated_seq: number;
   readonly payload: string;
@@ -235,29 +228,29 @@ const insertPendingDelivery = (
     readonly sentSeq: number;
     readonly senderId: string;
     readonly receiverId: string;
-    readonly receiverSquadronId: string;
+    readonly receiverProjectId: string;
     readonly exchangeId: string | null;
     readonly exchangeRole: string;
     readonly envelopeChannel: string;
     readonly correlationId: string | null;
     readonly messageText: string;
     readonly createdAt: string;
-    readonly originSquadronId: string | null;
+    readonly originProjectId: string | null;
     readonly originEnvironmentId: string | null;
     /** Set when the receiver is homed on a peer server; the worker hands such a row to the peer transport. */
     readonly receiverEnvironmentId: string | null;
   },
 ) => sql`
   INSERT INTO j5_a2a_delivery (
-    squadron_id, message_id, command_id, sent_seq, sender_id, receiver_id, receiver_squadron_id,
+    project_id, message_id, command_id, sent_seq, sender_id, receiver_id, receiver_project_id,
     exchange_id, exchange_role, envelope_channel, correlation_id, message_text,
     status, attempts, last_error, next_attempt_at, delivered_seq, created_at, updated_at,
-    origin_squadron_id, origin_environment_id, receiver_environment_id
+    origin_project_id, origin_environment_id, receiver_environment_id
   ) VALUES (
-    ${row.squadronId}, ${row.messageId}, ${row.commandId}, ${row.sentSeq}, ${row.senderId}, ${row.receiverId}, ${row.receiverSquadronId},
+    ${row.squadronId}, ${row.messageId}, ${row.commandId}, ${row.sentSeq}, ${row.senderId}, ${row.receiverId}, ${row.receiverProjectId},
     ${row.exchangeId}, ${row.exchangeRole}, ${row.envelopeChannel}, ${row.correlationId}, ${row.messageText},
     'pending', 0, NULL, NULL, NULL, ${row.createdAt}, ${row.createdAt},
-    ${row.originSquadronId}, ${row.originEnvironmentId}, ${row.receiverEnvironmentId}
+    ${row.originProjectId}, ${row.originEnvironmentId}, ${row.receiverEnvironmentId}
   )
 `;
 
@@ -276,7 +269,7 @@ const squadronFromRow = (row: SquadronRow) =>
 const eventFromRow = Effect.fn("j5.a2a.eventFromRow")(function* (row: EventRow) {
   return yield* decodeStoredEvent({
     seq: row.seq,
-    squadronId: row.squadron_id,
+    squadronId: row.project_id,
     kind: row.kind,
     sender: row.sender,
     receiver: row.receiver,
@@ -290,7 +283,7 @@ const eventFromRow = Effect.fn("j5.a2a.eventFromRow")(function* (row: EventRow) 
 const receiptFromRow = (row: ReceiptRow) =>
   decodeReceipt({
     commandId: row.command_id,
-    squadronId: row.squadron_id,
+    squadronId: row.project_id,
     commandType: row.command_type,
     acceptedAt: row.accepted_at,
     resultSeq: row.result_seq,
@@ -298,7 +291,7 @@ const receiptFromRow = (row: ReceiptRow) =>
 
 const membershipFromRow = Effect.fn("j5.a2a.membershipFromRow")(function* (row: MembershipRow) {
   return yield* decodeMembership({
-    squadronId: row.squadron_id,
+    squadronId: row.project_id,
     participant: yield* decodeJson(row.payload),
     joinedSeq: row.joined_seq,
     updatedSeq: row.updated_seq,
@@ -315,9 +308,22 @@ export const layer: Layer.Layer<
     const appendPermit = yield* Semaphore.make(1);
     const committed = yield* PubSub.unbounded<StoredCommEvent>();
 
+    // A ledger's name is its project's title. Upstream keeps a soft-deleted project's row, so the
+    // title outlives the delete; a ledger whose project row is gone is named by its id.
+    const selectSquadrons = (projectId: string | null) => sql<SquadronRow>`
+      SELECT
+        ledger.project_id AS id,
+        COALESCE(project.title, ledger.project_id) AS name,
+        ledger.created_at
+      FROM j5_a2a_project_ledger AS ledger
+      LEFT JOIN projection_projects AS project ON project.project_id = ledger.project_id
+      WHERE ${projectId === null ? sql`1 = 1` : sql`ledger.project_id = ${projectId}`}
+      ORDER BY ledger.created_at, ledger.project_id
+    `;
+
     const ensureSquadron = Effect.fn("j5.a2a.ensureSquadron")(function* (squadronId: SquadronId) {
       const rows = yield* sql<{ readonly id: string }>`
-        SELECT id FROM j5_a2a_squadron WHERE id = ${squadronId} LIMIT 1
+        SELECT project_id AS id FROM j5_a2a_project_ledger WHERE project_id = ${squadronId} LIMIT 1
       `;
       if (rows[0] === undefined) {
         return yield* new SquadronNotFoundError({ squadronId });
@@ -345,33 +351,33 @@ export const layer: Layer.Layer<
         if (event.kind !== "participant.joined") return;
         yield* sql`
           INSERT INTO j5_a2a_machine_participant (
-            participant_id, squadron_id, name, joined_seq, created_at
+            participant_id, project_id, name, joined_seq, created_at
           ) VALUES (${id}, ${event.squadronId}, ${participant.name}, ${event.seq}, ${event.createdAt})
           ON CONFLICT(participant_id) DO NOTHING
         `;
         return;
       }
       if (event.kind === "participant.archived" || event.kind === "participant.unarchived") {
-        yield* sql`UPDATE j5_a2a_squadron_membership
+        yield* sql`UPDATE j5_a2a_membership
           SET archived_at = ${event.kind === "participant.archived" ? event.createdAt : null}, updated_seq = ${event.seq}
-          WHERE squadron_id = ${event.squadronId} AND participant_id = ${id}`;
+          WHERE project_id = ${event.squadronId} AND participant_id = ${id}`;
         return;
       }
       if (event.kind === "participant.left" || event.kind === "participant.deleted") {
         if (event.kind === "participant.deleted") {
-          yield* sql`DELETE FROM j5_a2a_participant_placement WHERE squadron_id = ${event.squadronId} AND participant_id = ${id}`;
+          yield* sql`DELETE FROM j5_a2a_participant_placement WHERE project_id = ${event.squadronId} AND participant_id = ${id}`;
         }
         yield* sql`
-          DELETE FROM j5_a2a_squadron_membership
-          WHERE squadron_id = ${event.squadronId} AND participant_id = ${id}
+          DELETE FROM j5_a2a_membership
+          WHERE project_id = ${event.squadronId} AND participant_id = ${id}
         `;
         return;
       }
       const payload = yield* encodeJson(participant);
       const threadId = participant.kind === "agent" ? participant.threadId : null;
       yield* sql`
-        INSERT INTO j5_a2a_squadron_membership (
-          squadron_id,
+        INSERT INTO j5_a2a_membership (
+          project_id,
           participant_id,
           participant_kind,
           thread_id,
@@ -387,11 +393,11 @@ export const layer: Layer.Layer<
           ${event.seq},
           ${payload}
         )
-        ON CONFLICT(squadron_id, participant_id)
+        ON CONFLICT(project_id, participant_id)
         DO UPDATE SET
           participant_kind = excluded.participant_kind,
           thread_id = excluded.thread_id,
-          joined_seq = j5_a2a_squadron_membership.joined_seq,
+          joined_seq = j5_a2a_membership.joined_seq,
           updated_seq = excluded.updated_seq,
           payload = excluded.payload
       `;
@@ -409,7 +415,7 @@ export const layer: Layer.Layer<
           }
           yield* sql`
             INSERT INTO j5_a2a_exchange (
-              squadron_id,
+              project_id,
               exchange_id,
               sender_id,
               receiver_id,
@@ -449,7 +455,7 @@ export const layer: Layer.Layer<
               status = 'closed',
               closed_seq = ${event.seq},
               updated_at = ${event.createdAt}
-            WHERE squadron_id = ${event.squadronId}
+            WHERE project_id = ${event.squadronId}
               AND exchange_id = ${event.exchangeId}
               AND status = 'open'
           `;
@@ -465,7 +471,7 @@ export const layer: Layer.Layer<
               terminal_cause = NULL,
               terminal_facts = NULL,
               terminal_notice_message_id = NULL
-            WHERE squadron_id = ${event.squadronId}
+            WHERE project_id = ${event.squadronId}
               AND exchange_id = ${event.exchangeId}
               AND status = 'open'
           `;
@@ -482,7 +488,7 @@ export const layer: Layer.Layer<
               status = 'dropped',
               closed_seq = ${event.seq},
               updated_at = ${event.createdAt}
-            WHERE squadron_id = ${event.squadronId}
+            WHERE project_id = ${event.squadronId}
               AND exchange_id = ${event.exchangeId}
               AND status = 'open'
             RETURNING exchange_id
@@ -495,15 +501,15 @@ export const layer: Layer.Layer<
           // An undelivered human ask still needs a visible terminal history row.
           // Preserve the original ask rather than treating a no-op transport as notice delivery.
           yield* sql`INSERT INTO j5_a2a_human_inbox (
-            person_id, squadron_id, exchange_id, sender_id, intent, urgency,
+            person_id, project_id, exchange_id, sender_id, intent, urgency,
             latest_message_id, latest_message, opened_seq, opened_at, status)
-            SELECT e.receiver_id, e.squadron_id, e.exchange_id, e.sender_id, e.intent, e.urgency,
+            SELECT e.receiver_id, e.project_id, e.exchange_id, e.sender_id, e.intent, e.urgency,
               d.message_id, d.message_text, e.opened_seq, e.created_at, 'open'
             FROM j5_a2a_exchange e JOIN j5_a2a_delivery d
-              ON d.squadron_id = e.squadron_id AND d.exchange_id = e.exchange_id AND d.exchange_role = 'ask'
-            WHERE e.squadron_id = ${event.squadronId} AND e.exchange_id = ${event.exchangeId}
+              ON d.project_id = e.project_id AND d.exchange_id = e.exchange_id AND d.exchange_role = 'ask'
+            WHERE e.project_id = ${event.squadronId} AND e.exchange_id = ${event.exchangeId}
               AND e.receiver_id LIKE 'human:%'
-            ON CONFLICT(person_id, squadron_id, exchange_id) DO NOTHING`;
+            ON CONFLICT(person_id, project_id, exchange_id) DO NOTHING`;
           // A4 owns this retained projection; the ledger applies its terminal
           // state from the ordinary exchange.dropped fact in the same commit.
           yield* sql`
@@ -516,7 +522,7 @@ export const layer: Layer.Layer<
               terminal_cause = ${terminalCause},
               terminal_facts = ${terminalFacts},
               terminal_notice_message_id = ${dropped.noticeMessageId}
-            WHERE squadron_id = ${event.squadronId}
+            WHERE project_id = ${event.squadronId}
               AND exchange_id = ${event.exchangeId}
               AND status = 'open'
           `;
@@ -534,14 +540,14 @@ export const layer: Layer.Layer<
             sentSeq: event.seq,
             senderId: event.sender,
             receiverId: event.receiver,
-            receiverSquadronId: payload.receiverSquadronId,
+            receiverProjectId: payload.receiverProjectId,
             exchangeId: event.exchangeId,
             exchangeRole: payload.exchangeRole,
             envelopeChannel: payload.envelopeChannel,
             correlationId: event.correlationId,
             messageText: payload.text,
             createdAt: event.createdAt,
-            originSquadronId: null,
+            originProjectId: null,
             originEnvironmentId: null,
             receiverEnvironmentId: payload.receiverEnvironmentId ?? null,
           });
@@ -558,12 +564,12 @@ export const layer: Layer.Layer<
               next_attempt_at = NULL,
               delivered_seq = ${event.seq},
               updated_at = ${event.createdAt}
-            WHERE squadron_id = ${event.squadronId} AND message_id = ${payload.messageId} AND status <> 'cancelled'
+            WHERE project_id = ${event.squadronId} AND message_id = ${payload.messageId} AND status <> 'cancelled'
             RETURNING message_id
           `;
           if (rows[0] === undefined) {
             const cancelled =
-              yield* sql`SELECT 1 FROM j5_a2a_delivery WHERE squadron_id = ${event.squadronId} AND message_id = ${payload.messageId} AND status = 'cancelled'`;
+              yield* sql`SELECT 1 FROM j5_a2a_delivery WHERE project_id = ${event.squadronId} AND message_id = ${payload.messageId} AND status = 'cancelled'`;
             if (cancelled.length === 0)
               return yield* new A2AStorageError({ operation: "project message delivery outcome" });
           }
@@ -579,12 +585,12 @@ export const layer: Layer.Layer<
               last_error = ${payload.error},
               next_attempt_at = ${payload.nextAttemptAt},
               updated_at = ${event.createdAt}
-            WHERE squadron_id = ${event.squadronId} AND message_id = ${payload.messageId} AND status <> 'cancelled'
+            WHERE project_id = ${event.squadronId} AND message_id = ${payload.messageId} AND status <> 'cancelled'
             RETURNING message_id
           `;
           if (rows[0] === undefined) {
             const cancelled =
-              yield* sql`SELECT 1 FROM j5_a2a_delivery WHERE squadron_id = ${event.squadronId} AND message_id = ${payload.messageId} AND status = 'cancelled'`;
+              yield* sql`SELECT 1 FROM j5_a2a_delivery WHERE project_id = ${event.squadronId} AND message_id = ${payload.messageId} AND status = 'cancelled'`;
             if (cancelled.length === 0)
               return yield* new A2AStorageError({ operation: "project message delivery outcome" });
           }
@@ -593,7 +599,7 @@ export const layer: Layer.Layer<
         case "message.cancelled": {
           const payload = yield* decodeMessageCancelled(event.payload);
           yield* sql`UPDATE j5_a2a_delivery SET status = 'cancelled', next_attempt_at = NULL, last_error = ${payload.reason}, updated_at = ${event.createdAt}
-            WHERE squadron_id = ${event.squadronId} AND message_id = ${payload.messageId} AND status <> 'delivered'`;
+            WHERE project_id = ${event.squadronId} AND message_id = ${payload.messageId} AND status <> 'delivered'`;
           return;
         }
         case "message.received": {
@@ -614,14 +620,14 @@ export const layer: Layer.Layer<
             sentSeq: event.seq,
             senderId: event.sender,
             receiverId: event.receiver,
-            receiverSquadronId: event.squadronId,
+            receiverProjectId: event.squadronId,
             exchangeId: event.exchangeId,
             exchangeRole: message.exchangeRole,
             envelopeChannel: message.envelopeChannel,
             correlationId: event.correlationId,
             messageText: message.text,
             createdAt: event.createdAt,
-            originSquadronId: received.originSquadronId,
+            originProjectId: received.originProjectId,
             originEnvironmentId: received.originEnvironmentId,
             receiverEnvironmentId: null,
           });
@@ -642,9 +648,9 @@ export const layer: Layer.Layer<
     ) {
       yield* ensureSquadron(squadronId);
       const rows = yield* sql<MembershipRow>`
-        SELECT squadron_id, joined_seq, updated_seq, payload
-        FROM j5_a2a_squadron_membership
-        WHERE squadron_id = ${squadronId}
+        SELECT project_id, joined_seq, updated_seq, payload
+        FROM j5_a2a_membership
+        WHERE project_id = ${squadronId}
         ORDER BY participant_id
       `;
       return yield* Effect.forEach(rows, membershipFromRow, { concurrency: 1 });
@@ -656,7 +662,7 @@ export const layer: Layer.Layer<
         const rows = yield* sql<{ readonly participant_id: string }>`
         SELECT DISTINCT json_extract(payload, '$.participant.id') AS participant_id
         FROM j5_a2a_comm_event
-        WHERE squadron_id = ${input.squadronId}
+        WHERE project_id = ${input.squadronId}
           AND kind = 'participant.joined'
           AND json_extract(payload, '$.participant.kind') = 'agent'
           AND json_extract(payload, '$.participant.threadId') = ${input.threadId}
@@ -673,7 +679,7 @@ export const layer: Layer.Layer<
       const sequenceRows = yield* sql<{ readonly next_seq: number }>`
             SELECT COALESCE(MAX(seq), 0) + 1 AS next_seq
             FROM j5_a2a_comm_event
-            WHERE squadron_id = ${command.squadronId}
+            WHERE project_id = ${command.squadronId}
           `;
       const firstSeq = sequenceRows[0]?.next_seq;
       if (firstSeq === undefined) {
@@ -683,7 +689,7 @@ export const layer: Layer.Layer<
       const reserved = yield* sql<{ readonly command_id: string }>`
             INSERT INTO j5_a2a_comm_command_receipt (
               command_id,
-              squadron_id,
+              project_id,
               command_type,
               accepted_at,
               result_seq
@@ -700,7 +706,7 @@ export const layer: Layer.Layer<
 
       if (reserved[0] === undefined) {
         const receiptRows = yield* sql<ReceiptRow>`
-              SELECT command_id, squadron_id, command_type, accepted_at, result_seq
+              SELECT command_id, project_id, command_type, accepted_at, result_seq
               FROM j5_a2a_comm_command_receipt
               WHERE command_id = ${command.commandId}
               LIMIT 1
@@ -709,17 +715,17 @@ export const layer: Layer.Layer<
         if (row === undefined) {
           return yield* new A2AStorageError({ operation: "read replayed batch receipt" });
         }
-        if (row.squadron_id !== command.squadronId) {
+        if (row.project_id !== command.squadronId) {
           return yield* new CommCommandConflictError({
             commandId: command.commandId,
             requestedSquadronId: command.squadronId,
-            existingSquadronId: row.squadron_id,
+            existingSquadronId: row.project_id,
           });
         }
         const eventRows = yield* sql<EventRow>`
               SELECT
                 seq,
-                squadron_id,
+                project_id,
                 kind,
                 sender,
                 receiver,
@@ -728,7 +734,7 @@ export const layer: Layer.Layer<
                 payload,
                 created_at
               FROM j5_a2a_comm_event
-              WHERE squadron_id = ${command.squadronId} AND command_id = ${command.commandId}
+              WHERE project_id = ${command.squadronId} AND command_id = ${command.commandId}
               ORDER BY seq
             `;
         if (eventRows.length === 0) {
@@ -748,7 +754,7 @@ export const layer: Layer.Layer<
           candidate.payload.participant.kind === "human"
         ) {
           return yield* new A2AStorageError({
-            operation: "append host-global human as Squadron membership",
+            operation: "append host-global human as project membership",
           });
         }
         const pending = decideAppendCommEvent({
@@ -762,7 +768,7 @@ export const layer: Layer.Layer<
         yield* sql`
               INSERT INTO j5_a2a_comm_event (
                 seq,
-                squadron_id,
+                project_id,
                 kind,
                 sender,
                 receiver,
@@ -852,7 +858,7 @@ export const layer: Layer.Layer<
             const open = yield* sql<{ readonly exchange_id: string }>`
             SELECT exchange_id
             FROM j5_a2a_exchange
-            WHERE squadron_id = ${command.squadronId}
+            WHERE project_id = ${command.squadronId}
               AND exchange_id = ${exchangeId}
               AND status = 'open'
             LIMIT 1
@@ -868,66 +874,26 @@ export const layer: Layer.Layer<
     );
 
     const ledger = A2ALedger.of({
-      createSquadron: (command) =>
+      ensureProject: (command) =>
         Effect.gen(function* () {
           yield* sql`
-            INSERT INTO j5_a2a_squadron (id, name, created_at)
-            VALUES (
-              ${command.squadron.id},
-              ${command.squadron.name},
-              ${command.squadron.createdAt}
-            )
-            ON CONFLICT(id) DO NOTHING
+            INSERT INTO j5_a2a_project_ledger (project_id, created_at)
+            VALUES (${command.projectId}, ${command.createdAt})
+            ON CONFLICT(project_id) DO NOTHING
           `;
-          return yield* squadronFromRow(
-            (yield* sql<SquadronRow>`
-              SELECT id, name, created_at
-              FROM j5_a2a_squadron
-              WHERE id = ${command.squadron.id}
-              LIMIT 1
-            `)[0]!,
-          );
-        }).pipe(Effect.mapError(preserveDomainError("create squadron"))),
+        }).pipe(Effect.mapError(preserveDomainError("ensure project ledger"))),
       listSquadrons: () =>
         Effect.gen(function* () {
-          const rows = yield* sql<SquadronRow>`
-            SELECT id, name, created_at
-            FROM j5_a2a_squadron
-            ORDER BY created_at, id
-          `;
-          return yield* Effect.forEach(rows, squadronFromRow, { concurrency: 1 });
-        }).pipe(Effect.mapError(preserveDomainError("list squadrons"))),
+          return yield* Effect.forEach(yield* selectSquadrons(null), squadronFromRow, {
+            concurrency: 1,
+          });
+        }).pipe(Effect.mapError(preserveDomainError("list project ledgers"))),
       readSquadron: (squadronId) =>
         Effect.gen(function* () {
-          const rows = yield* sql<SquadronRow>`
-            SELECT id, name, created_at
-            FROM j5_a2a_squadron
-            WHERE id = ${squadronId}
-            LIMIT 1
-          `;
-          const row = rows[0];
+          const row = (yield* selectSquadrons(squadronId))[0];
           if (row === undefined) return yield* new SquadronNotFoundError({ squadronId });
           return yield* squadronFromRow(row);
-        }).pipe(Effect.mapError(preserveDomainError("read squadron"))),
-      renameSquadron: (input) =>
-        Effect.gen(function* () {
-          const row = (yield* sql<SquadronRow>`
-            UPDATE j5_a2a_squadron SET name = ${input.name}
-            WHERE id = ${input.squadronId}
-            RETURNING id, name, created_at
-          `)[0];
-          if (row === undefined) {
-            return yield* new SquadronNotFoundError({ squadronId: input.squadronId });
-          }
-          return yield* squadronFromRow(row);
-        }).pipe(Effect.mapError(preserveDomainError("rename squadron"))),
-      deleteSquadron: (squadronId) =>
-        Effect.gen(function* () {
-          const deleted = yield* sql<{ readonly id: string }>`
-            DELETE FROM j5_a2a_squadron WHERE id = ${squadronId} RETURNING id
-          `;
-          if (deleted.length === 0) return yield* new SquadronNotFoundError({ squadronId });
-        }).pipe(Effect.mapError(preserveDomainError("delete squadron"))),
+        }).pipe(Effect.mapError(preserveDomainError("read project ledger"))),
       append: (command) =>
         appendPermit
           .withPermit(
@@ -964,7 +930,7 @@ export const layer: Layer.Layer<
           const highWaterRows = yield* sql<{ readonly high_water: number }>`
             SELECT COALESCE(MAX(seq), 0) AS high_water
             FROM j5_a2a_comm_event
-            WHERE squadron_id = ${squadronId}
+            WHERE project_id = ${squadronId}
           `;
           const highWater = highWaterRows[0]?.high_water ?? 0;
           const snapshotEnd = cursor.snapshotEnd ?? highWater;
@@ -978,7 +944,7 @@ export const layer: Layer.Layer<
           const rows = yield* sql<EventRow>`
             SELECT
               seq,
-              squadron_id,
+              project_id,
               kind,
               sender,
               receiver,
@@ -987,7 +953,7 @@ export const layer: Layer.Layer<
               payload,
               created_at
             FROM j5_a2a_comm_event
-            WHERE squadron_id = ${squadronId}
+            WHERE project_id = ${squadronId}
               AND seq > ${cursor.afterSeq}
               AND seq <= ${snapshotEnd}
             ORDER BY seq
@@ -1017,7 +983,7 @@ export const layer: Layer.Layer<
         }).pipe(Effect.mapError(preserveDomainError("read communication events"))),
       listMembership: (squadronId) =>
         listMembershipEffect(squadronId).pipe(
-          Effect.mapError(preserveDomainError("list squadron membership")),
+          Effect.mapError(preserveDomainError("list project membership")),
         ),
       findHistoricalAgentParticipantId: (input) =>
         findHistoricalAgentParticipantId(input).pipe(
@@ -1029,11 +995,11 @@ export const layer: Layer.Layer<
             sql.withTransaction(
               Effect.gen(function* () {
                 yield* ensureSquadron(squadronId);
-                yield* sql`DELETE FROM j5_a2a_squadron_membership WHERE squadron_id = ${squadronId}`;
+                yield* sql`DELETE FROM j5_a2a_membership WHERE project_id = ${squadronId}`;
                 const rows = yield* sql<EventRow>`
                   SELECT
                     seq,
-                    squadron_id,
+                    project_id,
                     kind,
                     sender,
                     receiver,
@@ -1042,7 +1008,7 @@ export const layer: Layer.Layer<
                     payload,
                     created_at
                   FROM j5_a2a_comm_event
-                  WHERE squadron_id = ${squadronId}
+                  WHERE project_id = ${squadronId}
                     AND kind IN ('participant.joined', 'participant.left', 'participant.archived', 'participant.unarchived', 'participant.deleted')
                   ORDER BY seq
                 `;
@@ -1053,7 +1019,7 @@ export const layer: Layer.Layer<
               }),
             ),
           )
-          .pipe(Effect.mapError(preserveDomainError("rebuild squadron membership"))),
+          .pipe(Effect.mapError(preserveDomainError("rebuild project membership"))),
       subscribeCommitted: PubSub.subscribe(committed).pipe(
         Effect.map((subscription) => Stream.fromSubscription(subscription)),
       ),

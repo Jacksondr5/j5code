@@ -152,9 +152,7 @@ const seed = Effect.fn("test.j5.a2a.peer.store.seed")(function* () {
   yield* runJ5A2AMigrations();
   const ledger = yield* A2ALedger;
   const sql = yield* SqlClient.SqlClient;
-  yield* ledger.createSquadron({
-    squadron: { id: vmSquadron, name: "Billing Migration", createdAt: timestamp },
-  });
+  yield* ledger.ensureProject({ projectId: vmSquadron, createdAt: timestamp });
   yield* ledger.append({
     commandId: CommCommandId.make("command:peer-store:join"),
     squadronId: vmSquadron,
@@ -211,8 +209,8 @@ const store = (
           payload: {
             messageId: LedgerMessageId.make(`message:${name}`),
             text: `${name} text`,
-            originSquadronId: vmSquadron,
-            receiverSquadronId: laptopSquadron,
+            originProjectId: vmSquadron,
+            receiverProjectId: laptopSquadron,
             receiverEnvironmentId: options.environmentId ?? laptop,
             exchangeRole: exchangeId === null ? "none" : "ask",
             envelopeChannel: "peer",
@@ -243,7 +241,7 @@ const archiveBilling = Effect.gen(function* () {
   });
   const sql = yield* SqlClient.SqlClient;
   const membership = yield* sql<{ readonly archived_at: string | null }>`
-    SELECT archived_at FROM j5_a2a_squadron_membership WHERE participant_id = ${billing.id}
+    SELECT archived_at FROM j5_a2a_membership WHERE participant_id = ${billing.id}
   `;
   assert.isNotNull(
     membership[0]?.archived_at ?? null,
@@ -575,8 +573,8 @@ it.effect("bounds a batch by its UTF-8 bytes on the wire and by count, oldest fi
           payload: {
             messageId: LedgerMessageId.make(`message:bytes:${name}`),
             text,
-            originSquadronId: vmSquadron,
-            receiverSquadronId: laptopSquadron,
+            originProjectId: vmSquadron,
+            receiverProjectId: laptopSquadron,
             receiverEnvironmentId: laptop,
             exchangeRole: "none",
             envelopeChannel: "peer",
@@ -622,8 +620,8 @@ it.effect(
             payload: {
               messageId: LedgerMessageId.make(`message:edge:${name}`),
               text,
-              originSquadronId: vmSquadron,
-              receiverSquadronId: laptopSquadron,
+              originProjectId: vmSquadron,
+              receiverProjectId: laptopSquadron,
               receiverEnvironmentId: laptop,
               exchangeRole: "none",
               envelopeChannel: "peer",
@@ -769,8 +767,8 @@ it.effect("delivers a refusal's notice at once, with nothing else to wake the wo
             payload: {
               messageId: LedgerMessageId.make("message:warm-up"),
               text: "warm-up",
-              originSquadronId: vmSquadron,
-              receiverSquadronId: vmSquadron,
+              originProjectId: vmSquadron,
+              receiverProjectId: vmSquadron,
               exchangeRole: "none",
               envelopeChannel: "peer",
             },
@@ -917,8 +915,8 @@ it.effect("hands out and records acks while a slow local delivery holds the drai
             payload: {
               messageId: LedgerMessageId.make("message:slow-local"),
               text: "slow local",
-              originSquadronId: vmSquadron,
-              receiverSquadronId: vmSquadron,
+              originProjectId: vmSquadron,
+              receiverProjectId: vmSquadron,
               exchangeRole: "none",
               envelopeChannel: "peer",
             },

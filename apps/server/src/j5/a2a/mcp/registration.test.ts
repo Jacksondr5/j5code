@@ -19,8 +19,7 @@ import { A2ALedger } from "../LedgerService.ts";
 import { ParticipantPlacementService } from "../PlacementService.ts";
 import { A2ASendService } from "../SendService.ts";
 import { SpawnCompositionService } from "../SpawnCompositionService.ts";
-import { SquadronJoinService } from "../SquadronJoinService.ts";
-import { SquadronProjectReferences } from "../SquadronProjectReferences.ts";
+import { ThreadRegistration } from "../ThreadRegistration.ts";
 import { A2A_SEND_TOOL_DESCRIPTION } from "../EnvelopeFormatter.ts";
 import {
   J5OrchestratorSurfaceRegistrationLive,
@@ -40,8 +39,7 @@ const Dependencies = Layer.mergeAll(
   Layer.mock(A2ASendService)({}),
   Layer.mock(SpawnCompositionService)({}),
   Layer.mock(AgentCrewInstanceService)({}),
-  Layer.mock(SquadronJoinService)({}),
-  Layer.mock(SquadronProjectReferences)({}),
+  Layer.mock(ThreadRegistration)({}),
   Layer.mock(ArchiveCrewService)({}),
   Layer.mock(CrewStopService)({}),
   Layer.mock(CrewProposalService)({}),
@@ -61,11 +59,9 @@ it.effect("registers the exact composed production J5 orchestration surface", ()
       "clear_own_ask",
       "delegate_task",
       "delete_scheduled_task",
-      "join_squadron",
       "list_participants",
       "list_personas",
       "list_scheduled_tasks",
-      "list_squadrons",
       "orchestrator_capabilities",
       "playbook_back",
       "playbook_cancel",

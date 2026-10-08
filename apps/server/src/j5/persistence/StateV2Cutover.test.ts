@@ -46,11 +46,11 @@ const seedPinWithJ5State = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   yield* installPin();
   yield* runJ5A2AMigrations();
-  yield* sql`INSERT INTO j5_a2a_squadron (id, name, created_at)
-    VALUES ('squadron:keep', 'Keep', '2026-09-10T12:00:00Z')`;
+  yield* sql`INSERT INTO j5_a2a_project_ledger (project_id, created_at)
+    VALUES ('project-keep', '2026-09-10T12:00:00Z')`;
   yield* sql`INSERT INTO j5_a2a_exchange
-    (squadron_id, exchange_id, sender_id, receiver_id, status, intent, opened_seq, created_at, updated_at)
-    VALUES ('squadron:keep', 'exchange:keep', 'agent:sender', 'human:receiver', 'open',
+    (project_id, exchange_id, sender_id, receiver_id, status, intent, opened_seq, created_at, updated_at)
+    VALUES ('project-keep', 'exchange:keep', 'agent:sender', 'human:receiver', 'open',
       'Preserve this obligation', 1, '2026-09-10T12:00:00Z', '2026-09-10T12:00:00Z')`;
   return yield* readJ5Rows();
 });
@@ -118,15 +118,15 @@ it.effect("an existing statev2.sqlite wins and state.sqlite is never recopied", 
       yield* boot(baseDir, Effect.void);
       yield* Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
-        yield* sql`INSERT INTO j5_a2a_squadron (id, name, created_at)
-          VALUES ('squadron:v1-only', 'Written by an old binary', '2026-09-24T00:00:00Z')`;
+        yield* sql`INSERT INTO j5_a2a_project_ledger (project_id, created_at)
+          VALUES ('project-v1-only', '2026-09-24T00:00:00Z')`;
       }).pipe(Effect.provide(atFile(sourcePath)));
       yield* boot(
         baseDir,
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient;
           assert.deepStrictEqual(
-            yield* sql`SELECT id FROM j5_a2a_squadron WHERE id = 'squadron:v1-only'`,
+            yield* sql`SELECT project_id FROM j5_a2a_project_ledger WHERE project_id = 'project-v1-only'`,
             [],
           );
         }),

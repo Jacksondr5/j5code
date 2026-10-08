@@ -45,9 +45,7 @@ const makeTestLayer = () => {
 const setup = Effect.fn("test.j5.a2a.machineSend.setup")(function* () {
   yield* runJ5A2AMigrations();
   const ledger = yield* A2ALedger;
-  yield* ledger.createSquadron({
-    squadron: { id: squadronId, name: "Monitoring", createdAt: timestamp },
-  });
+  yield* ledger.ensureProject({ projectId: squadronId, createdAt: timestamp });
   for (const [index, participant] of [agent, watchdog].entries()) {
     yield* ledger.append({
       commandId: CommCommandId.make(`command:join:${String(index)}`),

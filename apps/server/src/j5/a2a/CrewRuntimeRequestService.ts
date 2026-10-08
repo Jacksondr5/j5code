@@ -142,7 +142,7 @@ export const layer = Layer.effect(
                     threadId: entry.threadId,
                     crewInstanceId: entry.crew.id,
                     crewName: entry.crew.displayName,
-                    squadronId: entry.crew.squadronId,
+                    projectId: entry.crew.squadronId,
                     seat: entry.seat,
                     threadTitle: projection.thread.title,
                   })),

@@ -499,7 +499,6 @@ const make = Effect.gen(function* () {
       : launcher
           .launch({
             commandId: lifecycleCommandId({ ...input.stableInput, operation: "spawn-launch" }),
-            squadronId: input.squadronId,
             threadId: input.threadId,
             reuseExistingThread: true,
             projectId: input.projectId,

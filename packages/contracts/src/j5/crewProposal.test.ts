@@ -29,7 +29,7 @@ it("reads a seat workspace it can't decode as absent, keeping the rest of the li
   const seat = { seat: "reviewer", agentId: null, reason: "Review" };
   const proposal = {
     id: "proposal",
-    squadronId: "squadron",
+    projectId: "project",
     captainParticipantId: "captain",
     captainThreadId: "thread",
     crewInstanceId: null,

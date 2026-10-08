@@ -26,8 +26,6 @@ export interface J5RuntimePolicy {
 export const J5_PREAPPROVED_TOOLS: ReadonlyArray<string> = [
   "send_message",
   "list_participants",
-  "list_squadrons",
-  "join_squadron",
   "spawn_agent",
   "list_personas",
   "propose_crew",

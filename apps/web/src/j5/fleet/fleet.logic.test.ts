@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { EnvironmentId, ProjectId } from "@t3tools/contracts";
+import { EnvironmentId } from "@t3tools/contracts";
 
 import { formatCrewStateSummary, summarizeCrewState, type CrewSeatThread } from "../crew/crewState";
 import {
@@ -13,7 +13,6 @@ import {
   partitionFleet,
   playbookRunHeader,
   playbookRunOwnerLabel,
-  resolveFleetRowProject,
   retiredCrews,
 } from "./fleet.logic";
 import type { FleetAgent, FleetCrew, FleetSquadron } from "./fleetClient";
@@ -37,8 +36,8 @@ const seat = (seatName: string, captain: string) => ({
 
 describe("fleet tree", () => {
   const squadron: FleetSquadron = {
-    id: "squadron:alpha",
-    name: "Alpha",
+    id: "project-alpha",
+    title: "Alpha",
     crews: [],
     agents: [
       agent("captain"),
@@ -100,8 +99,8 @@ describe("fleet involvement", () => {
     const environmentId = EnvironmentId.make("env:a");
     const refs = fleetInvolvedThreadRefs([
       {
-        id: "squadron:alpha",
-        name: "Alpha",
+        id: "project-alpha",
+        title: "Alpha",
         crews: [],
         environmentId,
         agents: [
@@ -160,8 +159,8 @@ describe("a Crew's playbook run", () => {
 
   it("rides onto the Captain's Crew group", () => {
     const [captain] = buildFleetTree({
-      id: "squadron:alpha",
-      name: "Alpha",
+      id: "project-alpha",
+      title: "Alpha",
       crews: [{ ...crew("crew:1", null), playbookRun: run }],
       agents: [
         agent("captain"),
@@ -185,10 +184,10 @@ const crew = (id: string, archivedAt: string | null): FleetCrew => ({
 });
 
 describe("retired crews", () => {
-  it("lists archived Crews of every Squadron, newest retirement first, each naming its Squadron", () => {
+  it("lists archived Crews of every project, newest retirement first, each naming its project", () => {
     const alpha: FleetSquadron = {
-      id: "squadron:alpha",
-      name: "Alpha",
+      id: "project-alpha",
+      title: "Alpha",
       agents: [],
       crews: [
         crew("live", null),
@@ -197,13 +196,13 @@ describe("retired crews", () => {
       ],
     };
     const beta: FleetSquadron = {
-      id: "squadron:beta",
-      name: "Beta",
+      id: "project-beta",
+      title: "Beta",
       agents: [],
       crews: [crew("newer", "2026-09-14T12:00:00.000Z")],
     };
     expect(
-      retiredCrews([alpha, beta]).map((entry) => [entry.crew.crewInstanceId, entry.squadron.name]),
+      retiredCrews([alpha, beta]).map((entry) => [entry.crew.crewInstanceId, entry.squadron.title]),
     ).toEqual([
       ["newest", "Alpha"],
       ["newer", "Beta"],
@@ -232,14 +231,14 @@ describe("fleet sections", () => {
     (shells: Record<string, CrewSeatThread | undefined>) => (_: EnvironmentId, threadId: string) =>
       shells[threadId.replace(/^thread:/, "")];
   const squadron = (id: string, agents: ReadonlyArray<FleetAgent>) => ({
-    id: `squadron:${id}`,
-    name: id,
+    id: `project-${id}`,
+    title: id,
     crews: [],
     agents,
     environmentId,
   });
   const roots = (rows: ReturnType<typeof partitionFleet>["active"]) =>
-    rows.map(({ squadron: s, node }) => `${s.name}/${node.row.agent.participantId}`);
+    rows.map(({ squadron: s, node }) => `${s.title}/${node.row.agent.participantId}`);
 
   it("places a settled agent under Settled and an idle or unknown one under Active", () => {
     const sections = partitionFleet(
@@ -311,7 +310,7 @@ describe("fleet sections", () => {
     expect(roots(seatUnknown.active)).toEqual(["Alpha/captain"]);
   });
 
-  it("merges every Squadron in source order and never re-sorts by state", () => {
+  it("merges every project in source order and never re-sorts by state", () => {
     const sections = partitionFleet(
       [
         squadron("Alpha", [agent("a-done"), agent("a-busy")]),
@@ -328,8 +327,8 @@ describe("roster seats without thread facts", () => {
   const environmentId = EnvironmentId.make("env:a");
   // The read carries a never-created seat with no thread, and a recorded seat may not be placed yet.
   const squadron: FleetSquadron = {
-    id: "squadron:roster",
-    name: "Roster",
+    id: "project-roster",
+    title: "Roster",
     crews: [],
     agents: [
       agent("captain"),
@@ -375,7 +374,7 @@ describe("roster seats without thread facts", () => {
 
   it("reads each environment's shells for its own rows when thread ids collide", () => {
     const other = EnvironmentId.make("env:b");
-    const solo = { id: "squadron:solo", name: "Solo", crews: [], agents: [agent("x")] };
+    const solo = { id: "project-solo", title: "Solo", crews: [], agents: [agent("x")] };
     const sections = partitionFleet(
       [
         { ...solo, environmentId },
@@ -392,9 +391,9 @@ describe("roster seats without thread facts", () => {
 describe("fleet rows by project", () => {
   const laptop = EnvironmentId.make("laptop");
   const server = EnvironmentId.make("server");
-  const squadron = (environmentId: EnvironmentId, id: string, name: string) => ({
+  const squadron = (environmentId: EnvironmentId, id: string, title: string) => ({
     id,
-    name,
+    title,
     crews: [],
     agents: [],
     environmentId,
@@ -411,10 +410,10 @@ describe("fleet rows by project", () => {
       crews: [],
     },
   });
-  const zeta = squadron(laptop, "squadron:zeta", "Zeta");
-  const appHere = squadron(laptop, "squadron:app", "App squadron");
-  const appThere = squadron(server, "squadron:app-remote", "App on the server");
-  const orphan = squadron(laptop, "squadron:orphan", "Mango");
+  const zeta = squadron(laptop, "project-zeta", "Zeta");
+  const appHere = squadron(laptop, "project-app", "App here");
+  const appThere = squadron(server, "project-app-remote", "App on the server");
+  const orphan = squadron(laptop, "project-orphan", "Mango");
   const app = { projectKey: "repo:app", displayName: "App" };
   const zebra = { projectKey: "laptop:zebra", displayName: "Zebra" };
   // Both machines' copies of the app resolve to one logical project; `orphan` resolves to none.
@@ -435,61 +434,8 @@ describe("fleet rows by project", () => {
     ).toEqual(["remote-agent", "local-b", "local-a", "lost", "z-agent", "machine"]);
   });
 
-  it("counts logical projects, and an unresolved root by its Squadron", () => {
+  it("counts logical projects, and an unresolved root by its own project id", () => {
     expect(countFleetProjects(rows, projectOf)).toBe(3);
     expect(countFleetProjects([], projectOf)).toBe(0);
-  });
-});
-
-describe("a Fleet row's project", () => {
-  const laptop = EnvironmentId.make("laptop");
-  const app = ProjectId.make("project:app");
-  const docs = ProjectId.make("project:docs");
-  const squadron = { environmentId: laptop, id: "squadron:docs" };
-  const resolve = (
-    row: Pick<FleetAgent, "threadId"> | null,
-    held: Readonly<Record<string, ProjectId>> = { "thread:in-app": app },
-  ) =>
-    resolveFleetRowProject({
-      squadron,
-      agent: row,
-      threadProjectId: (_environmentId, threadId) => held[threadId],
-      ofProject: (_environmentId, projectId) => `project ${projectId}`,
-      ofSquadron: (_environmentId, squadronId) =>
-        squadronId === "squadron:docs" ? `project ${docs}` : undefined,
-    });
-
-  it("uses the thread's own project when the client holds the thread", () => {
-    expect(resolve({ threadId: "thread:in-app" })).toBe(`project ${app}`);
-  });
-
-  it("falls back to the Squadron's project for a machine sender, a retired Crew, or an unheld thread", () => {
-    expect(resolve({ threadId: null })).toBe(`project ${docs}`);
-    expect(resolve(null)).toBe(`project ${docs}`);
-    expect(resolve({ threadId: "thread:not-held" })).toBe(`project ${docs}`);
-  });
-
-  it("falls back to the Squadron's project when the thread's project is not a known project", () => {
-    expect(
-      resolveFleetRowProject({
-        squadron,
-        agent: { threadId: "thread:in-app" },
-        threadProjectId: () => app,
-        ofProject: () => undefined,
-        ofSquadron: () => "squadron project",
-      }),
-    ).toBe("squadron project");
-  });
-
-  it("resolves to nothing when neither the thread nor the Squadron names a project", () => {
-    expect(
-      resolveFleetRowProject({
-        squadron: { environmentId: laptop, id: "squadron:unknown" },
-        agent: null,
-        threadProjectId: () => undefined,
-        ofProject: () => undefined,
-        ofSquadron: () => undefined,
-      }),
-    ).toBeUndefined();
   });
 });

@@ -11,9 +11,15 @@ import * as Path from "effect/Path";
 import * as Scope from "effect/Scope";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
+import { makeSqlitePersistenceLive } from "../../persistence/Layers/Sqlite.ts";
 import { runMigrations } from "../../persistence/Migrations.ts";
-import { J5_A2A_MIGRATIONS_TABLE, runJ5A2AMigrations } from "../a2a/Migrations.ts";
 import {
+  J5_A2A_MIGRATIONS_TABLE,
+  migrationEntries,
+  runJ5A2AMigrations,
+} from "../a2a/Migrations.ts";
+import {
+  J5_LEDGER_SNAPSHOT_MIGRATIONS,
   LedgerMigrationSnapshotError,
   ledgerMigrationSnapshotPath,
   snapshotBeforeJ5LedgerMigration,
@@ -33,7 +39,7 @@ const withDatabasePath = <A, E>(
     return yield* body({ dbPath, snapshotPath: ledgerMigrationSnapshotPath(path, dbPath, 30) });
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
 
-/** No shipped migration is guarded, so these tests guard 030 themselves. */
+/** These tests guard 030 themselves, so they do not move when the shipped list does. */
 const guarding030 = { guardedMigrationIds: [30] };
 
 /** A database with a J5 ledger whose latest applied migration is `latestApplied`. */
@@ -112,14 +118,41 @@ it.effect("snapshots once, before migration 030, and not again after it applied"
   ),
 );
 
-it.effect("takes no snapshot before migration 030 with the shipped guarded list", () =>
+// The real startup path, the real migrations and the shipped guarded list: nothing is a stand-in.
+it.effect("startup snapshots the database before the ledger re-keys to projects", () =>
   withDatabasePath(({ dbPath }) =>
     Effect.gen(function* () {
       const path = yield* Path.Path;
-      createLedgerDatabase(dbPath, 29);
-      // 030 is pending and is the newest migration this build knows.
-      yield* snapshotBeforeJ5LedgerMigration(dbPath, { migrationIds: [29, 30] });
-      assert.deepStrictEqual(NodeFS.readdirSync(path.dirname(dbPath)), ["statev2.sqlite"]);
+      const rekey = migrationEntries.find(([, name]) => name === "LedgerRekeysToProjects")![0];
+      assert.deepStrictEqual(J5_LEDGER_SNAPSHOT_MIGRATIONS, [rekey]);
+      const snapshotPath = ledgerMigrationSnapshotPath(path, dbPath, rekey);
+      yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* runMigrations();
+        yield* runJ5A2AMigrations({ toMigrationInclusive: rekey - 1 });
+        yield* sql`INSERT INTO j5_a2a_squadron (id, name, created_at)
+          VALUES ('squadron:keep', 'Keep', '2026-09-10T12:00:00Z')`;
+        yield* sql`INSERT INTO j5_a2a_squadron_project_reference
+          (squadron_id, project_id, ordinal, created_at)
+          VALUES ('squadron:keep', 'project-keep', 0, '2026-09-10T12:00:00Z')`;
+      }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: dbPath })));
+      const beforeMigration = readContent(dbPath);
+
+      const migrated = yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        return {
+          ledgers: yield* sql`SELECT project_id FROM j5_a2a_project_ledger`,
+          applied: yield* sql`
+            SELECT migration_id FROM ${sql(J5_A2A_MIGRATIONS_TABLE)} WHERE migration_id = ${rekey}
+          `,
+        };
+      }).pipe(Effect.provide(makeSqlitePersistenceLive(dbPath)));
+
+      // The live database was migrated; the copy beside it is the database as it was.
+      assert.deepStrictEqual(migrated.ledgers, [{ project_id: "project-keep" }]);
+      assert.deepStrictEqual(migrated.applied, [{ migration_id: rekey }]);
+      assert.deepStrictEqual(readContent(snapshotPath), beforeMigration);
+      assert.lengthOf(readContent(snapshotPath)["j5_a2a_squadron"] ?? [], 1);
     }),
   ),
 );

@@ -48,18 +48,6 @@ import { makeProviderRegistryLayer } from "../provider/testUtils/providerRegistr
 import * as ServerSettings from "../serverSettings.ts";
 import * as ScheduledTasks from "../scheduledTasks/ScheduledTaskService.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
-import { layer as homeRegistrarLayer } from "../j5/a2a/HomeRegistrar.ts";
-import { A2ALedger, layer as a2aLedgerLayer } from "../j5/a2a/LedgerService.ts";
-import {
-  SquadronProjectReferences,
-  layer as squadronProjectReferencesLayer,
-} from "../j5/a2a/SquadronProjectReferences.ts";
-import {
-  SquadronThreadCreationAmbiguousProjectError,
-  SquadronThreadCreationService,
-  layer as squadronThreadCreationServiceLayer,
-} from "../j5/a2a/SquadronThreadCreationService.ts";
-import { SquadronId } from "../j5/a2a/contracts.ts";
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import * as CommandReceiptStore from "./CommandReceiptStore.ts";
 import * as EffectOutbox from "./EffectOutbox.ts";
@@ -115,10 +103,6 @@ interface HarnessOptions {
   readonly generateBranchName?: TextGeneration.TextGeneration["Service"]["generateBranchName"];
   readonly serverSettings?: Parameters<typeof ServerSettings.layerTest>[0];
   readonly providers?: ReadonlyArray<ServerProvider>;
-  readonly registerAtDurableLaunch?: SquadronThreadCreationService["Service"]["registerAtDurableLaunch"];
-  readonly findRegisteredHome?: SquadronThreadCreationService["Service"]["findRegisteredHome"];
-  /** J5: run launches against the real Squadron registration over the harness database. */
-  readonly realSquadronRegistration?: boolean;
 }
 
 function makeHarness(options: HarnessOptions = {}) {
@@ -210,39 +194,8 @@ function makeHarness(options: HarnessOptions = {}) {
           : Option.none(),
       ),
   });
-  const squadronLedger = a2aLedgerLayer.pipe(Layer.provide(database));
-  const squadronReferences = squadronProjectReferencesLayer.pipe(Layer.provide(database));
-  const squadronCreation =
-    options.realSquadronRegistration === true
-      ? squadronThreadCreationServiceLayer.pipe(
-          Layer.provide(
-            homeRegistrarLayer.pipe(Layer.provide(squadronLedger), Layer.provide(database)),
-          ),
-          Layer.provide(squadronLedger),
-          Layer.provide(squadronReferences),
-          Layer.provide(projectedProjects),
-          Layer.provide(database),
-        )
-      : Layer.mock(SquadronThreadCreationService)({
-          registerAtDurableLaunch:
-            options.registerAtDurableLaunch ??
-            (() =>
-              Effect.succeed({
-                squadronId: "squadron:launch-test" as never,
-                participantId: "agent:launch-test" as never,
-              })),
-          findRegisteredHome: options.findRegisteredHome ?? (() => Effect.succeed(null)),
-        });
   const launch = ThreadLaunch.layer.pipe(
-    Layer.provide(
-      Layer.mergeAll(
-        externalServices,
-        threadManagement,
-        receipts,
-        IdAllocator.layer,
-        squadronCreation,
-      ),
-    ),
+    Layer.provide(Layer.mergeAll(externalServices, threadManagement, receipts, IdAllocator.layer)),
   );
   const titleRegeneration = ThreadTitleRegeneration.layer.pipe(
     Layer.provide(Layer.mergeAll(threadManagement, projectedProjects, externalServices)),
@@ -255,9 +208,6 @@ function makeHarness(options: HarnessOptions = {}) {
       outbox,
       database,
       externalServices,
-      squadronLedger,
-      squadronReferences,
-      squadronCreation,
     ),
     createWorktree,
     renameBranch,
@@ -272,13 +222,9 @@ function launchInput(input: {
   readonly thread: string;
   readonly message?: string;
   readonly workspace?: ThreadLaunch.ThreadLaunchWorkspaceStrategy;
-  readonly squadronId?: string | null;
 }) {
   return {
     commandId: CommandId.make(input.command),
-    ...(input.squadronId === null
-      ? {}
-      : { squadronId: input.squadronId ?? "squadron:launch-test" }),
     threadId: ThreadId.make(input.thread),
     projectId,
     title: "New thread",
@@ -314,258 +260,6 @@ function waitUntil<E, R>(predicate: () => Effect.Effect<boolean, E, R>): Effect.
     assert.fail("Condition was not reached before timeout.");
   });
 }
-
-it.effect("keeps a durable named thread when its Squadron registration is refused", () => {
-  let setupCalls = 0;
-  const harness = makeHarness({
-    runSetup: () =>
-      Effect.sync(() => {
-        setupCalls += 1;
-        return { status: "no-script" as const };
-      }),
-    registerAtDurableLaunch: (input) =>
-      input.squadronId === undefined
-        ? Effect.fail(
-            new SquadronThreadCreationAmbiguousProjectError({
-              commandId: input.commandId,
-              projectId: input.projectId,
-              squadronIds: ["squadron:first", "squadron:second"],
-            }),
-          )
-        : Effect.die("test expected no Squadron"),
-  });
-  return Effect.gen(function* () {
-    const launches = yield* ThreadLaunch.ThreadLaunchService;
-    const threads = yield* ThreadManagement.ThreadManagementService;
-    const launch = launchInput({
-      command: "command:launch:missing-squadron",
-      thread: "thread:launch:missing-squadron",
-      message: "Must not prepare",
-      workspace: { type: "worktree", baseRef: "main" },
-      squadronId: null,
-    });
-
-    const error = yield* launches.launch(launch).pipe(Effect.flip);
-    assert.instanceOf(error, ThreadLaunch.ThreadLaunchError);
-    assert.equal(error.operation, "register-squadron");
-    assert.equal(error.threadId, launch.threadId);
-    assert.match(error.message, /durable thread was not deleted/i);
-
-    const durable = yield* threads.getThreadProjection(launch.threadId);
-    assert.equal(durable.thread.id, launch.threadId);
-    assert.equal(durable.runs[0]?.status, "failed");
-    assert.equal(setupCalls, 0);
-  }).pipe(Effect.provide(harness.layer));
-});
-
-it.effect("replays the identical registration command after durable thread creation", () => {
-  const registrations: Array<{
-    readonly squadronId?: string;
-    readonly threadId: ThreadId;
-    readonly commandId: CommandId;
-    readonly createdAt: string;
-  }> = [];
-  const harness = makeHarness({
-    registerAtDurableLaunch: (input) => {
-      registrations.push(input);
-      return Effect.succeed({
-        squadronId: "squadron:launch-test" as never,
-        participantId: "agent:launch-test" as never,
-      });
-    },
-  });
-  return Effect.gen(function* () {
-    const launches = yield* ThreadLaunch.ThreadLaunchService;
-    const launch = launchInput({
-      command: "command:launch:registration-replay",
-      thread: "thread:launch:registration-replay",
-    });
-    yield* launches.launch(launch);
-    yield* launches.launch(launch);
-
-    assert.lengthOf(registrations, 2);
-    assert.deepStrictEqual(registrations[1], registrations[0]);
-    assert.equal(registrations[0]?.threadId, launch.threadId);
-  }).pipe(Effect.provide(harness.layer));
-});
-
-it.effect("inherits the Registrar home from a proposed-plan parent at durable launch", () => {
-  const registrations: Array<{ readonly squadronId?: string }> = [];
-  const harness = makeHarness({
-    findRegisteredHome: () =>
-      Effect.succeed({
-        squadronId: "squadron:parent-home" as never,
-        participantId: "agent:parent" as never,
-      }),
-    registerAtDurableLaunch: (input) => {
-      registrations.push(input);
-      return Effect.succeed({
-        squadronId: "squadron:parent-home" as never,
-        participantId: "agent:child" as never,
-      });
-    },
-  });
-  return Effect.gen(function* () {
-    const launches = yield* ThreadLaunch.ThreadLaunchService;
-    yield* launches.launch({
-      ...launchInput({
-        command: "command:launch:plan-home",
-        thread: "thread:launch:plan-home",
-        squadronId: null,
-      }),
-      sourcePlanRef: {
-        threadId: ThreadId.make("thread:launch:parent"),
-        planId: "plan:launch:parent" as never,
-      },
-    });
-    assert.deepStrictEqual(
-      registrations.map((registration) => registration.squadronId),
-      ["squadron:parent-home"],
-    );
-  }).pipe(Effect.provide(harness.layer));
-});
-
-it.effect("registers a plan child in its parent's Squadron over the one the launch sent", () => {
-  const registrations: Array<{ readonly squadronId?: string }> = [];
-  const harness = makeHarness({
-    findRegisteredHome: () =>
-      Effect.succeed({
-        squadronId: "squadron:parent-home" as never,
-        participantId: "agent:parent" as never,
-      }),
-    registerAtDurableLaunch: (input) => {
-      registrations.push(input);
-      return Effect.succeed({
-        squadronId: "squadron:parent-home" as never,
-        participantId: "agent:child" as never,
-      });
-    },
-  });
-  return Effect.gen(function* () {
-    const launches = yield* ThreadLaunch.ThreadLaunchService;
-    yield* launches.launch({
-      ...launchInput({
-        command: "command:launch:plan-home-over-sent",
-        thread: "thread:launch:plan-home-over-sent",
-        squadronId: "squadron:sent",
-      }),
-      sourcePlanRef: {
-        threadId: ThreadId.make("thread:launch:parent"),
-        planId: "plan:launch:parent" as never,
-      },
-    });
-    assert.deepStrictEqual(
-      registrations.map((registration) => registration.squadronId),
-      ["squadron:parent-home"],
-    );
-  }).pipe(Effect.provide(harness.layer));
-});
-
-it.effect("keeps a proposed-plan child of a no-home legacy parent native", () => {
-  const harness = makeHarness({
-    registerAtDurableLaunch: () => Effect.die("legacy no-home child must not register"),
-  });
-  return Effect.gen(function* () {
-    const launches = yield* ThreadLaunch.ThreadLaunchService;
-    const launched = yield* launches.launch({
-      ...launchInput({
-        command: "command:launch:legacy-plan",
-        thread: "thread:launch:legacy-plan",
-        squadronId: null,
-      }),
-      sourcePlanRef: {
-        threadId: ThreadId.make("thread:launch:legacy-parent"),
-        planId: "plan:launch:legacy-parent" as never,
-      },
-    });
-    assert.equal(launched.threadId, ThreadId.make("thread:launch:legacy-plan"));
-  }).pipe(Effect.provide(harness.layer));
-});
-
-const scheduledNewThreadTask = {
-  title: "Daily audit",
-  prompt: "Audit performance and crashes.",
-  enabled: false,
-  schedule: { type: "interval", everyMs: 60_000 },
-  projectId,
-  threadId: null,
-  workspaceStrategy: { type: "root" },
-  modelSelection,
-  runtimeMode: "full-access",
-  interactionMode: "default",
-} as const;
-
-const scheduledTasksOver = (harness: ReturnType<typeof makeHarness>) =>
-  ScheduledTasks.layer.pipe(
-    Layer.provide(Layer.mergeAll(harness.layer, NodeCrypto.layer, Scheduler.layer)),
-  );
-
-it.effect("a scheduled new-thread run creates its project's Squadron and registers there", () => {
-  const harness = makeHarness({ realSquadronRegistration: true });
-  return Effect.gen(function* () {
-    const tasks = yield* ScheduledTasks.ScheduledTaskService;
-    const threads = yield* ThreadManagement.ThreadManagementService;
-    const ledger = yield* A2ALedger;
-    const references = yield* SquadronProjectReferences;
-    const creation = yield* SquadronThreadCreationService;
-
-    const { task } = yield* tasks.upsert(scheduledNewThreadTask);
-    const first = yield* tasks.runNow({ id: task.id });
-    yield* TestClock.adjust(1);
-    const second = yield* tasks.runNow({ id: task.id });
-
-    assert.deepEqual(
-      [first.task.lastRunStatus, second.task.lastRunStatus],
-      ["succeeded", "succeeded"],
-    );
-    const squadrons = yield* ledger.listSquadrons();
-    assert.deepEqual(
-      squadrons.map((squadron) => squadron.name),
-      [project.title],
-    );
-    assert.lengthOf(yield* references.listForProject(projectId), 1);
-    const launched = yield* threads.listProjectThreads({ projectId, includeSubagents: false });
-    assert.lengthOf(launched, 2);
-    for (const thread of launched) {
-      const home = yield* creation.findRegisteredHome(thread.id);
-      assert.equal(home?.squadronId, squadrons[0]?.id);
-    }
-  }).pipe(Effect.provide(Layer.mergeAll(scheduledTasksOver(harness), harness.layer)));
-});
-
-it.effect(
-  "a scheduled new-thread run is refused before a thread exists when Squadrons share its project",
-  () => {
-    const harness = makeHarness({ realSquadronRegistration: true });
-    return Effect.gen(function* () {
-      const tasks = yield* ScheduledTasks.ScheduledTaskService;
-      const threads = yield* ThreadManagement.ThreadManagementService;
-      const ledger = yield* A2ALedger;
-      const references = yield* SquadronProjectReferences;
-      const createdAt = "2026-10-03T00:00:00.000Z";
-      for (const name of ["first", "second"]) {
-        const id = SquadronId.make(`squadron:scheduled:${name}`);
-        yield* ledger.createSquadron({ squadron: { id, name, createdAt } });
-        yield* references.replaceForSquadron({
-          squadronId: id,
-          projectIds: [projectId],
-          createdAt,
-        });
-      }
-
-      const { task } = yield* tasks.upsert(scheduledNewThreadTask);
-      const result = yield* tasks.runNow({ id: task.id });
-
-      assert.equal(result.task.lastRunStatus, "failed");
-      assert.match(result.task.lastRunError ?? "", /shared by 2 Squadrons/);
-      assert.include(result.task.lastRunError ?? "", projectId);
-      assert.deepEqual(
-        yield* threads.listProjectThreads({ projectId, includeSubagents: false }),
-        [],
-      );
-    }).pipe(Effect.provide(Layer.mergeAll(scheduledTasksOver(harness), harness.layer)));
-  },
-);
 
 for (const target of ["new", "existing"] as const) {
   for (const createdBy of ["user", "agent"] as const) {

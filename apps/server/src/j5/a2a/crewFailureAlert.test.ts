@@ -26,6 +26,7 @@ import { A2AHumanInbox, layer as humanInboxLayer } from "./HumanInboxService.ts"
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { noneLayer as peerDirectoryNoneLayer } from "./PeerDirectory.ts";
 import { PeerRegistryService } from "./PeerRegistryService.ts";
+import { runMigrations } from "../../persistence/Migrations.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import { A2ASendService, layer as sendLayer } from "./SendService.ts";
 import {
@@ -87,11 +88,12 @@ const makeTestLayer = (
 
 /** A Squadron holding the Captain, with the local person registered. */
 const seed = Effect.gen(function* () {
+  yield* runMigrations();
   yield* runJ5A2AMigrations();
   const sql = yield* SqlClient.SqlClient;
   const ledger = yield* A2ALedger;
   yield* sql`INSERT INTO j5_a2a_human_person (person_id, is_local_operator, created_at) VALUES (${person.id}, 1, ${at})`;
-  yield* ledger.createSquadron({ squadron: { id: squadronId, name: "Alerts", createdAt: at } });
+  yield* ledger.ensureProject({ projectId: squadronId, createdAt: at });
   yield* ledger.appendEvents({
     commandId: CommCommandId.make("join:alerts"),
     squadronId,

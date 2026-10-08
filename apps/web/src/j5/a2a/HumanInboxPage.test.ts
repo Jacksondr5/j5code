@@ -42,8 +42,8 @@ it("clears pending state when answer attempt id generation fails", async () => {
   const item = {
     environmentId: EnvironmentId.make("remote"),
     personId: "human:local-operator",
-    squadronId: "squadron:answer-test",
-    squadronName: "Answer test",
+    projectId: "project:answer-test",
+    projectTitle: "Answer test",
     exchangeId: "exchange:answer-test",
     senderId: "agent:answer-test",
     senderThreadId: "thread:answer-test",
@@ -88,8 +88,8 @@ it("reports a stale inbox without treating a delivered answer as failed", async 
   const item = {
     environmentId: EnvironmentId.make("remote"),
     personId: "human:local-operator",
-    squadronId: "squadron:refresh-test",
-    squadronName: "Refresh test",
+    projectId: "project:refresh-test",
+    projectTitle: "Refresh test",
     exchangeId: "exchange:refresh-test",
     senderId: "agent:refresh-test",
     senderThreadId: "thread:refresh-test",
@@ -139,8 +139,8 @@ it("retries an uncertain answer on its original server with the same request id 
   const item = {
     environmentId: EnvironmentId.make("remote"),
     personId: "human:remote",
-    squadronId: "squadron:shared",
-    squadronName: "Shared",
+    projectId: "project:shared",
+    projectTitle: "Shared",
     exchangeId: "exchange:shared",
     senderId: "agent:sender",
     senderThreadId: "thread:shared",

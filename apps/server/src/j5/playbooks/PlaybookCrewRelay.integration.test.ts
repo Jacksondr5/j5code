@@ -192,9 +192,7 @@ it.layer(TestLayer)("Crew playbook hand-off through the real orchestrator", (it)
           branch: null,
           worktreePath: null,
         });
-      yield* (yield* A2ALedger).createSquadron({
-        squadron: { id: squadronId, name: "Playbook relay", createdAt: now },
-      });
+      yield* (yield* A2ALedger).ensureProject({ projectId: squadronId, createdAt: now });
       yield* crews.record({
         id: "crew:playbook-relay",
         squadronId,

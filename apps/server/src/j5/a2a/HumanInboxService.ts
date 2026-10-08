@@ -52,7 +52,7 @@ export type A2AHumanInboxError =
 
 interface InboxRow {
   readonly person_id: string;
-  readonly squadron_id: string;
+  readonly project_id: string;
   readonly squadron_name: string;
   readonly exchange_id: string;
   readonly sender_id: string;
@@ -66,7 +66,7 @@ interface InboxRow {
 }
 
 interface ExchangeRow {
-  readonly squadron_id: string;
+  readonly project_id: string;
   readonly exchange_id: string;
   readonly sender_id: string;
   readonly receiver_id: string;
@@ -74,7 +74,7 @@ interface ExchangeRow {
 }
 
 interface ExistingReplyRow {
-  readonly squadron_id: string;
+  readonly project_id: string;
   readonly sent_seq: number;
 }
 
@@ -129,8 +129,8 @@ export const layer: Layer.Layer<A2AHumanInbox, never, A2ALedger | SqlClient.SqlC
           const rows = yield* sql<InboxRow>`
             SELECT
               exchange.receiver_id AS person_id,
-              exchange.squadron_id,
-              squadron.name AS squadron_name,
+              exchange.project_id,
+              COALESCE(project.title, squadron.project_id) AS squadron_name,
               exchange.exchange_id,
               exchange.sender_id,
               membership.thread_id AS sender_thread_id,
@@ -141,12 +141,13 @@ export const layer: Layer.Layer<A2AHumanInbox, never, A2ALedger | SqlClient.SqlC
               inbox.status,
               inbox.terminal_at
             FROM j5_a2a_human_inbox AS inbox
-            JOIN j5_a2a_squadron AS squadron ON squadron.id = inbox.squadron_id
+            JOIN j5_a2a_project_ledger AS squadron ON squadron.project_id = inbox.project_id
+            LEFT JOIN projection_projects AS project ON project.project_id = inbox.project_id
             JOIN j5_a2a_exchange AS exchange
-              ON exchange.squadron_id = inbox.squadron_id
+              ON exchange.project_id = inbox.project_id
              AND exchange.exchange_id = inbox.exchange_id
-            LEFT JOIN j5_a2a_squadron_membership AS membership
-              ON membership.squadron_id = inbox.squadron_id
+            LEFT JOIN j5_a2a_membership AS membership
+              ON membership.project_id = inbox.project_id
              AND membership.participant_id = inbox.sender_id
             WHERE (
                 (${status} = 'open' AND inbox.status = 'open' AND exchange.status = 'open')
@@ -165,15 +166,15 @@ export const layer: Layer.Layer<A2AHumanInbox, never, A2ALedger | SqlClient.SqlC
               END,
               CASE WHEN ${status} = 'open' THEN inbox.opened_at END,
               CASE WHEN ${status} = 'answered' THEN inbox.terminal_at END DESC,
-              inbox.squadron_id,
+              inbox.project_id,
               inbox.exchange_id
           `;
           return rows.map(
             (row) =>
               ({
                 personId: ParticipantId.make(row.person_id),
-                squadronId: SquadronId.make(row.squadron_id),
-                squadronName: row.squadron_name,
+                projectId: SquadronId.make(row.project_id),
+                projectTitle: row.squadron_name,
                 exchangeId: ExchangeId.make(row.exchange_id),
                 senderId: ParticipantId.make(row.sender_id),
                 senderThreadId:
@@ -196,7 +197,7 @@ export const layer: Layer.Layer<A2AHumanInbox, never, A2ALedger | SqlClient.SqlC
           }
           const messageId = messageIdFor(input.commandId);
           const replay = yield* sql<ExistingReplyRow>`
-            SELECT squadron_id, sent_seq
+            SELECT project_id, sent_seq
             FROM j5_a2a_delivery
             WHERE message_id = ${messageId}
               AND sender_id = ${input.personId}
@@ -215,7 +216,7 @@ export const layer: Layer.Layer<A2AHumanInbox, never, A2ALedger | SqlClient.SqlC
           }
 
           const exchanges = yield* sql<ExchangeRow>`
-            SELECT squadron_id, exchange_id, sender_id, receiver_id, status
+            SELECT project_id, exchange_id, sender_id, receiver_id, status
             FROM j5_a2a_exchange
             WHERE exchange_id = ${input.exchangeId}
               AND receiver_id = ${input.personId}
@@ -237,7 +238,7 @@ export const layer: Layer.Layer<A2AHumanInbox, never, A2ALedger | SqlClient.SqlC
             return yield* new A2AExchangeAlreadyAnsweredError({ exchangeId: input.exchangeId });
           }
 
-          const squadronId = SquadronId.make(exchange.squadron_id);
+          const squadronId = SquadronId.make(exchange.project_id);
           const senderId = ParticipantId.make(exchange.sender_id);
           const correlationId = correlationIdFor(input.commandId);
           const events: ReadonlyArray<CommEvent> = [
@@ -250,8 +251,8 @@ export const layer: Layer.Layer<A2AHumanInbox, never, A2ALedger | SqlClient.SqlC
               payload: {
                 messageId,
                 text: input.message,
-                originSquadronId: squadronId,
-                receiverSquadronId: squadronId,
+                originProjectId: squadronId,
+                receiverProjectId: squadronId,
                 exchangeRole: "reply",
                 envelopeChannel: "peer",
               },

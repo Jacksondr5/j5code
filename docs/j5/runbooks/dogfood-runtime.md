@@ -334,8 +334,8 @@ started (build failure), skip the restore and just rebuild at the previous commi
 
 ### Restoring the automatic pre-migration snapshot
 
-Some J5 ledger migrations rewrite data that cannot be rebuilt by hand. No migration is guarded this
-way yet; the ledger re-key will be the first. Before a guarded one runs, the server copies the
+Some J5 ledger migrations rewrite data that cannot be rebuilt by hand. The first is the one that re-keys
+the ledger from Squadrons to projects. Before a guarded one runs, the server copies the
 database to `userdata/statev2.pre-j5-<migration>.sqlite`, where `<migration>` is the migration's
 three-digit number, and logs the path, the size and how long it took. It does this on its own at startup, whether or not the update
 script ran. If the copy fails (a full disk, for instance) the server refuses to start and the
@@ -360,6 +360,50 @@ again. Everything written after the snapshot is lost, as with any restore.
 Nothing deletes these snapshots, and each is a full copy of the database. Delete
 `statev2.pre-j5-*.sqlite` by hand once the new version has proven itself. A file ending in
 `.partial` is a copy that was interrupted; delete it too.
+
+### A project shared by several Squadrons
+
+The migration that retires Squadrons moves each Squadron's ledger to the project that Squadron
+referenced. It cannot do
+that when two Squadrons referenced the same project, so the server refuses to start and logs the
+project and the Squadrons by name:
+
+```text
+Cannot retire Squadrons: project "<title>" (<project id>) is shared by Squadrons "<name>" (<squadron id>) and "<name>" (<squadron id>). Nothing was changed.
+```
+
+Nothing was changed: the database is as it was before the start. The app has had no way to create
+this state since Create Squadron was removed, so it is rare. To repair it, one of the Squadrons has
+to go, and only the previous version can remove one:
+
+1. **Run the previous version.** Check out and build the commit before this update, as in
+   [Rollback](#rollback), and start the service. No restore is needed. The snapshot the failed start
+   wrote (`statev2.pre-j5-<migration>.sqlite`) can stay; the next start replaces it.
+2. **Choose the Squadron to remove.** Its agents keep their threads and conversations, but its
+   agent-to-agent history (messages, Exchanges, Inbox items) is deleted with it.
+3. **Archive that Squadron's agents and Crews** in the app. The delete below refuses while any is
+   still live, and says which.
+4. **Delete the Squadron** on the server host:
+
+   ```sh
+   TOKEN=$(j5 auth session issue --ttl 10m --token-only)
+   curl -sS -X POST -H "Authorization: Bearer $TOKEN" \
+     "http://127.0.0.1:5773/api/j5/squadrons/$(jq -rn --arg id '<squadron id>' '$id|@uri')/delete"
+   ```
+
+   The id has a colon in it, which is why it is encoded. A `{"deleted":true,...}` reply means it is
+   gone.
+
+5. **Update again.** The migration now runs.
+
+To check for this before updating, read-only:
+
+```sql
+SELECT project_id, COUNT(*) AS squadrons
+FROM j5_a2a_squadron_project_reference GROUP BY project_id HAVING COUNT(*) > 1;
+```
+
+No rows means the migration will not refuse for this reason.
 
 ## Backups
 

@@ -35,7 +35,7 @@ function message(input: Partial<ChatMessage> = {}): ChatMessage {
 }
 
 const peerRaw = [
-  "[Cross-agent message from agent:delivery-sender in squadron squadron:alpha]",
+  "[Cross-agent message from agent:delivery-sender in project project-alpha (Alpha)]",
   "",
   "Please verify the worker.",
   "",
@@ -43,7 +43,7 @@ const peerRaw = [
 ].join("\n");
 
 const peerPlainRaw = [
-  "[Cross-agent message from agent:delivery-sender in squadron squadron:alpha]",
+  "[Cross-agent message from agent:delivery-sender in project project-alpha (Alpha)]",
   "",
   "Nothing further is needed.",
   "",
@@ -54,7 +54,7 @@ const closedInstruction =
   "The platform closed this exchange when this reply was sent. No further reply is required.";
 
 const peerClosedRaw = [
-  "[Cross-agent message from agent:delivery-sender in squadron squadron:alpha]",
+  "[Cross-agent message from agent:delivery-sender in project project-alpha (Alpha)]",
   "",
   "Peer reply delivered verbatim.",
   "",
@@ -106,7 +106,6 @@ describe("ThreadA2ADeliveryRenderer", () => {
       kind: "peer",
       senderId: "agent:delivery-sender",
       senderLabel: "Alice",
-      squadronId: "squadron:alpha",
       body: "Please verify the worker.",
       exchange: "expects-reply",
       exchangeId: "exchange:one",
@@ -119,7 +118,7 @@ describe("ThreadA2ADeliveryRenderer", () => {
     expect(markup).toContain(">5m<");
     expect(markup).toContain('dateTime="2026-08-29T12:00:00.000Z"');
     expect(markup).toContain("line-clamp-2");
-    expect(markup).not.toContain("squadron:alpha");
+    expect(markup).not.toContain("project-alpha");
     expect(markup).not.toContain("exchange:one");
     expect(markup).not.toContain("Show raw envelope");
     expect(parsed?.rawEnvelope).toBe(peerRaw);
@@ -419,7 +418,7 @@ describe("ThreadA2ADeliveryRenderer", () => {
 
   it("raw-renders a future or malformed delivery instead of hiding it", () => {
     const raw =
-      "[Cross-agent message from agent:delivery-sender in squadron squadron:alpha]\n\nFuture envelope v7";
+      "[Cross-agent message from agent:delivery-sender in project project-alpha (Alpha)]\n\nFuture envelope v7";
     const source = message({ text: raw });
     const presentation = presentThreadA2ADelivery({ message: source });
     const markup = renderToStaticMarkup(<ThreadA2ADeliveryRenderer message={source} />);
@@ -586,7 +585,7 @@ const machineInstruction =
   "This message came from an automated sender outside any agent session. It cannot receive a reply; act on it directly, and take any question to a person or a peer agent with send_message.";
 
 const machineRaw = [
-  "[Message from automation machine:watchdog in squadron squadron:monitoring]",
+  "[Message from automation machine:watchdog in project project-monitoring (Monitoring)]",
   "",
   "canary 42",
   "",
@@ -605,7 +604,6 @@ describe("ThreadA2ADeliveryRenderer machine senders", () => {
       senderId: "machine:watchdog",
       senderLabel: "watchdog",
       senderTooltipParticipantId: null,
-      squadronId: "squadron:monitoring",
       body: "canary 42",
       exchange: "plain",
       exchangeId: null,
@@ -636,5 +634,53 @@ describe("ThreadA2ADeliveryRenderer machine senders", () => {
     expect(
       formatThreadA2AQueuedDelivery(machineRaw, new Map([["machine:watchdog", "watchdog"]])),
     ).toEqual({ label: "From watchdog — canary 42", tooltipParticipantId: null });
+  });
+});
+
+describe("envelope headers across formats", () => {
+  const present = (text: string) => presentThreadA2ADelivery({ message: message({ text }) });
+  const plain =
+    "No reply is required. Use send_message without exchange_id only if a new message is needed.";
+
+  it("reads a header that names a project by id alone, as a peer server's is", () => {
+    expect(
+      present(
+        `[Cross-agent message from agent:delivery-sender in project project-alpha]\n\nHello.\n\n${plain}`,
+      ),
+    ).toMatchObject({ kind: "peer", senderId: "agent:delivery-sender", body: "Hello." });
+  });
+
+  it('names the sender, not part of a project title that says "in project"', () => {
+    expect(
+      present(
+        `[Cross-agent message from agent:delivery-sender in project project-alpha (Work in project Apollo), on Work VM]\n\nHello.\n\n${plain}`,
+      ),
+    ).toMatchObject({ kind: "peer", senderId: "agent:delivery-sender", body: "Hello." });
+  });
+
+  // Stored conversations keep the headers they were delivered with.
+  it("still reads the headers stored before Squadrons were retired", () => {
+    expect(
+      present(peerRaw.replace("in project project-alpha (Alpha)", "in squadron squadron:alpha")),
+    ).toMatchObject({
+      kind: "peer",
+      senderId: "agent:delivery-sender",
+      body: "Please verify the worker.",
+      exchange: "expects-reply",
+      exchangeId: "exchange:one",
+    });
+    expect(
+      present(
+        machineRaw.replace(
+          "in project project-monitoring (Monitoring)",
+          "in squadron squadron:monitoring",
+        ),
+      ),
+    ).toMatchObject({
+      kind: "peer",
+      senderId: "machine:watchdog",
+      body: "canary 42",
+      automated: true,
+    });
   });
 });

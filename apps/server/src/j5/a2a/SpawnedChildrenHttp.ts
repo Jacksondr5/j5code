@@ -58,6 +58,7 @@ export const projectSpawnedChildren = (
   rows: ReadonlyArray<PlacementRow>,
   crews: ReadonlyArray<AgentCrewInstance>,
   recordedSeats: ReadonlyMap<string, RecordedSeat> = new Map(),
+  spawnedParticipantIds: ReadonlySet<string> = new Set(),
 ): SpawnedChildrenResponse => {
   const seats = new Map<string, NonNullable<typeof SpawnedChild.Type.seat>>();
   const live = crews.filter((crew) => crew.archivedAt === null);
@@ -102,13 +103,19 @@ export const projectSpawnedChildren = (
     }
     if (children.length > 0) entries.push({ threadId, children });
   }
-  return { entries };
+  return {
+    entries,
+    spawnedByAgent: [...new Set(threadIds)].filter((threadId) =>
+      spawnedParticipantIds.has(participantIdForThread(threadId)),
+    ),
+  };
 };
 
 /**
  * Sidebar discovery read: the agents placed directly under each visible thread, so a Captain's
  * (or any spawner's) row can expand into the work it started. Placement is the J5 org tree;
- * upstream lineage children (subagents, forks) are not included here.
+ * upstream lineage children (subagents, forks) are not included here. It also says which of the
+ * visible threads an agent spawned, which is what moves a row under its spawner.
  */
 export const makeSpawnedChildrenHttpRouteLayer = (path: HttpRouter.PathInput) =>
   Layer.unwrap(
@@ -129,15 +136,16 @@ export const makeSpawnedChildrenHttpRouteLayer = (path: HttpRouter.PathInput) =>
           const threadIds = decoded.success.threadIds;
           const read = yield* Effect.result(
             Effect.gen(function* () {
-              if (threadIds.length === 0) return { entries: [] } satisfies SpawnedChildrenResponse;
+              if (threadIds.length === 0)
+                return { entries: [], spawnedByAgent: [] } satisfies SpawnedChildrenResponse;
               const parentIds = [...new Set(threadIds.map(participantIdForThread))];
               // Retired children leave the expander as they leave the Fleet page: a membership
               // stamped archived_at (reversible archive) is not a live child.
               const rows = yield* sql<PlacementRow>`
                 SELECT p.participant_id, p.placement_parent_id
                 FROM j5_a2a_participant_placement p
-                JOIN j5_a2a_squadron_membership m
-                  ON m.squadron_id = p.squadron_id AND m.participant_id = p.participant_id
+                JOIN j5_a2a_membership m
+                  ON m.project_id = p.project_id AND m.participant_id = p.participant_id
                 WHERE p.placement_parent_id IN ${sql.in(parentIds)} AND m.archived_at IS NULL
               `;
               const childThreadIds = rows.flatMap((row) => {
@@ -169,11 +177,17 @@ export const makeSpawnedChildrenHttpRouteLayer = (path: HttpRouter.PathInput) =>
                       readonly placement_parent_id: string | null;
                     }>`
                       SELECT m.participant_id, m.archived_at, p.placement_parent_id
-                      FROM j5_a2a_squadron_membership m
+                      FROM j5_a2a_membership m
                       LEFT JOIN j5_a2a_participant_placement p
-                        ON p.squadron_id = m.squadron_id AND p.participant_id = m.participant_id
+                        ON p.project_id = m.project_id AND p.participant_id = m.participant_id
                       WHERE m.participant_id IN ${sql.in(rosterIds)}
                     `;
+              // The sidebar's membership rule: a row an agent spawned leaves the top level.
+              const spawned = yield* sql<{ readonly participant_id: string }>`
+                SELECT participant_id
+                FROM j5_a2a_participant_placement
+                WHERE participant_id IN ${sql.in(parentIds)} AND provenance_kind = 'spawned-by'
+              `;
               return projectSpawnedChildren(
                 threadIds,
                 rows,
@@ -187,6 +201,7 @@ export const makeSpawnedChildrenHttpRouteLayer = (path: HttpRouter.PathInput) =>
                     },
                   ]),
                 ),
+                new Set(spawned.map((row) => row.participant_id)),
               );
             }).pipe(Effect.flatMap(encodeResponse)),
           );

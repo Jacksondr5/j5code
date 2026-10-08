@@ -98,8 +98,8 @@ export class A2ADeliveryRefusedError extends Schema.TaggedError<A2ADeliveryRefus
 export const isRefusedError = Schema.is(A2ADeliveryRefusedError);
 
 export interface AgentDeliveryInput {
-  readonly originSquadronId: SquadronId;
-  readonly receiverSquadronId: SquadronId;
+  readonly originProjectId: SquadronId;
+  readonly receiverProjectId: SquadronId;
   readonly messageId: LedgerMessageId;
   readonly senderId: ParticipantId;
   readonly receiverId: ParticipantId;
@@ -223,7 +223,9 @@ export const astraPeerSteeringRun = (
     : undefined;
 };
 
-export const formatAgentDeliveryEnvelope = (input: AgentDeliveryInput): string => {
+export const formatAgentDeliveryEnvelope = (
+  input: AgentDeliveryInput & { readonly originProjectTitle?: string | undefined },
+): string => {
   switch (input.envelopeChannel) {
     case "peer":
       return input.exchangeRole === "reply"
@@ -234,7 +236,8 @@ export const formatAgentDeliveryEnvelope = (input: AgentDeliveryInput): string =
             })
           : formatClosedPeerEnvelope({
               senderId: input.senderId,
-              originSquadronId: input.originSquadronId,
+              originProjectId: input.originProjectId,
+              originProjectTitle: input.originProjectTitle,
               message: input.message,
               ...(input.senderServerName === undefined
                 ? {}
@@ -245,12 +248,14 @@ export const formatAgentDeliveryEnvelope = (input: AgentDeliveryInput): string =
           : isMachineParticipantId(input.senderId)
             ? formatMachineEnvelope({
                 senderId: input.senderId,
-                originSquadronId: input.originSquadronId,
+                originProjectId: input.originProjectId,
+                originProjectTitle: input.originProjectTitle,
                 message: input.message,
               })
             : formatPeerEnvelope({
                 senderId: input.senderId,
-                originSquadronId: input.originSquadronId,
+                originProjectId: input.originProjectId,
+                originProjectTitle: input.originProjectTitle,
                 exchangeId: input.exchangeId,
                 message: input.message,
                 ...(input.senderServerName === undefined
@@ -301,8 +306,8 @@ export const live: Layer.Layer<
       participantId: ParticipantId,
     ) {
       const rows = yield* sql<{ readonly thread_id: string }>`SELECT thread_id
-        FROM j5_a2a_squadron_membership
-        WHERE squadron_id = ${squadronId} AND participant_id = ${participantId}`;
+        FROM j5_a2a_membership
+        WHERE project_id = ${squadronId} AND participant_id = ${participantId}`;
       return rows[0] === undefined ? undefined : ThreadId.make(rows[0].thread_id);
     });
 
@@ -366,8 +371,8 @@ export const live: Layer.Layer<
         Effect.gen(function* () {
           const rows = yield* sql<MembershipRow>`
             SELECT payload
-            FROM j5_a2a_squadron_membership
-            WHERE squadron_id = ${input.receiverSquadronId}
+            FROM j5_a2a_membership
+            WHERE project_id = ${input.receiverProjectId}
               AND participant_id = ${input.receiverId}
               AND archived_at IS NULL
             LIMIT 1
@@ -408,13 +413,29 @@ export const live: Layer.Layer<
           const steeringRun = alreadyAccepted
             ? undefined
             : astraPeerSteeringRun(target, input.envelopeChannel);
-          const envelope = formatAgentDeliveryEnvelope(input);
+          // The header names the sender's project by id, with its title when the sender is on this
+          // server. A peer server's project is not one of ours, so it is named by id alone.
+          const originProject =
+            input.senderServerName !== undefined
+              ? []
+              : yield* sql<{ readonly title: string }>`
+                  SELECT title FROM projection_projects WHERE project_id = ${input.originProjectId}
+                `.pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new A2ADeliveryTransportError({ operation: "read origin project", cause }),
+                  ),
+                );
+          const envelope = formatAgentDeliveryEnvelope({
+            ...input,
+            originProjectTitle: originProject[0]?.title,
+          });
           // Upstream links an agent-authored message to its sending thread.
           const senderThreadId =
             input.envelopeChannel === "peer" &&
             !isHumanParticipantId(input.senderId) &&
             !isMachineParticipantId(input.senderId)
-              ? yield* agentThreadId(input.originSquadronId, input.senderId)
+              ? yield* agentThreadId(input.originProjectId, input.senderId)
               : undefined;
           const sendInput = {
             projectId: target.thread.projectId,
@@ -558,7 +579,7 @@ export const live: Layer.Layer<
         input.envelopeChannel === "lifecycle_notice"
           ? Effect.gen(function* () {
               const terminal = yield* sql`SELECT 1 FROM j5_a2a_human_inbox
-                WHERE person_id = ${input.receiverId} AND squadron_id = ${input.originSquadronId}
+                WHERE person_id = ${input.receiverId} AND project_id = ${input.originProjectId}
                   AND exchange_id = ${input.exchangeId} AND status = 'dropped'
                   AND terminal_notice_message_id = ${input.messageId}`;
               if (terminal.length !== 1)
@@ -578,7 +599,7 @@ export const live: Layer.Layer<
           : Effect.gen(function* () {
               yield* sql`
             INSERT INTO j5_a2a_human_inbox_data (
-              origin_squadron_id,
+              origin_project_id,
               message_id,
               exchange_id,
               sender_id,
@@ -586,7 +607,7 @@ export const live: Layer.Layer<
               payload,
               created_at
             ) VALUES (
-              ${input.originSquadronId},
+              ${input.originProjectId},
               ${input.messageId},
               ${input.exchangeId},
               ${input.senderId},
@@ -594,13 +615,13 @@ export const live: Layer.Layer<
               ${input.message},
               ${input.createdAt}
             )
-            ON CONFLICT(origin_squadron_id, message_id) DO NOTHING
+            ON CONFLICT(origin_project_id, message_id) DO NOTHING
           `;
               if (input.exchangeId === null) return;
               const exchanges = yield* sql<HumanExchangeRow>`
             SELECT sender_id, receiver_id, status, intent, urgency, opened_seq, created_at
             FROM j5_a2a_exchange
-            WHERE squadron_id = ${input.originSquadronId}
+            WHERE project_id = ${input.originProjectId}
               AND exchange_id = ${input.exchangeId}
               AND receiver_id = ${input.receiverId}
             LIMIT 1
@@ -620,7 +641,7 @@ export const live: Layer.Layer<
               yield* sql`
             INSERT INTO j5_a2a_human_inbox (
               person_id,
-              squadron_id,
+              project_id,
               exchange_id,
               sender_id,
               intent,
@@ -638,7 +659,7 @@ export const live: Layer.Layer<
               terminal_notice_message_id
             ) VALUES (
               ${input.receiverId},
-              ${input.originSquadronId},
+              ${input.originProjectId},
               ${input.exchangeId},
               ${exchange.sender_id},
               ${exchange.intent},
@@ -655,7 +676,7 @@ export const live: Layer.Layer<
               NULL,
               NULL
             )
-            ON CONFLICT(person_id, squadron_id, exchange_id) DO UPDATE SET
+            ON CONFLICT(person_id, project_id, exchange_id) DO UPDATE SET
               latest_message_id = excluded.latest_message_id,
               latest_message = excluded.latest_message
             WHERE j5_a2a_human_inbox.status = 'open'

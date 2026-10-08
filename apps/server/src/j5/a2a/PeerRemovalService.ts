@@ -69,20 +69,20 @@ export const layer: Layer.Layer<
 
         // Exchanges first: an ask still waiting is told of by its Exchange's drop.
         const exchanges = yield* sql<DroppedExchange>`
-          SELECT e.squadron_id, e.exchange_id, e.sender_id, e.receiver_id
+          SELECT e.project_id, e.exchange_id, e.sender_id, e.receiver_id
           FROM j5_a2a_exchange AS e
           WHERE e.status = 'open'
             AND EXISTS (
               SELECT 1 FROM j5_a2a_delivery AS d
-              WHERE d.squadron_id = e.squadron_id AND d.exchange_id = e.exchange_id
+              WHERE d.project_id = e.project_id AND d.exchange_id = e.exchange_id
                 AND (d.receiver_environment_id = ${environmentId}
                   OR d.origin_environment_id = ${environmentId})
             )
-          ORDER BY e.squadron_id, e.opened_seq, e.exchange_id
+          ORDER BY e.project_id, e.opened_seq, e.exchange_id
         `;
         const dropped = new Set<string>();
         for (const exchange of exchanges) {
-          const squadronId = SquadronId.make(exchange.squadron_id);
+          const squadronId = SquadronId.make(exchange.project_id);
           const exchangeId = ExchangeId.make(exchange.exchange_id);
           const onPeer = (participantId: string) =>
             findPeerCounterparty(sql, {
@@ -99,7 +99,7 @@ export const layer: Layer.Layer<
           const appended = yield* ledger.appendEventsIfExchangeOpen(
             {
               commandId: CommCommandId.make(
-                `command:j5:a2a:peer-removed:drop:${stablePart(exchange.squadron_id)}:${stablePart(exchange.exchange_id)}`,
+                `command:j5:a2a:peer-removed:drop:${stablePart(exchange.project_id)}:${stablePart(exchange.exchange_id)}`,
               ),
               squadronId,
               acceptedAt: now,
@@ -111,9 +111,9 @@ export const layer: Layer.Layer<
                   participantId: ParticipantId.make(
                     remoteReceiver === null ? exchange.sender_id : exchange.receiver_id,
                   ),
-                  squadronId: remote.squadronId,
+                  projectId: remote.squadronId,
                 },
-                localSquadronId: exchange.squadron_id,
+                localSquadronId: exchange.project_id,
                 noticeText: formatPeerDropNotice({ exchangeId, disposition, because }),
                 createdAt: now,
               }),
@@ -121,7 +121,7 @@ export const layer: Layer.Layer<
             exchangeId,
           );
           if (appended !== null) {
-            dropped.add(droppedExchangeKey(exchange.squadron_id, exchange.exchange_id));
+            dropped.add(droppedExchangeKey(exchange.project_id, exchange.exchange_id));
           }
         }
 

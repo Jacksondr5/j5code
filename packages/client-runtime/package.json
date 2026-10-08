@@ -351,10 +351,6 @@
       "types": "./src/j5/scopedThreadReadStore.ts",
       "default": "./src/j5/scopedThreadReadStore.ts"
     },
-    "./j5/threadHomes": {
-      "types": "./src/j5/threadHomes.ts",
-      "default": "./src/j5/threadHomes.ts"
-    },
     "./j5/inbox": {
       "types": "./src/j5/inbox.ts",
       "default": "./src/j5/inbox.ts"
@@ -362,10 +358,6 @@
     "./j5/peering": {
       "types": "./src/j5/peering.ts",
       "default": "./src/j5/peering.ts"
-    },
-    "./j5/squadrons": {
-      "types": "./src/j5/squadrons.ts",
-      "default": "./src/j5/squadrons.ts"
     },
     "./thread-pull-request-compatibility": {
       "types": "./src/threadPullRequestCompatibility.ts",

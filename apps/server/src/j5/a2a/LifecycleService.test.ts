@@ -1,3 +1,4 @@
+// @effect-diagnostics preferSchemaOverJson:off - one test seeds a pre-upgrade ledger with raw SQL.
 import { assert, it } from "@effect/vitest";
 import { EventId, type OrchestrationV2StoredEvent, ThreadId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
@@ -26,6 +27,7 @@ import { A2ALifecycleService, manualLayer as lifecycleLayer } from "./LifecycleS
 import { resolveThreadHome } from "./HomeRegistrar.ts";
 import { ParticipantPlacementService, layer as placementLayer } from "./PlacementService.ts";
 import { PlacementCommandId } from "./placementContracts.ts";
+import { runMigrations } from "../../persistence/Migrations.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import { A2AParticipantArchivedError, A2ASendService, layer as sendLayer } from "./SendService.ts";
 import {
@@ -145,11 +147,8 @@ const retiredThreadEvent = (
 
 const createSquadron = Effect.fn("test.j5.a2a.lifecycle.createSquadron")(function* (
   squadronId: SquadronId,
-  name: string,
 ) {
-  yield* (yield* A2ALedger).createSquadron({
-    squadron: { id: squadronId, name, createdAt: openedAt },
-  });
+  yield* (yield* A2ALedger).ensureProject({ projectId: squadronId, createdAt: openedAt });
 });
 
 const join = Effect.fn("test.j5.a2a.lifecycle.join")(function* (
@@ -179,7 +178,7 @@ it.effect("drops a receiver-retired exchange loudly and rejects new sends to the
     yield* Effect.gen(function* () {
       yield* runJ5A2AMigrations();
       const squadronId = SquadronId.make("squadron:lifecycle:receiver-retired");
-      yield* createSquadron(squadronId, "Receiver retired");
+      yield* createSquadron(squadronId);
       yield* join(squadronId, sender, "receiver-retired:sender");
       yield* join(squadronId, receiver, "receiver-retired:receiver");
       const send = yield* A2ASendService;
@@ -251,7 +250,7 @@ it.effect("drops a receiver-retired exchange loudly and rejects new sends to the
       const retirement = yield* sql<{
         readonly seq: number;
         readonly kind: string;
-        readonly squadron_id: string;
+        readonly project_id: string;
         readonly participant_id: string;
         readonly participant_kind: string;
         readonly thread_id: string;
@@ -259,7 +258,7 @@ it.effect("drops a receiver-retired exchange loudly and rejects new sends to the
         SELECT
           seq,
           kind,
-          squadron_id,
+          project_id,
           json_extract(payload, '$.participant.id') AS participant_id,
           json_extract(payload, '$.participant.kind') AS participant_kind,
           json_extract(payload, '$.participant.threadId') AS thread_id
@@ -274,7 +273,7 @@ it.effect("drops a receiver-retired exchange loudly and rejects new sends to the
       assert.lengthOf(retirement, 1);
       assert.deepInclude(retirement[0]!, {
         kind: "participant.archived",
-        squadron_id: squadronId,
+        project_id: squadronId,
         participant_id: receiver.id,
         participant_kind: "agent",
         thread_id: receiver.threadId,
@@ -313,7 +312,7 @@ it.effect("drops a sender-retired person exchange so the active inbox source is 
     yield* Effect.gen(function* () {
       yield* runJ5A2AMigrations();
       const squadronId = SquadronId.make("squadron:lifecycle:person");
-      yield* createSquadron(squadronId, "Person inbox closure");
+      yield* createSquadron(squadronId);
       yield* join(squadronId, sender, "person:sender");
       yield* (yield* SqlClient.SqlClient)`
         INSERT INTO j5_a2a_human_person (person_id, is_local_operator, created_at)
@@ -354,7 +353,7 @@ it.effect("drops a sender-retired person exchange so the active inbox source is 
           json_extract(event.payload, '$.disposition') AS disposition
         FROM j5_a2a_exchange AS exchange
         JOIN j5_a2a_comm_event AS event
-          ON event.squadron_id = exchange.squadron_id
+          ON event.project_id = exchange.project_id
           AND event.exchange_id = exchange.exchange_id
           AND event.kind = 'exchange.dropped'
         WHERE exchange.exchange_id = ${opened.exchangeId}
@@ -396,8 +395,8 @@ it.effect("leaves unrelated same- and cross-Squadron exchanges open", () =>
         id: ParticipantId.make("agent:lifecycle:healthy:remote"),
         threadId: ThreadId.make("thread:lifecycle:healthy:remote"),
       };
-      yield* createSquadron(localSquadronId, "Healthy local");
-      yield* createSquadron(remoteSquadronId, "Healthy remote");
+      yield* createSquadron(localSquadronId);
+      yield* createSquadron(remoteSquadronId);
       yield* join(localSquadronId, sender, "healthy:affected-sender");
       yield* join(localSquadronId, receiver, "healthy:affected-receiver");
       yield* join(localSquadronId, localPeer, "healthy:local");
@@ -469,7 +468,7 @@ it.effect("replays archive then delete from its cursor without duplicating closu
     yield* Effect.gen(function* () {
       yield* runJ5A2AMigrations();
       const squadronId = SquadronId.make("squadron:lifecycle:bridge");
-      yield* createSquadron(squadronId, "Archive bridge");
+      yield* createSquadron(squadronId);
       yield* join(squadronId, sender, "bridge:sender");
       yield* join(squadronId, receiver, "bridge:receiver");
       const opened = yield* (yield* A2ASendService).send({
@@ -529,7 +528,7 @@ it.effect("drops a reply-owing participant exactly once from committed thread de
     yield* Effect.gen(function* () {
       yield* runJ5A2AMigrations();
       const squadronId = SquadronId.make("squadron:lifecycle:delete-bridge");
-      yield* createSquadron(squadronId, "Delete bridge");
+      yield* createSquadron(squadronId);
       yield* join(squadronId, sender, "delete-bridge:sender");
       yield* join(squadronId, receiver, "delete-bridge:receiver");
       const opened = yield* (yield* A2ASendService).send({
@@ -592,7 +591,7 @@ it.effect(
       yield* Effect.gen(function* () {
         yield* runJ5A2AMigrations();
         const squadronId = SquadronId.make("squadron:lifecycle:cycles");
-        yield* createSquadron(squadronId, "Cycles");
+        yield* createSquadron(squadronId);
         yield* join(squadronId, sender, "cycles:sender");
         yield* join(squadronId, receiver, "cycles:receiver");
         const lifecycle = yield* A2ALifecycleService;
@@ -679,7 +678,7 @@ it.effect(
       yield* Effect.gen(function* () {
         yield* runJ5A2AMigrations();
         const squadronId = SquadronId.make("squadron:lifecycle:delete");
-        yield* createSquadron(squadronId, "Delete");
+        yield* createSquadron(squadronId);
         yield* join(squadronId, sender, "delete:sender");
         yield* join(squadronId, receiver, "delete:receiver");
         const placements = yield* ParticipantPlacementService;
@@ -760,33 +759,57 @@ it.effect(
     Effect.gen(function* () {
       const notices = yield* Ref.make<ReadonlyArray<DeliveredNotice>>([]);
       yield* Effect.gen(function* () {
+        yield* runMigrations();
         yield* runJ5A2AMigrations({ toMigrationInclusive: 10 });
-        const squadronId = SquadronId.make("squadron:lifecycle:legacy");
-        yield* createSquadron(squadronId, "Legacy");
-        yield* join(squadronId, sender, "legacy:sender");
-        yield* join(squadronId, receiver, "legacy:receiver");
+        const sql = yield* SqlClient.SqlClient;
+        // The pre-upgrade ledger is written as rows: today's services no longer speak that schema.
+        const legacySquadronId = "squadron:lifecycle:legacy";
+        const squadronId = SquadronId.make("project:lifecycle:legacy");
+        yield* sql`
+          INSERT INTO j5_a2a_squadron (id, name, created_at)
+          VALUES (${legacySquadronId}, 'Legacy', ${openedAt})
+        `;
+        yield* sql`
+          INSERT INTO j5_a2a_squadron_project_reference (squadron_id, project_id, ordinal, created_at)
+          VALUES (${legacySquadronId}, ${squadronId}, 0, ${openedAt})
+        `;
+        for (const [index, event] of [
+          { kind: "participant.joined", participant: sender, at: openedAt },
+          { kind: "participant.joined", participant: receiver, at: openedAt },
+          { kind: "participant.left", participant: receiver, at: archivedAt },
+        ].entries()) {
+          const seq = index + 1;
+          const commandId = `legacy:${String(seq)}`;
+          yield* sql`
+            INSERT INTO j5_a2a_comm_event (
+              seq, squadron_id, kind, sender, receiver, exchange_id, correlation_id, payload,
+              created_at, command_id
+            ) VALUES (
+              ${seq}, ${legacySquadronId}, ${event.kind}, NULL, ${event.participant.id}, NULL, NULL,
+              ${JSON.stringify({ participant: event.participant })}, ${event.at}, ${commandId}
+            )
+          `;
+          yield* sql`
+            INSERT INTO j5_a2a_comm_command_receipt (
+              command_id, squadron_id, command_type, accepted_at, result_seq
+            ) VALUES (${commandId}, ${legacySquadronId}, 'comm.append', ${event.at}, ${seq})
+          `;
+        }
+        yield* sql`
+          INSERT INTO j5_a2a_squadron_membership (
+            squadron_id, participant_id, participant_kind, thread_id, joined_seq, updated_seq, payload
+          ) VALUES (
+            ${legacySquadronId}, ${sender.id}, 'agent', ${sender.threadId}, 1, 1,
+            ${JSON.stringify(sender)}
+          )
+        `;
         const ledger = yield* A2ALedger;
-        yield* ledger.append({
-          commandId: CommCommandId.make("legacy:retirement"),
-          squadronId,
-          acceptedAt: archivedAt,
-          event: {
-            kind: "participant.left",
-            sender: null,
-            receiver: receiver.id,
-            exchangeId: null,
-            correlationId: null,
-            payload: { participant: receiver },
-            createdAt: archivedAt,
-          },
-        });
         yield* runJ5A2AMigrations();
         yield* (yield* A2ALifecycleService).handleStoredEvent(
           retiredThreadEvent("thread.unarchived", receiver.threadId, 1),
         );
         yield* ledger.rebuildMembership(squadronId);
         yield* runJ5A2AMigrations();
-        const sql = yield* SqlClient.SqlClient;
         assert.isTrue((yield* resolveThreadHome(sql, receiver.threadId)).retired);
         assert.lengthOf(yield* (yield* A2ASendService).listParticipants(sender.threadId, true), 1);
         assert.lengthOf(
@@ -805,7 +828,7 @@ it.effect(
       yield* Effect.gen(function* () {
         yield* runJ5A2AMigrations();
         const squadronId = SquadronId.make("squadron:lifecycle:retry");
-        yield* createSquadron(squadronId, "Retry closure");
+        yield* createSquadron(squadronId);
         yield* join(squadronId, sender, "retry:sender");
         yield* join(squadronId, receiver, "retry:receiver");
         const sql = yield* SqlClient.SqlClient;
@@ -874,7 +897,7 @@ for (const directFirst of [true, false]) {
         yield* Effect.gen(function* () {
           yield* runJ5A2AMigrations();
           const squadronId = SquadronId.make(`squadron:archive-order:${directFirst}`);
-          yield* createSquadron(squadronId, "Archive order");
+          yield* createSquadron(squadronId);
           yield* join(squadronId, sender, "order:sender");
           const lifecycle = yield* A2ALifecycleService;
           const sql = yield* SqlClient.SqlClient;
@@ -899,13 +922,13 @@ for (const directFirst of [true, false]) {
             );
             yield* lifecycle.handleStoredEvent(event);
             assert.deepStrictEqual(
-              yield* sql`SELECT archived_at FROM j5_a2a_squadron_membership WHERE participant_id = ${sender.id}`,
+              yield* sql`SELECT archived_at FROM j5_a2a_membership WHERE participant_id = ${sender.id}`,
               [{ archived_at: null }],
             );
           }
           yield* (yield* A2ALedger).rebuildMembership(squadronId);
           assert.deepStrictEqual(
-            yield* sql`SELECT archived_at FROM j5_a2a_squadron_membership WHERE participant_id = ${sender.id}`,
+            yield* sql`SELECT archived_at FROM j5_a2a_membership WHERE participant_id = ${sender.id}`,
             [{ archived_at: null }],
           );
         }).pipe(Effect.provide(makeTestLayer(notices)));
@@ -919,7 +942,7 @@ it.effect("addresses drop notices to a counterparty on a peer server in both dir
     yield* Effect.gen(function* () {
       yield* runJ5A2AMigrations();
       const squadronId = SquadronId.make("squadron:lifecycle:peers");
-      yield* createSquadron(squadronId, "Peers");
+      yield* createSquadron(squadronId);
       yield* join(squadronId, sender, "peers:sender");
       yield* join(squadronId, receiver, "peers:receiver");
       const ledger = yield* A2ALedger;
@@ -952,13 +975,13 @@ it.effect("addresses drop notices to a counterparty on a peer server in both dir
             exchangeId: inboundExchange,
             correlationId: CorrelationId.make("correlation:lifecycle:inbound"),
             payload: {
-              originSquadronId: homeSquadron,
+              originProjectId: homeSquadron,
               originEnvironmentId: "environment-home",
               message: {
                 messageId: LedgerMessageId.make("message:lifecycle:inbound"),
                 text: "inbound ask",
-                originSquadronId: homeSquadron,
-                receiverSquadronId: squadronId,
+                originProjectId: homeSquadron,
+                receiverProjectId: squadronId,
                 exchangeRole: "ask",
                 envelopeChannel: "peer",
               },
@@ -991,8 +1014,8 @@ it.effect("addresses drop notices to a counterparty on a peer server in both dir
             payload: {
               messageId: LedgerMessageId.make("message:lifecycle:outbound"),
               text: "outbound ask",
-              originSquadronId: squadronId,
-              receiverSquadronId: homeSquadron,
+              originProjectId: squadronId,
+              receiverProjectId: homeSquadron,
               receiverEnvironmentId: "environment-home",
               exchangeRole: "ask",
               envelopeChannel: "peer",
@@ -1039,7 +1062,7 @@ it.effect("addresses drop notices to a counterparty on a peer server in both dir
       }>`
         SELECT receiver,
                json_extract(payload, '$.receiverEnvironmentId') AS receiver_environment,
-               json_extract(payload, '$.receiverSquadronId') AS receiver_squadron
+               json_extract(payload, '$.receiverProjectId') AS receiver_squadron
         FROM j5_a2a_comm_event
         WHERE kind = 'message.sent' AND json_extract(payload, '$.envelopeChannel') = 'lifecycle_notice'
         ORDER BY seq
@@ -1076,7 +1099,7 @@ it.effect(
       yield* Effect.gen(function* () {
         yield* runJ5A2AMigrations();
         const squadronId = SquadronId.make("squadron:lifecycle:unheld");
-        yield* createSquadron(squadronId, "Unheld");
+        yield* createSquadron(squadronId);
         yield* join(squadronId, sender, "unheld:sender");
         const ledger = yield* A2ALedger;
         const lifecycle = yield* A2ALifecycleService;
@@ -1106,8 +1129,8 @@ it.effect(
                 payload: {
                   messageId: LedgerMessageId.make(`message:lifecycle:${name}`),
                   text: `${name} ask`,
-                  originSquadronId: squadronId,
-                  receiverSquadronId: homeSquadron,
+                  originProjectId: squadronId,
+                  receiverProjectId: homeSquadron,
                   receiverEnvironmentId: "environment-laptop",
                   exchangeRole: "ask",
                   envelopeChannel: "peer",
@@ -1161,7 +1184,7 @@ it.effect("closes an Exchange on a peer server whose ask lands while its sender 
     yield* Effect.gen(function* () {
       yield* runJ5A2AMigrations();
       const squadronId = SquadronId.make("squadron:lifecycle:inflight");
-      yield* createSquadron(squadronId, "In flight");
+      yield* createSquadron(squadronId);
       yield* join(squadronId, sender, "inflight:sender");
       const ledger = yield* A2ALedger;
       const lifecycle = yield* A2ALifecycleService;
@@ -1192,8 +1215,8 @@ it.effect("closes an Exchange on a peer server whose ask lands while its sender 
             payload: {
               messageId: LedgerMessageId.make("message:lifecycle:inflight"),
               text: "inflight ask",
-              originSquadronId: squadronId,
-              receiverSquadronId: SquadronId.make("squadron:home-support"),
+              originProjectId: squadronId,
+              receiverProjectId: SquadronId.make("squadron:home-support"),
               receiverEnvironmentId: "environment-home",
               exchangeRole: "ask",
               envelopeChannel: "peer",

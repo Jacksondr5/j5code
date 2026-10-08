@@ -134,9 +134,7 @@ const seedLocal = Effect.fn("test.j5.a2a.peer.outbound.seed")(function* () {
   yield* runMigrations();
   yield* runJ5A2AMigrations();
   const ledger = yield* A2ALedger;
-  yield* ledger.createSquadron({
-    squadron: { id: localSquadron, name: "Billing Migration", createdAt: timestamp },
-  });
+  yield* ledger.ensureProject({ projectId: localSquadron, createdAt: timestamp });
   // The sender's thread title is the label the peer's people will see.
   const sql = yield* SqlClient.SqlClient;
   // Home as this server records it, for what reads the record directly, such as a notice's name for it.
@@ -171,7 +169,7 @@ const seedLocal = Effect.fn("test.j5.a2a.peer.outbound.seed")(function* () {
 });
 
 it.effect(
-  "resolves a receiver no local Squadron homes through the peer directory and records where it lives",
+  "resolves a receiver no local project homes through the peer directory and records where it lives",
   () =>
     Effect.gen(function* () {
       yield* seedLocal();
@@ -199,23 +197,21 @@ it.effect(
       });
       assert.equal(replayed.receiverServer, "Home", "a replay names it too");
       const rows = yield* sql<{
-        readonly receiver_squadron_id: string;
+        readonly receiver_project_id: string;
         readonly receiver_environment_id: string | null;
         readonly exchange_role: string;
-      }>`SELECT receiver_squadron_id, receiver_environment_id, exchange_role FROM j5_a2a_delivery WHERE message_id = ${sent.messageId}`;
+      }>`SELECT receiver_project_id, receiver_environment_id, exchange_role FROM j5_a2a_delivery WHERE message_id = ${sent.messageId}`;
       assert.deepStrictEqual(rows, [
         {
-          receiver_squadron_id: supportOnHome.squadronId,
+          receiver_project_id: supportOnHome.squadronId,
           receiver_environment_id: homePeer.environmentId,
           exchange_role: "ask",
         },
       ]);
-      const exchange = yield* sql<{ readonly receiver_id: string; readonly squadron_id: string }>`
-      SELECT receiver_id, squadron_id FROM j5_a2a_exchange WHERE exchange_id = ${sent.exchangeId!}
+      const exchange = yield* sql<{ readonly receiver_id: string; readonly project_id: string }>`
+      SELECT receiver_id, project_id FROM j5_a2a_exchange WHERE exchange_id = ${sent.exchangeId!}
     `;
-      assert.deepStrictEqual(exchange, [
-        { receiver_id: remoteSupport, squadron_id: localSquadron },
-      ]);
+      assert.deepStrictEqual(exchange, [{ receiver_id: remoteSupport, project_id: localSquadron }]);
 
       const nobody = yield* send
         .send({
@@ -628,8 +624,8 @@ it.effect(
           payload: {
             messageId: LedgerMessageId.make("message:peer-outbound:earlier"),
             text: "earlier",
-            originSquadronId: localSquadron,
-            receiverSquadronId: supportOnHome.squadronId,
+            originProjectId: localSquadron,
+            receiverProjectId: supportOnHome.squadronId,
             receiverEnvironmentId: "environment-Home",
             exchangeRole: "none",
             envelopeChannel: "peer",
@@ -702,7 +698,7 @@ it.effect(
         const cause = {
           kind: "participant-archived" as const,
           participantId: billing.id,
-          squadronId: localSquadron,
+          projectId: localSquadron,
         };
         yield* ledger.appendEvents({
           commandId: CommCommandId.make("command:peer-outbound:drop"),
@@ -732,8 +728,8 @@ it.effect(
               payload: {
                 messageId: noticeMessageId,
                 text: "exchange dropped",
-                originSquadronId: localSquadron,
-                receiverSquadronId: supportOnHome.squadronId,
+                originProjectId: localSquadron,
+                receiverProjectId: supportOnHome.squadronId,
                 receiverEnvironmentId: homePeer.environmentId,
                 exchangeRole: "terminal_notice",
                 envelopeChannel: "lifecycle_notice",
@@ -747,7 +743,15 @@ it.effect(
         const body = posted.at(-1)!.body as PeerDeliveryRequest;
         assert.equal(body.messageId, noticeMessageId);
         assert.equal(body.exchangeRole, "terminal_notice");
-        assert.deepStrictEqual(body.terminal, { kind: "dropped", cause });
+        // The stored cause names the project; the peer wire still calls it a Squadron.
+        assert.deepStrictEqual(body.terminal, {
+          kind: "dropped",
+          cause: {
+            kind: cause.kind,
+            participantId: cause.participantId,
+            squadronId: cause.projectId,
+          },
+        });
         assert.isUndefined(body.intent);
       }).pipe(
         Effect.provide(
@@ -867,8 +871,8 @@ it.effect(
           payload: {
             messageId: LedgerMessageId.make("message:peer-outbound:snapshot:earlier"),
             text: "earlier",
-            originSquadronId: localSquadron,
-            receiverSquadronId: supportOnHome.squadronId,
+            originProjectId: localSquadron,
+            receiverProjectId: supportOnHome.squadronId,
             receiverEnvironmentId: homePeer.environmentId,
             exchangeRole: "none",
             envelopeChannel: "peer",

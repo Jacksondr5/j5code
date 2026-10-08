@@ -11,7 +11,7 @@ export interface PeerCounterparty {
 
 interface RouteRow {
   readonly environment_id: string;
-  readonly squadron_id: string;
+  readonly project_id: string;
 }
 
 /**
@@ -34,9 +34,9 @@ export const findPeerCounterparty = Effect.fn("j5.a2a.peerCounterparty")(functio
   },
 ) {
   const outbound = yield* sql<RouteRow>`
-    SELECT receiver_environment_id AS environment_id, receiver_squadron_id AS squadron_id
+    SELECT receiver_environment_id AS environment_id, receiver_project_id AS project_id
     FROM j5_a2a_delivery
-    WHERE squadron_id = ${input.squadronId}
+    WHERE project_id = ${input.squadronId}
       AND exchange_id = ${input.exchangeId}
       AND receiver_id = ${input.participantId}
       AND receiver_environment_id IS NOT NULL
@@ -47,9 +47,9 @@ export const findPeerCounterparty = Effect.fn("j5.a2a.peerCounterparty")(functio
   const inbound = yield* sql<RouteRow>`
     SELECT
       json_extract(payload, '$.originEnvironmentId') AS environment_id,
-      json_extract(payload, '$.originSquadronId') AS squadron_id
+      json_extract(payload, '$.originProjectId') AS project_id
     FROM j5_a2a_comm_event
-    WHERE squadron_id = ${input.squadronId}
+    WHERE project_id = ${input.squadronId}
       AND kind = 'message.received'
       AND exchange_id = ${input.exchangeId}
       AND sender = ${input.participantId}
@@ -66,7 +66,7 @@ export const findPeerRoute = Effect.fn("j5.a2a.peerRoute")(function* (
   participantId: ParticipantId,
 ) {
   const outbound = yield* sql<RouteRow>`
-    SELECT receiver_environment_id AS environment_id, receiver_squadron_id AS squadron_id
+    SELECT receiver_environment_id AS environment_id, receiver_project_id AS project_id
     FROM j5_a2a_delivery
     WHERE receiver_id = ${participantId} AND receiver_environment_id IS NOT NULL
     ORDER BY sent_seq DESC
@@ -76,7 +76,7 @@ export const findPeerRoute = Effect.fn("j5.a2a.peerRoute")(function* (
   const inbound = yield* sql<RouteRow>`
     SELECT
       json_extract(payload, '$.originEnvironmentId') AS environment_id,
-      json_extract(payload, '$.originSquadronId') AS squadron_id
+      json_extract(payload, '$.originProjectId') AS project_id
     FROM j5_a2a_comm_event
     WHERE kind = 'message.received'
       AND sender = ${participantId}
@@ -115,5 +115,5 @@ export const isRoutedElsewhere = Effect.fn("j5.a2a.peerRoutedElsewhere")(functio
 
 const toCounterparty = (row: RouteRow): PeerCounterparty => ({
   environmentId: row.environment_id,
-  squadronId: SquadronId.make(row.squadron_id),
+  squadronId: SquadronId.make(row.project_id),
 });

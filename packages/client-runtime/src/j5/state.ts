@@ -1,8 +1,7 @@
-import type { ProjectId, ThreadId } from "@t3tools/contracts";
+import type { ThreadId } from "@t3tools/contracts";
 import { J5_PLAYBOOK_WS_METHODS } from "@t3tools/contracts/j5";
 import type {
   AnswerHumanExchangeRequest,
-  AssignImportedThreadsRequest,
   CrewProposalResolveRequest,
   CrewProposalPreviewRequest,
   CrewArchiveRequest,
@@ -108,12 +107,6 @@ export function createJ5EnvironmentAtoms<R, E>(
           ),
         ),
     }),
-    squadrons: createEnvironmentQueryAtomFamily(runtime, {
-      label: "j5:squadrons",
-      staleTimeMs: 30_000,
-      execute: (_input: Record<string, never>) =>
-        preparedConnection.pipe(Effect.flatMap(J5Http.listSquadrons)),
-    }),
     inbox: createEnvironmentQueryAtomFamily(runtime, {
       label: "j5:inbox",
       staleTimeMs: 7_500,
@@ -184,34 +177,6 @@ export function createJ5EnvironmentAtoms<R, E>(
       label: "j5:stop-crew",
       execute: (input: CrewStopRequest) =>
         preparedConnection.pipe(Effect.flatMap((prepared) => J5Http.stopCrew(prepared, input))),
-    }),
-    createSquadron: createEnvironmentCommand(runtime, {
-      label: "j5:create-squadron",
-      execute: (input: { readonly name: string; readonly projectId: ProjectId }) =>
-        preparedConnection.pipe(
-          Effect.flatMap((prepared) => J5Http.createSquadron(prepared, input)),
-        ),
-    }),
-    renameSquadron: createEnvironmentCommand(runtime, {
-      label: "j5:rename-squadron",
-      execute: (input: { readonly squadronId: string; readonly name: string }) =>
-        preparedConnection.pipe(
-          Effect.flatMap((prepared) => J5Http.renameSquadron(prepared, input)),
-        ),
-    }),
-    deleteSquadron: createEnvironmentCommand(runtime, {
-      label: "j5:delete-squadron",
-      execute: (input: { readonly squadronId: string }) =>
-        preparedConnection.pipe(
-          Effect.flatMap((prepared) => J5Http.deleteSquadron(prepared, input)),
-        ),
-    }),
-    assignImportedThreads: createEnvironmentCommand(runtime, {
-      label: "j5:assign-imported-threads",
-      execute: (input: AssignImportedThreadsRequest) =>
-        preparedConnection.pipe(
-          Effect.flatMap((prepared) => J5Http.assignImportedThreads(prepared, input)),
-        ),
     }),
     answerHumanExchange: createEnvironmentCommand(runtime, {
       label: "j5:answer-exchange",

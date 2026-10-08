@@ -9,7 +9,6 @@ import {
   AgentPersonaId,
   ModelSelection,
   OrchestrationV2RunStatus,
-  ProjectId,
   ProviderInstanceId,
   RunId,
   RuntimeMode,
@@ -47,8 +46,7 @@ import { ParticipantPlacementService } from "../PlacementService.ts";
 import { A2ASendService } from "../SendService.ts";
 import { SpawnCompositionService } from "../SpawnCompositionService.ts";
 import { GitRefName, SpawnWorkspaceService, WorktreePath } from "../spawnWorkspace.ts";
-import { SquadronJoinService } from "../SquadronJoinService.ts";
-import { SquadronProjectReferences } from "../SquadronProjectReferences.ts";
+import { ThreadRegistration } from "../ThreadRegistration.ts";
 import {
   AgentParticipant,
   ClearOwnAskResult,
@@ -115,9 +113,9 @@ export const J5ParticipantProvenanceView = Schema.Union([
 export type J5ParticipantProvenanceView = typeof J5ParticipantProvenanceView.Type;
 
 export const J5ParticipantDirectoryRow = Schema.Struct({
-  squadron_id: SquadronId,
-  /** The Squadron's name beside its id; on the self row, the Squadron the caller belongs to. */
-  squadron_name: Schema.NullOr(Schema.String),
+  project_id: SquadronId,
+  /** The project's title beside its id; on the self row, the caller's own project. */
+  project_title: Schema.NullOr(Schema.String),
   participant_id: ParticipantId,
   participant: J5Participant,
   self: Schema.Boolean,
@@ -219,7 +217,8 @@ export type J5SpawnAgentInput = typeof J5SpawnAgentInput.Type;
 export const J5SpawnAgentResult = Schema.Struct({
   participant_id: ParticipantId,
   thread_id: ThreadId,
-  squadron_id: SquadronId,
+  project_id: SquadronId,
+  project_title: Schema.String,
   placement: Schema.Struct({
     placement_parent_id: ParticipantId,
     provenance: Schema.Struct({
@@ -359,50 +358,14 @@ export const J5CrewProposalResult = Schema.Struct({
 
 export const J5StopAgentInput = Schema.Struct({
   client_request_id: Schema.optional(NonEmptyString),
-  squadron_id: SquadronId,
   participant_id: ParticipantId,
 });
 export type J5StopAgentInput = typeof J5StopAgentInput.Type;
 
 export const J5StopAgentResult = Schema.Literals(["interrupt_requested", "already_idle"]);
 
-export const J5JoinSquadronInput = Schema.Struct({
-  squadron_id: SquadronId,
-  client_request_id: Schema.optional(NonEmptyString),
-});
-export type J5JoinSquadronInput = typeof J5JoinSquadronInput.Type;
-
-export const J5JoinSquadronResult = Schema.Struct({
-  squadron_id: SquadronId,
-  participant_id: ParticipantId,
-  thread_id: ThreadId,
-  placement: Schema.Struct({
-    placement_parent_id: Schema.NullOr(ParticipantId),
-    provenance: J5ParticipantProvenanceView,
-  }),
-});
-export type J5JoinSquadronResult = typeof J5JoinSquadronResult.Type;
-
-export const J5SquadronDirectoryRow = Schema.Struct({
-  squadron_id: SquadronId,
-  name: Schema.String,
-  project_ids: Schema.Array(ProjectId),
-});
-
-export const J5ListSquadronsResult = Schema.Struct({
-  caller_project_id: Schema.NullOr(ProjectId),
-  squadrons: Schema.Array(J5SquadronDirectoryRow),
-});
-export type J5ListSquadronsResult = typeof J5ListSquadronsResult.Type;
-
-export const J5_JOIN_SQUADRON_DESCRIPTION =
-  "Join a Squadron when your thread has no Squadron home yet. Pass the exact squadron_id, taken from list_squadrons; that Squadron must reference your thread's project. Your thread, conversation, worktree, and running work stay exactly as they are. Calling it again for the Squadron you already belong to returns your existing registration. Reuse client_request_id to retry safely. Warning: you cannot switch Squadrons once you're assigned, be sure you're joining the right one.";
-
-export const J5_LIST_SQUADRONS_DESCRIPTION =
-  "The Squadron directory for this environment: every Squadron's squadron_id, name, and the project ids it references, plus your own thread's project id so you can see which Squadron can home you. Use it to obtain the exact squadron_id before join_squadron. Read-only.";
 export const J5StopCrewInput = Schema.Struct({
   client_request_id: Schema.optional(NonEmptyString),
-  squadron_id: SquadronId,
   crew_instance_id: NonEmptyString,
 });
 export type J5StopCrewInput = typeof J5StopCrewInput.Type;
@@ -440,7 +403,6 @@ export const J5ArchiveRunningTurnFact = Schema.Struct({
 
 export const J5ArchiveCrewInput = Schema.Struct({
   client_request_id: Schema.optional(NonEmptyString),
-  squadron_id: SquadronId,
   crew_instance_id: NonEmptyString,
   confirmation_token: Schema.optional(NonEmptyString),
 });
@@ -478,7 +440,7 @@ export const J5ArchiveCrewFailure = Schema.Struct({
 export type J5ArchiveCrewFailure = typeof J5ArchiveCrewFailure.Type;
 
 export const J5_SPAWN_AGENT_DESCRIPTION =
-  "Spawn a Peer Agent: a full-citizen teammate with its own top-level thread, starting on your brief as its first turn. It joins your Squadron, is placed under you, and records you as its immutable spawner; it is addressable the moment this returns. In your brief, tell the new agent what it should do first and whether it should reply to you. Choose provider, model, and reasoning for the work in the brief — see orchestrator_capabilities for what's available. To run a persona from list_personas, set `persona` to its id: the spawn gets that persona's instructions and runtime policy, and provider, model, and reasoning must be one of that persona's declared routes. Choose its workspace every time (see the workspace field). A new worktree is prepared after this returns, and the agent begins once it is bound, possibly while the project's setup script is still running; if preparing it fails, the agent's thread shows why, and it is not retried. Reuse client_request_id to retry the same spawn safely; a retry replays the first spawn, so a different base_ref or worktree_path needs a fresh client_request_id.";
+  "Spawn a Peer Agent: a full-citizen teammate with its own top-level thread, starting on your brief as its first turn. It joins your project, is placed under you, and records you as its immutable spawner; it is addressable the moment this returns. In your brief, tell the new agent what it should do first and whether it should reply to you. Choose provider, model, and reasoning for the work in the brief — see orchestrator_capabilities for what's available. To run a persona from list_personas, set `persona` to its id: the spawn gets that persona's instructions and runtime policy, and provider, model, and reasoning must be one of that persona's declared routes. Choose its workspace every time (see the workspace field). A new worktree is prepared after this returns, and the agent begins once it is bound, possibly while the project's setup script is still running; if preparing it fails, the agent's thread shows why, and it is not retried. Reuse client_request_id to retry the same spawn safely; a retry replays the first spawn, so a different base_ref or worktree_path needs a fresh client_request_id.";
 
 export const J5_LIST_AGENTS_DESCRIPTION =
   "List the personas in this environment: id, purpose, runtime policy, whether each can start now, and the provider, model, and reasoning it would run on. Read this before choosing a persona for spawn_agent or a crew roster so the choice fits the task and the user's budget. Read-only.";
@@ -490,7 +452,7 @@ export const J5_REQUEST_CREW_MEMBER_DESCRIPTION =
   "Ask the user to add one seat to a crew you command when the work needs one the roster lacks: seat name, persona id from list_personas (or none for a custom seat with required instructions and optional model_selection/runtime_mode overrides; an omitted model_selection inherits yours and an omitted runtime_mode is full-access; saved-persona runtime changes are made only by the human before approval), a clear reason identifying the concern and missing expertise or responsibility, its workspace (the same three choices as propose_crew), and optionally instructions and a brief for the new seat. On a crew that follows a playbook, steps may claim step ids from playbook_read that no seat owns yet. The user decides from their inbox; you receive the decision and the updated roster as a message here. Continue the already-approved work and direct coordination while the addition is pending. Captain-only; a member sends the concern and needed expertise to its Captain with send_message. Reuse client_request_id to retry safely. Filing the request is the human gate itself and works under every approval policy, including approval policy never.";
 
 export const J5_STOP_AGENT_DESCRIPTION =
-  "Stop one Peer Agent: interrupts its running turn now. The agent remains, stays readable, and can be messaged again later — stopping halts work, it retires nothing. Requires your current squadron_id. Reuse client_request_id to retry safely.";
+  "Stop one Peer Agent: interrupts its running turn now. The agent remains, stays readable, and can be messaged again later — stopping halts work, it retires nothing. The agent must be in your project. Reuse client_request_id to retry safely.";
 
 export const J5_ARCHIVE_CREW_DESCRIPTION =
   "Retire a whole Crew you command. Crews archive only as a unit — members are never retired one by one. A clean archive completes immediately; otherwise the call refuses with the facts and a confirmation_token. Before retrying with that token, check with the user. Nothing is destroyed: worktrees, branches, and ledgers stay readable. Reuse client_request_id to retry safely.";
@@ -520,6 +482,7 @@ const spawnDependencies = [
   A2ASendService,
   Crypto.Crypto,
   A2AHomeRegistrar,
+  ThreadRegistration,
   A2ALedger,
   SpawnCompositionService,
   // Resolves the workspace, binds the request key to it, and starts the brief.
@@ -536,6 +499,7 @@ const crewProposalDependencies = [
   A2ASendService,
   Crypto.Crypto,
   A2AHomeRegistrar,
+  ThreadRegistration,
   A2ALedger,
   ThreadManagementService,
   AgentCrewInstanceService,
@@ -546,20 +510,6 @@ const crewProposalDependencies = [
 ];
 
 const listAgentsDependencies = [McpInvocationContext.McpInvocationContext, ProviderRegistry];
-
-const joinDependencies = [
-  McpInvocationContext.McpInvocationContext,
-  Crypto.Crypto,
-  SquadronJoinService,
-  ThreadManagementService,
-];
-
-const listSquadronsDependencies = [
-  McpInvocationContext.McpInvocationContext,
-  A2ALedger,
-  SquadronProjectReferences,
-  ThreadManagementService,
-];
 
 const stopDependencies = [
   McpInvocationContext.McpInvocationContext,
@@ -627,27 +577,6 @@ export const J5SpawnAgentTool = Tool.make("spawn_agent", {
   .annotate(Tool.Idempotent, false)
   .annotate(Tool.OpenWorld, true);
 
-export const J5JoinSquadronTool = Tool.make("join_squadron", {
-  description: J5_JOIN_SQUADRON_DESCRIPTION,
-  parameters: J5JoinSquadronInput,
-  success: J5JoinSquadronResult,
-  failure: J5McpFailure,
-  failureMode: "return",
-  dependencies: joinDependencies,
-})
-  .annotate(Tool.Title, "Join a Squadron")
-  .annotate(Tool.Readonly, false)
-  .annotate(Tool.Destructive, false)
-  .annotate(Tool.Idempotent, true)
-  .annotate(Tool.OpenWorld, false);
-
-export const J5ListSquadronsTool = Tool.make("list_squadrons", {
-  description: J5_LIST_SQUADRONS_DESCRIPTION,
-  success: J5ListSquadronsResult,
-  failure: J5McpFailure,
-  failureMode: "return",
-  dependencies: listSquadronsDependencies,
-}).annotate(Tool.Title, "List Squadrons");
 export const J5ProposeCrewTool = Tool.make("propose_crew", {
   description: J5_PROPOSE_CREW_DESCRIPTION,
   parameters: J5ProposeCrewInput,
@@ -751,8 +680,6 @@ export const J5Toolkit = Toolkit.make(
   ...playbookTools,
   J5SendMessageTool,
   J5ListParticipantsTool,
-  J5ListSquadronsTool,
-  J5JoinSquadronTool,
   J5SpawnAgentTool,
   J5ListAgentsTool,
   J5ProposeCrewTool,

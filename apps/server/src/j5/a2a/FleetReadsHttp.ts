@@ -20,7 +20,7 @@ export const CLIENT_READS_FLEET_PATH = "/api/j5/a2a/client-reads/fleet";
 // The response shape is the J5 contract the clients decode; kept as aliases so the route's
 // encode and the client's decode cannot drift.
 export const FleetAgent = J5Contracts.FleetAgent;
-export const FleetSquadron = J5Contracts.FleetSquadron;
+export const FleetProject = J5Contracts.FleetProject;
 export const FleetResponse = J5Contracts.FleetResponse;
 export type FleetAgent = J5Contracts.FleetAgent;
 export type FleetResponse = J5Contracts.FleetResponse;
@@ -28,7 +28,7 @@ export type FleetResponse = J5Contracts.FleetResponse;
 const encodeResponse = Schema.encodeEffect(FleetResponse);
 const decodeRequest = Schema.decodeUnknownEffect(J5Contracts.FleetReadRequest);
 
-/** Pure projection from placement rows, live Crews, and open-ask counts to one Squadron. */
+/** Pure projection from placement rows, live Crews, and open-ask counts to one project. */
 export const projectFleetSquadron = (input: {
   readonly squadron: { readonly id: SquadronId; readonly name: string };
   readonly participants: ReadonlyArray<ParticipantPlacementView>;
@@ -36,7 +36,7 @@ export const projectFleetSquadron = (input: {
   readonly openAsks: ReadonlyMap<string, number>;
   /** Each live Crew's active playbook run, by Crew id. */
   readonly playbookRuns?: ReadonlyMap<string, J5Contracts.FleetCrew["playbookRun"]>;
-}): FleetResponse["squadrons"][number] => {
+}): FleetResponse["projects"][number] => {
   const seatByParticipant = new Map<string, FleetAgent["crew"]>();
   for (const crew of input.crews) {
     if (crew.archivedAt !== null) continue;
@@ -75,7 +75,7 @@ export const projectFleetSquadron = (input: {
   );
   return {
     id: input.squadron.id,
-    name: input.squadron.name,
+    title: input.squadron.name,
     agents: [
       ...agents.map((row): FleetAgent => ({
         participantId: row.participantId,
@@ -144,7 +144,7 @@ export const makeFleetReadsHttpRouteLayer = (path: HttpRouter.PathInput) =>
       const readFleet = (includeRetired: boolean) =>
         Effect.gen(function* () {
           const squadrons = yield* ledger.listSquadrons();
-          const result: Array<FleetResponse["squadrons"][number]> = [];
+          const result: Array<FleetResponse["projects"][number]> = [];
           for (const squadron of squadrons) {
             const participants = yield* placements.listParticipants(squadron.id);
             const agentIds = participants
@@ -178,7 +178,7 @@ export const makeFleetReadsHttpRouteLayer = (path: HttpRouter.PathInput) =>
               }),
             );
           }
-          return { squadrons: result } satisfies FleetResponse;
+          return { projects: result } satisfies FleetResponse;
         });
       return HttpRouter.add(
         "POST",

@@ -11,8 +11,8 @@ import { mergeHumanInboxSources, mergeOpenInboxCounts } from "./inbox.ts";
 
 const item: HumanInboxItem = {
   personId: "human:alpha",
-  squadronId: "squadron:shared",
-  squadronName: "Shared",
+  projectId: "project:shared",
+  projectTitle: "Shared",
   exchangeId: "exchange:shared",
   senderId: "agent:sender",
   senderThreadId: "thread:shared",

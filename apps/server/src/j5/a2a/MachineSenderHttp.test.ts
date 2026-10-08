@@ -107,8 +107,8 @@ const makeHandler = (input: {
                         {
                           participantId: "agent:j5:a2a:thread:twin-one",
                           kind: "agent" as const,
-                          squadronId: "squadron:monitoring",
-                          squadronName: "Monitoring",
+                          projectId: "squadron:monitoring",
+                          projectTitle: "Monitoring",
                           displayName: "twin",
                           threadId: null,
                           archived: false,
@@ -119,8 +119,8 @@ const makeHandler = (input: {
                         {
                           participantId: "agent:j5:a2a:thread:twin-two",
                           kind: "agent" as const,
-                          squadronId: "squadron:monitoring",
-                          squadronName: "Monitoring",
+                          projectId: "squadron:monitoring",
+                          projectTitle: "Monitoring",
                           displayName: "twin",
                           threadId: null,
                           archived: false,
@@ -271,11 +271,11 @@ it("answers whoami and the roster for a machine token, and the roster for a read
     const whoami = await machine.handler(get(J5_MACHINE_API_PATHS.whoami));
     assert.equal(whoami.status, 200);
     const identity = (await whoami.json()) as {
-      participant: { participantId: string; squadronName: string };
+      participant: { participantId: string; projectTitle: string };
       server: { version: string };
     };
     assert.equal(identity.participant.participantId, watchdog.participantId);
-    assert.equal(identity.participant.squadronName, "Monitoring");
+    assert.equal(identity.participant.projectTitle, "Monitoring");
     assert.isString(identity.server.version);
 
     assert.equal((await machine.handler(get(J5_MACHINE_API_PATHS.roster))).status, 200);
@@ -301,7 +301,7 @@ it("registers a machine only for an operate-scoped client", async () => {
   try {
     const created = await operator.handler(
       post(J5_MACHINE_API_PATHS.machineParticipants, {
-        squadronId: "squadron:monitoring",
+        projectId: "squadron:monitoring",
         name: "watchd",
       }),
     );
@@ -312,7 +312,7 @@ it("registers a machine only for an operate-scoped client", async () => {
 
     const badName = await operator.handler(
       post(J5_MACHINE_API_PATHS.machineParticipants, {
-        squadronId: "squadron:monitoring",
+        projectId: "squadron:monitoring",
         name: "Not Valid",
       }),
     );
@@ -320,7 +320,7 @@ it("registers a machine only for an operate-scoped client", async () => {
 
     const refused = await machine.handler(
       post(J5_MACHINE_API_PATHS.machineParticipants, {
-        squadronId: "squadron:monitoring",
+        projectId: "squadron:monitoring",
         name: "another",
       }),
     );

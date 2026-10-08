@@ -42,8 +42,7 @@ import { runJ5A2AMigrations } from "../a2a/Migrations.ts";
 import { ParticipantPlacementService } from "../a2a/PlacementService.ts";
 import { A2ASendService } from "../a2a/SendService.ts";
 import { SpawnCompositionService } from "../a2a/SpawnCompositionService.ts";
-import { SquadronJoinService } from "../a2a/SquadronJoinService.ts";
-import { SquadronProjectReferences } from "../a2a/SquadronProjectReferences.ts";
+import { ThreadRegistration } from "../a2a/ThreadRegistration.ts";
 import { J5ToolkitHandlersLive } from "../a2a/mcp/handlers.ts";
 import { J5Toolkit } from "../a2a/mcp/tools.ts";
 import { layer as agentCrewInstanceLayer } from "../a2a/AgentCrewInstanceService.ts";
@@ -156,8 +155,7 @@ const fixture = Effect.gen(function* () {
     Layer.mock(A2ASendService)({}),
     Layer.mock(SpawnCompositionService)({}),
     Layer.mock(ArchiveAgentService)({}),
-    Layer.mock(SquadronJoinService)({}),
-    Layer.mock(SquadronProjectReferences)({}),
+    Layer.mock(ThreadRegistration)({}),
     NodeServices.layer,
   );
   const dependencies = playbookCrewRelayLayer.pipe(

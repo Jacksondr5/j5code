@@ -1,4 +1,4 @@
-import { NonNegativeInt, ThreadId, TrimmedNonEmptyString } from "@t3tools/contracts";
+import { NonNegativeInt, TrimmedNonEmptyString } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -7,45 +7,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 
 import { type A2AHumanInboxError, A2AHumanInbox } from "./HumanInboxService.ts";
-import { ParticipantId, SquadronId } from "./contracts.ts";
-
-const SquadronRead = Schema.Struct({
-  id: SquadronId,
-  name: Schema.String.check(
-    Schema.makeFilter((name) => name.trim().length > 0 || "Squadron name must not be blank."),
-  ),
-});
-
-export const ParticipantHome = Schema.Union([
-  Schema.Struct({
-    kind: Schema.Literal("known"),
-    squadron: SquadronRead,
-    /**
-     * SB5 sidebar membership: `agent` means an agent spawned this participant (placement
-     * provenance `spawned-by`), so it is roster-only unless pinned; absent or `human` shows.
-     */
-    origin: Schema.optional(Schema.Literals(["human", "agent"])),
-  }),
-  Schema.Struct({ kind: Schema.Literal("unknown") }),
-]);
-export type ParticipantHome = typeof ParticipantHome.Type;
-
-export const ThreadHomeEntry = Schema.Struct({
-  threadId: ThreadId,
-  home: ParticipantHome,
-});
-export type ThreadHomeEntry = typeof ThreadHomeEntry.Type;
-
-/** Sidebar rows resolve visible threads at the durable registrar boundary. */
-export const ThreadHomesRequest = Schema.Struct({
-  threadIds: Schema.Array(ThreadId),
-});
-export type ThreadHomesRequest = typeof ThreadHomesRequest.Type;
-
-export const ThreadHomesResponse = Schema.Struct({
-  entries: Schema.Array(ThreadHomeEntry),
-});
-export type ThreadHomesResponse = typeof ThreadHomesResponse.Type;
+import { ParticipantId } from "./contracts.ts";
 
 export const DisplayIdentity = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("known"), displayName: TrimmedNonEmptyString }),
@@ -78,20 +40,9 @@ export type OpenInboxCount = typeof OpenInboxCount.Type;
 
 export type ClientReadsError = SqlError | A2AHumanInboxError;
 
-interface HistoricalHomeRow {
-  readonly thread_id: string;
-  readonly squadron_id: string;
-  readonly squadron_name: string;
-}
-
 interface IdentityRow {
   readonly participant_id: string;
   readonly display_name: string | null;
-}
-
-interface ProvenanceRow {
-  readonly participant_id: string;
-  readonly provenance_kind: string;
 }
 
 interface OpenInboxCountRow {
@@ -116,13 +67,6 @@ const batchesOf = <Value>(values: ReadonlyArray<Value>) => {
   return batches;
 };
 
-const unknownHome = (): ParticipantHome => ({ kind: "unknown" });
-
-/** Origin is stated only when a placement row exists; older homes without placement stay silent. */
-const originFor = (provenanceKind: string | undefined) =>
-  provenanceKind === undefined
-    ? {}
-    : { origin: provenanceKind === "spawned-by" ? ("agent" as const) : ("human" as const) };
 const unknownIdentity = (): DisplayIdentity => ({ kind: "unknown" });
 
 const toIdentity = (row: IdentityRow | undefined): DisplayIdentity => {
@@ -132,35 +76,6 @@ const toIdentity = (row: IdentityRow | undefined): DisplayIdentity => {
     ? unknownIdentity()
     : { kind: "known", displayName: TrimmedNonEmptyString.make(displayName) };
 };
-
-const threadHomeRows = (sql: SqlClient.SqlClient, threadIds: ReadonlyArray<ThreadId>) =>
-  sql<HistoricalHomeRow>`
-    WITH ranked_homes AS (
-      SELECT
-        json_extract(event.payload, '$.participant.threadId') AS thread_id,
-        squadron.id AS squadron_id,
-        squadron.name AS squadron_name,
-        ROW_NUMBER() OVER (
-          PARTITION BY json_extract(event.payload, '$.participant.threadId')
-          ORDER BY event.created_at ASC, event.squadron_id ASC, event.seq ASC
-        ) AS home_rank
-      FROM j5_a2a_comm_event AS event
-      JOIN j5_a2a_squadron AS squadron ON squadron.id = event.squadron_id
-      WHERE event.kind = 'participant.joined'
-        AND json_extract(event.payload, '$.participant.kind') = 'agent'
-        AND json_extract(event.payload, '$.participant.threadId') IN ${sql.in(threadIds)}
-    )
-    SELECT thread_id, squadron_id, squadron_name
-    FROM ranked_homes
-    WHERE home_rank = 1
-  `;
-
-const provenanceRows = (sql: SqlClient.SqlClient, participantIds: ReadonlyArray<string>) =>
-  sql<ProvenanceRow>`
-    SELECT participant_id, provenance_kind
-    FROM j5_a2a_participant_placement
-    WHERE participant_id IN ${sql.in(participantIds)}
-  `;
 
 /** The one definition of an agent's display name: the title of the thread its first `participant.joined` named. */
 export const participantIdentityRows = (
@@ -174,7 +89,7 @@ export const participantIdentityRows = (
         thread.title AS display_name,
         ROW_NUMBER() OVER (
           PARTITION BY json_extract(event.payload, '$.participant.id')
-          ORDER BY event.created_at ASC, event.squadron_id ASC, event.seq ASC
+          ORDER BY event.created_at ASC, event.project_id ASC, event.seq ASC
         ) AS history_rank
       FROM j5_a2a_comm_event AS event
       LEFT JOIN orchestration_v2_projection_threads AS thread
@@ -194,7 +109,7 @@ export const openInboxCountStatement = (sql: SqlClient.SqlClient, personId: Part
     SELECT COUNT(*) AS count
     FROM j5_a2a_human_inbox AS inbox
     JOIN j5_a2a_exchange AS exchange
-      ON exchange.squadron_id = inbox.squadron_id
+      ON exchange.project_id = inbox.project_id
      AND exchange.exchange_id = inbox.exchange_id
     WHERE inbox.status = 'open'
       AND exchange.status = 'open'
@@ -226,7 +141,7 @@ export const peerSenderLabelStatement = (
                AND json_extract(event.payload, '$.senderLabel') IS NOT NULL
                AND json_extract(event.payload, '$.originEnvironmentId') IS NOT NULL
                AND event.sender = asked.value
-             ORDER BY event.created_at DESC, event.squadron_id DESC, event.seq DESC
+             ORDER BY event.created_at DESC, event.project_id DESC, event.seq DESC
              LIMIT 1
            ) AS display_name
     FROM json_each(${JSON.stringify(participantIds)}) AS asked
@@ -251,10 +166,6 @@ export const explainOpenInboxCountStatement = (
 };
 
 export interface ClientReadsShape {
-  /** Resolves a thread's immutable join-history home without re-deriving its participant id. */
-  readonly threadHomes: (
-    threadIds: ReadonlyArray<ThreadId>,
-  ) => Effect.Effect<ReadonlyArray<ThreadHomeEntry>, SqlError>;
   /** Batch-oriented, total identity resolution for B3 timelines and A4 inbox sender labels. */
   readonly participantIdentities: (
     input: ParticipantIdentitiesRequest,
@@ -275,41 +186,6 @@ export const layer: Layer.Layer<ClientReadsService, never, A2AHumanInbox | SqlCl
     Effect.gen(function* () {
       const inbox = yield* A2AHumanInbox;
       const sql = yield* SqlClient.SqlClient;
-
-      const threadHomes: ClientReadsShape["threadHomes"] = (threadIds) =>
-        Effect.gen(function* () {
-          const uniqueThreadIds = uniqueInFirstOccurrenceOrder(threadIds);
-          if (uniqueThreadIds.length === 0) return [];
-          const rows: Array<HistoricalHomeRow> = [];
-          for (const threadIdBatch of batchesOf(uniqueThreadIds)) {
-            rows.push(...(yield* threadHomeRows(sql, threadIdBatch)));
-          }
-          const rowsByThread = Map.groupBy(rows, (row) => row.thread_id);
-          const provenance = new Map<string, string>();
-          for (const participantBatch of batchesOf(
-            uniqueThreadIds.map((threadId) => `agent:j5:a2a:${threadId}`),
-          )) {
-            for (const row of yield* provenanceRows(sql, participantBatch))
-              provenance.set(row.participant_id, row.provenance_kind);
-          }
-          return uniqueThreadIds.map((threadId) => {
-            const row = rowsByThread.get(threadId)?.[0];
-            return {
-              threadId,
-              home:
-                row === undefined
-                  ? unknownHome()
-                  : {
-                      kind: "known" as const,
-                      squadron: {
-                        id: SquadronId.make(row.squadron_id),
-                        name: row.squadron_name,
-                      },
-                      ...originFor(provenance.get(`agent:j5:a2a:${threadId}`)),
-                    },
-            } satisfies ThreadHomeEntry;
-          });
-        });
 
       const participantIdentities: ClientReadsShape["participantIdentities"] = (input) =>
         Effect.gen(function* () {
@@ -359,6 +235,6 @@ export const layer: Layer.Layer<ClientReadsService, never, A2AHumanInbox | SqlCl
           return { personId, count: rows[0]?.count ?? 0 } satisfies OpenInboxCount;
         });
 
-      return ClientReadsService.of({ threadHomes, participantIdentities, openInboxCount });
+      return ClientReadsService.of({ participantIdentities, openInboxCount });
     }),
   );

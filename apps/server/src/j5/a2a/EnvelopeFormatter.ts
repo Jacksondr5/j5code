@@ -10,6 +10,18 @@ export const A2A_CLEAR_OWN_ASK_TOOL_DESCRIPTION = config.clearOwnAskToolDescript
 const render = (template: string, values: Readonly<Record<string, string>>): string =>
   template.replace(/\{\{([^{}]+)\}\}/g, (placeholder, name: string) => values[name] ?? placeholder);
 
+/**
+ * How a header names the sender's project: its id, with the title beside it when this server
+ * knows one. The title is kept on the header's one line and clear of its closing bracket.
+ */
+const originLabel = (input: {
+  readonly originProjectId: SquadronId;
+  readonly originProjectTitle?: string | undefined;
+}) => {
+  const title = input.originProjectTitle?.replace(/[\]\s]+/g, " ").trim() ?? "";
+  return title.length === 0 ? input.originProjectId : `${input.originProjectId} (${title})`;
+};
+
 const deliveryInstruction = (input: {
   readonly senderId: ParticipantId;
   readonly exchangeId: ExchangeId | null;
@@ -27,14 +39,15 @@ const senderServer = (serverName: string | undefined) =>
 
 export const formatPeerEnvelope = (input: {
   readonly senderId: ParticipantId;
-  readonly originSquadronId: SquadronId;
+  readonly originProjectId: SquadronId;
+  readonly originProjectTitle?: string | undefined;
   readonly exchangeId: ExchangeId | null;
   readonly message: string;
   readonly senderServerName?: string;
 }): string =>
   render(config.peerMessage, {
     senderId: input.senderId,
-    originSquadronId: input.originSquadronId,
+    origin: originLabel(input),
     senderServer: senderServer(input.senderServerName),
     message: input.message,
     exchangeInstruction: deliveryInstruction(input),
@@ -43,25 +56,27 @@ export const formatPeerEnvelope = (input: {
 /** A machine sender never opens an exchange, so its envelope carries no reply instruction. */
 export const formatMachineEnvelope = (input: {
   readonly senderId: ParticipantId;
-  readonly originSquadronId: SquadronId;
+  readonly originProjectId: SquadronId;
+  readonly originProjectTitle?: string | undefined;
   readonly message: string;
 }): string =>
   render(config.machineMessage, {
     senderId: input.senderId,
-    originSquadronId: input.originSquadronId,
+    origin: originLabel(input),
     message: input.message,
     machineInstruction: config.machineInstruction,
   });
 
 export const formatClosedPeerEnvelope = (input: {
   readonly senderId: ParticipantId;
-  readonly originSquadronId: SquadronId;
+  readonly originProjectId: SquadronId;
+  readonly originProjectTitle?: string | undefined;
   readonly message: string;
   readonly senderServerName?: string;
 }): string =>
   render(config.peerClosedMessage, {
     senderId: input.senderId,
-    originSquadronId: input.originSquadronId,
+    origin: originLabel(input),
     senderServer: senderServer(input.senderServerName),
     message: input.message,
     closedExchangeInstruction: config.closedExchangeInstruction,

@@ -16,8 +16,6 @@ import { ManagedRelayDpopSigner } from "../relay/managedRelay.ts";
 import {
   addPeer,
   answerHumanExchange,
-  assignImportedThreads,
-  createSquadron,
   deletePlaybook,
   issuePeerCredential,
   listPeers,
@@ -25,7 +23,6 @@ import {
   isJ5UnsupportedError,
   J5HttpError,
   listHumanInbox,
-  listSquadrons,
   previewCrewProposal,
   readOpenInboxCount,
   readThreadPlaybooks,
@@ -38,33 +35,6 @@ const isJ5HttpError = Schema.is(J5HttpError);
 
 const relayToken = (accessToken: string) =>
   ({ _tag: "Dpop", accessToken, expiresAtEpochMs: 4_102_444_800_000 }) as const;
-
-it.effect(
-  "assigns imports on the selected owner with its credentials and preserves partial outcomes",
-  () =>
-    Effect.gen(function* () {
-      const requests: Request[] = [];
-      const entries = [
-        { threadId: "import:one", status: "assigned" },
-        { threadId: "import:two", status: "kept_elsewhere" },
-        { threadId: "import:three", status: "failed" },
-      ];
-      const fetch: typeof globalThis.fetch = async (input, init) => {
-        requests.push(new Request(input, init));
-        return Response.json({ entries });
-      };
-      const input = { squadronId: "squadron:bravo", projectId: ProjectId.make("project:bravo") };
-      const result = yield* assignImportedThreads(
-        prepared("bravo", { _tag: "Bearer", token: "bravo-token" }),
-        input,
-      ).pipe(Effect.provide(remoteHttpClientLayer(fetch)));
-      expect(result.entries).toEqual(entries);
-      expect(requests[0]?.url).toBe("https://bravo.test/api/j5/squadrons/assign-imported");
-      expect(requests[0]?.headers.get("authorization")).toBe("Bearer bravo-token");
-      expect(requests[0]?.method).toBe("POST");
-      expect(yield* Effect.promise(() => requests[0]!.json())).toEqual(input);
-    }),
-);
 
 it.effect("reads each environment's run overview with its own credentials and paging filter", () =>
   Effect.gen(function* () {
@@ -296,9 +266,9 @@ it.effect("includes session cookies for the prepared browser environment", () =>
     const requests: Request[] = [];
     const fetch: typeof globalThis.fetch = async (input, init) => {
       requests.push(new Request(input, init));
-      return Response.json({ squadrons: [] });
+      return Response.json({ personId: "human:browser", items: [] });
     };
-    yield* listSquadrons(prepared("browser", null)).pipe(
+    yield* listHumanInbox(prepared("browser", null), "open").pipe(
       Effect.provide(remoteHttpClientLayer(fetch)),
     );
     expect(requests[0]?.credentials).toBe("include");
@@ -306,38 +276,23 @@ it.effect("includes session cookies for the prepared browser environment", () =>
   }),
 );
 
-it.effect("creates a Squadron and answers an exchange on the selected remote server", () =>
+it.effect("answers an exchange on the selected remote server", () =>
   Effect.gen(function* () {
     const requests: Request[] = [];
     const fetch: typeof globalThis.fetch = async (input, init) => {
       const request = new Request(input, init);
       requests.push(request);
-      return new URL(request.url).pathname === "/api/j5/squadrons"
-        ? Response.json({
-            squadron: {
-              squadron: {
-                id: "squadron:remote",
-                name: "Remote",
-                createdAt: "2026-09-08T00:00:00Z",
-              },
-              projectIds: ["project:remote"],
-            },
-          })
-        : Response.json({
-            result: {
-              messageId: "message:reply",
-              exchangeId: "exchange:remote",
-              exchangeState: "closed",
-              joinedExistingExchange: false,
-              durableAtSeq: 1,
-            },
-          });
+      return Response.json({
+        result: {
+          messageId: "message:reply",
+          exchangeId: "exchange:remote",
+          exchangeState: "closed",
+          joinedExistingExchange: false,
+          durableAtSeq: 1,
+        },
+      });
     };
     const remote = prepared("remote", { _tag: "Bearer", token: "remote-token" });
-    yield* createSquadron(remote, {
-      name: "Remote",
-      projectId: ProjectId.make("project:remote"),
-    }).pipe(Effect.provide(remoteHttpClientLayer(fetch)));
     const answer = {
       personId: "human:remote",
       exchangeId: "exchange:remote",
@@ -347,13 +302,9 @@ it.effect("creates a Squadron and answers an exchange on the selected remote ser
     yield* answerHumanExchange(remote, answer).pipe(Effect.provide(remoteHttpClientLayer(fetch)));
     expect(requests.map((request) => [request.method, new URL(request.url).origin])).toEqual([
       ["POST", "https://remote.test"],
-      ["POST", "https://remote.test"],
     ]);
-    expect(yield* Effect.promise(() => requests[0]!.json())).toEqual({
-      name: "Remote",
-      projectId: "project:remote",
-    });
-    expect(yield* Effect.promise(() => requests[1]!.json())).toEqual(answer);
+    expect(requests[0]?.headers.get("authorization")).toBe("Bearer remote-token");
+    expect(yield* Effect.promise(() => requests[0]!.json())).toEqual(answer);
   }),
 );
 
@@ -364,14 +315,14 @@ it.effect("signs fresh DPoP proofs for the actual method and remote URL", () =>
     const fetch: typeof globalThis.fetch = async (input, init) => {
       const request = new Request(input, init);
       requests.push(request);
-      return new URL(request.url).pathname === "/api/j5/squadrons"
-        ? Response.json({ squadrons: [] })
+      return new URL(request.url).pathname === "/api/j5/a2a/inbox"
+        ? Response.json({ personId: "human:relay", items: [] })
         : Response.json({ personId: "human:relay", count: 2 });
     };
     const remote = prepared("relay", relayToken("stale-token"));
     const authorization = relayAuthorization(["relay-token"]);
     yield* Effect.gen(function* () {
-      yield* listSquadrons(remote);
+      yield* listHumanInbox(remote, "open");
       yield* readOpenInboxCount(remote);
     }).pipe(
       Effect.provide(remoteHttpClientLayer(fetch)),
@@ -387,7 +338,11 @@ it.effect("signs fresh DPoP proofs for the actual method and remote URL", () =>
     // The token comes from the authorization service at request time, not
     // from the credential captured when the connection was prepared.
     expect(proofs).toEqual([
-      { method: "GET", url: "https://relay.test/api/j5/squadrons", accessToken: "relay-token" },
+      {
+        method: "GET",
+        url: "https://relay.test/api/j5/a2a/inbox?status=open",
+        accessToken: "relay-token",
+      },
       {
         method: "POST",
         url: "https://relay.test/api/j5/a2a/client-reads/open-count",
@@ -413,11 +368,14 @@ it.effect("refreshes a rejected relay token once and retries the same request", 
       const request = new Request(input, init);
       requests.push(request);
       return request.headers.get("authorization") === "DPoP fresh-token"
-        ? Response.json({ squadrons: [] })
+        ? Response.json({ personId: "human:relay", items: [] })
         : Response.json({ code: "auth_invalid", reason: "invalid_credential" }, { status: 401 });
     };
     const authorization = relayAuthorization(["expired-token", "fresh-token"]);
-    const squadrons = yield* listSquadrons(prepared("relay", relayToken("expired-token"))).pipe(
+    const inbox = yield* listHumanInbox(
+      prepared("relay", relayToken("expired-token")),
+      "open",
+    ).pipe(
       Effect.provide(remoteHttpClientLayer(fetch)),
       Effect.provideService(RemoteEnvironmentAuthorization, authorization.service),
       Effect.provideService(ManagedRelayDpopSigner, {
@@ -425,7 +383,7 @@ it.effect("refreshes a rejected relay token once and retries the same request", 
         createProof: () => Effect.succeed("proof"),
       }),
     );
-    expect(squadrons).toEqual([]);
+    expect(inbox).toEqual({ personId: "human:relay", items: [] });
     expect(requests.map((request) => request.headers.get("authorization"))).toEqual([
       "DPoP expired-token",
       "DPoP fresh-token",
@@ -441,10 +399,10 @@ it.effect("reports a bearer rejection as a J5 error without retrying", () =>
       requests.push(new Request(input, init));
       return Response.json({ message: "Sign in again." }, { status: 401 });
     };
-    const error = yield* listSquadrons(prepared("bravo", { _tag: "Bearer", token: "old" })).pipe(
-      Effect.provide(remoteHttpClientLayer(fetch)),
-      Effect.flip,
-    );
+    const error = yield* listHumanInbox(
+      prepared("bravo", { _tag: "Bearer", token: "old" }),
+      "open",
+    ).pipe(Effect.provide(remoteHttpClientLayer(fetch)), Effect.flip);
     expect(error).toBeInstanceOf(J5HttpError);
     expect(error).toMatchObject({ status: 401, detail: "Sign in again." });
     expect(requests).toHaveLength(1);

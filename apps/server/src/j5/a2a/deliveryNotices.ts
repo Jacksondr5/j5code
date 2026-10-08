@@ -100,14 +100,14 @@ export const formatPeerDropNotice = (input: {
 
 /** The message a notice is about, as its delivery row records it. */
 export interface UndeliveredMessage {
-  readonly squadron_id: string;
+  readonly project_id: string;
   readonly message_id: string;
   readonly sender_id: string;
   readonly receiver_id: string;
 }
 
 const notDeliveredKey = (message: UndeliveredMessage) =>
-  `${stablePart(message.squadron_id)}:${stablePart(message.message_id)}`;
+  `${stablePart(message.project_id)}:${stablePart(message.message_id)}`;
 
 /** The one notice a message can get, so a later step can see it was already told. */
 export const notDeliveredNoticeMessageId = (message: UndeliveredMessage) =>
@@ -136,8 +136,8 @@ export const notDeliveredNoticeEvent = (input: {
         reason: input.reason,
         ...(input.handedOut === true ? { handedOut: true } : {}),
       }),
-      originSquadronId: SquadronId.make(input.message.squadron_id),
-      receiverSquadronId: SquadronId.make(input.message.squadron_id),
+      originProjectId: SquadronId.make(input.message.project_id),
+      receiverProjectId: SquadronId.make(input.message.project_id),
       exchangeRole: "none",
       envelopeChannel: "lifecycle_notice",
     },
@@ -147,7 +147,7 @@ export const notDeliveredNoticeEvent = (input: {
 
 /** The open Exchange a drop ends, and the party on this server who is told. */
 export interface DroppedExchange {
-  readonly squadron_id: string;
+  readonly project_id: string;
   readonly exchange_id: string;
   readonly sender_id: string;
   readonly receiver_id: string;
@@ -168,7 +168,7 @@ export const peerDropEvents = (input: {
   readonly createdAt: string;
 }): ReadonlyArray<CommEvent> => {
   const exchangeId = ExchangeId.make(input.exchange.exchange_id);
-  const key = `${stablePart(input.exchange.squadron_id)}:${stablePart(input.exchange.exchange_id)}:${input.cause.kind}`;
+  const key = `${stablePart(input.exchange.project_id)}:${stablePart(input.exchange.exchange_id)}:${input.cause.kind}`;
   const messageId = LedgerMessageId.make(`message:j5:a2a:peer-drop:${key}`);
   const correlationId = CorrelationId.make(`correlation:j5:a2a:peer-drop:${key}`);
   const localParty =
@@ -201,8 +201,8 @@ export const peerDropEvents = (input: {
             payload: {
               messageId,
               text: input.noticeText,
-              originSquadronId: SquadronId.make(input.exchange.squadron_id),
-              receiverSquadronId: SquadronId.make(input.localSquadronId),
+              originProjectId: SquadronId.make(input.exchange.project_id),
+              receiverProjectId: SquadronId.make(input.localSquadronId),
               exchangeRole: "terminal_notice",
               envelopeChannel: "lifecycle_notice",
             },

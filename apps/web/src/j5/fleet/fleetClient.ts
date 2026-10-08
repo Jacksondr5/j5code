@@ -1,6 +1,6 @@
 import type { J5ReadSources } from "@t3tools/client-runtime/j5/readSources";
 import type { EnvironmentId } from "@t3tools/contracts";
-import type { FleetResponse, FleetSquadron } from "@t3tools/contracts/j5";
+import type { FleetProject, FleetResponse } from "@t3tools/contracts/j5";
 
 import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { refreshCrewMembershipRows } from "../crew/CrewMembershipsClient";
@@ -15,7 +15,9 @@ import {
 import { createVisibleRefreshHook } from "../useVisibleRefresh";
 import { fleetInvolvedThreadRefs } from "./fleet.logic";
 
-export type { FleetAgent, FleetCrew, FleetResponse, FleetSquadron } from "@t3tools/contracts/j5";
+export type { FleetAgent, FleetCrew, FleetResponse } from "@t3tools/contracts/j5";
+/** One project's agents and Crews, as one machine's ledger answers for it. */
+export type FleetSquadron = FleetProject;
 
 /** The roster changes on the scale of turns, not keystrokes; poll rarely and only while visible. */
 export const FLEET_POLL_INTERVAL_MS = 30_000;
@@ -25,12 +27,12 @@ export type ScopedFleetSquadron = FleetSquadron & {
   readonly environmentLabel: string;
 };
 
-/** Every connected environment's Squadrons, each tagged with the environment its threads live on. */
+/** Every connected environment's projects, each tagged with the environment its threads live on. */
 export const mergeFleetSources = (
   sources: J5ReadSources<FleetResponse>,
 ): ReadonlyArray<ScopedFleetSquadron> =>
   sources.sources.flatMap((source) =>
-    (source.data?.squadrons ?? []).map((squadron) => ({
+    (source.data?.projects ?? []).map((squadron) => ({
       ...squadron,
       environmentId: source.environmentId,
       environmentLabel: source.environmentLabel,

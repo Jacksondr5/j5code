@@ -4,12 +4,17 @@ import {
   EnvironmentId,
   type AuthSessionState,
 } from "@t3tools/contracts";
+import { J5_LEDGER_CAPABILITIES } from "@t3tools/contracts/j5";
 import * as Cause from "effect/Cause";
 import * as Option from "effect/Option";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity";
 
 import { J5HttpError } from "./http.ts";
-import { resolveJ5ReadSource, spansMultipleEnvironments } from "./readSources.ts";
+import {
+  createJ5ReadSourcesAtom,
+  resolveJ5ReadSource,
+  spansMultipleEnvironments,
+} from "./readSources.ts";
 
 const session: AuthSessionState = {
   authenticated: true,
@@ -79,4 +84,58 @@ it("shows environment labels only once items span more than one environment", ()
   expect(spansMultipleEnvironments([])).toBe(false);
   expect(spansMultipleEnvironments([alpha, alpha])).toBe(false);
   expect(spansMultipleEnvironments([alpha, bravo])).toBe(true);
+});
+
+/** Reads one environment's source for a capability key, counting the route calls it makes. */
+const readSourceFor = (
+  capabilities: Partial<Record<keyof typeof J5_LEDGER_CAPABILITIES, boolean>>,
+  capability: keyof typeof J5_LEDGER_CAPABILITIES,
+) => {
+  const environmentId = source.environmentId;
+  let routeCalls = 0;
+  type Input = Parameters<typeof createJ5ReadSourcesAtom<ReadonlyArray<string>>>[0];
+  const sources = createJ5ReadSourcesAtom<ReadonlyArray<string>>({
+    label: "test:j5-read-sources",
+    // The two older keys are the ones the client from before the re-key passed here.
+    capability: capability as Input["capability"],
+    catalogValueAtom: Atom.make({
+      isReady: true,
+      entries: new Map([[environmentId, { target: { label: "Remote" } }]]),
+    }) as unknown as Input["catalogValueAtom"],
+    stateAtom: () =>
+      Atom.make(AsyncResult.success({ phase: "connected" })) as unknown as ReturnType<
+        Input["stateAtom"]
+      >,
+    configValueAtom: () =>
+      Atom.make({ environment: { capabilities } }) as unknown as ReturnType<
+        Input["configValueAtom"]
+      >,
+    sessionStateValueAtom: () => Atom.make(session),
+    queryAtom: () =>
+      Atom.make(() => {
+        routeCalls += 1;
+        return AsyncResult.success<ReadonlyArray<string>, unknown>(["row"]);
+      }),
+  });
+  const [result] = AtomRegistry.make().get(sources).sources;
+  return { status: result?.status, data: result?.data, routeCalls };
+};
+
+it("shows an older client's J5 views as unsupported against a project-keyed server, calling no route", () => {
+  // Fleet read `j5Squadrons`; the Inbox, its count, Crew proposals and Crew runtime requests read
+  // `j5HumanInbox`. Their routes changed shape, so that client must not reach them.
+  for (const olderKey of ["j5Squadrons", "j5HumanInbox"] as const) {
+    expect(readSourceFor(J5_LEDGER_CAPABILITIES, olderKey)).toEqual({
+      status: "unsupported",
+      data: null,
+      routeCalls: 0,
+    });
+  }
+  expect(readSourceFor(J5_LEDGER_CAPABILITIES, "j5ProjectLedger")).toEqual({
+    status: "ready",
+    data: ["row"],
+    routeCalls: 1,
+  });
+  // A key that is missing is probed, which is why the server states the older two as false.
+  expect(readSourceFor({ j5ProjectLedger: true }, "j5HumanInbox").routeCalls).toBe(1);
 });

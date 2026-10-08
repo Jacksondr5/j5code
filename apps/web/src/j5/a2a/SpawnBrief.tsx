@@ -33,8 +33,6 @@ export interface SpawnBriefPresentation {
    */
   readonly brief: string;
   readonly participantId: string;
-  readonly squadronId: string;
-  readonly squadronName: string;
   /** Null on briefs written before the server recorded the spawner. */
   readonly spawnedBy: string | null;
   readonly spawnerThreadId: ThreadId | null;
@@ -63,9 +61,10 @@ export function presentSpawnBrief(message: ChatMessage): SpawnBriefPresentation 
     if (separator > 0) facts.set(line.slice(0, separator), line.slice(separator + 2));
   }
   const participantId = facts.get("participant_id");
-  const squadronId = facts.get("squadron_id");
-  const squadronName = facts.get("squadron_name");
-  if (!participantId || !squadronId || !squadronName) return null;
+  // Briefs stored before Squadrons were retired name a Squadron where newer ones name a project.
+  const projectId = facts.get("project_id") ?? facts.get("squadron_id");
+  const projectTitle = facts.get("project_title") ?? facts.get("squadron_name");
+  if (!participantId || !projectId || !projectTitle) return null;
   const spawnerThreadId = facts.get("spawner_thread_id");
   const remainder = text.slice(closeIndex + CONTEXT_CLOSE.length);
   const bareBrief = BRIEF_ONLY_PATTERN.exec(remainder)?.[1];
@@ -74,8 +73,6 @@ export function presentSpawnBrief(message: ChatMessage): SpawnBriefPresentation 
   return {
     brief: bareBrief ?? remainder,
     participantId,
-    squadronId,
-    squadronName,
     spawnedBy: facts.get("spawned_by") ?? null,
     spawnerThreadId: spawnerThreadId ? ThreadId.make(spawnerThreadId) : null,
   };

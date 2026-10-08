@@ -55,8 +55,7 @@ import { PeerDirectory, noneLayer as peerDirectoryNoneLayer } from "../PeerDirec
 import { ParticipantPlacementService, PlacementStorageError } from "../PlacementService.ts";
 import { A2AHomeMembershipStateError, A2ASendService } from "../SendService.ts";
 import { SpawnCompositionService } from "../SpawnCompositionService.ts";
-import { SquadronJoinService } from "../SquadronJoinService.ts";
-import { SquadronProjectReferences } from "../SquadronProjectReferences.ts";
+import { ThreadRegistration } from "../ThreadRegistration.ts";
 import {
   type ClearOwnAskInput,
   ExchangeId,
@@ -139,7 +138,7 @@ const unusedLifecycleDependencies = Layer.mergeAll(
       Effect.succeed([
         {
           id: SquadronId.make("squadron:j5:mcp-directory"),
-          name: "Directory Squadron",
+          name: "Directory project",
           createdAt: DateTime.formatIso(createdAt),
         },
       ]),
@@ -155,8 +154,7 @@ const unusedLifecycleDependencies = Layer.mergeAll(
   Layer.mock(CrewStopService)({}),
   Layer.mock(CrewProposalService)({}),
   peerDirectoryNoneLayer,
-  Layer.mock(SquadronJoinService)({}),
-  Layer.mock(SquadronProjectReferences)({}),
+  Layer.mock(ThreadRegistration)({}),
 );
 
 it.effect("namespaces mutating-tool idempotency and sender identity from authenticated scope", () =>
@@ -164,10 +162,8 @@ it.effect("namespaces mutating-tool idempotency and sender identity from authent
     assert.deepStrictEqual(Object.keys(J5Toolkit.tools).sort(), [
       "archive_crew",
       "clear_own_ask",
-      "join_squadron",
       "list_participants",
       "list_personas",
-      "list_squadrons",
       "playbook_back",
       "playbook_cancel",
       "playbook_complete",
@@ -231,8 +227,6 @@ it.effect("namespaces mutating-tool idempotency and sender identity from authent
       Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
       Layer.mock(OrchestratorV2)({}),
       unusedLifecycleDependencies,
-      Layer.mock(SquadronJoinService)({}),
-      Layer.mock(SquadronProjectReferences)({}),
       NodeServices.layer,
       SqlitePersistenceMemory,
     );
@@ -305,8 +299,8 @@ it.effect("namespaces mutating-tool idempotency and sender identity from authent
       const multiMembershipMessage = (
         multiMembership.result as unknown as { readonly message: string }
       ).message;
-      assert.include(multiMembershipMessage, "immutable home");
-      assert.include(multiMembershipMessage, "active membership projection");
+      assert.include(multiMembershipMessage, "is registered as");
+      assert.include(multiMembershipMessage, "but its active membership is");
       const captured = yield* Ref.get(sends);
       assert.lengthOf(captured, 4);
       assert.equal(captured[0]?.commandId, captured[1]?.commandId);
@@ -432,8 +426,6 @@ it.effect("keeps participant listing placement-read-only", () =>
           Effect.fail(new OrchestratorProjectionError({ threadId: invocation.threadId })),
       }),
       unusedLifecycleDependencies,
-      Layer.mock(SquadronJoinService)({}),
-      Layer.mock(SquadronProjectReferences)({}),
       NodeServices.layer,
     );
     const layer = J5ToolkitHandlersLive.pipe(
@@ -592,8 +584,6 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
           }),
           Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
           unusedLifecycleDependencies,
-          Layer.mock(SquadronJoinService)({}),
-          Layer.mock(SquadronProjectReferences)({}),
           NodeServices.layer,
         ),
       ),
@@ -615,8 +605,8 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
 
     assert.deepStrictEqual(directory.participants, [
       {
-        squadron_id: squadronId,
-        squadron_name: "Directory Squadron",
+        project_id: squadronId,
+        project_title: "Directory project",
         participant_id: activeParticipantId,
         participant: { kind: "agent", id: activeParticipantId, thread_id: activeThreadId },
         self: false,
@@ -630,8 +620,8 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
         display_name: "Release reviewer",
       },
       {
-        squadron_id: squadronId,
-        squadron_name: "Directory Squadron",
+        project_id: squadronId,
+        project_title: "Directory project",
         participant_id: archivedParticipantId,
         participant: { kind: "agent", id: archivedParticipantId, thread_id: archivedThreadId },
         self: false,
@@ -645,8 +635,8 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
         display_name: "Archived researcher",
       },
       {
-        squadron_id: squadronId,
-        squadron_name: "Directory Squadron",
+        project_id: squadronId,
+        project_title: "Directory project",
         participant_id: missingParticipantId,
         participant: { kind: "agent", id: missingParticipantId, thread_id: missingThreadId },
         self: false,
@@ -660,8 +650,8 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
         display_name: null,
       },
       {
-        squadron_id: squadronId,
-        squadron_name: "Directory Squadron",
+        project_id: squadronId,
+        project_title: "Directory project",
         participant_id: humanParticipantId,
         participant: { kind: "human", id: humanParticipantId },
         self: false,
@@ -738,8 +728,6 @@ it.effect("returns null display names when the ambient shell snapshot fails", ()
           }),
           Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
           unusedLifecycleDependencies,
-          Layer.mock(SquadronJoinService)({}),
-          Layer.mock(SquadronProjectReferences)({}),
           NodeServices.layer,
         ),
       ),
@@ -769,7 +757,7 @@ it.effect("returns null display names when the ambient shell snapshot fails", ()
 it.effect("preflights home before creation and records facts before the one stable brief", () =>
   Effect.gen(function* () {
     const squadronId = SquadronId.make("squadron:j5:mcp-spawn");
-    const squadronName = "Release proof Squadron";
+    const squadronName = "Release proof project";
     const callerParticipantId = ParticipantId.make("agent:j5:mcp-spawn-caller");
     const childParticipantId = ParticipantId.make("agent:j5:mcp-spawn-child");
     const failFacts = yield* Ref.make(false);
@@ -949,8 +937,9 @@ it.effect("preflights home before creation and records facts before the one stab
       Layer.mock(CrewStopService)({}),
       Layer.mock(CrewProposalService)({}),
 
-      Layer.mock(SquadronJoinService)({}),
-      Layer.mock(SquadronProjectReferences)({}),
+      Layer.mock(ThreadRegistration)({
+        ensureRegistered: () => Effect.succeed({ squadronId, participantId: callerParticipantId }),
+      }),
       NodeServices.layer,
     );
     const layer = J5ToolkitHandlersLive.pipe(
@@ -984,7 +973,8 @@ it.effect("preflights home before creation and records facts before the one stab
       assert.deepStrictEqual(first.result, {
         participant_id: childParticipantId,
         thread_id: (first.result as { readonly thread_id: ThreadId }).thread_id,
-        squadron_id: squadronId,
+        project_id: squadronId,
+        project_title: squadronName,
         placement: {
           placement_parent_id: callerParticipantId,
           provenance: {
@@ -1022,7 +1012,7 @@ it.effect("preflights home before creation and records facts before the one stab
       if (firstTurn?.type === "message.dispatch") {
         assert.equal(
           firstTurn.text,
-          `<j5_spawn_context>\nPlatform-provided identity facts:\nparticipant_id: ${childParticipantId}\nsquadron_id: ${squadronId}\nsquadron_name: ${squadronName}\nspawned_by: ${callerParticipantId}\nspawner_thread_id: ${invocation.threadId}\n</j5_spawn_context>\n\n<spawner_brief>\n${args.brief}\n</spawner_brief>`,
+          `<j5_spawn_context>\nPlatform-provided identity facts:\nparticipant_id: ${childParticipantId}\nproject_id: ${squadronId}\nproject_title: ${squadronName}\nspawned_by: ${callerParticipantId}\nspawner_thread_id: ${invocation.threadId}\n</j5_spawn_context>\n\n<spawner_brief>\n${args.brief}\n</spawner_brief>`,
         );
       }
       const replayTurn = capturedCommands[3];
@@ -1082,7 +1072,7 @@ it.effect("preflights home before creation and records facts before the one stab
   }),
 );
 
-it.effect("refuses spawn before thread creation when the caller has no home", () =>
+it.effect("refuses spawn before thread creation when the caller is a Subagent", () =>
   Effect.gen(function* () {
     const dispatches = yield* Ref.make(0);
     const dependencies = Layer.mergeAll(
@@ -1105,8 +1095,8 @@ it.effect("refuses spawn before thread creation when the caller has no home", ()
       Layer.mock(CrewStopService)({}),
       Layer.mock(CrewProposalService)({}),
 
-      Layer.mock(SquadronJoinService)({}),
-      Layer.mock(SquadronProjectReferences)({}),
+      // Registration answers null for a thread that is never a participant.
+      Layer.mock(ThreadRegistration)({ ensureRegistered: () => Effect.succeed(null) }),
       NodeServices.layer,
     );
     const layer = J5ToolkitHandlersLive.pipe(
@@ -1133,7 +1123,7 @@ it.effect("refuses spawn before thread creation when the caller has no home", ()
       assert.isTrue(result.isFailure);
       assert.include(
         (result.result as unknown as { readonly message: string }).message,
-        "no usable immutable Squadron home",
+        "is a Subagent and is not an agent-to-agent participant",
       );
       assert.equal(yield* Ref.get(dispatches), 0);
     }).pipe(Effect.provide(layer));
@@ -1283,6 +1273,9 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
       Layer.mock(ArchiveCrewService)({}),
       Layer.mock(CrewStopService)({}),
       Layer.mock(CrewProposalService)({}),
+      Layer.mock(ThreadRegistration)({
+        ensureRegistered: () => Effect.succeed({ squadronId, participantId: callerParticipantId }),
+      }),
 
       ServerConfig.layerTest(process.cwd(), { prefix: "j5-mcp-spawn-persona-" }),
     ).pipe(Layer.provideMerge(NodeServices.layer));
@@ -1567,7 +1560,6 @@ it.effect("archives a crew only as a unit through its captain with one confirmat
             Effect.provideService(McpInvocationContext, invocation),
           );
       const refused = yield* run({
-        squadron_id: squadronId,
         crew_instance_id: "crew:j5:test",
         client_request_id: "archive-crew-1",
       });
@@ -1598,7 +1590,6 @@ it.effect("archives a crew only as a unit through its captain with one confirmat
       assert.include(message(refused), "check with the user");
 
       const confirmed = yield* run({
-        squadron_id: squadronId,
         crew_instance_id: "crew:j5:test",
         client_request_id: "archive-crew-1",
         confirmation_token: "crew-token",
@@ -1612,18 +1603,16 @@ it.effect("archives a crew only as a unit through its captain with one confirmat
       const calls = yield* Ref.get(archiveCalls);
       assert.lengthOf(calls, 2);
       assert.equal(calls[1]?.callerParticipantId, callerParticipantId);
+      assert.equal(
+        calls[1]?.squadronId,
+        squadronId,
+        "the Crew is archived in the caller's project",
+      );
       assert.equal(calls[1]?.clientRequestKey, "archive-crew-1");
       const ids = calls[1]!.commandIds("builder");
       assert.include(ids.archiveCommandId, "archive-crew-thread");
       assert.include(ids.archiveCommandId, encodeURIComponent("archive-crew-1/seat/builder"));
       assert.notEqual(ids.archiveCommandId, calls[1]!.commandIds("critic").archiveCommandId);
-
-      const wrongSquadron = yield* run({
-        squadron_id: SquadronId.make("squadron:j5:other"),
-        crew_instance_id: "crew:j5:test",
-      });
-      assert.isTrue(wrongSquadron.isFailure);
-      assert.include(message(wrongSquadron), "archive_crew targeted squadron:j5:other");
     }).pipe(Effect.provide(layer));
   }),
 );
@@ -1797,6 +1786,9 @@ it.effect("routes crew proposals through a captain that is not itself a crew mem
       }),
       Layer.mock(ParticipantPlacementService)({}),
       Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
+      Layer.mock(ThreadRegistration)({
+        ensureRegistered: () => Effect.succeed({ squadronId, participantId: callerParticipantId }),
+      }),
 
       Layer.mock(ArchiveCrewService)({}),
       Layer.mock(CrewStopService)({}),
@@ -2055,8 +2047,7 @@ it.effect("stops exactly one placed agent without consulting or touching descend
       Layer.mock(CrewStopService)({}),
       Layer.mock(CrewProposalService)({}),
 
-      Layer.mock(SquadronJoinService)({}),
-      Layer.mock(SquadronProjectReferences)({}),
+      Layer.mock(ThreadRegistration)({}),
       NodeServices.layer,
     );
     const layer = J5ToolkitHandlersLive.pipe(
@@ -2076,7 +2067,6 @@ it.effect("stops exactly one placed agent without consulting or touching descend
             Effect.provideService(McpInvocationContext, invocation),
           );
       const args = {
-        squadron_id: squadronId,
         participant_id: targetParticipantId,
         client_request_id: "stop-one-1",
       } satisfies J5StopAgentInput;
@@ -2089,16 +2079,6 @@ it.effect("stops exactly one placed agent without consulting or touching descend
         client_request_id: "stop-idle-1",
       });
       assert.equal(idle.result, "already_idle");
-      const crossSquadron = yield* call({
-        ...args,
-        squadron_id: SquadronId.make("squadron:j5:mcp-stop-other"),
-        client_request_id: "stop-cross-squadron",
-      });
-      assert.isTrue(crossSquadron.isFailure);
-      assert.include(
-        (crossSquadron.result as unknown as { readonly message: string }).message,
-        `currently in Squadron ${squadronId}`,
-      );
       const calls = yield* Ref.get(interrupted);
       assert.deepStrictEqual(
         calls.map((call) => call.threadId),
@@ -2209,8 +2189,7 @@ it.effect(
         Layer.mock(ArchiveCrewService)({}),
         Layer.mock(CrewStopService)({}),
         Layer.mock(CrewProposalService)({}),
-        Layer.mock(SquadronJoinService)({}),
-        Layer.mock(SquadronProjectReferences)({}),
+        Layer.mock(ThreadRegistration)({}),
         NodeServices.layer,
       );
       const layer = J5ToolkitHandlersLive.pipe(
@@ -2230,7 +2209,7 @@ it.effect(
           );
         const listed = yield* callList(false);
         assert.deepStrictEqual(
-          listed.participants.map((row) => [row.participant_id, row.squadron_id]),
+          listed.participants.map((row) => [row.participant_id, row.project_id]),
           [
             [callerParticipantId, squadronId],
             [remoteParticipantId, "squadron:home-support"],
@@ -2239,8 +2218,8 @@ it.effect(
         );
         const remoteRow = listed.participants[1]!;
         assert.equal(remoteRow.display_name, "Support triage");
-        assert.equal(remoteRow.squadron_name, "L2 Support Rotation");
-        assert.equal(listed.participants[0]!.squadron_name, null);
+        assert.equal(remoteRow.project_title, "L2 Support Rotation");
+        assert.equal(listed.participants[0]!.project_title, null);
         assert.equal(remoteRow.can_receive_message, true);
         assert.equal(remoteRow.can_open_exchange, true);
         assert.equal(remoteRow.self, false);

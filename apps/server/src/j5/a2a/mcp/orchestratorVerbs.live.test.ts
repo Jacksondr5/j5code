@@ -84,7 +84,8 @@ const lunaSelection = {
 } satisfies ModelSelection;
 const parentThreadId = ThreadId.make("thread:j5:luna-verb-e2e:parent");
 const projectId = ProjectId.make("project:j5:luna-verb-e2e");
-const squadronId = SquadronId.make("squadron:j5:luna-verb-e2e");
+// A thread's home is its project, so the ledger is keyed by the project's id.
+const squadronId = SquadronId.make(projectId);
 const requestKey = "j5-luna-verb-e2e-spawn";
 const scope = {
   environmentId: EnvironmentId.make("environment:j5:luna-verb-e2e"),
@@ -303,12 +304,9 @@ describe.runIf(process.env.T3_J5_LUNA_LIVE_ORCHESTRATOR === "1")(
           }
 
           const ledger = yield* A2ALedger;
-          yield* ledger.createSquadron({
-            squadron: {
-              id: squadronId,
-              name: "J5 Luna verb E2E",
-              createdAt: "2026-08-30T17:00:00.000Z",
-            },
+          yield* ledger.ensureProject({
+            projectId: squadronId,
+            createdAt: "2026-08-30T17:00:00.000Z",
           });
           const parentHome = yield* (yield* A2AHomeRegistrar).registerAtCreation({
             commandId: CommCommandId.make("command:j5:luna-verb-e2e:parent-home"),
@@ -350,11 +348,10 @@ describe.runIf(process.env.T3_J5_LUNA_LIVE_ORCHESTRATOR === "1")(
             client_request_id: requestKey,
           });
           assert.equal(spawned.thread_id, expectedThreadId);
-          assert.equal(spawned.squadron_id, squadronId);
+          assert.equal(spawned.project_id, squadronId);
           yield* Fiber.join(runningFiber);
 
           const stopped = yield* callStop({
-            squadron_id: squadronId,
             participant_id: spawned.participant_id,
             client_request_id: "j5-luna-verb-e2e-stop",
           });
@@ -381,7 +378,8 @@ describe.runIf(process.env.T3_J5_LUNA_LIVE_ORCHESTRATOR === "1")(
           assert.equal(projection.thread.modelSelection.model, lunaSelection.model);
           assert.equal(projection.thread.runtimeMode, "approval-required");
           assert.equal(projection.thread.worktreePath, isolatedWorkspace);
-          const firstTurnText = `<j5_spawn_context>\nPlatform-provided identity facts:\nparticipant_id: ${spawned.participant_id}\nsquadron_id: ${squadronId}\nsquadron_name: J5 Luna verb E2E\nspawned_by: ${parentHome.participantId}\nspawner_thread_id: ${parentThreadId}\n</j5_spawn_context>\n\n<spawner_brief>\n${brief}\n</spawner_brief>`;
+          // No project row is seeded here, so the title falls back to the project's id.
+          const firstTurnText = `<j5_spawn_context>\nPlatform-provided identity facts:\nparticipant_id: ${spawned.participant_id}\nproject_id: ${squadronId}\nproject_title: ${squadronId}\nspawned_by: ${parentHome.participantId}\nspawner_thread_id: ${parentThreadId}\n</j5_spawn_context>\n\n<spawner_brief>\n${brief}\n</spawner_brief>`;
           assert.equal(
             projection.messages.filter((message) => message.text === firstTurnText).length,
             1,

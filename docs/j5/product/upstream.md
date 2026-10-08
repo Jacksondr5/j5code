@@ -64,7 +64,7 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **J5:** those tools are hidden from agents. J5 keeps the upstream tools it has admitted, rewrites the descriptions that would mislead J5 agents, and hides any new upstream tool until someone reviews it.
 
-**Why:** J5 built its own versions of these tools, integrated with J5's model: `send_message` and Exchanges instead of raw send, `stop_agent` instead of interrupt, and `spawn_agent` and `propose_crew` instead of launch. Upstream's tools were more primitive and didn't meet J5's needs when this was decided. A raw send is communication the Squadron ledger can't see, so a reply that never comes stalls silently. Raw thread creation skips the Squadron home a spawn records. Hiding new upstream tools by default means each one is reviewed against J5's definitions before agents get it. The tools are hidden, not deleted, to keep the fork's edits small.
+**Why:** J5 built its own versions of these tools, integrated with J5's model: `send_message` and Exchanges instead of raw send, `stop_agent` instead of interrupt, and `spawn_agent` and `propose_crew` instead of launch. Upstream's tools were more primitive and didn't meet J5's needs when this was decided. A raw send is communication the ledger can't see, so a reply that never comes stalls silently. Raw thread creation skips the placement a spawn records. Hiding new upstream tools by default means each one is reviewed against J5's definitions before agents get it. The tools are hidden, not deleted, to keep the fork's edits small.
 
 **Consequences:** upstream's toolkit stays compiled but unused. Upstream's tools keep evolving, so J5 should periodically re-evaluate them and consider merging its tools with upstream's rather than carrying parallel versions. Each advance checks the admitted tool list, which a test pins, and re-reads upstream's descriptions. Open gaps: `t3_worktree_handoff` still points agents at a tool they can't use. `t3_pending_request_respond` answers another thread's pending approval or question without J5's authority checks (#345).
 
@@ -118,46 +118,7 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Decided:** introduced in PR #92 (2026-09-04); Jackson approved it on 2026-09-28. The floor value itself is still unproven. Recorded in FORK.md case 28.
 
-### Squadrons and the sidebar
-
-#### D8. Acting on another agent also requires a shared Squadron
-
-**Upstream:** an agent's actions on other threads are scoped to its project.
-
-**J5:** on top of upstream's same-project rule:
-
-- Archiving or unarchiving another agent that has a Squadron home also requires the caller to belong to that Squadron.
-- Merge-back is refused unless both threads share a Squadron home, or both have none.
-
-**Why:** the ledger is still keyed by Squadron, and these checks were written when a Squadron could differ from its project. They don't limit communication: any agent can still message any other.
-
-**Consequences:** the checks collapse into upstream's same-project rule when the ledger re-keys to projects ([#412](https://github.com/Jacksondr5/j5code/issues/412)), and this entry retires then. Merge-back hasn't been exercised live. Until then a project that several Squadrons reference refuses new threads, and the app no longer offers Delete Squadron to repair it. The repair a person does have is the server's delete route, `POST /api/j5/squadrons/<squadronId>/delete`, which refuses while the Squadron still has unarchived agents or live Crews; those have to be archived first.
-
-**Decided:** Jackson, 2026-09-28 (the organize check and merge-back limit, which arrived without a ruling in the 2026-09-17 integration). The Squadron as the person's unit of choice (new-thread doors, Add Project, the sidebar scope, thread cards, the clone notice) was decided between 2026-08-24 and 2026-09-25 and went back to upstream's project on 2026-10-04, in the plan to retire Squadrons. Recorded in FORK.md cases 10 and 38, and its root-spawn section.
-
-#### D9. A thread's Squadron is created for it
-
-**Upstream:** a first run lands in a draft, and a thread belongs to its project.
-
-**J5:** a first run lands in a draft, as upstream. Underneath, a thread launched without a Squadron registers into its project's Squadron, and when the project has none the server creates one named after the project. When several Squadrons reference the project, the launch is refused.
-
-**Why:** agents need a home in the ledger, and the ledger is still keyed by Squadron. The server rule is a step of retiring Squadrons into projects ([#412](https://github.com/Jacksondr5/j5code/issues/412)), where a thread's home is its project. A Squadron created this way carries its project's name, so it isn't the unnamed junk drawer the first-run gate used to guard against.
-
-**Consequences:** the person never creates or names a Squadron: the gate, Create Squadron, rename and delete are gone, and the app shows projects. A Squadron's name is still visible in two places until the ledger re-keys to projects: the playbook author picker in Settings, which lists Squadrons, and Fleet and the Inbox, which fall back to the Squadron's name when its project can't be resolved. A project that several Squadrons reference can't start a thread, and the app offers no repair for it; the server's delete route (`POST /api/j5/squadrons/<squadronId>/delete`) is the way out, once the extra Squadron's agents and Crews are archived. Nothing in the app can create that state any more.
-
-**Decided:** Jackson, 2026-08-24 (SC2), for the original gate. The server rule and the gate's removal: Jackson, 2026-10-03, in the plan to retire Squadrons. Recorded in FORK.md cases 9 and 10.
-
-#### D11. A scheduled task can't start a thread in a project that several Squadrons share
-
-**Upstream:** a scheduled task can be created two ways. An agent schedules work for its own thread, or the person creates one in Settings → Automations, and each fire starts a fresh thread.
-
-**J5:** both work. A fresh thread joins its project's Squadron, which the server creates when the project has none. When several Squadrons reference the project, the run is refused before a thread is created, and the task records a visible failure that names the project.
-
-**Why:** a new thread needs a Squadron home, and its project now supplies one. A task carries nothing that chooses between several Squadrons on one project, and picking one would invent a home. Refusing before the thread exists keeps a recurring task from leaving a homeless thread behind on every fire.
-
-**Consequences:** a task in a shared project fails each time it fires until it is bound to a thread or the project is left with one Squadron. This entry retires when Squadrons fold into projects ([#412](https://github.com/Jacksondr5/j5code/issues/412)).
-
-**Decided:** DV5, dated 2026-08-31 in the dogfood v0 overrides, refused every such run. Jackson, 2026-09-28: a gap to fill. Narrowed to shared projects on 2026-10-03, in the plan to retire Squadrons. Recorded in FORK.md case 12.
+### New threads
 
 #### D12. Multi-model send is refused from a persona draft
 
@@ -364,6 +325,18 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Decided:** Jackson, 2026-10-02 (#403), 2026-10-03 (the protocol bump and the `j5 update` step; #398; #397, including leaving the person's `PATH` alone in the Mac app) and 2026-10-04 (#441, in the command palette only). Recorded in FORK.md cases 50 to 55.
 
+#### D29. A client refuses a J5 server whose ledger has not been re-keyed
+
+**Upstream:** a client connects to any server that speaks its orchestration protocol version.
+
+**J5:** the same, with one refusal. A J5 server from before the ledger was re-keyed to projects is refused, with upstream's own message: "This client requires a newer server. Update the server on <name> to connect." The client recognizes it by the old ledger capability it reports.
+
+**Why:** the client's Fleet, Inbox and thread cards read a project-keyed ledger. Against a J5 server that has not been updated they would show nothing, with no error. Refusing says what to do.
+
+**Consequences:** a J5 server, the desktop app and the mobile app have to be updated together when this ships. Nothing changes for upstream's own servers: a server with no J5 ledger, plain T3 Code included, connects as it always has, and the J5 views report that source as unsupported. The other direction has no gate, because closing it would mean changing upstream's protocol version number, which would collide at the next advance. An older client still connects to a newer J5 server, and the server tells it that its Fleet, Inbox and Crew requests are not supported there, so it shows them as unsupported and reads nothing. Two things in an older client are not covered. A person on one cannot see or approve a Crew roster until they update, because the proposal does not appear above the composer. And archiving a thread warns that it could not check the thread's open work; the server still refuses to archive a single Crew member, but the older client no longer explains why.
+
+**Decided:** in the plan to retire Squadrons ([#412](https://github.com/Jacksondr5/j5code/issues/412)): a strict version gate for clients, narrowed on 2026-10-08 to J5 servers only. Recorded in FORK.md case 56.
+
 ### Awaiting a decision
 
 These already diverge on `j5/main`, but no human ruling is on record. Each landed as an implementer's call inside a merged PR. The person rules on each one; an approved entry moves up into its section, and a rejected one becomes a fix.
@@ -422,7 +395,19 @@ The person ruled against these. They still diverge on `j5/main` until their fix 
 
 #### D10. Welcome wizard assigns imported conversations a Squadron
 
-J5 added a fourth stage to upstream's welcome wizard that gave each imported folder's conversations a Squadron home (Jackson, 2026-09-17, PR #178). Retired 2026-10-04 in the plan to retire Squadrons ([#412](https://github.com/Jacksondr5/j5code/issues/412)): the wizard has upstream's three stages again. Imported conversations register in the ledger when it re-keys to projects.
+J5 added a fourth stage to upstream's welcome wizard that gave each imported folder's conversations a Squadron home (Jackson, 2026-09-17, PR #178). Retired 2026-10-04 in the plan to retire Squadrons ([#412](https://github.com/Jacksondr5/j5code/issues/412)): the wizard has upstream's three stages again. Imported conversations register in their project like every other thread since the ledger re-keyed to projects (2026-10-07).
+
+#### D8. Acting on another agent also requires a shared Squadron
+
+On top of upstream's same-project rule, J5 required a shared Squadron to archive or unarchive another agent and to merge back (Jackson, 2026-09-28). Retired 2026-10-07, when the ledger re-keyed to projects ([#412](https://github.com/Jacksondr5/j5code/issues/412)): a thread's home is its project, so upstream's same-project rule is the only rule.
+
+#### D9. A thread's Squadron is created for it
+
+A thread launched without a Squadron registered into its project's Squadron, which the server created when the project had none (Jackson, 2026-10-03). Retired 2026-10-07 ([#412](https://github.com/Jacksondr5/j5code/issues/412)): there are no Squadrons. Every thread except a provider Subagent is a participant in its own project's ledger from the moment it exists, and a server that upgrades registers the threads it already has.
+
+#### D11. A scheduled task can't start a thread in a project that several Squadrons share
+
+A scheduled run was refused before creating a thread when several Squadrons referenced its project (narrowed to that case on 2026-10-03). Retired 2026-10-07 ([#412](https://github.com/Jacksondr5/j5code/issues/412)): a scheduled task starts a fresh thread as it does upstream.
 
 ## History
 
@@ -430,3 +415,4 @@ J5 added a fourth stage to upstream's welcome wizard that gave each imported fol
 - 2026-10-04 — D25 added: user-visible copy, marks and branch names (PR #445).
 - 2026-10-04 — D26 added: `j5 triage` points at J5's repository (PR #446).
 - 2026-10-04 — D28 added: the `j5` command (PR #414).
+- 2026-10-07 — D8, D9 and D11 retired and D29 added: the ledger re-keyed to projects ([#412](https://github.com/Jacksondr5/j5code/issues/412)).

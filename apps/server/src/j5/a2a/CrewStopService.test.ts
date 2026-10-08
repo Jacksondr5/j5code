@@ -54,8 +54,9 @@ it.effect("interrupts only running seats, for the Captain or a person, and nobod
       ),
     );
     yield* runJ5A2AMigrations().pipe(Effect.provide(context));
-    yield* Context.get(context, A2ALedger).createSquadron({
-      squadron: { id: squadronId, name: "Stop", createdAt: DateTime.formatIso(createdAt) },
+    yield* Context.get(context, A2ALedger).ensureProject({
+      projectId: squadronId,
+      createdAt: DateTime.formatIso(createdAt),
     });
     const captain = participantIdForThread(captainThread);
     yield* Context.get(context, AgentCrewInstanceService).record({
@@ -167,7 +168,7 @@ it.effect("interrupts only running seats, for the Captain or a person, and nobod
           commandIds,
         })
         .pipe(Effect.flip);
-      assert.include(wrongSquadron.message, "lives in Squadron");
+      assert.include(wrongSquadron.message, "lives in project");
       const missing = yield* service
         .stop({
           callerParticipantId: null,
@@ -195,8 +196,9 @@ const ghostFixture = (ghost: "missing" | "unreadable" | "homed") =>
       ),
     );
     yield* runJ5A2AMigrations().pipe(Effect.provide(context));
-    yield* Context.get(context, A2ALedger).createSquadron({
-      squadron: { id: squadronId, name: "Stop", createdAt: DateTime.formatIso(createdAt) },
+    yield* Context.get(context, A2ALedger).ensureProject({
+      projectId: squadronId,
+      createdAt: DateTime.formatIso(createdAt),
     });
     yield* Context.get(context, AgentCrewInstanceService).record({
       id: "crew:ghost",

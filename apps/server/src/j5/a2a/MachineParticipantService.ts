@@ -57,7 +57,16 @@ export class MachineParticipantNameTakenError extends Schema.TaggedError<Machine
   },
 ) {
   override get message(): string {
-    return `Machine participant ${this.participantId} already has immutable home ${this.existingSquadronId}; registration requested ${this.requestedSquadronId}. Choose another name, or reuse the existing participant.`;
+    return `Machine participant ${this.participantId} is already registered in project ${this.existingSquadronId}; registration requested ${this.requestedSquadronId}. Choose another name, or reuse the existing participant.`;
+  }
+}
+
+export class MachineParticipantProjectNotFoundError extends Schema.TaggedError<MachineParticipantProjectNotFoundError>()(
+  "MachineParticipantProjectNotFoundError",
+  { projectId: Schema.String },
+) {
+  override get message(): string {
+    return `Project ${this.projectId} does not exist on this server. Pass the id of an existing project as --project.`;
   }
 }
 
@@ -66,7 +75,7 @@ export class MachineParticipantNotFoundError extends Schema.TaggedError<MachineP
   { participantId: Schema.String },
 ) {
   override get message(): string {
-    return `Machine participant ${this.participantId} is not registered. Register it with \`j5 a2a participant create --squadron <id> --name <name>\`.`;
+    return `Machine participant ${this.participantId} is not registered. Register it with \`j5 a2a participant create --project <id> --name <name>\`.`;
   }
 }
 
@@ -75,10 +84,11 @@ export type MachineParticipantError =
   | SqlError
   | MachineParticipantInvalidNameError
   | MachineParticipantNameTakenError
+  | MachineParticipantProjectNotFoundError
   | MachineParticipantNotFoundError;
 
 export interface MachineParticipantServiceShape {
-  /** Idempotent: the same name in the same Squadron returns the existing record with `created: false`. */
+  /** Idempotent: the same name in the same project returns the existing record with `created: false`. */
   readonly register: (
     input: RegisterMachineParticipantInput,
   ) => Effect.Effect<
@@ -98,7 +108,7 @@ export class MachineParticipantService extends Context.Service<
 
 interface MachineRow {
   readonly participant_id: string;
-  readonly squadron_id: string;
+  readonly project_id: string;
   readonly squadron_name: string;
   readonly name: string;
   readonly created_at: string;
@@ -106,7 +116,7 @@ interface MachineRow {
 
 const recordFromRow = (row: MachineRow): MachineParticipantRecord => ({
   participantId: ParticipantId.make(row.participant_id),
-  squadronId: SquadronId.make(row.squadron_id),
+  squadronId: SquadronId.make(row.project_id),
   squadronName: row.squadron_name,
   name: row.name,
   createdAt: row.created_at,
@@ -123,12 +133,13 @@ export const layer: Layer.Layer<MachineParticipantService, never, A2ALedger | Sq
         const rows = yield* sql<MachineRow>`
           SELECT
             machine.participant_id,
-            machine.squadron_id,
-            squadron.name AS squadron_name,
+            machine.project_id,
+            COALESCE(project.title, squadron.project_id) AS squadron_name,
             machine.name,
             machine.created_at
           FROM j5_a2a_machine_participant AS machine
-          JOIN j5_a2a_squadron AS squadron ON squadron.id = machine.squadron_id
+          JOIN j5_a2a_project_ledger AS squadron ON squadron.project_id = machine.project_id
+          LEFT JOIN projection_projects AS project ON project.project_id = machine.project_id
           WHERE machine.participant_id = ${participantId}
           LIMIT 1
         `;
@@ -141,7 +152,17 @@ export const layer: Layer.Layer<MachineParticipantService, never, A2ALedger | Sq
             return yield* new MachineParticipantInvalidNameError({ name: input.name });
           }
           const participantId = machineParticipantIdForName(input.name);
-          yield* ledger.readSquadron(input.squadronId);
+          const projects = yield* sql<{ readonly project_id: string }>`
+            SELECT project_id FROM projection_projects
+            WHERE project_id = ${input.squadronId} AND deleted_at IS NULL
+          `;
+          if (projects.length === 0) {
+            return yield* new MachineParticipantProjectNotFoundError({
+              projectId: input.squadronId,
+            });
+          }
+          // A machine can be a project's first participant.
+          yield* ledger.ensureProject({ projectId: input.squadronId, createdAt: input.acceptedAt });
           const existing = yield* readRow(participantId);
           if (existing !== null && existing.squadronId !== input.squadronId) {
             return yield* new MachineParticipantNameTakenError({
@@ -184,13 +205,14 @@ export const layer: Layer.Layer<MachineParticipantService, never, A2ALedger | Sq
         sql<MachineRow>`
           SELECT
             machine.participant_id,
-            machine.squadron_id,
-            squadron.name AS squadron_name,
+            machine.project_id,
+            COALESCE(project.title, squadron.project_id) AS squadron_name,
             machine.name,
             machine.created_at
           FROM j5_a2a_machine_participant AS machine
-          JOIN j5_a2a_squadron AS squadron ON squadron.id = machine.squadron_id
-          ORDER BY machine.squadron_id, machine.participant_id
+          JOIN j5_a2a_project_ledger AS squadron ON squadron.project_id = machine.project_id
+          LEFT JOIN projection_projects AS project ON project.project_id = machine.project_id
+          ORDER BY machine.project_id, machine.participant_id
         `.pipe(Effect.map((rows) => rows.map(recordFromRow)));
 
       return MachineParticipantService.of({ register, resolve, list });

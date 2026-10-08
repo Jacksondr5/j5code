@@ -48,7 +48,7 @@ import { A2ALifecycleService } from "./LifecycleService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import { ParticipantPlacementService } from "./PlacementService.ts";
 import { A2ASilenceDetector } from "./SilenceDetector.ts";
-import { ThreadHomesService } from "./ThreadHomesService.ts";
+import { ThreadRegistration } from "./ThreadRegistration.ts";
 import { SpawnCompositionService } from "./SpawnCompositionService.ts";
 import { SpawnWorkspaceService, layer as spawnWorkspaceLayer } from "./spawnWorkspace.ts";
 import { PeerRegistryService } from "./PeerRegistryService.ts";
@@ -158,7 +158,9 @@ it.effect("shares one runtime and outbox across the production HTTP and MCP regi
       const silenceConsumer = Layer.effectDiscard(A2ASilenceDetector.pipe(Effect.asVoid));
       const lifecycleConsumer = Layer.effectDiscard(A2ALifecycleService.pipe(Effect.asVoid));
       const archiveFactsConsumer = Layer.effectDiscard(A2AArchiveFacts.pipe(Effect.asVoid));
-      const threadHomesConsumer = Layer.effectDiscard(ThreadHomesService.pipe(Effect.asVoid));
+      const threadRegistrationConsumer = Layer.effectDiscard(
+        ThreadRegistration.pipe(Effect.asVoid),
+      );
       const spawnCompositionConsumer = Layer.effectDiscard(
         SpawnCompositionService.pipe(Effect.asVoid),
       );
@@ -190,7 +192,7 @@ it.effect("shares one runtime and outbox across the production HTTP and MCP regi
             silenceConsumer,
             lifecycleConsumer,
             archiveFactsConsumer,
-            threadHomesConsumer,
+            threadRegistrationConsumer,
             spawnCompositionConsumer,
             spawnWorkspaceConsumer,
           ).pipe(
@@ -273,14 +275,14 @@ it.effect("shares one runtime and outbox across the production HTTP and MCP regi
       const domainCounts = yield* sql<{
         readonly events: number;
         readonly memberships: number;
-        readonly squadrons: number;
+        readonly projects: number;
       }>`
         SELECT
-          (SELECT COUNT(*) FROM j5_a2a_squadron) AS squadrons,
-          (SELECT COUNT(*) FROM j5_a2a_squadron_membership) AS memberships,
+          (SELECT COUNT(*) FROM j5_a2a_project_ledger) AS projects,
+          (SELECT COUNT(*) FROM j5_a2a_membership) AS memberships,
           (SELECT COUNT(*) FROM j5_a2a_comm_event) AS events
       `;
-      assert.deepStrictEqual(domainCounts, [{ squadrons: 0, memberships: 0, events: 0 }]);
+      assert.deepStrictEqual(domainCounts, [{ projects: 0, memberships: 0, events: 0 }]);
     }),
   ),
 );
