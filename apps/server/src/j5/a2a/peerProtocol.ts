@@ -5,7 +5,7 @@ import { PEER_PROTOCOL_HEADER, PEER_PROTOCOL_VERSION } from "@t3tools/contracts/
  * protocol version on every request it sends and every response it answers,
  * and each side checks what the other stated here, so a mismatch is caught
  * whichever server was updated. A missing header is a server from before
- * versioning, which counts as version 1.
+ * versioning, which counts as version 1, except on a response that failed.
  */
 
 /** The header this server sends on every peer request and response. */
@@ -22,7 +22,10 @@ export const peerProtocolMismatch = (input: {
   readonly stated: string | number | undefined;
   /** How this server names the other one in the reason. */
   readonly peer: string;
+  /** This server's version; tests state another to model a protocol bump. */
+  readonly ours?: number;
 }): string | null => {
+  const ours = input.ours ?? PEER_PROTOCOL_VERSION;
   const stated = input.stated ?? 1;
   const version =
     typeof stated === "number"
@@ -35,10 +38,35 @@ export const peerProtocolMismatch = (input: {
   if (version === null) {
     return `${input.peer} sent an unreadable peer protocol version. Update J5 on ${input.peer}, then try again.`;
   }
-  if (version === PEER_PROTOCOL_VERSION) return null;
+  if (version === ours) return null;
   // The other server is named at the start of the sentence only: some callers name it with a phrase.
-  const where = version < PEER_PROTOCOL_VERSION ? "there" : "on this server";
-  return `${input.peer} runs peer protocol ${String(version)} and this server runs ${String(PEER_PROTOCOL_VERSION)}. Update J5 ${where}, then try again.`;
+  const where = version < ours ? "there" : "on this server";
+  return `${input.peer} runs peer protocol ${String(version)} and this server runs ${String(ours)}. Update J5 ${where}, then try again.`;
+};
+
+/**
+ * The mismatch a peer's response states, read before its status. A response
+ * with no header counts as version 1 only when it succeeded: an error answer
+ * without one, such as a proxy's 502, an unhandled 500 or a server that is not
+ * J5, is left to its status, so it never reads as a server to update. A real
+ * mismatch is refused with the header, so it is still caught.
+ */
+export const responseProtocolMismatch = (input: {
+  readonly response: {
+    readonly status: number;
+    readonly headers: Readonly<Record<string, string | undefined>>;
+  };
+  readonly peer: string;
+  readonly ours?: number;
+}): string | null => {
+  const stated = statedPeerProtocol(input.response.headers);
+  const succeeded = input.response.status >= 200 && input.response.status < 300;
+  if (stated === undefined && !succeeded) return null;
+  return peerProtocolMismatch({
+    stated,
+    peer: input.peer,
+    ...(input.ours === undefined ? {} : { ours: input.ours }),
+  });
 };
 
 /** The version a peer request or response states in its header. */

@@ -26,7 +26,11 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
 import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
 import { reportedLabel } from "./peerLabel.ts";
-import { peerProtocolHeaders, peerProtocolMismatch, statedPeerProtocol } from "./peerProtocol.ts";
+import {
+  peerProtocolHeaders,
+  peerProtocolMismatch,
+  responseProtocolMismatch,
+} from "./peerProtocol.ts";
 
 /**
  * The peer registry: the other servers this one exchanges agent messages
@@ -355,8 +359,8 @@ const helloAtOrigin = Effect.fn("j5.a2a.peer.hello")(function* (input: {
       ),
     );
   // Checked before the status: a server on another protocol may answer 200 to a request it misread.
-  const mismatch = peerProtocolMismatch({
-    stated: statedPeerProtocol(response.headers),
+  const mismatch = responseProtocolMismatch({
+    response,
     peer: `The server at ${input.origin}`,
   });
   if (mismatch !== null) {

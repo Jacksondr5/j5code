@@ -27,7 +27,11 @@ import { PeerInboundService, peerDeliveryRefusal } from "./PeerInboundService.ts
 import { PeerRegistryService } from "./PeerRegistryService.ts";
 import { PEER_POLL_HOLD } from "./PeerStoreService.ts";
 import { RosterService } from "./RosterService.ts";
-import { peerProtocolHeaders, peerProtocolMismatch, statedPeerProtocol } from "./peerProtocol.ts";
+import {
+  peerProtocolHeaders,
+  responseProtocolMismatch,
+  statedPeerProtocol,
+} from "./peerProtocol.ts";
 import { peerRosterHash, toPeerRoster } from "./peerRoster.ts";
 
 /**
@@ -231,8 +235,8 @@ const make = (daemon: boolean) =>
             return { kind: "unanswered", cause: headed.failure } satisfies PollExchange;
           }
           const response = headed.success;
-          const mismatch = peerProtocolMismatch({
-            stated: statedPeerProtocol(response.headers),
+          const mismatch = responseProtocolMismatch({
+            response,
             peer: peer.label,
           });
           if (mismatch !== null || response.status !== 200) {
@@ -280,8 +284,8 @@ const make = (daemon: boolean) =>
           // The headers decide. The body only words the reason, briefly, so one
           // that stalls cannot hold up stopping or backing off.
           const response = exchanged.response;
-          const mismatch = peerProtocolMismatch({
-            stated: statedPeerProtocol(response.headers),
+          const mismatch = responseProtocolMismatch({
+            response,
             peer: peer.label,
           });
           if (mismatch !== null) {

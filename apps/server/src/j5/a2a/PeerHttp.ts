@@ -38,7 +38,11 @@ import { ServerConfig } from "../../config.ts";
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
 import { annotateEnvironmentRequest } from "../../auth/http.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
-import { PeerInboundService, peerDeliveryRefusal } from "./PeerInboundService.ts";
+import {
+  A2APeerNotRecordedError,
+  PeerInboundService,
+  peerDeliveryRefusal,
+} from "./PeerInboundService.ts";
 import { PeerRegistryService } from "./PeerRegistryService.ts";
 import { PeerRemovalService } from "./PeerRemovalService.ts";
 import { PeerStoreService } from "./PeerStoreService.ts";
@@ -121,7 +125,13 @@ const addFailure = (error: unknown): Effect.Effect<HttpServerResponse.HttpServer
   }
 };
 
+const isPeerNotRecorded = Schema.is(A2APeerNotRecordedError);
+
 const deliveryFailure = (error: unknown): Effect.Effect<HttpServerResponse.HttpServerResponse> => {
+  // Removed while the delivery was on its way: answered as any unrecorded peer is.
+  if (isPeerNotRecorded(error)) {
+    return Effect.succeed(jsonError(403, "peer_not_registered", error.message));
+  }
   const refusal = peerDeliveryRefusal(error);
   if (refusal !== null) {
     return Effect.succeed(

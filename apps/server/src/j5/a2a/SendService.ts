@@ -954,6 +954,17 @@ const rawLayer: Layer.Layer<
         return yield* new A2AHumanFollowupNotAllowedError({ participantId: receiverId });
       }
 
+      // A receiver on a peer server is sent to only while that server is still a
+      // peer. Checked in this write, so a send that races a removal of that peer
+      // is wiped by it or, once the removal committed, refused here.
+      if (receiver.environmentId !== null) {
+        const peer = yield* sql`
+          SELECT 1 FROM j5_a2a_peer WHERE environment_id = ${receiver.environmentId}
+        `;
+        if (peer.length === 0) {
+          return yield* new A2AParticipantNotFoundError({ participantId: receiverId });
+        }
+      }
       const correlationId = correlationIdFor(input.commandId);
       const closesElsewhere = closeEvent !== undefined && closeProjectId !== sender.projectId;
       const result = yield* writer.appendEventsInTransaction({

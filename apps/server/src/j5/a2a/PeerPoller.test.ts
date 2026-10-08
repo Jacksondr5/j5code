@@ -80,7 +80,8 @@ type Answer =
   | {
       readonly status: number;
       readonly body: unknown;
-      readonly protocol?: string;
+      /** The version header it states; null states none, as a proxy or a non-J5 server answers. */
+      readonly protocol?: string | null;
       /** Sent as is instead of JSON, such as a proxy's HTML error page. */
       readonly raw?: string;
     }
@@ -265,7 +266,9 @@ const respond = (
         status: answer.status,
         headers: {
           "content-type": "application/json",
-          "x-j5-peer-protocol": answer.protocol ?? String(PEER_PROTOCOL_VERSION),
+          ...(answer.protocol === null
+            ? {}
+            : { "x-j5-peer-protocol": answer.protocol ?? String(PEER_PROTOCOL_VERSION) }),
         },
       }),
     );
@@ -597,6 +600,29 @@ it.effect(
         yield* TestClock.adjust("10 minutes");
         assert.equal(harness.requests.length, 4, "nothing polls until the peer is recorded again");
       }).pipe(Effect.provide(makeTestLayer(harness, { daemon: true })), Effect.scoped);
+    }),
+);
+
+it.effect(
+  "retries a proxy's error page that states no protocol, rather than reading a mismatch",
+  () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness;
+      yield* Effect.gen(function* () {
+        for (const status of [502, 503, 500]) {
+          harness.answers.push({
+            status,
+            body: null,
+            raw: "<html>Bad Gateway</html>",
+            protocol: null,
+          });
+          assert.equal((yield* pollOnce).kind, "failed", String(status));
+          assert.include(
+            harness.lastErrors.at(-1) ?? "",
+            `answered the poll with HTTP ${String(status)}`,
+          );
+        }
+      }).pipe(Effect.provide(makeTestLayer(harness)));
     }),
 );
 

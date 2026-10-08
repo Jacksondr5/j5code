@@ -13,7 +13,11 @@ import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
 import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
 import { runMigrations } from "../../persistence/Migrations.ts";
-import { A2ADeliveryTransport, type A2ADeliveryTransportShape } from "./DeliveryTransport.ts";
+import {
+  A2ADeliveryTransport,
+  A2ADeliveryTransportError,
+  type A2ADeliveryTransportShape,
+} from "./DeliveryTransport.ts";
 import {
   A2ADeliveryHooks,
   A2ADeliveryWorker,
@@ -72,14 +76,14 @@ const descriptor = Schema.decodeUnknownSync(ExecutionEnvironmentDescriptor)({
 /**
  * `delivering` runs the worker as the server does, as a daemon that delivers
  * to agents here, so a test can wait for a notice's receipt. `deliverPeer`
- * stands in for a direct send to the peer, so a test can hold one mid-attempt,
- * and `waitsForDrain` runs when a removal's cancel waits for that attempt.
+ * stands in for a direct send to the peer, and `beforeHandOutStamp` holds a
+ * poll's hand-out after it chose its rows.
  */
 const makeTestLayer = (
   options: {
     readonly delivering?: boolean;
     readonly deliverPeer?: A2ADeliveryTransportShape["deliverPeer"];
-    readonly waitsForDrain?: Effect.Effect<void>;
+    readonly beforeHandOutStamp?: Effect.Effect<void>;
   } = {},
 ) => {
   const database = NodeSqliteClient.layer({ filename: ":memory:" });
@@ -95,14 +99,14 @@ const makeTestLayer = (
     }),
   );
   const worker = (
-    options.waitsForDrain !== undefined
+    options.beforeHandOutStamp !== undefined
       ? deliveryWorkerLayerWithHooks(false).pipe(
           Layer.provide(
             Layer.succeed(
               A2ADeliveryHooks,
               A2ADeliveryHooks.of({
                 afterTransportSuccess: () => Effect.void,
-                peerCancelWaitsForDrain: options.waitsForDrain,
+                beforeHandOutStamp: options.beforeHandOutStamp,
               }),
             ),
           ),
@@ -374,12 +378,9 @@ it.effect(
 );
 
 it.effect(
-  "leaves a message the peer took as removal began delivered, and tells no one otherwise",
+  "tells the sender of a direct message it already tried that it may not have arrived",
   () =>
     Effect.gen(function* () {
-      const sending = yield* Deferred.make<void>();
-      const answered = yield* Deferred.make<void>();
-      const waiting = yield* Deferred.make<void>();
       yield* Effect.gen(function* () {
         yield* seed();
         const sql = yield* SqlClient.SqlClient;
@@ -389,38 +390,114 @@ it.effect(
         WHERE environment_id = ${laptop}
       `;
         const read = yield* rows;
-        const plain = yield* sendFromBilling("plain");
-        // The laptop is taking the message when the removal begins, and accepts it after.
+        // The first is sent and its answer lost; the second never left.
+        const tried = yield* sendFromBilling("tried");
+        assert.equal((yield* (yield* A2ADeliveryWorker).runOnce)?.state, "retry_scheduled");
+        yield* sendFromBilling("untried");
+
+        yield* (yield* PeerRemovalService).remove(laptop);
+        const told = (yield* read.notices).map((notice) => notice.message_text);
+        assert.lengthOf(told, 2);
+        assert.include(
+          told[0]!,
+          `Your message to ${iosBuild} on JM-LT-04213 may not have been delivered: JM-LT-04213 is no longer peered.`,
+          tried.messageId,
+        );
+        assert.include(
+          told[1]!,
+          `Your message to ${iosBuild} on JM-LT-04213 was not delivered: JM-LT-04213 is no longer peered.`,
+        );
+      }).pipe(
+        Effect.provide(
+          makeTestLayer({
+            deliverPeer: () =>
+              Effect.fail(
+                new A2ADeliveryTransportError({
+                  operation: "deliver to peer",
+                  cause: "the answer was lost",
+                }),
+              ),
+          }),
+        ),
+      );
+    }),
+);
+
+it.effect(
+  "tells the sender of a first direct send still on the wire that it may not have arrived",
+  () =>
+    Effect.gen(function* () {
+      const sending = yield* Deferred.make<void>();
+      const answered = yield* Deferred.make<void>();
+      yield* Effect.gen(function* () {
+        yield* seed();
+        const sql = yield* SqlClient.SqlClient;
+        yield* sql`
+        UPDATE j5_a2a_peer
+        SET link_mode = 'push', origin = 'https://laptop.example', credential = 'laptop-token'
+        WHERE environment_id = ${laptop}
+      `;
+        const read = yield* rows;
+        const onWire = yield* sendFromBilling("on-wire");
+        // The first attempt is sent; the peer has not answered when the removal runs.
         const attempt = yield* Effect.forkChild((yield* A2ADeliveryWorker).runOnce);
         yield* Deferred.await(sending);
-        // The removal either waits for the attempt or cancels under it; the first receipt says which.
-        const committed = yield* (yield* A2ALedger).subscribeCommitted;
-        const removalFirst = yield* Effect.forkChild(
-          Effect.raceFirst(
-            Deferred.await(waiting).pipe(Effect.as("waits for the attempt" as const)),
-            committed.pipe(
-              Stream.filter((event) => event.kind === "message.cancelled"),
-              Stream.runHead,
-              Effect.as("cancelled under the attempt" as const),
-            ),
-          ),
-        );
-        const removal = yield* Effect.forkChild((yield* PeerRemovalService).remove(laptop));
-        assert.equal(yield* Fiber.join(removalFirst), "waits for the attempt");
-        yield* Deferred.succeed(answered, undefined);
+        const [row] = yield* sql<{ readonly attempts: number }>`
+        SELECT attempts FROM j5_a2a_delivery WHERE message_id = ${onWire.messageId}
+      `;
+        assert.equal(row?.attempts, 0, "no attempt is recorded until its answer");
 
-        assert.equal((yield* Fiber.join(attempt))?.state, "delivered");
-        // It read the row as waiting before the receipt, and found it delivered when it decided.
-        assert.equal((yield* Fiber.join(removal)).cancelledMessages, 0);
-        assert.equal(yield* read.status(plain.messageId), "delivered");
-        assert.deepStrictEqual(yield* read.notices, [], "its sender is told nothing");
+        yield* (yield* PeerRemovalService).remove(laptop);
+        yield* Deferred.succeed(answered, undefined);
+        yield* Fiber.join(attempt);
+        const told = (yield* read.notices).map((notice) => notice.message_text);
+        assert.lengthOf(told, 1);
+        assert.include(
+          told[0]!,
+          `Your message to ${iosBuild} on JM-LT-04213 may not have been delivered: JM-LT-04213 is no longer peered.`,
+        );
       }).pipe(
-        Effect.scoped,
         Effect.provide(
           makeTestLayer({
             deliverPeer: () =>
               Deferred.succeed(sending, undefined).pipe(Effect.andThen(Deferred.await(answered))),
-            waitsForDrain: Deferred.succeed(waiting, undefined).pipe(Effect.asVoid),
+          }),
+        ),
+      );
+    }),
+);
+
+it.effect(
+  "never hands out a stored message the removal cancelled while the poll was choosing",
+  () =>
+    Effect.gen(function* () {
+      const chosen = yield* Deferred.make<void>();
+      const stamp = yield* Deferred.make<void>();
+      yield* Effect.gen(function* () {
+        yield* seed();
+        const read = yield* rows;
+        const stored = yield* sendFromBilling("handout-race");
+        // The laptop's poll has chosen the message, and the removal commits before it stamps it.
+        const handOut = yield* Effect.forkChild((yield* A2ADeliveryWorker).handOutToPeer(laptop));
+        yield* Deferred.await(chosen);
+        yield* (yield* PeerRemovalService).remove(laptop);
+        assert.equal(yield* read.status(stored.messageId), "cancelled");
+        yield* Deferred.succeed(stamp, undefined);
+
+        assert.deepStrictEqual(
+          (yield* Fiber.join(handOut)).deliveries,
+          [],
+          "nothing the removal cancelled goes out",
+        );
+        const told = (yield* read.notices).map((notice) => notice.message_text);
+        assert.lengthOf(told, 1);
+        assert.include(told[0]!, "was not delivered: JM-LT-04213 is no longer peered.");
+      }).pipe(
+        Effect.provide(
+          makeTestLayer({
+            beforeHandOutStamp: Deferred.succeed(chosen, undefined).pipe(
+              Effect.andThen(Deferred.await(stamp)),
+            ),
           }),
         ),
       );
