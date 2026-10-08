@@ -10,12 +10,6 @@ export interface SquadronChoice {
   readonly name: string;
 }
 
-export interface SquadronDraftState<TContent = unknown> {
-  readonly squadronId: string | null;
-  readonly frozenAtFirstSend: boolean;
-  readonly content: TContent;
-}
-
 /** The sidebar can set ambient context, but it must never manufacture a choice. */
 export const resolveSquadronScope = <T extends SquadronChoice>(
   choices: ReadonlyArray<T>,
@@ -64,54 +58,4 @@ export const filterThreadsForSquadronScope = <
       home.squadron.id === scope.id
     );
   });
-};
-
-/** Changing the pre-send chip is scoped state only; the typed draft stays intact. */
-export const selectSquadronForDraft = <TContent>(
-  state: SquadronDraftState<TContent>,
-  squadronId: string,
-): SquadronDraftState<TContent> => (state.frozenAtFirstSend ? state : { ...state, squadronId });
-
-export const freezeSquadronForFirstSend = <TContent>(
-  state: SquadronDraftState<TContent>,
-): SquadronDraftState<TContent> => ({ ...state, frozenAtFirstSend: true });
-
-/** Keep the immutable Registrar choice visible after this draft's first send. */
-export const shouldShowSquadronDraftChip = (input: {
-  readonly isFirstMessage: boolean;
-  readonly frozenAtFirstSend: boolean;
-}) => input.isFirstMessage || input.frozenAtFirstSend;
-
-export interface DurableSquadronHome {
-  readonly id: string;
-  readonly name: string;
-}
-
-/**
- * The Squadron a draft or thread will launch with, for the composer chip and draft headline.
- * It mirrors the first-send carrier: a persisted Registrar home, else the draft's explicit
- * choice. Ambient sidebar scope never names a draft's Squadron, because send refuses it.
- */
-export const resolveEffectiveSquadronId = (input: {
-  readonly durableHome: DurableSquadronHome | null;
-  readonly draftSquadronId: string | null;
-}) => input.durableHome?.id ?? input.draftSquadronId;
-
-/** A Registrar home is the durable, immutable source for an existing thread. */
-export const resolveSquadronDraftChipState = (input: {
-  readonly durableHome: DurableSquadronHome | null;
-  readonly draft: Pick<SquadronDraftState, "frozenAtFirstSend" | "squadronId">;
-  readonly isFirstMessage: boolean;
-}) => {
-  if (input.durableHome !== null) {
-    return { visible: true, frozen: true, squadronId: input.durableHome.id } as const;
-  }
-  return {
-    visible: shouldShowSquadronDraftChip({
-      isFirstMessage: input.isFirstMessage,
-      frozenAtFirstSend: input.draft.frozenAtFirstSend,
-    }),
-    frozen: input.draft.frozenAtFirstSend,
-    squadronId: input.draft.squadronId,
-  } as const;
 };

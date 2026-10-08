@@ -3,7 +3,6 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   describeSquadronDeleteFailure,
-  dropDraftStatesForDeletedSquadron,
   resolveScopeAfterSquadronDelete,
   resolveSquadronActionsState,
   resolveSquadronRenameState,
@@ -57,24 +56,6 @@ describe("resolveScopeAfterSquadronDelete", () => {
     const other = { environmentId: local, squadronId: "squadron:alpha" };
     expect(resolveScopeAfterSquadronDelete(other, alpha)).toBe(other);
     expect(resolveScopeAfterSquadronDelete(null, alpha)).toBeNull();
-  });
-});
-
-describe("dropDraftStatesForDeletedSquadron", () => {
-  const carrier = { squadronId: "squadron:alpha", frozenAtFirstSend: false, content: null };
-  const bravo = { squadronId: "squadron:bravo", frozenAtFirstSend: false, content: null };
-
-  it("drops carriers on the deleted Squadron's environment only", () => {
-    const next = dropDraftStatesForDeletedSquadron(
-      { "remote:thread-1": carrier, "local:thread-2": carrier, "remote:thread-3": bravo },
-      alpha,
-    );
-    expect(Object.keys(next)).toEqual(["local:thread-2", "remote:thread-3"]);
-  });
-
-  it("returns the same record when no carrier pointed at the deleted Squadron", () => {
-    const states = { "remote:thread-3": bravo };
-    expect(dropDraftStatesForDeletedSquadron(states, alpha)).toBe(states);
   });
 });
 

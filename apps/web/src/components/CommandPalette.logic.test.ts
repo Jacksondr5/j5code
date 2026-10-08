@@ -1,4 +1,3 @@
-import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import type { Project, Thread } from "../types";
@@ -14,7 +13,6 @@ import {
   filterCommandPaletteGroups,
   reduceCommandPaletteUiState,
   type CommandPaletteActionItem,
-  resolveSquadronPickerDestination,
   type CommandPaletteGroup,
 } from "./CommandPalette.logic";
 
@@ -299,98 +297,6 @@ describe("enumerateCommandPaletteItems", () => {
       "thread.jump.9",
       undefined,
     ]);
-  });
-});
-
-describe("resolveSquadronPickerDestination", () => {
-  it("never navigates Bravo to Alpha's sibling thread over their shared folder", () => {
-    const alpha = makeThreadFixture({
-      id: ThreadId.make("thread-alpha"),
-      projectId: ProjectId.make("project-shared"),
-      updatedAt: "2026-08-31T10:00:00.000Z",
-    });
-    const destination = resolveSquadronPickerDestination({
-      squadron: { environmentId: alpha.environmentId, squadronId: "squadron:bravo" },
-      threads: [alpha],
-      homesByThreadId: new Map([
-        [
-          scopedThreadKey(scopeThreadRef(alpha.environmentId, alpha.id)),
-          { kind: "known" as const, squadron: { id: "squadron:alpha" } },
-        ],
-      ]),
-      sortOrder: "updated_at",
-    });
-
-    expect(destination).toEqual({ kind: "create-draft" });
-  });
-
-  it("navigates only to Bravo's Registrar-home thread when it exists", () => {
-    const alpha = makeThreadFixture({
-      id: ThreadId.make("thread-alpha"),
-      projectId: ProjectId.make("project-shared"),
-      updatedAt: "2026-08-31T11:00:00.000Z",
-    });
-    const bravo = makeThreadFixture({
-      id: ThreadId.make("thread-bravo"),
-      projectId: ProjectId.make("project-shared"),
-      updatedAt: "2026-08-31T09:00:00.000Z",
-    });
-    const destination = resolveSquadronPickerDestination({
-      squadron: { environmentId: alpha.environmentId, squadronId: "squadron:bravo" },
-      threads: [alpha, bravo],
-      homesByThreadId: new Map([
-        [
-          scopedThreadKey(scopeThreadRef(alpha.environmentId, alpha.id)),
-          { kind: "known" as const, squadron: { id: "squadron:alpha" } },
-        ],
-        [
-          scopedThreadKey(scopeThreadRef(bravo.environmentId, bravo.id)),
-          { kind: "known" as const, squadron: { id: "squadron:bravo" } },
-        ],
-      ]),
-      sortOrder: "updated_at",
-    });
-
-    expect(destination).toEqual({ kind: "navigate", thread: bravo });
-  });
-});
-
-describe("filterCommandPaletteGroups context search", () => {
-  const projectItem = {
-    kind: "action" as const,
-    value: "project:folder",
-    searchTerms: ["Folder"],
-    title: "Folder",
-    icon: null,
-    run: async () => undefined,
-  };
-  const squadronItem = {
-    kind: "action" as const,
-    value: "squadron:bravo",
-    searchTerms: ["Bravo", "Folder"],
-    title: "Bravo",
-    icon: null,
-    run: async () => undefined,
-  };
-
-  it("uses the supplied Squadron context search while retaining the default project group", () => {
-    const input = {
-      activeGroups: [],
-      query: "folder",
-      isInSubmenu: false,
-      threadSearchItems: [],
-    };
-
-    expect(
-      filterCommandPaletteGroups({ ...input, projectSearchItems: [projectItem] }),
-    ).toMatchObject([{ value: "projects-search", label: "Projects", items: [projectItem] }]);
-    expect(
-      filterCommandPaletteGroups({
-        ...input,
-        projectSearchItems: [],
-        contextSearch: { label: "Squadrons", items: [squadronItem] },
-      }),
-    ).toMatchObject([{ value: "squadrons-search", label: "Squadrons", items: [squadronItem] }]);
   });
 });
 

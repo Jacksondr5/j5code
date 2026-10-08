@@ -2,13 +2,8 @@
 
 import { threadPullRequestLinkMode } from "@t3tools/client-runtime/thread-pull-request-compatibility";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
-import { scopedSquadronKey } from "@t3tools/contracts/j5";
 
-import {
-  scopedThreadKey,
-  scopeProjectRef,
-  scopeThreadRef,
-} from "@t3tools/client-runtime/environment";
+import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
   canCreateProjectInEnvironment,
   getCloneDestinationBrowsePath,
@@ -57,7 +52,6 @@ import {
   MonitorIcon,
   MoonIcon,
   PaletteIcon,
-  RadioIcon,
   SettingsIcon,
   SquarePenIcon,
   SunIcon,
@@ -104,7 +98,7 @@ import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
 import { useProjects, useServerConfigs, useThreadShells, waitForProject } from "../state/entities";
 import { useThreadSearch } from "../state/queries";
-import { resolveThreadActionProjectRef } from "../lib/chatThreadActions";
+import { resolveThreadActionProjectRef, startNewThreadFromContext } from "../lib/chatThreadActions";
 import {
   appendBrowsePathSegment,
   ensureBrowseDirectoryPath,
@@ -129,6 +123,7 @@ import {
   selectActiveRightPanel,
   useRightPanelStore,
 } from "../rightPanelStore";
+import { getLatestThreadForProject, sortThreads } from "../lib/threadSort";
 import {
   cn,
   getLocalFileManagerName,
@@ -149,6 +144,8 @@ import {
   ADDON_ICON_CLASS,
   browseInputEndPaddingClass,
   buildBrowseGroups,
+  buildCommandPaletteProjectMetadata,
+  buildProjectActionItems,
   buildRootGroups,
   buildThreadActionItems,
   buildLinkedThreadActionItems,
@@ -164,7 +161,6 @@ import {
   ITEM_ICON_CLASS,
   RECENT_THREAD_LIMIT,
   reduceCommandPaletteUiState,
-  resolveSquadronPickerDestination,
   type SearchOverlayMode,
 } from "./CommandPalette.logic";
 import { orderItemsByPreferredIds, sortLogicalProjectsForSidebar } from "./Sidebar.logic";
@@ -173,12 +169,17 @@ import { CommandPaletteContent } from "./CommandPaletteContent";
 import { CommandPaletteResults } from "./CommandPaletteResults";
 import { AzureDevOpsIcon, BitbucketIcon, GitHubIcon, GitLabIcon, ForgejoIcon } from "./Icons";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
+import { ProjectFavicon } from "./ProjectFavicon";
 import { ProjectFilePicker } from "./files/ProjectFilePicker";
 import { openLinkPullRequestDialog } from "./pullRequest/LinkPullRequestDialog";
 import { ProjectContentSearchDialog } from "./search/ProjectContentSearchDialog";
 import { toggleThemeEditorForTheme } from "./settings/themeEditorStore";
 import { searchSettings, SETTINGS_SECTION_LABELS } from "./settings/settingsSearch";
-import { ThreadCommandSubtitle } from "./ThreadCommandSubtitle";
+import {
+  COMMAND_PALETTE_META_ICON_CLASS,
+  CommandPaletteMetaDot,
+  ThreadCommandSubtitle,
+} from "./ThreadCommandSubtitle";
 import { ThreadRowLeadingStatus, ThreadRowTrailingStatus } from "./ThreadStatusIndicators";
 import { primaryServerKeybindingsAtom, primaryServerProvidersAtom } from "../state/server";
 import {
@@ -205,15 +206,6 @@ import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 import { readPullRequestListPreferences } from "~/components/pullRequest/pullRequestListPreferences";
 import { j5CommandPaletteActions } from "../j5/desktopCli/j5CommandPaletteActions";
 import { openSquadronCreate, resolveAddProjectDoor } from "../j5/squadron/SquadronCreateRequest";
-import { useSquadronDirectory } from "../j5/squadron/SquadronDirectory";
-import { selectDraftSquadron } from "../j5/squadron/SquadronDraftState";
-import {
-  buildSquadronPickerRow,
-  buildSquadronPickerEntries,
-  startSquadronDraft,
-  type SquadronPickerEntry,
-} from "../j5/squadron/SquadronPicker.logic";
-import { useThreadHomes } from "../j5/squadron/ThreadHomesClient";
 
 const EMPTY_BROWSE_ENTRIES: FilesystemBrowseResult["entries"] = [];
 
@@ -330,6 +322,10 @@ function remoteProjectSourceIcon(source: AddProjectRemoteSource, className: stri
     case "url":
       return <LinkIcon className={className} />;
   }
+}
+
+function projectFaviconIcon(project: Project): ReactNode {
+  return <ProjectFavicon project={project} className={ITEM_ICON_CLASS} />;
 }
 
 function remoteProjectInputPlaceholder(flow: AddProjectCloneFlow | null): string | null {
@@ -797,10 +793,6 @@ function OpenCommandPaletteDialog(props: {
   }, [activeThreadReferenceCopyTarget]);
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const threads = useThreadShells();
-  const { squadrons } = useSquadronDirectory();
-  const threadHomes = useThreadHomes(
-    threads.map((thread) => scopeThreadRef(thread.environmentId, thread.id)),
-  );
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const {
     theme,
@@ -896,7 +888,28 @@ function OpenCommandPaletteDialog(props: {
       ),
     [environments],
   );
-
+  const projectEnvironmentLocationById = useMemo(
+    () =>
+      new Map(
+        environments.map((environment) => {
+          const isPrimary = environment.entry.target._tag === "PrimaryConnectionTarget";
+          const isLocal = isPrimary || isDesktopLocalConnectionTarget(environment.entry.target);
+          return [
+            environment.environmentId,
+            {
+              kind: isLocal ? "local" : "remote",
+              label: isPrimary
+                ? "Local"
+                : isLocal
+                  ? `${environment.label} (Local)`
+                  : environment.label,
+              machine: resolveEnvironmentMachineKind(environment.serverConfig),
+            },
+          ] as const;
+        }),
+      ),
+    [environments],
+  );
   const orderedProjects = useMemo(
     () =>
       orderItemsByPreferredIds({
@@ -953,6 +966,14 @@ function OpenCommandPaletteDialog(props: {
         preferredProjectRef: contextualProjectRef,
       }),
     [contextualProjectRef, projectGroups],
+  );
+  const pickerProjects = useMemo(
+    () =>
+      projectPickerEntries.map(({ group, targetProject }) => ({
+        ...targetProject,
+        displayName: group.displayName,
+      })),
+    [projectPickerEntries],
   );
   const projectGroupByTargetKey = useMemo(
     () =>
@@ -1089,28 +1110,6 @@ function OpenCommandPaletteDialog(props: {
       new Map<ProjectId, string>(projects.map((project) => [project.id, project.workspaceRoot])),
     [projects],
   );
-  const projectEnvironmentLocationById = useMemo(
-    () =>
-      new Map(
-        environments.map((environment) => {
-          const isPrimary = environment.entry.target._tag === "PrimaryConnectionTarget";
-          const isLocal = isPrimary || isDesktopLocalConnectionTarget(environment.entry.target);
-          return [
-            environment.environmentId,
-            {
-              kind: isLocal ? "local" : "remote",
-              label: isPrimary
-                ? "Local"
-                : isLocal
-                  ? `${environment.label} (Local)`
-                  : environment.label,
-              machine: resolveEnvironmentMachineKind(environment.serverConfig),
-            },
-          ] as const;
-        }),
-      ),
-    [environments],
-  );
   const projectByKey = useMemo(
     () => new Map(projects.map((project) => [`${project.environmentId}:${project.id}`, project])),
     [projects],
@@ -1203,68 +1202,159 @@ function OpenCommandPaletteDialog(props: {
     [browseNavigation],
   );
 
-  const squadronPickerEntries = useMemo(
-    () => buildSquadronPickerEntries({ squadrons, projects }),
-    [projects, squadrons],
-  );
-  const startSquadronThread = useCallback(
-    async (entry: SquadronPickerEntry) =>
-      startSquadronDraft({
-        entry,
-        handleNewThread: (folder) =>
-          handleNewThread(scopeProjectRef(folder.environmentId, folder.id)),
-        selectDraftSquadron,
-      }),
-    [handleNewThread],
-  );
-  const openSquadronFromSearch = useCallback(
-    async (entry: SquadronPickerEntry) => {
-      const destination = resolveSquadronPickerDestination({
-        squadron: { environmentId: entry.environmentId, squadronId: entry.squadronId },
-        threads,
-        homesByThreadId: threadHomes,
-        sortOrder: clientSettings.sidebarThreadSortOrder,
-      });
-      if (destination.kind === "navigate") {
+  const openProjectFromSearch = useMemo(
+    () => async (project: (typeof projects)[number]) => {
+      const group = projectGroupByTargetKey.get(`${project.environmentId}:${project.id}`);
+      const groupedProjectKeys = group
+        ? new Set(
+            group.memberProjectRefs.map(
+              (projectRef) => `${projectRef.environmentId}:${projectRef.projectId}`,
+            ),
+          )
+        : null;
+      const latestThread = groupedProjectKeys
+        ? (sortThreads(
+            threads.filter(
+              (thread) =>
+                thread.archivedAt === null &&
+                groupedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`),
+            ),
+            clientSettings.sidebarThreadSortOrder,
+          )[0] ?? null)
+        : getLatestThreadForProject(
+            threads.filter((thread) => thread.environmentId === project.environmentId),
+            project.id,
+            clientSettings.sidebarThreadSortOrder,
+          );
+      if (latestThread) {
         await navigate({
           to: "/$environmentId/$threadId",
           params: buildThreadRouteParams(
-            scopeThreadRef(destination.thread.environmentId, destination.thread.id),
+            scopeThreadRef(latestThread.environmentId, latestThread.id),
           ),
         });
         return;
       }
-      await startSquadronThread(entry);
+
+      await handleNewThread(scopeProjectRef(project.environmentId, project.id));
     },
-    [clientSettings.sidebarThreadSortOrder, navigate, startSquadronThread, threadHomes, threads],
+    [
+      clientSettings.sidebarThreadSortOrder,
+      handleNewThread,
+      navigate,
+      projectGroupByTargetKey,
+      threads,
+    ],
   );
-  const buildSquadronItems = useCallback(
-    (
-      entries: ReadonlyArray<SquadronPickerEntry>,
-      valuePrefix: string,
-      run: (entry: SquadronPickerEntry) => Promise<unknown>,
-    ): CommandPaletteActionItem[] =>
-      entries.map((entry) => ({
-        kind: "action",
-        value: `${valuePrefix}:${scopedSquadronKey(entry)}`,
-        ...buildSquadronPickerRow(entry),
-        icon: <RadioIcon className={ITEM_ICON_CLASS} />,
-        run: async () => {
-          if (entry.folder !== null && entry.available) await run(entry);
+
+  const projectSearchItems = useMemo(
+    () =>
+      buildProjectActionItems({
+        projects: pickerProjects,
+        valuePrefix: "project",
+        searchTerms: (project) => {
+          const members = projectGroupByTargetKey.get(`${project.environmentId}:${project.id}`)
+            ?.memberProjects ?? [project];
+          return buildCommandPaletteProjectMetadata({
+            projects: members,
+            locationByEnvironmentId: projectEnvironmentLocationById,
+          }).searchTerms;
         },
-      })),
-    [],
+        renderDescription: (project) => {
+          const members = projectGroupByTargetKey.get(`${project.environmentId}:${project.id}`)
+            ?.memberProjects ?? [project];
+          const metadata = buildCommandPaletteProjectMetadata({
+            projects: members,
+            locationByEnvironmentId: projectEnvironmentLocationById,
+          });
+          const location = projectEnvironmentLocationById.get(project.environmentId) ?? {
+            kind: "remote" as const,
+            label: "Remote",
+            machine: "server" as const,
+          };
+          return (
+            <ProjectSearchDescription
+              environmentLabels={metadata.environmentLabels}
+              grouped={members.length > 1}
+              location={location}
+              workspaceRoot={project.workspaceRoot}
+            />
+          );
+        },
+        icon: projectFaviconIcon,
+        runProject: openProjectFromSearch,
+      }),
+    [
+      openProjectFromSearch,
+      pickerProjects,
+      projectEnvironmentLocationById,
+      projectGroupByTargetKey,
+    ],
   );
-  const squadronSearchItems = useMemo(
-    () => buildSquadronItems(squadronPickerEntries, "squadron", openSquadronFromSearch),
-    [buildSquadronItems, openSquadronFromSearch, squadronPickerEntries],
-  );
-  const squadronThreadItems = useMemo(
+
+  const projectThreadItems = useMemo(
     () =>
       enumerateCommandPaletteItems(
-        buildSquadronItems(squadronPickerEntries, "new-thread-in", startSquadronThread),
+        buildProjectActionItems({
+          projects: pickerProjects,
+          valuePrefix: "new-thread-in",
+          searchTerms: (project) => {
+            const group = projectGroupByTargetKey.get(`${project.environmentId}:${project.id}`);
+            const location = projectEnvironmentLocationById.get(project.environmentId);
+            return [
+              ...(group?.memberProjects.flatMap((member) => [member.title, member.workspaceRoot]) ??
+                []),
+              ...(location ? [location.label] : []),
+            ];
+          },
+          renderDescription: (project) => {
+            const location = projectEnvironmentLocationById.get(project.environmentId) ?? {
+              kind: "remote",
+              label: "Remote",
+              machine: "server" as const,
+            };
+            return (
+              <span className="flex min-w-0 items-center gap-1">
+                <span className="inline-flex min-w-0 items-center gap-1">
+                  {location.kind === "remote" ? (
+                    <EnvironmentMachineIcon
+                      aria-hidden
+                      kind={location.machine}
+                      className={COMMAND_PALETTE_META_ICON_CLASS}
+                    />
+                  ) : null}
+                  <span className="truncate">{location.label}</span>
+                </span>
+                <CommandPaletteMetaDot />
+                <span className="truncate">{project.workspaceRoot}</span>
+              </span>
+            );
+          },
+          icon: projectFaviconIcon,
+          runProject: async (project) => {
+            const group = projectGroupByTargetKey.get(`${project.environmentId}:${project.id}`);
+            const contextualRefBelongsToGroup =
+              contextualProjectRef !== null &&
+              group?.memberProjectRefs.some(
+                (projectRef) =>
+                  projectRef.environmentId === contextualProjectRef.environmentId &&
+                  projectRef.projectId === contextualProjectRef.projectId,
+              );
+            await handleNewThread(
+              contextualRefBelongsToGroup
+                ? contextualProjectRef
+                : scopeProjectRef(project.environmentId, project.id),
+            );
+          },
+        }),
       ),
-    [buildSquadronItems, squadronPickerEntries, startSquadronThread],
+    [
+      contextualProjectRef,
+      handleNewThread,
+      pickerProjects,
+      projectEnvironmentLocationById,
+      projectGroupByTargetKey,
+    ],
   );
 
   const allThreadItems = useMemo(
@@ -1662,7 +1752,7 @@ function OpenCommandPaletteDialog(props: {
   ]);
 
   useLayoutEffect(() => {
-    if (openIntent?.kind !== "new-thread-in" || squadronThreadItems.length === 0) {
+    if (openIntent?.kind !== "new-thread-in" || projectThreadItems.length === 0) {
       return;
     }
     clearOpenIntent();
@@ -1670,17 +1760,35 @@ function OpenCommandPaletteDialog(props: {
     setAddProjectCloneFlow(null);
     setViewStack([]);
     setQuery("");
+    const currentPrefix =
+      currentProjectEnvironmentId && currentProjectId
+        ? `new-thread-in:${currentProjectEnvironmentId}:${currentProjectId}`
+        : null;
+    const prioritized = currentPrefix
+      ? [
+          ...projectThreadItems.filter((item) => item.value === currentPrefix),
+          ...projectThreadItems.filter((item) => item.value !== currentPrefix),
+        ]
+      : projectThreadItems;
     pushPaletteView({
       addonIcon: <SquarePenIcon className={ADDON_ICON_CLASS} />,
       groups: [
         {
-          value: "squadrons",
-          label: "Squadrons",
-          items: squadronThreadItems,
+          value: "projects",
+          label: "Projects",
+          items: enumerateCommandPaletteItems(prioritized),
         },
       ],
     });
-  }, [clearOpenIntent, browseNavigation, openIntent, squadronThreadItems, pushPaletteView]);
+  }, [
+    clearOpenIntent,
+    browseNavigation,
+    currentProjectEnvironmentId,
+    currentProjectId,
+    openIntent,
+    projectThreadItems,
+    pushPaletteView,
+  ]);
 
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
   // J5 (case 13): outside a flow waiting for a folder, the Add project actions create a Squadron.
@@ -1691,35 +1799,30 @@ function OpenCommandPaletteDialog(props: {
     return true;
   };
 
-  if (squadronPickerEntries.length > 0) {
-    const activeHome = activeThread
-      ? threadHomes.get(
-          scopedThreadKey(scopeThreadRef(activeThread.environmentId, activeThread.id)),
-        )
-      : undefined;
-    const activeSquadron =
-      activeHome?.kind === "known"
-        ? (squadronPickerEntries.find(
-            (entry) =>
-              entry.environmentId === activeThread?.environmentId &&
-              entry.squadronId === activeHome.squadron.id,
-          ) ?? null)
-        : null;
+  if (projects.length > 0) {
+    const activeProjectTitle =
+      projectPickerEntries.find((entry) => entry.isPreferred)?.group.displayName ??
+      (currentProjectId ? (projectTitleById.get(currentProjectId) ?? null) : null);
 
-    if (activeSquadron !== null) {
+    if (activeProjectTitle) {
       actionItems.push({
         kind: "action",
         value: "action:new-thread",
-        searchTerms: ["new thread", "chat", "create", "draft", "squadron"],
+        searchTerms: ["new thread", "chat", "create", "draft"],
         title: (
           <>
-            New thread in <span className="font-semibold">{activeSquadron.name}</span>
+            New thread in <span className="font-semibold">{activeProjectTitle}</span>
           </>
         ),
         icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
         shortcutCommand: "chat.new",
         run: async () => {
-          await startSquadronThread(activeSquadron);
+          await startNewThreadFromContext({
+            activeDraftThread,
+            activeThread: activeThread ?? undefined,
+            defaultProjectRef,
+            handleNewThread,
+          });
         },
       });
     }
@@ -1727,11 +1830,11 @@ function OpenCommandPaletteDialog(props: {
     actionItems.push({
       kind: "submenu",
       value: "action:new-thread-in",
-      searchTerms: ["new thread", "squadron", "pick", "choose", "select"],
+      searchTerms: ["new thread", "project", "pick", "choose", "select"],
       title: "New thread in...",
       icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
       addonIcon: <SquarePenIcon className={ADDON_ICON_CLASS} />,
-      groups: [{ value: "squadrons", label: "Squadrons", items: squadronThreadItems }],
+      groups: [{ value: "projects", label: "Projects", items: projectThreadItems }],
     });
   }
 
@@ -2083,8 +2186,7 @@ function OpenCommandPaletteDialog(props: {
     activeGroups,
     query: deferredQuery,
     isInSubmenu: currentView !== null,
-    projectSearchItems: [],
-    contextSearch: { label: "Squadrons", items: squadronSearchItems },
+    projectSearchItems: projectSearchItems,
     settingsSearchItems,
     threadSearchItems:
       linkedThreadSearch?.linkedThreads && deferredQuery === linkedThreadSearch.query
@@ -2180,39 +2282,35 @@ function OpenCommandPaletteDialog(props: {
           setOpen(false);
           return;
         }
-        const folderSquadrons = squadronPickerEntries.filter(
-          (entry) =>
-            entry.folder?.environmentId === existing.environmentId &&
-            entry.folder.id === existing.id,
+        const latestThread = getLatestThreadForProject(
+          threads.filter((thread) => thread.environmentId === existing.environmentId),
+          existing.id,
+          clientSettings.sidebarThreadSortOrder,
         );
-        if (folderSquadrons.length === 1) {
-          await openSquadronFromSearch(folderSquadrons[0]!);
-          setOpen(false);
-          return;
-        }
-        if (folderSquadrons.length > 1) {
-          setQuery("");
-          pushPaletteView({
-            addonIcon: <SquarePenIcon className={ADDON_ICON_CLASS} />,
-            groups: [
-              {
-                value: "squadrons",
-                label: "Squadrons",
-                items: enumerateCommandPaletteItems(
-                  buildSquadronItems(folderSquadrons, "squadron", openSquadronFromSearch),
-                ),
-              },
-            ],
+        if (latestThread && latestThread.settledOverride !== "settled") {
+          await navigate({
+            to: "/$environmentId/$threadId",
+            params: buildThreadRouteParams(
+              scopeThreadRef(latestThread.environmentId, latestThread.id),
+            ),
           });
-          return;
+        } else {
+          const navigationResult = await settlePromise(() =>
+            handleNewThread(scopeProjectRef(existing.environmentId, existing.id)),
+          );
+          if (navigationResult._tag === "Failure") {
+            const error = squashAtomCommandFailure(navigationResult);
+            toastManager.add(
+              stackedThreadToast({
+                type: "error",
+                title: "Failed to open project",
+                description: error instanceof Error ? error.message : "An error occurred.",
+              }),
+            );
+            return;
+          }
         }
-        toastManager.add(
-          stackedThreadToast({
-            type: "error",
-            title: "No Squadron for folder",
-            description: "Create a Squadron for this folder before opening a thread.",
-          }),
-        );
+        setOpen(false);
         return;
       }
 
@@ -2275,15 +2373,11 @@ function OpenCommandPaletteDialog(props: {
       navigate,
       primaryEnvironmentId,
       projects,
-      pushPaletteView,
       providers,
       setOpen,
       onProjectSelected,
       sourcePicker,
       clientSettings.sidebarThreadSortOrder,
-      buildSquadronItems,
-      openSquadronFromSearch,
-      squadronPickerEntries,
       threads,
     ],
   );
@@ -3064,4 +3158,36 @@ function OpenCommandPaletteDialog(props: {
       />
     </CommandPaletteContent>
   );
+}
+
+function ProjectSearchDescription(props: {
+  readonly environmentLabels: ReadonlyArray<string>;
+  readonly grouped: boolean;
+  readonly location: {
+    readonly kind: "local" | "remote";
+    readonly label: string;
+    readonly machine: EnvironmentMachineKind;
+  };
+  readonly workspaceRoot: string;
+}) {
+  if (!props.grouped) {
+    return (
+      <span className="flex min-w-0 items-center gap-1">
+        <span className="inline-flex min-w-0 items-center gap-1">
+          {props.location.kind === "remote" ? (
+            <EnvironmentMachineIcon
+              aria-hidden
+              kind={props.location.machine}
+              className={COMMAND_PALETTE_META_ICON_CLASS}
+            />
+          ) : null}
+          <span className="truncate">{props.location.label}</span>
+        </span>
+        <CommandPaletteMetaDot />
+        <span className="truncate">{props.workspaceRoot}</span>
+      </span>
+    );
+  }
+
+  return <span className="truncate">{props.environmentLabels.join(" · ")}</span>;
 }

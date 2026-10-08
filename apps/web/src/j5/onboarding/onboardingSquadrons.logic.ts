@@ -2,7 +2,6 @@ import type { EnvironmentId, ProjectId, ScopedProjectRef } from "@t3tools/contra
 import type { AssignImportedThreadsResponse, ScopedSquadronRef } from "@t3tools/contracts/j5";
 
 import type { ScopedManagedSquadron } from "../squadron/SquadronDirectory";
-import { squadronDraftScopeKey, type StartedSquadronDraft } from "../squadron/SquadronPicker.logic";
 
 /**
  * Per-folder Squadron choice made on the onboarding Squadrons stage. `new` creates a Squadron
@@ -239,23 +238,3 @@ export const resolveOnboardingLandingSquadron = (
   }
   return undefined;
 };
-
-/**
- * Mirrors `startSquadronDraft`: the folder starts the draft, then only the Squadron id scopes
- * it, so the first send carries an explicit home instead of stopping at the Squadron chip.
- */
-export async function openOnboardingSquadronDraft(input: {
-  readonly projectRef: ScopedProjectRef;
-  readonly squadron: ScopedSquadronRef | undefined;
-  readonly handleNewThread: (projectRef: ScopedProjectRef) => Promise<StartedSquadronDraft | null>;
-  readonly selectDraftSquadron: (draftKey: string, squadronId: string) => void;
-}): Promise<StartedSquadronDraft | null> {
-  const draft = await input.handleNewThread(input.projectRef);
-  if (draft !== null && input.squadron !== undefined) {
-    input.selectDraftSquadron(
-      squadronDraftScopeKey(input.projectRef.environmentId, draft),
-      input.squadron.squadronId,
-    );
-  }
-  return draft;
-}

@@ -8,7 +8,6 @@ import {
   ensureOnboardingSquadron,
   hasKeptConversations,
   isOnboardingFolderComplete,
-  openOnboardingSquadronDraft,
   resolveOnboardingAssignment,
   resolveOnboardingLandingSquadron,
   resolveOnboardingSquadronsReadiness,
@@ -302,7 +301,7 @@ describe("folder outcomes", () => {
 });
 
 describe("landing", () => {
-  it("carries the landing folder's own Squadron into the draft, and nothing when it has none", async () => {
+  it("names the landing folder's own Squadron, and nothing when it has none", () => {
     const projectRef = { environmentId: laptop, projectId: apiProject };
     const homes = new Map<string, OnboardingSquadronHome>([
       [
@@ -316,25 +315,7 @@ describe("landing", () => {
       ["api", { squadronId: "squadron:alpha", name: "alpha", projectRef }],
     ]);
     const squadronRef = resolveOnboardingLandingSquadron(projectRef, homes);
-    const selectDraftSquadron = vi.fn();
-    const draft = { draftId: "draft-1", threadId: ThreadId.make("thread-1") };
-
     expect(squadronRef).toEqual({ environmentId: laptop, squadronId: "squadron:alpha" });
-    await openOnboardingSquadronDraft({
-      projectRef,
-      squadron: squadronRef,
-      handleNewThread: async () => draft,
-      selectDraftSquadron,
-    });
-    await openOnboardingSquadronDraft({
-      projectRef,
-      squadron: undefined,
-      handleNewThread: async () => draft,
-      selectDraftSquadron,
-    });
-
-    expect(selectDraftSquadron).toHaveBeenCalledTimes(1);
-    expect(selectDraftSquadron).toHaveBeenCalledWith(`${laptop}:thread-1`, "squadron:alpha");
     expect(
       resolveOnboardingLandingSquadron({ environmentId: buildBox, projectId: apiProject }, homes),
     ).toBeUndefined();
