@@ -120,23 +120,20 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 ### Squadrons and the sidebar
 
-#### D8. The Squadron replaces the project as the unit of choice
+#### D8. Acting on another agent also requires a shared Squadron
 
-**Upstream:** the user picks a folder, which becomes a project, everywhere: new threads, Add Project, sidebar filters, the new-thread headline, and the folder line on each thread card.
+**Upstream:** an agent's actions on other threads are scoped to its project.
 
-**J5:** the Squadron takes the project's place wherever the person chooses or reads what a thread belongs to:
+**J5:** on top of upstream's same-project rule:
 
-- Add Project opens Create Squadron.
-- The sidebar scopes by Squadron instead of filtering by project. Thread cards name the project, as upstream does.
-- The clone notice's "Open project" action is gone.
-- Archiving or unarchiving another agent that has a Squadron home also requires the caller to belong to that Squadron, on top of upstream's same-project rule.
+- Archiving or unarchiving another agent that has a Squadron home also requires the caller to belong to that Squadron.
 - Merge-back is refused unless both threads share a Squadron home, or both have none.
 
-**Why:** upstream's model is one folder, one project. Work isn't shaped like that: many efforts touch one repository, and one effort touches several. The Squadron is what the person chooses between. Reusing the project flow with a new name would rebuild the one-to-one shape the Squadron exists to replace. Upstream scopes an agent's actions on other threads to its project; J5 keeps that and adds a Squadron check on top, so a shared Squadron never reaches across projects. This doesn't limit communication: any agent can still message any other.
+**Why:** the ledger is still keyed by Squadron, and these checks were written when a Squadron could differ from its project. They don't limit communication: any agent can still message any other.
 
-**Consequences:** a Squadron has one folder for now. The new-thread doors, the draft headline and the composer placeholder are upstream's again: a new thread is started in a project, and the server puts it in that project's Squadron (D9). The remaining seams in upstream UI must be re-checked at every advance, and each case lists its own check. Merge-back hasn't been exercised live. Starting an implementation thread from a plan still uses J5's single launch instead of upstream's create-then-start, so the new thread gets a Squadron home; that returns to upstream when the ledger re-keys to projects. Open gaps: the scheduling selector (#38), the legacy sidebar door (#39), and project nouns still left in some upstream copy.
+**Consequences:** the checks collapse into upstream's same-project rule when the ledger re-keys to projects ([#412](https://github.com/Jacksondr5/j5code/issues/412)), and this entry retires then. Merge-back hasn't been exercised live. Until then a project that several Squadrons reference refuses new threads, and the app no longer offers Delete Squadron to repair it. The repair a person does have is the server's delete route, `POST /api/j5/squadrons/<squadronId>/delete`, which refuses while the Squadron still has unarchived agents or live Crews; those have to be archived first.
 
-**Decided:** Jackson, 2026-08-24 (SC2, SC3), 2026-08-29 (SB3), 2026-08-31 (E7), 2026-09-01 (#47, cards), 2026-09-12 (cross-environment drafts), 2026-09-24 (sidebar scope), 2026-09-25 (clone notice), and 2026-09-28 (the organize check and merge-back limit, which arrived without a ruling in the 2026-09-17 integration). The doors, headline and placeholder went back to upstream on 2026-10-04, in the plan to retire Squadrons ([#412](https://github.com/Jacksondr5/j5code/issues/412)). Recorded in FORK.md cases 9, 10, 13, 16–18, 23, 34 and 38, and its root-spawn section.
+**Decided:** Jackson, 2026-09-28 (the organize check and merge-back limit, which arrived without a ruling in the 2026-09-17 integration). The Squadron as the person's unit of choice (new-thread doors, Add Project, the sidebar scope, thread cards, the clone notice) was decided between 2026-08-24 and 2026-09-25 and went back to upstream's project on 2026-10-04, in the plan to retire Squadrons. Recorded in FORK.md cases 10 and 38, and its root-spawn section.
 
 #### D9. A thread's Squadron is created for it
 
@@ -146,7 +143,7 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Why:** agents need a home in the ledger, and the ledger is still keyed by Squadron. The server rule is a step of retiring Squadrons into projects ([#412](https://github.com/Jacksondr5/j5code/issues/412)), where a thread's home is its project. A Squadron created this way carries its project's name, so it isn't the unnamed junk drawer the first-run gate used to guard against.
 
-**Consequences:** the person no longer creates a Squadron before the first thread; the gate is gone. Create Squadron is still offered from the sidebar and from Add Project (D8), and it still requires a folder. A project that several Squadrons reference can't start a thread until one is deleted, and the server refuses to delete a Squadron that still has unarchived agents or live Crews, so those have to be archived first. Create Squadron does not check for an existing Squadron on the folder, so it can produce that state.
+**Consequences:** the person never creates or names a Squadron outside the welcome wizard: the gate, Create Squadron, rename and delete are gone, and the app shows projects. A Squadron's name is still visible in two places until the ledger re-keys to projects: the playbook author picker in Settings, which lists Squadrons, and Fleet and the Inbox, which fall back to the Squadron's name when its project can't be resolved. The welcome wizard still has a Squadron stage (D10). A project that several Squadrons reference can't start a thread, and the app offers no repair for it; the server's delete route (`POST /api/j5/squadrons/<squadronId>/delete`) is the way out, once the extra Squadron's agents and Crews are archived. The wizard's Squadron stage no longer offers a new Squadron for a folder whose project already has one, so the app itself can't create that state.
 
 **Decided:** Jackson, 2026-08-24 (SC2), for the original gate. The server rule and the gate's removal: Jackson, 2026-10-03, in the plan to retire Squadrons. Recorded in FORK.md cases 9 and 10.
 

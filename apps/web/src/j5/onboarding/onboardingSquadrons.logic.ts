@@ -45,11 +45,24 @@ export const defaultOnboardingAssignment = (candidate: {
   readonly title: string;
 }): OnboardingSquadronAssignment => ({ kind: "new", name: candidate.title });
 
+/**
+ * A folder whose project already has a Squadron uses it and is never offered a new one: a second
+ * Squadron on one project makes the project refuse new threads, and the app has no repair for
+ * that. Pass the folder's eligible Squadrons as `existing` to apply the rule.
+ */
 export const resolveOnboardingAssignment = (
   assignments: ReadonlyMap<string, OnboardingSquadronAssignment>,
   candidate: { readonly key: string; readonly title: string },
-): OnboardingSquadronAssignment =>
-  assignments.get(candidate.key) ?? defaultOnboardingAssignment(candidate);
+  existing: ReadonlyArray<{ readonly squadron: { readonly id: string } }> = [],
+): OnboardingSquadronAssignment => {
+  const chosen = assignments.get(candidate.key);
+  const first = existing[0];
+  if (first === undefined) return chosen ?? defaultOnboardingAssignment(candidate);
+  return chosen?.kind === "existing" &&
+    existing.some((entry) => entry.squadron.id === chosen.squadronId)
+    ? chosen
+    : { kind: "existing", squadronId: first.squadron.id };
+};
 
 /**
  * Existing Squadrons are offered only from the folder's own environment and only when they
@@ -74,14 +87,28 @@ export type OnboardingSquadronsReadiness = "ready" | "empty-name" | "unconfirmed
 
 /** The final button stays disabled until every selected folder has an actionable choice. */
 export const resolveOnboardingSquadronsReadiness = (
-  selected: ReadonlyArray<{ readonly key: string; readonly title: string }>,
+  selected: ReadonlyArray<{
+    readonly key: string;
+    readonly title: string;
+    readonly environmentId?: EnvironmentId;
+    readonly projectId?: ProjectId | null;
+  }>,
   assignments: ReadonlyMap<string, OnboardingSquadronAssignment>,
   homes: ReadonlyMap<string, OnboardingSquadronHome>,
+  squadrons: ReadonlyArray<ScopedManagedSquadron> = [],
 ): OnboardingSquadronsReadiness => {
   let readiness: OnboardingSquadronsReadiness = "ready";
   for (const candidate of selected) {
     if (homes.has(candidate.key)) continue;
-    const assignment = resolveOnboardingAssignment(assignments, candidate);
+    // Judge the same choice the row shows: a folder whose project has a Squadron uses it.
+    const existing =
+      candidate.environmentId === undefined
+        ? []
+        : eligibleExistingSquadrons(squadrons, {
+            environmentId: candidate.environmentId,
+            projectId: candidate.projectId ?? null,
+          });
+    const assignment = resolveOnboardingAssignment(assignments, candidate, existing);
     if (assignment.kind === "unconfirmed") return "unconfirmed";
     if (assignment.kind === "new" && assignment.name.trim().length === 0) {
       readiness = "empty-name";
@@ -117,7 +144,6 @@ export async function ensureOnboardingSquadron(input: {
   const remembered = input.homes.get(input.key);
   if (remembered !== undefined) return { kind: "ready", home: remembered };
   const { assignment, projectRef } = input;
-  if (assignment.kind === "unconfirmed") return { kind: "unconfirmed" };
   if (assignment.kind === "existing") {
     const chosen = eligibleExistingSquadrons(input.existingSquadrons, {
       environmentId: projectRef.environmentId,
@@ -133,6 +159,19 @@ export async function ensureOnboardingSquadron(input: {
     input.homes.set(input.key, home);
     return { kind: "ready", home };
   }
+  // The project already has a Squadron: use it, whatever the choice says, including a
+  // create whose answer was lost and has since shown up in the directory. See
+  // `resolveOnboardingAssignment`.
+  const already = eligibleExistingSquadrons(input.existingSquadrons, {
+    environmentId: projectRef.environmentId,
+    projectId: projectRef.projectId,
+  })[0];
+  if (already !== undefined) {
+    const home = { squadronId: already.squadron.id, name: already.squadron.name, projectRef };
+    input.homes.set(input.key, home);
+    return { kind: "ready", home };
+  }
+  if (assignment.kind === "unconfirmed") return { kind: "unconfirmed" };
   const name = assignment.name.trim();
   if (name.length === 0) return { kind: "failed", message: "Name the Squadron first." };
   try {

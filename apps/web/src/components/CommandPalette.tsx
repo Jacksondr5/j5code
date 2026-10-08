@@ -110,12 +110,7 @@ import {
   isUnsupportedWindowsProjectPath,
   resolveProjectPathForDispatch,
 } from "../lib/projectPaths";
-import {
-  onOpenCommandPalette,
-  returnCommandPaletteProjectSelection,
-  type CommandPaletteProjectSelection,
-  type CommandPaletteSourcePicker,
-} from "../commandPaletteBus";
+import { onOpenCommandPalette, type CommandPaletteSourcePicker } from "../commandPaletteBus";
 import { isPreviewFocused } from "../lib/previewFocus";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import {
@@ -205,7 +200,6 @@ import type { Project } from "../types";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 import { readPullRequestListPreferences } from "~/components/pullRequest/pullRequestListPreferences";
 import { j5CommandPaletteActions } from "../j5/desktopCli/j5CommandPaletteActions";
-import { openSquadronCreate, resolveAddProjectDoor } from "../j5/squadron/SquadronCreateRequest";
 
 const EMPTY_BROWSE_ENTRIES: FilesystemBrowseResult["entries"] = [];
 
@@ -447,20 +441,20 @@ function notifyThemeSaveFailure(): void {
   );
 }
 
+function projectFavicon(project: Project) {
+  return <ProjectFavicon project={project} className="size-4" />;
+}
+
 export function CommandPalette({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reduceCommandPaletteUiState, {
     open: false,
     mode: "command",
     openIntent: null,
   });
-  const [onProjectSelected, setOnProjectSelected] = useState<
-    ((selection: CommandPaletteProjectSelection) => void) | undefined
-  >(undefined);
   const [sourcePicker, setSourcePicker] = useState<CommandPaletteSourcePicker | undefined>();
   const sourcePickerRef = useRef<CommandPaletteSourcePicker | undefined>(undefined);
   const setOpen = useCallback((open: boolean) => {
     if (!open) {
-      setOnProjectSelected(undefined);
       setSourcePicker(undefined);
       sourcePickerRef.current = undefined;
     }
@@ -578,12 +572,6 @@ export function CommandPalette({ children }: { children: ReactNode }) {
   useEffect(
     () =>
       onOpenCommandPalette((detail) => {
-        // J5 (case 13): an Add Project door without a carrier creates a Squadron instead.
-        if (detail.open === "add-project" && resolveAddProjectDoor(detail) === "create-squadron") {
-          setOpen(false);
-          openSquadronCreate();
-          return;
-        }
         const picker = detail.open === "add-project" ? detail.sourcePicker : undefined;
         sourcePickerRef.current = picker;
         setSourcePicker(
@@ -598,9 +586,6 @@ export function CommandPalette({ children }: { children: ReactNode }) {
                 },
               }
             : undefined,
-        );
-        setOnProjectSelected(() =>
-          detail.open === "add-project" ? detail.onProjectSelected : undefined,
         );
         if (detail.open === "new-thread-in") {
           openNewThreadIn();
@@ -642,7 +627,6 @@ export function CommandPalette({ children }: { children: ReactNode }) {
           setOpen={setOpen}
           openOverlayMode={toggleMode}
           clearOpenIntent={clearOpenIntent}
-          onProjectSelected={onProjectSelected}
           sourcePicker={sourcePicker}
         />
       </CommandDialog>
@@ -656,7 +640,6 @@ function CommandPaletteDialog(props: {
   readonly setOpen: (open: boolean) => void;
   readonly openOverlayMode: (mode: SearchOverlayMode) => void;
   readonly clearOpenIntent: () => void;
-  readonly onProjectSelected: ((selection: CommandPaletteProjectSelection) => void) | undefined;
   readonly sourcePicker: CommandPaletteSourcePicker | undefined;
 }) {
   const composerHandleRef = useComposerHandleContext();
@@ -694,7 +677,6 @@ function CommandPaletteDialog(props: {
           setOpen={props.setOpen}
           openOverlayMode={props.openOverlayMode}
           clearOpenIntent={props.clearOpenIntent}
-          onProjectSelected={props.onProjectSelected}
           sourcePicker={props.sourcePicker}
         />
       )}
@@ -707,13 +689,11 @@ function OpenCommandPaletteDialog(props: {
   readonly setOpen: (open: boolean) => void;
   readonly openOverlayMode: (mode: SearchOverlayMode) => void;
   readonly clearOpenIntent: () => void;
-  readonly onProjectSelected: ((selection: CommandPaletteProjectSelection) => void) | undefined;
   readonly sourcePicker: CommandPaletteSourcePicker | undefined;
 }) {
   const navigate = useNavigate();
   const pathname = useLocation({ select: (location) => location.pathname });
-  const { clearOpenIntent, onProjectSelected, openIntent, openOverlayMode, setOpen, sourcePicker } =
-    props;
+  const { clearOpenIntent, openIntent, openOverlayMode, setOpen, sourcePicker } = props;
   const [query, setQuery] = useState(openIntent?.kind === "search" ? openIntent.query : "");
   const [linkedThreadSearch, setLinkedThreadSearch] = useState(
     openIntent?.kind === "search" ? openIntent : null,
@@ -1791,14 +1771,6 @@ function OpenCommandPaletteDialog(props: {
   ]);
 
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
-  // J5 (case 13): outside a flow waiting for a folder, the Add project actions create a Squadron.
-  const openSquadronCreateForAddProject = () => {
-    if (resolveAddProjectDoor({ onProjectSelected, sourcePicker }) === "pick-folder") return false;
-    setOpen(false);
-    openSquadronCreate();
-    return true;
-  };
-
   if (projects.length > 0) {
     const activeProjectTitle =
       projectPickerEntries.find((entry) => entry.isPreferred)?.group.displayName ??
@@ -1934,7 +1906,6 @@ function OpenCommandPaletteDialog(props: {
     icon: <FolderPlusIcon className={ITEM_ICON_CLASS} />,
     keepOpen: true,
     run: async () => {
-      if (openSquadronCreateForAddProject()) return;
       openAddProjectFlow();
     },
   });
@@ -1949,7 +1920,6 @@ function OpenCommandPaletteDialog(props: {
       icon: <FolderPlusIcon className={ITEM_ICON_CLASS} />,
       keepOpen: true,
       run: async () => {
-        if (openSquadronCreateForAddProject()) return;
         await startAddProjectBrowse(wslAddProjectEnvironmentOption.environmentId);
       },
     });
@@ -2272,16 +2242,6 @@ function OpenCommandPaletteDialog(props: {
         cwd,
       );
       if (existing) {
-        if (
-          returnCommandPaletteProjectSelection(onProjectSelected, {
-            projectRef: scopeProjectRef(existing.environmentId, existing.id),
-            title: existing.title,
-            workspaceRoot: existing.workspaceRoot,
-          })
-        ) {
-          setOpen(false);
-          return;
-        }
         const latestThread = getLatestThreadForProject(
           threads.filter((thread) => thread.environmentId === existing.environmentId),
           existing.id,
@@ -2339,17 +2299,6 @@ function OpenCommandPaletteDialog(props: {
         return;
       }
 
-      if (
-        returnCommandPaletteProjectSelection(onProjectSelected, {
-          projectRef: scopeProjectRef(input.environmentId, projectId),
-          title: inferProjectTitleFromPath(cwd),
-          workspaceRoot: cwd,
-        })
-      ) {
-        setOpen(false);
-        return;
-      }
-
       const navigationResult = await settlePromise(() =>
         handleNewThread(scopeProjectRef(input.environmentId, projectId)),
       );
@@ -2375,7 +2324,6 @@ function OpenCommandPaletteDialog(props: {
       projects,
       providers,
       setOpen,
-      onProjectSelected,
       sourcePicker,
       clientSettings.sidebarThreadSortOrder,
       threads,
@@ -2593,16 +2541,6 @@ function OpenCommandPaletteDialog(props: {
     // stream a moment so the draft opens with its project resolved instead of
     // flashing the project picker.
     await waitForProject(projectRef, 3_000).catch(() => null);
-    // J5 case 13: an opt-in folder picker receives the cloned folder instead of a new thread.
-    if (
-      returnCommandPaletteProjectSelection(onProjectSelected, {
-        projectRef,
-        title: inferProjectTitleFromPath(destinationPath),
-        workspaceRoot: destinationPath,
-      })
-    ) {
-      return;
-    }
     const navigationResult = await settlePromise(() => handleNewThread(projectRef));
     if (navigationResult._tag === "Failure") {
       const error = squashAtomCommandFailure(navigationResult);

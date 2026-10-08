@@ -1,71 +1,28 @@
 import { useAtomValue } from "@effect/atom-react";
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
-import { listThreadHomes as listThreadHomesEffect } from "@t3tools/client-runtime/j5/http";
+import { listThreadHomes } from "@t3tools/client-runtime/j5/http";
 import { createThreadHomesStore } from "@t3tools/client-runtime/j5/threadHomes";
-import type { ScopedThreadRef } from "@t3tools/contracts";
-import type { ScopedSquadronRef } from "@t3tools/contracts/j5";
-import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useSyncExternalStore } from "react";
 
 import { runtime } from "../../lib/runtime";
-import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { threadReadConnectionsAtom, type KeyedThreadRefs } from "../threads/useThreadRowReads";
 
-export type { ThreadHome, ThreadHomeEntry } from "@t3tools/contracts/j5";
-export type { ThreadHomesScopeReadState } from "@t3tools/client-runtime/j5/threadHomes";
-export { replaceThreadHomeEntries } from "@t3tools/client-runtime/j5/threadHomes";
-export {
-  J5HttpError as ThreadHomesHttpError,
-  listThreadHomes as listThreadHomesEffect,
-} from "@t3tools/client-runtime/j5/http";
-
 const store = createThreadHomesStore((prepared, ids) =>
-  runtime.runPromise(listThreadHomesEffect(prepared, ids)),
+  runtime.runPromise(listThreadHomes(prepared, ids)),
 );
 
-const requestThreadHomes = (refs: ReadonlyArray<ScopedThreadRef>, force = false) => {
-  store.setConnections(appAtomRegistry.get(threadReadConnectionsAtom));
-  store.request(refs, force);
-};
-
-export const refreshThreadHomes = (refs: ReadonlyArray<ScopedThreadRef>) =>
-  requestThreadHomes(refs, true);
-export const retryScopedThreadHomes = refreshThreadHomes;
-/** A renamed or deleted Squadron changes the home every visible row shows; re-read them all. */
-export const refreshRequestedThreadHomes = () => store.refreshRequested();
-export const shouldRequestThreadHome = (home: unknown, force: boolean) =>
-  force || home === undefined;
-export const shouldForceThreadHomesForScope = (scope: ScopedSquadronRef | null) => scope !== null;
-
-export function useThreadHomesScopeReadState(scope: ScopedSquadronRef | null = null) {
-  return useSyncExternalStore(store.subscribe, () =>
-    store.getScopeReadState(scope?.environmentId ?? null),
-  );
-}
-
-/** Incremental home reads follow the thread's environment; existing shared thread state is unchanged. */
-export function useThreadHomes(
-  refs: ReadonlyArray<ScopedThreadRef> | KeyedThreadRefs,
-  scope: ScopedSquadronRef | null = null,
-  scopeSelectionGeneration = 0,
-) {
-  // A caller that already holds a keyed row set (the sidebar) is not serialized again.
-  const key = "key" in refs ? refs.key : JSON.stringify(refs);
-  const requested = useMemo(() => JSON.parse(key) as ReadonlyArray<ScopedThreadRef>, [key]);
-  const requestedRef = useRef(requested);
-  requestedRef.current = requested;
+/**
+ * Each listed thread's Squadron home, read incrementally from the thread's own environment. The
+ * sidebar reads it only for `origin`, the placement provenance its membership rule needs
+ * (register D22).
+ */
+export function useThreadHomes({ refs: requested }: KeyedThreadRefs) {
   const connections = useAtomValue(threadReadConnectionsAtom);
   const homes = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   useEffect(() => {
     store.setConnections(connections);
     store.request(requested);
   }, [connections, requested]);
-  useEffect(() => {
-    if (scope !== null)
-      store.request(
-        requestedRef.current.filter((ref) => ref.environmentId === scope.environmentId),
-        true,
-      );
-  }, [scope, scopeSelectionGeneration]);
   return useMemo(
     () =>
       new Map(

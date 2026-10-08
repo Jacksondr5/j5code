@@ -110,35 +110,6 @@ export function useRetainedValue<T>(key: string | null, value: T | null): T | nu
 export const animateSidebarLayoutChanges: AnimateLayoutChanges = (args) =>
   args.isSorting ? defaultAnimateLayoutChanges(args) : false;
 
-export type SidebarEmptyState =
-  | { readonly kind: "loading"; readonly message: "Loading Squadrons…" }
-  | { readonly kind: "no-squadrons"; readonly message: "No Squadrons yet" }
-  | { readonly kind: "scope-read-failed"; readonly message: "Couldn’t read thread homes" }
-  | { readonly kind: "scoped"; readonly message: string }
-  | { readonly kind: "empty"; readonly message: "No threads yet" };
-
-/** The first-run action is unavailable until the Registrar directory is authoritative. */
-export function resolveSidebarEmptyState(input: {
-  readonly directoryStatus: "loading" | "ready" | "partial" | "error";
-  readonly squadronCount: number;
-  readonly squadronScopeName: string | null;
-  readonly scopeReadFailed?: boolean;
-}): SidebarEmptyState {
-  if (input.directoryStatus === "loading") {
-    return { kind: "loading", message: "Loading Squadrons…" };
-  }
-  if (input.directoryStatus === "ready" && input.squadronCount === 0) {
-    return { kind: "no-squadrons", message: "No Squadrons yet" };
-  }
-  if (input.squadronScopeName !== null && input.scopeReadFailed === true) {
-    return { kind: "scope-read-failed", message: "Couldn’t read thread homes" };
-  }
-  if (input.squadronScopeName !== null) {
-    return { kind: "scoped", message: `No threads in ${input.squadronScopeName} yet` };
-  }
-  return { kind: "empty", message: "No threads yet" };
-}
-
 // Rows and section markers share one sortable list. The separators resolve
 // the lifecycle action; Sidebar.drag previews the resulting layout. Pinned
 // and active threads keep the dragged position; settled threads use time

@@ -1,4 +1,5 @@
 import { useParams } from "@tanstack/react-router";
+import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import {
   type AtomCommandResult,
   isAtomCommandInterrupted,
@@ -13,6 +14,7 @@ import {
 } from "@t3tools/contracts";
 import { useCallback, useEffect, useRef } from "react";
 
+import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useRemoveClonedProject } from "../hooks/useRemoveClonedProject";
 import { useEnvironments } from "../state/environments";
 import { useEnvironmentProjectClones } from "../state/projectClones";
@@ -51,6 +53,7 @@ function renderKey(clone: ProjectCloneSnapshot): string {
 
 function EnvironmentCloneToasts({ environmentId }: { environmentId: EnvironmentId }) {
   const clones = useEnvironmentProjectClones(environmentId);
+  const handleNewThread = useNewThreadHandler();
   const { draftId: routeDraftId } = useParams({ strict: false });
   const cancelClone = useAtomCommand(sourceControlEnvironment.cancelProjectClone, {
     reportFailure: false,
@@ -89,6 +92,13 @@ function EnvironmentCloneToasts({ environmentId }: { environmentId: EnvironmentI
       return draft?.environmentId === environmentId && draft.projectId === projectId;
     },
     [environmentId, routeDraftId],
+  );
+
+  const openProject = useCallback(
+    (projectId: ProjectId) => {
+      void handleNewThread(scopeProjectRef(environmentId, projectId));
+    },
+    [environmentId, handleNewThread],
   );
 
   useEffect(() => {
@@ -143,8 +153,13 @@ function EnvironmentCloneToasts({ environmentId }: { environmentId: EnvironmentI
           title: `Cloned ${name}`,
           description: clone.destinationPath,
           timeout: 8_000,
-          // J5 (FORK.md case 19): no "Open project" action. It opened a draft with no
-          // Squadron; the cloned folder is picked from Create Squadron instead.
+          actionProps: {
+            children: "Open project",
+            onClick: () => {
+              closeToast();
+              openProject(clone.projectId);
+            },
+          },
           data: { hideCopyButton: true },
         });
         if (tracked) {
@@ -207,6 +222,7 @@ function EnvironmentCloneToasts({ environmentId }: { environmentId: EnvironmentI
     clones,
     environmentId,
     isViewingProjectDraft,
+    openProject,
     removeClonedProject,
     retryClone,
     runCloneAction,

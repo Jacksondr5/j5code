@@ -32,7 +32,6 @@ import {
   usePanelNavigationSuppression,
 } from "../panelAnimations";
 import LegacyThreadSidebar from "./LegacySidebar";
-import { SquadronCreateDialogHost } from "../j5/squadron/SquadronCreateDialog";
 import { useThreadVisitedMigration } from "../hooks/useThreadVisitedMigration";
 import ThreadSidebar from "./Sidebar";
 import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
@@ -330,8 +329,6 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         </Sidebar>
         {children}
         <SidebarControl />
-        {/* J5 (case 19): the one Create Squadron dialog, mounted where every door can reach it. */}
-        <SquadronCreateDialogHost />
         <NavigationHistoryShortcuts />
       </SidebarProvider>
     </PanelAnimationSuppressionProvider>
