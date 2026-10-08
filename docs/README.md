@@ -19,6 +19,7 @@
 - [Usage and limits](./user/usage.md)
 - [Planning artifacts](./user/artifacts.md)
 - [Playbooks](./user/playbooks.md)
+- [Connecting two J5 servers](./user/j5-peering.md)
 - [Product usage data](./user/telemetry.md)
 - [Remote access](./user/remote-access.md)
 - [Running in the background](./user/background-service.md)
