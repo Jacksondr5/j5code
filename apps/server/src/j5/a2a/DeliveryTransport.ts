@@ -28,7 +28,7 @@ import {
 } from "./EnvelopeFormatter.ts";
 import { PeerDeliveryRefusalCode } from "./PeerInboundService.ts";
 import { PeerRegistryService } from "./PeerRegistryService.ts";
-import { peerProtocolHeaders, peerProtocolMismatch, statedPeerProtocol } from "./peerProtocol.ts";
+import { peerProtocolHeaders, responseProtocolMismatch } from "./peerProtocol.ts";
 import {
   type DeliveryEnvelopeChannel,
   LedgerProjectId,
@@ -535,8 +535,8 @@ export const live: Layer.Layer<
             .pipe(Effect.timeout(PEER_DELIVERY_TIMEOUT));
           // An older server answers 201 to a body it cannot read, so its version is checked first.
           // The peer's row shows a mismatch until a later delivery succeeds.
-          const mismatch = peerProtocolMismatch({
-            stated: statedPeerProtocol(response.headers),
+          const mismatch = responseProtocolMismatch({
+            response,
             peer: peer.label,
           });
           if (mismatch !== null) {

@@ -9,7 +9,6 @@ import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
 import * as Semaphore from "effect/Semaphore";
@@ -49,7 +48,6 @@ import {
   type DroppedExchange,
   formatNotDeliveredNotice,
   notDeliveredNoticeEvent,
-  notDeliveredNoticeMessageId,
   peerDropEvents,
   peerRefusalReason,
 } from "./deliveryNotices.ts";
@@ -98,8 +96,8 @@ export interface A2ADeliveryHooksShape {
   readonly afterTransportSuccess: (
     attempt: DeliveryAttempt,
   ) => Effect.Effect<void, A2ADeliveryHookError>;
-  /** Told when a removed peer's direct rows wait for an attempt that holds the drain. */
-  readonly peerCancelWaitsForDrain?: Effect.Effect<void>;
+  /** Tests only: runs once a hand-out has chosen its rows, just before it stamps them. */
+  readonly beforeHandOutStamp?: Effect.Effect<void>;
 }
 
 export class A2ADeliveryHookError extends Schema.TaggedError<A2ADeliveryHookError>()(
@@ -127,6 +125,12 @@ export interface A2ADeliveryWorkerShape {
     participantId: ParticipantId,
   ) => Effect.Effect<void, A2ADeliveryWorkerError>;
   readonly runOnce: Effect.Effect<DeliveryMilestone | null, A2ADeliveryWorkerError>;
+  /**
+   * Whether a direct attempt of this row to a peer server is on the wire now,
+   * so the peer may already hold it. Read under the ledger writer's permit, it
+   * is exact: an attempt registers under that permit before it sends.
+   */
+  readonly peerAttemptInFlight: (projectId: string, messageId: string) => Effect.Effect<boolean>;
   readonly drain: Effect.Effect<ReadonlyArray<DeliveryMilestone>, A2ADeliveryWorkerError>;
   readonly listAlarms: Effect.Effect<ReadonlyArray<DeliveryAlarm>, A2ADeliveryWorkerError>;
   /** The next batch of messages stored for a polling peer, stamped as handed out. */
@@ -141,26 +145,8 @@ export interface A2ADeliveryWorkerShape {
     environmentId: string,
     acks: ReadonlyArray<PeerPollAck>,
   ) => Effect.Effect<void, A2ADeliveryWorkerError>;
-  /** Cancels every message still waiting to reach a peer being removed; returns how many. */
-  readonly cancelPeerDeliveries: (
-    removal: PeerDeliveriesRemoval,
-  ) => Effect.Effect<number, A2ADeliveryWorkerError>;
   readonly subscribeMilestones: Effect.Effect<Stream.Stream<DeliveryMilestone>, never, Scope.Scope>;
 }
-
-export interface PeerDeliveriesRemoval {
-  readonly environmentId: string;
-  /** The peer's name, for each sender's notice. */
-  readonly serverName: string;
-  /** Why, completing "… was not delivered: …". */
-  readonly reason: string;
-  /** Exchanges this removal dropped, as `projectId exchangeId`: their drop notice told the sender. */
-  readonly droppedExchanges: ReadonlySet<string>;
-}
-
-/** An Exchange's key in `PeerDeliveriesRemoval.droppedExchanges`. */
-export const droppedExchangeKey = (projectId: string, exchangeId: string) =>
-  `${projectId} ${exchangeId}`;
 
 export class A2ADeliveryWorker extends Context.Service<A2ADeliveryWorker, A2ADeliveryWorkerShape>()(
   "t3/j5/a2a/DeliveryWorker/A2ADeliveryWorker",
@@ -233,6 +219,8 @@ const makeLayer = (daemon: boolean) =>
       // and cancels share this permit instead, so a slow local delivery or a dead
       // direct peer holding the drain permit never stalls a poll.
       const storePermit = yield* Semaphore.make(1);
+      // Direct attempts to a peer server now on the wire, by `projectId messageId`.
+      const peerAttemptsInFlight = new Set<string>();
       // A row for a peer that polls waits for its poll: never attempted, retried or alarmed here.
       const notStoredForPollingPeer = sql`(
         receiver_environment_id IS NULL
@@ -654,11 +642,41 @@ const makeLayer = (daemon: boolean) =>
           yield* PubSub.publish(milestones, milestone);
           return milestone;
         }
-        const exit = yield* Effect.exit(attemptDelivery(row, attempt));
-        const milestone =
-          exit._tag === "Success"
+        const inFlight = `${row.project_id} ${row.message_id}`;
+        if (row.receiver_environment_id !== null) {
+          // Registered under the writer's permit with the row rechecked, so a peer
+          // removal, which holds that permit, either sees this attempt or has
+          // already cancelled the row, which is then never sent.
+          const claimed = yield* writer.withPermit(
+            Effect.gen(function* () {
+              const [current] = yield* sql<{ readonly status: string }>`
+                SELECT status FROM j5_a2a_delivery
+                WHERE project_id = ${row.project_id} AND message_id = ${row.message_id}
+              `;
+              if (current?.status !== "pending" && current?.status !== "retry_scheduled") {
+                return false;
+              }
+              peerAttemptsInFlight.add(inFlight);
+              return true;
+            }),
+          );
+          if (!claimed) {
+            const milestone = {
+              projectId: LedgerProjectId.make(row.project_id),
+              messageId: LedgerMessageId.make(row.message_id),
+              state: "cancelled",
+              attempt,
+            } satisfies DeliveryMilestone;
+            yield* PubSub.publish(milestones, milestone);
+            return milestone;
+          }
+        }
+        const milestone = yield* Effect.gen(function* () {
+          const exit = yield* Effect.exit(attemptDelivery(row, attempt));
+          return exit._tag === "Success"
             ? exit.value
             : yield* recordFailure(row, attempt, exit.cause, refusalOf(exit.cause));
+        }).pipe(Effect.ensuring(Effect.sync(() => peerAttemptsInFlight.delete(inFlight))));
         yield* PubSub.publish(milestones, milestone);
         return milestone;
       });
@@ -755,102 +773,6 @@ const makeLayer = (daemon: boolean) =>
         );
       });
       /**
-       * A removed peer's waiting rows, each cancelled with its sender's notice in
-       * one write that rechecks the row first. The caller holds the permit the
-       * rows' receipts take, so no receipt is in flight: a row delivered since
-       * it was read stays delivered, and its sender is told nothing. A row
-       * handed out to a polling peer may already be in the peer's thread, so its
-       * sender is told it may not have been delivered.
-       */
-      const cancelPeerRows = Effect.fn("j5.a2a.delivery.cancelPeerRows")(function* (
-        rows: ReadonlyArray<DeliveryRow>,
-        removal: PeerDeliveriesRemoval,
-      ) {
-        let cancelled = 0;
-        for (const row of rows) {
-          const now = DateTime.formatIso(yield* DateTime.now);
-          const messageId = LedgerMessageId.make(row.message_id);
-          const outcome = yield* writer.withPermit(
-            sql.withTransaction(
-              Effect.gen(function* () {
-                const current = (yield* sql<{
-                  readonly status: string;
-                  readonly handed_out_at: string | null;
-                }>`SELECT status, handed_out_at FROM j5_a2a_delivery
-                  WHERE project_id = ${row.project_id} AND message_id = ${row.message_id}`)[0];
-                if (
-                  current === undefined ||
-                  !["pending", "retry_scheduled", "alarmed"].includes(current.status)
-                ) {
-                  return null;
-                }
-                // A refusal already told the sender, and an ask's sender, or one
-                // on an Exchange this removal dropped, is told by the drop.
-                const alreadyTold =
-                  (yield* sql`SELECT 1 FROM j5_a2a_delivery
-                    WHERE project_id = ${row.project_id}
-                      AND message_id = ${notDeliveredNoticeMessageId(row)}`).length > 0;
-                const dropped =
-                  row.exchange_id !== null &&
-                  removal.droppedExchanges.has(droppedExchangeKey(row.project_id, row.exchange_id));
-                const tell =
-                  row.exchange_role !== "ask" &&
-                  !dropped &&
-                  canBeNotified(row.sender_id) &&
-                  !alreadyTold;
-                return yield* writer.appendEventsInTransaction({
-                  commandId: CommCommandId.make(
-                    `command:j5:a2a:peer-removed:cancel:${encodeURIComponent(row.project_id)}:${encodeURIComponent(row.message_id)}`,
-                  ),
-                  projectId: LedgerProjectId.make(row.project_id),
-                  acceptedAt: now,
-                  events: [
-                    {
-                      kind: "message.cancelled",
-                      sender: ParticipantId.make(row.sender_id),
-                      receiver: ParticipantId.make(row.receiver_id),
-                      exchangeId:
-                        row.exchange_id === null ? null : ExchangeId.make(row.exchange_id),
-                      correlationId: CorrelationId.make(row.correlation_id),
-                      payload: { messageId, reason: removal.reason },
-                      createdAt: now,
-                    },
-                    ...(tell
-                      ? [
-                          notDeliveredNoticeEvent({
-                            message: row,
-                            serverName: removal.serverName,
-                            reason: removal.reason,
-                            createdAt: now,
-                            handedOut: current.handed_out_at !== null,
-                          }),
-                        ]
-                      : []),
-                  ],
-                });
-              }),
-            ),
-          );
-          if (outcome === null) continue;
-          if (outcome.committed) yield* writer.publishCommitted(outcome.events);
-          yield* PubSub.publish(milestones, {
-            projectId: LedgerProjectId.make(row.project_id),
-            messageId,
-            state: "cancelled",
-            attempt: row.attempts + 1,
-          } satisfies DeliveryMilestone);
-          cancelled += 1;
-        }
-        // The notices are queued here, outside the drain: wake it.
-        if (cancelled > 0) yield* Queue.offer(wakeups, undefined);
-        return cancelled;
-      });
-      const waitingForPeer = (environmentId: string) => sql`
-        receiver_environment_id = ${environmentId}
-        AND status IN ('pending', 'retry_scheduled', 'alarmed')
-      `;
-
-      /**
        * A polling peer's waiting rows, oldest first, up to the batch limit, each
        * stamped the first time it is handed out. A row not acknowledged is
        * handed out again next time; the peer records each idempotently by its
@@ -888,14 +810,38 @@ const makeLayer = (daemon: boolean) =>
           bytes += size;
         }
         if (deliveries.length === 0) return { deliveries: [], more: false };
+        yield* hooks.beforeHandOutStamp ?? Effect.void;
         const handedOutAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
-        yield* sql`
-          UPDATE j5_a2a_delivery SET handed_out_at = ${handedOutAt}
-          WHERE receiver_environment_id = ${environmentId}
-            AND handed_out_at IS NULL
-            AND message_id IN ${sql.in(deliveries.map((delivery) => delivery.messageId))}
-        `;
-        return { deliveries, more: rows.length > deliveries.length };
+        // Rechecked and stamped in one write, so a peer removal that committed
+        // since these rows were read leaves nothing to hand out, and one that
+        // comes after sees them handed out.
+        const handed = yield* sql.withTransaction(
+          Effect.gen(function* () {
+            const recorded = yield* sql`
+              SELECT 1 FROM j5_a2a_peer WHERE environment_id = ${environmentId}
+            `;
+            if (recorded.length === 0) return new Set<string>();
+            const waiting = yield* sql<{ readonly message_id: string }>`
+              SELECT message_id FROM j5_a2a_delivery
+              WHERE receiver_environment_id = ${environmentId}
+                AND status IN ('pending', 'retry_scheduled')
+                AND message_id IN ${sql.in(deliveries.map((delivery) => delivery.messageId))}
+            `;
+            if (waiting.length === 0) return new Set<string>();
+            yield* sql`
+              UPDATE j5_a2a_delivery SET handed_out_at = ${handedOutAt}
+              WHERE receiver_environment_id = ${environmentId}
+                AND handed_out_at IS NULL
+                AND message_id IN ${sql.in(waiting.map((row) => row.message_id))}
+            `;
+            return new Set(waiting.map((row) => row.message_id));
+          }),
+        );
+        const stillWaiting = deliveries.filter((delivery) => handed.has(delivery.messageId));
+        return {
+          deliveries: stillWaiting,
+          more: stillWaiting.length > 0 && rows.length > deliveries.length,
+        };
       });
 
       /** A polling peer's answer about each row it was handed: a receipt, or its refusal. */
@@ -948,39 +894,9 @@ const makeLayer = (daemon: boolean) =>
           storePermit
             .withPermit(acknowledgePeer(environmentId, acks))
             .pipe(Effect.mapError(workerError("record a polling peer's acknowledgements"))),
-        // Direct rows under the drain permit their attempts hold, stored rows
-        // under the store permit their acks take, side by side.
-        cancelPeerDeliveries: (removal) =>
-          Effect.gen(function* () {
-            const direct = yield* sql<DeliveryRow>`SELECT * FROM j5_a2a_delivery
-              WHERE ${waitingForPeer(removal.environmentId)} AND ${notStoredForPollingPeer}
-              ORDER BY sent_seq, project_id, message_id`;
-            const stored = yield* sql<DeliveryRow>`SELECT * FROM j5_a2a_delivery
-              WHERE ${waitingForPeer(removal.environmentId)} AND ${storedForPollingPeer}
-              ORDER BY sent_seq, project_id, message_id`;
-            const cancelDirect = cancelPeerRows(direct, removal);
-            const [directCount, storedCount] = yield* Effect.all(
-              [
-                drainPermit
-                  .withPermitsIfAvailable(1)(cancelDirect)
-                  .pipe(
-                    Effect.flatMap(
-                      Option.match({
-                        onSome: Effect.succeed,
-                        onNone: () =>
-                          (hooks.peerCancelWaitsForDrain ?? Effect.void).pipe(
-                            Effect.andThen(drainPermit.withPermit(cancelDirect)),
-                          ),
-                      }),
-                    ),
-                  ),
-                storePermit.withPermit(cancelPeerRows(stored, removal)),
-              ],
-              { concurrency: "unbounded" },
-            );
-            return directCount + storedCount;
-          }).pipe(Effect.mapError(workerError("cancel a removed peer's deliveries"))),
         runOnce,
+        peerAttemptInFlight: (projectId, messageId) =>
+          Effect.sync(() => peerAttemptsInFlight.has(`${projectId} ${messageId}`)),
         drain,
         listAlarms: sql<{
           readonly project_id: string;

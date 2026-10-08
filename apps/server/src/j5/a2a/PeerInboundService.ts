@@ -7,7 +7,7 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 
-import { A2ALedger, type A2ALedgerError } from "./LedgerService.ts";
+import { A2ALedgerTransactionWriter, type A2ALedgerError } from "./LedgerService.ts";
 import { stablePart } from "./spawnIds.ts";
 import { findPeerCounterparty, isRoutedElsewhere } from "./peerCounterparty.ts";
 import {
@@ -162,7 +162,18 @@ export class A2APeerSenderNotAllowedError extends Schema.TaggedError<A2APeerSend
   }
 }
 
+/** The sending server is no longer a recorded peer: it was removed while this message was on its way. */
+export class A2APeerNotRecordedError extends Schema.TaggedError<A2APeerNotRecordedError>()(
+  "A2APeerNotRecordedError",
+  { originEnvironmentId: Schema.String },
+) {
+  override get message(): string {
+    return `Environment ${this.originEnvironmentId} is not a recorded peer of this server.`;
+  }
+}
+
 export type PeerInboundError =
+  | A2APeerNotRecordedError
   | SqlError
   | Schema.SchemaError
   | A2ALedgerError
@@ -256,11 +267,13 @@ interface ExchangeRow {
 
 const decodeParticipant = Schema.decodeUnknownEffect(Schema.fromJsonString(Participant));
 
-export const layer: Layer.Layer<PeerInboundService, never, A2ALedger | SqlClient.SqlClient> =
+type PeerInboundServiceRequirements = A2ALedgerTransactionWriter | SqlClient.SqlClient;
+
+export const layer: Layer.Layer<PeerInboundService, never, PeerInboundServiceRequirements> =
   Layer.effect(
     PeerInboundService,
     Effect.gen(function* () {
-      const ledger = yield* A2ALedger;
+      const writer = yield* A2ALedgerTransactionWriter;
       const sql = yield* SqlClient.SqlClient;
 
       const localReceiver = Effect.fn("j5.a2a.peer.inbound.receiver")(function* (
@@ -526,12 +539,30 @@ export const layer: Layer.Layer<PeerInboundService, never, A2ALedger | SqlClient
             }
           }
 
-          const appended = yield* ledger.appendEvents({
-            commandId,
-            projectId: receiver.projectId,
-            acceptedAt: receivedAt,
-            events,
-          });
+          // The peer is checked in the same write as the record, so a message that
+          // arrives as the peer is being removed is either wiped by the removal or,
+          // once the removal committed, refused here.
+          const appended = yield* writer.withPermit(
+            sql.withTransaction(
+              Effect.gen(function* () {
+                const recorded = yield* sql`
+                  SELECT 1 FROM j5_a2a_peer WHERE environment_id = ${input.originEnvironmentId}
+                `;
+                if (recorded.length === 0) {
+                  return yield* new A2APeerNotRecordedError({
+                    originEnvironmentId: input.originEnvironmentId,
+                  });
+                }
+                return yield* writer.appendEventsInTransaction({
+                  commandId,
+                  projectId: receiver.projectId,
+                  acceptedAt: receivedAt,
+                  events,
+                });
+              }),
+            ),
+          );
+          if (appended.committed) yield* writer.publishCommitted(appended.events);
           const received = appended.events.find((event) => event.kind === "message.received");
           return {
             receivedSeq: received?.seq ?? appended.receipt.resultSeq,

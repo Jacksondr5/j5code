@@ -78,6 +78,11 @@ const makeTestLayer = (delivered: Ref.Ref<Array<AgentDeliveryInput>>) => {
 
 const setup = Effect.fn("test.j5.a2a.peer.inbound.setup")(function* () {
   yield* runJ5A2AMigrations();
+  // Home is a recorded peer; a message from any other server is refused before it is recorded.
+  yield* (yield* SqlClient.SqlClient)`
+    INSERT INTO j5_a2a_peer (environment_id, label, link_mode, origin, credential, created_at, updated_at)
+    VALUES (${homeEnvironment}, 'Home', 'push', 'https://home.example', 'home-token', ${timestamp}, ${timestamp})
+  `;
   const ledger = yield* A2ALedger;
   yield* ledger.ensureProject({ projectId: localProject, createdAt: timestamp });
   yield* ledger.append({

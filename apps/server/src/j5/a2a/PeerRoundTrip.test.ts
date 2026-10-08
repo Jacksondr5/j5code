@@ -246,8 +246,14 @@ const runEnded = (thread: ThreadId, status: "completed" | "failed"): Orchestrati
   } as OrchestrationV2StoredEvent;
 };
 
-const seed = Effect.fn("test.j5.a2a.peer.roundtrip.seed")(function* (self: Server) {
+/** One server's project and agent, and its record of the server it is peered with. */
+const seed = Effect.fn("test.j5.a2a.peer.roundtrip.seed")(function* (self: Server, peer: Server) {
   yield* runJ5A2AMigrations();
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`
+    INSERT INTO j5_a2a_peer (environment_id, label, link_mode, origin, credential, created_at, updated_at)
+    VALUES (${peer.environmentId}, ${peer.environmentId}, 'push', 'https://peer.example', 'peer-token', ${timestamp}, ${timestamp})
+  `;
   const ledger = yield* A2ALedger;
   yield* ledger.ensureProject({ projectId: self.projectId, createdAt: timestamp });
   yield* ledger.append({
@@ -289,8 +295,8 @@ const pairWithOpenAsk = Effect.fn("test.j5.a2a.peer.roundtrip.pairWithOpenAsk")(
   const homeContext = yield* Layer.build(
     makeServer(home, work, "Work", workDoor, homeDelivered, crossed),
   );
-  const workServer = yield* seed(work).pipe(Effect.provide(workContext));
-  const homeServer = yield* seed(home).pipe(Effect.provide(homeContext));
+  const workServer = yield* seed(work, home).pipe(Effect.provide(workContext));
+  const homeServer = yield* seed(home, work).pipe(Effect.provide(homeContext));
   yield* Ref.set(workDoor, workServer.inbound);
   yield* Ref.set(homeDoor, homeServer.inbound);
   const asked = yield* workServer.send.send({
@@ -339,14 +345,13 @@ it.effect(
         const homeContext = yield* Layer.build(
           makeServer(home, work, "Work", workDoor, homeDelivered, homeCrossed),
         );
-        const workServer = yield* seed(work).pipe(Effect.provide(workContext));
-        const homeServer = yield* seed(home).pipe(Effect.provide(homeContext));
+        const workServer = yield* seed(work, home).pipe(Effect.provide(workContext));
+        const homeServer = yield* seed(home, work).pipe(Effect.provide(homeContext));
         yield* Ref.set(workDoor, workServer.inbound);
         yield* Ref.set(homeDoor, homeServer.inbound);
         // Home's record of Work carries the name Work reported for itself at hello.
         yield* homeServer.sql`
-          INSERT INTO j5_a2a_peer (environment_id, label, link_mode, origin, credential, created_at, updated_at)
-          VALUES (${work.environmentId}, 'Work VM', 'push', 'https://work.example', 'work-token', ${timestamp}, ${timestamp})
+          UPDATE j5_a2a_peer SET label = 'Work VM' WHERE environment_id = ${work.environmentId}
         `;
 
         // Work asks Home by participant id, naming no server.
@@ -437,7 +442,7 @@ it.effect(
         const context = yield* Layer.build(
           makeServer(work, home, "Home", noDoor, delivered, crossed),
         );
-        const server = yield* seed(work).pipe(Effect.provide(context));
+        const server = yield* seed(work, home).pipe(Effect.provide(context));
         const sent = yield* server.send.send({
           commandId: CommCommandId.make("command:roundtrip:dark"),
           senderThreadId: work.agent.threadId,

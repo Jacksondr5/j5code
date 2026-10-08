@@ -662,6 +662,11 @@ it.effect(
       const ledger = yield* A2ALedger;
       const send = yield* A2ASendService;
       const sql = yield* SqlClient.SqlClient;
+      // Home is still a peer, asleep: its directory read fails.
+      yield* sql`
+        INSERT INTO j5_a2a_peer (environment_id, label, link_mode, origin, credential, created_at, updated_at)
+        VALUES ('environment-Home', 'Home', 'push', 'https://home.example', 'home-token', ${timestamp}, ${timestamp})
+      `;
       // An earlier ask reached this agent on Home; that delivery row is the recorded route.
       yield* ledger.append({
         commandId: CommCommandId.make("command:peer-outbound:earlier"),

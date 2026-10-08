@@ -21,7 +21,7 @@ import {
   type PeerSessionReadError,
 } from "./PeerRegistryService.ts";
 import { ParticipantId, LedgerProjectId } from "./contracts.ts";
-import { peerProtocolHeaders, peerProtocolMismatch, statedPeerProtocol } from "./peerProtocol.ts";
+import { peerProtocolHeaders, responseProtocolMismatch } from "./peerProtocol.ts";
 
 /**
  * The address book across peers. Every read asks each peer this server
@@ -201,8 +201,8 @@ const readPeerRoster = Effect.fn("j5.a2a.peer.directory.roster")(function* (
   );
   const response = yield* client.execute(request);
   // The peer's row shows a mismatch until a later exchange with it succeeds.
-  const mismatch = peerProtocolMismatch({
-    stated: statedPeerProtocol(response.headers),
+  const mismatch = responseProtocolMismatch({
+    response,
     peer: peer.label,
   });
   if (mismatch !== null) {

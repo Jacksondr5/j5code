@@ -65,14 +65,14 @@ export const formatNotDeliveredNotice = (input: {
   readonly reason: string;
   /** Set for an ask: the Exchange it opened has ended. */
   readonly exchangeId?: string;
-  /** It was handed to the peer, which may have taken it before its answer was lost. */
-  readonly handedOut?: boolean;
+  /** The peer may already hold it: handed to a poller, or attempted directly. */
+  readonly mayHaveArrived?: boolean;
 }) =>
   [
-    input.handedOut === true
+    input.mayHaveArrived === true
       ? "[Cross-agent messaging system notice: message may not have been delivered]"
       : "[Cross-agent messaging system notice: message not delivered]",
-    `Your message to ${input.receiverId} on ${input.serverName} ${input.handedOut === true ? "may not have been delivered" : "was not delivered"}: ${input.reason}`,
+    `Your message to ${input.receiverId} on ${input.serverName} ${input.mayHaveArrived === true ? "may not have been delivered" : "was not delivered"}: ${input.reason}`,
     ...(input.exchangeId === undefined
       ? []
       : [
@@ -119,7 +119,7 @@ export const notDeliveredNoticeEvent = (input: {
   readonly serverName: string;
   readonly reason: string;
   readonly createdAt: string;
-  readonly handedOut?: boolean;
+  readonly mayHaveArrived?: boolean;
 }): CommEvent => {
   const key = notDeliveredKey(input.message);
   return {
@@ -134,7 +134,7 @@ export const notDeliveredNoticeEvent = (input: {
         receiverId: input.message.receiver_id,
         serverName: input.serverName,
         reason: input.reason,
-        ...(input.handedOut === true ? { handedOut: true } : {}),
+        ...(input.mayHaveArrived === true ? { mayHaveArrived: true } : {}),
       }),
       originProjectId: LedgerProjectId.make(input.message.project_id),
       receiverProjectId: LedgerProjectId.make(input.message.project_id),

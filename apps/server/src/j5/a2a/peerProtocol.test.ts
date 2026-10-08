@@ -1,7 +1,7 @@
 import { PEER_PROTOCOL_VERSION } from "@t3tools/contracts/j5";
 import { describe, expect, it } from "vite-plus/test";
 
-import { peerProtocolMismatch } from "./peerProtocol.ts";
+import { peerProtocolMismatch, responseProtocolMismatch } from "./peerProtocol.ts";
 
 describe("peerProtocolMismatch", () => {
   it("accepts this server's version, as text or as a number", () => {
@@ -31,5 +31,34 @@ describe("peerProtocolMismatch", () => {
         "Home sent an unreadable peer protocol version. Update J5 on Home, then try again.",
       );
     }
+  });
+});
+
+describe("responseProtocolMismatch", () => {
+  // After a protocol bump, a server on version 2 reading a response.
+  const ours = 2;
+  const response = (status: number, protocol?: string) => ({
+    status,
+    headers: protocol === undefined ? {} : { "x-j5-peer-protocol": protocol },
+  });
+
+  it("leaves an error answer with no header to its status, never to a version", () => {
+    for (const status of [500, 502, 503, 504, 404]) {
+      expect(
+        responseProtocolMismatch({ response: response(status), peer: "Home", ours }),
+      ).toBeNull();
+    }
+  });
+
+  it("reads a success with no header as version 1, and any stated header as stated", () => {
+    expect(responseProtocolMismatch({ response: response(200), peer: "Home", ours })).toBe(
+      "Home runs peer protocol 1 and this server runs 2. Update J5 there, then try again.",
+    );
+    expect(
+      responseProtocolMismatch({ response: response(409, "1"), peer: "Home", ours }),
+    ).toContain("Update J5 there");
+    expect(
+      responseProtocolMismatch({ response: response(502, "2"), peer: "Home", ours }),
+    ).toBeNull();
   });
 });

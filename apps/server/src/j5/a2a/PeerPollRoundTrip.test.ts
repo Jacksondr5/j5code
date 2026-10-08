@@ -1,3 +1,9 @@
+// @effect-diagnostics nodeBuiltinImport:off - one test reads the database from a second connection.
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
+import * as NodeFS from "node:fs";
+import * as NodeSqlite from "node:sqlite";
+
 import {
   AuthA2APeerScope,
   AuthSessionId,
@@ -21,6 +27,7 @@ import {
 } from "@t3tools/contracts/j5";
 import { assert, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
@@ -55,7 +62,8 @@ import {
   type PeerInboundServiceShape,
 } from "./PeerInboundService.ts";
 import { PeerPoller, manualLayer as peerPollerLayer, type PeerPollOutcome } from "./PeerPoller.ts";
-import { layer as peerRegistryLayer } from "./PeerRegistryService.ts";
+import { PeerRegistryService, layer as peerRegistryLayer } from "./PeerRegistryService.ts";
+import { PeerRemovalService, layer as peerRemovalLayer } from "./PeerRemovalService.ts";
 import {
   PEER_POLL_HOLD,
   PeerStoreService,
@@ -239,9 +247,19 @@ const recordingTransport = (
     }),
   );
 
-/** The VM: it stores the laptop's messages and reads the laptop's agents from its snapshot. */
-const makeVm = (delivered: Ref.Ref<Array<AgentDeliveryInput>>) => {
-  const database = NodeSqliteClient.layer({ filename: ":memory:" });
+interface VmOptions {
+  readonly removing?: Effect.Effect<void>;
+  /** A database file instead of memory, so a test can read it from a second connection. */
+  readonly filename?: string;
+}
+
+/**
+ * The VM: it stores the laptop's messages and reads the laptop's agents from
+ * its snapshot. `removing` runs inside a removal's transaction, just before the
+ * peer record goes, so a test can send traffic while the removal holds it.
+ */
+const makeVm = (delivered: Ref.Ref<Array<AgentDeliveryInput>>, options: VmOptions = {}) => {
+  const database = NodeSqliteClient.layer({ filename: options.filename ?? ":memory:" });
   const registry = peerRegistryLayer.pipe(
     Layer.provide(database),
     Layer.provide(noHttp),
@@ -262,6 +280,22 @@ const makeVm = (delivered: Ref.Ref<Array<AgentDeliveryInput>>) => {
     Layer.provide(registry),
     Layer.provide(core.ledger),
   );
+  const removingRegistry = Layer.effect(
+    PeerRegistryService,
+    Effect.map(PeerRegistryService, (peers) =>
+      PeerRegistryService.of({
+        ...peers,
+        remove: (environmentId) =>
+          (options.removing ?? Effect.void).pipe(Effect.andThen(peers.remove(environmentId))),
+      }),
+    ),
+  ).pipe(Layer.provide(registry));
+  const removal = peerRemovalLayer.pipe(
+    Layer.provide(removingRegistry),
+    Layer.provide(core.ledger),
+    Layer.provide(core.worker),
+    Layer.provide(core.database),
+  );
   return Layer.mergeAll(
     core.database,
     core.ledger,
@@ -272,6 +306,7 @@ const makeVm = (delivered: Ref.Ref<Array<AgentDeliveryInput>>) => {
     core.silence,
     store,
     directory,
+    removal,
   );
 };
 
@@ -426,14 +461,16 @@ const seed = Effect.fn("test.j5.a2a.peer.pollRoundTrip.seed")(function* (self: S
 });
 
 /** The VM and the laptop up and peered in poll mode, the laptop's roster already sent once. */
-const pollPair = Effect.fn("test.j5.a2a.peer.pollRoundTrip.pair")(function* () {
+const pollPair = Effect.fn("test.j5.a2a.peer.pollRoundTrip.pair")(function* (
+  options: VmOptions = {},
+) {
   const vmDoor = yield* Ref.make<PeerInboundServiceShape | null>(null);
   const vmStoreRef = yield* Ref.make<PeerStoreServiceShape | null>(null);
   const vmDelivered = yield* Ref.make<Array<AgentDeliveryInput>>([]);
   const laptopDelivered = yield* Ref.make<Array<AgentDeliveryInput>>([]);
   const roster = yield* Ref.make<ReadonlyArray<A2ARosterEntry>>([laptopRosterEntry(false)]);
 
-  const vmContext = yield* Layer.build(makeVm(vmDelivered));
+  const vmContext = yield* Layer.build(makeVm(vmDelivered, options));
   const laptopContext = yield* Layer.build(
     makeLaptop({ delivered: laptopDelivered, vmDoor, vmStore: vmStoreRef, roster }),
   );
@@ -462,7 +499,18 @@ const pollPair = Effect.fn("test.j5.a2a.peer.pollRoundTrip.pair")(function* () {
   assert.deepStrictEqual(yield* poll, { kind: "polled", received: 0, more: false });
 
   const vmDirectory = yield* PeerDirectory.pipe(Effect.provide(vmContext));
-  return { vmServer, laptopServer, vmDelivered, laptopDelivered, roster, poll, vmDirectory };
+  const vmRemoval = yield* PeerRemovalService.pipe(Effect.provide(vmContext));
+  return {
+    vmContext,
+    vmServer,
+    laptopServer,
+    vmDelivered,
+    laptopDelivered,
+    roster,
+    poll,
+    vmDirectory,
+    vmRemoval,
+  };
 });
 
 const exchangeStatus = (sql: SqlClient.SqlClient, exchangeId: string) =>
@@ -499,6 +547,177 @@ const vmAsksLaptop = Effect.fn("test.j5.a2a.peer.pollRoundTrip.vmAsks")(function
   assert.equal((yield* deliveryStatus(pair.vmServer.sql, asked.messageId))?.status, "delivered");
   return ExchangeId.make(asked.exchangeId!);
 });
+
+/** An ask from the laptop's agent to the VM's, as the VM's deliver route records it. */
+const laptopAsk = (name: string) => ({
+  messageId: `message:laptop:${name}`,
+  senderId: laptop.agent.id,
+  receiverId: vm.agent.id,
+  exchangeId: `exchange:laptop:${name}`,
+  correlationId: `correlation:laptop:${name}`,
+  exchangeRole: "ask" as const,
+  intent: `${name} intent`,
+  envelopeChannel: "peer" as const,
+  text: `${name} ask`,
+  originProjectId: laptop.projectId,
+  createdAt: timestamp,
+  originEnvironmentId: laptop.environmentId,
+});
+
+it.effect(
+  "wipes what was recorded for the laptop before the VM removed it, refuses what arrived during, and shows none of it until the removal commits",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        // The removal holds one write while traffic arrives: a second, independent
+        // connection sees none of it committed until it all is, and the inbound record
+        // and the local send are refused by the peer-record checks in their own writes.
+        const inside = yield* Deferred.make<void>();
+        const proceed = yield* Deferred.make<void>();
+        const filename = NodePath.join(
+          NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "j5-peer-removal-")),
+          "vm.sqlite",
+        );
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() =>
+            NodeFS.rmSync(NodePath.dirname(filename), { recursive: true, force: true }),
+          ),
+        );
+        // What a second connection sees while the removal holds its write: only
+        // what is committed. The removal has written its drops and cancels by now.
+        let committedMidRemoval: { exchange?: unknown; message?: unknown } = {};
+        let waitingMessageId = "";
+        const readCommitted = () => {
+          const reader = new NodeSqlite.DatabaseSync(filename, { readOnly: true });
+          try {
+            return {
+              exchange: (
+                reader
+                  .prepare("SELECT status FROM j5_a2a_exchange WHERE exchange_id = ?")
+                  .get("exchange:laptop:before") as { status?: string } | undefined
+              )?.status,
+              message: (
+                reader
+                  .prepare("SELECT status FROM j5_a2a_delivery WHERE message_id = ?")
+                  .get(waitingMessageId) as { status?: string } | undefined
+              )?.status,
+            };
+          } finally {
+            reader.close();
+          }
+        };
+        const pair = yield* pollPair({
+          filename,
+          removing: Effect.sync(() => {
+            committedMidRemoval = readCommitted();
+          }).pipe(
+            Effect.andThen(Deferred.succeed(inside, undefined)),
+            Effect.andThen(Deferred.await(proceed)),
+          ),
+        });
+        const { vmServer } = pair;
+        // As the server runs it, so a reader sees the last commit while a write is open.
+        yield* vmServer.sql`PRAGMA journal_mode = WAL`;
+        const sendToLaptop = (name: string) =>
+          vmServer.send.send({
+            commandId: CommCommandId.make(`command:poll-roundtrip:removal:${name}`),
+            senderThreadId: vm.agent.threadId,
+            to: laptop.agent.id,
+            message: `${name} message`,
+            acceptedAt: timestamp,
+          });
+
+        // Before: the laptop's agent has asked the VM's, and a message waits for the laptop.
+        yield* vmServer.inbound.receive(laptopAsk("before"));
+        const waiting = yield* sendToLaptop("before");
+        waitingMessageId = waiting.messageId;
+
+        // The removal holds its transaction while the same traffic arrives again.
+        const removal = yield* Effect.forkChild(pair.vmRemoval.remove(laptop.environmentId));
+        yield* Deferred.await(inside);
+        const inbound = yield* Effect.forkChild(
+          Effect.flip(vmServer.inbound.receive(laptopAsk("during"))),
+        );
+        const send = yield* Effect.forkChild(Effect.flip(sendToLaptop("during")));
+        yield* Deferred.succeed(proceed, undefined);
+
+        assert.deepStrictEqual(yield* Fiber.join(removal), {
+          removed: true,
+          cancelledMessages: 1,
+          droppedExchanges: 1,
+        });
+        assert.deepStrictEqual(
+          committedMidRemoval,
+          { exchange: "open", message: "pending" },
+          "nothing of the removal was committed before all of it",
+        );
+        assert.equal((yield* Fiber.join(inbound))._tag, "A2APeerNotRecordedError");
+        assert.equal((yield* Fiber.join(send))._tag, "A2AParticipantNotFoundError");
+        assert.equal(yield* exchangeStatus(vmServer.sql, "exchange:laptop:before"), "dropped");
+        assert.equal((yield* deliveryStatus(vmServer.sql, waiting.messageId))?.status, "cancelled");
+        assert.isUndefined(
+          yield* exchangeStatus(vmServer.sql, "exchange:laptop:during"),
+          "nothing from during the removal was recorded",
+        );
+        const left = yield* vmServer.sql<{ readonly count: number }>`
+          SELECT COUNT(*) AS count FROM j5_a2a_delivery
+          WHERE receiver_environment_id = ${laptop.environmentId}
+            AND status IN ('pending', 'retry_scheduled', 'alarmed')
+        `;
+        assert.equal(Number(left[0]?.count), 0, "nothing waits for the laptop");
+      }),
+    ),
+);
+
+it.effect("rolls a removal that fails back whole, publishing nothing", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      // The last step of the removal fails, after the drops and cancels were written.
+      const pair = yield* pollPair({ removing: Effect.die("the disk is full") });
+      const { vmServer } = pair;
+      yield* vmServer.inbound.receive(laptopAsk("kept"));
+      const waiting = yield* vmServer.send.send({
+        commandId: CommCommandId.make("command:poll-roundtrip:rollback:kept"),
+        senderThreadId: vm.agent.threadId,
+        to: laptop.agent.id,
+        message: "kept message",
+        acceptedAt: timestamp,
+      });
+      // Everything committed from here on, up to a marker sent after the failed removal.
+      const committed = yield* (yield* A2ALedger.pipe(Effect.provide(pair.vmContext)))
+        .subscribeCommitted;
+      const published = yield* Effect.forkChild(
+        committed.pipe(
+          Stream.takeUntil((event) => JSON.stringify(event).includes("rollback marker")),
+          Stream.runCollect,
+        ),
+      );
+
+      const failed = yield* Effect.exit(pair.vmRemoval.remove(laptop.environmentId));
+      assert.isTrue(failed._tag === "Failure", "the removal failed");
+      assert.equal(yield* exchangeStatus(vmServer.sql, "exchange:laptop:kept"), "open");
+      assert.equal((yield* deliveryStatus(vmServer.sql, waiting.messageId))?.status, "pending");
+      const peer = yield* vmServer.sql`
+        SELECT 1 FROM j5_a2a_peer WHERE environment_id = ${laptop.environmentId}
+      `;
+      assert.lengthOf(peer, 1, "the peer is still recorded");
+
+      yield* vmServer.send.send({
+        commandId: CommCommandId.make("command:poll-roundtrip:rollback:marker"),
+        senderThreadId: vm.agent.threadId,
+        to: laptop.agent.id,
+        message: "rollback marker",
+        acceptedAt: timestamp,
+      });
+      const events = yield* Fiber.join(published);
+      assert.deepStrictEqual(
+        events.map((event) => event.kind),
+        ["message.sent"],
+        "only the marker: nothing the rolled-back removal wrote was published",
+      );
+    }),
+  ),
+);
 
 it.effect("carries the laptop's ask to the VM directly and polls the VM's reply back", () =>
   Effect.scoped(
