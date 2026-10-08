@@ -14,6 +14,7 @@ import {
   type PeerSessionReadError,
 } from "./PeerRegistryService.ts";
 import { ParticipantId, SquadronId } from "./contracts.ts";
+import { peerProtocolHeaders, peerProtocolMismatch, statedPeerProtocol } from "./peerProtocol.ts";
 
 /**
  * The address book across peers. Every read asks each peer's roster live:
@@ -81,6 +82,15 @@ class PeerRosterStatusError extends Schema.TaggedError<PeerRosterStatusError>()(
   }
 }
 
+class PeerRosterProtocolError extends Schema.TaggedError<PeerRosterProtocolError>()(
+  "PeerRosterProtocolError",
+  { reason: Schema.String },
+) {
+  override get message(): string {
+    return this.reason;
+  }
+}
+
 class PeerSessionMissingError extends Schema.TaggedError<PeerSessionMissingError>()(
   "PeerSessionMissingError",
   { environmentId: Schema.String },
@@ -97,8 +107,14 @@ const readPeerRoster = Effect.fn("j5.a2a.peer.directory.roster")(function* (peer
   const request = HttpClientRequest.get(`${peer.origin}${J5_PEER_API_PATHS.roster}`).pipe(
     HttpClientRequest.bearerToken(peer.credential),
     HttpClientRequest.acceptJson,
+    HttpClientRequest.setHeaders(peerProtocolHeaders),
   );
   const response = yield* client.execute(request);
+  const mismatch = peerProtocolMismatch({
+    stated: statedPeerProtocol(response.headers),
+    peer: peer.label,
+  });
+  if (mismatch !== null) return yield* new PeerRosterProtocolError({ reason: mismatch });
   if (response.status !== 200) {
     return yield* new PeerRosterStatusError({ status: response.status });
   }

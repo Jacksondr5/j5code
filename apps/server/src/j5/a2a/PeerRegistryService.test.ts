@@ -25,13 +25,18 @@ const homeExpiry = "2036-09-16T12:00:00.000Z";
 interface SeenRequest {
   readonly url: string;
   readonly authorization: string | undefined;
+  readonly protocol: string | undefined;
 }
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 type HelloReply =
-  | { readonly status: 200; readonly body: PeerHelloResponse }
-  | { readonly status: number; readonly body?: unknown }
+  | {
+      readonly status: 200;
+      readonly body: PeerHelloResponse;
+      readonly headers?: Record<string, string>;
+    }
+  | { readonly status: number; readonly body?: unknown; readonly headers?: Record<string, string> }
   | { readonly unreachable: string }
   | { readonly stall: true };
 
@@ -48,7 +53,11 @@ const makeTestLayer = (input: {
     HttpClient.HttpClient,
     HttpClient.make((request) =>
       Effect.gen(function* () {
-        input.seen?.push({ url: request.url, authorization: request.headers.authorization });
+        input.seen?.push({
+          url: request.url,
+          authorization: request.headers.authorization,
+          protocol: request.headers["x-j5-peer-protocol"],
+        });
         const origin = request.url.replace(J5_PEER_API_PATHS.hello, "");
         const reply = input.replies[origin];
         if (reply === undefined || "unreachable" in reply) {
@@ -73,7 +82,7 @@ const makeTestLayer = (input: {
           request,
           new Response(reply.body === undefined ? null : encodeJson(reply.body), {
             status: reply.status,
-            headers: { "content-type": "application/json" },
+            headers: { "content-type": "application/json", ...reply.headers },
           }),
         );
       }),
@@ -146,6 +155,7 @@ it.effect(
         assert.equal(seen.length, 1);
         assert.equal(seen[0]!.url, `${homeOrigin}${J5_PEER_API_PATHS.hello}`);
         assert.equal(seen[0]!.authorization, "Bearer home-issued-token");
+        assert.equal(seen[0]!.protocol, "1", "hello states this server's peer protocol");
 
         const again = yield* registry.add({
           origin: homeOrigin,
@@ -392,4 +402,82 @@ it.effect(
         ),
       );
     }),
+);
+
+it.effect(
+  "counts a hello without a protocol version as version 1, ignores unknown fields, and refuses a mismatch",
+  () =>
+    Effect.gen(function* () {
+      yield* runJ5A2AMigrations();
+      const registry = yield* PeerRegistryService;
+      const attempt = (origin: string) =>
+        registry.add({
+          origin,
+          credential: "token",
+          label: undefined,
+          replaceOrigin: false,
+          acceptedAt: timestamp,
+        });
+
+      // A server from the first peering stack says nothing about versions.
+      assert.isTrue((yield* attempt(homeOrigin)).created);
+      // A newer server at the same version adds fields this one does not know.
+      assert.isTrue((yield* attempt("https://newer-fields.example")).created);
+
+      // A body that states another version is refused even when no header says so.
+      const bodyOnly = yield* Effect.flip(attempt("https://newer-body.example"));
+      assert.equal(bodyOnly._tag, "PeerProtocolMismatchError");
+      assert.include(bodyOnly.message, "runs peer protocol 2 and this server runs 1");
+
+      const newer = yield* Effect.flip(attempt("https://newer.example"));
+      assert.equal(newer._tag, "PeerProtocolMismatchError");
+      assert.equal(
+        newer.message,
+        "The server at https://newer.example runs peer protocol 2 and this server runs 1. Update J5 on this server, then try again.",
+      );
+      assert.deepStrictEqual(
+        (yield* registry.list()).map((peer) => peer.environmentId),
+        ["environment-fields", home],
+        "a mismatch records nothing",
+      );
+    }).pipe(
+      Effect.provide(
+        makeTestLayer({
+          replies: {
+            [homeOrigin]: homeHello(`peer:${work}`),
+            "https://newer-fields.example": {
+              status: 200,
+              headers: { "x-j5-peer-protocol": "1" },
+              body: {
+                environmentId: "environment-fields",
+                subject: `peer:${work}`,
+                server: { version: "0.0.99" },
+                peerProtocolVersion: 1,
+                capabilities: { poll: true, somethingLater: true },
+                somethingElse: { nested: true },
+              },
+            },
+            "https://newer-body.example": {
+              status: 200,
+              body: {
+                environmentId: "environment-newer-body",
+                subject: `peer:${work}`,
+                server: { version: "0.1.0" },
+                peerProtocolVersion: 2,
+              },
+            },
+            "https://newer.example": {
+              status: 200,
+              body: {
+                environmentId: "environment-newer",
+                subject: `peer:${work}`,
+                server: { version: "0.1.0" },
+                peerProtocolVersion: 2,
+              },
+              headers: { "x-j5-peer-protocol": "2" },
+            },
+          },
+        }),
+      ),
+    ),
 );

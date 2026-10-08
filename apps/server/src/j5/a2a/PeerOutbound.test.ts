@@ -1,5 +1,9 @@
 import { ThreadId } from "@t3tools/contracts";
-import { J5_PEER_API_PATHS, type PeerDeliveryRequest } from "@t3tools/contracts/j5";
+import {
+  J5_PEER_API_PATHS,
+  PEER_PROTOCOL_VERSION,
+  type PeerDeliveryRequest,
+} from "@t3tools/contracts/j5";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -247,10 +251,21 @@ it.effect(
     }),
 );
 
+interface PostedRequest {
+  url: string;
+  authorization: string | undefined;
+  body: unknown;
+  protocol?: string | undefined;
+}
+
 /** The live transport's peer branch, with the HTTP hop stubbed and everything else in memory. */
 const makeTransportLayer = (
-  reply: { readonly status: number; readonly body: unknown },
-  posted: Array<{ url: string; authorization: string | undefined; body: unknown }>,
+  reply: {
+    readonly status: number;
+    readonly body: unknown;
+    readonly headers?: Record<string, string>;
+  },
+  posted: Array<PostedRequest>,
 ) => {
   const database = NodeSqliteClient.layer({ filename: ":memory:" });
   const ledger = ledgerLayer.pipe(Layer.provide(database));
@@ -267,12 +282,17 @@ const makeTransportLayer = (
           request.body._tag === "Uint8Array"
             ? decodeJson(new TextDecoder().decode(request.body.body))
             : null;
-        posted.push({ url: request.url, authorization: request.headers.authorization, body });
+        posted.push({
+          url: request.url,
+          authorization: request.headers.authorization,
+          body,
+          protocol: request.headers["x-j5-peer-protocol"],
+        });
         return HttpClientResponse.fromWeb(
           request,
           new Response(encodeJson(reply.body), {
             status: reply.status,
-            headers: { "content-type": "application/json" },
+            headers: { "content-type": "application/json", ...reply.headers },
           }),
         );
       }),
@@ -325,13 +345,14 @@ it.effect(
   "posts the message to the peer's deliver route with its credential, the intent, and the correlation id",
   () =>
     Effect.gen(function* () {
-      const posted: Array<{ url: string; authorization: string | undefined; body: unknown }> = [];
+      const posted: Array<PostedRequest> = [];
       yield* Effect.gen(function* () {
         const { sent, deliver } = yield* crossingAsk();
         assert.equal((yield* deliver)?.state, "delivered");
         assert.equal(posted.length, 1);
         assert.equal(posted[0]!.url, `${homePeer.origin}${J5_PEER_API_PATHS.deliver}`);
         assert.equal(posted[0]!.authorization, "Bearer home-token");
+        assert.equal(posted[0]!.protocol, String(PEER_PROTOCOL_VERSION), "it states its protocol");
         const body = posted[0]!.body as PeerDeliveryRequest;
         assert.equal(body.messageId, sent.messageId);
         assert.equal(body.senderId, billing.id);
@@ -353,9 +374,43 @@ it.effect(
     }),
 );
 
+it.effect(
+  "fails a delivery a peer on another protocol accepted, naming which server to update",
+  () =>
+    Effect.gen(function* () {
+      const posted: Array<PostedRequest> = [];
+      const outcome = yield* Effect.gen(function* () {
+        const { deliver } = yield* crossingAsk();
+        const milestone = yield* deliver;
+        const sql = yield* SqlClient.SqlClient;
+        const [row] = yield* sql<{ readonly last_error: string | null }>`
+        SELECT last_error FROM j5_a2a_delivery
+      `;
+        return { state: milestone?.state, lastError: row?.last_error ?? "" };
+      }).pipe(
+        Effect.provide(
+          makeTransportLayer(
+            {
+              // A newer peer that misread the body still answers 201; its stated version gives it away.
+              status: 201,
+              body: { accepted: true, receivedSeq: 3, replay: false },
+              headers: { "x-j5-peer-protocol": "2" },
+            },
+            posted,
+          ),
+        ),
+      );
+      assert.notEqual(outcome.state, "delivered");
+      assert.include(
+        outcome.lastError,
+        "Home runs peer protocol 2 and this server runs 1. Update J5 on this server",
+      );
+    }),
+);
+
 it.effect("turns a peer's refusal into a delivery failure the worker retries and alarms on", () =>
   Effect.gen(function* () {
-    const posted: Array<{ url: string; authorization: string | undefined; body: unknown }> = [];
+    const posted: Array<PostedRequest> = [];
     const outcome = yield* Effect.gen(function* () {
       const { deliver } = yield* crossingAsk();
       const milestone = yield* deliver;
@@ -463,7 +518,7 @@ it.effect(
   "carries the drop fact the notice was written with, so the peer ends its Exchange the same way",
   () =>
     Effect.gen(function* () {
-      const posted: Array<{ url: string; authorization: string | undefined; body: unknown }> = [];
+      const posted: Array<PostedRequest> = [];
       yield* Effect.gen(function* () {
         const { sent, deliver } = yield* crossingAsk();
         assert.equal((yield* deliver)?.state, "delivered");
@@ -533,7 +588,7 @@ it.effect(
 
 it.effect("carries a withdrawn ask to the peer as a sender-cleared terminal notice", () =>
   Effect.gen(function* () {
-    const posted: Array<{ url: string; authorization: string | undefined; body: unknown }> = [];
+    const posted: Array<PostedRequest> = [];
     yield* Effect.gen(function* () {
       const { sent, deliver } = yield* crossingAsk();
       assert.equal((yield* deliver)?.state, "delivered");
