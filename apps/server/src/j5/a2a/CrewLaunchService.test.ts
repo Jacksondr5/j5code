@@ -1110,7 +1110,12 @@ it.effect("a full-access persona seat runs full access unless the seat overrides
         ],
         replaceExisting: false,
       });
-      const seat = { name: "operator", agentId: "operator", reason: "Operate" };
+      const seat = {
+        name: "operator",
+        agentId: "operator",
+        reason: "Operate",
+        workspace: { type: "shared" as const },
+      };
       const [unset] = yield* launcher.resolveSeats(captain, [seat]);
       assert.deepStrictEqual(
         [unset!.runtimeMode, unset!.runtime.access],
