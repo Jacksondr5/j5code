@@ -25,11 +25,11 @@ What this use case demands of the platform: durable schedules and machine trigge
 
 This use case is the standing test from the fleet vision: **"does this work for the monitoring fleet, or only for coding fleets?"** Any feature that quietly assumes code, repos, or PRs fails it.
 
-### 2a. L2 support — the shared-Squadron chapter (elevated)
+### 2a. L2 support — the shared-server chapter (elevated)
 
 A chapter of the monitoring story that brings enough differentiating requirements to stand on its own: a level-2 support team shares its agents, so when one person goes off shift the next picks them up immediately — **no context transfer**. It also puts **two humans in front of the same agent**: today developers relay agent output to each other over Slack/Teams; putting both people in the same conversation removes the relay entirely.
 
-What it demands beyond monitoring: everything in [Shared Squadrons](features/shared-squadrons.md) — the multi-person invariant, person-scoped surfaces, one-person-or-everyone delivery, and eventually duty-based addressing ("the on-call"). It is the reason multi-person constraints bind _today_ even though the capability ships later.
+What it demands beyond monitoring: everything in [Shared server](features/shared-server.md) — the multi-person invariant, person-scoped surfaces, one-person-or-everyone delivery, and eventually duty-based addressing ("the on-call"). It is the reason multi-person constraints bind _today_ even though the capability ships later.
 
 ## History
 

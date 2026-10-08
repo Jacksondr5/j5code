@@ -15,22 +15,22 @@ The J5 vocabulary, in one place, so that a name used anywhere in these docs reso
 
 ## Organization
 
-| Term                   | Gloss                                                                                                      | Owner                                                        |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
-| fleet                  | All of a user's agents across every connected server — the totality, never a sub-grouping                  | [cross-device.md](cross-device.md)                           |
-| peer server            | Another server this server exchanges agent messages with, by mutual record ("peer" alone is another agent) | [cross-device.md](cross-device.md)                           |
-| peering, peer registry | The mutual recording of two servers as each other's peer servers, and the set of a server's peer records   | [cross-device.md](cross-device.md)                           |
-| link mode              | How a peer-server link carries messages                                                                    | [cross-device.md](cross-device.md)                           |
-| **Crew**               | A group of agents that work one task as a unit                                                             | [features/crews.md](features/crews.md)                       |
-| **Captain**            | Any agent with Crews placed under it                                                                       | [features/crews.md](features/crews.md)                       |
-| **Persona**            | A reusable, user-authored definition of a kind of agent                                                    | [features/roles.md](features/roles.md)                       |
-| **Manifest**           | The approved roster snapshot of a Crew — implementation vocabulary, not a separate concept                 | [features/crews.md](features/crews.md)                       |
-| **Playbook**           | User-authored ordered prompts that a persona or Crew follows, with progress declared by its agents         | [features/playbooks.md](features/playbooks.md)               |
-| placement              | Where an agent sits in the display tree                                                                    | [features/fleet-page.md](features/fleet-page.md)             |
-| provenance             | The recorded fact of how an agent came to exist — spawned by whom, forked from what, or unrecorded         | [features/fleet-page.md](features/fleet-page.md)             |
-| **Shared Squadron**    | Several people sharing one server's projects and agents                                                    | [features/shared-squadrons.md](features/shared-squadrons.md) |
-| upstream               | T3 Code, the product J5 is a fork of, and the people who build it                                          | [upstream.md](upstream.md)                                   |
-| divergence             | A place where J5 makes upstream's product behave differently                                               | [upstream.md](upstream.md)                                   |
+| Term                   | Gloss                                                                                                      | Owner                                                  |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| fleet                  | All of a user's agents across every connected server — the totality, never a sub-grouping                  | [cross-device.md](cross-device.md)                     |
+| peer server            | Another server this server exchanges agent messages with, by mutual record ("peer" alone is another agent) | [cross-device.md](cross-device.md)                     |
+| peering, peer registry | The mutual recording of two servers as each other's peer servers, and the set of a server's peer records   | [cross-device.md](cross-device.md)                     |
+| link mode              | How a peer-server link carries messages                                                                    | [cross-device.md](cross-device.md)                     |
+| **Crew**               | A group of agents that work one task as a unit                                                             | [features/crews.md](features/crews.md)                 |
+| **Captain**            | Any agent with Crews placed under it                                                                       | [features/crews.md](features/crews.md)                 |
+| **Persona**            | A reusable, user-authored definition of a kind of agent                                                    | [features/roles.md](features/roles.md)                 |
+| **Manifest**           | The approved roster snapshot of a Crew — implementation vocabulary, not a separate concept                 | [features/crews.md](features/crews.md)                 |
+| **Playbook**           | User-authored ordered prompts that a persona or Crew follows, with progress declared by its agents         | [features/playbooks.md](features/playbooks.md)         |
+| placement              | Where an agent sits in the display tree                                                                    | [features/fleet-page.md](features/fleet-page.md)       |
+| provenance             | The recorded fact of how an agent came to exist — spawned by whom, forked from what, or unrecorded         | [features/fleet-page.md](features/fleet-page.md)       |
+| **Shared server**      | Several people sharing one server's projects and agents                                                    | [features/shared-server.md](features/shared-server.md) |
+| upstream               | T3 Code, the product J5 is a fork of, and the people who build it                                          | [upstream.md](upstream.md)                             |
+| divergence             | A place where J5 makes upstream's product behave differently                                               | [upstream.md](upstream.md)                             |
 
 ## Agents
 
@@ -74,7 +74,7 @@ These entries are the distinctions the whole team must share; the glossary owns 
 
 | Term                       | Gloss                                                                                     | Owner                                                                |
 | -------------------------- | ----------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| person id                  | The durable local identity of one person; nothing may assume there is exactly one person  | [features/shared-squadrons.md](features/shared-squadrons.md)         |
+| person id                  | The durable local identity of one person; nothing may assume there is exactly one person  | [features/shared-server.md](features/shared-server.md)               |
 | inbox                      | The person's queue of open asks addressed to them                                         | [features/inbox.md](features/inbox.md)                               |
 | **Fleet page**             | The page that shows every agent with its measured status                                  | [features/fleet-page.md](features/fleet-page.md)                     |
 | **Memo**                   | A small self-addressed note an agent keeps through the platform, visible to the person    | [features/memos.md](features/memos.md)                               |

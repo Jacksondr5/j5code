@@ -108,7 +108,7 @@ Agents executing a long Playbook can forget later steps — they read it once at
 
 The user can define detailed Playbooks, targeted at either a single Role or a Crew. Either can be spawned and prompted to follow a given Playbook. As they work, the platform tracks their progress and keeps every participant supplied with its current instructions. Advancement is always agent-declared, never platform-judged (the platform delivers facts, never judgment).
 
-### Shared Squadrons
+### Shared server
 
 As we start to work more and more with agents, the need to share them between humans grows. Take a level 2 support team for example. When one person goes off shift, another picks up their agents immediately — **no context transfer**. And a tool for developers: people already relay agent output to each other over Slack/Teams (human asks their agent, pastes the answer to the other human); removing chat apps from that loop and **putting both humans in front of the same agent** is powerful.
 
@@ -136,7 +136,7 @@ One row per problem theme / goal; the pointer is where the answer is designed or
 | Roles in platform tooling               | [Roles](features/roles.md): user-authored files the platform reads                                                                                                                                                                              | Item 3 session                                |
 | Crews                                   | [Crews](features/crews.md)                                                                                                                                                                                                                      | Register settled; manifest schema is item 3   |
 | Playbooks                               | [Playbooks](features/playbooks.md): the platform records progress, the agents decide when to advance, and the steps are the user's                                                                                                              | Backlog candidate                             |
-| Shared Squadrons                        | [Shared Squadrons](features/shared-squadrons.md): the multi-person invariant in force now; an architecture session before any build                                                                                                             | Backlog candidate                             |
+| Shared server                           | [Shared server](features/shared-server.md): the multi-person invariant in force now; an architecture session before any build                                                                                                                   | Backlog candidate                             |
 | Agent cron/DB                           | Parked with a named trigger ([Memos](features/memos.md) records it)                                                                                                                                                                             | Parked                                        |
 | Monitoring fleet                        | Standing test: "does it work for the monitoring fleet, or only coding fleets?" (`fleet-vision.md` implication 6)                                                                                                                                | Ongoing design lens                           |
 

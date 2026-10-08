@@ -18,7 +18,7 @@ Agents changing the code: read the [J5 overview](product/overview.md) and [J5 an
 
 ## Contents
 
-- **`product/`** — definitions: the [overview](product/overview.md) and [J5 and upstream](product/upstream.md), the core documents above, the [A2A trio](product/a2a/) (the communication protocol, the upstream substrate, the agent tool contracts), and [`features/`](product/features/) (inbox, thread rendering, archive flow, Roles, Crews, Memos, Playbooks, Spawning Guide, sidebar and roster, Shared Squadrons).
+- **`product/`** — definitions: the [overview](product/overview.md) and [J5 and upstream](product/upstream.md), the core documents above, the [A2A trio](product/a2a/) (the communication protocol, the upstream substrate, the agent tool contracts), and [`features/`](product/features/) (inbox, thread rendering, archive flow, Roles, Crews, Memos, Playbooks, Spawning Guide, sidebar and roster, Shared server).
 - **`worklog/`** — records, named date-first: design sessions and rulings, the tickets and reviews of the A2A build and the dogfood queue, how the fork was set up, the phase-3 friction list.
 - **`runbooks/`** — operating the software: the [dogfood runtime](runbooks/dogfood-runtime.md), [agent migration](runbooks/agent-migration.md), [macOS packaging](runbooks/macos-packaging.md), [machine senders](runbooks/machine-senders.md), [peering](runbooks/peering.md).
 - **`process/`** — rules for working in this repository: [how the docs are organized](process/docs.md), [working in the repo](process/working-in-the-repo.md), [merging upstream](process/upstream-merge.md), and [pull requests](process/pull-requests.md). How the fleet is run day to day is the operator's own practice and lives outside the repository.
