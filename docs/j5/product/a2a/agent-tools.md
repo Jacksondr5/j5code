@@ -133,7 +133,7 @@ Use `action: "archive"` with an agent's `threadId`, or omit it to archive the ca
 
 Use `action: "unarchive"` to restore the same identity. Old Exchanges remain closed and cancelled messages do not replay. Historical permanently retired agents remain retired. The human UI retains its archive warning; this tool uses upstream archive semantics without a separate confirmation-token flow. `archive_agent` has been retired.
 
-**Errors**, each naming state and next command: not the caller's project; unknown participant; consequential without a token (the refusal); stale or invalid token; self-target.
+**Errors:** upstream's own checks apply: the thread is unknown, or is not in the caller's project. J5 adds one refusal: the target is an active Crew seat, which is retired with its Crew through `archive_crew` or Archive crew on the Fleet page.
 
 **Events:** the archive, and an obligation-closure event for each Exchange it ended — loud in the ledger, not only in the dialog.
 
