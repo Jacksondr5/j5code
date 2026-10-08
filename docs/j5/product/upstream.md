@@ -164,17 +164,17 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Decided:** Jackson, during the 2026-09-17 upstream integration (PR #178), confirmed 2026-09-28. Recorded in FORK.md case 39.
 
-#### D11. Scheduled tasks created in the UI can't start threads
+#### D11. A scheduled task can't start a thread in a project that several Squadrons share
 
 **Upstream:** a scheduled task can be created two ways. An agent schedules work for its own thread, or the person creates one in Settings → Automations, and each fire starts a fresh thread.
 
-**J5:** an agent's task bound to its own thread works. A task created in the UI records a visible failure each time it fires.
+**J5:** both work. A fresh thread joins its project's Squadron, which the server creates when the project has none. When several Squadrons reference the project, the run is refused before a thread is created, and the task records a visible failure that names the project.
 
-**Why:** a new thread needs a Squadron, and a UI-created task carries nothing that says which one. Picking one would invent a Squadron home.
+**Why:** a new thread needs a Squadron home, and its project now supplies one. A task carries nothing that chooses between several Squadrons on one project, and picking one would invent a home. Refusing before the thread exists keeps a recurring task from leaving a homeless thread behind on every fire.
 
-**Consequences:** this makes upstream's scheduled tasks unusable from the UI in J5. **J5 wants to close this gap**, not keep it: the UI flow gets a Squadron choice (#38), and the server launches into that Squadron instead of refusing (#273). This entry retires when that ships.
+**Consequences:** a task in a shared project fails each time it fires until it is bound to a thread or the project is left with one Squadron. This entry retires when Squadrons fold into projects ([#412](https://github.com/Jacksondr5/j5code/issues/412)).
 
-**Decided:** DV5, dated 2026-08-31 in the dogfood v0 overrides, which doesn't name who ruled. Jackson, 2026-09-28: a gap to fill. Recorded in FORK.md case 12.
+**Decided:** DV5, dated 2026-08-31 in the dogfood v0 overrides, refused every such run. Jackson, 2026-09-28: a gap to fill. Narrowed to shared projects on 2026-10-03, in the plan to retire Squadrons. Recorded in FORK.md case 12.
 
 #### D12. Multi-model send carries the Squadron
 

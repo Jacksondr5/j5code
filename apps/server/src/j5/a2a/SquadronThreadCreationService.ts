@@ -184,13 +184,6 @@ export const layer: Layer.Layer<
       return created.id;
     });
 
-    const findRegisteredHome: SquadronThreadCreationServiceShape["findRegisteredHome"] = (
-      threadId,
-    ) =>
-      registrar
-        .getHomeForThread(threadId)
-        .pipe(Effect.catchTag("A2AHomeNotFoundError", () => Effect.succeed(null)));
-
     const registerAtDurableLaunch: SquadronThreadCreationServiceShape["registerAtDurableLaunch"] = (
       input,
     ) =>
