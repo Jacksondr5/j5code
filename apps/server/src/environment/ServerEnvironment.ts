@@ -217,6 +217,7 @@ export const make = Effect.gen(function* () {
     capabilities: {
       j5Squadrons: true,
       j5HumanInbox: true,
+      j5PeerPoll: true,
       repositoryIdentity: true,
       connectionProbe: true,
       attachmentUploads: true,

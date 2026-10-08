@@ -1,15 +1,25 @@
 import { AuthAccessWriteScope, type EnvironmentId } from "@t3tools/contracts";
 import {
-  defaultPeerOrigin,
   introducePeers,
+  introducePollingPeer,
   peerOriginWarning,
+  peeringChoiceReady,
+  peeringLines,
   peeringStepTitle,
-  resolvePeeringReadiness,
-  type PeeringOutcome,
+  pollPeeringStepTitle,
+  recommendPeering,
+  recordedPeeringChoice,
+  repeeringChoice,
+  type PeeringChoice,
+  type PeeringQuestion,
+  type PeeringRecommendation,
+  type PeeringReach,
+  type PeeringServer,
   type PeeringSide,
 } from "@t3tools/client-runtime/j5/peering";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
+import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert";
 import { Button } from "../../components/ui/button";
 import {
   Dialog,
@@ -21,6 +31,7 @@ import {
   DialogTitle,
 } from "../../components/ui/dialog";
 import { Input } from "../../components/ui/input";
+import { Radio, RadioGroup } from "../../components/ui/radio-group";
 import {
   Select,
   SelectItem,
@@ -28,29 +39,53 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../../components/ui/select";
+import { Toggle, ToggleGroup } from "../../components/ui/toggle-group";
 import {
   useEnvironment,
   useEnvironmentHttpBaseUrl,
   useEnvironments,
 } from "../../state/environments";
+import { useEnvironmentQuery } from "../../state/query";
 import { useEnvironmentSessionState } from "../../state/session";
+import { peersQueryAtom } from "../state";
+import {
+  noRouteMessage,
+  peeringServerOf,
+  runPeeringCheck,
+  type PeeringCheck,
+} from "./peeringCheck";
 import { addPeer, issuePeerCredential } from "./peeringClient";
 
+/** Where "How does this work?" goes: the explainer for sending directly and polling. */
+const EXPLAINER_URL = "https://j5.codes/peering";
+
+interface StepReport {
+  readonly title: string;
+  readonly status: "done" | "failed" | "skipped";
+  readonly detail: string | null;
+}
+
 /**
- * The introduction: this client is connected to both servers, so it asks each
- * to issue a credential for the other and tells each where the other is
- * reached. The origins default to what this client uses, which is only a hint;
- * the person confirms the address each server can actually reach.
+ * The introduction. Choosing the remote runs a quick check: each server tests
+ * the direction it would connect in, and each descriptor says how the server is
+ * run. The dialog then shows one setup built from what the check found, in
+ * plain lines saying how messages travel each way, and asks only what the
+ * check could not settle. "Set up differently" opens the manual form. A server
+ * too old for poll mode gets only "update J5 there" and Close. A pair already
+ * peered is peered again the way it is set up, with new credentials only.
  */
 export function PeerIntroductionDialog({
   open,
   onOpenChange,
   primaryEnvironmentId,
+  initialOtherEnvironmentId = null,
   onPeered,
 }: {
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
   readonly primaryEnvironmentId: EnvironmentId;
+  /** The remote server to start with, as when peering a pair again. */
+  readonly initialOtherEnvironmentId?: EnvironmentId | null;
   readonly onPeered: (otherEnvironmentId: EnvironmentId) => void;
 }) {
   const { environments } = useEnvironments();
@@ -62,73 +97,178 @@ export function PeerIntroductionDialog({
         .toSorted((left, right) => left.label.localeCompare(right.label)),
     [environments, primaryEnvironmentId],
   );
-  const [otherId, setOtherId] = useState<EnvironmentId | null>(null);
+  const [otherId, setOtherId] = useState<EnvironmentId | null>(initialOtherEnvironmentId);
   const other = candidates.find((environment) => environment.environmentId === otherId) ?? null;
   const primaryBaseUrl = useEnvironmentHttpBaseUrl(primaryEnvironmentId);
   const otherBaseUrl = useEnvironmentHttpBaseUrl(otherId);
   // The hook needs an id; until a remote is chosen, readiness stops before reading this.
   const otherSession = useEnvironmentSessionState(otherId ?? primaryEnvironmentId);
 
-  // What the person typed, if anything; the defaults below follow the chosen
-  // environment until then, and choosing another environment clears the edits.
-  const [primaryOriginEdit, setPrimaryOrigin] = useState<string | null>(null);
-  const [otherOriginEdit, setOtherOrigin] = useState<string | null>(null);
+  const local = useMemo(() => (primary === null ? null : peeringServerOf(primary)), [primary]);
+  const remote = useMemo(() => (other === null ? null : peeringServerOf(other)), [other]);
+  const otherReady =
+    other !== null &&
+    other.connection.phase === "connected" &&
+    otherSession.data?.authenticated === true &&
+    (otherSession.data.scopes?.includes(AuthAccessWriteScope) ?? false);
+  const bothSupportPoll = local?.supportsPoll === true && remote?.supportsPoll === true;
+  // Whether each server supports poll mode is known only once its descriptor is.
+  const described =
+    (primary?.serverConfig ?? null) !== null && (other?.serverConfig ?? null) !== null;
+
+  // Each server's record of the other: a pair already peered keeps how messages
+  // travel and where, so peering it again cannot turn it around.
+  const localPeers = useEnvironmentQuery(otherReady ? peersQueryAtom(primaryEnvironmentId) : null);
+  const remotePeers = useEnvironmentQuery(
+    otherReady && otherId !== null ? peersQueryAtom(otherId) : null,
+  );
+  const recordsRead =
+    otherReady &&
+    (localPeers.data !== null || localPeers.error !== null) &&
+    (remotePeers.data !== null || remotePeers.error !== null);
+  const recorded = recordsRead
+    ? recordedPeeringChoice({
+        local: localPeers.data?.find((peer) => peer.environmentId === otherId) ?? null,
+        remote:
+          remotePeers.data?.find((peer) => peer.environmentId === primaryEnvironmentId) ?? null,
+      })
+    : null;
+
+  // The check's result, kept with the pair it was run for.
+  const [checked, setChecked] = useState<{
+    readonly key: string;
+    readonly result: PeeringCheck;
+  } | null>(null);
+  const [manual, setManual] = useState<PeeringChoice | null>(null);
+  const [answer, setAnswer] = useState<"store" | "direct">("store");
+  const [originEdits, setOriginEdits] = useState<Partial<PeeringChoice>>({});
   const [busy, setBusy] = useState(false);
-  const [outcome, setOutcome] = useState<PeeringOutcome | null>(null);
-  const primaryOrigin = primaryOriginEdit ?? defaultPeerOrigin(primaryBaseUrl);
-  const otherOrigin = otherOriginEdit ?? defaultPeerOrigin(otherBaseUrl);
+  const [report, setReport] = useState<ReadonlyArray<StepReport> | null>(null);
+
   const chooseOther = (value: EnvironmentId | null) => {
     setOtherId(value);
-    setOtherOrigin(null);
-    setOutcome(null);
+    setManual(null);
+    setAnswer("store");
+    setOriginEdits({});
+    setReport(null);
   };
 
-  const readiness = resolvePeeringReadiness({
-    otherLabel: other?.label ?? null,
-    otherConnected: other?.connection.phase === "connected",
-    otherCanManage:
-      otherId !== null &&
-      otherSession.data?.authenticated === true &&
-      (otherSession.data.scopes?.includes(AuthAccessWriteScope) ?? false),
-    localOrigin: primaryOrigin,
-    remoteOrigin: otherOrigin,
-  });
+  // The check runs once the remote can be managed, both servers support it, and
+  // the pair is not already peered.
+  const checkKey =
+    local !== null && remote !== null && recordsRead && recorded === null && bothSupportPoll
+      ? `${local.environmentId}|${remote.environmentId}`
+      : null;
+  useEffect(() => {
+    if (checkKey === null || local === null || remote === null) return;
+    let cancelled = false;
+    void runPeeringCheck(
+      { server: local, clientUrl: primaryBaseUrl },
+      { server: remote, clientUrl: otherBaseUrl },
+    ).then((result) => {
+      if (!cancelled) setChecked({ key: checkKey, result });
+    });
+    return () => {
+      cancelled = true;
+    };
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Keyed on the pair and its addresses: the server objects are rebuilt on every environment refresh.
+  }, [checkKey, primaryBaseUrl, otherBaseUrl]);
+  const check = checked !== null && checked.key === checkKey ? checked.result : null;
 
-  // The two sides as the request will send them; the step titles read from the same values.
-  // Each server's name is its own, as its environment reports it.
-  const local: PeeringSide = {
-    environmentId: primaryEnvironmentId,
-    label: primary?.label ?? primaryEnvironmentId,
-    origin: primaryOrigin.trim(),
-  };
-  const remote: PeeringSide | null =
-    otherId === null || other === null
+  const recommendation: PeeringRecommendation | null =
+    local === null || remote === null || !described || (otherReady && !recordsRead)
       ? null
-      : {
-          environmentId: otherId,
-          label: other.label,
-          origin: otherOrigin.trim(),
-        };
-  const remoteLabel = remote?.label ?? "the other server";
+      : recorded !== null
+        ? { kind: "setup", choice: recorded, question: null }
+        : !bothSupportPoll
+          ? recommendPeering({
+              local,
+              remote,
+              localToRemote: { kind: "untested", error: null },
+              remoteToLocal: { kind: "untested", error: null },
+            })
+          : check === null
+            ? null
+            : recommendPeering({ local, remote, ...check });
+
+  const question =
+    recommendation?.kind === "setup" && manual === null ? recommendation.question : null;
+  const recommended =
+    recommendation?.kind === "setup"
+      ? question === null
+        ? recommendation.choice
+        : answer === "direct"
+          ? question.directChoice
+          : question.storeChoice
+      : null;
+  // A recorded pair's way and addresses stand; edits only fill what neither record holds.
+  const choice: PeeringChoice | null =
+    recorded !== null && recommended !== null
+      ? repeeringChoice(recorded, originEdits)
+      : (manual ?? (recommended === null ? null : { ...recommended, ...originEdits }));
+  const ready = choice !== null && peeringChoiceReady(choice) && !busy;
 
   const peer = async () => {
-    if (readiness.kind !== "ready" || remote === null) return;
+    if (choice === null || local === null || remote === null) return;
     setBusy(true);
-    setOutcome(null);
+    setReport(null);
     try {
-      const result = await introducePeers({
-        local,
-        remote,
-        issue: (issuer, holder) =>
-          issuePeerCredential(issuer.environmentId, {
-            environmentId: holder.environmentId,
-            label: holder.label,
-          }),
-        record: (recorder, target, credential) =>
-          addPeer(recorder.environmentId, { origin: target.origin, credential }),
-      });
-      setOutcome(result);
-      if (result.ok) {
+      const localSide: PeeringSide = {
+        environmentId: local.environmentId,
+        label: local.label,
+        origin: choice.localOrigin.trim(),
+      };
+      const remoteSide: PeeringSide = {
+        environmentId: remote.environmentId,
+        label: remote.label,
+        origin: choice.remoteOrigin.trim(),
+      };
+      let ok: boolean;
+      if (choice.connections === "both") {
+        const outcome = await introducePeers({
+          local: localSide,
+          remote: remoteSide,
+          issue: (issuer, holder) =>
+            issuePeerCredential(issuer.environmentId, {
+              environmentId: holder.environmentId,
+              label: holder.label,
+            }),
+          record: (recorder, target, credential) =>
+            addPeer(recorder.environmentId, { origin: target.origin, credential }),
+        });
+        ok = outcome.ok;
+        setReport(
+          outcome.steps.map((step) => ({
+            title: peeringStepTitle(step.step, localSide, remoteSide),
+            status: step.status,
+            detail: step.detail,
+          })),
+        );
+      } else {
+        const [poller, storer] =
+          choice.connections === "local-only" ? [localSide, remoteSide] : [remoteSide, localSide];
+        const outcome = await introducePollingPeer({
+          poller,
+          storer,
+          issue: (issuer, holder) =>
+            issuePeerCredential(issuer.environmentId, {
+              environmentId: holder.environmentId,
+              label: holder.label,
+              store: true,
+            }),
+          record: (recorder, target, credential) =>
+            addPeer(recorder.environmentId, { origin: target.origin, credential, poll: true }),
+        });
+        ok = outcome.ok;
+        setReport(
+          outcome.steps.map((step) => ({
+            title: pollPeeringStepTitle(step.step, poller, storer),
+            status: step.status,
+            detail: step.detail,
+          })),
+        );
+      }
+      if (ok) {
         onPeered(remote.environmentId);
         onOpenChange(false);
       }
@@ -136,6 +276,8 @@ export function PeerIntroductionDialog({
       setBusy(false);
     }
   };
+
+  const tooOld = recommendation?.kind === "too-old" ? recommendation.server : null;
 
   return (
     <Dialog
@@ -151,21 +293,18 @@ export function PeerIntroductionDialog({
         <DialogHeader>
           <DialogTitle>Peer with another server</DialogTitle>
           <DialogDescription>
-            Each server ends up holding a credential the other issued and the address it reaches the
-            other at. The addresses below start from what this browser uses; confirm the address
-            each server can actually reach.
+            {manual === null
+              ? "Each server records the other so their agents can message each other."
+              : "Choose how A2A messages travel between the two servers."}
           </DialogDescription>
         </DialogHeader>
         <DialogPanel>
-          <div className="space-y-5">
+          <div className="space-y-4">
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="flex flex-col gap-1.5 text-sm">
                 <span className="font-medium text-foreground">This server</span>
                 <span className="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-foreground">
-                  {primary?.label ?? primaryEnvironmentId}
-                </span>
-                <span className="text-xs text-muted-foreground">
-                  The server this page is served from.
+                  {local?.label ?? primaryEnvironmentId}
                 </span>
               </div>
               <label className="flex flex-col gap-1.5 text-sm font-medium text-foreground">
@@ -176,7 +315,7 @@ export function PeerIntroductionDialog({
                   onValueChange={(value) => chooseOther((value as EnvironmentId | null) ?? null)}
                 >
                   <SelectTrigger className="w-full" aria-label="Remote server to peer with">
-                    <SelectValue>{other?.label ?? "Choose a remote server"}</SelectValue>
+                    <SelectValue>{remote?.label ?? "Choose a remote server"}</SelectValue>
                   </SelectTrigger>
                   <SelectPopup align="start" alignItemWithTrigger={false}>
                     {candidates.map((environment) => (
@@ -186,123 +325,529 @@ export function PeerIntroductionDialog({
                     ))}
                   </SelectPopup>
                 </Select>
-                <span className="text-xs font-normal text-muted-foreground">
-                  {candidates.length === 0
-                    ? "Add another environment under Remote environments first."
-                    : "One of the environments this browser is connected to."}
-                </span>
+                {candidates.length === 0 ? (
+                  <span className="text-xs font-normal text-muted-foreground">
+                    Add another environment under Environments first.
+                  </span>
+                ) : null}
               </label>
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <PeerSideFields
-                heading={`This server · ${primary?.label ?? primaryEnvironmentId}`}
-                originTitle={`Reaches ${remoteLabel} at`}
-                originValue={otherOrigin}
-                onOriginChange={setOtherOrigin}
-                disabled={busy || otherId === null}
-              />
-              <PeerSideFields
-                heading={`Remote server · ${other?.label ?? "not chosen"}`}
-                originTitle="Reaches this server at"
-                originValue={primaryOrigin}
-                onOriginChange={setPrimaryOrigin}
-                disabled={busy || otherId === null}
-              />
-            </div>
-
-            {readiness.kind !== "ready" && otherId !== null ? (
-              <p className="text-xs text-muted-foreground">{readiness.message}</p>
+            {other !== null && !otherReady ? (
+              <p className="text-xs text-muted-foreground">
+                {other.connection.phase !== "connected"
+                  ? `Connect to ${other.label} first; peering needs both servers reachable from this browser.`
+                  : `This connection to ${other.label} cannot manage access (it lacks access:write), so it cannot issue a peer credential there.`}
+              </p>
             ) : null}
 
-            {outcome !== null && remote !== null ? (
-              <ol className="space-y-1 text-xs">
-                {outcome.steps.map((step) => (
-                  <li key={step.step} className="flex flex-col">
-                    <span
-                      className={
-                        step.status === "failed"
-                          ? "text-destructive"
-                          : step.status === "skipped"
-                            ? "text-muted-foreground/60"
-                            : "text-foreground"
-                      }
-                    >
-                      {step.status === "done"
-                        ? "Done"
-                        : step.status === "failed"
-                          ? "Failed"
-                          : "Skipped"}
-                      {": "}
-                      {peeringStepTitle(step.step, local, remote)}
-                    </span>
-                    {step.detail !== null ? (
-                      <span className="text-muted-foreground">{step.detail}</span>
-                    ) : null}
-                  </li>
-                ))}
-                {!outcome.ok &&
-                outcome.steps.some(
-                  (step) => step.status === "done" && step.step.startsWith("issue-"),
-                ) ? (
-                  <li className="text-muted-foreground">
-                    Nothing was undone. The existing peering, if any, still works. Credentials
-                    issued in this attempt stay listed under Connections on the server that issued
-                    them until a later peering replaces them, or you revoke them there.
-                  </li>
-                ) : null}
-              </ol>
+            {tooOld !== null && local !== null ? (
+              <Alert variant="error">
+                <AlertTitle>
+                  {tooOld.label} is running J5 {tooOld.serverVersion}, which is too old to peer with{" "}
+                  {tooOld.environmentId === local.environmentId ? remote?.label : local.label}.
+                </AlertTitle>
+                <AlertDescription>Update J5 on {tooOld.label}, then try again.</AlertDescription>
+              </Alert>
             ) : null}
+
+            {recorded !== null && remote !== null ? (
+              <p className="text-xs text-muted-foreground">
+                {remote.label} is already a peer. Peering again keeps how messages travel and issues
+                new credentials. To change how they travel, remove the peer, then peer again.
+              </p>
+            ) : null}
+
+            {otherReady &&
+            bothSupportPoll &&
+            recorded === null &&
+            local !== null &&
+            remote !== null &&
+            manual === null ? (
+              <CheckCard local={local} remote={remote} check={check} question={question} />
+            ) : null}
+
+            {recommendation?.kind === "no-route" && check !== null && manual === null ? (
+              <p className="text-xs text-muted-foreground">{noRouteMessage(check)}</p>
+            ) : null}
+
+            {question !== null && local !== null && remote !== null ? (
+              <ConnectionQuestion
+                question={question}
+                local={local}
+                remote={remote}
+                answer={answer}
+                onAnswer={setAnswer}
+                disabled={busy}
+              />
+            ) : null}
+
+            {manual !== null && local !== null && remote !== null ? (
+              <ManualForm
+                choice={manual}
+                local={local}
+                remote={remote}
+                onChange={setManual}
+                disabled={busy}
+              />
+            ) : null}
+
+            {choice !== null && local !== null && remote !== null ? (
+              <Alert variant="info">
+                <AlertTitle>How messages will travel</AlertTitle>
+                <AlertDescription>
+                  <ul className="space-y-1 text-foreground">
+                    {peeringLines(choice, local, remote).map((line) => (
+                      <li key={line}>{line}</li>
+                    ))}
+                  </ul>
+                </AlertDescription>
+              </Alert>
+            ) : null}
+
+            {manual === null && choice !== null && local !== null && remote !== null ? (
+              <UsedAddress
+                choice={choice}
+                local={local}
+                remote={remote}
+                question={question}
+                answer={answer}
+                recorded={recorded}
+                onChange={(edit) => setOriginEdits((edits) => ({ ...edits, ...edit }))}
+                disabled={busy}
+              />
+            ) : null}
+
+            {report !== null ? <StepList steps={report} /> : null}
           </div>
         </DialogPanel>
         <DialogFooter>
-          <Button variant="ghost" disabled={busy} onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button disabled={busy || readiness.kind !== "ready"} onClick={() => void peer()}>
-            {busy ? "Peering…" : "Peer"}
-          </Button>
+          <a
+            href={EXPLAINER_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="mr-auto self-center text-xs text-primary hover:underline"
+          >
+            How does this work?
+          </a>
+          {tooOld !== null ? (
+            <Button onClick={() => onOpenChange(false)}>Close</Button>
+          ) : (
+            <>
+              {manual !== null ? (
+                <Button variant="ghost" disabled={busy} onClick={() => setManual(null)}>
+                  Back to the recommended setup
+                </Button>
+              ) : recommendation !== null &&
+                recorded === null &&
+                local !== null &&
+                remote !== null ? (
+                <Button
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={() =>
+                    setManual(choice ?? { connections: "both", localOrigin: "", remoteOrigin: "" })
+                  }
+                >
+                  Set up differently
+                </Button>
+              ) : (
+                <Button variant="ghost" disabled={busy} onClick={() => onOpenChange(false)}>
+                  Cancel
+                </Button>
+              )}
+              <Button disabled={!ready} onClick={() => void peer()}>
+                {busy ? "Peering…" : "Peer"}
+              </Button>
+            </>
+          )}
         </DialogFooter>
       </DialogPopup>
     </Dialog>
   );
 }
 
-/**
- * One side of the pairing, from that server's point of view: where it reaches
- * the other server. The two columns mirror each other and stack when the
- * dialog is narrow.
- */
-function PeerSideFields({
-  heading,
-  originTitle,
-  originValue,
-  onOriginChange,
+/** What the check found in each direction, with each probe's own error, and how each server is run. */
+function CheckCard({
+  local,
+  remote,
+  check,
+  question,
+}: {
+  readonly local: PeeringServer;
+  readonly remote: PeeringServer;
+  readonly check: PeeringCheck | null;
+  readonly question: PeeringQuestion | null;
+}) {
+  if (check === null) {
+    return (
+      <Alert>
+        <AlertTitle>
+          Checking how {local.label} and {remote.label} reach each other…
+        </AlertTitle>
+      </Alert>
+    );
+  }
+  const asked =
+    question !== null && question.reason !== "untested"
+      ? question.toward === "local"
+        ? local
+        : remote
+      : null;
+  const bothReach =
+    check.localToRemote.kind === "reached" && check.remoteToLocal.kind === "reached";
+  return (
+    <Alert variant={!bothReach ? "warning" : asked === null ? "success" : "default"}>
+      <AlertDescription>
+        <ul className="space-y-1.5">
+          <ReachLine from={local} to={remote} reach={check.localToRemote} />
+          <ReachLine from={remote} to={local} reach={check.remoteToLocal} />
+          {asked !== null ? (
+            <li>
+              <span className="text-foreground">
+                {asked.label}{" "}
+                {asked.runMode === "desktop"
+                  ? "runs J5 in the desktop app"
+                  : "runs J5 started by hand, not as a service"}
+              </span>
+              <span className="block text-xs">
+                {asked.runMode === "desktop"
+                  ? "It's offline whenever the app is closed or the device sleeps."
+                  : "It may not stay on."}
+              </span>
+            </li>
+          ) : bothReach && local.runMode === "service" && remote.runMode === "service" ? (
+            <li className="text-foreground">Both run as always-on services</li>
+          ) : null}
+        </ul>
+      </AlertDescription>
+    </Alert>
+  );
+}
+
+function ReachLine({
+  from,
+  to,
+  reach,
+}: {
+  readonly from: PeeringServer;
+  readonly to: PeeringServer;
+  readonly reach: PeeringReach;
+}) {
+  switch (reach.kind) {
+    case "reached":
+      return (
+        <li>
+          <span className="text-foreground">
+            ✓ {from.label} reaches {to.label}
+          </span>
+          <span className="block text-xs">at {reach.origin}</span>
+        </li>
+      );
+    case "failed":
+      return (
+        <li>
+          <span className="text-foreground">
+            ✕ {from.label} can't reach {to.label}
+          </span>
+          {reach.errors.map((error) => (
+            <span key={error} className="block font-mono text-xs">
+              {error}
+            </span>
+          ))}
+        </li>
+      );
+    case "untested":
+      return (
+        <li>
+          <span className="text-foreground">
+            ? Couldn't test {from.label} reaching {to.label}
+          </span>
+          <span className="block text-xs">
+            {reach.error === null
+              ? `${to.label} only knows loopback addresses for itself`
+              : `${to.label} could not list its addresses: ${reach.error}`}
+          </span>
+        </li>
+      );
+  }
+}
+
+/** The connection method itself, for the one direction the check could not settle. */
+function ConnectionQuestion({
+  question,
+  local,
+  remote,
+  answer,
+  onAnswer,
   disabled,
 }: {
-  readonly heading: string;
-  readonly originTitle: string;
-  readonly originValue: string;
-  readonly onOriginChange: (value: string) => void;
+  readonly question: PeeringQuestion;
+  readonly local: PeeringServer;
+  readonly remote: PeeringServer;
+  readonly answer: "store" | "direct";
+  readonly onAnswer: (answer: "store" | "direct") => void;
   readonly disabled: boolean;
 }) {
-  const warning = peerOriginWarning(originValue);
+  const [receiver, sender] = question.toward === "local" ? [local, remote] : [remote, local];
+  const options = [
+    {
+      value: "direct" as const,
+      title: "Send them directly",
+      detail:
+        question.reason === "untested"
+          ? `Only if ${receiver.label} is always on and ${sender.label} can open connections to it, for example over Tailscale. You'll enter the address below.`
+          : `Choose this if ${receiver.label} is always on and the app stays open. Messages sent while it's off aren't delivered: they fail after a few quick retries.`,
+    },
+    {
+      value: "store" as const,
+      title: `Store them until ${receiver.label} polls`,
+      detail:
+        question.reason === "untested"
+          ? "Works on any network, including behind an office firewall."
+          : `${sender.label} keeps them and ${receiver.label} picks them up when it's next on. Safe if you're not sure.`,
+    },
+  ];
   return (
-    <fieldset className="flex flex-col gap-3 rounded-lg border border-border/60 p-3">
-      <legend className="px-1 text-xs font-medium text-muted-foreground">{heading}</legend>
-      <label className="flex flex-col gap-1.5 text-sm font-medium text-foreground">
-        {originTitle}
-        <Input
-          nativeInput
-          value={originValue}
+    <div className="space-y-2">
+      <p id="peering-question" className="text-sm font-medium text-foreground">
+        How should {sender.label} get A2A messages to {receiver.label}?
+      </p>
+      <RadioGroup
+        value={answer}
+        onValueChange={(value) => onAnswer(value === "direct" ? "direct" : "store")}
+        aria-labelledby="peering-question"
+        disabled={disabled}
+      >
+        {options.map((option) => (
+          <label
+            key={option.value}
+            className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-border/60 px-3 py-2 text-sm"
+          >
+            <Radio value={option.value} className="mt-0.5" />
+            <span className="flex flex-col gap-0.5">
+              <span className="font-medium text-foreground">{option.title}</span>
+              <span className="text-xs text-muted-foreground">{option.detail}</span>
+            </span>
+          </label>
+        ))}
+      </RadioGroup>
+    </div>
+  );
+}
+
+/**
+ * Only the address that will be used: the one a poller polls at, or one the
+ * check could not prove. Peering a recorded pair again shows its addresses as
+ * they stand, and asks only for one neither record holds.
+ */
+function UsedAddress({
+  choice,
+  local,
+  remote,
+  question,
+  answer,
+  recorded,
+  onChange,
+  disabled,
+}: {
+  readonly choice: PeeringChoice;
+  readonly local: PeeringServer;
+  readonly remote: PeeringServer;
+  readonly question: PeeringQuestion | null;
+  readonly answer: "store" | "direct";
+  readonly recorded: PeeringChoice | null;
+  readonly onChange: (edit: Partial<PeeringChoice>) => void;
+  readonly disabled: boolean;
+}) {
+  const fixed = (field: "localOrigin" | "remoteOrigin") =>
+    recorded !== null && recorded[field].length > 0;
+  if (choice.connections === "both" && recorded !== null) {
+    return (
+      <>
+        {(
+          [
+            [local, remote, "remoteOrigin"],
+            [remote, local, "localOrigin"],
+          ] as const
+        ).map(([from, to, field]) => (
+          <OriginField
+            key={field}
+            title={`${from.label} reaches ${to.label} at`}
+            value={choice[field]}
+            onChange={(value) => onChange({ [field]: value })}
+            disabled={disabled || fixed(field)}
+          />
+        ))}
+      </>
+    );
+  }
+  if (choice.connections === "both") {
+    if (question === null || !question.directNeedsAddress || answer !== "direct") return null;
+    const [to, from] = question.toward === "local" ? [local, remote] : [remote, local];
+    const field = question.toward === "local" ? "localOrigin" : "remoteOrigin";
+    return (
+      <OriginField
+        title={`${from.label} reaches ${to.label} at`}
+        value={choice[field]}
+        onChange={(value) => onChange({ [field]: value })}
+        disabled={disabled}
+      />
+    );
+  }
+  const [poller, storer, field] =
+    choice.connections === "local-only"
+      ? [local, remote, "remoteOrigin" as const]
+      : [remote, local, "localOrigin" as const];
+  return (
+    <OriginField
+      title={`${poller.label} reaches ${storer.label} at`}
+      value={choice[field]}
+      onChange={(value) => onChange({ [field]: value })}
+      disabled={disabled || fixed(field)}
+    />
+  );
+}
+
+/** "Set up differently": which way connections can go, and an address for each side that can be reached. */
+function ManualForm({
+  choice,
+  local,
+  remote,
+  onChange,
+  disabled,
+}: {
+  readonly choice: PeeringChoice;
+  readonly local: PeeringServer;
+  readonly remote: PeeringServer;
+  readonly onChange: (choice: PeeringChoice) => void;
+  readonly disabled: boolean;
+}) {
+  return (
+    <div className="space-y-4">
+      <div className="space-y-1.5">
+        <p id="peering-connections" className="text-sm font-medium text-foreground">
+          Which way can connections go?
+        </p>
+        <ToggleGroup
+          aria-labelledby="peering-connections"
+          className="w-full *:flex-1"
+          value={[choice.connections]}
           disabled={disabled}
-          placeholder="https://host:3773"
-          onChange={(event) => onOriginChange(event.currentTarget.value)}
-        />
-        {warning !== null ? (
-          <span className="text-xs font-normal text-warning-foreground">{warning}</span>
-        ) : null}
-      </label>
-    </fieldset>
+          onValueChange={(next) => {
+            const value = next[0];
+            if (value === "both" || value === "local-only" || value === "remote-only") {
+              onChange({ ...choice, connections: value });
+            }
+          }}
+        >
+          <Toggle value="both">Both ways</Toggle>
+          <Toggle value="local-only">
+            {local.label} → {remote.label} only
+          </Toggle>
+          <Toggle value="remote-only">
+            {remote.label} → {local.label} only
+          </Toggle>
+        </ToggleGroup>
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <fieldset className="flex flex-col gap-2 rounded-lg border border-border/60 p-3">
+          <legend className="px-1 text-xs font-medium text-muted-foreground">{local.label}</legend>
+          {choice.connections === "remote-only" ? (
+            <p className="text-xs text-muted-foreground">
+              Stores messages for {remote.label} and waits to be polled.
+            </p>
+          ) : (
+            <OriginField
+              title={`Reaches ${remote.label} at`}
+              value={choice.remoteOrigin}
+              onChange={(value) => onChange({ ...choice, remoteOrigin: value })}
+              disabled={disabled}
+            />
+          )}
+        </fieldset>
+        <fieldset className="flex flex-col gap-2 rounded-lg border border-border/60 p-3">
+          <legend className="px-1 text-xs font-medium text-muted-foreground">{remote.label}</legend>
+          {choice.connections === "local-only" ? (
+            <p className="text-xs text-muted-foreground">
+              Stores messages for {local.label} and waits to be polled.
+            </p>
+          ) : (
+            <OriginField
+              title={`Reaches ${local.label} at`}
+              value={choice.localOrigin}
+              onChange={(value) => onChange({ ...choice, localOrigin: value })}
+              disabled={disabled}
+            />
+          )}
+        </fieldset>
+      </div>
+    </div>
+  );
+}
+
+function OriginField({
+  title,
+  value,
+  onChange,
+  disabled,
+}: {
+  readonly title: string;
+  readonly value: string;
+  readonly onChange: (value: string) => void;
+  readonly disabled: boolean;
+}) {
+  const warning = peerOriginWarning(value);
+  return (
+    <label className="flex flex-col gap-1.5 text-sm font-medium text-foreground">
+      {title}
+      <Input
+        nativeInput
+        value={value}
+        disabled={disabled}
+        placeholder="https://host:3773"
+        onChange={(event) => onChange(event.currentTarget.value)}
+      />
+      {warning !== null ? (
+        <span className="text-xs font-normal text-warning-foreground">{warning}</span>
+      ) : null}
+    </label>
+  );
+}
+
+function StepList({ steps }: { readonly steps: ReadonlyArray<StepReport> }) {
+  const failedAfterIssuing =
+    steps.some((step) => step.status === "failed") &&
+    steps.some((step) => step.status === "done" && step.title.startsWith("Issue"));
+  return (
+    <ol className="space-y-1 text-xs">
+      {steps.map((step) => (
+        <li key={step.title} className="flex flex-col">
+          <span
+            className={
+              step.status === "failed"
+                ? "text-destructive"
+                : step.status === "skipped"
+                  ? "text-muted-foreground/60"
+                  : "text-foreground"
+            }
+          >
+            {step.status === "done" ? "Done" : step.status === "failed" ? "Failed" : "Skipped"}
+            {": "}
+            {step.title}
+          </span>
+          {step.detail !== null ? (
+            <span className="text-muted-foreground">{step.detail}</span>
+          ) : null}
+        </li>
+      ))}
+      {failedAfterIssuing ? (
+        <li className="text-muted-foreground">
+          Nothing was undone. The existing peering, if any, still works. Credentials issued in this
+          attempt stay listed under Connections on the server that issued them until a later peering
+          replaces them, or you revoke them there.
+        </li>
+      ) : null}
+    </ol>
   );
 }

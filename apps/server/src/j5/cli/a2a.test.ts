@@ -4,8 +4,10 @@ import type * as NodeNet from "node:net";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
+import { peerCredentialRejectedReason, peerPollStoppedError } from "@t3tools/contracts/j5";
 import * as NetService from "@t3tools/shared/Net";
 import * as Clock from "effect/Clock";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { Command } from "effect/unstable/cli";
@@ -416,6 +418,83 @@ it.live("issues a peer credential, adds, lists, and removes a peer through the a
         });
       }),
   ),
+);
+
+it.live(
+  "lists each peer's health as Settings does: online, offline since, or not polled yet",
+  () => {
+    const recent = DateTime.formatIso(DateTime.subtract(DateTime.nowUnsafe(), { seconds: 30 }));
+    const old = "2020-01-01T00:00:00.000Z";
+    const peers = [
+      {
+        ...homePeerDecoded,
+        environmentId: "environment-laptop",
+        label: "JM-LT-04213",
+        linkMode: "store",
+        origin: null,
+        credentialExpiresAt: null,
+        lastPolledAt: recent,
+        waitingCount: 2,
+        oldestWaitingAt: "2026-10-02T11:00:00.000Z",
+      },
+      {
+        ...homePeerDecoded,
+        environmentId: "environment-vm",
+        label: "Work VM",
+        linkMode: "poll",
+        origin: "https://vm.example:3773",
+        lastPolledAt: old,
+        lastError: "could not reach Work VM: ECONNREFUSED",
+      },
+      {
+        ...homePeerDecoded,
+        environmentId: "environment-mac",
+        label: "Home Mac",
+        linkMode: "store",
+        origin: null,
+        credentialExpiresAt: null,
+      },
+      homePeerDecoded,
+      {
+        ...homePeerDecoded,
+        environmentId: "environment-office",
+        label: "Office VM",
+        linkMode: "poll",
+        origin: "https://office.example:3773",
+        lastPolledAt: recent,
+        lastError: peerPollStoppedError(peerCredentialRejectedReason("Office VM")),
+      },
+    ];
+    return withStub(
+      () => ({ status: 200, body: { peers } }),
+      (stub) =>
+        Effect.gen(function* () {
+          yield* runCli(["a2a", "peer", "list", "--origin", stub.origin, "--token", "admin"]);
+          assert.equal(process.exitCode, undefined);
+          const [laptop, vm, mac, home, office] = lastText().split("\n");
+          assert.include(laptop, `online, last polled ${recent}`);
+          assert.include(laptop, "2 waiting since 2026-10-02T11:00:00.000Z");
+          assert.include(vm, `offline since ${old}`);
+          assert.include(vm, "last error: could not reach Work VM: ECONNREFUSED");
+          assert.include(mac, "has not polled yet");
+          assert.notInclude(home ?? "", "polled", "a peer sending directly has no poll health");
+          assert.include(office, `polling stopped: ${peerCredentialRejectedReason("Office VM")}`);
+          assert.notInclude(
+            office,
+            "Polling stopped:",
+            "the poller's mark is shown once, stripped",
+          );
+          assert.notInclude(
+            office,
+            "online",
+            "a stopped poller claims nothing about its last poll",
+          );
+          assert.notInclude(office, "last error", "the stop reason is said once");
+          assert.notInclude(vm, "inbound", "a poller holds no session from the server it polls");
+          assert.include(laptop, "inbound:");
+        }),
+    );
+  },
 );
 
 it.live(
