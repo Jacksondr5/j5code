@@ -1,6 +1,6 @@
 import { limitRecoveryCommand } from "./UsageLimitRecoveryWorker.ts";
 import { SourceControlProviderRegistry } from "../sourceControl/SourceControlProviderRegistry.ts";
-import { J5SquadronCreationLayer } from "../j5/a2a/runtimeLayer.ts";
+import { J5ThreadRegistrationLayer } from "../j5/a2a/runtimeLayer.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import { vi } from "vite-plus/test";
@@ -77,7 +77,7 @@ import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import { AgentCrewInstanceService } from "../j5/a2a/AgentCrewInstanceService.ts";
 import { A2AArchiveFacts } from "../j5/a2a/ArchiveFactsService.ts";
 import { CrewStopService, layer as crewStopLayer } from "../j5/a2a/CrewStopService.ts";
-import { ParticipantId, SquadronId } from "../j5/a2a/contracts.ts";
+import { ParticipantId, LedgerProjectId } from "../j5/a2a/contracts.ts";
 import { ThreadManagementService } from "./ThreadManagementService.ts";
 import {
   ThreadCommandExecutor,
@@ -90,7 +90,7 @@ const PlatformTestLayer = Layer.merge(
 );
 
 const OrchestrationV2LayerLive = UpstreamOrchestrationV2LayerLive.pipe(
-  Layer.provideMerge(J5SquadronCreationLayer),
+  Layer.provideMerge(J5ThreadRegistrationLayer),
 );
 
 const ServerConfigLayer = ServerConfig.layerTest(process.cwd(), {
@@ -2979,7 +2979,7 @@ it.layer(SharedApplicationDataPlaneTestLayer)("pending provider interruption", (
       const commandId = CommandId.make("crew-stop:builder");
       const input = {
         callerParticipantId: null,
-        squadronId: null,
+        projectId: null,
         crewInstanceId: "crew:stop",
         commandIds: () => ({ interruptCommandId: commandId }),
       };
@@ -2993,7 +2993,7 @@ it.layer(SharedApplicationDataPlaneTestLayer)("pending provider interruption", (
               read: () =>
                 Effect.succeed({
                   id: "crew:stop",
-                  squadronId: SquadronId.make("squadron:stop"),
+                  projectId: LedgerProjectId.make("project:stop"),
                   captainParticipantId: ParticipantId.make("captain"),
                   captainThreadId: threadId,
                   displayName: "Stop",

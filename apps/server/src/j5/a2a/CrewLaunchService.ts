@@ -46,7 +46,7 @@ import {
 } from "./spawnWorkspace.ts";
 import { getThreadProjectionIfPresent } from "./threadProjectionReads.ts";
 import { CREW_SEAT_CAP } from "./crewLimits.ts";
-import type { ParticipantId, SquadronId } from "./contracts.ts";
+import type { ParticipantId, LedgerProjectId } from "./contracts.ts";
 import {
   crewSeatRequestKey,
   spawnCrewInstanceId,
@@ -95,8 +95,8 @@ export interface CrewLaunchPlaybook {
 export { CREW_SEAT_CAP };
 
 export interface CrewCaptain {
-  readonly squadronId: SquadronId;
-  readonly squadronName: string;
+  readonly projectId: LedgerProjectId;
+  readonly projectTitle: string;
   readonly participantId: ParticipantId;
   readonly thread: OrchestrationV2AppThread;
 }
@@ -553,7 +553,7 @@ export const layer = Layer.effect(
           composition.recordFacts({
             homeCommandId: spawnHomeCommandId(member.stableInput),
             placementCommandId: spawnPlacementCommandId(member.stableInput),
-            squadronId: captain.squadronId,
+            projectId: captain.projectId,
             threadId: member.threadId,
             provenance: {
               kind: "spawned-by",
@@ -630,8 +630,8 @@ export const layer = Layer.effect(
         const text = spawnFirstTurnText({
           brief,
           participantId: member.participantId,
-          squadronId: captain.squadronId,
-          squadronName: captain.squadronName,
+          projectId: captain.projectId,
+          projectTitle: captain.projectTitle,
           spawnedByParticipantId: captain.participantId,
           spawnerThreadId: captain.thread.id,
           crew: {
@@ -672,7 +672,7 @@ export const layer = Layer.effect(
             spawnWorkspace.startBrief({
               workspace: member.workspace,
               stableInput: member.stableInput,
-              squadronId: captain.squadronId,
+              ledgerProjectId: captain.projectId,
               projectId: captain.thread.projectId,
               threadId: member.threadId,
               title: spawnTitle(member.seat.name, undefined),
@@ -765,7 +765,7 @@ export const layer = Layer.effect(
         const instance = yield* crews
           .record({
             id: crewInstanceId,
-            squadronId: input.captain.squadronId,
+            projectId: input.captain.projectId,
             captainParticipantId: input.captain.participantId,
             captainThreadId: input.captain.thread.id,
             displayName: input.displayName,

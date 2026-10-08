@@ -15,7 +15,7 @@ import {
   CommCommandId,
   type CommEvent,
   CorrelationId,
-  SquadronId,
+  LedgerProjectId,
   ExchangeId,
   isHumanParticipantId,
   isMachineParticipantId,
@@ -56,14 +56,14 @@ export class A2AHomeMembershipStateError extends Schema.TaggedError<A2AHomeMembe
   "A2AHomeMembershipStateError",
   {
     threadId: Schema.String,
-    expectedSquadronId: Schema.String,
+    expectedProjectId: Schema.String,
     expectedParticipantId: Schema.String,
     activeHomes: Schema.Array(Schema.String),
   },
 ) {
   override get message(): string {
     const active = this.activeHomes.length === 0 ? "none" : this.activeHomes.join(", ");
-    return `Thread ${this.threadId} is registered as ${this.expectedSquadronId}:${this.expectedParticipantId}, but its active membership is ${active}. Tell the human; do not retry.`;
+    return `Thread ${this.threadId} is registered as ${this.expectedProjectId}:${this.expectedParticipantId}, but its active membership is ${active}. Tell the human; do not retry.`;
   }
 }
 
@@ -71,12 +71,12 @@ export class A2ASenderRetiredError extends Schema.TaggedError<A2ASenderRetiredEr
   "A2ASenderRetiredError",
   {
     threadId: Schema.String,
-    squadronId: Schema.String,
+    projectId: Schema.String,
     participantId: Schema.String,
   },
 ) {
   override get message(): string {
-    return `Thread ${this.threadId} was retired from ${this.squadronId}:${this.participantId} by participant.left and cannot send cross-agent messages. Do not repair the projection or register another home; stop this messaging attempt.`;
+    return `Thread ${this.threadId} was retired from ${this.projectId}:${this.participantId} by participant.left and cannot send cross-agent messages. Do not repair the projection or register another home; stop this messaging attempt.`;
   }
 }
 
@@ -127,11 +127,11 @@ export class A2AParticipantArchivedError extends Schema.TaggedError<A2AParticipa
   "A2AParticipantArchivedError",
   {
     participantId: Schema.String,
-    squadronId: Schema.String,
+    projectId: Schema.String,
   },
 ) {
   override get message(): string {
-    return `Participant ${this.participantId} is archived or permanently retired from project ${this.squadronId} and cannot send or receive messages. Choose an active participant. Unarchive restores only reversibly archived identities.`;
+    return `Participant ${this.participantId} is archived or permanently retired from project ${this.projectId} and cannot send or receive messages. Choose an active participant. Unarchive restores only reversibly archived identities.`;
   }
 }
 
@@ -387,13 +387,13 @@ export const formatWithdrawalNotice = (input: {
   ].join("\n\n");
 
 interface ResolvedSender {
-  readonly squadronId: SquadronId;
+  readonly projectId: LedgerProjectId;
   readonly participantId: ParticipantId;
 }
 
 /** Where a receiver lives; `environmentId` names a peer server, null means this one. */
 interface ResolvedReceiver {
-  readonly squadronId: SquadronId;
+  readonly projectId: LedgerProjectId;
   readonly participantId: ParticipantId;
   readonly kind: Participant["kind"];
   readonly environmentId: string | null;
@@ -488,23 +488,23 @@ const rawLayer: Layer.Layer<
       );
       const matches = resolution.activeMemberships.filter(
         (membership) =>
-          membership.squadronId === resolution.home.squadronId &&
+          membership.projectId === resolution.home.projectId &&
           membership.participantId === resolution.home.participantId,
       );
       if (resolution.retired && resolution.activeMemberships.length === 0) {
         return yield* new A2ASenderRetiredError({
           threadId,
-          squadronId: resolution.home.squadronId,
+          projectId: resolution.home.projectId,
           participantId: resolution.home.participantId,
         });
       }
       if (resolution.retired || resolution.activeMemberships.length !== 1 || matches.length !== 1) {
         return yield* new A2AHomeMembershipStateError({
           threadId,
-          expectedSquadronId: resolution.home.squadronId,
+          expectedProjectId: resolution.home.projectId,
           expectedParticipantId: resolution.home.participantId,
           activeHomes: resolution.activeMemberships.map(
-            (membership) => `${membership.squadronId}:${membership.participantId}`,
+            (membership) => `${membership.projectId}:${membership.participantId}`,
           ),
         });
       }
@@ -514,7 +514,7 @@ const rawLayer: Layer.Layer<
       if (membership?.archived_at != null) {
         return yield* new A2AParticipantArchivedError({
           participantId: resolution.home.participantId,
-          squadronId: resolution.home.squadronId,
+          projectId: resolution.home.projectId,
         });
       }
       return resolution.home;
@@ -556,7 +556,7 @@ const rawLayer: Layer.Layer<
       if (row === undefined) {
         return yield* new A2AMachineSenderNotRegisteredError({ participantId: id });
       }
-      return { squadronId: SquadronId.make(row.project_id), participantId: id };
+      return { projectId: LedgerProjectId.make(row.project_id), participantId: id };
     });
 
     /**
@@ -572,7 +572,7 @@ const rawLayer: Layer.Layer<
     });
 
     /**
-     * A receiver no local Squadron homes may be an agent on a peer server. The
+     * A receiver no local project homes may be an agent on a peer server. The
      * platform resolves it through the peers' address books; the sender named a
      * participant, never a server. Runs outside the ledger transaction: it is
      * a network read, and the transaction re-checks the local facts afterwards.
@@ -600,7 +600,7 @@ const rawLayer: Layer.Layer<
         if (snapshot?.archived === true) {
           return yield* new A2AParticipantArchivedError({
             participantId: id,
-            squadronId: snapshot.squadronId,
+            projectId: snapshot.projectId,
           });
         }
         return known;
@@ -624,11 +624,11 @@ const rawLayer: Layer.Layer<
       if (agent.archived) {
         return yield* new A2AParticipantArchivedError({
           participantId: id,
-          squadronId: agent.squadronId,
+          projectId: agent.projectId,
         });
       }
       return {
-        squadronId: agent.squadronId,
+        projectId: agent.projectId,
         participantId: id,
         kind: "agent",
         environmentId: agent.environmentId,
@@ -656,7 +656,7 @@ const rawLayer: Layer.Layer<
 
     const participantMembership = Effect.fn("j5.a2a.send.participantMembership")(function* (
       id: ParticipantId,
-      senderSquadronId: SquadronId,
+      senderProjectId: LedgerProjectId,
       remote: ResolvedReceiver | null,
     ): Effect.fn.Return<
       ResolvedReceiver,
@@ -672,7 +672,7 @@ const rawLayer: Layer.Layer<
           return yield* new A2AParticipantNotFoundError({ participantId: id });
         }
         return {
-          squadronId: senderSquadronId,
+          projectId: senderProjectId,
           participantId: id,
           kind: "human",
           environmentId: null,
@@ -696,7 +696,7 @@ const rawLayer: Layer.Layer<
         }
         return yield* new A2AParticipantArchivedError({
           participantId: id,
-          squadronId: retired[0].project_id,
+          projectId: retired[0].project_id,
         });
       }
       if (matches.length > 1) {
@@ -705,12 +705,12 @@ const rawLayer: Layer.Layer<
       if (matches[0]!.archived_at !== null) {
         return yield* new A2AParticipantArchivedError({
           participantId: id,
-          squadronId: matches[0]!.project_id,
+          projectId: matches[0]!.project_id,
         });
       }
       const participant = yield* decodeParticipant(matches[0]!.payload);
       return {
-        squadronId: SquadronId.make(matches[0]!.project_id),
+        projectId: LedgerProjectId.make(matches[0]!.project_id),
         participantId: id,
         kind: participant.kind,
         environmentId: null,
@@ -740,7 +740,7 @@ const rawLayer: Layer.Layer<
                 const id = participantId(participant);
                 const addressable = membershipCounts.get(id) === 1 && row.archived_at === null;
                 return {
-                  squadronId: SquadronId.make(row.project_id),
+                  projectId: LedgerProjectId.make(row.project_id),
                   participantId: id,
                   participant,
                   archived: row.archived_at !== null,
@@ -757,7 +757,7 @@ const rawLayer: Layer.Layer<
           ...people.map(
             (personId) =>
               ({
-                squadronId: sender.squadronId,
+                projectId: sender.projectId,
                 participantId: personId,
                 participant: { kind: "human", id: personId },
                 archived: false,
@@ -770,7 +770,7 @@ const rawLayer: Layer.Layer<
           ...(yield* machineRows()).map(
             (row) =>
               ({
-                squadronId: SquadronId.make(row.project_id),
+                projectId: LedgerProjectId.make(row.project_id),
                 participantId: ParticipantId.make(row.participant_id),
                 participant: {
                   kind: "machine",
@@ -837,7 +837,7 @@ const rawLayer: Layer.Layer<
         });
       }
 
-      const receiver = yield* participantMembership(input.to, sender.squadronId, remote);
+      const receiver = yield* participantMembership(input.to, sender.projectId, remote);
       const receiverId = receiver.participantId;
       if (
         receiver.kind === "human" &&
@@ -853,7 +853,7 @@ const rawLayer: Layer.Layer<
       let openEvent: CommEvent | undefined;
       let closeEvent: CommEvent | undefined;
       // The ledger that opened the Exchange records its closure; an ask from another ledger is closed there.
-      let closeSquadronId = sender.squadronId;
+      let closeProjectId = sender.projectId;
 
       if (input.exchangeId !== undefined) {
         if (input.urgency !== undefined) {
@@ -893,7 +893,7 @@ const rawLayer: Layer.Layer<
           }
           exchangeRole = "reply";
           exchangeState = "closed";
-          closeSquadronId = SquadronId.make(exchange.project_id);
+          closeProjectId = LedgerProjectId.make(exchange.project_id);
           closeEvent = {
             kind: "exchange.closed",
             sender: sender.participantId,
@@ -911,7 +911,7 @@ const rawLayer: Layer.Layer<
         const existing = yield* sql<ExchangeRow>`
               SELECT project_id, exchange_id, sender_id, receiver_id, status
               FROM j5_a2a_exchange
-              WHERE project_id = ${sender.squadronId}
+              WHERE project_id = ${sender.projectId}
                 AND sender_id = ${sender.participantId}
                 AND receiver_id = ${receiverId}
                 AND status = 'open'
@@ -955,10 +955,10 @@ const rawLayer: Layer.Layer<
       }
 
       const correlationId = correlationIdFor(input.commandId);
-      const closesElsewhere = closeEvent !== undefined && closeSquadronId !== sender.squadronId;
+      const closesElsewhere = closeEvent !== undefined && closeProjectId !== sender.projectId;
       const result = yield* writer.appendEventsInTransaction({
         commandId: input.commandId,
-        squadronId: sender.squadronId,
+        projectId: sender.projectId,
         acceptedAt: input.acceptedAt,
         events: [
           ...(openEvent === undefined ? [] : [openEvent]),
@@ -972,8 +972,8 @@ const rawLayer: Layer.Layer<
               messageId,
               text: input.message,
               ...(input.attachments === undefined ? {} : { attachments: input.attachments }),
-              originProjectId: sender.squadronId,
-              receiverProjectId: receiver.squadronId,
+              originProjectId: sender.projectId,
+              receiverProjectId: receiver.projectId,
               ...(receiver.environmentId === null
                 ? {}
                 : { receiverEnvironmentId: receiver.environmentId }),
@@ -990,7 +990,7 @@ const rawLayer: Layer.Layer<
         // Inside the reply's transaction, so an answered Exchange is never left open.
         const closure = yield* writer.appendEventsInTransaction({
           commandId: replyClosureCommandIdFor(input.commandId),
-          squadronId: closeSquadronId,
+          projectId: closeProjectId,
           acceptedAt: input.acceptedAt,
           events: [closeEvent],
         });
@@ -1165,13 +1165,13 @@ const rawLayer: Layer.Layer<
         }
 
         const receiverId = ParticipantId.make(exchange.receiver_id);
-        const squadronId = SquadronId.make(exchange.project_id);
+        const projectId = LedgerProjectId.make(exchange.project_id);
         const correlationId = correlationIdFor(input.commandId);
         // A receiver on a peer server holds its own copy of this Exchange and
         // would keep owing a reply; a terminal notice travels the peer path to
         // close it there too.
         const remote = yield* findPeerCounterparty(sql, {
-          squadronId,
+          projectId,
           exchangeId: input.exchangeId,
           participantId: receiverId,
         });
@@ -1191,8 +1191,8 @@ const rawLayer: Layer.Layer<
                       exchangeId: input.exchangeId,
                       askerId: sender.participantId,
                     }),
-                    originProjectId: squadronId,
-                    receiverProjectId: remote.squadronId,
+                    originProjectId: projectId,
+                    receiverProjectId: remote.projectId,
                     receiverEnvironmentId: remote.environmentId,
                     exchangeRole: "terminal_notice",
                     envelopeChannel: "lifecycle_notice",
@@ -1203,7 +1203,7 @@ const rawLayer: Layer.Layer<
               ];
         const result = yield* ledger.appendEvents({
           commandId: input.commandId,
-          squadronId,
+          projectId,
           acceptedAt: input.acceptedAt,
           events: [
             {

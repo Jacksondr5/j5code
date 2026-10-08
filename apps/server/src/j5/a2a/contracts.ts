@@ -3,14 +3,14 @@ import { PeerSenderLabel } from "@t3tools/contracts/j5";
 import * as Schema from "effect/Schema";
 
 const Identifier = Schema.String.check(Schema.isNonEmpty());
-const SquadronName = Schema.String.check(
+const ProjectTitle = Schema.String.check(
   Schema.makeFilter((name) => name.trim().length > 0 || "A project title must not be blank."),
 );
 const PositiveInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
 const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 
-export const SquadronId = Identifier.pipe(Schema.brand("J5A2ASquadronId"));
-export type SquadronId = typeof SquadronId.Type;
+export const LedgerProjectId = Identifier.pipe(Schema.brand("J5A2ALedgerProjectId"));
+export type LedgerProjectId = typeof LedgerProjectId.Type;
 
 export const ExchangeId = Identifier.pipe(Schema.brand("J5A2AExchangeId"));
 export type ExchangeId = typeof ExchangeId.Type;
@@ -94,12 +94,12 @@ export type Participant = typeof Participant.Type;
 
 export const participantId = (participant: Participant): ParticipantId => participant.id;
 
-export const Squadron = Schema.Struct({
-  id: SquadronId,
-  name: SquadronName,
+export const ProjectLedger = Schema.Struct({
+  id: LedgerProjectId,
+  name: ProjectTitle,
   createdAt: Schema.String,
 });
-export type Squadron = typeof Squadron.Type;
+export type ProjectLedger = typeof ProjectLedger.Type;
 
 export const CommEventKind = Schema.Literals([
   "exchange.opened",
@@ -145,12 +145,12 @@ const NonMembershipCommEvent = Schema.Struct({
 });
 
 /**
- * The receiver Squadron's own row for a message another Squadron sent. When the
+ * The receiver project's own row for a message another project sent. When the
  * origin is a peer server, `originEnvironmentId` names it and the row is also
  * the fact this server delivers from, since no `message.sent` exists here.
  */
 export const MessageReceivedPayload = Schema.Struct({
-  originProjectId: SquadronId,
+  originProjectId: LedgerProjectId,
   originEnvironmentId: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
   /** The id and clock the origin used; this ledger keys and stamps the message itself. */
   originMessageId: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
@@ -197,7 +197,7 @@ export type CommEvent = typeof CommEvent.Type;
 
 const storedFields = {
   seq: PositiveInt,
-  squadronId: SquadronId,
+  projectId: LedgerProjectId,
 } as const;
 
 export const StoredCommEvent = Schema.Union([
@@ -209,14 +209,14 @@ export const StoredCommEvent = Schema.Union([
 export type StoredCommEvent = typeof StoredCommEvent.Type;
 
 export const EnsureProjectCommand = Schema.Struct({
-  projectId: SquadronId,
+  projectId: LedgerProjectId,
   createdAt: Schema.String,
 });
 export type EnsureProjectCommand = typeof EnsureProjectCommand.Type;
 
 export const AppendCommEventCommand = Schema.Struct({
   commandId: CommCommandId,
-  squadronId: SquadronId,
+  projectId: LedgerProjectId,
   acceptedAt: Schema.String,
   event: CommEvent,
 });
@@ -224,7 +224,7 @@ export type AppendCommEventCommand = typeof AppendCommEventCommand.Type;
 
 export const CommCommandReceipt = Schema.Struct({
   commandId: CommCommandId,
-  squadronId: SquadronId,
+  projectId: LedgerProjectId,
   commandType: Schema.Literal("comm.append"),
   acceptedAt: Schema.String,
   resultSeq: PositiveInt,
@@ -233,7 +233,7 @@ export type CommCommandReceipt = typeof CommCommandReceipt.Type;
 
 export const AppendCommEventsCommand = Schema.Struct({
   commandId: CommCommandId,
-  squadronId: SquadronId,
+  projectId: LedgerProjectId,
   acceptedAt: Schema.String,
   events: Schema.Array(CommEvent).pipe(Schema.check(Schema.isMinLength(1))),
 });
@@ -268,9 +268,9 @@ export const MessageSentPayload = Schema.Struct({
   terminal: Schema.optional(TerminalFact),
   messageId: LedgerMessageId,
   text: Schema.String.check(Schema.isNonEmpty()),
-  originProjectId: SquadronId,
-  receiverProjectId: SquadronId,
-  /** Present when the receiver's Squadron lives on a peer server. */
+  originProjectId: LedgerProjectId,
+  receiverProjectId: LedgerProjectId,
+  /** Present when the receiver's project lives on a peer server. */
   receiverEnvironmentId: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
   exchangeRole: Schema.Literals(["none", "ask", "followup", "reply", "terminal_notice"]),
   envelopeChannel: DeliveryEnvelopeChannel,
@@ -316,7 +316,7 @@ export const ExchangeDroppedPayload = Schema.Struct({
       "peer-removed",
     ]),
     participantId: ParticipantId,
-    projectId: SquadronId,
+    projectId: LedgerProjectId,
   }),
   facts: Schema.Struct({
     replyRequired: Schema.Literal(false),
@@ -386,7 +386,7 @@ export const SendMessageResult = Schema.Struct({
 export type SendMessageResult = typeof SendMessageResult.Type;
 
 export const ParticipantDirectoryRow = Schema.Struct({
-  squadronId: SquadronId,
+  projectId: LedgerProjectId,
   participantId: ParticipantId,
   participant: Participant,
   archived: Schema.Boolean,
@@ -397,7 +397,7 @@ export const ParticipantDirectoryRow = Schema.Struct({
 export type ParticipantDirectoryRow = typeof ParticipantDirectoryRow.Type;
 
 export const DeliveryAlarm = Schema.Struct({
-  squadronId: SquadronId,
+  projectId: LedgerProjectId,
   messageId: LedgerMessageId,
   attempts: PositiveInt,
   lastError: Schema.String,
@@ -405,7 +405,7 @@ export const DeliveryAlarm = Schema.Struct({
 export type DeliveryAlarm = typeof DeliveryAlarm.Type;
 
 export const DeliveryMilestone = Schema.Struct({
-  squadronId: SquadronId,
+  projectId: LedgerProjectId,
   messageId: LedgerMessageId,
   state: Schema.Literals(["delivered", "retry_scheduled", "alarmed", "cancelled"]),
   attempt: PositiveInt,
@@ -433,7 +433,7 @@ export const CommEventPage = Schema.Struct({
 export type CommEventPage = typeof CommEventPage.Type;
 
 export const Membership = Schema.Struct({
-  squadronId: SquadronId,
+  projectId: LedgerProjectId,
   participant: Participant,
   joinedSeq: PositiveInt,
   updatedSeq: PositiveInt,
@@ -442,7 +442,7 @@ export type Membership = typeof Membership.Type;
 
 export const HumanInboxItem = Schema.Struct({
   personId: ParticipantId,
-  projectId: SquadronId,
+  projectId: LedgerProjectId,
   projectTitle: Schema.String,
   exchangeId: ExchangeId,
   senderId: ParticipantId,

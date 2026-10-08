@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { J5SquadronCreationLayer } from "./a2a/runtimeLayer.ts";
+import { J5ThreadRegistrationLayer } from "./a2a/runtimeLayer.ts";
 // @effect-diagnostics nodeBuiltinImport:off globalTimersInEffect:off globalDateInEffect:off globalConsole:off - Standalone host-side benchmark owns an isolated process and temporary SQLite state.
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -41,7 +41,7 @@ import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 
 const OrchestrationV2LayerLive = UpstreamOrchestrationV2LayerLive.pipe(
-  Layer.provideMerge(J5SquadronCreationLayer),
+  Layer.provideMerge(J5ThreadRegistrationLayer),
 );
 
 const FLEET_SIZE = 30;

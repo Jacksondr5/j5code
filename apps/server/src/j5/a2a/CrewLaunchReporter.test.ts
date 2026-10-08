@@ -52,9 +52,9 @@ import { crewSeatBriefMessageId, crewSeatThreadId } from "./crewSeatIds.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
-import { ParticipantId, SquadronId } from "./contracts.ts";
+import { ParticipantId, LedgerProjectId } from "./contracts.ts";
 
-const squadronId = SquadronId.make("squadron:launch-report");
+const projectId = LedgerProjectId.make("ledger:launch-report");
 const captainThread = ThreadId.make("thread:captain");
 const captainId = ParticipantId.make("agent:j5:a2a:thread:captain");
 const createdAt = DateTime.makeUnsafe("2026-09-17T20:00:00.000Z");
@@ -150,7 +150,7 @@ const makeFixture = Effect.fn("test.j5.crewLaunchReporter.fixture")(function* (
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       yield* sql`INSERT INTO j5_a2a_human_person (person_id, is_local_operator, created_at) VALUES ('human:operator', 1, ${at})`;
-      yield* (yield* A2ALedger).ensureProject({ projectId: squadronId, createdAt: at });
+      yield* (yield* A2ALedger).ensureProject({ projectId: projectId, createdAt: at });
     }),
     context,
   );
@@ -234,7 +234,7 @@ const makeFixture = Effect.fn("test.j5.crewLaunchReporter.fixture")(function* (
       const crewId = `crew:${input.id}`;
       yield* proposals.create({
         id: input.id,
-        squadronId,
+        projectId,
         captainParticipantId: captainId,
         captainThreadId: captainThread,
         crewInstanceId: null,
@@ -246,7 +246,7 @@ const makeFixture = Effect.fn("test.j5.crewLaunchReporter.fixture")(function* (
       });
       yield* crews.record({
         id: crewId,
-        squadronId,
+        projectId,
         captainParticipantId: captainId,
         captainThreadId: captainThread,
         displayName: "Comedy",
@@ -291,7 +291,7 @@ const makeFixture = Effect.fn("test.j5.crewLaunchReporter.fixture")(function* (
     Effect.gen(function* () {
       yield* proposals.create({
         id: input.id,
-        squadronId,
+        projectId,
         captainParticipantId: captainId,
         captainThreadId: captainThread,
         crewInstanceId: input.crewId,

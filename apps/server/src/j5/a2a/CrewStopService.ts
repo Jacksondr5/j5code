@@ -7,7 +7,7 @@ import * as Layer from "effect/Layer";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { AgentCrewInstanceService, type AgentCrewMember } from "./AgentCrewInstanceService.ts";
 import { A2AArchiveFacts } from "./ArchiveFactsService.ts";
-import type { ParticipantId, SquadronId } from "./contracts.ts";
+import type { ParticipantId, LedgerProjectId } from "./contracts.ts";
 import { getThreadProjectionIfPresent } from "./threadProjectionReads.ts";
 
 /** `never_created`: the seat's row was recorded but its thread never came to exist. */
@@ -21,7 +21,7 @@ export interface StopCrewInput {
   /** The Captain calling over MCP, or null when a person stops the Crew from the app. */
   readonly callerParticipantId: ParticipantId | null;
   /** The caller's project when an agent calls; the Crew must live there. */
-  readonly squadronId: SquadronId | null;
+  readonly projectId: LedgerProjectId | null;
   readonly crewInstanceId: string;
   /** Deterministic per seat so a retried stop cannot interrupt twice. */
   readonly commandIds: (seatName: string) => { readonly interruptCommandId: CommandId };
@@ -123,9 +123,9 @@ export const layer = Layer.effect(
           );
         if (instance === null)
           return yield* new CrewStopNotFoundError({ crewInstanceId: input.crewInstanceId });
-        if (input.squadronId !== null && instance.squadronId !== input.squadronId)
+        if (input.projectId !== null && instance.projectId !== input.projectId)
           return yield* new CrewStopRequestError({
-            detail: `Crew ${instance.id} lives in project ${instance.squadronId}, and the caller is in project ${input.squadronId}.`,
+            detail: `Crew ${instance.id} lives in project ${instance.projectId}, and the caller is in project ${input.projectId}.`,
             nextStep: "A Captain stops a Crew from the Crew's own project.",
           });
         if (

@@ -12,7 +12,7 @@ import {
 } from "./HomeRegistrar.ts";
 import { A2ALedgerTransactionWriter } from "./LedgerService.ts";
 import { ParticipantPlacementTransactionWriter, type PlacementError } from "./PlacementService.ts";
-import type { CommCommandId, SquadronId } from "./contracts.ts";
+import type { CommCommandId, LedgerProjectId } from "./contracts.ts";
 import type {
   ParticipantPlacement,
   ParticipantProvenance,
@@ -22,7 +22,7 @@ import type {
 export interface RecordSpawnFactsInput {
   readonly homeCommandId: CommCommandId;
   readonly placementCommandId: PlacementCommandId;
-  readonly squadronId: SquadronId;
+  readonly projectId: LedgerProjectId;
   readonly threadId: ThreadId;
   readonly provenance: ParticipantProvenance;
   readonly createdAt: string;
@@ -76,13 +76,13 @@ export const layer: Layer.Layer<
               Effect.gen(function* () {
                 const registered = yield* homes.registerAtCreationInTransaction({
                   commandId: input.homeCommandId,
-                  squadronId: input.squadronId,
+                  projectId: input.projectId,
                   threadId: input.threadId,
                   createdAt: input.createdAt,
                 });
                 const placement = yield* placements.recordCreationInTransaction({
                   commandId: input.placementCommandId,
-                  squadronId: input.squadronId,
+                  projectId: input.projectId,
                   participantId: registered.home.participantId,
                   actor: "agent",
                   provenance: input.provenance,

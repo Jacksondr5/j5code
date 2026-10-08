@@ -1,12 +1,12 @@
 import * as Effect from "effect/Effect";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
 
-import { type ExchangeId, type ParticipantId, SquadronId } from "./contracts.ts";
+import { type ExchangeId, type ParticipantId, LedgerProjectId } from "./contracts.ts";
 
 /** Where a participant lives when it is on a peer server. */
 export interface PeerCounterparty {
   readonly environmentId: string;
-  readonly squadronId: SquadronId;
+  readonly projectId: LedgerProjectId;
 }
 
 interface RouteRow {
@@ -28,7 +28,7 @@ interface RouteRow {
 export const findPeerCounterparty = Effect.fn("j5.a2a.peerCounterparty")(function* (
   sql: SqlClient.SqlClient,
   input: {
-    readonly squadronId: SquadronId;
+    readonly projectId: LedgerProjectId;
     readonly exchangeId: ExchangeId;
     readonly participantId: ParticipantId;
   },
@@ -36,7 +36,7 @@ export const findPeerCounterparty = Effect.fn("j5.a2a.peerCounterparty")(functio
   const outbound = yield* sql<RouteRow>`
     SELECT receiver_environment_id AS environment_id, receiver_project_id AS project_id
     FROM j5_a2a_delivery
-    WHERE project_id = ${input.squadronId}
+    WHERE project_id = ${input.projectId}
       AND exchange_id = ${input.exchangeId}
       AND receiver_id = ${input.participantId}
       AND receiver_environment_id IS NOT NULL
@@ -49,7 +49,7 @@ export const findPeerCounterparty = Effect.fn("j5.a2a.peerCounterparty")(functio
       json_extract(payload, '$.originEnvironmentId') AS environment_id,
       json_extract(payload, '$.originProjectId') AS project_id
     FROM j5_a2a_comm_event
-    WHERE project_id = ${input.squadronId}
+    WHERE project_id = ${input.projectId}
       AND kind = 'message.received'
       AND exchange_id = ${input.exchangeId}
       AND sender = ${input.participantId}
@@ -115,5 +115,5 @@ export const isRoutedElsewhere = Effect.fn("j5.a2a.peerRoutedElsewhere")(functio
 
 const toCounterparty = (row: RouteRow): PeerCounterparty => ({
   environmentId: row.environment_id,
-  squadronId: SquadronId.make(row.project_id),
+  projectId: LedgerProjectId.make(row.project_id),
 });

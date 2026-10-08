@@ -22,15 +22,15 @@ import {
   type ArchiveCrewInput,
 } from "./ArchiveCrewService.ts";
 import { PlaybookStore } from "../playbooks/PlaybookStore.ts";
-import { ExchangeId, ParticipantId, SquadronId } from "./contracts.ts";
+import { ExchangeId, ParticipantId, LedgerProjectId } from "./contracts.ts";
 
-const squadronId = SquadronId.make("squadron:j5:archive-crew");
+const projectId = LedgerProjectId.make("project:j5:archive-crew");
 const captain = ParticipantId.make("agent:j5:a2a:captain");
 const builder = ParticipantId.make("agent:j5:a2a:thread:builder");
 const critic = ParticipantId.make("agent:j5:a2a:thread:critic");
 const instance: AgentCrewInstance = {
   id: "crew:j5:test",
-  squadronId,
+  projectId,
   captainParticipantId: captain,
   captainThreadId: ThreadId.make("t:captain"),
   brief: "Implement and review the login fix.",
@@ -160,7 +160,7 @@ const fixture = Effect.gen(function* () {
   const input = (overrides: Partial<ArchiveCrewInput> = {}): ArchiveCrewInput => ({
     providerSessionId: "session",
     callerParticipantId: captain,
-    squadronId,
+    projectId,
     crewInstanceId: instance.id,
     clientRequestKey: "archive-1",
     archivedAt: "2026-09-09T17:00:00.000Z",
@@ -356,7 +356,7 @@ it.effect("retires the unit for a person whose dialog already listed every seat'
     yield* Effect.gen(function* () {
       const service = yield* ArchiveCrewService;
       // The person's archive dialog reads the same seat facts the Captain's refusal would carry.
-      const before = yield* service.readCaptainFacts({ squadronId, captainParticipantId: captain });
+      const before = yield* service.readCaptainFacts({ projectId, captainParticipantId: captain });
       assert.deepStrictEqual(
         before.map((entry) => [
           entry.instance.id,
@@ -377,13 +377,13 @@ it.effect("retires the unit for a person whose dialog already listed every seat'
         ],
       );
       assert.deepStrictEqual(
-        yield* service.readCaptainFacts({ squadronId, captainParticipantId: builder }),
+        yield* service.readCaptainFacts({ projectId, captainParticipantId: builder }),
         [],
       );
 
       // No token is minted or checked: the person is not a participant and confirmed already.
       const outcome = yield* service.archive(
-        input({ callerParticipantId: null, squadronId: null, confirmationSatisfied: true }),
+        input({ callerParticipantId: null, projectId: null, confirmationSatisfied: true }),
       );
       assert.equal(outcome.status, "archived");
       assert.deepStrictEqual(
@@ -400,7 +400,7 @@ it.effect("retires the unit for a person whose dialog already listed every seat'
       assert.deepStrictEqual(yield* Ref.get(marked), [instance.id]);
       // Once retired, the Captain commands no live Crew and may be archived on its own.
       assert.deepStrictEqual(
-        yield* service.readCaptainFacts({ squadronId, captainParticipantId: captain }),
+        yield* service.readCaptainFacts({ projectId, captainParticipantId: captain }),
         [],
       );
     }).pipe(Effect.provide(layer));

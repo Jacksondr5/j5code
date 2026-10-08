@@ -16,7 +16,7 @@ import {
   AgentParticipant,
   CommCommandId,
   ExchangeId,
-  SquadronId,
+  LedgerProjectId,
   ParticipantId,
 } from "./contracts.ts";
 
@@ -57,15 +57,15 @@ const registerPerson = Effect.fn("test.j5.a2a.registerPerson")(function* () {
   `;
 });
 
-const setupSameSquadron = Effect.fn("test.j5.a2a.setupSameSquadron")(function* () {
+const setupSameProject = Effect.fn("test.j5.a2a.setupSameProject")(function* () {
   yield* runJ5A2AMigrations();
   const ledgerService = yield* A2ALedger;
-  const squadronId = SquadronId.make("squadron:exchange");
-  yield* ledgerService.ensureProject({ projectId: squadronId, createdAt: timestamp });
+  const projectId = LedgerProjectId.make("project:exchange");
+  yield* ledgerService.ensureProject({ projectId: projectId, createdAt: timestamp });
   for (const [index, participant] of [sender, receiver].entries()) {
     yield* ledgerService.append({
       commandId: CommCommandId.make(`command:join:${index}`),
-      squadronId,
+      projectId,
       acceptedAt: timestamp,
       event: {
         kind: "participant.joined",
@@ -78,12 +78,12 @@ const setupSameSquadron = Effect.fn("test.j5.a2a.setupSameSquadron")(function* (
       },
     });
   }
-  return squadronId;
+  return projectId;
 });
 
 it.effect("opens once per sender-receiver pair, joins follow-ups, and one reply closes", () =>
   Effect.gen(function* () {
-    const squadronId = yield* setupSameSquadron();
+    const projectId = yield* setupSameProject();
     const service = yield* A2ASendService;
     const sql = yield* SqlClient.SqlClient;
 
@@ -126,7 +126,7 @@ it.effect("opens once per sender-receiver pair, joins follow-ups, and one reply 
         acceptedAt: timestamp,
       }),
       reply,
-      "the same-squadron reply command replays its original durable sequence",
+      "the same-project reply command replays its original durable sequence",
     );
     assert.deepStrictEqual(
       yield* service.send({
@@ -157,7 +157,7 @@ it.effect("opens once per sender-receiver pair, joins follow-ups, and one reply 
     const rows = yield* sql<{ readonly kind: string; readonly count: number }>`
       SELECT kind, COUNT(*) AS count
       FROM j5_a2a_comm_event
-      WHERE project_id = ${squadronId}
+      WHERE project_id = ${projectId}
         AND kind IN ('exchange.opened', 'message.sent', 'exchange.closed')
       GROUP BY kind
       ORDER BY kind
@@ -184,7 +184,7 @@ it.effect("opens once per sender-receiver pair, joins follow-ups, and one reply 
 
 it.effect("refuses a second reply when an accepted reply exists on an open exchange", () =>
   Effect.gen(function* () {
-    yield* setupSameSquadron();
+    yield* setupSameProject();
     const service = yield* A2ASendService;
     const sql = yield* SqlClient.SqlClient;
     const opened = yield* service.send({
@@ -234,19 +234,19 @@ it.effect("refuses a second reply when an accepted reply exists on an open excha
   }).pipe(Effect.provide(testLayer)),
 );
 
-const setupTwoSquadrons = Effect.fn("test.j5.a2a.setupTwoSquadrons")(function* () {
+const setupTwoProjects = Effect.fn("test.j5.a2a.setupTwoProjects")(function* () {
   yield* runJ5A2AMigrations();
   const ledgerService = yield* A2ALedger;
-  const askerSquadronId = SquadronId.make("squadron:exchange:asker");
-  const replierSquadronId = SquadronId.make("squadron:exchange:replier");
-  for (const [squadronId, participant] of [
-    [askerSquadronId, sender],
-    [replierSquadronId, receiver],
+  const askerProjectId = LedgerProjectId.make("project:exchange:asker");
+  const replierProjectId = LedgerProjectId.make("project:exchange:replier");
+  for (const [projectId, participant] of [
+    [askerProjectId, sender],
+    [replierProjectId, receiver],
   ] as const) {
-    yield* ledgerService.ensureProject({ projectId: squadronId, createdAt: timestamp });
+    yield* ledgerService.ensureProject({ projectId: projectId, createdAt: timestamp });
     yield* ledgerService.append({
       commandId: CommCommandId.make(`command:join:${participant.id}`),
-      squadronId,
+      projectId,
       acceptedAt: timestamp,
       event: {
         kind: "participant.joined",
@@ -259,13 +259,13 @@ const setupTwoSquadrons = Effect.fn("test.j5.a2a.setupTwoSquadrons")(function* (
       },
     });
   }
-  return { askerSquadronId, replierSquadronId };
+  return { askerProjectId, replierProjectId };
 });
 
 /** Every event of one ledger in order; `readEvents` fails on a sequence gap. */
-const ledgerEvents = Effect.fn("test.j5.a2a.ledgerEvents")(function* (squadronId: SquadronId) {
+const ledgerEvents = Effect.fn("test.j5.a2a.ledgerEvents")(function* (projectId: LedgerProjectId) {
   const page = yield* (yield* A2ALedger).readEvents({
-    squadronId,
+    projectId,
     cursor: { afterSeq: 0 },
     limit: 100,
   });
@@ -277,9 +277,9 @@ const ledgerEvents = Effect.fn("test.j5.a2a.ledgerEvents")(function* (squadronId
   return page.events.map((event) => event.kind);
 });
 
-it.effect("one reply from another Squadron closes the asker's Exchange in the asker's ledger", () =>
+it.effect("one reply from another project closes the asker's Exchange in the asker's ledger", () =>
   Effect.gen(function* () {
-    const { askerSquadronId, replierSquadronId } = yield* setupTwoSquadrons();
+    const { askerProjectId, replierProjectId } = yield* setupTwoProjects();
     const service = yield* A2ASendService;
     const sql = yield* SqlClient.SqlClient;
 
@@ -316,14 +316,14 @@ it.effect("one reply from another Squadron closes the asker's Exchange in the as
     assert.equal(reply.exchangeState, "closed");
     assert.isFalse(reply.joinedExistingExchange);
 
-    assert.deepStrictEqual(yield* ledgerEvents(askerSquadronId), [
+    assert.deepStrictEqual(yield* ledgerEvents(askerProjectId), [
       "participant.joined",
       "exchange.opened",
       "message.sent",
       "message.sent",
       "exchange.closed",
     ]);
-    assert.deepStrictEqual(yield* ledgerEvents(replierSquadronId), [
+    assert.deepStrictEqual(yield* ledgerEvents(replierProjectId), [
       "participant.joined",
       "message.sent",
     ]);
@@ -338,7 +338,7 @@ it.effect("one reply from another Squadron closes the asker's Exchange in the as
         FROM j5_a2a_exchange
         WHERE exchange_id = ${opened.exchangeId}
       `,
-      [{ project_id: askerSquadronId, status: "closed", closed_seq: 5 }],
+      [{ project_id: askerProjectId, status: "closed", closed_seq: 5 }],
     );
     assert.deepStrictEqual(
       yield* sql<{ readonly project_id: string; readonly receiver_project_id: string }>`
@@ -346,7 +346,7 @@ it.effect("one reply from another Squadron closes the asker's Exchange in the as
         FROM j5_a2a_delivery
         WHERE exchange_id = ${opened.exchangeId} AND exchange_role = 'reply'
       `,
-      [{ project_id: replierSquadronId, receiver_project_id: askerSquadronId }],
+      [{ project_id: replierProjectId, receiver_project_id: askerProjectId }],
     );
 
     const secondReply = yield* Effect.flip(
@@ -371,14 +371,14 @@ it.effect("one reply from another Squadron closes the asker's Exchange in the as
       }),
     );
     assert.equal(lateFollowup._tag, "A2AExchangeNotOpenError");
-    assert.lengthOf(yield* ledgerEvents(askerSquadronId), 5);
-    assert.lengthOf(yield* ledgerEvents(replierSquadronId), 2);
+    assert.lengthOf(yield* ledgerEvents(askerProjectId), 5);
+    assert.lengthOf(yield* ledgerEvents(replierProjectId), 2);
   }).pipe(Effect.provide(testLayer)),
 );
 
-it.effect("replaying a reply to another Squadron writes nothing to either ledger", () =>
+it.effect("replaying a reply to another project writes nothing to either ledger", () =>
   Effect.gen(function* () {
-    const { askerSquadronId, replierSquadronId } = yield* setupTwoSquadrons();
+    const { askerProjectId, replierProjectId } = yield* setupTwoProjects();
     const service = yield* A2ASendService;
     const sql = yield* SqlClient.SqlClient;
     const opened = yield* service.send({
@@ -387,7 +387,7 @@ it.effect("replaying a reply to another Squadron writes nothing to either ledger
       to: receiver.id,
       message: "Can this reply be replayed?",
       expectReply: true,
-      intent: "Exercise cross-Squadron reply replay",
+      intent: "Exercise cross-project reply replay",
       acceptedAt: timestamp,
     });
     const replyInput = {
@@ -401,8 +401,8 @@ it.effect("replaying a reply to another Squadron writes nothing to either ledger
     const reply = yield* service.send(replyInput);
     const written = Effect.gen(function* () {
       return {
-        asker: yield* ledgerEvents(askerSquadronId),
-        replier: yield* ledgerEvents(replierSquadronId),
+        asker: yield* ledgerEvents(askerProjectId),
+        replier: yield* ledgerEvents(replierProjectId),
         receipts: (yield* sql<{ readonly count: number }>`
           SELECT COUNT(*) AS count FROM j5_a2a_comm_command_receipt
         `)[0]?.count,
@@ -419,9 +419,9 @@ it.effect("replaying a reply to another Squadron writes nothing to either ledger
   }).pipe(Effect.provide(testLayer)),
 );
 
-it.effect("refuses a second reply to another Squadron while the closure is missing", () =>
+it.effect("refuses a second reply to another project while the closure is missing", () =>
   Effect.gen(function* () {
-    yield* setupTwoSquadrons();
+    yield* setupTwoProjects();
     const service = yield* A2ASendService;
     const sql = yield* SqlClient.SqlClient;
     const opened = yield* service.send({
@@ -430,7 +430,7 @@ it.effect("refuses a second reply to another Squadron while the closure is missi
       to: receiver.id,
       message: "Only one reply may land.",
       expectReply: true,
-      intent: "Exercise the one-reply rule across Squadrons",
+      intent: "Exercise the one-reply rule across projects",
       acceptedAt: timestamp,
     });
     yield* service.send({
@@ -464,7 +464,7 @@ it.effect("refuses a second reply to another Squadron while the closure is missi
 
 it.effect("validates intent and human-only urgency at exchange open", () =>
   Effect.gen(function* () {
-    yield* setupSameSquadron();
+    yield* setupSameProject();
     const service = yield* A2ASendService;
     yield* registerPerson();
 
@@ -534,7 +534,7 @@ it.effect("validates intent and human-only urgency at exchange open", () =>
 
 it.effect("refuses plain human sends while allowing human asks and replies", () =>
   Effect.gen(function* () {
-    const squadronId = yield* setupSameSquadron();
+    const projectId = yield* setupSameProject();
     yield* registerPerson();
     const service = yield* A2ASendService;
     const ledgerService = yield* A2ALedger;
@@ -610,7 +610,7 @@ it.effect("refuses plain human sends while allowing human asks and replies", () 
     const inboundExchangeId = ExchangeId.make("exchange:human-inbound");
     yield* ledgerService.append({
       commandId: CommCommandId.make("command:human-inbound"),
-      squadronId,
+      projectId,
       acceptedAt: timestamp,
       event: {
         kind: "exchange.opened",
@@ -636,7 +636,7 @@ it.effect("refuses plain human sends while allowing human asks and replies", () 
 
 it.effect("rolls back the send receipt when its projection write fails", () =>
   Effect.gen(function* () {
-    yield* setupSameSquadron();
+    yield* setupSameProject();
     const service = yield* A2ASendService;
     const sql = yield* SqlClient.SqlClient;
     const command = CommCommandId.make("command:receipt-rollback");
@@ -687,7 +687,7 @@ it.effect("fails closed for a caller that is not a registrable thread", () =>
     yield* runJ5A2AMigrations();
     const service = yield* A2ASendService;
     const sql = yield* SqlClient.SqlClient;
-    const unknownThreadId = ThreadId.make("thread:native-without-home-squadron");
+    const unknownThreadId = ThreadId.make("thread:native-without-home-project");
     const subagentThreadId = ThreadId.make("thread:subagent-without-home");
     yield* sql`
       INSERT INTO orchestration_v2_projection_threads (
@@ -720,27 +720,27 @@ it.effect("fails closed for a caller that is not a registrable thread", () =>
       assert.equal(sendError._tag, "A2ASenderNotJoinedError");
     }
 
-    const state = yield* sql<{ readonly squadrons: number; readonly events: number }>`
+    const state = yield* sql<{ readonly projects: number; readonly events: number }>`
       SELECT
-        (SELECT COUNT(*) FROM j5_a2a_project_ledger) AS squadrons,
+        (SELECT COUNT(*) FROM j5_a2a_project_ledger) AS projects,
         (SELECT COUNT(*) FROM j5_a2a_comm_event) AS events
     `;
-    assert.deepStrictEqual(state, [{ squadrons: 0, events: 0 }]);
+    assert.deepStrictEqual(state, [{ projects: 0, events: 0 }]);
   }).pipe(Effect.provide(testLayer)),
 );
 
 it.effect("fails loudly when active membership diverges from the immutable home", () =>
   Effect.gen(function* () {
-    const homeSquadronId = yield* setupSameSquadron();
+    const homeProjectId = yield* setupSameProject();
     const service = yield* A2ASendService;
     const ledgerService = yield* A2ALedger;
     const sql = yield* SqlClient.SqlClient;
-    const corruptedSquadronId = SquadronId.make("squadron:corrupted-projection");
-    yield* ledgerService.ensureProject({ projectId: corruptedSquadronId, createdAt: timestamp });
+    const corruptedProjectId = LedgerProjectId.make("project:corrupted-projection");
+    yield* ledgerService.ensureProject({ projectId: corruptedProjectId, createdAt: timestamp });
     yield* sql`
       UPDATE j5_a2a_membership
-      SET project_id = ${corruptedSquadronId}
-      WHERE project_id = ${homeSquadronId}
+      SET project_id = ${corruptedProjectId}
+      WHERE project_id = ${homeProjectId}
         AND participant_id = ${sender.id}
     `;
 
@@ -748,11 +748,11 @@ it.effect("fails loudly when active membership diverges from the immutable home"
 
     assert.equal(error._tag, "A2AHomeMembershipStateError");
     if (error._tag === "A2AHomeMembershipStateError") {
-      assert.equal(error.expectedSquadronId, homeSquadronId);
+      assert.equal(error.expectedProjectId, homeProjectId);
       assert.equal(error.expectedParticipantId, sender.id);
-      assert.deepStrictEqual(error.activeHomes, [`${corruptedSquadronId}:${sender.id}`]);
-      assert.include(error.message, `is registered as ${homeSquadronId}:${sender.id}`);
-      assert.include(error.message, `its active membership is ${corruptedSquadronId}:${sender.id}`);
+      assert.deepStrictEqual(error.activeHomes, [`${corruptedProjectId}:${sender.id}`]);
+      assert.include(error.message, `is registered as ${homeProjectId}:${sender.id}`);
+      assert.include(error.message, `its active membership is ${corruptedProjectId}:${sender.id}`);
       assert.include(error.message, "Tell the human; do not retry");
       assert.notInclude(error.message, "no registered home squadron");
     }
@@ -761,12 +761,12 @@ it.effect("fails loudly when active membership diverges from the immutable home"
 
 it.effect("fails closed when an extra active membership accompanies the correct home", () =>
   Effect.gen(function* () {
-    const homeSquadronId = yield* setupSameSquadron();
+    const homeProjectId = yield* setupSameProject();
     const service = yield* A2ASendService;
     const ledgerService = yield* A2ALedger;
     const sql = yield* SqlClient.SqlClient;
-    const extraSquadronId = SquadronId.make("squadron:additive-projection-corruption");
-    yield* ledgerService.ensureProject({ projectId: extraSquadronId, createdAt: timestamp });
+    const extraProjectId = LedgerProjectId.make("project:additive-projection-corruption");
+    yield* ledgerService.ensureProject({ projectId: extraProjectId, createdAt: timestamp });
     yield* sql`
       INSERT INTO j5_a2a_membership (
         project_id,
@@ -778,7 +778,7 @@ it.effect("fails closed when an extra active membership accompanies the correct 
         payload
       )
       SELECT
-        ${extraSquadronId},
+        ${extraProjectId},
         participant_id,
         participant_kind,
         thread_id,
@@ -786,7 +786,7 @@ it.effect("fails closed when an extra active membership accompanies the correct 
         updated_seq,
         payload
       FROM j5_a2a_membership
-      WHERE project_id = ${homeSquadronId}
+      WHERE project_id = ${homeProjectId}
         AND participant_id = ${sender.id}
     `;
 
@@ -803,8 +803,8 @@ it.effect("fails closed when an extra active membership accompanies the correct 
     assert.equal(error._tag, "A2AHomeMembershipStateError");
     if (error._tag === "A2AHomeMembershipStateError") {
       assert.deepStrictEqual([...error.activeHomes].sort(), [
-        `${extraSquadronId}:${sender.id}`,
-        `${homeSquadronId}:${sender.id}`,
+        `${extraProjectId}:${sender.id}`,
+        `${homeProjectId}:${sender.id}`,
       ]);
     }
   }).pipe(Effect.provide(testLayer)),
@@ -812,12 +812,12 @@ it.effect("fails closed when an extra active membership accompanies the correct 
 
 it.effect("reports a legitimately retired sender without prescribing projection repair", () =>
   Effect.gen(function* () {
-    const squadronId = yield* setupSameSquadron();
+    const projectId = yield* setupSameProject();
     const service = yield* A2ASendService;
     const ledgerService = yield* A2ALedger;
     yield* ledgerService.append({
       commandId: CommCommandId.make("command:sender:retired"),
-      squadronId,
+      projectId,
       acceptedAt: timestamp,
       event: {
         kind: "participant.left",
@@ -843,18 +843,18 @@ it.effect("reports a legitimately retired sender without prescribing projection 
     assert.equal(error._tag, "A2ASenderRetiredError");
     if (error._tag === "A2ASenderRetiredError") {
       assert.equal(error.threadId, sender.threadId);
-      assert.equal(error.squadronId, squadronId);
+      assert.equal(error.projectId, projectId);
       assert.equal(error.participantId, sender.id);
-      assert.include(error.message, `was retired from ${squadronId}:${sender.id}`);
+      assert.include(error.message, `was retired from ${projectId}:${sender.id}`);
       assert.include(error.message, "participant.left");
       assert.include(error.message, "cannot send cross-agent messages");
       assert.include(error.message, "Do not repair the projection");
       assert.include(error.message, "stop this messaging attempt");
       assert.notInclude(error.message, "no registered home squadron");
     }
-    assert.deepStrictEqual(yield* ledgerService.listMembership(squadronId), [
+    assert.deepStrictEqual(yield* ledgerService.listMembership(projectId), [
       {
-        squadronId,
+        projectId,
         participant: receiver,
         joinedSeq: 2,
         updatedSeq: 2,
@@ -869,19 +869,19 @@ it.effect("ignores left events that do not identify a later retirement of the ex
     const service = yield* A2ASendService;
     const ledgerService = yield* A2ALedger;
     const sql = yield* SqlClient.SqlClient;
-    const homeSquadronId = SquadronId.make("squadron:retirement-decoys:home");
-    const foreignSquadronId = SquadronId.make("squadron:retirement-decoys:foreign");
-    yield* ledgerService.ensureProject({ projectId: homeSquadronId, createdAt: timestamp });
-    yield* ledgerService.ensureProject({ projectId: foreignSquadronId, createdAt: timestamp });
+    const homeProjectId = LedgerProjectId.make("project:retirement-decoys:home");
+    const foreignProjectId = LedgerProjectId.make("project:retirement-decoys:foreign");
+    yield* ledgerService.ensureProject({ projectId: homeProjectId, createdAt: timestamp });
+    yield* ledgerService.ensureProject({ projectId: foreignProjectId, createdAt: timestamp });
     const appendAgentEvent = (
-      squadronId: SquadronId,
+      projectId: LedgerProjectId,
       commandId: string,
       kind: "participant.joined" | "participant.left",
       participant: AgentParticipant,
     ) =>
       ledgerService.append({
         commandId: CommCommandId.make(commandId),
-        squadronId,
+        projectId,
         acceptedAt: timestamp,
         event: {
           kind,
@@ -895,26 +895,26 @@ it.effect("ignores left events that do not identify a later retirement of the ex
       });
 
     yield* appendAgentEvent(
-      homeSquadronId,
+      homeProjectId,
       "command:retirement-decoys:pre-join-left",
       "participant.left",
       sender,
     );
     yield* appendAgentEvent(
-      homeSquadronId,
+      homeProjectId,
       "command:retirement-decoys:sender-join",
       "participant.joined",
       sender,
     );
     yield* appendAgentEvent(
-      homeSquadronId,
+      homeProjectId,
       "command:retirement-decoys:receiver-join",
       "participant.joined",
       receiver,
     );
     for (const index of [1, 2]) {
       yield* appendAgentEvent(
-        foreignSquadronId,
+        foreignProjectId,
         `command:retirement-decoys:foreign-padding:${index}`,
         "participant.joined",
         {
@@ -925,13 +925,13 @@ it.effect("ignores left events that do not identify a later retirement of the ex
       );
     }
     yield* appendAgentEvent(
-      foreignSquadronId,
+      foreignProjectId,
       "command:retirement-decoys:foreign-left",
       "participant.left",
       sender,
     );
     yield* appendAgentEvent(
-      homeSquadronId,
+      homeProjectId,
       "command:retirement-decoys:wrong-participant-left",
       "participant.left",
       {
@@ -951,7 +951,7 @@ it.effect("ignores left events that do not identify a later retirement of the ex
     const sequenceRows = yield* sql<{ readonly next_seq: number }>`
       SELECT COALESCE(MAX(seq), 0) + 1 AS next_seq
       FROM j5_a2a_comm_event
-      WHERE project_id = ${homeSquadronId}
+      WHERE project_id = ${homeProjectId}
     `;
     const decoySeq = sequenceRows[0]!.next_seq;
     yield* sql`
@@ -968,7 +968,7 @@ it.effect("ignores left events that do not identify a later retirement of the ex
         command_id
       ) VALUES (
         ${decoySeq},
-        ${homeSquadronId},
+        ${homeProjectId},
         'participant.left',
         ${wrongThreadParticipant.id},
         NULL,
@@ -995,7 +995,7 @@ it.effect("ignores left events that do not identify a later retirement of the ex
 
 it.effect("lists member agents and registry-derived person capabilities", () =>
   Effect.gen(function* () {
-    yield* setupSameSquadron();
+    yield* setupSameProject();
     yield* registerPerson();
     const secondPersonId = ParticipantId.make("human:send-person-two");
     const sql = yield* SqlClient.SqlClient;
@@ -1043,17 +1043,17 @@ it.effect("lists member agents and registry-derived person capabilities", () =>
 
 it.effect("marks duplicate participant identities unavailable before send", () =>
   Effect.gen(function* () {
-    yield* setupSameSquadron();
+    yield* setupSameProject();
     const ledgerService = yield* A2ALedger;
-    const duplicateSquadronId = SquadronId.make("squadron:exchange:duplicate-receiver");
+    const duplicateProjectId = LedgerProjectId.make("project:exchange:duplicate-receiver");
     const duplicateReceiver = {
       ...receiver,
       threadId: ThreadId.make("thread:receiver:duplicate-identity"),
     };
-    yield* ledgerService.ensureProject({ projectId: duplicateSquadronId, createdAt: timestamp });
+    yield* ledgerService.ensureProject({ projectId: duplicateProjectId, createdAt: timestamp });
     yield* ledgerService.appendEvents({
       commandId: CommCommandId.make("command:join:duplicate-receiver"),
-      squadronId: duplicateSquadronId,
+      projectId: duplicateProjectId,
       acceptedAt: timestamp,
       events: [
         {

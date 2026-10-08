@@ -82,7 +82,7 @@ export const ensureLocalOperatorHumanPerson = Effect.fn(
   );
 });
 
-/** Runtime startup mints one durable host-local operator without Squadron state. */
+/** Runtime startup mints one durable host-local operator without project state. */
 export const humanPersonRegistryLayer = Layer.effectDiscard(
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;

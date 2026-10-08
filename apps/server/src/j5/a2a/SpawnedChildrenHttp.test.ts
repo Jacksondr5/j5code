@@ -4,7 +4,7 @@ import { ThreadId } from "@t3tools/contracts";
 import type { AgentCrewInstance } from "./AgentCrewInstanceService.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
 import { projectSpawnedChildren, threadIdForParticipant } from "./SpawnedChildrenHttp.ts";
-import { ParticipantId, SquadronId } from "./contracts.ts";
+import { ParticipantId, LedgerProjectId } from "./contracts.ts";
 
 const captainThread = ThreadId.make("thread:captain");
 const builderThread = ThreadId.make("thread:builder");
@@ -15,7 +15,7 @@ const helper = participantIdForThread(helperThread);
 
 const crew: AgentCrewInstance = {
   id: "crew:1",
-  squadronId: SquadronId.make("squadron:children"),
+  projectId: LedgerProjectId.make("project:children"),
   captainParticipantId: captain,
   captainThreadId: captainThread,
   brief: "Implement and review the login fix.",

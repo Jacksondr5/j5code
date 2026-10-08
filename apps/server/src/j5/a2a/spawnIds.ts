@@ -97,13 +97,13 @@ const briefLine = (text: string) => text.replace(/\s+/g, " ").trim().replace(/<\
 export const spawnFirstTurnText = (input: {
   readonly brief: string;
   readonly participantId: string;
-  readonly squadronId: string;
-  readonly squadronName: string;
+  readonly projectId: string;
+  readonly projectTitle: string;
   readonly spawnedByParticipantId: string;
   readonly spawnerThreadId: string;
   readonly crew?: CrewBriefContext;
 }) => {
-  const identity = `<j5_spawn_context>\nPlatform-provided identity facts:\nparticipant_id: ${input.participantId}\nproject_id: ${input.squadronId}\nproject_title: ${input.squadronName}\nspawned_by: ${input.spawnedByParticipantId}\nspawner_thread_id: ${input.spawnerThreadId}\n</j5_spawn_context>`;
+  const identity = `<j5_spawn_context>\nPlatform-provided identity facts:\nparticipant_id: ${input.participantId}\nproject_id: ${input.projectId}\nproject_title: ${input.projectTitle}\nspawned_by: ${input.spawnedByParticipantId}\nspawner_thread_id: ${input.spawnerThreadId}\n</j5_spawn_context>`;
   const brief = `<spawner_brief>\n${input.brief}\n</spawner_brief>`;
   if (input.crew === undefined) return `${identity}\n\n${brief}`;
   const crew = input.crew;

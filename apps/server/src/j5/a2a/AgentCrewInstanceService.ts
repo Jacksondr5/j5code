@@ -9,7 +9,7 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 
 import { makeKeyedSerialExecutor } from "../../orchestration-v2/KeyedSerialExecutor.ts";
 import type { CrewPlaybookRef } from "./AgentCrewProposalService.ts";
-import { ParticipantId, type SquadronId } from "./contracts.ts";
+import { ParticipantId, type LedgerProjectId } from "./contracts.ts";
 
 export interface AgentCrewMember {
   readonly seatName: string;
@@ -40,7 +40,7 @@ export class CrewStepAlreadyOwnedError extends Data.TaggedError("CrewStepAlready
 
 export interface AgentCrewInstance {
   readonly id: string;
-  readonly squadronId: SquadronId;
+  readonly projectId: LedgerProjectId;
   readonly captainParticipantId: ParticipantId;
   readonly captainThreadId: ThreadId;
   readonly displayName: string;
@@ -55,7 +55,7 @@ export interface AgentCrewInstance {
 
 export interface RecordAgentCrewInput {
   readonly id: string;
-  readonly squadronId: SquadronId;
+  readonly projectId: LedgerProjectId;
   readonly captainParticipantId: ParticipantId;
   readonly captainThreadId: ThreadId;
   readonly displayName: string;
@@ -120,13 +120,13 @@ export interface AgentCrewInstanceServiceShape {
     participantId: ParticipantId,
   ) => Effect.Effect<AgentCrewMembership | null, SqlError>;
   readonly listForCaptain: (input: {
-    readonly squadronId: SquadronId;
+    readonly projectId: LedgerProjectId;
     readonly captainParticipantId: ParticipantId;
   }) => Effect.Effect<ReadonlyArray<AgentCrewInstance>, SqlError>;
-  readonly listForSquadron: (
-    squadronId: SquadronId,
+  readonly listForProject: (
+    projectId: LedgerProjectId,
   ) => Effect.Effect<ReadonlyArray<AgentCrewInstance>, SqlError>;
-  /** Every Crew not yet retired, across Squadrons; the boot reconciliation walks this. */
+  /** Every Crew not yet retired, across projects; the boot reconciliation walks this. */
   readonly listLive: () => Effect.Effect<ReadonlyArray<AgentCrewInstance>, SqlError>;
   /** Every Crew that any of these threads sits in or that any of these participants commands. */
   readonly listInvolving: (input: {
@@ -242,7 +242,7 @@ const instanceFromRows = (
   members: ReadonlyArray<MemberRow>,
 ): AgentCrewInstance => ({
   id: row.id,
-  squadronId: row.project_id as SquadronId,
+  projectId: row.project_id as LedgerProjectId,
   captainParticipantId: ParticipantId.make(row.captain_participant_id),
   captainThreadId: ThreadId.make(row.captain_thread_id),
   displayName: row.display_name,
@@ -328,7 +328,7 @@ export const layer: Layer.Layer<AgentCrewInstanceService, never, SqlClient.SqlCl
                 id, project_id, captain_participant_id, captain_thread_id, display_name, brief,
                 version, created_at, archived_at, playbook_name, playbook_definition_path
               ) VALUES (
-                ${input.id}, ${input.squadronId}, ${input.captainParticipantId},
+                ${input.id}, ${input.projectId}, ${input.captainParticipantId},
                 ${input.captainThreadId}, ${input.displayName}, ${input.brief}, 1,
                 ${input.createdAt}, NULL, ${input.playbook?.name ?? null},
                 ${input.playbook?.definitionPath ?? null}
@@ -418,12 +418,12 @@ export const layer: Layer.Layer<AgentCrewInstanceService, never, SqlClient.SqlCl
 
       const listForCaptain = Effect.fn("j5.a2a.agentCrewInstances.listForCaptain")(
         function* (input: {
-          readonly squadronId: SquadronId;
+          readonly projectId: LedgerProjectId;
           readonly captainParticipantId: ParticipantId;
         }) {
           const rows = yield* sql<InstanceRow>`
           SELECT * FROM j5_agent_crew_instance
-          WHERE project_id = ${input.squadronId}
+          WHERE project_id = ${input.projectId}
             AND captain_participant_id = ${input.captainParticipantId}
           ORDER BY created_at, id
         `;
@@ -431,11 +431,11 @@ export const layer: Layer.Layer<AgentCrewInstanceService, never, SqlClient.SqlCl
         },
       );
 
-      const listForSquadron = Effect.fn("j5.a2a.agentCrewInstances.listForSquadron")(function* (
-        squadronId: SquadronId,
+      const listForProject = Effect.fn("j5.a2a.agentCrewInstances.listForProject")(function* (
+        projectId: LedgerProjectId,
       ) {
         const rows = yield* sql<InstanceRow>`
-          SELECT * FROM j5_agent_crew_instance WHERE project_id = ${squadronId}
+          SELECT * FROM j5_agent_crew_instance WHERE project_id = ${projectId}
           ORDER BY created_at, id
         `;
         return yield* readMany(rows);
@@ -539,7 +539,7 @@ export const layer: Layer.Layer<AgentCrewInstanceService, never, SqlClient.SqlCl
         findMembership,
         removeMembers,
         listForCaptain,
-        listForSquadron,
+        listForProject,
         listLive,
         listInvolving,
         markArchived,

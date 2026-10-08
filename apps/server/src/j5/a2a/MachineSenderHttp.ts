@@ -63,17 +63,17 @@ export const machineSendCommandId = (input: {
   );
 
 export const machineRegisterCommandId = (input: {
-  readonly squadronId: string;
+  readonly projectId: string;
   readonly name: string;
 }) =>
   CommCommandId.make(
-    `command:j5:a2a:machine:register:${stablePart(input.squadronId)}:${stablePart(input.name)}`,
+    `command:j5:a2a:machine:register:${stablePart(input.projectId)}:${stablePart(input.name)}`,
   );
 
 const wireRecord = (record: MachineParticipantRecord): MachineParticipantWire => ({
   participantId: record.participantId,
-  projectId: record.squadronId,
-  projectTitle: record.squadronName,
+  projectId: record.projectId,
+  projectTitle: record.projectTitle,
   name: record.name,
   createdAt: record.createdAt,
 });
@@ -178,10 +178,10 @@ export const machineSenderHttpRouteLayer = Layer.unwrap(
         const result = yield* Effect.result(
           machines.register({
             commandId: machineRegisterCommandId({
-              squadronId: decoded.success.projectId,
+              projectId: decoded.success.projectId,
               name: decoded.success.name,
             }),
-            squadronId: decoded.success.projectId as MachineParticipantRecord["squadronId"],
+            projectId: decoded.success.projectId as MachineParticipantRecord["projectId"],
             name: decoded.success.name,
             acceptedAt,
           }),

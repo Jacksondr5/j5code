@@ -37,7 +37,7 @@ import { ParticipantPlacementService, PlacementStorageError } from "./PlacementS
 import { A2ASendService } from "./SendService.ts";
 import { SpawnCompositionService } from "./SpawnCompositionService.ts";
 import { ThreadRegistration } from "./ThreadRegistration.ts";
-import { ParticipantId, SquadronId, type ParticipantDirectoryRow } from "./contracts.ts";
+import { ParticipantId, LedgerProjectId, type ParticipantDirectoryRow } from "./contracts.ts";
 import { J5ToolkitHandlersLive } from "./mcp/handlers.ts";
 import { J5SpawnAgentInput, J5Toolkit } from "./mcp/tools.ts";
 import {
@@ -120,7 +120,7 @@ const invocation = {
   capabilities: new Set(["orchestration"] as const),
   issuedAt: 1,
 };
-const squadronId = SquadronId.make("squadron:j5:spawn-workspace");
+const ledgerProjectId = LedgerProjectId.make("ledger:j5:spawn-workspace");
 const callerParticipantId = ParticipantId.make("agent:j5:spawn-workspace-caller");
 const childParticipantId = ParticipantId.make("agent:j5:spawn-workspace-child");
 const projectId = ProjectId.make("project:j5:spawn-workspace");
@@ -157,7 +157,7 @@ const spawnHarness = (input: {
     const launches = yield* Ref.make<ReadonlyArray<ThreadLaunchInput>>([]);
     const failFacts = yield* Ref.make(false);
     const callerRow = {
-      squadronId,
+      projectId: ledgerProjectId,
       participantId: callerParticipantId,
       participant: {
         kind: "agent" as const,
@@ -172,12 +172,13 @@ const spawnHarness = (input: {
     const dependencies = Layer.mergeAll(
       Layer.mock(A2ASendService)({ listParticipants: () => Effect.succeed([callerRow]) }),
       Layer.mock(A2AHomeRegistrar)({
-        getHomeForThread: () => Effect.succeed({ squadronId, participantId: callerParticipantId }),
+        getHomeForThread: () =>
+          Effect.succeed({ projectId: ledgerProjectId, participantId: callerParticipantId }),
       }),
       Layer.mock(A2ALedger)({
-        readSquadron: () =>
+        readProjectLedger: () =>
           Effect.succeed({
-            id: squadronId,
+            id: ledgerProjectId,
             name: "Workspace",
             createdAt: DateTime.formatIso(createdAt),
           }),
@@ -192,9 +193,9 @@ const spawnHarness = (input: {
               });
             yield* Ref.update(log, (items) => [...items, "facts"]);
             return {
-              home: { squadronId, participantId: childParticipantId },
+              home: { projectId: ledgerProjectId, participantId: childParticipantId },
               placement: {
-                squadronId,
+                projectId: ledgerProjectId,
                 participantId: childParticipantId,
                 provenance: facts.provenance,
                 placementParentId: callerParticipantId,
@@ -267,7 +268,8 @@ const spawnHarness = (input: {
       Layer.mock(CrewStopService)({}),
       Layer.mock(CrewProposalService)({}),
       Layer.mock(ThreadRegistration)({
-        ensureRegistered: () => Effect.succeed({ squadronId, participantId: callerParticipantId }),
+        ensureRegistered: () =>
+          Effect.succeed({ projectId: ledgerProjectId, participantId: callerParticipantId }),
       }),
       NodeServices.layer,
     );
@@ -325,7 +327,7 @@ it.effect("spawns into a new worktree from base_ref, keeping home, placement, an
       assert.deepStrictEqual(spawned.result, {
         participant_id: childParticipantId,
         thread_id: result.thread_id,
-        project_id: squadronId,
+        project_id: ledgerProjectId,
         project_title: "Workspace",
         placement: {
           placement_parent_id: callerParticipantId,

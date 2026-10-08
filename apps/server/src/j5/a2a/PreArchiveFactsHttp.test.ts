@@ -25,7 +25,7 @@ it("returns the pre-archive facts without turning a failed read into a clean arc
         : Effect.succeed({
             state: "registered" as const,
             threadId: receivedThreadId,
-            squadronId: "squadron:pre-archive-http" as never,
+            projectId: "project:pre-archive-http" as never,
             participantId: "agent:pre-archive-http" as never,
             retired: false,
             archived: false,
@@ -51,7 +51,7 @@ it("returns the pre-archive facts without turning a failed read into a clean arc
         {
           instance: {
             id: "crew:pre-archive-http",
-            squadronId: input.squadronId,
+            projectId: input.projectId,
             captainParticipantId: input.captainParticipantId,
             captainThreadId: threadId,
             displayName: "Review Pair",
@@ -105,7 +105,7 @@ it("returns the pre-archive facts without turning a failed read into a clean arc
     assert.deepStrictEqual(await success.json(), {
       state: "registered",
       threadId,
-      projectId: "squadron:pre-archive-http",
+      projectId: "project:pre-archive-http",
       participantId: "agent:pre-archive-http",
       retired: false,
       archived: false,

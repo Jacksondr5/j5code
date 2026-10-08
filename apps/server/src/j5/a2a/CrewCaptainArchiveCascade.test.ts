@@ -17,14 +17,14 @@ import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewIns
 import { ArchiveCrewService, type ArchiveCrewInput } from "./ArchiveCrewService.ts";
 import { CrewCaptainArchiveCascade, layer as cascadeLayer } from "./CrewCaptainArchiveCascade.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
-import { ParticipantId, SquadronId } from "./contracts.ts";
+import { ParticipantId, LedgerProjectId } from "./contracts.ts";
 
-const squadronId = SquadronId.make("squadron:j5:cascade");
+const projectId = LedgerProjectId.make("project:j5:cascade");
 const captainThread = ThreadId.make("thread:captain");
 const seatThread = ThreadId.make("thread:seat");
 const crew = (id: string, archivedAt: string | null): AgentCrewInstance => ({
   id,
-  squadronId,
+  projectId,
   captainParticipantId: participantIdForThread(captainThread),
   captainThreadId: captainThread,
   displayName: id,

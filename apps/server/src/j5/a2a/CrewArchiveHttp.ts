@@ -49,7 +49,7 @@ export const makeCrewArchiveHttpRouteLayer = (path: HttpRouter.PathInput) =>
               .archive({
                 providerSessionId: HUMAN_ARCHIVE_SESSION,
                 callerParticipantId: null,
-                squadronId: null,
+                projectId: null,
                 crewInstanceId,
                 clientRequestKey: requestKey,
                 confirmationSatisfied: true,

@@ -53,7 +53,7 @@ export const layer = Layer.effect(
           placementCommandId: PlacementCommandId.make(
             `command:j5:a2a:thread-fork-placement:${encodeURIComponent(command.commandId)}`,
           ),
-          squadronId: source.squadronId,
+          projectId: source.projectId,
           threadId: command.targetThreadId,
           provenance: {
             kind: "forked-from",

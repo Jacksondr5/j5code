@@ -13,7 +13,7 @@ import {
 } from "./AgentCrewProposalService.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
-import { ParticipantId, SquadronId } from "./contracts.ts";
+import { ParticipantId, LedgerProjectId } from "./contracts.ts";
 
 const database = NodeSqliteClient.layer({ filename: ":memory:" });
 const testLayer = Layer.mergeAll(
@@ -23,7 +23,7 @@ const testLayer = Layer.mergeAll(
   proposalLayer.pipe(Layer.provide(database)),
 );
 const createdAt = "2026-09-22T09:00:00.000Z";
-const squadronId = SquadronId.make("squadron:crew-proposals");
+const projectId = LedgerProjectId.make("project:crew-proposals");
 const captain = ParticipantId.make("agent:j5:a2a:captain-proposals");
 const captainThreadId = ThreadId.make("thread:captain-proposals");
 
@@ -51,7 +51,7 @@ const addition = (
   seats: ReadonlyArray<string>,
 ): CreateCrewProposalInput => ({
   id,
-  squadronId,
+  projectId,
   captainParticipantId: captain,
   captainThreadId,
   crewInstanceId,
@@ -67,13 +67,13 @@ it.effect(
   () =>
     Effect.gen(function* () {
       yield* runJ5A2AMigrations();
-      yield* (yield* A2ALedger).ensureProject({ projectId: squadronId, createdAt });
+      yield* (yield* A2ALedger).ensureProject({ projectId: projectId, createdAt });
       const crews = yield* AgentCrewInstanceService;
       const proposals = yield* AgentCrewProposalService;
       const crewId = "crew:counted";
       yield* crews.record({
         id: crewId,
-        squadronId,
+        projectId,
         captainParticipantId: captain,
         captainThreadId,
         displayName: "Counted",
@@ -127,13 +127,13 @@ it.effect(
 it.effect("a proposal resolves once: the second resolution finds it closed", () =>
   Effect.gen(function* () {
     yield* runJ5A2AMigrations();
-    yield* (yield* A2ALedger).ensureProject({ projectId: squadronId, createdAt });
+    yield* (yield* A2ALedger).ensureProject({ projectId: projectId, createdAt });
     const crews = yield* AgentCrewInstanceService;
     const proposals = yield* AgentCrewProposalService;
     const crewId = "crew:resolve-once";
     yield* crews.record({
       id: crewId,
-      squadronId,
+      projectId,
       captainParticipantId: captain,
       captainThreadId,
       displayName: "Resolve once",
@@ -181,7 +181,7 @@ it.effect("a proposal resolves once: the second resolution finds it closed", () 
 it.effect("a stored seat workspace this version can't read costs that seat its workspace", () =>
   Effect.gen(function* () {
     yield* runJ5A2AMigrations();
-    yield* (yield* A2ALedger).ensureProject({ projectId: squadronId, createdAt });
+    yield* (yield* A2ALedger).ensureProject({ projectId: projectId, createdAt });
     const proposals = yield* AgentCrewProposalService;
     yield* proposals.create({
       ...addition("proposal:stored", "crew:stored", ["a", "b"]),

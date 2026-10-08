@@ -69,7 +69,7 @@ import {
   CommCommandId,
   ExchangeId,
   ParticipantId,
-  SquadronId,
+  LedgerProjectId,
   type AgentParticipant,
 } from "./contracts.ts";
 
@@ -88,14 +88,14 @@ const vmOrigin = "https://vm.example:3773";
 interface Server {
   readonly environmentId: string;
   readonly label: string;
-  readonly squadronId: SquadronId;
+  readonly projectId: LedgerProjectId;
   readonly agent: AgentParticipant;
 }
 
 const vm: Server = {
   environmentId: "environment-vm",
   label: "Work VM",
-  squadronId: SquadronId.make("squadron:vm-billing"),
+  projectId: LedgerProjectId.make("project:vm-billing"),
   agent: {
     kind: "agent",
     id: ParticipantId.make("agent:j5:a2a:thread:billing"),
@@ -105,7 +105,7 @@ const vm: Server = {
 const laptop: Server = {
   environmentId: "environment-laptop",
   label: "JM-LT-04213",
-  squadronId: SquadronId.make("squadron:laptop-ios"),
+  projectId: LedgerProjectId.make("project:laptop-ios"),
   agent: {
     kind: "agent",
     id: ParticipantId.make("agent:j5:a2a:thread:ios-build"),
@@ -374,7 +374,7 @@ const makeLaptop = (input: {
 };
 
 const vmRosterAgent: PeerRosterAgent = {
-  squadronId: vm.squadronId,
+  squadronId: vm.projectId,
   squadronName: "Billing Migration",
   participantId: vm.agent.id,
   threadId: vm.agent.threadId,
@@ -386,7 +386,7 @@ const vmRosterAgent: PeerRosterAgent = {
 const laptopRosterEntry = (archived: boolean): A2ARosterEntry => ({
   participantId: laptop.agent.id,
   kind: "agent",
-  projectId: laptop.squadronId,
+  projectId: laptop.projectId,
   projectTitle: "iOS",
   displayName: "iOS build",
   threadId: laptop.agent.threadId,
@@ -400,10 +400,10 @@ const seed = Effect.fn("test.j5.a2a.peer.pollRoundTrip.seed")(function* (self: S
   yield* runMigrations();
   yield* runJ5A2AMigrations();
   const ledger = yield* A2ALedger;
-  yield* ledger.ensureProject({ projectId: self.squadronId, createdAt: timestamp });
+  yield* ledger.ensureProject({ projectId: self.projectId, createdAt: timestamp });
   yield* ledger.append({
     commandId: CommCommandId.make(`command:poll-roundtrip:join:${self.agent.id}`),
-    squadronId: self.squadronId,
+    projectId: self.projectId,
     acceptedAt: timestamp,
     event: {
       kind: "participant.joined",

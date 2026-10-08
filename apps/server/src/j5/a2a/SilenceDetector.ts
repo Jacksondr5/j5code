@@ -26,7 +26,7 @@ import { findPeerCounterparty } from "./peerCounterparty.ts";
 import {
   CommCommandId,
   CorrelationId,
-  SquadronId,
+  LedgerProjectId,
   ExchangeId,
   isHumanParticipantId,
   LedgerMessageId,
@@ -164,22 +164,22 @@ const terminalRun = (stored: OrchestrationV2StoredEvent): OrchestrationV2Run | u
 
 const stablePart = (value: string) => encodeURIComponent(value);
 
-const noticeIdentity = (squadronId: string, exchangeId: string, deliveryMessageId: string) =>
-  `${stablePart(squadronId)}:${stablePart(exchangeId)}:${stablePart(deliveryMessageId)}`;
+const noticeIdentity = (projectId: string, exchangeId: string, deliveryMessageId: string) =>
+  `${stablePart(projectId)}:${stablePart(exchangeId)}:${stablePart(deliveryMessageId)}`;
 
-const commandIdFor = (squadronId: string, exchangeId: string, deliveryMessageId: string) =>
+const commandIdFor = (projectId: string, exchangeId: string, deliveryMessageId: string) =>
   CommCommandId.make(
-    `command:j5:a2a:silence:${noticeIdentity(squadronId, exchangeId, deliveryMessageId)}`,
+    `command:j5:a2a:silence:${noticeIdentity(projectId, exchangeId, deliveryMessageId)}`,
   );
 
-const messageIdFor = (squadronId: string, exchangeId: string, deliveryMessageId: string) =>
+const messageIdFor = (projectId: string, exchangeId: string, deliveryMessageId: string) =>
   LedgerMessageId.make(
-    `message:j5:a2a:silence:${noticeIdentity(squadronId, exchangeId, deliveryMessageId)}`,
+    `message:j5:a2a:silence:${noticeIdentity(projectId, exchangeId, deliveryMessageId)}`,
   );
 
-const correlationIdFor = (squadronId: string, exchangeId: string, deliveryMessageId: string) =>
+const correlationIdFor = (projectId: string, exchangeId: string, deliveryMessageId: string) =>
   CorrelationId.make(
-    `correlation:j5:a2a:silence:${noticeIdentity(squadronId, exchangeId, deliveryMessageId)}`,
+    `correlation:j5:a2a:silence:${noticeIdentity(projectId, exchangeId, deliveryMessageId)}`,
   );
 
 const noticeMessage = (payload: SilenceNoticePayload, exchangeId: ExchangeId): string => {
@@ -398,7 +398,7 @@ const makeLayer = (daemon: boolean) =>
         const exchangeId = ExchangeId.make(exchange.exchange_id);
         // The waiter may be on a peer server; the notice then travels the peer path back.
         const remoteWaiter = yield* findPeerCounterparty(sql, {
-          squadronId: SquadronId.make(exchange.project_id),
+          projectId: LedgerProjectId.make(exchange.project_id),
           exchangeId,
           participantId: ParticipantId.make(exchange.sender_id),
         });
@@ -419,7 +419,7 @@ const makeLayer = (daemon: boolean) =>
               exchange.exchange_id,
               payload.deliveryMessageId,
             ),
-            squadronId: SquadronId.make(exchange.project_id),
+            projectId: LedgerProjectId.make(exchange.project_id),
             acceptedAt: payload.observedAt,
             events: [
               {
@@ -443,9 +443,9 @@ const makeLayer = (daemon: boolean) =>
                     noticeType: payload.state,
                     message: noticeMessage(payload, exchangeId),
                   }),
-                  originProjectId: SquadronId.make(exchange.project_id),
+                  originProjectId: LedgerProjectId.make(exchange.project_id),
                   receiverProjectId:
-                    remoteWaiter?.squadronId ?? SquadronId.make(exchange.project_id),
+                    remoteWaiter?.projectId ?? LedgerProjectId.make(exchange.project_id),
                   ...(remoteWaiter === null
                     ? {}
                     : { receiverEnvironmentId: remoteWaiter.environmentId }),
@@ -517,7 +517,7 @@ const makeLayer = (daemon: boolean) =>
            AND exchange.exchange_id = delivery.exchange_id
           JOIN j5_a2a_membership AS membership
             ON membership.participant_id = exchange.receiver_id
-          WHERE delivery.project_id = ${event.squadronId}
+          WHERE delivery.project_id = ${event.projectId}
             AND delivery.message_id = ${payload.messageId}
             AND delivery.envelope_channel = 'peer'
             AND exchange.status = 'open'

@@ -11,7 +11,7 @@ import {
   CommCommandId,
   type CommEvent,
   CorrelationId,
-  SquadronId,
+  LedgerProjectId,
   ExchangeId,
   type HumanInboxItem,
   type HumanInboxListStatus,
@@ -53,7 +53,7 @@ export type A2AHumanInboxError =
 interface InboxRow {
   readonly person_id: string;
   readonly project_id: string;
-  readonly squadron_name: string;
+  readonly project_title: string;
   readonly exchange_id: string;
   readonly sender_id: string;
   readonly sender_thread_id: string | null;
@@ -130,7 +130,7 @@ export const layer: Layer.Layer<A2AHumanInbox, never, A2ALedger | SqlClient.SqlC
             SELECT
               exchange.receiver_id AS person_id,
               exchange.project_id,
-              COALESCE(project.title, squadron.project_id) AS squadron_name,
+              COALESCE(project.title, ledger.project_id) AS project_title,
               exchange.exchange_id,
               exchange.sender_id,
               membership.thread_id AS sender_thread_id,
@@ -141,7 +141,7 @@ export const layer: Layer.Layer<A2AHumanInbox, never, A2ALedger | SqlClient.SqlC
               inbox.status,
               inbox.terminal_at
             FROM j5_a2a_human_inbox AS inbox
-            JOIN j5_a2a_project_ledger AS squadron ON squadron.project_id = inbox.project_id
+            JOIN j5_a2a_project_ledger AS ledger ON ledger.project_id = inbox.project_id
             LEFT JOIN projection_projects AS project ON project.project_id = inbox.project_id
             JOIN j5_a2a_exchange AS exchange
               ON exchange.project_id = inbox.project_id
@@ -173,8 +173,8 @@ export const layer: Layer.Layer<A2AHumanInbox, never, A2ALedger | SqlClient.SqlC
             (row) =>
               ({
                 personId: ParticipantId.make(row.person_id),
-                projectId: SquadronId.make(row.project_id),
-                projectTitle: row.squadron_name,
+                projectId: LedgerProjectId.make(row.project_id),
+                projectTitle: row.project_title,
                 exchangeId: ExchangeId.make(row.exchange_id),
                 senderId: ParticipantId.make(row.sender_id),
                 senderThreadId:
@@ -238,7 +238,7 @@ export const layer: Layer.Layer<A2AHumanInbox, never, A2ALedger | SqlClient.SqlC
             return yield* new A2AExchangeAlreadyAnsweredError({ exchangeId: input.exchangeId });
           }
 
-          const squadronId = SquadronId.make(exchange.project_id);
+          const projectId = LedgerProjectId.make(exchange.project_id);
           const senderId = ParticipantId.make(exchange.sender_id);
           const correlationId = correlationIdFor(input.commandId);
           const events: ReadonlyArray<CommEvent> = [
@@ -251,8 +251,8 @@ export const layer: Layer.Layer<A2AHumanInbox, never, A2ALedger | SqlClient.SqlC
               payload: {
                 messageId,
                 text: input.message,
-                originProjectId: squadronId,
-                receiverProjectId: squadronId,
+                originProjectId: projectId,
+                receiverProjectId: projectId,
                 exchangeRole: "reply",
                 envelopeChannel: "peer",
               },
@@ -270,7 +270,7 @@ export const layer: Layer.Layer<A2AHumanInbox, never, A2ALedger | SqlClient.SqlC
           ];
           const result = yield* ledger.appendEvents({
             commandId: input.commandId,
-            squadronId,
+            projectId,
             acceptedAt: input.acceptedAt,
             events,
           });

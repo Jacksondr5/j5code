@@ -369,7 +369,7 @@ const make = (daemon: boolean) =>
      * update that leaves it as sent, such as a branch change, is not a change.
      * Both sources are listened to from before the roster is read: the ledger
      * subscription is held from here, and thread updates replay from the
-     * sequence read here. Renaming a Squadron also changes the roster, but it
+     * sequence read here. Renaming a project also changes the roster, but it
      * writes no event, so the new name goes out with the next poll, within
      * the hold.
      */

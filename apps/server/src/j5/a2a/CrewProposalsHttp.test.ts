@@ -19,11 +19,11 @@ import { PlaybookStore, playbookStoreLayer } from "../playbooks/PlaybookStore.ts
 import { AgentCrewProposalService, type CrewProposal } from "./AgentCrewProposalService.ts";
 import { makeCrewProposalsHttpRouteLayer } from "./CrewProposalsHttp.ts";
 import { CrewProposalNotOpenError, CrewProposalService } from "./CrewProposalService.ts";
-import { ParticipantId, SquadronId } from "./contracts.ts";
+import { ParticipantId, LedgerProjectId } from "./contracts.ts";
 
 const proposal: CrewProposal = {
   id: "crew:j5:a2a:mcp:j5-crew-proposal:proposal:req",
-  squadronId: SquadronId.make("squadron:gate"),
+  projectId: LedgerProjectId.make("project:gate"),
   captainParticipantId: ParticipantId.make("agent:j5:a2a:thread:captain"),
   captainThreadId: ThreadId.make("thread:captain"),
   crewInstanceId: null,

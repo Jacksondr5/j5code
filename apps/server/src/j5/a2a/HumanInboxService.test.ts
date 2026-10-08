@@ -26,7 +26,7 @@ import { A2ASendService, layer as sendLayer } from "./SendService.ts";
 import {
   CommCommandId,
   ExchangeId,
-  SquadronId,
+  LedgerProjectId,
   ParticipantId,
   type AgentParticipant,
   type HumanParticipant,
@@ -111,16 +111,16 @@ it.effect(
           readonly urgency: "blocking" | "soon" | "fyi";
           readonly openedAt: string;
         }) {
-          const squadronId = SquadronId.make(`squadron:human-inbox:${input.suffix}`);
+          const projectId = LedgerProjectId.make(`project:human-inbox:${input.suffix}`);
           const agent: AgentParticipant = {
             kind: "agent",
             id: ParticipantId.make(`agent:human-inbox:${input.suffix}`),
             threadId: ThreadId.make(`thread:human-inbox:${input.suffix}`),
           };
-          yield* ledger.ensureProject({ projectId: squadronId, createdAt: input.openedAt });
+          yield* ledger.ensureProject({ projectId: projectId, createdAt: input.openedAt });
           yield* ledger.appendEvents({
             commandId: CommCommandId.make(`command:human-inbox:join:${input.suffix}`),
-            squadronId,
+            projectId,
             acceptedAt: input.openedAt,
             events: [
               {
@@ -145,7 +145,7 @@ it.effect(
             acceptedAt: input.openedAt,
           });
           yield* worker.drain;
-          return { agent, squadronId, exchangeId: sent.exchangeId! };
+          return { agent, projectId, exchangeId: sent.exchangeId! };
         });
 
         yield* open({
@@ -416,8 +416,8 @@ it.effect(
               payload: {
                 messageId: answered.messageId,
                 text: exactAnswer,
-                originProjectId: second.squadronId,
-                receiverProjectId: second.squadronId,
+                originProjectId: second.projectId,
+                receiverProjectId: second.projectId,
                 exchangeRole: "reply",
                 envelopeChannel: "peer",
               },

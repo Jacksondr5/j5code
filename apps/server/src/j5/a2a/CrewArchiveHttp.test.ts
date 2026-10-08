@@ -30,7 +30,7 @@ const authWith = (scopes: ReadonlyArray<string>) =>
 it("archives a crew for operators only, with the person's confirmation already satisfied", async () => {
   const calls: Array<{
     callerParticipantId: unknown;
-    squadronId: unknown;
+    projectId: unknown;
     confirmationSatisfied: boolean | undefined;
     ids: string[];
   }> = [];
@@ -38,7 +38,7 @@ it("archives a crew for operators only, with the person's confirmation already s
     archive: (input) => {
       calls.push({
         callerParticipantId: input.callerParticipantId,
-        squadronId: input.squadronId,
+        projectId: input.projectId,
         confirmationSatisfied: input.confirmationSatisfied,
         ids: ["builder", "critic"].map((seat) => input.commandIds(seat).archiveCommandId),
       });
@@ -103,7 +103,7 @@ it("archives a crew for operators only, with the person's confirmation already s
     );
     // A person is not a participant and confirmed the dialog: no Captain check, no token dance.
     assert.isNull(calls[0]?.callerParticipantId);
-    assert.isNull(calls[0]?.squadronId);
+    assert.isNull(calls[0]?.projectId);
     assert.isTrue(calls[0]?.confirmationSatisfied);
     assert.notEqual(calls[0]?.ids[0], calls[0]?.ids[1]);
 

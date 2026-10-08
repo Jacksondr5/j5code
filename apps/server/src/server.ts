@@ -113,7 +113,7 @@ import { authHttpApiLayer, environmentAuthenticatedAuthLayer } from "./auth/http
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import { j5AuthenticatedRoutesLayer } from "./j5/a2a/J5AuthenticatedRoutes.ts";
-import { J5A2AAuxiliaryLayer, J5SquadronCreationLayer } from "./j5/a2a/runtimeLayer.ts";
+import { J5A2AAuxiliaryLayer, J5ThreadRegistrationLayer } from "./j5/a2a/runtimeLayer.ts";
 import { layer as J5ArtifactRunFinalizationObserverLive } from "./j5/artifacts/ArtifactRunFinalizationObserver.ts";
 import { layer as J5ArtifactWorkspaceLive } from "./j5/artifacts/ArtifactWorkspace.ts";
 import { layer as J5AgentHandoffNudgeQueueLive } from "./j5/agents/agentHandoffNudgeQueue.ts";
@@ -438,7 +438,7 @@ const CloudManagedEndpointRuntimeLive = Layer.mergeAll(
 
 const OrchestrationV2RuntimeLayerLive = OrchestrationV2ProductionLayerLive.pipe(
   Layer.provide(ProviderEventIngestor.analyticsLive),
-  Layer.provideMerge(J5SquadronCreationLayer),
+  Layer.provideMerge(J5ThreadRegistrationLayer),
   Layer.provide(CheckpointStoreLayerLive),
   Layer.provide(GitWorkflowLayerLive),
   Layer.provide(ResourceCleanupService.live),

@@ -27,9 +27,9 @@ import { CrewStopService, layer as crewStopLayer } from "./CrewStopService.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
-import { SquadronId } from "./contracts.ts";
+import { LedgerProjectId } from "./contracts.ts";
 
-const squadronId = SquadronId.make("squadron:crew-stop");
+const projectId = LedgerProjectId.make("ledger:crew-stop");
 const captainThread = ThreadId.make("thread:captain");
 const builderThread = ThreadId.make("thread:builder");
 const criticThread = ThreadId.make("thread:critic");
@@ -55,13 +55,13 @@ it.effect("interrupts only running seats, for the Captain or a person, and nobod
     );
     yield* runJ5A2AMigrations().pipe(Effect.provide(context));
     yield* Context.get(context, A2ALedger).ensureProject({
-      projectId: squadronId,
+      projectId: projectId,
       createdAt: DateTime.formatIso(createdAt),
     });
     const captain = participantIdForThread(captainThread);
     yield* Context.get(context, AgentCrewInstanceService).record({
       id: "crew:stop",
-      squadronId,
+      projectId,
       captainParticipantId: captain,
       captainThreadId: captainThread,
       displayName: "Stop Crew",
@@ -122,7 +122,7 @@ it.effect("interrupts only running seats, for the Captain or a person, and nobod
 
       const stopped = yield* service.stop({
         callerParticipantId: captain,
-        squadronId,
+        projectId,
         crewInstanceId: "crew:stop",
         commandIds,
       });
@@ -143,7 +143,7 @@ it.effect("interrupts only running seats, for the Captain or a person, and nobod
       // A person stops the same Crew without a participant id.
       const byHuman = yield* service.stop({
         callerParticipantId: null,
-        squadronId: null,
+        projectId: null,
         crewInstanceId: "crew:stop",
         commandIds,
       });
@@ -153,26 +153,26 @@ it.effect("interrupts only running seats, for the Captain or a person, and nobod
       const refused = yield* service
         .stop({
           callerParticipantId: participantIdForThread(builderThread),
-          squadronId,
+          projectId,
           crewInstanceId: "crew:stop",
           commandIds,
         })
         .pipe(Effect.flip);
       assert.equal(refused._tag, "CrewStopRequestError");
       assert.include(refused.message, "only its Captain or the human");
-      const wrongSquadron = yield* service
+      const wrongProject = yield* service
         .stop({
           callerParticipantId: captain,
-          squadronId: SquadronId.make("squadron:other"),
+          projectId: LedgerProjectId.make("project:other"),
           crewInstanceId: "crew:stop",
           commandIds,
         })
         .pipe(Effect.flip);
-      assert.include(wrongSquadron.message, "lives in project");
+      assert.include(wrongProject.message, "lives in project");
       const missing = yield* service
         .stop({
           callerParticipantId: null,
-          squadronId: null,
+          projectId: null,
           crewInstanceId: "crew:nope",
           commandIds,
         })
@@ -197,12 +197,12 @@ const ghostFixture = (ghost: "missing" | "unreadable" | "homed") =>
     );
     yield* runJ5A2AMigrations().pipe(Effect.provide(context));
     yield* Context.get(context, A2ALedger).ensureProject({
-      projectId: squadronId,
+      projectId: projectId,
       createdAt: DateTime.formatIso(createdAt),
     });
     yield* Context.get(context, AgentCrewInstanceService).record({
       id: "crew:ghost",
-      squadronId,
+      projectId,
       captainParticipantId: participantIdForThread(captainThread),
       captainThreadId: captainThread,
       displayName: "Ghost Crew",
@@ -246,7 +246,7 @@ const ghostFixture = (ghost: "missing" | "unreadable" | "homed") =>
                 ? {
                     state: "registered",
                     threadId,
-                    squadronId,
+                    projectId,
                     participantId: participantIdForThread(threadId),
                     retired: false,
                     archived: false,
@@ -268,7 +268,7 @@ const ghostFixture = (ghost: "missing" | "unreadable" | "homed") =>
       Effect.flatMap((service) =>
         service.stop({
           callerParticipantId: null,
-          squadronId: null,
+          projectId: null,
           crewInstanceId: "crew:ghost",
           commandIds: (seatName) => ({ interruptCommandId: CommandId.make(`stop:${seatName}`) }),
         }),

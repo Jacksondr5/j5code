@@ -191,7 +191,7 @@ it.effect("reads Crews recorded before playbooks as following none and owning no
     yield* runJ5A2AMigrations();
     // The Crew followed its Squadron to that Squadron's project.
     const proposal = yield* (yield* AgentCrewProposalService).read("p-old");
-    assert.strictEqual(proposal?.squadronId, "project-crew");
+    assert.strictEqual(proposal?.projectId, "project-crew");
     assert.isNull(proposal?.playbook);
     assert.deepStrictEqual(proposal?.requestedSeats, [
       { seat: "helper", agentId: null, reason: "Helps" },

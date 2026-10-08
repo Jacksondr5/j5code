@@ -2,12 +2,12 @@ import { assert, it } from "@effect/vitest";
 import { ThreadId } from "@t3tools/contracts";
 
 import type { AgentCrewInstance } from "./AgentCrewInstanceService.ts";
-import { projectFleetSquadron } from "./FleetReadsHttp.ts";
+import { projectFleetProject } from "./FleetReadsHttp.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
-import { ParticipantId, SquadronId } from "./contracts.ts";
+import { ParticipantId, LedgerProjectId } from "./contracts.ts";
 import type { ParticipantPlacementView } from "./placementContracts.ts";
 
-const squadronId = SquadronId.make("squadron:fleet");
+const projectId = LedgerProjectId.make("project:fleet");
 const captainThread = ThreadId.make("thread:captain");
 const builderThread = ThreadId.make("thread:builder");
 const captain = participantIdForThread(captainThread);
@@ -21,7 +21,7 @@ const agentRow = (
   placementParentId: ParticipantId | null,
   archivedAt: string | null = null,
 ): ParticipantPlacementView => ({
-  squadronId,
+  projectId,
   participantId,
   participant: { kind: "agent", id: participantId, threadId },
   threadId,
@@ -39,8 +39,8 @@ const spawnedBy = (parent: ParticipantId): ParticipantPlacementView["provenance"
 it("drops retired agents; a live child keeps its parent id for the client to root", () => {
   const retiredCaptain = ParticipantId.make("agent:j5:a2a:retired-captain");
   const retiredSeat = ParticipantId.make("agent:j5:a2a:retired-seat");
-  const projected = projectFleetSquadron({
-    squadron: { id: squadronId, name: "Fleet" },
+  const projected = projectFleetProject({
+    project: { id: projectId, name: "Fleet" },
     participants: [
       agentRow(
         retiredCaptain,
@@ -73,7 +73,7 @@ it("drops retired agents; a live child keeps its parent id for the client to roo
 
 const crew: AgentCrewInstance = {
   id: "crew:1",
-  squadronId,
+  projectId,
   captainParticipantId: captain,
   captainThreadId: captainThread,
   brief: "Implement and review the login fix.",
@@ -94,8 +94,8 @@ const crew: AgentCrewInstance = {
 };
 
 it("projects agents with origin, placement, crew seat, and owed asks; humans are omitted", () => {
-  const projected = projectFleetSquadron({
-    squadron: { id: squadronId, name: "Fleet" },
+  const projected = projectFleetProject({
+    project: { id: projectId, name: "Fleet" },
     participants: [
       // A person's own launch: homed, never placed, so no placement row exists.
       agentRow(captain, captainThread, { kind: "unrecorded" }, null),
@@ -106,7 +106,7 @@ it("projects agents with origin, placement, crew seat, and owed asks; humans are
         captain,
       ),
       {
-        squadronId,
+        projectId,
         participantId: human,
         participant: { kind: "human", id: human, displayName: "Bryant" },
         threadId: null,
@@ -156,8 +156,8 @@ it("keeps every live roster seat: one with no ledger row rides under its Captain
     addedVersion: 1,
     reason: null,
   });
-  const projected = projectFleetSquadron({
-    squadron: { id: squadronId, name: "Fleet" },
+  const projected = projectFleetProject({
+    project: { id: projectId, name: "Fleet" },
     participants: [
       agentRow(captain, captainThread, { kind: "unrecorded" }, null),
       agentRow(builder, builderThread, spawnedBy(captain), captain),
@@ -209,8 +209,8 @@ it("keeps every live roster seat: one with no ledger row rides under its Captain
 });
 
 it("carries a Crew's playbook and each seat's steps on the Fleet roster", () => {
-  const projected = projectFleetSquadron({
-    squadron: { id: squadronId, name: "Fleet" },
+  const projected = projectFleetProject({
+    project: { id: projectId, name: "Fleet" },
     participants: [agentRow(captain, captainThread, { kind: "unrecorded" }, null)],
     crews: [
       {
@@ -243,8 +243,8 @@ it("carries each live Crew's playbook run, and null for a Crew without one", () 
     state: "pending" as const,
     seat: "builder",
   };
-  const projected = projectFleetSquadron({
-    squadron: { id: squadronId, name: "Fleet" },
+  const projected = projectFleetProject({
+    project: { id: projectId, name: "Fleet" },
     participants: [],
     crews: [crew, { ...crew, id: "crew:idle" }],
     openAsks: new Map(),
@@ -273,8 +273,8 @@ it("carries a run whose playbook can't be read, with its issue, for the header t
     seat: "builder",
     issue: "Cannot read the live playbook.",
   };
-  const projected = projectFleetSquadron({
-    squadron: { id: squadronId, name: "Fleet" },
+  const projected = projectFleetProject({
+    project: { id: projectId, name: "Fleet" },
     participants: [],
     crews: [crew],
     openAsks: new Map(),

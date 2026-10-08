@@ -33,7 +33,7 @@ import {
   ExchangeId,
   LedgerMessageId,
   ParticipantId,
-  SquadronId,
+  LedgerProjectId,
   type AgentParticipant,
   type MachineParticipant,
 } from "./contracts.ts";
@@ -47,8 +47,8 @@ import {
 const timestamp = "2026-10-02T12:00:00.000Z";
 const laptop = "environment-laptop";
 const otherPeer = "environment-home";
-const vmSquadron = SquadronId.make("squadron:work-billing");
-const laptopSquadron = SquadronId.make("squadron:laptop-ios");
+const vmProject = LedgerProjectId.make("project:work-billing");
+const laptopProject = LedgerProjectId.make("project:laptop-ios");
 const billing: AgentParticipant = {
   kind: "agent",
   id: ParticipantId.make("agent:j5:a2a:thread:billing"),
@@ -144,10 +144,10 @@ const seed = Effect.fn("test.j5.a2a.peer.removal.seed")(function* () {
   yield* runJ5A2AMigrations();
   const ledger = yield* A2ALedger;
   const sql = yield* SqlClient.SqlClient;
-  yield* ledger.ensureProject({ projectId: vmSquadron, createdAt: timestamp });
+  yield* ledger.ensureProject({ projectId: vmProject, createdAt: timestamp });
   yield* ledger.append({
     commandId: CommCommandId.make("command:peer-removal:join"),
-    squadronId: vmSquadron,
+    projectId: vmProject,
     acceptedAt: timestamp,
     event: {
       kind: "participant.joined",
@@ -190,7 +190,7 @@ const sendFromBilling = (
     const sender = options.sender ?? billing.id;
     yield* ledger.appendEvents({
       commandId: CommCommandId.make(`command:peer-removal:${name}`),
-      squadronId: vmSquadron,
+      projectId: vmProject,
       acceptedAt: timestamp,
       events: [
         ...(exchangeId === null
@@ -215,8 +215,8 @@ const sendFromBilling = (
           payload: {
             messageId: LedgerMessageId.make(`message:${name}`),
             text: `${name} text`,
-            originProjectId: vmSquadron,
-            receiverProjectId: laptopSquadron,
+            originProjectId: vmProject,
+            receiverProjectId: laptopProject,
             receiverEnvironmentId: options.environmentId ?? laptop,
             exchangeRole: exchangeId === null ? "none" : "ask",
             envelopeChannel: "peer",
@@ -307,7 +307,7 @@ it.effect(
         intent: "schema status",
         envelopeChannel: "peer",
         text: "Is the billing schema migrated?",
-        originSquadronId: laptopSquadron,
+        originSquadronId: laptopProject,
         createdAt: timestamp,
         originEnvironmentId: laptop,
       });
@@ -331,11 +331,11 @@ it.effect(
         [
           {
             exchangeId: ask.exchangeId!,
-            cause: { kind: "peer-removed", participantId: iosBuild, projectId: laptopSquadron },
+            cause: { kind: "peer-removed", participantId: iosBuild, projectId: laptopProject },
           },
           {
             exchangeId: "exchange:from-laptop",
-            cause: { kind: "peer-removed", participantId: iosBuild, projectId: laptopSquadron },
+            cause: { kind: "peer-removed", participantId: iosBuild, projectId: laptopProject },
           },
         ],
         "each drop names the party on the removed peer",
@@ -434,7 +434,7 @@ it.effect("tells the sender of a follow-up on a dropped Exchange once, by the dr
     const ask = yield* sendFromBilling("ask", { ask: true });
     yield* (yield* A2ALedger).appendEvents({
       commandId: CommCommandId.make("command:peer-removal:followup"),
-      squadronId: vmSquadron,
+      projectId: vmProject,
       acceptedAt: timestamp,
       events: [
         {
@@ -446,8 +446,8 @@ it.effect("tells the sender of a follow-up on a dropped Exchange once, by the dr
           payload: {
             messageId: LedgerMessageId.make("message:followup"),
             text: "One more detail.",
-            originProjectId: vmSquadron,
-            receiverProjectId: laptopSquadron,
+            originProjectId: vmProject,
+            receiverProjectId: laptopProject,
             receiverEnvironmentId: laptop,
             exchangeRole: "followup",
             envelopeChannel: "peer",
@@ -544,7 +544,7 @@ it.effect("starts empty when the pair is peered again, in every mode", () =>
           intent: "schema status",
           envelopeChannel: "peer",
           text: "Is the billing schema migrated?",
-          originSquadronId: laptopSquadron,
+          originSquadronId: laptopProject,
           createdAt: timestamp,
           originEnvironmentId: laptop,
         });
@@ -590,7 +590,7 @@ it.effect("sends no notice back for a platform message the peer refuses or remov
     const platformNotice = (name: string) =>
       ledger.append({
         commandId: CommCommandId.make(`command:peer-removal:platform:${name}`),
-        squadronId: vmSquadron,
+        projectId: vmProject,
         acceptedAt: timestamp,
         event: {
           kind: "message.sent",
@@ -601,8 +601,8 @@ it.effect("sends no notice back for a platform message the peer refuses or remov
           payload: {
             messageId: LedgerMessageId.make(`message:platform:${name}`),
             text: `${name} notice`,
-            originProjectId: vmSquadron,
-            receiverProjectId: laptopSquadron,
+            originProjectId: vmProject,
+            receiverProjectId: laptopProject,
             receiverEnvironmentId: laptop,
             exchangeRole: "none",
             envelopeChannel: "lifecycle_notice",
@@ -639,7 +639,7 @@ it.effect("sends no notice back to a machine sender when removal cancels its mes
     const read = yield* rows;
     yield* ledger.append({
       commandId: CommCommandId.make("command:peer-removal:join-watchdog"),
-      squadronId: vmSquadron,
+      projectId: vmProject,
       acceptedAt: timestamp,
       event: {
         kind: "participant.joined",
@@ -688,7 +688,7 @@ it.effect("delivers removal's notices at once, with nothing else to wake the wor
         intent: "schema status",
         envelopeChannel: "peer",
         text: "Is the billing schema migrated?",
-        originSquadronId: laptopSquadron,
+        originSquadronId: laptopProject,
         createdAt: timestamp,
         originEnvironmentId: laptop,
       });

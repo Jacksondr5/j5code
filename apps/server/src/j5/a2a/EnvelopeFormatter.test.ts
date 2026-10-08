@@ -15,7 +15,7 @@ import {
   formatReceiverBacklogNotice,
   formatSilenceNoticeEnvelope,
 } from "./EnvelopeFormatter.ts";
-import { SquadronId, ExchangeId, ParticipantId } from "./contracts.ts";
+import { LedgerProjectId, ExchangeId, ParticipantId } from "./contracts.ts";
 
 const documentedSendToolContract = new URL(
   "../../../../../docs/j5/product/a2a/agent-tools.md",
@@ -45,7 +45,7 @@ const readDocumentedSendToolDescription = Effect.fn("readDocumentedSendToolDescr
 it("renders the versioned peer envelope with exact reply semantics", () => {
   const rendered = formatPeerEnvelope({
     senderId: ParticipantId.make("agent:sender"),
-    originProjectId: SquadronId.make("squadron:origin"),
+    originProjectId: LedgerProjectId.make("project:origin"),
     exchangeId: ExchangeId.make("exchange:one"),
     message: "Please verify the worker.",
   });
@@ -54,7 +54,7 @@ it("renders the versioned peer envelope with exact reply semantics", () => {
   assert.include(rendered, "Cross-agent message");
   assert.notMatch(rendered, /\b(?:J5|A2A)\b/);
   assert.include(rendered, "agent:sender");
-  assert.include(rendered, "squadron:origin");
+  assert.include(rendered, "project:origin");
   assert.include(rendered, "Please verify the worker.");
   assert.include(rendered, 'send_message(to="agent:sender", exchange_id="exchange:one"');
   assert.include(rendered, "Reply once");
@@ -64,7 +64,7 @@ it("renders the versioned peer envelope with exact reply semantics", () => {
 it("names a remote sender's server in its sender line and leaves a local one unchanged", () => {
   const sender = {
     senderId: ParticipantId.make("agent:sender"),
-    originProjectId: SquadronId.make("project-origin"),
+    originProjectId: LedgerProjectId.make("project-origin"),
     message: "Build the iOS target.",
   };
   const remote = formatPeerEnvelope({ ...sender, exchangeId: null, senderServerName: "Work VM" });
@@ -94,7 +94,7 @@ it("renders reply closures without another reply instruction for either channel"
   const humanMessage = "  Human reply bytes\nremain exact. ";
   const peer = formatClosedPeerEnvelope({
     senderId: ParticipantId.make("agent:replying-peer"),
-    originProjectId: SquadronId.make("squadron:replying-peer"),
+    originProjectId: LedgerProjectId.make("project:replying-peer"),
     message: peerMessage,
   });
   const human = formatClosedHumanEnvelope({
@@ -129,7 +129,7 @@ it("does not interpret caller text as an envelope template", () => {
   const message = "Preserve this literal token: {{exchangeInstruction}}";
   const rendered = formatPeerEnvelope({
     senderId: ParticipantId.make("agent:sender"),
-    originProjectId: SquadronId.make("squadron:origin"),
+    originProjectId: LedgerProjectId.make("project:origin"),
     exchangeId: ExchangeId.make("exchange:one"),
     message,
   });
@@ -196,13 +196,13 @@ it("keeps the tool descriptions on their documented contracts", () => {
 it("renders the machine envelope as a plain send that names the sender as automation", () => {
   const rendered = formatMachineEnvelope({
     senderId: ParticipantId.make("machine:watchdog"),
-    originProjectId: SquadronId.make("squadron:monitoring"),
+    originProjectId: LedgerProjectId.make("project:monitoring"),
     message: "canary 42",
   });
 
   assert.match(
     rendered,
-    /^\[Message from automation machine:watchdog in project squadron:monitoring\]\n\n/,
+    /^\[Message from automation machine:watchdog in project project:monitoring\]\n\n/,
   );
   assert.include(rendered, "canary 42");
   assert.include(rendered, "cannot receive a reply");

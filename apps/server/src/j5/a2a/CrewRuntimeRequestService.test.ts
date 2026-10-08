@@ -31,9 +31,9 @@ import {
 import { participantIdForThread } from "./HomeRegistrar.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
-import { SquadronId } from "./contracts.ts";
+import { LedgerProjectId } from "./contracts.ts";
 
-const squadronId = SquadronId.make("squadron:crew-requests");
+const projectId = LedgerProjectId.make("ledger:crew-requests");
 const captainThread = ThreadId.make("thread:captain");
 const secondCaptainThread = ThreadId.make("thread:captain-two");
 const builderThread = ThreadId.make("thread:builder");
@@ -203,13 +203,13 @@ const setup = Effect.gen(function* () {
   const context = yield* Layer.build(storage);
   yield* runJ5A2AMigrations().pipe(Effect.provide(context));
   yield* Context.get(context, A2ALedger).ensureProject({
-    projectId: squadronId,
+    projectId: projectId,
     createdAt: DateTime.formatIso(at),
   });
   const instances = Context.get(context, AgentCrewInstanceService);
   yield* instances.record({
     id: "crew:requests",
-    squadronId,
+    projectId,
     captainParticipantId: participantIdForThread(captainThread),
     captainThreadId: captainThread,
     displayName: "Release Crew",
@@ -221,7 +221,7 @@ const setup = Effect.gen(function* () {
   // A second live Crew record naming the same seat thread: its approvals are still listed once.
   yield* instances.record({
     id: "crew:requests-again",
-    squadronId,
+    projectId,
     captainParticipantId: participantIdForThread(secondCaptainThread),
     captainThreadId: secondCaptainThread,
     displayName: "Follow-up Crew",

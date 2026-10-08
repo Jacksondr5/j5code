@@ -5,7 +5,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import { runMigrations } from "../../../persistence/Migrations.ts";
-import { ParticipantId, SquadronId } from "../contracts.ts";
+import { LedgerProjectId, ParticipantId } from "../contracts.ts";
 import { runJ5A2AMigrations } from "../Migrations.ts";
 import { PlacementCommandId } from "../placementContracts.ts";
 import { layer as placementLayer, ParticipantPlacementService } from "../PlacementService.ts";
@@ -652,7 +652,7 @@ it.effect("rewrites this server's ids in stored JSON and leaves a peer server's 
       Effect.flatMap((placements) =>
         placements.recordCreation({
           commandId: PlacementCommandId.make("command:placement:a"),
-          squadronId: SquadronId.make(ALPHA.project),
+          projectId: LedgerProjectId.make(ALPHA.project),
           participantId: ParticipantId.make("agent:thread-a"),
           actor: "agent",
           provenance: { kind: "unknown", source: "native_or_unobserved" },

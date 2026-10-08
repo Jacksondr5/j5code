@@ -45,7 +45,7 @@ export const makeCrewStopHttpRouteLayer = (path: HttpRouter.PathInput) =>
             stops
               .stop({
                 callerParticipantId: null,
-                squadronId: null,
+                projectId: null,
                 crewInstanceId: decoded.success.crewInstanceId,
                 commandIds: (seatName) => ({
                   interruptCommandId: CommandId.make(

@@ -2,7 +2,7 @@ import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { ThreadId, type EnvironmentId, type ScopedThreadRef } from "@t3tools/contracts";
 
 import { classifyCrewSeat, type CrewSeatState, type CrewSeatThread } from "../crew/crewState";
-import type { FleetAgent, FleetCrew, FleetSquadron } from "./fleetClient";
+import type { FleetAgent, FleetCrew, FleetLedgerProject } from "./fleetClient";
 
 /** One rendered row of the Roster tree. Crew members hang under their Captain as one unit. */
 export interface FleetRow {
@@ -63,17 +63,17 @@ const byLabel = (left: FleetAgent, right: FleetAgent) =>
   (left.displayName ?? left.participantId).localeCompare(right.displayName ?? right.participantId);
 
 /**
- * Placement tree per Squadron, the unit each machine's ledger answers in: roots are agents whose parent is null or not in the
- * Squadron; Crew members are pulled out of the plain child list and grouped under their
+ * Placement tree per project, the unit each machine's ledger answers in: roots are agents whose parent is null or not in the
+ * project; Crew members are pulled out of the plain child list and grouped under their
  * Captain by Crew. A seat on the roster that is not placed yet (or never created: the read
  * carries it with no thread) still hangs under its Captain, so a Crew's group always counts
  * every seat. Agents that sit in a Crew but whose Captain is gone still render at the root.
  */
-export function buildFleetTree(squadron: FleetSquadron): ReadonlyArray<FleetNode> {
-  const byId = new Map(squadron.agents.map((agent) => [agent.participantId, agent]));
-  const crewById = new Map(squadron.crews.map((crew) => [crew.crewInstanceId, crew]));
+export function buildFleetTree(ledgerProject: FleetLedgerProject): ReadonlyArray<FleetNode> {
+  const byId = new Map(ledgerProject.agents.map((agent) => [agent.participantId, agent]));
+  const crewById = new Map(ledgerProject.crews.map((crew) => [crew.crewInstanceId, crew]));
   const children = new Map<string | null, Array<FleetAgent>>();
-  for (const agent of squadron.agents) {
+  for (const agent of ledgerProject.agents) {
     const placed = agent.placementParentId ?? agent.crew?.captainParticipantId ?? null;
     const parent = placed !== null && byId.has(placed) ? placed : null;
     const siblings = children.get(parent) ?? [];
@@ -129,42 +129,44 @@ export function buildFleetTree(squadron: FleetSquadron): ReadonlyArray<FleetNode
     .filter((agent) => !visited.has(agent.participantId))
     .map((agent) => build(agent, 0));
   // A corrupt placement cycle has no root; surface its agents rather than losing them.
-  for (const agent of [...squadron.agents].toSorted(byLabel)) {
+  for (const agent of [...ledgerProject.agents].toSorted(byLabel)) {
     if (!visited.has(agent.participantId)) roots.push(build(agent, 0));
   }
   return roots;
 }
 
-/** A Crew paired with the Squadron it belonged to, for lists that span Squadrons. */
-export interface FleetSquadronCrew<S extends FleetSquadron = FleetSquadron> {
-  readonly squadron: S;
+/** A Crew paired with the project it belonged to, for lists that span projects. */
+export interface FleetProjectCrew<S extends FleetLedgerProject = FleetLedgerProject> {
+  readonly project: S;
   readonly crew: FleetCrew;
 }
 
 /**
- * Retired Crews across every Squadron, newest retirement first, each paired with its Squadron so
+ * Retired Crews across every project, newest retirement first, each paired with its project so
  * the row can name it. Their roster snapshot stays readable so whoever proposes a successor can
  * start from the brief and the approved seats (Crews AC20).
  */
-export const retiredCrews = <S extends FleetSquadron>(
-  squadrons: ReadonlyArray<S>,
-): ReadonlyArray<FleetSquadronCrew<S>> =>
-  squadrons
-    .flatMap((squadron) =>
-      squadron.crews.filter((crew) => crew.archivedAt !== null).map((crew) => ({ squadron, crew })),
+export const retiredCrews = <S extends FleetLedgerProject>(
+  projects: ReadonlyArray<S>,
+): ReadonlyArray<FleetProjectCrew<S>> =>
+  projects
+    .flatMap((ledgerProject) =>
+      ledgerProject.crews
+        .filter((crew) => crew.archivedAt !== null)
+        .map((crew) => ({ project: ledgerProject, crew })),
     )
     .toSorted((left, right) =>
       (right.crew.archivedAt ?? "").localeCompare(left.crew.archivedAt ?? ""),
     );
 
-/** A placement-tree root paired with the Squadron it belongs to, for tables that span Squadrons. */
-export interface FleetSectionRow<S extends FleetSquadron = FleetSquadron> {
-  readonly squadron: S;
+/** A placement-tree root paired with the project it belongs to, for tables that span projects. */
+export interface FleetSectionRow<S extends FleetLedgerProject = FleetLedgerProject> {
+  readonly project: S;
   readonly node: FleetNode;
 }
 
 /** The Active and Settled sections of the Fleet page; retired Crews are listed by `retiredCrews`. */
-export interface FleetSections<S extends FleetSquadron = FleetSquadron> {
+export interface FleetSections<S extends FleetLedgerProject = FleetLedgerProject> {
   readonly active: ReadonlyArray<FleetSectionRow<S>>;
   readonly settled: ReadonlyArray<FleetSectionRow<S>>;
   /** Every agent row in Settled, seats included, for the expander's label. */
@@ -203,33 +205,32 @@ export const isSettledFleetNode = (
 };
 
 /**
- * The Active and Settled sections across every Squadron. The roster read already leaves out
+ * The Active and Settled sections across every project. The roster read already leaves out
  * retired agents (fleet-page AC11), and the client's thread shells never hold archived threads,
  * so the child of a retired agent roots through `buildFleetTree` and nothing here filters. Roots
- * keep the order `buildFleetTree` gives them, Squadron by Squadron, so nothing is reordered by
+ * keep the order `buildFleetTree` gives them, project by project, so nothing is reordered by
  * activity (AC9); a root and its whole subtree land in one section together, placed by
  * `isSettledFleetNode`.
  */
-export function partitionFleet<S extends FleetSquadron & { readonly environmentId: EnvironmentId }>(
-  squadrons: ReadonlyArray<S>,
-  shellFor: FleetShellLookup,
-): FleetSections<S> {
+export function partitionFleet<
+  S extends FleetLedgerProject & { readonly environmentId: EnvironmentId },
+>(projects: ReadonlyArray<S>, shellFor: FleetShellLookup): FleetSections<S> {
   const active: Array<FleetSectionRow<S>> = [];
   const settled: Array<FleetSectionRow<S>> = [];
   let settledAgentCount = 0;
   let agentCount = 0;
-  for (const squadron of squadrons) {
+  for (const ledgerProject of projects) {
     const classify = (agent: FleetAgent) =>
       classifyCrewSeat(
-        agent.threadId === null ? undefined : shellFor(squadron.environmentId, agent.threadId),
+        agent.threadId === null ? undefined : shellFor(ledgerProject.environmentId, agent.threadId),
       );
-    agentCount += squadron.agents.length;
-    for (const node of buildFleetTree(squadron)) {
+    agentCount += ledgerProject.agents.length;
+    for (const node of buildFleetTree(ledgerProject)) {
       if (isSettledFleetNode(node, classify)) {
-        settled.push({ squadron, node });
+        settled.push({ project: ledgerProject, node });
         settledAgentCount += [...fleetNodeAgents(node)].length;
       } else {
-        active.push({ squadron, node });
+        active.push({ project: ledgerProject, node });
       }
     }
   }
@@ -243,10 +244,10 @@ export interface FleetProject {
 }
 
 /** The label a root row sorts under: its project, by the server's title while the client's is unresolved. */
-const fleetRowLabel = <S extends FleetSquadron>(
+const fleetRowLabel = <S extends FleetLedgerProject>(
   row: FleetSectionRow<S>,
   project: FleetProject | undefined,
-) => project?.displayName ?? row.squadron.title;
+) => project?.displayName ?? row.project.title;
 
 /**
  * Orders a section's roots by upstream's logical project, so the copies of one project on two
@@ -254,12 +255,12 @@ const fleetRowLabel = <S extends FleetSquadron>(
  * project the roots keep the order `buildFleetTree` gave them (AC9: nothing reorders by
  * activity). A root whose project cannot be resolved sorts by the title the read carries instead.
  */
-export function orderFleetRowsByProject<S extends FleetSquadron>(
+export function orderFleetRowsByProject<S extends FleetLedgerProject>(
   rows: ReadonlyArray<FleetSectionRow<S>>,
-  projectOf: (squadron: S) => FleetProject | undefined,
+  projectOf: (ledgerProject: S) => FleetProject | undefined,
 ): ReadonlyArray<FleetSectionRow<S>> {
   return rows
-    .map((row, index) => ({ row, index, project: projectOf(row.squadron) }))
+    .map((row, index) => ({ row, index, project: projectOf(row.project) }))
     .toSorted(
       (left, right) =>
         fleetRowLabel(left.row, left.project).localeCompare(
@@ -274,23 +275,26 @@ export function orderFleetRowsByProject<S extends FleetSquadron>(
 }
 
 /** How many projects the listed roots span; an unresolved root counts by its own project id. */
-export function countFleetProjects<S extends FleetSquadron & { readonly environmentId: string }>(
+export function countFleetProjects<
+  S extends FleetLedgerProject & { readonly environmentId: string },
+>(
   rows: ReadonlyArray<FleetSectionRow<S>>,
-  projectOf: (squadron: S) => FleetProject | undefined,
+  projectOf: (ledgerProject: S) => FleetProject | undefined,
 ) {
   return new Set(
     rows.map(
       (row) =>
-        projectOf(row.squadron)?.projectKey ??
-        `unresolved:${row.squadron.environmentId}:${row.squadron.id}`,
+        projectOf(row.project)?.projectKey ??
+        `unresolved:${row.project.environmentId}:${row.project.id}`,
     ),
   ).size;
 }
 
 /** Roster alert badge: measured "needs a human" facts only, so nothing here is guessed. */
-export const countFleetAlerts = (squadrons: ReadonlyArray<FleetSquadron>) =>
-  squadrons.reduce(
-    (count, squadron) => count + squadron.agents.filter((agent) => agent.openAsks > 0).length,
+export const countFleetAlerts = (projects: ReadonlyArray<FleetLedgerProject>) =>
+  projects.reduce(
+    (count, ledgerProject) =>
+      count + ledgerProject.agents.filter((agent) => agent.openAsks > 0).length,
     0,
   );
 
@@ -308,18 +312,18 @@ export const originLabel = (origin: FleetAgent["origin"]) =>
  * the row still holds one.
  */
 export function fleetInvolvedThreadRefs(
-  squadrons: ReadonlyArray<FleetSquadron & { readonly environmentId: EnvironmentId }>,
+  projects: ReadonlyArray<FleetLedgerProject & { readonly environmentId: EnvironmentId }>,
 ): ReadonlyArray<ScopedThreadRef> {
   const refs = new Map<string, ScopedThreadRef>();
-  for (const squadron of squadrons) {
-    const byId = new Map(squadron.agents.map((agent) => [agent.participantId, agent]));
+  for (const ledgerProject of projects) {
+    const byId = new Map(ledgerProject.agents.map((agent) => [agent.participantId, agent]));
     const involve = (participantId: string) => {
       const threadId = byId.get(participantId)?.threadId ?? null;
       if (threadId === null) return;
-      const ref = scopeThreadRef(squadron.environmentId, ThreadId.make(threadId));
+      const ref = scopeThreadRef(ledgerProject.environmentId, ThreadId.make(threadId));
       refs.set(`${ref.environmentId}\u0000${ref.threadId}`, ref);
     };
-    for (const agent of squadron.agents) {
+    for (const agent of ledgerProject.agents) {
       if (agent.crew !== null) {
         involve(agent.participantId);
         involve(agent.crew.captainParticipantId);

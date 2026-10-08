@@ -2,7 +2,7 @@ import { useSyncExternalStore } from "react";
 
 /**
  * Which persona a new-task draft should launch as, keyed by the route's thread key.
- * Session-local like the squadron draft carrier: the server resolves and pins the real
+ * Session-local: the server resolves and pins the real
  * assignment at first send, so nothing here needs to persist.
  */
 let snapshot: Readonly<Record<string, string>> = {};

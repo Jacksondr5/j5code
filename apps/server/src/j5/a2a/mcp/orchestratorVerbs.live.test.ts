@@ -1,6 +1,6 @@
 import { ThreadLaunchService } from "../../../orchestration-v2/ThreadLaunchService.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../../../persistence/Layers/OrchestrationCommandReceipts.ts";
-import { J5SquadronCreationLayer } from "../runtimeLayer.ts";
+import { J5ThreadRegistrationLayer } from "../runtimeLayer.ts";
 import { AntigravityInstallation } from "../../../provider/AntigravityInstallation.ts";
 import * as ModelManifest from "../../../provider/ModelManifest.ts";
 import * as CodexResetCredit from "../../../provider/Layers/codexResetCredit.ts";
@@ -59,7 +59,7 @@ import * as VcsProcess from "../../../vcs/VcsProcess.ts";
 import { A2AHomeRegistrar } from "../HomeRegistrar.ts";
 import { A2ALedger } from "../LedgerService.ts";
 import { ParticipantPlacementService } from "../PlacementService.ts";
-import { CommCommandId, ParticipantId, SquadronId } from "../contracts.ts";
+import { CommCommandId, ParticipantId, LedgerProjectId } from "../contracts.ts";
 import { PlacementCommandId } from "../placementContracts.ts";
 import { J5A2ARuntimeLayer } from "../runtimeLayer.ts";
 import { spawnThreadId } from "../spawnIds.ts";
@@ -73,7 +73,7 @@ import {
 } from "./tools.ts";
 
 const OrchestrationV2LayerLive = UpstreamOrchestrationV2LayerLive.pipe(
-  Layer.provideMerge(J5SquadronCreationLayer),
+  Layer.provideMerge(J5ThreadRegistrationLayer),
 );
 
 const codexInstanceId = ProviderInstanceId.make("codex");
@@ -85,7 +85,7 @@ const lunaSelection = {
 const parentThreadId = ThreadId.make("thread:j5:luna-verb-e2e:parent");
 const projectId = ProjectId.make("project:j5:luna-verb-e2e");
 // A thread's home is its project, so the ledger is keyed by the project's id.
-const squadronId = SquadronId.make(projectId);
+const ledgerProjectId = LedgerProjectId.make(projectId);
 const requestKey = "j5-luna-verb-e2e-spawn";
 const scope = {
   environmentId: EnvironmentId.make("environment:j5:luna-verb-e2e"),
@@ -305,18 +305,18 @@ describe.runIf(process.env.T3_J5_LUNA_LIVE_ORCHESTRATOR === "1")(
 
           const ledger = yield* A2ALedger;
           yield* ledger.ensureProject({
-            projectId: squadronId,
+            projectId: ledgerProjectId,
             createdAt: "2026-08-30T17:00:00.000Z",
           });
           const parentHome = yield* (yield* A2AHomeRegistrar).registerAtCreation({
             commandId: CommCommandId.make("command:j5:luna-verb-e2e:parent-home"),
-            squadronId,
+            projectId: ledgerProjectId,
             threadId: parentThreadId,
             createdAt: "2026-08-30T17:00:00.000Z",
           });
           yield* (yield* ParticipantPlacementService).recordCreation({
             commandId: PlacementCommandId.make("command:j5:luna-verb-e2e:parent-placement"),
-            squadronId,
+            projectId: ledgerProjectId,
             participantId: parentHome.participantId,
             actor: "platform",
             provenance: { kind: "unknown", source: "native_or_unobserved" },
@@ -348,7 +348,7 @@ describe.runIf(process.env.T3_J5_LUNA_LIVE_ORCHESTRATOR === "1")(
             client_request_id: requestKey,
           });
           assert.equal(spawned.thread_id, expectedThreadId);
-          assert.equal(spawned.project_id, squadronId);
+          assert.equal(spawned.project_id, ledgerProjectId);
           yield* Fiber.join(runningFiber);
 
           const stopped = yield* callStop({
@@ -379,7 +379,7 @@ describe.runIf(process.env.T3_J5_LUNA_LIVE_ORCHESTRATOR === "1")(
           assert.equal(projection.thread.runtimeMode, "approval-required");
           assert.equal(projection.thread.worktreePath, isolatedWorkspace);
           // No project row is seeded here, so the title falls back to the project's id.
-          const firstTurnText = `<j5_spawn_context>\nPlatform-provided identity facts:\nparticipant_id: ${spawned.participant_id}\nproject_id: ${squadronId}\nproject_title: ${squadronId}\nspawned_by: ${parentHome.participantId}\nspawner_thread_id: ${parentThreadId}\n</j5_spawn_context>\n\n<spawner_brief>\n${brief}\n</spawner_brief>`;
+          const firstTurnText = `<j5_spawn_context>\nPlatform-provided identity facts:\nparticipant_id: ${spawned.participant_id}\nproject_id: ${ledgerProjectId}\nproject_title: ${ledgerProjectId}\nspawned_by: ${parentHome.participantId}\nspawner_thread_id: ${parentThreadId}\n</j5_spawn_context>\n\n<spawner_brief>\n${brief}\n</spawner_brief>`;
           assert.equal(
             projection.messages.filter((message) => message.text === firstTurnText).length,
             1,
@@ -387,7 +387,7 @@ describe.runIf(process.env.T3_J5_LUNA_LIVE_ORCHESTRATOR === "1")(
           assert.equal(projection.runs.length, 1);
 
           const placement = yield* (yield* ParticipantPlacementService).readPlacement({
-            squadronId,
+            projectId: ledgerProjectId,
             participantId: ParticipantId.make(spawned.participant_id),
           });
           assert.deepStrictEqual(placement?.provenance, {

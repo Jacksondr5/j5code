@@ -49,7 +49,7 @@ const StubServicesLive = Layer.mergeAll(
   }),
   Layer.mock(A2ASendService)({ listParticipants: () => Effect.succeed([]) }),
   Layer.mock(ParticipantPlacementService)({ listParticipants: () => Effect.succeed([]) }),
-  Layer.mock(A2ALedger)({ listSquadrons: () => Effect.succeed([]) }),
+  Layer.mock(A2ALedger)({ listProjectLedgers: () => Effect.succeed([]) }),
   peerDirectoryNoneLayer,
   Layer.mock(ProviderRegistry)({}),
   Layer.mock(ProviderAdapterRegistryV2)({}),

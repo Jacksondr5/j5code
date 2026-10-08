@@ -28,8 +28,8 @@ import { spawnFirstTurnText, type CrewBriefContext } from "./spawnIds.ts";
 const identity = {
   brief: "Review the proposed change.",
   participantId: "agent:reviewer",
-  squadronId: "squadron:review",
-  squadronName: "Review",
+  projectId: "project:review",
+  projectTitle: "Review",
   spawnedByParticipantId: "agent:captain",
   spawnerThreadId: "thread:captain",
 };

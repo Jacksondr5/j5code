@@ -35,7 +35,7 @@ import {
   LedgerMessageId,
   LIFECYCLE_PARTICIPANT_ID,
   ParticipantId,
-  SquadronId,
+  LedgerProjectId,
   type AgentParticipant,
 } from "./contracts.ts";
 
@@ -43,7 +43,7 @@ const timestamp = "2026-09-16T12:00:00.000Z";
 const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
-const localSquadron = SquadronId.make("squadron:work-billing");
+const localProject = LedgerProjectId.make("project:work-billing");
 const billing: AgentParticipant = {
   kind: "agent",
   id: ParticipantId.make("agent:j5:a2a:thread:billing"),
@@ -68,8 +68,8 @@ const homePeer: PeerConnection = {
 const supportOnHome: RemoteAgent = {
   environmentId: homePeer.environmentId,
   environmentLabel: homePeer.label,
-  squadronId: SquadronId.make("squadron:home-support"),
-  squadronName: "L2 Support Rotation",
+  projectId: LedgerProjectId.make("project:home-support"),
+  projectTitle: "L2 Support Rotation",
   participantId: remoteSupport,
   threadId: ThreadId.make("thread:support"),
   displayName: "Support triage",
@@ -134,7 +134,7 @@ const seedLocal = Effect.fn("test.j5.a2a.peer.outbound.seed")(function* () {
   yield* runMigrations();
   yield* runJ5A2AMigrations();
   const ledger = yield* A2ALedger;
-  yield* ledger.ensureProject({ projectId: localSquadron, createdAt: timestamp });
+  yield* ledger.ensureProject({ projectId: localProject, createdAt: timestamp });
   // The sender's thread title is the label the peer's people will see.
   const sql = yield* SqlClient.SqlClient;
   // Home as this server records it, for what reads the record directly, such as a notice's name for it.
@@ -154,7 +154,7 @@ const seedLocal = Effect.fn("test.j5.a2a.peer.outbound.seed")(function* () {
   `;
   yield* ledger.append({
     commandId: CommCommandId.make("command:peer-outbound:join"),
-    squadronId: localSquadron,
+    projectId: localProject,
     acceptedAt: timestamp,
     event: {
       kind: "participant.joined",
@@ -203,7 +203,7 @@ it.effect(
       }>`SELECT receiver_project_id, receiver_environment_id, exchange_role FROM j5_a2a_delivery WHERE message_id = ${sent.messageId}`;
       assert.deepStrictEqual(rows, [
         {
-          receiver_project_id: supportOnHome.squadronId,
+          receiver_project_id: supportOnHome.projectId,
           receiver_environment_id: homePeer.environmentId,
           exchange_role: "ask",
         },
@@ -211,7 +211,7 @@ it.effect(
       const exchange = yield* sql<{ readonly receiver_id: string; readonly project_id: string }>`
       SELECT receiver_id, project_id FROM j5_a2a_exchange WHERE exchange_id = ${sent.exchangeId!}
     `;
-      assert.deepStrictEqual(exchange, [{ receiver_id: remoteSupport, project_id: localSquadron }]);
+      assert.deepStrictEqual(exchange, [{ receiver_id: remoteSupport, project_id: localProject }]);
 
       const nobody = yield* send
         .send({
@@ -412,7 +412,7 @@ it.effect(
         assert.equal(body.exchangeId, sent.exchangeId);
         assert.equal(body.exchangeRole, "ask");
         assert.equal(body.intent, "incident status");
-        assert.equal(body.originSquadronId, localSquadron);
+        assert.equal(body.originSquadronId, localProject);
         assert.equal(body.senderLabel, "Billing agent");
         assert.match(body.correlationId, /^correlation:j5:a2a:/);
       }).pipe(
@@ -613,7 +613,7 @@ it.effect(
       // An earlier ask reached this agent on Home; that delivery row is the recorded route.
       yield* ledger.append({
         commandId: CommCommandId.make("command:peer-outbound:earlier"),
-        squadronId: localSquadron,
+        projectId: localProject,
         acceptedAt: timestamp,
         event: {
           kind: "message.sent",
@@ -624,8 +624,8 @@ it.effect(
           payload: {
             messageId: LedgerMessageId.make("message:peer-outbound:earlier"),
             text: "earlier",
-            originProjectId: localSquadron,
-            receiverProjectId: supportOnHome.squadronId,
+            originProjectId: localProject,
+            receiverProjectId: supportOnHome.projectId,
             receiverEnvironmentId: "environment-Home",
             exchangeRole: "none",
             envelopeChannel: "peer",
@@ -659,7 +659,7 @@ it.effect("never resolves a machine sender's receiver through peers", () =>
     const watchdog = ParticipantId.make("machine:watchdog");
     yield* ledger.append({
       commandId: CommCommandId.make("command:peer-outbound:machine-join"),
-      squadronId: localSquadron,
+      projectId: localProject,
       acceptedAt: timestamp,
       event: {
         kind: "participant.joined",
@@ -698,11 +698,11 @@ it.effect(
         const cause = {
           kind: "participant-archived" as const,
           participantId: billing.id,
-          projectId: localSquadron,
+          projectId: localProject,
         };
         yield* ledger.appendEvents({
           commandId: CommCommandId.make("command:peer-outbound:drop"),
-          squadronId: localSquadron,
+          projectId: localProject,
           acceptedAt: timestamp,
           events: [
             {
@@ -728,8 +728,8 @@ it.effect(
               payload: {
                 messageId: noticeMessageId,
                 text: "exchange dropped",
-                originProjectId: localSquadron,
-                receiverProjectId: supportOnHome.squadronId,
+                originProjectId: localProject,
+                receiverProjectId: supportOnHome.projectId,
                 receiverEnvironmentId: homePeer.environmentId,
                 exchangeRole: "terminal_notice",
                 envelopeChannel: "lifecycle_notice",
@@ -860,7 +860,7 @@ it.effect(
       // An earlier message reached this agent on Home: its route is recorded.
       yield* ledger.append({
         commandId: CommCommandId.make("command:peer-outbound:snapshot:earlier"),
-        squadronId: localSquadron,
+        projectId: localProject,
         acceptedAt: timestamp,
         event: {
           kind: "message.sent",
@@ -871,8 +871,8 @@ it.effect(
           payload: {
             messageId: LedgerMessageId.make("message:peer-outbound:snapshot:earlier"),
             text: "earlier",
-            originProjectId: localSquadron,
-            receiverProjectId: supportOnHome.squadronId,
+            originProjectId: localProject,
+            receiverProjectId: supportOnHome.projectId,
             receiverEnvironmentId: homePeer.environmentId,
             exchangeRole: "none",
             envelopeChannel: "peer",

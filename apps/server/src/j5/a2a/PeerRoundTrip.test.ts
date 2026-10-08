@@ -46,7 +46,7 @@ import {
   CommCommandId,
   ExchangeId,
   ParticipantId,
-  SquadronId,
+  LedgerProjectId,
   type AgentParticipant,
 } from "./contracts.ts";
 
@@ -62,13 +62,13 @@ const timestamp = "2026-09-16T12:00:00.000Z";
 
 interface Server {
   readonly environmentId: string;
-  readonly squadronId: SquadronId;
+  readonly projectId: LedgerProjectId;
   readonly agent: AgentParticipant;
 }
 
 const work: Server = {
   environmentId: "environment-work",
-  squadronId: SquadronId.make("squadron:work-billing"),
+  projectId: LedgerProjectId.make("project:work-billing"),
   agent: {
     kind: "agent",
     id: ParticipantId.make("agent:j5:a2a:thread:billing"),
@@ -77,7 +77,7 @@ const work: Server = {
 };
 const home: Server = {
   environmentId: "environment-home",
-  squadronId: SquadronId.make("squadron:home-support"),
+  projectId: LedgerProjectId.make("project:home-support"),
   agent: {
     kind: "agent",
     id: ParticipantId.make("agent:j5:a2a:thread:support"),
@@ -88,8 +88,8 @@ const home: Server = {
 const remoteView = (server: Server, label: string): RemoteAgent => ({
   environmentId: server.environmentId,
   environmentLabel: label,
-  squadronId: server.squadronId,
-  squadronName: label,
+  projectId: server.projectId,
+  projectTitle: label,
   participantId: server.agent.id,
   threadId: server.agent.threadId,
   displayName: label,
@@ -249,10 +249,10 @@ const runEnded = (thread: ThreadId, status: "completed" | "failed"): Orchestrati
 const seed = Effect.fn("test.j5.a2a.peer.roundtrip.seed")(function* (self: Server) {
   yield* runJ5A2AMigrations();
   const ledger = yield* A2ALedger;
-  yield* ledger.ensureProject({ projectId: self.squadronId, createdAt: timestamp });
+  yield* ledger.ensureProject({ projectId: self.projectId, createdAt: timestamp });
   yield* ledger.append({
     commandId: CommCommandId.make(`command:roundtrip:join:${self.agent.id}`),
-    squadronId: self.squadronId,
+    projectId: self.projectId,
     acceptedAt: timestamp,
     event: {
       kind: "participant.joined",
@@ -366,7 +366,7 @@ it.effect(
           readonly receiver_project_id: string;
         }>`SELECT receiver_environment_id, receiver_project_id FROM j5_a2a_delivery WHERE message_id = ${asked.messageId}`;
         assert.deepStrictEqual(askRow, [
-          { receiver_environment_id: home.environmentId, receiver_project_id: home.squadronId },
+          { receiver_environment_id: home.environmentId, receiver_project_id: home.projectId },
         ]);
 
         // Work's worker crosses; Home records its own row and delivers locally.
@@ -389,7 +389,7 @@ it.effect(
         assert.equal(homeInjected.length, 1);
         assert.equal(
           homeInjected[0]!.originProjectId,
-          work.squadronId,
+          work.projectId,
           "the envelope names Work's project",
         );
         assert.equal(homeInjected[0]!.senderId, work.agent.id);
@@ -535,7 +535,7 @@ it.effect(
           cause: {
             kind: "participant-archived",
             participantId: work.agent.id,
-            squadronId: work.squadronId,
+            squadronId: work.projectId,
           },
         });
 

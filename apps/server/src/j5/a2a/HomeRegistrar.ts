@@ -10,7 +10,7 @@ import {
   type AppendCommEventsCommand,
   type CommCommandId,
   ParticipantId,
-  SquadronId,
+  LedgerProjectId,
   type StoredCommEvent,
 } from "./contracts.ts";
 import {
@@ -21,12 +21,12 @@ import {
 } from "./LedgerService.ts";
 
 export interface RegisteredThreadHome {
-  readonly squadronId: SquadronId;
+  readonly projectId: LedgerProjectId;
   readonly participantId: ParticipantId;
 }
 
 export interface RegisterAtCreationInput {
-  readonly squadronId: SquadronId;
+  readonly projectId: LedgerProjectId;
   readonly threadId: ThreadId;
   readonly createdAt: string;
   readonly commandId: CommCommandId;
@@ -50,12 +50,12 @@ export class A2AHomeConflictError extends Schema.TaggedError<A2AHomeConflictErro
   "A2AHomeConflictError",
   {
     threadId: Schema.String,
-    existingSquadronId: Schema.String,
-    requestedSquadronId: Schema.String,
+    existingProjectId: Schema.String,
+    requestedProjectId: Schema.String,
   },
 ) {
   override get message(): string {
-    return `Thread ${this.threadId} is already registered in project ${this.existingSquadronId}; registration requested ${this.requestedSquadronId}. A thread's project never changes.`;
+    return `Thread ${this.threadId} is already registered in project ${this.existingProjectId}; registration requested ${this.requestedProjectId}. A thread's project never changes.`;
   }
 }
 
@@ -64,11 +64,11 @@ export class A2AHomeCommandConflictError extends Schema.TaggedError<A2AHomeComma
   {
     commandId: Schema.String,
     requestedThreadId: Schema.String,
-    requestedSquadronId: Schema.String,
+    requestedProjectId: Schema.String,
   },
 ) {
   override get message(): string {
-    return `Creation command ${this.commandId} is already bound to a different ledger event than thread ${this.requestedThreadId} in project ${this.requestedSquadronId}. Reuse the original creation inputs or issue a new command id.`;
+    return `Creation command ${this.commandId} is already bound to a different ledger event than thread ${this.requestedThreadId} in project ${this.requestedProjectId}. Reuse the original creation inputs or issue a new command id.`;
   }
 }
 
@@ -167,7 +167,7 @@ export const resolveThreadHome = Effect.fn("j5.a2a.resolveThreadHome")(function*
               [
                 `${row.active_project_id}\u0000${row.active_participant_id}`,
                 {
-                  squadronId: row.active_project_id as SquadronId,
+                  projectId: row.active_project_id as LedgerProjectId,
                   participantId: ParticipantId.make(row.active_participant_id),
                 },
               ] as const,
@@ -177,7 +177,7 @@ export const resolveThreadHome = Effect.fn("j5.a2a.resolveThreadHome")(function*
   );
   return {
     home: {
-      squadronId: first.home_project_id as SquadronId,
+      projectId: first.home_project_id as LedgerProjectId,
       participantId: ParticipantId.make(first.home_participant_id),
     },
     activeMemberships,
@@ -196,11 +196,11 @@ const makeRegisterAtCreation = (input: {
     const existing = yield* input
       .getHomeForThread(registration.threadId)
       .pipe(Effect.catchTag("A2AHomeNotFoundError", () => Effect.succeed(null)));
-    if (existing !== null && existing.squadronId !== registration.squadronId) {
+    if (existing !== null && existing.projectId !== registration.projectId) {
       return yield* new A2AHomeConflictError({
         threadId: registration.threadId,
-        existingSquadronId: existing.squadronId,
-        requestedSquadronId: registration.squadronId,
+        existingProjectId: existing.projectId,
+        requestedProjectId: registration.projectId,
       });
     }
 
@@ -210,7 +210,7 @@ const makeRegisterAtCreation = (input: {
 
     // The first participant in a project makes it a ledger.
     yield* input.ensureProject({
-      projectId: registration.squadronId,
+      projectId: registration.projectId,
       createdAt: registration.createdAt,
     });
     const participantId = participantIdForThread(registration.threadId);
@@ -228,7 +228,7 @@ const makeRegisterAtCreation = (input: {
     const appendResult = yield* Effect.result(
       input.appendEvents({
         commandId: registration.commandId,
-        squadronId: registration.squadronId,
+        projectId: registration.projectId,
         acceptedAt: registration.createdAt,
         events: [
           membershipFact("participant.joined", registration.createdAt),
@@ -243,11 +243,11 @@ const makeRegisterAtCreation = (input: {
         .getHomeForThread(registration.threadId)
         .pipe(Effect.catchTag("A2AHomeNotFoundError", () => Effect.succeed(null)));
       if (racedHome === null) return yield* appendResult.failure;
-      if (racedHome.squadronId !== registration.squadronId) {
+      if (racedHome.projectId !== registration.projectId) {
         return yield* new A2AHomeConflictError({
           threadId: registration.threadId,
-          existingSquadronId: racedHome.squadronId,
-          requestedSquadronId: registration.squadronId,
+          existingProjectId: racedHome.projectId,
+          requestedProjectId: registration.projectId,
         });
       }
       return { home: racedHome, committedEvents: [] };
@@ -257,7 +257,7 @@ const makeRegisterAtCreation = (input: {
     if (
       event === undefined ||
       event.kind !== "participant.joined" ||
-      event.squadronId !== registration.squadronId ||
+      event.projectId !== registration.projectId ||
       event.createdAt !== registration.createdAt ||
       event.payload.participant.kind !== "agent" ||
       event.payload.participant.threadId !== registration.threadId ||
@@ -266,11 +266,11 @@ const makeRegisterAtCreation = (input: {
       return yield* new A2AHomeCommandConflictError({
         commandId: registration.commandId,
         requestedThreadId: registration.threadId,
-        requestedSquadronId: registration.squadronId,
+        requestedProjectId: registration.projectId,
       });
     }
     return {
-      home: { squadronId: registration.squadronId, participantId },
+      home: { projectId: registration.projectId, participantId },
       committedEvents: appendResult.success.committed ? appendResult.success.events : [],
     };
   });

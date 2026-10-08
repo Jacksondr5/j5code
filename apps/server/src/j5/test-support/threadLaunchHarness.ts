@@ -32,7 +32,7 @@ import * as ServerSettings from "../../serverSettings.ts";
 import * as TextGeneration from "../../textGeneration/TextGeneration.ts";
 
 /**
- * A real ThreadLaunch over a real orchestrator, with git, setup, and Squadron registration faked.
+ * A real ThreadLaunch over a real orchestrator, with git, setup, and project registration faked.
  * It mirrors orchestration-v2/ThreadLaunchService.test.ts so J5 launch cases stay out of the
  * upstream test file (FORK.md). Keep it in sync when that harness moves.
  */

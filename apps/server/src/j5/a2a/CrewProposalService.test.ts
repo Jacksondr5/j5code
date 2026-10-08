@@ -76,9 +76,9 @@ import { SpawnCompositionService } from "./SpawnCompositionService.ts";
 import type { ResolvedSpawnWorkspace } from "./spawnWorkspace.ts";
 import { fakeSpawnWorkspaceLayer, noRepository } from "./test-support/spawnWorkspaceFakes.ts";
 import { crewSeatRequestKey, spawnThreadId } from "./spawnIds.ts";
-import { ParticipantId, SquadronId } from "./contracts.ts";
+import { ParticipantId, LedgerProjectId } from "./contracts.ts";
 
-const squadronId = SquadronId.make("squadron:crew-proposal");
+const projectId = LedgerProjectId.make("ledger:crew-proposal");
 const captainThread = ThreadId.make("thread:captain");
 const captainId = ParticipantId.make("agent:j5:a2a:thread:captain");
 const createdAt = DateTime.makeUnsafe("2026-09-09T16:00:00.000Z");
@@ -97,8 +97,8 @@ const thread = (id: ThreadId): OrchestrationV2AppThread =>
     deletedAt: null,
   }) as unknown as OrchestrationV2AppThread;
 const captain: CrewCaptain = {
-  squadronId,
-  squadronName: "Proposal Squadron",
+  projectId,
+  projectTitle: "Proposal project",
   participantId: captainId,
   thread: thread(captainThread),
 };
@@ -167,7 +167,7 @@ const fakeLauncher = (crews: AgentCrewInstanceService["Service"]) =>
         : crews
             .record({
               id: `crew:${input.requestKey}`,
-              squadronId: input.captain.squadronId,
+              projectId: input.captain.projectId,
               captainParticipantId: input.captain.participantId,
               captainThreadId: input.captain.thread.id,
               displayName: input.displayName,
@@ -303,7 +303,7 @@ const fixture = Effect.gen(function* () {
   yield* Effect.provide(
     Effect.gen(function* () {
       yield* (yield* A2ALedger).ensureProject({
-        projectId: squadronId,
+        projectId: projectId,
         createdAt: DateTime.formatIso(createdAt),
       });
     }),
@@ -1606,7 +1606,7 @@ const playbookFixture = Effect.gen(function* () {
       yield* runJ5A2AMigrations();
       yield* seedPlaybookOwners([captainThread]);
       yield* (yield* A2ALedger).ensureProject({
-        projectId: squadronId,
+        projectId: projectId,
         createdAt: DateTime.formatIso(createdAt),
       });
     }),
@@ -1639,9 +1639,9 @@ const playbookFixture = Effect.gen(function* () {
       Layer.mock(SpawnCompositionService)({
         recordFacts: (input) =>
           Effect.succeed({
-            home: { squadronId, participantId: participantIdForThread(input.threadId) },
+            home: { projectId, participantId: participantIdForThread(input.threadId) },
             placement: {
-              squadronId,
+              projectId,
               participantId: participantIdForThread(input.threadId),
               provenance: input.provenance,
               placementParentId: captainId,
@@ -2207,7 +2207,7 @@ it.effect(
         // 2) Propose: the tool JSON the Captain sends, through the tool schema and the handler's
         // seat mapping.
         const input = yield* decodeProposeCrew({
-          project_id: squadronId,
+          project_id: projectId,
           name: "Ship Crew",
           brief: "Implement what we discussed. Ship: plan, build, review, and release a change.",
           playbook: "ship",

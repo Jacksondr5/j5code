@@ -277,7 +277,7 @@ const makeHandler = (input: {
             {
               participantId: "agent:j5:a2a:thread:local-triage",
               kind: "agent" as const,
-              projectId: "squadron:work-billing",
+              projectId: "project:work-billing",
               projectTitle: "Billing Migration",
               displayName: "Local triage",
               threadId: ThreadId.make("thread:local-triage"),
@@ -301,7 +301,7 @@ const makeHandler = (input: {
             {
               participantId: "machine:watchdog",
               kind: "machine" as const,
-              projectId: "squadron:work-billing",
+              projectId: "project:work-billing",
               projectTitle: "Billing Migration",
               displayName: "watchdog",
               threadId: null,
@@ -573,7 +573,7 @@ const delivery = {
   exchangeRole: "ask",
   envelopeChannel: "peer",
   text: "What is the incident status?",
-  originSquadronId: "squadron:home-support",
+  originSquadronId: "project:home-support",
   intent: "incident status",
   createdAt: "2026-09-16T10:00:00.000Z",
 } as const;
@@ -705,7 +705,7 @@ it("shows a recorded peer only the agents it could address, and nobody else the 
       agents: [
         {
           participantId: "agent:j5:a2a:thread:local-triage",
-          squadronId: "squadron:work-billing",
+          squadronId: "project:work-billing",
           squadronName: "Billing Migration",
           threadId: "thread:local-triage",
           displayName: "Local triage",
@@ -771,7 +771,7 @@ it("hands a storing peer's poll to the store, and refuses a poll from a peer thi
     });
     const agent = (index: number) => ({
       participantId: `agent:j5:a2a:thread:${String(index)}`,
-      squadronId: "squadron:laptop",
+      squadronId: "project:laptop",
       squadronName: "Laptop",
       threadId: `thread:${String(index)}`,
       displayName: null,

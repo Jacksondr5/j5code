@@ -33,12 +33,12 @@ import { CrewStopService, layer as crewStopLayer } from "../a2a/CrewStopService.
 import { participantIdForThread } from "../a2a/HomeRegistrar.ts";
 import { A2ALedger, layer as ledgerLayer } from "../a2a/LedgerService.ts";
 import { runJ5A2AMigrations } from "../a2a/Migrations.ts";
-import { SquadronId } from "../a2a/contracts.ts";
+import { LedgerProjectId } from "../a2a/contracts.ts";
 import { makePlaybookCrewRelay } from "./PlaybookCrewRelay.ts";
 import { makePlaybookStore, PlaybookStore } from "./PlaybookStore.ts";
 import { seedPlaybookOwners } from "./testFixtures.ts";
 
-const squadronId = SquadronId.make("squadron:relay");
+const projectId = LedgerProjectId.make("project:relay");
 const captainThread = ThreadId.make("thread:relay:captain");
 const otherCaptainThread = ThreadId.make("thread:relay:other-captain");
 const seatAThread = ThreadId.make("thread:relay:a");
@@ -85,7 +85,7 @@ const fixture = Effect.gen(function* () {
 
   const storage = yield* Layer.build(Layer.mergeAll(ledgerLayer, crewInstanceLayer));
   const crews = Context.get(storage, AgentCrewInstanceService);
-  yield* Context.get(storage, A2ALedger).ensureProject({ projectId: squadronId, createdAt });
+  yield* Context.get(storage, A2ALedger).ensureProject({ projectId: projectId, createdAt });
   const seat = (name: string, threadId: ThreadId, steps: ReadonlyArray<string>) => ({
     seatName: name,
     agentId: null,
@@ -97,7 +97,7 @@ const fixture = Effect.gen(function* () {
   const record = (id: string, playbook: string, captain = captainThread) =>
     crews.record({
       id,
-      squadronId,
+      projectId,
       captainParticipantId: participantIdForThread(captain),
       captainThreadId: captain,
       displayName: id,
@@ -167,7 +167,7 @@ const fixture = Effect.gen(function* () {
     const stops = yield* CrewStopService;
     return yield* stops.stop({
       callerParticipantId: participantIdForThread(captainThread),
-      squadronId,
+      projectId,
       crewInstanceId: crewId,
       commandIds: (seat) => ({ interruptCommandId: CommandId.make(`stop:${seat}`) }),
     });

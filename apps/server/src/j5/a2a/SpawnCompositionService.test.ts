@@ -30,7 +30,7 @@ import {
   SpawnCompositionService,
   layer as spawnCompositionLayer,
 } from "./SpawnCompositionService.ts";
-import { CommCommandId, ParticipantId, SquadronId } from "./contracts.ts";
+import { CommCommandId, ParticipantId, LedgerProjectId } from "./contracts.ts";
 import { PlacementCommandId } from "./placementContracts.ts";
 
 const createdAt = "2026-08-30T16:00:00.000Z";
@@ -57,16 +57,16 @@ const TestLayer = Layer.mergeAll(
   composition,
 );
 
-const seedSquadronAndSpawner = Effect.fn("test.j5.spawn.seedSquadronAndSpawner")(function* (
-  squadronId: SquadronId,
+const seedProjectAndSpawner = Effect.fn("test.j5.spawn.seedProjectAndSpawner")(function* (
+  projectId: LedgerProjectId,
   spawnerThreadId: ThreadId,
 ) {
   const ledgerService = yield* A2ALedger;
   const spawnerId = participantIdForThread(spawnerThreadId);
-  yield* ledgerService.ensureProject({ projectId: squadronId, createdAt });
+  yield* ledgerService.ensureProject({ projectId: projectId, createdAt });
   yield* ledgerService.append({
     commandId: CommCommandId.make(`command:seed:${spawnerId}`),
-    squadronId,
+    projectId,
     acceptedAt: createdAt,
     event: {
       kind: "participant.joined",
@@ -85,13 +85,13 @@ const seedSquadronAndSpawner = Effect.fn("test.j5.spawn.seedSquadronAndSpawner")
 
 const inputFor = (input: {
   readonly name: string;
-  readonly squadronId: SquadronId;
+  readonly projectId: LedgerProjectId;
   readonly threadId: ThreadId;
   readonly spawnedByParticipantId: ParticipantId;
 }) => ({
   homeCommandId: CommCommandId.make(`command:spawn-home:${input.name}`),
   placementCommandId: PlacementCommandId.make(`command:spawn-placement:${input.name}`),
-  squadronId: input.squadronId,
+  projectId: input.projectId,
   threadId: input.threadId,
   provenance: {
     kind: "spawned-by" as const,
@@ -106,9 +106,9 @@ it.effect("commits joined home and placement facts in one transaction", () =>
     yield* runJ5A2AMigrations();
     const service = yield* SpawnCompositionService;
     const sql = yield* SqlClient.SqlClient;
-    const squadronId = SquadronId.make("squadron:spawn-composition:commit");
-    const spawnerId = yield* seedSquadronAndSpawner(
-      squadronId,
+    const projectId = LedgerProjectId.make("project:spawn-composition:commit");
+    const spawnerId = yield* seedProjectAndSpawner(
+      projectId,
       ThreadId.make("thread:spawn-composition:spawner"),
     );
     const childThreadId = ThreadId.make("thread:spawn-composition:child");
@@ -122,7 +122,7 @@ it.effect("commits joined home and placement facts in one transaction", () =>
 
     const input = inputFor({
       name: "commit",
-      squadronId,
+      projectId,
       threadId: childThreadId,
       spawnedByParticipantId: spawnerId,
     });
@@ -168,9 +168,9 @@ it.effect("rolls home registration back when placement fails afterward", () =>
     yield* runJ5A2AMigrations();
     const service = yield* SpawnCompositionService;
     const sql = yield* SqlClient.SqlClient;
-    const squadronId = SquadronId.make("squadron:spawn-composition:rollback");
-    yield* seedSquadronAndSpawner(
-      squadronId,
+    const projectId = LedgerProjectId.make("project:spawn-composition:rollback");
+    yield* seedProjectAndSpawner(
+      projectId,
       ThreadId.make("thread:spawn-composition:rollback-spawner"),
     );
     const ledgerService = yield* A2ALedger;
@@ -187,7 +187,7 @@ it.effect("rolls home registration back when placement fails afterward", () =>
       service.recordFacts(
         inputFor({
           name: "rollback",
-          squadronId,
+          projectId,
           threadId: childThreadId,
           spawnedByParticipantId: missingSpawnerId,
         }),
@@ -213,7 +213,7 @@ it.effect("rolls home registration back when placement fails afterward", () =>
     const sentinelThreadId = ThreadId.make("thread:spawn-composition:rollback-sentinel");
     yield* ledgerService.append({
       commandId: CommCommandId.make("command:spawn-home:rollback-sentinel"),
-      squadronId,
+      projectId,
       acceptedAt: createdAt,
       event: {
         kind: "participant.joined",
@@ -278,16 +278,16 @@ it.effect("waits for a DeliveryWorker ledger permit before entering the spawn tr
       );
       const sendService = Context.get(sendContext, A2ASendService);
 
-      const squadronId = SquadronId.make("squadron:spawn-composition:delivery-race");
+      const projectId = LedgerProjectId.make("project:spawn-composition:delivery-race");
       const spawnerThreadId = ThreadId.make("thread:spawn-composition:delivery-race-spawner");
-      const spawnerId = yield* seedSquadronAndSpawner(squadronId, spawnerThreadId).pipe(
+      const spawnerId = yield* seedProjectAndSpawner(projectId, spawnerThreadId).pipe(
         Effect.provideService(A2ALedger, ledgerService),
       );
       const receiverThreadId = ThreadId.make("thread:spawn-composition:delivery-race-receiver");
       const receiverId = participantIdForThread(receiverThreadId);
       yield* ledgerService.append({
         commandId: CommCommandId.make("command:spawn-composition:delivery-race-receiver"),
-        squadronId,
+        projectId,
         acceptedAt: createdAt,
         event: {
           kind: "participant.joined",
@@ -375,7 +375,7 @@ it.effect("waits for a DeliveryWorker ledger permit before entering the spawn tr
         .recordFacts(
           inputFor({
             name: "delivery-race",
-            squadronId,
+            projectId,
             threadId: childThreadId,
             spawnedByParticipantId: spawnerId,
           }),

@@ -10,7 +10,7 @@ import {
   layer as homeRegistrarLayer,
   type RegisteredThreadHome,
 } from "./HomeRegistrar.ts";
-import { CommCommandId, SquadronId } from "./contracts.ts";
+import { CommCommandId, LedgerProjectId } from "./contracts.ts";
 
 /** A thread as registration sees it, read from upstream's thread projection. */
 export interface RegistrableThread {
@@ -86,7 +86,7 @@ export const layer: Layer.Layer<ThreadRegistration, never, A2AHomeRegistrar | Sq
           const thread = yield* readRegistrable(threadId);
           if (thread === null) return null;
           return yield* registrar.registerAtCreation({
-            squadronId: SquadronId.make(thread.projectId),
+            projectId: LedgerProjectId.make(thread.projectId),
             threadId,
             createdAt: thread.createdAt,
             commandId: registrationCommandId(threadId),

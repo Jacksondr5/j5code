@@ -14,11 +14,11 @@ import {
   CommCommandId,
   type MachineParticipant,
   ParticipantId,
-  SquadronId,
+  LedgerProjectId,
 } from "./contracts.ts";
 
 const timestamp = "2026-09-15T12:00:00.000Z";
-const squadronId = SquadronId.make("squadron:monitoring");
+const projectId = LedgerProjectId.make("project:monitoring");
 
 const agent: AgentParticipant = {
   kind: "agent",
@@ -45,11 +45,11 @@ const makeTestLayer = () => {
 const setup = Effect.fn("test.j5.a2a.machineSend.setup")(function* () {
   yield* runJ5A2AMigrations();
   const ledger = yield* A2ALedger;
-  yield* ledger.ensureProject({ projectId: squadronId, createdAt: timestamp });
+  yield* ledger.ensureProject({ projectId: projectId, createdAt: timestamp });
   for (const [index, participant] of [agent, watchdog].entries()) {
     yield* ledger.append({
       commandId: CommCommandId.make(`command:join:${String(index)}`),
-      squadronId,
+      projectId,
       acceptedAt: timestamp,
       event: {
         kind: "participant.joined",
@@ -159,7 +159,7 @@ it.effect("lists a machine in the address book as a named sender that receives n
     const rows = yield* service.listParticipants(agent.threadId);
     const machineRow = rows.find((row) => row.participantId === watchdog.id);
     assert.deepStrictEqual(machineRow, {
-      squadronId,
+      projectId,
       participantId: watchdog.id,
       participant: watchdog,
       archived: false,

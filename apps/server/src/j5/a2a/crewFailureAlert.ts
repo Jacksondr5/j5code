@@ -48,7 +48,7 @@ export const makeCrewFailureAlert = Effect.gen(function* () {
   return Effect.fn("j5.a2a.crewFailureAlert")(function* (input: {
     readonly instance: Pick<
       AgentCrewInstance,
-      "id" | "squadronId" | "captainParticipantId" | "displayName"
+      "id" | "projectId" | "captainParticipantId" | "displayName"
     >;
     readonly seatName: string;
     readonly runId: string;
@@ -63,10 +63,10 @@ export const makeCrewFailureAlert = Effect.gen(function* () {
             yield* sql`SELECT 1 FROM j5_a2a_comm_command_receipt WHERE command_id = ${commandId}`;
           if (replay.length > 0) return null;
           const personId = yield* getLocalOperatorHumanPersonId(sql);
-          const { squadronId, captainParticipantId } = input.instance;
+          const { projectId, captainParticipantId } = input.instance;
           const prefix = alertExchangePrefix(input.instance.id);
           const existing = (yield* sql<{ readonly exchange_id: string }>`
-      SELECT exchange_id FROM j5_a2a_exchange WHERE project_id = ${squadronId}
+      SELECT exchange_id FROM j5_a2a_exchange WHERE project_id = ${projectId}
         AND sender_id = ${captainParticipantId} AND receiver_id = ${personId} AND status = 'open'
         AND substr(exchange_id, 1, ${prefix.length}) = ${prefix}
     `)[0];
@@ -77,7 +77,7 @@ export const makeCrewFailureAlert = Effect.gen(function* () {
             existing === undefined
               ? undefined
               : (yield* sql<{ readonly message_text: string }>`
-      SELECT message_text FROM j5_a2a_delivery WHERE project_id = ${squadronId}
+      SELECT message_text FROM j5_a2a_delivery WHERE project_id = ${projectId}
         AND exchange_id = ${exchangeId} AND receiver_id = ${personId} ORDER BY sent_seq DESC LIMIT 1
     `)[0]?.message_text;
           const text = `Platform notice: Crew "${input.instance.displayName}", seat "${input.seatName}" needs your help.\n${formatRunFailure(input.failure)}\nCheck this environment's provider sign-in or permissions, then reply here so the Captain can re-brief the seat. No automatic retry was started.`;
@@ -105,15 +105,15 @@ export const makeCrewFailureAlert = Effect.gen(function* () {
             payload: {
               messageId: LedgerMessageId.make(`message:${commandId}`),
               text: previous === undefined ? text : `${previous}\n\n${text}`,
-              originProjectId: squadronId,
-              receiverProjectId: squadronId,
+              originProjectId: projectId,
+              receiverProjectId: projectId,
               exchangeRole: existing === undefined ? "ask" : "followup",
               envelopeChannel: "peer",
             },
           });
           return yield* writer.appendEventsInTransaction({
             commandId,
-            squadronId,
+            projectId,
             acceptedAt: at,
             events,
           });

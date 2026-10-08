@@ -16,11 +16,11 @@ import {
   CommCommandId,
   type MachineParticipant,
   ParticipantId,
-  SquadronId,
+  LedgerProjectId,
 } from "./contracts.ts";
 
 const timestamp = "2026-09-15T12:00:00.000Z";
-const squadronId = SquadronId.make("squadron:monitoring");
+const projectId = LedgerProjectId.make("project:monitoring");
 
 const sentinel: AgentParticipant = {
   kind: "agent",
@@ -93,13 +93,13 @@ const setup = Effect.fn("test.j5.a2a.roster.setup")(function* () {
   yield* sql`
     INSERT INTO projection_projects (
       project_id, title, workspace_root, scripts_json, created_at, updated_at, deleted_at
-    ) VALUES (${squadronId}, 'Monitoring', '/tmp/monitoring', '[]', ${timestamp}, ${timestamp}, NULL)
+    ) VALUES (${projectId}, 'Monitoring', '/tmp/monitoring', '[]', ${timestamp}, ${timestamp}, NULL)
   `;
-  yield* ledger.ensureProject({ projectId: squadronId, createdAt: timestamp });
+  yield* ledger.ensureProject({ projectId: projectId, createdAt: timestamp });
   for (const [index, participant] of [sentinel, twinOne, twinTwo, watchdog].entries()) {
     yield* ledger.append({
       commandId: CommCommandId.make(`command:join:${String(index)}`),
-      squadronId,
+      projectId,
       acceptedAt: timestamp,
       event: {
         kind: "participant.joined",

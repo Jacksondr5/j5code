@@ -5,7 +5,7 @@ import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 
-import { CommCommandId, ExchangeId, ParticipantId, SquadronId } from "./contracts.ts";
+import { CommCommandId, ExchangeId, ParticipantId, LedgerProjectId } from "./contracts.ts";
 import { type DroppedExchange, formatPeerDropNotice, peerDropEvents } from "./deliveryNotices.ts";
 import {
   A2ADeliveryWorker,
@@ -82,11 +82,11 @@ export const layer: Layer.Layer<
         `;
         const dropped = new Set<string>();
         for (const exchange of exchanges) {
-          const squadronId = SquadronId.make(exchange.project_id);
+          const projectId = LedgerProjectId.make(exchange.project_id);
           const exchangeId = ExchangeId.make(exchange.exchange_id);
           const onPeer = (participantId: string) =>
             findPeerCounterparty(sql, {
-              squadronId,
+              projectId,
               exchangeId,
               participantId: ParticipantId.make(participantId),
             }).pipe(Effect.map((route) => (route?.environmentId === environmentId ? route : null)));
@@ -101,7 +101,7 @@ export const layer: Layer.Layer<
               commandId: CommCommandId.make(
                 `command:j5:a2a:peer-removed:drop:${stablePart(exchange.project_id)}:${stablePart(exchange.exchange_id)}`,
               ),
-              squadronId,
+              projectId,
               acceptedAt: now,
               events: peerDropEvents({
                 exchange,
@@ -111,9 +111,9 @@ export const layer: Layer.Layer<
                   participantId: ParticipantId.make(
                     remoteReceiver === null ? exchange.sender_id : exchange.receiver_id,
                   ),
-                  projectId: remote.squadronId,
+                  projectId: remote.projectId,
                 },
-                localSquadronId: exchange.project_id,
+                localProjectId: exchange.project_id,
                 noticeText: formatPeerDropNotice({ exchangeId, disposition, because }),
                 createdAt: now,
               }),
