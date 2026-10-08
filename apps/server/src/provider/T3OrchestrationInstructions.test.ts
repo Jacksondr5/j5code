@@ -44,7 +44,11 @@ describe("T3 orchestration provider instructions", () => {
   it("documents structured schedules instead of JSON strings", () => {
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "structured object, never as JSON text");
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, '"everyMs":3600000');
-    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "bindToCurrentThread=false");
+    assert.include(
+      T3_CODE_ORCHESTRATION_INSTRUCTIONS,
+      "set `bindToCurrentThread=false` only when the user wants a fresh thread for every run",
+    );
+    assert.notInclude(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "explicit Squadron selection");
   });
 
   it("creates mixed crews from chat and keeps coordination independent of approvals and artifacts", () => {

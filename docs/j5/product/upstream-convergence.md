@@ -43,7 +43,7 @@ Two different things share the word "handoff". J5 docs call upstream's history t
 ## Long-running autonomy
 
 - **Upstream:** Limited state for usage limits, snoozing until the reset, opt-in auto-resume, scheduled tasks across environments on a shared Scheduler, and startup failures that retry and then fail visibly.
-- **J5:** committed Stop also beats usage-limit auto-resume; scheduled creation needs a Squadron (#273); a queued-run watchdog. Retire the watchdog if upstream's visible startup failures leave it with nothing to report.
+- **J5:** committed Stop also beats usage-limit auto-resume; a scheduled new thread is refused in a project that several Squadrons share; a queued-run watchdog. Retire the watchdog if upstream's visible startup failures leave it with nothing to report.
 
 ## Skills
 
@@ -55,7 +55,7 @@ Two different things share the word "handoff". J5 docs call upstream's history t
 
 - **Upstream:** scheduled tasks (Settings → Automations) start or continue threads on an interval or at a fixed time, through the shared Scheduler.
 - **J5:** Playbooks are step tracking for agent-led work: a workspace library of definitions, persisted runs that agents advance through MCP tools, progress and run history on web and mobile. They carry no scheduling, git, or worktree behavior of their own.
-- **Watch for:** upstream workflows or multi-step automations with durable progress, which would overlap Playbooks; and scheduled tasks that bind to a Squadron (#273).
+- **Watch for:** upstream workflows or multi-step automations with durable progress, which would overlap Playbooks.
 
 ## Give-back
 

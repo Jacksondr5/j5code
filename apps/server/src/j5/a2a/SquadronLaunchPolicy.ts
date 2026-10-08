@@ -1,4 +1,13 @@
-import type { OrchestrationV2Actor, OrchestrationV2CreationSource } from "@t3tools/contracts";
+import type {
+  OrchestrationV2Actor,
+  OrchestrationV2CreationSource,
+  ProjectId,
+} from "@t3tools/contracts";
+import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
+import type * as SqlClient from "effect/unstable/sql/SqlClient";
+
+import { listSquadronReferencesForProject } from "./SquadronProjectReferences.ts";
 
 /**
  * DV5's closed native/nonparticipant table. The agent-spawn row is an
@@ -14,12 +23,32 @@ export const DV5_NATIVE_COHORTS = {
     "Return through A2's spawn_agent verb; do not route OrchestratorMcp delegate_task through this launch policy.",
 } as const;
 
-export const DV5_SCHEDULED_NEW_THREAD_POLICY = {
-  kind: "unsupported-refused" as const,
-  message:
-    "Scheduled new-thread execution is unsupported until scheduling context can select an explicit existing Squadron.",
-  returnCondition: "Return with future scheduling context selection.",
-};
+export class ScheduledLaunchSharedProjectError extends Schema.TaggedError<ScheduledLaunchSharedProjectError>()(
+  "ScheduledLaunchSharedProjectError",
+  { projectId: Schema.String, squadronCount: Schema.Number },
+) {
+  override get message(): string {
+    return `Project ${this.projectId} is shared by ${this.squadronCount} Squadrons, and a scheduled task cannot choose between them, so no thread was started. Bind the task to an existing thread, or leave the project with one Squadron.`;
+  }
+}
+
+/**
+ * A scheduled new-thread run sends no Squadron, so its thread joins its
+ * project's. When several Squadrons reference the project the launch would be
+ * refused only after the thread exists; this refuses first, so a recurring
+ * task does not leave a homeless thread behind on every fire.
+ */
+export const refuseScheduledLaunchIntoSharedProject = Effect.fn(
+  "j5.a2a.refuseScheduledLaunchIntoSharedProject",
+)(function* (sql: SqlClient.SqlClient, projectId: ProjectId) {
+  const references = yield* listSquadronReferencesForProject(sql, projectId);
+  if (references.length > 1) {
+    return yield* new ScheduledLaunchSharedProjectError({
+      projectId,
+      squadronCount: references.length,
+    });
+  }
+});
 
 export type SquadronLaunchPolicy =
   | { readonly kind: "require-squadron" }
