@@ -1,5 +1,5 @@
 import type { ThreadId } from "@t3tools/contracts";
-import { J5_PEER_API_PATHS, PeerRosterResponse } from "@t3tools/contracts/j5";
+import { J5_PEER_API_PATHS, PeerRosterResponse, type PeerRosterAgent } from "@t3tools/contracts/j5";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -18,9 +18,11 @@ import { ParticipantId, SquadronId } from "./contracts.ts";
 import { peerProtocolHeaders, peerProtocolMismatch, statedPeerProtocol } from "./peerProtocol.ts";
 
 /**
- * The address book across peers. Every read asks each peer's roster live:
- * peers are few and a live answer is never stale, and a peer that does not
- * answer is reported as unread rather than guessed at. Once this server has a
+ * The address book across peers. Every read asks each peer this server
+ * connects to for its roster live: peers are few and a live answer is never
+ * stale, and a peer that does not answer is reported as unread rather than
+ * guessed at. A peer that polls this server is never called; its roster is the
+ * snapshot it sent with its last poll, and before its first it is unread. Once this server has a
  * peer, a reading names this server and each peer by its own name, so agents
  * see where each participant lives; they still address it by id.
  */
@@ -60,6 +62,15 @@ export interface PeerDirectoryShape {
   readonly resolveAgent: (
     participantId: ParticipantId,
   ) => Effect.Effect<PeerDirectoryReading, PeerDirectoryError>;
+  /**
+   * The agent as the snapshot from a peer that polls this server shows it,
+   * without any network read; null for a peer this server reads live, or one
+   * that has not polled yet.
+   */
+  readonly snapshotAgent: (
+    environmentId: string,
+    participantId: ParticipantId,
+  ) => Effect.Effect<RemoteAgent | null, PeerDirectoryError>;
   /** A peer server's name as last reported, or its environment id once it is no longer recorded. */
   readonly serverName: (environmentId: string) => Effect.Effect<string, PeerDirectoryError>;
 }
@@ -74,6 +85,7 @@ export const noneLayer = Layer.succeed(
   PeerDirectory.of({
     listAgents: () => Effect.succeed({ agents: [], unreadPeers: [], selfName: null }),
     resolveAgent: () => Effect.succeed({ agents: [], unreadPeers: [], selfName: null }),
+    snapshotAgent: () => Effect.succeed(null),
     serverName: (environmentId) => Effect.succeed(environmentId),
   }),
 );
@@ -98,6 +110,14 @@ class PeerRosterProtocolError extends Schema.TaggedError<PeerRosterProtocolError
   }
 }
 
+class PeerNotPolledError extends Schema.TaggedError<PeerNotPolledError>()("PeerNotPolledError", {
+  label: Schema.String,
+}) {
+  override get message(): string {
+    return `${this.label} has not polled yet`;
+  }
+}
+
 class PeerSessionMissingError extends Schema.TaggedError<PeerSessionMissingError>()(
   "PeerSessionMissingError",
   { environmentId: Schema.String },
@@ -109,32 +129,12 @@ class PeerSessionMissingError extends Schema.TaggedError<PeerSessionMissingError
 
 const reasonOf = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
 
-const readPeerRoster = Effect.fn("j5.a2a.peer.directory.roster")(function* (
+const remoteAgents = (
   peer: PeerConnection,
-  peers: PeerRegistryServiceShape,
-) {
-  const client = yield* HttpClient.HttpClient;
-  const request = HttpClientRequest.get(`${peer.origin}${J5_PEER_API_PATHS.roster}`).pipe(
-    HttpClientRequest.bearerToken(peer.credential),
-    HttpClientRequest.acceptJson,
-    HttpClientRequest.setHeaders(peerProtocolHeaders),
-  );
-  const response = yield* client.execute(request);
-  const mismatch = peerProtocolMismatch({
-    stated: statedPeerProtocol(response.headers),
-    peer: peer.label,
-  });
-  if (mismatch !== null) return yield* new PeerRosterProtocolError({ reason: mismatch });
-  if (response.status !== 200) {
-    return yield* new PeerRosterStatusError({ status: response.status });
-  }
-  const roster = yield* response.json.pipe(Effect.flatMap(decodeRoster));
-  // Each read refreshes the peer's name, so a renamed server is named anew without a re-add.
-  const label =
-    roster.label === undefined
-      ? peer.label
-      : ((yield* peers.recordLabel(peer.environmentId, roster.label)) ?? peer.label);
-  return roster.agents.map((entry): RemoteAgent => ({
+  agents: ReadonlyArray<PeerRosterAgent>,
+  label: string = peer.label,
+): ReadonlyArray<RemoteAgent> =>
+  agents.map((entry): RemoteAgent => ({
     environmentId: peer.environmentId,
     environmentLabel: label,
     squadronId: SquadronId.make(entry.squadronId),
@@ -145,6 +145,39 @@ const readPeerRoster = Effect.fn("j5.a2a.peer.directory.roster")(function* (
     archived: entry.archived,
     canReceiveMessage: entry.canReceiveMessage,
   }));
+
+const readPeerRoster = Effect.fn("j5.a2a.peer.directory.roster")(function* (
+  peer: PeerConnection & { readonly origin: string; readonly credential: string },
+  peers: PeerRegistryServiceShape,
+) {
+  const client = yield* HttpClient.HttpClient;
+  const request = HttpClientRequest.get(`${peer.origin}${J5_PEER_API_PATHS.roster}`).pipe(
+    HttpClientRequest.bearerToken(peer.credential),
+    HttpClientRequest.acceptJson,
+    HttpClientRequest.setHeaders(peerProtocolHeaders),
+  );
+  const response = yield* client.execute(request);
+  // The peer's row shows a mismatch until a later exchange with it succeeds.
+  const mismatch = peerProtocolMismatch({
+    stated: statedPeerProtocol(response.headers),
+    peer: peer.label,
+  });
+  if (mismatch !== null) {
+    yield* peers.recordLastError(peer.environmentId, mismatch);
+    return yield* new PeerRosterProtocolError({ reason: mismatch });
+  }
+  if (response.status !== 200) {
+    return yield* new PeerRosterStatusError({ status: response.status });
+  }
+  const roster = yield* response.json.pipe(Effect.flatMap(decodeRoster));
+  // Only a roster read in full clears it.
+  yield* peers.recordLastError(peer.environmentId, null);
+  // Each read refreshes the peer's name, so a renamed server is named anew without a re-add.
+  const label =
+    roster.label === undefined
+      ? peer.label
+      : ((yield* peers.recordLabel(peer.environmentId, roster.label)) ?? peer.label);
+  return remoteAgents(peer, roster.agents, label);
 });
 
 /** A peer that no longer holds a session here cannot complete an Exchange with us; it is reported, never read as if healthy. */
@@ -155,7 +188,14 @@ const readPeerRosterIfAuthorized = Effect.fn("j5.a2a.peer.directory.rosterIfAuth
   if (peer.inboundSession === "missing") {
     return yield* new PeerSessionMissingError({ environmentId: peer.environmentId });
   }
-  return yield* readPeerRoster(peer, peers);
+  if (peer.origin === null || peer.credential === null) {
+    if (peer.roster === null) return yield* new PeerNotPolledError({ label: peer.label });
+    return remoteAgents(peer, peer.roster);
+  }
+  return yield* readPeerRoster(
+    { ...peer, origin: peer.origin, credential: peer.credential },
+    peers,
+  );
 });
 
 export const layer: Layer.Layer<PeerDirectory, never, PeerRegistryService | HttpClient.HttpClient> =
@@ -210,6 +250,19 @@ export const layer: Layer.Layer<PeerDirectory, never, PeerRegistryService | Http
       const serverName: PeerDirectoryShape["serverName"] = (environmentId) =>
         peers.get(environmentId).pipe(Effect.map((peer) => peer?.label ?? environmentId));
 
-      return PeerDirectory.of({ listAgents, resolveAgent, serverName });
+      const snapshotAgent: PeerDirectoryShape["snapshotAgent"] = (environmentId, participantId) =>
+        peers
+          .connection(environmentId)
+          .pipe(
+            Effect.map((peer) =>
+              peer === null || peer.roster === null
+                ? null
+                : (remoteAgents(peer, peer.roster).find(
+                    (agent) => agent.participantId === participantId,
+                  ) ?? null),
+            ),
+          );
+
+      return PeerDirectory.of({ listAgents, resolveAgent, snapshotAgent, serverName });
     }),
   );

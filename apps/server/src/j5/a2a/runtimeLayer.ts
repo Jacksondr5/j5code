@@ -31,6 +31,7 @@ import { layer as lifecycleServiceLayer } from "./LifecycleService.ts";
 import { layer as machineParticipantLayer } from "./MachineParticipantService.ts";
 import { layer as peerDirectoryLayer } from "./PeerDirectory.ts";
 import { layer as peerInboundLayer } from "./PeerInboundService.ts";
+import { layer as peerStoreLayer } from "./PeerStoreService.ts";
 import { layer as peerRegistryLayer } from "./PeerRegistryService.ts";
 import { layer as rosterLayer } from "./RosterService.ts";
 import { layer as sendServiceLayer } from "./SendService.ts";
@@ -111,6 +112,8 @@ export const makeJ5A2AAuxiliaryLayer = (
   const lifecycleServiceProvided = lifecycleServiceLayer.pipe(
     Layer.provideMerge(deliveryWorkerProvided),
   );
+  // A polling peer's messages are handed out by the worker that owns their rows.
+  const peerStoreProvided = peerStoreLayer.pipe(Layer.provideMerge(deliveryWorkerProvided));
   const archiveFactsProvided = archiveFactsLayer.pipe(Layer.provide(placementFactsLayer));
   const squadronJoinProvided = squadronJoinLayer.pipe(
     Layer.provideMerge(homeRegistrationTransactionLayer),
@@ -187,6 +190,7 @@ export const makeJ5A2AAuxiliaryLayer = (
     machineParticipantLayer,
     peerDirectoryProvided,
     peerInboundLayer,
+    peerStoreProvided,
     rosterLayer,
     sendServiceProvided,
     deliveryWorkerProvided,

@@ -79,6 +79,7 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
       { migration_id: 27, name: "PeerSenderLabelRecency" },
       { migration_id: 28, name: "CrewPlaybooks" },
       { migration_id: 29, name: "CrewPlaybookRuns" },
+      { migration_id: 30, name: "PeerPollMode" },
     ]);
     assert.deepStrictEqual(
       migrationEntries.map(([id, name]) => [id, name]),
@@ -112,6 +113,7 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
         [27, "PeerSenderLabelRecency"],
         [28, "CrewPlaybooks"],
         [29, "CrewPlaybookRuns"],
+        [30, "PeerPollMode"],
       ],
     );
   }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
@@ -1352,7 +1354,7 @@ it.effect("recreates earlier-shaped crews tables when 14 runs over them", () =>
     `;
     assert.deepStrictEqual(
       applied.map((row) => row.migration_id),
-      [13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29],
+      [13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30],
     );
     const memberColumns = yield* sql<{ readonly name: string }>`
       SELECT name FROM pragma_table_info('j5_agent_crew_member') ORDER BY cid
@@ -1516,4 +1518,55 @@ it.effect(
       );
       yield* runJ5A2AMigrations();
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+);
+
+it.effect("keeps every recorded peer as one that sends directly when poll mode arrives", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* runJ5A2AMigrations({ toMigrationInclusive: 29 });
+    yield* sql`
+      INSERT INTO j5_a2a_peer (environment_id, label, origin, credential, credential_expires_at, created_at, updated_at)
+      VALUES ('environment-home', 'Home', 'https://home.example:3773', 'home-token', '2036-09-16T00:00:00.000Z',
+        '2026-09-16T00:00:00.000Z', '2026-09-17T00:00:00.000Z')
+    `;
+    yield* runJ5A2AMigrations();
+
+    assert.deepStrictEqual(
+      yield* sql`SELECT environment_id, label, link_mode, origin, credential, credential_expires_at,
+        roster_json, last_polled_at, last_error, created_at, updated_at FROM j5_a2a_peer`,
+      [
+        {
+          environment_id: "environment-home",
+          label: "Home",
+          link_mode: "push",
+          origin: "https://home.example:3773",
+          credential: "home-token",
+          credential_expires_at: "2036-09-16T00:00:00.000Z",
+          roster_json: null,
+          last_polled_at: null,
+          last_error: null,
+          created_at: "2026-09-16T00:00:00.000Z",
+          updated_at: "2026-09-17T00:00:00.000Z",
+        },
+      ],
+    );
+    // A peer that polls has no origin or credential from it; one this server calls has both.
+    yield* sql`
+      INSERT INTO j5_a2a_peer (environment_id, label, link_mode, created_at, updated_at)
+      VALUES ('environment-laptop', 'Laptop', 'store', '2026-10-02T00:00:00.000Z', '2026-10-02T00:00:00.000Z')
+    `;
+    const refused = yield* Effect.flip(sql`
+      INSERT INTO j5_a2a_peer (environment_id, label, link_mode, created_at, updated_at)
+      VALUES ('environment-vm', 'VM', 'push', '2026-10-02T00:00:00.000Z', '2026-10-02T00:00:00.000Z')
+    `);
+    assert.equal(refused._tag, "SqlError");
+    assert.deepStrictEqual(
+      yield* sql`SELECT environment_id FROM j5_a2a_peer ORDER BY environment_id`,
+      [{ environment_id: "environment-home" }, { environment_id: "environment-laptop" }],
+    );
+    const handedOut = yield* sql<{ readonly name: string }>`
+      SELECT name FROM pragma_table_info('j5_a2a_delivery') WHERE name = 'handed_out_at'
+    `;
+    assert.lengthOf(handedOut, 1);
+  }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );
