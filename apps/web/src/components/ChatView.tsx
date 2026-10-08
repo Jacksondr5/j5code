@@ -1511,6 +1511,8 @@ export default function ChatView(props: ChatViewProps) {
   const openTerminal = useAtomCommand(terminalEnvironment.open, "terminal open");
   const writeTerminal = useAtomCommand(terminalEnvironment.write, "terminal write");
   const closeTerminalMutation = useAtomCommand(terminalEnvironment.close, "terminal close");
+  const createThread = useAtomCommand(threadEnvironment.create, { reportFailure: false });
+  const deleteThread = useAtomCommand(threadEnvironment.delete, { reportFailure: false });
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   });
@@ -9646,41 +9648,47 @@ export default function ChatView(props: ChatViewProps) {
       resetLocalDispatch();
     };
 
-    const startResult = await startThreadTurn({
+    const createResult = await createThread({
       environmentId,
       input: {
         threadId: nextThreadId,
-        message: {
-          messageId: newMessageId(),
-          role: "user",
-          text: outgoingImplementationPrompt,
-          attachments: [],
-        },
-        modelSelection: ctxSelectedModelSelection,
-        titleSeed: nextThreadTitle,
+        projectId: activeProject.id,
+        title: nextThreadTitle,
+        modelSelection: nextThreadModelSelection,
         runtimeMode: defaultRuntimeMode,
         interactionMode: "default",
-        bootstrap: {
-          createThread: {
-            projectId: activeProject.id,
-            title: nextThreadTitle,
-            modelSelection: nextThreadModelSelection,
-            runtimeMode: defaultRuntimeMode,
-            interactionMode: "default",
-            branch: activeThreadBranch,
-            worktreePath: activeThread.worktreePath,
-            createdAt,
-          },
-        },
-        sourceProposedPlan: {
-          threadId: activeThread.id,
-          planId: activeProposedPlan.id,
-        },
+        branch: activeThreadBranch,
+        worktreePath: activeThread.worktreePath,
         createdAt,
       },
     });
     let failure: AtomCommandResult<unknown, unknown> | null =
-      startResult._tag === "Failure" ? startResult : null;
+      createResult._tag === "Failure" ? createResult : null;
+
+    if (failure === null) {
+      const startResult = await startThreadTurn({
+        environmentId,
+        input: {
+          threadId: nextThreadId,
+          message: {
+            messageId: newMessageId(),
+            role: "user",
+            text: outgoingImplementationPrompt,
+            attachments: [],
+          },
+          modelSelection: ctxSelectedModelSelection,
+          titleSeed: nextThreadTitle,
+          runtimeMode: defaultRuntimeMode,
+          interactionMode: "default",
+          sourceProposedPlan: {
+            threadId: activeThread.id,
+            planId: activeProposedPlan.id,
+          },
+          createdAt,
+        },
+      });
+      failure = startResult._tag === "Failure" ? startResult : null;
+    }
 
     if (failure === null) {
       const startedResult = await settlePromise(() =>
@@ -9703,6 +9711,18 @@ export default function ChatView(props: ChatViewProps) {
     }
 
     if (failure !== null) {
+      const cleanupResult = await deleteThread({
+        environmentId,
+        input: {
+          threadId: nextThreadId,
+        },
+      });
+      if (cleanupResult._tag === "Failure" && !isAtomCommandInterrupted(cleanupResult)) {
+        console.warn(
+          "Failed to clean up implementation thread after start failure.",
+          squashAtomCommandFailure(cleanupResult),
+        );
+      }
       if (!isAtomCommandInterrupted(failure)) {
         const error = squashAtomCommandFailure(failure);
         toastManager.add(
@@ -9725,6 +9745,8 @@ export default function ChatView(props: ChatViewProps) {
     activeThread,
     beginLocalDispatch,
     activeEnvironmentUnavailable,
+    createThread,
+    deleteThread,
     isConnecting,
     isSendBusy,
     isServerThread,
