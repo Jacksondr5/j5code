@@ -70,8 +70,9 @@ export type {
 } from "./SquadronProjectReferences.ts";
 export {
   registrationCommandIdForCreation,
-  SquadronThreadCreationMissingSquadronError,
+  SquadronThreadCreationAmbiguousProjectError,
   SquadronThreadCreationProjectReferenceError,
+  SquadronThreadCreationProjectUnavailableError,
   SquadronThreadCreationService,
   layer as squadronThreadCreationServiceLayer,
 } from "./SquadronThreadCreationService.ts";

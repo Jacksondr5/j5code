@@ -40,6 +40,10 @@ export interface SquadronProjectReferencesShape {
   readonly listForSquadron: (
     squadronId: SquadronId,
   ) => Effect.Effect<ReadonlyArray<SquadronProjectReference>, SquadronProjectReferenceError>;
+  /** Every Squadron that references the project, oldest first. */
+  readonly listForProject: (
+    projectId: ProjectId,
+  ) => Effect.Effect<ReadonlyArray<SquadronProjectReference>, SqlError>;
   /**
    * Replaces the ordered resource list atomically. This is deliberately
    * list-shaped: DV1's exact-one cap belongs to the future creation command,
@@ -99,6 +103,18 @@ export const layer: Layer.Layer<SquadronProjectReferences, never, SqlClient.SqlC
         },
       );
 
+      const listForProject = Effect.fn("j5.a2a.squadronProjectReferences.listForProject")(
+        function* (projectId: ProjectId) {
+          const rows = yield* sql<SquadronProjectReferenceRow>`
+        SELECT squadron_id, project_id, ordinal, created_at
+        FROM j5_a2a_squadron_project_reference
+        WHERE project_id = ${projectId}
+        ORDER BY created_at, squadron_id
+      `;
+          return rows.map(referenceFromRow);
+        },
+      );
+
       const replaceForSquadron = Effect.fn("j5.a2a.squadronProjectReferences.replaceForSquadron")(
         function* (input: ReplaceSquadronProjectReferencesInput) {
           const seenProjectIds = new Set<string>();
@@ -140,6 +156,10 @@ export const layer: Layer.Layer<SquadronProjectReferences, never, SqlClient.SqlC
         },
       );
 
-      return SquadronProjectReferences.of({ listForSquadron, replaceForSquadron });
+      return SquadronProjectReferences.of({
+        listForSquadron,
+        listForProject,
+        replaceForSquadron,
+      });
     }),
   );

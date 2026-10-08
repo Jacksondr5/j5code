@@ -49,7 +49,7 @@ import * as ServerSettings from "../serverSettings.ts";
 import * as ScheduledTasks from "../scheduledTasks/ScheduledTaskService.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import {
-  SquadronThreadCreationMissingSquadronError,
+  SquadronThreadCreationAmbiguousProjectError,
   SquadronThreadCreationService,
 } from "../j5/a2a/SquadronThreadCreationService.ts";
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
@@ -288,7 +288,7 @@ function waitUntil<E, R>(predicate: () => Effect.Effect<boolean, E, R>): Effect.
   });
 }
 
-it.effect("keeps a durable named thread when the required Squadron registration is absent", () => {
+it.effect("keeps a durable named thread when its Squadron registration is refused", () => {
   let setupCalls = 0;
   const harness = makeHarness({
     runSetup: () =>
@@ -299,7 +299,11 @@ it.effect("keeps a durable named thread when the required Squadron registration 
     registerAtDurableLaunch: (input) =>
       input.squadronId === undefined
         ? Effect.fail(
-            new SquadronThreadCreationMissingSquadronError({ commandId: input.commandId }),
+            new SquadronThreadCreationAmbiguousProjectError({
+              commandId: input.commandId,
+              projectId: input.projectId,
+              squadronIds: ["squadron:first", "squadron:second"],
+            }),
           )
         : Effect.die("test expected no Squadron"),
   });
@@ -381,6 +385,42 @@ it.effect("inherits the Registrar home from a proposed-plan parent at durable la
         command: "command:launch:plan-home",
         thread: "thread:launch:plan-home",
         squadronId: null,
+      }),
+      sourcePlanRef: {
+        threadId: ThreadId.make("thread:launch:parent"),
+        planId: "plan:launch:parent" as never,
+      },
+    });
+    assert.deepStrictEqual(
+      registrations.map((registration) => registration.squadronId),
+      ["squadron:parent-home"],
+    );
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("registers a plan child in its parent's Squadron over the one the launch sent", () => {
+  const registrations: Array<{ readonly squadronId?: string }> = [];
+  const harness = makeHarness({
+    findRegisteredHome: () =>
+      Effect.succeed({
+        squadronId: "squadron:parent-home" as never,
+        participantId: "agent:parent" as never,
+      }),
+    registerAtDurableLaunch: (input) => {
+      registrations.push(input);
+      return Effect.succeed({
+        squadronId: "squadron:parent-home" as never,
+        participantId: "agent:child" as never,
+      });
+    },
+  });
+  return Effect.gen(function* () {
+    const launches = yield* ThreadLaunch.ThreadLaunchService;
+    yield* launches.launch({
+      ...launchInput({
+        command: "command:launch:plan-home-over-sent",
+        thread: "thread:launch:plan-home-over-sent",
+        squadronId: "squadron:sent",
       }),
       sourcePlanRef: {
         threadId: ThreadId.make("thread:launch:parent"),

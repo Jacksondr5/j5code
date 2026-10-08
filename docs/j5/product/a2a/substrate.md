@@ -36,7 +36,7 @@ Delivery to a busy agent queues behind the active turn; steering is the person's
 
 **Upstream owns existence and lifecycle state; J5 tables overlay only organization facts** — Squadron home, placement, provenance, Exchange obligations. J5 writes flow through upstream's public command seams, never into its projections; J5 reads either join upstream state or say explicitly that they may be stale.
 
-**Participanthood is granted only by J5's registration surfaces** — the spawn verb, the composer's Squadron chip, a controlled seed, or the home-join verb for a native thread that never received a home — and never inferred from a thread's existence or addressability. The case that forces this: Codex-native Subagents get real shadow threads holding live, resumable provider references; they are thread-having and send-capable, and they are still Subagents. Any sweep that absorbs threads into the roster excludes provider-created and Subagent-lineage threads.
+**Participanthood is granted only by J5's registration surfaces** — the spawn verb, the composer's Squadron chip, a launch that names no Squadron and so joins its project's, a controlled seed, or the home-join verb for a native thread that never received a home — and never inferred from a thread's existence or addressability. The case that forces this: Codex-native Subagents get real shadow threads holding live, resumable provider references; they are thread-having and send-capable, and they are still Subagents. Any sweep that absorbs threads into the roster excludes provider-created and Subagent-lineage threads.
 
 ### The agent tool surface
 
@@ -62,7 +62,7 @@ Agents spawned through upstream's delegation path before the spawn verb existed 
 1. No J5 code writes into an upstream projection; every J5 mutation goes through an upstream public command seam or a J5-owned table.
 2. The agent surface exposes exactly the J5 verbs and the kept upstream tools listed above; every other upstream tool is absent by construction, and a new upstream tool arriving in a rebase is absent until admitted through a contract change.
 3. An agent-to-agent message sent through the platform always has a ledger row, an envelope, and a delivery outcome; no raw thread-send is reachable from the agent surface.
-4. A thread becomes a participant only through the spawn verb, the composer's Squadron chip, a controlled seed, or its own explicit home join when it has no home; a provider-created thread or a Subagent-lineage thread never becomes one by any sweep.
+4. A thread becomes a participant only through the spawn verb, the composer's Squadron chip, a launch that names no Squadron and so joins its project's, a controlled seed, or its own explicit home join when it has no home; a provider-created thread or a Subagent-lineage thread never becomes one by any sweep.
 5. A Peer Agent created through the spawn verb has root lineage; nothing about it is derived from upstream's lineage record.
 
 ## History
