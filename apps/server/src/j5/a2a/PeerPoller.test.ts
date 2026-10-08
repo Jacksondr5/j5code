@@ -476,7 +476,7 @@ it.effect("stops on a rejected credential, sets a protocol mismatch aside, and s
       const rejected = yield* pollOnce;
       assert.equal(rejected.kind, "stopped");
       assert.include(harness.lastErrors.at(-1) ?? "", "rejected this server's credential");
-      assert.include(harness.lastErrors.at(-1) ?? "", "Peer again");
+      assert.include(harness.lastErrors.at(-1) ?? "", "it ended this peering");
 
       harness.answers.push({ ...pollAnswer(), protocol: "3" } as Answer);
       const mismatched = yield* pollOnce;

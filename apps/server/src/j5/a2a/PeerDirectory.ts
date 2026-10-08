@@ -2,6 +2,7 @@ import type { ThreadId } from "@t3tools/contracts";
 import {
   J5_PEER_API_PATHS,
   PeerRosterResponse,
+  peerCredentialRejectedReason,
   peerPollState,
   type PeerRosterAgent,
 } from "@t3tools/contracts/j5";
@@ -210,6 +211,10 @@ const readPeerRoster = Effect.fn("j5.a2a.peer.directory.roster")(function* (
     return yield* new PeerRosterProtocolError({ reason: mismatch });
   }
   if (response.status !== 200) {
+    // Rejecting the credential it issued means the peer removed this server.
+    if (response.status === 401) {
+      yield* peers.recordLastError(peer.environmentId, peerCredentialRejectedReason(peer.label));
+    }
     return yield* new PeerRosterStatusError({ status: response.status });
   }
   const roster = yield* response.json.pipe(Effect.flatMap(decodeRoster));

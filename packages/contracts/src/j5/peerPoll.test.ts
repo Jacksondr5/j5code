@@ -48,6 +48,19 @@ describe("isPeerCredentialRejected", () => {
     ).toBe(false);
     expect(isPeerCredentialRejected(poller(null))).toBe(false);
   });
+
+  it("is true for a server that sends directly once it recorded the rejection", () => {
+    const rejected = peerCredentialRejectedReason("Work VM");
+    expect(isPeerCredentialRejected({ linkMode: "push", lastError: rejected })).toBe(true);
+    expect(isPeerCredentialRejected({ linkMode: "push", lastError: null })).toBe(false);
+    expect(
+      isPeerCredentialRejected({
+        linkMode: "push",
+        lastError:
+          "Work VM runs peer protocol 3 and this server runs 2. Update J5 on this server, then try again.",
+      }),
+    ).toBe(false);
+  });
 });
 
 describe("peerPollStoppedReason", () => {

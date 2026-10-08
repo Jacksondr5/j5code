@@ -22,10 +22,13 @@ export const peerPollState = (
     : { kind: "offline", since: peer.lastPolledAt };
 };
 
-const CREDENTIAL_REJECTED =
-  "rejected this server's credential (HTTP 401). Peer again to issue a new one.";
+const CREDENTIAL_REJECTED = "rejected this server's credential (HTTP 401): it ended this peering.";
 
-/** The reason a poller records when the storing server rejects its credential; polling stops until they peer again. */
+/**
+ * The reason recorded when a peer rejects the credential it issued, which it
+ * does only once it has removed this server: a poller stops polling on it, and
+ * a server that sends directly records it from a send or an address-book read.
+ */
 export const peerCredentialRejectedReason = (label: string) => `${label} ${CREDENTIAL_REJECTED}`;
 
 /** The mark a poller puts on the peer's last error when it stops polling. */
@@ -48,11 +51,16 @@ export const peerPollStoppedReason = (peer: {
     : null;
 
 /**
- * Whether polling stopped because the credential was rejected, which only
- * peering again fixes. Read from the poller's stop, so a retried failure that
- * quotes the same words is not one.
+ * Whether the other server ended this peering: it rejects the credential it
+ * issued. A poller reads it from its stop, so a retried failure that quotes the
+ * same words is not one; a server that sends directly reads the rejection it
+ * last recorded, which a later exchange that succeeds clears. Removing the peer
+ * here is what is left to do.
  */
 export const isPeerCredentialRejected = (peer: {
   readonly linkMode: "push" | "store" | "poll";
   readonly lastError: string | null;
-}) => peerPollStoppedReason(peer)?.endsWith(CREDENTIAL_REJECTED) === true;
+}) =>
+  peer.linkMode === "poll"
+    ? peerPollStoppedReason(peer)?.endsWith(CREDENTIAL_REJECTED) === true
+    : peer.linkMode === "push" && peer.lastError?.endsWith(CREDENTIAL_REJECTED) === true;

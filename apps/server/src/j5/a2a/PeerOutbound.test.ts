@@ -2,6 +2,7 @@ import { ThreadId } from "@t3tools/contracts";
 import {
   J5_PEER_API_PATHS,
   PEER_PROTOCOL_VERSION,
+  peerCredentialRejectedReason,
   type PeerDeliveryRequest,
 } from "@t3tools/contracts/j5";
 import { assert, it } from "@effect/vitest";
@@ -608,6 +609,23 @@ it.effect("retries a bare 403 or 404 that is not the peer's refusal, as any fail
       assert.equal(notices.length, 0, "nothing is final, so nobody is told");
     }).pipe(
       Effect.provide(makeTransportLayer({ status: 404, body: { error: "not_found" } }, posted)),
+    );
+  }),
+);
+
+it.effect("records that the peer ended the peering when it rejects this server's credential", () =>
+  Effect.gen(function* () {
+    const posted: Array<PostedRequest> = [];
+    const lastErrors: Array<string | null> = [];
+    yield* Effect.gen(function* () {
+      const { deliver } = yield* crossingAsk();
+      // The peer removed this server and revoked the credential it issued.
+      assert.equal((yield* deliver)?.state, "retry_scheduled", "the send retries and alarms");
+      assert.deepStrictEqual(lastErrors, [peerCredentialRejectedReason("Home")]);
+    }).pipe(
+      Effect.provide(
+        makeTransportLayer({ status: 401, body: { error: "invalid_token" } }, posted, lastErrors),
+      ),
     );
   }),
 );
