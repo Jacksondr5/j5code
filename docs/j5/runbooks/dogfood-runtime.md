@@ -334,10 +334,10 @@ started (build failure), skip the restore and just rebuild at the previous commi
 
 ### Restoring the automatic pre-migration snapshot
 
-Some J5 ledger migrations rewrite data that cannot be rebuilt by hand; migration 030 is the first.
-Before one of them runs, the server copies the database to
-`userdata/statev2.pre-j5-<migration>.sqlite`, for example `statev2.pre-j5-030.sqlite`, and logs the
-path, the size and how long it took. It does this on its own at startup, whether or not the update
+Some J5 ledger migrations rewrite data that cannot be rebuilt by hand. No migration is guarded this
+way yet; the ledger re-key will be the first. Before a guarded one runs, the server copies the
+database to `userdata/statev2.pre-j5-<migration>.sqlite`, where `<migration>` is the migration's
+three-digit number, and logs the path, the size and how long it took. It does this on its own at startup, whether or not the update
 script ran. If the copy fails (a full disk, for instance) the server refuses to start and the
 migration does not run; free space and start it again.
 
@@ -348,7 +348,7 @@ systemctl --user stop j5code.service              # 1. stop the server
 cd ~/.j5code/userdata
 mkdir -p ../db-aside
 mv statev2.sqlite statev2.sqlite-wal statev2.sqlite-shm ../db-aside/ 2>/dev/null
-mv statev2.pre-j5-030.sqlite statev2.sqlite       # 2. move the snapshot back
+mv statev2.pre-j5-<migration>.sqlite statev2.sqlite  # 2. move the snapshot back
 cd ~/j5code && git checkout <previous-commit>     # 3. run the previous version
 # rebuild as in the rollback steps above, then:
 systemctl --user start j5code.service

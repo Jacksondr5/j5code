@@ -10,10 +10,12 @@ import * as Schema from "effect/Schema";
 import { J5_A2A_MIGRATIONS_TABLE, migrationEntries } from "../a2a/Migrations.ts";
 
 /**
- * The J5 ledger migrations that get a snapshot first. Add an id only when its migration rewrites
- * or drops data destructively; an ordinary migration must not cost a full copy of the database.
+ * The J5 ledger migrations that get a snapshot first. None does yet. A migration adds its id here
+ * in the same PR that adds the migration, and only if it rewrites or drops data destructively; an
+ * ordinary migration must not cost a full copy of the database. Never list an id ahead of its
+ * migration: another migration can take the number first.
  */
-export const J5_LEDGER_SNAPSHOT_MIGRATIONS: ReadonlyArray<number> = [30];
+export const J5_LEDGER_SNAPSHOT_MIGRATIONS: ReadonlyArray<number> = [];
 
 const describeCause = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
 
@@ -40,7 +42,7 @@ export interface SnapshotBeforeJ5LedgerMigrationOptions {
   readonly guardedMigrationIds?: ReadonlyArray<number>;
 }
 
-/** `statev2.sqlite` → `statev2.pre-j5-030.sqlite`, beside the database. */
+/** `statev2.sqlite` → `statev2.pre-j5-<id>.sqlite` (the id padded to three digits), beside the database. */
 export const ledgerMigrationSnapshotPath = (path: Path.Path, dbPath: string, migrationId: number) =>
   path.join(
     path.dirname(dbPath),
