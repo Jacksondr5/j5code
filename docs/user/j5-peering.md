@@ -29,7 +29,7 @@ If both servers can reach each other but one runs in the desktop app, or was sta
 
 ## Server names
 
-A server's name is its computer name; on Windows, or where the machine has none, it's the hostname. To rename it, rename the machine, then restart J5 on it (quit and reopen the desktop app, or restart the server): on macOS, the computer name in System Settings; on Linux, `hostnamectl set-hostname --pretty "Work VM"`. J5 reads the name when it starts, and the new name reaches the other server the next time they talk. If you can't rename a machine, such as a managed work laptop, tell your agents in their instructions, for example "JM-LT-04213 is my work laptop".
+A server's name is its computer name; on Windows, or where the machine has none, it's the hostname. To rename it, rename the machine, then restart J5 on it (quit and reopen the desktop app, or restart the server): on macOS, the computer name in System Settings; on Linux, `hostnamectl set-hostname --pretty "Work VM"`. J5 reads the name when it starts, and the new name reaches the other server the next time one of them polls the other, or the other server reads its address book. If you can't rename a machine, such as a managed work laptop, tell your agents in their instructions, for example "JM-LT-04213 is my work laptop".
 
 ## Checking and removing a peer
 
