@@ -32,7 +32,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          persist-credentials: false
+          # Credentials stay until the post step: removing them inside checkout runs
+          # `git submodule foreach`, which fails on the vendored gitlinks under .repos.
           fetch-depth: 0
           sparse-checkout: |
             /*
@@ -76,6 +77,19 @@ jobs:
           # bundle JavaScript, so screen and state changes cannot break it.
           report build '^apps/mobile/(app\.config\.ts|eas\.json|package\.json|plugins/|modules/|assets/)|^assets/|^pnpm-lock\.yaml$|^scripts/lib/(j5-branding|brand-assets|public-config)\.ts$|^\.github/workflows/j5-mobile-ci\.yml$'
 
+      # These gitlinks belong to vendored manifests, not this repository.
+      # Remove them only from the disposable index before checkout's cleanup.
+      - name: Exclude vendored gitlinks from checkout cleanup
+        if: always()
+        run: |
+          python3 - <<'PYTHON'
+          import subprocess
+          entries = subprocess.check_output(["git", "ls-files", "--stage", "-z", ".repos"])
+          paths = [entry.split(b"\t", 1)[1] for entry in entries.split(b"\0") if entry.startswith(b"160000 ")]
+          if paths:
+              subprocess.run(["git", "update-index", "--force-remove", "-z", "--stdin"], input=b"\0".join(paths) + b"\0", check=True)
+          PYTHON
+
   native_lint:
     name: Mobile native static analysis
     needs: changes
@@ -87,7 +101,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          persist-credentials: false
           sparse-checkout: |
             /*
             !/.repos/
@@ -114,6 +127,19 @@ jobs:
       - name: Lint mobile native sources
         run: pnpm exec vp run lint:mobile
 
+      # These gitlinks belong to vendored manifests, not this repository.
+      # Remove them only from the disposable index before checkout's cleanup.
+      - name: Exclude vendored gitlinks from checkout cleanup
+        if: always()
+        run: |
+          python3 - <<'PYTHON'
+          import subprocess
+          entries = subprocess.check_output(["git", "ls-files", "--stage", "-z", ".repos"])
+          paths = [entry.split(b"\t", 1)[1] for entry in entries.split(b"\0") if entry.startswith(b"160000 ")]
+          if paths:
+              subprocess.run(["git", "update-index", "--force-remove", "-z", "--stdin"], input=b"\0".join(paths) + b"\0", check=True)
+          PYTHON
+
   ios_build:
     name: iOS simulator build
     needs: changes
@@ -127,7 +153,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          persist-credentials: false
           sparse-checkout: |
             /*
             !/.repos/
@@ -174,3 +199,16 @@ jobs:
             ONLY_ACTIVE_ARCH=YES \
             CODE_SIGNING_ALLOWED=NO \
             build
+
+      # These gitlinks belong to vendored manifests, not this repository.
+      # Remove them only from the disposable index before checkout's cleanup.
+      - name: Exclude vendored gitlinks from checkout cleanup
+        if: always()
+        run: |
+          python3 - <<'PYTHON'
+          import subprocess
+          entries = subprocess.check_output(["git", "ls-files", "--stage", "-z", ".repos"])
+          paths = [entry.split(b"\t", 1)[1] for entry in entries.split(b"\0") if entry.startswith(b"160000 ")]
+          if paths:
+              subprocess.run(["git", "update-index", "--force-remove", "-z", "--stdin"], input=b"\0".join(paths) + b"\0", check=True)
+          PYTHON
