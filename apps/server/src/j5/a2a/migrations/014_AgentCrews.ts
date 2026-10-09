@@ -1,5 +1,5 @@
 import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 // A Crew is composed at launch: a Captain proposes a roster from the agent library, a human
 // approves it, and the approved seats spawn as Peer Agents placed under

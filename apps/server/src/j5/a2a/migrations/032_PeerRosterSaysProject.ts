@@ -1,5 +1,5 @@
 import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 // The peer wire names a project where it named a Squadron (peer protocol 2). A
 // storing server keeps each polling peer's last roster as the JSON the peer

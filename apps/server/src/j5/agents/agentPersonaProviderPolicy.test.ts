@@ -13,8 +13,6 @@ import {
 } from "../../orchestration-v2/Adapters/ClaudeAdapterV2.ts";
 import { cursorRuntimeAgentPolicy } from "../../orchestration-v2/Adapters/CursorAdapterV2.ts";
 import { openCodePermissionRules } from "../../orchestration-v2/Adapters/OpenCodeAdapterV2.ts";
-import { buildPiRpcLaunch } from "../../orchestration-v2/Adapters/piT3McpInjection.ts";
-import { T3_PI_RUNTIME_MODE_ENV } from "../../orchestration-v2/Adapters/piT3McpExtensionSource.ts";
 import { acpPermissionDisposition } from "../../provider/acp/AcpClientPolicy.ts";
 import { antigravityPermissionMode } from "../../provider/acp/AntigravityAcpSupport.ts";
 import { grokAcpSpawnArgs } from "../../provider/acp/GrokAcpSupport.ts";
@@ -232,17 +230,6 @@ describe("full-access agent persona policy", () => {
       antigravityPermissionMode(runtimePolicy("full-access", "antigravity").runtimeMode),
       "yolo",
     );
-  });
-
-  it("hands Pi the full-access runtime mode", () => {
-    const launch = buildPiRpcLaunch({
-      launchArgs: [],
-      environment: {},
-      mcpSession: undefined,
-      extensionPath: "/tmp/pi-extension.ts",
-      runtimeMode: runtimePolicy("full-access", "pi").runtimeMode,
-    });
-    assert.equal(launch.env[T3_PI_RUNTIME_MODE_ENV], "full-access");
   });
 
   it("lets ACP registry harnesses run commands without asking", () => {

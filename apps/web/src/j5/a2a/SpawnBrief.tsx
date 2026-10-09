@@ -128,7 +128,7 @@ export function SpawnBriefAttribution(props: {
 }) {
   return (
     <p
-      className="me-1 text-[11px] text-muted-foreground/70"
+      className="me-1 text-2xs text-muted-foreground/70"
       data-user-message-attribution="spawn-brief"
     >
       Brief from <SpawnerIdentity {...props} />

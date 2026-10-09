@@ -6,12 +6,12 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { Tool } from "effect/unstable/ai";
+import { Tool } from "effect/ai";
 
 import { McpInvocationContext } from "../../mcp/McpInvocationContext.ts";
 import { OrchestratorMcpService } from "../../mcp/OrchestratorMcpService.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
-import * as ProviderRegistry from "../../provider/Services/ProviderRegistry.ts";
+import * as ProviderRegistry from "../../provider/ProviderRegistry.ts";
 import { invokeAgent } from "./agentInvocation.ts";
 
 /**
@@ -37,7 +37,7 @@ export type J5DelegateTaskInput = typeof J5DelegateTaskInput.Type;
  * fallback.
  */
 export const J5_DELEGATE_TASK_DESCRIPTION =
-  "Run one task as a J5-owned child of THIS thread with only the supplied task prompt; parent conversation history is not copied. Pass persona=ID when the user writes @persona:ID or asks for a persona by name: the server pins that persona's instructions, provider, model, reasoning, and runtime policy, so omit target and runtimeMode. Give the persona a self-contained task, and if that call fails, report the error instead of substituting a plain child. Without persona, this is a plain T3-tracked child for cross-provider work or for work the user wants tracked as a T3 task; for an ordinary subagent request, use your provider's native subagent mechanism instead. The childThreadId is backing storage, not an ordinary top-level thread. Provider, model, model options (see orchestrator_capabilities), runtime mode, and interaction mode inherit unless target overrides them. Prefer mode='async' for long work; mode='wait' blocks until completion or timeout. timeoutMs on mode=wait is only the parent's wait budget and does not cancel the child. waitTimedOut on that wait call means the timeout fired; keep that taskId and read status on later task_status. An async child's completion wakes this thread with a continuation message naming the task (queued behind any turn in progress), so end the turn instead of polling or spawning watchers; use task_status only when the result is needed mid-turn.";
+  "Run one task as a J5-owned child of THIS thread with only the supplied task prompt; parent conversation history is not copied. Pass persona=ID when the user writes @persona:ID or asks for a persona by name: the server pins that persona's instructions, provider, model, reasoning, and runtime policy, so omit target and runtimeMode. Give the persona a self-contained task, and if that call fails, report the error instead of substituting a plain child. Without persona, this is a plain J5-tracked child for cross-provider work or for work the user wants tracked as a J5 task; for an ordinary subagent request, use your provider's native subagent mechanism instead. The childThreadId is backing storage, not an ordinary top-level thread. Provider, model, model options (see orchestrator_capabilities), runtime mode, and interaction mode inherit unless target overrides them. Prefer mode='async' for long work; mode='wait' blocks until completion or timeout. timeoutMs on mode=wait is only the parent's wait budget and does not cancel the child. waitTimedOut on that wait call means the timeout fired; keep that taskId and read status on later task_status. An async child's completion wakes this thread with a continuation message naming the task (queued behind any turn in progress), so end the turn instead of polling or spawning watchers; use task_status only when the result is needed mid-turn.";
 
 /** J5's delegate_task: the upstream tool with the persona extension, registered in place of it. */
 export const J5DelegateTaskTool = Tool.make("delegate_task", {

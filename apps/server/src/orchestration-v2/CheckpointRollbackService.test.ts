@@ -12,25 +12,35 @@ import {
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import * as Option from "effect/Option";
 import { symlinksSupported } from "@t3tools/shared/testing/symlinks";
 import * as Layer from "effect/Layer";
 
 import { resolveCodexRollbackTurnCount } from "./Adapters/CodexAdapterV2.ts";
 import { isCheckpointRestoreIsolated } from "./CheckpointRestoreSafety.ts";
-import { CheckpointServiceV2 } from "./CheckpointService.ts";
-import {
-  CheckpointRollbackServiceV2,
-  layer as checkpointRollbackLayer,
-} from "./CheckpointRollbackService.ts";
-import { EventSinkV2 } from "./EventSink.ts";
-import { layer as idAllocatorLayer } from "./IdAllocator.ts";
-import { ProjectionStoreReadError, ProjectionStoreV2 } from "./ProjectionStore.ts";
-import type { ProviderAdapterV2RollbackThreadInput } from "./ProviderAdapter.ts";
-import { ProviderSessionManagerV2 } from "./ProviderSessionManager.ts";
-import { RuntimePolicyV2 } from "./RuntimePolicy.ts";
+import * as CheckpointService from "./CheckpointService.ts";
+import * as CheckpointRollbackService from "./CheckpointRollbackService.ts";
+import * as ThreadCommandExecutor from "./ThreadCommandExecutor.ts";
+import * as KeyedLock from "@t3tools/shared/KeyedLock";
+import * as EventSink from "./EventSink.ts";
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import * as ProjectionStore from "./ProjectionStore.ts";
+import * as ProjectStore from "./ProjectStore.ts";
+import type { ProviderAdapterV2RollbackThreadInput } from "@t3tools/provider-core/server/ProviderAdapter";
+import * as ProviderSessionManager from "./ProviderSessionManager.ts";
+import * as RuntimePolicy from "./RuntimePolicy.ts";
 
-const checkpointRollbackServiceLayer = checkpointRollbackLayer.pipe(
-  Layer.provide(NodeServices.layer),
+// A root that does not exist never overlaps, so other owners decide isolation.
+const unrelatedProject = Option.some({
+  workspaceRoot: "/nonexistent/t3-rollback-project",
+} as never);
+const layerCheckpointRollbackService = CheckpointRollbackService.layer.pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      NodeServices.layer,
+      Layer.mock(ProjectStore.ProjectStoreV2)({ get: () => Effect.succeed(unrelatedProject) }),
+    ),
+  ),
 );
 
 it.effect("rejects a non-ready checkpoint before opening a session or restoring files", () => {
@@ -53,13 +63,14 @@ it.effect("rejects a non-ready checkpoint before opening a session or restoring 
     checkpoints: [{ id: checkpointId, scopeId, status: "stale" }],
     checkpointScopes: [{ id: scopeId, cwd: process.cwd() }],
   } as unknown as OrchestrationV2ThreadProjection;
-  const testLayer = checkpointRollbackServiceLayer.pipe(
+  const layerTest = layerCheckpointRollbackService.pipe(
     Layer.provide(
       Layer.mergeAll(
-        Layer.mock(CheckpointServiceV2)({ restore }),
-        Layer.mock(EventSinkV2)({}),
-        idAllocatorLayer,
-        Layer.mock(ProjectionStoreV2)({
+        ThreadCommandExecutor.layer,
+        Layer.mock(CheckpointService.CheckpointServiceV2)({ restore }),
+        Layer.mock(EventSink.EventSinkV2)({}),
+        IdAllocator.layer,
+        Layer.mock(ProjectionStore.ProjectionStoreV2)({
           getThreadRecords: () => Effect.succeed(projection),
           getShellSnapshot: () =>
             Effect.succeed({
@@ -69,14 +80,14 @@ it.effect("rejects a non-ready checkpoint before opening a session or restoring 
               archivedThreads: [],
             }),
         }),
-        Layer.mock(ProviderSessionManagerV2)({ open }),
-        Layer.mock(RuntimePolicyV2)({ resolve: resolveRuntimePolicy }),
+        Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({ open }),
+        Layer.mock(RuntimePolicy.RuntimePolicyV2)({ resolve: resolveRuntimePolicy }),
       ),
     ),
   );
 
   return Effect.gen(function* () {
-    const service = yield* CheckpointRollbackServiceV2;
+    const service = yield* CheckpointRollbackService.CheckpointRollbackServiceV2;
     const error = yield* service
       .execute({
         threadId,
@@ -95,7 +106,7 @@ it.effect("rejects a non-ready checkpoint before opening a session or restoring 
     assert.equal(resolveRuntimePolicy.mock.calls.length, 0);
     assert.equal(open.mock.calls.length, 0);
     assert.equal(restore.mock.calls.length, 0);
-  }).pipe(Effect.provide(testLayer));
+  }).pipe(Effect.provide(layerTest));
 });
 
 it.effect("rejects a rollback when another provider thread became active", () => {
@@ -130,13 +141,14 @@ it.effect("rejects a rollback when another provider thread became active", () =>
     checkpoints: [{ id: checkpointId, scopeId, status: "ready" }],
     checkpointScopes: [{ id: scopeId, cwd: process.cwd() }],
   } as unknown as OrchestrationV2ThreadProjection;
-  const testLayer = checkpointRollbackServiceLayer.pipe(
+  const layerTest = layerCheckpointRollbackService.pipe(
     Layer.provide(
       Layer.mergeAll(
-        Layer.mock(CheckpointServiceV2)({ restore }),
-        Layer.mock(EventSinkV2)({}),
-        idAllocatorLayer,
-        Layer.mock(ProjectionStoreV2)({
+        ThreadCommandExecutor.layer,
+        Layer.mock(CheckpointService.CheckpointServiceV2)({ restore }),
+        Layer.mock(EventSink.EventSinkV2)({}),
+        IdAllocator.layer,
+        Layer.mock(ProjectionStore.ProjectionStoreV2)({
           getThreadRecords: () => Effect.succeed(projection),
           getShellSnapshot: () =>
             Effect.succeed({
@@ -146,14 +158,14 @@ it.effect("rejects a rollback when another provider thread became active", () =>
               archivedThreads: [],
             }),
         }),
-        Layer.mock(ProviderSessionManagerV2)({ open }),
-        Layer.mock(RuntimePolicyV2)({ resolve: resolveRuntimePolicy }),
+        Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({ open }),
+        Layer.mock(RuntimePolicy.RuntimePolicyV2)({ resolve: resolveRuntimePolicy }),
       ),
     ),
   );
 
   return Effect.gen(function* () {
-    const service = yield* CheckpointRollbackServiceV2;
+    const service = yield* CheckpointRollbackService.CheckpointRollbackServiceV2;
     const error = yield* service
       .execute({
         threadId,
@@ -172,7 +184,7 @@ it.effect("rejects a rollback when another provider thread became active", () =>
     assert.equal(resolveRuntimePolicy.mock.calls.length, 0);
     assert.equal(open.mock.calls.length, 0);
     assert.equal(restore.mock.calls.length, 0);
-  }).pipe(Effect.provide(testLayer));
+  }).pipe(Effect.provide(layerTest));
 });
 
 it.effect("rejects a rollback when provider selection changed before execution", () => {
@@ -210,13 +222,14 @@ it.effect("rejects a rollback when provider selection changed before execution",
     checkpoints: [{ id: checkpointId, scopeId, status: "ready" }],
     checkpointScopes: [{ id: scopeId, cwd: process.cwd() }],
   } as unknown as OrchestrationV2ThreadProjection;
-  const testLayer = checkpointRollbackServiceLayer.pipe(
+  const layerTest = layerCheckpointRollbackService.pipe(
     Layer.provide(
       Layer.mergeAll(
-        Layer.mock(CheckpointServiceV2)({ restore }),
-        Layer.mock(EventSinkV2)({}),
-        idAllocatorLayer,
-        Layer.mock(ProjectionStoreV2)({
+        ThreadCommandExecutor.layer,
+        Layer.mock(CheckpointService.CheckpointServiceV2)({ restore }),
+        Layer.mock(EventSink.EventSinkV2)({}),
+        IdAllocator.layer,
+        Layer.mock(ProjectionStore.ProjectionStoreV2)({
           getThreadRecords: () => Effect.succeed(projection),
           getShellSnapshot: () =>
             Effect.succeed({
@@ -226,14 +239,14 @@ it.effect("rejects a rollback when provider selection changed before execution",
               archivedThreads: [],
             }),
         }),
-        Layer.mock(ProviderSessionManagerV2)({ open }),
-        Layer.mock(RuntimePolicyV2)({ resolve: resolveRuntimePolicy }),
+        Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({ open }),
+        Layer.mock(RuntimePolicy.RuntimePolicyV2)({ resolve: resolveRuntimePolicy }),
       ),
     ),
   );
 
   return Effect.gen(function* () {
-    const service = yield* CheckpointRollbackServiceV2;
+    const service = yield* CheckpointRollbackService.CheckpointRollbackServiceV2;
     const error = yield* service
       .execute({
         threadId,
@@ -252,7 +265,7 @@ it.effect("rejects a rollback when provider selection changed before execution",
     assert.equal(resolveRuntimePolicy.mock.calls.length, 0);
     assert.equal(open.mock.calls.length, 0);
     assert.equal(restore.mock.calls.length, 0);
-  }).pipe(Effect.provide(testLayer));
+  }).pipe(Effect.provide(layerTest));
 });
 
 it.effect("reports a missing provider turn as a structured rollback failure", () => {
@@ -281,13 +294,14 @@ it.effect("reports a missing provider turn as a structured rollback failure", ()
     attempts: [],
     providerTurns: [],
   } as unknown as OrchestrationV2ThreadProjection;
-  const testLayer = checkpointRollbackServiceLayer.pipe(
+  const layerTest = layerCheckpointRollbackService.pipe(
     Layer.provide(
       Layer.mergeAll(
-        Layer.mock(CheckpointServiceV2)({ restore }),
-        Layer.mock(EventSinkV2)({}),
-        idAllocatorLayer,
-        Layer.mock(ProjectionStoreV2)({
+        ThreadCommandExecutor.layer,
+        Layer.mock(CheckpointService.CheckpointServiceV2)({ restore }),
+        Layer.mock(EventSink.EventSinkV2)({}),
+        IdAllocator.layer,
+        Layer.mock(ProjectionStore.ProjectionStoreV2)({
           getThreadRecords: () => Effect.succeed(projection),
           getShellSnapshot: () =>
             Effect.succeed({
@@ -297,10 +311,10 @@ it.effect("reports a missing provider turn as a structured rollback failure", ()
               archivedThreads: [],
             }),
         }),
-        Layer.mock(ProviderSessionManagerV2)({
+        Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({
           open: () => Effect.succeed({} as never),
         }),
-        Layer.mock(RuntimePolicyV2)({
+        Layer.mock(RuntimePolicy.RuntimePolicyV2)({
           resolve: () => Effect.succeed({} as never),
         }),
       ),
@@ -308,7 +322,7 @@ it.effect("reports a missing provider turn as a structured rollback failure", ()
   );
 
   return Effect.gen(function* () {
-    const service = yield* CheckpointRollbackServiceV2;
+    const service = yield* CheckpointRollbackService.CheckpointRollbackServiceV2;
     const error = yield* service
       .execute({
         threadId,
@@ -325,51 +339,7 @@ it.effect("reports a missing provider turn as a structured rollback failure", ()
     );
     assert.equal(error.cause, undefined);
     assert.equal(restore.mock.calls.length, 0);
-  }).pipe(Effect.provide(testLayer));
-});
-
-it.effect("wraps underlying failures with an unexpected-failure reason and cause", () => {
-  const threadId = ThreadId.make("thread:rollback-unexpected-failure");
-  const providerThreadId = ProviderThreadId.make("provider-thread:rollback-unexpected-failure");
-  const checkpointId = CheckpointId.make("checkpoint:rollback-unexpected-failure");
-  const scopeId = CheckpointScopeId.make("checkpoint-scope:rollback-unexpected-failure");
-  const projectionError = new ProjectionStoreReadError({
-    threadId,
-    cause: new Error("database read failed"),
-  });
-  const testLayer = checkpointRollbackServiceLayer.pipe(
-    Layer.provide(
-      Layer.mergeAll(
-        Layer.mock(CheckpointServiceV2)({}),
-        Layer.mock(EventSinkV2)({}),
-        idAllocatorLayer,
-        Layer.mock(ProjectionStoreV2)({
-          getThreadRecords: () => Effect.fail(projectionError),
-        }),
-        Layer.mock(ProviderSessionManagerV2)({}),
-        Layer.mock(RuntimePolicyV2)({}),
-      ),
-    ),
-  );
-
-  return Effect.gen(function* () {
-    const service = yield* CheckpointRollbackServiceV2;
-    const error = yield* service
-      .execute({
-        threadId,
-        providerThreadId,
-        checkpointId,
-        scopeId,
-      })
-      .pipe(Effect.flip);
-
-    assert.equal(error.reason, "unexpected-failure");
-    assert.equal(
-      error.message,
-      `Failed to execute rollback target ${checkpointId} on provider thread ${providerThreadId} for thread ${threadId}.`,
-    );
-    assert.strictEqual(error.cause, projectionError);
-  }).pipe(Effect.provide(testLayer));
+  }).pipe(Effect.provide(layerTest));
 });
 
 it.effect.each([
@@ -388,6 +358,15 @@ it.effect.each([
   const checkpointId = CheckpointId.make("rewind-start");
   const scopeId = CheckpointScopeId.make("rewind-scope");
   const calls: string[] = [];
+  let lockedThreads = Effect.succeed<ReadonlyArray<ThreadId>>([]);
+  const layerThreadCommands = Layer.effect(
+    ThreadCommandExecutor.ThreadCommandExecutor,
+    Effect.tap(KeyedLock.make<ThreadId>(), (lock) =>
+      Effect.sync(() => {
+        lockedThreads = lock.activeKeys;
+      }),
+    ),
+  );
   const providerThread = {
     id: providerThreadId,
     providerSessionId,
@@ -423,18 +402,22 @@ it.effect.each([
       activeAttemptId: `attempt-${ordinal}`,
     })),
   } as unknown as OrchestrationV2ThreadProjection;
-  const testLayer = checkpointRollbackServiceLayer.pipe(
+  const layerTest = layerCheckpointRollbackService.pipe(
     Layer.provide(
       Layer.mergeAll(
-        Layer.mock(CheckpointServiceV2)({
+        layerThreadCommands,
+        Layer.mock(CheckpointService.CheckpointServiceV2)({
           restore: () =>
             Effect.sync(() => {
               calls.push("files");
             }),
         }),
-        Layer.mock(EventSinkV2)({
+        Layer.mock(EventSink.EventSinkV2)({
           write: ({ events }) =>
-            Effect.sync(() => {
+            Effect.map(lockedThreads, (locked) => {
+              // A thread command that planned against the old provider thread
+              // must not commit after this and undo the rollback.
+              assert.include(locked, threadId);
               assert.ok(
                 events.some(
                   (event) => event.type === "run.updated" && event.payload.status === "rolled_back",
@@ -444,9 +427,10 @@ it.effect.each([
               return [];
             }),
         }),
-        idAllocatorLayer,
-        Layer.mock(ProjectionStoreV2)({
+        IdAllocator.layer,
+        Layer.mock(ProjectionStore.ProjectionStoreV2)({
           getThreadRecords: () => Effect.succeed(projection),
+          getThreadProviderContext: () => Effect.succeed({ providerSessions: [] } as never),
           getCheckpointContext: () =>
             Effect.succeed({
               checkpointScopes: [{ cwd: process.cwd() }],
@@ -470,7 +454,7 @@ it.effect.each([
                   : [],
             }),
         }),
-        Layer.mock(ProviderSessionManagerV2)({
+        Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({
           open: () =>
             Effect.succeed({
               rollbackThread: (input: ProviderAdapterV2RollbackThreadInput) =>
@@ -482,12 +466,12 @@ it.effect.each([
                 }),
             } as never),
         }),
-        Layer.mock(RuntimePolicyV2)({ resolve: () => Effect.succeed({} as never) }),
+        Layer.mock(RuntimePolicy.RuntimePolicyV2)({ resolve: () => Effect.succeed({} as never) }),
       ),
     ),
   );
   return Effect.gen(function* () {
-    const service = yield* CheckpointRollbackServiceV2;
+    const service = yield* CheckpointRollbackService.CheckpointRollbackServiceV2;
     if (restoreFiles && shared !== "none") {
       const error = yield* Effect.flip(
         service.execute({ threadId, providerThreadId, checkpointId, scopeId, restoreFiles }),
@@ -501,7 +485,7 @@ it.effect.each([
       calls,
       restoreFiles ? ["provider", "files", "projection"] : ["provider", "projection"],
     );
-  }).pipe(Effect.provide(testLayer));
+  }).pipe(Effect.provide(layerTest));
 });
 
 it.effect.skipIf(!symlinksSupported)(
@@ -515,7 +499,7 @@ it.effect.skipIf(!symlinksSupported)(
       yield* fileSystem.symlink(cwd, alias);
       const threadId = ThreadId.make("restore-alias-current");
       const otherId = ThreadId.make("restore-alias-archived");
-      const projections = ProjectionStoreV2.of({
+      const projections = ProjectionStore.ProjectionStoreV2.of({
         getShellSnapshot: () =>
           Effect.succeed({
             schemaVersion: 1,
@@ -523,13 +507,21 @@ it.effect.skipIf(!symlinksSupported)(
             threads: [],
             archivedThreads: [{ id: otherId, deletedAt: null, worktreePath: alias } as never],
           }),
+        getThreadProviderContext: () => Effect.succeed({ providerSessions: [] } as never),
         getCheckpointContext: () =>
           Effect.succeed({ runs: [], checkpointScopes: [], checkpoints: [] }),
       } as never);
       const isolated = yield* isCheckpointRestoreIsolated(
         { id: threadId, worktreePath: cwd },
         { cwd },
-        { fileSystem, projections },
+        {
+          fileSystem,
+          path,
+          projections,
+          projects: ProjectStore.ProjectStoreV2.of({
+            get: () => Effect.succeed(unrelatedProject),
+          } as never),
+        },
       );
       assert.isFalse(isolated);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),

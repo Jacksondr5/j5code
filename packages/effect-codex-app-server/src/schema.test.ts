@@ -3,25 +3,12 @@ import * as Schema from "effect/Schema";
 
 import * as CodexSchema from "./schema.ts";
 
-const decodeElicitation = Schema.decodeUnknownSync(CodexSchema.McpServerElicitationRequestParams);
-const isElicitation = Schema.is(CodexSchema.McpServerElicitationRequestParams);
-
 const isGetAccountResponse = Schema.is(CodexSchema.V2GetAccountResponse);
 const isThreadReadResponse = Schema.is(CodexSchema.V2ThreadReadResponse);
 const isThreadResumeResponse = Schema.is(CodexSchema.V2ThreadResumeResponse);
-const isThreadRollbackResponse = Schema.is(CodexSchema.V2ThreadRollbackResponse);
 const isThreadForkResponse = Schema.is(CodexSchema.V2ThreadForkResponse);
 const isTurnCompletedNotification = Schema.is(CodexSchema.V2TurnCompletedNotification);
 const decodeThreadResumeResponse = Schema.decodeUnknownSync(CodexSchema.V2ThreadResumeResponse);
-
-const isNotificationCollabTool = Schema.is(CodexSchema.ServerNotification__CollabAgentTool);
-const isResumeCollabTool = Schema.is(CodexSchema.V2ThreadResumeResponse__CollabAgentTool);
-const isNotificationCollabStatus = Schema.is(
-  CodexSchema.ServerNotification__CollabAgentToolCallStatus,
-);
-const isResumeCollabStatus = Schema.is(
-  CodexSchema.V2ThreadResumeResponse__CollabAgentToolCallStatus,
-);
 
 it("keeps async questions in live notifications and thread history", () => {
   const item = {
@@ -41,9 +28,8 @@ it("keeps async questions in live notifications and thread history", () => {
     CodexSchema.V2ItemCompletedNotification__ThreadItem,
     CodexSchema.V2ThreadReadResponse__ThreadItem,
     CodexSchema.V2ThreadResumeResponse__ThreadItem,
-    CodexSchema.V2ThreadRollbackResponse__ThreadItem,
   ]) {
-    assert.deepEqual(Schema.decodeUnknownSync(schema)(item), item);
+    assert.deepEqual(Schema.decodeSync(schema)(item), item);
   }
 });
 
@@ -61,12 +47,18 @@ it("accepts Codex 0.150 multi-agent values", () => {
   }
 
   for (const tool of ["sendMessage", "followupTask", "interruptAgent", "listAgents"]) {
-    assert.equal(isNotificationCollabTool(tool), true);
-    assert.equal(isResumeCollabTool(tool), true);
+    assert.equal(Schema.is(CodexSchema.ServerNotification__CollabAgentTool)(tool), true);
+    assert.equal(Schema.is(CodexSchema.V2ThreadResumeResponse__CollabAgentTool)(tool), true);
   }
 
-  assert.equal(isNotificationCollabStatus("interrupted"), true);
-  assert.equal(isResumeCollabStatus("interrupted"), true);
+  assert.equal(
+    Schema.is(CodexSchema.ServerNotification__CollabAgentToolCallStatus)("interrupted"),
+    true,
+  );
+  assert.equal(
+    Schema.is(CodexSchema.V2ThreadResumeResponse__CollabAgentToolCallStatus)("interrupted"),
+    true,
+  );
 
   const resumeResponse = {
     approvalPolicy: "never",
@@ -76,15 +68,15 @@ it("accepts Codex 0.150 multi-agent values", () => {
     modelProvider: "openai",
     sandbox: { type: "dangerFullAccess" },
     thread: {
-      cliVersion: "0.152.1",
+      cliVersion: "0.150.0",
       createdAt: 0,
       cwd: "/tmp/project",
       ephemeral: false,
       id: "root-thread",
       modelProvider: "openai",
       preview: "",
-      sessionId: "session-1",
       projectId: null,
+      sessionId: "session-1",
       source: "cli",
       status: { type: "idle" },
       turns: [
@@ -108,20 +100,20 @@ it("accepts Codex 0.150 multi-agent values", () => {
     },
   };
 
-  assert.equal(isThreadResumeResponse(resumeResponse), true);
+  assert.equal(Schema.is(CodexSchema.V2ThreadResumeResponse)(resumeResponse), true);
 });
 
 it("accepts Codex rate limit errors for thread responses", () => {
   const failedThread = {
-    cliVersion: "0.152.1",
+    cliVersion: "0.150.0",
     createdAt: 0,
     cwd: "/tmp/project",
     ephemeral: false,
     id: "thread-1",
     modelProvider: "openai",
     preview: "",
-    sessionId: "session-1",
     projectId: null,
+    sessionId: "session-1",
     source: "cli",
     status: { type: "idle" },
     turns: [
@@ -150,7 +142,6 @@ it("accepts Codex rate limit errors for thread responses", () => {
     }),
     true,
   );
-  assert.equal(isThreadRollbackResponse({ thread: failedThread }), true);
 });
 
 it("accepts Codex misalignment policy errors for thread responses", () => {
@@ -162,8 +153,8 @@ it("accepts Codex misalignment policy errors for thread responses", () => {
     id: "thread-1",
     modelProvider: "openai",
     preview: "",
-    sessionId: "session-1",
     projectId: null,
+    sessionId: "session-1",
     source: "cli",
     status: { type: "idle" },
     turns: [
@@ -190,7 +181,6 @@ it("accepts Codex misalignment policy errors for thread responses", () => {
   };
   assert.equal(isThreadReadResponse({ thread: failedThread }), true);
   assert.equal(isThreadResumeResponse(resumeLikeResponse), true);
-  assert.equal(isThreadRollbackResponse({ thread: failedThread }), true);
   assert.equal(isThreadForkResponse(resumeLikeResponse), true);
   const decodedResume = decodeThreadResumeResponse(resumeLikeResponse);
   assert.equal(decodedResume.thread.turns[0]?.error?.codexErrorInfo, "misalignmentPolicyViolation");
@@ -211,13 +201,15 @@ it("accepts Codex misalignment policy errors for thread responses", () => {
   );
 });
 
-it("accepts Codex 0.150 account plan values", () => {
+it("accepts account plan slugs newer than the pinned protocol", () => {
   const planTypes = [
     "self_serve_business_prolite",
     "ent26",
     "enterprise_cbp_automation",
     "edu_plus",
     "edu_pro",
+    "promax",
+    "some_future_plan",
   ];
 
   for (const planType of planTypes) {
@@ -232,25 +224,4 @@ it("accepts Codex 0.150 account plan values", () => {
 
     assert.equal(isGetAccountResponse(accountResponse), true);
   }
-});
-
-it("preserves elicitation identity and mode-specific fields after schema generation", () => {
-  const common = {
-    serverName: "test-mcp",
-    threadId: "thread-1",
-    turnId: null,
-    message: "Choose a value",
-  };
-  for (const fields of [
-    { mode: "form", requestedSchema: { type: "object", properties: {}, required: [] } },
-    { mode: "openai/form", requestedSchema: { type: "object" } },
-    { mode: "openaiForm", requestedSchema: { type: "object" } },
-    { mode: "url", url: "https://example.com/authorize", elicitationId: "request-1" },
-  ] as const) {
-    const request = { ...common, ...fields };
-    assert.deepEqual(decodeElicitation(request), request);
-    const { serverName: _server, ...withoutServer } = request;
-    assert.isFalse(isElicitation(withoutServer));
-  }
-  assert.isFalse(isElicitation({ ...common, mode: "url" }));
 });

@@ -33,6 +33,7 @@ vi.mock("../../state/environments", () => ({
   }),
 }));
 vi.mock("../../state/session", () => ({
+  useEnvironmentScope: () => true,
   usePreparedConnection: () =>
     testState.connected ? { _tag: "Some", value: {} } : { _tag: "None" },
 }));

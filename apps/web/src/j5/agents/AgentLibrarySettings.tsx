@@ -27,6 +27,7 @@ import {
   presentAgentPersonaCatalog,
   presentAgentPersonaUsage,
 } from "@t3tools/client-runtime/j5/agent-personas";
+import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
 import type {
   AgentPersonaEditInput,
   AgentPersonaImportConflict,
@@ -42,6 +43,7 @@ import { useSettingsScopeEnvironments } from "../settingsScopeEnvironment";
 import { agentPersonaEnvironment } from "./agentPersonaAtoms";
 import { PlaybookLibrarySettings } from "../playbooks/PlaybookLibrarySettings";
 import { useEnvironmentQuery } from "../../state/query";
+import { useEnvironmentScope } from "../../state/session";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { useAtomCommand } from "../../state/use-atom-command";
 import {
@@ -135,6 +137,9 @@ export function AgentLibrarySettings() {
     (environment) => environment.environmentId !== effectiveEnvironmentId,
   );
   const [busy, setBusy] = useState(false);
+  // Library changes need the operate scope; a session without it can still read and export.
+  const canOperate = useEnvironmentScope(effectiveEnvironmentId, AuthOrchestrationOperateScope);
+  const locked = busy || !canOperate;
   const [creating, setCreating] = useState<{ initial?: AgentPersonaCreateDraft } | null>(null);
   const [editing, setEditing] = useState<{
     environmentId: EnvironmentId;
@@ -438,7 +443,7 @@ export function AgentLibrarySettings() {
             <Button
               size="xs"
               variant="ghost-muted"
-              disabled={busy || effectiveEnvironmentId === null}
+              disabled={locked || effectiveEnvironmentId === null}
               onClick={() => setCreating({})}
             >
               <PlusIcon aria-hidden="true" className="size-3" />
@@ -447,20 +452,20 @@ export function AgentLibrarySettings() {
             <Menu>
               <MenuTrigger
                 render={<Button size="xs" variant="ghost-muted" />}
-                disabled={busy || effectiveEnvironmentId === null}
+                disabled={locked || effectiveEnvironmentId === null}
               >
                 Import
                 <ChevronDownIcon aria-hidden="true" className="size-3" />
               </MenuTrigger>
               <MenuPopup align="end">
                 <MenuItem
-                  disabled={busy || effectiveEnvironmentId === null}
+                  disabled={locked || effectiveEnvironmentId === null}
                   onClick={() => setPicking("import-file")}
                 >
                   Persona file
                 </MenuItem>
                 <MenuItem
-                  disabled={busy || effectiveEnvironmentId === null}
+                  disabled={locked || effectiveEnvironmentId === null}
                   onClick={() => setPicking("import-folder")}
                 >
                   Folder
@@ -559,7 +564,7 @@ export function AgentLibrarySettings() {
                       <Button
                         variant="outline"
                         size="sm"
-                        disabled={busy}
+                        disabled={locked}
                         aria-label={`Restore ${persona.displayName}`}
                         onClick={() => void restorePersona(persona.personaId)}
                       >
@@ -569,7 +574,7 @@ export function AgentLibrarySettings() {
                     ) : (
                       <Switch
                         checked={persona.enabled}
-                        disabled={busy}
+                        disabled={locked}
                         aria-label={`Enable ${persona.displayName}`}
                         onCheckedChange={(enabled) => void toggleAgent(persona.personaId, enabled)}
                       />
@@ -585,7 +590,7 @@ export function AgentLibrarySettings() {
                       <MenuPopup align="end">
                         {persona.removed ? null : (
                           <MenuItem
-                            disabled={busy || persona.edit === null}
+                            disabled={locked || persona.edit === null}
                             onClick={() => {
                               if (persona.edit && effectiveEnvironmentId)
                                 setEditing({
@@ -599,7 +604,7 @@ export function AgentLibrarySettings() {
                           </MenuItem>
                         )}
                         <MenuItem
-                          disabled={persona.availability === "unsupported"}
+                          disabled={!canOperate || persona.availability === "unsupported"}
                           onClick={() => void duplicatePersona(persona.personaId)}
                         >
                           <CopyIcon />
@@ -634,7 +639,7 @@ export function AgentLibrarySettings() {
                             <MenuSeparator />
                             <MenuItem
                               variant="destructive"
-                              disabled={busy}
+                              disabled={locked}
                               onClick={() => void removePersona(persona.personaId)}
                             >
                               <Trash2Icon />
@@ -660,7 +665,7 @@ export function AgentLibrarySettings() {
               <Button
                 size="xs"
                 variant="ghost-muted"
-                disabled={busy}
+                disabled={locked}
                 onClick={() => setPicking("library-folder")}
               >
                 <PlusIcon aria-hidden="true" className="size-3" />
@@ -728,7 +733,7 @@ export function AgentLibrarySettings() {
                           {canOpen ? (
                             <>
                               <MenuItem
-                                disabled={busy}
+                                disabled={locked}
                                 onClick={() => void openFolder(folder.path)}
                               >
                                 <ExternalLinkIcon />
@@ -739,7 +744,7 @@ export function AgentLibrarySettings() {
                           ) : null}
                           <MenuItem
                             variant="destructive"
-                            disabled={busy}
+                            disabled={locked}
                             onClick={() =>
                               void saveFolders(
                                 (librarySources.data?.folders ?? [])

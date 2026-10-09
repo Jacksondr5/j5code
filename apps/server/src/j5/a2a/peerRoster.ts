@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off - synchronous hashing for deterministic ids and digests.
 import * as NodeCrypto from "node:crypto";
 
 import type { A2ARosterEntry, PeerRosterAgent } from "@t3tools/contracts/j5";

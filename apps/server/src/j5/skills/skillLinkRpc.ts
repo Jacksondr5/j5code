@@ -21,10 +21,10 @@ import * as Effect from "effect/Effect";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import { resolveCodexHomeLayout } from "../../provider/Drivers/CodexHomeLayout.ts";
-import { mergeProviderInstanceEnvironment } from "../../provider/ProviderInstanceEnvironment.ts";
+import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
 import { ServerConfig } from "../../config.ts";
 import * as ProcessRunner from "../../processRunner.ts";
-import { deriveProviderInstanceConfigMap } from "../../provider/Layers/ProviderInstanceRegistryHydration.ts";
+import { deriveProviderInstanceConfigMap } from "../../provider/ProviderInstanceRegistryHydration.ts";
 import {
   normalizePath,
   skillDiscoveryState,
@@ -33,9 +33,8 @@ import {
 } from "@t3tools/shared/j5/skillInventory";
 import { affectedSkillProviderIds, resolveSkillRoot } from "./skillRoots.ts";
 import { refreshSkillProviders } from "./skillProviderRefresh.ts";
-import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
+import { ProviderRegistry } from "../../provider/ProviderRegistry.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
-import type { ObserveRpcEffect } from "../agents/agentPersonaRpc.ts";
 import { skillCatalogPermit } from "./skillCatalogTool.ts";
 import {
   previewSkillDeletion,
@@ -103,7 +102,6 @@ function discoveryMessage(discovery: SkillLinkMutationResult["discovery"]) {
 }
 
 export const makeSkillLinkRpcHandlers = Effect.fn("j5.makeSkillLinkRpcHandlers")(function* (deps: {
-  readonly observe: ObserveRpcEffect;
   readonly getProjectRoot: (
     projectId: ProjectId,
   ) => Effect.Effect<string | undefined, SkillLinkError>;
@@ -446,51 +444,42 @@ export const makeSkillLinkRpcHandlers = Effect.fn("j5.makeSkillLinkRpcHandlers")
     );
     return result.flat();
   });
-  const observe = <A>(tag: string, effect: Effect.Effect<A, SkillLinkError>) =>
-    deps.observe(tag, effect, { "rpc.aggregate": "j5SkillLinks" });
   // Share the catalog permit so a catalog apply cannot race a managed link operation.
   const mutation = <A>(effect: Effect.Effect<A, SkillLinkError>) =>
     skillCatalogPermit.withPermit(effect.pipe(Effect.uninterruptible));
   return {
-    [METHODS.preview]: (request: SkillLinkRequest) => observe(METHODS.preview, preview(request)),
-    [METHODS.list]: () =>
-      observe(
-        METHODS.list,
-        attempt(() => listManagedSkillLinks(config.stateDir)),
-      ),
+    [METHODS.preview]: (request: SkillLinkRequest) => preview(request),
+    [METHODS.list]: () => attempt(() => listManagedSkillLinks(config.stateDir)),
     [METHODS.create]: (request: SkillLinkCreate) =>
-      observe(
-        METHODS.create,
-        Effect.uninterruptible(
-          Effect.gen(function* () {
-            const { checked, action } = yield* mutation(
-              Effect.gen(function* () {
-                const checked = yield* preview(request, request.expectedSourcePath);
-                if (
-                  checked.sourcePath !== request.expectedSourcePath ||
-                  checked.destinationPath !== request.expectedDestinationPath
-                )
-                  return yield* failure("Source or destination changed. Preview the link again.");
-                const action = yield* attempt(() =>
-                  createManagedSkillLink(config.stateDir, checked, request, platform === "win32"),
-                );
-                return { checked, action };
-              }),
-            );
-            const discovery = yield* refresh(
-              request.targetInstanceId,
-              checked.destinationPath,
-              request.scope,
-              request.projectId,
-              checked.sourcePath,
-            );
-            return {
-              action,
-              discovery,
-              message: `${action === "created" ? "Link created" : "Link already exists"}. ${discoveryMessage(discovery)}`,
-            };
-          }),
-        ),
+      Effect.uninterruptible(
+        Effect.gen(function* () {
+          const { checked, action } = yield* mutation(
+            Effect.gen(function* () {
+              const checked = yield* preview(request, request.expectedSourcePath);
+              if (
+                checked.sourcePath !== request.expectedSourcePath ||
+                checked.destinationPath !== request.expectedDestinationPath
+              )
+                return yield* failure("Source or destination changed. Preview the link again.");
+              const action = yield* attempt(() =>
+                createManagedSkillLink(config.stateDir, checked, request, platform === "win32"),
+              );
+              return { checked, action };
+            }),
+          );
+          const discovery = yield* refresh(
+            request.targetInstanceId,
+            checked.destinationPath,
+            request.scope,
+            request.projectId,
+            checked.sourcePath,
+          );
+          return {
+            action,
+            discovery,
+            message: `${action === "created" ? "Link created" : "Link already exists"}. ${discoveryMessage(discovery)}`,
+          };
+        }),
       ),
     [METHODS.remove]: ({
       id,
@@ -499,183 +488,171 @@ export const makeSkillLinkRpcHandlers = Effect.fn("j5.makeSkillLinkRpcHandlers")
       readonly id: string;
       readonly forget?: boolean | undefined;
     }) =>
-      observe(
-        METHODS.remove,
-        Effect.uninterruptible(
-          Effect.gen(function* () {
-            const removed = yield* mutation(
-              attempt(() =>
-                removeManagedSkillLink(config.stateDir, id, platform === "win32", forget),
-              ),
-            );
-            if (forget)
-              return {
-                action: "forgotten" as const,
-                discovery: "not-checked" as const,
-                message: "Record forgotten. The destination and source were left unchanged.",
-              };
-            const discovery = removed
-              ? yield* refresh(
-                  removed.targetInstanceId,
-                  removed.destinationPath,
-                  removed.scope,
-                  removed.projectId,
-                  removed.sourcePath,
-                )
-              : ("not-checked" as const);
+      Effect.uninterruptible(
+        Effect.gen(function* () {
+          const removed = yield* mutation(
+            attempt(() =>
+              removeManagedSkillLink(config.stateDir, id, platform === "win32", forget),
+            ),
+          );
+          if (forget)
             return {
-              action: "removed" as const,
-              discovery,
-              message: `Link removed. The source is unchanged.${discovery === "failed" ? " Discovery refresh failed; retry Refresh." : " Running sessions may need refreshing or restarting."}`,
+              action: "forgotten" as const,
+              discovery: "not-checked" as const,
+              message: "Record forgotten. The destination and source were left unchanged.",
             };
-          }),
-        ),
+          const discovery = removed
+            ? yield* refresh(
+                removed.targetInstanceId,
+                removed.destinationPath,
+                removed.scope,
+                removed.projectId,
+                removed.sourcePath,
+              )
+            : ("not-checked" as const);
+          return {
+            action: "removed" as const,
+            discovery,
+            message: `Link removed. The source is unchanged.${discovery === "failed" ? " Discovery refresh failed; retry Refresh." : " Running sessions may need refreshing or restarting."}`,
+          };
+        }),
       ),
-    [METHODS.inspect]: (request: SkillLinkInspect) => observe(METHODS.inspect, inspect(request)),
+    [METHODS.inspect]: (request: SkillLinkInspect) => inspect(request),
     [METHODS.deletePreview]: (request: SkillLinkInspect) =>
-      observe(
-        METHODS.deletePreview,
-        deletePreview(request).pipe(Effect.map(({ checked }) => checked)),
-      ),
+      deletePreview(request).pipe(Effect.map(({ checked }) => checked)),
     [METHODS.delete]: (request: SkillDelete) =>
-      observe(
-        METHODS.delete,
-        Effect.uninterruptible(
-          Effect.gen(function* () {
-            const { affectedInstanceIds, scope } = yield* mutation(
-              Effect.gen(function* () {
-                const { checked, affectedInstanceIds, scope } = yield* deletePreview(request);
-                if (
-                  checked.expectedPath !== request.expectedPath ||
-                  checked.expectedIdentity !== request.expectedIdentity
-                )
-                  return yield* failure("The skill folder changed. Review the deletion again.");
-                yield* attempt(() => deleteSkillDirectory(checked));
-                return { affectedInstanceIds, scope };
-              }),
-            );
-            const discovery = yield* refresh(
-              request.source.instanceId,
-              request.expectedPath,
-              scope,
-              request.projectId,
-              undefined,
-              affectedInstanceIds,
-            );
-            return {
-              action: "removed" as const,
-              discovery,
-              message: `Skill permanently deleted.${discovery === "failed" ? " Discovery refresh failed; retry Refresh." : " Running sessions may need refreshing or restarting."}`,
-            };
-          }),
-        ),
+      Effect.uninterruptible(
+        Effect.gen(function* () {
+          const { affectedInstanceIds, scope } = yield* mutation(
+            Effect.gen(function* () {
+              const { checked, affectedInstanceIds, scope } = yield* deletePreview(request);
+              if (
+                checked.expectedPath !== request.expectedPath ||
+                checked.expectedIdentity !== request.expectedIdentity
+              )
+                return yield* failure("The skill folder changed. Review the deletion again.");
+              yield* attempt(() => deleteSkillDirectory(checked));
+              return { affectedInstanceIds, scope };
+            }),
+          );
+          const discovery = yield* refresh(
+            request.source.instanceId,
+            request.expectedPath,
+            scope,
+            request.projectId,
+            undefined,
+            affectedInstanceIds,
+          );
+          return {
+            action: "removed" as const,
+            discovery,
+            message: `Skill permanently deleted.${discovery === "failed" ? " Discovery refresh failed; retry Refresh." : " Running sessions may need refreshing or restarting."}`,
+          };
+        }),
       ),
     [METHODS.unlink]: (request: SkillLinkUnlinkBatch) =>
-      observe(
-        METHODS.unlink,
-        Effect.uninterruptible(
-          Effect.gen(function* () {
-            const { removedPaths, failed, refreshIds, workspaces } = yield* mutation(
-              Effect.gen(function* () {
-                const settings = yield* settingsService.getSettings.pipe(Effect.mapError(failure));
-                const snapshots = yield* providers.getProviders;
-                const rootsByProject = new Map(
-                  yield* Effect.forEach(
-                    [...new Set(request.links.map((link) => link.projectId))],
-                    (id) =>
-                      Effect.gen(function* () {
-                        return [id, yield* linkRoots(id)] as const;
-                      }),
-                  ),
-                );
-                const removedPaths: string[] = [];
-                const failed: Array<{ path: string; message: string }> = [];
-                const refreshIds = new Set<ProviderInstanceId>();
-                const workspaces = new Set<string>();
-                for (const link of new Map(
-                  request.links.map((link) => [link.expectedDestinationPath, link]),
-                ).values()) {
-                  const roots = rootsByProject.get(link.projectId)!;
-                  const outcome = yield* Effect.gen(function* () {
-                    if (
-                      !roots.some(
-                        (entry) =>
-                          entry.instanceId === link.targetInstanceId &&
-                          entry.scope === link.scope &&
-                          entry.root === path.dirname(link.expectedDestinationPath),
-                      )
-                    )
-                      return yield* failure("Destination changed. Preview again.");
-                    const cwd = yield* projectRoot(link.projectId);
-                    const reason = skillLinkUnavailableReason(
-                      skillOrigin(
-                        {
-                          name: path.basename(link.expectedDestinationPath),
-                          path: path.join(link.expectedDestinationPath, "SKILL.md"),
-                          linkTarget: path.join(link.expectedSourcePath, "SKILL.md"),
-                          scope: link.scope,
-                          enabled: true,
-                        },
-                        cwd,
-                        settings.skillCatalogSource,
-                      ),
-                    );
-                    if (reason) return yield* failure(reason);
-                    const affected = yield* affectedSkillProviderIds(
-                      snapshots,
-                      deriveProviderInstanceConfigMap(settings),
-                      [path.dirname(link.expectedDestinationPath)],
-                      { scope: link.scope, cwd },
-                    ).pipe(Effect.mapError(failure), Effect.provideService(Path.Path, path));
-                    yield* attempt(() => unlinkSkill(config.stateDir, link, platform === "win32"));
-                    for (const id of affected) refreshIds.add(id);
-                    if (cwd) workspaces.add(cwd);
-                    return undefined;
-                  }).pipe(Effect.catch((error) => Effect.succeed(error)));
-                  if (outcome) {
-                    failed.push({ path: link.expectedDestinationPath, message: outcome.message });
-                    continue;
-                  }
-                  removedPaths.push(link.expectedDestinationPath);
-                  for (const entry of roots)
-                    if (entry.root === path.dirname(link.expectedDestinationPath))
-                      refreshIds.add(entry.instanceId);
-                  for (const provider of snapshots) {
-                    const skills = [
-                      ...provider.skills,
-                      ...(provider.workspaceSnapshots ?? []).flatMap((snapshot) => snapshot.skills),
-                    ];
-                    if (
-                      skills.some(
-                        (skill) =>
-                          skill.linkTarget === path.join(link.expectedSourcePath, "SKILL.md"),
-                      )
-                    )
-                      refreshIds.add(provider.instanceId);
-                  }
-                }
-                return { removedPaths, failed, refreshIds, workspaces };
-              }),
-            );
-            // One refresh per affected instance after the whole batch, including shared roots.
-            const refreshFailed = yield* refreshSkillProviders(
-              providers,
-              [...refreshIds],
-              [...workspaces],
-            ).pipe(
-              Effect.map((updated) =>
-                updated.some(
-                  (provider) =>
-                    refreshIds.has(provider.instanceId) &&
-                    (skillDiscoveryState(provider) === "failed" ||
-                      provider.workspaceSnapshots?.some((snapshot) => snapshot.refreshError)),
+      Effect.uninterruptible(
+        Effect.gen(function* () {
+          const { removedPaths, failed, refreshIds, workspaces } = yield* mutation(
+            Effect.gen(function* () {
+              const settings = yield* settingsService.getSettings.pipe(Effect.mapError(failure));
+              const snapshots = yield* providers.getProviders;
+              const rootsByProject = new Map(
+                yield* Effect.forEach(
+                  [...new Set(request.links.map((link) => link.projectId))],
+                  (id) =>
+                    Effect.gen(function* () {
+                      return [id, yield* linkRoots(id)] as const;
+                    }),
                 ),
+              );
+              const removedPaths: string[] = [];
+              const failed: Array<{ path: string; message: string }> = [];
+              const refreshIds = new Set<ProviderInstanceId>();
+              const workspaces = new Set<string>();
+              for (const link of new Map(
+                request.links.map((link) => [link.expectedDestinationPath, link]),
+              ).values()) {
+                const roots = rootsByProject.get(link.projectId)!;
+                const outcome = yield* Effect.gen(function* () {
+                  if (
+                    !roots.some(
+                      (entry) =>
+                        entry.instanceId === link.targetInstanceId &&
+                        entry.scope === link.scope &&
+                        entry.root === path.dirname(link.expectedDestinationPath),
+                    )
+                  )
+                    return yield* failure("Destination changed. Preview again.");
+                  const cwd = yield* projectRoot(link.projectId);
+                  const reason = skillLinkUnavailableReason(
+                    skillOrigin(
+                      {
+                        name: path.basename(link.expectedDestinationPath),
+                        path: path.join(link.expectedDestinationPath, "SKILL.md"),
+                        linkTarget: path.join(link.expectedSourcePath, "SKILL.md"),
+                        scope: link.scope,
+                        enabled: true,
+                      },
+                      cwd,
+                      settings.skillCatalogSource,
+                    ),
+                  );
+                  if (reason) return yield* failure(reason);
+                  const affected = yield* affectedSkillProviderIds(
+                    snapshots,
+                    deriveProviderInstanceConfigMap(settings),
+                    [path.dirname(link.expectedDestinationPath)],
+                    { scope: link.scope, cwd },
+                  ).pipe(Effect.mapError(failure), Effect.provideService(Path.Path, path));
+                  yield* attempt(() => unlinkSkill(config.stateDir, link, platform === "win32"));
+                  for (const id of affected) refreshIds.add(id);
+                  if (cwd) workspaces.add(cwd);
+                  return undefined;
+                }).pipe(Effect.catch((error) => Effect.succeed(error)));
+                if (outcome) {
+                  failed.push({ path: link.expectedDestinationPath, message: outcome.message });
+                  continue;
+                }
+                removedPaths.push(link.expectedDestinationPath);
+                for (const entry of roots)
+                  if (entry.root === path.dirname(link.expectedDestinationPath))
+                    refreshIds.add(entry.instanceId);
+                for (const provider of snapshots) {
+                  const skills = [
+                    ...provider.skills,
+                    ...(provider.workspaceSnapshots ?? []).flatMap((snapshot) => snapshot.skills),
+                  ];
+                  if (
+                    skills.some(
+                      (skill) =>
+                        skill.linkTarget === path.join(link.expectedSourcePath, "SKILL.md"),
+                    )
+                  )
+                    refreshIds.add(provider.instanceId);
+                }
+              }
+              return { removedPaths, failed, refreshIds, workspaces };
+            }),
+          );
+          // One refresh per affected instance after the whole batch, including shared roots.
+          const refreshFailed = yield* refreshSkillProviders(
+            providers,
+            [...refreshIds],
+            [...workspaces],
+          ).pipe(
+            Effect.map((updated) =>
+              updated.some(
+                (provider) =>
+                  refreshIds.has(provider.instanceId) &&
+                  (skillDiscoveryState(provider) === "failed" ||
+                    provider.workspaceSnapshots?.some((snapshot) => snapshot.refreshError)),
               ),
-              Effect.catchCause(() => Effect.succeed(true)),
-            );
-            return { removedPaths, failed, refreshFailed };
-          }),
-        ),
+            ),
+            Effect.catchCause(() => Effect.succeed(true)),
+          );
+          return { removedPaths, failed, refreshFailed };
+        }),
       ),
   };
 });

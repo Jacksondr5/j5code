@@ -19,6 +19,10 @@ step. Stop and ask the owner wherever it says to.
 - **Data:** it stays in `~/.j5code/userdata`. On first start the new version
   copies `state.sqlite` to `statev2.sqlite` and uses the copy from then on. Work
   done after the upgrade exists only in `statev2.sqlite`.
+- **Two hops:** releases after 0.0.48 can't upgrade a database that 0.0.43 or
+  earlier wrote. They refuse it and tell you to run `j5 update 0.0.48` first. So
+  this guide installs 0.0.48, lets it upgrade the database, and then updates to
+  the newest release (step 5).
 - **Updating from the app:** the app shows **Update server** when its version is
   newer than the server's. That button cannot move an npm-installed server
   (0.0.43 or earlier) to a release archive: the old server only knows how to
@@ -29,12 +33,12 @@ step. Stop and ask the owner wherever it says to.
 
 ## Who needs this
 
-| Setup                                               | Action                                                                                                              |
-| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| J5 running as a background service (Linux, macOS)   | Follow every step below.                                                                                            |
-| J5 started by hand (`j5`, `npx @jacksondr5/j5code`) | Stop it, then do steps 3 and 5. Start it again with `j5` or `j5 serve` and your usual options.                      |
-| J5 desktop app only (no background service)         | Install the new desktop release. Nothing else.                                                                      |
-| SSH hosts that the desktop app launches             | Nothing. The first connection after the desktop update downloads the new server to `~/.j5code/runtime` on the host. |
+| Setup                                               | Action                                                                                                                                                                              |
+| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| J5 running as a background service (Linux, macOS)   | Follow every step below.                                                                                                                                                            |
+| J5 started by hand (`j5`, `npx @jacksondr5/j5code`) | Stop it, then do step 3. Start it once with `j5` or `j5 serve` so 0.0.48 upgrades the database, check step 5, stop it, run `j5 update`, and start it again with your usual options. |
+| J5 desktop app only (no background service)         | Install the 0.0.48 desktop release and open it once, then install the newest one.                                                                                                   |
+| SSH hosts that the desktop app launches             | Nothing. The first connection after the desktop update downloads the new server to `~/.j5code/runtime` on the host.                                                                 |
 
 ## 1. Inspect (read-only)
 
@@ -99,12 +103,16 @@ step. Stop and ask the owner wherever it says to.
 
 - **macOS:** `cp ~/Library/LaunchAgents/com.t3tools.t3code.service.plist ~/j5-migration-backup/`
 
-## 3. Install the new release
+## 3. Install 0.0.48
 
 ```sh
-curl -fsSL https://github.com/Jacksondr5/j5code/releases/latest/download/install.sh | sh
-~/.local/bin/j5 --version    # prints "j5 v0.0.44" or later
+curl -fsSL https://github.com/Jacksondr5/j5code/releases/latest/download/install.sh | T3CODE_VERSION=0.0.48 sh
+~/.local/bin/j5 --version    # prints "j5 v0.0.48"
 ```
+
+Install 0.0.48 exactly, not the newest release. A newer release refuses a
+database that 0.0.43 or earlier wrote. 0.0.48 upgrades it, and step 5 moves you
+to the newest release afterwards.
 
 The installer unpacks the release into `~/.j5code/runtime/versions/<version>/`
 and links `~/.local/bin/j5` to it. It never reads `T3CODE_HOME`.
@@ -179,13 +187,23 @@ old unit was recreated), and step 1 showed the unit is J5's, run
   Rollback.
 - Connect from a client and confirm that projects, threads, and agents appear.
 
+Then move to the newest release, now that 0.0.48 has upgraded the database:
+
+```sh
+j5 update
+```
+
+Check `j5 service status` and the logs once more. If you skipped 0.0.48 and a
+newer release reports that it can no longer upgrade this database, run
+`j5 update 0.0.48`, let the server start once, and run `j5 update` again.
+
 ## 6. Report the upgrade (final step)
 
-J5 still carries the code that upgrades databases from the August and September
-2026 builds. It stays only until every J5 install has started once on 0.0.44 or
-later, and this report is how we know.
+Releases after 0.0.48 no longer carry the code that upgrades databases from the
+August and September 2026 builds, which is why step 3 installs 0.0.48 first.
+This report records which installs have made the move.
 
-After the first successful start on 0.0.44 or later (step 5 passed), comment on
+After the first successful start on the newest release (step 5 passed), comment on
 [Jacksondr5/j5code#275](https://github.com/Jacksondr5/j5code/issues/275) with
 the machine or owner name and the version, for example:
 

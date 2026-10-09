@@ -1,5 +1,5 @@
 import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 // Historical homes had one implicit human. Preserve that data as one explicit
 // person key; runtime code gives this id no singleton or broadcast semantics.

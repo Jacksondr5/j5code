@@ -21,9 +21,9 @@ import {
 } from "./crewNotices.logic";
 
 const TONE_CLASS = {
-  good: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
-  bad: "bg-red-500/15 text-red-700 dark:text-red-300",
-  warn: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
+  good: "bg-success/15 text-success-foreground",
+  bad: "bg-destructive/15 text-destructive-foreground",
+  warn: "bg-warning/15 text-warning-foreground",
   muted: "border border-border/70 text-muted-foreground",
 } as const;
 
@@ -59,7 +59,7 @@ function CrewGateCard(props: {
   };
   return (
     <section
-      className="max-w-[88%] rounded-[10px] border border-border/70 bg-muted/25 px-3.5 py-2.5"
+      className="max-w-[88%] rounded-lg border border-border/70 bg-muted/25 px-3.5 py-2.5"
       data-j5-crew-renderer="gate"
       data-j5-crew-decision={notice.decision}
     >
@@ -72,12 +72,12 @@ function CrewGateCard(props: {
           <span className="font-medium text-foreground">{notice.crewName}</span>
         ) : null}
         {approved && notice.requestKind === "addition" && notice.crewVersion !== null ? (
-          <span className="rounded-md border border-border/70 px-1.5 py-0.5 text-[11px] font-semibold text-muted-foreground">
+          <span className="rounded-md border border-border/70 px-1.5 py-0.5 text-2xs font-semibold text-muted-foreground">
             v{notice.crewVersion}
           </span>
         ) : null}
         {!approved ? (
-          <span className="rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300">
+          <span className="rounded-md bg-warning/15 px-1.5 py-0.5 text-2xs font-semibold text-warning-foreground">
             Declined
           </span>
         ) : null}
@@ -124,16 +124,16 @@ function CrewGateCard(props: {
                     <TooltipPopup>{seat.participantId}</TooltipPopup>
                   </Tooltip>
                   {seat.isNew ? (
-                    <span className="rounded-md bg-emerald-500/15 px-1.5 py-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
+                    <span className="rounded-md bg-success/15 px-1.5 py-0.5 text-2xs font-semibold text-success-foreground">
                       New
                     </span>
                   ) : null}
                   {seat.start === "failed" ? (
-                    <span className="ms-auto shrink-0 rounded-md bg-red-500/15 px-1.5 py-0.5 text-[11px] font-semibold text-red-700 dark:text-red-300">
+                    <span className="ms-auto shrink-0 rounded-md bg-destructive/15 px-1.5 py-0.5 text-2xs font-semibold text-destructive-foreground">
                       Failed
                     </span>
                   ) : seat.start === "pending" ? (
-                    <span className="ms-auto shrink-0 rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300">
+                    <span className="ms-auto shrink-0 rounded-md bg-warning/15 px-1.5 py-0.5 text-2xs font-semibold text-warning-foreground">
                       Start unconfirmed
                     </span>
                   ) : null}
@@ -150,7 +150,7 @@ function CrewGateCard(props: {
                 <Badge variant="outline" size="sm" className="shrink-0">
                   {seat.seat}
                 </Badge>
-                <span className="ms-auto shrink-0 rounded-md bg-red-500/15 px-1.5 py-0.5 text-[11px] font-semibold text-red-700 dark:text-red-300">
+                <span className="ms-auto shrink-0 rounded-md bg-destructive/15 px-1.5 py-0.5 text-2xs font-semibold text-destructive-foreground">
                   Not created
                 </span>
               </div>
@@ -193,7 +193,7 @@ function CrewSeatsCard(props: {
   };
   return (
     <section
-      className="max-w-[88%] rounded-[10px] border border-border/70 bg-muted/25 px-3.5 py-2.5"
+      className="max-w-[88%] rounded-lg border border-border/70 bg-muted/25 px-3.5 py-2.5"
       data-j5-crew-renderer="seats"
     >
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
@@ -226,7 +226,7 @@ function CrewSeatsCard(props: {
                 onClick={() => openSeat(seat.threadId)}
               >
                 <span
-                  className={`rounded-md px-1.5 py-0.5 text-[11px] font-semibold ${TONE_CLASS[status.tone]}`}
+                  className={`rounded-md px-1.5 py-0.5 text-2xs font-semibold ${TONE_CLASS[status.tone]}`}
                 >
                   {status.label}
                 </span>
@@ -238,7 +238,7 @@ function CrewSeatsCard(props: {
                 ) : null}
                 {handoff.status === "none declared" ? null : (
                   <span
-                    className={`rounded-md px-1.5 py-0.5 text-[11px] font-semibold ${
+                    className={`rounded-md px-1.5 py-0.5 text-2xs font-semibold ${
                       handoff.status === "written" ? TONE_CLASS.muted : TONE_CLASS.warn
                     }`}
                   >

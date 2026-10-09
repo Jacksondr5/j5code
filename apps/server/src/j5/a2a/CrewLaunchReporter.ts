@@ -17,7 +17,7 @@ import * as Layer from "effect/Layer";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import type { SqlError } from "effect/sql/SqlError";
 import type { OrchestratorV2Error } from "../../orchestration-v2/Orchestrator.ts";
 
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";

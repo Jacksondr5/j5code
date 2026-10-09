@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off - a project directory name is a synchronous hash.
 import type { ArtifactContent, ArtifactEntry, ProjectId } from "@t3tools/contracts";
 import * as NodeCrypto from "node:crypto";
 import * as Context from "effect/Context";

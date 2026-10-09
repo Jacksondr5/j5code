@@ -9,9 +9,9 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Scope from "effect/Scope";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
-import { makeSqlitePersistenceLive } from "../../persistence/Layers/Sqlite.ts";
+import { layerFromPath } from "../../persistence/Sqlite.ts";
 import { runMigrations } from "../../persistence/Migrations.ts";
 import {
   J5_A2A_MIGRATIONS_TABLE,
@@ -146,7 +146,7 @@ it.effect("startup snapshots the database before the ledger re-keys to projects"
             SELECT migration_id FROM ${sql(J5_A2A_MIGRATIONS_TABLE)} WHERE migration_id = ${rekey}
           `,
         };
-      }).pipe(Effect.provide(makeSqlitePersistenceLive(dbPath)));
+      }).pipe(Effect.provide(layerFromPath(dbPath)));
 
       // The live database was migrated; the copy beside it is the database as it was.
       assert.deepStrictEqual(migrated.ledgers, [{ project_id: "project-keep" }]);

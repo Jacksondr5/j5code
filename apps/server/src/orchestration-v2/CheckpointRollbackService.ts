@@ -1,6 +1,7 @@
 import {
   CheckpointId,
   CheckpointScopeId,
+  latestProviderTurnForAttempt,
   type OrchestrationV2DomainEvent,
   ProviderThreadId,
   ThreadId,
@@ -10,6 +11,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
 import {
@@ -18,11 +20,16 @@ import {
 } from "./CheckpointRestoreSafety.ts";
 import { CheckpointServiceV2 } from "./CheckpointService.ts";
 import { EventSinkV2 } from "./EventSink.ts";
-import { IdAllocatorV2 } from "./IdAllocator.ts";
+import { IdAllocatorV2 } from "@t3tools/provider-core/server/IdAllocator";
 import { ProjectionStoreV2 } from "./ProjectionStore.ts";
-import type { ProviderAdapterV2RollbackTarget } from "./ProviderAdapter.ts";
+import * as ProjectStore from "./ProjectStore.ts";
+import type { ProviderAdapterV2RollbackTarget } from "@t3tools/provider-core/server/ProviderAdapter";
 import { ProviderSessionManagerV2 } from "./ProviderSessionManager.ts";
 import { RuntimePolicyV2 } from "./RuntimePolicy.ts";
+import * as ThreadCommandExecutor from "./ThreadCommandExecutor.ts";
+
+export const ROLLBACK_FAILED_MESSAGE =
+  "The provider could not roll back this conversation. Try again; if it keeps failing, check the provider and server logs.";
 
 export class CheckpointRollbackExecutionError extends Schema.TaggedError<CheckpointRollbackExecutionError>()(
   "CheckpointRollbackExecutionError",
@@ -51,7 +58,7 @@ export class CheckpointRollbackExecutionError extends Schema.TaggedError<Checkpo
       case "shared-workspace":
         return SHARED_WORKSPACE_RESTORE_MESSAGE;
       case "unexpected-failure":
-        return `Failed to execute rollback target ${this.checkpointId} on provider thread ${this.providerThreadId} for thread ${this.threadId}.`;
+        return ROLLBACK_FAILED_MESSAGE;
     }
   }
 }
@@ -83,6 +90,9 @@ export const layer: Layer.Layer<
   | ProviderSessionManagerV2
   | RuntimePolicyV2
   | FileSystem.FileSystem
+  | Path.Path
+  | ProjectStore.ProjectStoreV2
+  | ThreadCommandExecutor.ThreadCommandExecutor
 > = Layer.effect(
   CheckpointRollbackServiceV2,
   Effect.gen(function* () {
@@ -93,6 +103,9 @@ export const layer: Layer.Layer<
     const sessions = yield* ProviderSessionManagerV2;
     const runtimePolicy = yield* RuntimePolicyV2;
     const fileSystem = yield* FileSystem.FileSystem;
+    const projects = yield* ProjectStore.ProjectStoreV2;
+    const path = yield* Path.Path;
+    const threadCommands = yield* ThreadCommandExecutor.ThreadCommandExecutor;
 
     const execute = Effect.fn("orchestrationV2.checkpointRollback.execute")(function* (input: {
       readonly threadId: ThreadId;
@@ -147,7 +160,12 @@ export const layer: Layer.Layer<
 
       if (
         input.restoreFiles !== false &&
-        !(yield* isCheckpointRestoreIsolated(projection.thread, scope, { fileSystem, projections }))
+        !(yield* isCheckpointRestoreIsolated(projection.thread, scope, {
+          fileSystem,
+          projections,
+          projects,
+          path,
+        }))
       ) {
         return yield* new CheckpointRollbackExecutionError({
           reason: "shared-workspace",
@@ -182,8 +200,15 @@ export const layer: Layer.Layer<
       });
 
       const targetOrdinal = checkpoint.appRunOrdinal ?? 0;
+      // Stopped and failed runs after the target leave the provider
+      // conversation too, so they must not stay visible.
       const runsToRollback = projection.runs.filter(
-        (run) => run.ordinal > targetOrdinal && run.status === "completed",
+        (run) =>
+          run.ordinal > targetOrdinal &&
+          (run.status === "completed" ||
+            run.status === "interrupted" ||
+            run.status === "failed" ||
+            run.status === "cancelled"),
       );
       // Rolled-back turns stay in the audit history, but no longer exist in
       // the provider conversation and must not be counted by a later rewind.
@@ -212,11 +237,10 @@ export const layer: Layer.Layer<
               const targetAttempt = projection.attempts.find(
                 (attempt) => attempt.id === targetRun?.activeAttemptId,
               );
-              const targetTurn = projection.providerTurns.find(
-                (turn) =>
-                  turn.id === targetAttempt?.providerTurnId ||
-                  turn.runAttemptId === targetAttempt?.id,
-              );
+              // A goal run can span several native turns; roll back to its last.
+              const targetTurn =
+                latestProviderTurnForAttempt(projection.providerTurns, targetAttempt?.id) ??
+                projection.providerTurns.find((turn) => turn.id === targetAttempt?.providerTurnId);
               if (targetTurn === undefined || targetTurn.providerThreadId !== providerThread.id) {
                 return yield* new CheckpointRollbackExecutionError({
                   reason: "provider-turn-unavailable",
@@ -253,72 +277,80 @@ export const layer: Layer.Layer<
         yield* checkpoints.deleteStaleRefs({ scope, checkpoints: staleCheckpoints });
       }
 
-      const now = yield* DateTime.now;
-      const makeEvent = <Event extends OrchestrationV2DomainEvent>(event: Omit<Event, "id">) =>
-        Effect.map(
-          ids.allocate.event({ threadId: event.threadId }),
-          (id) =>
-            ({
-              ...event,
-              id,
-            }) as Event,
-        );
-      const events: Array<OrchestrationV2DomainEvent> = [];
-      events.push(
-        yield* makeEvent({
-          type: "provider-thread.updated",
-          threadId: input.threadId,
-          driver: providerThread.driver,
-          providerInstanceId: providerThread.providerInstanceId,
-          occurredAt: now,
-          payload: {
-            ...snapshot.providerThread,
-            lastRunOrdinal: targetOrdinal === 0 ? null : targetOrdinal,
-            updatedAt: now,
-          },
-        }),
-      );
-      for (const staleCheckpoint of staleCheckpoints) {
-        events.push(
-          yield* makeEvent({
-            type: "checkpoint.captured",
-            threadId: input.threadId,
-            ...(staleCheckpoint.runId === null ? {} : { runId: staleCheckpoint.runId }),
-            nodeId: staleCheckpoint.nodeId,
-            providerInstanceId: providerThread.providerInstanceId,
-            occurredAt: now,
-            payload: { ...staleCheckpoint, status: "stale" },
-          }),
-        );
-      }
-      for (const run of runsToRollback) {
-        const rootNode = projection.nodes.find((candidate) => candidate.id === run.rootNodeId);
-        events.push(
-          yield* makeEvent({
-            type: "run.updated",
-            threadId: input.threadId,
-            runId: run.id,
-            ...(rootNode === undefined ? {} : { nodeId: rootNode.id }),
-            providerInstanceId: run.providerInstanceId,
-            occurredAt: now,
-            payload: { ...run, status: "rolled_back", completedAt: now },
-          }),
-        );
-        if (rootNode !== undefined) {
+      // Thread commands write full provider thread rows under this lock. Without
+      // it, a message sent during the rollback can plan against the old native
+      // session and commit after this, undoing the provider's fork.
+      yield* threadCommands.withLock(
+        input.threadId,
+        Effect.gen(function* () {
+          const now = yield* DateTime.now;
+          const makeEvent = <Event extends OrchestrationV2DomainEvent>(event: Omit<Event, "id">) =>
+            Effect.map(
+              ids.allocate.event({ threadId: event.threadId }),
+              (id) =>
+                ({
+                  ...event,
+                  id,
+                }) as Event,
+            );
+          const events: Array<OrchestrationV2DomainEvent> = [];
           events.push(
             yield* makeEvent({
-              type: "node.updated",
+              type: "provider-thread.updated",
               threadId: input.threadId,
-              runId: run.id,
-              nodeId: rootNode.id,
-              providerInstanceId: run.providerInstanceId,
+              driver: providerThread.driver,
+              providerInstanceId: providerThread.providerInstanceId,
               occurredAt: now,
-              payload: { ...rootNode, status: "rolled_back", completedAt: now },
+              payload: {
+                ...snapshot.providerThread,
+                lastRunOrdinal: targetOrdinal === 0 ? null : targetOrdinal,
+                updatedAt: now,
+              },
             }),
           );
-        }
-      }
-      yield* eventSink.write({ events });
+          for (const staleCheckpoint of staleCheckpoints) {
+            events.push(
+              yield* makeEvent({
+                type: "checkpoint.captured",
+                threadId: input.threadId,
+                ...(staleCheckpoint.runId === null ? {} : { runId: staleCheckpoint.runId }),
+                nodeId: staleCheckpoint.nodeId,
+                providerInstanceId: providerThread.providerInstanceId,
+                occurredAt: now,
+                payload: { ...staleCheckpoint, status: "stale" },
+              }),
+            );
+          }
+          for (const run of runsToRollback) {
+            const rootNode = projection.nodes.find((candidate) => candidate.id === run.rootNodeId);
+            events.push(
+              yield* makeEvent({
+                type: "run.updated",
+                threadId: input.threadId,
+                runId: run.id,
+                ...(rootNode === undefined ? {} : { nodeId: rootNode.id }),
+                providerInstanceId: run.providerInstanceId,
+                occurredAt: now,
+                payload: { ...run, status: "rolled_back", completedAt: now },
+              }),
+            );
+            if (rootNode !== undefined) {
+              events.push(
+                yield* makeEvent({
+                  type: "node.updated",
+                  threadId: input.threadId,
+                  runId: run.id,
+                  nodeId: rootNode.id,
+                  providerInstanceId: run.providerInstanceId,
+                  occurredAt: now,
+                  payload: { ...rootNode, status: "rolled_back", completedAt: now },
+                }),
+              );
+            }
+          }
+          yield* eventSink.write({ events });
+        }),
+      );
     });
 
     return CheckpointRollbackServiceV2.of({

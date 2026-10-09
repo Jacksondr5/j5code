@@ -1,4 +1,4 @@
-import type { ProviderAdapterV2RuntimePolicy } from "../../orchestration-v2/ProviderAdapter.ts";
+import type { ProviderAdapterV2RuntimePolicy } from "@t3tools/provider-core/server/ProviderAdapter";
 
 /**
  * Crew seats do not get native question tools (issue #325, Jackson's 2026-09-26 decision). A seat

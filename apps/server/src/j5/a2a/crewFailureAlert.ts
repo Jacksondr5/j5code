@@ -1,7 +1,7 @@
 import type { OrchestrationV2ProviderFailure } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import type { AgentCrewInstance } from "./AgentCrewInstanceService.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { getLocalOperatorHumanPersonId } from "./HumanPersonRegistry.ts";

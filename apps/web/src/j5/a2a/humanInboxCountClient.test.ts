@@ -1,7 +1,7 @@
 import { testPreparedConnection } from "../../../test/j5";
 import { assert, it, vi } from "@effect/vitest";
 import * as Effect from "effect/Effect";
-import { HttpClient, HttpClientResponse } from "effect/unstable/http";
+import { HttpClient, HttpClientResponse } from "effect/http";
 
 import { readOpenInboxCountEffect } from "./humanInboxCountClient";
 

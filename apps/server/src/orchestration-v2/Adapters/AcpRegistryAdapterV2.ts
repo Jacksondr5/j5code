@@ -18,32 +18,32 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcessSpawner } from "effect/process";
 import * as EffectAcpErrors from "effect-acp/errors";
 
-import { ServerConfig } from "../../config.ts";
+import * as ServerConfig from "../../config.ts";
 import {
   normalizeAcpRegistryCommands,
   normalizeAcpRegistryLiveConfiguration,
   normalizeAcpRegistryWebUrl,
 } from "../../provider/acp/AcpRegistryProbe.ts";
-import { AcpRegistryCatalog } from "../../provider/acp/AcpRegistrySupport.ts";
-import { AcpRegistryRuntimeCoordinator } from "../../provider/acp/AcpRegistryRuntimeCoordinator.ts";
+import * as AcpRegistrySupport from "../../provider/acp/AcpRegistrySupport.ts";
+import * as AcpRegistryRuntimeCoordinator from "../../provider/acp/AcpRegistryRuntimeCoordinator.ts";
 import * as AcpSessionRuntime from "../../provider/acp/AcpSessionRuntime.ts";
 import { makeAcpNativeLoggerFactory } from "../../provider/acp/AcpNativeLogging.ts";
-import { ProviderEventLoggers } from "../../provider/Layers/ProviderEventLoggers.ts";
-import { mergeProviderInstanceEnvironment } from "../../provider/ProviderInstanceEnvironment.ts";
-import { IdAllocatorV2 } from "../IdAllocator.ts";
-import { makeProviderFailure } from "../ProviderFailure.ts";
-import { MISTRAL_VIBE_RATE_LIMITED, registerMistralVibeAcpExtensions } from "./MistralVibeAcp.ts";
+import * as ProviderEventLoggers from "../../provider/ProviderEventLoggers.ts";
+import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
 import {
   ProviderAdapterDriverCreateError,
   type ProviderAdapterDriver,
   type ProviderAdapterDriverCreateInput,
-} from "../ProviderAdapterDriver.ts";
+} from "@t3tools/provider-core/server/adapterDriver";
 import {
   AcpProviderCapabilitiesV2,
   makeAcpAdapterV2,
+  type AcpAdapterV2ExtensionContext,
   type AcpAdapterV2Flavor,
   type AcpAdapterV2RuntimeInput,
 } from "./AcpAdapterV2.ts";
@@ -62,10 +62,10 @@ export interface AcpRegistryAdapterV2Options {
   readonly crypto: Crypto.Crypto;
   readonly selfInvocation: SelfInvocation;
   readonly fileSystem: FileSystem.FileSystem;
-  readonly idAllocator: IdAllocatorV2["Service"];
-  readonly resolver: Pick<AcpRegistryCatalog["Service"], "resolve">;
-  readonly runtimeCoordinator?: AcpRegistryRuntimeCoordinator["Service"];
-  readonly serverConfig: ServerConfig["Service"];
+  readonly idAllocator: IdAllocator.IdAllocatorV2["Service"];
+  readonly resolver: Pick<AcpRegistrySupport.AcpRegistryCatalog["Service"], "resolve">;
+  readonly runtimeCoordinator?: AcpRegistryRuntimeCoordinator.AcpRegistryRuntimeCoordinator["Service"];
+  readonly serverConfig: ServerConfig.ServerConfig["Service"];
   readonly nativeLogging?: Parameters<typeof makeAcpAdapterV2>[0]["nativeLogging"];
   readonly makeRuntime?: (
     input: AcpAdapterV2RuntimeInput,
@@ -77,6 +77,49 @@ export interface AcpRegistryAdapterV2Options {
   readonly assertComplete?: Effect.Effect<void, EffectAcpErrors.AcpError>;
 }
 
+// ─── Per-agent exceptions ────────────────────────────────────────────────────
+// This adapter serves every ACP registry agent through the plain ACP spec.
+// Agent-specific behavior does not belong here: an agent that needs it gets a
+// dedicated driver (as Grok and Antigravity have). The few exceptions below
+// predate that rule and are small presentation hooks, not permission or tool
+// behavior.
+//
+// Agents changing this file: do NOT add another `agentId === "..."` branch,
+// agent table, or agent-specific hook without explicit approval from the
+// maintainer in the conversation. Propose a dedicated driver instead.
+
+// Mistral Vibe: its application error code for rate limits (not an ACP code).
+const MISTRAL_VIBE_RATE_LIMITED = -31001;
+
+const MistralVibeSessionRetrying = Schema.Struct({
+  sessionId: Schema.String,
+  category: Schema.Literals(["rate_limited", "server_error", "timed_out", "connection", "unknown"]),
+  detail: Schema.String,
+});
+
+/** Mistral Vibe (v2.25.5) reports SDK backoff through this ACP extension. */
+export function registerMistralVibeAcpExtensions(context: AcpAdapterV2ExtensionContext) {
+  return context.runtime.handleExtNotification(
+    "_session/retrying",
+    MistralVibeSessionRetrying,
+    (notice) =>
+      context.reportProviderRetry({
+        sessionId: notice.sessionId,
+        failure: makeProviderFailure({
+          message: notice.detail,
+          class:
+            notice.category === "rate_limited"
+              ? "usage_limit"
+              : notice.category === "unknown"
+                ? "provider_error"
+                : "transport_error",
+          retryable: true,
+        }),
+      }),
+  );
+}
+// ─── End per-agent exceptions (Devin's gates are marked in makeAcpRegistryAdapterV2) ───
+
 export function acpRegistryPromptFailure(agentId: string, cause: unknown) {
   return makeProviderFailure({
     cause,
@@ -85,6 +128,7 @@ export function acpRegistryPromptFailure(agentId: string, cause: unknown) {
           message: cause.errorMessage,
           code: String(cause.code),
           class:
+            // Per-agent exception: see the note above registerMistralVibeAcpExtensions.
             agentId === "mistral-vibe" && cause.code === MISTRAL_VIBE_RATE_LIMITED
               ? ("usage_limit" as const)
               : ("provider_error" as const),
@@ -139,12 +183,17 @@ function makeAcpRegistryRuntime(options: AcpRegistryAdapterV2Options) {
 
 export function makeAcpRegistryAdapterV2(options: AcpRegistryAdapterV2Options) {
   const runtimeCoordinator = options.runtimeCoordinator;
-  const isDevin = options.settings.agentId === "devin";
+  const registryAgentId = options.settings.source === "local" ? "" : options.settings.agentId;
+  const startupKey =
+    options.settings.source === "local" ? `local:${options.instanceId}` : registryAgentId;
+  const isDevin = registryAgentId === "devin";
   const flavor: AcpAdapterV2Flavor = {
     driver: ACP_REGISTRY_PROVIDER,
     capabilities: AcpProviderCapabilitiesV2,
-    promptFailure: (cause) => acpRegistryPromptFailure(options.settings.agentId, cause),
-    ...(options.settings.agentId === "mistral-vibe"
+    promptFailure: (cause) => acpRegistryPromptFailure(registryAgentId, cause),
+    // Per-agent exceptions (Mistral Vibe, Devin): see the note above
+    // registerMistralVibeAcpExtensions before adding any more.
+    ...(registryAgentId === "mistral-vibe"
       ? { registerExtensions: registerMistralVibeAcpExtensions }
       : {}),
     ...(isDevin
@@ -184,7 +233,7 @@ export function makeAcpRegistryAdapterV2(options: AcpRegistryAdapterV2Options) {
             });
           },
           withRuntimeStartup: <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-            runtimeCoordinator.withForegroundStartup(options.settings.agentId, effect),
+            runtimeCoordinator.withForegroundStartup(startupKey, effect),
         }),
     ...(options.assertComplete === undefined ? {} : { assertComplete: options.assertComplete }),
   };
@@ -196,11 +245,18 @@ export function makeAcpRegistryAdapterV2(options: AcpRegistryAdapterV2Options) {
     idAllocator: options.idAllocator,
     serverConfig: options.serverConfig,
     selfInvocation: options.selfInvocation,
-    clientTerminals: {
-      childProcessSpawner: options.childProcessSpawner,
-      environment: options.environment,
-      shellCommands: isDevin,
-    },
+    // Per-agent exception (see the note above registerMistralVibeAcpExtensions):
+    // Devin runs commands through client terminals and has no ask mode over
+    // ACP to fall back on. Every other registry agent runs its own.
+    ...(isDevin
+      ? {
+          clientTerminals: {
+            childProcessSpawner: options.childProcessSpawner,
+            environment: options.environment,
+            shellCommands: true,
+          },
+        }
+      : {}),
     ...(options.nativeLogging === undefined ? {} : { nativeLogging: options.nativeLogging }),
   });
 }
@@ -209,11 +265,11 @@ export type AcpRegistryAdapterV2DriverEnv =
   | ChildProcessSpawner.ChildProcessSpawner
   | Crypto.Crypto
   | FileSystem.FileSystem
-  | AcpRegistryCatalog
-  | IdAllocatorV2
+  | AcpRegistrySupport.AcpRegistryCatalog
+  | IdAllocator.IdAllocatorV2
   | Path.Path
-  | ProviderEventLoggers
-  | ServerConfig;
+  | ProviderEventLoggers.ProviderEventLoggers
+  | ServerConfig.ServerConfig;
 
 export const AcpRegistryAdapterV2Driver: ProviderAdapterDriver<
   AcpRegistrySettings,
@@ -229,12 +285,14 @@ export const AcpRegistryAdapterV2Driver: ProviderAdapterDriver<
       const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const crypto = yield* Crypto.Crypto;
       const fileSystem = yield* FileSystem.FileSystem;
-      const idAllocator = yield* IdAllocatorV2;
-      const providerEventLoggers = yield* ProviderEventLoggers;
-      const serverConfig = yield* ServerConfig;
+      const idAllocator = yield* IdAllocator.IdAllocatorV2;
+      const providerEventLoggers = yield* ProviderEventLoggers.ProviderEventLoggers;
+      const serverConfig = yield* ServerConfig.ServerConfig;
       const makeNativeLogger = yield* makeAcpNativeLoggerFactory();
-      const resolver = yield* AcpRegistryCatalog;
-      const runtimeCoordinator = yield* Effect.serviceOption(AcpRegistryRuntimeCoordinator);
+      const resolver = yield* AcpRegistrySupport.AcpRegistryCatalog;
+      const runtimeCoordinator = yield* Effect.serviceOption(
+        AcpRegistryRuntimeCoordinator.AcpRegistryRuntimeCoordinator,
+      );
       return makeAcpRegistryAdapterV2({
         instanceId: input.instanceId,
         settings: { ...input.config, enabled: input.enabled },

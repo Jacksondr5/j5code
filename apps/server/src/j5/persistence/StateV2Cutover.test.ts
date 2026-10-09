@@ -9,13 +9,14 @@ import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import { layerTest } from "../../config.ts";
-import { layerConfig } from "../../persistence/Layers/Sqlite.ts";
+import { layerConfig } from "../../persistence/Sqlite.ts";
 import { migrationManifest } from "../../persistence/Migrations.ts";
 import { runJ5A2AMigrations } from "../a2a/Migrations.ts";
 import { installPin } from "./test-support/historicalMigrations.ts";
+import { pinMigrationHistory } from "./UpstreamMigrationCompatibility.ts";
 
 // Upstream copies `state.sqlite` to `statev2.sqlite` once, before persistence starts.
 // J5's compatibility wrapper and lanes must then run against the copy only.
@@ -106,7 +107,14 @@ it.effect("copies state.sqlite first, then upgrades only the copy with every J5 
       // The V1 file is a rollback snapshot: untouched, still at the pin's history.
       assert.deepStrictEqual(NodeFS.readFileSync(sourcePath), original);
       const pinHistory = yield* readHistory().pipe(Effect.provide(atFile(sourcePath)));
-      assert.deepStrictEqual(pinHistory.at(-1), [51, "OrchestrationV2"]);
+      assert.deepStrictEqual(pinHistory, pinMigrationHistory);
+      // The renumbering took its own snapshot of the copy before the first write.
+      const snapshot = yield* readHistory().pipe(
+        Effect.provide(
+          atFile(destinationPath.replace(/\.sqlite$/, ".pre-upstream-renumber.sqlite")),
+        ),
+      );
+      assert.deepStrictEqual(snapshot, pinMigrationHistory);
     }),
   ),
 );
@@ -144,7 +152,7 @@ it.effect(
           const rows = yield* seedPinWithJ5State;
           const sql = yield* SqlClient.SqlClient;
           yield* sql`CREATE TRIGGER inject BEFORE INSERT ON effect_sql_migrations
-          WHEN NEW.migration_id = 55 BEGIN SELECT RAISE(ABORT, 'injected first-boot failure'); END`;
+          WHEN NEW.migration_id = 54 BEGIN SELECT RAISE(ABORT, 'injected first-boot failure'); END`;
           return rows;
         }).pipe(Effect.provide(atFile(sourcePath)));
 
@@ -153,10 +161,10 @@ it.effect(
         assert.isTrue(NodeFS.existsSync(destinationPath));
         yield* Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient;
-          assert.deepStrictEqual((yield* readHistory()).at(-1), [51, "OrchestrationV2"]);
+          assert.deepStrictEqual(yield* readHistory(), pinMigrationHistory);
           assert.deepStrictEqual(
             yield* sql`SELECT name FROM pragma_table_info('projection_threads')
-            WHERE name = 'title_state_json'`,
+            WHERE name = 'auto_settle_disabled_at'`,
             [],
           );
           // Stand-in for the fixed binary; the V1 file keeps the trigger, so a recopy would fail.

@@ -8,37 +8,45 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import { vi } from "vite-plus/test";
-import { HttpClient } from "effect/unstable/http";
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+import { HttpClient } from "effect/http";
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
 import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
-import { ServerConfig } from "../../config.ts";
-import { ServerSettingsService } from "../../serverSettings.ts";
-import { NoOpProviderEventLoggers, ProviderEventLoggers } from "../Layers/ProviderEventLoggers.ts";
+import * as ServerConfig from "../../config.ts";
+import * as ServerSettings from "../../serverSettings.ts";
+import * as ProviderEventLoggers from "../ProviderEventLoggers.ts";
 import { CursorDriver } from "./CursorDriver.ts";
-import { CursorAgentSdkRunner } from "../../orchestration-v2/Adapters/CursorAgentSdk.ts";
-import { layer as idAllocatorLayer } from "../../orchestration-v2/IdAllocator.ts";
-import { ProviderAdapterV2RuntimePolicy } from "../../orchestration-v2/ProviderAdapter.ts";
+import * as CursorAgentSdk from "../../orchestration-v2/Adapters/CursorAgentSdk.ts";
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import { ProviderAdapterV2RuntimePolicy } from "@t3tools/provider-core/server/ProviderAdapter";
 import { Cursor } from "../cursorSdk.ts";
+import * as ProviderHostLive from "../ProviderHostLive.ts";
 
-const testLayer = ServerSecretStore.layer.pipe(
+const layerDeps = ServerSecretStore.layer.pipe(
   Layer.provideMerge(
-    ServerConfig.layerTest(process.cwd(), { prefix: "t3-cursor-driver-copy-command-" }),
+    ServerConfig.layerTest(process.cwd(), {
+      prefix: "t3-cursor-driver-copy-command-",
+    }),
   ),
   Layer.provideMerge(NodeServices.layer),
-  Layer.provideMerge(idAllocatorLayer),
+  Layer.provideMerge(IdAllocator.layer),
   Layer.provideMerge(
-    Layer.mock(CursorAgentSdkRunner)({
+    Layer.mock(CursorAgentSdk.CursorAgentSdkRunner)({
       open: () => Effect.die("Maintenance resolution must not open a Cursor session"),
     }),
   ),
-  Layer.provideMerge(ServerSettingsService.layerTest()),
+  Layer.provideMerge(ServerSettings.layerTest()),
   Layer.provideMerge(
     Layer.mock(BackgroundPolicy.BackgroundPolicy)({
       shouldRunScopeWork: () => Effect.succeed(false),
     }),
   ),
-  Layer.provideMerge(Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers)),
+  Layer.provideMerge(
+    Layer.succeed(
+      ProviderEventLoggers.ProviderEventLoggers,
+      ProviderEventLoggers.NoOpProviderEventLoggers,
+    ),
+  ),
   Layer.provideMerge(
     Layer.succeed(
       HttpClient.HttpClient,
@@ -46,8 +54,9 @@ const testLayer = ServerSecretStore.layer.pipe(
     ),
   ),
 );
+const layerTest = ProviderHostLive.layer.pipe(Layer.provideMerge(layerDeps));
 
-it.layer(testLayer)("CursorDriver", (it) => {
+it.layer(layerTest)("CursorDriver", (it) => {
   it.effect(
     "persists browser credentials, uses them for chat, and closes the SDK session on logout",
     () =>
@@ -89,7 +98,7 @@ it.layer(testLayer)("CursorDriver", (it) => {
         const openedKeys: Array<string | undefined> = [];
         let closed = 0;
         const instance = yield* CursorDriver.create(input).pipe(
-          Effect.provideService(CursorAgentSdkRunner, {
+          Effect.provideService(CursorAgentSdk.CursorAgentSdkRunner, {
             assertComplete: Effect.void,
             open: (request) =>
               Effect.sync(() => {

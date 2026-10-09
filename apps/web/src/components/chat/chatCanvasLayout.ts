@@ -19,12 +19,15 @@ export interface ChatCanvasPreview {
 }
 
 const GAP = 12;
+// Minimum space between chat and the workspace card. Chat stays centered while
+// the card fits beside it with this much room.
+export const DETAILS_CARD_CLEARANCE = 32;
 
-/** Pure geometry shared by the conversation, composer, and floating preview. */
+/** Pure geometry shared by the conversation, composer, workspace card, and floating preview. */
 export function resolveChatCanvasLayout({
   container,
   preview,
-  padding = 20,
+  padding = 48,
   maxChatWidth = 768,
   minChatWidth = 640,
   composerHeight = 0,
@@ -38,9 +41,24 @@ export function resolveChatCanvasLayout({
   composerHeight?: number;
   detailsCard?: PreviewMiniPlayerObstacles["detailsCard"];
 }) {
-  const normalWidth = Math.max(0, Math.min(maxChatWidth, container.width - padding * 2));
-  const normalLeft = (container.width - normalWidth) / 2;
-  let chat = { left: normalLeft, width: normalWidth, insetStart: 0, insetEnd: 0 };
+  const centeredWidth = Math.max(0, Math.min(maxChatWidth, container.width - padding * 2));
+  // A workspace card that does not fit beside the centered chat first moves
+  // chat left, only as far as it needs. Chat narrows only after it reaches the
+  // left padding.
+  const laneRight = detailsCard
+    ? detailsCard.left - DETAILS_CARD_CLEARANCE
+    : container.width - padding;
+  const normalWidth = Math.max(0, Math.min(centeredWidth, laneRight - padding));
+  const normalLeft = Math.max(
+    padding,
+    Math.min((container.width - normalWidth) / 2, laneRight - normalWidth),
+  );
+  let chat = {
+    left: normalLeft,
+    width: normalWidth,
+    insetStart: 0,
+    insetEnd: Math.max(0, container.width - normalLeft * 2 - normalWidth),
+  };
   let frame: PreviewMiniPlayerFrame | null = null;
   let overlapsChat = false;
   if (preview && container.width > 0 && container.height > 0) {
@@ -51,6 +69,27 @@ export function resolveChatCanvasLayout({
       preview.lastInteraction === "resize" ? GAP : padding + minChatWidth + GAP;
     // New players start beside the composer, with the workspace card above them.
     if (preview.position === null) frame = { ...frame, y: container.height - frame.height - GAP };
+    if (preview.lastInteraction === "resize" && composerHeight > 0) {
+      // Lift the preview while chat uses its remaining shrink room, reaching
+      // the composer's top before the preview enters the readable chat lane.
+      const laneWidth = Math.min(normalWidth, minChatWidth);
+      const transitionWidth = Math.max(GAP, normalWidth - laneWidth);
+      const lift = Math.min(
+        1,
+        Math.max(0, (padding + normalWidth + GAP - frame.x) / transitionWidth),
+      );
+      if (lift > 0) {
+        frame = resolvePreviewMiniPlayerFrame({
+          width: frame.width,
+          position: frame,
+          source: preview.source,
+          container: {
+            ...container,
+            height: Math.max(GAP * 2 + 1, container.height - composerHeight * lift),
+          },
+        });
+      }
+    }
     const preferredFrame = {
       ...frame,
       ...clampPreviewMiniPlayerPosition(frame, container, frame, undefined, minimumPreviewX),
@@ -90,7 +129,15 @@ export function resolveChatCanvasLayout({
     }
     if (nextChat) chat = nextChat;
     else overlapsChat = true;
-    if (overlapsChat) {
+    if (overlapsChat && preview.lastInteraction === "resize") {
+      const width = Math.min(normalWidth, minChatWidth);
+      chat = {
+        left: padding,
+        width,
+        insetStart: 0,
+        insetEnd: Math.max(0, container.width - padding * 2 - width),
+      };
+    } else if (overlapsChat) {
       const obstacles = {
         detailsCard: cardObstacle,
         composer: { left: chat.left, right: chat.left + chat.width, height: composerHeight },

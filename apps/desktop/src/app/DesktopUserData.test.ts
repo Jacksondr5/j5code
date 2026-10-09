@@ -36,8 +36,9 @@ it.effect("identifies a failed profile inspection and preserves its cause", () =
 
 // J5 keeps one profile per channel on every platform (merge decision #4) and
 // never reads or seeds from an installed T3 Code's profiles.
-for (const platform of ["darwin", "linux", "win32"] as const) {
-  it.effect(`uses the J5 profiles on ${platform} and never a T3 Code profile`, () =>
+it.effect.each(["darwin", "linux", "win32"] as const)(
+  "uses the J5 profiles on %s and never a T3 Code profile",
+  (platform) =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
@@ -58,5 +59,4 @@ for (const platform of ["darwin", "linux", "win32"] as const) {
       assert.equal(yield* resolve(false), path.join(directory, "J5 Code"));
       assert.equal(yield* resolve(true), path.join(directory, "J5 Code (Dev)"));
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-  );
-}
+);

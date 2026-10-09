@@ -1,5 +1,5 @@
 import * as Effect from "effect/Effect";
-import * as Migrator from "effect/unstable/sql/Migrator";
+import * as Migrator from "effect/sql/Migrator";
 
 import Migration0001 from "./migrations/001_EpicCommunicationLedger.ts";
 import Migration0002 from "./migrations/002_SendDeliverReply.ts";

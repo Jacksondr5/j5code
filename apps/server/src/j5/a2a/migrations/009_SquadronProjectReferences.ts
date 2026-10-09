@@ -1,5 +1,5 @@
 import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 // A project is an explicit Squadron resource reference, never its identity.
 // The ordinal makes the relation list-ready while v0 creation remains capped

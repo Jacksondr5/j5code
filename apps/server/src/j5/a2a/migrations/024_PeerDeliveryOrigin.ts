@@ -1,5 +1,5 @@
 import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 // A delivery row that came in from a peer server is owned by the receiver's
 // Squadron ledger, so `squadron_id` can no longer double as the origin. These

@@ -2,7 +2,7 @@ import { assert, it } from "@effect/vitest";
 import { ProviderInstanceId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Schema from "effect/Schema";
-import { Tool } from "effect/unstable/ai";
+import { Tool } from "effect/ai";
 
 import { A2A_SEND_TOOL_DESCRIPTION } from "../EnvelopeFormatter.ts";
 import { J5OrchestratorSurface } from "./orchestratorSurface.ts";

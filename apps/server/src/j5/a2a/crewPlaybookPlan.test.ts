@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off - synchronous hashing for deterministic ids and digests.
 import * as NodeCrypto from "node:crypto";
 import { assert, describe, it } from "@effect/vitest";
 

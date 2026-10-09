@@ -23,13 +23,12 @@ export const resolvePlaybookWorkspaceRoot = (
     if (Option.isNone(project) || project.value.deletedAt !== null) return null;
     let root = project.value.workspaceRoot;
     if (input.threadId !== undefined) {
-      const projection = yield* threads
-        .getThreadProjection(input.threadId)
-        .pipe(
-          Effect.catchTag("OrchestratorProjectionError", (error) =>
+      const projection = yield* threads.getThreadProjection(input.threadId).pipe(
+        Effect.catchTags({
+          OrchestratorProjectionError: (error) =>
             isMissingThread(error.cause) ? Effect.succeed(null) : Effect.fail(error),
-          ),
-        );
+        }),
+      );
       if (
         !projection ||
         projection.thread.deletedAt !== null ||

@@ -3,7 +3,6 @@ import {
   AuthOrchestrationReadScope,
   J5_ARTIFACT_WS_METHODS,
   type ArtifactWatchInput,
-  type EnvironmentAuthorizationError,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -27,21 +26,10 @@ export const ARTIFACT_RPC_SCOPES = {
 export function makeArtifactRpcHandlers(input: {
   readonly projects: Pick<ProjectService.ProjectService["Service"], "getById">;
   readonly artifacts: Pick<ArtifactWorkspace["Service"], "watch">;
-  /** Upstream's authorize-then-instrument wrapper for a stream-producing effect (ws.ts). */
-  readonly observeStream: <A, StreamError, StreamContext, EffectError, EffectContext>(
-    method: string,
-    effect: Effect.Effect<Stream.Stream<A, StreamError, StreamContext>, EffectError, EffectContext>,
-    traceAttributes?: Readonly<Record<string, unknown>>,
-  ) => Stream.Stream<
-    A,
-    StreamError | EffectError | EnvironmentAuthorizationError,
-    StreamContext | EffectContext
-  >;
 }) {
   return {
     [METHODS.subscribeArtifactChanges]: (request: ArtifactWatchInput) =>
-      input.observeStream(
-        METHODS.subscribeArtifactChanges,
+      Stream.unwrap(
         input.projects.getById(request.projectId).pipe(
           Effect.flatMap(
             Option.match({
@@ -84,7 +72,6 @@ export function makeArtifactRpcHandlers(input: {
               new ArtifactWatchError({ projectId: request.projectId, detail: cause.message }),
           ),
         ),
-        { "rpc.aggregate": "artifacts" },
       ),
   };
 }

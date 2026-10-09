@@ -1,6 +1,6 @@
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 // Squadrons are retired (#412): a thread's home is its project, and the ledger is keyed by
 // project id. Every Squadron referenced exactly one project, so each ledger moves to that

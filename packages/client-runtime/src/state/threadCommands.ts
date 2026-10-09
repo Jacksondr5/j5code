@@ -2,7 +2,7 @@ import type { ThreadId } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 import {
   WS_METHODS,
   type EnvironmentId,
@@ -21,6 +21,7 @@ import {
   type ThreadCommandInput,
   type ArchiveThreadInput,
   type CancelQueuedRunInput,
+  type RetryWorkspacePreparationInput,
   type CreateThreadInput,
   type DeleteThreadInput,
   type EditQueuedRunInput,
@@ -40,6 +41,7 @@ import {
   type PinThreadInput,
   type ReorderPinnedThreadInput,
   type ReorderActiveThreadInput,
+  type SetThreadAutoSettleInput,
   type SettleThreadInput,
   type SnoozeThreadInput,
   type StartThreadTurnInput,
@@ -47,6 +49,7 @@ import {
   type UnarchiveThreadInput,
   type UnlinkThreadPullRequestInput,
   type UnpinThreadInput,
+  type WatchThreadPullRequestInput,
   type UnsettleThreadInput,
   type UnsnoozeThreadInput,
   type UpdateThreadMetadataInput,
@@ -63,6 +66,7 @@ import {
   promoteQueuedRun,
   reorderQueuedRun,
   resumeThreadQueue,
+  retryWorkspacePreparation,
   linkThreadPullRequest,
   respondToThreadApproval,
   respondToThreadUserInput,
@@ -73,6 +77,7 @@ import {
   pinThread,
   reorderPinnedThread,
   reorderActiveThread,
+  setThreadAutoSettle,
   settleThread,
   snoozeThread,
   startThreadTurn,
@@ -84,16 +89,15 @@ import {
   unsnoozeThread,
   updateThreadMetadata,
   visitThread,
+  watchThreadPullRequest,
 } from "../operations/commands.ts";
 import type { EnvironmentRegistry } from "../connection/registry.ts";
-import { EnvironmentSupervisor } from "../connection/supervisor.ts";
-import {
-  ThreadHistoryController,
-  type ThreadHistoryLoadEarlierResult,
-} from "./threadHistoryController.ts";
+import * as EnvironmentSupervisor from "../connection/supervisor.ts";
+import * as ThreadHistoryController from "./threadHistoryController.ts";
 
 export type LoadEarlierThreadHistoryInput = {
   readonly threadId: ThreadId;
+  readonly throughEntryId?: string;
 };
 
 export type {
@@ -118,6 +122,7 @@ export type {
   PinThreadInput,
   ReorderPinnedThreadInput,
   ReorderActiveThreadInput,
+  SetThreadAutoSettleInput,
   SettleThreadInput,
   SnoozeThreadInput,
   StartThreadTurnInput,
@@ -130,6 +135,7 @@ export type {
   UnsnoozeThreadInput,
   UpdateThreadMetadataInput,
   VisitThreadInput,
+  WatchThreadPullRequestInput,
 } from "../operations/commands.ts";
 
 export function createThreadEnvironmentAtoms<R, E>(
@@ -209,6 +215,12 @@ export function createThreadEnvironmentAtoms<R, E>(
       scheduler,
       concurrency,
     }),
+    setAutoSettle: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:set-auto-settle",
+      execute: (input: SetThreadAutoSettleInput) => setThreadAutoSettle(input),
+      scheduler,
+      concurrency,
+    }),
     reorderActive: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:reorder-active",
       execute: (input: ReorderActiveThreadInput) => reorderActiveThread(input),
@@ -242,6 +254,12 @@ export function createThreadEnvironmentAtoms<R, E>(
     unlinkPullRequest: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:unlink-pull-request",
       execute: (input: UnlinkThreadPullRequestInput) => unlinkThreadPullRequest(input),
+      scheduler,
+      concurrency,
+    }),
+    watchPullRequest: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:watch-pull-request",
+      execute: (input: WatchThreadPullRequestInput) => watchThreadPullRequest(input),
       scheduler,
       concurrency,
     }),
@@ -342,6 +360,12 @@ export function createThreadEnvironmentAtoms<R, E>(
       scheduler,
       concurrency,
     }),
+    retryWorkspacePreparation: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:retry-workspace-preparation",
+      execute: (input: RetryWorkspacePreparationInput) => retryWorkspacePreparation(input),
+      scheduler,
+      concurrency,
+    }),
     editQueuedRun: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:edit-queued-run",
       execute: (input: EditQueuedRunInput) => editQueuedRun(input),
@@ -352,14 +376,19 @@ export function createThreadEnvironmentAtoms<R, E>(
       label: "environment-data:commands:thread:load-earlier-history",
       execute: (input: LoadEarlierThreadHistoryInput) =>
         Effect.gen(function* () {
-          const supervisor = yield* EnvironmentSupervisor;
-          const controller = yield* Effect.serviceOption(ThreadHistoryController);
+          const supervisor = yield* EnvironmentSupervisor.EnvironmentSupervisor;
+          const controller = yield* Effect.serviceOption(
+            ThreadHistoryController.ThreadHistoryController,
+          );
           if (Option.isNone(controller)) {
-            return { _tag: "noop" } satisfies ThreadHistoryLoadEarlierResult;
+            return {
+              _tag: "noop",
+            } satisfies ThreadHistoryController.ThreadHistoryLoadEarlierResult;
           }
           return yield* controller.value.loadEarlier(
             supervisor.target.environmentId,
             input.threadId,
+            input.throughEntryId,
           );
         }),
       scheduler,
@@ -424,6 +453,10 @@ export function createThreadEnvironmentAtoms<R, E>(
       ...thread,
       snoozedUntil: null,
       snoozedAt: null,
+    })),
+    setAutoSettle: optimistic.wrap(commands.setAutoSettle, (thread, input, now) => ({
+      ...thread,
+      autoSettleDisabledAt: input.enabled ? null : (thread.autoSettleDisabledAt ?? now),
     })),
     pin: optimistic.wrap(commands.pin, (thread, input, now) => ({
       ...thread,

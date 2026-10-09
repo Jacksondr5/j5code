@@ -11,12 +11,11 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Stream from "effect/Stream";
 
-import {
-  layerFromProjectRepository,
-  RuntimePolicyV2,
-} from "../../orchestration-v2/RuntimePolicy.ts";
-import * as ProjectionProjects from "../../persistence/Services/ProjectionProjects.ts";
+import { layerFromProjectStore, RuntimePolicyV2 } from "../../orchestration-v2/RuntimePolicy.ts";
+import * as ProjectStore from "../../orchestration-v2/ProjectStore.ts";
+import * as ProviderInstanceRegistry from "../../provider/ProviderInstanceRegistry.ts";
 import { BUILDER_AGENT_PERSONA_INSTRUCTIONS_V1 } from "./agentPersonaPrompts.ts";
 
 // Mirrors the fixtures in orchestration-v2/RuntimePolicy.test.ts (FORK.md).
@@ -61,10 +60,19 @@ function makeThread(input: {
   };
 }
 
-const TestLayer = layerFromProjectRepository.pipe(
+const TestLayer = layerFromProjectStore.pipe(
   Layer.provide(
-    Layer.mock(ProjectionProjects.ProjectionProjectRepository)({
-      getById: () =>
+    Layer.succeed(ProviderInstanceRegistry.ProviderInstanceRegistry, {
+      getInstance: () => Effect.succeed(undefined),
+      listInstances: Effect.succeed([]),
+      listUnavailable: Effect.succeed([]),
+      streamChanges: Stream.empty,
+      subscribeChanges: Effect.never,
+    }),
+  ),
+  Layer.provide(
+    Layer.mock(ProjectStore.ProjectStoreV2)({
+      get: () =>
         Effect.succeed(
           Option.some({
             projectId,
@@ -73,6 +81,8 @@ const TestLayer = layerFromProjectRepository.pipe(
             defaultModelSelection: null,
             defaultThreadEnvMode: null,
             autoPull: false,
+            faviconPath: null,
+            projectIcon: null,
             scripts: [],
             createdAt: "2026-06-21T00:00:00.000Z",
             updatedAt: "2026-06-21T00:00:00.000Z",

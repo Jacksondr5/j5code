@@ -64,9 +64,8 @@ vi.mock("../../state/environments", () => ({
   useEnvironmentHttpBaseUrl: () => "http://client.example",
 }));
 vi.mock("../../state/session", () => ({
-  useEnvironmentSessionState: () => ({
-    data: { authenticated: true, scopes: state.canManage ? [AuthAccessWriteScope] : [] },
-  }),
+  useEnvironmentScope: (environmentId: string | null, scope: string) =>
+    environmentId !== null && scope === AuthAccessWriteScope && state.canManage,
 }));
 vi.mock("../state", () => ({ peersQueryAtom: (id: string) => id }));
 vi.mock("../../state/query", () => ({

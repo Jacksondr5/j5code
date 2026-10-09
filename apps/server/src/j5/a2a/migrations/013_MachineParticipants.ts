@@ -1,5 +1,5 @@
 import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 // A machine participant is a registered non-agent sender (a cron job, a
 // watchdog, a shell script) homed in one Squadron. It sends plain messages and

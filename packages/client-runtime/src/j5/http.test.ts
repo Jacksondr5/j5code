@@ -11,7 +11,7 @@ import {
   type PreparedHttpAuthorization,
 } from "../connection/model.ts";
 import { RemoteEnvironmentAuthorization } from "../authorization/service.ts";
-import { remoteHttpClientLayer } from "../rpc/http.ts";
+import { layerRemoteHttpClient } from "../rpc/http.ts";
 import { ManagedRelayDpopSigner } from "../relay/managedRelay.ts";
 import {
   addPeer,
@@ -50,7 +50,7 @@ it.effect("reads each environment's run overview with its own credentials and pa
           status: "active",
           offset: 100,
         },
-      ).pipe(Effect.provide(remoteHttpClientLayer(fetch)));
+      ).pipe(Effect.provide(layerRemoteHttpClient(fetch)));
       expect(response.total).toBe(101);
     }
     expect(requests.map((request) => [request.url, request.headers.get("authorization")])).toEqual([
@@ -77,7 +77,7 @@ it.effect("reads the selected playbook workspace using only its environment cred
       yield* readPlaybookLibrary(prepared(id, { _tag: "Bearer", token: `${id}-token` }), {
         projectId: ProjectId.make("same-project"),
         threadId: ThreadId.make("same-thread"),
-      }).pipe(Effect.provide(remoteHttpClientLayer(fetch)));
+      }).pipe(Effect.provide(layerRemoteHttpClient(fetch)));
     }
     expect(requests.map((request) => [request.url, request.headers.get("authorization")])).toEqual([
       ["https://alpha.test/api/j5/playbooks/library", "Bearer alpha-token"],
@@ -105,7 +105,7 @@ it.effect("deletes from the selected environment and workspace with its own cred
         projectId: ProjectId.make("same-project"),
         threadId: ThreadId.make("same-thread"),
         name: "demo",
-      }).pipe(Effect.provide(remoteHttpClientLayer(fetch)));
+      }).pipe(Effect.provide(layerRemoteHttpClient(fetch)));
     }
     expect(requests.map((request) => [request.url, request.headers.get("authorization")])).toEqual([
       ["https://alpha.test/api/j5/playbooks/delete", "Bearer alpha-token"],
@@ -133,7 +133,7 @@ it.effect("renames in the selected environment and workspace with its own creden
         threadId: ThreadId.make("same-thread"),
         name: "demo",
         title: "Renamed playbook",
-      }).pipe(Effect.provide(remoteHttpClientLayer(fetch)));
+      }).pipe(Effect.provide(layerRemoteHttpClient(fetch)));
     }
     expect(requests.map((request) => [request.url, request.headers.get("authorization")])).toEqual([
       ["https://alpha.test/api/j5/playbooks/rename", "Bearer alpha-token"],
@@ -169,7 +169,7 @@ it.effect("reads playbook progress from the selected thread's environment", () =
       yield* readThreadPlaybooks(
         prepared(id, { _tag: "Bearer", token: `${id}-token` }),
         ThreadId.make(`${id}-thread`),
-      ).pipe(Effect.provide(remoteHttpClientLayer(fetch)));
+      ).pipe(Effect.provide(layerRemoteHttpClient(fetch)));
     }
     expect(requests.map((request) => [request.url, request.headers.get("authorization")])).toEqual([
       ["https://alpha.test/api/j5/playbooks/thread", "Bearer alpha-token"],
@@ -240,11 +240,11 @@ it.effect("sends each server's own bearer credential and resolves its own person
     const alpha = yield* listHumanInbox(
       prepared("alpha", { _tag: "Bearer", token: "alpha-token" }),
       "open",
-    ).pipe(Effect.provide(remoteHttpClientLayer(fetch)));
+    ).pipe(Effect.provide(layerRemoteHttpClient(fetch)));
     const bravo = yield* listHumanInbox(
       prepared("bravo", { _tag: "Bearer", token: "bravo-token" }),
       "open",
-    ).pipe(Effect.provide(remoteHttpClientLayer(fetch)));
+    ).pipe(Effect.provide(layerRemoteHttpClient(fetch)));
     expect([alpha.personId, bravo.personId]).toEqual(["human:alpha", "human:bravo"]);
     expect(
       requests.map((request) => [
@@ -269,7 +269,7 @@ it.effect("includes session cookies for the prepared browser environment", () =>
       return Response.json({ personId: "human:browser", items: [] });
     };
     yield* listHumanInbox(prepared("browser", null), "open").pipe(
-      Effect.provide(remoteHttpClientLayer(fetch)),
+      Effect.provide(layerRemoteHttpClient(fetch)),
     );
     expect(requests[0]?.credentials).toBe("include");
     expect(requests[0]?.headers.has("authorization")).toBe(false);
@@ -299,7 +299,7 @@ it.effect("answers an exchange on the selected remote server", () =>
       message: "Proceed",
       clientRequestId: "request:stable",
     };
-    yield* answerHumanExchange(remote, answer).pipe(Effect.provide(remoteHttpClientLayer(fetch)));
+    yield* answerHumanExchange(remote, answer).pipe(Effect.provide(layerRemoteHttpClient(fetch)));
     expect(requests.map((request) => [request.method, new URL(request.url).origin])).toEqual([
       ["POST", "https://remote.test"],
     ]);
@@ -325,7 +325,7 @@ it.effect("signs fresh DPoP proofs for the actual method and remote URL", () =>
       yield* listHumanInbox(remote, "open");
       yield* readOpenInboxCount(remote);
     }).pipe(
-      Effect.provide(remoteHttpClientLayer(fetch)),
+      Effect.provide(layerRemoteHttpClient(fetch)),
       Effect.provideService(RemoteEnvironmentAuthorization, authorization.service),
       Effect.provideService(ManagedRelayDpopSigner, {
         thumbprint: Effect.succeed("test-thumbprint"),
@@ -376,7 +376,7 @@ it.effect("refreshes a rejected relay token once and retries the same request", 
       prepared("relay", relayToken("expired-token")),
       "open",
     ).pipe(
-      Effect.provide(remoteHttpClientLayer(fetch)),
+      Effect.provide(layerRemoteHttpClient(fetch)),
       Effect.provideService(RemoteEnvironmentAuthorization, authorization.service),
       Effect.provideService(ManagedRelayDpopSigner, {
         thumbprint: Effect.succeed("test-thumbprint"),
@@ -402,7 +402,7 @@ it.effect("reports a bearer rejection as a J5 error without retrying", () =>
     const error = yield* listHumanInbox(
       prepared("bravo", { _tag: "Bearer", token: "old" }),
       "open",
-    ).pipe(Effect.provide(remoteHttpClientLayer(fetch)), Effect.flip);
+    ).pipe(Effect.provide(layerRemoteHttpClient(fetch)), Effect.flip);
     expect(error).toBeInstanceOf(J5HttpError);
     expect(error).toMatchObject({ status: 401, detail: "Sign in again." });
     expect(requests).toHaveLength(1);
@@ -473,7 +473,7 @@ it.effect("previews custom crew seats on their remote environment with its own a
     const preview = yield* previewCrewProposal(
       prepared("crew-server", { _tag: "Bearer", token: "crew-token" }),
       input,
-    ).pipe(Effect.provide(remoteHttpClientLayer(fetch)));
+    ).pipe(Effect.provide(layerRemoteHttpClient(fetch)));
     expect(preview).toEqual(result);
     expect(requests[0]?.url).toBe("https://crew-server.test/api/j5/a2a/crews/proposals/preview");
     expect(requests[0]?.headers.get("authorization")).toBe("Bearer crew-token");
@@ -532,18 +532,18 @@ it.effect(
       const issued = yield* issuePeerCredential(work, {
         environmentId: "environment-home",
         label: "Home",
-      }).pipe(Effect.provide(remoteHttpClientLayer(fetch)));
+      }).pipe(Effect.provide(layerRemoteHttpClient(fetch)));
       expect(issued.credential).toBe("issued");
       const added = yield* addPeer(work, {
         origin: "https://home.test",
         credential: "home-issued",
-      }).pipe(Effect.provide(remoteHttpClientLayer(fetch)));
+      }).pipe(Effect.provide(layerRemoteHttpClient(fetch)));
       expect(added.created).toBe(true);
       expect(added.peer.label).toBe("Home");
-      const peers = yield* listPeers(work).pipe(Effect.provide(remoteHttpClientLayer(fetch)));
+      const peers = yield* listPeers(work).pipe(Effect.provide(layerRemoteHttpClient(fetch)));
       expect(peers).toEqual([]);
       const removed = yield* removePeer(work, { environmentId: "environment-home" }).pipe(
-        Effect.provide(remoteHttpClientLayer(fetch)),
+        Effect.provide(layerRemoteHttpClient(fetch)),
       );
       expect(removed).toEqual({ removed: true, revokedSessions: 1 });
       expect(
@@ -571,7 +571,7 @@ it.effect("surfaces the server's peer refusal code and message", () =>
     const failure = yield* addPeer(prepared("work", { _tag: "Bearer", token: "t" }), {
       origin: "https://dark.test",
       credential: "c",
-    }).pipe(Effect.provide(remoteHttpClientLayer(fetch)), Effect.flip);
+    }).pipe(Effect.provide(layerRemoteHttpClient(fetch)), Effect.flip);
     expect(isJ5HttpError(failure)).toBe(true);
     if (isJ5HttpError(failure)) {
       expect(failure.code).toBe("peer_unreachable");

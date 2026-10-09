@@ -1,6 +1,6 @@
 import { assert, it } from "@effect/vitest";
 
-import { T3_CODE_ORCHESTRATION_INSTRUCTIONS } from "../../provider/T3OrchestrationInstructions.ts";
+import { T3_CODE_ORCHESTRATION_INSTRUCTIONS } from "../orchestrationInstructions.ts";
 import { J5_PROPOSE_CREW_DESCRIPTION } from "../a2a/mcp/tools.ts";
 import { PLAYBOOK_CREW_INSTRUCTIONS, PLAYBOOK_INSTRUCTIONS } from "./instructions.ts";
 

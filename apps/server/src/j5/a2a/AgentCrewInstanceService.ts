@@ -4,10 +4,10 @@ import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
 
-import { makeKeyedSerialExecutor } from "../../orchestration-v2/KeyedSerialExecutor.ts";
+import * as KeyedLock from "@t3tools/shared/KeyedLock";
 import type { CrewPlaybookRef } from "./AgentCrewProposalService.ts";
 import { ParticipantId, type LedgerProjectId } from "./contracts.ts";
 
@@ -527,7 +527,7 @@ export const layer: Layer.Layer<AgentCrewInstanceService, never, SqlClient.SqlCl
       });
 
       // Keyed and reference-counted, so a Crew's lock is gone once no step holds or awaits it.
-      const units = yield* makeKeyedSerialExecutor<string>();
+      const units = yield* KeyedLock.make<string>();
       const serialize: AgentCrewInstanceServiceShape["serialize"] = (id, effect) =>
         units.withLock(id, effect);
 

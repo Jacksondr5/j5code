@@ -4,7 +4,7 @@ import { PeerRosterAgent } from "@t3tools/contracts/j5";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import { runMigrations } from "../../../persistence/Migrations.ts";
 import { runJ5A2AMigrations } from "../Migrations.ts";

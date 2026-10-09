@@ -19,7 +19,8 @@ export const getThreadProjectionIfPresent = (
 ) =>
   threads.getThreadProjection(threadId).pipe(
     Effect.map((projection): OrchestrationV2ThreadProjection | null => projection),
-    Effect.catchTag("OrchestratorProjectionError", (error) =>
-      isThreadNotFound(error.cause) ? Effect.succeed(null) : Effect.fail(error),
-    ),
+    Effect.catchTags({
+      OrchestratorProjectionError: (error) =>
+        isThreadNotFound(error.cause) ? Effect.succeed(null) : Effect.fail(error),
+    }),
   );

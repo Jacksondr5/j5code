@@ -3,7 +3,6 @@ import { it as effectIt } from "@effect/vitest";
 import {
   CheckpointScopeId,
   ContextHandoffId,
-  ContextTransferId,
   MessageId,
   NodeId,
   ProviderSessionId,
@@ -23,30 +22,24 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
-import * as Logger from "effect/Logger";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import * as Stream from "effect/Stream";
 
 import { CodexAppServerRequestError } from "effect-codex-app-server/errors";
-import { assertSupportedCodexCliVersion } from "../j5/codex/CodexCliVersionGate.ts";
-import {
-  ProviderAdapterEnsureThreadError,
-  ProviderAdapterResumeThreadError,
-  type ProviderAdapterV2SessionRuntime,
-} from "./ProviderAdapter.ts";
 
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
+import { QueuedRunWatchdog } from "../j5/run-observability/QueuedRunWatchdog.ts";
 import * as ProjectService from "../project/ProjectService.ts";
-import { ServerSettingsService } from "../serverSettings.ts";
-import { CheckpointServiceV2 } from "./CheckpointService.ts";
-import { ProviderEventIngestorV2 } from "./ProviderEventIngestor.ts";
-import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
-import { ProviderAuthService } from "../provider/Services/ProviderAuthService.ts";
+import * as ProviderAuthService from "../provider/ProviderAuthService.ts";
 import * as ContextHandoffService from "./ContextHandoffService.ts";
 import * as EventSink from "./EventSink.ts";
-import * as IdAllocator from "./IdAllocator.ts";
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
+import {
+  ProviderAdapterEventStreamError,
+  ProviderAdapterResumeThreadError,
+} from "@t3tools/provider-core/server/ProviderAdapter";
 import * as ProviderSessionManager from "./ProviderSessionManager.ts";
 import * as ProviderTurnStart from "./ProviderTurnStartService.ts";
 import * as RunExecutionService from "./RunExecutionService.ts";
@@ -140,7 +133,9 @@ it("does not commit running state when inherited background routing cannot be re
           },
         }),
         Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({}),
-        Layer.mock(ProviderAuthService)({ tryHandlePromptCommand: () => Effect.succeed(false) }),
+        Layer.mock(ProviderAuthService.ProviderAuthService)({
+          tryHandlePromptCommand: () => Effect.succeed(false),
+        }),
         Layer.mock(RunExecutionService.RunExecutionServiceV2)({ startRootRun }),
         Layer.mock(RuntimePolicy.RuntimePolicyV2)({}),
       ),
@@ -171,9 +166,18 @@ function makeLocalCommandHarness(input: {
   readonly previousMessages?: ReadonlyArray<string>;
   readonly logoutFailure?: string;
   readonly openFailure?: unknown;
+  /** Opens the session, then fails loading its provider thread. */
+  readonly ensureThreadFailure?: unknown;
+  /**
+   * Resumes a thread that has a native ref: resume fails, the fresh-thread
+   * fallback succeeds, then reading history for its handoff fails.
+   */
+  readonly historyReadFailureAfterFallback?: unknown;
   readonly interruptOpen?: boolean;
   readonly interruptRunBeforeOpenFailure?: boolean;
   readonly writeFailure?: unknown;
+  /** Loads the thread and starts the run, then fails every later state read. */
+  readonly failReadsAfterRunning?: boolean;
 }) {
   const now = DateTime.makeUnsafe("2026-09-04T12:00:00Z");
   const threadId = ThreadId.make("thread-native-account-command");
@@ -345,36 +349,115 @@ function makeLocalCommandHarness(input: {
     checkpoints: [],
     updatedAt: now,
   };
+  if ("historyReadFailureAfterFallback" in input) {
+    const nativeThreadRef = {
+      driver: providerThread.driver,
+      nativeId: "native-resume-thread",
+      strength: "strong" as const,
+    };
+    projection = {
+      ...projection,
+      providerThreads: projection.providerThreads.map((candidate) =>
+        candidate.id === providerThreadId ? { ...candidate, nativeThreadRef } : candidate,
+      ),
+    };
+  }
   const events: Array<OrchestrationV2DomainEvent> = [];
+  const interruptRun = () => {
+    projection = {
+      ...projection,
+      runs: projection.runs.map((candidate) =>
+        candidate.id === runId
+          ? { ...candidate, status: "interrupted", completedAt: now }
+          : candidate,
+      ),
+    };
+  };
+  const ensureThread = vi.fn(() =>
+    Effect.sync(() => {
+      if (input.interruptRunBeforeOpenFailure === true) interruptRun();
+    }).pipe(
+      Effect.andThen(
+        Effect.fail(
+          new ProviderAdapterEventStreamError({
+            driver: providerThread.driver,
+            providerSessionId,
+            cause: input.ensureThreadFailure,
+          }),
+        ),
+      ),
+    ),
+  );
+  const resumeFallbackSession = {
+    driver: providerThread.driver,
+    // J5: only a resume failure reporting the conversation gone falls back.
+    resumeThread: () =>
+      Effect.fail(
+        new ProviderAdapterResumeThreadError({
+          driver: providerThread.driver,
+          providerSessionId,
+          providerThreadId,
+          cause: "native thread is gone",
+          nativeThreadMissing: true,
+        }),
+      ),
+    ensureThread: () => Effect.succeed(providerThread),
+  };
   const open = vi.fn(() =>
     input.interruptOpen === true
       ? Effect.interrupt
-      : "openFailure" in input
-        ? Effect.sync(() => {
-            if (input.interruptRunBeforeOpenFailure === true) {
-              projection = {
-                ...projection,
-                runs: projection.runs.map((candidate) =>
-                  candidate.id === runId
-                    ? { ...candidate, status: "interrupted", completedAt: now }
-                    : candidate,
+      : "historyReadFailureAfterFallback" in input
+        ? Effect.succeed(resumeFallbackSession as never)
+        : "ensureThreadFailure" in input
+          ? Effect.succeed({ driver: providerThread.driver, ensureThread } as never)
+          : "openFailure" in input
+            ? Effect.sync(() => {
+                if (input.interruptRunBeforeOpenFailure === true) interruptRun();
+              }).pipe(
+                Effect.andThen(
+                  Effect.fail(
+                    new ProviderSessionManager.ProviderSessionOpenError({
+                      instanceId: newInstanceId,
+                      providerSessionId,
+                      cause: input.openFailure,
+                    }),
+                  ),
                 ),
-              };
-            }
-          }).pipe(
-            Effect.andThen(
-              Effect.fail(
-                new ProviderSessionManager.ProviderSessionOpenError({
-                  instanceId: newInstanceId,
-                  providerSessionId,
-                  cause: input.openFailure,
-                }),
-              ),
-            ),
-          )
-        : Effect.die("A local command must not open a native session."),
+              )
+            : input.failReadsAfterRunning === true
+              ? Effect.succeed({
+                  driver: providerThread.driver,
+                  providerSession: {
+                    id: providerSessionId,
+                    driver: providerThread.driver,
+                    providerInstanceId: newInstanceId,
+                    status: "ready",
+                    cwd: "/tmp/native-account-command",
+                    model: null,
+                    capabilities: CodexProviderCapabilitiesV2,
+                    createdAt: now,
+                    updatedAt: now,
+                    lastError: null,
+                  },
+                  ensureThread: () => Effect.succeed(providerThread),
+                } as never)
+              : Effect.die("A local command must not open a native session."),
   );
-  const startRootRun = vi.fn(() => Effect.die("A local command must not start a native turn."));
+  const startRootRun = vi.fn<
+    (input: RunExecutionService.RunExecutionServiceV2StartRootRunInput) => Effect.Effect<void>
+  >(() =>
+    input.failReadsAfterRunning === true
+      ? Effect.void
+      : Effect.die("A local command must not start a native turn."),
+  );
+  const failReadIfRunning = Effect.suspend(() =>
+    input.failReadsAfterRunning === true &&
+    projection.runs.find((candidate) => candidate.id === runId)?.status === "running"
+      ? Effect.fail(
+          new ProjectionStore.ProjectionStoreReadError({ threadId, cause: "database unavailable" }),
+        )
+      : Effect.void,
+  );
   const tryHandlePromptCommand = vi.fn(() =>
     input.logoutFailure === undefined
       ? Effect.succeed(true)
@@ -413,7 +496,9 @@ function makeLocalCommandHarness(input: {
   const layer = ProviderTurnStart.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
-        Layer.mock(ContextHandoffService.ContextHandoffServiceV2)({}),
+        Layer.mock(ContextHandoffService.ContextHandoffServiceV2)({
+          prepareProviderHandoff: () => Effect.die("history read must fail first"),
+        }),
         Layer.mock(EventSink.EventSinkV2)({ writeIfRunCurrent }),
         IdAllocator.layer,
         FileSystem.layerNoop({}),
@@ -430,7 +515,7 @@ function makeLocalCommandHarness(input: {
               ),
             }),
           getRuntimeRecoveryProjection: () =>
-            Effect.succeed({
+            Effect.as(failReadIfRunning, {
               ...projection,
               hasConversation: projection.messages.some(
                 (m) =>
@@ -438,9 +523,16 @@ function makeLocalCommandHarness(input: {
                   (m.text.trim().toLowerCase() !== "/compact" || m.attachments.length > 0),
               ),
             }),
+          getTurnStartHistory: () =>
+            Effect.fail(
+              new ProjectionStore.ProjectionStoreReadError({
+                threadId,
+                cause: input.historyReadFailureAfterFallback,
+              }),
+            ),
         }),
         Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({ open }),
-        Layer.mock(ProviderAuthService)({ tryHandlePromptCommand }),
+        Layer.mock(ProviderAuthService.ProviderAuthService)({ tryHandlePromptCommand }),
         Layer.mock(RunExecutionService.RunExecutionServiceV2)({ startRootRun }),
         Layer.mock(RuntimePolicy.RuntimePolicyV2)({
           resolve: () => Effect.succeed({} as never),
@@ -576,6 +668,120 @@ effectIt.effect("does not overwrite a run interrupted while its provider session
   }),
 );
 
+effectIt.effect("fails a starting run when its last start attempt cannot load the thread", () =>
+  Effect.gen(function* () {
+    const harness = makeLocalCommandHarness({
+      text: "Continue",
+      ensureThreadFailure: new Error("Pi RPC read failed: pi process exited with code 1."),
+    });
+
+    yield* harness.start;
+
+    expect(harness.startRootRun).not.toHaveBeenCalled();
+    const projection = harness.projection();
+    expect(projection.runs.at(-1)).toMatchObject({ status: "failed", startedAt: null });
+    expect(projection.attempts[0]).toMatchObject({ status: "failed", startedAt: null });
+    expect(projection.nodes[0]).toMatchObject({ status: "failed", startedAt: null });
+    expect(projection.turnItems).toMatchObject([
+      {
+        type: "error",
+        title: "Provider turn failed to start",
+        failure: {
+          class: "provider_error",
+          message: "Pi RPC read failed: pi process exited with code 1.",
+        },
+      },
+    ]);
+  }),
+);
+
+effectIt.effect("leaves the run starting when a thread-load failure will be retried", () =>
+  Effect.gen(function* () {
+    const harness = makeLocalCommandHarness({
+      text: "Continue",
+      ensureThreadFailure: new Error("pi process exited with code 1"),
+    });
+
+    const error = yield* harness.startWithRetry.pipe(Effect.flip);
+
+    expect(error._tag).toBe("ProviderTurnStartError");
+    expect(harness.writeIfRunCurrent).not.toHaveBeenCalled();
+    expect(harness.projection().runs.at(-1)?.status).toBe("starting");
+  }),
+);
+
+effectIt.effect("keeps a thread-load failure retryable when terminal persistence fails", () =>
+  Effect.gen(function* () {
+    const harness = makeLocalCommandHarness({
+      text: "Continue",
+      ensureThreadFailure: new Error("pi process exited with code 1"),
+      writeFailure: new Error("database unavailable"),
+    });
+
+    const error = yield* harness.start.pipe(Effect.flip);
+
+    expect(error._tag).toBe("ProviderTurnStartError");
+    expect(harness.projection().runs.at(-1)?.status).toBe("starting");
+    expect(harness.events).toEqual([]);
+  }),
+);
+
+effectIt.effect(
+  "keeps a store failure after the provider loaded the thread typed and retryable",
+  () =>
+    Effect.gen(function* () {
+      const harness = makeLocalCommandHarness({
+        text: "Continue",
+        historyReadFailureAfterFallback: new Error("database unavailable"),
+      });
+
+      const error = yield* harness.start.pipe(Effect.flip);
+
+      // The provider succeeded; the failing stage is the projection read, so
+      // the run is not failed as a provider error on the last attempt.
+      expect(error._tag).toBe("ProviderTurnStartError");
+      expect((error.cause as { _tag?: string } | undefined)?._tag).toBe("ProjectionStoreReadError");
+      expect(harness.writeIfRunCurrent).not.toHaveBeenCalled();
+      expect(harness.projection().runs.at(-1)?.status).toBe("starting");
+      expect(harness.events).toEqual([]);
+    }),
+);
+
+effectIt.effect("does not mistake a failed state read for a superseded run", () =>
+  Effect.gen(function* () {
+    const harness = makeLocalCommandHarness({ text: "Continue", failReadsAfterRunning: true });
+
+    yield* harness.start;
+
+    expect(harness.projection().runs.at(-1)?.status).toBe("running");
+    const controls = harness.startRootRun.mock.calls[0]?.[0];
+    expect(controls).toBeDefined();
+    if (controls === undefined) return;
+    // "false" would skip the provider turn or the terminal write and leave the
+    // run active. A read failure must reach the caller instead.
+    const startCheck = yield* Effect.flip(controls.shouldStartProviderTurn!());
+    const finalizeCheck = yield* Effect.flip(controls.shouldFinalizeRun!());
+    expect(startCheck._tag).toBe("ProjectionStoreReadError");
+    expect(finalizeCheck._tag).toBe("ProjectionStoreReadError");
+  }),
+);
+
+effectIt.effect("does not overwrite a run interrupted while its thread loads", () =>
+  Effect.gen(function* () {
+    const harness = makeLocalCommandHarness({
+      text: "Continue",
+      ensureThreadFailure: new Error("pi process exited with code 1"),
+      interruptRunBeforeOpenFailure: true,
+    });
+
+    yield* harness.start;
+
+    expect(harness.projection().runs.at(-1)?.status).toBe("interrupted");
+    expect(harness.projection().turnItems).toEqual([]);
+    expect(harness.events).toEqual([]);
+  }),
+);
+
 effectIt.effect(
   "signs out the existing native provider before opening the newly selected provider",
   () =>
@@ -660,41 +866,19 @@ for (const previousMessages of [[], ["/compact", " /COMPACT "]]) {
   );
 }
 
-const resumeStartDependencies = Layer.mergeAll(
-  FileSystem.layerNoop({}),
-  Layer.mock(GitWorkflow.GitWorkflowService)({}),
-  Layer.mock(ProjectService.ProjectService)({}),
-  Layer.mock(ProviderAuthService)({ tryHandlePromptCommand: () => Effect.succeed(false) }),
-);
-
+// J5 native resume (FORK.md): a resume failure that is not "conversation gone"
+// fails the run at once instead of being retried or replaced by a fresh session.
 const CODEX_DRIVER = ProviderDriverKind.make("codex");
 
-/** Serves the turn-start reads from one mutable projection. */
-function startProjectionStore(current: () => OrchestrationV2ThreadProjection) {
-  const withConversation = () =>
-    Effect.sync(() => {
-      const projection = current();
-      return {
-        ...projection,
-        hasConversation: projection.messages.some(
-          (m) =>
-            m.role === "user" &&
-            (m.text.trim().toLowerCase() !== "/compact" || m.attachments.length > 0),
-        ),
-      };
-    });
-  return Layer.mock(ProjectionStore.ProjectionStoreV2)({
-    getTurnStartContext: withConversation,
-    getRuntimeRecoveryProjection: withConversation,
-    getTurnStartHistory: () => Effect.succeed([]),
-  });
+interface NativeResumeIds {
+  readonly providerSessionId: ProviderSessionId;
+  readonly providerThreadId: ProviderThreadId;
 }
 
 /** Builds the resume failure the Codex adapter raises when a thread/resume response fails schema decode. */
-const makeCodexResumeSchemaFailure = Effect.fn("makeCodexResumeSchemaFailure")(function* (input: {
-  readonly providerSessionId: ProviderSessionId;
-  readonly providerThreadId: ProviderThreadId;
-}) {
+const makeCodexResumeSchemaFailure = Effect.fn("makeCodexResumeSchemaFailure")(function* (
+  ids: NativeResumeIds,
+) {
   const resumeResponse = Schema.Struct({
     thread: Schema.Struct({
       turns: Schema.Array(
@@ -711,11 +895,10 @@ const makeCodexResumeSchemaFailure = Effect.fn("makeCodexResumeSchemaFailure")(f
   });
   const schemaError = yield* Schema.decodeUnknownEffect(resumeResponse)({
     thread: { turns: [{ items: [{ id: "call-1", type: "functionCallOutput" }] }] },
-  }).pipe(Effect.flip);
+  }).pipe(Effect.flip, Effect.orDie);
   return new ProviderAdapterResumeThreadError({
     driver: CODEX_DRIVER,
-    providerSessionId: input.providerSessionId,
-    providerThreadId: input.providerThreadId,
+    ...ids,
     cause: CodexAppServerRequestError.invalidPayload(
       "thread/resume",
       "decode-payload",
@@ -724,131 +907,82 @@ const makeCodexResumeSchemaFailure = Effect.fn("makeCodexResumeSchemaFailure")(f
   });
 });
 
-function makeResumeFallbackFixture(input: { readonly suffix: string }) {
-  const threadId = ThreadId.make(`thread_resume_fallback_${input.suffix}`);
-  const runId = RunId.make(`run_resume_fallback_${input.suffix}`);
-  const attemptId = RunAttemptId.make(`attempt_resume_fallback_${input.suffix}`);
-  const rootNodeId = NodeId.make(`node_resume_fallback_${input.suffix}`);
-  const providerThreadId = ProviderThreadId.make(`provider_thread_resume_fallback_${input.suffix}`);
-  const providerSessionId = ProviderSessionId.make(
-    `provider_session_resume_fallback_${input.suffix}`,
-  );
-  const providerInstanceId = ProviderInstanceId.make("codex");
-  const messageId = MessageId.make(`message_resume_fallback_${input.suffix}`);
-  const checkpointScopeId = CheckpointScopeId.make(
-    `checkpoint_scope_resume_fallback_${input.suffix}`,
-  );
-  const createdAt = DateTime.makeUnsafe("2026-09-03T00:00:00.000Z");
-  const nativeThreadId = `codex:native-thread-${input.suffix}`;
-  const providerThread = {
-    id: providerThreadId,
-    driver: CODEX_DRIVER,
-    providerInstanceId,
-    providerSessionId,
-    appThreadId: threadId,
-    ownerNodeId: null,
-    nativeThreadRef: { driver: CODEX_DRIVER, nativeId: nativeThreadId, strength: "strong" },
-    nativeConversationHeadRef: null,
-    status: "idle",
-    firstRunOrdinal: 1,
-    lastRunOrdinal: 1,
-    handoffIds: [],
-    forkedFrom: null,
-    createdAt,
-    updatedAt: createdAt,
-  };
-  const projection = {
-    thread: { id: threadId, branch: null, worktreePath: null },
-    runs: [
-      {
-        id: runId,
-        status: "starting",
-        rootNodeId,
-        activeAttemptId: attemptId,
-        providerThreadId,
-        providerInstanceId,
-        userMessageId: messageId,
-        ordinal: 2,
-        modelSelection: { instanceId: providerInstanceId, model: "gpt-5.3-codex" },
-      },
-    ],
-    nodes: [{ id: rootNodeId, checkpointScopeId }],
-    attempts: [{ id: attemptId }],
-    providerThreads: [providerThread],
-    providerSessions: [],
-    providerTurns: [],
-    subagents: [],
-    messages: [{ id: messageId, role: "user", text: "continue", attachments: [] }],
-    checkpointScopes: [{ id: checkpointScopeId }],
-    contextHandoffs: [],
-    contextTransfers: [],
-    turnItems: [],
-  } as unknown as OrchestrationV2ThreadProjection;
-  return {
-    threadId,
-    runId,
-    providerThreadId,
-    providerSessionId,
-    providerInstanceId,
-    nativeThreadId,
-    providerThread,
-    projection,
-  };
-}
-
-function makeLogCapture() {
-  const records: Array<Record<string, unknown>> = [];
-  const logger = Logger.make<unknown, void>(({ message }) => {
-    for (const entry of Array.isArray(message) ? message : [message]) {
-      if (typeof entry === "object" && entry !== null) {
-        records.push(entry as Record<string, unknown>);
-      }
-    }
-  });
-  return { records, layer: Logger.layer([logger], { mergeWithExisting: false }) };
-}
-
-/** Starts one run against a mocked provider session and records what it wrote. */
-async function startWithResume(input: {
-  readonly fixture: ReturnType<typeof makeResumeFallbackFixture>;
-  readonly projection?: OrchestrationV2ThreadProjection;
-  readonly resumeThread: () => Effect.Effect<never, unknown>;
-  readonly ensureThread?: () => Effect.Effect<unknown, unknown>;
+/**
+ * Starts a run whose provider thread already has native history, against a
+ * provider session whose resume outcome the test chooses. Every event the
+ * start writes is applied to one projection, as the store would.
+ */
+function makeNativeResumeHarness(input: {
+  readonly text?: string;
+  readonly resumeThread: (
+    ids: NativeResumeIds,
+  ) => Effect.Effect<never, ProviderAdapterResumeThreadError>;
+  readonly withoutNativeRef?: boolean;
+  /** Handoffs already recorded for the run's provider thread. */
+  readonly contextHandoffs?: (
+    ids: NativeResumeIds & { readonly runId: RunId; readonly nativeThreadId: string },
+  ) => ReadonlyArray<unknown>;
 }) {
-  const { fixture } = input;
-  const projection = input.projection ?? fixture.projection;
-  const written: Array<OrchestrationV2DomainEvent> = [];
-  const write = vi.fn((write: { readonly events: ReadonlyArray<OrchestrationV2DomainEvent> }) => {
-    written.push(...write.events);
-    return Effect.succeed([] as never);
-  });
-  const logCapture = makeLogCapture();
-  let startedSession: ProviderAdapterV2SessionRuntime | undefined;
-  const startRootRun = vi.fn((run: { readonly session: ProviderAdapterV2SessionRuntime }) => {
-    startedSession = run.session;
-    return Effect.void;
-  });
-  const resumeThread = vi.fn(input.resumeThread);
+  const initial = makeLocalCommandHarness({
+    text: input.text ?? "Continue",
+    previousMessages: ["Existing native conversation"],
+  }).projection();
+  const run = initial.runs[0]!;
+  const nativeThreadRef = {
+    driver: CODEX_DRIVER,
+    nativeId: "native-context-must-survive",
+    strength: "strong" as const,
+  };
+  const providerThread = {
+    ...initial.providerThreads[0]!,
+    nativeThreadRef: input.withoutNativeRef === true ? null : nativeThreadRef,
+    status: "idle" as const,
+  };
+  const ids = {
+    providerSessionId: providerThread.providerSessionId!,
+    providerThreadId: providerThread.id,
+  };
+  let projection: OrchestrationV2ThreadProjection = {
+    ...initial,
+    providerThreads: [providerThread],
+    contextHandoffs: (input.contextHandoffs?.({
+      ...ids,
+      runId: run.id,
+      nativeThreadId: nativeThreadRef.nativeId,
+    }) ?? []) as unknown as OrchestrationV2ThreadProjection["contextHandoffs"],
+  };
+  const events: Array<OrchestrationV2DomainEvent> = [];
+  const commit = (incoming: ReadonlyArray<OrchestrationV2DomainEvent>) => {
+    for (const event of incoming) {
+      events.push(event);
+      projection = ProjectionStore.applyToProjection(projection, event);
+    }
+  };
+  const resumeThread = vi.fn(() => input.resumeThread(ids));
   const ensureThread = vi.fn(
-    input.ensureThread ??
-      (() =>
-        Effect.succeed({
-          ...fixture.providerThread,
-          nativeThreadRef: {
-            driver: CODEX_DRIVER,
-            nativeId: "codex:native-thread-replacement",
-            strength: "strong",
-          },
-        })),
+    (_load: { readonly existingProviderThread?: { readonly nativeThreadRef: unknown } }) =>
+      Effect.succeed({
+        ...providerThread,
+        nativeThreadRef: { ...nativeThreadRef, nativeId: "native-replacement" },
+      }),
   );
+  const startRootRun = vi.fn(() => Effect.void);
+  const projectionRead = () =>
+    Effect.sync(() => ({
+      ...projection,
+      hasConversation: projection.messages.some(
+        (m) =>
+          m.role === "user" &&
+          (m.text.trim().toLowerCase() !== "/compact" || m.attachments.length > 0),
+      ),
+    }));
   const layer = ProviderTurnStart.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
-        resumeStartDependencies,
         Layer.mock(ContextHandoffService.ContextHandoffServiceV2)({
           prepareProviderHandoff: (handoff) =>
             Effect.succeed({
-              id: ContextHandoffId.make(`handoff_resume_fallback_${fixture.runId}`),
+              id: ContextHandoffId.make("handoff-native-resume-fallback"),
               transferId: handoff.transferId,
               threadId: handoff.threadId,
               targetRunId: handoff.targetRunId,
@@ -864,53 +998,98 @@ async function startWithResume(input: {
             } as never),
         }),
         Layer.mock(EventSink.EventSinkV2)({
-          write,
-          writeIfRunCurrent: () => Effect.succeed({ committed: true, storedEvents: [] }),
+          write: ({ events: incoming }) =>
+            Effect.sync(() => {
+              commit(incoming);
+              return [] as never;
+            }),
+          writeIfRunCurrent: ({ events: incoming, activeAttemptId, expectedStatus }) =>
+            Effect.sync(() => {
+              const current = projection.runs.find((candidate) => candidate.id === run.id);
+              const committed =
+                current?.activeAttemptId === activeAttemptId && current.status === expectedStatus;
+              if (committed) commit(incoming);
+              return { committed, storedEvents: [] };
+            }),
         }),
         IdAllocator.layer,
-        startProjectionStore(() => projection),
+        FileSystem.layerNoop({}),
+        Layer.mock(GitWorkflow.GitWorkflowService)({}),
+        Layer.mock(ProjectService.ProjectService)({}),
+        Layer.mock(ProjectionStore.ProjectionStoreV2)({
+          getTurnStartContext: projectionRead,
+          getRuntimeRecoveryProjection: projectionRead,
+          getTurnStartHistory: () => Effect.succeed([]),
+        }),
         Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({
           open: () =>
             Effect.succeed({
               driver: CODEX_DRIVER,
-              providerSession: { id: fixture.providerSessionId },
+              providerSession: {
+                id: ids.providerSessionId,
+                driver: CODEX_DRIVER,
+                providerInstanceId: run.providerInstanceId,
+                status: "ready",
+                cwd: "/tmp/native-account-command",
+                model: null,
+                capabilities: CodexProviderCapabilitiesV2,
+                createdAt: providerThread.createdAt,
+                updatedAt: providerThread.updatedAt,
+                lastError: null,
+              },
               resumeThread,
               ensureThread,
             } as never),
         }),
-        Layer.mock(RunExecutionService.RunExecutionServiceV2)({
-          startRootRun: startRootRun as never,
+        Layer.mock(ProviderAuthService.ProviderAuthService)({
+          tryHandlePromptCommand: () => Effect.succeed(false),
         }),
+        Layer.mock(RunExecutionService.RunExecutionServiceV2)({ startRootRun }),
         Layer.mock(RuntimePolicy.RuntimePolicyV2)({
           resolve: () => Effect.succeed({} as never),
         }),
       ),
     ),
   );
-
-  await Effect.flatMap(ProviderTurnStart.ProviderTurnStartServiceV2, (service) =>
-    service.start({ threadId: fixture.threadId, runId: fixture.runId }),
-  ).pipe(Effect.provide(Layer.merge(layer, logCapture.layer)), Effect.runPromise);
-
-  expect(startRootRun).toHaveBeenCalledTimes(1);
   return {
-    written,
-    logs: logCapture.records,
+    ...ids,
+    runId: run.id,
+    nativeThreadRef,
     resumeThread,
     ensureThread,
-    session: startedSession!,
-    startFailure: () => startedSession!.startTurn({} as never).pipe(Effect.flip, Effect.runPromise),
+    startRootRun,
+    events,
+    projection: () => projection,
+    start: (options?: { readonly willRetry: boolean }) =>
+      Effect.gen(function* () {
+        yield* (yield* ProviderTurnStart.ProviderTurnStartServiceV2).start({
+          threadId: projection.thread.id,
+          runId: run.id,
+          ...options,
+        });
+      }).pipe(Effect.provide(layer)),
   };
 }
 
-const freshStartWarning = (written: ReadonlyArray<OrchestrationV2DomainEvent>) =>
-  written.flatMap((event) =>
-    event.type === "turn-item.updated" && event.payload.type === "system_notice"
-      ? [event.payload]
-      : [],
+const failResume =
+  (failure: (ids: NativeResumeIds) => Effect.Effect<ProviderAdapterResumeThreadError>) =>
+  (ids: NativeResumeIds) =>
+    failure(ids).pipe(Effect.flatMap(Effect.fail));
+
+const nativeThreadGone = (ids: NativeResumeIds) =>
+  Effect.fail(
+    new ProviderAdapterResumeThreadError({
+      driver: CODEX_DRIVER,
+      ...ids,
+      cause: new Error("thread not found: native-context-must-survive"),
+      nativeThreadMissing: true,
+    }),
   );
 
-it.each([
+const freshConversationNotices = (projection: OrchestrationV2ThreadProjection) =>
+  projection.turnItems.filter((item) => item.type === "system_notice");
+
+effectIt.effect.each([
   {
     name: "a schema decode failure",
     failure: makeCodexResumeSchemaFailure,
@@ -922,354 +1101,210 @@ it.each([
   },
   {
     name: "a provider error that is not a missing conversation",
-    failure: (input: {
-      readonly providerSessionId: ProviderSessionId;
-      readonly providerThreadId: ProviderThreadId;
-    }) =>
+    failure: (ids: NativeResumeIds) =>
       Effect.succeed(
         new ProviderAdapterResumeThreadError({
           driver: CODEX_DRIVER,
-          providerSessionId: input.providerSessionId,
-          providerThreadId: input.providerThreadId,
+          ...ids,
           cause: new Error("rollout file is locked by another process"),
           nativeThreadMissing: false,
         }),
       ),
     detail: ["[cause]: Error: rollout file is locked by another process"],
   },
-])("fails visibly and keeps native history after $name", async ({ failure, detail }) => {
-  const fixture = makeResumeFallbackFixture({ suffix: "terminal" });
-  const result = await startWithResume({
-    fixture,
-    resumeThread: () =>
-      failure({
-        providerSessionId: fixture.providerSessionId,
-        providerThreadId: fixture.providerThreadId,
-      }).pipe(Effect.flatMap(Effect.fail)),
-  });
-
-  expect(result.ensureThread).not.toHaveBeenCalled();
-  expect(result.written).toEqual([]);
-  const startFailure = await result.startFailure();
-  expect(startFailure._tag).toBe("ProviderResumeFailedError");
-  expect(startFailure.message).toContain(
-    "Native codex provider resume failed for provider_thread_resume_fallback_terminal",
-  );
-  for (const line of detail) expect(startFailure.message).toContain(line);
-  // Schema paths stay; stack frames do not.
-  expect(startFailure.message).not.toMatch(/^\s+at (?!\[)/mu);
-});
-
-it("starts a new conversation with a visible warning when the provider no longer has it", async () => {
-  const fixture = makeResumeFallbackFixture({ suffix: "missing" });
-  const result = await startWithResume({
-    fixture,
-    resumeThread: () =>
-      Effect.fail(
-        new ProviderAdapterResumeThreadError({
-          driver: CODEX_DRIVER,
-          providerSessionId: fixture.providerSessionId,
-          providerThreadId: fixture.providerThreadId,
-          cause: new Error("thread not found: codex:native-thread-missing"),
-          nativeThreadMissing: true,
-        }),
-      ),
-  });
-
-  expect(result.ensureThread).toHaveBeenCalledWith(
-    expect.objectContaining({
-      existingProviderThread: expect.objectContaining({ nativeThreadRef: null }),
-    }),
-  );
-  const transfer = result.written.find((event) => event.type === "context-transfer.updated");
-  expect(transfer?.type === "context-transfer.updated" && transfer.payload).toMatchObject({
-    type: "provider_handoff",
-    targetRunId: fixture.runId,
-    status: "resolved_portable",
-    resolution: { strategy: "portable_context" },
-    error: expect.stringContaining("thread not found: codex:native-thread-missing"),
-  });
-  expect(freshStartWarning(result.written)).toEqual([
-    expect.objectContaining({
-      runId: fixture.runId,
-      status: "completed",
-      message: expect.stringContaining("no longer has this conversation"),
-    }),
-  ]);
-  expect(result.logs).toContainEqual(
-    expect.objectContaining({ runId: fixture.runId, reason: "native_thread_missing" }),
-  );
-  expect(result.session.startTurn).not.toBe(undefined);
-});
-
-it("starts a new conversation when an earlier history delivery is uncertain", async () => {
-  const fixture = makeResumeFallbackFixture({ suffix: "uncertain" });
-  const projection = {
-    ...fixture.projection,
-    contextHandoffs: [
-      {
-        id: ContextHandoffId.make("handoff_uncertain_delivery"),
-        toProviderThreadId: fixture.providerThreadId,
-        targetRunId: RunId.make("run_earlier"),
-        status: "consumed",
-        delivery: { nativeThreadId: fixture.nativeThreadId, status: "pending" },
-      },
-    ],
-  } as unknown as OrchestrationV2ThreadProjection;
-  const result = await startWithResume({
-    fixture,
-    projection,
-    resumeThread: () => Effect.die("An uncertain delivery must not resume native history"),
-  });
-
-  expect(result.resumeThread).not.toHaveBeenCalled();
-  expect(result.ensureThread).toHaveBeenCalledTimes(1);
-  expect(freshStartWarning(result.written)).toEqual([
-    expect.objectContaining({ message: expect.stringContaining("earlier history handoff") }),
-  ]);
-  expect(result.logs).toContainEqual(
-    expect.objectContaining({ reason: "uncertain_history_delivery" }),
-  );
-});
-
-it("delivers no history after a terminal resume failure", async () => {
-  const fixture = makeResumeFallbackFixture({ suffix: "no_delivery" });
-  const projection = {
-    ...fixture.projection,
-    contextHandoffs: [
-      {
-        id: ContextHandoffId.make("handoff_ready_for_run"),
-        toProviderThreadId: fixture.providerThreadId,
-        targetRunId: fixture.runId,
-        status: "ready",
-      },
-    ],
-  } as unknown as OrchestrationV2ThreadProjection;
-  const result = await startWithResume({
-    fixture,
-    projection,
-    resumeThread: () =>
-      makeCodexResumeSchemaFailure({
-        providerSessionId: fixture.providerSessionId,
-        providerThreadId: fixture.providerThreadId,
-      }).pipe(Effect.flatMap(Effect.fail)),
-  });
-
-  // A delivery attempt would persist a pending marker that later forces a new conversation.
-  expect((await result.startFailure())._tag).toBe("ProviderResumeFailedError");
-  expect(result.written).toEqual([]);
-});
-
-it("keeps the no-native-ref fresh-start path unchanged", async () => {
-  const fixture = makeResumeFallbackFixture({ suffix: "no_native_ref" });
-  const providerThread = { ...fixture.providerThread, nativeThreadRef: null };
-  const result = await startWithResume({
-    fixture,
-    projection: {
-      ...fixture.projection,
-      providerThreads: [providerThread],
-    } as unknown as OrchestrationV2ThreadProjection,
-    resumeThread: () => Effect.die("resumeThread must not run without a native ref"),
-    ensureThread: () => Effect.succeed(providerThread),
-  });
-
-  expect(result.resumeThread).not.toHaveBeenCalled();
-  expect(result.ensureThread).toHaveBeenCalledTimes(1);
-  expect(freshStartWarning(result.written)).toEqual([]);
-});
-
-it("fails a fresh provider thread through run execution when the Codex CLI is unsupported", async () => {
-  const fixture = makeResumeFallbackFixture({ suffix: "fresh_unsupported_cli" });
-  const providerThread = { ...fixture.providerThread, nativeThreadRef: null };
-  const result = await startWithResume({
-    fixture,
-    projection: {
-      ...fixture.projection,
-      providerThreads: [providerThread],
-    } as unknown as OrchestrationV2ThreadProjection,
-    resumeThread: () => Effect.die("resumeThread must not run without a native ref"),
-    ensureThread: () =>
-      assertSupportedCodexCliVersion("t3code_desktop/0.120.0 (Mac OS 26.4.1; arm64)").pipe(
-        Effect.mapError(
-          (cause) =>
-            new ProviderAdapterEnsureThreadError({
-              driver: CODEX_DRIVER,
-              threadId: fixture.threadId,
-              cause,
-            }),
-        ),
-      ),
-  });
-
-  expect(result.resumeThread).not.toHaveBeenCalled();
-  const startFailure = await result.startFailure();
-  expect(startFailure._tag).toBe("ProviderAdapterProtocolError");
-  expect(startFailure.message).toContain("J5 requires Codex CLI ≥ 0.151.0; found 0.120.0");
-});
-
-it("fails the run through run execution instead of falling back when the Codex CLI is unsupported", async () => {
-  const fixture = makeResumeFallbackFixture({ suffix: "unsupported_cli" });
-  const result = await startWithResume({
-    fixture,
-    resumeThread: () =>
-      assertSupportedCodexCliVersion("t3code_desktop/0.120.0 (Mac OS 26.4.1; arm64)").pipe(
-        Effect.mapError(
-          (cause) =>
-            new ProviderAdapterResumeThreadError({
-              driver: CODEX_DRIVER,
-              providerSessionId: fixture.providerSessionId,
-              providerThreadId: fixture.providerThreadId,
-              cause,
-            }),
-        ),
-        Effect.andThen(Effect.die("unreachable")),
-      ),
-    ensureThread: () => Effect.die("ensureThread must not run for an unsupported CLI"),
-  });
-
-  expect(result.written).toEqual([]);
-  const startFailure = await result.startFailure();
-  expect(startFailure._tag).toBe("ProviderResumeFailedError");
-  expect(startFailure.message).toContain("J5 requires Codex CLI ≥ 0.151.0; found 0.120.0");
-});
-
-for (const text of ["Continue", "/compact"]) {
-  effectIt.effect(`terminalizes ${text} through run execution when native resume fails`, () =>
+])(
+  "fails the run and keeps native history after $name, even when the start would be retried",
+  ({ failure, detail }) =>
     Effect.gen(function* () {
-      const initial = makeLocalCommandHarness({
+      const harness = makeNativeResumeHarness({ resumeThread: failResume(failure) });
+
+      // Returning normally is what stops the effect worker from retrying.
+      yield* harness.start({ willRetry: true });
+
+      expect(harness.ensureThread).not.toHaveBeenCalled();
+      expect(harness.startRootRun).not.toHaveBeenCalled();
+      const projection = harness.projection();
+      expect(projection.runs.at(-1)).toMatchObject({ status: "failed", startedAt: null });
+      expect(projection.attempts[0]).toMatchObject({ status: "failed", startedAt: null });
+      expect(projection.nodes[0]).toMatchObject({ status: "failed", startedAt: null });
+      expect(projection.providerThreads[0]?.nativeThreadRef).toEqual(harness.nativeThreadRef);
+      expect(projection.contextTransfers).toEqual([]);
+      expect(projection.contextHandoffs).toEqual([]);
+      expect(projection.turnItems).toMatchObject([
+        {
+          type: "error",
+          status: "failed",
+          title: "Provider turn failed to start",
+          failure: { class: "provider_error" },
+        },
+      ]);
+      const item = projection.turnItems[0];
+      const message = item?.type === "error" ? item.failure.message : "";
+      expect(message).toContain(
+        `Native codex provider resume failed for ${harness.providerThreadId}: `,
+      );
+      for (const line of detail) expect(message).toContain(line);
+      // Schema paths stay; stack frames do not.
+      expect(message).not.toMatch(/^\s+at (?!\[)/mu);
+    }),
+);
+
+effectIt.effect.each(["Continue", "/compact"])(
+  "fails %s once when native resume fails on the last start attempt",
+  (text) =>
+    Effect.gen(function* () {
+      const harness = makeNativeResumeHarness({
         text,
-        previousMessages: ["Existing native conversation"],
-      }).projection();
-      const run = initial.runs[0]!;
-      const providerThread = {
-        ...initial.providerThreads[0]!,
-        nativeThreadRef: {
-          driver: CODEX_DRIVER,
-          nativeId: "native-context-must-survive",
-          strength: "strong" as const,
-        },
-        status: "idle" as const,
-      };
-      let projection: OrchestrationV2ThreadProjection = {
-        ...initial,
-        providerThreads: [providerThread],
-      };
-      const providerSessionId = providerThread.providerSessionId!;
-      const written: Array<OrchestrationV2DomainEvent> = [];
-      const commitEvents = (events: ReadonlyArray<OrchestrationV2DomainEvent>) => {
-        for (const event of events) {
-          expect(isDomainEvent(event)).toBe(true);
-          written.push(event);
-          projection = ProjectionStore.applyToProjection(projection, event);
-        }
-      };
-      const ensureThread = vi.fn(() =>
-        Effect.die("A failed resume must not replace native history"),
-      );
-      const startTurn = vi.fn(() => Effect.die("A failed resume must not start a native turn"));
-      const compactThread = vi.fn(() =>
-        Effect.die("A failed resume must not compact native history"),
-      );
-      const runtime = {
-        driver: CODEX_DRIVER,
-        providerSession: {
-          id: providerSessionId,
-          driver: CODEX_DRIVER,
-          providerInstanceId: run.providerInstanceId,
-          status: "ready",
-          cwd: "/tmp/native-account-command",
-          model: run.modelSelection.model,
-          capabilities: CodexProviderCapabilitiesV2,
-          createdAt: providerThread.createdAt,
-          updatedAt: providerThread.updatedAt,
-          lastError: null,
-        },
-        events: Stream.never,
-        resumeThread: () =>
+        resumeThread: (ids) =>
           Effect.fail(
             new ProviderAdapterResumeThreadError({
               driver: CODEX_DRIVER,
-              providerSessionId,
-              providerThreadId: providerThread.id,
-              cause: new Error("native resume rejected in integrated start proof"),
+              ...ids,
+              cause: new Error("native resume rejected"),
             }),
           ),
-        ensureThread,
-        startTurn,
-        compactThread,
-      } as unknown as ProviderAdapterV2SessionRuntime;
-      const dependencies = Layer.mergeAll(
-        resumeStartDependencies,
-        IdAllocator.layer,
-        ServerSettingsService.layerTest(),
-        Layer.mock(CheckpointServiceV2)({ captureBaseline: () => Effect.void }),
-        Layer.mock(ProviderEventIngestorV2)({ ingestNormalized: () => Effect.succeed([]) }),
-        Layer.mock(ContextHandoffService.ContextHandoffServiceV2)({}),
-        Layer.mock(EventSink.EventSinkV2)({
-          writeIfRunCurrent: ({ events, activeAttemptId, expectedStatus }) =>
-            Effect.sync(() => {
-              const current = projection.runs.find((candidate) => candidate.id === run.id);
-              const committed =
-                current?.activeAttemptId === activeAttemptId && current.status === expectedStatus;
-              if (committed) commitEvents(events);
-              return { committed, storedEvents: [] };
-            }),
-          writeWithEffects: ({ events }) =>
-            Effect.sync(() => {
-              commitEvents(events);
-              return [];
-            }),
-        }),
-        startProjectionStore(() => projection),
-        Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({
-          open: () => Effect.succeed(runtime),
-        }),
-        Layer.mock(RuntimePolicy.RuntimePolicyV2)({
-          resolve: () =>
-            Effect.succeed({
-              runtimeMode: "full-access",
-              interactionMode: "default",
-              cwd: "/tmp/native-account-command",
-              approvalPolicy: "never",
-              sandboxPolicy: { type: "dangerFullAccess" },
-            }),
-        }),
-      );
-      const layer = ProviderTurnStart.layer.pipe(
-        Layer.provide(RunExecutionService.layer),
-        Layer.provide(dependencies),
-      );
-      yield* Effect.gen(function* () {
-        const service = yield* ProviderTurnStart.ProviderTurnStartServiceV2;
-        yield* service.start({ threadId: projection.thread.id, runId: run.id });
-        yield* service.start({ threadId: projection.thread.id, runId: run.id });
-      }).pipe(Effect.provide(layer));
+      });
 
-      expect(ensureThread).not.toHaveBeenCalled();
-      expect(startTurn).not.toHaveBeenCalled();
-      expect(compactThread).not.toHaveBeenCalled();
-      expect(projection.runs[0]?.status).toBe("failed");
-      expect(projection.attempts[0]?.status).toBe("failed");
-      expect(projection.nodes[0]?.status).toBe("failed");
-      expect(projection.providerThreads[0]?.nativeThreadRef).toEqual(
-        providerThread.nativeThreadRef,
-      );
-      expect(projection.contextTransfers).toEqual([]);
-      expect(projection.contextHandoffs).toEqual([]);
+      yield* harness.start();
+      yield* harness.start();
+
+      expect(harness.ensureThread).not.toHaveBeenCalled();
+      expect(harness.startRootRun).not.toHaveBeenCalled();
+      const projection = harness.projection();
+      expect(projection.runs.at(-1)?.status).toBe("failed");
+      expect(projection.providerThreads[0]?.nativeThreadRef).toEqual(harness.nativeThreadRef);
       expect(
-        written.filter(
+        harness.events.filter(
           (event) => event.type === "run.updated" && event.payload.status === "failed",
         ),
       ).toHaveLength(1);
-      expect(projection.turnItems).toEqual([
-        expect.objectContaining({
+      expect(projection.turnItems).toMatchObject([
+        {
           type: "error",
-          status: "failed",
-          failure: expect.objectContaining({
-            message: expect.stringContaining("native resume rejected in integrated start proof"),
-          }),
-        }),
+          failure: { message: expect.stringContaining("native resume rejected") },
+        },
       ]);
     }),
-  );
-}
+);
+
+effectIt.effect("delivers no history after a terminal resume failure", () =>
+  Effect.gen(function* () {
+    const harness = makeNativeResumeHarness({
+      resumeThread: failResume(makeCodexResumeSchemaFailure),
+      contextHandoffs: ({ providerThreadId, runId }) => [
+        {
+          id: ContextHandoffId.make("handoff-ready-for-run"),
+          toProviderThreadId: providerThreadId,
+          targetRunId: runId,
+          status: "ready",
+        },
+      ],
+    });
+
+    yield* harness.start({ willRetry: true });
+
+    // A delivery attempt would persist a pending marker that later forces a new conversation.
+    expect(harness.projection().runs.at(-1)?.status).toBe("failed");
+    expect(harness.events.filter((event) => event.type === "context-handoff.updated")).toEqual([]);
+    expect(harness.projection().contextHandoffs).toMatchObject([{ status: "ready" }]);
+  }),
+);
+
+effectIt.effect(
+  "starts a new conversation with a visible notice when the provider no longer has it",
+  () =>
+    Effect.gen(function* () {
+      const harness = makeNativeResumeHarness({ resumeThread: nativeThreadGone });
+
+      yield* harness.start({ willRetry: true });
+
+      expect(harness.ensureThread).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          existingProviderThread: expect.objectContaining({ nativeThreadRef: null }),
+        }),
+      );
+      expect(harness.startRootRun).toHaveBeenCalledOnce();
+      const projection = harness.projection();
+      expect(projection.runs.at(-1)?.status).toBe("running");
+      expect(projection.contextTransfers).toMatchObject([
+        {
+          type: "provider_handoff",
+          targetRunId: harness.runId,
+          status: "resolved_portable",
+          resolution: { strategy: "portable_context" },
+          error: expect.stringContaining("thread not found: native-context-must-survive"),
+        },
+      ]);
+      expect(freshConversationNotices(projection)).toMatchObject([
+        {
+          runId: harness.runId,
+          status: "completed",
+          title: "Started a new provider conversation",
+          message: expect.stringContaining("no longer has this conversation"),
+        },
+      ]);
+    }),
+);
+
+effectIt.effect("starts a new conversation when an earlier history delivery is uncertain", () =>
+  Effect.gen(function* () {
+    const harness = makeNativeResumeHarness({
+      resumeThread: () => Effect.die("An uncertain delivery must not resume native history"),
+      contextHandoffs: ({ providerThreadId, nativeThreadId }) => [
+        {
+          id: ContextHandoffId.make("handoff-uncertain-delivery"),
+          toProviderThreadId: providerThreadId,
+          targetRunId: RunId.make("run-earlier"),
+          status: "consumed",
+          delivery: { nativeThreadId, status: "pending" },
+        },
+      ],
+    });
+
+    yield* harness.start();
+
+    expect(harness.resumeThread).not.toHaveBeenCalled();
+    expect(harness.ensureThread).toHaveBeenCalledOnce();
+    expect(harness.startRootRun).toHaveBeenCalledOnce();
+    expect(freshConversationNotices(harness.projection())).toMatchObject([
+      { message: expect.stringContaining("earlier history handoff") },
+    ]);
+  }),
+);
+
+effectIt.effect("starts a thread without native history with no resume and no notice", () =>
+  Effect.gen(function* () {
+    const harness = makeNativeResumeHarness({
+      withoutNativeRef: true,
+      resumeThread: () => Effect.die("resumeThread must not run without a native ref"),
+    });
+
+    yield* harness.start();
+
+    expect(harness.resumeThread).not.toHaveBeenCalled();
+    expect(harness.ensureThread).toHaveBeenCalledOnce();
+    expect(harness.startRootRun).toHaveBeenCalledOnce();
+    expect(harness.projection().contextTransfers).toEqual([]);
+    expect(freshConversationNotices(harness.projection())).toEqual([]);
+  }),
+);
+
+effectIt.effect("reports a start failure to the run watchdog without replacing it", () =>
+  Effect.gen(function* () {
+    const harness = makeLocalCommandHarness({
+      text: "Continue",
+      openFailure: new Error("provider session rejected"),
+    });
+    const recordVcsFailure = vi.fn(() => Effect.void);
+
+    const error = yield* harness.startWithRetry.pipe(
+      Effect.provideService(QueuedRunWatchdog, { scan: () => Effect.void, recordVcsFailure }),
+      Effect.flip,
+    );
+
+    expect(error._tag).toBe("ProviderTurnStartError");
+    expect(recordVcsFailure).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ phase: "start", cause: error }),
+    );
+  }),
+);

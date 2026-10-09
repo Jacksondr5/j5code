@@ -8,7 +8,7 @@ import { toastManager } from "../../components/ui/toast";
 import { requestConfirmDialog } from "../../confirmDialog";
 import { useEnvironments } from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";
-import { useEnvironmentSessionState } from "../../state/session";
+import { useEnvironmentScope } from "../../state/session";
 import { peersQueryAtom } from "../state";
 import { PeerIntroductionDialog } from "./PeerIntroductionDialog";
 import { refreshPeers, removePeer, type PeerRecord } from "./peeringClient";
@@ -107,12 +107,7 @@ function PeerRow({
   /** The peer as one of this client's connected environments, when it is one. */
   readonly otherEnvironmentId: EnvironmentId | null;
 }) {
-  // The hook needs an id; the result is read only when the peer is a connected environment.
-  const otherSession = useEnvironmentSessionState(otherEnvironmentId ?? primaryEnvironmentId);
-  const otherManageable =
-    otherEnvironmentId !== null &&
-    otherSession.data?.authenticated === true &&
-    (otherSession.data.scopes?.includes(AuthAccessWriteScope) ?? false);
+  const otherManageable = useEnvironmentScope(otherEnvironmentId, AuthAccessWriteScope);
   const [removing, setRemoving] = useState(false);
 
   const confirmation = removalConfirmation({

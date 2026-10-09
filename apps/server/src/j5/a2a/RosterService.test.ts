@@ -3,7 +3,7 @@ import { type OrchestrationV2ShellSnapshot, ThreadId } from "@t3tools/contracts"
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import { OrchestratorV2 } from "../../orchestration-v2/Orchestrator.ts";

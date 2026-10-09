@@ -5,7 +5,8 @@ import {
   ORCHESTRATION_PROTOCOL_VERSION_TEXT,
 } from "@t3tools/contracts";
 import * as Result from "effect/Result";
-import { FetchHttpClient, type HttpMethod } from "effect/unstable/http";
+import { withRelayClientTracing } from "@t3tools/shared/relayTracing";
+import { FetchHttpClient, type HttpMethod } from "effect/http";
 
 import type { RemoteEnvironmentAuthorization } from "../authorization/service.ts";
 import type { PreparedConnection, PreparedHttpAuthorization } from "../connection/model.ts";
@@ -94,14 +95,40 @@ const buildEnvironmentAuthHeaders = (
     return { authorization: `DPoP ${authorization.accessToken}`, dpop: proof };
   });
 
+const ENVIRONMENT_REQUEST_SPAN = "clientRuntime.state.executeAuthenticatedEnvironmentHttpRequest";
+const ENVIRONMENT_RAW_REQUEST_SPAN =
+  "clientRuntime.state.executeAuthenticatedEnvironmentRawHttpRequest";
+
+const withEnvironmentRequestSpan = <A, E, R>(
+  prepared: PreparedConnection,
+  span: string,
+  request: Effect.Effect<A, E, R>,
+) =>
+  prepared.httpAuthorization?._tag === "Dpop"
+    ? request.pipe(Effect.withSpan(span, { root: true }), withRelayClientTracing)
+    : request.pipe(Effect.withSpan(span));
+
 /**
  * Resolve relay credentials at request time without replacing the live socket.
  * A rejected credential gets one refresh and retry, with a new request-bound
  * proof. Cookie and bearer requests keep their existing authentication behavior.
+ *
+ * A DPoP request is T3 Connect work, so its span starts an exported trace that
+ * the environment continues; its local caller's span would leave that trace
+ * without a root.
+ *
+ * J5: this raw form serves routes outside the typed API groups.
  */
-export const executeAuthenticatedEnvironmentRawHttpRequest = Effect.fn(
-  "clientRuntime.state.executeAuthenticatedEnvironmentRawHttpRequest",
-)(function* <A, E, R>(input: {
+export const executeAuthenticatedEnvironmentRawHttpRequest = <A, E, R>(
+  input: Parameters<typeof executeEnvironmentRequest<A, E, R>>[0],
+) =>
+  withEnvironmentRequestSpan(
+    input.prepared,
+    ENVIRONMENT_RAW_REQUEST_SPAN,
+    executeEnvironmentRequest(input),
+  );
+
+const executeEnvironmentRequest = Effect.fnUntraced(function* <A, E, R>(input: {
   readonly prepared: PreparedConnection;
   readonly signer: Option.Option<ManagedRelayDpopSigner["Service"]>;
   readonly remoteAuthorization?: Option.Option<RemoteEnvironmentAuthorization["Service"]>;
@@ -142,7 +169,10 @@ export const executeAuthenticatedEnvironmentRawHttpRequest = Effect.fn(
                 }),
             ),
           );
-        httpBaseUrl = current.httpBaseUrl;
+        // A learned direct route keeps its own origin; only the token renews.
+        if (input.prepared.target._tag === "RelayConnectionTarget") {
+          httpBaseUrl = current.httpBaseUrl;
+        }
         authorization = current.httpAuthorization;
       }
 
@@ -202,34 +232,27 @@ export const executeAuthenticatedEnvironmentHttpRequest = <
   A,
   E,
   R,
->(input: {
-  readonly prepared: PreparedConnection;
-  readonly signer: Option.Option<ManagedRelayDpopSigner["Service"]>;
-  readonly remoteAuthorization?: Option.Option<RemoteEnvironmentAuthorization["Service"]>;
-  readonly method: HttpMethod.HttpMethod;
-  readonly url: (httpBaseUrl: string) => string;
-  readonly timeoutMs: number;
-  readonly group: Group;
-  readonly request: (input: {
-    readonly client: Effect.Success<ReturnType<typeof makeEnvironmentHttpApiGroupClient<Group>>>;
-    readonly headers: EnvironmentHttpAuthHeaders;
-  }) => Effect.Effect<A, E, R>;
-  /** Some endpoints report rejected credentials in a successful response. */
-  readonly isUnauthorizedResponse?: (response: NoInfer<A>) => boolean;
-}): Effect.Effect<
-  A,
-  RemoteEnvironmentRequestError,
-  Effect.Services<ReturnType<typeof makeEnvironmentHttpApiGroupClient<Group>>> | R
-> => {
-  return executeAuthenticatedEnvironmentRawHttpRequest<
-    A,
-    E,
-    Effect.Services<ReturnType<typeof makeEnvironmentHttpApiGroupClient<Group>>> | R
-  >({
-    ...input,
-    request: ({ httpBaseUrl, headers }) =>
-      Effect.flatMap(makeEnvironmentHttpApiGroupClient(httpBaseUrl, input.group), (client) =>
-        input.request({ client, headers }),
-      ),
-  });
-};
+>(
+  input: Omit<Parameters<typeof executeEnvironmentRequest<A, E, R>>[0], "request"> & {
+    readonly group: Group;
+    readonly request: (input: {
+      readonly client: Effect.Success<ReturnType<typeof makeEnvironmentHttpApiGroupClient<Group>>>;
+      readonly headers: EnvironmentHttpAuthHeaders;
+    }) => Effect.Effect<A, E, R>;
+  },
+) =>
+  withEnvironmentRequestSpan(
+    input.prepared,
+    ENVIRONMENT_REQUEST_SPAN,
+    executeEnvironmentRequest<
+      A,
+      E,
+      Effect.Services<ReturnType<typeof makeEnvironmentHttpApiGroupClient<Group>>> | R
+    >({
+      ...input,
+      request: ({ httpBaseUrl, headers }) =>
+        Effect.flatMap(makeEnvironmentHttpApiGroupClient(httpBaseUrl, input.group), (client) =>
+          input.request({ client, headers }),
+        ),
+    }),
+  );

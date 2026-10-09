@@ -169,6 +169,7 @@ export function applyOrchestrationV2ProjectionEvent(
     case "thread.unsettled":
     case "thread.snoozed":
     case "thread.unsnoozed":
+    case "thread.auto-settle-set":
     case "thread.pinned":
     case "thread.unpinned":
     case "thread.pin-reordered":
@@ -189,6 +190,18 @@ export function applyOrchestrationV2ProjectionEvent(
       const next = { ...base, runs: upsertEntity(base.runs, event.payload) };
       return { ...next, visibleTurnItems: activeVisibleTurnItems(next) };
     }
+    case "run.background-work-cancelled":
+      return {
+        ...base,
+        runs: base.runs.map((run) =>
+          run.id === event.payload.runId
+            ? {
+                ...run,
+                restartCancelledBackgroundWork: event.payload.restartCancelledBackgroundWork,
+              }
+            : run,
+        ),
+      };
     case "run-attempt.created":
     case "run-attempt.updated": {
       const next = { ...base, attempts: upsertEntity(base.attempts, event.payload) };

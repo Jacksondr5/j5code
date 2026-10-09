@@ -1,8 +1,10 @@
+import { presentThreadShell } from "@t3tools/client-runtime/state/models";
+import * as DateTime from "effect/DateTime";
 import { deriveActiveWorkStartedAt } from "../session-logic.ts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { defaultAnimateLayoutChanges, type AnimateLayoutChanges } from "@dnd-kit/sortable";
 import * as Cause from "effect/Cause";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 import {
   animateSidebarLayoutChanges,
   archiveSelectedThreadEntries,
@@ -22,15 +24,17 @@ import {
   hasUnseenCompletion,
   isContextMenuPointerDown,
   isSidebarSubagentThread,
+  isSidebarThreadWorking,
   isTrailingDoubleClick,
   orderItemsByPreferredIds,
   pinOrderKeyBetween,
-  planPinnedReorder,
   reduceSidebarProjectScopeMenuState,
   resolveAdjacentThreadId,
   resolveProjectStatusIndicator,
+  resolveSidebarSweepKeys,
   resolveSidebarStageBadgeLabel,
   resolveSidebarThreadSection,
+  resolveSidebarRowAccessibility,
   resolveSidebarThreadStatus,
   resolveSidebarV2TopStatus,
   resolveThreadLastVisitedAt,
@@ -43,12 +47,13 @@ import {
   shouldShowSidebarV2Duration,
   shouldRecedeSidebarThread,
   sortLogicalProjectsForSidebar,
+  sortInboxThreadsByReturn,
+  resolveSidebarDropTarget,
+  planSidebarThreadDrop,
   sortPinnedThreadsForSidebar,
   sortProjectsForSidebar,
   sortScopedProjectsForSidebar,
-  sortSettledThreadsForSidebar,
   sortSidebarV2ProjectGroups,
-  sortThreadsForSidebar,
   shouldCreateNewThreadInCurrentProject,
   shouldNavigateAfterThreadPark,
   THREAD_JUMP_HINT_SHOW_DELAY_MS,
@@ -58,6 +63,7 @@ import {
   resolveSidebarDropVerb,
 } from "./Sidebar.logic";
 import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
+import { sortSettledThreads } from "@t3tools/client-runtime/state/thread-sort";
 import { EnvironmentId, ProjectId, ProviderInstanceId, RunId, ThreadId } from "@t3tools/contracts";
 
 import {
@@ -69,6 +75,35 @@ import {
 import { makeThreadFixture, type ThreadFixtureOverrides } from "../test-fixtures";
 
 const localEnvironmentId = EnvironmentId.make("environment-local");
+
+describe("resolveSidebarRowAccessibility", () => {
+  it.each([
+    {
+      title: "Can you audit the UI?",
+      statusLabel: "Working",
+      projectDisplayName: "T3 Code",
+      isActive: true,
+      expected: { label: "Can you audit the UI?, Working, T3 Code", current: "page" },
+    },
+    {
+      title: "The audit is done",
+      statusLabel: null,
+      projectDisplayName: "T3 Code",
+      isActive: false,
+      expected: { label: "The audit is done, T3 Code", current: undefined },
+    },
+    {
+      title: "Untitled task",
+      statusLabel: null,
+      projectDisplayName: null,
+      isActive: false,
+      expected: { label: "Untitled task", current: undefined },
+    },
+  ])("leads with the title without folding row actions into its name: %j", (input) => {
+    const { expected, ...state } = input;
+    expect(resolveSidebarRowAccessibility(state)).toEqual(expected);
+  });
+});
 
 describe("animateSidebarLayoutChanges", () => {
   const baseArgs: Parameters<AnimateLayoutChanges>[0] = {
@@ -1112,127 +1147,6 @@ describe("reduceSidebarProjectScopeMenuState", () => {
   });
 });
 
-describe("sortThreadsForSidebar", () => {
-  const sortable = (input: { id: string; createdAt: string }) => ({
-    id: input.id,
-    createdAt: input.createdAt,
-  });
-
-  it("orders by creation time, newest first, ignoring activity", () => {
-    const sorted = sortThreadsForSidebar([
-      sortable({ id: "oldest", createdAt: "2026-03-09T08:00:00.000Z" }),
-      sortable({ id: "newest", createdAt: "2026-03-09T12:00:00.000Z" }),
-      sortable({ id: "middle", createdAt: "2026-03-09T10:00:00.000Z" }),
-    ]);
-
-    expect(sorted.map((thread) => thread.id)).toEqual(["newest", "middle", "oldest"]);
-  });
-
-  it("breaks creation-time ties by id so the order is stable", () => {
-    const sorted = sortThreadsForSidebar([
-      sortable({ id: "b", createdAt: "2026-03-09T10:00:00.000Z" }),
-      sortable({ id: "a", createdAt: "2026-03-09T10:00:00.000Z" }),
-    ]);
-
-    expect(sorted.map((thread) => thread.id)).toEqual(["a", "b"]);
-  });
-
-  it("surfaces an un-settled thread at the top via its re-entry stamp", () => {
-    const sorted = sortThreadsForSidebar([
-      {
-        id: "old-unsettled",
-        createdAt: "2026-03-09T08:00:00.000Z",
-        unsettledAt: "2026-03-09T13:00:00.000Z",
-      },
-      sortable({ id: "newest", createdAt: "2026-03-09T12:00:00.000Z" }),
-      sortable({ id: "middle", createdAt: "2026-03-09T10:00:00.000Z" }),
-    ]);
-
-    expect(sorted.map((thread) => thread.id)).toEqual(["old-unsettled", "newest", "middle"]);
-  });
-
-  it("ignores a re-entry stamp older than the thread's creation", () => {
-    const sorted = sortThreadsForSidebar([
-      {
-        id: "stale-stamp",
-        createdAt: "2026-03-09T10:00:00.000Z",
-        unsettledAt: "2026-03-09T09:00:00.000Z",
-      },
-      sortable({ id: "newest", createdAt: "2026-03-09T12:00:00.000Z" }),
-    ]);
-
-    expect(sorted.map((thread) => thread.id)).toEqual(["newest", "stale-stamp"]);
-  });
-});
-
-describe("sortSettledThreadsForSidebar", () => {
-  const settled = (input: {
-    id: string;
-    settledAt?: string | null;
-    latestUserMessageAt?: string | null;
-    latestRun?: Thread["latestRun"];
-    updatedAt?: string;
-  }) => ({
-    id: input.id,
-    settledAt: input.settledAt ?? null,
-    latestUserMessageAt: input.latestUserMessageAt ?? null,
-    latestRun: input.latestRun ?? null,
-    updatedAt: input.updatedAt ?? "2026-03-09T09:00:00.000Z",
-  });
-
-  it("orders by settle time, most recently settled first", () => {
-    const sorted = sortSettledThreadsForSidebar([
-      settled({
-        id: "settled-first",
-        settledAt: "2026-03-09T10:00:00.000Z",
-        // Created/active later than the other thread: settle time must win.
-        latestUserMessageAt: "2026-03-09T09:59:00.000Z",
-      }),
-      settled({
-        id: "settled-last",
-        settledAt: "2026-03-09T12:00:00.000Z",
-        latestUserMessageAt: "2026-03-09T08:00:00.000Z",
-      }),
-    ]);
-
-    expect(sorted.map((thread) => thread.id)).toEqual(["settled-last", "settled-first"]);
-  });
-
-  it("falls back to last activity for auto-settled threads without a settledAt stamp", () => {
-    const sorted = sortSettledThreadsForSidebar([
-      settled({ id: "auto-old", latestUserMessageAt: "2026-03-09T08:00:00.000Z" }),
-      settled({ id: "explicit", settledAt: "2026-03-09T10:00:00.000Z" }),
-      settled({ id: "auto-recent", latestUserMessageAt: "2026-03-09T11:00:00.000Z" }),
-    ]);
-
-    expect(sorted.map((thread) => thread.id)).toEqual(["auto-recent", "explicit", "auto-old"]);
-  });
-
-  it("counts a turn completion as activity for auto-settled threads", () => {
-    // The message came in before the other thread's, but its turn finished
-    // after: completion time is the real "work ended" moment.
-    const sorted = sortSettledThreadsForSidebar([
-      settled({ id: "message-only", latestUserMessageAt: "2026-03-09T10:04:00.000Z" }),
-      settled({
-        id: "completed-later",
-        latestUserMessageAt: "2026-03-09T10:00:00.000Z",
-        latestRun: makeLatestRun({ completedAt: "2026-03-09T10:30:00.000Z" }),
-      }),
-    ]);
-
-    expect(sorted.map((thread) => thread.id)).toEqual(["completed-later", "message-only"]);
-  });
-
-  it("breaks timestamp ties by id so the order is stable", () => {
-    const sorted = sortSettledThreadsForSidebar([
-      settled({ id: "b", settledAt: "2026-03-09T10:00:00.000Z" }),
-      settled({ id: "a", settledAt: "2026-03-09T10:00:00.000Z" }),
-    ]);
-
-    expect(sorted.map((thread) => thread.id)).toEqual(["a", "b"]);
-  });
-});
-
 describe("resolveWorkingStartedAt", () => {
   const runtime = {
     status: "running" as const,
@@ -1383,7 +1297,7 @@ describe("resolveThreadStatusPill", () => {
       resolveThreadStatusPill({
         thread: {
           ...baseThread,
-          pendingBackgroundTasks: [{ taskId: "bg-1", description: "sleep 20" }],
+          pendingBackgroundTasks: [{ taskId: "bg-1", description: "Watch build", kind: "monitor" }],
           runtime: {
             ...baseThread.runtime,
             status: "idle",
@@ -1404,7 +1318,7 @@ describe("resolveThreadStatusPill", () => {
       resolveThreadStatusPill({
         thread: {
           ...baseThread,
-          pendingBackgroundTasks: [{ taskId: "bg-1", description: "sleep 20" }],
+          pendingBackgroundTasks: [{ taskId: "bg-1", description: "sleep 20", kind: "command" }],
         },
       }),
     ).toMatchObject({ label: "Working", pulse: true });
@@ -1475,28 +1389,6 @@ describe("resolveThreadStatusPill", () => {
         },
       }),
     ).toMatchObject({ label: "Completed", pulse: false });
-  });
-});
-
-describe("resolveThreadRowClassName", () => {
-  it("uses the active sidebar surface when a thread is both selected and active", () => {
-    const className = resolveThreadRowClassName({ isActive: true, isSelected: true });
-    expect(className).toContain("bg-sidebar-row-active");
-    expect(className).toContain("text-sidebar-foreground");
-    expect(className).not.toContain("bg-primary");
-  });
-
-  it("uses selected hover colors for selected threads", () => {
-    const className = resolveThreadRowClassName({ isActive: false, isSelected: true });
-    expect(className).toContain("bg-sidebar-row-selected");
-    expect(className).toContain("hover:bg-sidebar-row-active");
-    expect(className).not.toContain("bg-primary");
-  });
-
-  it("uses the active sidebar surface for active-only threads", () => {
-    const className = resolveThreadRowClassName({ isActive: true, isSelected: false });
-    expect(className).toContain("bg-sidebar-row-active");
-    expect(className).toContain("hover:bg-sidebar-row-active");
   });
 });
 
@@ -1846,6 +1738,49 @@ describe("sortProjectsForSidebar", () => {
     ]);
   });
 
+  it.each(["updated_at", "created_at"] as const)(
+    "matches the per-comparison %s order on a shuffled list with ties",
+    (sortOrder) => {
+      const minute = (value: number) => `2026-03-09T10:0${value}:00.000Z`;
+      // (index * 7) % 24 scrambles the input order. Titles repeat, and
+      // projects 16-23 have no threads, so they use their own stamps.
+      const projects = Array.from({ length: 24 }, (_, index) => {
+        const n = (index * 7) % 24;
+        return makeProject({
+          id: ProjectId.make(`project-${n}`),
+          title: n % 2 === 0 ? "Alpha" : "Beta",
+          createdAt: minute(n % 3),
+          updatedAt: n % 5 === 0 ? "invalid" : minute(n % 2),
+        });
+      });
+      const threads = Array.from({ length: 48 }, (_, n) => ({
+        projectId: ProjectId.make(`project-${n % 16}`),
+        createdAt: minute(n % 6),
+        updatedAt: minute(n % 3),
+        latestUserMessageAt: n % 4 === 0 ? null : minute(n % 5),
+      }));
+      // The comparator this sort replaced: it walked each project's threads
+      // on every call.
+      const timestamp = (project: Project) =>
+        getProjectSortTimestamp(
+          project,
+          threads.filter((thread) => thread.projectId === project.id),
+          sortOrder,
+        );
+      const expected = projects.toSorted((left, right) => {
+        const rightTimestamp = timestamp(right);
+        const leftTimestamp = timestamp(left);
+        const byTimestamp =
+          rightTimestamp === leftTimestamp ? 0 : rightTimestamp > leftTimestamp ? 1 : -1;
+        return (
+          byTimestamp || left.title.localeCompare(right.title) || left.id.localeCompare(right.id)
+        );
+      });
+
+      expect(sortProjectsForSidebar(projects, threads, sortOrder)).toEqual(expected);
+    },
+  );
+
   it("returns the project timestamp when no threads are present", () => {
     const timestamp = getProjectSortTimestamp(
       makeProject({ updatedAt: "2026-03-09T10:10:00.000Z" }),
@@ -2087,52 +2022,6 @@ describe("pinOrderKeyBetween", () => {
   });
 });
 
-describe("planPinnedReorder", () => {
-  it("writes only the moved thread when neighbors are keyed", () => {
-    const assignments = planPinnedReorder({
-      orderedIds: ["a", "c", "b"],
-      keysById: new Map([
-        ["a", "f"],
-        ["b", "m"],
-        ["c", "t"],
-      ]),
-      movedId: "c",
-    });
-    expect(assignments).toHaveLength(1);
-    expect(assignments[0]!.id).toBe("c");
-    expect(assignments[0]!.orderKey > "f" && assignments[0]!.orderKey < "m").toBe(true);
-  });
-
-  it("treats list edges as open bounds", () => {
-    const assignments = planPinnedReorder({
-      orderedIds: ["b", "a"],
-      keysById: new Map([
-        ["a", "m"],
-        ["b", null],
-      ]),
-      movedId: "b",
-    });
-    expect(assignments).toHaveLength(1);
-    expect(assignments[0]!.orderKey < "m").toBe(true);
-  });
-
-  it("materializes keys for the whole section when a neighbor is keyless", () => {
-    const assignments = planPinnedReorder({
-      orderedIds: ["b", "a", "c"],
-      keysById: new Map([
-        ["a", null],
-        ["b", "m"],
-        ["c", null],
-      ]),
-      movedId: "b",
-    });
-    expect(assignments.map((entry) => entry.id)).toEqual(["b", "a", "c"]);
-    const keys = assignments.map((entry) => entry.orderKey);
-    expect([...keys].sort()).toEqual(keys);
-    expect(new Set(keys).size).toBe(keys.length);
-  });
-});
-
 describe("sortPinnedThreadsForSidebar", () => {
   const pinnable = (input: { id: string; createdAt: string; pinOrderKey?: string | null }) => ({
     id: input.id,
@@ -2163,6 +2052,22 @@ describe("sortPinnedThreadsForSidebar", () => {
     ]);
 
     expect(sorted.map((thread) => thread.id)).toEqual(["a", "b"]);
+  });
+});
+
+describe("resolveSidebarSweepKeys", () => {
+  const ordered = ["a", "b", "c", "d", "blocked"];
+  const canSettle = (key: string) => key !== "blocked";
+
+  it("covers every row between the pressed row and the pointer, in either direction", () => {
+    expect(resolveSidebarSweepKeys(ordered, "b", "b", canSettle)).toEqual(["b"]);
+    expect(resolveSidebarSweepKeys(ordered, "b", "d", canSettle)).toEqual(["b", "c", "d"]);
+    expect(resolveSidebarSweepKeys(ordered, "d", "a", canSettle)).toEqual(["a", "b", "c", "d"]);
+  });
+
+  it("leaves out rows that cannot settle and rows that left the list", () => {
+    expect(resolveSidebarSweepKeys(ordered, "c", "blocked", canSettle)).toEqual(["c", "d"]);
+    expect(resolveSidebarSweepKeys(ordered, "gone", "a", canSettle)).toEqual([]);
   });
 });
 
@@ -2205,4 +2110,249 @@ describe("navigation after parking a thread", () => {
       ).toBe(expected);
     },
   );
+});
+
+describe("unseen completion with background work", () => {
+  it.each([
+    { kind: "command", status: "ready", topStatus: "done", receded: false, pill: "Completed" },
+    { kind: "monitor", status: "waiting", topStatus: "waiting", receded: true, pill: "Waiting" },
+  ] as const)("presents a completed thread with a $kind roster", (expected) => {
+    const thread = presentThreadShell(localEnvironmentId, {
+      ...makeThreadFixture().source,
+      latestRunId: RunId.make("run-background-completion"),
+      status: "completed",
+      latestRunCompletedAt: DateTime.makeUnsafe("2026-06-20T01:00:00.000Z"),
+      lastVisitedAt: DateTime.makeUnsafe("2026-06-20T00:59:00.000Z"),
+      pendingBackgroundTasks: [{ taskId: "background-work", kind: expected.kind }],
+    });
+    const status = resolveSidebarThreadStatus(thread);
+    const isUnread = hasUnseenCompletion(thread);
+
+    expect(isUnread).toBe(true);
+    expect(status).toBe(expected.status);
+    expect(resolveSidebarV2TopStatus({ status, isUnread, isWoke: false })).toBe(expected.topStatus);
+    expect(
+      shouldRecedeSidebarThread({
+        status,
+        isUnread,
+        isWoke: false,
+        isActive: false,
+        isSelected: false,
+      }),
+    ).toBe(expected.receded);
+    expect(isSidebarThreadWorking(thread)).toBe(expected.receded);
+    expect(resolveThreadStatusPill({ thread })).toMatchObject({ label: expected.pill });
+  });
+});
+
+describe("Working shelf (beta)", () => {
+  const runtime = {
+    status: "running" as const,
+    activeRunId: null,
+    providerInstanceId: ProviderInstanceId.make("codex"),
+    providerName: "Codex",
+    lastError: null,
+    updatedAt: "2026-03-09T10:00:00.000Z",
+  };
+  const backgroundTask = { taskId: "bg-1", description: "Watch build", kind: "monitor" as const };
+  const idle = {
+    hasActionableProposedPlan: false,
+    hasPendingApprovals: false,
+    hasPendingUserInput: false,
+    interactionMode: "default" as const,
+    latestRun: makeLatestRun(),
+    runtime: null,
+  };
+  // Stopped with background tasks still open: V2's "waiting" sidebar status.
+  const waiting = {
+    ...idle,
+    runtime: { ...runtime, status: "idle" as const },
+    pendingBackgroundTasks: [backgroundTask],
+  };
+
+  it("folds away running threads and threads waiting on background work only", () => {
+    expect(isSidebarThreadWorking({ ...idle, runtime })).toBe(true);
+    expect(isSidebarThreadWorking(waiting)).toBe(true);
+    expect(isSidebarThreadWorking(idle)).toBe(false);
+    expect(isSidebarThreadWorking({ ...idle, runtime, hasPendingApprovals: true })).toBe(false);
+    expect(isSidebarThreadWorking({ ...idle, runtime, hasPendingUserInput: true })).toBe(false);
+    expect(
+      isSidebarThreadWorking({
+        ...waiting,
+        runtime: { ...runtime, status: "failed" as const, lastError: "boom" },
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps a ready plan in the inbox while background work runs", () => {
+    expect(
+      isSidebarThreadWorking({
+        ...waiting,
+        interactionMode: "plan",
+        hasActionableProposedPlan: true,
+      }),
+    ).toBe(false);
+  });
+
+  describe("sortInboxThreadsByReturn", () => {
+    const thread = (
+      id: string,
+      input: { createdAt: string; completedAt?: string | null; unsettledAt?: string },
+    ) => ({
+      id: ThreadId.make(id),
+      environmentId: localEnvironmentId,
+      createdAt: input.createdAt,
+      unsettledAt: input.unsettledAt ?? null,
+      latestRun:
+        input.completedAt === undefined
+          ? null
+          : { ...makeLatestRun({ completedAt: input.completedAt }), requestedAt: input.createdAt },
+    });
+
+    it("puts the thread that finished last on top, whatever its age", () => {
+      const sorted = sortInboxThreadsByReturn([
+        thread("new", { createdAt: "2026-03-09T11:00:00.000Z" }),
+        thread("old-finished-now", {
+          createdAt: "2026-03-01T09:00:00.000Z",
+          completedAt: "2026-03-09T12:00:00.000Z",
+        }),
+        thread("reopened", {
+          createdAt: "2026-03-02T09:00:00.000Z",
+          unsettledAt: "2026-03-09T11:30:00.000Z",
+        }),
+      ]);
+      expect(sorted.map((entry) => entry.id)).toEqual(["old-finished-now", "reopened", "new"]);
+    });
+
+    it("counts a return the server does not stamp, like an approval request", () => {
+      const waiting = thread("asks-approval", {
+        createdAt: "2026-03-09T09:00:00.000Z",
+        completedAt: null,
+      });
+      const finished = thread("finished", {
+        createdAt: "2026-03-09T09:30:00.000Z",
+        completedAt: "2026-03-09T11:00:00.000Z",
+      });
+      expect(sortInboxThreadsByReturn([finished, waiting]).map((entry) => entry.id)).toEqual([
+        "finished",
+        "asks-approval",
+      ]);
+      expect(
+        sortInboxThreadsByReturn([finished, waiting], (entry) =>
+          entry === waiting ? Date.parse("2026-03-09T11:05:00.000Z") : undefined,
+        ).map((entry) => entry.id),
+      ).toEqual(["asks-approval", "finished"]);
+    });
+  });
+
+  describe("dragging", () => {
+    const marker = (name: SidebarListMarker): SidebarListItem => ({ kind: "marker", marker: name });
+    const row = (key: string, section: SidebarSection): SidebarListItem => ({
+      kind: "thread",
+      key,
+      section,
+    });
+    // Pinned p1 | Active a1 a2 | Working w1 | Settled s1
+    const items: readonly SidebarListItem[] = [
+      marker("pinned-header"),
+      row("p1", "pinned"),
+      marker("pinned-divider"),
+      row("a1", "active"),
+      row("a2", "active"),
+      marker("working-header"),
+      row("w1", "working"),
+      marker("settled-header"),
+      row("s1", "settled"),
+    ];
+
+    it("never drops into the Working shelf, and keeps it out of the inbox order", () => {
+      expect(resolveSidebarDropTarget(items, "a1", "w1")).toBeNull();
+      expect(resolveSidebarDropTarget(items, "p1", "a2")).toEqual({
+        section: "active",
+        pinnedOrder: [],
+        activeOrder: ["a1", "a2", "p1"],
+      });
+      expect(resolveSidebarDropVerb("active", "working")).toBeNull();
+    });
+
+    it("arranges the rows it can write when another row's server cannot store an order", () => {
+      // None of the rows has a key yet, so the drop needs keys for its
+      // neighbors too. "offline" sits on a server that cannot take them.
+      const plan = planSidebarThreadDrop({
+        activeKey: "a2",
+        activeSection: "active",
+        target: {
+          section: "active",
+          pinnedOrder: [],
+          activeOrder: ["offline", "a2", "a1"],
+        },
+        pinnedOrder: [],
+        pinnedKeysById: new Map(),
+        activeOrder: ["offline", "a1", "a2"],
+        activeKeysById: new Map([
+          ["offline", null],
+          ["a1", null],
+          ["a2", null],
+        ]),
+        activeReorderableKeys: new Set(["a1", "a2"]),
+      });
+      expect(plan.kind).toBe("move-active");
+      if (plan.kind !== "move-active") return;
+      expect(plan.assignments.map(({ id }) => id)).toEqual(["a2", "a1"]);
+      const [a2, a1] = plan.assignments.map(({ orderKey }) => orderKey);
+      expect(a2! < a1!).toBe(true);
+
+      // A keyed row on that server still sorts by its key, so it stays a bound.
+      const above = planSidebarThreadDrop({
+        activeKey: "a2",
+        activeSection: "active",
+        target: { section: "active", pinnedOrder: [], activeOrder: ["a2", "offline"] },
+        pinnedOrder: [],
+        pinnedKeysById: new Map(),
+        activeOrder: ["offline", "a2"],
+        activeKeysById: new Map([
+          ["offline", "m"],
+          ["a2", "t"],
+        ]),
+        activeReorderableKeys: new Set(["a2"]),
+      });
+      expect(above.kind === "move-active" && above.assignments[0]!.orderKey < "m").toBe(true);
+    });
+
+    it("only changes lifecycle when the inbox is time-ordered", () => {
+      const base = {
+        pinnedOrder: ["p1"],
+        pinnedKeysById: new Map([["p1", "m"]]),
+        activeOrder: ["a1", "a2"],
+        activeKeysById: new Map([
+          ["a1", "f"],
+          ["a2", "t"],
+        ]),
+        activeTimeOrdered: true,
+      };
+      expect(
+        planSidebarThreadDrop({
+          ...base,
+          activeKey: "a1",
+          activeSection: "active",
+          target: { section: "active", pinnedOrder: ["p1"], activeOrder: ["a2", "a1"] },
+        }),
+      ).toEqual({ kind: "none" });
+      expect(
+        planSidebarThreadDrop({
+          ...base,
+          activeKey: "p1",
+          activeSection: "pinned",
+          target: { section: "active", pinnedOrder: [], activeOrder: ["a1", "p1", "a2"] },
+        }),
+      ).toEqual({
+        kind: "move-active",
+        order: null,
+        assignments: [],
+        unpin: true,
+        unsettle: false,
+        unsnooze: false,
+      });
+    });
+  });
 });

@@ -12,6 +12,7 @@ import * as Result from "effect/Result";
 
 import { threadShellFromProjection } from "../../orchestration-v2/ProjectionStore.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
+import { isAutoSettlementCandidate } from "../../orchestration-v2/ThreadSettlementService.ts";
 import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewInstanceService.ts";
 import { ArchiveCrewService } from "./ArchiveCrewService.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
@@ -43,17 +44,23 @@ export class CrewCaptainArchiveCascade extends Context.Service<
 >()("t3/j5/a2a/CrewCaptainArchiveCascade") {}
 
 /**
- * A seat busy the way upstream's auto-settle refuses to settle: blocked on a pending runtime
- * request, a live run, or post-settlement background work. Mirrors those three checks of
- * `isAutoSettlementCandidate` in `orchestration-v2/ThreadSettlementService.ts`, read through the
- * same shell derivation the settlement sweep's candidates come from.
+ * Whether a Captain's settle carries this seat. The rule is upstream's own: the seat settles only
+ * if `isAutoSettlementCandidate` would let auto-settle take it, so a seat that is pinned, parked on
+ * a snooze, working, waiting on the person, or about to start is left alone. The exceptions are the
+ * two markers that only hold off automatic settling, the auto-settle opt-out and the "active"
+ * override an unsettle leaves behind: neither blocks a person's explicit Captain settle (register
+ * D14), so a Captain settled, unsettled and settled again carries its seats each time.
+ * The seat is read through the same shell derivation the settlement sweep's candidates come from.
  */
-const seatIsBusy = (projection: OrchestrationV2ThreadProjection) => {
+const seatFollowsCaptainSettle = (projection: OrchestrationV2ThreadProjection, nowMs: number) => {
   const shell = threadShellFromProjection(projection);
-  return (
-    shell.pendingRuntimeRequest !== null ||
-    shell.activityRunStatus != null ||
-    (shell.pendingBackgroundTasks?.length ?? 0) > 0
+  return isAutoSettlementCandidate(
+    {
+      ...shell,
+      autoSettleDisabledAt: null,
+      settledOverride: shell.settledOverride === "active" ? null : shell.settledOverride,
+    },
+    nowMs,
   );
 };
 
@@ -145,7 +152,7 @@ export const layer = Layer.effect(
 
     /**
      * Settle or unsettle every seat of one live Crew that is not already there. Settle skips a
-     * seat that is still working or waiting on the person, as upstream's auto-settle does. Unsettle
+     * seat upstream's auto-settle would leave alone (see `seatFollowsCaptainSettle`). Unsettle
      * only reaches seats that are settled, so a seat that never settled keeps upstream's automatic
      * settlement. A seat whose thread was never created, or an archived one, is left alone.
      */
@@ -156,11 +163,12 @@ export const layer = Layer.effect(
       occurrence: string,
     ) {
       let moved = false;
+      const nowMs = DateTime.toEpochMillis(yield* DateTime.now);
       for (const member of instance.members) {
         const seat = yield* getThreadProjectionIfPresent(threads, member.threadId);
         if (seat === null || seat.thread.archivedAt !== null) continue;
         const settled = seat.thread.settledOverride === "settled";
-        if (to === "settle" ? settled || seatIsBusy(seat) : !settled) continue;
+        if (to === "settle" ? !seatFollowsCaptainSettle(seat, nowMs) : !settled) continue;
         const commandId = seatCommandId(
           captainThreadId,
           instance,

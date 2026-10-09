@@ -13,8 +13,8 @@ import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
-import { FetchHttpClient } from "effect/unstable/http";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { FetchHttpClient } from "effect/http";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import {
@@ -908,144 +908,143 @@ it.effect(
     }),
 );
 
-for (const deliveredBeforeClosure of [true, false]) {
-  it.effect(
-    `receipts a human lifecycle notice with retained terminal history (ask delivered=${deliveredBeforeClosure})`,
-    () =>
-      Effect.gen(function* () {
-        const database = NodeSqliteClient.layer({ filename: ":memory:" });
-        const ledger = ledgerLayer.pipe(Layer.provide(database));
-        const send = sendLayer.pipe(
-          Layer.provide(peerDirectoryNoneLayer),
-          Layer.provide(ledger),
-          Layer.provide(database),
-        );
-        const transport = deliveryTransportLive.pipe(
-          Layer.provide(FetchHttpClient.layer),
-          Layer.provide(Layer.mock(PeerRegistryService)({})),
-          Layer.provide(database),
-          Layer.provide(Layer.mock(ThreadManagementService)({})),
-          Layer.provide(Layer.mock(OrchestratorV2)({})),
-          Layer.provide(Layer.mock(EffectOutboxV2)({ listByCommandId: () => Effect.succeed([]) })),
-        );
-        const worker = deliveryWorkerLayerWithHooks(false).pipe(
-          Layer.provide(ledger),
-          Layer.provide(database),
-          Layer.provide(transport),
-          Layer.provide(
-            Layer.succeed(
-              A2ADeliveryHooks,
-              A2ADeliveryHooks.of({ afterTransportSuccess: () => Effect.void }),
-            ),
+it.effect.each([true, false])(
+  "receipts a human lifecycle notice with retained terminal history (ask delivered=%s)",
+  (deliveredBeforeClosure) =>
+    Effect.gen(function* () {
+      const database = NodeSqliteClient.layer({ filename: ":memory:" });
+      const ledger = ledgerLayer.pipe(Layer.provide(database));
+      const send = sendLayer.pipe(
+        Layer.provide(peerDirectoryNoneLayer),
+        Layer.provide(ledger),
+        Layer.provide(database),
+      );
+      const transport = deliveryTransportLive.pipe(
+        Layer.provide(FetchHttpClient.layer),
+        Layer.provide(Layer.mock(PeerRegistryService)({})),
+        Layer.provide(database),
+        Layer.provide(Layer.mock(ThreadManagementService)({})),
+        Layer.provide(Layer.mock(OrchestratorV2)({})),
+        Layer.provide(Layer.mock(EffectOutboxV2)({ listByCommandId: () => Effect.succeed([]) })),
+      );
+      const worker = deliveryWorkerLayerWithHooks(false).pipe(
+        Layer.provide(ledger),
+        Layer.provide(database),
+        Layer.provide(transport),
+        Layer.provide(
+          Layer.succeed(
+            A2ADeliveryHooks,
+            A2ADeliveryHooks.of({ afterTransportSuccess: () => Effect.void }),
           ),
-        );
-        const layer = Layer.mergeAll(database, ledger, send, transport, worker);
+        ),
+      );
+      const layer = Layer.mergeAll(database, ledger, send, transport, worker);
 
-        yield* Effect.gen(function* () {
-          yield* runJ5A2AMigrations();
-          const ledgerService = yield* A2ALedger;
-          const sendService = yield* A2ASendService;
-          const deliveryWorker = yield* A2ADeliveryWorker;
-          const sql = yield* SqlClient.SqlClient;
-          const projectId = LedgerProjectId.make("project:delivery:human-lifecycle");
-          const noticeMessageId = LedgerMessageId.make("message:delivery:human-lifecycle");
-          const correlationId = CorrelationId.make("correlation:delivery:human-lifecycle");
-          yield* ledgerService.ensureProject({ projectId: projectId, createdAt: timestamp });
-          yield* join(projectId, sender, "human-lifecycle-sender");
-          yield* sql`
+      yield* Effect.gen(function* () {
+        yield* runJ5A2AMigrations();
+        const ledgerService = yield* A2ALedger;
+        const sendService = yield* A2ASendService;
+        const deliveryWorker = yield* A2ADeliveryWorker;
+        const sql = yield* SqlClient.SqlClient;
+        const projectId = LedgerProjectId.make("project:delivery:human-lifecycle");
+        const noticeMessageId = LedgerMessageId.make("message:delivery:human-lifecycle");
+        const correlationId = CorrelationId.make("correlation:delivery:human-lifecycle");
+        yield* ledgerService.ensureProject({ projectId: projectId, createdAt: timestamp });
+        yield* join(projectId, sender, "human-lifecycle-sender");
+        yield* sql`
         INSERT INTO j5_a2a_human_person (person_id, is_local_operator, created_at)
         VALUES (${person.id}, 1, ${timestamp})
       `;
-          const opened = yield* sendService.send({
-            commandId: CommCommandId.make("command:delivery:human-lifecycle:open"),
-            senderThreadId: sender.threadId,
-            to: person.id,
-            message: "This person-addressed obligation will be dropped loudly.",
-            expectReply: true,
-            intent: "Prove lifecycle notices stay non-actionable",
-            urgency: "soon",
-            acceptedAt: timestamp,
-          });
-          if (deliveredBeforeClosure)
-            assert.equal((yield* deliveryWorker.runOnce)?.state, "delivered");
-          yield* ledgerService.appendEvents({
-            commandId: CommCommandId.make("command:delivery:human-lifecycle:drop"),
+        const opened = yield* sendService.send({
+          commandId: CommCommandId.make("command:delivery:human-lifecycle:open"),
+          senderThreadId: sender.threadId,
+          to: person.id,
+          message: "This person-addressed obligation will be dropped loudly.",
+          expectReply: true,
+          intent: "Prove lifecycle notices stay non-actionable",
+          urgency: "soon",
+          acceptedAt: timestamp,
+        });
+        if (deliveredBeforeClosure)
+          assert.equal((yield* deliveryWorker.runOnce)?.state, "delivered");
+        yield* ledgerService.appendEvents({
+          commandId: CommCommandId.make("command:delivery:human-lifecycle:drop"),
+          projectId,
+          acceptedAt: timestamp,
+          events: [
+            {
+              kind: "exchange.dropped",
+              sender: sender.id,
+              receiver: person.id,
+              exchangeId: opened.exchangeId!,
+              correlationId,
+              payload: {
+                disposition: "sender-retired",
+                cause: {
+                  kind: "participant-archived",
+                  participantId: sender.id,
+                  projectId: projectId,
+                },
+                facts: {
+                  replyRequired: false,
+                  retryAllowed: false,
+                  replacementRequired: false,
+                },
+                noticeMessageId,
+              },
+              createdAt: timestamp,
+            },
+            {
+              kind: "message.sent",
+              sender: LIFECYCLE_PARTICIPANT_ID,
+              receiver: person.id,
+              exchangeId: opened.exchangeId!,
+              correlationId,
+              payload: {
+                messageId: noticeMessageId,
+                text: "The exchange was dropped because its agent sender retired from A2A.",
+                originProjectId: projectId,
+                receiverProjectId: projectId,
+                exchangeRole: "terminal_notice",
+                envelopeChannel: "lifecycle_notice",
+              },
+              createdAt: timestamp,
+            },
+          ],
+        });
+
+        if (!deliveredBeforeClosure) {
+          yield* ledgerService.append({
+            commandId: CommCommandId.make("human-lifecycle:cancel-ask"),
             projectId,
             acceptedAt: timestamp,
-            events: [
-              {
-                kind: "exchange.dropped",
-                sender: sender.id,
-                receiver: person.id,
-                exchangeId: opened.exchangeId!,
-                correlationId,
-                payload: {
-                  disposition: "sender-retired",
-                  cause: {
-                    kind: "participant-archived",
-                    participantId: sender.id,
-                    projectId: projectId,
-                  },
-                  facts: {
-                    replyRequired: false,
-                    retryAllowed: false,
-                    replacementRequired: false,
-                  },
-                  noticeMessageId,
-                },
-                createdAt: timestamp,
-              },
-              {
-                kind: "message.sent",
-                sender: LIFECYCLE_PARTICIPANT_ID,
-                receiver: person.id,
-                exchangeId: opened.exchangeId!,
-                correlationId,
-                payload: {
-                  messageId: noticeMessageId,
-                  text: "The exchange was dropped because its agent sender retired from A2A.",
-                  originProjectId: projectId,
-                  receiverProjectId: projectId,
-                  exchangeRole: "terminal_notice",
-                  envelopeChannel: "lifecycle_notice",
-                },
-                createdAt: timestamp,
-              },
-            ],
+            event: {
+              kind: "message.cancelled",
+              sender: null,
+              receiver: person.id,
+              exchangeId: null,
+              correlationId: null,
+              payload: { messageId: opened.messageId, reason: "Asker archived before delivery." },
+              createdAt: timestamp,
+            },
           });
-
-          if (!deliveredBeforeClosure) {
-            yield* ledgerService.append({
-              commandId: CommCommandId.make("human-lifecycle:cancel-ask"),
-              projectId,
-              acceptedAt: timestamp,
-              event: {
-                kind: "message.cancelled",
-                sender: null,
-                receiver: person.id,
-                exchangeId: null,
-                correlationId: null,
-                payload: { messageId: opened.messageId, reason: "Asker archived before delivery." },
-                createdAt: timestamp,
-              },
-            });
-          }
-          const delivery = yield* deliveryWorker.runOnce;
-          assert.equal(delivery?.state, "delivered");
-          const rawRows = yield* sql<{ readonly count: number }>`
+        }
+        const delivery = yield* deliveryWorker.runOnce;
+        assert.equal(delivery?.state, "delivered");
+        const rawRows = yield* sql<{ readonly count: number }>`
         SELECT COUNT(*) AS count
         FROM j5_a2a_human_inbox_data
         WHERE origin_project_id = ${projectId}
       `;
-          const inboxRows = yield* sql<{
-            readonly cause_participant_id: string;
-            readonly replacement_required: number;
-            readonly reply_required: number;
-            readonly retry_allowed: number;
-            readonly status: string;
-            readonly terminal_disposition: string | null;
-            readonly terminal_notice_message_id: string | null;
-          }>`
+        const inboxRows = yield* sql<{
+          readonly cause_participant_id: string;
+          readonly replacement_required: number;
+          readonly reply_required: number;
+          readonly retry_allowed: number;
+          readonly status: string;
+          readonly terminal_disposition: string | null;
+          readonly terminal_notice_message_id: string | null;
+        }>`
         SELECT
           status,
           terminal_disposition,
@@ -1057,31 +1056,31 @@ for (const deliveredBeforeClosure of [true, false]) {
         FROM j5_a2a_human_inbox
         WHERE person_id = ${person.id} AND exchange_id = ${opened.exchangeId!}
       `;
-          const receipt = yield* sql<{ readonly status: string }>`
+        const receipt = yield* sql<{ readonly status: string }>`
         SELECT status
         FROM j5_a2a_delivery
         WHERE message_id = ${noticeMessageId}
       `;
-          assert.deepStrictEqual(rawRows, [{ count: deliveredBeforeClosure ? 1 : 0 }]);
-          assert.deepStrictEqual(inboxRows, [
-            {
-              cause_participant_id: sender.id,
-              replacement_required: 0,
-              reply_required: 0,
-              retry_allowed: 0,
-              status: "dropped",
-              terminal_disposition: "sender-retired",
-              terminal_notice_message_id: noticeMessageId,
-            },
-          ]);
-          assert.deepStrictEqual(receipt, [{ status: "delivered" }]);
-        }).pipe(Effect.provide(layer));
-      }),
-  );
-}
+        assert.deepStrictEqual(rawRows, [{ count: deliveredBeforeClosure ? 1 : 0 }]);
+        assert.deepStrictEqual(inboxRows, [
+          {
+            cause_participant_id: sender.id,
+            replacement_required: 0,
+            reply_required: 0,
+            retry_allowed: 0,
+            status: "dropped",
+            terminal_disposition: "sender-retired",
+            terminal_notice_message_id: noticeMessageId,
+          },
+        ]);
+        assert.deepStrictEqual(receipt, [{ status: "delivered" }]);
+      }).pipe(Effect.provide(layer));
+    }),
+);
 
-for (const outcome of ["cancelled", "delivered"] as const) {
-  it.effect(`reports the confirmed transport outcome after concurrent archive (${outcome})`, () =>
+it.effect.each(["cancelled", "delivered"] as const)(
+  "reports the confirmed transport outcome after concurrent archive (%s)",
+  (outcome) =>
     Effect.gen(function* () {
       const afterTransport = yield* Ref.make<Effect.Effect<void, A2ADeliveryHookError>>(
         Effect.void,
@@ -1143,8 +1142,7 @@ for (const outcome of ["cancelled", "delivered"] as const) {
         ),
       );
     }),
-  );
-}
+);
 
 it.effect(
   "records a peer-accepted delivery as delivered even if the sender retired during the call",

@@ -15,6 +15,7 @@ import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as PairRouteImport } from './routes/pair'
 import { Route as InboxRouteImport } from './routes/inbox'
 import { Route as FleetRouteImport } from './routes/fleet'
+import { Route as ConnectAgentRouteImport } from './routes/connect-agent'
 import { Route as ConnectRouteImport } from './routes/connect'
 import { Route as ArtifactsRouteImport } from './routes/artifacts'
 import { Route as ChatRouteImport } from './routes/_chat'
@@ -68,6 +69,11 @@ const InboxRoute = InboxRouteImport.update({
 const FleetRoute = FleetRouteImport.update({
   id: '/fleet',
   path: '/fleet',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ConnectAgentRoute = ConnectAgentRouteImport.update({
+  id: '/connect-agent',
+  path: '/connect-agent',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ConnectRoute = ConnectRouteImport.update({
@@ -196,6 +202,7 @@ export interface FileRoutesByFullPath {
   '/': typeof ChatIndexRoute
   '/artifacts': typeof ArtifactsRoute
   '/connect': typeof ConnectRoute
+  '/connect-agent': typeof ConnectAgentRoute
   '/fleet': typeof FleetRoute
   '/inbox': typeof InboxRoute
   '/pair': typeof PairRoute
@@ -226,6 +233,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/artifacts': typeof ArtifactsRoute
   '/connect': typeof ConnectRoute
+  '/connect-agent': typeof ConnectAgentRoute
   '/fleet': typeof FleetRoute
   '/inbox': typeof InboxRoute
   '/pair': typeof PairRoute
@@ -259,6 +267,7 @@ export interface FileRoutesById {
   '/_chat': typeof ChatRouteWithChildren
   '/artifacts': typeof ArtifactsRoute
   '/connect': typeof ConnectRoute
+  '/connect-agent': typeof ConnectAgentRoute
   '/fleet': typeof FleetRoute
   '/inbox': typeof InboxRoute
   '/pair': typeof PairRoute
@@ -293,6 +302,7 @@ export interface FileRouteTypes {
     | '/'
     | '/artifacts'
     | '/connect'
+    | '/connect-agent'
     | '/fleet'
     | '/inbox'
     | '/pair'
@@ -323,6 +333,7 @@ export interface FileRouteTypes {
   to:
     | '/artifacts'
     | '/connect'
+    | '/connect-agent'
     | '/fleet'
     | '/inbox'
     | '/pair'
@@ -355,6 +366,7 @@ export interface FileRouteTypes {
     | '/_chat'
     | '/artifacts'
     | '/connect'
+    | '/connect-agent'
     | '/fleet'
     | '/inbox'
     | '/pair'
@@ -388,6 +400,7 @@ export interface RootRouteChildren {
   ChatRoute: typeof ChatRouteWithChildren
   ArtifactsRoute: typeof ArtifactsRoute
   ConnectRoute: typeof ConnectRoute
+  ConnectAgentRoute: typeof ConnectAgentRoute
   FleetRoute: typeof FleetRoute
   InboxRoute: typeof InboxRoute
   PairRoute: typeof PairRoute
@@ -439,6 +452,13 @@ declare module '@tanstack/react-router' {
       path: '/fleet'
       fullPath: '/fleet'
       preLoaderRoute: typeof FleetRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/connect-agent': {
+      id: '/connect-agent'
+      path: '/connect-agent'
+      fullPath: '/connect-agent'
+      preLoaderRoute: typeof ConnectAgentRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/connect': {
@@ -674,6 +694,7 @@ const rootRouteChildren: RootRouteChildren = {
   ChatRoute: ChatRouteWithChildren,
   ArtifactsRoute: ArtifactsRoute,
   ConnectRoute: ConnectRoute,
+  ConnectAgentRoute: ConnectAgentRoute,
   FleetRoute: FleetRoute,
   InboxRoute: InboxRoute,
   PairRoute: PairRoute,

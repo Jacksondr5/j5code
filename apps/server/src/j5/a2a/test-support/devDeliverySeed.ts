@@ -6,9 +6,12 @@ import * as ProjectService from "../../../project/ProjectService.ts";
  * Dev-only disposable A2A delivery seed support.
  *
  * A6 multi-statement-truncation lesson: never seed this flow with a raw
- * multi-statement SQL string. Each scenario's durable state uses production
- * services in one transaction, so it either has a complete receipt or rolls
- * back. Run only while the target T3 server is stopped; this process owns the
+ * multi-statement SQL string. Each scenario's durable state is written by
+ * production services. A scenario is not one transaction: the orchestrator's
+ * terminal-run reactor takes a thread's lock and then reads the database, so
+ * holding a transaction across a dispatch to that thread deadlocks. A run
+ * that fails part way leaves partial rows; discard the disposable home.
+ * Run only while the target T3 server is stopped; this process owns the
  * one database accessor and exits completely after printing its receipt.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -31,8 +34,9 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
-import { FetchHttpClient } from "effect/unstable/http";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { FetchHttpClient } from "effect/http";
+import * as SqlClient from "effect/sql/SqlClient";
+import { isSqlError } from "effect/sql/SqlError";
 import * as NodeOS from "node:os";
 
 import { EnvironmentAuth } from "../../../auth/EnvironmentAuth.ts";
@@ -41,8 +45,8 @@ import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
 import { ServerConfig } from "../../../config.ts";
 import { layer as mcpSessionRegistryTestLayer } from "../../../mcp/McpSessionRegistry.testkit.ts";
 import {
-  OrchestrationV2EventSinkLayerLive,
-  OrchestrationV2LayerLive as UpstreamOrchestrationV2LayerLive,
+  layerEventSink as OrchestrationV2EventSinkLayerLive,
+  layer as UpstreamOrchestrationV2LayerLive,
 } from "../../../orchestration-v2/runtimeLayer.ts";
 import {
   EffectOutboxV2,
@@ -53,11 +57,11 @@ import {
   latestActiveRun,
   ThreadManagementService,
 } from "../../../orchestration-v2/ThreadManagementService.ts";
-import { makeSqlitePersistenceLive } from "../../../persistence/Layers/Sqlite.ts";
-import type { ProviderAdapterV2Shape } from "../../../orchestration-v2/ProviderAdapter.ts";
+import { layerFromPath as makeSqlitePersistenceLive } from "../../../persistence/Sqlite.ts";
+import type { ProviderAdapterV2Shape } from "@t3tools/provider-core/server/ProviderAdapter";
 import { CodexProviderCapabilitiesV2 } from "../../../orchestration-v2/Adapters/CodexAdapterV2.ts";
-import type { ProviderInstance } from "../../../provider/ProviderDriver.ts";
-import { ProviderInstanceRegistry } from "../../../provider/Services/ProviderInstanceRegistry.ts";
+import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
+import { ProviderInstanceRegistry } from "../../../provider/ProviderInstanceRegistry.ts";
 import { ServerSettingsService } from "../../../serverSettings.ts";
 import * as VcsDriverRegistry from "../../../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../../../vcs/VcsProcess.ts";
@@ -193,11 +197,6 @@ class DevDeliverySeedScenarioError extends Schema.TaggedError<DevDeliverySeedSce
   { name: Schema.String, cause: Schema.Defect() },
 ) {}
 
-class DevDeliverySeedControlledRollbackError extends Schema.TaggedError<DevDeliverySeedControlledRollbackError>()(
-  "DevDeliverySeedControlledRollbackError",
-  {},
-) {}
-
 const isDevDeliverySeedPreflightRollback = Schema.is(DevDeliverySeedPreflightRollback);
 const isDevDeliverySeedServerOffError = Schema.is(DevDeliverySeedServerOffError);
 
@@ -275,10 +274,11 @@ const databasePathFor = (path: Path.Path, baseDir: string) =>
 
 const seededId = (runId: string, suffix: string) => `${runId}:${suffix}`;
 
-const isDatabaseContention = (cause: unknown) =>
-  /SQLITE_BUSY|database is locked|database is busy/i.test(
-    `${String(cause)} ${cause instanceof Error ? String(cause.cause) : ""}`,
-  );
+/** SQLite reports a busy or locked database as a lock timeout, possibly wrapped by a service error. */
+const isDatabaseContention = (cause: unknown): boolean =>
+  isSqlError(cause)
+    ? cause.reason._tag === "LockTimeoutError"
+    : cause instanceof Error && isDatabaseContention(cause.cause);
 
 const unavailableAdapter: ProviderAdapterV2Shape = {
   instanceId: fakeProviderInstanceId,
@@ -322,7 +322,8 @@ const makeRuntimeLayer = (databasePath: string, baseDir: string) => {
     },
     displayName: "J5 disposable seed unavailable provider",
     enabled: false,
-    snapshot: {} as ProviderInstance["snapshot"],
+    // No supportedRuntimeModes: every runtime mode runs as stored.
+    snapshot: { getSnapshot: Effect.succeed({}) } as unknown as ProviderInstance["snapshot"],
     orchestrationAdapter: unavailableAdapter,
     textGeneration: {} as ProviderInstance["textGeneration"],
   };
@@ -436,12 +437,8 @@ const interruptActiveSeedRun = (input: {
     return active.id;
   });
 
-const atomicScenario = <A, E, R>(name: string, effect: Effect.Effect<A, E, R>) =>
-  Effect.flatMap(SqlClient.SqlClient, (sql) =>
-    sql
-      .withTransaction(effect)
-      .pipe(Effect.mapError((cause) => new DevDeliverySeedScenarioError({ name, cause }))),
-  );
+const scenario = <A, E, R>(name: string, effect: Effect.Effect<A, E, R>) =>
+  effect.pipe(Effect.mapError((cause) => new DevDeliverySeedScenarioError({ name, cause })));
 
 /**
  * Takes and rolls back a real production-ledger write before any scenario.
@@ -541,14 +538,13 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
         projectId: LedgerProjectId.make(seededId(runId, "server-off-preflight")),
         createdAt: now,
       });
-      // This is the production host-local registry bootstrap, deliberately outside
-      // a scenario transaction: it has no project or thread state and must exist
-      // before the real HumanInbox send/answer scenario can address a person.
+      // This is the production host-local registry bootstrap: it has no project or thread
+      // state and must exist before the real HumanInbox send/answer scenario can address a person.
       const localOperatorPersonId = yield* ensureLocalOperatorHumanPerson(
         yield* SqlClient.SqlClient,
       );
 
-      yield* atomicScenario(
+      yield* scenario(
         "bootstrap",
         Effect.gen(function* () {
           // The seed runs no project commands, so it writes the project row the ledger reads
@@ -601,7 +597,7 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
         }),
       );
 
-      const ta1 = yield* atomicScenario(
+      const ta1 = yield* scenario(
         "ta1-peer-exchange",
         Effect.gen(function* () {
           const result = yield* sender.send({
@@ -630,7 +626,7 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
         }),
       );
 
-      const ta2 = yield* atomicScenario(
+      const ta2 = yield* scenario(
         "ta2-human-answer",
         Effect.gen(function* () {
           const opened = yield* sender.send({
@@ -708,7 +704,7 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
         }),
       );
 
-      const ta3 = yield* atomicScenario(
+      const ta3 = yield* scenario(
         "ta3-silence",
         Effect.gen(function* () {
           const source = yield* sender.send({
@@ -754,7 +750,7 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
         }),
       );
 
-      const machineMessage = yield* atomicScenario(
+      const machineMessage = yield* scenario(
         "machine-message",
         Effect.gen(function* () {
           const { participant } = yield* machines.register({
@@ -787,7 +783,7 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
         }),
       );
 
-      const rawFutureEnvelope = yield* atomicScenario(
+      const rawFutureEnvelope = yield* scenario(
         "raw-future-envelope",
         Effect.gen(function* () {
           const messageId = LedgerMessageId.make(seededId(runId, "raw:future-envelope"));
@@ -828,7 +824,7 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
         }),
       );
 
-      const normalNonA2AContrast = yield* atomicScenario(
+      const normalNonA2AContrast = yield* scenario(
         "normal-non-a2a-contrast",
         Effect.gen(function* () {
           const messageId = MessageId.make(`message:mcp:${runId}:thread-send:contrast`);
@@ -936,55 +932,4 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
           : Effect.fail(new DevDeliverySeedServerOffError({ cause })),
       ),
     );
-  }).pipe(Effect.provide(NodeServices.layer));
-
-/** Test-only proof that nested production writes roll back as one durable scenario. */
-export const verifyDevDeliverySeedRollback = (requestedBaseDir: string) =>
-  Effect.gen(function* () {
-    const baseDir = yield* validateIsolatedBaseDir(requestedBaseDir);
-    const path = yield* Path.Path;
-    const crypto = yield* Crypto.Crypto;
-    const runId = `j5-a2a-rollback-${yield* crypto.randomUUIDv4}`;
-    const ledgerProjectId = LedgerProjectId.make(`ledger:${runId}`);
-    const senderId = ParticipantId.make(`agent:${runId}:sender`);
-    const senderThreadId = ThreadId.make(`thread:${runId}:sender`);
-    const createdAt = DateTime.formatIso(yield* DateTime.now);
-    const runtime = makeRuntimeLayer(databasePathFor(path, baseDir), baseDir);
-    return yield* Effect.gen(function* () {
-      const ledger = yield* A2ALedger;
-      const failedScenario = yield* Effect.exit(
-        atomicScenario(
-          "controlled-mid-scenario-failure",
-          Effect.gen(function* () {
-            yield* ledger.ensureProject({ projectId: ledgerProjectId, createdAt });
-            yield* ledger.appendEvents({
-              commandId: CommCommandId.make(seededId(runId, "membership")),
-              projectId: ledgerProjectId,
-              acceptedAt: createdAt,
-              events: [
-                {
-                  kind: "participant.joined",
-                  sender: null,
-                  receiver: senderId,
-                  exchangeId: null,
-                  correlationId: null,
-                  payload: {
-                    participant: { kind: "agent", id: senderId, threadId: senderThreadId },
-                  },
-                  createdAt,
-                },
-              ],
-            });
-            return yield* new DevDeliverySeedControlledRollbackError();
-          }),
-        ),
-      );
-      if (failedScenario._tag !== "Failure") {
-        return yield* Effect.die("Controlled rollback scenario unexpectedly committed.");
-      }
-      const squads = yield* ledger.listProjectLedgers();
-      if (squads.some((project) => project.id === ledgerProjectId)) {
-        return yield* Effect.die("Controlled rollback left durable A2A state behind.");
-      }
-    }).pipe(Effect.provide(runtime));
   }).pipe(Effect.provide(NodeServices.layer));

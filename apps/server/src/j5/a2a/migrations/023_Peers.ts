@@ -1,5 +1,5 @@
 import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 // A peer is another server this one exchanges agent messages with. One row per
 // peer environment: the origin this server reaches it at, the credential that

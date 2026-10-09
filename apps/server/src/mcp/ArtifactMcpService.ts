@@ -11,20 +11,20 @@ import * as Layer from "effect/Layer";
 
 import { ArtifactWorkspace } from "../j5/artifacts/ArtifactWorkspace.ts";
 import { ThreadManagementService } from "../orchestration-v2/ThreadManagementService.ts";
-import type { McpInvocationScope } from "./McpInvocationContext.ts";
+import type { McpThreadInvocationScope } from "./McpInvocationContext.ts";
 
 export class ArtifactMcpService extends Context.Service<
   ArtifactMcpService,
   {
     readonly list: (
-      scope: McpInvocationScope,
+      scope: McpThreadInvocationScope,
     ) => Effect.Effect<ArtifactListResponse, ArtifactMcpFailure>;
     readonly read: (
-      scope: McpInvocationScope,
+      scope: McpThreadInvocationScope,
       path: string,
     ) => Effect.Effect<ArtifactContent, ArtifactMcpFailure>;
     readonly write: (
-      scope: McpInvocationScope,
+      scope: McpThreadInvocationScope,
       input: ArtifactWriteInput,
     ) => Effect.Effect<ArtifactWriteResult, ArtifactMcpFailure>;
   }
@@ -40,7 +40,7 @@ const make = Effect.gen(function* () {
   const threadManagement = yield* ThreadManagementService;
 
   const projectIdFor = Effect.fn("ArtifactMcpService.projectIdFor")(function* (
-    scope: McpInvocationScope,
+    scope: McpThreadInvocationScope,
   ) {
     if (!scope.capabilities.has("artifacts")) {
       return yield* failure(
@@ -48,20 +48,21 @@ const make = Effect.gen(function* () {
         "This MCP credential does not grant artifact capabilities.",
       );
     }
+    const threadId = scope.thread.threadId;
     const projection = yield* threadManagement
-      .getThreadProjection(scope.threadId)
+      .getThreadProjection(threadId)
       .pipe(
         Effect.mapError((error) =>
           error._tag === "OrchestratorProjectionError"
-            ? failure("thread_not_found", `Thread '${scope.threadId}' was not found.`)
+            ? failure("thread_not_found", `Thread '${threadId}' was not found.`)
             : failure(
                 "operation_failed",
-                `Unable to read thread '${scope.threadId}': ${errorMessage(error)}`,
+                `Unable to read thread '${threadId}': ${errorMessage(error)}`,
               ),
         ),
       );
     if (projection.thread.deletedAt !== null) {
-      return yield* failure("thread_not_found", `Thread '${scope.threadId}' was not found.`);
+      return yield* failure("thread_not_found", `Thread '${threadId}' was not found.`);
     }
     return projection.thread.projectId;
   });

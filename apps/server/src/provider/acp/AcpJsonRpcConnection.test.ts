@@ -33,8 +33,9 @@ const mockRuntimeOptions = {
 } satisfies AcpSessionRuntime.AcpSessionRuntimeOptions;
 
 describe("AcpSessionRuntime", () => {
-  for (const setupMethod of ["session/new", "session/resume"] as const) {
-    it.effect(`buffers root metadata while ${setupMethod} startup is still pending`, () =>
+  it.effect.each(["session/new", "session/resume"] as const)(
+    "buffers root metadata while %s startup is still pending",
+    (setupMethod) =>
       Effect.gen(function* () {
         const setupReplied = yield* Deferred.make<void>();
         const allowStartup = yield* Deferred.make<void>();
@@ -91,8 +92,7 @@ describe("AcpSessionRuntime", () => {
           (yield* runtime.getConfigOptions).find((option) => option.category === "model"),
         ).toMatchObject({ currentValue: "gpt-5.4" });
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-    );
-  }
+  );
 
   it.effect("publishes model changes returned by a config request and live notifications", () =>
     Effect.gen(function* () {
@@ -1100,6 +1100,54 @@ describe("AcpSessionRuntime", () => {
             env: {
               T3_ACP_EMIT_INTERLEAVED_ASSISTANT_TOOL_CALLS: "1",
             },
+          },
+          cwd: process.cwd(),
+          clientInfo: { name: "t3-test", version: "0.0.0" },
+          authMethodId: "test",
+        }),
+      ),
+      Effect.scoped,
+      Effect.provide(NodeServices.layer),
+    ),
+  );
+
+  it.effect("keeps one answer when an earlier tool reports progress mid-stream", () =>
+    Effect.gen(function* () {
+      const runtime = yield* AcpSessionRuntime.AcpSessionRuntime;
+      yield* runtime.start();
+      yield* runtime.prompt({ prompt: [{ type: "text", text: "hi" }] });
+
+      const notes = Array.from(yield* Stream.runCollect(Stream.take(runtime.getEvents(), 9)));
+      // The coalesced progress tick emits nothing, and neither the completion
+      // nor a repeated one splits the markdown table across items.
+      expect(notes.map((note) => note._tag)).toEqual([
+        "ToolCallUpdated",
+        "AssistantItemStarted",
+        "ContentDelta",
+        "ContentDelta",
+        "ToolCallUpdated",
+        "ContentDelta",
+        "ToolCallUpdated",
+        "ContentDelta",
+        "AssistantItemCompleted",
+      ]);
+      const itemIds = new Set(
+        notes.flatMap((note) =>
+          note._tag === "ContentDelta" ||
+          note._tag === "AssistantItemStarted" ||
+          note._tag === "AssistantItemCompleted"
+            ? [note.itemId]
+            : [],
+        ),
+      );
+      expect(itemIds.size).toBe(1);
+    }).pipe(
+      Effect.provide(
+        AcpSessionRuntime.layer({
+          spawn: {
+            command: mockAgentCommand,
+            args: mockAgentArgs,
+            env: { T3_ACP_EMIT_BACKGROUND_TOOL_DURING_ANSWER: "1" },
           },
           cwd: process.cwd(),
           clientInfo: { name: "t3-test", version: "0.0.0" },

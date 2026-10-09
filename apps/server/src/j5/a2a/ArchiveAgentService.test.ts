@@ -227,14 +227,11 @@ const makeHarness = (options: HarnessOptions = {}) => {
     }),
     Layer.mock(ThreadManagementService)({
       getThreadProjection: () => Effect.succeed(projection()),
-      interruptThread: () => {
-        order.push("interrupt_requested");
-        return Effect.succeed({
-          type: "interrupt_requested",
-          run: projection().runs[0]!,
-          dispatch: { sequence: 1, storedEvents: [] },
-        });
+      dispatch: (command) => {
+        order.push(command.type === "thread.stop" ? "interrupt_requested" : command.type);
+        return Effect.succeed({ sequence: 1, storedEvents: [] });
       },
+      stopDelegatedTasks: () => Effect.void,
     }),
     Layer.mock(ThreadLifecycleService)({
       archive: () => {

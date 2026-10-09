@@ -6,7 +6,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   ThreadId,
-  type OrchestrationV2Command,
+  type OrchestrationV2ServerCommand,
   type OrchestrationV2ThreadProjection,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
@@ -25,7 +25,7 @@ import { McpInvocationContext } from "../../mcp/McpInvocationContext.ts";
 import { OrchestratorMcpService } from "../../mcp/OrchestratorMcpService.ts";
 import type { ThreadLaunchInput } from "../../orchestration-v2/ThreadLaunchService.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
-import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
+import { ProviderRegistry } from "../../provider/ProviderRegistry.ts";
 import { AgentCrewInstanceService } from "./AgentCrewInstanceService.ts";
 import { ArchiveCrewService } from "./ArchiveCrewService.ts";
 import { CrewProposalService } from "./CrewProposalService.ts";
@@ -114,9 +114,13 @@ it("refuses a choice git can't give, with the next step", () => {
 
 const invocation = {
   environmentId: EnvironmentId.make("environment:j5:spawn-workspace"),
-  threadId: ThreadId.make("thread:j5:spawn-workspace-caller"),
-  providerSessionId: "provider-session:j5:spawn-workspace",
-  providerInstanceId: ProviderInstanceId.make("codex"),
+  requestNamespace: "provider-session:j5:spawn-workspace",
+  thread: {
+    threadId: ThreadId.make("thread:j5:spawn-workspace-caller"),
+    providerSessionId: "provider-session:j5:spawn-workspace",
+    providerInstanceId: ProviderInstanceId.make("codex"),
+  },
+  client: undefined,
   capabilities: new Set(["orchestration"] as const),
   issuedAt: 1,
 };
@@ -147,13 +151,14 @@ const spawnHarness = (input: {
   /** Git as an agent's shell leaves it, served through upstream-style cached refs. */
   readonly liveCheckout?: Ref.Ref<FakeCheckout>;
   /** The durable command log; pass one from an earlier harness to model a restart. */
-  readonly commands?: Ref.Ref<ReadonlyArray<OrchestrationV2Command>>;
+  readonly commands?: Ref.Ref<ReadonlyArray<OrchestrationV2ServerCommand>>;
   /** Runs inside each thread.create before it lands, so a test can hold a start open. */
   readonly beforeCreate?: Effect.Effect<void>;
 }) =>
   Effect.gen(function* () {
     const log = yield* Ref.make<ReadonlyArray<string>>([]);
-    const commands = input.commands ?? (yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]));
+    const commands =
+      input.commands ?? (yield* Ref.make<ReadonlyArray<OrchestrationV2ServerCommand>>([]));
     const launches = yield* Ref.make<ReadonlyArray<ThreadLaunchInput>>([]);
     const failFacts = yield* Ref.make(false);
     const callerRow = {
@@ -162,7 +167,7 @@ const spawnHarness = (input: {
       participant: {
         kind: "agent" as const,
         id: callerParticipantId,
-        threadId: invocation.threadId,
+        threadId: invocation.thread.threadId,
       },
       archived: false,
       canReceiveMessage: true,
@@ -207,7 +212,20 @@ const spawnHarness = (input: {
       }),
       Layer.mock(ThreadManagementService)({
         getThreadProjection: (threadId) => Effect.succeed(callerThread(threadId)),
-        getThreadShell: () => Effect.succeed(null),
+        // The caller is mid-run, as upstream's tool access check requires; the child does not
+        // exist yet.
+        getThreadShell: (threadId) =>
+          Effect.succeed(
+            threadId === invocation.thread.threadId
+              ? ({
+                  ...callerThread(threadId).thread,
+                  providerInstanceId: invocation.thread.providerInstanceId,
+                  activeRunId: "run:j5:spawn-workspace-caller",
+                  archivedAt: null,
+                  deletedAt: null,
+                } as never)
+              : null,
+          ),
         dispatch: (command) =>
           Effect.gen(function* () {
             if (command.type === "thread.create" && input.beforeCreate) yield* input.beforeCreate;
@@ -219,8 +237,8 @@ const spawnHarness = (input: {
       Layer.mock(OrchestratorMcpService)({
         capabilities: () =>
           Effect.succeed({
-            parentThreadId: invocation.threadId,
-            inheritedProviderInstanceId: invocation.providerInstanceId,
+            parentThreadId: invocation.thread.threadId,
+            inheritedProviderInstanceId: invocation.thread.providerInstanceId,
             inheritedModel: "gpt-5.6-sol",
             runtimeMode: "full-access",
             interactionMode: "default",

@@ -1,0 +1,65 @@
+import {
+  J5AgentPersonaRpcGroup,
+  J5ArtifactRpcGroup,
+  J5SkillCatalogRpcGroup,
+  J5SkillLinkRpcGroup,
+  SkillLinkError,
+} from "@t3tools/contracts";
+import { J5PlaybookRpcGroup } from "@t3tools/contracts/j5";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import type * as RpcGroup from "effect/rpc/RpcGroup";
+
+import * as ProjectService from "../project/ProjectService.ts";
+import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
+import { makeAgentPersonaRpcHandlers } from "./agents/agentPersonaRpc.ts";
+import { makeArtifactRpcHandlers } from "./artifacts/artifactRpc.ts";
+import type { ArtifactWorkspace } from "./artifacts/ArtifactWorkspace.ts";
+import { PlaybookStore } from "./playbooks/PlaybookStore.ts";
+import { makePlaybookRpcHandlers } from "./playbooks/playbookRpc.ts";
+import { makeSkillCatalogRpcHandlers } from "./skills/skillCatalogRpc.ts";
+import { makeSkillLinkRpcHandlers } from "./skills/skillLinkRpc.ts";
+
+/** J5's own WebSocket RPCs: the groups `WsRpcGroup` merges into upstream's in contracts. */
+const J5WsRpcGroup = J5AgentPersonaRpcGroup.merge(
+  J5ArtifactRpcGroup,
+  J5SkillCatalogRpcGroup,
+  J5SkillLinkRpcGroup,
+  J5PlaybookRpcGroup,
+);
+
+/** Every J5 RPC method, for `ws.ts` to leave out of the group upstream's handlers are typed by. */
+export const J5_WS_RPC_METHODS = [...J5WsRpcGroup.requests.keys()] as ReadonlyArray<
+  RpcGroup.Rpcs<typeof J5WsRpcGroup>["_tag"]
+>;
+
+/**
+ * The handlers of J5's RPCs, as their own layer beside upstream's in `ws.ts`. A handler is
+ * looked up by method, so the socket serves both from one group. They are built apart because
+ * one handler record for upstream's RPCs and J5's together exceeds TypeScript's type
+ * instantiation limit.
+ */
+export const layerJ5WsRpc = (artifactWorkspace: ArtifactWorkspace["Service"]) =>
+  J5WsRpcGroup.toLayer(
+    Effect.gen(function* () {
+      const projects = yield* ProjectService.ProjectService;
+      const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
+      return J5WsRpcGroup.of({
+        ...makeArtifactRpcHandlers({ projects, artifacts: artifactWorkspace }),
+        ...(yield* makeAgentPersonaRpcHandlers({
+          providers: providerRegistry.getProviders,
+        })),
+        ...(yield* makeSkillCatalogRpcHandlers()),
+        ...(yield* makeSkillLinkRpcHandlers({
+          getProjectRoot: (projectId) =>
+            projects.getById(projectId).pipe(
+              Effect.map((project) =>
+                Option.isSome(project) ? project.value.workspaceRoot : undefined,
+              ),
+              Effect.mapError((cause) => new SkillLinkError({ message: String(cause) })),
+            ),
+        })),
+        ...(yield* makePlaybookRpcHandlers({ store: yield* PlaybookStore })),
+      });
+    }),
+  );

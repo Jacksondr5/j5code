@@ -26,7 +26,7 @@ import {
   HttpClientError,
   HttpClientResponse,
   type HttpClientRequest,
-} from "effect/unstable/http";
+} from "effect/http";
 
 import { EventSinkV2 } from "../../orchestration-v2/EventSink.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";

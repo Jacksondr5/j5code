@@ -9,7 +9,7 @@ import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
@@ -888,53 +888,51 @@ it.effect(
     }),
 );
 
-for (const directFirst of [true, false]) {
-  it.effect(
-    `records one archive fact per transition in both entry-point orders (direct first=${directFirst})`,
-    () =>
-      Effect.gen(function* () {
-        const notices = yield* Ref.make<ReadonlyArray<DeliveredNotice>>([]);
-        yield* Effect.gen(function* () {
-          yield* runJ5A2AMigrations();
-          const projectId = LedgerProjectId.make(`project:archive-order:${directFirst}`);
-          yield* createProjectLedger(projectId);
-          yield* join(projectId, sender, "order:sender");
-          const lifecycle = yield* A2ALifecycleService;
-          const sql = yield* SqlClient.SqlClient;
-          for (const cycle of [0, 1]) {
-            const event = retiredThreadEvent("thread.archived", sender.threadId, cycle * 2 + 1);
-            const direct = lifecycle.archiveParticipant({ participantId: sender.id, archivedAt });
-            if (directFirst) {
-              yield* direct;
-              yield* lifecycle.handleStoredEvent(event);
-            } else {
-              yield* lifecycle.handleStoredEvent(event);
-              yield* direct;
-            }
+it.effect.each([true, false])(
+  "records one archive fact per transition in both entry-point orders (direct first=%s)",
+  (directFirst) =>
+    Effect.gen(function* () {
+      const notices = yield* Ref.make<ReadonlyArray<DeliveredNotice>>([]);
+      yield* Effect.gen(function* () {
+        yield* runJ5A2AMigrations();
+        const projectId = LedgerProjectId.make(`project:archive-order:${directFirst}`);
+        yield* createProjectLedger(projectId);
+        yield* join(projectId, sender, "order:sender");
+        const lifecycle = yield* A2ALifecycleService;
+        const sql = yield* SqlClient.SqlClient;
+        for (const cycle of [0, 1]) {
+          const event = retiredThreadEvent("thread.archived", sender.threadId, cycle * 2 + 1);
+          const direct = lifecycle.archiveParticipant({ participantId: sender.id, archivedAt });
+          if (directFirst) {
             yield* direct;
             yield* lifecycle.handleStoredEvent(event);
-            assert.deepStrictEqual(
-              yield* sql`SELECT count(*) AS count FROM j5_a2a_comm_event WHERE kind = 'participant.archived'`,
-              [{ count: cycle + 1 }],
-            );
-            yield* lifecycle.handleStoredEvent(
-              retiredThreadEvent("thread.unarchived", sender.threadId, cycle * 2 + 2),
-            );
+          } else {
             yield* lifecycle.handleStoredEvent(event);
-            assert.deepStrictEqual(
-              yield* sql`SELECT archived_at FROM j5_a2a_membership WHERE participant_id = ${sender.id}`,
-              [{ archived_at: null }],
-            );
+            yield* direct;
           }
-          yield* (yield* A2ALedger).rebuildMembership(projectId);
+          yield* direct;
+          yield* lifecycle.handleStoredEvent(event);
+          assert.deepStrictEqual(
+            yield* sql`SELECT count(*) AS count FROM j5_a2a_comm_event WHERE kind = 'participant.archived'`,
+            [{ count: cycle + 1 }],
+          );
+          yield* lifecycle.handleStoredEvent(
+            retiredThreadEvent("thread.unarchived", sender.threadId, cycle * 2 + 2),
+          );
+          yield* lifecycle.handleStoredEvent(event);
           assert.deepStrictEqual(
             yield* sql`SELECT archived_at FROM j5_a2a_membership WHERE participant_id = ${sender.id}`,
             [{ archived_at: null }],
           );
-        }).pipe(Effect.provide(makeTestLayer(notices)));
-      }),
-  );
-}
+        }
+        yield* (yield* A2ALedger).rebuildMembership(projectId);
+        assert.deepStrictEqual(
+          yield* sql`SELECT archived_at FROM j5_a2a_membership WHERE participant_id = ${sender.id}`,
+          [{ archived_at: null }],
+        );
+      }).pipe(Effect.provide(makeTestLayer(notices)));
+    }),
+);
 
 it.effect("addresses drop notices to a counterparty on a peer server in both directions", () =>
   Effect.gen(function* () {

@@ -1,5 +1,9 @@
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
-import type { ArtifactContent, ArtifactEntry } from "@t3tools/contracts";
+import {
+  AuthOrchestrationOperateScope,
+  type ArtifactContent,
+  type ArtifactEntry,
+} from "@t3tools/contracts";
 import {
   FileIcon,
   FileImageIcon,
@@ -18,6 +22,7 @@ import { ScrollArea } from "../../components/ui/scroll-area";
 import { SidebarInset } from "../../components/ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip";
 import { WorkspaceBreadcrumb, WorkspaceBreadcrumbItem } from "../../components/WorkspaceBreadcrumb";
+import { WorkspacePageHeader } from "../../components/WorkspacePageHeader";
 import { requestConfirmDialog } from "../../confirmDialog";
 import { isElectron } from "../../env";
 import { type ResizableWidthHandlers, useResizableWidth } from "../../hooks/useResizableWidth";
@@ -25,8 +30,7 @@ import { cn } from "../../lib/utils";
 import { useEnvironments } from "../../state/environments";
 import { useProjects } from "../../state/entities";
 import { useEnvironmentQuery } from "../../state/query";
-import { usePreparedConnection } from "../../state/session";
-import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "../../workspaceTitlebar";
+import { useEnvironmentScope, usePreparedConnection } from "../../state/session";
 import { artifactEnvironment } from "./artifactChanges";
 import { listArtifacts, readArtifact, deleteArtifact } from "./artifactClient";
 import { artifactPreviewRevision } from "./artifactPreview.logic";
@@ -145,6 +149,7 @@ export function ArtifactsPage({
     [embedded, projects, selectedProjectKey],
   );
   const selectedEnvironmentId = selectedProject?.environmentId ?? null;
+  const canDelete = useEnvironmentScope(selectedEnvironmentId, AuthOrchestrationOperateScope);
   const selectedProjectId = selectedProject?.id ?? null;
   const selectedWorkspaceRoot = selectedProject?.workspaceRoot;
   const selectedKey = selectedProject === null ? null : projectKey(selectedProject);
@@ -313,15 +318,7 @@ export function ArtifactsPage({
     >
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {!embedded ? (
-          <header
-            className={cn(
-              "flex shrink-0 items-center gap-3 px-3 sm:px-5",
-              isElectron
-                ? "drag-region h-[52px] wco:h-[env(titlebar-area-height)] wco:pr-[calc(100vw-env(titlebar-area-width)-env(titlebar-area-x)+1em)]"
-                : "h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)]",
-              COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
-            )}
-          >
+          <WorkspacePageHeader electron={isElectron}>
             <WorkspaceBreadcrumb ariaLabel="Artifacts breadcrumb">
               <WorkspaceBreadcrumbItem current>Artifacts</WorkspaceBreadcrumbItem>
             </WorkspaceBreadcrumb>
@@ -337,7 +334,7 @@ export function ArtifactsPage({
                 className={cn("size-3.5", listState === "loading" && "animate-spin")}
               />
             </Button>
-          </header>
+          </WorkspacePageHeader>
         ) : null}
 
         <div
@@ -480,7 +477,7 @@ export function ArtifactsPage({
                   render={
                     <Button
                       aria-label="Delete artifact permanently"
-                      disabled={selectedPath === null || deleting}
+                      disabled={selectedPath === null || deleting || !canDelete}
                       onClick={() => void deleteSelectedArtifact()}
                       size="icon-micro"
                       variant="ghost"

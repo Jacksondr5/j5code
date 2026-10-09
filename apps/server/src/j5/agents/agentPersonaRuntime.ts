@@ -1,6 +1,6 @@
 import * as Effect from "effect/Effect";
 import { isAgentPersonaAuthorityPolicy, type OrchestrationV2AppThread } from "@t3tools/contracts";
-import { ProviderAdapterV2RuntimePolicy } from "../../orchestration-v2/ProviderAdapter.ts";
+import { ProviderAdapterV2RuntimePolicy } from "@t3tools/provider-core/server/ProviderAdapter";
 import { getBuiltInAgentPersonaInstructions } from "./agentPersonaPrompts.ts";
 import {
   AgentPersonaLibraryError,

@@ -24,11 +24,15 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
-import type { Tool } from "effect/unstable/ai";
+import type { Tool } from "effect/ai";
 import { stringify } from "yaml";
 
 import { ServerConfig } from "../../config.ts";
-import { McpInvocationContext, type McpInvocationScope } from "../../mcp/McpInvocationContext.ts";
+import {
+  McpInvocationContext,
+  type McpThreadInvocationScope,
+} from "../../mcp/McpInvocationContext.ts";
+import { liveThreadShell } from "../../mcp/McpToolAccess.testkit.ts";
 import { OrchestratorMcpService } from "../../mcp/OrchestratorMcpService.ts";
 import { OrchestratorV2 } from "../../orchestration-v2/Orchestrator.ts";
 import { emptyProjection } from "../../orchestration-v2/ProjectionStore.ts";
@@ -59,13 +63,16 @@ const decodeFailure = Schema.decodeUnknownEffect(PlaybookError);
 const decodeListed = Schema.decodeUnknownEffect(PlaybookDiscovery);
 const decodeRead = Schema.decodeUnknownEffect(PlaybookReadResponse);
 type PlaybookToolName = (typeof playbookTools)[number]["name"];
-const scopeFor = (threadId = owner, providerSessionId = "session:first"): McpInvocationScope => ({
+const scopeFor = (
+  threadId = owner,
+  providerSessionId = "session:first",
+): McpThreadInvocationScope => ({
   environmentId: EnvironmentId.make("environment:playbook-mcp"),
-  threadId,
-  providerSessionId,
-  providerInstanceId: ProviderInstanceId.make("codex"),
   capabilities: new Set(["orchestration"]),
   issuedAt: 1,
+  requestNamespace: providerSessionId,
+  thread: { threadId, providerSessionId, providerInstanceId: ProviderInstanceId.make("codex") },
+  client: undefined,
 });
 const sample = (title: string) => ({
   title,
@@ -96,6 +103,8 @@ const fixture = Effect.gen(function* () {
   const services = Layer.mergeAll(
     Layer.succeed(PlaybookStore, store),
     Layer.mock(ThreadManagementService)({
+      // The access gate reads the calling thread before each tool.
+      getThreadShell: (threadId) => Effect.succeed(liveThreadShell(threadId)),
       getThreadProjection: (threadId) =>
         Effect.succeed(
           emptyProjection({
@@ -288,7 +297,7 @@ it.effect("denies a different owner and every tool when orchestration capability
     const run = yield* decodeStep(started.result);
     const movement = { runId: run.runId, expectedStepId: "research", client_request_id: "denied" };
     for (const scope of [scopeFor(rootOwner), { ...scopeFor(), capabilities: new Set<never>() }]) {
-      const expected = scope.threadId === rootOwner ? "not_owner" : "capability_denied";
+      const expected = scope.thread.threadId === rootOwner ? "not_owner" : "capability_denied";
       const responses = [
         yield* call("playbook_current", { runId: run.runId }, scope),
         yield* call("playbook_next", movement, scope),

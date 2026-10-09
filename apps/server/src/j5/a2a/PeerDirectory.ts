@@ -12,8 +12,8 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import { HttpClient, HttpClientRequest } from "effect/unstable/http";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import { HttpClient, HttpClientRequest } from "effect/http";
+import type { SqlError } from "effect/sql/SqlError";
 
 import {
   PeerRegistryService,

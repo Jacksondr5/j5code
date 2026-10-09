@@ -7,8 +7,8 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
 
 import * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
 import { A2ADeliveryWorker, type A2ADeliveryWorkerError } from "./DeliveryWorker.ts";
@@ -537,7 +537,7 @@ const makeLayer = (daemon: boolean) =>
           yield* sql`SELECT 1 FROM j5_a2a_lifecycle_processed WHERE event_id = ${stored.event.id}`;
         if (processed.length !== 0) return true;
         const resolution = yield* resolveThreadHome(sql, stored.event.threadId).pipe(
-          Effect.catchTag("A2AHomeNotFoundError", () => Effect.succeed(null)),
+          Effect.catchTags({ A2AHomeNotFoundError: () => Effect.succeed(null) }),
         );
         if (resolution === null) return false;
         yield* archiveParticipantInternal(

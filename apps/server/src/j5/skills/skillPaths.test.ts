@@ -5,7 +5,7 @@ import * as Deferred from "effect/Deferred";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
-import { parseCodexSkillsListResponse } from "../../provider/Layers/CodexProvider.ts";
+import { parseCodexSkillsListResponse } from "../../provider/CodexProvider.ts";
 import { resolveProviderSkillPaths } from "./skillPaths.ts";
 
 it.layer(NodeServices.layer)("provider skill paths", (it) => {

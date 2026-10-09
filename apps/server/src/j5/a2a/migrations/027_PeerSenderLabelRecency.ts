@@ -1,5 +1,5 @@
 import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 // The client identity read names a sender homed on a peer by the label its
 // server sent with the delivery this server recorded last. The "nothing newer"

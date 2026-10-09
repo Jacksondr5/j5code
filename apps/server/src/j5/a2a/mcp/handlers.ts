@@ -10,12 +10,17 @@ import * as Result from "effect/Result";
 
 import {
   McpInvocationContext,
-  type McpInvocationScope,
+  type McpThreadInvocationScope,
+  requireThreadScope,
 } from "../../../mcp/McpInvocationContext.ts";
+import * as McpToolAccess from "../../../mcp/McpToolAccess.ts";
 import { OrchestratorMcpService } from "../../../mcp/OrchestratorMcpService.ts";
 import { OrchestratorV2 } from "../../../orchestration-v2/Orchestrator.ts";
-import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
-import { ProviderRegistry } from "../../../provider/Services/ProviderRegistry.ts";
+import {
+  ThreadManagementService,
+  latestActiveRun,
+} from "../../../orchestration-v2/ThreadManagementService.ts";
+import { ProviderRegistry } from "../../../provider/ProviderRegistry.ts";
 import { makeAgentPersonaLibrary } from "../../agents/agentPersonaLibrary.ts";
 import { buildAgentPersonaCatalog } from "../../agents/agentPersonaRouting.ts";
 import { translateAgentPersonaProviderPolicy } from "../../agents/agentPersonaProviderPolicy.ts";
@@ -42,6 +47,7 @@ import { PeerDirectory } from "../PeerDirectory.ts";
 import { ParticipantPlacementService } from "../PlacementService.ts";
 import { withDeliveryNotice } from "../receiverBacklog.ts";
 import { A2ASendService } from "../SendService.ts";
+import { stopThread } from "../stopThread.ts";
 import { SpawnCompositionService } from "../SpawnCompositionService.ts";
 import {
   SpawnWorkspaceService,
@@ -173,32 +179,40 @@ type AgentDirectoryRow = ParticipantDirectoryRow & {
 const stateError = (state: string, nextCommand: string) =>
   new J5AgentToolStateError({ state, nextCommand });
 
+/**
+ * The calling thread's scope. Every handler that reads it is declared `readsAsCaller` or
+ * `actsAsCaller` below, which refuses a caller without a thread before the handler runs.
+ */
+const callerScope = McpInvocationContext.pipe(
+  Effect.flatMap((scope) => requireThreadScope(scope, "This tool")),
+);
+
 const resolveCallerMembership = Effect.fn("j5.a2a.mcp.resolveCallerMembership")(function* (
-  scope: McpInvocationScope,
+  scope: McpThreadInvocationScope,
 ) {
   const directory = yield* (yield* A2ASendService)
-    .listParticipants(scope.threadId)
+    .listParticipants(scope.thread.threadId)
     .pipe(
       Effect.mapError((error) =>
         stateError(
-          `Caller thread ${scope.threadId} has no usable membership in its project: ${error instanceof Error ? error.message : String(error)}.`,
+          `Caller thread ${scope.thread.threadId} has no usable membership in its project: ${error instanceof Error ? error.message : String(error)}.`,
           "Call list_participants to inspect current membership before retrying.",
         ),
       ),
     );
   const memberships = directory.filter(
     (row): row is AgentDirectoryRow =>
-      row.participant.kind === "agent" && row.participant.threadId === scope.threadId,
+      row.participant.kind === "agent" && row.participant.threadId === scope.thread.threadId,
   );
   if (memberships.length === 0) {
     return yield* stateError(
-      `Caller membership is missing for thread ${scope.threadId}.`,
+      `Caller membership is missing for thread ${scope.thread.threadId}.`,
       "Call list_participants to inspect current membership before retrying.",
     );
   }
   if (memberships.length !== 1) {
     return yield* stateError(
-      `Caller membership for thread ${scope.threadId} is ambiguous across projects ${memberships.map((row) => row.projectId).join(", ")}.`,
+      `Caller membership for thread ${scope.thread.threadId} is ambiguous across projects ${memberships.map((row) => row.projectId).join(", ")}.`,
       "Call list_participants to inspect current membership before retrying.",
     );
   }
@@ -206,23 +220,23 @@ const resolveCallerMembership = Effect.fn("j5.a2a.mcp.resolveCallerMembership")(
 });
 
 const preflightSpawnCaller = Effect.fn("j5.a2a.mcp.preflightSpawnCaller")(function* (
-  scope: McpInvocationScope,
+  scope: McpThreadInvocationScope,
 ) {
   const ledger = yield* A2ALedger;
   // A thread from before every thread registered at creation registers here, on its first call.
   const home = yield* (yield* ThreadRegistration)
-    .ensureRegistered(scope.threadId)
+    .ensureRegistered(scope.thread.threadId)
     .pipe(
       Effect.mapError((error) =>
         stateError(
-          `Caller thread ${scope.threadId} could not be registered in its project: ${error instanceof Error ? error.message : String(error)}.`,
+          `Caller thread ${scope.thread.threadId} could not be registered in its project: ${error instanceof Error ? error.message : String(error)}.`,
           "Retry spawn_agent; if it keeps failing, tell the human.",
         ),
       ),
     );
   if (home === null) {
     return yield* stateError(
-      `Caller thread ${scope.threadId} is a Subagent and is not an agent-to-agent participant.`,
+      `Caller thread ${scope.thread.threadId} is a Subagent and is not an agent-to-agent participant.`,
       "Return your result to the agent that started you; it can spawn agents.",
     );
   }
@@ -231,7 +245,7 @@ const preflightSpawnCaller = Effect.fn("j5.a2a.mcp.preflightSpawnCaller")(functi
     .pipe(
       Effect.mapError((error) =>
         stateError(
-          `Caller thread ${scope.threadId} is registered in project ${home.projectId}, but that project's ledger is unavailable: ${error instanceof Error ? error.message : String(error)}.`,
+          `Caller thread ${scope.thread.threadId} is registered in project ${home.projectId}, but that project's ledger is unavailable: ${error instanceof Error ? error.message : String(error)}.`,
           "Tell the human before retrying spawn_agent.",
         ),
       ),
@@ -239,7 +253,7 @@ const preflightSpawnCaller = Effect.fn("j5.a2a.mcp.preflightSpawnCaller")(functi
   const membership = yield* resolveCallerMembership(scope);
   if (membership.projectId !== home.projectId || membership.participantId !== home.participantId) {
     return yield* stateError(
-      `Caller thread ${scope.threadId} is registered as ${home.projectId}/${home.participantId}, but its current membership is ${membership.projectId}/${membership.participantId}.`,
+      `Caller thread ${scope.thread.threadId} is registered as ${home.projectId}/${home.participantId}, but its current membership is ${membership.projectId}/${membership.participantId}.`,
       "Call list_participants to inspect current membership, then ask the human to repair the mismatch before retrying spawn_agent.",
     );
   }
@@ -247,7 +261,7 @@ const preflightSpawnCaller = Effect.fn("j5.a2a.mcp.preflightSpawnCaller")(functi
 });
 
 const selectSpawnModel = Effect.fn("j5.a2a.mcp.selectSpawnModel")(function* (
-  scope: McpInvocationScope,
+  scope: McpThreadInvocationScope,
   input: { readonly provider: string; readonly model: string; readonly reasoning: string },
 ) {
   const capabilities = yield* (yield* OrchestratorMcpService)
@@ -353,7 +367,7 @@ const prepareSpawnPersona = Effect.fn("j5.a2a.mcp.prepareSpawnPersona")(function
 
 /** Crew requests come from a Peer Agent with a home that is not itself a crew member (R20). */
 const preflightCrewCaptain = Effect.fn("j5.a2a.mcp.preflightCrewCaptain")(function* (
-  scope: McpInvocationScope,
+  scope: McpThreadInvocationScope,
   command: "propose_crew" | "request_crew_member",
 ) {
   const caller = yield* preflightSpawnCaller(scope);
@@ -374,11 +388,11 @@ const preflightCrewCaptain = Effect.fn("j5.a2a.mcp.preflightCrewCaptain")(functi
     );
   }
   const parent = yield* (yield* ThreadManagementService)
-    .getThreadProjection(scope.threadId)
+    .getThreadProjection(scope.thread.threadId)
     .pipe(
       Effect.mapError((error) =>
         stateError(
-          `Caller thread ${scope.threadId} cannot be read for ${command}: ${error.message}.`,
+          `Caller thread ${scope.thread.threadId} cannot be read for ${command}: ${error.message}.`,
           `Read the caller thread state and retry ${command} after it is available.`,
         ),
       ),
@@ -446,17 +460,18 @@ export const crewSeatFromInput = (seat: J5ProposeCrewInput["seats"][number]) => 
 
 const handlers = {
   ...playbookHandlers,
-  send_message: (input) =>
+  send_message: McpToolAccess.actsAsCaller((input) =>
     Effect.gen(function* () {
-      const scope = yield* McpInvocationContext;
+      const scope = yield* callerScope;
       // The send below registers a caller that has no home yet and refuses a Subagent.
       const callerParticipantId = yield* (yield* A2AHomeRegistrar)
-        .getHomeForThread(scope.threadId)
+        .getHomeForThread(scope.thread.threadId)
         .pipe(
           Effect.map((home) => home.participantId),
-          Effect.catchTag("A2AHomeNotFoundError", () =>
-            Effect.succeed(participantIdForThread(scope.threadId)),
-          ),
+          Effect.catchTags({
+            A2AHomeNotFoundError: () =>
+              Effect.succeed(participantIdForThread(scope.thread.threadId)),
+          }),
         );
       if (input.to === callerParticipantId) {
         return yield* stateError(
@@ -472,10 +487,10 @@ const handlers = {
       const result = yield* service.send({
         commandId: commandIdForRequest({
           toolName: "send_message",
-          providerSessionId: scope.providerSessionId,
+          providerSessionId: scope.thread.providerSessionId,
           requestKey,
         }),
-        senderThreadId: scope.threadId,
+        senderThreadId: scope.thread.threadId,
         to: input.to,
         message: input.message,
         ...(input.expect_reply == null ? {} : { expectReply: input.expect_reply }),
@@ -487,21 +502,22 @@ const handlers = {
       yield* worker.notify;
       return yield* withDeliveryNotice(result, {
         receiverId: input.to,
-        callerThreadId: scope.threadId,
+        callerThreadId: scope.thread.threadId,
       });
     }).pipe(Effect.mapError(failure)),
-  clear_own_ask: (input) =>
+  ),
+  clear_own_ask: McpToolAccess.actsAsCaller((input) =>
     Effect.gen(function* () {
-      const scope = yield* McpInvocationContext;
+      const scope = yield* callerScope;
       const service = yield* A2ASendService;
       const acceptedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
       const cleared = yield* service.clearOwnAsk({
         commandId: commandIdForRequest({
           toolName: "clear_own_ask",
-          providerSessionId: scope.providerSessionId,
+          providerSessionId: scope.thread.providerSessionId,
           requestKey: input.client_request_id,
         }),
-        senderThreadId: scope.threadId,
+        senderThreadId: scope.thread.threadId,
         exchangeId: input.exchange_id,
         acceptedAt,
       });
@@ -510,13 +526,14 @@ const handlers = {
       if (withdrawalQueued) yield* (yield* A2ADeliveryWorker).notify;
       return result;
     }).pipe(Effect.mapError(failure)),
-  list_participants: (input) =>
+  ),
+  list_participants: McpToolAccess.readsAsCaller((input) =>
     Effect.gen(function* () {
-      const scope = yield* McpInvocationContext;
+      const scope = yield* callerScope;
       const service = yield* A2ASendService;
       const orchestrator = yield* OrchestratorV2;
       const includeArchived = input.include_archived ?? false;
-      const directory = yield* service.listParticipants(scope.threadId, includeArchived);
+      const directory = yield* service.listParticipants(scope.thread.threadId, includeArchived);
       // A project's title beside its id places a participant. Titles are
       // enrichment: a read that fails leaves them null rather than taking the
       // address book with it.
@@ -587,7 +604,8 @@ const handlers = {
               `${row.projectId}\u0000${row.participantId}`,
             );
             const self =
-              row.participant.kind === "agent" && row.participant.threadId === scope.threadId;
+              row.participant.kind === "agent" &&
+              row.participant.threadId === scope.thread.threadId;
             return {
               project_id: row.projectId,
               project_title: projectTitles.get(row.projectId) ?? null,
@@ -625,9 +643,10 @@ const handlers = {
           .concat(remoteRows),
       };
     }).pipe(Effect.mapError(failure)),
-  spawn_agent: (input) =>
+  ),
+  spawn_agent: McpToolAccess.actsAsCaller((input) =>
     Effect.gen(function* () {
-      const scope = yield* McpInvocationContext;
+      const scope = yield* callerScope;
       const crypto = yield* Crypto.Crypto;
       const caller = yield* preflightSpawnCaller(scope);
       // Only a Captain grows a Crew, and only through the human gate (Bryant, 2026-09-14): a seat
@@ -651,11 +670,11 @@ const handlers = {
       const selected = yield* selectSpawnModel(scope, input);
       const threadManagement = yield* ThreadManagementService;
       const parent = yield* threadManagement
-        .getThreadProjection(scope.threadId)
+        .getThreadProjection(scope.thread.threadId)
         .pipe(
           Effect.mapError((error) =>
             stateError(
-              `Caller thread ${scope.threadId} cannot be read for spawn_agent: ${error.message}.`,
+              `Caller thread ${scope.thread.threadId} cannot be read for spawn_agent: ${error.message}.`,
               "Read the caller thread state and retry spawn_agent after it is available.",
             ),
           ),
@@ -668,7 +687,7 @@ const handlers = {
       const modelSelection = persona?.modelSelection ?? selected;
       const requestKey = input.client_request_id ?? (yield* crypto.randomUUIDv4);
       const stableInput = {
-        providerSessionId: scope.providerSessionId,
+        providerSessionId: scope.thread.providerSessionId,
         requestKey,
       };
       const threadId = spawnThreadId(stableInput);
@@ -787,7 +806,7 @@ const handlers = {
                   projectId: facts.home.projectId,
                   projectTitle: caller.project.name,
                   spawnedByParticipantId: caller.participantId,
-                  spawnerThreadId: scope.threadId,
+                  spawnerThreadId: scope.thread.threadId,
                 }),
                 modelSelection,
                 runtimeMode: persona?.runtimeMode ?? parent.thread.runtimeMode,
@@ -818,14 +837,18 @@ const handlers = {
           }),
         )
         .pipe(
-          Effect.catchTag("SpawnWorkspaceError", (error) =>
-            Effect.fail(stateError(`Peer Agent was not created: ${error.detail}`, error.nextStep)),
-          ),
+          Effect.catchTags({
+            SpawnWorkspaceError: (error) =>
+              Effect.fail(
+                stateError(`Peer Agent was not created: ${error.detail}`, error.nextStep),
+              ),
+          }),
         );
     }).pipe(Effect.mapError(failure)),
-  propose_crew: (input) =>
+  ),
+  propose_crew: McpToolAccess.actsAsCaller((input) =>
     Effect.gen(function* () {
-      const scope = yield* McpInvocationContext;
+      const scope = yield* callerScope;
       const crypto = yield* Crypto.Crypto;
       const captain = yield* preflightCrewCaptain(scope, "propose_crew");
       const requestKey = input.client_request_id ?? (yield* crypto.randomUUIDv4);
@@ -846,7 +869,7 @@ const handlers = {
             };
       const outcome = yield* (yield* CrewProposalService)
         .propose({
-          requestKey: `${scope.providerSessionId}:${requestKey}`,
+          requestKey: `${scope.thread.providerSessionId}:${requestKey}`,
           captain,
           displayName: input.name,
           brief: input.brief,
@@ -856,15 +879,16 @@ const handlers = {
         .pipe(Effect.mapError((error) => stateError(error.message, crewProposalNextStep(error))));
       return projectCrewProposal(outcome);
     }).pipe(Effect.mapError(failure)),
-  request_crew_member: (input) =>
+  ),
+  request_crew_member: McpToolAccess.actsAsCaller((input) =>
     Effect.gen(function* () {
-      const scope = yield* McpInvocationContext;
+      const scope = yield* callerScope;
       const crypto = yield* Crypto.Crypto;
       const captain = yield* preflightCrewCaptain(scope, "request_crew_member");
       const requestKey = input.client_request_id ?? (yield* crypto.randomUUIDv4);
       const outcome = yield* (yield* CrewProposalService)
         .requestMember({
-          requestKey: `${scope.providerSessionId}:${requestKey}`,
+          requestKey: `${scope.thread.providerSessionId}:${requestKey}`,
           captain,
           crewInstanceId: input.crew_instance_id ?? null,
           seat: {
@@ -884,7 +908,8 @@ const handlers = {
         .pipe(Effect.mapError((error) => stateError(error.message, crewProposalNextStep(error))));
       return projectCrewProposal(outcome);
     }).pipe(Effect.mapError(failure)),
-  list_personas: () =>
+  ),
+  list_personas: McpToolAccess.reads(() =>
     Effect.gen(function* () {
       const library = yield* makeAgentPersonaLibrary;
       const current = yield* library
@@ -926,11 +951,12 @@ const handlers = {
         }),
       };
     }).pipe(Effect.mapError(failure)),
-  stop_agent: (input) =>
+  ),
+  stop_agent: McpToolAccess.actsAsCaller((input) =>
     Effect.gen(function* () {
-      const scope = yield* McpInvocationContext;
+      const scope = yield* callerScope;
       const crypto = yield* Crypto.Crypto;
-      // Upstream's rule: an agent acts on agents in its own project.
+      // A participant id is looked up in the caller's project.
       const caller = yield* resolveCallerMembership(scope);
       const placements = yield* ParticipantPlacementService;
       const matches = (yield* placements.listParticipants(caller.projectId)).filter(
@@ -961,31 +987,28 @@ const handlers = {
           ),
         );
       const requestKey = input.client_request_id ?? (yield* crypto.randomUUIDv4);
-      const result = yield* threadManagement
-        .interruptThread({
-          projectId: targetProjection.thread.projectId,
-          commandId: lifecycleCommandId({
-            providerSessionId: scope.providerSessionId,
-            requestKey,
-            operation: "stop-agent",
-          }),
-          threadId: target.threadId,
-        })
-        .pipe(
-          Effect.mapError((error) =>
-            stateError(
-              `Peer Agent ${input.participant_id} on thread ${target.threadId} could not be stopped: ${error.message}.`,
-              "Call list_participants to confirm the target, then retry stop_agent with the same client_request_id.",
-            ),
+      const commandId = lifecycleCommandId({
+        providerSessionId: scope.thread.providerSessionId,
+        requestKey,
+        operation: "stop-agent",
+      });
+      // Upstream's Stop, delegated tasks included (see stopThread.ts).
+      yield* stopThread(threadManagement, { commandId, threadId: target.threadId }).pipe(
+        Effect.mapError((error) =>
+          stateError(
+            `Peer Agent ${input.participant_id} on thread ${target.threadId} could not be stopped: ${error.message}.`,
+            "Call list_participants to confirm the target, then retry stop_agent with the same client_request_id.",
           ),
-        );
-      return result.type === "interrupt_requested"
-        ? ("interrupt_requested" as const)
-        : ("already_idle" as const);
+        ),
+      );
+      return latestActiveRun(targetProjection) === undefined
+        ? ("already_idle" as const)
+        : ("interrupt_requested" as const);
     }).pipe(Effect.mapError(failure)),
-  stop_crew: (input) =>
+  ),
+  stop_crew: McpToolAccess.actsAsCaller((input) =>
     Effect.gen(function* () {
-      const scope = yield* McpInvocationContext;
+      const scope = yield* callerScope;
       const crypto = yield* Crypto.Crypto;
       const caller = yield* resolveCallerMembership(scope);
       const requestKey = input.client_request_id ?? (yield* crypto.randomUUIDv4);
@@ -996,7 +1019,7 @@ const handlers = {
           crewInstanceId: input.crew_instance_id,
           commandIds: (seatName) => ({
             interruptCommandId: lifecycleCommandId({
-              providerSessionId: scope.providerSessionId,
+              providerSessionId: scope.thread.providerSessionId,
               requestKey: crewSeatRequestKey(requestKey, seatName),
               operation: "stop-crew-interrupt",
             }),
@@ -1023,15 +1046,16 @@ const handlers = {
         })),
       };
     }).pipe(Effect.mapError(failure)),
-  archive_crew: (input) =>
+  ),
+  archive_crew: McpToolAccess.actsAsCaller((input) =>
     Effect.gen(function* () {
-      const scope = yield* McpInvocationContext;
+      const scope = yield* callerScope;
       const crypto = yield* Crypto.Crypto;
       const caller = yield* resolveCallerMembership(scope);
       const requestKey = input.client_request_id ?? (yield* crypto.randomUUIDv4);
       const archivedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
       const outcome = yield* (yield* ArchiveCrewService).archive({
-        providerSessionId: scope.providerSessionId,
+        providerSessionId: scope.thread.providerSessionId,
         callerParticipantId: caller.participantId,
         projectId: caller.projectId,
         crewInstanceId: input.crew_instance_id,
@@ -1042,12 +1066,12 @@ const handlers = {
         archivedAt,
         commandIds: (seatName) => ({
           interruptCommandId: lifecycleCommandId({
-            providerSessionId: scope.providerSessionId,
+            providerSessionId: scope.thread.providerSessionId,
             requestKey: crewSeatRequestKey(requestKey, seatName),
             operation: "archive-crew-interrupt",
           }),
           archiveCommandId: lifecycleCommandId({
-            providerSessionId: scope.providerSessionId,
+            providerSessionId: scope.thread.providerSessionId,
             requestKey: crewSeatRequestKey(requestKey, seatName),
             operation: "archive-crew-thread",
           }),
@@ -1063,6 +1087,11 @@ const handlers = {
         })),
       };
     }).pipe(Effect.mapError(archiveCrewFailure)),
-} satisfies Parameters<typeof J5Toolkit.toLayer>[0];
+  ),
+} satisfies McpToolAccess.Handlers<typeof J5Toolkit.tools>;
 
-export const J5ToolkitHandlersLive = J5Toolkit.toLayer(handlers);
+/** What `/mcp` registers: every J5 tool with its access declared. */
+export const layer = McpToolAccess.toLayer(J5Toolkit, handlers);
+
+/** The same handlers as a plain layer, for tests that call a tool without registering it. */
+export const J5ToolkitHandlersLive = McpToolAccess.HandlersLayer.layer(layer);

@@ -1,5 +1,5 @@
 import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 // Every inbound peer delivery asks whether its sender is routed to another
 // server, and every send to a known remote id reads its latest route. Both

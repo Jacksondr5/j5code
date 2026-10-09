@@ -23,7 +23,7 @@ import {
   ProjectionStoreV2,
   layer as projectionStoreLayer,
 } from "../../orchestration-v2/ProjectionStore.ts";
-import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
+import { layerMemory as SqlitePersistenceMemory } from "../../persistence/Sqlite.ts";
 
 // Mirrors the store composition in orchestration-v2/FoundationPersistence.test.ts (FORK.md).
 const databaseLayer = SqlitePersistenceMemory;

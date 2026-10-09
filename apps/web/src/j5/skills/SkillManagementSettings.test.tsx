@@ -101,7 +101,9 @@ vi.mock("../../components/settings/settingsLayout", () => ({
 }));
 vi.mock("../../components/settings/providerDriverMeta", () => ({
   getDriverOption: () => undefined,
+  providerClients: new Map(),
 }));
+vi.mock("../../state/session", () => ({ useEnvironmentScope: () => true }));
 vi.mock("../../components/ui/select", () => ({
   Select: ({
     children,

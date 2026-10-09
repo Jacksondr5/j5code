@@ -19,7 +19,7 @@ import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
 
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
-import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
+import { ProviderRegistry } from "../../provider/ProviderRegistry.ts";
 import { prepareAgentPersonaLaunch } from "../agents/agentPersonaLaunch.ts";
 import { agentHandoffArtifactPath } from "../agents/agentPersonaArtifacts.ts";
 import { makeAgentPersonaLibrary } from "../agents/agentPersonaLibrary.ts";

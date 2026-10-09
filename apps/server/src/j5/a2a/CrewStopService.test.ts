@@ -43,10 +43,11 @@ const projection = (threadId: ThreadId): OrchestrationV2ThreadProjection =>
       projectId: ProjectId.make("project:crew-stop"),
       archivedAt: threadId === retiredThread ? "2026-09-14T19:00:00.000Z" : null,
     },
-    runs: [],
+    // Only the builder has a turn to stop.
+    runs: threadId === builderThread ? [{ id: "run:builder", ordinal: 1, status: "running" }] : [],
   }) as unknown as OrchestrationV2ThreadProjection;
 
-it.effect("interrupts only running seats, for the Captain or a person, and nobody else", () =>
+it.effect("stops every live seat, for the Captain or a person, and nobody else", () =>
   Effect.gen(function* () {
     const context = yield* Layer.build(
       Layer.mergeAll(ledgerLayer, crewInstanceLayer).pipe(
@@ -96,18 +97,14 @@ it.effect("interrupts only running seats, for the Captain or a person, and nobod
       Layer.provideMerge(
         Layer.mock(ThreadManagementService)({
           getThreadProjection: (threadId) => Effect.succeed(projection(threadId)),
-          // Only the builder has a turn to interrupt.
-          interruptThread: (input) =>
+          dispatch: (command) =>
             Ref.update(interrupts, (items) => [
               ...items,
-              `${input.threadId}:${input.commandId}`,
-            ]).pipe(
-              Effect.as(
-                input.threadId === builderThread
-                  ? ({ type: "interrupt_requested" } as never)
-                  : ({ type: "already_idle" } as never),
-              ),
-            ),
+              command.type === "thread.stop"
+                ? `${command.type}:${command.threadId}:${command.commandId}`
+                : command.type,
+            ]).pipe(Effect.as({ sequence: 1, storedEvents: [] })),
+          stopDelegatedTasks: () => Effect.void,
         }),
       ),
       // Every seat here has a thread, so no home is read.
@@ -134,10 +131,11 @@ it.effect("interrupts only running seats, for the Captain or a person, and nobod
           ["retired", "archived"],
         ],
       );
-      // The archived seat is never interrupted; live seats use the caller's deterministic ids.
+      // The archived seat is never stopped; live seats get upstream's Stop under the caller's
+      // deterministic ids, idle or not, so a held queue and delegated tasks stop too.
       assert.deepStrictEqual(yield* Ref.get(interrupts), [
-        `${builderThread}:stop:builder`,
-        `${criticThread}:stop:critic`,
+        `thread.stop:${builderThread}:stop:builder`,
+        `thread.stop:${criticThread}:stop:critic`,
       ]);
 
       // A person stops the same Crew without a participant id.
@@ -232,10 +230,11 @@ const ghostFixture = (ghost: "missing" | "unreadable" | "homed") =>
                         : new ProjectionStoreThreadNotFoundError({ threadId }),
                   }),
                 ),
-          interruptThread: (input) =>
-            Ref.update(interrupts, (items) => [...items, input.threadId]).pipe(
-              Effect.as({ type: "interrupt_requested" } as never),
-            ),
+          dispatch: (command) =>
+            Ref.update(interrupts, (items) =>
+              command.type === "thread.stop" ? [...items, command.threadId] : items,
+            ).pipe(Effect.as({ sequence: 1, storedEvents: [] })),
+          stopDelegatedTasks: () => Effect.void,
         }),
       ),
       Layer.provideMerge(

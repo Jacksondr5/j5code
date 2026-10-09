@@ -42,33 +42,33 @@ Each entry has an ID ("divergence D7"), which never changes and is never reused.
 - **Consequences:** what it costs, what to check at each upstream advance, and known gaps.
 - **Decided:** who decided, when, and where it's recorded.
 
-Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorded in `docs/j5/worklog/` or in the dogfood v0 plan (removed on 2026-09-29; it's in git history). Numbered decisions dated 2026-09-24 were made during that day's upstream advance.
+Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorded in `docs/j5/worklog/` or in the dogfood v0 plan (removed on 2026-09-29; it's in git history). Numbered decisions dated 2026-09-24 were made during that day's upstream advance, and decisions dated 2026-10-08 during the advance onto upstream `main`.
 
 ### Agents and orchestration
 
 #### D1. Help is a Subagent, a Peer Agent, or a Crew
 
-**Upstream:** the instructions every agent receives point it to `delegate_task` for cross-provider help, and to `t3_thread_launch` or `create_threads` to start new threads.
+**Upstream:** the instructions every agent receives point it to `delegate_task` for help from another provider, or from a model its own subagent tool can't run, and to `t3_thread_launch` or `create_threads` to start new threads.
 
-**J5:** agents are told about three shapes of help: a Subagent their own provider runs, a Peer Agent started with `spawn_agent`, and a Crew proposed with `propose_crew`. `delegate_task` is kept for two narrow cases: running a saved persona as a subagent, and cross-provider work the person doesn't need to talk to directly.
+**J5:** agents are told about three shapes of help: a Subagent their own provider runs, a Peer Agent started with `spawn_agent`, and a Crew proposed with `propose_crew`. `delegate_task` is kept for three narrow cases: running a saved persona as a subagent, work on another provider that the person doesn't need to talk to directly, and, as upstream now says, a model the provider's own subagent tool can't run. A review that takes several rounds gets a new `delegate_task` call for each round.
 
 **Why:** upstream's delegated child is "a Peer Agent in a Subagent costume": the person can't talk to it, yet it outlives the agent that started it. That is the awkward middle J5's vocabulary exists to remove. The Crew shape was added after an agent asked to "spawn a crew" made subagents instead, because nothing it had been told mentioned a Crew. Personas later gave `delegate_task` a purpose again: a persona needs a way to run as a subagent.
 
-**Consequences:** upstream's launch and workspace guidance never reaches J5 agents. `spawn_agent` and Crew seats require their own workspace choice instead, with upstream's `existing_worktree` name and shape beside `shared` and `worktree`, and reuse upstream's ThreadLaunch to prepare a new worktree (#274). The instructions file is also edited for playbooks and personas, so every upstream advance merges upstream's prompt changes by hand, and a test pins J5's wording.
+**Consequences:** upstream's launch and workspace guidance never reaches J5 agents. `spawn_agent` and Crew seats require their own workspace choice instead, with upstream's `existing_worktree` name and shape beside `shared` and `worktree`, and reuse upstream's ThreadLaunch to prepare a new worktree (#274). J5's text lives in its own server module. Upstream moved its text into a package that can't reach J5's code, so the provider adapters read J5's module instead of upstream's. Every upstream advance ports upstream's prompt changes into it by hand, and a test pins J5's wording. J5 takes upstream's own sections as upstream writes them: secrets, thread links, showing visuals, the browser, schedules, and the two `delegate_task` rules above. Pi is the exception: its extension reads upstream's package, so Pi agents get upstream's text, including guidance for tools J5 hides.
 
-**Decided:** Jackson with Product, 2026-08-24 (ST1–ST5); the Crew shape on 2026-09-17; the persona route in Jackson's review of 2026-09-13, which partly reverses ST5. Whether `delegate_task` stays at all is under discussion (#336). Recorded in FORK.md case 8 and the saved-agent mentions section.
+**Decided:** Jackson with Product, 2026-08-24 (ST1–ST5); the Crew shape on 2026-09-17; the persona route in Jackson's review of 2026-09-13, which partly reverses ST5; the text's new home and the sections taken from upstream by Jackson, 2026-10-08. Whether `delegate_task` stays at all is under discussion (#336). Recorded in FORK.md case 8 and the saved-agent mentions section.
 
 #### D2. Agents see a fail-closed subset of upstream's MCP tools
 
-**Upstream:** agents can send into another thread, interrupt it, wait on it, launch threads, and create threads in bulk.
+**Upstream:** agents can send into another thread, interrupt it, wait on it, launch threads, and create threads in bulk. Every tool declares who may call it. Thread tools reach any thread in the environment, not only the caller's project. An agent outside the app can sign in to the MCP server and use the tools that don't need a calling thread.
 
-**J5:** those tools are hidden from agents. J5 keeps the upstream tools it has admitted, rewrites the descriptions that would mislead J5 agents, and hides any new upstream tool until someone reviews it.
+**J5:** the raw send, interrupt, wait, launch and bulk-create tools are hidden from agents, with upstream's queue, project and environment writers. Everything else follows upstream: its access model, its reach across the environment (writes included), and its outside-agent sign-in as shipped. J5's own tools declare their access the same way, so the ones that act for a calling thread are refused to an outside agent by upstream's own check. J5 rewrites the few descriptions that would mislead J5 agents, and reviews every new upstream tool at each advance.
 
-**Why:** J5 built its own versions of these tools, integrated with J5's model: `send_message` and Exchanges instead of raw send, `stop_agent` instead of interrupt, and `spawn_agent` and `propose_crew` instead of launch. Upstream's tools were more primitive and didn't meet J5's needs when this was decided. A raw send is communication the ledger can't see, so a reply that never comes stalls silently. Raw thread creation skips the placement a spawn records. Hiding new upstream tools by default means each one is reviewed against J5's definitions before agents get it. The tools are hidden, not deleted, to keep the fork's edits small.
+**Why:** J5 built its own versions of the hidden tools, integrated with J5's model: `send_message` and Exchanges instead of raw send, `stop_agent` instead of interrupt, and `spawn_agent` and `propose_crew` instead of launch. A raw send is communication the ledger can't see, so a reply that never comes stalls silently. Raw thread creation skips the placement a spawn records. Waiting on another thread blocks the turn that would receive that thread's news. The tools are hidden, not deleted, to keep the fork's edits small. J5 used to hold thread tools to the caller's project as upstream did; upstream dropped that rule and J5 had no reason of its own to keep it.
 
-**Consequences:** upstream's toolkit stays compiled but unused. Upstream's tools keep evolving, so J5 should periodically re-evaluate them and consider merging its tools with upstream's rather than carrying parallel versions. Each advance checks the admitted tool list, which a test pins, and re-reads upstream's descriptions. Open gaps: `t3_worktree_handoff` still points agents at a tool they can't use. `t3_pending_request_respond` answers another thread's pending approval or question without J5's authority checks (#345).
+**Consequences:** upstream's toolkit stays compiled, with part of it unused. A test pins the exact tool list, so a tool upstream adds fails the build until someone reviews it; all ten that arrived on 2026-10-08 were admitted (HTML previews, `request_secret`, five more browser controls and pull-request watches). Each advance also checks J5's access declarations and re-reads upstream's descriptions. An outside agent has no identity in J5's ledger, so it can't send a ledger message or be addressed; giving it one is #498. `t3_pending_request_respond` and `t3_thread_configure` act on other threads under upstream's own checks, which settles #345 as "follow upstream". One J5 rule stays on top of upstream's: a Crew seat can't be archived alone (D13). Open gap: `t3_worktree_handoff` still points agents at a tool they can't use.
 
-**Decided:** Jackson, 2026-08-29 (substrate session). Omitting bulk creation was a Director disposition (an agent role), 2026-08-31. Withdrawing `t3_thread_wait` was Bryant's decision, 2026-09-14. `delegate_task` returned after Jackson's review of 2026-09-13. Recorded in FORK.md cases 2, 4 and 38.
+**Decided:** Jackson, 2026-08-29 (substrate session). Omitting bulk creation was a Director disposition (an agent role), 2026-08-31. Withdrawing `t3_thread_wait` was Bryant's decision, 2026-09-14. `delegate_task` returned after Jackson's review of 2026-09-13. Following upstream's access model, its environment-wide reach and its outside-agent sign-in, and admitting the ten new tools, is Jackson's decision of 2026-10-08. Recorded in FORK.md cases 2, 4 and 38.
 
 #### D3. J5's tools are pre-approved on Codex and Claude only
 
@@ -78,9 +78,9 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Why:** without the Codex approvals, `send_message`, `spawn_agent` and `propose_crew` all fail in full-access mode. The approvals are per tool, never server-wide, so worktree handoff, preview and scheduling keep Codex's own verdict. Making other harnesses skip their native prompt is adapter work, and adapters are upstream's. ACP has no trustworthy server identity in its permission request, and Cursor's SDK doesn't expose MCP approval at all. A read-only persona being blocked from proposing is acceptable, because proposing a Crew is enough of a write.
 
-**Consequences:** every advance must keep the Codex and Claude additions and their exact-list tests. A general fix belongs upstream (#276). Crews AC5 must say the roster card is the only human step on Codex and Claude, not on every harness.
+**Consequences:** every advance must keep the Codex and Claude additions and their exact-list tests. A general fix belongs upstream (#276). Crews AC5 must say the roster card is the only human step on Codex and Claude, not on every harness. Muse Code sits with the other non-priority harnesses: it arrives as upstream ships it and J5 does no work for it. Muse doesn't read a persona's instructions or the Crew-seat rule, and in full-access mode it approves tool calls itself.
 
-**Decided:** Bryant built the approvals, 2026-09-10 to 2026-09-15. Jackson's ruling of 2026-09-26 (#233) kept them and limited them to Codex and Claude; Bryant accepted it by narrowing and merging #301 and closing #233 on 2026-09-29. Recorded in FORK.md's saved-agent mentions section.
+**Decided:** Bryant built the approvals, 2026-09-10 to 2026-09-15. Jackson's ruling of 2026-09-26 (#233) kept them and limited them to Codex and Claude; Bryant accepted it by narrowing and merging #301 and closing #233 on 2026-09-29. Muse Code: Jackson, 2026-10-08. Recorded in FORK.md's saved-agent mentions section.
 
 #### D4. Agent deliveries queue behind a running turn; Astra peers can steer
 
@@ -90,33 +90,21 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Why:** a peer owns nothing about another agent's turn, and upstream's steering was actively harmful. On Claude, a steer aborts the turn and makes the agent report that "the user doesn't want to take this action", a refusal the human never gave. On Cursor, it destroys the turn. The ruling expected this to fold back into upstream: J5 only changed the default value of upstream's own delivery setting, so that it would collapse if upstream shipped a queue option. Astra is built to take messages during work. Without the exception, a 36-minute Astra run worked from stale guidance because its peers' updates waited for the end.
 
-**Consequences:** this changes when a message is admitted, not whether the model reads it. Queueing also removed an accidental way of freeing a stuck start, so a queued run's age became something the Fleet page shows. Each advance checks the outbox and follow-up behavior this depends on. Checked on 2026-09-28 against upstream's V2 branch, it is still needed: upstream still steers whenever it can (Claude with `priority: "now"`, which cancels sibling tool calls), and has no Astra-specific or asynchronous delivery. **J5 wants to drop this divergence** and follow upstream's delivery once upstream can deliver a message to a running turn without aborting it (Claude) or restarting it (Cursor), and supports Astra's in-work messaging. Once the committed-Stop patch is removed (D5), a stopped Astra agent can occasionally be woken by a peer steer that was already in flight; the person stops it again.
+**Consequences:** this changes when a message is admitted, not whether the model reads it. Queueing also removed an accidental way of freeing a stuck start, so a queued run's age became something the Fleet page shows. Each advance checks the outbox and follow-up behavior this depends on. Checked on 2026-10-08 against upstream `main`, it is still needed: upstream still steers whenever it can (Claude with `priority: "now"`, which cancels sibling tool calls), and has no Astra-specific or asynchronous delivery. **J5 wants to drop this divergence** and follow upstream's delivery once upstream can deliver a message to a running turn without aborting it (Claude) or restarting it (Cursor), and supports Astra's in-work messaging. Upstream's Stop holds a thread's queue. A stopped agent's queued messages wait until a person resumes its queue; no agent tool releases them, and a message sent after the stop runs ahead of them. J5 doesn't guard a steer that races a Stop (D5, retired): a peer steer already in flight when the person presses Stop can occasionally wake an Astra agent, and the person stops it again.
 
 **Decided:** Jackson with Product, 2026-09-03 (QS1); the Astra exception by Jackson, 2026-09-04. Recorded in FORK.md case 26.
 
 #### D6. Native resume starts fresh only when the conversation is gone
 
-**Upstream:** when resuming a provider conversation fails for any reason, V2 starts a new one, primed with a summary.
+**Upstream:** when resuming a provider conversation fails for any reason, it starts a new one, primed with a summary, without telling the person. Other failures to start a turn are retried and then fail the run visibly.
 
 **J5:** a new conversation starts only when the provider reports the old one is gone, and the thread says so visibly. Any other resume failure is a visible error. The one other fresh start is deliberate: when an earlier history delivery to the provider is uncertain, J5 skips resume and starts fresh rather than risk a duplicated or half-applied history.
 
 **Why:** a provider's native history can't be rebuilt from the app's transcript. A silent fresh start hands the agent a stranger's memory without anyone noticing. That happened once, after a Codex schema change, and the transfer recorded no error.
 
-**Consequences:** each adapter has to report "conversation gone" for this to work: Codex and OpenCode do, Claude resumes lazily, and ACP and Pi never report it. Upstream appears to intend the fresh start, so the change offered back upstream (#276) has to argue for it. If upstream declines, the fallback position is a visible fresh start. Checked on 2026-09-28, it is still needed: V2 still starts fresh on any resume failure without telling the person, and upstream's recent changes reinforce that behavior. **J5 wants to drop this patch** as soon as upstream starts fresh only when the provider reports the conversation is gone, and tells the person when it does; the give-back in #276 argues for exactly that.
+**Consequences:** each adapter has to report "conversation gone" for this to work: Codex and OpenCode do, Claude resumes lazily, and the others never report it. J5 follows upstream's retry-then-fail for every other start failure. This is the one exception: a resume failure that isn't "conversation gone" fails the run at once, with no retry and no fresh start. The rule sits on upstream's own start-failure path, and its two fields live in upstream's `provider-core` package, so it is now an edit to a package as well as to the server. Upstream appears to intend the fresh start, so the change offered back upstream (#276) has to argue for it. If upstream declines, the fallback position is a visible fresh start. Checked on 2026-10-08, it is still needed. **J5 wants to drop this patch** as soon as upstream starts fresh only when the provider reports the conversation is gone, and tells the person when it does; the give-back in #276 argues for exactly that.
 
-**Decided:** Jackson, 2026-09-24 (#8), narrowing an earlier refuse-everything rule from 2026-09-04. Recorded in FORK.md's temporary patches.
-
-#### D7. Codex CLI version floor
-
-**Upstream:** no minimum Codex version.
-
-**J5:** Codex CLIs older than 0.151.0 are refused with a named error.
-
-**Why:** older CLIs omit fields the schema requires. Their responses fail to decode and degrade into silent fallbacks, such as a silent fresh start (D6).
-
-**Consequences:** the floor itself is unproven, because the test fixtures don't prove compatibility with a real 0.151.0. It is revalidated at every schema regeneration.
-
-**Decided:** introduced in PR #92 (2026-09-04); Jackson approved it on 2026-09-28. The floor value itself is still unproven. Recorded in FORK.md case 28.
+**Decided:** Jackson, 2026-09-24 (#8), narrowing an earlier refuse-everything rule from 2026-09-04; kept on 2026-10-08 as the one exception to upstream's start-failure handling. Recorded in FORK.md's temporary patches.
 
 ### New threads
 
@@ -150,25 +138,13 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Upstream:** archive, unarchive, settle and unsettle each touch one thread.
 
-**J5:** archiving or deleting a Captain retires its live Crews. Unarchiving it brings back the Crews that retired with it. Settling it settles its seats, except those upstream's own auto-settle would leave alone because they're still working or waiting on the person. Unsettling it unsettles the seats that were settled.
+**J5:** archiving or deleting a Captain retires its live Crews. Unarchiving it brings back the Crews that retired with it. Settling it settles its seats, except those upstream's own auto-settle would leave alone: a seat that is pinned, snoozed, working, waiting on the person, or about to start. Unsettling it unsettles the seats that were settled.
 
 **Why:** a Crew without its Captain has no one to report to, and the interface would need a place to show it. Before archive cascaded, sidebar archives of Captains stranded sixteen seats. Settle keeps upstream's meaning: a finished run is not a settled seat, but a settled Captain carries its seats with it.
 
-**Consequences:** a Crew restore that stops partway is repaired by hand, by archiving and unarchiving the Captain again. Unarchiving doesn't bring back interrupted runs or dropped Exchanges. Snooze doesn't cascade.
+**Consequences:** a Crew restore that stops partway is repaired by hand, by archiving and unarchiving the Captain again. Unarchiving doesn't bring back interrupted runs or dropped Exchanges. Snooze doesn't cascade. The seat rule is upstream's auto-settle rule, called directly, so it follows upstream as upstream changes it: a seat that is pinned, snoozed, working, waiting on the person, or about to start a turn stays as it is, and a dev server a seat left running no longer keeps it from settling. Two exceptions: a seat that opted out of auto-settle, and a seat an earlier unsettle marked active, are still settled with their Captain, because the person settled the Captain on purpose. Upstream's settle-time project script runs once for each seat that settles. Stopping a Crew sends upstream's Stop to each seat, which holds that seat's queue.
 
-**Decided:** archive and delete follow the Crew unit rule (R14) and were built on 2026-09-15. Jackson ratified the rest on 2026-09-26 (#312). Recorded in FORK.md case 21.
-
-#### D15. Archive Undo is withheld when Crews may retire
-
-**Upstream:** every archive offers Undo.
-
-**J5:** Undo is hidden when the archive may retire a Captain's Crews, including when it can't tell.
-
-**Why:** Undo would bring the Captain back without its Crews, so a one-keystroke Undo would quietly break the Crew.
-
-**Consequences:** this retires when unarchiving a Captain restores its Crews (D14). That code exists on the Crews stack (#315): with it, Undo, which unarchives the Captain, brings the Crews back too, and #315 removes this suppression so upstream's Undo returns unchanged. It depends on #315's fix for re-archiving after an Undo, which otherwise reuses the first archive's command IDs and leaves the Crew live.
-
-**Decided:** Jackson, 2026-09-24 (#7d). Recorded in FORK.md case 21.
+**Decided:** archive and delete follow the Crew unit rule (R14) and were built on 2026-09-15. Jackson ratified the rest on 2026-09-26 (#312). The opt-out exception, the per-seat script and upstream's Stop for Crews are Jackson's decisions of 2026-10-08. Recorded in FORK.md case 21.
 
 ### Timeline, composer, and plans
 
@@ -180,7 +156,7 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Why:** the person is a first-class reader of every agent-to-agent message and should see it in the normal flow without hunting. A first, quieter design made the messages hard to spot, so they were made prominent. The minimap tracks the person's own prompts, and agent messages there were noise.
 
-**Consequences:** the seams in the timeline are small, but each advance checks the row and minimap hooks. Sent-message cards recognize only Codex and Claude tool records; other providers keep generic rendering. Upstream is still building out its own agent-to-agent features (see the [upstream convergence watchlist](upstream-convergence.md)), so its treatment of these messages may change. Check this entry at every upstream advance, and prefer upstream's treatment if it now meets the need.
+**Consequences:** the seams in the timeline are small, but each advance checks the row and minimap hooks. Sent-message cards recognize only Codex and Claude tool records; other providers keep generic rendering. Upstream's in-thread find searches the cards' text. Upstream is still building out its own agent-to-agent features (see the [upstream convergence watchlist](upstream-convergence.md)), so its treatment of these messages may change. Check this entry at every upstream advance, and prefer upstream's treatment if it now meets the need.
 
 **Decided:** Jackson, 2026-08-29 (TA1–TA5) and 2026-08-31 (TA6–TA8, including cards for sent messages). The minimap rule is from Jackson's PR #168 (2026-09-16). Sender labels on queued rows came from Jackson's dogfood findings (#42, #62), fixed on 2026-09-04. Recorded in FORK.md cases 7, 14 and 24.
 
@@ -214,13 +190,19 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Upstream:** T3 Code keeps its data in `~/.t3`, reads `T3CODE_HOME`, and uses a `.t3` folder in worktrees.
 
-**J5:** it uses `~/.j5code`, `J5CODE_HOME`, and `.j5code`, with no fallback to T3's. J5 has its own desktop profiles, and refuses to open T3's databases. Its app ID (`codes.jackson.j5code`), URL scheme (`j5code`), CLI command (`j5`), and update URLs are its own.
+**J5:** it uses `~/.j5code`, `J5CODE_HOME`, and `.j5code`, with no fallback to T3's. J5 has its own desktop profiles and keeps its database in its own home. Its app ID (`codes.jackson.j5code`), URL scheme (`j5code`), CLI command (`j5`), and update URLs are its own.
 
 **Why:** J5 and T3 Code must be able to run side by side on one machine without either reading or damaging the other's data, or taking the other's deep links, updates, or system registrations. Nothing in J5 points at upstream's infrastructure.
 
-**Consequences:** some Linux integrations still collide with an installed T3 Code (#138), and many `T3CODE_*` variable names remain. One exception remains, to be removed: SSH transport still writes `~/.t3/ssh-launch` on remote hosts, kept only for npm-era remote servers that no longer exist (#339). Whether to rename the remaining `T3CODE_*` variables is open (#340). Each advance checks for new upstream reads of `T3CODE_HOME` or `.t3` paths, and re-checks the database migration bridge.
+**Consequences:** some Linux integrations still collide with an installed T3 Code (#138), and many `T3CODE_*` variable names remain. One exception remains, to be removed: SSH transport still writes `~/.t3/ssh-launch` on remote hosts, kept only for npm-era remote servers that no longer exist (#339). Whether to rename the remaining `T3CODE_*` variables is open (#340).
 
-**Decided:** Jackson, 2026-08-30 (DQ5, recorded on #33), 2026-09-02 (#68), and 2026-09-24 (#1, #4). The identifiers were settled in the fork setup plan (2026-08-15) and confirmed by Jackson on 2026-09-28. Recorded in FORK.md cases 15, 25, 31 and 41, and in `BRANDING.md`.
+The separate home is what keeps the two products' databases apart. J5 used to refuse a T3 Code database by its migration history as well; it no longer does, because upstream's own migrator now does the renumbering J5 used to bridge. Pointed at a T3 Code database on purpose, J5 would upgrade it. J5 does refuse its own databases from 0.0.43 or earlier, whose upgrade code is retired, with a message to run `j5 update 0.0.48` first.
+
+One read of a T3 location is left in as upstream ships it: the desktop app looks for T3 Code's V1 desktop profile to carry local storage over. It imports nothing, because it takes only entries stored for the app's own address, which in J5 is `j5code://`.
+
+Each advance checks for new upstream reads of `T3CODE_HOME` or `.t3` paths. The 2026-10-08 advance found them in the browser and trace CLI commands, the desktop launcher and the provider sign-in return links, and changed each to J5's.
+
+**Decided:** Jackson, 2026-08-30 (DQ5, recorded on #33), 2026-09-02 (#68), 2026-09-24 (#1, #4), and 2026-10-08 (the history refusal retired; upstream's legacy local-storage import left in). The identifiers were settled in the fork setup plan (2026-08-15) and confirmed by Jackson on 2026-09-28. Recorded in FORK.md cases 15, 25, 31 and 41, and in `BRANDING.md`.
 
 #### D20. J5 installs from its own release archives
 
@@ -254,7 +236,7 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Why:** J5 servers were reporting their users' usage to T3 Tools, which J5 has no agreement with and whose data Jackson can't see or delete. He wants the usage data himself, and J5's privacy page has to name who receives it.
 
-**Consequences:** one default in `AnalyticsService.ts` differs, so each upstream advance checks the token is still J5's. Jackson is responsible for the data: the project discards client IP addresses, and J5's privacy page describes what is sent. Releases installed before this change keep reporting to upstream's project. There is no Settings toggle, only the environment variable.
+**Consequences:** one default in `AnalyticsService.ts` differs, so each upstream advance checks the token is still J5's. Jackson is responsible for the data: the project discards client IP addresses, and J5's privacy page describes what is sent. Releases installed before this change keep reporting to upstream's project. There is no Settings toggle, only the environment variable. Upstream's welcome wizard now tells the person about the data; in J5 that sentence names J5 Code and links J5's privacy page.
 
 **Decided:** Jackson, 2026-10-04. Recorded in `BRANDING.md`.
 
@@ -272,15 +254,15 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 #### D25. The product is named J5 Code wherever a person or an agent reads it
 
-**Upstream:** the app, its CLI output, error messages, agent instructions and tool titles say "T3 Code", tool rows and the mobile header show the T3 mark, and new worktree branches start with `t3code/`.
+**Upstream:** the app, its CLI output, error messages, agent instructions and tool titles say "T3 Code", tool rows and the mobile header show the T3 mark, and new worktree branches start with `t3/`, a prefix the person can change in Settings.
 
-**J5:** all of that says "J5 Code" and shows the J5 mark, and new branches start with `j5code/`. Upstream's own services keep their names ("T3 Connect", "T3 Account"), as do protocol identifiers such as the `t3-code` MCP server. Documentation keeps upstream's wording.
+**J5:** all of that says "J5 Code" and shows the J5 mark, and new branches start with `j5code/`. Upstream's prefix setting is kept, with `j5code` as its default, and so is its fallback to a flat name (`j5code-<id>`) when a branch called `j5code` is in the way. Upstream's own services keep their names ("T3 Connect", "T3 Account"), as do protocol identifiers such as the `t3-code` MCP server. Documentation keeps upstream's wording.
 
 **Why:** J5 and T3 Code can be installed side by side, and a person should always be able to tell which one they are looking at. The old name kept reappearing because the branding rules left general copy alone.
 
-**Consequences:** these are literal edits in roughly 230 upstream files, so every upstream advance has to rebrand the strings upstream added or changed; the grep is in [Merging upstream](../process/upstream-merge.md) and `BRANDING.md` lists what stays. Temporary branches created under `t3code/` are still recognized.
+**Consequences:** these are literal edits in a few hundred upstream files, so every upstream advance has to rebrand the strings upstream added or changed; the grep is in [Merging upstream](../process/upstream-merge.md) and `BRANDING.md` lists what stays. J5's artifact links and badges use upstream's theme tokens, which upstream's raw-color lint rule requires; a proper assessment of J5's colors is [#499](https://github.com/Jacksondr5/j5code/issues/499). Temporary branches named `t3/…`, `t3-…` or the older `t3code/…` are still recognized.
 
-**Decided:** Jackson, 2026-10-04, PR #445. Recorded in `BRANDING.md`.
+**Decided:** Jackson, 2026-10-04, PR #445; the branch prefix against upstream's new `t3/`, 2026-10-08. Recorded in `BRANDING.md`.
 
 #### D28. The `j5` command
 
@@ -290,7 +272,7 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 - **Updates.** Only `t3 update` moves that link. An update from the app leaves the command on the old version.
 - **`PATH`.** When the link's directory isn't on `PATH`, the installer prints a line for the person to add.
 - **Agents.** Agents and terminals inherit the server's `PATH`, which has `t3` only if the person's shell provides it.
-- **The desktop app.** It installs no command, and its agents have `t3` only if the person's shell provides it.
+- **The desktop app.** It keeps a launcher for its bundled CLI in the T3 home, and its Settings has a "t3 command" row whose Install button links that launcher onto `PATH`. Its agents still have `t3` only if the person's shell provides it.
 
 **J5:**
 
@@ -299,7 +281,7 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 - **The command follows the service.** When the background service's server starts as the committed version, after an update or any restart, it repoints the installer's `~/.local/bin/j5` at itself.
 - **The installer puts it on `PATH`.** When `~/.local/bin` isn't on `PATH`, the installer adds one marked line to the shell's startup file (zsh, bash, or fish) that puts the directory last, and `j5 uninstall` removes it. A profile it can't write gets the printed hint instead, and `J5CODE_NO_MODIFY_PATH` skips the edit.
 - **Agents get the server's own `j5`.** A release server keeps `<home>/bin/j5` pointed at itself, and every server that finds a `j5` there puts `<home>/bin` first on the `PATH` its agents and terminals inherit.
-- **The Mac app gives its agents `j5` too.** At every launch it writes a script that runs its bundled CLI to `<home>/bin/j5`, which its server then puts first for its agents. It leaves the person's own `PATH` and shell startup files alone unless they ask: a command in the palette, "Install 'j5' command in PATH", links `~/.local/bin/j5` to that script and adds the installer's line when needed, and a matching command undoes it.
+- **The desktop app uses upstream's launcher, renamed.** At every launch the packaged app writes a launcher for its bundled CLI to `<home>/bin/j5`, which its server then puts first for its agents. It leaves the person's own `PATH` alone unless they ask: Settings → General → About has upstream's row, titled "j5 command", whose Install button links the launcher into a folder on `PATH` and whose Remove button takes it off again.
 
 **Why:**
 
@@ -308,7 +290,7 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 - **Following updates.** On the dogfood box the command ran 0.0.44 while the service ran 0.0.47, so agents called a CLI three versions behind their server (#398). Upstream has the same gap with `t3`; the fix is in the give-back backlog (#276).
 - **The installer and `PATH`.** A stock macOS shell doesn't have `~/.local/bin` on `PATH`, so a fresh install's `j5` wasn't found until the person edited their profile (#397). Jackson chose a profile line over linking into `/usr/local/bin`, which needs an admin prompt and a root-owned file the server couldn't repoint.
 - **Agents.** An agent that can't find `j5` tends to work around it without saying so. Giving every agent its server's CLI, whatever the person's shell setup, removes that failure. The directory is J5's own and holds only `j5`, so it can go first without shadowing anything, including an installed T3 Code's `t3`.
-- **The Mac app.** Most desktop apps never edit shell startup files; the few that do have a record of bugs from it. Agents were the actual problem, and they don't need the person's shell changed. The person's own terminal gets `j5` from a command they run, as VS Code offers for `code`.
+- **The desktop app.** Agents were the actual problem, and they don't need the person's shell changed. J5 first built its own launcher and a command-palette install for the person's terminal. Upstream then shipped the same two things, so J5 took upstream's and renamed them. That moved the install from the command palette to Settings, and upstream's Install adds no line to a shell startup file.
 
 **Consequences:**
 
@@ -318,12 +300,14 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 - **No downgrade across the rename.** Downgrading below the rename with `j5 update --allow-downgrade` isn't supported.
 - **Only the default link is repointed.** The repoint covers only the installer's default link, `~/.local/bin/j5`, and only when it already points into the home's runtime. A link placed elsewhere stays where it is.
 - **One `j5` per home for agents.** If two servers share a home, the last one started owns `<home>/bin/j5`.
+- **The app no longer replaces a `j5` it did not write.** J5's own launcher overwrote whatever was at `<home>/bin/j5`. Upstream's leaves a file it didn't write. When a release server shares the app's home, its link stays, and the app's agents run the server's `j5`.
+- **`j5 uninstall` can leave an app-installed link.** It knows the `~/.local/bin/j5` link; upstream's Install can link into other folders on `PATH`. Settings → Remove takes it off.
 - **`j5 service status` asks for a repair after an update from the app.** The service's unit still names the launcher it was installed with, and the now-current `j5` reports that as needing `j5 service install`. That is accurate: running it replaces the launcher, with a restart. An agent that follows the suggestion restarts its own server. Keeping the launcher current is a separate improvement.
 - **`j5 uninstall` removes the `PATH` line only with its command.** The installer's link and its line go when the link belongs to the home being uninstalled, so uninstalling another home, such as an agent's scratch home, leaves them.
 - **A terminal can still find another `j5` first.** The directory is first for what the server starts directly. A shell that re-reads the person's profile can put their own directories, and a `j5` in them, ahead again.
 - **At each advance:** check new upstream code that locates the executable by name, upstream's `SERVICE_LAUNCHER_PROTOCOL` (J5's number must stay above it), and that the startup hook still runs after `prepareTrial`.
 
-**Decided:** Jackson, 2026-10-02 (#403), 2026-10-03 (the protocol bump and the `j5 update` step; #398; #397, including leaving the person's `PATH` alone in the Mac app) and 2026-10-04 (#441, in the command palette only). Recorded in FORK.md cases 50 to 55.
+**Decided:** Jackson, 2026-10-02 (#403), 2026-10-03 (the protocol bump and the `j5 update` step; #398; #397, including leaving the person's `PATH` alone in the Mac app), 2026-10-04 (#441, in the command palette only) and 2026-10-08 (upstream's launcher and Settings row, renamed, which revises the palette-only ruling). Recorded in FORK.md cases 50 to 53 and 57; cases 54 and 55 are retired.
 
 #### D29. A client refuses a J5 server whose ledger has not been re-keyed
 
@@ -357,28 +341,6 @@ These already diverge on `j5/main`, but no human ruling is on record. Each lande
 
 The person ruled against these. They still diverge on `j5/main` until their fix lands, and then move to Retired.
 
-#### D5. A committed Stop wins over a racing steer
-
-**Upstream:** a steer the provider accepted before the person pressed Stop can come back as a follow-up turn after it. Upstream lists this as unfinished (`TODO(interrupt-hardening)`).
-
-**J5:** once a Stop is committed, a steer accepted before it doesn't start a new turn.
-
-**Why:** J5 agents message Astra peers as steers (D4), so a peer's steer that the provider accepted just before the person pressed Stop can wake the agent they stopped. Other agent messages queue rather than steer, and upstream's Stop-holds-the-queue change covers those.
-
-**Consequences:** only an Astra peer's steer still in flight at the moment of Stop is affected; if a stopped agent wakes, the person stops it again. Upstream tracks the underlying gap as `TODO(interrupt-hardening)`.
-
-**Status:** it arrived with the 2026-09-17 upstream integration without a ruling, and Jackson kept it on 2026-09-24 (#5). Jackson, 2026-09-28: controlling a thread's turns is upstream's area and this is a race J5 doesn't design for, so follow upstream's implementation. To be removed (#343). Recorded in FORK.md's temporary patches.
-
-#### D23. A committed Stop also blocks usage-limit auto-resume
-
-**Upstream:** when a run fails because the provider's usage limit was hit, it resumes automatically once the limit resets. Upstream checks only that the run failed on a usage limit.
-
-**J5:** it also checks whether the person pressed Stop on that run first. The case this covers: the person presses Stop, but before the provider acknowledges it, the provider hits its usage limit, so the run ends as "failed: usage limit" rather than "stopped". Upstream would then resume the run hours later, restarting an agent the person deliberately stopped. J5 doesn't resume it.
-
-**Why:** it extends D5: a Stop the person committed wins over anything automatic that would revive the run. No separate reason is recorded.
-
-**Status:** added during the 2026-09-24 advance (PR #262), without its own decision. Jackson, 2026-09-28: an edge case J5 doesn't design for, so follow upstream. To be removed (#343).
-
 #### D24. Astra model aliases
 
 **Upstream:** no short aliases for `gpt-6-astra`.
@@ -399,7 +361,7 @@ J5 added a fourth stage to upstream's welcome wizard that gave each imported fol
 
 #### D8. Acting on another agent also requires a shared Squadron
 
-On top of upstream's same-project rule, J5 required a shared Squadron to archive or unarchive another agent and to merge back (Jackson, 2026-09-28). Retired 2026-10-07, when the ledger re-keyed to projects ([#412](https://github.com/Jacksondr5/j5code/issues/412)): a thread's home is its project, so upstream's same-project rule is the only rule.
+On top of upstream's same-project rule, J5 required a shared Squadron to archive or unarchive another agent and to merge back (Jackson, 2026-09-28). Retired 2026-10-07, when the ledger re-keyed to projects ([#412](https://github.com/Jacksondr5/j5code/issues/412)): a thread's home is its project, so upstream's same-project rule was the only rule. Upstream has since dropped that rule for thread tools, and J5 follows it (D2).
 
 #### D9. A thread's Squadron is created for it
 
@@ -409,6 +371,22 @@ A thread launched without a Squadron registered into its project's Squadron, whi
 
 A scheduled run was refused before creating a thread when several Squadrons referenced its project (narrowed to that case on 2026-10-03). Retired 2026-10-07 ([#412](https://github.com/Jacksondr5/j5code/issues/412)): a scheduled task starts a fresh thread as it does upstream.
 
+#### D5. A committed Stop wins over a racing steer
+
+Once a Stop was committed, J5 kept a steer the provider had accepted before it from starting a new turn. It arrived with the 2026-09-17 upstream integration and Jackson kept it on 2026-09-24. Jackson ruled on 2026-09-28 that controlling a thread's turns is upstream's area and this is a race J5 doesn't design for. Removed 2026-10-08 ([#343](https://github.com/Jacksondr5/j5code/issues/343)): J5 runs upstream's code. Upstream's Stop holds the thread's queue, which covers queued messages; a peer steer already in flight to an Astra agent can still wake it (D4).
+
+#### D7. Codex CLI version floor
+
+J5 refused Codex CLIs older than 0.151.0 with a named error, because older CLIs omitted fields the schema required (PR #92, 2026-09-04; approved by Jackson on 2026-09-28). Retired 2026-10-08 (Jackson): J5 follows upstream's provider compatibility table, which warns about a version and doesn't block it. J5 reads that table with the upstream version it is based on, because J5 keeps its own version numbers (FORK.md case 59).
+
+#### D15. Archive Undo is withheld when Crews may retire
+
+J5 hid Undo on an archive that might retire a Captain's Crews, because unarchiving the Captain didn't bring them back (Jackson, 2026-09-24). Retired in [#312](https://github.com/Jacksondr5/j5code/issues/312), when unarchiving a Captain began restoring its Crews (D14): every archive door offers upstream's Undo again. This register listed the entry as live until 2026-10-08.
+
+#### D23. A committed Stop also blocks usage-limit auto-resume
+
+J5 kept a run from resuming after a usage-limit reset when the person had pressed Stop on it first. It was added during the 2026-09-24 advance without its own decision, as an extension of D5. Jackson ruled on 2026-09-28 that it is an edge case J5 doesn't design for. Removed 2026-10-08 ([#343](https://github.com/Jacksondr5/j5code/issues/343)) with D5.
+
 ## History
 
 - 2026-09-26 — created: the three zones, the decision protocol, and the register, seeded from FORK.md and the worklog records (Jackson, [#327](https://github.com/Jacksondr5/j5code/issues/327)).
@@ -417,3 +395,4 @@ A scheduled run was refused before creating a thread when several Squadrons refe
 - 2026-10-04 — D28 added: the `j5` command (PR #414).
 - 2026-10-07 — D8, D9 and D11 retired and D29 added: the ledger re-keyed to projects ([#412](https://github.com/Jacksondr5/j5code/issues/412)).
 - 2026-10-08 — D9 records the accepted reversal of "no junk drawer": upstream's "No project" project is taken as upstream ships it (Jackson, 2026-10-05; [#412](https://github.com/Jacksondr5/j5code/issues/412)).
+- 2026-10-08 — the advance onto upstream `main`: D5, D7 and D23 retired, D15 recorded as retired, D8's retired text corrected, and D1, D2, D3, D4, D6, D14, D19, D25 and D28 rewritten for what upstream now ships (Jackson's decisions of that day).

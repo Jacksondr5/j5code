@@ -1,5 +1,5 @@
 import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 // Peering poll mode. A peer record gains its link mode: `push` sends directly
 // both ways, `store` keeps messages here for a peer that polls (no origin and

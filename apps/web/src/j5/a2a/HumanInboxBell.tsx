@@ -60,7 +60,7 @@ export function HumanInboxBell({ onBackdrop }: { readonly onBackdrop: boolean })
     >
       <InboxIcon aria-hidden className="size-4" />
       {shouldShowOpenInboxCount(count) || incomplete ? (
-        <span className="absolute -end-1 -top-1 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[0.625rem] font-semibold leading-none text-primary-foreground tabular-nums ring-2 ring-sidebar">
+        <span className="absolute -end-1 -top-1 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-3xs font-semibold leading-none text-primary-foreground tabular-nums ring-2 ring-sidebar">
           {incomplete ? (count !== null && count > 0 ? `${count}*` : "?") : count}
         </span>
       ) : null}

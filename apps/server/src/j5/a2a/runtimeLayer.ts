@@ -1,8 +1,8 @@
 import * as Layer from "effect/Layer";
-import { OrchestrationV2EventSinkLayerLive } from "../../orchestration-v2/runtimeLayer.ts";
+import { layerEventSink as OrchestrationV2EventSinkLayerLive } from "../../orchestration-v2/runtimeLayer.ts";
 import { layer as playbookCrewRelayLayer } from "../playbooks/PlaybookCrewRelay.ts";
 import { playbookStoreLayer } from "../playbooks/PlaybookStore.ts";
-import { FetchHttpClient } from "effect/unstable/http";
+import { FetchHttpClient } from "effect/http";
 
 import { layer as artifactWorkspaceLayer } from "../artifacts/ArtifactWorkspace.ts";
 import { layer as agentCrewInstanceLayer } from "./AgentCrewInstanceService.ts";

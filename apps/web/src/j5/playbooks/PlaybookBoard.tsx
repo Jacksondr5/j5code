@@ -69,12 +69,12 @@ export function PlaybookBoard(props: { environmentId: EnvironmentId; threadId: T
         )}
         {run.description && <p className="mt-2 text-xs text-muted-foreground">{run.description}</p>}
         {query.error && (
-          <p role="status" className="mt-2 text-xs text-amber-600">
+          <p role="status" className="mt-2 text-xs text-warning">
             Progress could not refresh. Showing the last received state.
           </p>
         )}
         {run.issue && (
-          <p role="status" className="mt-2 text-xs text-amber-600">
+          <p role="status" className="mt-2 text-xs text-warning">
             {run.issue.message}
           </p>
         )}

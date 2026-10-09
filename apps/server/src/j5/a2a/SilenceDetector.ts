@@ -13,7 +13,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import { EventSinkV2 } from "../../orchestration-v2/EventSink.ts";
 import * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";

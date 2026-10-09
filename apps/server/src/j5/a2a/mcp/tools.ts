@@ -1,4 +1,4 @@
-import { Tool, Toolkit } from "effect/unstable/ai";
+import { Tool, Toolkit } from "effect/ai";
 import { playbookTools } from "../../playbooks/mcp.ts";
 import * as Schema from "effect/Schema";
 import { PLAYBOOK_MAX_STEPS } from "@t3tools/contracts/j5";
@@ -15,12 +15,12 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import * as McpInvocationContext from "../../../mcp/McpInvocationContext.ts";
 import { OrchestratorMcpService } from "../../../mcp/OrchestratorMcpService.ts";
 import { OrchestratorV2 } from "../../../orchestration-v2/Orchestrator.ts";
 import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
-import { ProviderRegistry } from "../../../provider/Services/ProviderRegistry.ts";
+import { ProviderRegistry } from "../../../provider/ProviderRegistry.ts";
 import { AgentCrewInstanceService } from "../AgentCrewInstanceService.ts";
 import { ArchiveCrewService } from "../ArchiveCrewService.ts";
 import {
@@ -382,7 +382,7 @@ export const J5StopCrewResult = Schema.Struct({
 });
 
 export const J5_STOP_CREW_DESCRIPTION =
-  "Stop a Crew you command: interrupts the running turn of every seat now. Nothing settles or is retired, and every seat can be messaged again afterwards. Captain-only. Reuse client_request_id to retry safely.";
+  "Stop a Crew you command the way a user Stop does, seat by seat: each seat's running turn is interrupted now, turns already queued behind it, messages you sent it included, are held until a person resumes its queue (no tool releases them, and a message sent after the stop runs ahead of them), its pull request watches end, and the tasks it delegated stop too. Nothing settles or is retired, and every seat can be messaged again afterwards. Captain-only. Reuse client_request_id to retry safely.";
 
 export const J5ArchiveResult = Schema.Literals(["archived", "already_archived"]);
 
@@ -452,13 +452,16 @@ export const J5_REQUEST_CREW_MEMBER_DESCRIPTION =
   "Ask the user to add one seat to a crew you command when the work needs one the roster lacks: seat name, persona id from list_personas (or none for a custom seat with required instructions and optional model_selection/runtime_mode overrides; an omitted model_selection inherits yours and an omitted runtime_mode is full-access; saved-persona runtime changes are made only by the human before approval), a clear reason identifying the concern and missing expertise or responsibility, its workspace (the same three choices as propose_crew), and optionally instructions and a brief for the new seat. On a crew that follows a playbook, steps may claim step ids from playbook_read that no seat owns yet. The user decides from their inbox; you receive the decision and the updated roster as a message here. Continue the already-approved work and direct coordination while the addition is pending. Captain-only; a member sends the concern and needed expertise to its Captain with send_message. Reuse client_request_id to retry safely. Filing the request is the human gate itself and works under every approval policy, including approval policy never.";
 
 export const J5_STOP_AGENT_DESCRIPTION =
-  "Stop one Peer Agent: interrupts its running turn now. The agent remains, stays readable, and can be messaged again later — stopping halts work, it retires nothing. The agent must be in your project. Reuse client_request_id to retry safely.";
+  "Stop one Peer Agent the way a user Stop does: its running turn is interrupted now, turns already queued behind it, messages you sent it included, are held until a person resumes its queue (no tool releases them, and a message sent after the stop runs ahead of them), its pull request watches end, and the tasks it delegated stop too. The agent remains, stays readable, and can be messaged again later — stopping halts work, it retires nothing. The agent must be in your project. Reuse client_request_id to retry safely.";
 
 export const J5_ARCHIVE_CREW_DESCRIPTION =
   "Retire a whole Crew you command. Crews archive only as a unit — members are never retired one by one. A clean archive completes immediately; otherwise the call refuses with the facts and a confirmation_token. Before retrying with that token, check with the user. Nothing is destroyed: worktrees, branches, and ledgers stay readable. Reuse client_request_id to retry safely.";
 
+// McpToolAccess reads the calling thread before any tool that needs one, so each of those
+// tools depends on ThreadManagementService whether or not its handler does.
 const sendDependencies = [
   McpInvocationContext.McpInvocationContext,
+  ThreadManagementService,
   A2ASendService,
   A2AHomeRegistrar,
   A2ADeliveryWorker,
@@ -470,6 +473,7 @@ const sendDependencies = [
 
 const placementDependencies = [
   McpInvocationContext.McpInvocationContext,
+  ThreadManagementService,
   A2ASendService,
   ParticipantPlacementService,
   OrchestratorV2,
@@ -521,6 +525,7 @@ const stopDependencies = [
 
 const stopCrewDependencies = [
   McpInvocationContext.McpInvocationContext,
+  ThreadManagementService,
   A2ASendService,
   Crypto.Crypto,
   A2ALedger,
@@ -529,6 +534,7 @@ const stopCrewDependencies = [
 
 const archiveCrewDependencies = [
   McpInvocationContext.McpInvocationContext,
+  ThreadManagementService,
   A2ASendService,
   Crypto.Crypto,
   A2ALedger,
@@ -667,7 +673,12 @@ export const J5ClearOwnAskTool = Tool.make("clear_own_ask", {
   success: ClearOwnAskResult,
   failure: J5McpFailure,
   failureMode: "return",
-  dependencies: [McpInvocationContext.McpInvocationContext, A2ASendService, A2ADeliveryWorker],
+  dependencies: [
+    McpInvocationContext.McpInvocationContext,
+    ThreadManagementService,
+    A2ASendService,
+    A2ADeliveryWorker,
+  ],
 })
   .annotate(Tool.Title, "Withdraw your open ask")
   .annotate(Tool.Readonly, false)

@@ -10,14 +10,16 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Stream from "effect/Stream";
 
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import {
   layer as runtimePolicyLayer,
-  layerFromProjectRepository,
+  layerFromProjectStore,
   RuntimePolicyV2,
 } from "../../orchestration-v2/RuntimePolicy.ts";
-import * as ProjectionProjects from "../../persistence/Services/ProjectionProjects.ts";
+import * as ProjectStore from "../../orchestration-v2/ProjectStore.ts";
+import * as ProviderInstanceRegistry from "../../provider/ProviderInstanceRegistry.ts";
 import { AgentCrewInstanceService, layer as crewLayer } from "./AgentCrewInstanceService.ts";
 import { CREW_SEAT_QUESTION_INSTRUCTIONS } from "./crewSeatQuestions.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
@@ -66,15 +68,26 @@ const makeThread = (
 };
 
 const database = NodeSqliteClient.layer({ filename: ":memory:" });
-const projects = Layer.mock(ProjectionProjects.ProjectionProjectRepository)({
-  getById: () => Effect.succeedNone,
+const projects = Layer.mock(ProjectStore.ProjectStoreV2)({
+  get: () => Effect.succeedNone,
+});
+const providerInstances = Layer.succeed(ProviderInstanceRegistry.ProviderInstanceRegistry, {
+  getInstance: () => Effect.succeed(undefined),
+  listInstances: Effect.succeed([]),
+  listUnavailable: Effect.succeed([]),
+  streamChanges: Stream.empty,
+  subscribeChanges: Effect.never,
 });
 const testLayer = Layer.mergeAll(
   database,
   ledgerLayer.pipe(Layer.provide(database)),
   crewLayer.pipe(Layer.provide(database)),
   // Production resolves the policy over the server's SQL client; so does this layer.
-  layerFromProjectRepository.pipe(Layer.provide(projects), Layer.provide(database)),
+  layerFromProjectStore.pipe(
+    Layer.provide(projects),
+    Layer.provide(providerInstances),
+    Layer.provide(database),
+  ),
 );
 
 const seatThreadId = "thread:j5:a2a:seat-reviewer";

@@ -3,20 +3,23 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 
-import { RemoteEnvironmentAuthorization } from "../authorization/service.ts";
+import * as RemoteEnvironmentAuthorization from "../authorization/service.ts";
 import type { PreparedConnection } from "../connection/model.ts";
 import { environmentEndpointUrl } from "../environment/endpoint.ts";
-import { ManagedRelayDpopSigner } from "../relay/managedRelay.ts";
+import * as ManagedRelay from "../relay/managedRelay.ts";
 import type { RemoteEnvironmentRequestError } from "../rpc/http.ts";
 import {
   executeAuthenticatedEnvironmentHttpRequest,
   withOrchestrationProtocolHeader,
 } from "./environmentHttpAuth.ts";
 
-// Bounded so a pathologically slow endpoint cannot block the (cheaper) socket
-// fallback for long. The cached thread renders while this runs, so the wait only
-// delays the transition to live data on the first open, not the initial paint.
-const DEFAULT_THREAD_SNAPSHOT_TIMEOUT_MS = 6_000;
+// Long enough for a slow but alive server to finish. On a cold open a timeout
+// makes the socket ask the same server for the same snapshot again, and older
+// turn pages have no fallback, so a short deadline only drops work. The socket
+// fallback is for setups where /api fails but /ws works, such as a proxy that
+// blocks /api. A dead server drops the socket session, which interrupts a
+// cold-open load. Older turn pages wait for this deadline.
+const DEFAULT_THREAD_SNAPSHOT_TIMEOUT_MS = 20_000;
 
 /** Progressive history metadata returned by a bounded snapshot loader. */
 export type ThreadSnapshotHistoryMeta = {
@@ -52,8 +55,10 @@ export const fetchEnvironmentThreadSnapshot = Effect.fn(
 )(function* (input: {
   readonly prepared: PreparedConnection;
   readonly threadId: ThreadId;
-  readonly signer: Option.Option<ManagedRelayDpopSigner["Service"]>;
-  readonly remoteAuthorization?: Option.Option<RemoteEnvironmentAuthorization["Service"]>;
+  readonly signer: Option.Option<ManagedRelay.ManagedRelayDpopSigner["Service"]>;
+  readonly remoteAuthorization?: Option.Option<
+    RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization["Service"]
+  >;
   readonly timeoutMs?: number;
 }) {
   return yield* executeAuthenticatedEnvironmentHttpRequest({

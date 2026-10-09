@@ -11,14 +11,14 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 
 import { EventSinkV2 } from "../../orchestration-v2/EventSink.ts";
-import { IdAllocatorV2 } from "../../orchestration-v2/IdAllocator.ts";
+import { IdAllocatorV2 } from "@t3tools/provider-core/server/IdAllocator";
 import { ProjectionStoreV2 } from "../../orchestration-v2/ProjectionStore.ts";
 import {
   type CandidateCursor,
   QueuedRunCandidates,
   layer as candidateLayer,
 } from "./QueuedRunCandidates.ts";
-import { makeProviderFailure } from "../../orchestration-v2/ProviderFailure.ts";
+import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
 import { forkParked } from "../../serverActivation.ts";
 
 export const QUEUED_RUN_WATCHDOG_DELAY_MS = 5 * 60 * 1000;

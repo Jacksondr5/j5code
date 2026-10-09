@@ -12,17 +12,21 @@ import * as Layer from "effect/Layer";
 import { ArtifactWorkspace } from "../j5/artifacts/ArtifactWorkspace.ts";
 import { ThreadManagementService } from "../orchestration-v2/ThreadManagementService.ts";
 import { ArtifactMcpService, layer } from "./ArtifactMcpService.ts";
-import type { McpInvocationScope } from "./McpInvocationContext.ts";
+import type { McpInvocationScope, McpThreadInvocationScope } from "./McpInvocationContext.ts";
 
 const projectId = ProjectId.make("project:artifact-mcp");
 const threadId = ThreadId.make("thread:artifact-mcp");
-const scope = (capabilities: McpInvocationScope["capabilities"]): McpInvocationScope => ({
+const scope = (capabilities: McpInvocationScope["capabilities"]): McpThreadInvocationScope => ({
   environmentId: EnvironmentId.make("environment:artifact-mcp"),
-  threadId,
-  providerSessionId: "provider-session:artifact-mcp",
-  providerInstanceId: ProviderInstanceId.make("codex"),
   capabilities,
   issuedAt: 1,
+  requestNamespace: "provider-session:artifact-mcp",
+  thread: {
+    threadId,
+    providerSessionId: "provider-session:artifact-mcp",
+    providerInstanceId: ProviderInstanceId.make("codex"),
+  },
+  client: undefined,
 });
 
 describe("ArtifactMcpService", () => {

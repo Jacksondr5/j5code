@@ -5,8 +5,8 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
 
 import { OrchestratorV2 } from "../../orchestration-v2/Orchestrator.ts";
 import { listRegisteredHumanPersonIds } from "./HumanPersonRegistry.ts";

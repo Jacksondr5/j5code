@@ -20,25 +20,22 @@ import { stringify } from "yaml";
 import * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { layer as mcpSessionRegistryTestLayer } from "../../mcp/McpSessionRegistry.testkit.ts";
-import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
-import { OrchestrationLayerLive } from "../../orchestration/runtimeLayer.ts";
 import { CodexProviderCapabilitiesV2 } from "../../orchestration-v2/Adapters/CodexAdapterV2.ts";
 import { OrchestrationEffectWorkerV2 } from "../../orchestration-v2/EffectWorker.ts";
-import type { ProviderAdapterV2Shape } from "../../orchestration-v2/ProviderAdapter.ts";
-import { worktreeRepairDependenciesTestLayer } from "../../orchestration-v2/ProviderTurnStartService.testkit.ts";
+import type { ProviderAdapterV2Shape } from "@t3tools/provider-core/server/ProviderAdapter";
+import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
+import * as ProviderTurnStartServiceTestkit from "../../orchestration-v2/ProviderTurnStartService.testkit.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
-import {
-  OrchestrationV2EventSinkLayerLive,
-  OrchestrationV2LayerLive as UpstreamOrchestrationV2LayerLive,
-} from "../../orchestration-v2/runtimeLayer.ts";
-import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
+import * as RuntimeLayer from "../../orchestration-v2/runtimeLayer.ts";
+import * as SqlitePersistence from "../../persistence/Sqlite.ts";
 import { ProjectEnrichmentService } from "../../project/ProjectEnrichmentService.ts";
-import type { ProviderInstance } from "../../provider/ProviderDriver.ts";
-import { ProviderInstanceRegistry } from "../../provider/Services/ProviderInstanceRegistry.ts";
+import { ProjectService } from "../../project/ProjectService.ts";
+import { ProviderInstanceRegistry } from "../../provider/ProviderInstanceRegistry.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { SourceControlProviderRegistry } from "../../sourceControl/SourceControlProviderRegistry.ts";
 import * as VcsDriverRegistry from "../../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../../vcs/VcsProcess.ts";
+import * as WorkspacePaths from "../../workspace/WorkspacePaths.ts";
 import {
   AgentCrewInstanceService,
   layer as crewInstanceLayer,
@@ -79,16 +76,22 @@ const providerInstance = {
   continuationIdentity: { driverKind: driver, continuationKey: "codex:test" },
   displayName: "Codex test",
   enabled: true,
-  snapshot: {} as ProviderInstance["snapshot"],
+  // No supportedRuntimeModes: every runtime mode runs as stored.
+  snapshot: { getSnapshot: Effect.succeed({}) } as unknown as ProviderInstance["snapshot"],
   orchestrationAdapter,
   textGeneration: {} as ProviderInstance["textGeneration"],
 } satisfies ProviderInstance;
 const TestLayer = Layer.mergeAll(
-  OrchestrationLayerLive,
-  UpstreamOrchestrationV2LayerLive.pipe(Layer.provideMerge(J5ThreadRegistrationLayer)),
-  OrchestrationV2EventSinkLayerLive,
+  RuntimeLayer.layer.pipe(Layer.provideMerge(J5ThreadRegistrationLayer)),
+  RuntimeLayer.layerEventSink,
 ).pipe(
-  Layer.provide(worktreeRepairDependenciesTestLayer),
+  Layer.provideMerge(RuntimeLayer.layerProjectService),
+  Layer.provide(
+    Layer.mock(WorkspacePaths.WorkspacePaths)({
+      normalizeWorkspaceRoot: (workspaceRoot) => Effect.succeed(workspaceRoot),
+    }),
+  ),
+  Layer.provide(ProviderTurnStartServiceTestkit.layer),
   Layer.provide(
     Layer.succeed(ProjectEnrichmentService, {
       peek: () =>
@@ -133,7 +136,7 @@ const TestLayer = Layer.mergeAll(
     }),
   ),
   Layer.provideMerge(Layer.mergeAll(ledgerLayer, crewInstanceLayer)),
-  Layer.provideMerge(SqlitePersistenceMemory),
+  Layer.provideMerge(SqlitePersistence.layerMemory),
   Layer.provideMerge(PlatformTestLayer),
 );
 
@@ -167,15 +170,12 @@ it.layer(TestLayer)("Crew playbook hand-off through the real orchestrator", (it)
           ],
         }),
       );
-      yield* (yield* OrchestrationEngineService).dispatch({
-        type: "project.create",
+      yield* (yield* ProjectService).create({
         commandId: CommandId.make("command:playbook-relay:project"),
         projectId,
         title: "Playbook relay",
         workspaceRoot: root,
         defaultModelSelection: modelSelection,
-        scripts: [],
-        createdAt: now,
       });
       for (const threadId of [captainThread, seatThread])
         yield* threads.dispatch({

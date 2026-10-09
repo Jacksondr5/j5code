@@ -110,16 +110,16 @@ permission ceiling between Peer Agents (Jackson, 2026-09-16), since any such gua
 to a trusting peer away from bypass. Disabled, removed, and unknown personas refuse before creation.
 A plain spawn without `persona` is unchanged and inherits the parent's runtime mode as before.
 
-**Description:** "Stop one Peer Agent: interrupts its running turn now. The agent remains, stays readable, and can be messaged again later — stopping halts work, it retires nothing. The agent must be in your project. Reuse client_request_id to retry safely."
+**Description:** "Stop one Peer Agent the way a user Stop does: its running turn is interrupted now, turns already queued behind it, messages you sent it included, are held until a person resumes its queue (no tool releases them, and a message sent after the stop runs ahead of them), its pull request watches end, and the tasks it delegated stop too. The agent remains, stays readable, and can be messaged again later — stopping halts work, it retires nothing. The agent must be in your project. Reuse client_request_id to retry safely."
 
 | Input               | Type          | Required                    |
 | ------------------- | ------------- | --------------------------- |
 | `participant_id`    | ParticipantId | yes — the one agent to stop |
 | `client_request_id` | string        | no                          |
 
-**Result:** exactly one of `interrupt_requested` (a running turn is being interrupted) or `already_idle` (no running turn; no side effect). An interrupt acknowledgement and an observed terminal run state are separate facts; the tool never claims a turn stopped merely because interruption was requested. A target outside the caller's project is an error pointing at `list_participants`.
+**Result:** exactly one of `interrupt_requested` (the agent has an active run, which is being interrupted) or `already_idle` (the agent has no active run; its queue is still held). A run that is preparing, starting, running or waiting is active. An interrupt acknowledgement and an observed terminal run state are separate facts; the tool never claims a turn stopped merely because interruption was requested. A target outside the caller's project is an error pointing at `list_participants`.
 
-**Rules.** A caller's runtime policy never gates `stop_agent`, `stop_crew`, or `archive_crew`: a read-only persona may run them, because identity (the Captain, its own Crew) and the human's confirmation token are the gates, and the sandbox guards the workspace rather than the platform's verbs (Bryant, 2026-09-14). Stop and archive are single-target; the unit cascade belongs to Crews, which stop and archive as units through their own verbs when they exist. A stop is final across restarts: a committed stop wins even if the provider has not yet acknowledged it, so a stopped run is never resumed by upstream's restart continuation.
+**Rules.** A caller's runtime policy never gates `stop_agent`, `stop_crew`, or `archive_crew`: a read-only persona may run them, because identity (the Captain, its own Crew) and the human's confirmation token are the gates, and the sandbox guards the workspace rather than the platform's verbs (Bryant, 2026-09-14). Stop and archive are single-target; the unit cascade belongs to Crews, which stop and archive as units through their own verbs when they exist. Stop is upstream's Stop. Besides interrupting the turn, it holds the turns queued behind it, ends the thread's pull request watches and stops the tasks it delegated, so a message already queued for a stopped agent waits until a person resumes its queue. No agent tool releases it, and a message sent after the stop runs ahead of it. Upstream does not continue a stopped run after a restart.
 
 **Amendment (Jackson, 2026-08-29):** the A6 build cascaded over the placement subtree; that blast
 radius makes the tool less useful, so `stop_agent` and thread archive are single-target. The
@@ -129,7 +129,7 @@ survives as their engine (a cascade of one is its degenerate case).
 
 ## `t3_thread_organize` — archive and restore
 
-Use `action: "archive"` with an agent's `threadId`, or omit it to archive the calling thread. The target must be in the calling project, which is upstream's rule and the only one. The tool archives one thread, hides it from the active directory, and closes its open Exchanges through the shared lifecycle reactor. It does not interrupt an existing run. Use `stop_agent` when work must stop.
+Use `action: "archive"` with an agent's `threadId`, or omit it to archive the calling thread. Upstream's access check is the only rule: the tool reaches any thread in the environment, within the limits upstream sets for the caller. The tool archives one thread, hides it from the active directory, and closes its open Exchanges through the shared lifecycle reactor. It does not interrupt an existing run. Use `stop_agent` when work must stop.
 
 Use `action: "unarchive"` to restore the same identity. Old Exchanges remain closed and cancelled messages do not replay. Historical permanently retired agents remain retired. The human UI retains its archive warning; this tool uses upstream archive semantics without a separate confirmation-token flow. `archive_agent` has been retired.
 
@@ -294,9 +294,7 @@ the 2026-09-10 `deliver_artifact` verb, its ledger table, and the crew-only `rea
 
 ### `stop_crew`
 
-**Description (contract):** "Stop a Crew you command: interrupts the running turn of every seat
-now. Nothing settles or is retired, and every seat can be messaged again afterwards. Captain-only.
-Reuse client_request_id to retry safely."
+**Description (contract):** "Stop a Crew you command the way a user Stop does, seat by seat: each seat's running turn is interrupted now, turns already queued behind it, messages you sent it included, are held until a person resumes its queue (no tool releases them, and a message sent after the stop runs ahead of them), its pull request watches end, and the tasks it delegated stop too. Nothing settles or is retired, and every seat can be messaged again afterwards. Captain-only. Reuse client_request_id to retry safely."
 
 | Input               | Type              | Required | Meaning                                        |
 | ------------------- | ----------------- | -------- | ---------------------------------------------- |
@@ -306,9 +304,8 @@ Reuse client_request_id to retry safely."
 Result: `crew_instance_id` and `members` (seat, participant_id, result: `interrupt_requested`,
 `already_idle`, or `archived`). Semantics: the unit form of `stop_agent`. Only the Captain may call
 it; anyone else is refused and pointed at asking the Captain; an archived Crew is refused naming
-its state. Every seat with a run in flight is interrupted through the ordinary single-agent stop
-(so a committed stop wins over restart continuation here too); idle seats are reported as such and
-left alone; nothing settles, nothing is retired, no Exchange closes, and the seats stay addressable.
+its state. Every seat is stopped through the ordinary single-agent stop, upstream's Stop; an idle seat is
+reported as such and its queue is held too; nothing settles, nothing is retired, no Exchange closes, and the seats stay addressable.
 The person has the same act as a **Stop crew** control on the Crew's header on the Fleet page and on
 the Captain's expander in the sidebar, shown only while a seat is running; it is not a Crew
 participant, so no Captain check applies to it (Bryant, 2026-09-14).
@@ -370,6 +367,7 @@ run; `stop_crew` doesn't, and unarchiving doesn't restart it.
 - `delegate_task`, `task_status`, `task_cancel` — upstream's provider-owned child delegation. J5 re-declares `delegate_task` with its own description, which leads with the optional `persona` (a persona id from an `@persona:ID` mention or the Settings → Personas library) and presents the plain child as the fallback for cross-provider or T3-tracked work rather than the default for any subagent request. With `persona`, the server pins that persona's instructions, model route, reasoning, and runtime policy and refuses `target` and `runtimeMode`; without it, the child is upstream's plain subagent. The child is backing storage under the calling thread, not a Peer Agent; use `spawn_agent` for a participant. Its wait mode is safe where `t3_thread_wait` was not: a child that messages its parent ends its own turn, so the wait returns and the parent reads the message on its next turn (latency, never starvation).
 - `schedule_task`, `list_scheduled_tasks`, `update_scheduled_task`, `delete_scheduled_task` — consumed as-is.
 - `t3_thread_list`, `t3_thread_read` — consumed as-is; if an upstream description mentions delegation, J5 re-declares that tool with corrected prose.
+- `html_preview`, `html_render`, `request_secret`, `preview_dialog`, `preview_hover`, `preview_select`, `preview_drag`, `preview_upload`, `watch_pull_request`, `unwatch_pull_request` — consumed as-is.
 - `t3_thread_wait` is **withdrawn** from the J5 surface. Platform notices queue behind a running turn, so a participant that blocks inside its turn waiting on another thread can never receive the notice that thread's finish produces; a Captain that waited on a seat this way starved itself of its own Crew's news (Bryant, 2026-09-14). Whatever a participant is waiting for arrives as a message once it ends its turn.
 
 ## Acceptance criteria
@@ -383,7 +381,7 @@ run; `stop_crew` doesn't, and unarchiving doesn't restart it.
 7. `spawn_agent` refuses a call that omits provider, model, or reasoning, refuses a choice outside the Role's allowlist with an error naming the Role, and refuses a caller that sits in a Crew with an error naming escalation to its Captain.
 8. A spawned agent's first turn contains its own participant id and project.
 9. `stop_agent` and `t3_thread_organize` act on one target; neither cascades. A stopped run is never resumed after a server restart, even when restart continuation is enabled.
-10. `t3_thread_organize` archives and restores another registered agent only within the caller's project. Archive closes Exchanges through the shared reactor without a confirmation-token exchange or interrupting an existing run; human archive warnings remain.
+10. `t3_thread_organize` archives and restores any thread in the environment that upstream's access check lets the caller act on. Archive closes Exchanges through the shared reactor without a confirmation-token exchange or interrupting an existing run; human archive warnings remain.
 11. `clear_own_ask` closes only an Exchange the caller opened and records the closure as sender-cleared.
 12. Every error from every verb names the actual state and the next command.
 13. `list_participants` omits archived agents unless `include_archived` is set, and then marks each one `archived` and unable to receive a message or an ask.
@@ -393,7 +391,7 @@ run; `stop_crew` doesn't, and unarchiving doesn't restart it.
 17. `list_personas` returns every persona with its availability and route; `propose_crew` and `request_crew_member` file a human gate and refuse unknown, disabled, duplicate, or over-cap seats before anything is recorded; both succeed under every sandbox and approval policy, including Codex approval policy `never`.
 18. Approving a proposal spawns exactly once; a second approval finds it resolved; a seat that fails to spawn is reported by name in the launch report and the other seats still start.
 19. `archive_crew` is Captain-only, refuses with per-seat facts and a token when any seat has an open Exchange or a running turn, and finishes a partial archive on retry; `t3_thread_organize` refuses an active Crew member, while Captain archive retains the unit cascade.
-20. `stop_crew` is Captain-only, interrupts every seat with a running turn and reports each seat as interrupted, already idle, or archived; it settles, retires, and closes nothing, and a non-Captain or an archived Crew is refused naming the next step. The person's Stop crew control does the same through the operate scope.
+20. `stop_crew` is Captain-only, stops every seat as a user Stop does and reports each seat as interrupted, already idle, or archived; it settles, retires, and closes nothing, and a non-Captain or an archived Crew is refused naming the next step. The person's Stop crew control does the same through the operate scope.
 21. `list_participants` lists participants on peer servers with their project and reports an unreadable peer in the result; `send_message` accepts their ids exactly as local ones.
 22. Once a server has a peer, every `list_participants` row names the server the participant lives on and marks this server's as local, and a row on a peer server that polls this one says whether it is available and when it was last available; a server with no peers adds no server field.
 23. A `send_message` to a participant on a peer server names that server in its result, and, when that server is offline, says the message is waiting for the recipient and when the server was last available.
@@ -431,3 +429,4 @@ run; `stop_crew` doesn't, and unarchiving doesn't restart it.
 - 2026-10-03 — `spawn_agent`, `propose_crew` seats and `request_crew_member` require a `workspace`, with no default: the caller's checkout, a new worktree from a required `base_ref` prepared by upstream's ThreadLaunch, or an existing worktree of the project. (Jackson; [#274](https://github.com/Jacksondr5/j5code/issues/274)).
 - 2026-10-06 — a peer whose new worktree fails to prepare is left as upstream leaves any failed launch: its thread shows the failure, and it is not retried, retired, or guarded, and its spawner is not told. Upstream reads an unbound thread as the project's checkout, but in practice no turn has landed there, and each guard tried (a turn guard, then waiting for the checkout and retiring the peer) raised a new edge case. The turn guard and the `<j5_spawn_workspace_failed>` notice are removed, and `spawn_agent` returns once the peer is registered (Jackson on [#396](https://github.com/Jacksondr5/j5code/pull/396)).
 - 2026-10-07 — Squadrons retired: every thread but a provider Subagent is a participant in its project's ledger, so `list_squadrons` and `join_squadron` are removed and AC15 and AC16 retired; `stop_agent`, `stop_crew` and `archive_crew` take no `squadron_id`; `list_participants` rows and the `spawn_agent` result carry `project_id` and `project_title`; archiving another agent follows upstream's same-project rule alone (Jackson, 2026-10-05; [#412](https://github.com/Jacksondr5/j5code/issues/412)).
+- 2026-10-08 — the advance onto upstream `main`: `stop_agent` and `stop_crew` send upstream's Stop, which also holds the queue, ends pull request watches and stops delegated tasks; `t3_thread_organize` follows upstream's reach across the environment (AC10); ten new upstream tools are kept as-is (Jackson's decisions of that day; [register of divergences](../upstream.md), D2).

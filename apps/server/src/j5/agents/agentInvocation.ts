@@ -1,15 +1,14 @@
 import {
   AgentPersonaId,
   OrchestratorMcpDelegateTaskInput,
-  OrchestratorMcpDelegateTaskResult,
   OrchestratorMcpFailure,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { McpInvocationContext } from "../../mcp/McpInvocationContext.ts";
+import { McpInvocationContext, requireThreadScope } from "../../mcp/McpInvocationContext.ts";
 import { OrchestratorMcpService, resolveRuntimeMode } from "../../mcp/OrchestratorMcpService.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
-import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
+import { ProviderRegistry } from "../../provider/ProviderRegistry.ts";
 import { prepareAgentPersonaLaunch } from "./agentPersonaLaunch.ts";
 import { makeAgentPersonaLibrary } from "./agentPersonaLibrary.ts";
 import { resolveAgentPersonaRuntime } from "./agentPersonaRuntime.ts";
@@ -38,12 +37,13 @@ export const invokeAgent = Effect.fn("j5.invokeAgent")(function* (
       message: "This session cannot invoke agents.",
     });
   }
+  const { thread } = yield* requireThreadScope(scope, "delegate_task");
   const threads = yield* ThreadManagementService;
   const service = yield* OrchestratorMcpService;
   const registry = yield* ProviderRegistry;
   const library = yield* makeAgentPersonaLibrary;
   const parent = yield* threads
-    .getThreadProjection(scope.threadId)
+    .getThreadProjection(thread.threadId)
     .pipe(
       Effect.mapError(
         (error) =>

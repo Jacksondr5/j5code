@@ -14,7 +14,7 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
+import { HttpClientRequest, HttpClientResponse } from "effect/http";
 
 import { runtime } from "../../lib/runtime";
 import { readPreparedConnection } from "../../state/session";

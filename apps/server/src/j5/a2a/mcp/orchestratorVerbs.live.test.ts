@@ -1,18 +1,12 @@
-import { ThreadLaunchService } from "../../../orchestration-v2/ThreadLaunchService.ts";
-import { OrchestrationCommandReceiptRepositoryLive } from "../../../persistence/Layers/OrchestrationCommandReceipts.ts";
-import { J5ThreadRegistrationLayer } from "../runtimeLayer.ts";
-import { AntigravityInstallation } from "../../../provider/AntigravityInstallation.ts";
-import * as ModelManifest from "../../../provider/ModelManifest.ts";
-import * as CodexResetCredit from "../../../provider/Layers/codexResetCredit.ts";
-import * as GitWorkflow from "../../../git/GitWorkflowService.ts";
-import * as ProjectService from "../../../project/ProjectService.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
   CommandId,
   EnvironmentId,
   ProjectId,
+  ProviderDriverKind,
   ProviderInstanceId,
+  RunId,
   ThreadId,
   type ModelSelection,
 } from "@t3tools/contracts";
@@ -24,36 +18,46 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
-import { FetchHttpClient } from "effect/unstable/http";
+import { FetchHttpClient } from "effect/http";
 import { describe } from "vite-plus/test";
 
+import { EnvironmentAuth } from "../../../auth/EnvironmentAuth.ts";
+import * as ServerSecretStore from "../../../auth/ServerSecretStore.ts";
 import * as BackgroundPolicy from "../../../background/BackgroundPolicy.ts";
 import * as HostPowerMonitor from "../../../background/HostPowerMonitor.ts";
 import * as CheckpointStore from "../../../checkpointing/CheckpointStore.ts";
 import { ServerConfig } from "../../../config.ts";
-import { EnvironmentAuth } from "../../../auth/EnvironmentAuth.ts";
-import { ServerEnvironment } from "../../../environment/ServerEnvironment.ts";
-import * as ServerSecretStore from "../../../auth/ServerSecretStore.ts";
+import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
+import * as GitWorkflow from "../../../git/GitWorkflowService.ts";
+import {
+  McpInvocationContext,
+  type McpInvocationScope,
+} from "../../../mcp/McpInvocationContext.ts";
 import { layer as mcpSessionRegistryTestLayer } from "../../../mcp/McpSessionRegistry.testkit.ts";
-import { McpInvocationContext } from "../../../mcp/McpInvocationContext.ts";
 import * as OrchestratorMcpService from "../../../mcp/OrchestratorMcpService.ts";
 import { runDaemonWithOptions as runEffectWorkerDaemonWithOptions } from "../../../orchestration-v2/EffectWorker.ts";
 import { OrchestratorV2 } from "../../../orchestration-v2/Orchestrator.ts";
 import { layerFromProviderInstanceRegistry as providerAdapterRegistryFromInstances } from "../../../orchestration-v2/ProviderAdapterRegistry.ts";
-import { SourceControlProviderRegistry } from "../../../sourceControl/SourceControlProviderRegistry.ts";
+import * as RuntimeLayer from "../../../orchestration-v2/runtimeLayer.ts";
+import { ThreadLaunchService } from "../../../orchestration-v2/ThreadLaunchService.ts";
 import { layer as threadLifecycleServiceLayer } from "../../../orchestration-v2/ThreadLifecycleService.ts";
-import { OrchestrationV2LayerLive as UpstreamOrchestrationV2LayerLive } from "../../../orchestration-v2/runtimeLayer.ts";
-import { ProviderInstanceRegistryHydrationLive } from "../../../provider/Layers/ProviderInstanceRegistryHydration.ts";
-import { ProviderRegistryLive } from "../../../provider/Layers/ProviderRegistry.ts";
-import {
-  NoOpProviderEventLoggers,
-  ProviderEventLoggers,
-} from "../../../provider/Layers/ProviderEventLoggers.ts";
-import { OpenCodeRuntimeLive } from "../../../provider/opencodeRuntime.ts";
-import { ProviderRegistry } from "../../../provider/Services/ProviderRegistry.ts";
+import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
+import * as OrchestrationCommandReceipts from "../../../persistence/OrchestrationCommandReceipts.ts";
+import * as SqlitePersistence from "../../../persistence/Sqlite.ts";
+import * as ProjectService from "../../../project/ProjectService.ts";
+import { AntigravityInstallation } from "../../../provider/AntigravityInstallation.ts";
+import * as CodexInstallation from "../../../provider/CodexInstallation.ts";
+import * as ModelManifest from "../../../provider/ModelManifest.ts";
+import * as OpenCodeRuntime from "../../../provider/opencodeRuntime.ts";
+import * as OpenCodeServerLedger from "../../../provider/OpenCodeServerLedger.ts";
+import * as ProviderEventLoggers from "../../../provider/ProviderEventLoggers.ts";
+import * as ProviderInstanceRegistryHydration from "../../../provider/ProviderInstanceRegistryHydration.ts";
+import * as ProviderRegistry from "../../../provider/ProviderRegistry.ts";
+import * as ResetCreditCoordinator from "../../../provider/resetCreditCoordinator.ts";
 import { ScheduledTaskService } from "../../../scheduledTasks/ScheduledTaskService.ts";
-import { SqlitePersistenceMemory } from "../../../persistence/Layers/Sqlite.ts";
+import { SecretRequests } from "../../../secrets/SecretRequests.ts";
 import { ServerSettingsService } from "../../../serverSettings.ts";
+import { SourceControlProviderRegistry } from "../../../sourceControl/SourceControlProviderRegistry.ts";
 import * as VcsDriverRegistry from "../../../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../../../vcs/VcsProcess.ts";
 import { A2AHomeRegistrar } from "../HomeRegistrar.ts";
@@ -61,7 +65,7 @@ import { A2ALedger } from "../LedgerService.ts";
 import { ParticipantPlacementService } from "../PlacementService.ts";
 import { CommCommandId, ParticipantId, LedgerProjectId } from "../contracts.ts";
 import { PlacementCommandId } from "../placementContracts.ts";
-import { J5A2ARuntimeLayer } from "../runtimeLayer.ts";
+import { J5A2ARuntimeLayer, J5ThreadRegistrationLayer } from "../runtimeLayer.ts";
 import { spawnThreadId } from "../spawnIds.ts";
 import { J5ToolkitHandlersLive } from "./handlers.ts";
 import {
@@ -72,9 +76,7 @@ import {
   J5Toolkit,
 } from "./tools.ts";
 
-const OrchestrationV2LayerLive = UpstreamOrchestrationV2LayerLive.pipe(
-  Layer.provideMerge(J5ThreadRegistrationLayer),
-);
+const orchestrationLayer = RuntimeLayer.layer.pipe(Layer.provideMerge(J5ThreadRegistrationLayer));
 
 const codexInstanceId = ProviderInstanceId.make("codex");
 const lunaSelection = {
@@ -87,13 +89,15 @@ const projectId = ProjectId.make("project:j5:luna-verb-e2e");
 // A thread's home is its project, so the ledger is keyed by the project's id.
 const ledgerProjectId = LedgerProjectId.make(projectId);
 const requestKey = "j5-luna-verb-e2e-spawn";
-const scope = {
-  environmentId: EnvironmentId.make("environment:j5:luna-verb-e2e"),
-  threadId: parentThreadId,
-  providerSessionId: "provider-session:j5:luna-verb-e2e",
-  providerInstanceId: codexInstanceId,
+const environmentId = EnvironmentId.make("environment:j5:luna-verb-e2e");
+const providerSessionId = "provider-session:j5:luna-verb-e2e";
+const scope: McpInvocationScope = {
+  environmentId,
   capabilities: new Set(["orchestration"] as const),
   issuedAt: 1,
+  requestNamespace: providerSessionId,
+  thread: { threadId: parentThreadId, providerSessionId, providerInstanceId: codexInstanceId },
+  client: undefined,
 };
 const decodeSpawnResult = Schema.decodeUnknownEffect(J5SpawnAgentResult);
 const decodeStopResult = Schema.decodeUnknownEffect(J5StopAgentResult);
@@ -102,7 +106,9 @@ const serverConfigLayer = ServerConfig.layerTest(process.cwd(), {
   prefix: "t3-j5-luna-verb-live-",
 });
 const serverSettingsLayer = ServerSettingsService.layerTest({
-  providers: { codex: { enabled: true } },
+  providerInstances: {
+    [codexInstanceId]: { driver: ProviderDriverKind.make("codex"), enabled: true },
+  },
 });
 const vcsDriverRegistryLayer = VcsDriverRegistry.layer.pipe(
   Layer.provide(VcsProcess.layer),
@@ -114,7 +120,7 @@ const backgroundPolicyLayer = BackgroundPolicy.layer.pipe(
   Layer.provide(Layer.effect(HostPowerMonitor.HostPowerMonitor, HostPowerMonitor.make())),
   Layer.provide(serverSettingsLayer),
 );
-const providerInstanceRegistryLayer = ProviderInstanceRegistryHydrationLive.pipe(
+const providerInstanceRegistryLayer = ProviderInstanceRegistryHydration.layer.pipe(
   Layer.provide(
     Layer.mergeAll(
       serverConfigLayer.pipe(Layer.provide(NodeServices.layer)),
@@ -125,23 +131,34 @@ const providerInstanceRegistryLayer = ProviderInstanceRegistryHydrationLive.pipe
         Layer.provide(FetchHttpClient.layer),
         Layer.provide(NodeServices.layer),
       ),
-      ModelManifest.layerTest,
       ServerSecretStore.layer.pipe(
         Layer.provide(serverConfigLayer),
         Layer.provide(NodeServices.layer),
       ),
-      CodexResetCredit.layer,
-      OpenCodeRuntimeLive.pipe(Layer.provide(NodeServices.layer)),
-      Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers),
-    ).pipe(Layer.provideMerge(NodeServices.layer)),
+      OpenCodeRuntime.layer.pipe(
+        Layer.provide(OpenCodeServerLedger.layerTest),
+        Layer.provide(NodeServices.layer),
+      ),
+      Layer.succeed(
+        ProviderEventLoggers.ProviderEventLoggers,
+        ProviderEventLoggers.NoOpProviderEventLoggers,
+      ),
+      CodexInstallation.CodexInstallation.layer.pipe(
+        Layer.provide(serverConfigLayer),
+        Layer.provide(FetchHttpClient.layer),
+        Layer.provide(NodeServices.layer),
+      ),
+      Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {
+        getEnvironmentId: Effect.succeed(environmentId),
+      }),
+    ).pipe(Layer.provideMerge(ModelManifest.layerTest), Layer.provideMerge(NodeServices.layer)),
   ),
 );
-const providerRegistryLayer = ProviderRegistryLive.pipe(
+const providerRegistryLayer = ProviderRegistry.layer.pipe(
   Layer.provide(providerInstanceRegistryLayer),
   Layer.provide(serverConfigLayer),
   Layer.provide(NodeServices.layer),
 );
-const orchestrationLayer = OrchestrationV2LayerLive;
 const threadLifecycleLayer = threadLifecycleServiceLayer.pipe(Layer.provide(orchestrationLayer));
 const secretStoreLayer = ServerSecretStore.layer.pipe(
   Layer.provide(serverConfigLayer),
@@ -152,6 +169,7 @@ const orchestratorMcpLayer = OrchestratorMcpService.layer.pipe(
     Layer.mergeAll(
       orchestrationLayer,
       Layer.mock(ScheduledTaskService)({}),
+      Layer.mock(SecretRequests)({}),
       providerAdapterRegistryFromInstances,
     ),
   ),
@@ -163,12 +181,34 @@ const j5Layer = J5A2ARuntimeLayer.pipe(
   // The peer registry checks which peer sessions are live; this test has no peers.
   Layer.provide(Layer.mock(EnvironmentAuth)({ listSessions: () => Effect.succeed([]) })),
   Layer.provide(
-    Layer.mock(ServerEnvironment)({
-      getEnvironmentId: Effect.succeed(EnvironmentId.make("environment:j5:luna-verb-e2e")),
+    Layer.mock(ServerEnvironment.ServerEnvironment)({
+      getEnvironmentId: Effect.succeed(environmentId),
     }),
   ),
 );
+// A verb runs inside its caller's turn, and the access gate refuses a caller with no live run.
+// This test calls the verbs from outside any turn, so the gate is shown the parent mid-run.
+const callerMidRunLayer = Layer.effect(
+  ThreadManagementService,
+  Effect.gen(function* () {
+    const threads = yield* ThreadManagementService;
+    return ThreadManagementService.of({
+      ...threads,
+      getThreadShell: (threadId) =>
+        threads
+          .getThreadShell(threadId)
+          .pipe(
+            Effect.map((shell) =>
+              shell !== null && threadId === parentThreadId
+                ? { ...shell, activeRunId: RunId.make("run:j5:luna-verb-e2e:parent") }
+                : shell,
+            ),
+          ),
+    });
+  }),
+);
 const handlersLayer = J5ToolkitHandlersLive.pipe(
+  Layer.provide(callerMidRunLayer),
   Layer.provideMerge(j5Layer),
   Layer.provide(orchestrationLayer),
   Layer.provide(orchestratorMcpLayer),
@@ -182,7 +222,7 @@ const liveLayer = Layer.mergeAll(
   Layer.provide(Layer.mock(GitWorkflow.GitWorkflowService)({})),
   // The project is unreadable here, so every spawn shares the caller's checkout.
   Layer.provide(Layer.mock(ThreadLaunchService)({})),
-  Layer.provide(OrchestrationCommandReceiptRepositoryLive),
+  Layer.provide(OrchestrationCommandReceipts.layer),
   Layer.provide(
     Layer.mock(SourceControlProviderRegistry)({
       resolveLink: () => Effect.die("unused title link"),
@@ -194,12 +234,13 @@ const liveLayer = Layer.mergeAll(
     }),
   ),
   Layer.provide(mcpSessionRegistryTestLayer),
-  Layer.provide(SqlitePersistenceMemory),
+  Layer.provide(SqlitePersistence.layerMemory),
   Layer.provide(checkpointStoreLayer),
   Layer.provide(serverConfigLayer),
   Layer.provide(serverSettingsLayer),
   Layer.provideMerge(providerRegistryLayer),
   Layer.provide(providerInstanceRegistryLayer),
+  Layer.provide(ResetCreditCoordinator.layer),
   Layer.provide(backgroundPolicyLayer),
   Layer.provide(ModelManifest.layerTest),
   Layer.provide(NodeServices.layer),
@@ -286,7 +327,7 @@ describe.runIf(process.env.T3_J5_LUNA_LIVE_ORCHESTRATOR === "1")(
             worktreePath: isolatedWorkspace,
           });
 
-          yield* (yield* ProviderRegistry).refreshInstance(codexInstanceId);
+          yield* (yield* ProviderRegistry.ProviderRegistry).refreshInstance(codexInstanceId);
           const capabilities =
             yield* (yield* OrchestratorMcpService.OrchestratorMcpService).capabilities(scope);
           const codex = capabilities.providers.find(
@@ -323,10 +364,7 @@ describe.runIf(process.env.T3_J5_LUNA_LIVE_ORCHESTRATOR === "1")(
             createdAt: "2026-08-30T17:00:00.000Z",
           });
 
-          const expectedThreadId = spawnThreadId({
-            providerSessionId: scope.providerSessionId,
-            requestKey,
-          });
+          const expectedThreadId = spawnThreadId({ providerSessionId, requestKey });
           const runningFiber = yield* runStatus(expectedThreadId, new Set(["running"])).pipe(
             Effect.forkScoped,
           );

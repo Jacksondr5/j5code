@@ -15,7 +15,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
@@ -26,16 +26,16 @@ import { GitWorkflowService } from "../git/GitWorkflowService.ts";
 import { ProjectService } from "../project/ProjectService.ts";
 import { layer as mcpSessionRegistryTestLayer } from "../mcp/McpSessionRegistry.testkit.ts";
 import {
-  OrchestrationV2EventSinkLayerLive,
-  OrchestrationV2LayerLive as UpstreamOrchestrationV2LayerLive,
+  layerEventSink as OrchestrationV2EventSinkLayerLive,
+  layer as UpstreamOrchestrationV2LayerLive,
 } from "../orchestration-v2/runtimeLayer.ts";
 import { CodexProviderCapabilitiesV2 } from "../orchestration-v2/Adapters/CodexAdapterV2.ts";
 import { OrchestratorV2, type OrchestratorV2Shape } from "../orchestration-v2/Orchestrator.ts";
-import type { ProviderAdapterV2Shape } from "../orchestration-v2/ProviderAdapter.ts";
-import { makeSqlitePersistenceLive } from "../persistence/Layers/Sqlite.ts";
+import type { ProviderAdapterV2Shape } from "@t3tools/provider-core/server/ProviderAdapter";
+import { layerFromPath as makeSqlitePersistenceLive } from "../persistence/Sqlite.ts";
 import { SourceControlProviderRegistry } from "../sourceControl/SourceControlProviderRegistry.ts";
-import { ProviderInstanceRegistry } from "../provider/Services/ProviderInstanceRegistry.ts";
-import type { ProviderInstance } from "../provider/ProviderDriver.ts";
+import { ProviderInstanceRegistry } from "../provider/ProviderInstanceRegistry.ts";
+import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
 import { ServerSettingsService } from "../serverSettings.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
@@ -76,7 +76,8 @@ const providerInstance = {
   },
   displayName: "J5 fake provider",
   enabled: true,
-  snapshot: {} as ProviderInstance["snapshot"],
+  // No supportedRuntimeModes: every runtime mode runs as stored.
+  snapshot: { getSnapshot: Effect.succeed({}) } as unknown as ProviderInstance["snapshot"],
   orchestrationAdapter,
   textGeneration: {} as ProviderInstance["textGeneration"],
 } satisfies ProviderInstance;

@@ -19,7 +19,7 @@ import * as Ref from "effect/Ref";
 import * as ProcessRunner from "../../processRunner.ts";
 import { layerTest as configLayer } from "../../config.ts";
 import { discoverClaudeSkills } from "../../provider/Drivers/ClaudeSkills.ts";
-import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
+import { ProviderRegistry } from "../../provider/ProviderRegistry.ts";
 import { makeProviderRegistryMock } from "../../provider/testUtils/providerRegistryMock.ts";
 import { layerTest as settingsLayer, ServerSettingsService } from "../../serverSettings.ts";
 import { resolveSkillRoot } from "./skillRoots.ts";
@@ -126,7 +126,6 @@ const fixture = Effect.gen(function* () {
   const { handlers, settings } = yield* Effect.gen(function* () {
     return {
       handlers: yield* makeSkillLinkRpcHandlers({
-        observe: (_, effect) => effect,
         getProjectRoot: (id) => Effect.succeed(id === projectId ? cwd : undefined),
       }),
       settings: yield* ServerSettingsService,
@@ -164,7 +163,6 @@ const fixture = Effect.gen(function* () {
     settings,
     handlers,
     reopen: makeSkillLinkRpcHandlers({
-      observe: (_, effect) => effect,
       getProjectRoot: (id) => Effect.succeed(id === projectId ? cwd : undefined),
     }).pipe(Effect.provide(layer)),
     request,
@@ -178,7 +176,7 @@ const run = <A, E>(
     | FileSystem.FileSystem
     | Path.Path
     | import("effect/Scope").Scope
-    | import("effect/unstable/process/ChildProcessSpawner").ChildProcessSpawner
+    | import("effect/process/ChildProcessSpawner").ChildProcessSpawner
   >,
 ) => effect.pipe(Effect.provide(NodeServices.layer), Effect.scoped);
 
@@ -465,59 +463,63 @@ describe("skill link RPCs", () => {
         }),
       ),
   );
-  it.effect(
-    "links default providers from legacy settings and honors explicit instance overrides",
-    () =>
-      run(
-        Effect.gen(function* () {
-          const f = yield* fixture;
-          const claudeId = ProviderInstanceId.make("claudeAgent");
-          const codexId = ProviderInstanceId.make("codex");
-          yield* f.settings.updateSettings({
-            providers: { claudeAgent: { homePath: f.claudeHome } },
-          });
-          assert.isUndefined((yield* f.settings.getSettings).providerInstances[claudeId]);
-          assert.isUndefined((yield* f.settings.getSettings).providerInstances[codexId]);
-          const claudeRequest = { ...f.request, targetInstanceId: claudeId };
-          const preview = yield* f.handlers["j5.skills.links.preview"](claudeRequest);
-          assert.equal(preview.destinationPath, f.path.join(f.claudeHome, "skills", "example"));
-          assert.deepEqual(
-            preview.sharedWith.map((entry) => entry.instanceId).sort(),
-            [claudeId, targetId, "claude-shared"].sort(),
-          );
-          for (const request of [
-            claudeRequest,
-            { ...f.request, targetInstanceId: codexId, scope: "project" as const },
-          ]) {
-            const create = yield* f.prepare(request);
-            assert.equal((yield* f.handlers["j5.skills.links.create"](create)).action, "created");
-            assert.equal((yield* f.handlers["j5.skills.links.create"](create)).action, "unchanged");
-            const [link] = yield* f.handlers["j5.skills.links.list"]();
-            assert.equal(link!.targetInstanceId, request.targetInstanceId);
-            yield* f.handlers["j5.skills.links.remove"]({ id: link!.id });
-            assert.isTrue(yield* f.fs.exists(f.source));
-          }
-          yield* f.settings.updateSettings({
-            providerInstances: {
-              [claudeId]: {
-                driver: ProviderDriverKind.make("claudeAgent"),
-                config: { homePath: f.path.join(f.root, "explicit-claude") },
-              },
+  it.effect("links default provider instances and honors explicit instance overrides", () =>
+    run(
+      Effect.gen(function* () {
+        const f = yield* fixture;
+        const claudeId = ProviderInstanceId.make("claudeAgent");
+        const codexId = ProviderInstanceId.make("codex");
+        // Codex stays an implicit default; Claude's default needs a home inside the fixture.
+        yield* f.settings.updateSettings({
+          providerInstances: {
+            ...(yield* f.settings.getSettings).providerInstances,
+            [claudeId]: {
+              driver: ProviderDriverKind.make("claudeAgent"),
+              config: { homePath: f.claudeHome },
             },
-          });
-          assert.equal(
-            (yield* f.handlers["j5.skills.links.preview"](claudeRequest)).destinationPath,
-            f.path.join(f.root, "explicit-claude", "skills", "example"),
-          );
-          const missing = yield* Effect.flip(
-            f.handlers["j5.skills.links.preview"]({
-              ...f.request,
-              targetInstanceId: ProviderInstanceId.make("removed-instance"),
-            }),
-          );
-          assert.match(missing.message, /destination provider instance no longer exists/);
-        }),
-      ),
+          },
+        });
+        assert.isUndefined((yield* f.settings.getSettings).providerInstances[codexId]);
+        const claudeRequest = { ...f.request, targetInstanceId: claudeId };
+        const preview = yield* f.handlers["j5.skills.links.preview"](claudeRequest);
+        assert.equal(preview.destinationPath, f.path.join(f.claudeHome, "skills", "example"));
+        assert.deepEqual(
+          preview.sharedWith.map((entry) => entry.instanceId).sort(),
+          [claudeId, targetId, "claude-shared"].sort(),
+        );
+        for (const request of [
+          claudeRequest,
+          { ...f.request, targetInstanceId: codexId, scope: "project" as const },
+        ]) {
+          const create = yield* f.prepare(request);
+          assert.equal((yield* f.handlers["j5.skills.links.create"](create)).action, "created");
+          assert.equal((yield* f.handlers["j5.skills.links.create"](create)).action, "unchanged");
+          const [link] = yield* f.handlers["j5.skills.links.list"]();
+          assert.equal(link!.targetInstanceId, request.targetInstanceId);
+          yield* f.handlers["j5.skills.links.remove"]({ id: link!.id });
+          assert.isTrue(yield* f.fs.exists(f.source));
+        }
+        yield* f.settings.updateSettings({
+          providerInstances: {
+            [claudeId]: {
+              driver: ProviderDriverKind.make("claudeAgent"),
+              config: { homePath: f.path.join(f.root, "explicit-claude") },
+            },
+          },
+        });
+        assert.equal(
+          (yield* f.handlers["j5.skills.links.preview"](claudeRequest)).destinationPath,
+          f.path.join(f.root, "explicit-claude", "skills", "example"),
+        );
+        const missing = yield* Effect.flip(
+          f.handlers["j5.skills.links.preview"]({
+            ...f.request,
+            targetInstanceId: ProviderInstanceId.make("removed-instance"),
+          }),
+        );
+        assert.match(missing.message, /destination provider instance no longer exists/);
+      }),
+    ),
   );
   it.effect("warns about Git exposure unless the project destination is ignored", () =>
     run(

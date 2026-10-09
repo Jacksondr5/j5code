@@ -55,60 +55,33 @@ import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
-import { ServerConfig } from "../../config.ts";
-import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
-import type { EventNdjsonLogger } from "../../provider/Layers/EventNdjsonLogger.ts";
-import { ProviderEventLoggers } from "../../provider/Layers/ProviderEventLoggers.ts";
+import * as ServerConfig from "../../config.ts";
+import { mcpToolPresentation } from "@t3tools/provider-core/server/mcpToolPresentation";
+import * as McpProviderSession from "@t3tools/provider-core/server/mcpSession";
+import type { EventNdjsonLogger } from "../../provider/EventNdjsonLogger.ts";
+import * as ProviderEventLoggers from "../../provider/ProviderEventLoggers.ts";
 import {
   structuralProtocolMethod,
   summarizeNativeProtocolPayload,
 } from "../../provider/NativeProtocolLogging.ts";
-import { mergeProviderInstanceEnvironment } from "../../provider/ProviderInstanceEnvironment.ts";
-import { t3OrchestrationSystemPrompt } from "../../provider/T3OrchestrationInstructions.ts";
-import { buildRuntimeInstructions } from "../../provider/RuntimeInstructions.ts";
-import {
-  OpenCodeRuntime,
-  loadOpenCodeCommands,
-  OpenCodeRuntimeError,
-  openCodeQuestionId,
-  openCodeRuntimeErrorDetail,
-  parseOpenCodeModelSlug,
-  runOpenCodeSdk,
-  toOpenCodeFileParts,
-  toOpenCodePermissionReply,
-  toOpenCodeQuestionAnswers,
-  type OpenCodeRuntimeShape,
-} from "../../provider/opencodeRuntime.ts";
-import { IdAllocatorV2, type IdAllocatorV2Shape } from "../IdAllocator.ts";
-import { makeProviderFailure } from "../ProviderFailure.ts";
-import { turnScopedSelectionTransition } from "../ProviderSelectionTransition.ts";
-import { providerMessageTextWithAttachmentPaths } from "../AttachmentPrompt.ts";
-import {
-  ProviderAdapterEnsureThreadError,
-  ProviderAdapterForkThreadError,
-  ProviderAdapterInterruptError,
-  ProviderAdapterOpenSessionError,
-  ProviderAdapterProtocolError,
-  ProviderAdapterReadThreadSnapshotError,
-  ProviderAdapterResumeThreadError,
-  ProviderAdapterRollbackThreadError,
-  ProviderAdapterRuntimeRequestResponseError,
-  ProviderAdapterSteerRunError,
-  ProviderAdapterTurnStartError,
-  ProviderAdapterV2,
-  type ProviderAdapterV2Event,
-  type ProviderAdapterV2OpenSessionInput,
-  type ProviderAdapterV2SessionRuntime,
-  type ProviderAdapterV2Shape,
-  type ProviderAdapterV2RuntimePolicy,
-  type ProviderAdapterV2TurnInput,
-} from "../ProviderAdapter.ts";
+import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
+import { t3OrchestrationSystemPrompt } from "../../j5/orchestrationInstructions.ts";
+import { buildRuntimeInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
+import * as OpenCodeRuntime from "../../provider/opencodeRuntime.ts";
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
+import { turnScopedSelectionTransition } from "@t3tools/provider-core/server/selectionTransition";
+import { providerMessageTextWithAttachmentPaths } from "@t3tools/provider-core/server/attachmentPrompt";
+import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import {
   ProviderAdapterDriverCreateError,
   type ProviderAdapterDriver,
   type ProviderAdapterDriverCreateInput,
-} from "../ProviderAdapterDriver.ts";
+} from "@t3tools/provider-core/server/adapterDriver";
 import { makeSubagentChildThread, subagentThreadTitle } from "../SubagentProjection.ts";
+import { openCodeToolTurnItem } from "./OpenCodeToolItems.ts";
+
+export { openCodeToolProjectionKind } from "./OpenCodeToolItems.ts";
 
 export const OPENCODE_PROVIDER = ProviderDriverKind.make("opencode");
 export const OPENCODE_DEFAULT_INSTANCE_ID = defaultInstanceIdForDriver(OPENCODE_PROVIDER);
@@ -146,7 +119,7 @@ const makeOpenCodeMessageId = Effect.fnUntraced(function* () {
  * message is the best native turn correlation point, and session idle is the
  * authoritative terminal signal.
  */
-export const OpenCodeProviderCapabilitiesV2 = {
+const OpenCodeProviderCapabilitiesV2 = {
   sessions: {
     // The current adapter owns one directory-bound client/server per session.
     // Keep it isolated until its runtime is made safe for cross-thread pooling.
@@ -300,12 +273,14 @@ interface ActiveOpenCodeTurn {
   readonly usage: OpenCodeTurnTokenUsageAccumulator;
   readonly isRoot: boolean;
   readonly threadId: ThreadId;
-  readonly runId: ProviderAdapterV2TurnInput["runId"] | null;
-  readonly rootNodeId: ProviderAdapterV2TurnInput["rootNodeId"];
+  readonly runId: ProviderAdapter.ProviderAdapterV2TurnInput["runId"] | null;
+  readonly rootNodeId: ProviderAdapter.ProviderAdapterV2TurnInput["rootNodeId"];
   readonly appThread: OrchestrationV2AppThread;
   readonly modelSelection: ModelSelection;
-  readonly runtimePolicy: ProviderAdapterV2RuntimePolicy;
+  readonly runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy;
   readonly providerTurnId: OrchestrationV2ProviderTurn["id"];
+  /** The provider thread the turn started on, which its terminal names. */
+  readonly providerThreadId: OrchestrationV2ProviderTurn["providerThreadId"];
   readonly providerTurnOrdinal: number;
   readonly runOrdinal: number;
   readonly runAttemptId: OrchestrationV2ProviderTurn["runAttemptId"];
@@ -314,6 +289,7 @@ interface ActiveOpenCodeTurn {
   readonly parts: Map<string, Exclude<OpenCodePart, ToolPart>>;
   readonly partIdsByMessage: Map<string, Set<string>>;
   readonly toolNamesByCallId: Map<string, string>;
+  mcpServerNames?: ReadonlyArray<string>;
   readonly providerTurn: OrchestrationV2ProviderTurn;
   nextItemOrdinal: number;
   nativeUserMessageId: string | null;
@@ -394,6 +370,7 @@ export const reconcileOpenCodePromptAdmissionStatus = Effect.fn(
 interface OpenCodeSubagentContext {
   readonly nativeItemId: string;
   readonly nodeId: OrchestrationV2Subagent["id"];
+  readonly parentState: OpenCodeThreadState;
   readonly parentTurn: ActiveOpenCodeTurn;
   readonly prompt: string;
   readonly title: string | null;
@@ -420,12 +397,36 @@ interface OpenCodeThreadState {
   nextAdmissionGeneration: number;
 }
 
+interface OpenCodeRequestOwner {
+  readonly state: OpenCodeThreadState;
+  readonly turn: ActiveOpenCodeTurn;
+  /** The subagent on the owner's thread that leads to the asking session. */
+  readonly subagent: OpenCodeSubagentContext | null;
+}
+
+/**
+ * The top-level thread and active turn that own a session's requests, walking
+ * up through (possibly nested) subagents.
+ */
+function topLevelRequestOwner(state: OpenCodeThreadState): OpenCodeRequestOwner | undefined {
+  let owner = state;
+  let subagent: OpenCodeSubagentContext | null = null;
+  while (owner.parentSubagent !== null) {
+    subagent = owner.parentSubagent;
+    owner = subagent.parentState;
+  }
+  return owner.activeTurn === null ? undefined : { state: owner, turn: owner.activeTurn, subagent };
+}
+
 interface PendingOpenCodeRequest {
   readonly requestId: RuntimeRequestId;
   readonly nativeRequestId: string;
+  /** The session that asked, which may be a subagent's. */
+  readonly nativeSessionId: string;
   readonly turn: ActiveOpenCodeTurn;
   readonly state: OpenCodeThreadState;
   readonly nodeId: OrchestrationV2ExecutionNode["id"];
+  readonly parentNodeId: OrchestrationV2ExecutionNode["id"];
   readonly turnItemId: OrchestrationV2TurnItem["id"];
   readonly requestKind: OpenCodePermissionRequestKind | "user_input";
   readonly createdAt: DateTime.Utc;
@@ -437,9 +438,9 @@ export interface OpenCodeAdapterV2Options {
   readonly instanceId: ProviderInstanceId;
   readonly settings: OpenCodeSettings;
   readonly environment: NodeJS.ProcessEnv;
-  readonly runtime: OpenCodeRuntimeShape;
-  readonly idAllocator: IdAllocatorV2Shape;
-  readonly serverConfig: ServerConfig["Service"];
+  readonly runtime: OpenCodeRuntime.OpenCodeRuntimeShape;
+  readonly idAllocator: IdAllocator.IdAllocatorV2Shape;
+  readonly serverConfig: ServerConfig.ServerConfig["Service"];
   readonly nativeEventLogger?: EventNdjsonLogger;
 }
 
@@ -461,7 +462,7 @@ function formatOpenCodeProtocolLogPayload(event: OpenCodeProtocolLogEvent) {
 
 export function makeOpenCodeProtocolLogger(input: {
   readonly nativeEventLogger: EventNdjsonLogger | undefined;
-  readonly idAllocator: IdAllocatorV2Shape;
+  readonly idAllocator: IdAllocator.IdAllocatorV2Shape;
   readonly providerInstanceId: ProviderInstanceId;
   readonly providerSessionId: ProviderSessionId;
   readonly threadId: ThreadId;
@@ -505,8 +506,11 @@ export function makeOpenCodeProtocolLogger(input: {
     );
 }
 
-function protocolError(detail: string, payload?: unknown): ProviderAdapterProtocolError {
-  return new ProviderAdapterProtocolError({
+function protocolError(
+  detail: string,
+  payload?: unknown,
+): ProviderAdapter.ProviderAdapterProtocolError {
+  return new ProviderAdapter.ProviderAdapterProtocolError({
     driver: OPENCODE_PROVIDER,
     detail,
     ...(payload === undefined ? {} : { payload }),
@@ -542,23 +546,6 @@ function recordString(input: unknown, ...keys: ReadonlyArray<string>): string | 
     if (value !== undefined) return value;
   }
   return undefined;
-}
-
-function recordNumber(input: unknown, ...keys: ReadonlyArray<string>): number | undefined {
-  for (const key of keys) {
-    const value = recordValue(input, key);
-    if (typeof value === "number" && Number.isFinite(value)) return value;
-  }
-  return undefined;
-}
-
-function stableJson(value: unknown): string {
-  if (typeof value === "string") return value;
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
 }
 
 function sdkResponseForRawLog(value: unknown): unknown {
@@ -607,34 +594,6 @@ export function openCodePermissionRequestKind(
   return "command";
 }
 
-export function openCodeToolProjectionKind(
-  toolName: string,
-): "command_execution" | "file_change" | "file_search" | "web_search" | "dynamic_tool" {
-  const normalized = toolName.toLowerCase();
-  if (normalized === "todowrite") {
-    return "dynamic_tool";
-  }
-  if (normalized.includes("bash") || normalized.includes("shell")) {
-    return "command_execution";
-  }
-  if (normalized.includes("edit") || normalized.includes("write") || normalized.includes("patch")) {
-    return "file_change";
-  }
-  if (normalized.includes("web") || normalized === "codesearch" || normalized === "code_search") {
-    return "web_search";
-  }
-  if (
-    normalized === "read" ||
-    normalized.includes("glob") ||
-    normalized.includes("grep") ||
-    normalized.includes("search") ||
-    normalized.includes("lsp")
-  ) {
-    return "file_search";
-  }
-  return "dynamic_tool";
-}
-
 const OPENCODE_ALWAYS_ALLOWED_PERMISSIONS = [
   "question",
   "read",
@@ -664,7 +623,7 @@ const OPENCODE_RESTRICTED_PERMISSIONS = [
  * allows it.
  */
 export function openCodePermissionRules(
-  runtimePolicy: ProviderAdapterV2RuntimePolicy,
+  runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy,
 ): PermissionRuleset {
   const sandboxPolicy = recordValue(runtimePolicy, "sandboxPolicy");
   const sandboxType = recordString(sandboxPolicy, "type");
@@ -773,7 +732,7 @@ function permissionRuleEquals(
  * were added specifically for the selected child agent.
  */
 export function openCodeChildPermissionRules(
-  runtimePolicy: ProviderAdapterV2RuntimePolicy,
+  runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy,
   nativeChildRules: PermissionRuleset,
 ): PermissionRuleset {
   const parentRules = openCodePermissionRules(runtimePolicy);
@@ -874,7 +833,7 @@ function taskSessionId(part: ToolPart): string | null {
 }
 
 function makeProviderThread(input: {
-  readonly idAllocator: IdAllocatorV2Shape;
+  readonly idAllocator: IdAllocator.IdAllocatorV2Shape;
   readonly providerInstanceId: ProviderInstanceId;
   readonly providerSessionId: OrchestrationV2ProviderThread["providerSessionId"];
   readonly appThreadId: OrchestrationV2ProviderThread["appThreadId"];
@@ -977,7 +936,7 @@ function isOpenCodeNotFound(cause: unknown): boolean {
 
 function unwrapData<A>(operation: string, result: { readonly data?: A }): NonNullable<A> {
   if (result.data === undefined) {
-    throw new OpenCodeRuntimeError({
+    throw new OpenCodeRuntime.OpenCodeRuntimeError({
       operation,
       detail: `OpenCode ${operation} returned no response payload.`,
     });
@@ -985,16 +944,18 @@ function unwrapData<A>(operation: string, result: { readonly data?: A }): NonNul
   return result.data as NonNullable<A>;
 }
 
-export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): ProviderAdapterV2Shape {
+export function makeOpenCodeAdapterV2(
+  options: OpenCodeAdapterV2Options,
+): ProviderAdapter.ProviderAdapterV2Shape {
   const { idAllocator, runtime, serverConfig } = options;
 
-  return ProviderAdapterV2.of({
+  return ProviderAdapter.ProviderAdapterV2.of({
     instanceId: options.instanceId,
     driver: OPENCODE_PROVIDER,
     getCapabilities: () => Effect.succeed(OpenCodeProviderCapabilitiesV2),
     planSelectionTransition: () => Effect.succeed(turnScopedSelectionTransition()),
     openSession: Effect.fn("OpenCodeAdapterV2.openSession")(
-      function* (input: ProviderAdapterV2OpenSessionInput) {
+      function* (input: ProviderAdapter.ProviderAdapterV2OpenSessionInput) {
         const scope = yield* Effect.scope;
         const cwd = input.runtimePolicy.cwd ?? serverConfig.cwd;
         const connection = yield* runtime.connectToOpenCodeServer({
@@ -1015,7 +976,7 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
         const hasT3Mcp = mcpSession !== undefined && !connection.external;
         const orchestrationSystemPrompt = t3OrchestrationSystemPrompt(hasT3Mcp);
         if (hasT3Mcp) {
-          yield* runOpenCodeSdk("mcp.add", () =>
+          yield* OpenCodeRuntime.runOpenCodeSdk("mcp.add", () =>
             client.mcp.add({
               name: "t3-code",
               config: {
@@ -1041,7 +1002,7 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
           updatedAt: now,
           lastError: null,
         };
-        const events = yield* Queue.unbounded<ProviderAdapterV2Event, Cause.Done>();
+        const events = yield* Queue.unbounded<ProviderAdapter.ProviderAdapterV2Event, Cause.Done>();
         let nativeStreamFailure: OrchestrationV2ProviderFailure | null = null;
         const threads = new Map<string, OpenCodeThreadState>();
         const commandReceipts = new Map<string, Deferred.Deferred<void>>();
@@ -1055,6 +1016,10 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
         // to the root thread state whose active turn owns the request; asks
         // arriving before the relation is known resolve it via session.get.
         const relatedSessionOwners = new Map<string, OpenCodeThreadState>();
+        // Sessions of this runtime that OpenCode reports busy. A background
+        // task child keeps running after its parent turn settles, so idle
+        // release must not close the server under it.
+        const busySessionIds = new Set<string>();
         // Requests settled before their session relation resolved: a late
         // routing attempt must never resurrect them. Bounded because entries
         // only matter for the seconds a routing retry can still be running.
@@ -1068,7 +1033,7 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
         let closing = false;
         let hasConnected = false;
 
-        const emitProviderEvent = (event: ProviderAdapterV2Event) =>
+        const emitProviderEvent = (event: ProviderAdapter.ProviderAdapterV2Event) =>
           Queue.offer(events, event).pipe(Effect.asVoid);
 
         const logProtocolEvent = makeOpenCodeProtocolLogger({
@@ -1083,14 +1048,14 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
           method: string,
           payload: unknown,
           call: (signal: AbortSignal) => Promise<A>,
-        ): Effect.Effect<A, OpenCodeRuntimeError> =>
+        ): Effect.Effect<A, OpenCodeRuntime.OpenCodeRuntimeError> =>
           logProtocolEvent({
             direction: "outgoing",
             messageKind: "request",
             method,
             payload,
           }).pipe(
-            Effect.andThen(runOpenCodeSdk(method, call)),
+            Effect.andThen(OpenCodeRuntime.runOpenCodeSdk(method, call)),
             Effect.tap((response) =>
               logProtocolEvent({
                 direction: "incoming",
@@ -1108,7 +1073,7 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
             const visit = (
               sessionId: string,
               abort: boolean,
-            ): Effect.Effect<OpenCodeRuntimeError | undefined> =>
+            ): Effect.Effect<OpenCodeRuntime.OpenCodeRuntimeError | undefined> =>
               Effect.gen(function* () {
                 const abortResult = abort
                   ? yield* sdkCall("session.abort", { sessionID: sessionId }, (signal) =>
@@ -1376,6 +1341,7 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
             context = {
               nativeItemId: part.id,
               nodeId,
+              parentState: state,
               parentTurn: turn,
               prompt,
               title,
@@ -1633,77 +1599,46 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
           >;
           const input = toolInput(part);
           const output = toolOutput(part);
-          const projectionKind = openCodeToolProjectionKind(part.tool);
-          let turnItem: OrchestrationV2TurnItem;
-          if (projectionKind === "command_execution") {
-            turnItem = {
-              ...base,
-              type: "command_execution",
-              input: recordString(input, "command", "cmd") ?? stableJson(input),
-              ...(output === undefined ? {} : { output }),
-              ...(recordNumber(
-                part.state.status === "completed" ? part.state.metadata : undefined,
-                "exit",
-                "exitCode",
-              ) === undefined
-                ? {}
-                : {
-                    exitCode: recordNumber(
-                      part.state.status === "completed" ? part.state.metadata : undefined,
-                      "exit",
-                      "exitCode",
-                    )!,
-                  }),
-            };
-          } else if (projectionKind === "file_change") {
-            turnItem = {
-              ...base,
-              type: "file_change",
-              fileName: recordString(input, "filePath", "path", "file") ?? part.tool,
-              ...(recordString(input, "oldString", "oldText") === undefined
-                ? {}
-                : { oldStr: recordString(input, "oldString", "oldText")! }),
-              ...(recordString(input, "newString", "content", "newText") === undefined
-                ? {}
-                : { newStr: recordString(input, "newString", "content", "newText")! }),
-              ...(recordString(
-                part.state.status === "completed" ? part.state.metadata : undefined,
-                "diff",
-                "patch",
-              ) === undefined
-                ? {}
-                : {
-                    diffStr: recordString(
-                      part.state.status === "completed" ? part.state.metadata : undefined,
-                      "diff",
-                      "patch",
-                    )!,
-                  }),
-            };
-          } else if (projectionKind === "file_search") {
-            turnItem = {
-              ...base,
-              type: "file_search",
-              ...(recordString(input, "pattern", "query", "path", "filePath") === undefined
-                ? {}
-                : { pattern: recordString(input, "pattern", "query", "path", "filePath")! }),
-            };
-          } else if (projectionKind === "web_search") {
-            const pattern = recordString(input, "query", "url", "pattern");
-            turnItem = {
-              ...base,
-              type: "web_search",
-              ...(pattern === undefined ? {} : { patterns: [pattern] }),
-            };
-          } else {
-            turnItem = {
-              ...base,
-              type: "dynamic_tool",
-              toolName: part.tool,
-              input,
-              ...(output === undefined ? {} : { output }),
-            };
+          const isNativeTool = part.tool === "code_search" || part.tool === "apply_patch";
+          if (!isNativeTool && part.tool.includes("_") && turn.mcpServerNames === undefined) {
+            const serverNames = yield* OpenCodeRuntime.runOpenCodeSdk("mcp.status", (signal) =>
+              client.mcp.status(undefined, { signal, throwOnError: true }),
+            ).pipe(
+              Effect.timeout("1 second"),
+              Effect.map((response) => Object.keys(response.data ?? {})),
+              Effect.catch(() => Effect.succeed(undefined)),
+            );
+            if (serverNames !== undefined) turn.mcpServerNames = serverNames;
           }
+          const matchingServers = turn.mcpServerNames?.filter(
+            (name) =>
+              !isNativeTool && part.tool.startsWith(`${name.replace(/[^a-zA-Z0-9_-]/g, "_")}_`),
+          );
+          const serverName = matchingServers?.length === 1 ? matchingServers[0] : undefined;
+          const presentation =
+            serverName === undefined
+              ? {}
+              : mcpToolPresentation({
+                  serverName,
+                  toolName: part.tool.slice(serverName.replace(/[^a-zA-Z0-9_-]/g, "_").length + 1),
+                  title: toolTitle(part) === part.tool ? undefined : toolTitle(part),
+                });
+          const turnItem: OrchestrationV2TurnItem = matchingServers?.length
+            ? {
+                ...base,
+                type: "dynamic_tool",
+                ...presentation,
+                toolName: part.tool,
+                input,
+                ...(output === undefined ? {} : { output }),
+              }
+            : openCodeToolTurnItem(base, {
+                name: part.tool,
+                input,
+                output,
+                completedMetadata:
+                  part.state.status === "completed" ? part.state.metadata : undefined,
+              });
           yield* emitProviderEvent({
             type: "node.updated",
             driver: OPENCODE_PROVIDER,
@@ -1827,7 +1762,7 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
 
         const requestQuestions = (request: QuestionRequest) =>
           request.questions.map((question, index) => ({
-            id: openCodeQuestionId(index, question),
+            id: OpenCodeRuntime.openCodeQuestionId(index, question),
             header: question.header.trim() || `Question ${index + 1}`,
             question: question.question.trim() || question.header.trim() || `Question ${index + 1}`,
             options: question.options.map((option) => ({
@@ -1884,14 +1819,14 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
         };
 
         const emitRuntimeRequest = Effect.fnUntraced(function* (
-          state: OpenCodeThreadState,
-          turn: ActiveOpenCodeTurn,
+          owner: OpenCodeRequestOwner,
           nativeRequestId: string,
           request:
             | { readonly type: "permission"; readonly value: PermissionRequest }
             | { readonly type: "question"; readonly value: QuestionRequest },
         ) {
           if (pendingRequestsByNativeId.has(nativeRequestId)) return;
+          const { state, turn, subagent } = owner;
           const now = yield* DateTime.now;
           const requestId = yield* idAllocator.allocate.runtimeRequest({
             driver: OPENCODE_PROVIDER,
@@ -1900,9 +1835,12 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
           });
           const nodeId = idAllocator.derive.approvalNode({ requestId });
           const turnItemId = idAllocator.derive.approvalTurnItem({ requestId });
+          // The tool call belongs to the asking session's turn, not the owner's.
           const permissionToolName =
             request.type === "permission" && request.value.tool !== undefined
-              ? turn.toolNamesByCallId.get(request.value.tool.callID)
+              ? threads
+                  .get(request.value.sessionID)
+                  ?.activeTurn?.toolNamesByCallId.get(request.value.tool.callID)
               : undefined;
           const permissionRequestKind =
             request.type === "permission"
@@ -1913,9 +1851,11 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
           const pending: PendingOpenCodeRequest = {
             requestId,
             nativeRequestId,
+            nativeSessionId: request.value.sessionID,
             turn,
             state,
             nodeId,
+            parentNodeId: subagent?.nodeId ?? turn.rootNodeId,
             turnItemId,
             requestKind,
             createdAt: now,
@@ -1947,7 +1887,7 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
               id: nodeId,
               threadId: turn.threadId,
               runId: turn.runId,
-              parentNodeId: turn.rootNodeId,
+              parentNodeId: pending.parentNodeId,
               rootNodeId: turn.rootNodeId,
               kind: request.type === "question" ? "user_input_request" : "approval_request",
               status: "waiting",
@@ -2004,7 +1944,7 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
               id: pending.nodeId,
               threadId: pending.turn.threadId,
               runId: pending.turn.runId,
-              parentNodeId: pending.turn.rootNodeId,
+              parentNodeId: pending.parentNodeId,
               rootNodeId: pending.turn.rootNodeId,
               kind: pending.question === undefined ? "approval_request" : "user_input_request",
               status: status === "resolved" ? "completed" : "cancelled",
@@ -2036,19 +1976,12 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
           if (!hasOtherPending) yield* updateProviderSession("running", null);
         });
 
-        const requestOwnerState = (sessionId: string): OpenCodeThreadState | undefined => {
-          const direct = threads.get(sessionId);
-          if (direct?.activeTurn != null) return direct;
-          const related = relatedSessionOwners.get(sessionId);
-          if (related?.activeTurn != null) return related;
-          return direct ?? related;
-        };
-
-        /** Resolve which thread state owns a session's requests by walking the
-         *  native parent chain. Registers every hop so later requests from the
-         *  same child resolve without another lookup. */
+        /** Resolve the thread state a session belongs to: its own, or for a
+         *  child not registered yet, the nearest known ancestor found by walking
+         *  the native parent chain. Registers every hop so later requests from
+         *  the same child resolve without another lookup. */
         const resolveSessionOwner = Effect.fnUntraced(function* (sessionId: string) {
-          const known = requestOwnerState(sessionId);
+          const known = threads.get(sessionId) ?? relatedSessionOwners.get(sessionId);
           if (known !== undefined) return known;
           let cursor = sessionId;
           const hops: string[] = [];
@@ -2070,12 +2003,15 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
           return undefined;
         });
 
-        /** A child's permission can arrive before the task part or
-         *  session.created event that reveals its relation to a thread. The
-         *  first resolution attempt runs inline (the replayable path); if the
-         *  relation or the owning turn is not established yet, a short forked
-         *  backoff keeps trying instead of dropping the request. */
-        const routeChildRequest = Effect.fnUntraced(function* (
+        /** Every request is asked on the top-level thread and its active turn,
+         *  under the subagent that leads to the asking session, because native
+         *  subagent threads are hidden from the sidebar. A child's request can
+         *  arrive before the task part or session.created event that reveals
+         *  its relation to a thread. The first resolution attempt runs inline
+         *  (the replayable path); if the relation or the owning turn is not
+         *  established yet, a short forked backoff keeps trying instead of
+         *  dropping the request. */
+        const routeRuntimeRequest = Effect.fnUntraced(function* (
           nativeRequestId: string,
           sessionId: string,
           request:
@@ -2090,9 +2026,10 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
             ) {
               return true;
             }
-            const owner = yield* resolveSessionOwner(sessionId);
-            if (owner?.activeTurn == null) return false;
-            yield* emitRuntimeRequest(owner, owner.activeTurn, nativeRequestId, request);
+            const state = yield* resolveSessionOwner(sessionId);
+            const owner = state === undefined ? undefined : topLevelRequestOwner(state);
+            if (owner === undefined) return false;
+            yield* emitRuntimeRequest(owner, nativeRequestId, request);
             return true;
           });
           if (yield* attempt) return;
@@ -2130,7 +2067,10 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
             }
           }
           for (const pending of Array.from(pendingRequests.values())) {
-            if (pending.turn.providerTurnId === turn.providerTurnId) {
+            if (
+              pending.turn.providerTurnId === turn.providerTurnId ||
+              pending.nativeSessionId === state.nativeSessionId
+            ) {
               yield* resolveRuntimeRequest(pending.nativeRequestId, "cancelled");
             }
           }
@@ -2180,7 +2120,7 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
               ? {
                   type: "turn.terminal",
                   driver: OPENCODE_PROVIDER,
-                  providerThreadId: state.providerThread.id,
+                  providerThreadId: turn.providerThreadId,
                   providerTurnId: turn.providerTurnId,
                   runOrdinal: turn.runOrdinal,
                   failureItemOrdinal: itemOrdinal(turn, `terminal-failure:${turn.providerTurnId}`),
@@ -2196,7 +2136,7 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
               : {
                   type: "turn.terminal",
                   driver: OPENCODE_PROVIDER,
-                  providerThreadId: state.providerThread.id,
+                  providerThreadId: turn.providerThreadId,
                   providerTurnId: turn.providerTurnId,
                   runOrdinal: turn.runOrdinal,
                   status,
@@ -2318,6 +2258,7 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
             modelSelection: state.appThread.modelSelection,
             runtimePolicy: state.parentSubagent.parentTurn.runtimePolicy,
             providerTurnId,
+            providerThreadId: providerTurn.providerThreadId,
             providerTurnOrdinal: providerTurn.ordinal,
             runOrdinal: state.parentSubagent.parentTurn.runOrdinal,
             runAttemptId: null,
@@ -2652,36 +2593,18 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
               }
               return;
             }
-            case "permission.asked": {
-              const state = requestOwnerState(event.properties.sessionID);
-              if (state?.activeTurn !== null && state?.activeTurn !== undefined) {
-                yield* emitRuntimeRequest(state, state.activeTurn, event.properties.id, {
-                  type: "permission",
-                  value: event.properties,
-                });
-              } else {
-                yield* routeChildRequest(event.properties.id, event.properties.sessionID, {
-                  type: "permission",
-                  value: event.properties,
-                });
-              }
+            case "permission.asked":
+              yield* routeRuntimeRequest(event.properties.id, event.properties.sessionID, {
+                type: "permission",
+                value: event.properties,
+              });
               return;
-            }
-            case "question.asked": {
-              const state = requestOwnerState(event.properties.sessionID);
-              if (state?.activeTurn !== null && state?.activeTurn !== undefined) {
-                yield* emitRuntimeRequest(state, state.activeTurn, event.properties.id, {
-                  type: "question",
-                  value: event.properties,
-                });
-              } else {
-                yield* routeChildRequest(event.properties.id, event.properties.sessionID, {
-                  type: "question",
-                  value: event.properties,
-                });
-              }
+            case "question.asked":
+              yield* routeRuntimeRequest(event.properties.id, event.properties.sessionID, {
+                type: "question",
+                value: event.properties,
+              });
               return;
-            }
             case "permission.replied":
             case "question.replied":
               rememberSettledRequest(event.properties.requestID);
@@ -2704,9 +2627,22 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
             }
             case "session.deleted":
               relatedSessionOwners.delete(event.properties.info.id);
+              busySessionIds.delete(event.properties.info.id);
               return;
             case "session.status": {
-              const state = threads.get(event.properties.sessionID);
+              const sessionId = event.properties.sessionID;
+              switch (event.properties.status.type) {
+                case "busy":
+                case "retry":
+                  if (threads.has(sessionId) || relatedSessionOwners.has(sessionId)) {
+                    busySessionIds.add(sessionId);
+                  }
+                  break;
+                case "idle":
+                  busySessionIds.delete(sessionId);
+                  break;
+              }
+              const state = threads.get(sessionId);
               if (state === undefined) return;
               if (event.properties.status.type === "busy") {
                 yield* updateProviderThread(state, { status: "active" });
@@ -2726,6 +2662,7 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
               return;
             }
             case "session.idle": {
+              busySessionIds.delete(event.properties.sessionID);
               const state = threads.get(event.properties.sessionID);
               if (state?.activeTurn !== null && state?.activeTurn !== undefined) {
                 if (state.activeTurn.admissionPending) {
@@ -2792,9 +2729,9 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
         yield* Stream.fromAsyncIterable(
           subscription.stream,
           (cause) =>
-            new OpenCodeRuntimeError({
+            new OpenCodeRuntime.OpenCodeRuntimeError({
               operation: "event.subscribe",
-              detail: openCodeRuntimeErrorDetail(cause),
+              detail: OpenCodeRuntime.openCodeRuntimeErrorDetail(cause),
               cause,
             }),
         ).pipe(
@@ -2802,10 +2739,12 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
           Effect.exit,
           Effect.flatMap((exit) =>
             Effect.gen(function* () {
+              // No further status can clear a busy session once the stream ends.
+              busySessionIds.clear();
               if (closing || abortController.signal.aborted) return;
               const detail = Exit.isSuccess(exit)
                 ? "OpenCode event stream ended unexpectedly."
-                : openCodeRuntimeErrorDetail(Cause.squash(exit.cause));
+                : OpenCodeRuntime.openCodeRuntimeErrorDetail(Cause.squash(exit.cause));
               nativeStreamFailure = makeProviderFailure({
                 message: detail,
                 class: "transport_error",
@@ -2910,13 +2849,14 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
           return state;
         };
 
-        const resolvePromptParts = (turnInput: ProviderAdapterV2TurnInput) => {
+        const resolvePromptParts = (turnInput: ProviderAdapter.ProviderAdapterV2TurnInput) => {
           const text = providerMessageTextWithAttachmentPaths({
             text: turnInput.message.text,
             attachments: turnInput.message.attachments,
-            attachmentsDir: serverConfig.attachmentsDir,
+            resolveAttachmentPath: (attachment) =>
+              resolveAttachmentPath({ attachmentsDir: serverConfig.attachmentsDir, attachment }),
           }).trim();
-          const files = toOpenCodeFileParts({
+          const files = OpenCodeRuntime.toOpenCodeFileParts({
             attachments: turnInput.message.attachments,
             resolveAttachmentPath: (attachment) =>
               resolveAttachmentPath({ attachmentsDir: serverConfig.attachmentsDir, attachment }),
@@ -3018,7 +2958,7 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
             .trim();
           const match = text?.match(/^\/([^\s/]+)(?:\s+([\s\S]*))?$/);
           const command = match
-            ? (yield* loadOpenCodeCommands(client).pipe(
+            ? (yield* OpenCodeRuntime.loadOpenCodeCommands(client).pipe(
                 Effect.timeout("10 seconds"),
                 Effect.orElseSucceed(() => []),
               )).find((entry) => entry.name === match[1])
@@ -3075,26 +3015,29 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
           );
           yield* Effect.raceFirst(Fiber.join(request), Deferred.await(receipt)).pipe(
             Effect.timeout("10 seconds"),
-            Effect.catchTag("TimeoutError", (cause) => {
-              const error = new OpenCodeRuntimeError({
-                operation: "session.command",
-                detail: "OpenCode command admission did not complete within 10 seconds.",
-                cause,
-              });
-              abortController.abort();
-              return finalizeTurn(state, turn, "failed", {
-                failure: makeProviderFailure({ cause: error, class: "provider_error" }),
-              }).pipe(Effect.andThen(Effect.fail(error)));
+            Effect.catchTags({
+              TimeoutError: (cause) => {
+                const error = new OpenCodeRuntime.OpenCodeRuntimeError({
+                  operation: "session.command",
+                  detail: "OpenCode command admission did not complete within 10 seconds.",
+                  cause,
+                });
+                abortController.abort();
+                return finalizeTurn(state, turn, "failed", {
+                  failure: makeProviderFailure({ cause: error, class: "provider_error" }),
+                }).pipe(Effect.andThen(Effect.fail(error)));
+              },
             }),
           );
         });
 
-        const runtimeSession: ProviderAdapterV2SessionRuntime = {
+        const runtimeSession: ProviderAdapter.ProviderAdapterV2SessionRuntime = {
           instanceId: options.instanceId,
           driver: OPENCODE_PROVIDER,
           providerSessionId: input.providerSessionId,
           providerSession: sessionEntity,
           events: Stream.fromEffectRepeat(Queue.take(events)),
+          hasPendingBackgroundWork: Effect.sync(() => busySessionIds.size > 0),
           ensureThread: (threadInput) =>
             Effect.gen(function* () {
               // Only a row that already carries a native session can be
@@ -3104,15 +3047,13 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
                   providerThread: threadInput.existingProviderThread,
                 });
               }
+              // No title: OpenCode generates one from the first prompt only when
+              // session.create leaves it unset (SessionPrompt.ensureTitle).
               const response = yield* sdkCall(
                 "session.create",
-                {
-                  title: `J5 Code ${threadInput.threadId}`,
-                  permission: openCodePermissionRules(threadInput.runtimePolicy),
-                },
+                { permission: openCodePermissionRules(threadInput.runtimePolicy) },
                 () =>
                   client.session.create({
-                    title: `J5 Code ${threadInput.threadId}`,
                     permission: openCodePermissionRules(threadInput.runtimePolicy),
                   }),
               );
@@ -3146,7 +3087,7 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
             }).pipe(
               Effect.mapError(
                 (cause) =>
-                  new ProviderAdapterEnsureThreadError({
+                  new ProviderAdapter.ProviderAdapterEnsureThreadError({
                     driver: OPENCODE_PROVIDER,
                     threadId: threadInput.threadId,
                     cause,
@@ -3172,7 +3113,7 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
             }).pipe(
               Effect.mapError(
                 (cause) =>
-                  new ProviderAdapterResumeThreadError({
+                  new ProviderAdapter.ProviderAdapterResumeThreadError({
                     driver: OPENCODE_PROVIDER,
                     providerSessionId: input.providerSessionId,
                     providerThreadId: threadInput.providerThread.id,
@@ -3203,7 +3144,9 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
                   `OpenCode provider thread ${turnInput.providerThread.id} already has an active turn`,
                 );
               }
-              const parsedModel = parseOpenCodeModelSlug(turnInput.modelSelection.model);
+              const parsedModel = OpenCodeRuntime.parseOpenCodeModelSlug(
+                turnInput.modelSelection.model,
+              );
               if (parsedModel === null) {
                 return yield* protocolError(
                   `OpenCode model '${turnInput.modelSelection.model}' must use provider/model format`,
@@ -3254,6 +3197,7 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
                 modelSelection: turnInput.modelSelection,
                 runtimePolicy: turnInput.runtimePolicy,
                 providerTurnId,
+                providerThreadId: turnInput.providerThread.id,
                 providerTurnOrdinal: turnInput.providerTurnOrdinal,
                 runOrdinal: turnInput.runOrdinal,
                 runAttemptId: turnInput.attemptId,
@@ -3380,7 +3324,7 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
             }).pipe(
               Effect.mapError(
                 (cause) =>
-                  new ProviderAdapterTurnStartError({
+                  new ProviderAdapter.ProviderAdapterTurnStartError({
                     driver: OPENCODE_PROVIDER,
                     threadId: turnInput.threadId,
                     providerThreadId: turnInput.providerThread.id,
@@ -3405,7 +3349,7 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
                   `OpenCode turn ${steerInput.providerTurnId} is not active`,
                 );
               }
-              const parsedModel = parseOpenCodeModelSlug(turn.modelSelection.model);
+              const parsedModel = OpenCodeRuntime.parseOpenCodeModelSlug(turn.modelSelection.model);
               if (parsedModel === null) {
                 return yield* protocolError(
                   `OpenCode model '${turn.modelSelection.model}' must use provider/model format`,
@@ -3414,9 +3358,13 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
               const text = providerMessageTextWithAttachmentPaths({
                 text: steerInput.message.text,
                 attachments: steerInput.message.attachments,
-                attachmentsDir: serverConfig.attachmentsDir,
+                resolveAttachmentPath: (attachment) =>
+                  resolveAttachmentPath({
+                    attachmentsDir: serverConfig.attachmentsDir,
+                    attachment,
+                  }),
               }).trim();
-              const files = toOpenCodeFileParts({
+              const files = OpenCodeRuntime.toOpenCodeFileParts({
                 attachments: steerInput.message.attachments,
                 resolveAttachmentPath: (attachment) =>
                   resolveAttachmentPath({
@@ -3474,7 +3422,7 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
             }).pipe(
               Effect.mapError(
                 (cause) =>
-                  new ProviderAdapterSteerRunError({
+                  new ProviderAdapter.ProviderAdapterSteerRunError({
                     driver: OPENCODE_PROVIDER,
                     providerThreadId: steerInput.providerThread.id,
                     providerTurnId: steerInput.providerTurnId,
@@ -3487,6 +3435,17 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
               const sessionId = nativeThreadId(interruptInput.providerThread);
               const state = threads.get(sessionId);
               const turn = state?.activeTurn;
+              // Stop on a settled turn: a background task child can outlive
+              // it (busySessionIds), and aborting the descendants ends it.
+              if (
+                (turn === undefined || turn === null) &&
+                interruptInput.requestRuntimeRestart === true
+              ) {
+                for (const controller of commandControllers.get(sessionId) ?? [])
+                  controller.abort();
+                yield* abortDescendants(sessionId);
+                return;
+              }
               if (
                 turn === undefined ||
                 turn === null ||
@@ -3533,7 +3492,7 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
             }).pipe(
               Effect.mapError(
                 (cause) =>
-                  new ProviderAdapterInterruptError({
+                  new ProviderAdapter.ProviderAdapterInterruptError({
                     driver: OPENCODE_PROVIDER,
                     providerThreadId: interruptInput.providerThread.id,
                     providerTurnId: interruptInput.providerTurnId,
@@ -3555,7 +3514,10 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
                     `OpenCode question request ${requestInput.requestId} requires answers`,
                   );
                 }
-                const answers = toOpenCodeQuestionAnswers(pending.question, requestInput.answers);
+                const answers = OpenCodeRuntime.toOpenCodeQuestionAnswers(
+                  pending.question,
+                  requestInput.answers,
+                );
                 yield* sdkCall(
                   "question.reply",
                   { requestID: pending.nativeRequestId, answers },
@@ -3575,7 +3537,7 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
                   `OpenCode approval request ${requestInput.requestId} requires a decision`,
                 );
               }
-              const reply = toOpenCodePermissionReply(requestInput.decision);
+              const reply = OpenCodeRuntime.toOpenCodePermissionReply(requestInput.decision);
               yield* sdkCall(
                 "permission.reply",
                 { requestID: pending.nativeRequestId, reply },
@@ -3591,7 +3553,7 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
             }).pipe(
               Effect.mapError(
                 (cause) =>
-                  new ProviderAdapterRuntimeRequestResponseError({
+                  new ProviderAdapter.ProviderAdapterRuntimeRequestResponseError({
                     driver: OPENCODE_PROVIDER,
                     requestId: requestInput.requestId,
                     cause,
@@ -3602,7 +3564,7 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
             readSnapshot(snapshotInput.providerThread).pipe(
               Effect.mapError(
                 (cause) =>
-                  new ProviderAdapterReadThreadSnapshotError({
+                  new ProviderAdapter.ProviderAdapterReadThreadSnapshotError({
                     driver: OPENCODE_PROVIDER,
                     providerThreadId: snapshotInput.providerThread.id,
                     cause,
@@ -3685,7 +3647,7 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
             }).pipe(
               Effect.mapError(
                 (cause) =>
-                  new ProviderAdapterRollbackThreadError({
+                  new ProviderAdapter.ProviderAdapterRollbackThreadError({
                     driver: OPENCODE_PROVIDER,
                     providerThreadId: rollbackInput.providerThread.id,
                     checkpointId: rollbackInput.target.checkpointId,
@@ -3749,7 +3711,7 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
             }).pipe(
               Effect.mapError(
                 (cause) =>
-                  new ProviderAdapterForkThreadError({
+                  new ProviderAdapter.ProviderAdapterForkThreadError({
                     driver: OPENCODE_PROVIDER,
                     providerThreadId: forkInput.sourceProviderThread.id,
                     cause,
@@ -3764,7 +3726,7 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
         effect.pipe(
           Effect.mapError(
             (cause) =>
-              new ProviderAdapterOpenSessionError({
+              new ProviderAdapter.ProviderAdapterOpenSessionError({
                 driver: OPENCODE_PROVIDER,
                 providerSessionId: input.providerSessionId,
                 cause,
@@ -3776,10 +3738,10 @@ export function makeOpenCodeAdapterV2(options: OpenCodeAdapterV2Options): Provid
 }
 
 export type OpenCodeAdapterV2DriverEnv =
-  | OpenCodeRuntime
-  | IdAllocatorV2
-  | ProviderEventLoggers
-  | ServerConfig;
+  | OpenCodeRuntime.OpenCodeRuntime
+  | IdAllocator.IdAllocatorV2
+  | ProviderEventLoggers.ProviderEventLoggers
+  | ServerConfig.ServerConfig;
 
 export const OpenCodeAdapterV2Driver: ProviderAdapterDriver<
   OpenCodeSettings,
@@ -3791,10 +3753,10 @@ export const OpenCodeAdapterV2Driver: ProviderAdapterDriver<
   create: Effect.fn("OpenCodeAdapterV2Driver.create")(
     function* (input: ProviderAdapterDriverCreateInput<OpenCodeSettings>) {
       const hostEnvironment = yield* HostProcessEnvironment;
-      const openCodeRuntime = yield* OpenCodeRuntime;
-      const idAllocator = yield* IdAllocatorV2;
-      const providerEventLoggers = yield* ProviderEventLoggers;
-      const serverConfig = yield* ServerConfig;
+      const openCodeRuntime = yield* OpenCodeRuntime.OpenCodeRuntime;
+      const idAllocator = yield* IdAllocator.IdAllocatorV2;
+      const providerEventLoggers = yield* ProviderEventLoggers.ProviderEventLoggers;
+      const serverConfig = yield* ServerConfig.ServerConfig;
       return makeOpenCodeAdapterV2({
         instanceId: input.instanceId,
         settings: { ...input.config, enabled: input.enabled },
@@ -3822,24 +3784,25 @@ export const OpenCodeAdapterV2Driver: ProviderAdapterDriver<
   ),
 };
 
-const layer: Layer.Layer<ProviderAdapterV2, never, OpenCodeAdapterV2DriverEnv> = Layer.effect(
-  ProviderAdapterV2,
-  Effect.gen(function* () {
-    const hostEnvironment = yield* HostProcessEnvironment;
-    const openCodeRuntime = yield* OpenCodeRuntime;
-    const idAllocator = yield* IdAllocatorV2;
-    const providerEventLoggers = yield* ProviderEventLoggers;
-    const serverConfig = yield* ServerConfig;
-    return makeOpenCodeAdapterV2({
-      instanceId: OPENCODE_DEFAULT_INSTANCE_ID,
-      settings: DEFAULT_OPENCODE_SETTINGS,
-      environment: hostEnvironment,
-      runtime: openCodeRuntime,
-      idAllocator,
-      serverConfig,
-      ...(providerEventLoggers.native === undefined
-        ? {}
-        : { nativeEventLogger: providerEventLoggers.native }),
-    });
-  }),
-);
+const layer: Layer.Layer<ProviderAdapter.ProviderAdapterV2, never, OpenCodeAdapterV2DriverEnv> =
+  Layer.effect(
+    ProviderAdapter.ProviderAdapterV2,
+    Effect.gen(function* () {
+      const hostEnvironment = yield* HostProcessEnvironment;
+      const openCodeRuntime = yield* OpenCodeRuntime.OpenCodeRuntime;
+      const idAllocator = yield* IdAllocator.IdAllocatorV2;
+      const providerEventLoggers = yield* ProviderEventLoggers.ProviderEventLoggers;
+      const serverConfig = yield* ServerConfig.ServerConfig;
+      return makeOpenCodeAdapterV2({
+        instanceId: OPENCODE_DEFAULT_INSTANCE_ID,
+        settings: DEFAULT_OPENCODE_SETTINGS,
+        environment: hostEnvironment,
+        runtime: openCodeRuntime,
+        idAllocator,
+        serverConfig,
+        ...(providerEventLoggers.native === undefined
+          ? {}
+          : { nativeEventLogger: providerEventLoggers.native }),
+      });
+    }),
+  );

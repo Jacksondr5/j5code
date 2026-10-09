@@ -1,5 +1,5 @@
 import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 // A resolution claims its proposal first (`approving`, `declining`), does its work, then writes
 // the final status, so two devices resolving one reopened gate cannot undo each other; and the

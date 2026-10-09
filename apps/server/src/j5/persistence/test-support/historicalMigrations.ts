@@ -1,46 +1,17 @@
 import * as Effect from "effect/Effect";
-import * as Migrator from "effect/unstable/sql/Migrator";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as Migrator from "effect/sql/Migrator";
+import * as SqlClient from "effect/sql/SqlClient";
 import { migrationEntries } from "../../../persistence/Migrations.ts";
-import { septemberV2RemainingSteps } from "../SeptemberV2Steps.ts";
-import SeptemberV2Base from "./SeptemberV2Base.ts";
 
 const run = Migrator.make({});
-export const historicalEntries = [
-  ...migrationEntries.filter(([id]) => id <= 47),
-  [48, "OrchestrationV2", SeptemberV2Base] as const,
-  ...septemberV2RemainingSteps,
-];
-export const installHistorical = Effect.fn("test.installHistorical")(function* (
-  kind: "august" | "september",
-  through = 59,
-) {
-  const sql = yield* SqlClient.SqlClient;
-  yield* sql`PRAGMA foreign_keys = ON`;
-  yield* run({
-    loader: Migrator.fromRecord(
-      Object.fromEntries(
-        historicalEntries
-          .filter(([id]) =>
-            kind === "august" ? id <= 40 || (id >= 48 && id <= 56) : id <= through,
-          )
-          .map(([id, name, migration]) => [
-            `${kind === "august" && id >= 48 ? id - 7 : id}_${name}`,
-            migration,
-          ]),
-      ),
-    ),
-  });
-  yield* sql`UPDATE effect_sql_migrations SET created_at = '2026-08-15 12:00:00'`;
-});
 
 /**
- * A database created at pin 62aef8587c: current 1–50 plus `51 = OrchestrationV2`.
- * Upstream's 054 implementation and helpers are byte-identical to the pin's 051
- * (the migration audit enforces this), so they reproduce the pin schema exactly.
+ * A database created at pin 67a2be0fdb: upstream's 1–53, then `54 = OrchestrationV2` and
+ * `55 = RemoveRedundantProjectionIndexes`. Upstream's 055 and 056 are those two migrations
+ * unchanged (the migration audit enforces this), so they reproduce the pin schema exactly.
  */
 export const installPin = Effect.fn("test.installPin")(function* (
-  createdAt = "2026-09-10 12:00:00",
+  createdAt = "2026-09-26 20:29:48",
 ) {
   const sql = yield* SqlClient.SqlClient;
   yield* sql`PRAGMA foreign_keys = ON`;
@@ -48,33 +19,32 @@ export const installPin = Effect.fn("test.installPin")(function* (
     loader: Migrator.fromRecord(
       Object.fromEntries(
         migrationEntries
-          .filter(([id]) => id <= 50 || id === 54)
-          .map(([id, name, migration]) => [`${id === 54 ? 51 : id}_${name}`, migration]),
+          .filter(([id]) => id <= 53 || id === 55 || id === 56)
+          .map(([id, name, migration]) => [`${id >= 55 ? id - 1 : id}_${name}`, migration]),
       ),
     ),
   });
   yield* sql`UPDATE effect_sql_migrations SET created_at = ${createdAt}`;
 });
 
-/** A pin database reached through the September bridge keeps that bridge's provenance. */
-export const installPinWithSeptemberProvenance = Effect.fn(
-  "test.installPinWithSeptemberProvenance",
-)(function* (sourceRef: string) {
+/** Where each retired history recorded V2, after upstream's migrations below that id. */
+export const retiredHistories = [
+  ["August", 41],
+  ["September", 48],
+  ["pin 62aef8587c", 51],
+] as const;
+
+/** The recorded history of a retired database. Its V2 tables are not rebuilt: it is only refused. */
+export const installRetired = Effect.fn("test.installRetired")(function* (v2Id: number) {
   const sql = yield* SqlClient.SqlClient;
-  yield* installPin();
-  yield* sql`CREATE TABLE j5_upstream_migration_history (
-    source_ref TEXT NOT NULL,
-    migration_id INTEGER NOT NULL,
-    name TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    PRIMARY KEY (source_ref, migration_id)
-  )`;
-  yield* sql`INSERT INTO j5_upstream_migration_history ${sql.insert(
-    historicalEntries.map(([migration_id, name]) => ({
-      source_ref: sourceRef,
-      migration_id,
-      name,
-      created_at: "2026-09-04 21:51:02",
-    })),
-  )}`;
+  yield* run({
+    loader: Migrator.fromRecord(
+      Object.fromEntries(
+        migrationEntries
+          .filter(([id]) => id < v2Id)
+          .map(([id, name, migration]) => [`${id}_${name}`, migration]),
+      ),
+    ),
+  });
+  yield* sql`INSERT INTO effect_sql_migrations (migration_id, name) VALUES (${v2Id}, 'OrchestrationV2')`;
 });

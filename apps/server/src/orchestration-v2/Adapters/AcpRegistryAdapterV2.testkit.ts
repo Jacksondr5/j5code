@@ -7,11 +7,12 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcessSpawner } from "effect/process";
 
-import { ServerConfig } from "../../config.ts";
-import { layer as idAllocatorLayer, IdAllocatorV2 } from "../IdAllocator.ts";
-import { makeLayerEffect as makeProviderAdapterRegistryLayerEffect } from "../ProviderAdapterRegistry.ts";
+import * as ServerConfig from "../../config.ts";
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import * as ProviderAdapterRegistry from "../ProviderAdapterRegistry.ts";
+import type { ProviderReplayGate } from "@t3tools/provider-testing/replayGate";
 import type { OrchestratorV2ProviderReplayHarness } from "../testkit/ProviderReplayHarness.ts";
 import { makeReplayServerConfig } from "../testkit/ProviderReplayHarness.ts";
 import {
@@ -32,20 +33,24 @@ const REPLAY_SETTINGS = Schema.decodeUnknownSync(AcpRegistrySettings)({
   authMethodId: "replay",
 });
 
-function makeAcpRegistryProviderAdapterRegistryReplayLayer(transcript: AcpReplayTranscript) {
-  const serverConfigLayer = Layer.effect(
-    ServerConfig,
+function layerAcpRegistryProviderAdapterRegistryReplay(
+  transcript: AcpReplayTranscript,
+  options: { readonly replayGate?: ProviderReplayGate } = {},
+) {
+  const layerServerConfig = Layer.effect(
+    ServerConfig.ServerConfig,
     makeReplayServerConfig(`acp-registry-${transcript.scenario}`).pipe(Effect.orDie),
   ).pipe(Layer.provide(NodeServices.layer));
 
-  return makeProviderAdapterRegistryLayerEffect(
+  return ProviderAdapterRegistry.layerFromAdaptersEffect(
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const crypto = yield* Crypto.Crypto;
-      const idAllocator = yield* IdAllocatorV2;
-      const serverConfig = yield* ServerConfig;
+      const idAllocator = yield* IdAllocator.IdAllocatorV2;
+      const serverConfig = yield* ServerConfig.ServerConfig;
+      const replayGate = options.replayGate;
       const replayDir = yield* fileSystem
         .makeTempDirectory({
           prefix: `t3-orchestration-v2-acp-registry-replay-${transcript.scenario}-`,
@@ -73,12 +78,22 @@ function makeAcpRegistryProviderAdapterRegistryReplayLayer(transcript: AcpReplay
           statusPath,
           scriptPath,
           childProcessSpawner,
+          fileSystem,
+          ...(replayGate === undefined ? {} : { replayGate }),
         }),
         assertComplete: makeAcpReplayCompletenessAssertion(fileSystem, statusPath, transcript),
       });
       return [adapter];
     }),
-  ).pipe(Layer.provide(Layer.mergeAll(serverConfigLayer, NodeServices.layer, idAllocatorLayer)));
+  ).pipe(
+    Layer.provide(Layer.mergeAll(layerServerConfig, NodeServices.layer, IdAllocator.layer)),
+    // Held inbound lines must not outlive the scenario and wedge teardown.
+    Layer.merge(
+      Layer.effectDiscard(
+        Effect.addFinalizer(() => Effect.sync(() => options.replayGate?.releaseAll())),
+      ),
+    ),
+  );
 }
 
 export const AcpRegistryOrchestratorReplayHarness: OrchestratorV2ProviderReplayHarness<
@@ -90,5 +105,5 @@ export const AcpRegistryOrchestratorReplayHarness: OrchestratorV2ProviderReplayH
     decodeAcpReplayTranscript(transcript, ACP_REGISTRY_PROVIDER, {
       retargetProvider: true,
     }),
-  makeProviderAdapterRegistryLayer: makeAcpRegistryProviderAdapterRegistryReplayLayer,
+  makeProviderAdapterRegistryLayer: layerAcpRegistryProviderAdapterRegistryReplay,
 };

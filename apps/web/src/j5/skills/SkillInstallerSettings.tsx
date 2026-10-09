@@ -1,4 +1,5 @@
 import {
+  AuthOrchestrationOperateScope,
   DEFAULT_SERVER_SETTINGS,
   type EnvironmentId,
   type SkillCatalogApplyResult,
@@ -48,6 +49,7 @@ import { useSettingsScopeEnvironments } from "../settingsScopeEnvironment";
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { useEnvironmentScope } from "../../state/session";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { openCommandPalette } from "../../commandPaletteBus";
 
@@ -187,6 +189,7 @@ export function SkillCatalogPanel({ environmentId }: { readonly environmentId: E
   );
 
   const [busy, setBusy] = useState(false);
+  const canOperate = useEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
   const [notice, setNotice] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [applyFailure, setApplyFailure] = useState<ApplyFailure | null>(null);
@@ -324,11 +327,12 @@ export function SkillCatalogPanel({ environmentId }: { readonly environmentId: E
       conflict.replacement ? [{ skill: conflict.skill, ...conflict.replacement }] : [],
     ) ?? [];
   const canReplace =
+    canOperate &&
     catalogReady &&
     lastApply?.selectedGroups.length === selectedGroups.length &&
     lastApply.selectedGroups.every((group) => selectedGroups.includes(group));
-  const applyDisabled = !catalogReady;
-  const updateDisabled = !catalogReady || upstreamOf(status.data) === null;
+  const applyDisabled = !catalogReady || !canOperate;
+  const updateDisabled = !catalogReady || !canOperate || upstreamOf(status.data) === null;
 
   const toggleGroup = (name: string) => {
     if (!catalogReady) return;

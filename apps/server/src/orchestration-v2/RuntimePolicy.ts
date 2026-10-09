@@ -3,6 +3,7 @@ import {
   OrchestrationV2AppThread,
   ProjectId,
   ProviderInstanceId,
+  type RuntimeMode,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -10,12 +11,13 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
-import * as ProjectionProjects from "../persistence/Services/ProjectionProjects.ts";
+import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import { makeAgentPersonaRuntimePolicyResolver } from "../j5/agents/agentPersonaRuntime.ts";
 import {
   ProviderAdapterV2RuntimePolicy,
   type ProviderAdapterV2RuntimePolicy as ProviderAdapterV2RuntimePolicyType,
-} from "./ProviderAdapter.ts";
+} from "@t3tools/provider-core/server/ProviderAdapter";
+import * as ProjectStore from "./ProjectStore.ts";
 
 /**
  * ERRORS
@@ -80,20 +82,42 @@ export const layer: Layer.Layer<RuntimePolicyV2> = Layer.effect(
   }),
 );
 
-export const layerFromProjectRepository: Layer.Layer<
+/**
+ * The mode a provider runs a thread in. A mode the provider does not offer
+ * (a thread set before it stopped offering it, or a stale client) runs in
+ * Supervised rather than having T3 imitate it.
+ */
+function providerRuntimeMode(
+  runtimeMode: RuntimeMode,
+  supportedRuntimeModes: ReadonlyArray<RuntimeMode> | undefined,
+): RuntimeMode {
+  return supportedRuntimeModes === undefined ||
+    supportedRuntimeModes.length === 0 ||
+    supportedRuntimeModes.includes(runtimeMode)
+    ? runtimeMode
+    : "approval-required";
+}
+
+export const layerFromProjectStore: Layer.Layer<
   RuntimePolicyV2,
   never,
-  ProjectionProjects.ProjectionProjectRepository
+  ProjectStore.ProjectStoreV2 | ProviderInstanceRegistry.ProviderInstanceRegistry
 > = Layer.effect(
   RuntimePolicyV2,
   Effect.gen(function* () {
-    const projects = yield* ProjectionProjects.ProjectionProjectRepository;
+    const projects = yield* ProjectStore.ProjectStoreV2;
+    const providerInstances = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;
     const resolve = yield* resolveThreadPolicy;
     return RuntimePolicyV2.of({
       resolve: Effect.fn("RuntimePolicyV2.resolve")(function* (input) {
+        const instance = yield* providerInstances.getInstance(input.modelSelection.instanceId);
+        const supportedRuntimeModes =
+          instance === undefined
+            ? undefined
+            : (yield* instance.snapshot.getSnapshot).supportedRuntimeModes;
         const cwd =
           input.thread.worktreePath ??
-          (yield* projects.getById({ projectId: input.thread.projectId }).pipe(
+          (yield* projects.get(input.thread.projectId).pipe(
             Effect.mapError(
               (cause) =>
                 new RuntimePolicyResolveError({
@@ -116,7 +140,11 @@ export const layerFromProjectRepository: Layer.Layer<
               }),
             ),
           ));
-        return yield* resolve({ thread: input.thread, cwd });
+        const policy = yield* resolve({ thread: input.thread, cwd });
+        return ProviderAdapterV2RuntimePolicy.make({
+          ...policy,
+          runtimeMode: providerRuntimeMode(policy.runtimeMode, supportedRuntimeModes),
+        });
       }),
     });
   }),

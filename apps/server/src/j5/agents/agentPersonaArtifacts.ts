@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off - synchronous hashing for deterministic ids and digests.
 import type { ThreadId } from "@t3tools/contracts";
 import * as NodeCrypto from "node:crypto";
 

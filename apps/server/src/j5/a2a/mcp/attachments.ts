@@ -4,12 +4,13 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Schema from "effect/Schema";
-import { Tool, Toolkit } from "effect/unstable/ai";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { Tool, Toolkit } from "effect/ai";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import { ServerConfig } from "../../../config.ts";
-import { McpInvocationContext } from "../../../mcp/McpInvocationContext.ts";
-import { readWritableThread, unavailable } from "../../../mcp/threadAccess.ts";
+import { McpInvocationContext, requireThreadScope } from "../../../mcp/McpInvocationContext.ts";
+import * as McpToolAccess from "../../../mcp/McpToolAccess.ts";
+import { readThread, unavailable } from "../../../mcp/threadAccess.ts";
 import { resolveAttachmentReferences } from "../../../mcp/toolkits/attachment/handlers.ts";
 import { McpAttachmentInput } from "../../../mcp/toolkits/attachment/input.ts";
 import {
@@ -78,17 +79,20 @@ const isSendRefusal = Schema.is(
   ]),
 );
 
-export const J5AttachmentSendHandlersLive = J5AttachmentSendToolkit.toLayer({
-  t3_thread_send_attachments: (input) =>
+/** What `/mcp` registers. The sender is the calling thread, so the tool acts as its caller. */
+export const layer = McpToolAccess.toLayer(J5AttachmentSendToolkit, {
+  t3_thread_send_attachments: McpToolAccess.actsAsCaller((input) =>
     Effect.gen(function* () {
-      const { scope, caller, projection } = yield* readWritableThread(input.threadId, ["messages"]);
-      if (input.threadId === caller.id)
+      const { scope, projection } = yield* readThread(input.threadId, ["messages"]);
+      const callerThreadId = (yield* requireThreadScope(scope, "t3_thread_send_attachments")).thread
+        .threadId;
+      if (input.threadId === callerThreadId)
         return yield* new OrchestratorMcpFailure({
           code: "invalid_request",
           message: "Self-messaging is not supported. Choose another agent from list_participants.",
         });
       const send = yield* A2ASendService;
-      const directory = yield* send.listParticipants(scope.threadId);
+      const directory = yield* send.listParticipants(callerThreadId);
       const target = directory.find(
         (row) =>
           row.participant.kind === "agent" &&
@@ -113,7 +117,7 @@ export const J5AttachmentSendHandlersLive = J5AttachmentSendToolkit.toLayer({
       const result = yield* send
         .send({
           commandId: CommCommandId.make(`command:j5:a2a:attachments:${yield* crypto.randomUUIDv4}`),
-          senderThreadId: scope.threadId,
+          senderThreadId: callerThreadId,
           to: target.participantId,
           message:
             input.message?.trim() ||
@@ -132,7 +136,7 @@ export const J5AttachmentSendHandlersLive = J5AttachmentSendToolkit.toLayer({
         threadId: input.threadId,
         ...(yield* withDeliveryNotice(result, {
           receiverId: target.participantId,
-          callerThreadId: scope.threadId,
+          callerThreadId: callerThreadId,
         })),
       };
     }).pipe(
@@ -145,4 +149,8 @@ export const J5AttachmentSendHandlersLive = J5AttachmentSendToolkit.toLayer({
       ),
       Effect.catchDefect(() => Effect.fail(unavailable())),
     ),
+  ),
 });
+
+/** The same handler as a plain layer, for tests that call the tool without registering it. */
+export const J5AttachmentSendHandlersLive = McpToolAccess.HandlersLayer.layer(layer);

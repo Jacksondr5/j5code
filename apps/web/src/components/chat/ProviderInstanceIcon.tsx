@@ -11,10 +11,11 @@ import {
   Icon,
   OpenAI,
   OpenCodeIcon,
-  PiAgentIcon,
 } from "../Icons";
 
 import { cn } from "~/lib/utils";
+import { providerClients } from "../settings/providerDriverMeta";
+import { ProviderPackageIcon } from "./ProviderPackageIcon";
 import {
   AcpRegistryAgentIcon,
   officialAcpRegistryIconUrlForAgentId,
@@ -28,7 +29,6 @@ const PROVIDER_ICON_BY_PROVIDER: Partial<Record<ProviderDriverKind, Icon>> = {
   [ProviderDriverKind.make("cursor")]: CursorIcon,
   [ProviderDriverKind.make("grok")]: GrokIcon,
   [ProviderDriverKind.make("antigravity")]: AntigravityIcon,
-  [ProviderDriverKind.make("pi")]: PiAgentIcon,
 };
 
 const PROVIDER_TEXT_COLOR_BY_PROVIDER: Partial<Record<ProviderDriverKind, string>> = {
@@ -36,13 +36,24 @@ const PROVIDER_TEXT_COLOR_BY_PROVIDER: Partial<Record<ProviderDriverKind, string
   [ProviderDriverKind.make("claudeAgent")]: "text-[#d97757]",
   [ProviderDriverKind.make("cursor")]: "text-[#26251E] dark:text-[#EDECEC]",
   [ProviderDriverKind.make("grok")]: "text-[#0F0F0F] dark:text-[#F5F5F5]",
-  [ProviderDriverKind.make("pi")]: "text-[#0F0F0F] dark:text-[#F5F5F5]",
   [ProviderDriverKind.make("opencode")]: "text-[#211E1E] dark:text-[#F1ECEC]",
   [ProviderDriverKind.make("antigravity")]: "text-[#5b87bf]",
 };
 
-export function providerTextColorClassName(driverKind: ProviderDriverKind): string | undefined {
-  return PROVIDER_TEXT_COLOR_BY_PROVIDER[driverKind];
+/** Brand text color for a provider label; package glyphs supply theirs as CSS variables. */
+export function providerTextColor(driverKind: ProviderDriverKind): {
+  readonly className?: string;
+  readonly style?: CSSProperties;
+} {
+  const icon = providerClients.get(driverKind)?.icon;
+  if (icon) {
+    return {
+      className: "text-(--icon-light) dark:text-(--icon-dark)",
+      style: { "--icon-light": icon.fill.light, "--icon-dark": icon.fill.dark } as CSSProperties,
+    };
+  }
+  const className = PROVIDER_TEXT_COLOR_BY_PROVIDER[driverKind];
+  return className ? { className } : {};
 }
 
 export function resolveProviderInstanceAcpRegistryIconUrl(input: {
@@ -72,6 +83,7 @@ export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
   indicatorBackground?: string;
 }) {
   const Icon = PROVIDER_ICON_BY_PROVIDER[props.driverKind] ?? null;
+  const packageIcon = providerClients.get(props.driverKind)?.icon;
   const indicatorBackground = props.indicatorBackground ?? "var(--card)";
   const accentStyle = props.accentColor
     ? ({ "--provider-accent": props.accentColor } as CSSProperties)
@@ -101,10 +113,16 @@ export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
           fallbackClassName="size-full"
           icon={acpRegistryIconUrl}
         />
+      ) : packageIcon ? (
+        <ProviderPackageIcon
+          icon={packageIcon}
+          className={cn("size-5 shrink-0", props.iconClassName)}
+          aria-hidden
+        />
       ) : Icon ? (
         <Icon className={cn("size-5 shrink-0", props.iconClassName)} aria-hidden />
       ) : (
-        <span className={cn("text-[10px] font-semibold leading-none", props.iconClassName)}>
+        <span className={cn("text-3xs font-semibold leading-none", props.iconClassName)}>
           {providerInstanceInitials(props.displayName)}
         </span>
       )}
@@ -121,9 +139,9 @@ export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
       {props.showBadge ? (
         <span
           className={cn(
-            "pointer-events-none absolute right-0 bottom-0 z-10 flex h-3.5 min-w-3.5 items-center justify-center rounded-full border px-0.5 text-[8px] font-semibold leading-none shadow-sm",
+            "pointer-events-none absolute right-0 bottom-0 z-10 flex h-3.5 min-w-3.5 items-center justify-center rounded-full border px-0.5 text-4xs font-semibold leading-none shadow-sm",
             props.accentColor
-              ? "bg-[var(--provider-accent)] text-white"
+              ? "bg-(--provider-accent) text-white"
               : "bg-card text-muted-foreground",
             props.badgeClassName,
           )}

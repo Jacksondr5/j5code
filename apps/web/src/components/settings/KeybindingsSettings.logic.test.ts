@@ -7,6 +7,7 @@ import {
   buildKeybindingCommandOptions,
   buildWhenVariableOptions,
   commandLabel,
+  groupKeybindingRows,
   keybindingConflictLabels,
   keybindingFromKeyboardEvent,
   parseWhenExpressionDraft,
@@ -58,6 +59,48 @@ describe("KeybindingsSettings.logic", () => {
       );
     },
   );
+  it("groups rows by command area in page order and drops empty groups", () => {
+    const groups = groupKeybindingRows(buildKeybindingRows(DEFAULT_RESOLVED_KEYBINDINGS, ""));
+    expect(groups.map((group) => group.title)).toEqual([
+      "Navigation",
+      "Threads",
+      "Composer",
+      "Terminal",
+      "Preview & diff",
+      "Appearance",
+      "Other",
+    ]);
+    const composer = groups.find((group) => group.id === "composer");
+    expect(composer?.rows.map((row) => row.command)).toEqual(
+      expect.arrayContaining(["composer.host", "modelPicker.toggle"]),
+    );
+    expect(groupKeybindingRows(buildKeybindingRows(DEFAULT_RESOLVED_KEYBINDINGS, "split"))).toEqual(
+      [expect.objectContaining({ id: "terminal" })],
+    );
+  });
+  it("orders Usage bindings and command choices like the page", () => {
+    const expected = [
+      "usage.open",
+      "usage.cost",
+      "usage.tokens",
+      "usage.limits",
+      "usage.period.day",
+      "usage.period.week",
+      "usage.period.month",
+      "usage.period.quarter",
+    ];
+    // The order must not depend on the order of the configured bindings.
+    for (const bindings of [
+      DEFAULT_RESOLVED_KEYBINDINGS,
+      DEFAULT_RESOLVED_KEYBINDINGS.toReversed(),
+    ]) {
+      expect(buildKeybindingRows(bindings, "usage").map((row) => row.command)).toEqual(expected);
+      expect(
+        buildKeybindingCommandOptions(bindings).filter((command) => command.startsWith("usage.")),
+      ).toEqual(expected);
+    }
+  });
+
   it("builds searchable rows with readable key and when values", () => {
     const rows = buildKeybindingRows(
       [
@@ -105,6 +148,31 @@ describe("KeybindingsSettings.logic", () => {
         "Win32",
       ),
     ).toBe("mod+shift+k");
+  });
+
+  it.each([
+    ["k", "KeyK", "k"],
+    ["Tab", "Tab", "tab"],
+    ["F5", "F5", "f5"],
+  ])("captures %s without a modifier", (key, code, expected) => {
+    const noModifiers = { metaKey: false, ctrlKey: false, altKey: false, shiftKey: false };
+    expect(keybindingFromKeyboardEvent({ key, code, ...noModifiers }, "MacIntel")).toBe(expected);
+  });
+
+  it("waits for a key when only a modifier is pressed", () => {
+    expect(
+      keybindingFromKeyboardEvent(
+        {
+          key: "Meta",
+          code: "MetaLeft",
+          metaKey: true,
+          ctrlKey: false,
+          altKey: false,
+          shiftKey: false,
+        },
+        "MacIntel",
+      ),
+    ).toBeNull();
   });
 
   it.each([
@@ -215,6 +283,7 @@ describe("KeybindingsSettings.logic", () => {
   it("formats static and project script command labels", () => {
     expect(commandLabel("commandPalette.toggle")).toBe("Command Palette: Toggle");
     expect(commandLabel("themeEditor.toggle")).toBe("Theme Editor: Toggle");
+    expect(commandLabel("view.reopenClosed")).toBe("Reopen Closed Tab");
     expect(commandLabel("script.setup-db.run")).toBe("Run Script: Setup Db");
   });
 
@@ -255,13 +324,17 @@ describe("KeybindingsSettings.logic", () => {
         "chat.new",
         "threadPanel.toggle",
         "rightPanel.toggleMaximized",
+        "composer.cycleHost",
         "thread.stop",
+        "usage.open",
         "script.setup-db.run",
       ]),
     );
-    expect(DEFAULT_RESOLVED_KEYBINDINGS.some((binding) => binding.command === "thread.stop")).toBe(
-      false,
-    );
+    for (const command of ["thread.stop", "composer.cycleHost"]) {
+      expect(DEFAULT_RESOLVED_KEYBINDINGS.some((binding) => binding.command === command)).toBe(
+        false,
+      );
+    }
   });
 
   it("reports unknown when variables without rejecting parseable expressions", () => {

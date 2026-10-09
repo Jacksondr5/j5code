@@ -1,6 +1,10 @@
 import { ThreadDetailsControl } from "./chat/ThreadDetailsControl";
 import { useAtomValue } from "@effect/atom-react";
-import { type ScopedThreadRef } from "@t3tools/contracts";
+import {
+  AuthOrchestrationOperateScope,
+  AuthSourceControlWriteScope,
+  type ScopedThreadRef,
+} from "@t3tools/contracts";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -108,7 +112,8 @@ import {
   useVcsInitAction,
   useVcsPullAction,
 } from "~/lib/sourceControlActions";
-import { useThreadShell } from "~/state/entities";
+import { useThreadProjection, useThreadShell } from "~/state/entities";
+import { readEnvironmentScope, useEnvironmentScope } from "~/state/session";
 import { useEnvironmentQuery } from "~/state/query";
 import { serverEnvironment } from "~/state/server";
 import { sourceControlEnvironment } from "~/state/sourceControl";
@@ -116,12 +121,11 @@ import { threadEnvironment } from "~/state/threads";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { vcsActionManager, vcsEnvironment } from "~/state/vcs";
 import { randomUUID } from "~/lib/utils";
-import { resolvePathLinkTarget } from "~/terminal-links";
+import { resolvePathLinkTarget } from "@t3tools/shared/fileLinks";
 import { type DraftId, useComposerDraftStore } from "~/composerDraftStore";
 import {
   THREAD_DETAILS_PANEL_CHEVRON_CLASS,
   THREAD_DETAILS_PANEL_ICON_CLASS,
-  THREAD_DETAILS_PANEL_ROW_POPUP_CLASS,
   THREAD_DETAILS_PANEL_SPLIT_GROUP_CLASS,
   THREAD_DETAILS_PANEL_SPLIT_SEPARATOR_CLASS,
 } from "./chat/threadDetailsPanelStyles";
@@ -451,7 +455,7 @@ function GitActionProgressButtonContent({
       {!isPanel ? (
         <GitActionElapsedTime
           startedAtMs={progress.startedAtMs}
-          className="row-start-1 text-[11px] font-normal tabular-nums text-muted-foreground"
+          className="row-start-1 text-2xs font-normal tabular-nums text-muted-foreground"
         />
       ) : null}
       <div
@@ -465,7 +469,7 @@ function GitActionProgressButtonContent({
           <Tooltip>
             <TooltipTrigger
               render={
-                <p className="truncate pt-0.5 text-left text-[11px] font-normal text-muted-foreground" />
+                <p className="truncate pt-0.5 text-left text-2xs font-normal text-muted-foreground" />
               }
             >
               {progress.output}
@@ -501,7 +505,7 @@ function GitActionSuccessButtonContent({ success }: { success: InlineGitActionSu
           <Tooltip>
             <TooltipTrigger
               render={
-                <p className="truncate pt-0.5 text-left text-[11px] font-normal text-muted-foreground" />
+                <p className="truncate pt-0.5 text-left text-2xs font-normal text-muted-foreground" />
               }
             >
               {success.description}
@@ -631,14 +635,19 @@ function PublishRepositoryDialog(props: PublishRepositoryDialogProps) {
   ] as const;
 
   const canSubmitPublishRepository = useMemo(() => {
-    if (!selectedPublishProviderReadiness.ready) return false;
+    if (!publishRepositoryAction.isAllowed || !selectedPublishProviderReadiness.ready) return false;
     if (publishRepositoryAction.isPending) return false;
     const repositoryParts = publishRepository.trim().split("/");
     const owner = repositoryParts[0]?.trim() ?? "";
     const rest = repositoryParts.slice(1);
     const name = rest.join("/").trim();
     return owner.length > 0 && name.length > 0;
-  }, [publishRepository, publishRepositoryAction.isPending, selectedPublishProviderReadiness]);
+  }, [
+    publishRepository,
+    publishRepositoryAction.isAllowed,
+    publishRepositoryAction.isPending,
+    selectedPublishProviderReadiness,
+  ]);
 
   const submitPublishRepository = useCallback(() => {
     if (!canSubmitPublishRepository) {
@@ -747,7 +756,7 @@ function PublishRepositoryDialog(props: PublishRepositoryDialogProps) {
                   return (
                     <div
                       key={option.value}
-                      className="relative flex cursor-not-allowed items-center gap-3 rounded-lg border border-border bg-background px-3 py-3 text-left opacity-55 dark:border-transparent dark:bg-white/[0.035]"
+                      className="relative flex cursor-not-allowed items-center gap-3 rounded-lg border border-border bg-background px-3 py-3 text-left opacity-64 dark:border-transparent dark:bg-white/[0.035]"
                     >
                       <option.Icon className="size-5 shrink-0 text-muted-foreground" aria-hidden />
                       <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
@@ -1071,6 +1080,11 @@ export default function GitActionsControl({
   );
   const activeEnvironmentId = activeThreadRef?.environmentId ?? null;
   const successScopeKey = `${activeEnvironmentId ?? ""}\u0000${gitCwd ?? ""}`;
+  const canWriteSourceControl = useEnvironmentScope(
+    activeEnvironmentId,
+    AuthSourceControlWriteScope,
+  );
+  const canOperateThread = useEnvironmentScope(activeEnvironmentId, AuthOrchestrationOperateScope);
   const serverConfig = useAtomValue(serverEnvironment.configValueAtom(activeEnvironmentId));
   const openInPreferredEditor = useOpenInPreferredEditor(
     activeEnvironmentId,
@@ -1080,7 +1094,7 @@ export default function GitActionsControl({
     () => (activeThreadRef ? { threadRef: activeThreadRef } : undefined),
     [activeThreadRef],
   );
-  const activeServerThread = useThreadShell(activeThreadRef);
+  const activeServerThreadShell = useThreadShell(activeThreadRef);
   const openPrLink = useOpenPrLink(activeThreadRef ?? undefined);
   const activeDraftThread = useComposerDraftStore((store) =>
     draftId
@@ -1089,6 +1103,13 @@ export default function GitActionsControl({
         ? store.getDraftThreadByRef(activeThreadRef)
         : null,
   );
+  const activeServerThreadProjection = useThreadProjection(
+    activeDraftThread !== null && activeServerThreadShell === null ? null : activeThreadRef,
+  );
+  const activeServerThread =
+    activeServerThreadShell ?? activeServerThreadProjection?.projection.thread ?? null;
+  const isLocalDraftThread = activeDraftThread !== null && activeServerThread === null;
+  const canChangeThreadBranch = canWriteSourceControl && (isLocalDraftThread || canOperateThread);
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
   const [isCommitDialogOpen, setIsCommitDialogOpen] = useState(false);
   const [dialogCommitMessage, setDialogCommitMessage] = useState("");
@@ -1121,7 +1142,10 @@ export default function GitActionsControl({
       }
 
       if (activeServerThread) {
-        if (activeServerThread.branch === branch) {
+        if (
+          !readEnvironmentScope(activeThreadRef.environmentId, AuthOrchestrationOperateScope) ||
+          activeServerThread.branch === branch
+        ) {
           return;
         }
 
@@ -1193,6 +1217,8 @@ export default function GitActionsControl({
   const isRepo = gitStatus?.isRepo ?? true;
   const hasPrimaryRemote = gitStatus?.hasPrimaryRemote ?? false;
   const gitStatusForActions = gitStatus;
+  // Matches the diff panel's Changes view. Older servers only report uncommitted totals.
+  const changesTotals = gitStatusForActions?.branchChanges ?? gitStatusForActions?.workingTree;
 
   const allFiles = gitStatusForActions?.workingTree.files ?? [];
   const selectedFiles = allFiles.filter((f) => !excludedFiles.has(f.path));
@@ -1247,9 +1273,11 @@ export default function GitActionsControl({
       resolveQuickAction(gitStatusForActions, isGitActionRunning, isDefaultRef, hasPrimaryRemote),
     [gitStatusForActions, hasPrimaryRemote, isDefaultRef, isGitActionRunning],
   );
-  const quickActionDisabledReason = quickAction.disabled
-    ? (quickAction.hint ?? "This action is currently unavailable.")
-    : null;
+  const quickActionDisabledReason = !canWriteSourceControl
+    ? "This connection cannot change source control."
+    : quickAction.disabled
+      ? (quickAction.hint ?? "This action is currently unavailable.")
+      : null;
   const gitActionProgress = resolveGitActionProgressPresentation(vcsActionState);
   const pendingDefaultBranchActionCopy = pendingDefaultBranchAction
     ? resolveDefaultBranchActionDialogCopy({
@@ -1303,6 +1331,14 @@ export default function GitActionsControl({
       featureBranch = false,
       filePaths,
     }: RunGitActionWithToastInput) => {
+      if (
+        activeEnvironmentId === null ||
+        !readEnvironmentScope(activeEnvironmentId, AuthSourceControlWriteScope) ||
+        (featureBranch &&
+          !isLocalDraftThread &&
+          !readEnvironmentScope(activeEnvironmentId, AuthOrchestrationOperateScope))
+      )
+        return;
       const actionStatus = statusOverride ?? gitStatusForActions;
       const actionBranch = actionStatus?.refName ?? null;
       const actionIsDefaultBranch = featureBranch ? false : isDefaultRef;
@@ -1458,7 +1494,7 @@ export default function GitActionsControl({
   };
 
   const checkoutFeatureBranchAndContinuePendingAction = () => {
-    if (!pendingDefaultBranchAction) return;
+    if (!canChangeThreadBranch || !pendingDefaultBranchAction) return;
     const { action, commitMessage, onConfirmed, filePaths } = pendingDefaultBranchAction;
     setPendingDefaultBranchAction(null);
     void runGitActionWithToast({
@@ -1472,7 +1508,7 @@ export default function GitActionsControl({
   };
 
   const runDialogActionOnNewBranch = () => {
-    if (!isCommitDialogOpen) return;
+    if (!canChangeThreadBranch || !isCommitDialogOpen) return;
     const commitMessage = dialogCommitMessage.trim();
 
     setIsCommitDialogOpen(false);
@@ -1615,7 +1651,8 @@ export default function GitActionsControl({
     [gitCwd, openInPreferredEditor, threadToastData],
   );
 
-  const canPublishRepository = isRepo && gitStatusForActions !== null && !hasPrimaryRemote;
+  const canPublishRepository =
+    canWriteSourceControl && isRepo && gitStatusForActions !== null && !hasPrimaryRemote;
 
   const initializeGit = () => {
     void (async () => {
@@ -1682,7 +1719,7 @@ export default function GitActionsControl({
           <MenuItem
             density={presentation === "menu" ? "touch" : "default"}
             key={`${item.id}-${item.label}`}
-            disabled={item.disabled}
+            disabled={!canWriteSourceControl || item.disabled}
             onClick={() => {
               openDialogForMenuItem(item);
             }}
@@ -1776,7 +1813,7 @@ export default function GitActionsControl({
           variant={isPanel ? "ghost" : "outline"}
           part="row"
           panel={isPanel}
-          disabled={initAction.isPending}
+          disabled={!canWriteSourceControl || initAction.isPending}
           onClick={initializeGit}
         >
           <GitBranchPlusIcon className="size-3.5" aria-hidden />
@@ -1838,7 +1875,7 @@ export default function GitActionsControl({
                 <span
                   className={cn(
                     "sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5",
-                    isPanel && "not-sr-only ml-0.5 truncate",
+                    isPanel && "not-sr-only ml-0 truncate",
                   )}
                 >
                   {quickAction.label}
@@ -1854,7 +1891,7 @@ export default function GitActionsControl({
               size="xs"
               part="primary"
               panel={isPanel}
-              disabled={isGitActionRunning || quickAction.disabled}
+              disabled={!canWriteSourceControl || isGitActionRunning || quickAction.disabled}
               onClick={runQuickAction}
             >
               <GitQuickActionIcon
@@ -1865,7 +1902,7 @@ export default function GitActionsControl({
               <span
                 className={cn(
                   "sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5",
-                  isPanel && "not-sr-only ml-0.5 truncate",
+                  isPanel && "not-sr-only ml-0 truncate",
                 )}
               >
                 {quickAction.label}
@@ -1879,7 +1916,7 @@ export default function GitActionsControl({
             // the output row expands below.
             <GitActionElapsedTime
               startedAtMs={gitActionProgress.startedAtMs}
-              className="flex h-9 shrink-0 items-center self-start pe-2.5 text-[11px] font-normal tabular-nums text-muted-foreground"
+              className="flex h-8 shrink-0 items-center self-start pe-2.5 text-2xs font-normal tabular-nums text-muted-foreground"
             />
           ) : (
             <>
@@ -1915,7 +1952,7 @@ export default function GitActionsControl({
                 <MenuPopup
                   align="end"
                   {...(isPanel ? { anchor: panelAnchorRef } : {})}
-                  className={isPanel ? THREAD_DETAILS_PANEL_ROW_POPUP_CLASS : "w-full"}
+                  className={isPanel ? "w-(--anchor-width)" : "w-full"}
                 >
                   {gitItems}
                 </MenuPopup>
@@ -1936,13 +1973,9 @@ export default function GitActionsControl({
         >
           <FileDiffIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} aria-hidden />
           <span className="flex-1 text-left">Changes</span>
-          <span className="flex items-center gap-1 font-mono text-[11px] tabular-nums">
-            <span className="text-success">
-              +{gitStatusForActions?.workingTree.insertions ?? 0}
-            </span>
-            <span className="text-destructive">
-              -{gitStatusForActions?.workingTree.deletions ?? 0}
-            </span>
+          <span className="flex items-center gap-1 font-mono text-2xs tabular-nums">
+            <span className="text-success">+{changesTotals?.insertions ?? 0}</span>
+            <span className="text-destructive">-{changesTotals?.deletions ?? 0}</span>
           </span>
         </ThreadDetailsControl>
       ) : null}
@@ -2038,6 +2071,8 @@ export default function GitActionsControl({
                                 <button
                                   type="button"
                                   className="flex min-w-0 flex-1 items-center justify-between gap-3 text-left"
+                                  disabled={!canOperateThread}
+                                  aria-label={`Open ${file.path} in editor`}
                                   onClick={() => openChangedFileInEditor(file.path)}
                                 >
                                   <StartTruncatedPath
@@ -2105,12 +2140,16 @@ export default function GitActionsControl({
             <Button
               variant="outline"
               size="sm"
-              disabled={noneSelected}
+              disabled={!canChangeThreadBranch || noneSelected}
               onClick={runDialogActionOnNewBranch}
             >
               Commit on new branch
             </Button>
-            <Button size="sm" disabled={noneSelected} onClick={runDialogAction}>
+            <Button
+              size="sm"
+              disabled={!canWriteSourceControl || noneSelected}
+              onClick={runDialogAction}
+            >
               Commit
             </Button>
           </DialogFooter>
@@ -2154,6 +2193,7 @@ export default function GitActionsControl({
               variant="outline"
               size="sm-multiline"
               onClick={continuePendingDefaultBranchAction}
+              disabled={!canWriteSourceControl}
             >
               {pendingDefaultBranchActionCopy?.continueLabel ?? "Continue"}
             </Button>
@@ -2161,6 +2201,7 @@ export default function GitActionsControl({
               className="w-full max-w-full sm:w-auto"
               size="sm-multiline"
               onClick={checkoutFeatureBranchAndContinuePendingAction}
+              disabled={!canChangeThreadBranch}
             >
               Check out feature branch & continue
             </Button>

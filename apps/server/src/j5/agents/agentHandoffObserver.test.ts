@@ -31,7 +31,7 @@ import {
   layer as projectionStoreLayer,
 } from "../../orchestration-v2/ProjectionStore.ts";
 import * as RunFinalization from "../../orchestration-v2/RunFinalizationService.ts";
-import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
+import { layerMemory as SqlitePersistenceMemory } from "../../persistence/Sqlite.ts";
 import { ArtifactWorkspace } from "../artifacts/ArtifactWorkspace.ts";
 import { AgentHandoffNudgeQueue, layer as queueLayer } from "./agentHandoffNudgeQueue.ts";
 import { layer as observerLayer } from "./agentHandoffObserver.ts";

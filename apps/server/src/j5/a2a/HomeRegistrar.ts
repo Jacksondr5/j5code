@@ -3,8 +3,8 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
 
 import {
   type AppendCommEventsCommand,
@@ -195,7 +195,7 @@ const makeRegisterAtCreation = (input: {
   Effect.fn("j5.a2a.registerAtCreation")(function* (registration: RegisterAtCreationInput) {
     const existing = yield* input
       .getHomeForThread(registration.threadId)
-      .pipe(Effect.catchTag("A2AHomeNotFoundError", () => Effect.succeed(null)));
+      .pipe(Effect.catchTags({ A2AHomeNotFoundError: () => Effect.succeed(null) }));
     if (existing !== null && existing.projectId !== registration.projectId) {
       return yield* new A2AHomeConflictError({
         threadId: registration.threadId,
@@ -241,7 +241,7 @@ const makeRegisterAtCreation = (input: {
     if (appendResult._tag === "Failure") {
       const racedHome = yield* input
         .getHomeForThread(registration.threadId)
-        .pipe(Effect.catchTag("A2AHomeNotFoundError", () => Effect.succeed(null)));
+        .pipe(Effect.catchTags({ A2AHomeNotFoundError: () => Effect.succeed(null) }));
       if (racedHome === null) return yield* appendResult.failure;
       if (racedHome.projectId !== registration.projectId) {
         return yield* new A2AHomeConflictError({

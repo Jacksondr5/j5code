@@ -45,7 +45,7 @@ import {
   useEnvironments,
 } from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";
-import { useEnvironmentSessionState } from "../../state/session";
+import { useEnvironmentScope } from "../../state/session";
 import { peersQueryAtom } from "../state";
 import {
   noRouteMessage,
@@ -98,16 +98,12 @@ export function PeerIntroductionDialog({
   const other = candidates.find((environment) => environment.environmentId === otherId) ?? null;
   const primaryBaseUrl = useEnvironmentHttpBaseUrl(primaryEnvironmentId);
   const otherBaseUrl = useEnvironmentHttpBaseUrl(otherId);
-  // The hook needs an id; until a remote is chosen, readiness stops before reading this.
-  const otherSession = useEnvironmentSessionState(otherId ?? primaryEnvironmentId);
+  const otherCanWriteAccess = useEnvironmentScope(otherId, AuthAccessWriteScope);
 
   const local = useMemo(() => (primary === null ? null : peeringServerOf(primary)), [primary]);
   const remote = useMemo(() => (other === null ? null : peeringServerOf(other)), [other]);
   const otherReady =
-    other !== null &&
-    other.connection.phase === "connected" &&
-    otherSession.data?.authenticated === true &&
-    (otherSession.data.scopes?.includes(AuthAccessWriteScope) ?? false);
+    other !== null && other.connection.phase === "connected" && otherCanWriteAccess;
   const bothSupportPoll = local?.supportsPoll === true && remote?.supportsPoll === true;
   // Whether each server supports poll mode is known only once its descriptor is.
   const described =

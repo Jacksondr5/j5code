@@ -24,7 +24,7 @@ export function AgentIdentityChip(props: {
           <span
             className={
               props.className ??
-              "inline-flex max-w-36 shrink-0 items-center gap-1 truncate rounded-sm border border-border/60 px-1 text-[.65rem] text-muted-foreground"
+              "inline-flex max-w-36 shrink-0 items-center gap-1 truncate rounded-sm border border-border/60 px-1 text-3xs text-muted-foreground"
             }
           />
         }

@@ -12,7 +12,7 @@ import {
   type ServerProvider,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
-import { Atom, AtomRegistry } from "effect/unstable/reactivity";
+import { Atom, AtomRegistry } from "effect/reactivity";
 import { PlaybookError, type PlaybookProgress } from "@t3tools/contracts/j5";
 import {
   ensurePlaybookAuthor,

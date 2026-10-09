@@ -19,7 +19,7 @@ import {
   HttpServerRequest,
   HttpServerRespondable,
   HttpServerResponse,
-} from "effect/unstable/http";
+} from "effect/http";
 import { annotateEnvironmentRequest, failEnvironmentInternal } from "../../auth/http.ts";
 import {
   authenticateClientRead,

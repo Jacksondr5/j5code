@@ -4,9 +4,7 @@ import * as NodeCrypto from "node:crypto";
 import * as NodePath from "node:path";
 import * as NodeUtil from "node:util";
 
-import collapse from "../../apps/server/src/j5/persistence/reviewed-v2-collapse.v1.json" with { type: "json" };
-import reviewed from "../../apps/server/src/j5/persistence/legacy-upstream-migrations.v1.json" with { type: "json" };
-import renumber from "../../apps/server/src/j5/persistence/reviewed-v2-renumber.v1.json" with { type: "json" };
+import reviewed from "../../apps/server/src/j5/persistence/reviewed-v2-reconcile.v1.json" with { type: "json" };
 
 export interface MigrationRecord {
   readonly id: number;
@@ -93,8 +91,8 @@ const sameManifest = (
     );
   });
 
-/** Reviewed upstream targets, newest first. A candidate must contain one of these exact commits. */
-export const reviewedTargetRefs = [renumber.targetRef, collapse.targetRef, reviewed.targetRef];
+/** Reviewed upstream targets. A candidate must contain one of these exact commits. */
+export const reviewedTargetRefs = [reviewed.targetRef];
 
 /** Allows only the recorded old manifest and exact reviewed upstream target. */
 export function matchesReviewedBridge(
@@ -102,52 +100,15 @@ export function matchesReviewedBridge(
   after: ReadonlyArray<MigrationRecord>,
   targetSha: string,
 ): boolean {
-  if (targetSha === renumber.targetRef) {
-    // Pin → U: V2 moves 51 → 54 after three inserted migrations; 050's backfill
-    // dependencies drifted, which is safe only because a recorded 050 never reruns.
-    return (
-      sameManifest(before, renumber.sourceMigrations) &&
-      sameManifest(after, renumber.targetMigrations)
-    );
-  }
-  if (targetSha === collapse.targetRef) {
-    return (
-      (sameManifest(before, reviewed.migrations) ||
-        sameManifest(before, collapse.sourceMigrations)) &&
-      sameManifest(after, collapse.targetMigrations)
-    );
-  }
-  if (
-    targetSha !== reviewed.targetRef ||
-    before.length !== reviewed.migrations.length ||
-    after.length !== 59
-  ) {
-    return false;
-  }
-  if (
-    inspectMigrationChanges(before, after).some(
-      ({ kind }) =>
-        kind === "invalid_manifest" || kind === "removed" || kind === "implementation_changed",
-    )
-  ) {
-    return false;
-  }
-  const originalNames = new Set(reviewed.migrations.map(({ name }) => name));
-  const additions = after
-    .filter(({ name }) => !originalNames.has(name))
-    .map(({ id }) => id)
-    .sort((a, b) => a - b);
-  if (additions.join(",") !== "41,42,43,44,45,46,47,57,58,59") return false;
-  return reviewed.migrations.every((expected) => {
-    const old = before.find(({ id }) => id === expected.id);
-    const next = after.find(({ name }) => name === expected.name);
-    return (
-      old?.name === expected.name &&
-      old.sha256 === expected.sha256 &&
-      next?.id === (expected.id >= 41 ? expected.id + 7 : expected.id) &&
-      next.sha256 === expected.sha256
-    );
-  });
+  // Pin → UP: upstream inserts 054, so V2 moves 54 → 55 and the index cleanup 55 → 56, which
+  // upstream's own reconcileV2PreviewMigration applies to a pin database. Every hash changed with
+  // the `effect/sql` import rename, and 050's backfill dependencies drifted, which is safe only
+  // because a recorded 050 never reruns.
+  return (
+    targetSha === reviewed.targetRef &&
+    sameManifest(before, reviewed.sourceMigrations) &&
+    sameManifest(after, reviewed.targetMigrations)
+  );
 }
 
 const gitText = (cwd: string, ...args: ReadonlyArray<string>) =>
@@ -157,7 +118,7 @@ const gitText = (cwd: string, ...args: ReadonlyArray<string>) =>
     maxBuffer: 8 * 1024 * 1024,
   });
 
-// Identified by manifest name: upstream renumbers these files (051 → 054 for V2).
+// Identified by manifest name: upstream renumbers these files (054 → 055 for V2).
 const composedName = "OrchestrationV2";
 const backfillName = "ProjectionThreadPullRequests";
 const auditedNames = new Set([composedName, backfillName]);
@@ -166,7 +127,6 @@ const auditedNames = new Set([composedName, backfillName]);
  * Hash the reviewed V2 setup and the functions reached by the PR backfill.
  * This is a bounded dependency list, not a module resolver: implementation changes
  * require reviewing these dependencies again before allowing another bridge.
- * A self-contained historical V2 migration (September's 048) has no dependencies.
  */
 export function readMigrationDependencies(
   cwd: string,
@@ -178,9 +138,9 @@ export function readMigrationDependencies(
   const imports = [...implementation.matchAll(/from "([^"\n]+)"/g)].map((match) => match[1]!);
   if (/\bimport\s*\(/.test(implementation))
     throw new Error("Unreviewed dynamic migration dependency");
-  const expected = renumber.targetMigrations.find((row) => row.name === name)?.dependencies ?? [];
+  const expected: NonNullable<MigrationRecord["dependencies"]> =
+    reviewed.targetMigrations.find((row) => row.name === name)?.dependencies ?? [];
   const direct = imports.filter((specifier) => !specifier.startsWith("effect/"));
-  if (name === composedName && direct.length === 0) return [];
   const expectedDirect =
     name === composedName
       ? expected.map(({ path }) => `./OrchestrationV2/${NodePath.posix.basename(path)}`)

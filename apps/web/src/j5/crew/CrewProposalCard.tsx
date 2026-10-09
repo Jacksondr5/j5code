@@ -1,5 +1,5 @@
 import { presentAgentPersonaCatalog } from "@t3tools/client-runtime/j5/agent-personas";
-import type { EnvironmentId } from "@t3tools/contracts";
+import { AuthOrchestrationOperateScope, type EnvironmentId } from "@t3tools/contracts";
 import { PencilIcon, PlusIcon, XIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
@@ -7,6 +7,7 @@ import { Badge } from "../../components/ui/badge";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../../components/ui/tooltip";
 import { Button } from "../../components/ui/button";
 import { useEnvironmentQuery } from "../../state/query";
+import { useEnvironmentScope } from "../../state/session";
 import { agentPersonaEnvironment } from "../agents/agentPersonaAtoms";
 import type { CrewProposal, CrewProposalSeat } from "./crewProposalsClient";
 import { addSeat, describeSeatAgent, removeSeat, saveSeat } from "./crewProposalDraft";
@@ -50,6 +51,8 @@ export function CrewProposalCard(props: {
   readonly onOpenCaptain?: (() => void) | undefined;
 }) {
   const { proposal } = props;
+  // Resolving a roster launches or refuses agents, so it needs the operate scope.
+  const canResolve = useEnvironmentScope(props.environmentId, AuthOrchestrationOperateScope);
   const [seats, setSeats] = useState<ReadonlyArray<CrewProposalSeat>>(proposal.requestedSeats);
   const [editor, setEditor] = useState<{
     readonly seat: CrewProposalSeat | null;
@@ -298,7 +301,7 @@ export function CrewProposalCard(props: {
       ) : null}
       <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
         <Button
-          disabled={props.busy}
+          disabled={props.busy || !canResolve}
           size="sm"
           type="button"
           variant="outline"
@@ -307,7 +310,7 @@ export function CrewProposalCard(props: {
           Decline
         </Button>
         <Button
-          disabled={props.busy || seats.length === 0 || preview.data === null}
+          disabled={props.busy || !canResolve || seats.length === 0 || preview.data === null}
           size="sm"
           type="button"
           onClick={() => {

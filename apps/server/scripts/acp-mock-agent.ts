@@ -4,6 +4,7 @@ import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 import * as Deferred from "effect/Deferred";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -29,6 +30,8 @@ const emitPostSettleMonitorFlow = process.env.T3_ACP_EMIT_POST_SETTLE_MONITOR_FL
 const emitInTurnTaskOutputThenLateDuplicate =
   process.env.T3_ACP_EMIT_IN_TURN_TASKOUTPUT_THEN_LATE_DUPLICATE === "1";
 const injectedReportTriggerPath = process.env.T3_ACP_INJECTED_REPORT_TRIGGER_PATH;
+const emitBackgroundToolDuringAnswer =
+  process.env.T3_ACP_EMIT_BACKGROUND_TOOL_DURING_ANSWER === "1";
 const emitAskQuestion = process.env.T3_ACP_EMIT_ASK_QUESTION === "1";
 const emitElicitation = process.env.T3_ACP_EMIT_ELICITATION === "1";
 const emitMcpToolApprovalElicitation =
@@ -51,6 +54,12 @@ const waitForResumeRelease = process.env.T3_ACP_WAIT_FOR_RESUME_RELEASE === "1";
 const completeFirstPromptOnCancel = process.env.T3_ACP_COMPLETE_FIRST_PROMPT_ON_CANCEL === "1";
 const floodStderr = process.env.T3_ACP_FLOOD_STDERR === "1";
 const hangPromptForever = process.env.T3_ACP_HANG_PROMPT_FOREVER === "1";
+// Sends fs/write_text_file for this path, then fs/read_text_file, at the start of
+// each prompt whatever the client advertised, and appends each outcome as a JSON
+// line to T3_ACP_CLIENT_FS_PROBE_LOG_PATH.
+const clientFsProbePath = process.env.T3_ACP_CLIENT_FS_PROBE_PATH;
+const clientFsProbeLogPath = process.env.T3_ACP_CLIENT_FS_PROBE_LOG_PATH;
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const hangAfterPermission = process.env.T3_ACP_HANG_AFTER_PERMISSION === "1";
 const hangFirstPromptForever = process.env.T3_ACP_HANG_FIRST_PROMPT_FOREVER === "1";
 const emitLateUpdateAfterCancel = process.env.T3_ACP_EMIT_LATE_UPDATE_AFTER_CANCEL === "1";
@@ -864,6 +873,34 @@ const program = Effect.gen(function* () {
       const requestedSessionId = String(request.sessionId ?? sessionId);
       beginAcpMockPrompt(cancelledSessions, requestedSessionId);
       promptCount += 1;
+      if (
+        process.env.T3_ACP_CRASH_PROMPT === "1" &&
+        request.prompt.some((part) => part.type === "text" && part.text === "crash now")
+      ) {
+        return yield* Effect.sync(() => process.exit(23));
+      }
+
+      if (clientFsProbePath !== undefined && clientFsProbeLogPath !== undefined) {
+        const probes = [
+          [
+            "fs/write_text_file",
+            { sessionId: requestedSessionId, path: clientFsProbePath, content: "probe" },
+          ],
+          ["fs/read_text_file", { sessionId: requestedSessionId, path: clientFsProbePath }],
+        ] as const;
+        for (const [method, params] of probes) {
+          const outcome = yield* agent.raw.request(method, params).pipe(
+            Effect.map((result) => ({ method, result })),
+            Effect.catch((error) =>
+              Effect.succeed({
+                method,
+                errorCode: error._tag === "AcpRequestError" ? error.code : error._tag,
+              }),
+            ),
+          );
+          NodeFS.appendFileSync(clientFsProbeLogPath, `${encodeJson(outcome)}\n`, "utf8");
+        }
+      }
 
       if (vibeRetryOutcome !== undefined) {
         if (vibeRetryOutcome === "recovered") {
@@ -1022,6 +1059,87 @@ const program = Effect.gen(function* () {
                 },
               },
             ],
+          },
+          {
+            sessionUpdate: "tool_call_update",
+            toolCallId: "structured-read",
+            title: "Read `src/env.ts`",
+            kind: "read",
+            status: "completed",
+            rawInput: { path: "src/env.ts" },
+            locations: [{ path: "src/env.ts" }],
+          },
+          {
+            sessionUpdate: "tool_call_update",
+            toolCallId: "structured-search",
+            title: "Grep",
+            kind: "search",
+            status: "completed",
+            rawInput: { query: "TODO", path: "apps/web" },
+          },
+          // Grok backend searches: the query only arrives in the completed rawOutput.
+          {
+            sessionUpdate: "tool_call_update",
+            toolCallId: "grok-x-search",
+            title: "X search:",
+            kind: "search",
+            status: "in_progress",
+            rawInput: { variant: "XSearch", backend: true },
+          },
+          {
+            sessionUpdate: "tool_call_update",
+            toolCallId: "grok-x-search",
+            title: "X search:",
+            status: "completed",
+            rawOutput: {
+              call_id: "xs_call-1",
+              input: '{"query":"conversation_id:42","limit":"10","mode":"Latest"}',
+              name: "x_keyword_search",
+              id: "grok-x-search",
+            },
+          },
+          {
+            sessionUpdate: "tool_call_update",
+            toolCallId: "grok-web-search",
+            title: "Web search:",
+            kind: "search",
+            status: "completed",
+            rawInput: { variant: "WebSearch", backend: true },
+            rawOutput: {
+              action: {
+                type: "search",
+                query: "t3 code",
+                sources: [
+                  { type: "url", url: "https://t3.codes" },
+                  { type: "url", url: "https://t3.codes" },
+                  { type: "url", url: "https://github.com/pingdotgg/t3code" },
+                ],
+              },
+              id: "grok-web-search",
+              status: "completed",
+            },
+          },
+          {
+            sessionUpdate: "tool_call_update",
+            toolCallId: "grok-web-fetch",
+            title: "Fetch: https://t3.codes",
+            kind: "fetch",
+            status: "completed",
+            rawInput: { variant: "WebFetch", url: "https://t3.codes" },
+            rawOutput: {
+              type: "WebFetch",
+              Content: { url: "https://t3.codes", content: "T3 Code page" },
+            },
+            content: [{ type: "content", content: { type: "text", text: "T3 Code page" } }],
+          },
+          {
+            sessionUpdate: "tool_call_update",
+            toolCallId: "antigravity-shell",
+            title: "run_command",
+            kind: "execute",
+            status: "completed",
+            rawInput: { command: "cat probe.txt" },
+            rawOutput: { commandLine: "cat probe.txt", exitCode: 0, combinedOutput: "after\n" },
           },
           {
             sessionUpdate: "compaction_update",
@@ -1563,6 +1681,47 @@ const program = Effect.gen(function* () {
           agentResult: null,
         });
         return yield* Effect.never;
+      }
+
+      if (emitBackgroundToolDuringAnswer) {
+        // A command backgrounded earlier reports progress and then finishes
+        // while the next answer is still streaming.
+        const toolCallId = "background-1";
+        const say = (text: string) =>
+          agent.client.sessionUpdate({
+            sessionId: requestedSessionId,
+            update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text } },
+          });
+        const progress = (status: "in_progress" | "completed", stdout: string) =>
+          agent.client.sessionUpdate({
+            sessionId: requestedSessionId,
+            update: {
+              sessionUpdate: "tool_call_update",
+              toolCallId,
+              status,
+              rawOutput: { stdout },
+            },
+          });
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: "tool_call_update",
+            toolCallId,
+            title: "Terminal",
+            kind: "execute",
+            status: "in_progress",
+            rawInput: { command: "sleep 3 && echo done" },
+          },
+        });
+        yield* say("| a | b |\n|---|---|\n| 1 ");
+        yield* progress("in_progress", ".");
+        yield* say("| x |\n");
+        yield* progress("completed", "done");
+        yield* say("| 2 | y |\n");
+        // Agents can repeat a terminal update after the call finished.
+        yield* progress("completed", "done");
+        yield* say("| 3 | z |");
+        return yield* finishPrompt(requestedSessionId, "end_turn");
       }
 
       if (emitInterleavedAssistantToolCalls) {

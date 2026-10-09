@@ -1,30 +1,31 @@
 // @effect-diagnostics nodeBuiltinImport:off - the redirect test needs a real HTTP server.
 import * as NodeHttp from "node:http";
 import { DeviceService } from "../../device/DeviceService.ts";
-import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { EffectOutboxV2 } from "../../orchestration-v2/EffectOutbox.ts";
 import { EventSinkV2 } from "../../orchestration-v2/EventSink.ts";
 import { OrchestratorV2 } from "../../orchestration-v2/Orchestrator.ts";
 import { assert, it } from "@effect/vitest";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
-import { FetchHttpClient, HttpClient } from "effect/unstable/http";
+import { FetchHttpClient, HttpClient } from "effect/http";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { NodeHttpServer } from "@effect/platform-node";
 import { EnvironmentId } from "@t3tools/contracts";
-import { HttpRouter } from "effect/unstable/http";
+import { HttpRouter } from "effect/http";
 import * as McpHttpServer from "../../mcp/McpHttpServer.ts";
 import * as McpSessionRegistry from "../../mcp/McpSessionRegistry.ts";
 import * as PreviewAutomationBroker from "../../mcp/PreviewAutomationBroker.ts";
+import * as PreviewBrowser from "../../preview/PreviewBrowser.ts";
+import * as SecretRequests from "../../secrets/SecretRequests.ts";
 import { EnvironmentAuth } from "../../auth/EnvironmentAuth.ts";
 import { ServerEnvironment } from "../../environment/ServerEnvironment.ts";
 import * as ServerConfig from "../../config.ts";
 import { ProjectService } from "../../project/ProjectService.ts";
 import { ProjectSetupScriptRunner } from "../../project/ProjectSetupScriptRunner.ts";
-import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
+import { ProviderRegistry } from "../../provider/ProviderRegistry.ts";
 import { ScheduledTaskService } from "../../scheduledTasks/ScheduledTaskService.ts";
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
@@ -41,7 +42,7 @@ import { runMigrations } from "../../persistence/Migrations.ts";
 import { ThreadLifecycleService } from "../../orchestration-v2/ThreadLifecycleService.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { ThreadLaunchService } from "../../orchestration-v2/ThreadLaunchService.ts";
-import { OrchestrationCommandReceiptRepository } from "../../persistence/Services/OrchestrationCommandReceipts.ts";
+import { OrchestrationCommandReceiptRepository } from "../../persistence/OrchestrationCommandReceipts.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { A2AArchiveFacts } from "./ArchiveFactsService.ts";
 import { A2ALifecycleService } from "./LifecycleService.ts";
@@ -200,7 +201,6 @@ it.effect("shares one runtime and outbox across the production HTTP and MCP regi
             Layer.provide(countedThreadManagement),
             Layer.provide(emptyEventStore),
             Layer.provide(Layer.mock(DeviceService)({})),
-            Layer.provide(Layer.mock(ProjectionSnapshotQuery)({})),
             Layer.provide(Layer.mock(OrchestratorV2)({})),
             Layer.provide(
               outboxLayer.pipe(
@@ -229,6 +229,8 @@ it.effect("shares one runtime and outbox across the production HTTP and MCP regi
                 Layer.mock(GitWorkflowService)({}),
                 Layer.mock(VcsStatusBroadcaster)({}),
                 Layer.mock(VcsProcess)({}),
+                Layer.mock(SecretRequests.SecretRequests)({}),
+                Layer.mock(PreviewBrowser.PreviewBrowser)({}),
                 ServerSettingsService.layerTest(),
               ),
             ),
