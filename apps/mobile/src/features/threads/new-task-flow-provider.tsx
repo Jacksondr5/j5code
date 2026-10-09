@@ -1,6 +1,7 @@
 import { resolveFilesystemReadAccess } from "@t3tools/client-runtime/state/filesystem";
 import { useEnvironmentPresentation } from "../../state/presentation";
 import { environmentSession } from "../../state/session";
+import { expandPlaybookPrompt } from "@t3tools/client-runtime/j5/playbooks";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert } from "react-native";
 
@@ -121,6 +122,11 @@ import {
 } from "./new-task-context-presentation";
 import { resolveEnvironmentProjectMatch } from "./new-task-project-selection";
 import { resolveProjectThreadCreationBranch } from "./projectThreadCreationValidation";
+import {
+  clearDraftAgent,
+  readDraftAgentPersonaId,
+  selectDraftAgent,
+} from "../../j5/agents/agentDraftState";
 
 type WorkspaceMode = "local" | "worktree";
 
@@ -1076,6 +1082,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
           startFromOrigin: message.creation.startFromOrigin ?? false,
         },
       });
+      selectDraftAgent(draftKey, message.creation.agentPersonaId ?? null);
     }
     setSelectedEnvironmentId(message.environmentId);
     setSelectedProjectKey(scopedProjectKey(message.environmentId, message.creation.projectId));
@@ -1097,7 +1104,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
         return null;
       }
       const draft = getComposerDraftSnapshot(selectedProjectDraftKey);
-      const text = draft.text.trim();
+      const text = expandPlaybookPrompt(draft.text.trim());
       // Use the displayed selection rules without substituting an unavailable
       // Antigravity model while the task is queued.
       const draftModelSelection =
@@ -1125,6 +1132,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
       const projectCwd = usingPendingSnapshot
         ? editingPendingTask?.creation?.projectCwd
         : selectedProject.workspaceRoot;
+      const agentPersonaId = readDraftAgentPersonaId(selectedProjectDraftKey);
       return {
         environmentId: selectedProject.environmentId,
         threadId: ThreadId.make(metadata.threadId),
@@ -1165,6 +1173,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
           ...((workspaceSelection?.startFromOrigin ?? startFromOrigin)
             ? { startFromOrigin: true }
             : {}),
+          ...(agentPersonaId === null ? {} : { agentPersonaId }),
         },
         createdAt: metadata.createdAt,
       };
@@ -1193,6 +1202,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
         activeEditingMessageId = null;
       }
       clearComposerDraft(pendingTaskDraftKey(editing.messageId));
+      clearDraftAgent(pendingTaskDraftKey(editing.messageId));
       releaseEditingQueuedMessage(editing.messageId);
       scheduleUnusedComposerAttachmentCleanup(editing.attachments);
     }
@@ -1267,6 +1277,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
             return;
           }
           clearComposerDraft(pendingTaskDraftKey(editing.messageId));
+          clearDraftAgent(pendingTaskDraftKey(editing.messageId));
           releaseEditingQueuedMessage(editing.messageId);
           scheduleUnusedComposerAttachmentCleanup(editing.attachments);
         })

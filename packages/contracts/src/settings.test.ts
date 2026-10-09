@@ -1012,7 +1012,7 @@ describe("branch naming settings", () => {
   it("defaults existing settings to the t3 static prefix", () => {
     expect(decodeServerSettings({})).toMatchObject({
       branchNamingMode: "static",
-      branchNamePrefix: "t3",
+      branchNamePrefix: "j5code",
       branchNameInstructions: "",
     });
   });
@@ -1042,5 +1042,39 @@ describe("ServerSettings.removeAgentCreditsOnMerge", () => {
         projectSettingsOverrides: { project: { removeAgentCreditsOnMerge: true } },
       }).projectSettingsOverrides["project" as ProjectId]?.removeAgentCreditsOnMerge,
     ).toBe(true);
+  });
+});
+
+describe("ServerSettings skill catalog source", () => {
+  it("defaults to an unconfigured catalog", () => {
+    expect(decodeServerSettings({}).skillCatalogSource).toBe("");
+  });
+
+  it("round-trips a custom source and trims patches", () => {
+    const settings = decodeServerSettings({ skillCatalogSource: "  /opt/skills  " });
+    expect(settings.skillCatalogSource).toBe("/opt/skills");
+    const patch = decodeServerSettingsPatch({ skillCatalogSource: "  /opt/skills  " });
+    expect(patch.skillCatalogSource).toBe("/opt/skills");
+  });
+
+  it("allows clearing the source at the settings and patch boundaries", () => {
+    for (const skillCatalogSource of ["", "   "]) {
+      expect(decodeServerSettings({ skillCatalogSource }).skillCatalogSource).toBe("");
+      expect(decodeServerSettingsPatch({ skillCatalogSource }).skillCatalogSource).toBe("");
+    }
+  });
+
+  it("rejects credential-bearing Git URLs in patches without breaking SSH usernames", () => {
+    for (const skillCatalogSource of [
+      "https://user:token@example.com/repo.git",
+      "https://token@example.com/repo.git",
+      "ssh://git:token@example.com/repo.git",
+    ]) {
+      expect(() => decodeServerSettingsPatch({ skillCatalogSource })).toThrow();
+    }
+    expect(
+      decodeServerSettingsPatch({ skillCatalogSource: "ssh://git@example.com/repo.git" })
+        .skillCatalogSource,
+    ).toBe("ssh://git@example.com/repo.git");
   });
 });

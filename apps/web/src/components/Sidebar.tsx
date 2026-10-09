@@ -122,6 +122,7 @@ import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../termina
 import { isMacPlatform } from "~/lib/utils";
 import { useOpenPrLink } from "../lib/openPullRequestLink";
 import { readLocalApi } from "../localApi";
+import { requestConfirmDialog } from "../confirmDialog";
 import { useSidebarPendingFileDropStore } from "../sidebarPendingFileDropStore";
 import { getProjectOrderKey, selectProjectGroupingSettings } from "../logicalProject";
 import {
@@ -226,6 +227,12 @@ import {
   type SidebarSection,
 } from "./Sidebar.logic";
 import { resolveLocalCheckoutBranchMismatch } from "./BranchToolbar.logic";
+import { archiveWithPreflight } from "../j5/a2a/archiveFlow";
+import { SpawnedChildren } from "../j5/threads/SpawnedChildren";
+import { useAgentSpawnedThreadKeys } from "../j5/threads/SpawnedChildrenClient";
+import { ThreadCardIdentity } from "../j5/threads/ThreadCardIdentity";
+import { isSidebarMember } from "../j5/threads/sidebarMembership";
+import { useKeyedThreadRefs, useThreadRowReads } from "../j5/threads/useThreadRowReads";
 import {
   createSidebarCollisionDetection,
   createSidebarSortingStrategy,
@@ -1155,6 +1162,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   onCancelRename: () => void;
   isRenaming: boolean;
   renamingTitle: string;
+  // A thread being renamed that has no row of its own: one of the spawned children below.
+  renamingChildThreadKey: string | null;
   onContextMenu: (threadRef: ScopedThreadRef, position: { x: number; y: number }) => void;
   onSettle: (threadRef: ScopedThreadRef) => void;
   onActionSweepStart: (
@@ -1991,18 +2000,20 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               {props.project ? (
                 <ProjectFavicon project={props.project} className="size-4 shrink-0" />
               ) : null}
-              {props.projectDisplayName ? (
-                <span
-                  className={cn(
-                    "min-w-0 flex-1 truncate text-secondary-label text-xs",
-                    shouldRecede ? "font-normal" : "font-medium",
-                  )}
-                >
-                  {props.projectDisplayName}
-                </span>
-              ) : (
-                <span className="flex-1" />
-              )}
+              <span
+                className={cn(
+                  "min-w-0 flex-1 text-secondary-label text-xs",
+                  shouldRecede ? "font-normal" : "font-medium",
+                )}
+                data-testid={`thread-card-identity-${thread.id}`}
+              >
+                <ThreadCardIdentity
+                  threadId={thread.id}
+                  environmentId={thread.environmentId}
+                  projectName={props.projectDisplayName}
+                  agentPersonaAssignment={thread.agentPersonaAssignment}
+                />
+              </span>
               {pinIndicator}
               {/* The visible state owns this slot's width: status at rest,
                   actions on hover/keyboard focus or while the popover is open. Keeping
@@ -2213,6 +2224,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
         </TooltipTrigger>
         {detailsTooltip}
       </Tooltip>
+      <SpawnedChildren
+        thread={thread}
+        renamingThreadKey={props.renamingChildThreadKey}
+        onContextMenu={onContextMenu}
+        onCommitRename={onCommitRename}
+        onCancelRename={onCancelRename}
+      />
     </li>
   );
 });
@@ -2583,6 +2601,13 @@ export default function Sidebar() {
   // fresh clock whenever it recomputes.
   const [snoozeWakeTick, bumpSnoozeWakeTick] = useState(0);
 
+  // J5 (case 23): Crew chips and spawned children for the listed rows. The same read says which
+  // rows an agent spawned, which decides sidebar membership (register D22).
+  const threadRefs = useKeyedThreadRefs(
+    threads.map((thread) => scopeThreadRef(thread.environmentId, thread.id)),
+  );
+  useThreadRowReads(threadRefs);
+  const agentSpawnedThreadKeys = useAgentSpawnedThreadKeys();
   // Project scope: one menu above the list. Scoping filters the list without
   // making the header width depend on the number or length of project names.
   // The selection lives in the persisted UI store next to the other sidebar
@@ -2780,7 +2805,15 @@ export default function Sidebar() {
     const preciseNow = new Date().toISOString();
     // Subagent child threads live in the parent's Agents surface, not the
     // sidebar roster (v2 models them as real threads with lineage).
-    const visible = filterSidebarV2VisibleThreads(threads, scopedProjectKeys);
+    // J5 (register D22): an agent-spawned thread shows under its spawner, not at the top level.
+    const visible = filterSidebarV2VisibleThreads(threads, scopedProjectKeys).filter((thread) =>
+      isSidebarMember(
+        thread,
+        agentSpawnedThreadKeys.has(
+          scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+        ),
+      ),
+    );
     inboxReturns.observe(workingShelfEnabled ? threads : null);
     const pinned: EnvironmentThreadShell[] = [];
     const active: EnvironmentThreadShell[] = [];
@@ -2886,6 +2919,7 @@ export default function Sidebar() {
     scopedProjectKeys,
     serverConfigs,
     snoozeWakeTick,
+    agentSpawnedThreadKeys,
     threads,
     workingShelfEnabled,
   ]);
@@ -3098,6 +3132,9 @@ export default function Sidebar() {
   // event and defeat row memoization during streaming.
   const threadByKeyRef = useRef(threadByKey);
   threadByKeyRef.current = threadByKey;
+  // Spawned children are not listed rows; their menu reads them from every shell.
+  const threadsRef = useRef(threads);
+  threadsRef.current = threads;
   // handleNewThread is inherently unstable (depends on the projects list);
   // a ref keeps it out of attemptSettle's dependency array.
   const handleNewThreadRef = useRef(newThreadContext.handleNewThread);
@@ -3258,6 +3295,8 @@ export default function Sidebar() {
     setRenamingTitle(title);
   }, []);
   const cancelThreadRename = useCallback(() => setRenamingThreadKey(null), []);
+  const renamingChildThreadKey =
+    renamingThreadKey !== null && !threadByKey.has(renamingThreadKey) ? renamingThreadKey : null;
   const commitThreadRename = useCallback(
     (threadRef: ScopedThreadRef, title: string, originalTitle: string) => {
       void (async () => {
@@ -4574,7 +4613,13 @@ export default function Sidebar() {
           await handleMultiSelectContextMenu(position);
           return;
         }
-        const thread = threadByKeyRef.current.get(threadKey);
+        const listedThread = threadByKeyRef.current.get(threadKey);
+        const thread =
+          listedThread ??
+          threadsRef.current.find(
+            (shell) =>
+              shell.environmentId === threadRef.environmentId && shell.id === threadRef.threadId,
+          );
         if (!thread) return;
         const threadWorkspacePath =
           thread.worktreePath ??
@@ -4597,8 +4642,21 @@ export default function Sidebar() {
           serverConfigs.get(thread.environmentId)?.environment.capabilities
             .threadTitleRegeneration === true;
         const isRegeneratingTitle = thread.titleRegeneration != null;
-        const isSettled = settledThreadKeysRef.current.has(threadKey);
-        const isSnoozed = snoozedThreadKeysRef.current.has(threadKey);
+        // A spawned child has no sidebar section, so it classifies off its shell the same way.
+        const childSection = listedThread
+          ? null
+          : resolveSidebarThreadSection({
+              snoozed:
+                supportsSnooze && effectiveSnoozed(thread, { now: new Date().toISOString() }),
+              settled: supportsSettlement && thread.settledOverride === "settled",
+              pinned: thread.pinnedAt != null,
+            });
+        const isSettled = listedThread
+          ? settledThreadKeysRef.current.has(threadKey)
+          : childSection === "settled";
+        const isSnoozed = listedThread
+          ? snoozedThreadKeysRef.current.has(threadKey)
+          : childSection === "snoozed";
         const isPinned = thread.pinnedAt != null;
         // Presets resolve at menu-open time (same as the popover).
         const snoozePresets = resolveSnoozePresets(new Date(), timestampFormat);
@@ -4770,18 +4828,39 @@ export default function Sidebar() {
             copyThreadIdToClipboard(thread.id, { threadId: thread.id });
             return;
           case "archive": {
-            if (confirmThreadArchive) {
-              const confirmed = await settlePromise(() =>
-                api.dialogs.confirm(`Archive thread "${thread.title}"?`),
-              );
-              if (confirmed._tag === "Failure" || !confirmed.value) return;
-            }
             let didArchive = false;
-            const result = await archiveThread(threadRef, {
-              onArchived: () => {
-                didArchive = true;
+            const result = await archiveWithPreflight({
+              threadRef,
+              threadTitle: thread.title,
+              confirm: async ({ message, content, confirmLabel }) => {
+                const confirmed = await settlePromise(
+                  () =>
+                    requestConfirmDialog(
+                      message,
+                      { variant: "destructive" },
+                      { content, confirmLabel },
+                    ) ?? Promise.resolve(false),
+                );
+                return confirmed._tag === "Success" && confirmed.value;
               },
+              ...(confirmThreadArchive
+                ? {
+                    confirmCleanArchive: async () => {
+                      const confirmed = await settlePromise(() =>
+                        api.dialogs.confirm(`Archive thread "${thread.title}"?`),
+                      );
+                      return confirmed._tag === "Success" && confirmed.value;
+                    },
+                  }
+                : {}),
+              archive: () =>
+                archiveThread(threadRef, {
+                  onArchived: () => {
+                    didArchive = true;
+                  },
+                }),
             });
+            if (result === undefined) return;
             if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
               const error = squashAtomCommandFailure(result);
               toastManager.add(
@@ -5350,6 +5429,7 @@ export default function Sidebar() {
                             onCancelRename={cancelThreadRename}
                             isRenaming={renamingThreadKey === threadKey}
                             renamingTitle={renamingThreadKey === threadKey ? renamingTitle : ""}
+                            renamingChildThreadKey={renamingChildThreadKey}
                             onContextMenu={handleThreadContextMenu}
                             onSettle={attemptSettle}
                             onActionSweepStart={startActionSweep}

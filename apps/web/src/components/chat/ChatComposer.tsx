@@ -1,4 +1,6 @@
 import { formatProviderSkillDisplayName } from "@t3tools/shared/inlineSkills";
+import { useAgentMentionPicker } from "../../j5/agents/useAgentMentionPicker";
+import { applyAgentMentionSelection } from "@t3tools/client-runtime/j5/agent-mentions";
 import { DESKTOP_PASTE_AS_TEXT_EVENT } from "../../lib/desktopPasteAsText";
 import { runtimeModeConfig, runtimeModeOptions as runtimeModes } from "./runtimeModeConfig";
 import { isLocalEnvironmentDisabled } from "../../localEnvironment";
@@ -26,6 +28,7 @@ import type {
   ModelSelection,
   ProjectId,
   PullRequestListInput,
+  OrchestrationV2AgentPersonaAssignment,
   PreviewAnnotationPayload,
   ProviderApprovalDecision,
   ThreadContextRecord,
@@ -55,6 +58,12 @@ import {
   wouldTextPasteExceedLimit,
 } from "@t3tools/client-runtime/text-paste";
 import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
+import { j5Environment } from "../../j5/state";
+import {
+  isPlaybookSlashCommandVisible,
+  playbookMenuItems,
+  playbookSelectionText,
+} from "@t3tools/client-runtime/j5/playbooks";
 import { folderDropTarget, resolveDroppedFolderPath } from "./folderDrop";
 import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
 import { USAGE_LIMITS_COMMAND } from "@t3tools/shared/usageLimits";
@@ -1078,6 +1087,10 @@ function ComposerCommandMenuLayer(props: { anchor: HTMLElement | null; children:
 import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectValue } from "../ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { AgentPersonaAssignmentControl } from "../../j5/agents/AgentPersonaAssignmentControl";
+import { AgentDraftPicker } from "../../j5/agents/AgentDraftPicker";
+import { composerModelSelectionForThread } from "../../j5/agents/personaComposerSelection";
+import { useDraftAgentAssignment } from "../../j5/agents/useDraftAgentAssignment";
 import { toastManager } from "../ui/toast";
 import {
   FileIcon,
@@ -1516,6 +1529,7 @@ export interface ChatComposerProps {
   composerDraftTarget: ScopedThreadRef | DraftId;
   environmentId: EnvironmentId;
   canOperateThread: boolean;
+  projectId: ProjectId | null;
   attachmentUploadsCapabilityKnown: boolean;
   supportsAttachmentUploads: boolean;
   supportsQuestionAttachments: boolean;
@@ -1598,6 +1612,7 @@ export interface ChatComposerProps {
   // Mode
   runtimeMode: RuntimeMode;
   interactionMode: ProviderInteractionMode;
+  agentPersonaAssignment?: OrchestrationV2AgentPersonaAssignment;
 
   // Provider / model
   lockedProvider: ProviderDriverKind | null;
@@ -1710,6 +1725,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     composerDraftTarget,
     environmentId,
     canOperateThread,
+    projectId,
     attachmentUploadsCapabilityKnown,
     supportsAttachmentUploads,
     supportsQuestionAttachments,
@@ -1724,7 +1740,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeThreadEnvironmentId: _activeThreadEnvironmentId,
     activeThread,
     promptHistoryMessages,
-    isServerThread: _isServerThread,
+    isServerThread,
     isLocalDraftThread: _isLocalDraftThread,
     forceExpandedOnMobile,
     projectSelectionRequired,
@@ -1750,6 +1766,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeProposedPlan,
     runtimeMode,
     interactionMode: requestedInteractionMode,
+    agentPersonaAssignment,
     lockedProvider,
     providerStatuses,
     providerCatalogKnown,
@@ -2341,9 +2358,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     provider: selectedProviderStatus,
     interactionMode: requestedInteractionMode,
   });
+  // J5: a saved-agent thread always sends its immutable launch route (see personaComposerSelection).
   const selectedModelSelection = useMemo<ModelSelection>(
-    () => createModelSelection(selectedInstanceId, selectedModel, selectedModelOptionsForDispatch),
-    [selectedInstanceId, selectedModel, selectedModelOptionsForDispatch],
+    () =>
+      composerModelSelectionForThread(
+        agentPersonaAssignment,
+        createModelSelection(selectedInstanceId, selectedModel, selectedModelOptionsForDispatch),
+      ),
+    [agentPersonaAssignment, selectedInstanceId, selectedModel, selectedModelOptionsForDispatch],
   );
   const selectedModelForPicker = selectedModel;
   // Instance-keyed option list so the picker can show each configured
@@ -2573,6 +2595,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     cwd: isPathTrigger ? gitCwd : null,
     query: isPathTrigger ? pathTriggerQuery : null,
   });
+  const playbookQuery = useEnvironmentQuery(
+    composerTriggerKind === "slash-playbook" && projectId
+      ? j5Environment.playbookLibrary({
+          environmentId,
+          input: {
+            projectId,
+            ...(isServerThread && activeThreadId ? { threadId: activeThreadId } : {}),
+          },
+        })
+      : null,
+  );
   const compactSlashCommandAvailable =
     composerTrigger?.kind === "slash-command" &&
     prompt.slice(0, composerTrigger.rangeStart).trim() === "" &&
@@ -2646,12 +2679,24 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         }),
   );
 
+  const agentPicker = useAgentMentionPicker(environmentId, selectedProvider, composerTrigger);
+  const draftAgent = useDraftAgentAssignment(
+    props.routeThreadRef,
+    environmentId,
+    props.isLocalDraftThread,
+  );
+  const effectiveAgentAssignment = agentPersonaAssignment ?? draftAgent.assignment ?? undefined;
   const composerMenuItems = useMemo<ComposerCommandItem[]>(() => {
     if (!composerTrigger) return [];
+    if (composerTrigger.kind === "agent") return agentPicker.items;
+    if (composerTrigger.kind === "slash-playbook")
+      return playbookMenuItems(playbookQuery.data?.playbooks ?? [], composerTrigger, prompt);
     if (composerTrigger.kind === "path") {
-      // Threads only surface for a typed query so `@` alone stays a file picker. A title match
-      // is far more specific than a fuzzy path hit, so the few threads lead the list.
+      // Order (J5 decision): saved agents, then threads, then files. Personas whose id or name
+      // starts with the typed text lead; threads only surface for a typed query so `@` alone
+      // stays a file/agent picker, and a title match outranks a fuzzy path hit.
       return [
+        ...agentPicker.items,
         ...matchComposerThreadItems({
           shells: environmentThreadShells,
           environmentId,
@@ -2670,6 +2715,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }
     if (composerTrigger.kind === "slash-command") {
       const builtInSlashCommandItems = [
+        {
+          id: "slash:playbook",
+          type: "slash-command",
+          command: "playbook",
+          label: "/playbook",
+          description: "Start a playbook in this thread",
+        },
         {
           id: "slash:model",
           type: "slash-command",
@@ -2727,7 +2779,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         (item) => item.command.name !== "compact" || compactSlashCommandAvailable,
       );
       const slashCommandItems = slashCommandItemsForPromptPosition(
-        [...builtInSlashCommandItems, ...visibleProviderSlashCommandItems, ...skillItems],
+        [
+          ...builtInSlashCommandItems.filter((item) =>
+            isPlaybookSlashCommandVisible(item.command, composerTrigger.rangeStart === 0),
+          ),
+          ...visibleProviderSlashCommandItems,
+          ...skillItems,
+        ],
         composerTrigger.rangeStart === 0,
       );
       return searchSlashCommandItems(slashCommandItems, query);
@@ -2799,6 +2857,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     return [];
   }, [
     activeThreadId,
+    agentPicker.items,
+    playbookQuery.data,
+    prompt,
     compactSlashCommandAvailable,
     composerTrigger,
     environmentId,
@@ -2887,6 +2948,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   ]);
 
   const isComposerMenuLoading =
+    (composerTriggerKind === "agent" && agentPicker.isPending) ||
+    (composerTriggerKind === "slash-playbook" && playbookQuery.isPending) ||
     (composerTriggerKind === "path" && pathTriggerQuery.length > 0 && workspaceEntries.isPending) ||
     (composerTriggerKind === "pull-request" &&
       pullRequestProjectId !== null &&
@@ -2896,6 +2959,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         pullRequestTriggerNumber !== debouncedPullRequestNumber ||
         exactPullRequestLookup.isPending));
   const composerMenuEmptyState = useMemo(() => {
+    if (composerTriggerKind === "slash-playbook")
+      return projectId
+        ? (playbookQuery.error ?? "No matching playbooks.")
+        : "Choose a project to see its playbooks.";
+    if (composerTriggerKind === "agent") return agentPicker.error ?? "No available personas found.";
     if (composerTriggerKind === "skill") {
       return "No skills found. Try / to browse provider commands.";
     }
@@ -2917,8 +2985,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       ? "No matching files or folders."
       : "No matching command.";
   }, [
+    agentPicker.error,
     composerTrigger,
     composerTriggerKind,
+    playbookQuery.error,
+    projectId,
     pullRequestLookup.data?.errors,
     pullRequestLookup.error,
     pullRequestProjectId,
@@ -3982,6 +4053,21 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       });
       const { snapshot, trigger } = resolveActiveComposerTrigger();
       if (!trigger) return;
+      if (item.type === "playbook") {
+        applyPromptReplacement(
+          trigger.rangeStart,
+          trigger.rangeEnd,
+          playbookSelectionText(snapshot.value, trigger, item.name),
+          { expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd) },
+        );
+        setComposerHighlightedItemId(null);
+        return;
+      }
+      if (item.type === "agent") {
+        if (applyAgentMentionSelection(item, trigger, snapshot.value, applyPromptReplacement))
+          setComposerHighlightedItemId(null);
+        return;
+      }
       if (item.type === "path") {
         const replacement = `${serializeComposerFileLink(item.path)} `;
         const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
@@ -4001,6 +4087,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         return;
       }
       if (item.type === "slash-command") {
+        if (item.command === "playbook") {
+          applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "/playbook ", {
+            expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
+          });
+          setComposerHighlightedItemId(null);
+          return;
+        }
         if (item.command === "model") {
           const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
             expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
@@ -4157,9 +4250,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       const nextIndex =
         (normalizedIndex + offset + composerMenuItems.length) % composerMenuItems.length;
       const nextItem = composerMenuItems[nextIndex];
-      setComposerHighlightedItemId(nextItem?.id ?? null);
+      onComposerMenuItemHighlighted(nextItem?.id ?? null);
     },
-    [composerHighlightedItemId, composerMenuItems],
+    [composerHighlightedItemId, composerMenuItems, onComposerMenuItemHighlighted],
   );
 
   const blurMobileComposerAfterSend = useCallback(() => {
@@ -5470,7 +5563,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const hiddenRestingBlockIds = restingBlockDefs
     .slice(restingBlockDefs.length - restingHiddenBlockCount)
     .map((def) => def.id);
-  const composerControls = showProviderUnavailable ? (
+  const composerControls = effectiveAgentAssignment ? (
+    <AgentPersonaAssignmentControl
+      assignment={effectiveAgentAssignment}
+      environmentId={environmentId}
+      {...(agentPersonaAssignment
+        ? { threadId: props.routeThreadRef.threadId }
+        : { onClear: draftAgent.clear })}
+    />
+  ) : showProviderUnavailable ? (
     <ComposerControl
       type="button"
       disabled={!providerSetupInstanceId}
@@ -5494,6 +5595,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           size="xs"
           className="@max-[400px]/composer-surface:hidden"
           data-resting-controls-separator="true"
+        />
+      ) : null}
+      {draftAgent.enabled ? (
+        <AgentDraftPicker
+          environmentId={environmentId}
+          draftKey={draftAgent.draftKey}
+          size={composerControlsCollapsed ? "xs" : "sm"}
         />
       ) : null}
       <ProviderModelPicker

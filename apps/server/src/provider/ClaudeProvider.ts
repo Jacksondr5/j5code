@@ -2,6 +2,7 @@ import {
   type ClaudeSettings,
   type ModelCapabilities,
   type ServerProvider,
+  type ServerProviderSkill,
   type ServerProviderSlashCommand,
   type ServerProviderResetCredits,
 } from "@t3tools/contracts";
@@ -12,6 +13,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { createModelCapabilities } from "@t3tools/shared/model";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
@@ -239,6 +241,7 @@ type ClaudeCapabilitiesProbe = {
    */
   readonly apiProvider: string | undefined;
   readonly slashCommands: ReadonlyArray<ServerProviderSlashCommand>;
+  readonly bundledSkills: ReadonlyArray<ServerProviderSkill>;
   /**
    * Subscription windows from the SDK's `get_usage` control request, or
    * `undefined` when the request itself failed. Absent windows on an
@@ -246,6 +249,18 @@ type ClaudeCapabilitiesProbe = {
    */
   readonly usage?: Pick<SDKControlGetUsageResponse, "rate_limits_available" | "rate_limits">;
 };
+
+// reload_skills exposes builtin at runtime, but the SDK type omits it.
+const decodeReloadedClaudeSkills = Schema.decodeUnknownEffect(
+  Schema.Array(
+    Schema.Struct({
+      name: Schema.String,
+      description: Schema.optional(Schema.String),
+      argumentHint: Schema.optional(Schema.String),
+      builtin: Schema.optional(Schema.Boolean),
+    }),
+  ),
+);
 
 function parseClaudeInitializationCommands(
   commands: ReadonlyArray<ClaudeSlashCommand> | undefined,
@@ -361,20 +376,50 @@ const probeClaudeCapabilities = (
         }),
       });
       const init = await q.initializationResult();
-      return { q, init };
+      return { q, init, executablePath };
     });
   }).pipe(
     Effect.timeout(CAPABILITIES_PROBE_TIMEOUT_MS),
-    Effect.flatMap(({ q, init }) =>
+    Effect.flatMap(({ q, init, executablePath }) =>
       Effect.gen(function* () {
-        // Usage has its own deadline so a slow optional request cannot discard initialization.
+        // Optional requests have independent deadlines and cannot discard initialization.
         // Only the rate limits are read, so skip the local transcript scan that fills
         // `behaviors`: with a few GB of transcripts it outlasts the deadline.
-        const usageResult = includeUsage
-          ? yield* Effect.tryPromise(() =>
-              q.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({ skipBehaviors: true }),
-            ).pipe(Effect.timeout(DEFAULT_TIMEOUT_MS), Effect.result)
-          : undefined;
+        // Workspace probes skip both: they reuse the machine snapshot's bundled skills.
+        const [usageResult, skillsResult] = includeUsage
+          ? yield* Effect.all(
+              [
+                Effect.tryPromise(() =>
+                  q.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({
+                    skipBehaviors: true,
+                  }),
+                ).pipe(Effect.timeout(DEFAULT_TIMEOUT_MS), Effect.result),
+                Effect.tryPromise(() => q.reloadSkills()).pipe(
+                  Effect.flatMap(({ skills }) => decodeReloadedClaudeSkills(skills)),
+                  Effect.timeout(DEFAULT_TIMEOUT_MS),
+                  Effect.result,
+                ),
+              ],
+              { concurrency: "unbounded" },
+            )
+          : [undefined, undefined];
+        const bundledSkills: ReadonlyArray<ServerProviderSkill> =
+          skillsResult && Result.isSuccess(skillsResult)
+            ? skillsResult.success.flatMap((skill) => {
+                const name = nonEmptyProbeString(skill.name);
+                if (skill.builtin !== true || !name) return [];
+                const description = nonEmptyProbeString(skill.description ?? "");
+                return [
+                  {
+                    name,
+                    ...(description ? { description } : {}),
+                    scope: "builtin",
+                    enabled: true,
+                    path: executablePath,
+                  },
+                ];
+              })
+            : [];
         const usage =
           usageResult && Result.isSuccess(usageResult)
             ? {
@@ -396,6 +441,7 @@ const probeClaudeCapabilities = (
           tokenSource: account?.tokenSource,
           apiProvider: account?.apiProvider,
           slashCommands: parseClaudeInitializationCommands(init.commands),
+          bundledSkills,
           ...(usage ? { usage } : {}),
         } satisfies ClaudeCapabilitiesProbe;
       }),
@@ -434,7 +480,11 @@ export const probeClaudeWorkspaceSnapshot = Effect.fn("probeClaudeWorkspaceSnaps
   environment?: NodeJS.ProcessEnv,
 ): Effect.fn.Return<ProviderWorkspaceSnapshot, never, FileSystem.FileSystem | Path.Path> {
   if (!claudeSettings.enabled) return machineSnapshot;
-  const skills = yield* discoverClaudeSkills(claudeSettings, cwd, environment);
+  const discovered = yield* discoverClaudeSkills(claudeSettings, cwd, environment);
+  const skills = [
+    ...discovered,
+    ...machineSnapshot.skills.filter((skill) => skill.scope === "builtin"),
+  ].sort((a, b) => a.name.localeCompare(b.name));
   const capabilities = yield* probeClaudeCapabilities(claudeSettings, environment, cwd, false);
   return {
     ...machineSnapshot,
@@ -483,7 +533,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
         version: null,
         status: "warning",
         auth: { status: "unknown" },
-        message: "Claude is disabled in T3 Code settings.",
+        message: "Claude is disabled in J5 Code settings.",
       },
     });
   }
@@ -567,7 +617,10 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   const capabilities = resolveCapabilities
     ? yield* resolveCapabilities(claudeSettings).pipe(Effect.orElseSucceed(() => undefined))
     : undefined;
-  const skills = yield* discoverClaudeSkills(claudeSettings, cwd, resolvedEnvironment);
+  const discovered = yield* discoverClaudeSkills(claudeSettings, cwd, resolvedEnvironment);
+  const skills = [...discovered, ...(capabilities?.bundledSkills ?? [])].sort((a, b) =>
+    a.name.localeCompare(b.name),
+  );
   const slashCommands = [COMPACT_SLASH_COMMAND, ...(capabilities?.slashCommands ?? [])];
   const dedupedSlashCommands = dedupeSlashCommands(slashCommands);
 
@@ -658,7 +711,7 @@ export const makePendingClaudeProvider = (
           version: null,
           status: "warning",
           auth: { status: "unknown" },
-          message: "Claude is disabled in T3 Code settings.",
+          message: "Claude is disabled in J5 Code settings.",
         },
       });
     }

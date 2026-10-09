@@ -50,9 +50,11 @@ import { formatClaudeResumeCompactionQuestion } from "@t3tools/shared/claudeComp
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { SpawnExecutableResolution } from "@t3tools/shared/shell";
 
+import { T3_CODE_ORCHESTRATION_INSTRUCTIONS } from "../../j5/orchestrationInstructions.ts";
 import { attachmentRelativePath } from "../../attachmentStore.ts";
 import * as ServerConfig from "../../config.ts";
 import * as McpProviderSession from "@t3tools/provider-core/server/mcpSession";
+import { ArtifactToolkit } from "../../mcp/toolkits/artifacts/tools.ts";
 import { PreviewControlsToolkit } from "../../mcp/toolkits/previewControls/tools.ts";
 import { HtmlToolkit } from "../../mcp/toolkits/html/tools.ts";
 import { EnvironmentToolkit } from "../../mcp/toolkits/environment/tools.ts";
@@ -71,6 +73,8 @@ import type { ProviderContinuationRequest } from "@t3tools/provider-core/server/
 import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
 import * as ClaudeAdapterV2 from "./ClaudeAdapterV2.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import { J5_CLAUDE_MCP_ALLOWED_TOOLS } from "../../j5/a2a/mcp/claudeAllowedTools.ts";
+import { J5_CLAUDE_CREW_SEAT_DISALLOWED_TOOLS } from "../../j5/a2a/crewSeatQuestions.ts";
 
 const DEFAULT_CLAUDE_SETTINGS = Schema.decodeSync(ClaudeSettings)({});
 const AUTO_COMPACT_CLAUDE_SETTINGS = Schema.decodeSync(ClaudeSettings)({
@@ -564,6 +568,7 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
         allowedTools: [
           ...ClaudeAdapterV2.CLAUDE_READ_ONLY_ALLOWED_TOOLS,
           ...ClaudeAdapterV2.CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS,
+          ...J5_CLAUDE_MCP_ALLOWED_TOOLS,
         ],
         mcpServers: T3_MCP_SERVERS,
       });
@@ -581,6 +586,7 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
 
       assert.deepEqual(overrides.allowedTools, [
         ...ClaudeAdapterV2.CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS,
+        ...J5_CLAUDE_MCP_ALLOWED_TOOLS,
       ]);
     });
   });
@@ -659,6 +665,7 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
       ...Object.values(EnvironmentToolkit.tools),
       ...Object.values(PreviewControlsToolkit.tools),
       ...Object.values(HtmlToolkit.tools),
+      ...Object.values(ArtifactToolkit.tools),
     ]
       .filter((tool) => Context.get(tool.annotations, Tool.Readonly))
       .map((tool) => `mcp__t3-code__${tool.name}`)
@@ -722,7 +729,7 @@ describe("ClaudeAdapterV2 native protocol logging", () => {
       };
       assert.equal(systemPrompt.type, "preset");
       assert.equal(systemPrompt.preset, "claude_code");
-      assert.include(systemPrompt.append ?? "", "Use `delegate_task`");
+      assert.include(systemPrompt.append ?? "", T3_CODE_ORCHESTRATION_INSTRUCTIONS);
       const logged = ClaudeAdapterV2.loggedClaudeQueryOptions(options);
       assert.equal(logged.hasMcpServers, true);
       assert.notInclude(JSON.stringify(logged), "secret-claude-token");
@@ -2674,6 +2681,30 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         assert.lengthOf(harness.terminalEvents(), 1);
       }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
     ),
+  );
+
+  // J5: a Crew seat asks its Captain instead of the person (j5/a2a/crewSeatQuestions.ts).
+  it.effect.each([false, true])(
+    "withholds AskUserQuestion only from a Crew seat (seat=%s)",
+    (seat) =>
+      Effect.gen(function* () {
+        const harness = yield* makeWakeHarness;
+        yield* harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make(`attempt-crew-seat-${seat}`),
+            text: "Review the change.",
+            attachments: [],
+            runtimePolicy: { ...CLAUDE_TEST_RUNTIME_POLICY, ...(seat ? { crewSeat: true } : {}) },
+          }),
+        );
+        assert.deepEqual(
+          harness.getOpenedOptions()?.disallowedTools,
+          seat ? [...J5_CLAUDE_CREW_SEAT_DISALLOWED_TOOLS] : undefined,
+        );
+      }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
   );
 
   it.effect("announces usage-limit pauses once per window and again on a new turn", () =>

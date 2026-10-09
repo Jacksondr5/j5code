@@ -34,6 +34,9 @@ describe("authorization grants", () => {
       "access:write",
       "relay:read",
       "relay:write",
+      // J5: its clients and peers from before granular permissions know these two.
+      "a2a:send",
+      "a2a:peer",
     ]),
   );
 

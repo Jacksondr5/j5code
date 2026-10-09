@@ -166,6 +166,10 @@ import {
   makeSubagentConversationArtifacts,
   subagentThreadTitle,
 } from "../SubagentProjection.ts";
+import { codexApplicationContext } from "../../j5/orchestrationInstructions.ts";
+import { isCodexResumeThreadMissing } from "../../j5/codexNativeResume.ts";
+import { j5CodexT3McpServerConfig } from "../../j5/a2a/mcp/codexToolApproval.ts";
+import { j5CodexCrewSeatConfig } from "../../j5/a2a/crewSeatQuestions.ts";
 
 const CODEX_PROVIDER = ProviderDriverKind.make("codex");
 export const CODEX_DRIVER_KIND = CODEX_PROVIDER;
@@ -777,10 +781,17 @@ export function buildCodexTurnStartParams(input: {
             },
           )
         : undefined;
+    // J5: a persona's instructions ride the same channel as the application's own.
+    const personaContext = codexApplicationContext(
+      "j5_agent_persona",
+      input.runtimePolicy.agentPersonaInstructions,
+    );
     const additionalContext =
-      t3Context === undefined && Object.keys(appContext).length === 0
+      t3Context === undefined &&
+      Object.keys(appContext).length === 0 &&
+      Object.keys(personaContext).length === 0
         ? undefined
-        : { ...t3Context, ...appContext };
+        : { ...t3Context, ...personaContext, ...appContext };
     const collaborationMode: CodexSchema.ClientRequest__CollaborationMode | undefined =
       input.runtimePolicy.interactionMode !== "plan" && developerInstructions === undefined
         ? undefined
@@ -1341,8 +1352,13 @@ export function codexThreadRuntimeParams(input: {
                 http_headers: {
                   Authorization: mcpSession.authorizationHeader,
                 },
+                // J5 fork extension: Codex would otherwise reject non-read-only platform tools
+                // under approval policy `never` (see codexToolApproval.ts).
+                ...j5CodexT3McpServerConfig(input.runtimePolicy),
               },
             },
+            // J5: a Crew seat asks its Captain, not the person (crewSeatQuestions.ts).
+            ...j5CodexCrewSeatConfig(input.runtimePolicy),
           }),
     },
   };
@@ -6540,6 +6556,7 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
                     providerSessionId: input.providerSessionId,
                     providerThreadId: threadInput.providerThread.id,
                     cause: normalizeCodexCause(cause),
+                    nativeThreadMissing: isCodexResumeThreadMissing(cause),
                   }),
               ),
             ),

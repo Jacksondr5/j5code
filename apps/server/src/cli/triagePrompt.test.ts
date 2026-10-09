@@ -12,7 +12,7 @@ import {
 } from "./triagePrompt.ts";
 
 it("stays byte-identical to .github/triage/PLAYBOOK.md", () => {
-  // Old releases fetch the repo copy from `main` and follow it when it differs
+  // Old releases fetch the repo copy from `j5/main` and follow it when it differs
   // from their bundled playbook. The two must say the same thing at HEAD, or a
   // playbook edit silently changes behavior only for old (or only for new)
   // installs. Edit both files together.
@@ -45,7 +45,7 @@ it("context file carries every path the playbook depends on", () => {
     releaseTag: "v0.0.33",
     os: "linux x64 (7.0.0)",
     nodeVersion: "v24.0.0",
-    launchedAs: "npx t3 triage",
+    launchedAs: "npx @jacksondr5/j5code triage",
     server: "running (pid 42, http://127.0.0.1:4501)",
     paths: {
       stateDir: "/home/u/.t3/userdata",
@@ -69,6 +69,6 @@ it("context file carries every path the playbook depends on", () => {
   assert.include(context, "/home/u/.t3/userdata/logs/provider/events.log");
   assert.include(context, "/home/u/.t3/userdata/secrets");
   assert.include(context, "/home/u/.t3/source");
-  assert.include(context, "npx t3 triage");
+  assert.include(context, "npx @jacksondr5/j5code triage");
   assert.include(context, "v0.0.33");
 });

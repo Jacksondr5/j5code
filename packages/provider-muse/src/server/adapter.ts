@@ -2029,7 +2029,7 @@ export function makeMuseAdapterV2(options: MuseAdapterV2Options): ProviderAdapte
               driver: MUSE_PROVIDER,
               providerThreadId: args.providerThread.id,
               checkpointId: args.target.checkpointId,
-              cause: "Muse Code does not support conversation rollback in T3 Code.",
+              cause: "Muse Code does not support conversation rollback in J5 Code.",
             }),
           ),
         forkThread: (args) =>
@@ -2037,7 +2037,7 @@ export function makeMuseAdapterV2(options: MuseAdapterV2Options): ProviderAdapte
             new ProviderAdapterForkThreadError({
               driver: MUSE_PROVIDER,
               providerThreadId: args.sourceProviderThread.id,
-              cause: "Muse Code does not support native forks in T3 Code.",
+              cause: "Muse Code does not support native forks in J5 Code.",
             }),
           ),
       };

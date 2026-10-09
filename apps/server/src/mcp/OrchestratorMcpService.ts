@@ -1,3 +1,4 @@
+import type { OrchestrationV2AgentPersonaCommandAssignment } from "@t3tools/contracts";
 import {
   CommandId,
   type RunId,
@@ -126,7 +127,9 @@ export interface OrchestratorMcpServiceShape {
   ) => Effect.Effect<OrchestratorMcpCapabilitiesResult, OrchestratorMcpFailure>;
   readonly delegateTask: (
     scope: McpInvocationScope,
-    input: OrchestratorMcpDelegateTaskInput,
+    input: OrchestratorMcpDelegateTaskInput & {
+      readonly agentPersonaAssignment?: OrchestrationV2AgentPersonaCommandAssignment;
+    },
   ) => Effect.Effect<OrchestratorMcpDelegateTaskResult, OrchestratorMcpFailure>;
   readonly taskStatus: (
     scope: McpInvocationScope,
@@ -969,7 +972,7 @@ const make = Effect.gen(function* () {
         : Effect.fail(
             failure(
               "target_required",
-              "Pass projectId: this MCP client is not running inside a T3 thread.",
+              "Pass projectId: this MCP client is not running inside a J5 thread.",
             ),
           );
 
@@ -1505,7 +1508,7 @@ const make = Effect.gen(function* () {
           return yield* failure(
             "invalid_request",
             parent === undefined
-              ? "bindToCurrentThread needs an agent running inside a T3 thread."
+              ? "bindToCurrentThread needs an agent running inside a J5 thread."
               : "bindToCurrentThread binds to this thread, which belongs to a different project.",
           );
         }
@@ -1578,7 +1581,7 @@ const make = Effect.gen(function* () {
           return yield* failure(
             "invalid_request",
             parent === undefined
-              ? "bindToCurrentThread needs an agent running inside a T3 thread."
+              ? "bindToCurrentThread needs an agent running inside a J5 thread."
               : "bindToCurrentThread binds to this thread, which belongs to a different project.",
           );
         }
@@ -1855,6 +1858,9 @@ const make = Effect.gen(function* () {
             parentRunId: parentRun.id,
             parentNodeId: parentRun.rootNodeId,
             task: taskPrompt(input),
+            ...(input.agentPersonaAssignment === undefined
+              ? {}
+              : { agentPersonaAssignment: input.agentPersonaAssignment }),
             ...(input.title === undefined ? {} : { title: input.title }),
             modelSelection: target.modelSelection,
             runtimeMode,

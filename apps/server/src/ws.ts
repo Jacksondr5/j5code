@@ -169,6 +169,13 @@ import * as AcpRegistrySupport from "./provider/acp/AcpRegistrySupport.ts";
 import * as AcpRegistryRuntimeCoordinator from "./provider/acp/AcpRegistryRuntimeCoordinator.ts";
 import * as ModelManifest from "./provider/ModelManifest.ts";
 import * as ProviderMaintenance from "@t3tools/provider-core/server/maintenanceResolver";
+import {
+  makeCrewSeatArchiveGuard,
+  type CrewSeatArchiveGuard,
+} from "./j5/a2a/crewSeatArchiveGuard.ts";
+import { refreshSkillProviders } from "./j5/skills/skillProviderRefresh.ts";
+import { PlaybookStore } from "./j5/playbooks/PlaybookStore.ts";
+import { J5_WS_RPC_METHODS, layerJ5WsRpc } from "./j5/wsRpc.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import * as ProviderAuthService from "./provider/ProviderAuthService.ts";
 import { makeProviderInstallation } from "./provider/providerInstallation.ts";
@@ -221,6 +228,8 @@ import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as HostResources from "./resourceTelemetry/HostResources.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as UsageService from "./usage/UsageService.ts";
+import * as ArtifactWorkspace from "./j5/artifacts/ArtifactWorkspace.ts";
+import { AgentHandoffRefreshes } from "./j5/agents/agentHandoffRefreshes.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as PullRequestService from "./pullRequest/PullRequestService.ts";
 import { listLinkedPullRequestThreads } from "./pullRequest/linkedThreads.ts";
@@ -543,6 +552,9 @@ const PROVIDER_STATUS_DEBOUNCE_MS = 200;
 
 // Middleware added later wraps middleware added earlier, so instrumentation wraps authorization.
 const ServerWsRpcGroup = WsRpcGroup.middleware(RpcInstrumentation);
+// J5: upstream's handlers are typed by upstream's own RPCs. J5's are built in j5/wsRpc.ts and
+// served beside them; one handler record for both exceeds TypeScript's instantiation limit.
+const UpstreamWsRpcGroup = ServerWsRpcGroup.omit(...J5_WS_RPC_METHODS);
 // When a resuming client's cursor is more than this many events behind the
 // current head, skip the per-event catch-up replay and send a fresh shell
 // snapshot instead. Replaying each intervening event costs a shell refetch;
@@ -1189,8 +1201,10 @@ const layerWsRpc = (
   clientAnalyticsProps: Readonly<Record<string, unknown>>,
   previewAutomationBroker: PreviewAutomationBroker.PreviewAutomationBroker["Service"],
   serverBrowser: ServerBrowser.ServerBrowser["Service"],
+  // J5: a Crew member is never archived or deleted alone, whichever client door asks.
+  j5CrewSeatArchiveGuard: CrewSeatArchiveGuard,
 ) =>
-  ServerWsRpcGroup.toLayer(
+  UpstreamWsRpcGroup.toLayer(
     Effect.gen(function* () {
       const currentSessionId = currentSession.sessionId;
       const sql = yield* SqlClient.SqlClient;
@@ -1519,7 +1533,7 @@ const layerWsRpc = (
               if (racedImport !== null) return { threadId, imported: false } as const;
               return yield* new AcpRegistryOperationError({
                 reason: "session_import_failed",
-                message: "Could not create a T3 thread for the ACP session.",
+                message: "Could not create a J5 thread for the ACP session.",
                 cause: launched.failure,
               });
             }
@@ -1560,7 +1574,7 @@ const layerWsRpc = (
             if (importedThread !== null) {
               return yield* new AcpRegistryOperationError({
                 reason: "session_delete_failed",
-                message: "Delete the imported T3 thread before deleting its native ACP session.",
+                message: "Delete the imported J5 thread before deleting its native ACP session.",
               });
             }
             yield* manager.deleteSession({
@@ -1814,7 +1828,7 @@ const layerWsRpc = (
         return result;
       });
 
-      const handlers = ServerWsRpcGroup.of({
+      const handlers = UpstreamWsRpcGroup.of({
         [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command) =>
           Effect.annotateCurrentSpan({
             "orchestration_v2.command_id": command.commandId,
@@ -1849,6 +1863,8 @@ const layerWsRpc = (
                   ).pipe(Effect.provide(intakeContext)),
                 )
                 .pipe(
+                  // J5: a lone Crew seat archive or delete is refused before this is enqueued.
+                  (enqueue) => Effect.andThen(j5CrewSeatArchiveGuard(command), enqueue),
                   Effect.tap(() => recordClientCommandAnalytics(command)),
                   Effect.map((result) => ({ sequence: result.sequence })),
                   Effect.mapError((cause) => {
@@ -1968,6 +1984,9 @@ const layerWsRpc = (
                     modelSelection: input.modelSelection,
                     runtimeMode: input.runtimeMode,
                     interactionMode: input.interactionMode,
+                    ...(input.agentPersona === undefined
+                      ? {}
+                      : { agentPersona: input.agentPersona }),
                     workspaceStrategy: input.workspaceStrategy,
                     ...(input.initialMessage === undefined
                       ? {}
@@ -2210,10 +2229,12 @@ const layerWsRpc = (
                   instanceId: input.instanceId,
                   cwd: input.cwd,
                   fresh: input.fresh === true,
+                  // J5: an explicit refresh replaces cached and pending workspace discovery.
+                  force: true,
                 })
               : input.instanceId !== undefined
-                ? providerRegistry.refreshInstance(input.instanceId)
-                : providerRegistry.refresh();
+                ? refreshSkillProviders(providerRegistry, [input.instanceId])
+                : refreshSkillProviders(providerRegistry);
             if (input.refreshModels) {
               const instances = yield* providerInstances.listInstances;
               for (const instance of instances) {
@@ -3130,9 +3151,14 @@ export const layer = Layer.unwrap(
   Effect.gen(function* () {
     const previewAutomationBroker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
     const serverBrowser = yield* ServerBrowser.ServerBrowser;
+    const artifactWorkspace = yield* ArtifactWorkspace.ArtifactWorkspace;
+    const j5CrewSeatArchiveGuard = yield* makeCrewSeatArchiveGuard;
     const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
     const pullRequests = yield* PullRequestService.PullRequestService;
     const sql = yield* SqlClient.SqlClient;
+    // J5: the revision counter the saved-agent handoff observer bumps; one instance per server.
+    const agentHandoffRefreshes = yield* AgentHandoffRefreshes;
+    const playbooks = yield* PlaybookStore;
     return HttpRouter.add(
       "GET",
       "/ws",
@@ -3186,7 +3212,10 @@ export const layer = Layer.unwrap(
               clientAnalyticsProps,
               previewAutomationBroker,
               serverBrowser,
+              j5CrewSeatArchiveGuard,
             ).pipe(
+              // J5: J5's RPC handlers, served on the same socket.
+              Layer.merge(layerJ5WsRpc(artifactWorkspace)),
               Layer.provideMerge(RpcSerialization.layerJson),
               // Request fibers run in the handlers' context, so this reporter sees
               // their defects, not the rest of the server's.
@@ -3198,6 +3227,8 @@ export const layer = Layer.unwrap(
               // One server-lifetime service means clients share the same PR caches, and a WS
               // mutation invalidates the HTTP diff cache that every client reads from.
               Layer.provide(Layer.succeed(PullRequestService.PullRequestService, pullRequests)),
+              Layer.provide(Layer.succeed(AgentHandoffRefreshes, agentHandoffRefreshes)),
+              Layer.provide(Layer.succeed(PlaybookStore, playbooks)),
               Layer.provide(
                 SourceControlDiscovery.layer.pipe(
                   Layer.provide(
@@ -3235,4 +3266,4 @@ export const layer = Layer.unwrap(
       ),
     );
   }),
-);
+).pipe(Layer.provide(ArtifactWorkspace.layer));

@@ -19,6 +19,7 @@ jobs:
   # passes only when every other job does.
   lint:
     name: Lint
+    if: github.repository == 'pingdotgg/t3code'
     runs-on: blacksmith-8vcpu-ubuntu-2404
     timeout-minutes: 10
     steps:
@@ -57,6 +58,7 @@ jobs:
 
   typecheck:
     name: Typecheck
+    if: github.repository == 'pingdotgg/t3code'
     runs-on: blacksmith-8vcpu-ubuntu-2404
     timeout-minutes: 10
     steps:
@@ -83,6 +85,7 @@ jobs:
 
   build:
     name: Build
+    if: github.repository == 'pingdotgg/t3code'
     runs-on: blacksmith-8vcpu-ubuntu-2404
     timeout-minutes: 10
     steps:
@@ -137,6 +140,7 @@ jobs:
   # per runner is unchanged.
   test:
     name: Test
+    if: github.repository == 'pingdotgg/t3code'
     runs-on: blacksmith-8vcpu-ubuntu-2404
     timeout-minutes: 10
     steps:
@@ -201,6 +205,7 @@ jobs:
   # started last and ran alone for about 40s after everything else finished.
   test_web:
     name: Test Web
+    if: github.repository == 'pingdotgg/t3code'
     runs-on: blacksmith-8vcpu-ubuntu-2404
     timeout-minutes: 10
     steps:
@@ -230,6 +235,7 @@ jobs:
   # split files by recorded duration (apps/server/src/testUtils/weightedShardSequencer.ts).
   test_server:
     name: Test Server ${{ matrix.shard }}
+    if: github.repository == 'pingdotgg/t3code'
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
     strategy:
@@ -299,6 +305,7 @@ jobs:
   transfer-report:
     name: Transfer report artifact
     needs: test_server
+    if: github.repository == 'pingdotgg/t3code'
     # On Blacksmith like every other job here: the GitHub-hosted queue is shared
     # with the PR bots and can leave this job waiting until it is abandoned,
     # which fails `Check` on an otherwise green run.
@@ -315,6 +322,7 @@ jobs:
   # for checks that take under 3s, on the critical path of every PR.
   rust:
     name: Rust
+    if: github.repository == 'pingdotgg/t3code'
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
     steps:
@@ -349,6 +357,7 @@ jobs:
   # the diff cannot be resolved, the lint runs.
   mobile_native_changes:
     name: Mobile Native Changes
+    if: github.repository == 'pingdotgg/t3code'
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     permissions:
@@ -426,7 +435,7 @@ jobs:
     needs: mobile_native_changes
     # Skip only on an explicit "no": a gate job that failed or errored leaves the
     # output empty, and that must run the lint rather than silently skip it.
-    if: ${{ !cancelled() && needs.mobile_native_changes.outputs.changed != 'false' }}
+    if: ${{ github.repository == 'pingdotgg/t3code' && !cancelled() && needs.mobile_native_changes.outputs.changed != 'false' }}
     runs-on: blacksmith-6vcpu-macos-26
     timeout-minutes: 10
     steps:
@@ -455,6 +464,7 @@ jobs:
 
   release_smoke:
     name: Release Smoke
+    if: github.repository == 'pingdotgg/t3code'
     runs-on: blacksmith-8vcpu-ubuntu-2404
     timeout-minutes: 10
     steps:
@@ -485,7 +495,7 @@ jobs:
   # branch protection, so a cancelled run must still produce a failing check.
   check:
     name: Check
-    if: ${{ always() }}
+    if: ${{ always() && github.repository == 'pingdotgg/t3code' }}
     needs:
       [
         lint,

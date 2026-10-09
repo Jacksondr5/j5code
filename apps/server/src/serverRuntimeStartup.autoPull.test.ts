@@ -5,6 +5,7 @@ import { DEFAULT_SIGNAL_EXPORT } from "@t3tools/shared/observability";
 import * as OtelEnvironment from "@t3tools/shared/otelEnvironment";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import { HttpServer } from "effect/http";
@@ -170,6 +171,8 @@ it.effect("parks automatic pull until activation without delaying command readin
           address: NetAddress.inetAddressFromIpStringUnsafe("127.0.0.1", 3773),
         }),
         Path.layer,
+        // J5: a managed startup repoints the `j5` launcher, which needs a file system.
+        FileSystem.layerNoop({}),
       );
 
       yield* Effect.gen(function* () {

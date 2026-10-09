@@ -246,6 +246,16 @@ describe("composerSubmissionIntentForKey", () => {
 });
 
 describe("detectComposerTrigger", () => {
+  it("detects an @playbook: mention with the shared playbook trigger", () => {
+    const text = "Use @playbook:rev";
+    expect(detectComposerTrigger(text, text.length)).toEqual({
+      kind: "slash-playbook",
+      query: "rev",
+      rangeStart: 4,
+      rangeEnd: text.length,
+    });
+  });
+
   it("detects @path trigger at cursor", () => {
     const text = "Please check @src/com";
     const trigger = detectComposerTrigger(text, text.length);
@@ -299,6 +309,33 @@ describe("detectComposerTrigger", () => {
       rangeStart: 0,
       rangeEnd: text.length,
     });
+  });
+
+  it("searches playbook names after /playbook", () => {
+    const text = "/playbook debug";
+    expect(detectComposerTrigger(text, text.length)).toEqual({
+      kind: "slash-playbook",
+      query: "debug",
+      rangeStart: 0,
+      rangeEnd: text.length,
+    });
+    expect(detectComposerTrigger("/playbook code r", 16)).toBeNull();
+    expect(detectComposerTrigger("/playbook code-r", 16)).toMatchObject({ query: "code-r" });
+    expect(detectComposerTrigger("/playbook ", 10)).toMatchObject({ query: "" });
+    expect(detectComposerTrigger("/playbook debugging ", 20)).toBeNull();
+    expect(detectComposerTrigger("Earlier text\n/playbook deb", 26)?.kind).not.toBe(
+      "slash-playbook",
+    );
+    expect(detectComposerTrigger("/playbook deb\nMore text", 13)).toMatchObject({
+      query: "deb",
+      rangeEnd: 13,
+    });
+    expect(detectComposerTrigger("/playbook deb then summarize", 13)).toMatchObject({
+      query: "deb",
+      rangeEnd: 13,
+    });
+    expect(detectComposerTrigger("/playbook debug", 13)).toBeNull();
+    expect(detectComposerTrigger("/playbook review, then summarize", 31)).toBeNull();
   });
 
   it("keeps slash command detection active for provider commands", () => {

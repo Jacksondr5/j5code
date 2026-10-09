@@ -1,0 +1,141 @@
+import { expect, it } from "@effect/vitest";
+import {
+  AuthOrchestrationReadScope,
+  EnvironmentId,
+  type AuthSessionState,
+} from "@t3tools/contracts";
+import { J5_LEDGER_CAPABILITIES } from "@t3tools/contracts/j5";
+import * as Cause from "effect/Cause";
+import * as Option from "effect/Option";
+import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity";
+
+import { J5HttpError } from "./http.ts";
+import {
+  createJ5ReadSourcesAtom,
+  resolveJ5ReadSource,
+  spansMultipleEnvironments,
+} from "./readSources.ts";
+
+const session: AuthSessionState = {
+  authenticated: true,
+  scopes: [AuthOrchestrationReadScope],
+  auth: {
+    policy: "remote-reachable",
+    bootstrapMethods: ["one-time-token"],
+    sessionMethods: ["bearer-access-token"],
+    sessionCookieName: "session",
+  },
+};
+const source = {
+  environmentId: EnvironmentId.make("remote"),
+  environmentLabel: "Remote",
+  phase: "connected" as const,
+  session,
+};
+
+it("preserves an independently loaded read-only source without permitting mutations", () => {
+  const result = resolveJ5ReadSource({ ...source, result: AsyncResult.success(["remote-row"]) });
+  expect(result).toMatchObject({ data: ["remote-row"], status: "ready", canOperate: false });
+});
+
+it("retains data but reports an outage or refresh failure instead of an empty successful source", () => {
+  const success = AsyncResult.success(["cached-row"]);
+  const offline = resolveJ5ReadSource({ ...source, phase: "offline", result: success });
+  expect(offline).toMatchObject({ status: "offline", data: ["cached-row"], canOperate: false });
+  const failed = resolveJ5ReadSource({
+    ...source,
+    result: AsyncResult.failure(
+      Cause.fail(new J5HttpError({ status: 503, detail: "Unavailable" })),
+      { previousSuccess: Option.some(success) },
+    ),
+  });
+  expect(failed).toMatchObject({ status: "error", data: ["cached-row"], error: "Unavailable" });
+});
+
+it("keeps unsupported, authentication failure, and not-yet-connected states distinct", () => {
+  expect(
+    resolveJ5ReadSource({ ...source, supported: false, result: AsyncResult.initial(false) }).status,
+  ).toBe("unsupported");
+  expect(
+    resolveJ5ReadSource({
+      ...source,
+      result: AsyncResult.failure(
+        Cause.fail(new J5HttpError({ status: 404, detail: "Not found" })),
+      ),
+    }).status,
+  ).toBe("unsupported");
+  expect(
+    resolveJ5ReadSource({
+      ...source,
+      result: AsyncResult.failure(
+        Cause.fail(new J5HttpError({ status: 401, detail: "Pair again" })),
+      ),
+    }).status,
+  ).toBe("error");
+  expect(
+    resolveJ5ReadSource({ ...source, phase: "connecting", result: AsyncResult.initial(false) })
+      .status,
+  ).toBe("loading");
+});
+
+it("shows environment labels only once items span more than one environment", () => {
+  const alpha = { environmentId: EnvironmentId.make("alpha") };
+  const bravo = { environmentId: EnvironmentId.make("bravo") };
+  expect(spansMultipleEnvironments([])).toBe(false);
+  expect(spansMultipleEnvironments([alpha, alpha])).toBe(false);
+  expect(spansMultipleEnvironments([alpha, bravo])).toBe(true);
+});
+
+/** Reads one environment's source for a capability key, counting the route calls it makes. */
+const readSourceFor = (
+  capabilities: Partial<Record<keyof typeof J5_LEDGER_CAPABILITIES, boolean>>,
+  capability: keyof typeof J5_LEDGER_CAPABILITIES,
+) => {
+  const environmentId = source.environmentId;
+  let routeCalls = 0;
+  type Input = Parameters<typeof createJ5ReadSourcesAtom<ReadonlyArray<string>>>[0];
+  const sources = createJ5ReadSourcesAtom<ReadonlyArray<string>>({
+    label: "test:j5-read-sources",
+    // The two older keys are the ones the client from before the re-key passed here.
+    capability: capability as Input["capability"],
+    catalogValueAtom: Atom.make({
+      isReady: true,
+      entries: new Map([[environmentId, { target: { label: "Remote" } }]]),
+    }) as unknown as Input["catalogValueAtom"],
+    stateAtom: () =>
+      Atom.make(AsyncResult.success({ phase: "connected" })) as unknown as ReturnType<
+        Input["stateAtom"]
+      >,
+    configValueAtom: () =>
+      Atom.make({ environment: { capabilities } }) as unknown as ReturnType<
+        Input["configValueAtom"]
+      >,
+    sessionStateValueAtom: () => Atom.make(session),
+    queryAtom: () =>
+      Atom.make(() => {
+        routeCalls += 1;
+        return AsyncResult.success<ReadonlyArray<string>, unknown>(["row"]);
+      }),
+  });
+  const [result] = AtomRegistry.make().get(sources).sources;
+  return { status: result?.status, data: result?.data, routeCalls };
+};
+
+it("shows an older client's J5 views as unsupported against a project-keyed server, calling no route", () => {
+  // Fleet read `j5Squadrons`; the Inbox, its count, Crew proposals and Crew runtime requests read
+  // `j5HumanInbox`. Their routes changed shape, so that client must not reach them.
+  for (const olderKey of ["j5Squadrons", "j5HumanInbox"] as const) {
+    expect(readSourceFor(J5_LEDGER_CAPABILITIES, olderKey)).toEqual({
+      status: "unsupported",
+      data: null,
+      routeCalls: 0,
+    });
+  }
+  expect(readSourceFor(J5_LEDGER_CAPABILITIES, "j5ProjectLedger")).toEqual({
+    status: "ready",
+    data: ["row"],
+    routeCalls: 1,
+  });
+  // A key that is missing is probed, which is why the server states the older two as false.
+  expect(readSourceFor({ j5ProjectLedger: true }, "j5HumanInbox").routeCalls).toBe(1);
+});

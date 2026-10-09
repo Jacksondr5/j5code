@@ -18,6 +18,7 @@ const state = vi.hoisted(() => ({
   configs: new Map<string, unknown>(),
   showTooltips: false,
   command: vi.fn().mockResolvedValue({ _tag: "Success" }),
+  personaShell: undefined as unknown,
 }));
 
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => state.navigate }));
@@ -26,6 +27,12 @@ vi.mock("../../state/entities", () => ({
   useThreadShells: () => state.shells,
   useProjects: () => state.projects,
   useServerConfigs: () => state.configs,
+  // J5 lineage saved-agent identity reads the child shell.
+  useThreadShell: (ref: { threadId: string } | null) =>
+    ref?.threadId === "child-1" ? state.personaShell : undefined,
+}));
+vi.mock("../../j5/agents/AgentHandoffChip", () => ({
+  AgentHandoffChip: () => <a href="/artifacts">Handoff written</a>,
 }));
 vi.mock("../../lib/archivedThreadsState", () => ({
   useArchivedThreadSnapshots: () => ({ snapshots: [] }),
@@ -51,6 +58,7 @@ afterEach(async () => {
   state.showTooltips = false;
   state.command.mockClear();
   state.projection = null;
+  state.personaShell = undefined;
 });
 
 it.each(["codex", "claudeAgent"])(
@@ -840,3 +848,58 @@ it.each(["source", "target"])(
     }
   },
 );
+
+it("keeps a child's saved-agent identity and handoff link beside the row button", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  state.personaShell = {
+    agentPersonaAssignment: {
+      personaId: "critic",
+      displayName: "Critic",
+      authorityPolicy: "critic-fix",
+      resolvedDriver: "codex",
+      resolvedModelSelection: { instanceId: "codex", model: "gpt-5.4" },
+    },
+  };
+  state.projection = {
+    thread: { id: "parent", lineage: { relationshipToParent: null }, activeProviderThreadId: null },
+    runs: [],
+    providerThreads: [],
+    providerSessions: [],
+    contextTransfers: [],
+    subagents: [
+      {
+        id: "agent-1",
+        driver: "codex",
+        providerInstanceId: "codex",
+        childThreadId: "child-1",
+        title: "Checker",
+        prompt: "Check the change",
+        model: "gpt-5.4",
+        status: "running",
+        progress: null,
+        result: null,
+        startedAt: DateTime.makeUnsafe("2026-09-16T12:00:00Z"),
+        completedAt: null,
+        updatedAt: DateTime.makeUnsafe("2026-09-16T12:00:00Z"),
+      },
+    ],
+  };
+  await act(async () => {
+    renderer = create(
+      <ThreadRelationshipsPanel
+        environmentId={EnvironmentId.make("test")}
+        threadId={ThreadId.make("parent")}
+      />,
+    );
+  });
+  const link = renderer.root.findByType("a");
+  expect(link.props.href).toBe("/artifacts");
+  const insideButton = (node: typeof link): boolean =>
+    node.parent !== null && (node.parent.type === "button" || insideButton(node.parent));
+  expect(insideButton(link)).toBe(false);
+  const persona = renderer.root.findAll(
+    (node) => typeof node.type === "string" && node.children.includes("Critic · Fix"),
+  );
+  expect(persona).toHaveLength(1);
+  expect(insideButton(persona[0]!)).toBe(false);
+});

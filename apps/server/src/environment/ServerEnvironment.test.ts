@@ -219,6 +219,11 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
       expect(second.capabilities.connectionProbe).toBe(true);
       expect(second.capabilities.attachmentUploads).toBe(true);
       expect(second.capabilities.fileAttachments).toEqual({ maxUploadBytes: 50 * 1024 * 1024 });
+      expect(second.capabilities.j5ProjectLedger).toBe(true);
+      // Stated false so that a client from before the re-key does not read the changed routes.
+      expect(second.capabilities.j5Squadrons).toBe(false);
+      expect(second.capabilities.j5HumanInbox).toBe(false);
+      expect(second.capabilities.j5PeerPoll).toBe(true);
       expect(second.capabilities.pullRequests).toBe(true);
       expect(second.capabilities.requiredWorktreeBootstrap).toBe(true);
       expect(second.capabilities.usagePriceOverrides).toBe(true);

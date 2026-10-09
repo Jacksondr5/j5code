@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import type { NativeReviewDiffRow } from "./nativeReviewDiffSurface";
 import type { NativeReviewDiffFile } from "./nativeReviewDiffTypes";
@@ -34,7 +34,16 @@ vi.mock("react-native-shiki-engine", async () => {
   return { isNativeEngineAvailable: () => true, createNativeEngine: createJavaScriptRegexEngine };
 });
 
+// Shiki stops tokenizing a line after 500 ms of wall clock, stretches the last matched token
+// to the end of that line, and carries that halted grammar state into the next line. A cold
+// regex engine on a loaded CI runner can cross that budget, so the clock stands still here;
+// these tests are about grammar-state handling, not tokenization speed.
+beforeEach(() => {
+  vi.spyOn(Date, "now").mockReturnValue(0);
+});
+
 afterEach(() => {
+  vi.restoreAllMocks();
   tokenization.calls = [];
   tokenization.afterCall = undefined;
 });

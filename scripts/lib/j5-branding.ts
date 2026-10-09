@@ -1,0 +1,58 @@
+/**
+ * Fork-owned product identity.
+ *
+ * Keep upstream's T3CODE_* environment and protocol-internal names intact. This
+ * module only owns values that identify J5 Code to people, operating systems,
+ * installers, and deep-link dispatchers.
+ */
+export const J5_BRANDING = {
+  cli: {
+    /** Historical npm package; releases ship as archives from 0.0.44 on. */
+    packageName: "@jacksondr5/j5code",
+    /** The command on PATH, and the name of the archive's executable. */
+    command: "j5",
+  },
+  desktop: {
+    baseName: "J5 Code",
+    developmentName: "J5 Code (Dev)",
+    nightlyName: "J5 Code (Nightly)",
+    appId: "codes.jackson.j5code",
+    developmentAppId: "codes.jackson.j5code.dev",
+    productionScheme: "j5code",
+    developmentScheme: "j5code-dev",
+    linuxExecutableName: "j5code",
+    defaultBaseDirName: ".j5code",
+    productionUserDataDirName: "j5code",
+    developmentUserDataDirName: "j5code-dev",
+  },
+  mobile: {
+    slug: "j5-code",
+    expoOwner: "jacksondr5",
+    easProjectId: "bcb6f6ad-b327-449e-a419-e6455595504c",
+    development: {
+      appName: "J5 Code Dev",
+      scheme: "j5code-dev",
+      appId: "codes.jackson.j5code.dev",
+    },
+    preview: {
+      appName: "J5 Code Preview",
+      scheme: "j5code-preview",
+      appId: "codes.jackson.j5code.preview",
+    },
+    production: {
+      appName: "J5 Code",
+      scheme: "j5code",
+      appId: "codes.jackson.j5code",
+    },
+  },
+} as const;
+
+/**
+ * The iOS project, scheme and `.app` name `expo prebuild` generates for a mobile
+ * app name, mirroring `@expo/config-plugins` `sanitizedName` (e.g. `J5CodeDev`).
+ */
+export const mobileNativeProjectName = (appName: string): string =>
+  appName
+    .replace(/[\W_]+/g, "")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "");

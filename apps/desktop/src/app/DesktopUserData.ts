@@ -4,6 +4,8 @@ import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 
+import { J5_BRANDING } from "../../../../scripts/lib/j5-branding.ts";
+
 export class DesktopUserDataInitializationError extends Schema.TaggedError<DesktopUserDataInitializationError>()(
   "DesktopUserDataInitializationError",
   {
@@ -31,7 +33,16 @@ export class DesktopUserDataInitializationError extends Schema.TaggedError<Deskt
   }
 }
 
-/** Select Electron's profile independently of the server's T3 home. */
+/**
+ * Select Electron's profile independently of the server's J5 home.
+ *
+ * J5 (FORK.md case 25, merge decision #4): the profile stays `j5code` /
+ * `j5code-dev`, or the older productName-derived `J5 Code` / `J5 Code (Dev)`
+ * directory when an install already lives there. Upstream moved its production
+ * profile to `t3code-v2` so a V1 and a V2 T3 Code could run side by side and
+ * seeded it from `t3code/Local State` on Windows; J5 never runs two versions
+ * at once and must never read T3 Code's profiles, so none of that applies.
+ */
 export const resolveUserDataPath = Effect.fn("desktop.userData.resolveUserDataPath")(
   function* (input: {
     readonly appDataDirectory: string;
@@ -41,58 +52,23 @@ export const resolveUserDataPath = Effect.fn("desktop.userData.resolveUserDataPa
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const names = input.isDevelopment
-      ? { current: "t3code-dev", legacy: "T3 Code (Dev)" }
-      : { current: "t3code-v2", legacy: "T3 Code (Alpha)" };
+      ? {
+          current: J5_BRANDING.desktop.developmentUserDataDirName,
+          legacy: J5_BRANDING.desktop.developmentName,
+        }
+      : {
+          current: J5_BRANDING.desktop.productionUserDataDirName,
+          legacy: J5_BRANDING.desktop.baseName,
+        };
     const destinationPath = path.join(input.appDataDirectory, names.current);
     const legacyPath = path.join(input.appDataDirectory, names.legacy);
-    const inspect = (resourcePath: string) =>
-      fs
-        .exists(resourcePath)
-        .pipe(
-          Effect.mapError((cause) =>
-            DesktopUserDataInitializationError.fromFileSystem(cause, "inspect", resourcePath),
-          ),
-        );
-    if (input.isDevelopment) {
-      return (yield* inspect(legacyPath)) ? legacyPath : destinationPath;
-    }
-    // Chromium databases require their own profile for each running version.
-    if (input.platform !== "win32") return destinationPath;
-    const destinationState = path.join(destinationPath, "Local State");
-    if (yield* inspect(destinationState)) return destinationPath;
-    const legacyState = path.join(legacyPath, "Local State");
-    const sourceState = (yield* inspect(legacyState))
-      ? legacyState
-      : path.join(input.appDataDirectory, "t3code", "Local State");
-    if (!(yield* inspect(sourceState))) return destinationPath;
-    // Windows safeStorage keys live here. Copy only these preferences, never locked databases.
-    const state = yield* fs
-      .readFileString(sourceState)
+    const legacyExists = yield* fs
+      .exists(legacyPath)
       .pipe(
         Effect.mapError((cause) =>
-          DesktopUserDataInitializationError.fromFileSystem(cause, "read", sourceState),
+          DesktopUserDataInitializationError.fromFileSystem(cause, "inspect", legacyPath),
         ),
       );
-    yield* fs
-      .makeDirectory(destinationPath, { recursive: true })
-      .pipe(
-        Effect.mapError((cause) =>
-          DesktopUserDataInitializationError.fromFileSystem(
-            cause,
-            "create-directory",
-            destinationPath,
-          ),
-        ),
-      );
-    yield* fs.writeFileString(destinationState, state, { flag: "wx" }).pipe(
-      Effect.catchIf(
-        (error) => error.reason._tag === "AlreadyExists",
-        () => Effect.void,
-      ),
-      Effect.mapError((cause) =>
-        DesktopUserDataInitializationError.fromFileSystem(cause, "write", destinationState),
-      ),
-    );
-    return destinationPath;
+    return legacyExists ? legacyPath : destinationPath;
   },
 );

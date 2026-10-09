@@ -1,3 +1,5 @@
+import { SCHEDULED_TASK_MESSAGE_ID_PREFIX } from "@t3tools/contracts";
+import type { ChatMessage } from "../../types";
 import type { MessagesTimelineRow } from "./MessagesTimeline.logic";
 
 export interface TimelineMinimapItem {
@@ -7,6 +9,21 @@ export interface TimelineMinimapItem {
   readonly assistantText: string | null;
 }
 
+/**
+ * J5: the minimap indexes what the person sent, including Inbox replies.
+ * Automated user-role messages — peer and machine A2A deliveries, scheduled
+ * task fires, delegated-task completions, restart continuations, and system
+ * nudges — still render in the timeline but would otherwise crowd the rail on
+ * long-running agent threads. A2A deliveries carry the sender's actor in
+ * createdBy, so only scheduled task fires need an id check: they inherit the
+ * task creator's actor.
+ */
+export function isHumanAuthoredUserMessage(message: ChatMessage): boolean {
+  if (message.role !== "user") return false;
+  if (message.createdBy !== undefined && message.createdBy !== "user") return false;
+  return !String(message.id).startsWith(SCHEDULED_TASK_MESSAGE_ID_PREFIX);
+}
+
 /** Keep full source text untouched until a minimap preview is opened. */
 export function deriveTimelineMinimapItems(
   rows: ReadonlyArray<MessagesTimelineRow>,
@@ -14,7 +31,7 @@ export function deriveTimelineMinimapItems(
   const items: TimelineMinimapItem[] = [];
   for (let index = 0; index < rows.length; index += 1) {
     const row = rows[index];
-    if (row?.kind !== "message" || row.message.role !== "user") {
+    if (row?.kind !== "message" || !isHumanAuthoredUserMessage(row.message)) {
       continue;
     }
 

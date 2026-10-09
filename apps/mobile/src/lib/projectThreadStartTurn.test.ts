@@ -101,6 +101,37 @@ describe("project thread title", () => {
   });
 });
 
+describe("saved agent launch", () => {
+  const spec = {
+    projectId: ProjectId.make("project"),
+    projectCwd: "/workspace",
+    threadId: "new-thread",
+    commandId: "command",
+    messageId: "message",
+    createdAt: "2026-09-20T00:00:00Z",
+    text: "Review this",
+    uploadedAttachments: [],
+    modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.6-sol" },
+    runtimeMode: "full-access" as const,
+    interactionMode: "default" as const,
+    workspaceMode: "local" as const,
+    branch: null,
+    worktreePath: null,
+    startFromOrigin: false,
+    worktreeBranchName: "unused",
+  };
+
+  it("requests the saved agent only when the draft chose one", () => {
+    expect(
+      buildProjectThreadStartTurnInput({ ...spec, agentPersonaId: "critic" }).bootstrap.createThread
+        .agentPersona,
+    ).toEqual({ personaId: "critic" });
+    expect(buildProjectThreadStartTurnInput(spec).bootstrap.createThread).not.toHaveProperty(
+      "agentPersona",
+    );
+  });
+});
+
 describe("new thread on an existing branch", () => {
   it.each([null, "/worktrees/existing"])(
     "reuses the selected workspace %s without preparing a new worktree",

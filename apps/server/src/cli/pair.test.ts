@@ -9,9 +9,12 @@ import { AuthStandardClientScopes } from "@t3tools/contracts";
 import * as NetService from "@t3tools/shared/Net";
 import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
 import { assert, describe, expect, it } from "@effect/vitest";
+import * as Clock from "effect/Clock";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as TestConsole from "effect/testing/TestConsole";
+import * as TestClock from "effect/testing/TestClock";
 import { Command, CliError } from "effect/cli";
 
 import { cli } from "../binCli.ts";
@@ -29,6 +32,7 @@ import {
   DevServerNotProxiableError,
   resolveDirectPairingBaseUrl,
   resolveTailscaleLocalTarget,
+  RuntimeFileActivationDelay,
 } from "./pair.ts";
 
 import packageJson from "../../package.json" with { type: "json" };
@@ -144,7 +148,18 @@ const withDescriptorServer = <A, E, R>(run: (origin: string) => Effect.Effect<A,
     (server) => Effect.sync(() => server.close()),
   );
 
-describe("t3 pair", () => {
+const withWorkingDirectory = <A, E, R>(cwd: string, effect: Effect.Effect<A, E, R>) =>
+  Effect.acquireUseRelease(
+    Effect.sync(() => {
+      const previous = process.cwd();
+      process.chdir(cwd);
+      return previous;
+    }),
+    () => effect,
+    (previous) => Effect.sync(() => process.chdir(previous)),
+  );
+
+describe("j5 pair", () => {
   it.effect("mints a token and prints a QR pairing URL for a live server", () =>
     withDescriptorServer((origin) =>
       Effect.gen(function* () {
@@ -179,7 +194,7 @@ describe("t3 pair", () => {
           readonly scopes: ReadonlyArray<string>;
         }>;
         assert.equal(credentials.length, 1);
-        assert.equal(credentials[0]?.label, "t3 pair");
+        assert.equal(credentials[0]?.label, "j5 pair");
         assert.deepEqual(credentials[0]?.scopes, AuthStandardClientScopes);
       }),
     ).pipe(
@@ -258,20 +273,52 @@ describe("t3 pair", () => {
     ).pipe(Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("directs to t3 serve or t3 connect when no server is running", () =>
+  it.effect("explains an absent explicit runtime file after waiting for activation", () =>
     Effect.gen(function* () {
       const baseDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-pair-none-test-"));
+      const waits: Array<number> = [];
+      const startedAt = yield* Clock.currentTimeMillis;
 
       const error = yield* provideCliTestLayers(
         runCli(["pair", "--base-dir", baseDir]).pipe(Effect.flip),
+      ).pipe(
+        Effect.provideService(RuntimeFileActivationDelay, (duration) =>
+          Effect.sync(() => waits.push(Duration.toMillis(duration))).pipe(
+            Effect.andThen(TestClock.adjust(duration)),
+          ),
+        ),
       );
+      assert.deepEqual(waits, [1_000, 1_000, 1_000]);
+      assert.equal((yield* Clock.currentTimeMillis) - startedAt, 3_000);
 
       const rendered = String(
         typeof error === "object" && error !== null && "cause" in error ? error.cause : error,
       );
-      assert.include(rendered, "No running T3 Code server found.");
-      assert.include(rendered, "npx t3 serve");
-      assert.include(rendered, "npx t3 connect");
+      assert.include(rendered, `No runtime file under ${baseDir}`);
+      assert.include(rendered, "either no server is running, or one is still starting");
+      assert.include(rendered, "wait for the printed pairing URL");
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("refuses a bare pair command in a linked worktree without a runtime file", () =>
+    Effect.gen(function* () {
+      const worktree = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-pair-worktree-test-"));
+      NodeFS.writeFileSync(
+        NodePath.join(worktree, ".git"),
+        "gitdir: /tmp/t3-pair-common.git/worktrees/pair-test\n",
+      );
+      const worktreeHome = NodePath.join(NodeFS.realpathSync(worktree), ".j5code");
+
+      const error = yield* withWorkingDirectory(
+        worktree,
+        provideCliTestLayers(runCli(["pair"]).pipe(Effect.flip)),
+      );
+      const rendered = String(
+        typeof error === "object" && error !== null && "cause" in error ? error.cause : error,
+      );
+      assert.include(rendered, `worktree home ${worktreeHome}`);
+      assert.include(rendered, "Refusing to fall through");
+      assert.include(rendered, "--base-dir <path>");
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
@@ -300,7 +347,7 @@ describe("t3 pair", () => {
         const rendered = String(
           typeof error === "object" && error !== null && "cause" in error ? error.cause : error,
         );
-        assert.include(rendered, "No running T3 Code server found.");
+        assert.include(rendered, "No running J5 Code server found.");
       }),
     ).pipe(Effect.provide(NodeServices.layer)),
   );
@@ -326,7 +373,7 @@ describe("t3 pair", () => {
       const rendered = String(
         typeof error === "object" && error !== null && "cause" in error ? error.cause : error,
       );
-      assert.include(rendered, "No running T3 Code server found.");
+      assert.include(rendered, "No running J5 Code server found.");
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 });
@@ -390,7 +437,7 @@ describe("auth scope options", () => {
       if (!CliError.isCliError(error) || error._tag !== "ShowHelp") {
         assert.fail(`Expected ShowHelp, got ${String(error)}`);
       }
-      assert.deepEqual(error.commandPath, ["t3", ...command]);
+      assert.deepEqual(error.commandPath, ["j5", ...command]);
       const scopeError = error.errors[0];
       if (scopeError?._tag !== "InvalidValue") {
         assert.fail(`Expected InvalidValue, got ${String(scopeError?._tag)}`);

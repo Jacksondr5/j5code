@@ -38,7 +38,9 @@ import {
 } from "@t3tools/provider-core/server/handoffBudget";
 import { deliverContextHandoffs } from "./ContextHandoffDelivery.ts";
 import {
+  ProviderAdapterResumeThreadError,
   ProviderAdapterTurnStartError,
+  ProviderResumeFailedError,
   type ProviderAdapterV2Error,
   type ProviderAdapterV2HistoricalContext,
   type ProviderAdapterV2SessionRuntime,
@@ -49,6 +51,7 @@ import * as ProviderSessionManager from "./ProviderSessionManager.ts";
 import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
 import * as RunExecutionService from "./RunExecutionService.ts";
 import * as RuntimePolicy from "./RuntimePolicy.ts";
+import { QueuedRunWatchdog } from "../j5/run-observability/QueuedRunWatchdog.ts";
 import {
   isRestartNoteContinuation,
   pendingRestartCancelledBackgroundWork,
@@ -64,6 +67,20 @@ export class ProviderTurnStartError extends Schema.TaggedError<ProviderTurnStart
 ) {}
 
 const isProviderTurnStartError = Schema.is(ProviderTurnStartError);
+const isProviderAdapterResumeThreadError = Schema.is(ProviderAdapterResumeThreadError);
+
+/**
+ * Renders the provider resume failure and its cause chain (adapter error →
+ * Codex request error → schema error with its path) without stack frames,
+ * redacted and bounded like every other provider failure message.
+ */
+function resumeFailureText(error: unknown): string {
+  const text = Cause.pretty(Cause.fail(error))
+    .split("\n")
+    .filter((line) => !/^\s+at (?!\[)/u.test(line) && !/^\s*[{}]\s*$/u.test(line))
+    .join("\n");
+  return makeProviderFailure({ message: text }).message;
+}
 
 /** Claude refuses to replace a process running background work before it reads the prompt. */
 const refusedBeforePrompt = (error: unknown): boolean =>
@@ -106,6 +123,7 @@ export const layer: Layer.Layer<
   ProviderTurnStartServiceV2,
   Effect.gen(function* () {
     const eventSink = yield* EventSink.EventSinkV2;
+    const queuedRunWatchdog = yield* QueuedRunWatchdog;
     const contextHandoffService = yield* ContextHandoffService.ContextHandoffServiceV2;
     const idAllocator = yield* IdAllocator.IdAllocatorV2;
     const fileSystem = yield* FileSystem.FileSystem;
@@ -690,13 +708,33 @@ export const layer: Layer.Layer<
         if (resumed._tag === "Success") {
           return resumed.success;
         }
-
+        const resumeFailure = resumeFailureText(resumed.failure);
+        // Native history cannot be rebuilt from the app transcript. Replace it only
+        // when the provider reports the conversation is gone, or when an earlier
+        // history injection may have partially landed; any other failure is terminal.
+        const nativeThreadMissing =
+          isProviderAdapterResumeThreadError(resumed.failure) &&
+          resumed.failure.nativeThreadMissing === true;
+        if (!uncertainDelivery && !nativeThreadMissing) {
+          // J5: fails the run now, even on an attempt the worker would retry.
+          yield* settleStartFailure({
+            signal: "provider-thread-load-failure",
+            title: "Provider turn failed to start",
+            error: new ProviderResumeFailedError({
+              driver: session.driver,
+              providerThreadId: providerThread.id,
+              detail: resumeFailure,
+            }),
+          });
+          return undefined;
+        }
         yield* Effect.logWarning("Provider resume failed; attempting a fresh native session", {
           driver: session.driver,
           providerThreadId: providerThread.id,
           runId,
-          reason: uncertainDelivery ? "uncertain_history_delivery" : "resume_failed",
+          reason: uncertainDelivery ? "uncertain_history_delivery" : "native_thread_missing",
           errorTag: resumed.failure._tag,
+          error: resumeFailure,
         });
         const replacement = yield* loadFromProvider(
           session.ensureThread({
@@ -769,10 +807,42 @@ export const layer: Layer.Layer<
                 status: "resolved_portable",
                 resolution: { strategy: "portable_context", contextHandoffId: handoff.id },
                 createdBy: "system",
-                error: null,
+                error: resumeFailure,
                 createdAt,
                 updatedAt: createdAt,
                 consumedAt: null,
+              },
+            },
+            {
+              id: yield* idAllocator.allocate.event({ threadId: projection.thread.id }),
+              type: "turn-item.updated",
+              threadId: projection.thread.id,
+              runId: run.id,
+              nodeId: rootNode.id,
+              providerInstanceId: run.providerInstanceId,
+              occurredAt: createdAt,
+              payload: {
+                id: idAllocator.derive.runSignalTurnItem({
+                  runId: run.id,
+                  signal: "provider-resume-fallback",
+                }),
+                threadId: projection.thread.id,
+                runId: run.id,
+                nodeId: rootNode.id,
+                providerThreadId: providerThread.id,
+                providerTurnId: null,
+                nativeItemRef: null,
+                parentItemId: null,
+                ordinal: run.ordinal * 100 - 1,
+                status: "completed",
+                title: "Started a new provider conversation",
+                message: uncertainDelivery
+                  ? "An earlier history handoff may not have reached the provider conversation, so this turn starts a new one with a summary of this thread."
+                  : "The provider no longer has this conversation, so this turn starts a new one with a summary of this thread.",
+                startedAt: createdAt,
+                completedAt: createdAt,
+                updatedAt: createdAt,
+                type: "system_notice",
               },
             },
           ],
@@ -1287,6 +1357,14 @@ export const layer: Layer.Layer<
             isProviderTurnStartError(cause)
               ? cause
               : new ProviderTurnStartError({ runId: input.runId, cause }),
+          ),
+          Effect.tapError((cause) =>
+            queuedRunWatchdog.recordVcsFailure({
+              threadId: input.threadId,
+              runId: input.runId,
+              phase: "start",
+              cause,
+            }),
           ),
         ),
     });

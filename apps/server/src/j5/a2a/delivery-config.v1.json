@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "alarmAfterAttempts": 3,
+  "initialBackoffMs": 250,
+  "maximumBackoffMs": 5000
+}

@@ -1,0 +1,50 @@
+import * as Effect from "effect/Effect";
+import * as Migrator from "effect/sql/Migrator";
+import * as SqlClient from "effect/sql/SqlClient";
+import { migrationEntries } from "../../../persistence/Migrations.ts";
+
+const run = Migrator.make({});
+
+/**
+ * A database created at pin 67a2be0fdb: upstream's 1–53, then `54 = OrchestrationV2` and
+ * `55 = RemoveRedundantProjectionIndexes`. Upstream's 055 and 056 are those two migrations
+ * unchanged (the migration audit enforces this), so they reproduce the pin schema exactly.
+ */
+export const installPin = Effect.fn("test.installPin")(function* (
+  createdAt = "2026-09-26 20:29:48",
+) {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`PRAGMA foreign_keys = ON`;
+  yield* run({
+    loader: Migrator.fromRecord(
+      Object.fromEntries(
+        migrationEntries
+          .filter(([id]) => id <= 53 || id === 55 || id === 56)
+          .map(([id, name, migration]) => [`${id >= 55 ? id - 1 : id}_${name}`, migration]),
+      ),
+    ),
+  });
+  yield* sql`UPDATE effect_sql_migrations SET created_at = ${createdAt}`;
+});
+
+/** Where each retired history recorded V2, after upstream's migrations below that id. */
+export const retiredHistories = [
+  ["August", 41],
+  ["September", 48],
+  ["pin 62aef8587c", 51],
+] as const;
+
+/** The recorded history of a retired database. Its V2 tables are not rebuilt: it is only refused. */
+export const installRetired = Effect.fn("test.installRetired")(function* (v2Id: number) {
+  const sql = yield* SqlClient.SqlClient;
+  yield* run({
+    loader: Migrator.fromRecord(
+      Object.fromEntries(
+        migrationEntries
+          .filter(([id]) => id < v2Id)
+          .map(([id, name, migration]) => [`${id}_${name}`, migration]),
+      ),
+    ),
+  });
+  yield* sql`INSERT INTO effect_sql_migrations (migration_id, name) VALUES (${v2Id}, 'OrchestrationV2')`;
+});

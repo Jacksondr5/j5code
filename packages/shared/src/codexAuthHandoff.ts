@@ -1,5 +1,6 @@
 import { EnvironmentId, ProviderInstanceId } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
+import { J5_BRANDING } from "../../../scripts/lib/j5-branding.ts";
 import { providerAuthReturnUrl } from "./providerAuthReturnUrl.ts";
 
 export const CodexAuthHandoff = Schema.Struct({
@@ -84,8 +85,11 @@ export function codexCallbackUrl(value: string, redirectUri: string, state: stri
   return callback;
 }
 
+const handoffScheme = (development: boolean) =>
+  development ? J5_BRANDING.desktop.developmentScheme : J5_BRANDING.desktop.productionScheme;
+
 export function codexAuthHandoffUrl(input: CodexAuthHandoff, development = false) {
-  const url = new URL(`${development ? "t3code-dev" : "t3code"}://auth/codex`);
+  const url = new URL(`${handoffScheme(development)}://auth/codex`);
   url.searchParams.set("request", encodeHandoff(input));
   return url.toString();
 }
@@ -95,7 +99,7 @@ export function readCodexAuthHandoff(value: string, development: boolean) {
     const url = new URL(value);
     if (
       value.length > 32_768 ||
-      url.protocol !== (development ? "t3code-dev:" : "t3code:") ||
+      url.protocol !== `${handoffScheme(development)}:` ||
       url.host !== "auth" ||
       url.pathname !== "/codex" ||
       url.username ||
@@ -118,7 +122,7 @@ export function codexAuthDeliveryUrl(input: CodexAuthHandoff, callbackUrl: strin
   const request = codexAuthorizationRequest(input.authorizationUrl);
   codexCallbackUrl(callbackUrl, request.redirectUri, request.state);
   const destination = providerAuthReturnUrl(input.returnUrl);
-  if (!destination) throw new Error("Invalid T3 Code return address.");
+  if (!destination) throw new Error("Invalid J5 Code return address.");
   const url = new URL(destination);
   const delivery = {
     environmentId: input.environmentId,

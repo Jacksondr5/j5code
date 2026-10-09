@@ -97,7 +97,7 @@ import * as AcpSessionRuntime from "../../provider/acp/AcpSessionRuntime.ts";
 import {
   t3AcpPromptWithInstructions,
   type T3AcpInstructionState,
-} from "@t3tools/provider-core/server/orchestrationInstructions";
+} from "../../j5/orchestrationInstructions.ts";
 import { buildRuntimeInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import { type ProviderContinuationRequest } from "@t3tools/provider-core/server/continuationRequests";
@@ -5539,8 +5539,8 @@ export function makeAcpAdapterV2(
               Effect.fail(
                 EffectAcpErrors.AcpRequestError.internalError(
                   disposition === "ask"
-                    ? `The active T3 runtime policy requires approval for ${operation}. Request permission with session/request_permission before retrying.`
-                    : `The active T3 runtime policy does not allow ${operation}.`,
+                    ? `The active J5 runtime policy requires approval for ${operation}. Request permission with session/request_permission before retrying.`
+                    : `The active J5 runtime policy does not allow ${operation}.`,
                 ),
               ),
             ),

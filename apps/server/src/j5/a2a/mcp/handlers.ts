@@ -1,0 +1,1097 @@
+import { isAgentPersonaReasoningOptionId, type ModelSelection } from "@t3tools/contracts";
+import { playbookHandlers } from "../../playbooks/mcp.ts";
+import { playbookWorkspaceRoot } from "../../playbooks/workspace.ts";
+import * as Crypto from "effect/Crypto";
+import * as Data from "effect/Data";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Result from "effect/Result";
+
+import {
+  McpInvocationContext,
+  type McpThreadInvocationScope,
+  requireThreadScope,
+} from "../../../mcp/McpInvocationContext.ts";
+import * as McpToolAccess from "../../../mcp/McpToolAccess.ts";
+import { OrchestratorMcpService } from "../../../mcp/OrchestratorMcpService.ts";
+import { OrchestratorV2 } from "../../../orchestration-v2/Orchestrator.ts";
+import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
+import { ProviderRegistry } from "../../../provider/ProviderRegistry.ts";
+import { makeAgentPersonaLibrary } from "../../agents/agentPersonaLibrary.ts";
+import { buildAgentPersonaCatalog } from "../../agents/agentPersonaRouting.ts";
+import { translateAgentPersonaProviderPolicy } from "../../agents/agentPersonaProviderPolicy.ts";
+import { prepareAgentPersonaPeerSpawn } from "../../agents/agentPersonaSpawn.ts";
+import { AgentCrewInstanceService } from "../AgentCrewInstanceService.ts";
+import type { ArchiveAgentConsequenceFacts } from "../ArchiveAgentService.ts";
+import {
+  ArchiveCrewConfirmationRequiredError,
+  ArchiveCrewConfirmationStaleError,
+  ArchiveCrewPartialFailureError,
+  ArchiveCrewService,
+  type ArchiveCrewConsequenceFacts,
+} from "../ArchiveCrewService.ts";
+import {
+  CrewProposalService,
+  type CrewProposalError,
+  type CrewProposalOutcome,
+} from "../CrewProposalService.ts";
+import { CrewStopService } from "../CrewStopService.ts";
+import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
+import { A2AHomeRegistrar, participantIdForThread } from "../HomeRegistrar.ts";
+import { A2ALedger } from "../LedgerService.ts";
+import { PeerDirectory } from "../PeerDirectory.ts";
+import { ParticipantPlacementService } from "../PlacementService.ts";
+import { withDeliveryNotice } from "../receiverBacklog.ts";
+import { A2ASendService } from "../SendService.ts";
+import { stopThread } from "../stopThread.ts";
+import { SpawnCompositionService } from "../SpawnCompositionService.ts";
+import {
+  SpawnWorkspaceService,
+  namedBaseRefs,
+  namedWorktreePaths,
+  resolveSpawnWorkspace,
+  spawnCreateCommandId,
+  spawnThreadCheckout,
+} from "../spawnWorkspace.ts";
+import { ThreadRegistration } from "../ThreadRegistration.ts";
+import {
+  crewSeatRequestKey,
+  lifecycleCommandId,
+  spawnFirstTurnText,
+  spawnHomeCommandId,
+  spawnMessageId,
+  spawnPlacementCommandId,
+  spawnThreadId,
+  spawnTitle,
+  stablePart,
+} from "../spawnIds.ts";
+import { CommCommandId, type ParticipantDirectoryRow } from "../contracts.ts";
+import type { ParticipantProvenanceView } from "../placementContracts.ts";
+import {
+  J5Toolkit,
+  type J5ArchiveCrewFailure,
+  type J5McpFailure,
+  type J5ProposeCrewInput,
+  spawnWorkspaceFromInput,
+} from "./tools.ts";
+
+class J5AgentToolStateError extends Data.TaggedError("J5AgentToolStateError")<{
+  readonly state: string;
+  readonly nextCommand: string;
+}> {
+  override get message(): string {
+    return `${this.state} ${this.nextCommand}`;
+  }
+}
+
+const failure = (error: unknown): J5McpFailure => ({
+  code:
+    typeof error === "object" && error !== null && "_tag" in error
+      ? String(error._tag)
+      : "J5A2AError",
+  message: error instanceof Error ? error.message : String(error),
+});
+
+const projectArchiveFacts = (facts: ArchiveAgentConsequenceFacts) => ({
+  open_exchanges: facts.openExchanges.map((exchange) => ({
+    exchange_id: exchange.exchangeId,
+    direction: exchange.direction,
+    reply_obligation: exchange.replyObligation,
+    counterparty_id: exchange.counterpartyId,
+    intent: exchange.intent,
+    urgency: exchange.urgency,
+    opened_at: exchange.openedAt,
+  })),
+  running_turn:
+    facts.runningTurn === null
+      ? null
+      : { run_id: facts.runningTurn.runId, status: facts.runningTurn.status },
+});
+
+const projectCrewArchiveFacts = (facts: ArchiveCrewConsequenceFacts) => ({
+  members: facts.members.map((member) => ({
+    seat: member.seatName,
+    participant_id: member.participantId,
+    already_archived: member.alreadyArchived,
+    ...projectArchiveFacts(member.facts),
+  })),
+});
+
+const archiveCrewFailure = (error: unknown): J5ArchiveCrewFailure => {
+  const base = failure(error);
+  if (
+    error instanceof ArchiveCrewConfirmationRequiredError ||
+    error instanceof ArchiveCrewConfirmationStaleError
+  ) {
+    return {
+      ...base,
+      ...projectCrewArchiveFacts(error.facts),
+      confirmation_token: error.confirmationToken,
+    };
+  }
+  if (error instanceof ArchiveCrewPartialFailureError) {
+    return {
+      ...base,
+      archived_seats: [...error.archivedSeats],
+      failed_seat: error.failedSeat,
+    };
+  }
+  return base;
+};
+
+const projectProvenance = (provenance: ParticipantProvenanceView) => {
+  switch (provenance.kind) {
+    case "spawned-by":
+      return {
+        kind: provenance.kind,
+        spawned_by_participant_id: provenance.spawnedByParticipantId,
+        source: provenance.source,
+      } as const;
+    case "forked-from":
+      return {
+        kind: provenance.kind,
+        source_participant_id: provenance.sourceParticipantId,
+        source: provenance.source,
+      } as const;
+    default:
+      return provenance;
+  }
+};
+
+export const commandIdForRequest = (input: {
+  readonly toolName: "send_message" | "clear_own_ask";
+  readonly providerSessionId: string;
+  readonly requestKey: string;
+}) => {
+  return CommCommandId.make(
+    `command:j5:a2a:mcp:${stablePart(input.providerSessionId)}:${stablePart(input.toolName)}:${stablePart(input.requestKey)}`,
+  );
+};
+
+type AgentDirectoryRow = ParticipantDirectoryRow & {
+  readonly participant: Extract<ParticipantDirectoryRow["participant"], { readonly kind: "agent" }>;
+};
+
+const stateError = (state: string, nextCommand: string) =>
+  new J5AgentToolStateError({ state, nextCommand });
+
+/**
+ * The calling thread's scope. Every handler that reads it is declared `readsAsCaller` or
+ * `actsAsCaller` below, which refuses a caller without a thread before the handler runs.
+ */
+const callerScope = McpInvocationContext.pipe(
+  Effect.flatMap((scope) => requireThreadScope(scope, "This tool")),
+);
+
+const resolveCallerMembership = Effect.fn("j5.a2a.mcp.resolveCallerMembership")(function* (
+  scope: McpThreadInvocationScope,
+) {
+  const directory = yield* (yield* A2ASendService)
+    .listParticipants(scope.thread.threadId)
+    .pipe(
+      Effect.mapError((error) =>
+        stateError(
+          `Caller thread ${scope.thread.threadId} has no usable membership in its project: ${error instanceof Error ? error.message : String(error)}.`,
+          "Call list_participants to inspect current membership before retrying.",
+        ),
+      ),
+    );
+  const memberships = directory.filter(
+    (row): row is AgentDirectoryRow =>
+      row.participant.kind === "agent" && row.participant.threadId === scope.thread.threadId,
+  );
+  if (memberships.length === 0) {
+    return yield* stateError(
+      `Caller membership is missing for thread ${scope.thread.threadId}.`,
+      "Call list_participants to inspect current membership before retrying.",
+    );
+  }
+  if (memberships.length !== 1) {
+    return yield* stateError(
+      `Caller membership for thread ${scope.thread.threadId} is ambiguous across projects ${memberships.map((row) => row.projectId).join(", ")}.`,
+      "Call list_participants to inspect current membership before retrying.",
+    );
+  }
+  return memberships[0]!;
+});
+
+const preflightSpawnCaller = Effect.fn("j5.a2a.mcp.preflightSpawnCaller")(function* (
+  scope: McpThreadInvocationScope,
+) {
+  const ledger = yield* A2ALedger;
+  // A thread from before every thread registered at creation registers here, on its first call.
+  const home = yield* (yield* ThreadRegistration)
+    .ensureRegistered(scope.thread.threadId)
+    .pipe(
+      Effect.mapError((error) =>
+        stateError(
+          `Caller thread ${scope.thread.threadId} could not be registered in its project: ${error instanceof Error ? error.message : String(error)}.`,
+          "Retry spawn_agent; if it keeps failing, tell the human.",
+        ),
+      ),
+    );
+  if (home === null) {
+    return yield* stateError(
+      `Caller thread ${scope.thread.threadId} is a Subagent and is not an agent-to-agent participant.`,
+      "Return your result to the agent that started you; it can spawn agents.",
+    );
+  }
+  const project = yield* ledger
+    .readProjectLedger(home.projectId)
+    .pipe(
+      Effect.mapError((error) =>
+        stateError(
+          `Caller thread ${scope.thread.threadId} is registered in project ${home.projectId}, but that project's ledger is unavailable: ${error instanceof Error ? error.message : String(error)}.`,
+          "Tell the human before retrying spawn_agent.",
+        ),
+      ),
+    );
+  const membership = yield* resolveCallerMembership(scope);
+  if (membership.projectId !== home.projectId || membership.participantId !== home.participantId) {
+    return yield* stateError(
+      `Caller thread ${scope.thread.threadId} is registered as ${home.projectId}/${home.participantId}, but its current membership is ${membership.projectId}/${membership.participantId}.`,
+      "Call list_participants to inspect current membership, then ask the human to repair the mismatch before retrying spawn_agent.",
+    );
+  }
+  return { ...membership, project };
+});
+
+const selectSpawnModel = Effect.fn("j5.a2a.mcp.selectSpawnModel")(function* (
+  scope: McpThreadInvocationScope,
+  input: { readonly provider: string; readonly model: string; readonly reasoning: string },
+) {
+  const capabilities = yield* (yield* OrchestratorMcpService)
+    .capabilities(scope)
+    .pipe(
+      Effect.mapError((error) =>
+        stateError(
+          `Provider capabilities are unavailable for spawn_agent: ${error.message}.`,
+          "Call orchestrator_capabilities, choose an available provider, model, and reasoning option, then retry spawn_agent.",
+        ),
+      ),
+    );
+  const provider = capabilities.providers.find(
+    (candidate) => candidate.providerInstanceId === input.provider,
+  );
+  if (provider === undefined) {
+    return yield* stateError(
+      `Provider ${input.provider} is not present in current orchestrator capabilities.`,
+      "Call orchestrator_capabilities and retry spawn_agent with a listed provider.",
+    );
+  }
+  if (provider.constraints.length > 0) {
+    return yield* stateError(
+      `Provider ${input.provider} is currently unavailable: ${provider.constraints.join(" ")}`,
+      "Call orchestrator_capabilities and retry spawn_agent with an unconstrained provider.",
+    );
+  }
+  const model = provider.models.find((candidate) => candidate.id === input.model);
+  if (model === undefined) {
+    return yield* stateError(
+      `Model ${input.model} is not listed for provider ${input.provider}.`,
+      "Call orchestrator_capabilities and retry spawn_agent with a model listed for that provider.",
+    );
+  }
+  const reasoningDescriptor = model.options?.find(
+    (descriptor) => descriptor.type === "select" && isAgentPersonaReasoningOptionId(descriptor.id),
+  );
+  if (reasoningDescriptor === undefined || reasoningDescriptor.type !== "select") {
+    return yield* stateError(
+      `Model ${input.model} on provider ${input.provider} exposes no reasoning options; spawn_agent requires explicit reasoning selection.`,
+      "Call orchestrator_capabilities and choose a model that exposes reasoning options before retrying spawn_agent.",
+    );
+  }
+  if (!reasoningDescriptor.options.some((option) => option.id === input.reasoning)) {
+    return yield* stateError(
+      `Reasoning ${input.reasoning} is not listed for model ${input.model} on provider ${input.provider}.`,
+      `Call orchestrator_capabilities and retry spawn_agent with one of: ${reasoningDescriptor.options.map((option) => option.id).join(", ")}.`,
+    );
+  }
+  return {
+    instanceId: provider.providerInstanceId,
+    model: model.id,
+    options: [{ id: reasoningDescriptor.id, value: input.reasoning }],
+  } satisfies ModelSelection;
+});
+
+/**
+ * A Role-ful spawn keeps the explicit provider/model/reasoning pick; the saved agent's declared
+ * routes constrain it and its authority policy becomes the child's runtime mode. A child's
+ * permissions come from its own saved agent's policy or from the human's approval, never from
+ * the parent: J5 carries no parent-child permission ceiling (Jackson, 2026-09-16), because any
+ * such guard is one message to a trusting peer away from bypass and every child-creation door
+ * would have to enforce it identically.
+ */
+const prepareSpawnPersona = Effect.fn("j5.a2a.mcp.prepareSpawnPersona")(function* (
+  input: {
+    readonly persona: string;
+    readonly provider: string;
+    readonly model: string;
+    readonly reasoning: string;
+  },
+  modelSelection: ModelSelection,
+) {
+  const library = yield* makeAgentPersonaLibrary;
+  const providers = yield* (yield* ProviderRegistry).getProviders;
+  const assignment = yield* prepareAgentPersonaPeerSpawn(
+    {
+      personaId: input.persona,
+      provider: providers.find((candidate) => candidate.instanceId === modelSelection.instanceId),
+      instanceId: modelSelection.instanceId,
+      model: input.model,
+      reasoning: input.reasoning,
+    },
+    library,
+  ).pipe(
+    Effect.mapError((error) =>
+      stateError(
+        `Persona ${input.persona} cannot be spawned as requested: ${error.message}`,
+        "Call orchestrator_capabilities, then retry spawn_agent with a provider, model, and reasoning from that persona's declared routes, or omit persona for a plain Peer Agent.",
+      ),
+    ),
+  );
+  const policy = translateAgentPersonaProviderPolicy(
+    assignment.authorityPolicy,
+    assignment.resolvedDriver,
+  );
+  return {
+    assignment,
+    modelSelection: assignment.resolvedModelSelection,
+    runtimeMode: policy.runtimeMode,
+  };
+});
+
+/** Crew requests come from a Peer Agent with a home that is not itself a crew member (R20). */
+const preflightCrewCaptain = Effect.fn("j5.a2a.mcp.preflightCrewCaptain")(function* (
+  scope: McpThreadInvocationScope,
+  command: "propose_crew" | "request_crew_member",
+) {
+  const caller = yield* preflightSpawnCaller(scope);
+  const membership = yield* (yield* AgentCrewInstanceService)
+    .findMembership(caller.participantId)
+    .pipe(
+      Effect.mapError((error) =>
+        stateError(
+          `Crew membership for ${caller.participantId} cannot be read: ${error.message}.`,
+          `Retry ${command} once crew records are readable.`,
+        ),
+      ),
+    );
+  if (membership !== null) {
+    return yield* stateError(
+      `Caller ${caller.participantId} is seat ${membership.seatName} of crew ${membership.crewInstanceId}; crew members cannot request crews or seats.`,
+      "Send your Captain an ask describing the extra hands you need.",
+    );
+  }
+  const parent = yield* (yield* ThreadManagementService)
+    .getThreadProjection(scope.thread.threadId)
+    .pipe(
+      Effect.mapError((error) =>
+        stateError(
+          `Caller thread ${scope.thread.threadId} cannot be read for ${command}: ${error.message}.`,
+          `Read the caller thread state and retry ${command} after it is available.`,
+        ),
+      ),
+    );
+  return {
+    projectId: caller.projectId,
+    projectTitle: caller.project.name,
+    participantId: caller.participantId,
+    thread: parent.thread,
+  };
+});
+
+const crewProposalNextStep = (error: CrewProposalError) =>
+  error._tag === "CrewProposalRequestError"
+    ? error.nextStep
+    : error._tag === "CrewLaunchSeatUnavailableError"
+      ? "Choose a different persona from list_personas or ask the user to fix that persona, then retry."
+      : error._tag === "CrewLaunchCapError"
+        ? "The crew is full. Work with the seats it has, or propose a new crew for the extra work."
+        : error._tag === "CrewLaunchSeatConflictError"
+          ? "Choose a seat name the crew does not already use, then retry."
+          : error._tag === "CrewStepAlreadyOwnedError"
+            ? "Claim only steps no seat owns yet, then retry."
+            : "Retry with the same client_request_id; recovery is forward-only.";
+
+const projectCrewProposal = (outcome: CrewProposalOutcome) => ({
+  proposal_id: outcome.proposal.id,
+  status: outcome.proposal.status,
+  crew_instance_id: outcome.instance?.id ?? null,
+  members: (outcome.instance?.members ?? []).map((member) => ({
+    seat: member.seatName,
+    persona_id: member.agentId,
+    participant_id: member.participantId,
+    thread_id: member.threadId,
+  })),
+  ...(outcome.playbook == null
+    ? {}
+    : {
+        playbook: {
+          name: outcome.playbook.name,
+          title: outcome.playbook.title,
+          unowned_steps: outcome.playbook.unownedSteps,
+          persona_swaps: outcome.playbook.swaps.map(({ seat, swap }) => ({
+            seat,
+            step_id: swap.stepId,
+            wanted_persona: swap.wanted,
+            seat_persona: swap.seatPersona,
+            wanted_problem: swap.wantedProblem,
+          })),
+        },
+      }),
+});
+
+/** One propose_crew seat as the proposal service takes it; unset fields stay unset. */
+export const crewSeatFromInput = (seat: J5ProposeCrewInput["seats"][number]) => ({
+  seat: seat.seat,
+  agentId: seat.persona ?? null,
+  reason: seat.reason,
+  ...(seat.instructions === undefined ? {} : { instructions: seat.instructions }),
+  ...(seat.model_selection === undefined ? {} : { modelSelection: seat.model_selection }),
+  ...(seat.runtime_mode === undefined ? {} : { runtimeMode: seat.runtime_mode }),
+  ...(seat.steps === undefined ? {} : { steps: seat.steps }),
+  workspace: spawnWorkspaceFromInput(seat.workspace),
+});
+
+const handlers = {
+  ...playbookHandlers,
+  send_message: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* callerScope;
+      // The send below registers a caller that has no home yet and refuses a Subagent.
+      const callerParticipantId = yield* (yield* A2AHomeRegistrar)
+        .getHomeForThread(scope.thread.threadId)
+        .pipe(
+          Effect.map((home) => home.participantId),
+          Effect.catchTags({
+            A2AHomeNotFoundError: () =>
+              Effect.succeed(participantIdForThread(scope.thread.threadId)),
+          }),
+        );
+      if (input.to === callerParticipantId) {
+        return yield* stateError(
+          `send_message cannot target your own participant_id ${callerParticipantId}; self-messaging is not supported.`,
+          "Call list_participants to find the intended recipient, or use schedule_task if you need a future trigger for yourself.",
+        );
+      }
+      const crypto = yield* Crypto.Crypto;
+      const service = yield* A2ASendService;
+      const worker = yield* A2ADeliveryWorker;
+      const acceptedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
+      const requestKey = input.client_request_id ?? (yield* crypto.randomUUIDv4);
+      const result = yield* service.send({
+        commandId: commandIdForRequest({
+          toolName: "send_message",
+          providerSessionId: scope.thread.providerSessionId,
+          requestKey,
+        }),
+        senderThreadId: scope.thread.threadId,
+        to: input.to,
+        message: input.message,
+        ...(input.expect_reply == null ? {} : { expectReply: input.expect_reply }),
+        ...(input.exchange_id == null ? {} : { exchangeId: input.exchange_id }),
+        ...(input.intent == null ? {} : { intent: input.intent }),
+        ...(input.urgency == null ? {} : { urgency: input.urgency }),
+        acceptedAt,
+      });
+      yield* worker.notify;
+      return yield* withDeliveryNotice(result, {
+        receiverId: input.to,
+        callerThreadId: scope.thread.threadId,
+      });
+    }).pipe(Effect.mapError(failure)),
+  ),
+  clear_own_ask: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* callerScope;
+      const service = yield* A2ASendService;
+      const acceptedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
+      const cleared = yield* service.clearOwnAsk({
+        commandId: commandIdForRequest({
+          toolName: "clear_own_ask",
+          providerSessionId: scope.thread.providerSessionId,
+          requestKey: input.client_request_id,
+        }),
+        senderThreadId: scope.thread.threadId,
+        exchangeId: input.exchange_id,
+        acceptedAt,
+      });
+      // A withdrawal addressed to a peer is a pending delivery; wake the worker as a send does.
+      const { withdrawalQueued, ...result } = cleared;
+      if (withdrawalQueued) yield* (yield* A2ADeliveryWorker).notify;
+      return result;
+    }).pipe(Effect.mapError(failure)),
+  ),
+  list_participants: McpToolAccess.readsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* callerScope;
+      const service = yield* A2ASendService;
+      const orchestrator = yield* OrchestratorV2;
+      const includeArchived = input.include_archived ?? false;
+      const directory = yield* service.listParticipants(scope.thread.threadId, includeArchived);
+      // A project's title beside its id places a participant. Titles are
+      // enrichment: a read that fails leaves them null rather than taking the
+      // address book with it.
+      const projectTitles = new Map(
+        (yield* (yield* A2ALedger).listProjectLedgers().pipe(Effect.orElseSucceed(() => []))).map(
+          (project) => [project.id, project.name] as const,
+        ),
+      );
+      // Agents on peer servers sit beside local ones. Once this server has
+      // a peer, every row names the server it lives on; with none, no row does.
+      // A peer that did not answer is reported, never omitted.
+      const remote = yield* (yield* PeerDirectory).listAgents();
+      const localServer =
+        remote.selfName === null ? {} : { server: { name: remote.selfName, local: true } };
+      const placements = yield* ParticipantPlacementService;
+      const projectIds = [...new Set(directory.map((row) => row.projectId))];
+      const placementRows = (yield* Effect.forEach(
+        projectIds,
+        (projectId) => placements.listParticipants(projectId),
+        { concurrency: 1 },
+      )).flat();
+      const placementByParticipant = new Map(
+        placementRows.map((row) => [`${row.projectId}\u0000${row.participantId}`, row] as const),
+      );
+      const snapshot = yield* Effect.option(orchestrator.getShellSnapshot());
+      const titleByThreadId = new Map(
+        Option.match(snapshot, {
+          onNone: () => [],
+          onSome: ({ archivedThreads, threads }) =>
+            [...threads, ...archivedThreads].map((thread) => [thread.id, thread.title] as const),
+        }),
+      );
+      const remoteRows = remote.agents
+        .filter((agent) => includeArchived || !agent.archived)
+        .map((agent) => ({
+          project_id: agent.projectId,
+          project_title: agent.projectTitle,
+          participant_id: agent.participantId,
+          participant: {
+            kind: "agent" as const,
+            id: agent.participantId,
+            thread_id: agent.threadId,
+          },
+          self: false,
+          archived: agent.archived,
+          can_receive_message: !agent.archived && agent.canReceiveMessage,
+          can_open_exchange: !agent.archived && agent.canReceiveMessage,
+          accepts_urgency: false,
+          thread_id: agent.threadId,
+          provenance: projectProvenance({ kind: "unrecorded" } as const),
+          placement_parent_id: null,
+          display_name: agent.displayName,
+          server: {
+            name: agent.environmentLabel,
+            local: false,
+            // Only a server that polls this one has its availability measured.
+            ...(agent.available === null ? {} : { available: agent.available }),
+            ...(agent.available === null || agent.lastAvailableAt === null
+              ? {}
+              : { last_available_at: agent.lastAvailableAt }),
+          },
+        }));
+      return {
+        unread_peer_count: remote.unreadPeers.length,
+        participants: directory
+          .map((row) => {
+            const placement = placementByParticipant.get(
+              `${row.projectId}\u0000${row.participantId}`,
+            );
+            const self =
+              row.participant.kind === "agent" &&
+              row.participant.threadId === scope.thread.threadId;
+            return {
+              project_id: row.projectId,
+              project_title: projectTitles.get(row.projectId) ?? null,
+              participant_id: row.participantId,
+              participant:
+                row.participant.kind === "agent"
+                  ? {
+                      kind: row.participant.kind,
+                      id: row.participant.id,
+                      thread_id: row.participant.threadId,
+                    }
+                  : row.participant,
+              self,
+              archived: row.archived,
+              can_receive_message: !self && row.canReceiveMessage,
+              can_open_exchange: !self && row.canOpenExchange,
+              accepts_urgency: row.acceptsUrgency,
+              thread_id: row.participant.kind === "agent" ? row.participant.threadId : null,
+              provenance: projectProvenance(
+                placement?.provenance ??
+                  (row.participant.kind !== "agent"
+                    ? ({ kind: "not-applicable" } as const)
+                    : ({ kind: "unrecorded" } as const)),
+              ),
+              placement_parent_id: placement?.placementParentId ?? null,
+              display_name:
+                row.participant.kind === "agent"
+                  ? (titleByThreadId.get(row.participant.threadId) ?? null)
+                  : row.participant.kind === "machine"
+                    ? row.participant.name
+                    : null,
+              ...localServer,
+            };
+          })
+          .concat(remoteRows),
+      };
+    }).pipe(Effect.mapError(failure)),
+  ),
+  spawn_agent: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* callerScope;
+      const crypto = yield* Crypto.Crypto;
+      const caller = yield* preflightSpawnCaller(scope);
+      // Only a Captain grows a Crew, and only through the human gate (Bryant, 2026-09-14): a seat
+      // that wants more hands escalates to its Captain; its own helpers are subagents.
+      const membership = yield* (yield* AgentCrewInstanceService)
+        .findMembership(caller.participantId)
+        .pipe(
+          Effect.mapError((error) =>
+            stateError(
+              `Crew membership for ${caller.participantId} cannot be read: ${error.message}.`,
+              "Retry spawn_agent once crew records are readable.",
+            ),
+          ),
+        );
+      if (membership !== null) {
+        return yield* stateError(
+          `Caller ${caller.participantId} is seat ${membership.seatName} of crew ${membership.crewInstanceId}; crew members cannot spawn Peer Agents.`,
+          "Ask your Captain for the seat with send_message, or run the work yourself as a subagent with delegate_task.",
+        );
+      }
+      const selected = yield* selectSpawnModel(scope, input);
+      const threadManagement = yield* ThreadManagementService;
+      const parent = yield* threadManagement
+        .getThreadProjection(scope.thread.threadId)
+        .pipe(
+          Effect.mapError((error) =>
+            stateError(
+              `Caller thread ${scope.thread.threadId} cannot be read for spawn_agent: ${error.message}.`,
+              "Read the caller thread state and retry spawn_agent after it is available.",
+            ),
+          ),
+        );
+      const personaId = input.persona;
+      const persona =
+        personaId === undefined
+          ? undefined
+          : yield* prepareSpawnPersona({ ...input, persona: personaId }, selected);
+      const modelSelection = persona?.modelSelection ?? selected;
+      const requestKey = input.client_request_id ?? (yield* crypto.randomUUIDv4);
+      const stableInput = {
+        providerSessionId: scope.thread.providerSessionId,
+        requestKey,
+      };
+      const threadId = spawnThreadId(stableInput);
+      const spawnWorkspace = yield* SpawnWorkspaceService;
+      const choice = spawnWorkspaceFromInput(input.workspace);
+      // A replay must not refuse the branch its own first attempt created, so a named branch is
+      // checked for only before the thread exists.
+      const checkBranches =
+        choice.type === "worktree" &&
+        choice.branch !== undefined &&
+        (yield* threadManagement
+          .getThreadShell(threadId)
+          .pipe(Effect.orElseSucceed(() => null))) === null;
+      // Sharing the caller's checkout asks nothing of git.
+      const checkout =
+        choice.type === "shared"
+          ? null
+          : yield* spawnWorkspace.inspect({
+              projectId: parent.thread.projectId,
+              worktreePath: parent.thread.worktreePath,
+              checkBranches,
+              baseRefs: namedBaseRefs([choice]),
+              existingWorktreePaths: namedWorktreePaths([choice]),
+            });
+      const workspace = yield* Effect.fromResult(
+        checkout === null
+          ? Result.succeed({ type: "shared" } as const)
+          : resolveSpawnWorkspace(checkout, choice),
+      ).pipe(
+        Effect.mapError((error) =>
+          stateError(`Peer Agent was not created: ${error.detail}`, error.nextStep),
+        ),
+      );
+      return yield* spawnWorkspace
+        .withSpawnStart(
+          { stableInput, threadId, workspace },
+          Effect.gen(function* () {
+            yield* threadManagement
+              .dispatch({
+                type: "thread.create",
+                createdBy: "agent",
+                creationSource: "mcp",
+                commandId: spawnCreateCommandId(stableInput, workspace.type),
+                threadId,
+                projectId: parent.thread.projectId,
+                title: spawnTitle(input.brief, input.title),
+                modelSelection,
+                runtimeMode: persona?.runtimeMode ?? parent.thread.runtimeMode,
+                interactionMode: parent.thread.interactionMode,
+                ...(persona === undefined ? {} : { agentPersonaAssignment: persona.assignment }),
+                ...spawnThreadCheckout(workspace, parent.thread),
+              })
+              .pipe(
+                Effect.mapError((error) =>
+                  stateError(
+                    `Peer Agent thread ${threadId} could not be created: ${error.message}.`,
+                    error._tag === "OrchestratorCommandPreviouslyRejectedError"
+                      ? "Inspect the rejection, correct the request, and retry spawn_agent with a fresh client_request_id; the rejected key is permanently bound."
+                      : "Inspect the caller thread and provider state, then retry spawn_agent with the same client_request_id.",
+                  ),
+                ),
+              );
+            const child = yield* threadManagement
+              .getThreadProjection(threadId)
+              .pipe(
+                Effect.mapError((error) =>
+                  stateError(
+                    `Created Peer Agent thread ${threadId} is not readable: ${error.message}.`,
+                    "Retry spawn_agent with the same client_request_id so registration can continue safely.",
+                  ),
+                ),
+              );
+            const facts = yield* (yield* SpawnCompositionService)
+              .recordFacts({
+                homeCommandId: spawnHomeCommandId(stableInput),
+                placementCommandId: spawnPlacementCommandId(stableInput),
+                projectId: caller.projectId,
+                threadId,
+                provenance: {
+                  kind: "spawned-by",
+                  spawnedByParticipantId: caller.participantId,
+                  source: "j5_spawn",
+                },
+                createdAt: DateTime.formatIso(child.thread.createdAt),
+              })
+              .pipe(
+                Effect.mapError((error) =>
+                  stateError(
+                    `Peer Agent thread ${threadId} exists as a visible orphan without committed home/placement facts or a started brief: ${error.message}.`,
+                    "Retry spawn_agent with the same client_request_id only after repairing transient state; otherwise ask the human operator to retire or repair the orphan after A9 lifecycle support lands.",
+                  ),
+                ),
+              );
+            if (
+              facts.placement.provenance.kind !== "spawned-by" ||
+              facts.placement.provenance.source !== "j5_spawn" ||
+              facts.placement.placementParentId === null
+            ) {
+              return yield* stateError(
+                `Peer Agent ${facts.home.participantId} committed placement facts that do not satisfy the J5 spawn contract.`,
+                "Call list_participants to inspect committed placement truth and ask the human operator to repair the inconsistent record.",
+              );
+            }
+            yield* spawnWorkspace
+              .startBrief({
+                workspace,
+                stableInput,
+                ledgerProjectId: facts.home.projectId,
+                projectId: parent.thread.projectId,
+                threadId,
+                title: spawnTitle(input.brief, input.title),
+                messageId: spawnMessageId(stableInput),
+                text: spawnFirstTurnText({
+                  brief: input.brief,
+                  participantId: facts.home.participantId,
+                  projectId: facts.home.projectId,
+                  projectTitle: caller.project.name,
+                  spawnedByParticipantId: caller.participantId,
+                  spawnerThreadId: scope.thread.threadId,
+                }),
+                modelSelection,
+                runtimeMode: persona?.runtimeMode ?? parent.thread.runtimeMode,
+                interactionMode: parent.thread.interactionMode,
+              })
+              .pipe(
+                Effect.mapError((error) =>
+                  stateError(
+                    `Peer Agent ${facts.home.participantId} is registered and addressable, but its brief did not start: ${error.message}.`,
+                    "Retry spawn_agent with the same client_request_id to start the same brief safely.",
+                  ),
+                ),
+              );
+            return {
+              participant_id: facts.home.participantId,
+              thread_id: threadId,
+              project_id: facts.home.projectId,
+              project_title: caller.project.name,
+              placement: {
+                placement_parent_id: facts.placement.placementParentId,
+                provenance: {
+                  kind: "spawned-by" as const,
+                  spawned_by_participant_id: facts.placement.provenance.spawnedByParticipantId,
+                  source: facts.placement.provenance.source,
+                },
+              },
+            };
+          }),
+        )
+        .pipe(
+          Effect.catchTags({
+            SpawnWorkspaceError: (error) =>
+              Effect.fail(
+                stateError(`Peer Agent was not created: ${error.detail}`, error.nextStep),
+              ),
+          }),
+        );
+    }).pipe(Effect.mapError(failure)),
+  ),
+  propose_crew: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* callerScope;
+      const crypto = yield* Crypto.Crypto;
+      const captain = yield* preflightCrewCaptain(scope, "propose_crew");
+      const requestKey = input.client_request_id ?? (yield* crypto.randomUUIDv4);
+      // The Captain's playbooks are the ones its own playbook_list shows.
+      const playbook =
+        input.playbook === undefined
+          ? undefined
+          : {
+              name: input.playbook,
+              workspaceRoot: yield* playbookWorkspaceRoot(captain.thread.id).pipe(
+                Effect.mapError((error) =>
+                  stateError(
+                    `Your playbook workspace could not be read: ${error.message}`,
+                    "Retry, or propose the crew without a playbook.",
+                  ),
+                ),
+              ),
+            };
+      const outcome = yield* (yield* CrewProposalService)
+        .propose({
+          requestKey: `${scope.thread.providerSessionId}:${requestKey}`,
+          captain,
+          displayName: input.name,
+          brief: input.brief,
+          ...(playbook === undefined ? {} : { playbook }),
+          seats: input.seats.map(crewSeatFromInput),
+        })
+        .pipe(Effect.mapError((error) => stateError(error.message, crewProposalNextStep(error))));
+      return projectCrewProposal(outcome);
+    }).pipe(Effect.mapError(failure)),
+  ),
+  request_crew_member: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* callerScope;
+      const crypto = yield* Crypto.Crypto;
+      const captain = yield* preflightCrewCaptain(scope, "request_crew_member");
+      const requestKey = input.client_request_id ?? (yield* crypto.randomUUIDv4);
+      const outcome = yield* (yield* CrewProposalService)
+        .requestMember({
+          requestKey: `${scope.thread.providerSessionId}:${requestKey}`,
+          captain,
+          crewInstanceId: input.crew_instance_id ?? null,
+          seat: {
+            seat: input.seat,
+            agentId: input.persona ?? null,
+            reason: input.reason,
+            ...(input.instructions === undefined ? {} : { instructions: input.instructions }),
+            ...(input.model_selection === undefined
+              ? {}
+              : { modelSelection: input.model_selection }),
+            ...(input.runtime_mode === undefined ? {} : { runtimeMode: input.runtime_mode }),
+            ...(input.steps === undefined ? {} : { steps: input.steps }),
+            workspace: spawnWorkspaceFromInput(input.workspace),
+          },
+          brief: input.brief ?? null,
+        })
+        .pipe(Effect.mapError((error) => stateError(error.message, crewProposalNextStep(error))));
+      return projectCrewProposal(outcome);
+    }).pipe(Effect.mapError(failure)),
+  ),
+  list_personas: McpToolAccess.reads(() =>
+    Effect.gen(function* () {
+      const library = yield* makeAgentPersonaLibrary;
+      const current = yield* library
+        .catalog()
+        .pipe(
+          Effect.mapError((error) =>
+            stateError(
+              `The persona library cannot be read: ${error.message}`,
+              "Ask the user to fix the persona library in Settings → Personas, then retry list_personas.",
+            ),
+          ),
+        );
+      const providers = yield* (yield* ProviderRegistry).getProviders;
+      const disabled = new Set(current.disabledIds);
+      const catalog = buildAgentPersonaCatalog(providers, current.definitions);
+      return {
+        personas: catalog.personas.map((persona) => {
+          const isDisabled = disabled.has(persona.personaId);
+          const available = !isDisabled && persona.availability.status === "available";
+          return {
+            id: persona.personaId,
+            display_name: persona.displayName,
+            description: persona.description,
+            runtime_policy: persona.defaultAuthorityPolicy,
+            availability: isDisabled
+              ? ("disabled" as const)
+              : available
+                ? ("available" as const)
+                : ("blocked" as const),
+            route:
+              persona.availability.status === "available" && !isDisabled
+                ? `${persona.availability.resolvedDriver} · ${persona.availability.resolvedModelSelection.model}${
+                    persona.availability.resolvedModelSelection.options?.[0]?.value === undefined
+                      ? ""
+                      : ` · ${persona.availability.resolvedModelSelection.options[0].value}`
+                  }`
+                : null,
+          };
+        }),
+      };
+    }).pipe(Effect.mapError(failure)),
+  ),
+  stop_agent: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* callerScope;
+      const crypto = yield* Crypto.Crypto;
+      // A participant id is looked up in the caller's project.
+      const caller = yield* resolveCallerMembership(scope);
+      const placements = yield* ParticipantPlacementService;
+      const matches = (yield* placements.listParticipants(caller.projectId)).filter(
+        (row) => row.participantId === input.participant_id,
+      );
+      if (matches.length !== 1) {
+        return yield* stateError(
+          `Your project has ${matches.length === 0 ? "no" : "an ambiguous"} participant ${input.participant_id}.`,
+          "Call list_participants and retry stop_agent with exactly one listed agent participant_id.",
+        );
+      }
+      const target = matches[0]!;
+      if (target.participant.kind !== "agent" || target.threadId === null) {
+        return yield* stateError(
+          `Participant ${input.participant_id} is not an agent with a thread and cannot be stopped.`,
+          "Call list_participants and retry stop_agent with an agent participant_id.",
+        );
+      }
+      const threadManagement = yield* ThreadManagementService;
+      const targetProjection = yield* threadManagement
+        .getThreadProjection(target.threadId)
+        .pipe(
+          Effect.mapError((error) =>
+            stateError(
+              `Peer Agent thread ${target.threadId} cannot be read for stop_agent: ${error.message}.`,
+              "Call list_participants to confirm the target thread, then retry stop_agent.",
+            ),
+          ),
+        );
+      const requestKey = input.client_request_id ?? (yield* crypto.randomUUIDv4);
+      const commandId = lifecycleCommandId({
+        providerSessionId: scope.thread.providerSessionId,
+        requestKey,
+        operation: "stop-agent",
+      });
+      // Upstream's Stop, delegated tasks included (see stopThread.ts).
+      yield* stopThread(threadManagement, { commandId, threadId: target.threadId }).pipe(
+        Effect.mapError((error) =>
+          stateError(
+            `Peer Agent ${input.participant_id} on thread ${target.threadId} could not be stopped: ${error.message}.`,
+            "Call list_participants to confirm the target, then retry stop_agent with the same client_request_id.",
+          ),
+        ),
+      );
+      return targetProjection.runs.some(
+        (run) =>
+          run.status === "preparing" || run.status === "starting" || run.status === "running",
+      )
+        ? ("interrupt_requested" as const)
+        : ("already_idle" as const);
+    }).pipe(Effect.mapError(failure)),
+  ),
+  stop_crew: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* callerScope;
+      const crypto = yield* Crypto.Crypto;
+      const caller = yield* resolveCallerMembership(scope);
+      const requestKey = input.client_request_id ?? (yield* crypto.randomUUIDv4);
+      const outcome = yield* (yield* CrewStopService)
+        .stop({
+          callerParticipantId: caller.participantId,
+          projectId: caller.projectId,
+          crewInstanceId: input.crew_instance_id,
+          commandIds: (seatName) => ({
+            interruptCommandId: lifecycleCommandId({
+              providerSessionId: scope.thread.providerSessionId,
+              requestKey: crewSeatRequestKey(requestKey, seatName),
+              operation: "stop-crew-interrupt",
+            }),
+          }),
+        })
+        .pipe(
+          Effect.mapError((error) =>
+            stateError(
+              error.message,
+              error._tag === "CrewStopNotFoundError"
+                ? "Check crew_instance_id against the <j5_crew_gate> roster notice and retry."
+                : error._tag === "CrewStopRequestError"
+                  ? error.nextStep
+                  : "Retry stop_crew with the same client_request_id; seats already interrupted stay interrupted.",
+            ),
+          ),
+        );
+      return {
+        crew_instance_id: outcome.crewInstanceId,
+        members: outcome.members.map((member) => ({
+          seat: member.seatName,
+          participant_id: member.participantId,
+          result: member.result,
+        })),
+      };
+    }).pipe(Effect.mapError(failure)),
+  ),
+  archive_crew: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* callerScope;
+      const crypto = yield* Crypto.Crypto;
+      const caller = yield* resolveCallerMembership(scope);
+      const requestKey = input.client_request_id ?? (yield* crypto.randomUUIDv4);
+      const archivedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
+      const outcome = yield* (yield* ArchiveCrewService).archive({
+        providerSessionId: scope.thread.providerSessionId,
+        callerParticipantId: caller.participantId,
+        projectId: caller.projectId,
+        crewInstanceId: input.crew_instance_id,
+        clientRequestKey: requestKey,
+        ...(input.confirmation_token === undefined
+          ? {}
+          : { confirmationToken: input.confirmation_token }),
+        archivedAt,
+        commandIds: (seatName) => ({
+          interruptCommandId: lifecycleCommandId({
+            providerSessionId: scope.thread.providerSessionId,
+            requestKey: crewSeatRequestKey(requestKey, seatName),
+            operation: "archive-crew-interrupt",
+          }),
+          archiveCommandId: lifecycleCommandId({
+            providerSessionId: scope.thread.providerSessionId,
+            requestKey: crewSeatRequestKey(requestKey, seatName),
+            operation: "archive-crew-thread",
+          }),
+        }),
+      });
+      return {
+        status: outcome.status,
+        crew_instance_id: input.crew_instance_id,
+        members: outcome.members.map((member) => ({
+          seat: member.seatName,
+          participant_id: member.participantId,
+          result: member.result,
+        })),
+      };
+    }).pipe(Effect.mapError(archiveCrewFailure)),
+  ),
+} satisfies McpToolAccess.Handlers<typeof J5Toolkit.tools>;
+
+/** What `/mcp` registers: every J5 tool with its access declared. */
+export const layer = McpToolAccess.toLayer(J5Toolkit, handlers);
+
+/** The same handlers as a plain layer, for tests that call a tool without registering it. */
+export const J5ToolkitHandlersLive = McpToolAccess.HandlersLayer.layer(layer);

@@ -280,6 +280,15 @@ it.layer(NodeServices.layer)("Claude capability probe SDK boundary", (it) => {
         subscriptionType: "pro",
         tokenSource: "oauth",
         apiProvider: undefined,
+        bundledSkills: [
+          {
+            name: "simplify",
+            description: "Simplify code",
+            scope: "builtin",
+            enabled: true,
+            path: executablePath,
+          },
+        ],
         slashCommands: [
           {
             name: "review",
@@ -320,18 +329,26 @@ it.layer(NodeServices.layer)("Claude capability probe SDK boundary", (it) => {
 it.effect("preserves initialized capabilities when optional usage times out", () =>
   Effect.gen(function* () {
     const usageStarted = yield* Deferred.make<void>();
+    const reloadedSkills = [{ name: "simplify", description: "", argumentHint: "", builtin: true }];
     let abortSignal: AbortSignal | undefined;
     const query = vi.spyOn(ClaudeSdk, "query").mockImplementation(({ options }) => {
       abortSignal = options?.abortController?.signal;
       return {
-        initializationResult: async () => ({
+        initializationResult: async (): Promise<ClaudeSdk.SDKControlInitializeResponse> => ({
           account: { email: "dev@example.com", subscriptionType: "pro", tokenSource: "oauth" },
           commands: [{ name: "review", description: "Review changes", argumentHint: "[path]" }],
+          agents: [],
+          models: [],
+          output_style: "default",
+          available_output_styles: ["default"],
         }),
         usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET: () => {
           Deferred.doneUnsafe(usageStarted, Effect.void);
-          return new Promise(() => {});
+          return new Promise<ClaudeSdk.SDKControlGetUsageResponse>(() => {});
         },
+        reloadSkills: async (): Promise<ClaudeSdk.SDKControlReloadSkillsResponse> => ({
+          skills: reloadedSkills,
+        }),
       } as ReturnType<typeof ClaudeSdk.query>;
     });
     yield* Effect.addFinalizer(() => Effect.sync(() => query.mockRestore()));
@@ -348,8 +365,51 @@ it.effect("preserves initialized capabilities when optional usage times out", ()
       { name: "review", description: "Review changes", input: { hint: "[path]" } },
     ]);
     assert.equal(capabilities?.usage, undefined);
+    assert.equal(capabilities?.bundledSkills[0]?.name, "simplify");
     assert.equal(abortSignal?.aborted, true);
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect.each(["timeout", "rejection"] as const)(
+  "preserves initialized capabilities when skill reload ends in %s",
+  (failure) =>
+    Effect.gen(function* () {
+      const reloadStarted = yield* Deferred.make<void>();
+      let abortSignal: AbortSignal | undefined;
+      const query = vi.spyOn(ClaudeSdk, "query").mockImplementation(({ options }) => {
+        abortSignal = options?.abortController?.signal;
+        return {
+          initializationResult: async () => ({
+            account: { email: "dev@example.com" },
+            commands: [{ name: "simplify", description: "Simplify code", argumentHint: "" }],
+          }),
+          usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET: async () => ({
+            rate_limits_available: false,
+            rate_limits: {},
+          }),
+          reloadSkills: () => {
+            Deferred.doneUnsafe(reloadStarted, Effect.void);
+            return failure === "timeout"
+              ? new Promise(() => {})
+              : Promise.reject(new Error("Unsupported control request"));
+          },
+        } as ReturnType<typeof ClaudeSdk.query>;
+      });
+      yield* Effect.addFinalizer(() => Effect.sync(() => query.mockRestore()));
+      const probe = yield* probeClaudeCapabilities(
+        decodeClaudeSettings({ binaryPath: "claude" }),
+      ).pipe(Effect.forkChild);
+      yield* Deferred.await(reloadStarted);
+      if (failure === "timeout") yield* TestClock.adjust("4 seconds");
+      const capabilities = yield* Fiber.join(probe);
+      assert.equal(capabilities?.email, "dev@example.com");
+      assert.deepEqual(capabilities?.slashCommands, [
+        { name: "simplify", description: "Simplify code" },
+      ]);
+      assert.deepEqual(capabilities?.bundledSkills, []);
+      assert.deepEqual(capabilities?.usage, { rate_limits_available: false, rate_limits: {} });
+      assert.equal(abortSignal?.aborted, true);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
 
 it.effect("asks for usage without the local transcript scan", () =>

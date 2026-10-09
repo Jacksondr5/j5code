@@ -35,6 +35,11 @@ function recordEffect(action: string) {
 }
 
 vi.mock("../components/CustomSnoozeDialog", () => ({ requestCustomSnooze: vi.fn() }));
+// J5 (case 21): the archive door's preflight has its own tests; here it passes straight through.
+vi.mock("../confirmDialog", () => ({ requestConfirmDialog: vi.fn() }));
+vi.mock("../j5/a2a/archiveFlow", () => ({
+  archiveWithPreflight: (input: { readonly archive: () => unknown }) => input.archive(),
+}));
 vi.mock("react", () => ({
   useCallback: (callback: unknown) => callback,
   useMemo: (factory: () => unknown) => factory(),

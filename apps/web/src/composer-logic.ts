@@ -1,4 +1,6 @@
+import { detectPlaybookTrigger } from "@t3tools/shared/j5/playbookTrigger";
 import type { ClientSettings } from "@t3tools/contracts/settings";
+import { detectAgentMention } from "@t3tools/shared/j5/agentMention";
 import type { AssistantCitation, ResolvedKeybindingsConfig } from "@t3tools/contracts";
 import {
   serializeAssistantCitation,
@@ -11,8 +13,14 @@ import {
 
 import { resolveShortcutCommand, type ShortcutEventLike } from "./keybindings";
 
-export type ComposerTriggerKind = "path" | "pull-request" | "slash-command" | "skill";
-export type ComposerSlashCommand = "model" | "plan" | "default";
+export type ComposerTriggerKind =
+  | "agent"
+  | "path"
+  | "pull-request"
+  | "slash-command"
+  | "slash-playbook"
+  | "skill";
+export type ComposerSlashCommand = "model" | "plan" | "default" | "playbook";
 export type ComposerSubmissionIntent = "foreground" | "background" | "alternate";
 
 export interface ComposerTrigger {
@@ -272,6 +280,12 @@ export function detectComposerTrigger(text: string, cursorInput: number): Compos
         rangeEnd: cursor,
       };
     }
+    const playbookTrigger = detectPlaybookTrigger(
+      linePrefix,
+      text.slice(0, lineStart),
+      text.slice(cursor),
+    );
+    if (playbookTrigger) return playbookTrigger;
   }
 
   const tokenStart = tokenStartForCursor(text, cursor);
@@ -294,6 +308,8 @@ export function detectComposerTrigger(text: string, cursorInput: number): Compos
       rangeEnd: cursor,
     };
   }
+  const agentMention = detectAgentMention(token, tokenStart, cursor);
+  if (agentMention !== null) return agentMention;
   if (!token.startsWith("@")) {
     return null;
   }
@@ -325,7 +341,7 @@ export function composerStateAtPromptEnd(
 
 export function parseStandaloneComposerSlashCommand(
   text: string,
-): Exclude<ComposerSlashCommand, "model"> | null {
+): Exclude<ComposerSlashCommand, "model" | "playbook"> | null {
   const match = /^\/(plan|default)\s*$/i.exec(text.trim());
   if (!match) {
     return null;

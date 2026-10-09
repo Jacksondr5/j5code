@@ -1,0 +1,39 @@
+import { assert, it } from "@effect/vitest";
+import * as Effect from "effect/Effect";
+import * as SqlClient from "effect/sql/SqlClient";
+
+import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
+import {
+  getLocalOperatorHumanPersonId,
+  ensureLocalOperatorHumanPerson,
+  listRegisteredHumanPersonIds,
+} from "./HumanPersonRegistry.ts";
+import { runJ5A2AMigrations } from "./Migrations.ts";
+
+it.effect("mints one opaque local operator once without project ledger state", () =>
+  Effect.gen(function* () {
+    yield* runJ5A2AMigrations();
+    const sql = yield* SqlClient.SqlClient;
+    const missing = yield* Effect.flip(getLocalOperatorHumanPersonId(sql));
+    assert.equal(missing._tag, "A2ALocalOperatorNotFoundError");
+    const first = yield* ensureLocalOperatorHumanPerson(sql);
+    const restarted = yield* ensureLocalOperatorHumanPerson(sql);
+    assert.equal(restarted, first);
+    assert.equal(yield* getLocalOperatorHumanPersonId(sql), first);
+    assert.match(first, /^human:[0-9a-f]{8}-[0-9a-f-]{27}$/);
+
+    const people = yield* listRegisteredHumanPersonIds(sql);
+    assert.deepStrictEqual(people, [first]);
+    const domainCounts = yield* sql<{
+      readonly events: number;
+      readonly memberships: number;
+      readonly projects: number;
+    }>`
+      SELECT
+        (SELECT COUNT(*) FROM j5_a2a_project_ledger) AS projects,
+        (SELECT COUNT(*) FROM j5_a2a_membership) AS memberships,
+        (SELECT COUNT(*) FROM j5_a2a_comm_event) AS events
+    `;
+    assert.deepStrictEqual(domainCounts, [{ projects: 0, memberships: 0, events: 0 }]);
+  }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+);

@@ -9,10 +9,17 @@ export interface CommandPaletteLinkedThreads {
 // without owning its React state.
 const COMMAND_PALETTE_OPEN_EVENT = "t3code:open-command-palette";
 
+export interface CommandPaletteSourcePicker {
+  readonly environmentId: EnvironmentId;
+  readonly onSelect: (source: string) => void;
+}
+
 export interface CommandPaletteOpenDetail {
   readonly open?: "add-project" | "new-thread-in";
   readonly query?: string;
   readonly linkedThreads?: CommandPaletteLinkedThreads;
+  /** Select an existing folder or repository URL without creating a project or cloning. */
+  readonly sourcePicker?: CommandPaletteSourcePicker;
 }
 
 export function openCommandPalette(detail?: CommandPaletteOpenDetail): void {

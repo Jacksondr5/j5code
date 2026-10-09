@@ -5,8 +5,13 @@ import * as Path from "effect/Path";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 
-import { runMigrations } from "./Migrations.ts";
 import { initializeV2Database } from "./initializeV2Database.ts";
+import {
+  runJ5CompatibleUpstreamMigrations,
+  snapshotBeforeUpstreamRenumber,
+} from "../j5/persistence/UpstreamMigrationCompatibility.ts";
+import { runJ5A2AMigrations } from "../j5/a2a/Migrations.ts";
+import { snapshotBeforeJ5LedgerMigration } from "../j5/persistence/LedgerMigrationSnapshot.ts";
 import * as ServerConfig from "../config.ts";
 
 // Size the -wal file is cut back to on the first commit after a WAL reset.
@@ -22,7 +27,8 @@ const layerSetup = Layer.effectDiscard(
     // PASSIVE checkpoints never shrink the -wal file, so it otherwise keeps its
     // largest size until the last connection closes.
     yield* sql.unsafe(`PRAGMA journal_size_limit = ${WAL_SIZE_LIMIT_BYTES};`);
-    yield* runMigrations();
+    yield* runJ5CompatibleUpstreamMigrations();
+    yield* runJ5A2AMigrations();
   }),
 );
 
@@ -30,6 +36,8 @@ export const layerFromPath = Effect.fn("makeSqlitePersistenceLive")(function* (d
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   yield* fs.makeDirectory(path.dirname(dbPath), { recursive: true });
+  yield* snapshotBeforeUpstreamRenumber(dbPath).pipe(Effect.orDie);
+  yield* snapshotBeforeJ5LedgerMigration(dbPath).pipe(Effect.orDie);
 
   return Layer.provideMerge(
     layerSetup,

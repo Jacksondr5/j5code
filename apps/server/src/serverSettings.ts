@@ -31,6 +31,7 @@ import {
   ResponseStreamingMode,
   ServerSettings,
   ServerSettingsError,
+  SkillCatalogSource,
   type ServerSettingsPatch,
 } from "@t3tools/contracts";
 import * as Cache from "effect/Cache";
@@ -70,6 +71,7 @@ export { resolveSourceControlWriterModelSelection } from "@t3tools/shared/server
 const encodeServerSettings = Schema.encodeEffect(ServerSettings);
 const encodeServerSettingsJson = Schema.encodeUnknownEffect(fromJsonStringPretty(ServerSettings));
 const decodeServerSettings = Schema.decodeUnknownEffect(ServerSettings);
+const isSafeSkillCatalogSource = Schema.is(SkillCatalogSource);
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
@@ -217,7 +219,16 @@ export function redactServerSettingsForClient(settings: ServerSettings): ServerS
       Object.entries(settings.github.tokens).map(([host, token]) => [host, redactSecret(token)]),
     ),
   };
-  return { ...settings, providerInstances, usageLimitSources, bitbucket, github };
+  return {
+    ...settings,
+    skillCatalogSource: isSafeSkillCatalogSource(settings.skillCatalogSource)
+      ? settings.skillCatalogSource
+      : "",
+    providerInstances,
+    usageLimitSources,
+    bitbucket,
+    github,
+  };
 }
 
 export function applyProviderInstanceMutation(

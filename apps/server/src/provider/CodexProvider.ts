@@ -290,7 +290,7 @@ function appendCustomCodexModels(
   return customEntries.length === 0 ? models : [...models, ...customEntries];
 }
 
-function parseCodexSkillsListResponse(
+export function parseCodexSkillsListResponse(
   response: CodexSchema.V2SkillsListResponse,
   cwd: string,
 ): ReadonlyArray<ServerProviderSkill> {
@@ -314,6 +314,9 @@ function parseCodexSkillsListResponse(
     }
     if (skill.scope) {
       parsedSkill.scope = skill.scope;
+    }
+    if (skill.pluginId) {
+      parsedSkill.pluginId = skill.pluginId;
     }
     if (skill.interface?.displayName) {
       parsedSkill.displayName = skill.interface.displayName;
@@ -515,7 +518,7 @@ const makePendingCodexProvider = (
           version: null,
           status: "warning",
           auth: { status: "unknown" },
-          message: "Codex is disabled in T3 Code settings.",
+          message: "Codex is disabled in J5 Code settings.",
         },
       });
     }
@@ -603,7 +606,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
         version: null,
         status: "warning",
         auth: { status: "unknown" },
-        message: "Codex is disabled in T3 Code settings.",
+        message: "Codex is disabled in J5 Code settings.",
       },
     });
   }

@@ -1878,7 +1878,7 @@ function PullRequestsRouteView() {
       ) : !pullRequestsSupported ? (
         <PullRequestsUnavailableState
           title="Pull requests unavailable"
-          error="Update your T3 Code servers to browse pull requests."
+          error="Update your J5 Code servers to browse pull requests."
         />
       ) : firstLoad ? (
         <PullRequestListGhost rows={7} />
@@ -2247,6 +2247,7 @@ function PullRequestsRouteView() {
             onAddTerminal={() => undefined}
             onAddDiff={() => undefined}
             onAddFiles={() => undefined}
+            onAddArtifacts={() => undefined}
             onAddPullRequest={() => undefined}
             onAddPullRequests={() => undefined}
             onAddDevice={() => undefined}
@@ -2254,6 +2255,7 @@ function PullRequestsRouteView() {
             terminalAvailable={false}
             diffAvailable={false}
             filesAvailable={false}
+            artifactsAvailable={false}
             pullRequestAvailable={false}
             pullRequestsAvailable={false}
             deviceAvailable={false}

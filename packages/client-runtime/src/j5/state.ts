@@ -1,0 +1,226 @@
+import type { ThreadId } from "@t3tools/contracts";
+import { J5_PLAYBOOK_WS_METHODS } from "@t3tools/contracts/j5";
+import type {
+  AnswerHumanExchangeRequest,
+  CrewProposalResolveRequest,
+  CrewProposalPreviewRequest,
+  CrewArchiveRequest,
+  CrewStopRequest,
+  CrewRuntimeRequestRespondRequest,
+  FleetReadRequest,
+  PlaybookLibraryRequest,
+  PlaybookDeleteRequest,
+  PlaybookRenameRequest,
+  PlaybookRunsRequest,
+  AddPeerRequest,
+  IssuePeerCredentialRequest,
+  PeerProbeRequest,
+  RemovePeerRequest,
+} from "@t3tools/contracts/j5";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as SubscriptionRef from "effect/SubscriptionRef";
+import type { HttpClient } from "effect/http";
+import type { Atom } from "effect/reactivity";
+
+import type { EnvironmentRegistry } from "../connection/registry.ts";
+import { EnvironmentSupervisor } from "../connection/supervisor.ts";
+import {
+  createEnvironmentCommand,
+  createEnvironmentQueryAtomFamily,
+  createEnvironmentRpcCommand,
+  createEnvironmentRpcSubscriptionAtomFamily,
+} from "../state/runtime.ts";
+import * as J5Http from "./http.ts";
+
+const preparedConnection = Effect.gen(function* () {
+  const supervisor = yield* EnvironmentSupervisor;
+  const prepared = yield* SubscriptionRef.get(supervisor.prepared);
+  const state = yield* SubscriptionRef.get(supervisor.state);
+  if (Option.isNone(prepared) || state.phase !== "connected") {
+    return yield* new J5Http.J5HttpError({ status: 0, detail: "The environment is disconnected." });
+  }
+  return prepared.value;
+});
+
+export const supportedJ5Read = <A extends object, E, R>(read: Effect.Effect<A, E, R>) =>
+  read.pipe(
+    Effect.map((data) => ({ ...data, supported: true as const })),
+    Effect.catchIf(J5Http.isJ5UnsupportedError, () =>
+      Effect.succeed({ supported: false as const }),
+    ),
+  );
+
+/** J5 uses the same environment registry, query lifecycle, and command dispatch as other features. */
+export function createJ5EnvironmentAtoms<R, E>(
+  runtime: Atom.AtomRuntime<EnvironmentRegistry | HttpClient.HttpClient | R, E>,
+) {
+  return {
+    playbookChanges: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "j5:playbook-changes",
+      tag: J5_PLAYBOOK_WS_METHODS.subscribeChanges,
+      idleTtlMs: 0,
+    }),
+    playbookRuns: createEnvironmentQueryAtomFamily(runtime, {
+      label: "j5:playbook-runs",
+      staleTimeMs: 2_500,
+      execute: (input: PlaybookRunsRequest) =>
+        supportedJ5Read(
+          preparedConnection.pipe(
+            Effect.flatMap((prepared) => J5Http.readAllPlaybooks(prepared, input)),
+          ),
+        ),
+    }),
+    playbookLibrary: createEnvironmentQueryAtomFamily(runtime, {
+      label: "j5:playbook-library",
+      staleTimeMs: 0,
+      execute: (input: PlaybookLibraryRequest) =>
+        preparedConnection.pipe(
+          Effect.flatMap((prepared) => J5Http.readPlaybookLibrary(prepared, input)),
+        ),
+    }),
+    deletePlaybook: createEnvironmentCommand(runtime, {
+      label: "j5:delete-playbook",
+      execute: (input: PlaybookDeleteRequest) =>
+        preparedConnection.pipe(
+          Effect.flatMap((prepared) => J5Http.deletePlaybook(prepared, input)),
+        ),
+    }),
+    exportPlaybook: createEnvironmentRpcCommand(runtime, {
+      label: "j5:export-playbook",
+      tag: J5_PLAYBOOK_WS_METHODS.exportPlaybook,
+    }),
+    renamePlaybook: createEnvironmentCommand(runtime, {
+      label: "j5:rename-playbook",
+      execute: (input: PlaybookRenameRequest) =>
+        preparedConnection.pipe(
+          Effect.flatMap((prepared) => J5Http.renamePlaybook(prepared, input)),
+        ),
+    }),
+    playbooks: createEnvironmentQueryAtomFamily(runtime, {
+      label: "j5:playbooks",
+      staleTimeMs: 2_500,
+      execute: (input: { readonly threadId: ThreadId }) =>
+        supportedJ5Read(
+          preparedConnection.pipe(
+            Effect.flatMap((prepared) => J5Http.readThreadPlaybooks(prepared, input.threadId)),
+          ),
+        ),
+    }),
+    inbox: createEnvironmentQueryAtomFamily(runtime, {
+      label: "j5:inbox",
+      staleTimeMs: 7_500,
+      execute: (input: { readonly status: "open" | "answered"; readonly personId?: string }) =>
+        preparedConnection.pipe(
+          Effect.flatMap((prepared) =>
+            J5Http.listHumanInbox(prepared, input.status, input.personId),
+          ),
+        ),
+    }),
+    openCount: createEnvironmentQueryAtomFamily(runtime, {
+      label: "j5:inbox-count",
+      staleTimeMs: 7_500,
+      execute: (input: { readonly personId?: string }) =>
+        preparedConnection.pipe(
+          Effect.flatMap((prepared) => J5Http.readOpenInboxCount(prepared, input.personId)),
+        ),
+    }),
+    // The Fleet page reads every connected environment's roster; it changes on the scale of turns.
+    fleet: createEnvironmentQueryAtomFamily(runtime, {
+      label: "j5:fleet",
+      staleTimeMs: 30_000,
+      execute: (input: FleetReadRequest) =>
+        preparedConnection.pipe(Effect.flatMap((prepared) => J5Http.readFleet(prepared, input))),
+    }),
+    // Crew gates are read per environment like the inbox; a Captain on any connected server
+    // reaches the human's bell and thread.
+    crewProposals: createEnvironmentQueryAtomFamily(runtime, {
+      label: "j5:crew-proposals",
+      staleTimeMs: 7_500,
+      execute: (_input: Record<string, never>) =>
+        preparedConnection.pipe(Effect.flatMap(J5Http.listCrewProposals)),
+    }),
+    previewCrewProposal: createEnvironmentCommand(runtime, {
+      label: "j5:preview-crew-proposal",
+      execute: (input: CrewProposalPreviewRequest) =>
+        preparedConnection.pipe(
+          Effect.flatMap((prepared) => J5Http.previewCrewProposal(prepared, input)),
+        ),
+    }),
+    resolveCrewProposal: createEnvironmentCommand(runtime, {
+      label: "j5:resolve-crew-proposal",
+      execute: (input: CrewProposalResolveRequest) =>
+        preparedConnection.pipe(
+          Effect.flatMap((prepared) => J5Http.resolveCrewProposal(prepared, input)),
+        ),
+    }),
+    archiveCrew: createEnvironmentCommand(runtime, {
+      label: "j5:archive-crew",
+      execute: (input: CrewArchiveRequest) =>
+        preparedConnection.pipe(Effect.flatMap((prepared) => J5Http.archiveCrew(prepared, input))),
+    }),
+    // Crew seats' provider approvals answered from the Inbox; same cadence as gates.
+    crewRuntimeRequests: createEnvironmentQueryAtomFamily(runtime, {
+      label: "j5:crew-runtime-requests",
+      staleTimeMs: 7_500,
+      execute: (_input: Record<string, never>) =>
+        preparedConnection.pipe(Effect.flatMap(J5Http.listCrewRuntimeRequests)),
+    }),
+    respondCrewRuntimeRequest: createEnvironmentCommand(runtime, {
+      label: "j5:respond-crew-runtime-request",
+      execute: (input: CrewRuntimeRequestRespondRequest) =>
+        preparedConnection.pipe(
+          Effect.flatMap((prepared) => J5Http.respondCrewRuntimeRequest(prepared, input)),
+        ),
+    }),
+    stopCrew: createEnvironmentCommand(runtime, {
+      label: "j5:stop-crew",
+      execute: (input: CrewStopRequest) =>
+        preparedConnection.pipe(Effect.flatMap((prepared) => J5Http.stopCrew(prepared, input))),
+    }),
+    answerHumanExchange: createEnvironmentCommand(runtime, {
+      label: "j5:answer-exchange",
+      execute: (input: AnswerHumanExchangeRequest) =>
+        preparedConnection.pipe(
+          Effect.flatMap((prepared) => J5Http.answerHumanExchange(prepared, input)),
+        ),
+    }),
+    // Polls, backlogs and errors change while Connections stays open, and
+    // nothing pushes them, so the list is read again on an interval well inside
+    // the two-minute online window.
+    peers: createEnvironmentQueryAtomFamily(runtime, {
+      label: "j5:peers",
+      staleTimeMs: 30_000,
+      refreshIntervalMs: 30_000,
+      execute: (_input: Record<string, never>) =>
+        preparedConnection.pipe(Effect.flatMap(J5Http.listPeers)),
+    }),
+    issuePeerCredential: createEnvironmentCommand(runtime, {
+      label: "j5:issue-peer-credential",
+      execute: (input: IssuePeerCredentialRequest) =>
+        preparedConnection.pipe(
+          Effect.flatMap((prepared) => J5Http.issuePeerCredential(prepared, input)),
+        ),
+    }),
+    addPeer: createEnvironmentCommand(runtime, {
+      label: "j5:add-peer",
+      execute: (input: AddPeerRequest) =>
+        preparedConnection.pipe(Effect.flatMap((prepared) => J5Http.addPeer(prepared, input))),
+    }),
+    listPeerAddresses: createEnvironmentCommand(runtime, {
+      label: "j5:peer-addresses",
+      execute: (_input: Record<string, never>) =>
+        preparedConnection.pipe(Effect.flatMap(J5Http.listPeerAddresses)),
+    }),
+    probePeer: createEnvironmentCommand(runtime, {
+      label: "j5:probe-peer",
+      execute: (input: PeerProbeRequest) =>
+        preparedConnection.pipe(Effect.flatMap((prepared) => J5Http.probePeer(prepared, input))),
+    }),
+    removePeer: createEnvironmentCommand(runtime, {
+      label: "j5:remove-peer",
+      execute: (input: RemovePeerRequest) =>
+        preparedConnection.pipe(Effect.flatMap((prepared) => J5Http.removePeer(prepared, input))),
+    }),
+  };
+}

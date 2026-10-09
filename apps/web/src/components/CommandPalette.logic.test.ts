@@ -76,7 +76,7 @@ describe("buildCommandPaletteProjectMetadata", () => {
       projects: [
         {
           environmentId: localEnvironmentId,
-          title: "T3 Code",
+          title: "J5 Code",
           workspaceRoot: "/Users/theo/Projects/t3code",
         },
         {
@@ -89,7 +89,7 @@ describe("buildCommandPaletteProjectMetadata", () => {
     });
 
     expect(metadata.searchTerms).toEqual([
-      "T3 Code",
+      "J5 Code",
       "/Users/theo/Projects/t3code",
       "Local",
       "t3code",
@@ -106,7 +106,7 @@ describe("buildCommandPaletteProjectMetadata", () => {
         {
           kind: "action",
           value: "project:t3code",
-          title: "T3 Code",
+          title: "J5 Code",
           searchTerms: metadata.searchTerms,
           icon: null,
           run: async () => undefined,
@@ -122,12 +122,12 @@ describe("buildCommandPaletteProjectMetadata", () => {
       projects: [
         {
           environmentId: remoteEnvironmentId,
-          title: "T3 Code",
+          title: "J5 Code",
           workspaceRoot: "/srv/t3code",
         },
         {
           environmentId: remoteEnvironmentId,
-          title: "T3 Code worktree",
+          title: "J5 Code worktree",
           workspaceRoot: "/srv/t3code-feature",
         },
       ],
@@ -143,12 +143,12 @@ describe("buildCommandPaletteProjectMetadata", () => {
       projects: [
         {
           environmentId: remoteEnvironmentId,
-          title: "T3 Code",
+          title: "J5 Code",
           workspaceRoot: "/srv/t3code",
         },
         {
           environmentId: secondRemoteEnvironmentId,
-          title: "T3 Code mirror",
+          title: "J5 Code mirror",
           workspaceRoot: "/srv/mirror/t3code",
         },
       ],
@@ -166,7 +166,7 @@ describe("buildCommandPaletteProjectMetadata", () => {
       projects: [
         {
           environmentId: remoteEnvironmentId,
-          title: "T3 Code",
+          title: "J5 Code",
           workspaceRoot: "/srv/t3code",
         },
       ],
@@ -367,6 +367,23 @@ describe("buildProjectActionItems", () => {
 });
 
 describe("buildThreadActionItems", () => {
+  it("keeps colliding thread ids separately selectable across environments", async () => {
+    const threads = [LOCAL_ENVIRONMENT_ID, EnvironmentId.make("environment-remote")].map(
+      (environmentId) => makeThread({ environmentId, id: ThreadId.make("shared-thread") }),
+    );
+    const runThread = vi.fn(async () => {});
+    const items = buildThreadActionItems({
+      threads,
+      projectTitleById: new Map(),
+      sortOrder: "updated_at",
+      icon: null,
+      runThread,
+    });
+    expect(new Set(items.map((item) => item.value)).size).toBe(2);
+    for (const item of items) await item.run();
+    expect(runThread.mock.calls).toEqual(threads.map((thread) => [thread]));
+  });
+
   it("orders threads by most recent activity and formats timestamps from updatedAt", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-25T12:00:00.000Z"));
@@ -393,8 +410,8 @@ describe("buildThreadActionItems", () => {
       });
 
       expect(items.map((item) => item.value)).toEqual([
-        "thread:thread-older",
-        "thread:thread-newer",
+        "thread:environment-local:thread-older",
+        "thread:environment-local:thread-newer",
       ]);
       expect(items[0]?.timestamp).toBe("1d ago");
       expect(items[1]?.timestamp).toBe("5d ago");
@@ -435,8 +452,8 @@ describe("buildThreadActionItems", () => {
     expect(groups).toHaveLength(1);
     expect(groups[0]?.value).toBe("threads-search");
     expect(groups[0]?.items.map((item) => item.value)).toEqual([
-      "thread:thread-title-match",
-      "thread:thread-context-match",
+      "thread:environment-local:thread-title-match",
+      "thread:environment-local:thread-context-match",
     ]);
   });
 
@@ -463,7 +480,7 @@ describe("buildThreadActionItems", () => {
     ];
     const items = buildThreadActionItems({
       threads,
-      projectTitleById: new Map([[PROJECT_ID, "T3 Code"]]),
+      projectTitleById: new Map([[PROJECT_ID, "J5 Code"]]),
       sortOrder: "created_at",
       icon: null,
       getContentMatch: (thread) =>
@@ -482,9 +499,9 @@ describe("buildThreadActionItems", () => {
     });
 
     expect(groups[0]?.items.map((item) => item.value)).toEqual([
-      "thread:recent-title",
-      "thread:old-prefix",
-      "thread:recent-content",
+      "thread:environment-local:recent-title",
+      "thread:environment-local:old-prefix",
+      "thread:environment-local:recent-content",
     ]);
   });
 
@@ -612,7 +629,7 @@ describe("buildThreadActionItems", () => {
   it("keeps message excerpts searchable without replacing thread metadata", () => {
     const [item] = buildThreadActionItems({
       threads: [makeThread({ branch: "feat/search" })],
-      projectTitleById: new Map([[PROJECT_ID, "T3 Code"]]),
+      projectTitleById: new Map([[PROJECT_ID, "J5 Code"]]),
       sortOrder: "updated_at",
       icon: null,
       getContentMatch: () => ({
@@ -629,7 +646,7 @@ describe("buildThreadActionItems", () => {
       snippet: "The relay reconnect is now bounded.",
       query: "reconnect",
     });
-    expect(item?.description).toBe("T3 Code · #feat/search");
+    expect(item?.description).toBe("J5 Code · #feat/search");
   });
 
   it("surfaces threads when the query is their ID, without outranking title matches", () => {
@@ -645,7 +662,7 @@ describe("buildThreadActionItems", () => {
     });
     const items = buildThreadActionItems({
       threads: [idThread, titleThread],
-      projectTitleById: new Map([[PROJECT_ID, "T3 Code"]]),
+      projectTitleById: new Map([[PROJECT_ID, "J5 Code"]]),
       sortOrder: "updated_at",
       icon: null,
       runThread: async (_thread) => undefined,
@@ -661,15 +678,15 @@ describe("buildThreadActionItems", () => {
     });
 
     expect(groups.flatMap((group) => group.items)).toEqual([
-      expect.objectContaining({ value: `thread:${titleThread.id}` }),
-      expect.objectContaining({ value: `thread:${idThread.id}` }),
+      expect.objectContaining({ value: `thread:${LOCAL_ENVIRONMENT_ID}:${titleThread.id}` }),
+      expect.objectContaining({ value: `thread:${LOCAL_ENVIRONMENT_ID}:${idThread.id}` }),
     ]);
   });
 
   it("prefers renderDescription when provided", () => {
     const [item] = buildThreadActionItems({
       threads: [makeThread({ branch: "feat/search", worktreePath: "/tmp/wt" })],
-      projectTitleById: new Map([[PROJECT_ID, "T3 Code"]]),
+      projectTitleById: new Map([[PROJECT_ID, "J5 Code"]]),
       sortOrder: "updated_at",
       icon: null,
       renderDescription: (thread, { projectTitle }) =>
@@ -677,7 +694,7 @@ describe("buildThreadActionItems", () => {
       runThread: async (_thread) => undefined,
     });
 
-    expect(item?.description).toBe("T3 Code:feat/search:wt");
+    expect(item?.description).toBe("J5 Code:feat/search:wt");
   });
 
   it("filters archived threads out of thread search items", () => {
@@ -702,7 +719,7 @@ describe("buildThreadActionItems", () => {
       runThread: async (_thread) => undefined,
     });
 
-    expect(items.map((item) => item.value)).toEqual(["thread:thread-active"]);
+    expect(items.map((item) => item.value)).toEqual(["thread:environment-local:thread-active"]);
   });
 });
 

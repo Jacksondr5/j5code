@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from "vite-plus/test";
+import { createElement } from "react";
 
 import {
   completeConfirmDialogClose,
@@ -52,6 +53,29 @@ describe("confirm dialog coordinator", () => {
     completeConfirmDialogClose();
     expect(readConfirmDialogState()).toEqual({ status: "idle" });
     expect(isConfirmDialogActive()).toBe(false);
+    unregister();
+  });
+
+  it("carries optional typed content without changing string-only state", () => {
+    const unregister = registerConfirmDialogHost();
+    const content = createElement("span", { "data-confirm-content": "archive" }, "Archive facts");
+    requestConfirmDialog(
+      "Archive thread?",
+      { variant: "destructive" },
+      {
+        content,
+        confirmLabel: "Archive anyway",
+      },
+    );
+
+    expect(readConfirmDialogState()).toEqual({
+      status: "confirming",
+      message: "Archive thread?",
+      variant: "destructive",
+      content,
+      confirmLabel: "Archive anyway",
+    });
+
     unregister();
   });
 

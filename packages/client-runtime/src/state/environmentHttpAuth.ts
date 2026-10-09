@@ -95,6 +95,19 @@ const buildEnvironmentAuthHeaders = (
     return { authorization: `DPoP ${authorization.accessToken}`, dpop: proof };
   });
 
+const ENVIRONMENT_REQUEST_SPAN = "clientRuntime.state.executeAuthenticatedEnvironmentHttpRequest";
+const ENVIRONMENT_RAW_REQUEST_SPAN =
+  "clientRuntime.state.executeAuthenticatedEnvironmentRawHttpRequest";
+
+const withEnvironmentRequestSpan = <A, E, R>(
+  prepared: PreparedConnection,
+  span: string,
+  request: Effect.Effect<A, E, R>,
+) =>
+  prepared.httpAuthorization?._tag === "Dpop"
+    ? request.pipe(Effect.withSpan(span, { root: true }), withRelayClientTracing)
+    : request.pipe(Effect.withSpan(span));
+
 /**
  * Resolve relay credentials at request time without replacing the live socket.
  * A rejected credential gets one refresh and retry, with a new request-bound
@@ -103,48 +116,32 @@ const buildEnvironmentAuthHeaders = (
  * A DPoP request is T3 Connect work, so its span starts an exported trace that
  * the environment continues; its local caller's span would leave that trace
  * without a root.
+ *
+ * J5: this raw form serves routes outside the typed API groups.
  */
-export const executeAuthenticatedEnvironmentHttpRequest = <
-  Group extends Parameters<typeof makeEnvironmentHttpApiGroupClient>[1],
-  A,
-  E,
-  R,
->(
-  input: Parameters<typeof executeEnvironmentRequest<Group, A, E, R>>[0],
+export const executeAuthenticatedEnvironmentRawHttpRequest = <A, E, R>(
+  input: Parameters<typeof executeEnvironmentRequest<A, E, R>>[0],
 ) =>
-  input.prepared.httpAuthorization?._tag === "Dpop"
-    ? executeEnvironmentRequest(input).pipe(
-        Effect.withSpan(ENVIRONMENT_REQUEST_SPAN, { root: true }),
-        withRelayClientTracing,
-      )
-    : executeEnvironmentRequest(input).pipe(Effect.withSpan(ENVIRONMENT_REQUEST_SPAN));
+  withEnvironmentRequestSpan(
+    input.prepared,
+    ENVIRONMENT_RAW_REQUEST_SPAN,
+    executeEnvironmentRequest(input),
+  );
 
-const ENVIRONMENT_REQUEST_SPAN = "clientRuntime.state.executeAuthenticatedEnvironmentHttpRequest";
-
-const executeEnvironmentRequest = Effect.fnUntraced(function* <
-  Group extends Parameters<typeof makeEnvironmentHttpApiGroupClient>[1],
-  A,
-  E,
-  R,
->(input: {
+const executeEnvironmentRequest = Effect.fnUntraced(function* <A, E, R>(input: {
   readonly prepared: PreparedConnection;
   readonly signer: Option.Option<ManagedRelayDpopSigner["Service"]>;
   readonly remoteAuthorization?: Option.Option<RemoteEnvironmentAuthorization["Service"]>;
   readonly method: HttpMethod.HttpMethod;
   readonly url: (httpBaseUrl: string) => string;
   readonly timeoutMs: number;
-  readonly group: Group;
   readonly request: (input: {
-    readonly client: Effect.Success<ReturnType<typeof makeEnvironmentHttpApiGroupClient<Group>>>;
+    readonly httpBaseUrl: string;
     readonly headers: EnvironmentHttpAuthHeaders;
   }) => Effect.Effect<A, E, R>;
   /** Some endpoints report rejected credentials in a successful response. */
   readonly isUnauthorizedResponse?: (response: NoInfer<A>) => boolean;
-}): Effect.fn.Return<
-  A,
-  RemoteEnvironmentRequestError,
-  Effect.Services<ReturnType<typeof makeEnvironmentHttpApiGroupClient<Group>>> | R
-> {
+}): Effect.fn.Return<A, RemoteEnvironmentRequestError, R> {
   let httpBaseUrl = input.prepared.httpBaseUrl;
   return yield* Effect.gen(function* () {
     let rejectedAccessToken: string | undefined;
@@ -180,7 +177,6 @@ const executeEnvironmentRequest = Effect.fnUntraced(function* <
       }
 
       const requestUrl = input.url(httpBaseUrl);
-      const client = yield* makeEnvironmentHttpApiGroupClient(httpBaseUrl, input.group);
       const headers = yield* buildEnvironmentAuthHeaders(
         authorization,
         input.method,
@@ -190,7 +186,7 @@ const executeEnvironmentRequest = Effect.fnUntraced(function* <
       const result = yield* executeEnvironmentHttpRequest(
         requestUrl,
         input.timeoutMs,
-        withEnvironmentCredentials(authorization, input.request({ client, headers })),
+        withEnvironmentCredentials(authorization, input.request({ httpBaseUrl, headers })),
       ).pipe(Effect.result);
 
       if (Result.isFailure(result)) {
@@ -229,3 +225,34 @@ const executeEnvironmentRequest = Effect.fnUntraced(function* <
     }),
   );
 });
+
+/** Typed API groups share the credential and retry flow used by raw J5 routes. */
+export const executeAuthenticatedEnvironmentHttpRequest = <
+  Group extends Parameters<typeof makeEnvironmentHttpApiGroupClient>[1],
+  A,
+  E,
+  R,
+>(
+  input: Omit<Parameters<typeof executeEnvironmentRequest<A, E, R>>[0], "request"> & {
+    readonly group: Group;
+    readonly request: (input: {
+      readonly client: Effect.Success<ReturnType<typeof makeEnvironmentHttpApiGroupClient<Group>>>;
+      readonly headers: EnvironmentHttpAuthHeaders;
+    }) => Effect.Effect<A, E, R>;
+  },
+) =>
+  withEnvironmentRequestSpan(
+    input.prepared,
+    ENVIRONMENT_REQUEST_SPAN,
+    executeEnvironmentRequest<
+      A,
+      E,
+      Effect.Services<ReturnType<typeof makeEnvironmentHttpApiGroupClient<Group>>> | R
+    >({
+      ...input,
+      request: ({ httpBaseUrl, headers }) =>
+        Effect.flatMap(makeEnvironmentHttpApiGroupClient(httpBaseUrl, input.group), (client) =>
+          input.request({ client, headers }),
+        ),
+    }),
+  );

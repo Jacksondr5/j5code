@@ -11,10 +11,18 @@ import { createRoot, type Root } from "react-dom/client";
 const refreshProviders = vi.hoisted(() => vi.fn());
 vi.mock("react-native", () => ({ Alert: { alert: vi.fn() } }));
 
+vi.mock("../../j5/agents/useAgentMentionPicker", () => ({
+  useAgentMentionPicker: () => ({ items: [], isPending: false, error: null }),
+}));
+
 vi.mock("../../state/queries", () => ({
   useComposerPathSearch: () => ({ entries: [], isPending: false }),
   useComposerPullRequestSearch: () => ({ entries: [], isPending: false, error: null }),
 }));
+vi.mock("../../state/query", () => ({
+  useEnvironmentQuery: () => ({ data: null, isPending: false }),
+}));
+vi.mock("../../j5/state", () => ({ j5Environment: { playbookLibrary: vi.fn() } }));
 vi.mock("../../state/use-composer-drafts", () => ({
   getComposerDraftSnapshot: vi.fn(),
   readComposerDraftSelection: vi.fn(),
@@ -35,6 +43,72 @@ import {
 } from "./use-composer-command-menu";
 
 describe("mobile slash commands", () => {
+  it("hides playbooks after earlier text while retaining local commands", () => {
+    const items = buildComposerSlashCommandItems({
+      query: "",
+      atMessageStart: false,
+      hasThread: true,
+      allowInteractionMode: true,
+      selectedProviderStatus: null,
+    });
+    expect(items.map((item) => item.label)).toEqual(["/model", "/plan", "/default"]);
+  });
+
+  it("inserts the registered playbook name", () => {
+    expect(
+      resolveComposerCommandSelection({
+        draftMessage: "/playbook deb",
+        trigger: { rangeStart: 0, rangeEnd: 13 },
+        item: {
+          id: "playbook:debugging",
+          type: "playbook",
+          name: "debugging",
+          label: "Debug",
+          description: "",
+        },
+        allowInteractionMode: false,
+      }),
+    ).toEqual({ text: "/playbook debugging ", cursor: 20, interactionMode: null });
+  });
+  it("inserts a mentioned playbook name mid-message", () => {
+    const draftMessage = "Please run @playbook:deb";
+    expect(
+      resolveComposerCommandSelection({
+        draftMessage,
+        trigger: { rangeStart: 11, rangeEnd: 24 },
+        item: {
+          id: "playbook:debugging",
+          type: "playbook",
+          name: "debugging",
+          label: "debugging",
+          description: "",
+        },
+        allowInteractionMode: false,
+      }),
+    ).toEqual({ text: "Please run @playbook:debugging ", cursor: 31, interactionMode: null });
+  });
+  it("keeps the playbook command active to search names", () => {
+    const item = buildComposerSlashCommandItems({
+      query: "playbook",
+      atMessageStart: true,
+      hasThread: true,
+      allowInteractionMode: false,
+      selectedProviderStatus: null,
+    })[0];
+    if (!item) throw new Error("Expected playbook command");
+    expect(
+      resolveComposerCommandSelection({
+        draftMessage: "/playbook",
+        trigger: { rangeStart: 0, rangeEnd: 9 },
+        item,
+        allowInteractionMode: false,
+      }),
+    ).toEqual({
+      text: "/playbook ",
+      cursor: 10,
+      interactionMode: null,
+    });
+  });
   const antigravity = {
     driver: ProviderDriverKind.make("antigravity"),
     showInteractionModeToggle: false,
@@ -52,9 +126,8 @@ describe("mobile slash commands", () => {
         selectedProviderStatus: antigravity,
       });
 
-      expect(items).toHaveLength(1);
-      expect(items[0]?.type).toBe("provider-slash-command");
-      const item = items[0];
+      expect(items.map((item) => item.type)).toEqual(["slash-command", "provider-slash-command"]);
+      const item = items.find((item) => item.type === "provider-slash-command");
       if (!item) throw new Error("Expected the native plan command");
       expect(
         resolveComposerCommandSelection({
@@ -145,6 +218,7 @@ describe("workspace command discovery retry", () => {
       draftMessage: "/project",
       ownerKey: null,
       environmentId,
+      projectId: null,
       projectCwd: cwd,
       selectedProviderStatus: status,
       hasThread: false,

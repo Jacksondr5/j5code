@@ -19,8 +19,11 @@ import { toastManager } from "./ui/toast";
 // app. Delete this file when the store apps move to V2. See #14871.
 
 /** True on Nightly desktop, `npx t3@nightly`, and the hosted Nightly app. */
-export const IS_NIGHTLY_BUILD =
+const IS_UPSTREAM_NIGHTLY_BUILD =
   parseSemver(APP_VERSION)?.prerelease[0] === "nightly" || HOSTED_APP_CHANNEL === "nightly";
+// J5: there is no J5 mobile beta, and the links below are T3 Code's, so the notice and row stay hidden.
+const J5_HAS_MOBILE_BETA = false;
+export const IS_NIGHTLY_BUILD = J5_HAS_MOBILE_BETA && IS_UPSTREAM_NIGHTLY_BUILD;
 
 const IOS_TESTFLIGHT_URL = "https://testflight.apple.com/join/XgaxaRtd";
 const ANDROID_BETA_GROUP_URL = "https://groups.google.com/g/t3-code-v2-beta";
@@ -103,6 +106,7 @@ function BetaLinkQr({ url, label }: { url: string; label: string }) {
 
 /** Settings → General → About row with the beta app links. Render it only for Nightly. */
 export function NightlyMobileBetaRow() {
+  if (!J5_HAS_MOBILE_BETA) return null;
   return (
     <SettingsRow
       id={ROW_ID}

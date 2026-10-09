@@ -74,8 +74,21 @@ import type { ProviderContinuationRequest } from "@t3tools/provider-core/server/
 import * as CodexAdapterV2 from "./CodexAdapterV2.ts";
 import { makeReplayServerConfig, withCodexReplayChildMetadata } from "./CodexAdapterV2.testkit.ts";
 import * as CodexAdapterV2Testkit from "./CodexAdapterV2.testkit.ts";
+import { T3_CODE_ORCHESTRATION_INSTRUCTIONS } from "../../j5/orchestrationInstructions.ts";
+import {
+  J5_CODEX_T3_MCP_SERVER_CONFIG,
+  J5_CODEX_COORDINATION_MCP_SERVER_CONFIG,
+} from "../../j5/a2a/mcp/codexToolApproval.ts";
 
 const encodeUnknownJson = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
+// J5 spreads its orchestration text over `t3_code_orchestration`, `t3_code_orchestration_2`, ...
+const codexOrchestrationContext = (params: {
+  readonly additionalContext?: Readonly<Record<string, { readonly value: string }>> | null;
+}) =>
+  Object.entries(params.additionalContext ?? {})
+    .filter(([key]) => key.startsWith("t3_code_orchestration"))
+    .map(([, entry]) => entry.value)
+    .join("\n");
 const replayTranscriptJson = Schema.fromJsonString(CodexReplay.CodexAppServerReplayTranscript);
 const encodeReplayTranscriptJson = Schema.encodeEffect(replayTranscriptJson);
 const decodeReplayTranscriptJson = Schema.decodeUnknownEffect(replayTranscriptJson);
@@ -516,14 +529,8 @@ describe("CodexAdapterV2 runtime policy", () => {
       });
 
       assert.equal(params.collaborationMode?.mode, "default");
-      assert.include(
-        params.additionalContext?.t3_code_orchestration?.value ?? "",
-        "Use `delegate_task`",
-      );
-      assert.include(
-        params.additionalContext?.t3_code_orchestration?.value ?? "",
-        "structured object, never as JSON text",
-      );
+      assert.include(codexOrchestrationContext(params), T3_CODE_ORCHESTRATION_INSTRUCTIONS.trim());
+      assert.include(codexOrchestrationContext(params), "structured object, never as JSON text");
     }),
   );
 
@@ -571,6 +578,7 @@ describe("CodexAdapterV2 runtime policy", () => {
         "request_user_input",
       );
       assert.include(params.additionalContext?.t3_code_tools?.value ?? "", "preview_status");
+      assert.include(codexOrchestrationContext(params), T3_CODE_ORCHESTRATION_INSTRUCTIONS.trim());
     }),
   );
 
@@ -680,11 +688,34 @@ describe("CodexAdapterV2 process spawning", () => {
                 http_headers: {
                   Authorization: "Bearer secret-codex-token",
                 },
+                ...J5_CODEX_T3_MCP_SERVER_CONFIG,
               },
             },
           },
         },
       );
+      // Supervised custom seats still communicate and file roster requests without a second
+      // provider approval. Other mutations retain the runtime's ordinary approval policy.
+      for (const runtimeMode of ["approval-required", "auto-accept-edits", "auto"] as const) {
+        assert.deepEqual(
+          CodexAdapterV2.codexThreadRuntimeParams({
+            threadId,
+            runtimePolicy: { runtimeMode, interactionMode: "default", cwd: null },
+          }),
+          {
+            config: {
+              "tools.update_plan.enabled": true,
+              mcp_servers: {
+                "t3-code": {
+                  url: "http://127.0.0.1:43123/mcp",
+                  http_headers: { Authorization: "Bearer secret-codex-token" },
+                  ...J5_CODEX_COORDINATION_MCP_SERVER_CONFIG,
+                },
+              },
+            },
+          },
+        );
+      }
     } finally {
       McpProviderSession.clearMcpProviderSession(threadId);
     }
@@ -3049,6 +3080,66 @@ describe("CodexAdapterV2 post-settle continuation", () => {
         );
         assert.equal(resumed.status, "idle");
         assert.equal(DateTime.toEpochMillis(resumed.updatedAt), 1782622450000);
+      }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+    ),
+  );
+
+  it.effect.each([
+    { message: "no rollout found for thread id native-codex-resume-missing-thread", missing: true },
+    { message: "thread not found: native-codex-resume-missing-thread", missing: true },
+    { message: "thread is busy with another client", missing: false },
+    { message: "failed to open rollout: permission denied", missing: false },
+  ])("reports whether Codex says the resumed thread is gone: $message", ({ message, missing }) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const scenario = "codex-resume-missing";
+        const nativeThreadId = `native-${scenario}-thread`;
+        const preamble = codexReplayPreamble({
+          nativeThreadId,
+          nativeTurnId: "unused-turn",
+          prompt: "unused-prompt",
+        }).slice(0, 5);
+        const transcript = makeCodexReplayTranscript({
+          scenario,
+          entries: [
+            ...preamble,
+            {
+              type: "expect_outbound",
+              label: "thread/resume",
+              frame: {
+                id: 3,
+                method: "thread/resume",
+                params: {
+                  threadId: nativeThreadId,
+                  excludeTurns: true,
+                  cwd: CODEX_TEST_RUNTIME_POLICY.cwd,
+                  model: CODEX_TEST_MODEL_SELECTION.model,
+                  config: CodexAdapterV2.CODEX_THREAD_CONFIG,
+                },
+              },
+            },
+            {
+              type: "emit_inbound",
+              label: "thread/resume",
+              frame: { id: 3, error: { code: -32600, message } },
+            },
+          ],
+        });
+        const harness = yield* makeCodexReplayHarness(transcript);
+        const error = yield* harness.runtime
+          .resumeThread({
+            providerThread: harness.providerThread,
+            modelSelection: CODEX_TEST_MODEL_SELECTION,
+            runtimePolicy: CODEX_TEST_RUNTIME_POLICY,
+          })
+          .pipe(Effect.flip);
+
+        assert.equal(error._tag, "ProviderAdapterResumeThreadError");
+        assert.nestedPropertyVal(error, "cause.errorMessage", message);
+        assert.equal(
+          error._tag === "ProviderAdapterResumeThreadError" && error.nativeThreadMissing,
+          missing,
+        );
       }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
     ),
   );

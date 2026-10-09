@@ -18,6 +18,11 @@ import {
 import { useId, useImperativeHandle, useMemo, useRef, useState, type Ref } from "react";
 
 import { useAssetUrls } from "../../assets/assetUrls";
+import {
+  formatThreadA2AQueuedDelivery,
+  participantIdsForThreadA2AEnvelope,
+} from "../../j5/a2a/ThreadA2ARenderer";
+import { useParticipantLabels } from "../../j5/a2a/ParticipantIdentitiesClient";
 import { threadEnvironment } from "../../state/threads";
 import { useThreadProjection } from "../../state/entities";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -164,6 +169,10 @@ export function QueuedRunsControl({
       pending: true,
     })),
   ];
+  const participantLabels = useParticipantLabels(
+    props.environmentId,
+    items.flatMap((item) => participantIdsForThreadA2AEnvelope(item.text)),
+  );
 
   const move = async (runId: RunId, beforeRunId: RunId | null) => {
     setBusyRunId(runId);
@@ -275,6 +284,7 @@ export function QueuedRunsControl({
               const previewText = replaceComposerContextReferences(item.text, (reference) =>
                 reference.kind === "image" && item.thumbnails.length > 0 ? "" : reference.label,
               ).trim();
+              const delivery = formatThreadA2AQueuedDelivery(item.text, participantLabels);
               const rowRunId = item.runId;
               const rowServerIndex = item.serverIndex;
               const isEditing = rowRunId !== null && rowRunId === props.editingRunId;
@@ -396,10 +406,12 @@ export function QueuedRunsControl({
                     ) : null}
                     <Tooltip>
                       <TooltipTrigger render={<span className="min-w-0 flex-1 truncate" />}>
-                        {previewText}
+                        {delivery?.label ?? previewText}
                       </TooltipTrigger>
                       <TooltipPopup side="top" className="max-w-96 break-words">
-                        {previewText}
+                        {delivery === null
+                          ? previewText
+                          : (delivery.tooltipParticipantId ?? delivery.label)}
                       </TooltipPopup>
                     </Tooltip>
                   </ComposerBanner.Content>

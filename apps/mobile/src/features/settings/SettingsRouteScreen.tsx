@@ -160,6 +160,7 @@ function SettingsIndexSections() {
 
       <SettingsSection title="Automations">
         <SettingsRow icon="clock" label="Scheduled tasks" target="SettingsScheduledTasks" />
+        <SettingsRow icon="person.2" label="Personas" target="SettingsAgents" />
       </SettingsSection>
 
       <SettingsSection title="Projects & threads">
@@ -212,7 +213,7 @@ function SettingsIndexSections() {
 
       <SettingsSection title="App">
         <SettingsRow icon="chart.bar.xaxis" label="Usage" target="SettingsUsage" />
-        <SettingsRow icon="info.circle" label="About T3 Code" target="SettingsAbout" />
+        <SettingsRow icon="info.circle" label="About J5 Code" target="SettingsAbout" />
       </SettingsSection>
     </>
   );

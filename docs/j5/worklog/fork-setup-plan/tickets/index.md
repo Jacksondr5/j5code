@@ -1,0 +1,4 @@
+---
+title: "Tickets"
+kind: record
+---

@@ -1,29 +1,35 @@
 #!/bin/sh
-# Installs the T3 Code CLI from a GitHub Release archive. Needs only sh, tar,
+# Installs the J5 Code CLI from a GitHub Release archive. Needs only sh, tar,
 # sha256sum or shasum, and curl or wget; no Node, npm, or compiler.
 #
-#   curl -fsSL https://t3.codes/install.sh | sh
+#   curl -fsSL https://github.com/Jacksondr5/j5code/releases/latest/download/install.sh | sh
+#
+# J5 publishes archives for macOS (Apple silicon) and Linux x64. The archive's
+# executable is `j5`; releases before the rename named it `t3`.
 #
 # Environment:
 #   T3CODE_CHANNEL           release train to follow: stable, nightly, or preview
 #                            (default: stable; preview is a maintainers' test train)
 #   T3CODE_VERSION           exact version to install (overrides T3CODE_CHANNEL)
-#   T3CODE_HOME              T3 home directory (default: ~/.t3)
-#   T3CODE_INSTALL_BIN_DIR   where the `t3` symlink goes (default: ~/.local/bin)
+#   J5CODE_HOME              J5 home directory (default: ~/.j5code). T3CODE_HOME
+#                            belongs to T3 Code and is never read.
+#   T3CODE_INSTALL_BIN_DIR   where the `j5` symlink goes (default: ~/.local/bin)
+#   J5CODE_NO_MODIFY_PATH    set to leave shell startup files alone and only print
+#                            the PATH line to add
 #   T3CODE_RELEASE_BASE_URL  mirror for releases/download (default: GitHub)
 #
-# The archive is unpacked into $T3CODE_HOME/runtime/versions/<version>, the
-# same layout `t3 service install` uses, so the service reuses this download
+# The archive is unpacked into $J5CODE_HOME/runtime/versions/<version>, the
+# same layout `j5 service install` uses, so the service reuses this download
 # instead of fetching the release again.
 set -eu
 
-repo="pingdotgg/t3code"
+repo="Jacksondr5/j5code"
 base_url="${T3CODE_RELEASE_BASE_URL:-https://github.com/${repo}/releases/download}"
-t3_home="${T3CODE_HOME:-$HOME/.t3}"
+t3_home="${J5CODE_HOME:-$HOME/.j5code}"
 bin_dir="${T3CODE_INSTALL_BIN_DIR:-$HOME/.local/bin}"
 
 fail() {
-  printf '\nt3 install: %s\n' "$1" >&2
+  printf '\nj5 install: %s\n' "$1" >&2
   exit 1
 }
 
@@ -41,11 +47,7 @@ step() {
 }
 if "$interactive"; then
   printf '\n%s' "$bold" >&2
-  printf '  %s\n' '██████████ ████████ ' >&2
-  printf '  %s\n' '    ███       ▄██▀       T3 Code' >&2
-  printf '  %s%s     %sCLI installer%s\n' '    ███       ████▄ ' "$reset" "$muted" "$reset$bold" >&2
-  printf '  %s\n' '    ███    ▄     ███' >&2
-  printf '  %s\n' '    ███    ███████▀ ' >&2
+  printf '  %s%s  %sCLI installer%s\n' 'J5 Code' "$reset" "$muted" "$reset$bold" >&2
   printf '%s\n' "$reset" >&2
 fi
 step "Finding your release..."
@@ -126,12 +128,16 @@ download() {
 case "$(uname -s)" in
   Darwin) platform="darwin" ;;
   Linux) platform="linux" ;;
-  *) fail "unsupported operating system $(uname -s); use the desktop app or npm" ;;
+  *) fail "unsupported operating system $(uname -s); use the desktop app" ;;
 esac
 case "$(uname -m)" in
   arm64 | aarch64) arch="arm64" ;;
   x86_64 | amd64) arch="x64" ;;
   *) fail "unsupported architecture $(uname -m)" ;;
+esac
+case "${platform}-${arch}" in
+  darwin-arm64 | linux-x64) ;;
+  *) fail "J5 Code publishes CLI archives for macOS (Apple silicon) and Linux x64 only, not ${platform}-${arch}" ;;
 esac
 command -v tar >/dev/null 2>&1 || fail "tar is required"
 if command -v sha256sum >/dev/null 2>&1; then
@@ -162,7 +168,7 @@ fi
 case "$version" in
   *-preview.*)
     printf '%s\n' \
-      "t3 ${version} is a preview build." \
+      "j5 ${version} is a preview build." \
       "  Preview builds are cut by maintainers from unreleased branches to exercise the release" \
       "  pipeline. They can be broken, receive no fixes, and are never offered as updates." \
       "  Set T3CODE_CHANNEL=stable (the default) for a supported build." >&2
@@ -188,12 +194,12 @@ else
   trap 'printf "\n" >&2; exit 143' TERM
 
   if "$interactive"; then printf '\r\033[2K' >&2; fi
-  printf '  %sInstalling%s T3 Code %s%s%s\n\n' "$muted" "$reset" "$bold" "$version" "$reset" >&2
+  printf '  %sInstalling%s J5 Code %s%s%s\n\n' "$muted" "$reset" "$bold" "$version" "$reset" >&2
   step "Downloading..."
   fetch_status=0
   fetch "${base_url}/v${version}/SHA256SUMS" "${staging}/SHA256SUMS" || fetch_status=$?
   if [ "$fetch_status" -eq 44 ]; then
-    fail "t3 ${version} has no release archive for ${platform}-${arch}; releases before the self-contained CLI can only be installed with \`npm install -g t3@${version}\`"
+    fail "j5 ${version} has no release archive for ${platform}-${arch}; J5 releases 0.0.43 and earlier were published to npm as @jacksondr5/j5code"
   elif [ "$fetch_status" -ne 0 ]; then
     fail "could not download the release checksums"
   fi
@@ -205,10 +211,11 @@ else
   actual="$(checksum "${staging}/${archive}")"
   [ "$actual" = "$expected" ] || fail "checksum mismatch for ${archive}"
 
-  step "Extracting T3 Code..."
+  step "Extracting J5 Code..."
   tar -xzf "${staging}/${archive}" -C "$staging" --strip-components=1
   rm -f "${staging}/${archive}" "${staging}/SHA256SUMS"
-  "${staging}/t3" --version >/dev/null || fail "the downloaded executable does not run"
+  if [ -e "${staging}/j5" ]; then exe=j5; else exe=t3; fi
+  "${staging}/${exe}" --version >/dev/null || fail "the downloaded executable does not run"
   printf '%s\n' "$version" > "${staging}/.install-complete"
 
   rm -rf "$target_dir"
@@ -216,12 +223,68 @@ else
   trap - EXIT
 fi
 
-step "Setting up the t3 command..."
+step "Setting up the j5 command..."
 mkdir -p "$bin_dir"
-ln -sfn "${target_dir}/t3" "${bin_dir}/t3"
+if [ -e "${target_dir}/j5" ]; then exe=j5; else exe=t3; fi
+ln -sfn "${target_dir}/${exe}" "${bin_dir}/j5"
 if "$interactive"; then printf '\r\033[2K' >&2; fi
-printf '  %sInstalled T3 Code %s%s\n\n' "$green" "$version" "$reset" >&2
+printf '  %sInstalled J5 Code %s%s\n\n' "$green" "$version" "$reset" >&2
 case ":${PATH}:" in
-  *":${bin_dir}:"*) printf '  Run %st3%s to get started.\n\n' "$bold" "$reset" ;;
-  *) printf '  Add %s to your PATH, then run %st3%s.\n\n' "$bin_dir" "$bold" "$reset" ;;
+  *":${bin_dir}:"*) printf '  Run %sj5%s to get started.\n\n' "$bold" "$reset"; exit 0 ;;
 esac
+
+# J5: put bin_dir on PATH for new terminals with one marked line in the shell's
+# startup file. `j5 uninstall` removes lines ending with this marker; keep it
+# in step with packages/shared/src/j5/shellProfile.ts.
+marker='# Added by J5 Code; `j5 uninstall` removes this line.'
+profile=
+# The directory goes last: `j5` replaces nothing, so it has no reason to take
+# precedence over what is already on PATH.
+line="export PATH=\"\$PATH:${bin_dir}\" ${marker}"
+case "$(basename "${SHELL:-}")" in
+  zsh) profile="${ZDOTDIR:-$HOME}/.zshrc" ;;
+  bash)
+    if [ "$platform" = darwin ]; then
+      # macOS terminals start login shells, which read only the first of these
+      # that exists; creating .bash_profile would hide an existing .profile.
+      profile="$HOME/.bash_profile"
+      for candidate in "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.profile"; do
+        if [ -e "$candidate" ]; then profile="$candidate"; break; fi
+      done
+    else
+      profile="$HOME/.bashrc"
+    fi
+    ;;
+  fish)
+    profile="${XDG_CONFIG_HOME:-$HOME/.config}/fish/config.fish"
+    # --path changes only this shell's PATH, so deleting the line undoes it.
+    line="fish_add_path --path --append \"${bin_dir}\" ${marker}"
+    ;;
+esac
+path_hint() {
+  printf '  Add %s to your PATH, then run %sj5%s.\n\n' "$bin_dir" "$bold" "$reset"
+  exit 0
+}
+[ -n "$profile" ] || path_hint
+[ -z "${J5CODE_NO_MODIFY_PATH:-}" ] || path_hint
+# The line quotes bin_dir in double quotes; a directory the shell would expand
+# or split there gets the hint instead of a line that points somewhere else.
+case "$bin_dir" in
+  *[\"\$\`\\]*) path_hint ;;
+esac
+if grep -qF "$marker" "$profile" 2>/dev/null; then
+  printf '  %s already has the PATH line from an earlier J5 Code install.\n  Open a new terminal, then run %sj5%s.\n\n' "$profile" "$bold" "$reset"
+  exit 0
+fi
+# A read-only profile (a home-manager link, say) gets the hint, not a failure.
+if ! {
+  mkdir -p "$(dirname "$profile")" &&
+    {
+      # Start on a fresh line when the file doesn't end with one.
+      if [ -s "$profile" ] && [ -n "$(tail -c 1 "$profile")" ]; then printf '\n'; fi
+      printf '%s\n' "$line"
+    } >> "$profile"
+} 2>/dev/null; then
+  path_hint
+fi
+printf '  Added %s to your PATH in %s.\n  Open a new terminal, then run %sj5%s.\n\n' "$bin_dir" "$profile" "$bold" "$reset"

@@ -19,6 +19,7 @@ import { Command, Flag, GlobalFlag, Prompt } from "effect/cli";
 
 import * as BootService from "../cloud/bootService.ts";
 import { pinnedRuntimeVersionsDir } from "../cloud/pinnedRuntime.ts";
+import { planShellCleanup, removeJ5PathLines } from "../j5/cli/shellProfile.ts";
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
 import * as CliService from "./service.ts";
 import { findWindowsShim, launcherOwnsVersionsDir, resolveLauncherPath } from "./update.ts";
@@ -110,7 +111,7 @@ export const uninstallCommand = Command.make("uninstall", {
   ),
 }).pipe(
   Command.withDescription(
-    "Remove t3 from this machine: the background service, the launcher, and every downloaded version. Your projects and threads are kept.",
+    "Remove j5 from this machine: the background service, the launcher, and every downloaded version. Your projects and threads are kept.",
   ),
   Command.withHandler((flags) =>
     Effect.gen(function* () {
@@ -132,12 +133,28 @@ const runUninstall = Effect.fn("cli.uninstall.run")(function* (input: {
   const environment = yield* HostProcessEnvironment;
   const service = yield* BootService.BootService;
   const plan = yield* planUninstall({ baseDir: input.baseDir });
+  // J5: the PATH line the installer added to shell startup files (#397, FORK.md case 52).
+  const cleanup = yield* planShellCleanup(input.baseDir).pipe(
+    Effect.mapError(
+      (error) =>
+        new CliUninstallError({ reason: `Could not read a shell startup file: ${error.message}` }),
+    ),
+  );
+  const profiles = cleanup.profiles;
+  // The installer's link, when uninstall wasn't started through it.
+  const installerLink = cleanup.installerLink === plan.launcher ? undefined : cleanup.installerLink;
 
-  if (!plan.service && plan.launcher === undefined && plan.runtimeDir === undefined) {
-    yield* Console.log(`Nothing to remove: t3 is not installed for ${input.baseDir}.`);
+  if (
+    !plan.service &&
+    plan.launcher === undefined &&
+    plan.runtimeDir === undefined &&
+    profiles.length === 0 &&
+    installerLink === undefined
+  ) {
+    yield* Console.log(`Nothing to remove: j5 is not installed for ${input.baseDir}.`);
     if (!(yield* HostProcessIsExecutable)) {
       yield* Console.log(
-        "  This t3 runs from a Node script, so it was installed by npm or built from source. Remove it the same way (`npm uninstall -g t3`, or delete the checkout).",
+        "  This j5 runs from a Node script, so it was installed by npm or built from source. Remove it the same way (`npm uninstall -g @jacksondr5/j5code`, or delete the checkout).",
       );
     }
     return;
@@ -149,6 +166,8 @@ const runUninstall = Effect.fn("cli.uninstall.run")(function* (input: {
   if (plan.runtimeDir !== undefined) {
     yield* Console.log(`  every downloaded version under ${plan.runtimeDir}`);
   }
+  if (installerLink !== undefined) yield* Console.log(`  the launcher at ${installerLink}`);
+  for (const profile of profiles) yield* Console.log(`  the PATH line J5 added to ${profile}`);
   yield* Console.log(
     `Your projects, threads, and settings under ${plan.userdataDir} are kept. Delete that directory yourself if you want them gone too.`,
   );
@@ -161,7 +180,7 @@ const runUninstall = Effect.fn("cli.uninstall.run")(function* (input: {
       });
     }
     const confirmed = yield* Prompt.run(
-      Prompt.Confirm({ message: "Remove t3 from this machine?", initial: false }),
+      Prompt.Confirm({ message: "Remove j5 from this machine?", initial: false }),
     ).pipe(Effect.catchTags({ QuitError: () => Effect.succeed(false) }));
     if (!confirmed) {
       yield* Console.log("Left as is.");
@@ -184,6 +203,25 @@ const runUninstall = Effect.fn("cli.uninstall.run")(function* (input: {
       );
     yield* Console.log(`Removed ${plan.launcher}.`);
   }
+  if (installerLink !== undefined) {
+    yield* fs
+      .remove(installerLink, { force: true })
+      .pipe(
+        Effect.mapError(
+          () =>
+            new CliUninstallError({ reason: `Could not remove the launcher at ${installerLink}.` }),
+        ),
+      );
+    yield* Console.log(`Removed ${installerLink}.`);
+  }
+  if (profiles.length > 0) {
+    yield* removeJ5PathLines(profiles).pipe(
+      Effect.mapError(
+        () => new CliUninstallError({ reason: `Could not edit ${profiles.join(", ")}.` }),
+      ),
+    );
+    yield* Console.log(`Removed the PATH line from ${profiles.join(", ")}.`);
+  }
   if (plan.runtimeDir !== undefined) {
     // This process runs from inside runtimeDir. POSIX unlinks a running
     // executable fine; Windows refuses, so the tree is removed after this
@@ -205,7 +243,7 @@ const runUninstall = Effect.fn("cli.uninstall.run")(function* (input: {
             reason: `Could not schedule removal of ${runtimeDir}. Delete it yourself once this window is closed.`,
           }),
       });
-      yield* Console.log(`${runtimeDir} will be removed once t3 exits.`);
+      yield* Console.log(`${runtimeDir} will be removed once j5 exits.`);
     } else {
       yield* fs
         .remove(plan.runtimeDir, { recursive: true, force: true })
@@ -218,5 +256,5 @@ const runUninstall = Effect.fn("cli.uninstall.run")(function* (input: {
     }
   }
   yield* Console.log("");
-  yield* Console.log("t3 is uninstalled. Thanks for trying T3 Code.");
+  yield* Console.log("j5 is uninstalled. Thanks for trying J5 Code.");
 });

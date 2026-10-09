@@ -303,6 +303,18 @@
       "types": "./src/state/threadSubagents.ts",
       "default": "./src/state/threadSubagents.ts"
     },
+    "./j5/agent-personas": {
+      "types": "./src/j5/agentPersonas.ts",
+      "default": "./src/j5/agentPersonas.ts"
+    },
+    "./j5/agent-persona-atoms": {
+      "types": "./src/j5/agentPersonaAtoms.ts",
+      "default": "./src/j5/agentPersonaAtoms.ts"
+    },
+    "./j5/agent-mentions": {
+      "types": "./src/j5/agentMentions.ts",
+      "default": "./src/j5/agentMentions.ts"
+    },
     "./state/thread-settled": {
       "types": "./src/state/threadSettled.ts",
       "default": "./src/state/threadSettled.ts"
@@ -342,6 +354,34 @@
     "./work-log/scroll-anchor": {
       "types": "./src/work-log/scrollAnchor.ts",
       "default": "./src/work-log/scrollAnchor.ts"
+    },
+    "./j5/playbooks": {
+      "types": "./src/j5/playbooks.ts",
+      "default": "./src/j5/playbooks.ts"
+    },
+    "./j5/http": {
+      "types": "./src/j5/http.ts",
+      "default": "./src/j5/http.ts"
+    },
+    "./j5/state": {
+      "types": "./src/j5/state.ts",
+      "default": "./src/j5/state.ts"
+    },
+    "./j5/readSources": {
+      "types": "./src/j5/readSources.ts",
+      "default": "./src/j5/readSources.ts"
+    },
+    "./j5/scopedThreadReadStore": {
+      "types": "./src/j5/scopedThreadReadStore.ts",
+      "default": "./src/j5/scopedThreadReadStore.ts"
+    },
+    "./j5/inbox": {
+      "types": "./src/j5/inbox.ts",
+      "default": "./src/j5/inbox.ts"
+    },
+    "./j5/peering": {
+      "types": "./src/j5/peering.ts",
+      "default": "./src/j5/peering.ts"
     },
     "./thread-pull-request-compatibility": {
       "types": "./src/threadPullRequestCompatibility.ts",

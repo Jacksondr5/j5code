@@ -19,25 +19,34 @@ import {
 
 it("formats package runner commands from their cache entry paths", () => {
   for (const [entryPath, expected] of [
-    ["/home/theo/.npm/_npx/abc123/node_modules/t3/dist/bin.mjs", "npx t3 serve"],
     [
-      "C:\\Users\\theo\\AppData\\Local\\npm-cache\\_npx\\abc\\node_modules\\t3\\dist\\bin.mjs",
-      "npx t3 serve",
-    ],
-    ["/home/theo/.cache/pnpm/dlx/abc/node_modules/t3/dist/bin.mjs", "pnpm dlx t3 serve"],
-    [
-      "/home/theo/.local/share/pnpm/.pnpm/dlx/abc/node_modules/t3/dist/bin.mjs",
-      "pnpm dlx t3 serve",
+      "/home/theo/.npm/_npx/abc123/node_modules/@jacksondr5/j5code/dist/bin.mjs",
+      "npx @jacksondr5/j5code serve",
     ],
     [
-      "C:\\Users\\theo\\AppData\\Local\\pnpm-cache\\dlx\\abc\\node_modules\\t3\\dist\\bin.mjs",
-      "pnpm dlx t3 serve",
+      "C:\\Users\\theo\\AppData\\Local\\npm-cache\\_npx\\abc\\node_modules\\@jacksondr5\\j5code\\dist\\bin.mjs",
+      "npx @jacksondr5/j5code serve",
     ],
-    ["/home/theo/.bun/install/cache/t3@0.0.31/dist/bin.mjs", "bunx t3 serve"],
-    ["/tmp/bunx-1000-t3@latest/node_modules/t3/dist/bin.mjs", "bunx t3 serve"],
     [
-      "C:\\Users\\theo\\AppData\\Local\\Temp\\bunx-0-t3@latest\\node_modules\\t3\\dist\\bin.mjs",
-      "bunx t3 serve",
+      "/home/theo/.cache/pnpm/dlx/abc/node_modules/@jacksondr5/j5code/dist/bin.mjs",
+      "pnpm dlx @jacksondr5/j5code serve",
+    ],
+    [
+      "/home/theo/.local/share/pnpm/.pnpm/dlx/abc/node_modules/@jacksondr5/j5code/dist/bin.mjs",
+      "pnpm dlx @jacksondr5/j5code serve",
+    ],
+    [
+      "C:\\Users\\theo\\AppData\\Local\\pnpm-cache\\dlx\\abc\\node_modules\\@jacksondr5\\j5code\\dist\\bin.mjs",
+      "pnpm dlx @jacksondr5/j5code serve",
+    ],
+    ["/home/theo/.bun/install/cache/t3@0.0.31/dist/bin.mjs", "bunx @jacksondr5/j5code serve"],
+    [
+      "/tmp/bunx-1000-t3@latest/node_modules/@jacksondr5/j5code/dist/bin.mjs",
+      "bunx @jacksondr5/j5code serve",
+    ],
+    [
+      "C:\\Users\\theo\\AppData\\Local\\Temp\\bunx-0-t3@latest\\node_modules\\@jacksondr5\\j5code\\dist\\bin.mjs",
+      "bunx @jacksondr5/j5code serve",
     ],
   ] as const) {
     assert.equal(formatCliCommand({ subcommand: "serve", entryPath, version: "0.0.31" }), expected);
@@ -46,29 +55,27 @@ it("formats package runner commands from their cache entry paths", () => {
 
 it("treats stable installs as direct invocations", () => {
   for (const entryPath of [
-    "/usr/local/lib/node_modules/t3/dist/bin.mjs",
+    "/usr/local/lib/node_modules/@jacksondr5/j5code/dist/bin.mjs",
     "/home/theo/Code/work/t3code/apps/server/dist/bin.mjs",
-    "/home/theo/.t3/runtime/0.0.31/node_modules/t3/dist/bin.mjs",
+    "/home/theo/.t3/runtime/0.0.31/node_modules/@jacksondr5/j5code/dist/bin.mjs",
     "",
   ]) {
     assert.equal(
       formatCliCommand({ subcommand: "serve", entryPath, version: "0.0.31" }),
-      "t3 serve",
+      "j5 serve",
     );
   }
 });
 
 it("re-suggests the prerelease channel only for prerelease builds", () => {
   for (const [version, expected] of [
-    ["0.0.31-nightly.20260729", "npx t3@nightly serve"],
-    ["0.0.31-preview.20260729.1", "npx t3@preview serve"],
-    ["0.0.31-foo-preview.20260729.1", "npx t3 serve"],
-    ["0.0.31", "npx t3 serve"],
+    ["0.0.31-nightly.20260729", "npx @jacksondr5/j5code@nightly serve"],
+    ["0.0.31", "npx @jacksondr5/j5code serve"],
   ] as const) {
     assert.equal(
       formatCliCommand({
         subcommand: "serve",
-        entryPath: "/home/theo/.npm/_npx/abc123/node_modules/t3/dist/bin.mjs",
+        entryPath: "/home/theo/.npm/_npx/abc123/node_modules/@jacksondr5/j5code/dist/bin.mjs",
         version,
       }),
       expected,
@@ -80,31 +87,31 @@ it("formats serve suggestions to match the launching command", () => {
   assert.equal(
     formatCliCommand({
       subcommand: "serve",
-      entryPath: "/home/theo/.npm/_npx/abc/node_modules/t3/dist/bin.mjs",
+      entryPath: "/home/theo/.npm/_npx/abc/node_modules/@jacksondr5/j5code/dist/bin.mjs",
       version: "0.0.31-nightly.20260729",
     }),
-    "npx t3@nightly serve",
+    "npx @jacksondr5/j5code@nightly serve",
   );
   assert.equal(
     formatCliCommand({
       subcommand: "serve",
-      entryPath: "/tmp/bunx-1000-t3@latest/node_modules/t3/dist/bin.mjs",
+      entryPath: "/tmp/bunx-1000-j5code@latest/node_modules/@jacksondr5/j5code/dist/bin.mjs",
       version: "0.0.31",
     }),
-    "bunx t3 serve",
+    "bunx @jacksondr5/j5code serve",
   );
   assert.equal(
     formatCliCommand({
       subcommand: "serve",
-      entryPath: "/usr/local/lib/node_modules/t3/dist/bin.mjs",
+      entryPath: "/usr/local/lib/node_modules/@jacksondr5/j5code/dist/bin.mjs",
       version: "0.0.31-nightly.20260729",
     }),
-    "t3 serve",
+    "j5 serve",
   );
 });
 
 it.layer(NodeServices.layer)("root CLI commands", (it) => {
-  /** `sudo t3 browser setup` as this process would render it, with `t3` on PATH or not. */
+  /** `sudo j5 browser setup` as this process would render it, with `j5` on PATH or not. */
   const rootCommand = (input: {
     readonly node: string;
     readonly entry: string;
@@ -120,12 +127,12 @@ it.layer(NodeServices.layer)("root CLI commands", (it) => {
       Effect.provideService(HostProcessEnvironment, { PATH: input.path ?? "", ...input.env }),
     );
 
-  /** A directory holding an executable `t3`, to stand in for one on PATH. */
-  const pathWithT3 = Effect.gen(function* () {
+  /** A directory holding an executable `j5`, to stand in for one on PATH. */
+  const pathWithJ5 = Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const bin = yield* fs.makeTempDirectoryScoped();
-    yield* fs.writeFileString(path.join(bin, "t3"), "#!/bin/sh\n", { mode: 0o755 });
+    yield* fs.writeFileString(path.join(bin, "j5"), "#!/bin/sh\n", { mode: 0o755 });
     return bin;
   });
 
@@ -134,28 +141,28 @@ it.layer(NodeServices.layer)("root CLI commands", (it) => {
       const npx = "/home/theo/.npm/_npx/abc/node_modules/t3/dist/bin.mjs";
       // sudo's secure_path already has a system Node.
       expect(yield* rootCommand({ node: "/usr/bin/node", entry: npx })).toBe(
-        "sudo npx t3 browser setup",
+        "sudo npx @jacksondr5/j5code browser setup",
       );
       // nvm, fnm, and tarball installs are dropped by sudo's PATH reset.
       expect(
         yield* rootCommand({ node: "/home/theo/.nvm/versions/node/v24/bin/node", entry: npx }),
-      ).toBe('sudo env "PATH=$PATH" npx t3 browser setup');
+      ).toBe('sudo env "PATH=$PATH" npx @jacksondr5/j5code browser setup');
       expect(
         yield* rootCommand({
           node: "/home/theo/.local/node/bin/node",
           entry: "/home/theo/.local/lib/node_modules/t3/dist/bin.mjs",
-          path: yield* pathWithT3,
+          path: yield* pathWithJ5,
         }),
-      ).toBe('sudo env "PATH=$PATH" t3 browser setup');
+      ).toBe('sudo env "PATH=$PATH" j5 browser setup');
     }).pipe(Effect.scoped),
   );
 
-  it.effect("names this install's launcher when t3 is not on PATH", () =>
+  it.effect("names this install's launcher when j5 is not on PATH", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const home = yield* fs.makeTempDirectoryScoped();
-      const shim = path.join(home, ".local bin", "t3");
+      const shim = path.join(home, ".local bin", "j5");
       yield* fs.makeDirectory(path.dirname(shim), { recursive: true });
       yield* fs.writeFileString(shim, "#!/bin/sh\n", { mode: 0o755 });
       const desktop = {
@@ -165,22 +172,22 @@ it.layer(NodeServices.layer)("root CLI commands", (it) => {
       };
       // The desktop app's shim, quoted for the shell and run as root as is.
       expect(yield* rootCommand(desktop)).toBe(`sudo '${shim}' browser setup`);
-      // A `t3` the person put on PATH still wins.
-      expect(yield* rootCommand({ ...desktop, path: yield* pathWithT3 })).toBe(
-        'sudo env "PATH=$PATH" t3 browser setup',
+      // A `j5` the person put on PATH still wins.
+      expect(yield* rootCommand({ ...desktop, path: yield* pathWithJ5 })).toBe(
+        'sudo env "PATH=$PATH" j5 browser setup',
       );
       // A standalone binary names itself.
       expect(
         yield* rootCommand({
-          node: "/opt/t3/t3",
-          entry: "/opt/t3/t3",
+          node: "/opt/j5/j5",
+          entry: "/opt/j5/j5",
           executable: true,
         }),
-      ).toBe("sudo /opt/t3/t3 browser setup");
-      // A stale shim path, then no launcher at all, fall back to plain `t3`.
+      ).toBe("sudo /opt/j5/j5 browser setup");
+      // A stale shim path, then no launcher at all, fall back to plain `j5`.
       expect(
         yield* rootCommand({ ...desktop, env: { T3CODE_CLI_PATH: path.join(home, "gone") } }),
-      ).toBe('sudo env "PATH=$PATH" t3 browser setup');
+      ).toBe('sudo env "PATH=$PATH" j5 browser setup');
     }).pipe(Effect.scoped),
   );
 });

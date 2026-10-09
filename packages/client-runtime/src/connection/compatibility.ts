@@ -4,6 +4,7 @@ import {
   type ExecutionEnvironmentDescriptor,
 } from "@t3tools/contracts";
 
+import { j5ServerCompatibilityError } from "../j5/serverCompatibility.ts";
 import { ConnectionBlockedError } from "./model.ts";
 
 export function orchestrationProtocolCompatibilityError(
@@ -12,7 +13,8 @@ export function orchestrationProtocolCompatibilityError(
   // Servers shipped before negotiation use the original wire protocol.
   const serverProtocolVersion = descriptor.orchestrationProtocolVersion ?? 1;
   if (serverProtocolVersion === ORCHESTRATION_PROTOCOL_VERSION) {
-    return null;
+    // J5: the server must also keep the ledger this client reads.
+    return j5ServerCompatibilityError(descriptor);
   }
   return serverProtocolVersion > ORCHESTRATION_PROTOCOL_VERSION
     ? new ConnectionBlockedError({
@@ -21,7 +23,7 @@ export function orchestrationProtocolCompatibilityError(
       })
     : new ConnectionBlockedError({
         reason: "unsupported",
-        detail: `This client requires a newer server. Update T3 Code on ${descriptor.label} to connect.`,
+        detail: `This client requires a newer server. Update the server on ${descriptor.label} to connect.`,
         ...(canSelfUpdate(descriptor) ? { serverUpdateRequired: true } : {}),
       });
 }

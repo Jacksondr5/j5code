@@ -1,6 +1,6 @@
 {
   "name": "@t3tools/contracts",
-  "version": "0.0.45",
+  "version": "0.0.48",
   "private": true,
   "files": [
     "dist"
@@ -18,6 +18,10 @@
     "./relay": {
       "types": "./src/relay.ts",
       "import": "./src/relay.ts"
+    },
+    "./j5": {
+      "types": "./src/j5.ts",
+      "import": "./src/j5.ts"
     }
   },
   "scripts": {

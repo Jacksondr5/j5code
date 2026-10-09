@@ -95,6 +95,7 @@ function renderTabs(
   second?: DesktopPreviewFavicon,
   audio?: { audible?: boolean; audioMuted?: boolean },
   previewRuntimeTabId: ((tabId: string) => string) | null = (tabId) => `runtime:${tabId}`,
+  empty = false,
 ) {
   return renderToStaticMarkup(
     <RightPanelTabs
@@ -108,9 +109,9 @@ function renderTabs(
         isWeb: true,
         isDesktop: false,
       })}
-      surfaces={second ? [previewSurface, secondSurface] : [previewSurface]}
+      surfaces={empty ? [] : second ? [previewSurface, secondSurface] : [previewSurface]}
       environmentId={null}
-      activeSurfaceId={previewSurface.id}
+      activeSurfaceId={empty ? null : previewSurface.id}
       pendingSurfaceIds={new Set()}
       previewSessions={sessions}
       desktopByTabId={{
@@ -132,11 +133,13 @@ function renderTabs(
       onAddPullRequests={() => undefined}
       onAddDiff={() => undefined}
       onAddFiles={() => undefined}
+      onAddArtifacts={() => undefined}
       onAddDevice={() => undefined}
       browserAvailable
       terminalAvailable={false}
       diffAvailable={false}
       filesAvailable={false}
+      artifactsAvailable
       pullRequestAvailable={false}
       pullRequestsAvailable={false}
       deviceAvailable={false}
@@ -147,6 +150,10 @@ function renderTabs(
 }
 
 describe("RightPanelTabs preview favicon", () => {
+  it("offers the workspace artifacts surface", () => {
+    expect(renderTabs(null, undefined, undefined, undefined, true)).toContain("Artifacts");
+  });
+
   it("prefers a live capture and never asks Google about a private hostname", () => {
     const captured = renderTabs(favicon("data:image/png;base64,AAAA", "http://24x.xf.local/"));
     expect(captured).toContain("data:image/png;base64,AAAA");

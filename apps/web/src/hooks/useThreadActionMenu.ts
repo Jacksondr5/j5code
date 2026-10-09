@@ -47,6 +47,8 @@ import { useCopyToClipboard } from "./useCopyToClipboard";
 import { useNewThreadHandler } from "./useHandleNewThread";
 import { useClientSettings } from "./useSettings";
 import { useThreadActions } from "./useThreadActions";
+import { requestConfirmDialog } from "../confirmDialog";
+import { archiveWithPreflight } from "../j5/a2a/archiveFlow";
 
 function failureToast(title: string, error: unknown) {
   toastManager.add(
@@ -289,18 +291,40 @@ export function useThreadActionMenu(input: {
             copyThreadIdToClipboard(thread.id, { threadId: thread.id });
             return;
           case "archive": {
-            if (confirmThreadArchive) {
-              const confirmed = await settlePromise(() =>
-                api.dialogs.confirm(`Archive thread "${thread.title}"?`),
-              );
-              if (confirmed._tag === "Failure" || !confirmed.value) return;
-            }
+            // J5 (case 21): the header archive door runs the same per-thread preflight.
             let didArchive = false;
-            const result = await archiveThread(threadRef, {
-              onArchived: () => {
-                didArchive = true;
+            const result = await archiveWithPreflight({
+              threadRef,
+              threadTitle: thread.title,
+              confirm: async ({ message, content, confirmLabel }) => {
+                const confirmed = await settlePromise(
+                  () =>
+                    requestConfirmDialog(
+                      message,
+                      { variant: "destructive" },
+                      { content, confirmLabel },
+                    ) ?? Promise.resolve(false),
+                );
+                return confirmed._tag === "Success" && confirmed.value;
               },
+              ...(confirmThreadArchive
+                ? {
+                    confirmCleanArchive: async () => {
+                      const confirmed = await settlePromise(() =>
+                        api.dialogs.confirm(`Archive thread "${thread.title}"?`),
+                      );
+                      return confirmed._tag === "Success" && confirmed.value;
+                    },
+                  }
+                : {}),
+              archive: () =>
+                archiveThread(threadRef, {
+                  onArchived: () => {
+                    didArchive = true;
+                  },
+                }),
             });
+            if (result === undefined) return;
             if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
               failureToast(
                 didArchive ? "Thread archived, but navigation failed" : "Failed to archive thread",

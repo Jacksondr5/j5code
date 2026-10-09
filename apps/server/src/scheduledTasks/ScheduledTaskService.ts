@@ -2,6 +2,7 @@ import {
   CommandId,
   MessageId,
   PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
+  SCHEDULED_TASK_MESSAGE_ID_PREFIX,
   ScheduledTask,
   ScheduledTaskError,
   ScheduledTaskId,
@@ -783,7 +784,7 @@ export const layer = Layer.effect(
             ? `${active.id}:${DateTime.toEpochMillis(startedAt)}:${trigger}`
             : `${active.id}:webhook:${webhook.deliveryId}`;
         const commandId = CommandId.make(`scheduled-task:${fireKey}`);
-        const messageId = MessageId.make(`scheduled-task-message:${fireKey}`);
+        const messageId = MessageId.make(`${SCHEDULED_TASK_MESSAGE_ID_PREFIX}${fireKey}`);
         // Dispatch from the fresh row so prompt/model/binding edits made
         // after the poll read are honoured. A webhook prompt was rendered
         // from the row when the request arrived.

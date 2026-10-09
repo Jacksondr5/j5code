@@ -162,25 +162,16 @@ describe("ServerUpdateAction", () => {
     expect(testState.updateServer).not.toHaveBeenCalled();
   });
 
+  // J5 (case 40): every install kind updates in place with `j5 update`.
   it.each([
     [
       { kind: "npm-global", prefix: "/opt/node" },
-      "npm install --global --prefix '/opt/node' t3@0.0.45",
+      "j5 update 0.0.45",
       "Update command copied",
-      "then restart t3",
+      "to update it",
     ],
-    [
-      { kind: "npx" },
-      "npx t3@0.0.45",
-      "Relaunch command copied",
-      "This does not update an installed t3 command.",
-    ],
-    [
-      undefined,
-      "npx t3@0.0.45",
-      "Relaunch command copied",
-      "This does not update an installed t3 command.",
-    ],
+    [{ kind: "npx" }, "j5 update 0.0.45", "Update command copied", "to update it"],
+    [undefined, "j5 update 0.0.45", "Update command copied", "to update it"],
   ] satisfies ReadonlyArray<readonly [ServerInstallation | undefined, string, string, string]>)(
     "copies an honest manual command for %j without invoking remote update",
     (installation, command, title, guidance) => {
@@ -218,7 +209,7 @@ describe("ServerUpdateAction", () => {
     expect(testState.toast).toHaveBeenCalledWith({
       type: "success",
       title: "Test server updated",
-      description: "Reconnected on t3@0.0.31.",
+      description: "Reconnected on j5 0.0.31.",
     });
   });
 

@@ -1,6 +1,7 @@
 import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
 import { readEnvironmentScope } from "./session";
 import type { ComposerTextPaste } from "../native/T3ComposerEditor.types";
+import { expandPlaybookPrompt } from "@t3tools/client-runtime/j5/playbooks";
 import { useAtomValue } from "@effect/atom-react";
 import { threadRuntimeIsActive } from "@t3tools/client-runtime/state/shell";
 import {
@@ -579,7 +580,7 @@ export function useThreadComposerState() {
       const draft = getComposerDraftSnapshot(threadKey);
       if (appAtomRegistry.get(composerContextImportsAtom)[threadKey]) return null;
       const thread = selectedThreadShell;
-      const text = draft.text.trim();
+      const text = expandPlaybookPrompt(draft.text.trim());
       const attachments = draft.attachments;
       if (
         composerAttachmentUploadBlockReason({

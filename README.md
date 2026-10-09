@@ -1,135 +1,110 @@
-# T3 Code
+# J5 Code
 
-T3 Code is an "agent harness control surface". It enables control of the agents on your machine with a best-in-class mobile app ([iOS](https://apps.apple.com/us/app/t3-code-remote-claude-more/id6787819824), [Android](https://play.google.com/store/apps/details?id=com.t3tools.t3code)), [web app](https://app.t3.codes) and [Electron-based desktop app](https://t3.codes).
+Steer fleets of agents, not just a few chats.
 
-Works with your subscriptions on Claude Code, Codex, Cursor, Grok Build, OpenCode, and Google Antigravity. If they're set up on your computer, T3 Code can control them.
+J5 Code is a tracking fork of [T3 Code](https://t3.codes). Everything T3 Code does, J5 Code does: six agent harnesses on your own subscriptions, desktop, web and mobile clients, remote control over your tailnet, a checkpoint on every turn, and the one-button PR. J5 adds a layer above it for running agents in groups:
 
-## "Wait, what are you selling me?"
+- **Agent-to-agent messaging.** Agents message each other to get work done, through the same platform that manages them.
+- **Personas.** Pick the right model for the job, give it a personality, and share it with your team.
+- **Playbooks.** Keep agents on track during long-running work, and see how the work is going at a glance.
+- **Crews.** Spawn a group of agents with a single goal and talk to its Captain.
+- **Inbox.** Agents send you messages when they need you; reply from one place.
+- **Fleet page.** See what all your agents are doing, including the stalled and stuck ones.
 
-Nothing. We built T3 Code because we wanted the best possible development experience with agents. We were inspired by existing solutions like the Codex desktop app, Conductor, Claude Desktop and Cursor Glass, but none met our bar.
+It is early software, in daily use by its author. Expect rough edges. It is free and MIT licensed, like T3 Code, and it installs alongside T3 Code without sharing its app, data, or server. [FORK.md](./FORK.md) explains how the fork stays in sync with upstream.
 
-We wanted something performant, remote-ready, and truly open. If we ever go the wrong direction, we want you to have everything you need to fork and build the editor that you want.
+More at [j5.codes](https://j5.codes). Want normal T3 Code? It is excellent: [t3.codes](https://t3.codes).
 
 ## Installation
 
-> [!WARNING]
-> T3 Code currently supports Codex, Claude, Cursor, Grok Build, OpenCode, and Antigravity. Install and authenticate at least one provider before use:
->
-> - Codex: install [Codex CLI](https://developers.openai.com/codex/cli) and run `codex login`
-> - Claude: install [Claude Code](https://claude.com/product/claude-code) and run `claude auth login`
-> - Cursor: install [Cursor CLI](https://cursor.com/cli) and run `agent login`
-> - Grok Build: install [Grok Build CLI](https://x.ai/cli) and run `grok login`
-> - OpenCode: install [OpenCode](https://opencode.ai) and run `opencode auth login`
-> - Antigravity: enable it in Settings, then use **Install Antigravity** and **Sign in with Google**. No CLI is required.
+J5 Code drives the coding agents already set up on your machine. Install and sign in to at least one before you start a thread:
+
+| Provider    | Install and authenticate                                                                     |
+| ----------- | -------------------------------------------------------------------------------------------- |
+| Codex       | Install [Codex CLI](https://developers.openai.com/codex/cli), then run `codex login`.        |
+| Claude      | Install [Claude Code](https://claude.com/product/claude-code), then run `claude auth login`. |
+| Cursor      | Install [Cursor CLI](https://cursor.com/cli), then run `agent login`.                        |
+| Grok Build  | Install [Grok Build CLI](https://x.ai/cli), then run `grok login`.                           |
+| OpenCode    | Install [OpenCode](https://opencode.ai), then run `opencode auth login`.                     |
+| Antigravity | Enable it in Settings, then use **Install Antigravity** and **Sign in with Google**.         |
 
 ### Command line
 
+A self-contained server for macOS (Apple silicon) and Linux x64. No Node.js or npm is needed:
+
 ```bash
-curl -fsSL https://t3.codes/install.sh | sh
+curl -fsSL https://j5.codes/install.sh | sh
 ```
 
-On Windows, in PowerShell:
+Then run `j5` to start the server and open the web app. `j5 service install` keeps it running in the background, `j5 update` moves to a newer release, and `j5 --help` has the full reference. Data lives in `~/.j5code` (override with `J5CODE_HOME`).
 
-```powershell
-irm https://t3.codes/install.ps1 | iex
-```
-
-Then run `t3` to start the server and open the local web app. `t3 service install` keeps it running in the background, `t3 update` moves to a newer release, and `t3 --help` has the full reference.
-
-To try it once without installing, run `npx t3@latest` instead.
+Intel Macs, Linux on ARM, and Windows have no build yet. The [install guide](./docs/user/install.md#other-platforms) covers running a server from source there.
 
 ### Desktop app
 
-Install the latest version of the desktop app from [GitHub Releases](https://github.com/pingdotgg/t3code/releases), or from your favorite package registry:
+Download the macOS (Apple silicon) app from [j5.codes/download](https://j5.codes/download) or [GitHub Releases](https://github.com/Jacksondr5/j5code/releases). It is the only desktop build today. `winget`, Homebrew, and AUR packages named T3 Code install upstream T3 Code, not J5 Code.
 
-#### Windows (`winget`)
+### Mobile app
 
-```bash
-winget install T3Tools.T3Code
-```
-
-#### macOS (Homebrew)
-
-```bash
-brew install --cask t3-code
-```
-
-#### Debian, Ubuntu (`.deb`)
-
-Download the `.deb` from [GitHub Releases](https://github.com/pingdotgg/t3code/releases), then:
-
-```bash
-sudo apt install ./T3-Code-*.deb
-```
-
-#### Arch Linux (AUR)
-
-Stable:
-
-```bash
-yay -S t3code-bin
-```
-
-Nightly:
-
-```bash
-yay -S t3code-nightly-bin
-```
-
-The AUR packaging is maintained in this repository under [`packaging/aur`](./packaging/aur).
-
-## Some notes
-
-We are very very early in this project. Expect bugs.
-
-We are (mostly) not accepting contributions yet. Small fixes may be considered. Big features will not be.
+There is no public J5 Code mobile app yet. iOS builds go to TestFlight testers; the [mobile README](./apps/mobile/README.md) covers building your own.
 
 ## Documentation
 
-Full docs live in [docs/](./docs). There's no docs site yet.
+For using J5 Code:
 
 - [Install and first run](./docs/user/install.md)
+- [Working with threads](./docs/user/thread-sidebar.md)
 - [Permission modes](./docs/user/permission-modes.md)
-- [Keyboard shortcuts](./docs/user/keybindings.md)
-- [Project settings](./docs/user/project-settings.md)
-- [Appearance preferences](./docs/user/appearance.md)
 - [Remote access from a phone or another machine](./docs/user/remote-access.md)
-- [Connect Claude Code, Codex, ChatGPT and other agents over MCP](./docs/user/outside-agents.md)
-- [Keeping app and server in sync](./docs/user/updating.md)
-- [Source control integrations](./docs/user/source-control.md)
-- Multiple accounts: [Codex](./docs/user/providers-codex.md) · [Claude](./docs/user/providers-claude.md)
-- [Run T3 Code as a background service](./docs/user/background-service.md)
+- [Running as a background service](./docs/user/background-service.md)
+- [Updating](./docs/user/updating.md)
+- [Personas](./docs/user/personas.md), [playbooks](./docs/user/playbooks.md), and [messages between agents](./docs/user/j5-peer-messages.md)
+- [Everything else](./docs/user), one page per feature
 
-Building from source? Start at [docs/internals/overview.md](./docs/internals/overview.md).
+These guides are mostly upstream's and say "T3 Code"; they apply to J5 Code unless they say otherwise.
 
-## If you REALLY want to contribute still.... read this first
+For understanding J5:
+
+- [J5 documentation](./docs/j5/README.md): where everything is, and a reading order
+- [Overview](./docs/j5/product/overview.md): what J5 adds to T3 Code
+- [Glossary](./docs/j5/product/glossary.md): Crew, Captain, Exchange, and the rest
+- [Feature definitions](./docs/j5/product/features): each feature, with acceptance criteria
+- [J5 and upstream](./docs/j5/product/upstream.md): where J5 differs from T3 Code, and why
+
+Found a bug or want a feature? [Open an issue](https://github.com/Jacksondr5/j5code/issues/new/choose).
+
+## Local development
 
 ### Install `vp`
 
-T3 Code uses Vite+ so you'll need to install the global `vp` command-line tool.
+J5 Code uses Vite+, so you need its global `vp` command-line tool and Node 24.
 
-#### macOS / Linux
+macOS / Linux:
 
 ```bash
 curl -fsSL https://vite.plus | bash
 ```
 
-#### Windows
+Windows:
 
 ```bash
 irm https://vite.plus/ps1 | iex
 ```
 
-Checkout their getting started guide for more information: https://viteplus.dev/guide/
+See the [Vite+ getting started guide](https://viteplus.dev/guide/) for more.
 
-### Install dependencies
+### Run it
 
 ```bash
 vp i
+vp run dev
 ```
 
-Read [CONTRIBUTING.md](./CONTRIBUTING.md) before reporting a bug or opening a PR.
+Open the pairing URL the dev runner prints; the bare origin does not sign in a new browser. `vp run dev:desktop` starts the Electron client instead. The [development guide](./docs/operations/development.md) has the rest: flags, ports, state directories, and sharing a dev server.
 
-Have a feature request? Start an [Ideas discussion](https://github.com/pingdotgg/t3code/discussions/categories/ideas).
+### Before you change anything
 
-Need support? Join the [Discord](https://discord.gg/jn4EGJjrvv).
+- [AGENTS.md](./AGENTS.md): how the repository works and what to watch for. Coding agents load it automatically.
+- [Working in the repo](./docs/j5/process/working-in-the-repo.md) and [pull requests](./docs/j5/process/pull-requests.md).
+- [FORK.md](./FORK.md): which files are upstream's, and how J5 edits them.
+- [CONTRIBUTING.md](./CONTRIBUTING.md).

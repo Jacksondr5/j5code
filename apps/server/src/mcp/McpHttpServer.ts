@@ -56,6 +56,7 @@ import {
   DeviceStandardToolkit,
 } from "./toolkits/device/tools.ts";
 import * as HtmlHandlers from "./toolkits/html/handlers.ts";
+import { layerJ5Toolkits } from "../j5/a2a/mcp/registration.ts";
 import { HtmlPreviewTool, HtmlPreviewToolkit, HtmlRenderToolkit } from "./toolkits/html/tools.ts";
 
 /** Where an MCP client discovers how to sign in (RFC 9728), at this request's own origin. */
@@ -90,7 +91,7 @@ const unauthorized = (input: {
   return HttpServerResponse.jsonUnsafe(
     {
       error: "invalid_mcp_credential",
-      message: "A valid T3 Code MCP credential is required.",
+      message: "A valid J5 Code MCP credential is required.",
     },
     {
       status: 401,
@@ -852,11 +853,9 @@ export const layerMcpTransport = McpServer.layerHttp({
 
 export const layer = Layer.mergeAll(
   layerPreviewToolkit,
-  layerOrchestratorToolkit,
-  layerThreadToolkit,
-  layerAttachmentToolkit,
-  layerProjectRegistration,
-  layerEnvironmentRegistration,
+  // J5: the admitted part of upstream's orchestrator, thread, attachment, project and
+  // environment toolkits, with J5's own tools (FORK.md case 2).
+  layerJ5Toolkits(toolkitRegistration),
   layerPreviewControlsRegistration,
   layerWorktreeToolkitRegistration,
   layerPullRequestsToolkit,

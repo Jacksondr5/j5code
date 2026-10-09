@@ -17,6 +17,8 @@ export type SettingsPath =
   | "/settings/appearance"
   | "/settings/keybindings"
   | "/settings/snap-shot"
+  | "/settings/personas"
+  | "/settings/skills"
   | "/settings/providers"
   | "/settings/integrations"
   | "/settings/scheduled-tasks"
@@ -92,6 +94,8 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/appearance": "Appearance",
   "/settings/keybindings": "Keybindings",
   "/settings/snap-shot": "SnapShots",
+  "/settings/personas": "Personas",
+  "/settings/skills": "Skills",
   "/settings/providers": "Providers",
   "/settings/integrations": "Integrations",
   "/settings/scheduled-tasks": "Scheduled Tasks",
@@ -505,7 +509,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "cli-command",
-    title: "t3 command",
+    title: "j5 command",
     to: "/settings/general",
     searchTerms: ["cli terminal shell path install command line"],
     desktopOnly: true,
@@ -590,6 +594,21 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Capture animations",
     to: "/settings/snap-shot",
     targetId: "snap-shot-enabled",
+  },
+  {
+    id: "personas",
+    title: "Personas",
+    to: "/settings/personas",
+    // "agents" stays a search hit: the library was called Agents until 2026-09-17.
+    searchTerms: ["agents saved agent library yaml definitions instructions runtime policy"],
+  },
+  {
+    id: "skills",
+    title: "Skills",
+    to: "/settings/skills",
+    searchTerms: [
+      "catalog groups install update source git local skills management inventory discovery installed link unlink use in shared destination",
+    ],
   },
   {
     id: "providers",
@@ -899,7 +918,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "remote-environments",
     title: "Environments",
     to: "/settings/connections",
-    searchTerms: ["add pair backend host code ssh config agent tunnel saved t3 connect"],
+    searchTerms: ["add pair backend host code ssh config agent tunnel saved j5 connect"],
   },
   {
     id: "load-balancing",
@@ -932,6 +951,8 @@ const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScop
   "/settings/general": null,
   "/settings/appearance": null,
   "/settings/snap-shot": null,
+  "/settings/personas": null,
+  "/settings/skills": null,
   // Keybindings fan out to the selection; Providers shows the representative
   // environment at any selection. Neither needs a particular scope to render.
   "/settings/keybindings": null,

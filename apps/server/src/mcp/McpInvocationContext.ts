@@ -11,12 +11,13 @@ import {
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 
-const ALL_MCP_CAPABILITIES = [
+export const ALL_MCP_CAPABILITIES = [
   "preview",
   "orchestration",
   "worktree",
   "device",
   "pull-requests",
+  "artifacts",
 ] as const;
 export type McpCapability = (typeof ALL_MCP_CAPABILITIES)[number];
 
@@ -121,7 +122,7 @@ export const requireThreadMcpCapability = <const C extends "preview" | "device">
 const threadCallerRequired = (operation: string) =>
   new OrchestratorMcpFailure({
     code: "thread_credential_required",
-    message: `${operation} acts as the calling T3 thread, so it needs an agent running inside T3 Code. This MCP client signed in from outside a thread.`,
+    message: `${operation} acts as the calling J5 thread, so it needs an agent running inside J5 Code. This MCP client signed in from outside a thread.`,
   });
 
 /** A scope with a thread caller, for tools whose whole surface acts as the caller. */

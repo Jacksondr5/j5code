@@ -55,6 +55,14 @@ lines.on("line", (line) => {
       behaviors: null,
     });
   }
+  if (message.request?.subtype === "reload_skills") {
+    reply({
+      skills: [
+        { name: "simplify", description: " Simplify code ", argumentHint: "", builtin: true },
+        { name: "review", description: "Review changes", argumentHint: "[path]" },
+      ],
+    });
+  }
 });
 // Stay alive for follow-up control requests, but never outlive the
 // parent: the probe aborts the SDK without awaiting the child, so an

@@ -169,6 +169,32 @@ describe("EventNdjsonLogger", () => {
       }),
   );
 
+  it.effect("keeps platform-spawned threads with a shared long id prefix in separate files", () =>
+    Effect.gen(function* () {
+      const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-provider-log-"));
+      const basePath = NodePath.join(tempDir, "events.log");
+      try {
+        const logger = yield* makeEventNdjsonLogger(basePath, { stream: "orchestration" });
+        assert.notEqual(logger, undefined);
+        if (!logger) return;
+        // Crew seats differ only in their final segment, far past the safe file-name length.
+        const prefix =
+          "thread:j5:a2a:mcp:j5-crew-proposal:spawn:crew%3Aj5%3Aa2a%3Amcp%3Aj5-crew-proposal%3Aproposal%3A685b3a39%2Fseat%2F";
+        yield* logger.write({ id: "evidence" }, `${prefix}evidence` as unknown as ThreadId);
+        yield* logger.write({ id: "adversary" }, `${prefix}adversary` as unknown as ThreadId);
+        yield* logger.close();
+        const files = NodeFS.readdirSync(tempDir).filter((name) => name.startsWith("events."));
+        assert.lengthOf(files, 2);
+        for (const name of files) {
+          assert.match(name, /^events\.[a-z0-9-]+-[0-9a-f]{12}\.log$/);
+          assert.isAtMost(name.length, "events.".length + 80 + ".log".length);
+        }
+      } finally {
+        NodeFS.rmSync(tempDir, { recursive: true, force: true });
+      }
+    }),
+  );
+
   it.effect("shares one thread writer across native and canonical streams", () =>
     Effect.gen(function* () {
       const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-provider-log-"));

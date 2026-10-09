@@ -94,9 +94,9 @@ export const make = Effect.gen(function* () {
     // Electron removes spaces from this name to build the native User-Agent
     // product token, but leaves parentheses intact. Keep the runtime name valid
     // without rewriting preview sessions (which breaks Turnstile, #7110).
-    yield* electronApp.setName(
-      `${environment.branding.baseName} ${environment.branding.stageLabel}`,
-    );
+    // J5: the production name carries no stage ("J5 Code"), so the display
+    // name without its parentheses is used instead of upstream's base + stage.
+    yield* electronApp.setName(environment.displayName.replace(/[()]/g, ""));
     yield* electronApp.setAboutPanelOptions({
       applicationName: environment.displayName,
       applicationVersion: environment.appVersion,

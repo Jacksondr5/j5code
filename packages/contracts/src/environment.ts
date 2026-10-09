@@ -86,7 +86,7 @@ export type ServerInstallation = typeof ServerInstallation.Type;
 
 /** What update path a client should offer for a server: one of the RPC
     self-update methods above, or "desktop-managed" when the backend's
-    version belongs to the T3 Code desktop app supervising it — updating the
+    version belongs to the J5 Code desktop app supervising it — updating the
     app on that machine is the only way to update the server. */
 export const ServerSelfUpdateCapability = Schema.Literals([
   "boot-service",
@@ -96,6 +96,18 @@ export const ServerSelfUpdateCapability = Schema.Literals([
 export type ServerSelfUpdateCapability = typeof ServerSelfUpdateCapability.Type;
 
 export const ExecutionEnvironmentCapabilities = Schema.Struct({
+  /** The J5 ledger is keyed by project. Absent on a server without J5's ledger. */
+  j5ProjectLedger: Schema.optionalKey(Schema.Boolean),
+  /**
+   * The two keys a J5 server reported while its ledger was keyed by Squadron, naming the Fleet
+   * routes and the Inbox and Crew request routes as they were then. A server keyed by project
+   * reports both `false` (see `J5_LEDGER_CAPABILITIES`), and a client reads `j5Squadrons` only to
+   * tell an older J5 server apart and ask for an update.
+   */
+  j5Squadrons: Schema.optionalKey(Schema.Boolean),
+  j5HumanInbox: Schema.optionalKey(Schema.Boolean),
+  /** J5 peering poll mode: the poll and reachability routes and the link-mode peer fields. */
+  j5PeerPoll: Schema.optionalKey(Schema.Boolean),
   repositoryIdentity: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   connectionProbe: Schema.optionalKey(Schema.Boolean),
   /** Missing on older servers, which still accept inline image attachments. */

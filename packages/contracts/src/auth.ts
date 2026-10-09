@@ -97,6 +97,10 @@ export const AuthAccessReadScope = "access:read" as const;
 export const AuthAccessWriteScope = "access:write" as const;
 export const AuthRelayReadScope = "relay:read" as const;
 export const AuthRelayWriteScope = "relay:write" as const;
+/** J5: lets a registered machine participant send A2A messages; never part of a client bundle. */
+export const AuthA2ASendScope = "a2a:send" as const;
+/** J5: lets a peer server deliver A2A messages and read the address book; never part of a client bundle. */
+export const AuthA2APeerScope = "a2a:peer" as const;
 export const AuthEnvironmentScope = Schema.Literals([
   AuthOrchestrationReadScope,
   AuthOrchestrationOperateScope,
@@ -115,13 +119,21 @@ export const AuthEnvironmentScope = Schema.Literals([
   AuthAccessWriteScope,
   AuthRelayReadScope,
   AuthRelayWriteScope,
+  AuthA2ASendScope,
+  AuthA2APeerScope,
 ]);
 export type AuthEnvironmentScope = typeof AuthEnvironmentScope.Type;
 export const AuthEnvironmentScopes = Schema.Array(AuthEnvironmentScope);
 export type AuthEnvironmentScopes = typeof AuthEnvironmentScopes.Type;
 
 export const AuthGrantScope = Schema.Literals(
-  AuthEnvironmentScope.literals.filter((scope) => scope !== AuthReviewWriteScope),
+  AuthEnvironmentScope.literals.filter(
+    (scope) =>
+      scope !== AuthReviewWriteScope &&
+      // J5: machine-only scopes are issued by `j5 a2a` and peer pairing, never granted to a client.
+      scope !== AuthA2ASendScope &&
+      scope !== AuthA2APeerScope,
+  ),
 );
 export type AuthGrantScope = typeof AuthGrantScope.Type;
 export const AuthGrantScopes = Schema.Array(AuthGrantScope);
@@ -137,6 +149,9 @@ const legacyScopes = new Set<AuthEnvironmentScope>([
   AuthAccessWriteScope,
   AuthRelayReadScope,
   AuthRelayWriteScope,
+  // J5: both predate granular permissions in J5's own clients and peers.
+  AuthA2ASendScope,
+  AuthA2APeerScope,
 ]);
 
 /** Format public auth metadata without changing the server's authorization grant. */

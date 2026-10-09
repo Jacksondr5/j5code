@@ -551,6 +551,38 @@ describe("OpenCodeAdapterV2", () => {
       }).pipe(Effect.provide(IdAllocator.layer), Effect.scoped),
   );
 
+  it.effect.each([
+    { name: "status 404", failure: { status: 404 }, missing: true },
+    { name: "NotFoundError", failure: { name: "NotFoundError" }, missing: true },
+    {
+      name: "status 500 named NotFoundError",
+      failure: { status: 500, name: "NotFoundError" },
+      missing: false,
+    },
+    { name: "a plain error", failure: new Error("session not found"), missing: false },
+  ])("reports whether a failed resume is a missing session: $name", ({ failure, missing }) =>
+    Effect.gen(function* () {
+      const harness = yield* makeOpenCodeRuntimeHarness("resume-missing", "root", {
+        event: { subscribe: async () => ({ stream: asyncEventStream().stream }) },
+        session: {
+          create: async () => ({ data: { id: "root", time: { created: 1, updated: 1 } } }),
+          get: async () => {
+            throw failure;
+          },
+        },
+      });
+      const error = yield* harness.runtime
+        .resumeThread({ providerThread: harness.providerThread })
+        .pipe(Effect.flip);
+
+      assert.equal(error._tag, "ProviderAdapterResumeThreadError");
+      assert.equal(
+        error._tag === "ProviderAdapterResumeThreadError" && error.nativeThreadMissing,
+        missing,
+      );
+    }).pipe(Effect.provide(IdAllocator.layer), Effect.scoped),
+  );
+
   it.effect(
     "preserves tool lifecycle, approval kinds, and late assistant text without cached tool payloads",
     () =>

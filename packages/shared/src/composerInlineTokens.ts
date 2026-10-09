@@ -1,3 +1,5 @@
+import { isJ5MentionPath } from "./j5/agentMention.ts";
+
 export type ComposerInlineToken =
   | {
       readonly type: "mention";
@@ -95,7 +97,11 @@ function collectMentionTokens(text: string): ComposerInlineToken[] {
     const prefix = match[1] ?? "";
     const quotedPath = match[2];
     const path = quotedPath !== undefined ? quotedPath.replace(/\\(.)/g, "$1") : (match[3] ?? "");
-    if (!path || (quotedPath === undefined && SCOPED_PACKAGE_REFERENCE_REGEX.test(path))) {
+    if (
+      !path ||
+      (quotedPath === undefined &&
+        (isJ5MentionPath(path) || SCOPED_PACKAGE_REFERENCE_REGEX.test(path)))
+    ) {
       continue;
     }
     const start = (match.index ?? 0) + prefix.length;

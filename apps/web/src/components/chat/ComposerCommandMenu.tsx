@@ -30,7 +30,10 @@ import { PierreEntryIcon } from "./PierreEntryIcon";
 import { ComposerBanner } from "./ComposerBanner";
 import { resolvePullRequestState } from "../pullRequest/pullRequestPresentation";
 
+import type { agentPersonaMentionItems } from "@t3tools/client-runtime/j5/agent-mentions";
+
 export type ComposerCommandItem =
+  | ReturnType<typeof agentPersonaMentionItems>[number]
   | {
       id: string;
       type: "path";
@@ -43,6 +46,13 @@ export type ComposerCommandItem =
       id: string;
       type: "slash-command";
       command: ComposerSlashCommand;
+      label: string;
+      description: string;
+    }
+  | {
+      id: string;
+      type: "playbook";
+      name: string;
       label: string;
       description: string;
     }
@@ -140,9 +150,11 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
               {props.isLoading
                 ? props.triggerKind === "skill"
                   ? "Searching workspace skills..."
-                  : props.triggerKind === "pull-request"
-                    ? "Finding pull request..."
-                    : "Searching workspace files..."
+                  : props.triggerKind === "slash-playbook"
+                    ? "Loading playbooks..."
+                    : props.triggerKind === "pull-request"
+                      ? "Finding pull request..."
+                      : "Searching workspace files..."
                 : (props.emptyStateText ??
                   (props.triggerKind === "skill"
                     ? "No skills found. Try / to browse provider commands."
@@ -221,6 +233,7 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
         <span className="min-w-0 flex-1 truncate text-left text-secondary-label text-xs">
           {props.item.description}
         </span>
+        {props.item.type === "agent" ? <Badge variant="outline">Persona</Badge> : null}
         {skillSourceKind ? (
           <SkillSourceBadge
             kind={skillSourceKind}
@@ -242,6 +255,9 @@ const LISTBOX_LABEL_BY_TRIGGER: Record<ComposerTriggerKind, string> = {
   "pull-request": "Pull requests",
   "slash-command": "Commands",
   skill: "Skills",
+  // J5 triggers.
+  agent: "Saved agents",
+  "slash-playbook": "Playbooks",
 };
 
 const SKILL_SOURCE_ICON_BY_KIND: Record<ProviderSkillSourceKind, LucideIcon> = {

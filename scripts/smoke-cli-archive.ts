@@ -107,8 +107,14 @@ const smokeCliArchive = Effect.fn("smokeCliArchive")(function* (input: {
     });
   }
   const contentDir = path.join(scratch, root);
-  const executable = path.join(contentDir, platform === "win32" ? "t3.exe" : "t3");
-  for (const required of [executable, path.join(contentDir, "client/index.html")]) {
+  const executable = path.join(contentDir, platform === "win32" ? "j5.exe" : "j5");
+  // J5: the link pre-rename servers update through (see build-cli-archive.ts).
+  const legacyExecutable = platform === "win32" ? undefined : path.join(contentDir, "t3");
+  for (const required of [
+    executable,
+    ...(legacyExecutable === undefined ? [] : [legacyExecutable]),
+    path.join(contentDir, "client/index.html"),
+  ]) {
     if (!(yield* fs.exists(required))) {
       return yield* new CliArchiveSmokeError({
         step: "checking the archive layout",
@@ -117,12 +123,16 @@ const smokeCliArchive = Effect.fn("smokeCliArchive")(function* (input: {
     }
   }
 
-  const version = yield* runExecutable(executable, ["--version"], contentDir);
-  if (version.exitCode !== 0 || !version.stdout.includes(input.expectVersion)) {
-    return yield* new CliArchiveSmokeError({
-      step: "running --version",
-      detail: `exit ${String(version.exitCode)}\n${version.stdout}${version.stderr}`,
-    });
+  for (const candidate of legacyExecutable === undefined
+    ? [executable]
+    : [executable, legacyExecutable]) {
+    const version = yield* runExecutable(candidate, ["--version"], contentDir);
+    if (version.exitCode !== 0 || !version.stdout.includes(input.expectVersion)) {
+      return yield* new CliArchiveSmokeError({
+        step: `running ${path.basename(candidate)} --version`,
+        detail: `exit ${String(version.exitCode)}\n${version.stdout}${version.stderr}`,
+      });
+    }
   }
 
   // Starting the server is what actually opens sqlite, loads the terminal
@@ -144,7 +154,7 @@ const smokeCliArchive = Effect.fn("smokeCliArchive")(function* (input: {
           USERPROFILE: home,
           TMPDIR: scratch,
           TEMP: scratch,
-          T3CODE_HOME: home,
+          J5CODE_HOME: home,
         },
         extendEnv: false,
       },

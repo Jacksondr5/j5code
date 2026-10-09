@@ -12,6 +12,7 @@ import {
   type ModelSelection,
   type OrchestrationV2Command,
   type OrchestrationV2CreationSource,
+  type OrchestrationV2AgentPersonaRequest,
   type PlanId,
   type ProjectId,
   type ProjectIconOverride,
@@ -151,6 +152,7 @@ interface StartThreadBootstrap {
     readonly branch: string | null;
     readonly worktreePath: string | null;
     readonly createdAt: string;
+    readonly agentPersona?: OrchestrationV2AgentPersonaRequest;
   };
   readonly prepareWorktree?: {
     /** V2 worktree launches always fail rather than falling back to the project checkout. */
@@ -668,6 +670,7 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
     return yield* request(ORCHESTRATION_V2_WS_METHODS.launchThread, {
       commandId,
       creationSource: input.creationSource ?? "web",
+      ...(bootstrap?.agentPersona === undefined ? {} : { agentPersona: bootstrap.agentPersona }),
       threadId: input.threadId,
       ...(bootstrap === undefined ? { reuseExistingThread: true } : {}),
       projectId: thread.projectId,
