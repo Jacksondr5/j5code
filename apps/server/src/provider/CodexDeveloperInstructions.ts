@@ -3,10 +3,10 @@ import type { V2TurnStartParams__AdditionalContextEntry } from "effect-codex-app
 import { buildRuntimeInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
 
 import {
-  codexApplicationContext,
   T3_CODE_BROWSER_TOOL_INSTRUCTIONS,
   T3_CODE_ORCHESTRATION_INSTRUCTIONS,
-} from "../j5/orchestrationInstructions.ts";
+} from "@t3tools/provider-core/server/orchestrationInstructions";
+import { codexApplicationContext } from "../j5/codexApplicationContext.ts";
 
 const T3_CODE_DEVICE_TOOL_INSTRUCTIONS = `## J5 Code devices
 

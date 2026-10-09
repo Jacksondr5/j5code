@@ -74,7 +74,7 @@ import type { ProviderContinuationRequest } from "@t3tools/provider-core/server/
 import * as CodexAdapterV2 from "./CodexAdapterV2.ts";
 import { makeReplayServerConfig, withCodexReplayChildMetadata } from "./CodexAdapterV2.testkit.ts";
 import * as CodexAdapterV2Testkit from "./CodexAdapterV2.testkit.ts";
-import { T3_CODE_ORCHESTRATION_INSTRUCTIONS } from "../../j5/orchestrationInstructions.ts";
+import { T3_CODE_ORCHESTRATION_INSTRUCTIONS } from "@t3tools/provider-core/server/orchestrationInstructions";
 import {
   J5_CODEX_T3_MCP_SERVER_CONFIG,
   J5_CODEX_COORDINATION_MCP_SERVER_CONFIG,

@@ -166,7 +166,7 @@ import {
   makeSubagentConversationArtifacts,
   subagentThreadTitle,
 } from "../SubagentProjection.ts";
-import { codexApplicationContext } from "../../j5/orchestrationInstructions.ts";
+import { codexApplicationContext } from "../../j5/codexApplicationContext.ts";
 import { isCodexResumeThreadMissing } from "../../j5/codexNativeResume.ts";
 import { j5CodexT3McpServerConfig } from "../../j5/a2a/mcp/codexToolApproval.ts";
 import { j5CodexCrewSeatConfig } from "../../j5/a2a/crewSeatQuestions.ts";

@@ -44,14 +44,14 @@ Two different things share the word "handoff". J5 docs call upstream's history t
 ## Long-running autonomy
 
 - **Upstream:** Limited state for usage limits, snoozing until the reset, opt-in auto-resume, scheduled tasks across environments on a shared Scheduler, and startup failures that retry and then fail visibly. New since the last check: pull-request watches that wake a thread on checks, reviews or conflicts (`watch_pull_request`); webhook-triggered schedules, held by the relay while the server is offline; an agent settling its own thread at the end of its turn; an auto-settle opt-out for a thread; and a project script that runs when a thread settles.
-- **J5:** follows all of it. The committed-Stop patch is removed. A Crew seat may settle itself, and a Captain's settle carries its seats ([divergence D14](upstream.md)). J5 keeps a queued-run watchdog; retire it if upstream's visible startup failures leave it with nothing to report.
+- **J5:** follows all of it. The committed-Stop patch is removed. A Crew seat may settle itself, and a Captain's settle carries its seats ([divergence D14](upstream.md)). A message from another agent holds a merged thread open, as a person's does ([divergence D30](upstream.md)). J5 keeps a queued-run watchdog; retire it if upstream's visible startup failures leave it with nothing to report.
 - **Watch for:** upstream closing the race between Stop and an in-flight steer (pingdotgg/t3code#15013), which J5 no longer guards.
 
 ## Providers as packages
 
 - **Upstream:** provider-facing code is moving into packages: `provider-core` holds the adapter contract, failure handling and the standing instructions, and Pi and Muse Code are packages of their own. Muse Code is a new provider, off by default.
-- **J5:** J5's persona instructions, Crew-seat flag and native-resume fields are edits to `provider-core`, and J5's standing instructions live in a J5 server module that the adapters import ([divergence D1](upstream.md)). Muse Code is taken as an ordinary provider with no J5 work.
-- **Watch for:** a way to supply instructions or runtime policy to a provider without editing a package or an adapter. That would let J5's package edits and import swaps go.
+- **J5:** J5's persona instructions, Crew-seat flag and native-resume fields are edits to `provider-core`, and J5's standing instructions live in a J5 folder inside it, behind the constant upstream exports ([divergence D1](upstream.md)). Muse Code is taken as an ordinary provider with no J5 work.
+- **Watch for:** a way to supply instructions or runtime policy to a provider without editing a package or an adapter. That would let J5's package edits go.
 
 ## Skills
 

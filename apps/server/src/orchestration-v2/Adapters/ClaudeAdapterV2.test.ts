@@ -50,7 +50,7 @@ import { formatClaudeResumeCompactionQuestion } from "@t3tools/shared/claudeComp
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { SpawnExecutableResolution } from "@t3tools/shared/shell";
 
-import { T3_CODE_ORCHESTRATION_INSTRUCTIONS } from "../../j5/orchestrationInstructions.ts";
+import { T3_CODE_ORCHESTRATION_INSTRUCTIONS } from "@t3tools/provider-core/server/orchestrationInstructions";
 import { attachmentRelativePath } from "../../attachmentStore.ts";
 import * as ServerConfig from "../../config.ts";
 import * as McpProviderSession from "@t3tools/provider-core/server/mcpSession";

@@ -7,7 +7,7 @@ import {
   makeClaudeQueryOptions,
 } from "../../orchestration-v2/Adapters/ClaudeAdapterV2.ts";
 import { buildCodexTurnStartParams } from "../../orchestration-v2/Adapters/CodexAdapterV2.ts";
-import { T3_CODE_ORCHESTRATION_INSTRUCTIONS } from "../orchestrationInstructions.ts";
+import { T3_CODE_ORCHESTRATION_INSTRUCTIONS } from "@t3tools/provider-core/server/orchestrationInstructions";
 
 const CLAUDE_TEST_MODEL_SELECTION = {
   instanceId: ProviderInstanceId.make(CLAUDE_PROVIDER),

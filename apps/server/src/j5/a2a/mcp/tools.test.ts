@@ -17,6 +17,7 @@ import {
   J5SpawnAgentTool,
   J5StopAgentTool,
   J5Toolkit,
+  J5_PROPOSE_CREW_DESCRIPTION,
   J5_SPAWN_AGENT_DESCRIPTION,
   J5_STOP_AGENT_DESCRIPTION,
 } from "./tools.ts";
@@ -163,4 +164,8 @@ it("accepts explicit custom seat settings through both crew tools without requir
   assert.isDefined(selection);
   assert.sameMembers(selection?.required ?? [], ["instanceId", "model"]);
   assert.property(schema.properties, "runtime_mode");
+});
+
+it("tells a Captain proposing a crew how a playbook shapes the roster", () => {
+  assert.include(J5_PROPOSE_CREW_DESCRIPTION, "For a crew built from a playbook");
 });

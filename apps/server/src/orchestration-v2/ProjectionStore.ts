@@ -79,6 +79,10 @@ import * as SqlClient from "effect/sql/SqlClient";
 import type * as Statement from "effect/sql/Statement";
 
 import { MCP_APP_OUTPUT_KEY } from "@t3tools/shared/mcpApp";
+import {
+  latestSettlementActivityMessageAt,
+  SETTLEMENT_ACTIVITY_MESSAGE_SQL,
+} from "../j5/settlementActivity.ts";
 import { threadHtmlRenderAttachmentIds } from "../attachmentStore.ts";
 import {
   isThreadHistoryUserTurn,
@@ -5431,7 +5435,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 SELECT message.updated_at
                 FROM orchestration_v2_projection_messages message
                 WHERE message.thread_id = t.thread_id AND message.role = 'user'
-                  AND json_extract(message.payload_json, '$.createdBy') = 'user'
+                  -- J5 (FORK.md case 62): a message another participant sent counts too.
+                  AND ${sql.literal(SETTLEMENT_ACTIVITY_MESSAGE_SQL)}
                 ORDER BY message.updated_at DESC, message.message_id DESC
                 LIMIT 1
               ) AS latest_user_authored_message_at
@@ -6019,7 +6024,8 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
               const shell = threadShellFromProjection(projection);
               return {
                 ...shell,
-                latestUserAuthoredMessageAt: shell.latestUserAuthoredMessageAt ?? null,
+                // J5 (FORK.md case 62): a message another participant sent counts too.
+                latestUserAuthoredMessageAt: latestSettlementActivityMessageAt(projection.messages),
               };
             })
             .toSorted(

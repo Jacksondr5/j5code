@@ -65,7 +65,7 @@ import {
   summarizeNativeProtocolPayload,
 } from "../../provider/NativeProtocolLogging.ts";
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
-import { t3OrchestrationSystemPrompt } from "../../j5/orchestrationInstructions.ts";
+import { t3OrchestrationSystemPrompt } from "@t3tools/provider-core/server/orchestrationInstructions";
 import { buildRuntimeInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
 import * as OpenCodeRuntime from "../../provider/opencodeRuntime.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";

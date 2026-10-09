@@ -31,7 +31,7 @@ How J5 advances to a new upstream T3 Code. FORK.md holds the rules this depends 
   - **New upstream workflows and jobs** that need the `pingdotgg/t3code` repository guard.
 - **Walk every FORK.md integration case and temporary patch.** For each patch, decide keep, retire (upstream fixed it) or narrow.
 - **Walk the [register of divergences](../product/upstream.md).** For each entry, check whether upstream's change makes it unnecessary, harder to carry, or wrong. Bring any change to the maintainer; retiring a divergence is the default when upstream now does the job.
-- **Port upstream's edits to the files J5 owns outright** (`AGENTS.md`, the PR template; see FORK.md) and to J5's copy of the standing agent instructions (FORK.md case 8). Keep J5's version and apply what fits.
+- **Port upstream's edits to the files J5 owns outright** (`AGENTS.md`, the PR template; see FORK.md) and to J5's standing agent instructions, `packages/provider-core/src/j5/orchestrationInstructions.ts` (FORK.md case 8). Keep J5's version and apply what fits. Upstream's changes to its own instruction text show up as a merge conflict in `packages/provider-core/src/server/orchestrationInstructions.ts`, where J5 deleted that text.
 - **Rewrite** the [upstream convergence watchlist](../product/upstream-convergence.md) and check the give-back backlog (#276).
 - **Bring the decisions to the maintainer.** Default to adopting upstream and adjusting later if it proves bad.
 

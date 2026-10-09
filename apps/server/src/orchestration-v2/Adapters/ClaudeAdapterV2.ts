@@ -111,7 +111,7 @@ import {
 } from "../../provider/claudeUsageLimits.ts";
 import type { ServerProviderShape } from "@t3tools/provider-core/server/snapshot";
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
-import { T3_CODE_ORCHESTRATION_INSTRUCTIONS } from "../../j5/orchestrationInstructions.ts";
+import { T3_CODE_ORCHESTRATION_INSTRUCTIONS } from "@t3tools/provider-core/server/orchestrationInstructions";
 import { buildRuntimeInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
 import {
   mcpToolPresentation,

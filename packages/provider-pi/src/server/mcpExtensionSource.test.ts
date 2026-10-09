@@ -171,6 +171,19 @@ describe("Pi MCP tool exposure", () => {
     assert.equal(bridge.requests.at(-1)?.method, "tools/call");
   });
 
+  // J5: Pi reads the package's constant, which carries J5's text (FORK.md case 8).
+  it("appends J5's orchestration instructions to Pi's system prompt", async () => {
+    const bridge = await loadMcpBridge({ modern: true });
+    const prompt = await bridge.handlers.get("before_agent_start")!(
+      { systemPrompt: "Pi system prompt" },
+      { ui: { notify: () => undefined } },
+    );
+    assert.include(prompt.systemPrompt, "propose_crew");
+    for (const hidden of ["t3_thread_launch", "create_threads", "t3_thread_wait"]) {
+      assert.notInclude(prompt.systemPrompt, hidden);
+    }
+  });
+
   it.each(["legacy Pi", "disabled tool search"])(
     "keeps tool execution available with %s",
     async (mode) => {

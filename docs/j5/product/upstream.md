@@ -54,9 +54,9 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Why:** upstream's delegated child is "a Peer Agent in a Subagent costume": the person can't talk to it, yet it outlives the agent that started it. That is the awkward middle J5's vocabulary exists to remove. The Crew shape was added after an agent asked to "spawn a crew" made subagents instead, because nothing it had been told mentioned a Crew. Personas later gave `delegate_task` a purpose again: a persona needs a way to run as a subagent.
 
-**Consequences:** upstream's launch and workspace guidance never reaches J5 agents. `spawn_agent` and Crew seats require their own workspace choice instead, with upstream's `existing_worktree` name and shape beside `shared` and `worktree`, and reuse upstream's ThreadLaunch to prepare a new worktree (#274). J5's text lives in its own server module. Upstream moved its text into a package that can't reach J5's code, so the provider adapters read J5's module instead of upstream's. Every upstream advance ports upstream's prompt changes into it by hand, and a test pins J5's wording. J5 takes upstream's own sections as upstream writes them: secrets, thread links, showing visuals, the browser, schedules, and the two `delegate_task` rules above. Pi is the exception: its extension reads upstream's package, so Pi agents get upstream's text, including guidance for tools J5 hides.
+**Consequences:** upstream's launch and workspace guidance never reaches J5 agents. `spawn_agent` and Crew seats require their own workspace choice instead, with upstream's `existing_worktree` name and shape beside `shared` and `worktree`, and reuse upstream's ThreadLaunch to prepare a new worktree (#274). J5's text lives in a J5 folder inside upstream's shared provider package, and the constant upstream exports for its own text points at it. So J5's text reaches every harness that reads that constant: Codex, Claude, Cursor, OpenCode, the ACP agents and Pi, and any provider upstream later moves into a package of its own. Every upstream advance ports upstream's prompt changes into it by hand, and a test pins J5's wording. J5 takes upstream's own sections as upstream writes them: secrets, thread links, showing visuals, the browser, schedules, and the two `delegate_task` rules above.
 
-**Decided:** Jackson with Product, 2026-08-24 (ST1–ST5); the Crew shape on 2026-09-17; the persona route in Jackson's review of 2026-09-13, which partly reverses ST5; the text's new home and the sections taken from upstream by Jackson, 2026-10-08. Whether `delegate_task` stays at all is under discussion (#336). Recorded in FORK.md case 8 and the saved-agent mentions section.
+**Decided:** Jackson with Product, 2026-08-24 (ST1–ST5); the Crew shape on 2026-09-17; the persona route in Jackson's review of 2026-09-13, which partly reverses ST5; the sections taken from upstream by Jackson, 2026-10-08; the text's home in the shared package, so that Pi and later provider packages get it, by Jackson, 2026-10-09. Whether `delegate_task` stays at all is under discussion (#336). Recorded in FORK.md case 8 and the saved-agent mentions section.
 
 #### D2. Agents see a fail-closed subset of upstream's MCP tools
 
@@ -145,6 +145,18 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 **Consequences:** a Crew restore that stops partway is repaired by hand, by archiving and unarchiving the Captain again. Unarchiving doesn't bring back interrupted runs or dropped Exchanges. Snooze doesn't cascade. The seat rule is upstream's auto-settle rule, called directly, so it follows upstream as upstream changes it: a seat that is pinned, snoozed, working, waiting on the person, or about to start a turn stays as it is, and a dev server a seat left running no longer keeps it from settling. Two exceptions: a seat that opted out of auto-settle, and a seat an earlier unsettle marked active, are still settled with their Captain, because the person settled the Captain on purpose. Upstream's settle-time project script runs once for each seat that settles. Stopping a Crew sends upstream's Stop to each seat, which holds that seat's queue.
 
 **Decided:** archive and delete follow the Crew unit rule (R14) and were built on 2026-09-15. Jackson ratified the rest on 2026-09-26 (#312). The opt-out exception, the per-seat script and upstream's Stop for Crews are Jackson's decisions of 2026-10-08. Recorded in FORK.md case 21.
+
+#### D30. A message from another participant holds a merged thread open
+
+**Upstream:** a thread whose pull request has merged or closed settles once it is idle, unless a person wrote to it after the merge. Messages from another agent, a pull-request watch, a schedule or background work don't count. The idle-days rule is separate and counts every message and run.
+
+**J5:** a message another participant sent through a tool counts like a person's. That covers agent-to-agent messages, asks and replies, from this server, a machine participant or a peer server; the brief a Peer Agent or Crew seat starts with; and upstream's own agent sends. Upstream's wakes keep upstream's treatment: a pull-request watch, an agent's scheduled task, background-work and delegated-completion notices, and a restart continuation don't count. J5's platform notices don't count either: silence and lifecycle notices, the Crew launch report, the playbook step relay, the handoff nudge and the seat-finished report.
+
+**Why:** people's messages are not the only kind that matter in a fleet. A Peer Agent or a Crew seat may never get one. Under upstream's rule such a thread counts as untouched since it was created, so a merged pull request on its branch settles it while other agents are still working with it. It should settle when its overall activity settles.
+
+**Consequences:** a thread that gets an agent message after its merge no longer settles on the merge. It settles on the idle-days rule, or never if that setting is off, as upstream already does for a thread a person wrote to. The sidebar's Working order is unchanged: it still follows the last message a person sent. A Captain's seat-finished reports don't hold it open; a seat's own message to its Captain does.
+
+**Decided:** Jackson, 2026-10-09. Recorded in FORK.md case 62.
 
 ### Timeline, composer, and plans
 
@@ -396,3 +408,5 @@ J5 kept a run from resuming after a usage-limit reset when the person had presse
 - 2026-10-07 — D8, D9 and D11 retired and D29 added: the ledger re-keyed to projects ([#412](https://github.com/Jacksondr5/j5code/issues/412)).
 - 2026-10-08 — D9 records the accepted reversal of "no junk drawer": upstream's "No project" project is taken as upstream ships it (Jackson, 2026-10-05; [#412](https://github.com/Jacksondr5/j5code/issues/412)).
 - 2026-10-08 — the advance onto upstream `main`: D5, D7 and D23 retired, D15 recorded as retired, D8's retired text corrected, and D1, D2, D3, D4, D6, D14, D19, D25 and D28 rewritten for what upstream now ships (Jackson's decisions of that day).
+- 2026-10-09 — D30 added: a message from another participant holds a merged thread open (Jackson).
+- 2026-10-09 — D1 rewritten: J5's instruction text lives in upstream's shared provider package and reaches Pi (Jackson).

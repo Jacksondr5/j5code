@@ -1,8 +1,7 @@
 import { assert, it } from "@effect/vitest";
 
-import { T3_CODE_ORCHESTRATION_INSTRUCTIONS } from "../orchestrationInstructions.ts";
-import { J5_PROPOSE_CREW_DESCRIPTION } from "../a2a/mcp/tools.ts";
-import { PLAYBOOK_CREW_INSTRUCTIONS, PLAYBOOK_INSTRUCTIONS } from "./instructions.ts";
+import { J5_ORCHESTRATION_INSTRUCTIONS } from "./orchestrationInstructions.ts";
+import { PLAYBOOK_CREW_INSTRUCTIONS, PLAYBOOK_INSTRUCTIONS } from "./playbookInstructions.ts";
 
 it("the crew procedure is appended to PLAYBOOK_INSTRUCTIONS with the Crew exception", () => {
   assert.include(PLAYBOOK_INSTRUCTIONS, `- ${PLAYBOOK_CREW_INSTRUCTIONS}\n`);
@@ -39,6 +38,5 @@ it("the crew procedure text names its trigger, its rulings, and its tools in cal
 });
 
 it("the crew procedure reaches every provider through the shared orchestration instructions", () => {
-  assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, PLAYBOOK_CREW_INSTRUCTIONS);
-  assert.include(J5_PROPOSE_CREW_DESCRIPTION, "For a crew built from a playbook");
+  assert.include(J5_ORCHESTRATION_INSTRUCTIONS, PLAYBOOK_CREW_INSTRUCTIONS);
 });

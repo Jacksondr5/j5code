@@ -97,7 +97,7 @@ import * as AcpSessionRuntime from "../../provider/acp/AcpSessionRuntime.ts";
 import {
   t3AcpPromptWithInstructions,
   type T3AcpInstructionState,
-} from "../../j5/orchestrationInstructions.ts";
+} from "@t3tools/provider-core/server/orchestrationInstructions";
 import { buildRuntimeInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import { type ProviderContinuationRequest } from "@t3tools/provider-core/server/continuationRequests";

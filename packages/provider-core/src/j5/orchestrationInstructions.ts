@@ -1,19 +1,14 @@
 /**
- * J5's standing instructions for agents, and the helpers that place them in a provider's prompt.
- *
- * Upstream keeps its own text and the same helpers in
- * `@t3tools/provider-core/server/orchestrationInstructions`. J5's text names J5-owned tools and
- * imports J5 server modules, which a package cannot reach, so it is composed here and each
- * adapter imports this module instead of upstream's. The exports keep upstream's names so that
- * swap is one import line per adapter. When upstream changes a helper or adds a section, port it
- * here; J5's Subagent, Peer Agent, Crew, artifact and playbook text has no upstream counterpart.
+ * J5's standing instructions for agents: the text every harness receives about the `t3-code`
+ * tools. Upstream's `../server/orchestrationInstructions.ts` exports it as
+ * `T3_CODE_ORCHESTRATION_INSTRUCTIONS`, so upstream's helpers and every consumer of that constant
+ * carry J5's text. When upstream changes its own text, port what fits here by hand; J5's
+ * Subagent, Peer Agent, Crew, artifact and playbook text has no upstream counterpart.
  */
-import type { ProviderInteractionMode } from "@t3tools/contracts";
+import { AGENT_INVOCATION_INSTRUCTIONS } from "./agentInvocationInstructions.ts";
+import { PLAYBOOK_INSTRUCTIONS } from "./playbookInstructions.ts";
 
-import { AGENT_INVOCATION_INSTRUCTIONS } from "./agents/agentInvocationInstructions.ts";
-import { PLAYBOOK_INSTRUCTIONS } from "./playbooks/instructions.ts";
-
-export const T3_CODE_ORCHESTRATION_INSTRUCTIONS = `
+export const J5_ORCHESTRATION_INSTRUCTIONS = `
 
 ## J5 Code orchestration
 
@@ -43,110 +38,3 @@ ACP fallback: some ACP agents accept the injected MCP server but fail to expose 
 
 When a chart, table, diagram, image collage, or mockup would say more than prose, build a self-contained HTML page, check it with \`html_preview\`, then publish it with \`html_render\` before your final reply. The reader sees the page above that reply, so don't announce or restate it; add only what it doesn't say.
 `;
-
-export const T3_CODE_BROWSER_TOOL_INSTRUCTIONS = `
-
-## J5 Code collaborative browser
-
-You are running inside J5 Code. The \`t3-code\` MCP server is the product-native collaborative browser shared with the user. When it exposes \`preview_*\` tools, prefer those tools for browser navigation, inspection, interaction, screenshots, and recordings.
-
-For browser work, first call \`preview_status\`. If no automation-capable preview is attached, call \`preview_open\` before concluding that the browser is unavailable. Then use \`preview_navigate\`, \`preview_snapshot\`, and the focused interaction tools. Prefer snapshot-provided locators over coordinates.
-
-\`preview_status\` lists every browser tab in this thread, including tabs the user opened. When the user asks about "this page" or a page they have open, read their tab: pass its \`tabId\` to \`preview_snapshot\` or \`preview_wait_for\`, or omit \`tabId\` when you have no tab of your own. You may act on the user's tab, including \`preview_evaluate\`, only while its owner is \`unclaimed\`; while it is \`human\`, the user is driving, so read it with \`preview_snapshot\` or open your own tab. To use a browser profile (a set of saved logins), pass \`profileId\` from \`preview_status\` profiles to \`preview_open\`.
-
-Do not switch to global browser skills, Chrome, Node REPL browser automation, standalone Playwright, or agent-browser merely because the preview is initially closed or a first call fails. Inspect a failed preview call and retry with corrected arguments when the error is actionable. Use another browser system when:
-- the J5 preview tools are absent, or \`preview_open\` returns an explicit unsupported/unavailable error;
-- the user asks for another browser, or invokes a skill or documented repository workflow that names one; follow that workflow and report any prerequisite it is missing;
-- preview calls on an open tab have failed twice on the same step (timeouts, \`chrome-error://\` pages, a different client answering). Quote the raw error and switch without asking the user which browser to use.
-`;
-
-const T3_CODE_ACP_DEFAULT_MODE_INSTRUCTIONS = `## J5 Code interaction mode: Default
-
-Prefer making reasonable assumptions and carrying out the user's request. Ask a concise question only when a missing user decision would materially change the result. Treat this mode as active until J5 Code supplies a different interaction-mode instruction.`;
-
-const T3_CODE_ACP_PLAN_MODE_INSTRUCTIONS = `## J5 Code interaction mode: Plan
-
-Investigate with read-only actions and do not edit files or otherwise execute the implementation. Resolve discoverable facts before asking questions. When the requirements are decision complete, return a concrete implementation plan and do not start implementing it. Treat this mode as active until J5 Code supplies a different interaction-mode instruction.`;
-
-export interface T3AcpInstructionState {
-  readonly interactionMode: ProviderInteractionMode;
-  readonly hasT3Mcp: boolean;
-}
-
-/**
- * ACP has no system/developer prompt field, so send J5-owned context in the
- * first user prompt and whenever the available tools or interaction mode change.
- */
-export function t3AcpPromptWithInstructions(input: {
-  readonly prompt: string;
-  readonly state: T3AcpInstructionState;
-  readonly previousState?: T3AcpInstructionState;
-}): string {
-  // Native slash commands must remain at the start of the prompt.
-  if (input.prompt.trimStart().startsWith("/")) return input.prompt;
-  if (
-    input.previousState?.interactionMode === input.state.interactionMode &&
-    input.previousState.hasT3Mcp === input.state.hasT3Mcp
-  ) {
-    return input.prompt;
-  }
-  const instructions = [
-    input.state.interactionMode === "plan"
-      ? T3_CODE_ACP_PLAN_MODE_INSTRUCTIONS
-      : T3_CODE_ACP_DEFAULT_MODE_INSTRUCTIONS,
-    ...(input.state.hasT3Mcp
-      ? [T3_CODE_BROWSER_TOOL_INSTRUCTIONS.trim(), T3_CODE_ORCHESTRATION_INSTRUCTIONS.trim()]
-      : []),
-  ];
-  return `<t3_code_instructions>\n${instructions.join("\n\n")}\n</t3_code_instructions>\n\n<user_request>\n${input.prompt}\n</user_request>`;
-}
-
-/**
- * Providers without a system/developer-instruction channel receive this
- * context in the first prompt. Keep the wrapper explicit so it cannot be
- * mistaken for text authored by the user.
- */
-function prependT3OrchestrationInstructions(prompt: string): string {
-  return `<t3_code_orchestration_instructions>${T3_CODE_ORCHESTRATION_INSTRUCTIONS.trim()}</t3_code_orchestration_instructions>\n\n<user_request>\n${prompt}\n</user_request>`;
-}
-
-export function t3OrchestrationPromptForFirstRun(input: {
-  readonly prompt: string;
-  readonly runOrdinal: number;
-  readonly hasT3Mcp: boolean;
-}): string {
-  return input.runOrdinal === 1 && input.hasT3Mcp
-    ? prependT3OrchestrationInstructions(input.prompt)
-    : input.prompt;
-}
-
-export function t3OrchestrationSystemPrompt(hasT3Mcp: boolean): string | undefined {
-  return hasT3Mcp ? T3_CODE_ORCHESTRATION_INSTRUCTIONS : undefined;
-}
-
-/**
- * Codex carries application instructions in `turn/start.additionalContext` and truncates the
- * middle of any entry past about 1,000 tokens, which it estimates at 4 bytes each. J5's text is
- * longer than that, so it is spread over numbered keys (`key`, `key_2`, ...), split between lines.
- */
-const CODEX_CONTEXT_ENTRY_MAX_BYTES = 3_600;
-
-export function codexApplicationContext(
-  key: string,
-  text: string | undefined,
-): Record<string, { readonly kind: "application"; readonly value: string }> {
-  const entries: Record<string, { readonly kind: "application"; readonly value: string }> = {};
-  let value = "";
-  const push = () => {
-    if (value.trim() === "") return;
-    const index = Object.keys(entries).length;
-    entries[index === 0 ? key : `${key}_${index + 1}`] = { kind: "application", value };
-    value = "";
-  };
-  for (const line of (text ?? "").trim().split("\n")) {
-    if (Buffer.byteLength(`${value}\n${line}`) > CODEX_CONTEXT_ENTRY_MAX_BYTES) push();
-    value = value === "" ? line : `${value}\n${line}`;
-  }
-  push();
-  return entries;
-}
