@@ -43,6 +43,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # apps/server's preview tests drive a real headless Chromium.
+      - name: Install Chromium for server browser integration tests
+        run: node apps/server/node_modules/playwright-core/cli.js install --only-shell chromium
+
       - name: Full test suite
         run: pnpm exec vp run -r --log grouped --verbose test
 

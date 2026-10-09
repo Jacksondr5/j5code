@@ -27,7 +27,7 @@ How J5 advances to a new upstream T3 Code. FORK.md holds the rules this depends 
   - **Upstream behavior** that crosses a J5 policy, such as resume, Stop, settle, queues or delivery.
   - **Migrations:** run `node scripts/j5/check-upstream-migrations.ts --base <pin> --candidate <candidate>`. For a renumbering or insertion, first check whether upstream ships its own reconcile and use it. It also needs a reviewed manifest, the checker's `--allow-reviewed-bridge`, and a rehearsal on a `VACUUM INTO` copy of real data.
   - **Codex fixtures and generated protocol:** take upstream's files whole.
-  - **Muse fixtures:** take upstream's `muse_transcript.ndjson` files, then change "running in T3 Code" to "running in J5 Code" in each (FORK.md, "Advancing").
+  - **Muse fixtures:** take upstream's `muse_transcript.ndjson` files, then change "running in T3 Code" to "running in J5 Code" and "T3 Code wakes you" to "J5 Code wakes you" in each, to match J5's runtime instructions (FORK.md, "Advancing").
   - **New upstream workflows and jobs** that need the `pingdotgg/t3code` repository guard.
 - **Walk every FORK.md integration case and temporary patch.** For each patch, decide keep, retire (upstream fixed it) or narrow.
 - **Walk the [register of divergences](../product/upstream.md).** For each entry, check whether upstream's change makes it unnecessary, harder to carry, or wrong. Bring any change to the maintainer; retiring a divergence is the default when upstream now does the job.
