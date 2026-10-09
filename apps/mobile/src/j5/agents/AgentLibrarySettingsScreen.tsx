@@ -17,11 +17,12 @@ import {
   presentAgentPersonaUsage,
   importAgentPersonasWithConfirmation,
 } from "@t3tools/client-runtime/j5/agent-personas";
-import type {
-  AgentPersonaEditInput,
-  AgentPersonaImportConflict,
-  AgentPersonaImportConflictError,
-  EnvironmentId,
+import {
+  AuthOrchestrationOperateScope,
+  type AgentPersonaEditInput,
+  type AgentPersonaImportConflict,
+  type AgentPersonaImportConflictError,
+  type EnvironmentId,
 } from "@t3tools/contracts";
 import { useNavigation } from "@react-navigation/native";
 import { Platform, Pressable, ScrollView, Share, Switch, View } from "react-native";
@@ -37,6 +38,7 @@ import { cn } from "../../lib/cn";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { agentPersonaEnvironment } from "./agentPersonaAtoms";
 import { useEnvironmentQuery } from "../../state/query";
+import { useEnvironmentsWithScope } from "../../state/session";
 import { useRemoteConnectionStatus } from "../../state/use-remote-environment-registry";
 import { SettingsSection } from "../../features/settings/components/SettingsSection";
 import { PlaybookLibrarySettingsSection } from "../playbooks/PlaybookLibrarySettingsScreen";
@@ -77,10 +79,21 @@ export function AgentLibrarySettingsScreen() {
     reportFailure: false,
   });
   const [pickingFolder, setPickingFolder] = useState(false);
-  const otherEnvironments = connectedEnvironments.filter(
-    (environment) => environment.environmentId !== effectiveEnvironmentId,
-  );
   const [busy, setBusy] = useState(false);
+  // Library changes need the operate scope; a session without it can still read and export.
+  const operableEnvironments = useEnvironmentsWithScope(
+    connectedEnvironments,
+    AuthOrchestrationOperateScope,
+  );
+  const canOperate =
+    effectiveEnvironmentId !== null && operableEnvironments.has(effectiveEnvironmentId);
+  const locked = busy || !canOperate;
+  // Copying a persona imports it into the target, so only operable targets are offered.
+  const otherEnvironments = connectedEnvironments.filter(
+    (environment) =>
+      environment.environmentId !== effectiveEnvironmentId &&
+      operableEnvironments.has(environment.environmentId),
+  );
   const [confirmation, setConfirmation] = useState<{
     error: AgentPersonaImportConflictError;
     resolve: (selected: ReadonlyArray<AgentPersonaImportConflict> | null) => void;
@@ -385,8 +398,8 @@ export function AgentLibrarySettingsScreen() {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Create persona"
-              accessibilityState={{ disabled: busy || effectiveEnvironmentId === null }}
-              disabled={busy || effectiveEnvironmentId === null}
+              accessibilityState={{ disabled: locked }}
+              disabled={locked}
               className="flex-row items-center gap-2 rounded-lg border border-border px-4 py-3 disabled:opacity-40"
               onPress={() => setCreating({})}
             >
@@ -403,21 +416,18 @@ export function AgentLibrarySettingsScreen() {
                 Use Settings → Personas in the web app to import files.
               </Text>
             ) : (
-              <View
-                className="self-start"
-                pointerEvents={busy || effectiveEnvironmentId === null ? "none" : "auto"}
-              >
+              <View className="self-start" pointerEvents={locked ? "none" : "auto"}>
                 <ControlPillMenu
                   actions={[
                     {
                       id: "agent",
                       title: "Persona file",
-                      attributes: { disabled: busy || effectiveEnvironmentId === null },
+                      attributes: { disabled: locked },
                     },
                     {
                       id: "folder",
                       title: "Folder",
-                      attributes: { disabled: busy || effectiveEnvironmentId === null },
+                      attributes: { disabled: locked },
                     },
                   ]}
                   onPressAction={({ nativeEvent }) => {
@@ -428,8 +438,8 @@ export function AgentLibrarySettingsScreen() {
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel="Import personas"
-                    accessibilityState={{ disabled: busy || effectiveEnvironmentId === null }}
-                    disabled={busy || effectiveEnvironmentId === null}
+                    accessibilityState={{ disabled: locked }}
+                    disabled={locked}
                     className="flex-row items-center gap-2 rounded-lg border border-border px-4 py-3 disabled:opacity-40"
                   >
                     <Text className="text-sm text-foreground">Import</Text>
@@ -495,8 +505,8 @@ export function AgentLibrarySettingsScreen() {
                           <Pressable
                             accessibilityRole="button"
                             accessibilityLabel={`Restore ${persona.displayName}`}
-                            accessibilityState={{ disabled: busy }}
-                            disabled={busy}
+                            accessibilityState={{ disabled: locked }}
+                            disabled={locked}
                             className="h-11 flex-row items-center gap-2 rounded-lg border border-border px-3 disabled:opacity-40"
                             onPress={() => void restorePersona(persona.personaId)}
                           >
@@ -512,7 +522,7 @@ export function AgentLibrarySettingsScreen() {
                           <>
                             <Switch
                               value={persona.enabled}
-                              disabled={busy}
+                              disabled={locked}
                               accessibilityLabel={`Enable ${persona.displayName}`}
                               onValueChange={(enabled) =>
                                 void toggleAgent(persona.personaId, enabled)
@@ -526,8 +536,8 @@ export function AgentLibrarySettingsScreen() {
                                   ? "Edit this imported copy"
                                   : "Duplicate this persona to edit a copy"
                               }
-                              accessibilityState={{ disabled: busy || persona.edit === null }}
-                              disabled={busy || persona.edit === null}
+                              accessibilityState={{ disabled: locked || persona.edit === null }}
+                              disabled={locked || persona.edit === null}
                               className="size-11 items-center justify-center rounded-lg disabled:opacity-40"
                               onPress={() => {
                                 if (persona.edit && effectiveEnvironmentId)
@@ -552,7 +562,7 @@ export function AgentLibrarySettingsScreen() {
                               id: "duplicate",
                               title: "Duplicate as personal persona",
                               attributes: {
-                                disabled: busy || persona.availability === "unsupported",
+                                disabled: locked || persona.availability === "unsupported",
                               },
                             },
                             { id: "export", title: "Export YAML", attributes: { disabled: busy } },
@@ -607,8 +617,8 @@ export function AgentLibrarySettingsScreen() {
                           <Pressable
                             accessibilityRole="button"
                             accessibilityLabel={`Remove ${persona.displayName}`}
-                            accessibilityState={{ disabled: busy }}
-                            disabled={busy}
+                            accessibilityState={{ disabled: locked }}
+                            disabled={locked}
                             className="size-11 items-center justify-center rounded-lg border border-danger-foreground/30 disabled:opacity-40"
                             onPress={() => void removePersona(persona.personaId)}
                           >
@@ -707,8 +717,8 @@ export function AgentLibrarySettingsScreen() {
                           <Pressable
                             accessibilityRole="button"
                             accessibilityLabel={`Stop reading ${folder.configuredPath}`}
-                            accessibilityState={{ disabled: busy }}
-                            disabled={busy}
+                            accessibilityState={{ disabled: locked }}
+                            disabled={locked}
                             className="size-11 items-center justify-center rounded-lg border border-danger-foreground/30 disabled:opacity-40"
                             onPress={() =>
                               void saveFolders(
@@ -743,8 +753,8 @@ export function AgentLibrarySettingsScreen() {
                     <Pressable
                       accessibilityRole="button"
                       accessibilityLabel="Add folder"
-                      accessibilityState={{ disabled: busy }}
-                      disabled={busy}
+                      accessibilityState={{ disabled: locked }}
+                      disabled={locked}
                       className="flex-row items-center gap-2 self-start rounded-lg border border-border px-4 py-3 disabled:opacity-40"
                       onPress={() => setPickingFolder(true)}
                     >

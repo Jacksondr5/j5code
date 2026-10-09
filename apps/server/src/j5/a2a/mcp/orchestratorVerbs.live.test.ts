@@ -131,7 +131,6 @@ const providerInstanceRegistryLayer = ProviderInstanceRegistryHydration.layer.pi
         Layer.provide(FetchHttpClient.layer),
         Layer.provide(NodeServices.layer),
       ),
-      ModelManifest.layerTest,
       ServerSecretStore.layer.pipe(
         Layer.provide(serverConfigLayer),
         Layer.provide(NodeServices.layer),
@@ -152,7 +151,7 @@ const providerInstanceRegistryLayer = ProviderInstanceRegistryHydration.layer.pi
       Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {
         getEnvironmentId: Effect.succeed(environmentId),
       }),
-    ).pipe(Layer.provideMerge(NodeServices.layer)),
+    ).pipe(Layer.provideMerge(ModelManifest.layerTest), Layer.provideMerge(NodeServices.layer)),
   ),
 );
 const providerRegistryLayer = ProviderRegistry.layer.pipe(

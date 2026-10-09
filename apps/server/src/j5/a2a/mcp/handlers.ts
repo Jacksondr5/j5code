@@ -16,7 +16,10 @@ import {
 import * as McpToolAccess from "../../../mcp/McpToolAccess.ts";
 import { OrchestratorMcpService } from "../../../mcp/OrchestratorMcpService.ts";
 import { OrchestratorV2 } from "../../../orchestration-v2/Orchestrator.ts";
-import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
+import {
+  ThreadManagementService,
+  latestActiveRun,
+} from "../../../orchestration-v2/ThreadManagementService.ts";
 import { ProviderRegistry } from "../../../provider/ProviderRegistry.ts";
 import { makeAgentPersonaLibrary } from "../../agents/agentPersonaLibrary.ts";
 import { buildAgentPersonaCatalog } from "../../agents/agentPersonaRouting.ts";
@@ -998,12 +1001,9 @@ const handlers = {
           ),
         ),
       );
-      return targetProjection.runs.some(
-        (run) =>
-          run.status === "preparing" || run.status === "starting" || run.status === "running",
-      )
-        ? ("interrupt_requested" as const)
-        : ("already_idle" as const);
+      return latestActiveRun(targetProjection) === undefined
+        ? ("already_idle" as const)
+        : ("interrupt_requested" as const);
     }).pipe(Effect.mapError(failure)),
   ),
   stop_crew: McpToolAccess.actsAsCaller((input) =>

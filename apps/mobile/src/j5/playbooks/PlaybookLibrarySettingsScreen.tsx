@@ -6,7 +6,7 @@ import {
 } from "@t3tools/client-runtime/j5/playbooks";
 import { useAtomValue } from "@effect/atom-react";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import { CommandId, MessageId, ThreadId } from "@t3tools/contracts";
+import { AuthOrchestrationOperateScope, CommandId, MessageId, ThreadId } from "@t3tools/contracts";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { Alert, Platform, Pressable, Share, View } from "react-native";
@@ -16,6 +16,7 @@ import { makeTurnCommandMetadata } from "../../lib/commandMetadata";
 import { beginForegroundHandoff } from "../../lib/foreground-handoff";
 import { useServerConfigs } from "../../state/entities";
 import { useEnvironmentQuery } from "../../state/query";
+import { useEnvironmentScope } from "../../state/session";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useAtomQueryRunner } from "../../state/use-atom-query-runner";
 import { useRemoteConnectionStatus } from "../../state/use-remote-environment-registry";
@@ -52,6 +53,11 @@ export const PlaybookLibrarySettingsSection = memo(function PlaybookLibrarySetti
       : null,
   );
   const { refresh } = query;
+  // Creating, renaming and deleting a playbook change the workspace.
+  const canOperate = useEnvironmentScope(
+    workspace?.environmentId ?? null,
+    AuthOrchestrationOperateScope,
+  );
   const deletePlaybook = useAtomCommand(j5Environment.deletePlaybook, { reportFailure: false });
   const exportPlaybook = useAtomCommand(j5Environment.exportPlaybook, { reportFailure: false });
   const renamePlaybook = useAtomCommand(j5Environment.renamePlaybook, { reportFailure: false });
@@ -281,7 +287,7 @@ export const PlaybookLibrarySettingsSection = memo(function PlaybookLibrarySetti
       <View className="flex-row gap-3">
         <Pressable
           accessibilityRole="button"
-          disabled={disabled}
+          disabled={disabled || !canOperate}
           onPress={() => void createPlaybook()}
           className="rounded-lg border border-border p-3 disabled:opacity-40"
         >
@@ -330,7 +336,7 @@ export const PlaybookLibrarySettingsSection = memo(function PlaybookLibrarySetti
               <View className="flex-row gap-2">
                 <Pressable
                   accessibilityRole="button"
-                  disabled={renaming || !renameTarget.title.trim()}
+                  disabled={renaming || !canOperate || !renameTarget.title.trim()}
                   onPress={() => void submitRename()}
                   className="rounded-lg border border-border px-3 py-2 disabled:opacity-40"
                 >
@@ -386,7 +392,7 @@ export const PlaybookLibrarySettingsSection = memo(function PlaybookLibrarySetti
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`Rename ${playbook.name} playbook`}
-            disabled={disabled || !!playbook.issue}
+            disabled={disabled || !canOperate || !!playbook.issue}
             onPress={() => setRenameTarget({ name: playbook.name, title: playbook.title })}
             className="self-start rounded-lg border border-border px-3 py-2 disabled:opacity-40"
           >
@@ -403,7 +409,7 @@ export const PlaybookLibrarySettingsSection = memo(function PlaybookLibrarySetti
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`Delete ${playbook.name} playbook`}
-            disabled={disabled}
+            disabled={disabled || !canOperate}
             onPress={() => confirmDelete(playbook.name)}
             className="self-start rounded-lg border border-border px-3 py-2 disabled:opacity-40"
           >

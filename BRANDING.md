@@ -33,6 +33,8 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
   state outranks an ambient home. Pairing must target the same resolved state.
 - SSH runner homes: `packages/ssh/src/tunnel.ts` uses `~/.j5code` for both release-archive runtimes (under
   `~/.j5code/runtime/versions`) and node-script runners; `~/.t3/ssh-launch` remains transport bookkeeping.
+  The device tools' state on a remote simulator host also keeps upstream's path, `~/.t3/device`
+  (`apps/server/src/device/sshDeviceScript.ts`).
 - Release archives and installers (FORK.md case 40): `packages/shared/src/cliRelease.ts`
   (`CLI_RELEASE_REPOSITORY`), `scripts/install.sh`, `scripts/install.ps1`, and
   `scripts/smoke-cli-archive.ts` (scratch `J5CODE_HOME`).
@@ -130,12 +132,14 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
   use the `J5_BRANDING` desktop schemes where upstream hard-codes `t3code` and `t3code-dev`.
   J5 has no hosted client, so upstream's `https://app.t3.codes` return origin is dropped. The
   Codex sign-in pages (`apps/server/src/provider/CodexAuthCallbackPage.ts`, `CodexAuthCallback.ts`,
-  `packages/shared/src/codexAuthCallback.ts`) name J5 Code.
+  `packages/shared/src/codexAuthCallback.ts`) name J5 Code, and the `agent_name_hint` sent in
+  ChatGPT sign-in (`CodexChatGptAuth.ts`) is "J5 Code": ChatGPT may show it to the person, so it
+  is a branding matter (Jackson's 2026-10-09 ruling).
 - Privacy: `PRIVACY_POLICY_URL` in `apps/web/src/legalLinks.ts` is `https://j5.codes/privacy-policy`,
   and the welcome wizard's telemetry sentence names J5 Code (`WelcomeWizard.tsx`).
 - Things J5 writes into a person's repository or folders: the stack-rebase committer in
-  `apps/server/src/pullRequest/githubStackRebase.ts` ("J5 Code" `<noreply@j5.codes>`; the address
-  was the implementer's choice at the 2026-10-08 advance and awaits confirmation) and the readme
+  `apps/server/src/pullRequest/githubStackRebase.ts` ("J5 Code" `<noreply@j5.codes>`, confirmed by the
+  maintainer) and the readme
   line in `apps/server/src/project/ManagedProjectFolders.ts` ("Created in J5 Code").
 - New upstream files: the list above names only known sites. On every advance, also grep the files
   upstream added since the old pin for `t3code`, `T3 Code`, `.t3`, `T3CODE_HOME`, `pingdotgg`,
@@ -158,11 +162,8 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
   them wherever they appear, along with `infra/relay` and the mobile legal links to `t3.codes`.
 - The `t3-code` MCP server key, its `T3 Code` MCP server `name` (`McpHttpServer.ts`), the Codex
   client info ("T3 Code", `buildCodexInitializeParams` in `apps/server/src/provider/CodexProvider.ts`),
-  the Muse client info (`t3_code` / "T3 Code", `packages/provider-muse`), and the
-  `agent_name_hint` sent in ChatGPT sign-in (`apps/server/src/provider/CodexChatGptAuth.ts`):
-  protocol identity that tool names, aliases (`t3McpToolPresentation.ts`) and recorded provider
-  fixtures depend on. The `agent_name_hint` may be shown to the person by ChatGPT; leaving it was
-  the implementer's call at the 2026-10-08 advance.
+  and the Muse client info (`t3_code` / "T3 Code", `packages/provider-muse`): protocol identity
+  that tool names, aliases (`t3McpToolPresentation.ts`) and recorded provider fixtures depend on.
 - Telemetry service names (`t3code-server`, `t3code-desktop`, `t3code-mobile`).
 - Strings inside native modules under `apps/mobile/modules/` (for example "T3 Code" in the
   composer editor's Kotlin). J5 adds no native code (FORK.md, mobile seams), so they are left

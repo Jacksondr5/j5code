@@ -9,6 +9,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
+import * as TestClock from "effect/testing/TestClock";
 
 import { OrchestratorProjectionError } from "../../orchestration-v2/Orchestrator.ts";
 import { ProjectionStoreThreadNotFoundError } from "../../orchestration-v2/ProjectionStore.ts";
@@ -233,6 +234,10 @@ const seatProjection = (
     archivedAt?: string | null;
     pendingRequest?: boolean;
     running?: boolean;
+    pinnedAt?: string;
+    snoozedUntil?: string;
+    autoSettleDisabledAt?: string;
+    userMessageAt?: string;
   } = {},
 ) =>
   ({
@@ -242,6 +247,14 @@ const seatProjection = (
       deletedAt: null,
       settledOverride: facts.settledOverride ?? null,
       settledAt: facts.settledOverride === "settled" ? DateTime.makeUnsafe(seatAt) : null,
+      pinnedAt: facts.pinnedAt === undefined ? null : DateTime.makeUnsafe(facts.pinnedAt),
+      snoozedUntil:
+        facts.snoozedUntil === undefined ? null : DateTime.makeUnsafe(facts.snoozedUntil),
+      snoozedAt: facts.snoozedUntil === undefined ? null : DateTime.makeUnsafe(seatAt),
+      autoSettleDisabledAt:
+        facts.autoSettleDisabledAt === undefined
+          ? null
+          : DateTime.makeUnsafe(facts.autoSettleDisabledAt),
     },
     runs: facts.running
       ? [
@@ -271,7 +284,17 @@ const seatProjection = (
     providerSessions: [],
     providerThreads: [],
     providerTurns: [],
-    messages: [],
+    messages:
+      facts.userMessageAt === undefined
+        ? []
+        : [
+            {
+              id: "message:seat",
+              role: "user",
+              createdBy: "user",
+              updatedAt: DateTime.makeUnsafe(facts.userMessageAt),
+            },
+          ],
     plans: [],
     turnItems: [],
     checkpointScopes: [],
@@ -538,4 +561,78 @@ it.effect("settling a Captain leaves a seat that is waiting on the person or sti
       );
     }).pipe(Effect.provide(layer));
   }),
+);
+
+it.effect(
+  "settling a Captain leaves the seats upstream's auto-settle would, except ones only held off automatic settling",
+  () =>
+    Effect.gen(function* () {
+      const seats = {
+        pinned: ThreadId.make("thread:pinned"),
+        snoozed: ThreadId.make("thread:snoozed"),
+        queued: ThreadId.make("thread:queued"),
+        optedOut: ThreadId.make("thread:opted-out"),
+        unsettled: ThreadId.make("thread:unsettled"),
+      };
+      const member = crew("x", null).members[0]!;
+      const instance: AgentCrewInstance = {
+        ...crew("crew:mixed", null),
+        members: Object.entries(seats).map(([seatName, threadId]) => ({
+          ...member,
+          seatName,
+          threadId,
+        })),
+      };
+      const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]);
+      const layer = cascadeLayer.pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            Layer.mock(AgentCrewInstanceService)({
+              listInvolving: () => Effect.succeed([instance]),
+            }),
+            Layer.mock(ArchiveCrewService)({}),
+            Layer.mock(ThreadManagementService)({
+              getThreadProjection: (threadId) =>
+                Effect.succeed(
+                  seatProjection(
+                    threadId,
+                    threadId === seats.pinned
+                      ? { pinnedAt: seatAt }
+                      : threadId === seats.snoozed
+                        ? { snoozedUntil: "2026-09-18T09:00:00.000Z" }
+                        : threadId === seats.queued
+                          ? // Sent a minute ago; no run has picked it up yet.
+                            { userMessageAt: "2026-09-17T09:59:00.000Z" }
+                          : threadId === seats.unsettled
+                            ? // What the cascade's own unsettle leaves on a seat.
+                              { settledOverride: "active" }
+                            : { autoSettleDisabledAt: seatAt },
+                  ),
+                ),
+              dispatch: (command) =>
+                Ref.update(dispatched, (items) => [...items, command]).pipe(
+                  Effect.as({ sequence: 1 } as never),
+                ),
+            }),
+          ),
+        ),
+      );
+      yield* Effect.gen(function* () {
+        yield* TestClock.setTime(Date.parse("2026-09-17T10:00:00.000Z"));
+        const cascade = yield* CrewCaptainArchiveCascade;
+        yield* cascade.handleStoredEvent(lifecycleEvent("event:settle", "thread.settled"));
+        // No settle reaches the pinned seat, so it keeps its pin; the snoozed and about-to-start
+        // seats are left alone too. The opt-out and an earlier unsettle do not hold a seat back.
+        assert.deepStrictEqual(
+          (yield* Ref.get(dispatched)).map((command) => [
+            command.type,
+            "threadId" in command ? command.threadId : null,
+          ]),
+          [
+            ["thread.settle", seats.optedOut],
+            ["thread.settle", seats.unsettled],
+          ],
+        );
+      }).pipe(Effect.provide(layer));
+    }),
 );

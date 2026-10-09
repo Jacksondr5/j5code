@@ -110,16 +110,16 @@ permission ceiling between Peer Agents (Jackson, 2026-09-16), since any such gua
 to a trusting peer away from bypass. Disabled, removed, and unknown personas refuse before creation.
 A plain spawn without `persona` is unchanged and inherits the parent's runtime mode as before.
 
-**Description:** "Stop one Peer Agent the way a user Stop does: its running turn is interrupted now, turns already queued behind it are held, its pull request watches end, and the tasks it delegated stop too. The agent remains, stays readable, and can be messaged again later — stopping halts work, it retires nothing. The agent must be in your project. Reuse client_request_id to retry safely."
+**Description:** "Stop one Peer Agent the way a user Stop does: its running turn is interrupted now, turns already queued behind it, messages you sent it included, are held until a person resumes its queue (no tool releases them, and a message sent after the stop runs ahead of them), its pull request watches end, and the tasks it delegated stop too. The agent remains, stays readable, and can be messaged again later — stopping halts work, it retires nothing. The agent must be in your project. Reuse client_request_id to retry safely."
 
 | Input               | Type          | Required                    |
 | ------------------- | ------------- | --------------------------- |
 | `participant_id`    | ParticipantId | yes — the one agent to stop |
 | `client_request_id` | string        | no                          |
 
-**Result:** exactly one of `interrupt_requested` (a running turn is being interrupted) or `already_idle` (no running turn; the agent's queue is still held). An interrupt acknowledgement and an observed terminal run state are separate facts; the tool never claims a turn stopped merely because interruption was requested. A target outside the caller's project is an error pointing at `list_participants`.
+**Result:** exactly one of `interrupt_requested` (the agent has an active run, which is being interrupted) or `already_idle` (the agent has no active run; its queue is still held). A run that is preparing, starting, running or waiting is active. An interrupt acknowledgement and an observed terminal run state are separate facts; the tool never claims a turn stopped merely because interruption was requested. A target outside the caller's project is an error pointing at `list_participants`.
 
-**Rules.** A caller's runtime policy never gates `stop_agent`, `stop_crew`, or `archive_crew`: a read-only persona may run them, because identity (the Captain, its own Crew) and the human's confirmation token are the gates, and the sandbox guards the workspace rather than the platform's verbs (Bryant, 2026-09-14). Stop and archive are single-target; the unit cascade belongs to Crews, which stop and archive as units through their own verbs when they exist. Stop is upstream's Stop. Besides interrupting the turn, it holds the turns queued behind it, ends the thread's pull request watches and stops the tasks it delegated, so a message delivered to a stopped agent waits until someone resumes the thread. Upstream does not continue a stopped run after a restart.
+**Rules.** A caller's runtime policy never gates `stop_agent`, `stop_crew`, or `archive_crew`: a read-only persona may run them, because identity (the Captain, its own Crew) and the human's confirmation token are the gates, and the sandbox guards the workspace rather than the platform's verbs (Bryant, 2026-09-14). Stop and archive are single-target; the unit cascade belongs to Crews, which stop and archive as units through their own verbs when they exist. Stop is upstream's Stop. Besides interrupting the turn, it holds the turns queued behind it, ends the thread's pull request watches and stops the tasks it delegated, so a message already queued for a stopped agent waits until a person resumes its queue. No agent tool releases it, and a message sent after the stop runs ahead of it. Upstream does not continue a stopped run after a restart.
 
 **Amendment (Jackson, 2026-08-29):** the A6 build cascaded over the placement subtree; that blast
 radius makes the tool less useful, so `stop_agent` and thread archive are single-target. The
@@ -294,7 +294,7 @@ the 2026-09-10 `deliver_artifact` verb, its ledger table, and the crew-only `rea
 
 ### `stop_crew`
 
-**Description (contract):** "Stop a Crew you command the way a user Stop does, seat by seat: each seat's running turn is interrupted now, turns already queued behind it are held, its pull request watches end, and the tasks it delegated stop too. Nothing settles or is retired, and every seat can be messaged again afterwards. Captain-only. Reuse client_request_id to retry safely."
+**Description (contract):** "Stop a Crew you command the way a user Stop does, seat by seat: each seat's running turn is interrupted now, turns already queued behind it, messages you sent it included, are held until a person resumes its queue (no tool releases them, and a message sent after the stop runs ahead of them), its pull request watches end, and the tasks it delegated stop too. Nothing settles or is retired, and every seat can be messaged again afterwards. Captain-only. Reuse client_request_id to retry safely."
 
 | Input               | Type              | Required | Meaning                                        |
 | ------------------- | ----------------- | -------- | ---------------------------------------------- |
