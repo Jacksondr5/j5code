@@ -484,7 +484,7 @@ jobs:
           - Command-line server, fresh install:
             \`curl -fsSL https://github.com/$GH_REPO/releases/download/$tag/install.sh | T3CODE_CHANNEL=nightly sh\`
           - Command-line server, from an installed \`j5\`: \`j5 update --channel nightly\`. It then follows nightlies.
-          - macOS app: in an installed J5 Code, Settings, Update track, Nightly. Or install the DMG below, which replaces the installed app and follows nightlies.
+          - macOS app: in an installed J5 Code, Settings, Update track, Nightly. Or install the DMG below. It installs as "J5 Code (Nightly)" beside "J5 Code" and follows nightlies. The two share one profile and one database, so run only one of them at a time.
 
           Built from $RELEASE_SHA.
           EOF
