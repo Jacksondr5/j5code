@@ -23,6 +23,16 @@ export const MIGRATION_SNAPSHOTS_KEPT = 3;
 
 const UPSTREAM_MIGRATIONS_TABLE = "effect_sql_migrations";
 
+/**
+ * How long a read waits for another connection's lock: the server's own `busy_timeout`. A
+ * rollback-journal database is locked against readers while a writer commits, and a read that
+ * does not wait fails there with "database is locked". A WAL database never makes a reader wait.
+ */
+const BUSY_TIMEOUT_MS = 5000;
+
+const openReadOnly = (filename: string) =>
+  new NodeSqlite.DatabaseSync(filename, { readOnly: true, timeout: BUSY_TIMEOUT_MS });
+
 export class MigrationSnapshotError extends Schema.TaggedError<MigrationSnapshotError>()(
   "MigrationSnapshotError",
   {
@@ -52,7 +62,7 @@ export interface SnapshotBeforeMigrationsOptions {
 }
 
 const snapshotSuffix = /\.pre-migration-u\d+-j\d+\.sqlite$/;
-// An unpublished copy, and the journal SQLite keeps beside it while writing.
+// An unpublished copy, and a journal SQLite may keep beside one while writing it.
 const partialSuffix = /\.pre-migration-u\d+-j\d+\.sqlite\..+\.partial(-journal)?$/;
 /**
  * A copy takes seconds, so a partial file this old belongs to a process that was killed. A newer
@@ -78,7 +88,7 @@ export const migrationSnapshotPath = (
 };
 
 const readRecordedMigrations = (filename: string): RecordedMigrations => {
-  const database = new NodeSqlite.DatabaseSync(filename, { readOnly: true });
+  const database = openReadOnly(filename);
   try {
     const latest = (table: string) => {
       const exists = database
@@ -89,6 +99,22 @@ const readRecordedMigrations = (filename: string): RecordedMigrations => {
       return Number(row?.latest ?? 0);
     };
     return { upstream: latest(UPSTREAM_MIGRATIONS_TABLE), j5: latest(J5_A2A_MIGRATIONS_TABLE) };
+  } finally {
+    database.close();
+  }
+};
+
+/**
+ * Copies the database at `sourcePath` to `destinationPath`, which must not exist, and returns
+ * when the copy is complete. `VACUUM INTO` reads one consistent snapshot through the WAL and
+ * never writes to the source. It is synchronous on purpose: `node:sqlite`'s `backup()` rejects
+ * the one-step rate on the Node that release executables embed, and its promise there settles
+ * only when some other event wakes the loop.
+ */
+const copyDatabase = (sourcePath: string, destinationPath: string) => {
+  const database = openReadOnly(sourcePath);
+  try {
+    database.prepare("VACUUM INTO ?").run(destinationPath);
   } finally {
     database.close();
   }
@@ -144,12 +170,11 @@ const removeOldSnapshots = Effect.fn("removeOldSnapshots")(function* (
  * copy. A database with no history is new and is not copied; neither is one with nothing pending,
  * so an ordinary start costs two small reads.
  *
- * The copy uses SQLite's backup API, which reads through the WAL and never writes to the source.
- * It is published only if it still records the same migrations, so a copy taken after another
- * process already migrated never replaces a real snapshot. It replaces an older snapshot of the
- * same name, and the oldest snapshots beyond `MIGRATION_SNAPSHOTS_KEPT` are then deleted.
- *
- * Interrupting it waits for the copy in progress, which cannot be abandoned, then removes it.
+ * The copy (`copyDatabase`) blocks the thread until it is complete, about two seconds per
+ * gigabyte. It is published only if it still records the same migrations, so a copy taken after
+ * another process already migrated never replaces a real snapshot. It replaces an older snapshot
+ * of the same name, and the oldest snapshots beyond `MIGRATION_SNAPSHOTS_KEPT` are then deleted.
+ * A copy that fails or is interrupted before it is published is removed.
  */
 export const snapshotBeforeMigrations = Effect.fn("snapshotBeforeMigrations")(function* (
   dbPath: string,
@@ -188,21 +213,9 @@ export const snapshotBeforeMigrations = Effect.fn("snapshotBeforeMigrations")(fu
     newestKnown,
   });
   const [elapsed, published] = yield* Effect.gen(function* () {
-    // Uninterruptible: the copy keeps writing after its promise is abandoned, so the file can
-    // only be removed once the copy has finished.
-    yield* Effect.tryPromise({
-      try: async () => {
-        const database = new NodeSqlite.DatabaseSync(dbPath, { readOnly: true });
-        try {
-          // One step, under a single read snapshot. Copying in several steps starts over
-          // whenever another connection commits, and so never ends beside a busy server.
-          await NodeSqlite.backup(database, partialPath, { rate: -1 });
-        } finally {
-          database.close();
-        }
-      },
-      catch: fail,
-    }).pipe(Effect.uninterruptible);
+    // `VACUUM INTO` refuses a destination that already holds anything.
+    yield* fs.remove(partialPath, { force: true }).pipe(Effect.mapError(fail));
+    yield* Effect.try({ try: () => copyDatabase(dbPath, partialPath), catch: fail });
     const copied = yield* Effect.try({
       try: () => readRecordedMigrations(partialPath),
       catch: fail,

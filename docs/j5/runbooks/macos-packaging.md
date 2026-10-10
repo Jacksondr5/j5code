@@ -212,7 +212,8 @@ the time to repeat step 2.
   for a preview, which no install updates to;
 - self-contained CLI archives `t3-<version>-darwin-arm64.tar.gz` (Developer ID signed and notarized)
   and `t3-<version>-linux-x64.tar.gz`, built and smoke-tested in the release run from the same
-  commit;
+  commit. The executable embeds a newer Node than the one tests run on, so the run also runs the
+  database startup tests on that Node;
 - `install.sh` and `SHA256SUMS` over the archives and the installer.
 
 Run by hand with a build's run ID, its resolve job reads the version from the build commit's four
