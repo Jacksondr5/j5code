@@ -118,7 +118,7 @@ export const removeAppLinks = Effect.fn("j5.cli.remove_app_links")(function* (
 ) {
   const fs = yield* FileSystem.FileSystem;
   for (const link of links) {
-    const removed = yield* fs.remove(link).pipe(
+    const removed = yield* fs.remove(link, { force: true }).pipe(
       Effect.as(true),
       Effect.catch(() => Effect.succeed(false)),
     );
