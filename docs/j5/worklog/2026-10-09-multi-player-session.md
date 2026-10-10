@@ -102,6 +102,7 @@ In progress.
 - **A guest can enter someone else's username.** That is accepted: their name is still the one the sharer gave them.
 
 - **Members outrank guests, and the agent is told why.** The note the agent gets when a thread becomes shared says that members own the server it runs on, that guests take part at a member's invitation, and that a guest is not fully trusted unless a member says so. Members decide what a guest may tell the agent to do. The agent works with a guest normally; when a guest's request conflicts with what a member said, or goes well beyond the work in the thread, it holds off and asks a member through the inbox.
+- **The sharer can say what a guest is here for.** The share dialog has an optional line for it, and the line goes into the note the agent receives. A member can also widen or narrow a guest's standing at any time by saying so in the thread.
 - **This is guidance to the agent, not enforcement.** An agent reads every message as text, so the platform cannot make it rank one person over another. Members of one server are equals: a disagreement between them is an ordinary change of mind. There is no per-thread owner.
 
 Still open: how an agent reaches one particular person, what happens when two people send or steer at once, and what a newly added person sees of the conversation from before they joined.
