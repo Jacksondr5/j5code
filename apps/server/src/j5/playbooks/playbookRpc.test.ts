@@ -10,7 +10,7 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import { requiredScopeForRpcMethod } from "../../auth/RpcAuthorization.ts";
-import { J5_PLAYBOOK_WS_METHODS } from "@t3tools/contracts/j5";
+import { J5_PLAYBOOK_WS_METHODS, type PlaybookError } from "@t3tools/contracts/j5";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -28,7 +28,7 @@ import {
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { ProjectService } from "../../project/ProjectService.ts";
 import { runJ5A2AMigrations } from "../a2a/Migrations.ts";
-import { makePlaybookStore } from "./PlaybookStore.ts";
+import { makePlaybookStore, playbookError } from "./PlaybookStore.ts";
 import { makePlaybookRpcHandlers, PLAYBOOK_RPC_SCOPES } from "./playbookRpc.ts";
 
 const projectId = ProjectId.make("project:playbook-rpc");
@@ -132,9 +132,9 @@ const fixture = Effect.gen(function* () {
       );
     },
   });
-  const handlers = yield* makePlaybookRpcHandlers({
-    store,
-  }).pipe(Effect.provide(Layer.merge(projects, threads)));
+  const handlersFor = (served: Parameters<typeof makePlaybookRpcHandlers>[0]["store"]) =>
+    makePlaybookRpcHandlers({ store: served }).pipe(Effect.provide(Layer.merge(projects, threads)));
+  const handlers = yield* handlersFor(store);
   const exportPlaybook = (input: { projectId: ProjectId; threadId?: ThreadId; name: string }) =>
     handlers[J5_PLAYBOOK_WS_METHODS.exportPlaybook](input);
   const deletePlaybook = (input: { projectId: ProjectId; threadId?: ThreadId; name: string }) =>
@@ -146,6 +146,7 @@ const fixture = Effect.gen(function* () {
     exportPlaybook,
     deletePlaybook,
     renamePlaybook,
+    handlersFor,
     store,
     fs,
     filename,
@@ -288,6 +289,45 @@ it.effect("rejects invalid rename inputs and invalid YAML", () =>
     assert.equal(
       yield* codeOf(renamePlaybook({ projectId, name: "demo", title: "Nope" })),
       "invalid_definition",
+    );
+  }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+);
+
+it.effect("tells a storage failure in the action's general words, never the store's", () =>
+  Effect.gen(function* () {
+    const { handlersFor, store } = yield* fixture;
+    // What the store reports when the filesystem refuses: the underlying error's own text.
+    const refused = Effect.fail(
+      playbookError(
+        "operation_failed",
+        "EACCES: permission denied, unlink '/srv/private/.j5/playbooks/demo.yaml'",
+      ),
+    );
+    const handlers = yield* handlersFor({
+      changes: store.changes,
+      exportDefinition: () => refused,
+      removeDefinition: () => refused,
+      renameDefinition: () => refused,
+    });
+    const request = { projectId, name: "demo" };
+    const failure = <A>(call: Effect.Effect<A, PlaybookError>) =>
+      call.pipe(
+        Effect.flip,
+        Effect.map(({ code, message }) => ({ code, message })),
+      );
+    assert.deepStrictEqual(
+      yield* failure(handlers[J5_PLAYBOOK_WS_METHODS.deletePlaybook](request)),
+      { code: "operation_failed", message: "Deleting the playbook failed." },
+    );
+    assert.deepStrictEqual(
+      yield* failure(
+        handlers[J5_PLAYBOOK_WS_METHODS.renamePlaybook]({ ...request, title: "Renamed" }),
+      ),
+      { code: "operation_failed", message: "Renaming the playbook failed." },
+    );
+    assert.deepStrictEqual(
+      yield* failure(handlers[J5_PLAYBOOK_WS_METHODS.exportPlaybook](request)),
+      { code: "operation_failed", message: "Exporting the playbook failed." },
     );
   }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );

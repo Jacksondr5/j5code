@@ -33,9 +33,14 @@ export const makePlaybookRpcHandlers = Effect.fn("makePlaybookRpcHandlers")(func
   const projects = yield* ProjectService;
   const threads = yield* ThreadManagementService;
   const { store } = options;
-  /** Run a store call in the project's root or the thread's worktree, whichever the request names. */
+  /**
+   * Run a store call in the project's root or the thread's worktree, whichever the request names.
+   * A refusal keeps the store's words. A storage failure carries the underlying error's text,
+   * which can name a path on the server, so it is logged here and told to the client as `failed`.
+   */
   const inWorkspace = <A>(
     input: PlaybookLibraryRequest,
+    failed: string,
     run: (workspaceRoot: string) => Effect.Effect<A, PlaybookError>,
   ) =>
     resolvePlaybookWorkspaceRoot(projects, threads, input).pipe(
@@ -48,16 +53,30 @@ export const makePlaybookRpcHandlers = Effect.fn("makePlaybookRpcHandlers")(func
                 "This project or thread workspace is no longer available.",
               ),
             )
-          : run(root),
+          : run(root).pipe(
+              Effect.catch((error) =>
+                error.code === "operation_failed"
+                  ? Effect.logError(failed, { cause: error }).pipe(
+                      Effect.andThen(Effect.fail(playbookError("operation_failed", failed))),
+                    )
+                  : Effect.fail(error),
+              ),
+            ),
       ),
     );
   return {
     [J5_PLAYBOOK_WS_METHODS.subscribeChanges]: () => store.changes,
     [J5_PLAYBOOK_WS_METHODS.exportPlaybook]: (input: PlaybookExportRequest) =>
-      inWorkspace(input, (root) => store.exportDefinition(root, input.name)),
+      inWorkspace(input, "Exporting the playbook failed.", (root) =>
+        store.exportDefinition(root, input.name),
+      ),
     [J5_PLAYBOOK_WS_METHODS.deletePlaybook]: (input: PlaybookDeleteRequest) =>
-      inWorkspace(input, (root) => store.removeDefinition(root, input.name)),
+      inWorkspace(input, "Deleting the playbook failed.", (root) =>
+        store.removeDefinition(root, input.name),
+      ),
     [J5_PLAYBOOK_WS_METHODS.renamePlaybook]: (input: PlaybookRenameRequest) =>
-      inWorkspace(input, (root) => store.renameDefinition(root, input.name, input.title)),
+      inWorkspace(input, "Renaming the playbook failed.", (root) =>
+        store.renameDefinition(root, input.name, input.title),
+      ),
   };
 });
