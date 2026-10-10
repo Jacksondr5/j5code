@@ -93,8 +93,6 @@ This is the sketch the rulings were made against, not a plan.
 
 ## Rulings: shared conversations
 
-In progress.
-
 - **The server names the author of a message, in the message text**, the way it already names the sender of an agent-to-agent message. It takes the name from the session, so a client cannot forge it.
 - **Only on a thread more than one person can write to.** A person's private threads are unchanged. When a thread gains its first collaborator, the agent is told once who can now write and that earlier unlabelled messages came from the owner.
 - **Each person sees their own messages as they do today**, and other people's as cards of their own. The cards may resemble agent-to-agent cards; the look is undecided.
@@ -113,7 +111,10 @@ In progress.
 - **A guest queues; only a member steers or stops.** A guest's message starts the agent when it is idle and queues behind the current work when it is not. A guest can never interrupt work in progress. The cost was raised and accepted: a guest who watches the agent do something wrong cannot stop it and has to reach a member.
 - **No presence.** Nothing shows that another person is typing or looking at the thread.
 
-Still open: whether a guest can edit or remove their own queued message, and what a newly added person sees of the conversation from before they joined.
+- **Sharing a thread shares all of it.** A newly added person sees the whole conversation from the start, and the share dialog says so before the sharer confirms. Hiding earlier history would be a promise J5 cannot keep for a collaborator, who can ask the agent what was said. A thread holding something that should not be shared is forked, or the shared work starts in a fresh thread.
+- **Removing a person's access removes the thread from their view.** Their messages stay in it under their name.
+
+Still open: whether a guest can edit or remove their own queued message.
 
 ## Not verified
 
