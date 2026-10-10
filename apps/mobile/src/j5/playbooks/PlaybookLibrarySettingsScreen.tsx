@@ -6,7 +6,7 @@ import {
 } from "@t3tools/client-runtime/j5/playbooks";
 import { useAtomValue } from "@effect/atom-react";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import { AuthOrchestrationOperateScope, CommandId, MessageId, ThreadId } from "@t3tools/contracts";
+import { CommandId, MessageId, ThreadId } from "@t3tools/contracts";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { Alert, Platform, Pressable, Share, View } from "react-native";
@@ -16,7 +16,6 @@ import { makeTurnCommandMetadata } from "../../lib/commandMetadata";
 import { beginForegroundHandoff } from "../../lib/foreground-handoff";
 import { useServerConfigs } from "../../state/entities";
 import { useEnvironmentQuery } from "../../state/query";
-import { useEnvironmentScope } from "../../state/session";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useAtomQueryRunner } from "../../state/use-atom-query-runner";
 import { useRemoteConnectionStatus } from "../../state/use-remote-environment-registry";
@@ -54,9 +53,8 @@ export const PlaybookLibrarySettingsSection = memo(function PlaybookLibrarySetti
   );
   const { refresh } = query;
   // Creating, renaming and deleting a playbook change the workspace.
-  const canOperate = useEnvironmentScope(
-    workspace?.environmentId ?? null,
-    AuthOrchestrationOperateScope,
+  const canOperate = useAtomValue(
+    j5Environment.deletePlaybook.permissionAtom(workspace?.environmentId ?? null),
   );
   const deletePlaybook = useAtomCommand(j5Environment.deletePlaybook, { reportFailure: false });
   const exportPlaybook = useAtomCommand(j5Environment.exportPlaybook, { reportFailure: false });

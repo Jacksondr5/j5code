@@ -68,8 +68,13 @@ export function AgentCreateModal(props: {
   const create = useAtomCommand(agentPersonaEnvironment.createAgentPersona, {
     reportFailure: false,
   });
+  // The sheet may outlive the grant it was opened with, so its action follows the live answer.
+  const canCreate = useAtomValue(
+    agentPersonaEnvironment.createAgentPersona.permissionAtom(props.environmentId),
+  );
   const ready =
     !saving &&
+    canCreate &&
     idError === null &&
     draft.displayName.trim() !== "" &&
     draft.description.trim() !== "" &&
