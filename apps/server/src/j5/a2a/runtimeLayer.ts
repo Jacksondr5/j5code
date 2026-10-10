@@ -45,6 +45,7 @@ import { layer as spawnWorkspaceLayer } from "./spawnWorkspace.ts";
 import { layer as agentHandoffNudgeQueueLayer } from "../agents/agentHandoffNudgeQueue.ts";
 import { layer as agentHandoffNudgeWorkerLayer } from "../agents/agentHandoffNudgeWorker.ts";
 import { layer as agentHandoffRefreshesLayer } from "../agents/agentHandoffRefreshes.ts";
+import { layer as turnAnalyticsLayer } from "../analytics/TurnAnalytics.ts";
 
 /**
  * Registration, homes and placement. This subset has no ThreadManagement dependency, so
@@ -210,6 +211,7 @@ export const makeJ5A2AAuxiliaryLayer = (
     crewStopProvided,
     crewRuntimeRequestProvided,
     crewSeatFinishNotifierProvided,
+    turnAnalyticsLayer.pipe(Layer.provide(agentCrewInstanceLayer)),
   ).pipe(Layer.provideMerge(peerRegistryProvided));
   return clientReadsLayer.pipe(Layer.provideMerge(runtimeWithoutClientReads));
 };

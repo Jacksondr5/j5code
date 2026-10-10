@@ -30,6 +30,12 @@ import { CONTACT_EMAIL } from "../lib/site";
     </li>
     <li>a thread starting, and a turn being requested;</li>
     <li>
+      a turn starting, with who asked for it (you, an agent, or J5 Code itself), where the request
+      came from (a client, an agent tool, or the server), whether a scheduled task or a background
+      wake-up started it, whether it is the thread's first turn, and whether the thread was started
+      by an agent or is a seat in a Crew;
+    </li>
+    <li>
       a turn finishing, with the provider, model, reasoning effort, permission mode, result,
       duration, and token totals.
     </li>

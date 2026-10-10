@@ -28,6 +28,7 @@ import * as HostPowerMonitor from "../../../background/HostPowerMonitor.ts";
 import * as CheckpointStore from "../../../checkpointing/CheckpointStore.ts";
 import { ServerConfig } from "../../../config.ts";
 import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
+import { AnalyticsService } from "../../../telemetry/AnalyticsService.ts";
 import * as GitWorkflow from "../../../git/GitWorkflowService.ts";
 import {
   McpInvocationContext,
@@ -178,6 +179,7 @@ const j5Layer = J5A2ARuntimeLayer.pipe(
   Layer.provideMerge(orchestrationLayer),
   Layer.provide(threadLifecycleLayer),
   Layer.provide(secretStoreLayer),
+  Layer.provide(AnalyticsService.layerTest),
   // The peer registry checks which peer sessions are live; this test has no peers.
   Layer.provide(Layer.mock(EnvironmentAuth)({ listSessions: () => Effect.succeed([]) })),
   Layer.provide(
