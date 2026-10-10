@@ -147,7 +147,12 @@ before a migration needs the database from before that migration too.
 The server keeps that database. Before a new version runs any migration it copies the database to
 `~/.j5code/userdata/statev2.pre-migration-u<upstream>-j<j5>.sqlite`, named for the newest upstream
 and J5 migrations the database had recorded, and keeps the three most recent copies. Everything
-written after the copy is lost by restoring it. In an emergency:
+written after the copy is lost by restoring it.
+
+**A person runs this, from a terminal outside J5 Code. An agent running inside the J5 Code server
+being rolled back must not:** step 1 stops that server, which ends the agent partway through and
+leaves the database moved aside with nothing in its place. An agent asked to roll back its own
+server stops and hands these steps to the person. In an emergency:
 
 1. Stop everything that has the database open: quit the Mac app, and stop the server
    (`systemctl --user stop j5code.service` on Linux,
