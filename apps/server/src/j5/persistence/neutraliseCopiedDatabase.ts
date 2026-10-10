@@ -184,7 +184,8 @@ export const neutraliseCopiedDatabase = Effect.fn("j5.neutraliseCopiedDatabase")
   const copyDir = yield* canonical(path.dirname(input.copyPath));
   for (const home of [".t3", ".j5code"]) {
     const sharedStateDir = yield* canonical(path.join(NodeOS.homedir(), home, "userdata"));
-    if (copyDir === sharedStateDir) {
+    const inside = path.relative(sharedStateDir, copyDir);
+    if (inside === "" || (!inside.startsWith("..") && !path.isAbsolute(inside))) {
       return yield* new NeutraliseCopiedDatabaseRefusedError({
         copyPath,
         reason: "in-a-shared-home",

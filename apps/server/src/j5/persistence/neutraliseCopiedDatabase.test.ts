@@ -301,6 +301,21 @@ it.layer(NodeServices.layer)("neutraliseCopiedDatabase", (it) => {
             "in-a-shared-home",
           );
           assert.equal((yield* withDatabase(installed, actingRows())).peers, 2);
+
+          // A folder below the installed home is refused too.
+          const nestedDir = path.join(stateDir, "copies");
+          yield* fs.makeDirectory(nestedDir, { recursive: true });
+          const nested = path.join(nestedDir, "statev2.sqlite");
+          yield* withDatabase(nested, seed());
+          const nestedError = yield* neutraliseCopiedDatabase({
+            copyPath: nested,
+            sourcePath: path.join(home, "elsewhere.sqlite"),
+          }).pipe(Effect.flip);
+          assert.equal(
+            nestedError._tag === "NeutraliseCopiedDatabaseRefusedError" && nestedError.reason,
+            "in-a-shared-home",
+          );
+          assert.equal((yield* withDatabase(nested, actingRows())).peers, 2);
         }
       } finally {
         if (originalHome === undefined) delete process.env.HOME;
