@@ -101,7 +101,10 @@ In progress.
 - **Initials on a coloured circle are the fallback**, for a person with no username and when GitHub cannot be reached.
 - **A guest can enter someone else's username.** That is accepted: their name is still the one the sharer gave them.
 
-Still open: whose word counts when two people disagree, how an agent reaches one particular person, what happens when two people send or steer at once, and what a newly added person sees of the conversation from before they joined.
+- **Members outrank guests, and the agent is told why.** The note the agent gets when a thread becomes shared says that members own the server it runs on, that guests take part at a member's invitation, and that a guest is not fully trusted unless a member says so. Members decide what a guest may tell the agent to do. The agent works with a guest normally; when a guest's request conflicts with what a member said, or goes well beyond the work in the thread, it holds off and asks a member through the inbox.
+- **This is guidance to the agent, not enforcement.** An agent reads every message as text, so the platform cannot make it rank one person over another. Members of one server are equals: a disagreement between them is an ordinary change of mind. There is no per-thread owner.
+
+Still open: how an agent reaches one particular person, what happens when two people send or steer at once, and what a newly added person sees of the conversation from before they joined.
 
 ## Not verified
 
