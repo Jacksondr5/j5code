@@ -8,7 +8,8 @@ started it, and whether the thread is a seat in a Crew. When an ask between part
 event says how it ended, what kind of participant was on each side, its urgency, and how long it
 was open. A playbook run reports its step count when it starts, and the step it reached when it
 completes or is cancelled. A Crew reports the number of seats asked for, approved and changed when
-you decide on its roster, and how many seats started when it launches.
+you decide on its roster, and how many seats started when it launches. Every fifteen minutes the
+server reports counts of working threads, live Crews and waiting asks.
 
 Events do not include prompts, responses, file contents, authentication tokens, conversation IDs,
 raw provider events, or child-agent output. Child-agent token use is excluded from the totals.

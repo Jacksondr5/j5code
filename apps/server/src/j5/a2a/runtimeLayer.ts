@@ -46,6 +46,7 @@ import { layer as agentHandoffNudgeQueueLayer } from "../agents/agentHandoffNudg
 import { layer as agentHandoffNudgeWorkerLayer } from "../agents/agentHandoffNudgeWorker.ts";
 import { layer as agentHandoffRefreshesLayer } from "../agents/agentHandoffRefreshes.ts";
 import { layer as exchangeAnalyticsLayer } from "../analytics/ExchangeAnalytics.ts";
+import { layer as fleetSnapshotLayer } from "../analytics/FleetSnapshot.ts";
 import { layer as turnAnalyticsLayer } from "../analytics/TurnAnalytics.ts";
 
 /**
@@ -214,6 +215,7 @@ export const makeJ5A2AAuxiliaryLayer = (
     crewSeatFinishNotifierProvided,
     turnAnalyticsLayer.pipe(Layer.provide(agentCrewInstanceLayer)),
     exchangeAnalyticsLayer,
+    fleetSnapshotLayer,
   ).pipe(Layer.provideMerge(peerRegistryProvided));
   return clientReadsLayer.pipe(Layer.provideMerge(runtimeWithoutClientReads));
 };
