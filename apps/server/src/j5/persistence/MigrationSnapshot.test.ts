@@ -1,11 +1,13 @@
 // @effect-diagnostics nodeBuiltinImport:off - fixtures read database files directly.
 import * as NodeFS from "node:fs";
 import * as NodeSqlite from "node:sqlite";
+import * as NodeWorkerThreads from "node:worker_threads";
 
 import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as Cause from "effect/Cause";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
@@ -291,6 +293,74 @@ it.effect("includes rows still in the WAL while another connection holds the dat
       // The snapshot read the source; it did not checkpoint or otherwise write to it.
       assert.deepStrictEqual(NodeFS.readFileSync(dbPath), mainFileBefore);
       writer.exec("INSERT INTO j5_a2a_squadron VALUES ('squadron:after', 'Still writable')");
+    }),
+  ),
+);
+
+// A second connection on its own thread, committing as fast as it can until told to stop.
+const busyWriter = `
+  const { parentPort, workerData } = require("node:worker_threads");
+  const { DatabaseSync } = require("node:sqlite");
+  const database = new DatabaseSync(workerData.dbPath);
+  database.exec("PRAGMA busy_timeout = 5000; PRAGMA synchronous = OFF;");
+  const insert = database.prepare("INSERT INTO commits DEFAULT VALUES");
+  const stop = new Int32Array(workerData.stop);
+  let commits = 0;
+  while (Atomics.load(stop, 0) === 0 && commits < workerData.commitLimit) {
+    insert.run();
+    commits += 1;
+    if (commits === 1) parentPort.postMessage("writing");
+  }
+  database.close();
+  parentPort.postMessage(commits);
+`;
+
+it.effect("finishes while another connection keeps committing", () =>
+  withDatabasePath(({ dbPath, snapshotAt }) =>
+    Effect.gen(function* () {
+      const setup = new NodeSqlite.DatabaseSync(dbPath);
+      setup.exec("PRAGMA journal_mode = WAL;");
+      seedHistory(setup, 9, 4);
+      // About a thousand pages, so a copy in SQLite's default hundred-page steps takes several.
+      setup.exec(`
+        CREATE TABLE filler (id INTEGER PRIMARY KEY, body BLOB NOT NULL);
+        WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 1000)
+        INSERT INTO filler (body) SELECT randomblob(3500) FROM n;
+        CREATE TABLE commits (id INTEGER PRIMARY KEY);
+      `);
+      setup.close();
+
+      // Many times what fits inside one copy. A copy that starts over at every commit ends only
+      // when the writer reaches this and goes quiet.
+      const commitLimit = 100_000;
+      const stop = new SharedArrayBuffer(4);
+      const worker = new NodeWorkerThreads.Worker(busyWriter, {
+        eval: true,
+        workerData: { dbPath, stop, commitLimit },
+      });
+      yield* Effect.addFinalizer(() => Effect.promise(() => worker.terminate()));
+      const writing = yield* Deferred.make<void>();
+      const stopped = yield* Deferred.make<number>();
+      worker.on("message", (message) => {
+        if (message === "writing") Deferred.doneUnsafe(writing, Effect.void);
+        else Deferred.doneUnsafe(stopped, Effect.succeed(Number(message)));
+      });
+      yield* Deferred.await(writing);
+
+      yield* snapshotBeforeMigrations(dbPath, build);
+      Atomics.store(new Int32Array(stop), 0, 1);
+      const commits = yield* Deferred.await(stopped);
+
+      assert.isBelow(commits, commitLimit);
+      const copy = new NodeSqlite.DatabaseSync(snapshotAt(9, 4), { readOnly: true });
+      yield* Effect.addFinalizer(() => Effect.sync(() => copy.close()));
+      const count = (table: string) =>
+        Number(copy.prepare(`SELECT COUNT(*) AS rows FROM ${table}`).get()?.rows);
+      assert.strictEqual(copy.prepare("PRAGMA integrity_check").get()?.integrity_check, "ok");
+      assert.strictEqual(count("filler"), 1000);
+      // Taken while the writer was running: some of its commits, not all of them.
+      assert.isAbove(count("commits"), 0);
+      assert.isBelow(count("commits"), commits);
     }),
   ),
 );

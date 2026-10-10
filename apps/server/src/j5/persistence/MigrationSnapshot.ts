@@ -171,7 +171,9 @@ export const snapshotBeforeMigrations = Effect.fn("snapshotBeforeMigrations")(fu
       try: async () => {
         const database = new NodeSqlite.DatabaseSync(dbPath, { readOnly: true });
         try {
-          await NodeSqlite.backup(database, partialPath);
+          // One step, under a single read snapshot. Copying in several steps starts over
+          // whenever another connection commits, and so never ends beside a busy server.
+          await NodeSqlite.backup(database, partialPath, { rate: -1 });
         } finally {
           database.close();
         }
