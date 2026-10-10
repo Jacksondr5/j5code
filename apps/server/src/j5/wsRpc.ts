@@ -5,14 +5,20 @@ import {
   J5SkillLinkRpcGroup,
   SkillLinkError,
 } from "@t3tools/contracts";
-import { J5PlaybookRpcGroup } from "@t3tools/contracts/j5";
+import { J5ClientActionRpcGroup, J5PlaybookRpcGroup } from "@t3tools/contracts/j5";
+import type * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import type * as RpcGroup from "effect/rpc/RpcGroup";
 
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
+import { makeClientActionRpcHandlers } from "./a2a/clientActionRpc.ts";
+import { ClientActionsService } from "./a2a/ClientActionsService.ts";
+import { PeerAdminService } from "./a2a/PeerAdminService.ts";
 import { makeAgentPersonaRpcHandlers } from "./agents/agentPersonaRpc.ts";
+import { ArtifactDeletion } from "./artifacts/ArtifactDeletion.ts";
 import { makeArtifactRpcHandlers } from "./artifacts/artifactRpc.ts";
 import type { ArtifactWorkspace } from "./artifacts/ArtifactWorkspace.ts";
 import { PlaybookStore } from "./playbooks/PlaybookStore.ts";
@@ -26,6 +32,7 @@ const J5WsRpcGroup = J5AgentPersonaRpcGroup.merge(
   J5SkillCatalogRpcGroup,
   J5SkillLinkRpcGroup,
   J5PlaybookRpcGroup,
+  J5ClientActionRpcGroup,
 );
 
 /** Every J5 RPC method, for `ws.ts` to leave out of the group upstream's handlers are typed by. */
@@ -33,19 +40,35 @@ export const J5_WS_RPC_METHODS = [...J5WsRpcGroup.requests.keys()] as ReadonlyAr
   RpcGroup.Rpcs<typeof J5WsRpcGroup>["_tag"]
 >;
 
+type J5WsRpcServices = ClientActionsService | PeerAdminService | ArtifactDeletion;
+
+/**
+ * The server-lifetime J5 services the handlers call. `ws.ts` reads them once, where its route is
+ * built, and hands them to every socket's handler layer.
+ */
+export const j5WsRpcServices = Effect.context<J5WsRpcServices>();
+
 /**
  * The handlers of J5's RPCs, as their own layer beside upstream's in `ws.ts`. A handler is
  * looked up by method, so the socket serves both from one group. They are built apart because
  * one handler record for upstream's RPCs and J5's together exceeds TypeScript's type
  * instantiation limit.
  */
-export const layerJ5WsRpc = (artifactWorkspace: ArtifactWorkspace["Service"]) =>
+export const layerJ5WsRpc = (
+  artifactWorkspace: ArtifactWorkspace["Service"],
+  services: Context.Context<J5WsRpcServices>,
+) =>
   J5WsRpcGroup.toLayer(
     Effect.gen(function* () {
       const projects = yield* ProjectService.ProjectService;
       const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
       return J5WsRpcGroup.of({
-        ...makeArtifactRpcHandlers({ projects, artifacts: artifactWorkspace }),
+        ...makeArtifactRpcHandlers({
+          projects,
+          artifacts: artifactWorkspace,
+          deletion: yield* ArtifactDeletion,
+        }),
+        ...(yield* makeClientActionRpcHandlers()),
         ...(yield* makeAgentPersonaRpcHandlers({
           providers: providerRegistry.getProviders,
         })),
@@ -62,4 +85,4 @@ export const layerJ5WsRpc = (artifactWorkspace: ArtifactWorkspace["Service"]) =>
         ...(yield* makePlaybookRpcHandlers({ store: yield* PlaybookStore })),
       });
     }),
-  );
+  ).pipe(Layer.provide(Layer.succeedContext(services)));

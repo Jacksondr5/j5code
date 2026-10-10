@@ -2,6 +2,7 @@ import { seedPlaybookOwners } from "./testFixtures.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
+  AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   EventId,
   ProjectId,
@@ -67,7 +68,7 @@ const fixture = Effect.gen(function* () {
     );
   }
   yield* runJ5A2AMigrations();
-  yield* seedPlaybookOwners([]);
+  yield* seedPlaybookOwners(["delete-owner", "rename-owner"]);
   const store = yield* makePlaybookStore;
   const projects = Layer.mock(ProjectService)({
     getById: (id) =>
@@ -136,7 +137,37 @@ const fixture = Effect.gen(function* () {
   }).pipe(Effect.provide(Layer.merge(projects, threads)));
   const exportPlaybook = (input: { projectId: ProjectId; threadId?: ThreadId; name: string }) =>
     handlers[J5_PLAYBOOK_WS_METHODS.exportPlaybook](input);
-  return { exportPlaybook };
+  const deletePlaybook = (input: { projectId: ProjectId; threadId?: ThreadId; name: string }) =>
+    handlers[J5_PLAYBOOK_WS_METHODS.deletePlaybook](input);
+  const renamePlaybook = (input: { projectId: ProjectId; name: string; title: string }) =>
+    handlers[J5_PLAYBOOK_WS_METHODS.renamePlaybook](input);
+  const filename = (root: string) => path.join(root, ".j5/playbooks/demo.yaml");
+  return {
+    exportPlaybook,
+    deletePlaybook,
+    renamePlaybook,
+    store,
+    fs,
+    filename,
+    projectRoot,
+    worktree,
+  };
+});
+
+const codeOf = <A>(call: Effect.Effect<A, { readonly code: string }>) =>
+  call.pipe(
+    Effect.flip,
+    Effect.map((error) => error.code),
+  );
+
+it("requires operate scope to delete or rename a playbook", () => {
+  for (const method of [
+    J5_PLAYBOOK_WS_METHODS.deletePlaybook,
+    J5_PLAYBOOK_WS_METHODS.renamePlaybook,
+  ]) {
+    assert.equal(requiredScopeForRpcMethod(method), AuthOrchestrationOperateScope);
+    assert.equal(PLAYBOOK_RPC_SCOPES[method], AuthOrchestrationOperateScope);
+  }
 });
 
 it("requires read scope to export a playbook", () => {
@@ -180,5 +211,83 @@ it.effect("rejects missing, foreign, and deleted workspaces and bad names", () =
       assert.equal(yield* code(input), "workspace_not_found");
     assert.equal(yield* code({ projectId, name: "../demo" }), "invalid_name");
     assert.equal(yield* code({ projectId, name: "missing" }), "not_found");
+  }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+);
+
+it.effect("deletes only the selected workspace's file, and never one a run is using", () =>
+  Effect.gen(function* () {
+    const { fs, filename, projectRoot, worktree, store, deletePlaybook } = yield* fixture;
+    const request = { projectId, name: "demo" };
+    assert.equal(yield* codeOf(deletePlaybook({ projectId, name: "../demo" })), "invalid_name");
+    assert.equal(yield* codeOf(deletePlaybook({ projectId, name: "demo/other" })), "invalid_name");
+    for (const input of [
+      { projectId: missingProjectId, name: "demo" },
+      { projectId, threadId: foreignThread, name: "demo" },
+    ])
+      assert.equal(yield* codeOf(deletePlaybook(input)), "workspace_not_found");
+    const run = yield* store.start(ThreadId.make("delete-owner"), projectRoot, "demo", "start");
+    assert.equal(yield* codeOf(deletePlaybook(request)), "in_use");
+    yield* store.mutate(run.ownerThreadId, {
+      operation: "cancel",
+      runId: run.runId,
+      client_request_id: "cancel",
+    });
+    assert.deepStrictEqual(yield* deletePlaybook(request), { deleted: true });
+    assert.isFalse(yield* fs.exists(filename(projectRoot)));
+    assert.isTrue(yield* fs.exists(filename(worktree)));
+    assert.equal(yield* codeOf(deletePlaybook(request)), "not_found");
+    assert.equal((yield* store.listForThread(run.ownerThreadId)).runs[0]?.status, "cancelled");
+    assert.deepStrictEqual(yield* deletePlaybook({ ...request, threadId: worktreeThread }), {
+      deleted: true,
+    });
+    assert.isFalse(yield* fs.exists(filename(worktree)));
+  }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+);
+
+it.effect("can delete an invalid YAML definition without reading its contents", () =>
+  Effect.gen(function* () {
+    const { fs, filename, projectRoot, deletePlaybook } = yield* fixture;
+    yield* fs.writeFileString(filename(projectRoot), "title: [broken");
+    assert.deepStrictEqual(yield* deletePlaybook({ projectId, name: "demo" }), { deleted: true });
+    assert.isFalse(yield* fs.exists(filename(projectRoot)));
+  }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+);
+
+it.effect("renames the YAML title without changing its stable filename or active run", () =>
+  Effect.gen(function* () {
+    const { fs, filename, projectRoot, store, renamePlaybook } = yield* fixture;
+    const request = { projectId, name: "demo", title: "Renamed playbook" };
+    const run = yield* store.start(ThreadId.make("rename-owner"), projectRoot, "demo", "start");
+    assert.deepStrictEqual(yield* renamePlaybook(request), { renamed: true });
+    assert.isTrue(yield* fs.exists(filename(projectRoot)));
+    const [playbook] = (yield* store.discover(projectRoot)).playbooks;
+    assert.equal(playbook?.title, "Renamed playbook");
+    assert.equal(playbook?.description, "Purpose of Project library.");
+    assert.equal(playbook?.steps[0]?.id, "first");
+    assert.equal((yield* store.current(run.ownerThreadId, run.runId)).title, "Renamed playbook");
+    assert.deepStrictEqual(yield* renamePlaybook(request), { renamed: false });
+  }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+);
+
+it.effect("rejects invalid rename inputs and invalid YAML", () =>
+  Effect.gen(function* () {
+    const { fs, filename, projectRoot, renamePlaybook } = yield* fixture;
+    assert.equal(
+      yield* codeOf(renamePlaybook({ projectId, name: "../demo", title: "Nope" })),
+      "invalid_name",
+    );
+    assert.equal(
+      yield* codeOf(renamePlaybook({ projectId, name: "demo", title: "   " })),
+      "invalid_title",
+    );
+    assert.equal(
+      yield* codeOf(renamePlaybook({ projectId, name: "missing", title: "Nope" })),
+      "not_found",
+    );
+    yield* fs.writeFileString(filename(projectRoot), "title: [broken");
+    assert.equal(
+      yield* codeOf(renamePlaybook({ projectId, name: "demo", title: "Nope" })),
+      "invalid_definition",
+    );
   }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );

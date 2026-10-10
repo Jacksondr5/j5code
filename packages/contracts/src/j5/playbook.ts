@@ -24,6 +24,8 @@ export function suggestPlaybookName(text: string): string | null {
 export const J5_PLAYBOOK_WS_METHODS = {
   subscribeChanges: "j5.playbooks.subscribeChanges",
   exportPlaybook: "j5.playbooks.export",
+  deletePlaybook: "j5.playbooks.delete",
+  renamePlaybook: "j5.playbooks.rename",
 } as const;
 
 const Text = Schema.String.check(Schema.isPattern(/\S/));
@@ -158,7 +160,6 @@ export const PlaybookDeleteRequest = Schema.Struct({
 });
 export type PlaybookDeleteRequest = typeof PlaybookDeleteRequest.Type;
 export const PlaybookDeleteResponse = Schema.Struct({ deleted: Schema.Boolean });
-export const PLAYBOOK_DELETE_PATH = "/api/j5/playbooks/delete";
 export const PlaybookRenameRequest = Schema.Struct({
   ...PlaybookLibraryRequest.fields,
   name: Text,
@@ -166,7 +167,6 @@ export const PlaybookRenameRequest = Schema.Struct({
 });
 export type PlaybookRenameRequest = typeof PlaybookRenameRequest.Type;
 export const PlaybookRenameResponse = Schema.Struct({ renamed: Schema.Boolean });
-export const PLAYBOOK_RENAME_PATH = "/api/j5/playbooks/rename";
 export const PlaybookExportRequest = Schema.Struct({
   ...PlaybookLibraryRequest.fields,
   name: Text,
@@ -185,6 +185,16 @@ export const J5PlaybookRpcGroup = RpcGroup.make(
   Rpc.make(J5_PLAYBOOK_WS_METHODS.exportPlaybook, {
     payload: PlaybookExportRequest,
     success: PlaybookExportResponse,
+    error: Schema.Union([PlaybookError, EnvironmentAuthorizationError]),
+  }),
+  Rpc.make(J5_PLAYBOOK_WS_METHODS.deletePlaybook, {
+    payload: PlaybookDeleteRequest,
+    success: PlaybookDeleteResponse,
+    error: Schema.Union([PlaybookError, EnvironmentAuthorizationError]),
+  }),
+  Rpc.make(J5_PLAYBOOK_WS_METHODS.renamePlaybook, {
+    payload: PlaybookRenameRequest,
+    success: PlaybookRenameResponse,
     error: Schema.Union([PlaybookError, EnvironmentAuthorizationError]),
   }),
 );

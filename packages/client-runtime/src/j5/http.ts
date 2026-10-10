@@ -1,10 +1,4 @@
 import {
-  PLAYBOOK_DELETE_PATH,
-  PlaybookDeleteResponse,
-  type PlaybookDeleteRequest,
-  PLAYBOOK_RENAME_PATH,
-  PlaybookRenameResponse,
-  type PlaybookRenameRequest,
   PLAYBOOK_LIBRARY_PATH,
   PlaybookLibraryResponse,
   type PlaybookLibraryRequest,
@@ -13,38 +7,17 @@ import {
   PlaybookRunsResponse,
   type PlaybookRunsRequest,
   ThreadPlaybooksResponse,
-  AddPeerResponse,
-  AnswerHumanExchangeResponse,
   CrewMembershipsResponse,
-  CrewProposalResolveResponse,
-  CrewProposalPreviewResponse,
   CrewProposalsResponse,
-  CrewRuntimeRequestRespondResponse,
   CrewRuntimeRequestsResponse,
-  CrewArchiveResponse,
-  CrewStopResponse,
   FleetResponse,
   HumanInboxResponse,
-  IssuePeerCredentialResponse,
   J5_API_PATHS,
   J5_PEER_API_PATHS,
   OpenInboxCountResponse,
   SpawnedChildrenResponse,
   PeerListResponse,
-  RemovePeerResponse,
-  type AddPeerRequest,
-  type AnswerHumanExchangeRequest,
-  type CrewProposalResolveRequest,
-  type CrewProposalPreviewRequest,
-  type CrewArchiveRequest,
-  type CrewStopRequest,
-  type CrewRuntimeRequestRespondRequest,
   type FleetReadRequest,
-  type IssuePeerCredentialRequest,
-  PeerAddressesResponse,
-  PeerProbeResponse,
-  type PeerProbeRequest,
-  type RemovePeerRequest,
 } from "@t3tools/contracts/j5";
 import type { ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -83,7 +56,6 @@ export const isJ5UnsupportedError = (error: unknown): boolean =>
     (error.status === 404 && (error.code === undefined || error.code === "not_found")));
 
 const READ_TIMEOUT_MS = 10_000;
-const WRITE_TIMEOUT_MS = 15_000;
 
 export const readPlaybookLibrary = Effect.fn("j5.http.readPlaybookLibrary")(function* (
   prepared: PreparedConnection,
@@ -94,28 +66,6 @@ export const readPlaybookLibrary = Effect.fn("j5.http.readPlaybookLibrary")(func
   );
   const response = yield* executeJ5Request(prepared, request, READ_TIMEOUT_MS);
   return yield* HttpClientResponse.schemaBodyJson(PlaybookLibraryResponse)(response);
-});
-
-export const deletePlaybook = Effect.fn("j5.http.deletePlaybook")(function* (
-  prepared: PreparedConnection,
-  input: PlaybookDeleteRequest,
-) {
-  const request = yield* HttpClientRequest.post(PLAYBOOK_DELETE_PATH).pipe(
-    HttpClientRequest.bodyJson(input),
-  );
-  const response = yield* executeJ5Request(prepared, request, WRITE_TIMEOUT_MS);
-  return yield* HttpClientResponse.schemaBodyJson(PlaybookDeleteResponse)(response);
-});
-
-export const renamePlaybook = Effect.fn("j5.http.renamePlaybook")(function* (
-  prepared: PreparedConnection,
-  input: PlaybookRenameRequest,
-) {
-  const request = yield* HttpClientRequest.post(PLAYBOOK_RENAME_PATH).pipe(
-    HttpClientRequest.bodyJson(input),
-  );
-  const response = yield* executeJ5Request(prepared, request, WRITE_TIMEOUT_MS);
-  return yield* HttpClientResponse.schemaBodyJson(PlaybookRenameResponse)(response);
 });
 
 export const readThreadPlaybooks = Effect.fn("j5.http.readThreadPlaybooks")(function* (
@@ -215,17 +165,6 @@ export const readOpenInboxCount = Effect.fn("j5.http.readOpenInboxCount")(functi
   return yield* HttpClientResponse.schemaBodyJson(OpenInboxCountResponse)(response);
 });
 
-export const answerHumanExchange = Effect.fn("j5.http.answerHumanExchange")(function* (
-  prepared: PreparedConnection,
-  input: AnswerHumanExchangeRequest,
-) {
-  const request = yield* HttpClientRequest.post(J5_API_PATHS.answer).pipe(
-    HttpClientRequest.bodyJson(input),
-  );
-  const response = yield* executeJ5Request(prepared, request, WRITE_TIMEOUT_MS);
-  return yield* HttpClientResponse.schemaBodyJson(AnswerHumanExchangeResponse)(response);
-});
-
 export const listCrewProposals = Effect.fn("j5.http.listCrewProposals")(function* (
   prepared: PreparedConnection,
 ) {
@@ -234,28 +173,6 @@ export const listCrewProposals = Effect.fn("j5.http.listCrewProposals")(function
   );
   const response = yield* executeJ5Request(prepared, request, READ_TIMEOUT_MS);
   return (yield* HttpClientResponse.schemaBodyJson(CrewProposalsResponse)(response)).proposals;
-});
-
-export const previewCrewProposal = Effect.fn("j5.http.previewCrewProposal")(function* (
-  prepared: PreparedConnection,
-  input: CrewProposalPreviewRequest,
-) {
-  const request = yield* HttpClientRequest.post(J5_API_PATHS.crewProposalPreview).pipe(
-    HttpClientRequest.bodyJson(input),
-  );
-  const response = yield* executeJ5Request(prepared, request, READ_TIMEOUT_MS);
-  return yield* HttpClientResponse.schemaBodyJson(CrewProposalPreviewResponse)(response);
-});
-
-export const resolveCrewProposal = Effect.fn("j5.http.resolveCrewProposal")(function* (
-  prepared: PreparedConnection,
-  input: CrewProposalResolveRequest,
-) {
-  const request = yield* HttpClientRequest.post(J5_API_PATHS.crewProposalResolve).pipe(
-    HttpClientRequest.bodyJson(input),
-  );
-  const response = yield* executeJ5Request(prepared, request, WRITE_TIMEOUT_MS);
-  return yield* HttpClientResponse.schemaBodyJson(CrewProposalResolveResponse)(response);
 });
 
 export const readFleet = Effect.fn("j5.http.readFleet")(function* (
@@ -291,28 +208,6 @@ export const listSpawnedChildren = Effect.fn("j5.http.listSpawnedChildren")(func
   return yield* HttpClientResponse.schemaBodyJson(SpawnedChildrenResponse)(response);
 });
 
-export const archiveCrew = Effect.fn("j5.http.archiveCrew")(function* (
-  prepared: PreparedConnection,
-  input: CrewArchiveRequest,
-) {
-  const request = yield* HttpClientRequest.post(J5_API_PATHS.crewArchive).pipe(
-    HttpClientRequest.bodyJson(input),
-  );
-  const response = yield* executeJ5Request(prepared, request, WRITE_TIMEOUT_MS);
-  return yield* HttpClientResponse.schemaBodyJson(CrewArchiveResponse)(response);
-});
-
-export const stopCrew = Effect.fn("j5.http.stopCrew")(function* (
-  prepared: PreparedConnection,
-  input: CrewStopRequest,
-) {
-  const request = yield* HttpClientRequest.post(J5_API_PATHS.crewStop).pipe(
-    HttpClientRequest.bodyJson(input),
-  );
-  const response = yield* executeJ5Request(prepared, request, WRITE_TIMEOUT_MS);
-  return yield* HttpClientResponse.schemaBodyJson(CrewStopResponse)(response);
-});
-
 /** Provider approvals waiting on this environment's live Crew seats that the Inbox can answer. */
 export const listCrewRuntimeRequests = Effect.fn("j5.http.listCrewRuntimeRequests")(function* (
   prepared: PreparedConnection,
@@ -324,18 +219,7 @@ export const listCrewRuntimeRequests = Effect.fn("j5.http.listCrewRuntimeRequest
   return (yield* HttpClientResponse.schemaBodyJson(CrewRuntimeRequestsResponse)(response)).requests;
 });
 
-export const respondCrewRuntimeRequest = Effect.fn("j5.http.respondCrewRuntimeRequest")(function* (
-  prepared: PreparedConnection,
-  input: CrewRuntimeRequestRespondRequest,
-) {
-  const request = yield* HttpClientRequest.post(J5_API_PATHS.crewRuntimeRequestRespond).pipe(
-    HttpClientRequest.bodyJson(input),
-  );
-  const response = yield* executeJ5Request(prepared, request, WRITE_TIMEOUT_MS);
-  return yield* HttpClientResponse.schemaBodyJson(CrewRuntimeRequestRespondResponse)(response);
-});
-
-/** Peering: the client introduces two servers it is connected to with administrative scope. */
+/** The peers this server has recorded, as Settings → Connections lists them. */
 export const listPeers = Effect.fn("j5.http.listPeers")(function* (prepared: PreparedConnection) {
   const response = yield* executeJ5Request(
     prepared,
@@ -343,62 +227,4 @@ export const listPeers = Effect.fn("j5.http.listPeers")(function* (prepared: Pre
     READ_TIMEOUT_MS,
   );
   return (yield* HttpClientResponse.schemaBodyJson(PeerListResponse)(response)).peers;
-});
-
-export const issuePeerCredential = Effect.fn("j5.http.issuePeerCredential")(function* (
-  prepared: PreparedConnection,
-  input: IssuePeerCredentialRequest,
-) {
-  const request = yield* HttpClientRequest.post(J5_PEER_API_PATHS.credentials).pipe(
-    HttpClientRequest.bodyJson(input),
-  );
-  const response = yield* executeJ5Request(prepared, request, WRITE_TIMEOUT_MS);
-  return yield* HttpClientResponse.schemaBodyJson(IssuePeerCredentialResponse)(response);
-});
-
-/** The server proves the credential at the origin before recording, so this can take a while. */
-export const addPeer = Effect.fn("j5.http.addPeer")(function* (
-  prepared: PreparedConnection,
-  input: AddPeerRequest,
-) {
-  const request = yield* HttpClientRequest.post(J5_PEER_API_PATHS.peers).pipe(
-    HttpClientRequest.bodyJson(input),
-  );
-  const response = yield* executeJ5Request(prepared, request, WRITE_TIMEOUT_MS);
-  return yield* HttpClientResponse.schemaBodyJson(AddPeerResponse)(response);
-});
-
-/** Where this server thinks others might reach it; the check before peering probes each. */
-export const listPeerAddresses = Effect.fn("j5.http.listPeerAddresses")(function* (
-  prepared: PreparedConnection,
-) {
-  const response = yield* executeJ5Request(
-    prepared,
-    HttpClientRequest.get(J5_PEER_API_PATHS.addresses),
-    READ_TIMEOUT_MS,
-  );
-  return (yield* HttpClientResponse.schemaBodyJson(PeerAddressesResponse)(response)).origins;
-});
-
-/** This server fetches another's public identity at the origin, bounded on the server. */
-export const probePeer = Effect.fn("j5.http.probePeer")(function* (
-  prepared: PreparedConnection,
-  input: PeerProbeRequest,
-) {
-  const request = yield* HttpClientRequest.post(J5_PEER_API_PATHS.probe).pipe(
-    HttpClientRequest.bodyJson(input),
-  );
-  const response = yield* executeJ5Request(prepared, request, WRITE_TIMEOUT_MS);
-  return yield* HttpClientResponse.schemaBodyJson(PeerProbeResponse)(response);
-});
-
-export const removePeer = Effect.fn("j5.http.removePeer")(function* (
-  prepared: PreparedConnection,
-  input: RemovePeerRequest,
-) {
-  const request = yield* HttpClientRequest.post(J5_PEER_API_PATHS.remove).pipe(
-    HttpClientRequest.bodyJson(input),
-  );
-  const response = yield* executeJ5Request(prepared, request, WRITE_TIMEOUT_MS);
-  return yield* HttpClientResponse.schemaBodyJson(RemovePeerResponse)(response);
 });
