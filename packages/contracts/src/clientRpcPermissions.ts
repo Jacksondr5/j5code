@@ -5,6 +5,7 @@ import {
   AuthSourceControlWriteScope,
   type AuthEnvironmentScope,
 } from "./auth.ts";
+import { J5_CLIENT_GUARDED_RPC_SCOPES } from "./j5/clientRpcPermissions.ts";
 import { WS_METHODS } from "./rpc.ts";
 
 /** Incremental client enforcement; the server still authorizes every request. */
@@ -39,6 +40,7 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.scheduledTasksDelete]: AuthOrchestrationOperateScope,
   [WS_METHODS.scheduledTasksRunNow]: AuthOrchestrationOperateScope,
   [WS_METHODS.scheduledTasksRotateWebhookToken]: AuthOrchestrationOperateScope,
+  ...J5_CLIENT_GUARDED_RPC_SCOPES,
 } as const;
 export type ClientGuardedRpcTag = keyof typeof CLIENT_GUARDED_RPC_SCOPES;
 

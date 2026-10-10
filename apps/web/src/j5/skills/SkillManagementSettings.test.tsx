@@ -25,7 +25,10 @@ const state = vi.hoisted(() => ({
   links: [] as ReadonlyArray<ManagedSkillLink>,
   catalogSource: "/catalog",
 }));
-vi.mock("@effect/atom-react", () => ({ useAtomValue: () => state.providers }));
+// A command's permission atom is the string "permission"; every session here may operate.
+vi.mock("@effect/atom-react", () => ({
+  useAtomValue: (atom: unknown) => (atom === "permission" ? true : state.providers),
+}));
 vi.mock("../../state/environments", () => ({
   useEnvironment: () => ({
     connection: { phase: "connected" },
@@ -56,8 +59,8 @@ vi.mock("./skillLinkAtoms", () => ({
     deletePreview: "deletePreview",
     delete: "delete",
     unlink: "unlink",
-    create: "create",
-    remove: "remove",
+    create: { name: "create", permissionAtom: () => "permission" },
+    remove: { name: "remove", permissionAtom: () => "permission" },
   },
 }));
 vi.mock("../../state/query", () => ({
@@ -69,8 +72,9 @@ vi.mock("../../state/query", () => ({
   }),
 }));
 vi.mock("../../state/use-atom-command", () => ({
-  useAtomCommand: (command: string) =>
-    command === "deletePreview"
+  useAtomCommand: (given: string | { readonly name: string }) => {
+    const command = typeof given === "string" ? given : given.name;
+    return command === "deletePreview"
       ? state.deletePreview
       : command === "delete"
         ? state.delete
@@ -84,7 +88,8 @@ vi.mock("../../state/use-atom-command", () => ({
                 ? state.create
                 : command === "remove"
                   ? state.remove
-                  : state.refresh,
+                  : state.refresh;
+  },
 }));
 vi.mock("../../components/ui/dialog", () => ({
   Dialog: ({ children }: { children: React.ReactNode }) => children,
@@ -103,7 +108,6 @@ vi.mock("../../components/settings/providerDriverMeta", () => ({
   getDriverOption: () => undefined,
   providerClients: new Map(),
 }));
-vi.mock("../../state/session", () => ({ useEnvironmentScope: () => true }));
 vi.mock("../../components/ui/select", () => ({
   Select: ({
     children,

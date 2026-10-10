@@ -4,6 +4,7 @@ import { layer as playbookCrewRelayLayer } from "../playbooks/PlaybookCrewRelay.
 import { playbookStoreLayer } from "../playbooks/PlaybookStore.ts";
 import { FetchHttpClient } from "effect/http";
 
+import { layer as artifactDeletionLayer } from "../artifacts/ArtifactDeletion.ts";
 import { layer as artifactWorkspaceLayer } from "../artifacts/ArtifactWorkspace.ts";
 import { layer as agentCrewInstanceLayer } from "./AgentCrewInstanceService.ts";
 import { layer as archiveFactsLayer, placementFactsLayer } from "./ArchiveFactsService.ts";
@@ -38,10 +39,13 @@ import { layer as rosterLayer } from "./RosterService.ts";
 import { layer as sendServiceLayer } from "./SendService.ts";
 import { layer as silenceDetectorLayer } from "./SilenceDetector.ts";
 import { layer as humanInboxLayer } from "./HumanInboxService.ts";
+import { layer as clientActionsLayer } from "./ClientActionsService.ts";
 import { layer as clientReadsLayer } from "./ClientReadsService.ts";
+import { layer as peerAdminLayer } from "./PeerAdminService.ts";
 import { layer as threadRegistrationLayer } from "./ThreadRegistration.ts";
 import { layer as spawnCompositionLayer } from "./SpawnCompositionService.ts";
 import { layer as spawnWorkspaceLayer } from "./spawnWorkspace.ts";
+import { layer as agentHandoffArtifactDeleteLayer } from "../agents/agentHandoffArtifactDelete.ts";
 import { layer as agentHandoffNudgeQueueLayer } from "../agents/agentHandoffNudgeQueue.ts";
 import { layer as agentHandoffNudgeWorkerLayer } from "../agents/agentHandoffNudgeWorker.ts";
 import { layer as agentHandoffRefreshesLayer } from "../agents/agentHandoffRefreshes.ts";
@@ -217,7 +221,19 @@ export const makeJ5A2AAuxiliaryLayer = (
     exchangeAnalyticsLayer,
     fleetSnapshotLayer,
   ).pipe(Layer.provideMerge(peerRegistryProvided));
-  return clientReadsLayer.pipe(Layer.provideMerge(runtimeWithoutClientReads));
+  // The person's permanent artifact delete, which also marks a handoff that pointed at the file.
+  const artifactDeletionProvided = artifactDeletionLayer.pipe(
+    Layer.provide(agentHandoffArtifactDeleteLayer),
+    Layer.provide(agentHandoffRefreshesLayer),
+    Layer.provide(artifactWorkspaceLayer),
+  );
+  // What clients read and do, over the services above.
+  return Layer.mergeAll(
+    clientReadsLayer,
+    clientActionsLayer,
+    peerAdminLayer,
+    artifactDeletionProvided,
+  ).pipe(Layer.provideMerge(runtimeWithoutClientReads));
 };
 
 export const makeJ5A2ARuntimeLayer = (

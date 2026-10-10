@@ -5,7 +5,11 @@ import type { J5ReadSource, J5ReadSources } from "./readSources.ts";
 export type PresentedHumanInboxItem = ScopedHumanInboxItem & {
   readonly environmentLabel: string;
   readonly connected: boolean;
-  readonly canAnswer: boolean;
+  /**
+   * The item's server is connected and its inbox read is current. Whether this session may
+   * answer is the answer command's `permissionAtom`.
+   */
+  readonly sourceReady: boolean;
 };
 
 const urgencyOrder = { blocking: 0, soon: 1, fyi: 2 } as const;
@@ -17,7 +21,7 @@ export function mergeHumanInboxSources(input: J5ReadSources<HumanInboxResponse>)
       environmentId: source.environmentId,
       environmentLabel: source.environmentLabel,
       connected: source.connected,
-      canAnswer: source.status === "ready" && source.canOperate,
+      sourceReady: source.status === "ready",
     })),
   );
   items.sort(

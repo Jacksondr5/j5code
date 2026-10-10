@@ -1,10 +1,8 @@
-import { AuthOrchestrationOperateScope, AuthOrchestrationReadScope } from "@t3tools/contracts";
-import * as DateTime from "effect/DateTime";
+import { AuthOrchestrationReadScope } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
-import * as Schema from "effect/Schema";
 import {
   HttpRouter,
   HttpServerRequest,
@@ -19,23 +17,13 @@ import {
   failEnvironmentInternal,
   failEnvironmentScopeRequired,
 } from "../../auth/http.ts";
-import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { A2AHumanInbox } from "./HumanInboxService.ts";
-import { CommCommandId, ExchangeId, ParticipantId } from "./contracts.ts";
-import {
-  AnswerHumanExchangeRequest,
-  J5_API_PATHS,
-  type HumanInboxResponse,
-  type AnswerHumanExchangeResponse,
-} from "@t3tools/contracts/j5";
+import { ParticipantId } from "./contracts.ts";
+import { J5_API_PATHS, type HumanInboxResponse } from "@t3tools/contracts/j5";
 
 const INBOX_PATH = J5_API_PATHS.inbox;
-const ANSWER_PATH = J5_API_PATHS.answer;
-const decodeAnswerRequest = Schema.decodeUnknownEffect(AnswerHumanExchangeRequest);
 
-const authenticate = (
-  scope: typeof AuthOrchestrationReadScope | typeof AuthOrchestrationOperateScope,
-) =>
+const authenticate = (scope: typeof AuthOrchestrationReadScope) =>
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest;
     const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
@@ -72,11 +60,10 @@ const operationFailure = (error: unknown) => {
   return HttpServerResponse.jsonUnsafe({ error: tag, message }, { status });
 };
 
-/** Authenticated raw routes keep A4 out of upstream wire contracts. */
+/** The human inbox's read. Answering an Exchange is an RPC (`clientActionRpc.ts`). */
 export const humanInboxHttpRouteLayer = Layer.unwrap(
   Effect.gen(function* () {
     const inbox = yield* A2AHumanInbox;
-    const worker = yield* A2ADeliveryWorker;
     const listRoute = HttpRouter.add(
       "GET",
       INBOX_PATH,
@@ -112,48 +99,6 @@ export const humanInboxHttpRouteLayer = Layer.unwrap(
         }),
       ),
     );
-    const answerRoute = HttpRouter.add(
-      "POST",
-      ANSWER_PATH,
-      Effect.gen(function* () {
-        yield* annotateEnvironmentRequest("j5.a2a.humanInbox.answer");
-        yield* authenticate(AuthOrchestrationOperateScope);
-        const request = yield* HttpServerRequest.HttpServerRequest;
-        const body = yield* Effect.result(request.json);
-        if (Result.isFailure(body)) return requestFailure("The request body must be JSON.");
-        const decoded = yield* Effect.result(decodeAnswerRequest(body.success));
-        if (Result.isFailure(decoded)) {
-          return requestFailure(
-            "A valid personId, exchangeId, message, and clientRequestId are required.",
-          );
-        }
-        const acceptedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
-        const result = yield* Effect.result(
-          inbox
-            .answer({
-              commandId: CommCommandId.make(
-                `command:j5:a2a:human:${encodeURIComponent(decoded.success.personId)}:${encodeURIComponent(decoded.success.exchangeId)}:${encodeURIComponent(decoded.success.clientRequestId)}`,
-              ),
-              personId: ParticipantId.make(decoded.success.personId),
-              exchangeId: ExchangeId.make(decoded.success.exchangeId),
-              message: decoded.success.message,
-              acceptedAt,
-            })
-            .pipe(Effect.tap(() => worker.notify)),
-        );
-        return Result.isSuccess(result)
-          ? HttpServerResponse.jsonUnsafe({
-              result: result.success,
-            } satisfies typeof AnswerHumanExchangeResponse.Type)
-          : operationFailure(result.failure);
-      }).pipe(
-        Effect.catchTags({
-          EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
-          EnvironmentInternalError: HttpServerRespondable.toResponse,
-          EnvironmentScopeRequiredError: HttpServerRespondable.toResponse,
-        }),
-      ),
-    );
-    return Layer.mergeAll(listRoute, answerRoute);
+    return listRoute;
   }),
 );

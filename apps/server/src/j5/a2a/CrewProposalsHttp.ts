@@ -8,31 +8,14 @@ import { annotateEnvironmentRequest } from "../../auth/http.ts";
 import * as J5Contracts from "@t3tools/contracts/j5";
 
 import { PlaybookStore } from "../playbooks/PlaybookStore.ts";
-import { AgentCrewProposalService, type CrewProposal } from "./AgentCrewProposalService.ts";
-import {
-  authenticateClientRead,
-  authenticateOperate,
-  invalidRequest,
-  jsonBody,
-} from "./ClientReadsHttp.ts";
-import { crewPlaybookSummary } from "./crewPlaybookPlan.ts";
-import { CrewProposalService } from "./CrewProposalService.ts";
+import { AgentCrewProposalService } from "./AgentCrewProposalService.ts";
+import { authenticateClientRead } from "./ClientReadsHttp.ts";
+import { projectCrewProposal } from "./crewProposalProjection.ts";
 
 export const CREW_PROPOSALS_PATH = "/api/j5/a2a/crews/proposals";
-export const CREW_PROPOSAL_PREVIEW_PATH = "/api/j5/a2a/crews/proposals/preview";
-export const CREW_PROPOSAL_RESOLVE_PATH = "/api/j5/a2a/crews/proposals/resolve";
 
-// The response and request shapes are the J5 contract the clients decode; aliased so the route's
-// encode and the client's decode cannot drift.
-const CrewProposalsResponse = J5Contracts.CrewProposalsResponse;
-const CrewProposalResolveRequest = J5Contracts.CrewProposalResolveRequest;
-const CrewProposalResolveResponse = J5Contracts.CrewProposalResolveResponse;
-
-const encodeList = Schema.encodeEffect(CrewProposalsResponse);
-const encodeResolve = Schema.encodeEffect(CrewProposalResolveResponse);
-const decodePreview = Schema.decodeUnknownEffect(J5Contracts.CrewProposalPreviewRequest);
-const encodePreview = Schema.encodeEffect(J5Contracts.CrewProposalPreviewResponse);
-const decodeResolve = Schema.decodeUnknownEffect(CrewProposalResolveRequest);
+// The response shape is the J5 contract the clients decode, so encode and decode cannot drift.
+const encodeList = Schema.encodeEffect(J5Contracts.CrewProposalsResponse);
 
 const failureResponse = (cause: unknown) => {
   const tag =
@@ -64,60 +47,12 @@ const failureResponse = (cause: unknown) => {
     : respond;
 };
 
-/** Authenticated routes for the crew gate: list what awaits the human, and resolve one proposal. */
-export const makeCrewProposalsHttpRouteLayer = (paths: {
-  readonly list: HttpRouter.PathInput;
-  readonly resolve: HttpRouter.PathInput;
-  readonly preview?: HttpRouter.PathInput;
-}) =>
+/** The crew gate's read: every proposal that awaits the human. Resolving one is an RPC. */
+export const makeCrewProposalsHttpRouteLayer = (paths: { readonly list: HttpRouter.PathInput }) =>
   Layer.unwrap(
     Effect.gen(function* () {
       const store = yield* AgentCrewProposalService;
-      const gate = yield* CrewProposalService;
-      const playbooks = yield* PlaybookStore;
-      /**
-       * A proposal as the card reads it: its playbook projected from the live YAML. A definition
-       * that cannot be read, or has lost a step a seat claims, becomes the playbook's issue rather
-       * than a failed list.
-       */
-      const projectProposal = ({
-        playbook,
-        projectId: projectId,
-        ...stored
-      }: CrewProposal): Effect.Effect<J5Contracts.CrewProposal> => {
-        const proposal = { ...stored, projectId };
-        return playbook == null
-          ? Effect.succeed({ ...proposal, playbook: null })
-          : playbooks.readPath(playbook.definitionPath).pipe(
-              Effect.map((definition) => {
-                const ids = new Set(definition.steps.map(({ id }) => id));
-                const lost = proposal.requestedSeats
-                  .flatMap((seat) => seat.steps ?? [])
-                  .find((id) => !ids.has(id));
-                return {
-                  ...proposal,
-                  playbook: crewPlaybookSummary(
-                    playbook.name,
-                    definition,
-                    lost === undefined
-                      ? null
-                      : `Step ${lost} is no longer in the playbook; approving is refused until the Captain proposes again.`,
-                  ),
-                };
-              }),
-              Effect.catch((error) =>
-                Effect.succeed({
-                  ...proposal,
-                  playbook: {
-                    name: playbook.name,
-                    title: playbook.name,
-                    steps: [],
-                    issue: error.message,
-                  },
-                }),
-              ),
-            );
-      };
+      const projectProposal = projectCrewProposal(yield* PlaybookStore);
       const listRoute = HttpRouter.add(
         "POST",
         paths.list,
@@ -141,74 +76,10 @@ export const makeCrewProposalsHttpRouteLayer = (paths: {
           }),
         ),
       );
-      const previewRoute = HttpRouter.add(
-        "POST",
-        paths.preview ?? CREW_PROPOSAL_PREVIEW_PATH,
-        Effect.gen(function* () {
-          yield* annotateEnvironmentRequest("j5.a2a.crews.proposals.preview");
-          yield* authenticateClientRead;
-          const body = yield* jsonBody;
-          if (Result.isFailure(body)) return invalidRequest("The request body must be JSON.");
-          const decoded = yield* Effect.result(decodePreview(body.success));
-          if (Result.isFailure(decoded))
-            return invalidRequest("proposalId and optional seats are required.");
-          const preview = yield* Effect.result(
-            gate.preview(decoded.success).pipe(Effect.flatMap(encodePreview)),
-          );
-          return Result.isSuccess(preview)
-            ? HttpServerResponse.jsonUnsafe(preview.success)
-            : yield* failureResponse(preview.failure);
-        }).pipe(
-          Effect.catchTags({
-            EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
-            EnvironmentInternalError: HttpServerRespondable.toResponse,
-            EnvironmentScopeRequiredError: HttpServerRespondable.toResponse,
-          }),
-        ),
-      );
-      const resolveRoute = HttpRouter.add(
-        "POST",
-        paths.resolve,
-        Effect.gen(function* () {
-          yield* annotateEnvironmentRequest("j5.a2a.crews.proposals.resolve");
-          yield* authenticateOperate;
-          const body = yield* jsonBody;
-          if (Result.isFailure(body)) return invalidRequest("The request body must be JSON.");
-          const decoded = yield* Effect.result(decodeResolve(body.success));
-          if (Result.isFailure(decoded))
-            return invalidRequest(
-              "A valid proposalId and decision are required; approval also requires a runtime preview token.",
-            );
-          const outcome = yield* Effect.result(
-            gate
-              .resolve(decoded.success)
-              .pipe(
-                Effect.flatMap((result) =>
-                  projectProposal(result.proposal).pipe(
-                    Effect.flatMap((proposal) =>
-                      encodeResolve({ proposal, crewInstanceId: result.instance?.id ?? null }),
-                    ),
-                  ),
-                ),
-              ),
-          );
-          return Result.isSuccess(outcome)
-            ? HttpServerResponse.jsonUnsafe(outcome.success)
-            : yield* failureResponse(outcome.failure);
-        }).pipe(
-          Effect.catchTags({
-            EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
-            EnvironmentInternalError: HttpServerRespondable.toResponse,
-            EnvironmentScopeRequiredError: HttpServerRespondable.toResponse,
-          }),
-        ),
-      );
-      return Layer.mergeAll(listRoute, previewRoute, resolveRoute);
+      return listRoute;
     }),
   );
 
 export const crewProposalsHttpRouteLayer = makeCrewProposalsHttpRouteLayer({
   list: CREW_PROPOSALS_PATH,
-  resolve: CREW_PROPOSAL_RESOLVE_PATH,
-  preview: CREW_PROPOSAL_PREVIEW_PATH,
 });

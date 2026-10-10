@@ -33,11 +33,7 @@ import * as Schema from "effect/Schema";
 import * as Layer from "effect/Layer";
 import type * as RpcGroup from "effect/rpc/RpcGroup";
 
-import { AGENT_PERSONA_RPC_SCOPES } from "../j5/agents/agentPersonaRpc.ts";
-import { ARTIFACT_RPC_SCOPES } from "../j5/artifacts/artifactRpc.ts";
-import { SKILL_LINK_RPC_SCOPES } from "../j5/skills/skillLinkRpc.ts";
-import { SKILL_CATALOG_RPC_SCOPES } from "../j5/skills/skillCatalogRpc.ts";
-import { PLAYBOOK_RPC_SCOPES } from "../j5/playbooks/playbookRpc.ts";
+import { J5_RPC_SCOPES } from "../j5/wsRpcScopes.ts";
 
 type WsRpcMethod = RpcGroup.Rpcs<typeof WsRpcGroup>["_tag"];
 
@@ -48,11 +44,7 @@ type WsRpcMethod = RpcGroup.Rpcs<typeof WsRpcGroup>["_tag"];
  */
 export const RPC_REQUIRED_SCOPES = {
   ...CLIENT_GUARDED_RPC_SCOPES,
-  ...AGENT_PERSONA_RPC_SCOPES,
-  ...ARTIFACT_RPC_SCOPES,
-  ...SKILL_CATALOG_RPC_SCOPES,
-  ...SKILL_LINK_RPC_SCOPES,
-  ...PLAYBOOK_RPC_SCOPES,
+  ...J5_RPC_SCOPES,
   [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: AuthOrchestrationOperateScope,
   [ORCHESTRATION_V2_WS_METHODS.getWorkflowScript]: AuthOrchestrationReadScope,
   [ORCHESTRATION_V2_WS_METHODS.getTurnDiff]: AuthOrchestrationReadScope,

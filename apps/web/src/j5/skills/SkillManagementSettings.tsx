@@ -1,4 +1,3 @@
-import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import type {
   EnvironmentId,
@@ -7,6 +6,7 @@ import type {
   ServerProviderSkill,
 } from "@t3tools/contracts";
 import { skillLinkUnavailableReason } from "@t3tools/shared/j5/skillInventory";
+import { skillLinkEnvironment } from "./skillLinkAtoms";
 import { SkillLinksPanel, type SkillLinkSelection } from "./SkillLinksPanel";
 import { ChevronRightIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -38,7 +38,6 @@ import { lockedSettingsScopeProject } from "../settingsScopeEnvironment.logic";
 import { useProjects } from "../../state/entities";
 import { EMPTY_SERVER_PROVIDERS, serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { useEnvironmentScope } from "../../state/session";
 import {
   buildSkillInventory,
   filterSkillInventory,
@@ -125,7 +124,7 @@ export function SkillInventoryPanel({ environmentId }: { readonly environmentId:
   const [linkSelection, setLinkSelection] = useState<SkillLinkSelection | null>(null);
   const [collapsedOrigins, setCollapsedOrigins] = useState<ReadonlySet<SkillOrigin>>(new Set());
   const connected = environment?.connection.phase === "connected";
-  const canOperate = useEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
+  const canOperate = useAtomValue(skillLinkEnvironment.create.permissionAtom(environmentId));
   const refresh = useAtomCommand(serverEnvironment.refreshProviders, { reportFailure: false });
   const attempted = useRef({ selection: "", instances: new Set<ProviderInstanceId>() });
   const [failures, setFailures] = useState<ReadonlySet<string>>(new Set());

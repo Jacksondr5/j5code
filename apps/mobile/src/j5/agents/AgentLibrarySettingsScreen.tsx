@@ -18,7 +18,6 @@ import {
   importAgentPersonasWithConfirmation,
 } from "@t3tools/client-runtime/j5/agent-personas";
 import {
-  AuthOrchestrationOperateScope,
   type AgentPersonaEditInput,
   type AgentPersonaImportConflict,
   type AgentPersonaImportConflictError,
@@ -27,6 +26,8 @@ import {
 import { useNavigation } from "@react-navigation/native";
 import { Platform, Pressable, ScrollView, Share, Switch, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useAtomValue } from "@effect/atom-react";
+import { Atom } from "effect/reactivity";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
@@ -38,7 +39,6 @@ import { cn } from "../../lib/cn";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { agentPersonaEnvironment } from "./agentPersonaAtoms";
 import { useEnvironmentQuery } from "../../state/query";
-import { useEnvironmentsWithScope } from "../../state/session";
 import { useRemoteConnectionStatus } from "../../state/use-remote-environment-registry";
 import { SettingsSection } from "../../features/settings/components/SettingsSection";
 import { PlaybookLibrarySettingsSection } from "../playbooks/PlaybookLibrarySettingsScreen";
@@ -80,19 +80,28 @@ export function AgentLibrarySettingsScreen() {
   });
   const [pickingFolder, setPickingFolder] = useState(false);
   const [busy, setBusy] = useState(false);
-  // Library changes need the operate scope; a session without it can still read and export.
-  const operableEnvironments = useEnvironmentsWithScope(
-    connectedEnvironments,
-    AuthOrchestrationOperateScope,
+  // A session that may not change the library can still read and export it.
+  const canOperate = useAtomValue(
+    agentPersonaEnvironment.createAgentPersona.permissionAtom(effectiveEnvironmentId),
   );
-  const canOperate =
-    effectiveEnvironmentId !== null && operableEnvironments.has(effectiveEnvironmentId);
   const locked = busy || !canOperate;
-  // Copying a persona imports it into the target, so only operable targets are offered.
-  const otherEnvironments = connectedEnvironments.filter(
-    (environment) =>
-      environment.environmentId !== effectiveEnvironmentId &&
-      operableEnvironments.has(environment.environmentId),
+  // Copying a persona imports it into the target, so only targets that permit the import are offered.
+  const otherEnvironments = useAtomValue(
+    useMemo(
+      () =>
+        Atom.make((get) =>
+          connectedEnvironments.filter(
+            (environment) =>
+              environment.environmentId !== effectiveEnvironmentId &&
+              get(
+                agentPersonaEnvironment.importAgentPersonas.permissionAtom(
+                  environment.environmentId,
+                ),
+              ),
+          ),
+        ),
+      [connectedEnvironments, effectiveEnvironmentId],
+    ),
   );
   const [confirmation, setConfirmation] = useState<{
     error: AgentPersonaImportConflictError;

@@ -1,9 +1,6 @@
+import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
-import {
-  AuthOrchestrationOperateScope,
-  type ArtifactContent,
-  type ArtifactEntry,
-} from "@t3tools/contracts";
+import { type ArtifactContent, type ArtifactEntry } from "@t3tools/contracts";
 import {
   FileIcon,
   FileImageIcon,
@@ -30,8 +27,9 @@ import { cn } from "../../lib/utils";
 import { useEnvironments } from "../../state/environments";
 import { useProjects } from "../../state/entities";
 import { useEnvironmentQuery } from "../../state/query";
-import { useEnvironmentScope, usePreparedConnection } from "../../state/session";
+import { usePreparedConnection } from "../../state/session";
 import { artifactEnvironment } from "./artifactChanges";
+import { j5Environment } from "../state";
 import { listArtifacts, readArtifact, deleteArtifact } from "./artifactClient";
 import { artifactPreviewRevision } from "./artifactPreview.logic";
 import { nextArtifactRefreshGeneration } from "./artifactRefresh";
@@ -149,7 +147,9 @@ export function ArtifactsPage({
     [embedded, projects, selectedProjectKey],
   );
   const selectedEnvironmentId = selectedProject?.environmentId ?? null;
-  const canDelete = useEnvironmentScope(selectedEnvironmentId, AuthOrchestrationOperateScope);
+  const canDelete = useAtomValue(
+    j5Environment.deleteArtifact.permissionAtom(selectedEnvironmentId),
+  );
   const selectedProjectId = selectedProject?.id ?? null;
   const selectedWorkspaceRoot = selectedProject?.workspaceRoot;
   const selectedKey = selectedProject === null ? null : projectKey(selectedProject);

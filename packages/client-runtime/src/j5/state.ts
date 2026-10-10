@@ -1,32 +1,21 @@
-import type { ThreadId } from "@t3tools/contracts";
-import { J5_PLAYBOOK_WS_METHODS } from "@t3tools/contracts/j5";
+import { J5_ARTIFACT_WS_METHODS, type ThreadId } from "@t3tools/contracts";
+import { J5_CLIENT_ACTION_WS_METHODS, J5_PLAYBOOK_WS_METHODS } from "@t3tools/contracts/j5";
 import type {
-  AnswerHumanExchangeRequest,
-  CrewProposalResolveRequest,
-  CrewProposalPreviewRequest,
-  CrewArchiveRequest,
-  CrewStopRequest,
-  CrewRuntimeRequestRespondRequest,
   FleetReadRequest,
   PlaybookLibraryRequest,
-  PlaybookDeleteRequest,
-  PlaybookRenameRequest,
   PlaybookRunsRequest,
-  AddPeerRequest,
-  IssuePeerCredentialRequest,
-  PeerProbeRequest,
-  RemovePeerRequest,
 } from "@t3tools/contracts/j5";
+import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import type { HttpClient } from "effect/http";
-import type { Atom } from "effect/reactivity";
+import { AsyncResult, type Atom } from "effect/reactivity";
 
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 import { EnvironmentSupervisor } from "../connection/supervisor.ts";
+import { EnvironmentRpcUnavailableError, type EnvironmentUnaryRpcTag } from "../rpc/client.ts";
 import {
-  createEnvironmentCommand,
   createEnvironmentQueryAtomFamily,
   createEnvironmentRpcCommand,
   createEnvironmentRpcSubscriptionAtomFamily,
@@ -50,6 +39,43 @@ export const supportedJ5Read = <A extends object, E, R>(read: Effect.Effect<A, E
       Effect.succeed({ supported: false as const }),
     ),
   );
+
+const defectText = (defect: unknown) => (defect instanceof Error ? defect.message : String(defect));
+
+/**
+ * A J5 action as a permission-aware command: `permissionAtom` says whether the session may run it,
+ * and the same grant is checked again when it runs.
+ *
+ * A server too old to have the method answers with an "Unknown request tag" defect. That becomes
+ * a failure the control shows, in the words upstream uses for a server that must be updated.
+ */
+const createJ5ActionCommand = <R, E, TTag extends EnvironmentUnaryRpcTag>(
+  runtime: Atom.AtomRuntime<EnvironmentRegistry | R, E>,
+  label: string,
+  tag: TTag,
+) => {
+  const command = createEnvironmentRpcCommand(runtime, { label, tag });
+  const run: typeof command.run = async (registry, target) => {
+    const result = await command.run(registry, target);
+    return AsyncResult.isFailure(result) &&
+      result.cause.reasons.some(
+        (reason) =>
+          Cause.isDieReason(reason) &&
+          defectText(reason.defect).includes(`Unknown request tag: ${tag}`),
+      )
+      ? AsyncResult.failure(
+          Cause.fail(
+            new EnvironmentRpcUnavailableError({
+              environmentId: target.environmentId,
+              message:
+                "This action needs a newer server. Update the server hosting this environment, then try again.",
+            }),
+          ),
+        )
+      : result;
+  };
+  return { ...command, run };
+};
 
 /** J5 uses the same environment registry, query lifecycle, and command dispatch as other features. */
 export function createJ5EnvironmentAtoms<R, E>(
@@ -79,24 +105,25 @@ export function createJ5EnvironmentAtoms<R, E>(
           Effect.flatMap((prepared) => J5Http.readPlaybookLibrary(prepared, input)),
         ),
     }),
-    deletePlaybook: createEnvironmentCommand(runtime, {
-      label: "j5:delete-playbook",
-      execute: (input: PlaybookDeleteRequest) =>
-        preparedConnection.pipe(
-          Effect.flatMap((prepared) => J5Http.deletePlaybook(prepared, input)),
-        ),
-    }),
+    deletePlaybook: createJ5ActionCommand(
+      runtime,
+      "j5:delete-playbook",
+      J5_PLAYBOOK_WS_METHODS.deletePlaybook,
+    ),
+    deleteArtifact: createJ5ActionCommand(
+      runtime,
+      "j5:delete-artifact",
+      J5_ARTIFACT_WS_METHODS.deleteArtifact,
+    ),
     exportPlaybook: createEnvironmentRpcCommand(runtime, {
       label: "j5:export-playbook",
       tag: J5_PLAYBOOK_WS_METHODS.exportPlaybook,
     }),
-    renamePlaybook: createEnvironmentCommand(runtime, {
-      label: "j5:rename-playbook",
-      execute: (input: PlaybookRenameRequest) =>
-        preparedConnection.pipe(
-          Effect.flatMap((prepared) => J5Http.renamePlaybook(prepared, input)),
-        ),
-    }),
+    renamePlaybook: createJ5ActionCommand(
+      runtime,
+      "j5:rename-playbook",
+      J5_PLAYBOOK_WS_METHODS.renamePlaybook,
+    ),
     playbooks: createEnvironmentQueryAtomFamily(runtime, {
       label: "j5:playbooks",
       staleTimeMs: 2_500,
@@ -140,25 +167,21 @@ export function createJ5EnvironmentAtoms<R, E>(
       execute: (_input: Record<string, never>) =>
         preparedConnection.pipe(Effect.flatMap(J5Http.listCrewProposals)),
     }),
-    previewCrewProposal: createEnvironmentCommand(runtime, {
-      label: "j5:preview-crew-proposal",
-      execute: (input: CrewProposalPreviewRequest) =>
-        preparedConnection.pipe(
-          Effect.flatMap((prepared) => J5Http.previewCrewProposal(prepared, input)),
-        ),
-    }),
-    resolveCrewProposal: createEnvironmentCommand(runtime, {
-      label: "j5:resolve-crew-proposal",
-      execute: (input: CrewProposalResolveRequest) =>
-        preparedConnection.pipe(
-          Effect.flatMap((prepared) => J5Http.resolveCrewProposal(prepared, input)),
-        ),
-    }),
-    archiveCrew: createEnvironmentCommand(runtime, {
-      label: "j5:archive-crew",
-      execute: (input: CrewArchiveRequest) =>
-        preparedConnection.pipe(Effect.flatMap((prepared) => J5Http.archiveCrew(prepared, input))),
-    }),
+    previewCrewProposal: createJ5ActionCommand(
+      runtime,
+      "j5:preview-crew-proposal",
+      J5_CLIENT_ACTION_WS_METHODS.previewCrewProposal,
+    ),
+    resolveCrewProposal: createJ5ActionCommand(
+      runtime,
+      "j5:resolve-crew-proposal",
+      J5_CLIENT_ACTION_WS_METHODS.resolveCrewProposal,
+    ),
+    archiveCrew: createJ5ActionCommand(
+      runtime,
+      "j5:archive-crew",
+      J5_CLIENT_ACTION_WS_METHODS.archiveCrew,
+    ),
     // Crew seats' provider approvals answered from the Inbox; same cadence as gates.
     crewRuntimeRequests: createEnvironmentQueryAtomFamily(runtime, {
       label: "j5:crew-runtime-requests",
@@ -166,25 +189,17 @@ export function createJ5EnvironmentAtoms<R, E>(
       execute: (_input: Record<string, never>) =>
         preparedConnection.pipe(Effect.flatMap(J5Http.listCrewRuntimeRequests)),
     }),
-    respondCrewRuntimeRequest: createEnvironmentCommand(runtime, {
-      label: "j5:respond-crew-runtime-request",
-      execute: (input: CrewRuntimeRequestRespondRequest) =>
-        preparedConnection.pipe(
-          Effect.flatMap((prepared) => J5Http.respondCrewRuntimeRequest(prepared, input)),
-        ),
-    }),
-    stopCrew: createEnvironmentCommand(runtime, {
-      label: "j5:stop-crew",
-      execute: (input: CrewStopRequest) =>
-        preparedConnection.pipe(Effect.flatMap((prepared) => J5Http.stopCrew(prepared, input))),
-    }),
-    answerHumanExchange: createEnvironmentCommand(runtime, {
-      label: "j5:answer-exchange",
-      execute: (input: AnswerHumanExchangeRequest) =>
-        preparedConnection.pipe(
-          Effect.flatMap((prepared) => J5Http.answerHumanExchange(prepared, input)),
-        ),
-    }),
+    respondCrewRuntimeRequest: createJ5ActionCommand(
+      runtime,
+      "j5:respond-crew-runtime-request",
+      J5_CLIENT_ACTION_WS_METHODS.respondCrewRuntimeRequest,
+    ),
+    stopCrew: createJ5ActionCommand(runtime, "j5:stop-crew", J5_CLIENT_ACTION_WS_METHODS.stopCrew),
+    answerHumanExchange: createJ5ActionCommand(
+      runtime,
+      "j5:answer-exchange",
+      J5_CLIENT_ACTION_WS_METHODS.answerHumanExchange,
+    ),
     // Polls, backlogs and errors change while Connections stays open, and
     // nothing pushes them, so the list is read again on an interval well inside
     // the two-minute online window.
@@ -195,32 +210,26 @@ export function createJ5EnvironmentAtoms<R, E>(
       execute: (_input: Record<string, never>) =>
         preparedConnection.pipe(Effect.flatMap(J5Http.listPeers)),
     }),
-    issuePeerCredential: createEnvironmentCommand(runtime, {
-      label: "j5:issue-peer-credential",
-      execute: (input: IssuePeerCredentialRequest) =>
-        preparedConnection.pipe(
-          Effect.flatMap((prepared) => J5Http.issuePeerCredential(prepared, input)),
-        ),
-    }),
-    addPeer: createEnvironmentCommand(runtime, {
-      label: "j5:add-peer",
-      execute: (input: AddPeerRequest) =>
-        preparedConnection.pipe(Effect.flatMap((prepared) => J5Http.addPeer(prepared, input))),
-    }),
-    listPeerAddresses: createEnvironmentCommand(runtime, {
-      label: "j5:peer-addresses",
-      execute: (_input: Record<string, never>) =>
-        preparedConnection.pipe(Effect.flatMap(J5Http.listPeerAddresses)),
-    }),
-    probePeer: createEnvironmentCommand(runtime, {
-      label: "j5:probe-peer",
-      execute: (input: PeerProbeRequest) =>
-        preparedConnection.pipe(Effect.flatMap((prepared) => J5Http.probePeer(prepared, input))),
-    }),
-    removePeer: createEnvironmentCommand(runtime, {
-      label: "j5:remove-peer",
-      execute: (input: RemovePeerRequest) =>
-        preparedConnection.pipe(Effect.flatMap((prepared) => J5Http.removePeer(prepared, input))),
-    }),
+    issuePeerCredential: createJ5ActionCommand(
+      runtime,
+      "j5:issue-peer-credential",
+      J5_CLIENT_ACTION_WS_METHODS.issuePeerCredential,
+    ),
+    addPeer: createJ5ActionCommand(runtime, "j5:add-peer", J5_CLIENT_ACTION_WS_METHODS.addPeer),
+    listPeerAddresses: createJ5ActionCommand(
+      runtime,
+      "j5:peer-addresses",
+      J5_CLIENT_ACTION_WS_METHODS.listPeerAddresses,
+    ),
+    probePeer: createJ5ActionCommand(
+      runtime,
+      "j5:probe-peer",
+      J5_CLIENT_ACTION_WS_METHODS.probePeer,
+    ),
+    removePeer: createJ5ActionCommand(
+      runtime,
+      "j5:remove-peer",
+      J5_CLIENT_ACTION_WS_METHODS.removePeer,
+    ),
   };
 }
