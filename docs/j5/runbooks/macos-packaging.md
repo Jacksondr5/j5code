@@ -114,9 +114,14 @@ committed for one: the version is stamped into the four manifests during the bui
 To publish one, run `J5 Nightly` on `j5/main`. It takes no inputs. It names the build
 `<x.y.z>-nightly.<yyyymmdd>.<run>`, where `x.y.z` is the next patch after the version `j5/main`
 commits, then runs the signed macOS build and the release for that commit. The result is a GitHub
-pre-release, never marked latest, tagged `v<version>`. GitHub can refuse to let the
-workflow tag a commit that is no longer a branch head, so if `j5/main` moves during the run and the
-release job fails creating the release, run `J5 Nightly` again.
+pre-release, never marked latest, tagged `v<version>`.
+
+If the release job fails, re-run the failed job in that run: it reuses the draft release the first
+attempt created. Running `J5 Nightly` again instead gets a new version and leaves that draft, with
+its assets, orphaned, so delete the draft release first if you do. GitHub can refuse to let the
+workflow tag a commit that is no longer a branch head; if `j5/main` moved during the run and
+creating the release keeps failing for that reason, delete any draft and run `J5 Nightly` again on
+the new head.
 
 To move a machine to nightlies:
 
