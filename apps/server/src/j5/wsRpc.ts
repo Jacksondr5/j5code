@@ -6,7 +6,7 @@ import {
   SkillLinkError,
 } from "@t3tools/contracts";
 import { J5ClientActionRpcGroup, J5PlaybookRpcGroup } from "@t3tools/contracts/j5";
-import type * as Context from "effect/Context";
+import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -46,7 +46,10 @@ type J5WsRpcServices = ClientActionsService | PeerAdminService | ArtifactDeletio
  * The server-lifetime J5 services the handlers call. `ws.ts` reads them once, where its route is
  * built, and hands them to every socket's handler layer.
  */
-export const j5WsRpcServices = Effect.context<J5WsRpcServices>();
+export const j5WsRpcServices = Effect.context<J5WsRpcServices>().pipe(
+  // Only these: the whole server context laid over a socket's would shadow that socket's own.
+  Effect.map(Context.pick(ClientActionsService, PeerAdminService, ArtifactDeletion)),
+);
 
 /**
  * The handlers of J5's RPCs, as their own layer beside upstream's in `ws.ts`. A handler is
