@@ -125,7 +125,6 @@ import { ThreadContextChip } from "../ThreadContextChip";
 import {
   participantIdsForThreadA2ADelivery,
   renderThreadA2ADelivery,
-  renderThreadA2AOutboundTool,
 } from "../../j5/a2a/ThreadA2ARenderer";
 import { useParticipantLabels } from "../../j5/a2a/ParticipantIdentitiesClient";
 import {
@@ -2141,9 +2140,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
               displayLabel={row.displayLabel}
             />
           ) : null}
-          {row.kind === "work-live"
-            ? (renderThreadA2AOutboundTool(row.entry) ?? <LiveWorkEntryTimelineRow row={row} />)
-            : null}
+          {row.kind === "work-live" ? <LiveWorkEntryTimelineRow row={row} /> : null}
           {row.kind === "work-toggle" ? <WorkGroupToggleTimelineRow row={row} /> : null}
           {row.kind === "thinking" ? <ThinkingTimelineRow row={row} /> : null}
         </WorkLogBlock>
@@ -5705,9 +5702,6 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
         },
       }
     : {};
-
-  const a2aOutbound = renderThreadA2AOutboundTool(workEntry);
-  if (a2aOutbound !== null) return a2aOutbound;
 
   return (
     <WorkLogRow

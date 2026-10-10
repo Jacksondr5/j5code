@@ -2,7 +2,7 @@ import { Tooltip, TooltipTrigger, TooltipPopup } from "../../components/ui/toolt
 import type { ChatMessage } from "~/types";
 import { useNowMinute } from "~/hooks/useNowMinute";
 import type { ScopedThreadRef } from "@t3tools/contracts";
-import { ChevronRightIcon, InboxIcon, SendIcon } from "lucide-react";
+import { ChevronRightIcon, InboxIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { useFindRevealRef } from "../../components/chat/markdownFindContext";
@@ -17,8 +17,8 @@ import { presentParticipantIdentity } from "./ParticipantIdentity";
  */
 export const J5_A2A_DELIVERY_MESSAGE_PREFIX = "message:j5:a2a:delivery:";
 
-// J5's tools gained a `j5_` prefix on 2026-10-10 (#508). Stored deliveries and tool calls keep
-// the name they were written with, so everything here that reads the timeline accepts both.
+// J5's tools gained a `j5_` prefix on 2026-10-10 (#508). Stored deliveries keep the name they
+// were written with, so everything here that reads the timeline accepts both.
 const SEND_TOOL_NAMES = ["j5_send_message", "send_message"] as const;
 
 const PLAIN_DELIVERY_INSTRUCTIONS = new Set(
@@ -518,152 +518,6 @@ function PeerDeliveryCard({
       </div>
       <A2ABodyClamp body={body} />
     </section>
-  );
-}
-
-type UnknownRecord = Readonly<Record<string, unknown>>;
-
-function isRecord(value: unknown): value is UnknownRecord {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function nonEmptyString(value: unknown): string | null {
-  return typeof value === "string" && value.trim().length > 0 ? value : null;
-}
-
-// Codex reports `t3-code.<tool>` and Claude `mcp__t3-code__<tool>`.
-const SEND_TOOL_CALL_NAMES = new Set<unknown>(
-  SEND_TOOL_NAMES.flatMap((tool) => [`t3-code.${tool}`, `mcp__t3-code__${tool}`]),
-);
-
-function isJ5SendMessageTool(toolName: unknown) {
-  return SEND_TOOL_CALL_NAMES.has(toolName);
-}
-
-type OutboundExchangeState = "none" | "open" | "closing" | "closed";
-
-export type ThreadA2AOutboundPresentation = {
-  readonly kind: "sent";
-  readonly recipientId: string;
-  readonly body: string;
-  readonly sentAt: string;
-  readonly exchangeId: string | null;
-  readonly exchangeState: OutboundExchangeState;
-  readonly isReply: boolean;
-};
-
-/**
- * Owns the outbound dynamic-tool gate. The upstream timeline delegates every
- * work entry here and preserves its exact generic row when this returns null.
- */
-export function presentThreadA2AOutboundTool(input: {
-  readonly createdAt: string;
-  readonly toolLifecycleStatus?: string | undefined;
-  readonly structuredPayload?: unknown;
-}): ThreadA2AOutboundPresentation | null {
-  if (input.toolLifecycleStatus !== "completed" || !isRecord(input.structuredPayload)) {
-    return null;
-  }
-
-  const payload = input.structuredPayload;
-  if (payload.type !== "dynamic_tool" || !isJ5SendMessageTool(payload.toolName)) return null;
-  if (!isRecord(payload.input) || !isRecord(payload.output)) return null;
-
-  const recipientId = nonEmptyString(payload.input.to);
-  const body = nonEmptyString(payload.input.message);
-  const requestedExchangeId =
-    payload.input.exchange_id === undefined ? null : nonEmptyString(payload.input.exchange_id);
-  if (recipientId === null || body === null) return null;
-  if (payload.input.exchange_id !== undefined && requestedExchangeId === null) return null;
-
-  const messageId = nonEmptyString(payload.output.messageId);
-  const outputExchangeId =
-    payload.output.exchangeId === null ? null : nonEmptyString(payload.output.exchangeId);
-  const exchangeState = payload.output.exchangeState;
-  if (
-    messageId === null ||
-    (payload.output.exchangeId !== null && outputExchangeId === null) ||
-    (exchangeState === "open" && outputExchangeId === null) ||
-    (requestedExchangeId !== null && outputExchangeId !== requestedExchangeId) ||
-    (exchangeState !== "none" &&
-      exchangeState !== "open" &&
-      exchangeState !== "closing" &&
-      exchangeState !== "closed")
-  ) {
-    return null;
-  }
-
-  return {
-    kind: "sent",
-    recipientId,
-    body,
-    sentAt: input.createdAt,
-    exchangeId: outputExchangeId,
-    exchangeState,
-    isReply: requestedExchangeId !== null,
-  };
-}
-
-function SentMessageCard({
-  presentation,
-  now,
-}: {
-  readonly presentation: ThreadA2AOutboundPresentation;
-  readonly now?: number | undefined;
-}) {
-  const nowMinute = useNowMinute();
-  const currentNow = now ?? Date.parse(`${nowMinute}:00.000Z`);
-  const badge =
-    !presentation.isReply && presentation.exchangeState === "open"
-      ? { label: "Awaiting reply", className: "bg-warning/15 text-warning-foreground" }
-      : presentation.isReply && presentation.exchangeState === "closed"
-        ? { label: "Reply", className: "border border-border/70 text-muted-foreground" }
-        : null;
-  return (
-    <section
-      className="max-w-[88%] rounded-lg border border-border/70 px-3.5 py-2.5"
-      data-j5-a2a-renderer="sent"
-    >
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-        <span className="inline-flex items-center gap-1 text-muted-foreground">
-          <SendIcon className="size-3.5 shrink-0" aria-hidden />
-          To
-        </span>
-        <span className="font-medium text-foreground">{presentation.recipientId}</span>
-        {badge ? (
-          <span className={`rounded-md px-1.5 py-0.5 text-2xs font-semibold ${badge.className}`}>
-            {badge.label}
-          </span>
-        ) : null}
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <time
-                className="ml-auto tabular-nums text-muted-foreground"
-                dateTime={presentation.sentAt}
-              />
-            }
-          >
-            {formatTimeSinceSent(presentation.sentAt, currentNow)}
-          </TooltipTrigger>
-          <TooltipPopup>{presentation.sentAt}</TooltipPopup>
-        </Tooltip>
-      </div>
-      <A2ABodyClamp body={presentation.body} />
-    </section>
-  );
-}
-
-export function renderThreadA2AOutboundTool(input: {
-  readonly id: string;
-  readonly createdAt: string;
-  readonly now?: number | undefined;
-  readonly toolLifecycleStatus?: string | undefined;
-  readonly structuredPayload?: unknown;
-}): ReactNode {
-  const presentation = presentThreadA2AOutboundTool(input);
-  return presentation === null ? null : (
-    <SentMessageCard key={input.id} now={input.now} presentation={presentation} />
   );
 }
 
