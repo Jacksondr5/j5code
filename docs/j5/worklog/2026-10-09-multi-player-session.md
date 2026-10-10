@@ -97,8 +97,11 @@ In progress.
 - **The server names the author of a message, in the message text**, the way it already names the sender of an agent-to-agent message. It takes the name from the session, so a client cannot forge it.
 - **Only on a thread more than one person can write to.** A person's private threads are unchanged. When a thread gains its first collaborator, the agent is told once who can now write and that earlier unlabelled messages came from the owner.
 - **Each person sees their own messages as they do today**, and other people's as cards of their own. The cards may resemble agent-to-agent cards; the look is undecided.
+- **Profile pictures come from GitHub.** A person enters their github.com username in their own client's settings, and the client tells each server it connects to. The server keeps the username on the person; each viewer's client loads the picture from GitHub. The server stores a username and never a picture address, so a person cannot make other people's clients fetch an address of their choosing. An access manager can clear a username from the People page.
+- **Initials on a coloured circle are the fallback**, for a person with no username and when GitHub cannot be reached.
+- **A guest can enter someone else's username.** That is accepted: their name is still the one the sharer gave them.
 
-Still open: profile pictures for people, whose word counts when two people disagree, how an agent reaches one particular person, what happens when two people send or steer at once, and what a newly added person sees of the conversation from before they joined.
+Still open: whose word counts when two people disagree, how an agent reaches one particular person, what happens when two people send or steer at once, and what a newly added person sees of the conversation from before they joined.
 
 ## Not verified
 
