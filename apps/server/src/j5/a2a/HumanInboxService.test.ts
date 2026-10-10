@@ -335,7 +335,7 @@ it.effect(
           alreadyClosedClear.message,
           `Exchange ${senderCleared.exchangeId} is already closed; j5_clear_own_ask made no change.`,
         );
-        assert.notInclude(alreadyClosedClear.message, "j5_send_message");
+        assert.notInclude(alreadyClosedClear.message, "send_message");
 
         const exactAnswer = "  First line\nSecond line  ";
         const answerCommand = {

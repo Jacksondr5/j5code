@@ -88,6 +88,11 @@ describe("J5 orchestration instructions", () => {
       J5_ORCHESTRATION_INSTRUCTIONS,
       "Never substitute provider-native Subagents, `delegate_task`, or individual `j5_spawn_agent` calls for a requested crew",
     );
+    // Codex's own tool keeps its name: it is not J5's `j5_spawn_agent`.
+    assert.include(
+      J5_ORCHESTRATION_INSTRUCTIONS,
+      "Codex's native `spawn_agent` or collaboration tools",
+    );
     assert.include(
       J5_ORCHESTRATION_INSTRUCTIONS,
       "report that blocker instead of launching replacement agents",

@@ -167,7 +167,7 @@ describe("ThreadA2ADeliveryRenderer", () => {
     expect(markup).toContain("Closed your exchange");
     expect(markup).not.toContain("Expects reply");
     expect(markup).not.toContain(closedInstruction);
-    expect(markup).not.toContain("j5_send_message");
+    expect(markup).not.toContain("send_message");
     expect(markup).not.toContain("Show raw envelope");
   });
 
@@ -218,7 +218,7 @@ describe("ThreadA2ADeliveryRenderer", () => {
     expect(markup).toContain("Closed your exchange");
     expect(markup).not.toContain("Expects reply");
     expect(markup).not.toContain(closedInstruction);
-    expect(markup).not.toContain("j5_send_message");
+    expect(markup).not.toContain("send_message");
     expect(markup).not.toContain("Show raw envelope");
   });
 
