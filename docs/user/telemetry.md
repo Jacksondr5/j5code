@@ -4,7 +4,9 @@ The T3 Code server sends product usage events to PostHog, associated with a hash
 installation identifier. Events include the provider, model, reasoning effort, permission mode,
 turn result, duration, and main-agent token totals when available. Each turn that starts is also
 reported with who asked for it (you, an agent, or the server itself), whether a scheduled task
-started it, and whether the thread is a seat in a Crew.
+started it, and whether the thread is a seat in a Crew. When an ask between participants ends, the
+event says how it ended, what kind of participant was on each side, its urgency, and how long it
+was open.
 
 Events do not include prompts, responses, file contents, authentication tokens, conversation IDs,
 raw provider events, or child-agent output. Child-agent token use is excluded from the totals.
