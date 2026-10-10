@@ -4,6 +4,7 @@ import {
   shellProfilePaths,
   withoutJ5PathLines,
 } from "@t3tools/shared/j5/shellProfile";
+import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
@@ -18,22 +19,50 @@ import { pinnedRuntimeVersionsDir } from "../../cloud/pinnedRuntime.ts";
 const asBytes = (contents: Uint8Array) => Buffer.from(contents).toString("latin1");
 
 /**
+ * The other folders the desktop app's "j5 command" install can link into
+ * (`unixCandidates` in `apps/desktop/src/app/DesktopCliCommand.ts`, which also
+ * lists `~/.local/bin`, handled by the installer's link below). Keep the two in
+ * step.
+ */
+const appLinkFolders = (home: string) => ["/opt/homebrew/bin", "/usr/local/bin", `${home}/bin`];
+
+/**
  * What `j5 uninstall` removes from the person's shell setup along with a home:
  * the installer's `~/.local/bin/j5` link and the PATH line that finds it. Both
  * go when that link belongs to this home (the installer's, into its runtime,
  * or the desktop app's, to its `bin`), however uninstall was started, or when
  * no `j5` is there at all (an orphaned line). A `j5` that
  * belongs to something else, such as another home while an agent uninstalls a
- * scratch one, is left alone with its line. A startup file that exists but
- * can't be read fails the uninstall rather than being skipped.
+ * scratch one, is left alone with its line. The desktop app's link
+ * in `/opt/homebrew/bin`, `/usr/local/bin` or `~/bin` goes too (`appLinks`),
+ * when it points at this home's launcher; anything else there is left alone.
+ * A startup file that exists but can't be read fails the uninstall rather than
+ * being skipped. `folders` is for tests.
  */
-export const planShellCleanup = Effect.fn("j5.cli.plan_shell_cleanup")(function* (baseDir: string) {
+export const planShellCleanup = Effect.fn("j5.cli.plan_shell_cleanup")(function* (
+  baseDir: string,
+  folders?: ReadonlyArray<string>,
+) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const environment = yield* HostProcessEnvironment;
   const home = environment["HOME"];
-  const nothing = { profiles: [] as Array<string>, installerLink: undefined as string | undefined };
+  const nothing = {
+    profiles: [] as Array<string>,
+    installerLink: undefined as string | undefined,
+    appLinks: [] as Array<string>,
+  };
   if ((yield* HostProcessPlatform) === "win32" || !home) return nothing;
+
+  const launcher = path.join(agentCliDirectory(path, baseDir), "j5");
+  const appLinks: Array<string> = [];
+  for (const folder of folders ?? appLinkFolders(home)) {
+    const candidate = path.join(folder, "j5");
+    const linked = yield* fs.readLink(candidate).pipe(Effect.option);
+    if (Option.isSome(linked) && path.resolve(folder, linked.value) === launcher) {
+      appLinks.push(candidate);
+    }
+  }
 
   const command = path.join(home, ".local/bin/j5");
   const target = yield* fs.readLink(command).pipe(Effect.option);
@@ -43,8 +72,10 @@ export const planShellCleanup = Effect.fn("j5.cli.plan_shell_cleanup")(function*
   const owned =
     Option.isSome(resolved) &&
     (launcherOwnsVersionsDir(path, pinnedRuntimeVersionsDir(path, baseDir), resolved.value) ||
-      resolved.value === path.join(agentCliDirectory(path, baseDir), "j5"));
-  if (!owned && (Option.isSome(target) || (yield* fs.exists(command)))) return nothing;
+      resolved.value === launcher);
+  if (!owned && (Option.isSome(target) || (yield* fs.exists(command)))) {
+    return { ...nothing, appLinks };
+  }
 
   const profiles: Array<string> = [];
   const files = shellProfilePaths({
@@ -64,7 +95,7 @@ export const planShellCleanup = Effect.fn("j5.cli.plan_shell_cleanup")(function*
     );
     if (Option.isSome(contents) && hasJ5PathLine(asBytes(contents.value))) profiles.push(file);
   }
-  return { profiles, installerLink: owned ? command : undefined };
+  return { profiles, installerLink: owned ? command : undefined, appLinks };
 });
 
 /** Removes J5's PATH line from each file, leaving every other byte as it was. */
@@ -75,5 +106,26 @@ export const removeJ5PathLines = Effect.fn("j5.cli.remove_path_lines")(function*
   for (const file of files) {
     const contents = asBytes(yield* fs.readFile(file));
     yield* fs.writeFile(file, Buffer.from(withoutJ5PathLines(contents), "latin1"));
+  }
+});
+
+/**
+ * Removes the app's links. A folder the person can't write to is named in the
+ * output as left behind and does not fail the uninstall.
+ */
+export const removeAppLinks = Effect.fn("j5.cli.remove_app_links")(function* (
+  links: ReadonlyArray<string>,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  for (const link of links) {
+    const removed = yield* fs.remove(link).pipe(
+      Effect.as(true),
+      Effect.catch(() => Effect.succeed(false)),
+    );
+    yield* Console.log(
+      removed
+        ? `Removed ${link}.`
+        : `Could not remove ${link}; the desktop app's j5 link is left behind. Delete it yourself.`,
+    );
   }
 });
