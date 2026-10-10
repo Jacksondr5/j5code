@@ -338,26 +338,40 @@ whether or not the update script ran, and only when a migration is pending. If t
 full disk, for instance) the server refuses to start and nothing migrates; free space and start it
 again.
 
-To go back to the state before those migrations:
+To go back to the state before those migrations. A person runs this, from a terminal outside J5
+Code; an agent running inside the server being rolled back must not, because the first step stops
+that server and ends the agent partway through. There can be up to three snapshots: `ls -l` shows
+when each was written, and the one to restore is the one written when the version you are leaving
+first started.
 
 ```sh
 systemctl --user stop j5code.service              # 1. stop the server
 cd ~/.j5code/userdata
-mkdir -p ../db-aside
-mv statev2.sqlite statev2.sqlite-wal statev2.sqlite-shm ../db-aside/ 2>/dev/null
-mv statev2.pre-migration-u<upstream>-j<j5>.sqlite statev2.sqlite  # 2. move the snapshot back
+ls -l statev2.pre-migration-*.sqlite
+snapshot=statev2.pre-migration-u<upstream>-j<j5>.sqlite
+aside=../db-aside-$(date +%Y%m%d-%H%M%S)
+# 2. move the newer database aside and copy the snapshot into its place
+test -f "$snapshot" && mkdir "$aside" &&
+  mv statev2.sqlite "$aside"/ &&
+  { [ ! -e statev2.sqlite-wal ] || mv statev2.sqlite-wal "$aside"/; } &&
+  { [ ! -e statev2.sqlite-shm ] || mv statev2.sqlite-shm "$aside"/; } &&
+  cp "$snapshot" statev2.sqlite &&
+  echo "Restored $snapshot. The newer database is in $aside."
 cd ~/j5code && git checkout <previous-commit>     # 3. run the previous version
 # rebuild as in the rollback steps above, then:
 systemctl --user start j5code.service
 ```
 
-Run the previous version, not the new one: the new one would take a fresh snapshot and migrate
-again. Everything written after the snapshot is lost, as with any restore.
+Step 2 stops at the first command that fails, and has worked only if it prints its last line; do
+not go on to step 3 otherwise. The snapshot is copied, not moved, so it is still there to restore
+again. Run the previous version, not the new one: the new one would take a fresh snapshot and
+migrate again. Everything written after the snapshot is lost, as with any restore.
 
 Each snapshot is a full copy of the database. The server keeps the three most recent and deletes
 older ones when it writes a new one. Snapshots named `statev2.pre-j5-*.sqlite` or
 `statev2.pre-upstream-renumber.sqlite` come from earlier versions and are never deleted: remove
-them by hand. A file ending in `.partial` is a copy that was interrupted; delete it too.
+them by hand. A file ending in `.partial` or `.partial-journal` is a copy that was killed partway;
+the server deletes those, once an hour old, the next time it writes a snapshot.
 
 ### A project shared by several Squadrons
 

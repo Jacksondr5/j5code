@@ -127,20 +127,26 @@ To move a machine to nightlies:
 - **Mac app:** **Settings → General → Update track → Nightly**. The app then updates itself to the
   nightly build in place: one install, one profile and one database, as with upstream's.
 
-To return to stable:
+To return to stable when the stable build knows every migration the nightly ran:
 
 - **Server:** `j5 update --channel stable`, adding `--allow-downgrade` while the newest stable is
   older than the nightly.
 - **Mac app:** **Update track → Stable**.
+
+That is the case when the stable release was cut from the nightly's commit or a later one. It is
+also the case when no nightly you ran migrated the database, which you can check: the server took
+no `statev2.pre-migration-*.sqlite` snapshot in `~/.j5code/userdata` while you were on nightlies.
+Otherwise the stable build is older than the database, and these steps would leave it running
+against migrations it does not know. Use [Going back to an older build](#going-back-to-an-older-build)
+instead.
 
 Start with one server and one Mac. A nightly that changes the client-server or peer protocol splits
 a mixed fleet until every machine has moved.
 
 ### Going back to an older build
 
-The policy is to roll forward: a broken nightly is fixed by the next nightly. Returning to stable
-as above is safe only while the stable build knows every migration the nightly ran, which holds
-when that stable was cut from the same commit or a later one. An older build starts against a
+The policy is to roll forward: a broken nightly is fixed by the next nightly. This section is for
+going back to a build that lacks a migration the newer build ran. An older build starts against a
 newer database without complaint and fails later, at query time. So going back to a build from
 before a migration needs the database from before that migration too.
 
@@ -157,17 +163,29 @@ server stops and hands these steps to the person. In an emergency:
 1. Stop everything that has the database open: quit the Mac app, and stop the server
    (`systemctl --user stop j5code.service` on Linux,
    `launchctl bootout gui/$(id -u)/codes.jackson.j5code.service` on macOS).
-2. Move the newer database aside and the snapshot into its place:
+2. Move the newer database aside and copy the snapshot into its place. There can be up to three
+   snapshots: `ls -l` shows when each was written, and the one to restore is the one written when
+   the build you are leaving first started.
 
    ```sh
    cd ~/.j5code/userdata
-   mkdir -p ../db-aside
-   mv statev2.sqlite statev2.sqlite-wal statev2.sqlite-shm ../db-aside/ 2>/dev/null
-   mv statev2.pre-migration-u<upstream>-j<j5>.sqlite statev2.sqlite
+   ls -l statev2.pre-migration-*.sqlite
+   snapshot=statev2.pre-migration-u<upstream>-j<j5>.sqlite
+   aside=../db-aside-$(date +%Y%m%d-%H%M%S)
+   test -f "$snapshot" && mkdir "$aside" &&
+     mv statev2.sqlite "$aside"/ &&
+     { [ ! -e statev2.sqlite-wal ] || mv statev2.sqlite-wal "$aside"/; } &&
+     { [ ! -e statev2.sqlite-shm ] || mv statev2.sqlite-shm "$aside"/; } &&
+     cp "$snapshot" statev2.sqlite &&
+     echo "Restored $snapshot. The newer database is in $aside."
    ```
 
+   It stops at the first step that fails, and has worked only if it prints the last line. The
+   snapshot is copied, not moved, so it is still there to restore again.
+
 3. Install the older build, which starts the server on it: `j5 update <stable> --allow-downgrade`.
-   On the Mac, set **Update track → Stable**, or install the stable DMG.
+   On the Mac, install the stable DMG. Do not open the nightly app to change its Update track: it
+   would start on the restored database and migrate it again before it downgrades.
 
 Restore before the older build starts, in that order: an older build must never run against the
 newer database. If the nightly starts again first, it copies and migrates again, which costs only
