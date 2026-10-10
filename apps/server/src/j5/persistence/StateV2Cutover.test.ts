@@ -14,9 +14,9 @@ import * as SqlClient from "effect/sql/SqlClient";
 import { layerTest } from "../../config.ts";
 import { layerConfig } from "../../persistence/Sqlite.ts";
 import { migrationManifest } from "../../persistence/Migrations.ts";
-import { runJ5A2AMigrations } from "../a2a/Migrations.ts";
-import { installPin } from "./test-support/historicalMigrations.ts";
-import { pinMigrationHistory } from "./UpstreamMigrationCompatibility.ts";
+import { migrationEntries as j5MigrationEntries, runJ5A2AMigrations } from "../a2a/Migrations.ts";
+import { migrationSnapshotPath } from "./MigrationSnapshot.ts";
+import { installPin, pinMigrationHistory } from "./test-support/historicalMigrations.ts";
 
 // Upstream copies `state.sqlite` to `statev2.sqlite` once, before persistence starts.
 // J5's compatibility wrapper and lanes must then run against the copy only.
@@ -108,10 +108,16 @@ it.effect("copies state.sqlite first, then upgrades only the copy with every J5 
       assert.deepStrictEqual(NodeFS.readFileSync(sourcePath), original);
       const pinHistory = yield* readHistory().pipe(Effect.provide(atFile(sourcePath)));
       assert.deepStrictEqual(pinHistory, pinMigrationHistory);
-      // The renumbering took its own snapshot of the copy before the first write.
+      // Startup took its own snapshot of the copy before the first write.
+      const path = yield* Path.Path;
       const snapshot = yield* readHistory().pipe(
         Effect.provide(
-          atFile(destinationPath.replace(/\.sqlite$/, ".pre-upstream-renumber.sqlite")),
+          atFile(
+            migrationSnapshotPath(path, destinationPath, {
+              upstream: 55,
+              j5: Math.max(...j5MigrationEntries.map(([id]) => id)),
+            }),
+          ),
         ),
       );
       assert.deepStrictEqual(snapshot, pinMigrationHistory);

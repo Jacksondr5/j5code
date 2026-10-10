@@ -330,32 +330,48 @@ started (build failure), skip the restore and just rebuild at the previous commi
 
 ### Restoring the automatic pre-migration snapshot
 
-Some J5 ledger migrations rewrite data that cannot be rebuilt by hand. The first is the one that re-keys
-the ledger from Squadrons to projects. Before a guarded one runs, the server copies the
-database to `userdata/statev2.pre-j5-<migration>.sqlite`, where `<migration>` is the migration's
-three-digit number, and logs the path, the size and how long it took. It does this on its own at startup, whether or not the update
-script ran. If the copy fails (a full disk, for instance) the server refuses to start and the
-migration does not run; free space and start it again.
+Before a new version runs any migration, upstream's or J5's, the server copies the database to
+`userdata/statev2.pre-migration-u<upstream>-j<j5>.sqlite`, where the two three-digit numbers are
+the newest upstream and J5 ledger migrations the database had recorded, and logs the path, the size
+and how long it took (a few seconds for a 2 GB database). It does this on its own at startup,
+whether or not the update script ran, and only when a migration is pending. If the copy fails (a
+full disk, for instance) the server refuses to start and nothing migrates; free space and start it
+again.
 
-To go back to the state before that migration:
+To go back to the state before those migrations. A person runs this, from a terminal outside J5
+Code; an agent running inside the server being rolled back must not, because the first step stops
+that server and ends the agent partway through. There can be up to three snapshots: `ls -l` shows
+when each was written, and the one to restore is the one written when the version you are leaving
+first started.
 
 ```sh
 systemctl --user stop j5code.service              # 1. stop the server
 cd ~/.j5code/userdata
-mkdir -p ../db-aside
-mv statev2.sqlite statev2.sqlite-wal statev2.sqlite-shm ../db-aside/ 2>/dev/null
-mv statev2.pre-j5-<migration>.sqlite statev2.sqlite  # 2. move the snapshot back
+ls -l statev2.pre-migration-*.sqlite
+snapshot=statev2.pre-migration-u<upstream>-j<j5>.sqlite
+aside=../db-aside-$(date +%Y%m%d-%H%M%S)
+# 2. move the newer database aside and copy the snapshot into its place
+test -f "$snapshot" && mkdir "$aside" &&
+  mv statev2.sqlite "$aside"/ &&
+  { [ ! -e statev2.sqlite-wal ] || mv statev2.sqlite-wal "$aside"/; } &&
+  { [ ! -e statev2.sqlite-shm ] || mv statev2.sqlite-shm "$aside"/; } &&
+  cp "$snapshot" statev2.sqlite &&
+  echo "Restored $snapshot. The newer database is in $aside."
 cd ~/j5code && git checkout <previous-commit>     # 3. run the previous version
 # rebuild as in the rollback steps above, then:
 systemctl --user start j5code.service
 ```
 
-Run the previous version, not the new one: the new one would take a fresh snapshot and migrate
-again. Everything written after the snapshot is lost, as with any restore.
+Step 2 stops at the first command that fails, and has worked only if it prints its last line; do
+not go on to step 3 otherwise. The snapshot is copied, not moved, so it is still there to restore
+again. Run the previous version, not the new one: the new one would take a fresh snapshot and
+migrate again. Everything written after the snapshot is lost, as with any restore.
 
-Nothing deletes these snapshots, and each is a full copy of the database. Delete
-`statev2.pre-j5-*.sqlite` by hand once the new version has proven itself. A file ending in
-`.partial` is a copy that was interrupted; delete it too.
+Each snapshot is a full copy of the database. The server keeps the three most recent and deletes
+older ones when it writes a new one. Snapshots named `statev2.pre-j5-*.sqlite` or
+`statev2.pre-upstream-renumber.sqlite` come from earlier versions and are never deleted: remove
+them by hand. A file ending in `.partial` or `.partial-journal` is a copy that was killed partway;
+the server deletes those, once an hour old, the next time it writes a snapshot.
 
 ### A project shared by several Squadrons
 
@@ -374,7 +390,7 @@ to go, and only the previous version can remove one:
 
 1. **Run the previous version.** Check out and build the commit before this update, as in
    [Rollback](#rollback), and start the service. No restore is needed. The snapshot the failed start
-   wrote (`statev2.pre-j5-<migration>.sqlite`) can stay; the next start replaces it.
+   wrote (`statev2.pre-migration-*.sqlite`) can stay; the next start replaces it.
 2. **Choose the Squadron to remove.** Its agents keep their threads and conversations, but its
    agent-to-agent history (messages, Exchanges, Inbox items) is deleted with it.
 3. **Archive that Squadron's agents and Crews** in the app. The delete below refuses while any is
