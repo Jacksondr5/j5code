@@ -57,6 +57,12 @@ A signal can come from three sources: the platform measured it; the agent declar
 - **No model-written judgment or summary on the Fleet page.** A description of what an agent is doing is what the [catch-up](2026-10-10-catch-up-session.md) summary gives, when asked for.
 - **"Done" is not a fact the platform can measure.** The facts are that a turn ended, a pull request merged, a Playbook run was completed by the agent, or a person settled the thread. Each is shown as what it is.
 
+## Rulings: how far along an agent is
+
+- **A row shows the Playbook step, and the provider's task list where the agent keeps one.** Both are declared by the agent and already recorded: upstream holds the task list as a `todo_list` with steps, emitted by the Codex, Claude, Cursor and OpenCode adapters. An agent with neither shows nothing for this question.
+- **No new tool for an agent to declare a status line.** It is one more thing for every agent to remember, and a line left stale is worse than none.
+- Not checked: whether a task list resets at each turn in each adapter. A task count is how much of the agent's own plan is ticked, and is labelled as tasks so it does not read as how much of the work is finished.
+
 ## Rulings: the Fleet page
 
 - **The middle belongs on the Fleet page.** Its definition already gives each row four questions answered from measurements, and the Playbooks definition adds the step.
