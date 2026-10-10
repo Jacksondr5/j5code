@@ -50,7 +50,7 @@ import { QueuedRunsControl } from "./QueuedRunsControl";
 const environmentId = EnvironmentId.make("remote-queue");
 const threadId = ThreadId.make("queue-thread");
 const peerMessage =
-  "[Cross-agent message from agent:peer in project project-one (One)]\n\nReview this change.\n\nNo reply is required. Use send_message without exchange_id only if a new message is needed.";
+  "[Cross-agent message from agent:peer in project project-one (One)]\n\nReview this change.\n\nNo reply is required. Use j5_send_message without exchange_id only if a new message is needed.";
 const attachment = {
   type: "image",
   id: "image-1",

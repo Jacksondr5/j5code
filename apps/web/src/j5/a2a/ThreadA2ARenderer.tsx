@@ -17,8 +17,16 @@ import { presentParticipantIdentity } from "./ParticipantIdentity";
  */
 export const J5_A2A_DELIVERY_MESSAGE_PREFIX = "message:j5:a2a:delivery:";
 
-const PLAIN_DELIVERY_INSTRUCTION =
-  "No reply is required. Use send_message without exchange_id only if a new message is needed.";
+// J5's tools gained a `j5_` prefix on 2026-10-10 (#508). Stored deliveries and tool calls keep
+// the name they were written with, so everything here that reads the timeline accepts both.
+const SEND_TOOL_NAMES = ["j5_send_message", "send_message"] as const;
+
+const PLAIN_DELIVERY_INSTRUCTIONS = new Set(
+  SEND_TOOL_NAMES.map(
+    (tool) =>
+      `No reply is required. Use ${tool} without exchange_id only if a new message is needed.`,
+  ),
+);
 const CLOSED_DELIVERY_INSTRUCTION =
   "The platform closed this exchange when this reply was sent. No further reply is required.";
 const REPLY_DELIVERY_INSTRUCTION_SUFFIX =
@@ -27,8 +35,12 @@ const HUMAN_DELIVERY_MARKER =
   "\n\nThis person is not watching this chat. They see only what you send back on this exchange.\n\n";
 const SILENCE_DELIVERY_SUFFIX =
   "\n\nThis is a platform-authored delivery signal, not a peer reply.";
-const MACHINE_DELIVERY_INSTRUCTION =
-  "This message came from an automated sender outside any agent session. It cannot receive a reply; act on it directly, and take any question to a person or a peer agent with send_message.";
+const MACHINE_DELIVERY_INSTRUCTIONS = new Set(
+  SEND_TOOL_NAMES.map(
+    (tool) =>
+      `This message came from an automated sender outside any agent session. It cannot receive a reply; act on it directly, and take any question to a person or a peer agent with ${tool}.`,
+  ),
+);
 
 export interface ThreadA2ADeliveryCompositionInput {
   readonly message: ChatMessage;
@@ -98,15 +110,17 @@ function parseKnownInstruction(input: {
   readonly exchange: "expects-reply" | "plain" | "closed";
   readonly exchangeId: string | null;
 } | null {
-  if (input.instruction === PLAIN_DELIVERY_INSTRUCTION) {
+  if (PLAIN_DELIVERY_INSTRUCTIONS.has(input.instruction)) {
     return { exchange: "plain", exchangeId: null };
   }
   if (input.instruction === CLOSED_DELIVERY_INSTRUCTION) {
     return { exchange: "closed", exchangeId: null };
   }
 
-  const replyPrefix = `Reply once with send_message(to="${input.senderId}", exchange_id="`;
-  if (!input.instruction.startsWith(replyPrefix)) return null;
+  const replyPrefix = SEND_TOOL_NAMES.map(
+    (tool) => `Reply once with ${tool}(to="${input.senderId}", exchange_id="`,
+  ).find((prefix) => input.instruction.startsWith(prefix));
+  if (replyPrefix === undefined) return null;
   const exchangeIdAndSuffix = input.instruction.slice(replyPrefix.length);
   const separatorIndex = exchangeIdAndSuffix.indexOf(REPLY_DELIVERY_INSTRUCTION_SUFFIX);
   if (separatorIndex <= 0) return null;
@@ -155,7 +169,7 @@ function parseMachineEnvelope(rawEnvelope: string) {
   if (!header) return null;
   const content = rawEnvelope.slice(header[0].length);
   const divider = content.lastIndexOf("\n\n");
-  if (divider <= 0 || content.slice(divider + 2) !== MACHINE_DELIVERY_INSTRUCTION) return null;
+  if (divider <= 0 || !MACHINE_DELIVERY_INSTRUCTIONS.has(content.slice(divider + 2))) return null;
   return {
     senderId: header[1]!,
     body: content.slice(0, divider),
@@ -517,8 +531,13 @@ function nonEmptyString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value : null;
 }
 
+// Codex reports `t3-code.<tool>` and Claude `mcp__t3-code__<tool>`.
+const SEND_TOOL_CALL_NAMES = new Set<unknown>(
+  SEND_TOOL_NAMES.flatMap((tool) => [`t3-code.${tool}`, `mcp__t3-code__${tool}`]),
+);
+
 function isJ5SendMessageTool(toolName: unknown) {
-  return toolName === "t3-code.send_message" || toolName === "mcp__t3-code__send_message";
+  return SEND_TOOL_CALL_NAMES.has(toolName);
 }
 
 type OutboundExchangeState = "none" | "open" | "closing" | "closed";
