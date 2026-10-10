@@ -23,8 +23,6 @@ export const MIGRATION_SNAPSHOTS_KEPT = 3;
 
 const UPSTREAM_MIGRATIONS_TABLE = "effect_sql_migrations";
 
-const describeCause = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
-
 export class MigrationSnapshotError extends Schema.TaggedError<MigrationSnapshotError>()(
   "MigrationSnapshotError",
   {
@@ -34,7 +32,7 @@ export class MigrationSnapshotError extends Schema.TaggedError<MigrationSnapshot
   },
 ) {
   override get message() {
-    return `Could not snapshot ${this.databasePath} to ${this.snapshotPath} before its pending migrations: ${describeCause(this.cause)}. Nothing has been migrated.`;
+    return `Could not snapshot ${this.databasePath} to ${this.snapshotPath} before its pending migrations. Nothing has been migrated.`;
   }
 }
 
@@ -234,10 +232,9 @@ export const snapshotBeforeMigrations = Effect.fn("snapshotBeforeMigrations")(fu
   // The snapshot that matters exists; a leftover old one is not worth refusing to start over.
   yield* removeOldSnapshots(dbPath, snapshotPath, options.keep ?? MIGRATION_SNAPSHOTS_KEPT).pipe(
     Effect.catch((cause) =>
-      Effect.logWarning("Could not remove old pre-migration snapshots", {
-        databasePath: dbPath,
-        cause: describeCause(cause),
-      }),
+      Effect.logWarning("Could not remove old pre-migration snapshots", cause).pipe(
+        Effect.annotateLogs({ databasePath: dbPath }),
+      ),
     ),
   );
 });
