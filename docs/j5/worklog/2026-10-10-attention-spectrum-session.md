@@ -43,6 +43,11 @@ What already moves an agent, as Jackson listed it:
 - **The middle is where J5 adds what upstream lacks.** Upstream has many tools for managing foreground agents and places for background agents to live, and no feature for an agent the person does not want to talk to and still wants a signal from: which Playbook step it is on, how many Exchanges it has open, whether it died.
 - **J5 also helps the agent.** It can tell an agent where it sits on the spectrum and manage the tools it has accordingly.
 
+## Rulings: snooze, and what comes first
+
+- **Snooze is not the way into the middle.** The agent proposed reading a snoozed agent as a middle agent, since it leaves the sidebar and stays a row on the Fleet page. Jackson: snooze is upstream's and is left alone. A snoozed agent is meant to disappear for a short while and come back. The person's action sends it to the background, and the platform brings it to the foreground when the time is up.
+- **The signals are defined before the middle is.** What sending an agent to the middle means, and when a person wants to, follows from exactly which signals reach the person from an agent there. Whether a person can choose to move an agent into the middle waits on that.
+
 ## Rulings: the Fleet page
 
 - **The middle belongs on the Fleet page.** Its definition already gives each row four questions answered from measurements, and the Playbooks definition adds the step.
