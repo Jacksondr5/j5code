@@ -35,7 +35,8 @@ import {
   type ResolvedCrewLaunchSeat,
 } from "./CrewLaunchService.ts";
 import { planCrewPlaybook, withPersonaSwaps, type CrewPlaybookPlan } from "./crewPlaybookPlan.ts";
-import { crewDeclinedNoticeText } from "./crewGateNotice.ts";
+import { crewDeclinedNoticeText, crewRosterChanges } from "./crewGateNotice.ts";
+import { durationMsBetween, j5AnalyticsRecorder } from "../analytics/recorder.ts";
 import { CrewLaunchReporter } from "./CrewLaunchReporter.ts";
 import { crewSeatShapeProblem } from "./crewLimits.ts";
 import { CREW_PROPOSAL_SESSION } from "./crewSeatIds.ts";
@@ -237,6 +238,32 @@ export const layer = Layer.effect(
     const crews = yield* AgentCrewInstanceService;
     const launcher = yield* CrewLaunchService;
     const reporter = yield* CrewLaunchReporter;
+    const recordAnalytics = yield* j5AnalyticsRecorder;
+    /** `j5.crew.proposal.resolved`: what the person decided, and what they changed first. */
+    const recordResolved = Effect.fn("j5.a2a.crewProposal.recordResolved")(function* (
+      proposal: CrewProposal,
+      approved: ReadonlyArray<CrewProposalSeat> | null,
+    ) {
+      const changes =
+        approved === null ? null : crewRosterChanges(proposal.requestedSeats, approved);
+      yield* recordAnalytics("j5.crew.proposal.resolved", {
+        kind: proposal.kind,
+        decision: approved === null ? "declined" : "approved",
+        requestedSeats: proposal.requestedSeats.length,
+        hasPlaybook: proposal.playbook !== undefined && proposal.playbook !== null,
+        ...durationMsBetween(proposal.createdAt, DateTime.formatIso(yield* DateTime.now)),
+        ...(approved === null || changes === null
+          ? {}
+          : {
+              approvedSeats: approved.length,
+              seatsAdded: changes.added.length,
+              seatsRemoved: changes.removed.length,
+              seatsRenamed: changes.renamed.length,
+              seatsRuntimeChanged: changes.runtimeChanged.length,
+              seatsInstructionsChanged: changes.instructionsChanged.length,
+            }),
+      });
+    });
     const threadManagement = yield* ThreadManagementService;
     const ledger = yield* A2ALedger;
     const agents = yield* makeAgentPersonaLibrary;
@@ -826,6 +853,7 @@ export const layer = Layer.effect(
                 proposalId: proposal.id,
                 status: "resolved",
               });
+            yield* recordResolved(proposal, null);
             return { proposal: declined, instance: null } satisfies CrewProposalOutcome;
           }
           const seats = input.seats ?? proposal.requestedSeats;
@@ -866,6 +894,7 @@ export const layer = Layer.effect(
           // The Captain hears once the seats have started or failed to start, not now: a
           // dispatched brief is intent, and the report says what became of it.
           yield* reporter.watch(proposal.id, launched.seats);
+          yield* recordResolved(proposal, seats);
           return {
             proposal: final ?? proposal,
             instance: launched.instance,

@@ -24,6 +24,7 @@ import { SqlError, UnknownError } from "effect/sql/SqlError";
 import { stringify } from "yaml";
 
 import { ServerConfig } from "../../config.ts";
+import { AnalyticsService } from "../../telemetry/AnalyticsService.ts";
 import {
   OrchestratorDispatchError,
   OrchestratorProjectionError,
@@ -418,6 +419,68 @@ const fixture = Effect.gen(function* () {
     captainModel,
   };
 });
+
+it.effect("reports what the person decided about a roster, and what they changed first", () =>
+  Effect.gen(function* () {
+    const { layer } = yield* fixture;
+    const recorded: Array<Readonly<Record<string, unknown>>> = [];
+    const analytics = Layer.succeed(
+      AnalyticsService,
+      AnalyticsService.of({
+        record: (event, properties = {}) =>
+          Effect.sync(() => void recorded.push({ event, ...properties })),
+        flush: Effect.void,
+      }),
+    );
+    yield* Effect.gen(function* () {
+      const gate = withPreview(yield* CrewProposalService);
+      const seat = (name: string) => ({
+        workspace: { type: "shared" as const },
+        seat: name,
+        agentId: name,
+        reason: `Does the ${name} work`,
+      });
+      const edited = yield* gate.propose({
+        requestKey: "analytics-edited",
+        captain,
+        displayName: "Edited Crew",
+        brief: "Fix the flaky login test.",
+        seats: [seat("builder"), seat("critic")],
+      });
+      // The person drops the critic and adds a security pass.
+      yield* gate.resolve({
+        proposalId: edited.proposal.id,
+        decision: "approve",
+        seats: [seat("builder"), seat("sentry")],
+      });
+      const refused = yield* gate.propose({
+        requestKey: "analytics-declined",
+        captain,
+        displayName: "Declined Crew",
+        brief: "Rewrite everything.",
+        seats: [seat("builder")],
+      });
+      yield* gate.resolve({ proposalId: refused.proposal.id, decision: "decline" });
+    }).pipe(Effect.provide(layer.pipe(Layer.provide(analytics))));
+
+    const resolved = { event: "j5.crew.proposal.resolved", kind: "roster", hasPlaybook: false };
+    assert.deepStrictEqual(recorded, [
+      {
+        ...resolved,
+        decision: "approved",
+        requestedSeats: 2,
+        durationMs: 0,
+        approvedSeats: 2,
+        seatsAdded: 1,
+        seatsRemoved: 1,
+        seatsRenamed: 0,
+        seatsRuntimeChanged: 0,
+        seatsInstructionsChanged: 0,
+      },
+      { ...resolved, decision: "declined", requestedSeats: 1, durationMs: 0 },
+    ]);
+  }),
+);
 
 it.effect(
   "holds a roster until the human approves, honours human-added seats, and hands the launch to the report",

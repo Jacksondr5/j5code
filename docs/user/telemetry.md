@@ -7,7 +7,8 @@ reported with who asked for it (you, an agent, or the server itself), whether a 
 started it, and whether the thread is a seat in a Crew. When an ask between participants ends, the
 event says how it ended, what kind of participant was on each side, its urgency, and how long it
 was open. A playbook run reports its step count when it starts, and the step it reached when it
-completes or is cancelled.
+completes or is cancelled. A Crew reports the number of seats asked for, approved and changed when
+you decide on its roster, and how many seats started when it launches.
 
 Events do not include prompts, responses, file contents, authentication tokens, conversation IDs,
 raw provider events, or child-agent output. Child-agent token use is excluded from the totals.

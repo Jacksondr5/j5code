@@ -32,6 +32,7 @@ import {
   CrewStepAlreadyOwnedError,
   type AgentCrewInstance,
 } from "./AgentCrewInstanceService.ts";
+import { j5AnalyticsRecorder } from "../analytics/recorder.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
 import { SpawnCompositionService } from "./SpawnCompositionService.ts";
 import {
@@ -256,6 +257,7 @@ export const layer = Layer.effect(
     const threadManagement = yield* ThreadManagementService;
     const composition = yield* SpawnCompositionService;
     const crews = yield* AgentCrewInstanceService;
+    const recordAnalytics = yield* j5AnalyticsRecorder;
     const registry = yield* ProviderRegistry;
     const agents = yield* makeAgentPersonaLibrary;
     const spawnWorkspace = yield* SpawnWorkspaceService;
@@ -703,6 +705,7 @@ export const layer = Layer.effect(
       planned: ReadonlyArray<Planned>,
       brief: string,
       playbook: CrewLaunchPlaybook | null,
+      addition: boolean,
     ) {
       const spawned = yield* spawnSeats(captain, planned);
       const notCreated = spawned.outcomes.flatMap((outcome) =>
@@ -730,6 +733,20 @@ export const layer = Layer.effect(
         return outcome.kind === "created" && briefFailure !== undefined
           ? { seatName: outcome.seatName, kind: "not_started", detail: briefFailure }
           : outcome;
+      });
+      const outcomes = (kind: CrewSeatLaunchOutcome["kind"]) =>
+        seats.filter((seat) => seat.kind === kind).length;
+      yield* recordAnalytics("j5.crew.launched", {
+        addition,
+        seats: planned.length,
+        personaSeats: planned.filter((member) => member.assignment !== null).length,
+        worktreeSeats: planned.filter((member) => member.workspace.type === "worktree").length,
+        fullAccessSeats: planned.filter((member) => member.runtimeMode === "full-access").length,
+        models: new Set(planned.map((member) => member.modelSelection.model)).size,
+        hasPlaybook: playbook !== null,
+        created: outcomes("created"),
+        notCreated: outcomes("not_created"),
+        notStarted: outcomes("not_started"),
       });
       return { instance: current, seats } satisfies CrewLaunchResult;
     });
@@ -792,6 +809,7 @@ export const layer = Layer.effect(
           planned,
           input.brief,
           input.playbook ?? null,
+          false,
         );
       }).pipe((launch) =>
         // One unit step from the record through the briefs, so a unit archive waits for every
@@ -883,6 +901,7 @@ export const layer = Layer.effect(
           planned,
           input.brief ?? reserved.brief,
           input.playbook ?? null,
+          true,
         );
       }).pipe((addition) => crews.serialize(input.instance.id, addition));
 
