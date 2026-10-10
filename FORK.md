@@ -71,7 +71,7 @@ These files exist upstream, but J5 owns its copy outright and they are not integ
 
 ### Replaced wholesale
 
-`apps/marketing` is the one directory where the rule above is deliberately broken. Upstream's T3 Code marketing site carries nothing the fork wants, so J5 replaced its contents with the j5.codes site (Astro, same package name and root scripts, upstream's fonts and harness marks kept). On a pin advance take ours for the whole directory; do not merge upstream's marketing changes in. The site reads the current pin from this file at build time (`apps/marketing/src/lib/forkFacts.ts`): the first line starting `Current pin:` or `Current candidate pin:` followed by a backticked SHA, with an optional `selected`/`frozen` date on the same line. Keep that line in one of those shapes or update the parser with it; the site omits the row rather than failing when it cannot parse.
+`apps/marketing` is the one directory where the rule above is deliberately broken. Upstream's T3 Code marketing site carries nothing the fork wants, so J5 replaced its contents with the j5.codes site (Astro, same package name and root scripts, upstream's fonts and harness marks kept). On a pin advance take ours for the whole directory; do not merge upstream's marketing changes in. The site reads the pin of the latest stable release from this file at build time (`apps/marketing/src/lib/forkFacts.ts`): the first line of the shape ``Released pin: `<sha>`, from `<upstream branch>` (in J5 Code <version>, frozen <date>).`` It does not read `Current pin:`, because `j5/main` runs ahead of the stable release. The branch on that line also decides what the site says J5 tracks: `t3code/codex-turn-mapping` and `main` are the two it knows. Keep the line in that shape or update the parser with it; the site omits the row and the tracking claim rather than failing when it cannot parse.
 
 ### Sanctioned appended integration cases
 
@@ -410,6 +410,10 @@ migrations after upstream migrations.
 ## Pin and upstream advance runbook
 
 Current pin: `29980a31409234b676f97bd477c4e46fdb61a929`, from upstream `main` (frozen 2026-10-08). The previous pin was `67a2be0fdbee7afb64b691f147ed286a108c706b`, from upstream's V2 branch `t3code/codex-turn-mapping`.
+
+Released pin: `67a2be0fdbee7afb64b691f147ed286a108c706b`, from `t3code/codex-turn-mapping` (in J5 Code 0.0.48, frozen 2026-09-24).
+
+The released pin is the one the latest stable release is built on, and it is what j5.codes shows. It changes in the pull request that brings a stable release's version bump into `j5/main`, never in the advance itself.
 
 Upstream merged V2 into `main` as a squash (pingdotgg/t3code#2829), so the previous pin is not an ancestor of this one. From this pin on, `j5/main` descends from upstream `main`, which upstream does not rewrite, so the next advance is an ordinary merge.
 

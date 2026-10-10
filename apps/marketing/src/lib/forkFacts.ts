@@ -2,10 +2,14 @@ import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
 export interface ForkFacts {
-  /** Short SHA of the upstream commit the fork is pinned to. */
+  /** Short SHA of the upstream commit the latest stable release is built on. */
   pin: string;
-  /** ISO date the pin was selected or frozen, from FORK.md. */
-  pinSelectedOn: string | undefined;
+  /** ISO date that pin was frozen. */
+  pinFrozenOn: string;
+  /** The stable J5 Code release that carries the pin, such as "0.0.48". */
+  releaseVersion: string;
+  /** The upstream branch the pin was taken from, such as "main". */
+  upstreamBranch: string;
 }
 
 /**
@@ -27,25 +31,30 @@ function findForkFile(): string | undefined {
 }
 
 /**
- * Reads the fork's upstream pin from FORK.md at build time so the Foundation
- * section never carries a hand-typed commit.
- * Returns undefined when the file or the sentence it depends on is missing, and
- * the page then omits the line rather than showing a stale value.
+ * Parses FORK.md's `Released pin:` line, which describes the latest stable
+ * release rather than `j5/main`:
+ *   Released pin: `<sha>`, from `<branch>` (in J5 Code <version>, frozen <date>).
+ * Returns undefined unless the whole line parses, so a half-edited line shows
+ * nothing rather than a mix of old and new facts.
+ */
+export function parseReleasedPin(text: string): ForkFacts | undefined {
+  const line =
+    /^Released pin: `([0-9a-f]{7,40})`, from (?:upstream )?`?([^\s`,]+)`? \(in J5 Code (\d+\.\d+\.\d+), frozen (\d{4}-\d{2}-\d{2})\)/m.exec(
+      text,
+    );
+  const [, pin, upstreamBranch, releaseVersion, pinFrozenOn] = line ?? [];
+  if (!pin || !upstreamBranch || !releaseVersion || !pinFrozenOn) return undefined;
+  return { pin: pin.slice(0, 7), pinFrozenOn, releaseVersion, upstreamBranch };
+}
+
+/**
+ * Reads the released pin from FORK.md at build time so the Foundation section
+ * never carries a hand-typed commit.
+ * Returns undefined when the file or the line it depends on is missing, and
+ * the page then omits the row rather than showing a stale value.
  */
 export function readForkFacts(): ForkFacts | undefined {
   const file = findForkFile();
   if (!file) return undefined;
-
-  // FORK.md has written this line two ways so far:
-  //   Current pin: `<sha>` (selected 2026-09-05; ...)
-  //   Current candidate pin: `<sha>`, from `<branch>` (frozen 2026-09-24).
-  const text = NodeFS.readFileSync(file, "utf8");
-  const pin = /^Current (?:candidate )?pin: `([0-9a-f]{7,40})`([^\n]*)/m.exec(text);
-  if (!pin?.[1]) return undefined;
-  const date = /(?:selected|frozen) (\d{4}-\d{2}-\d{2})/.exec(pin[2] ?? "");
-
-  return {
-    pin: pin[1].slice(0, 7),
-    pinSelectedOn: date?.[1],
-  };
+  return parseReleasedPin(NodeFS.readFileSync(file, "utf8"));
 }

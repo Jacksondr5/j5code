@@ -80,6 +80,8 @@ For a public release:
 3. After CI and the signed build pass, run `J5 Release` with that build's numeric run ID.
 4. After publication, bring the version bump into `j5/main` with a PR so `j5/main` never reports an
    older version than the latest release.
+5. In that PR, update the `Released pin:` line in `FORK.md` to the release's version and the
+   upstream pin, branch and frozen date it was built on. j5.codes reads that line.
 
 For a preview, to test installs and updates from a branch before it merges:
 
