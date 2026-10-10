@@ -188,8 +188,9 @@ the time to repeat step 2.
 Run by hand with a build's run ID, its resolve job reads the version from the build commit's four
 manifests, which must agree. Called by `J5 Nightly`, it is given the commit and the version, stamps
 the version before building the CLI archives, and publishes the desktop build made earlier in the
-same run. Either way the version must be stable, preview or nightly, and at least 0.0.44 (0.0.43
-and earlier were npm releases). If a release for that
+same run. A run by hand publishes only a stable or preview version and refuses a nightly one,
+whatever the branch commits: a nightly comes only from `J5 Nightly`, and a call publishes nothing
+else. The version must be at least 0.0.44 (0.0.43 and earlier were npm releases). If a release for that
 version already exists at a different commit, the run fails: bump the version and build again. If
 it is already published from the same commit with `SHA256SUMS` attached, the run does nothing. The
 workflow uses GitHub-hosted runners and does not deploy relay or Vercel services.

@@ -20,8 +20,9 @@ name: J5 Release
 #
 # A version `<x.y.z>-nightly.<yyyymmdd>.<n>` publishes a nightly: also a
 # pre-release that never becomes "latest", but with `nightly-mac.yml`, the feed
-# desktop apps on the nightly update track follow. Nightlies come from J5
-# Nightly, which calls this workflow with a commit and a version. The version is
+# desktop apps on the nightly update track follow. Nightlies come only from J5
+# Nightly, which calls this workflow with a commit and a version; a manual run
+# refuses a nightly version, and a call refuses any other. The version is
 # then stamped into the manifests at build time instead of being read from them,
 # and the desktop build is the one J5 Nightly made earlier in the same run.
 #
@@ -127,6 +128,16 @@ jobs:
               : null;
             if (channel === null) {
               throw new Error(`This workflow requires a stable (x.y.z), preview (x.y.z-preview.<date>.<n>) or nightly (x.y.z-nightly.<date>.<n>) version; found ${version}.`);
+            }
+            // A nightly reaches every install on the nightly track, so it comes only from J5
+            // Nightly, which builds j5/main. A manual run never publishes one, whatever version
+            // the branch commits.
+            if (!stamp && channel === 'nightly') {
+              throw new Error(`Nightlies are published by J5 Nightly, not by a manual J5 Release; found ${version}.`);
+            }
+            // Nothing calls this workflow with a stable or preview version until promotion exists.
+            if (stamp && channel !== 'nightly') {
+              throw new Error(`A calling workflow can publish only a nightly; found ${version}.`);
             }
             // Release archives replace the npm package from 0.0.44 on; an older
             // version number would be offered as a downgrade to every installed
