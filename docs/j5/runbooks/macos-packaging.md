@@ -155,6 +155,13 @@ The server keeps that database. Before a new version runs any migration it copie
 and J5 migrations the database had recorded, and keeps the three most recent copies. Everything
 written after the copy is lost by restoring it.
 
+The first snapshot a machine takes when it moves off 0.0.48 (`statev2.pre-migration-u055-j029.sqlite`
+on a machine that was up to date; the numbers depend on the machine) is the only copy from before
+the ledger was re-keyed to projects. The cap deletes it at the third later update that migrates, so
+copy it somewhere else if you want to keep it. The older `statev2.pre-j5-031.sqlite` and
+`statev2.pre-upstream-renumber.sqlite` files, from earlier builds, are never deleted by the cap;
+remove them by hand when you no longer want them.
+
 **A person runs this, from a terminal outside J5 Code. An agent running inside the J5 Code server
 being rolled back must not:** step 1 stops that server, which ends the agent partway through and
 leaves the database moved aside with nothing in its place. An agent asked to roll back its own
