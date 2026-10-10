@@ -75,7 +75,7 @@ Read from the tree at `ff34d7067e`. The counts come from reading the server only
 
 ### What a guest sees
 
-- **Inbox.** A guest has one, holding only asks addressed to them by name from threads they can reach. An ask sent to everyone on the server goes to members only.
+- **Inbox.** A guest has none. An agent asks a guest in the conversation (see shared conversations below). An earlier ruling in the session gave guests an inbox of asks addressed to them by name; it was withdrawn.
 - **Fleet page.** Not shown to guests at first; to be considered for a second version.
 - **Personas and Playbooks.** Not shown. They are only useful to someone who can spawn agents, which a guest cannot.
 - **Memos.** Not built. When they are, a guest sees the Memos of agents in threads they can reach.
@@ -101,11 +101,15 @@ In progress.
 - **Initials on a coloured circle are the fallback**, for a person with no username and when GitHub cannot be reached.
 - **A guest can enter someone else's username.** That is accepted: their name is still the one the sharer gave them.
 
-- **Members outrank guests, and the agent is told why.** The note the agent gets when a thread becomes shared says that members own the server it runs on, that guests take part at a member's invitation, and that a guest is not fully trusted unless a member says so. Members decide what a guest may tell the agent to do. The agent works with a guest normally; when a guest's request conflicts with what a member said, or goes well beyond the work in the thread, it holds off and asks a member through the inbox.
+- **Members outrank guests, and the agent is told why.** The note the agent gets when a thread becomes shared says that members own the server it runs on, that guests take part at a member's invitation, and that a guest is not fully trusted unless a member says so. Members decide what a guest may tell the agent to do. The agent works with a guest normally; when a guest's request conflicts with what a member said, or goes well beyond the work in the thread, it holds off and asks a member in the conversation, by name, where the guest can see it.
 - **The sharer can say what a guest is here for.** The share dialog has an optional line for it, and the line goes into the note the agent receives. A member can also widen or narrow a guest's standing at any time by saying so in the thread.
 - **This is guidance to the agent, not enforcement.** An agent reads every message as text, so the platform cannot make it rank one person over another. Members of one server are equals: a disagreement between them is an ordinary change of mind. There is no per-thread owner.
 
-Still open: how an agent reaches one particular person, what happens when two people send or steer at once, and what a newly added person sees of the conversation from before they joined.
+- **On a thread with a guest collaborator, an agent asks people in the conversation.** Its tool for sending an ask to a person's inbox is refused there, with a message telling it to ask in the thread and name the person it wants. Jackson: a private message to one person is counter-productive when everyone is in the chat, and sending it to several people is a messy thing to build. Everyone sees the question and the answer.
+- **What that gives up.** A person who is not watching learns of the question only from the thread's ordinary signals, and nothing tracks an unanswered question the way the inbox does. How a shared thread gets a person's attention is left to the attention spectrum session.
+- **Parked for the hosted-server session:** what an ask means on a server with several members, where every thread can be written to by all of them. The rule above is scoped to threads with a guest collaborator so that it does not switch the inbox off across such a server.
+
+Still open: what happens when two people send or steer at once, and what a newly added person sees of the conversation from before they joined.
 
 ## Not verified
 
