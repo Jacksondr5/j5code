@@ -30,6 +30,7 @@ interface RecordedBatchRequest {
         readonly serverAppVersion?: string;
         readonly serverMode?: string;
         readonly t3CodeVersion?: string;
+        readonly telemetryTag?: string;
       };
     }>;
   } | null;
@@ -46,6 +47,7 @@ interface RecordedBatchBody {
       readonly serverAppVersion?: string;
       readonly serverMode?: string;
       readonly t3CodeVersion?: string;
+      readonly telemetryTag?: string;
     };
   }>;
 }
@@ -144,6 +146,7 @@ it.layer(NodeServices.layer)("AnalyticsService test", (it) => {
           T3CODE_POSTHOG_KEY: "phc_test_key",
           T3CODE_POSTHOG_HOST: "http://localhost",
           T3CODE_TELEMETRY_FLUSH_BATCH_SIZE: 20,
+          J5CODE_TELEMETRY_TAG: " verify-run-42 ",
         }),
       );
       const layerBatchServer = HttpServer.serve(
@@ -226,6 +229,13 @@ it.layer(NodeServices.layer)("AnalyticsService test", (it) => {
               event.properties.serverAppVersion === event.properties.t3CodeVersion &&
               event.properties.serverMode === "web",
           ),
+        ),
+        true,
+      );
+      // J5: the tester's tag rides on every event.
+      assert.equal(
+        batchRequests.every((request) =>
+          request.body.batch.every((event) => event.properties?.telemetryTag === "verify-run-42"),
         ),
         true,
       );
