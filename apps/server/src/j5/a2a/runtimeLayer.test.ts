@@ -23,6 +23,7 @@ import * as SecretRequests from "../../secrets/SecretRequests.ts";
 import { EnvironmentAuth } from "../../auth/EnvironmentAuth.ts";
 import { ServerEnvironment } from "../../environment/ServerEnvironment.ts";
 import * as ServerConfig from "../../config.ts";
+import { AnalyticsService } from "../../telemetry/AnalyticsService.ts";
 import { ProjectService } from "../../project/ProjectService.ts";
 import { ProjectSetupScriptRunner } from "../../project/ProjectSetupScriptRunner.ts";
 import { ProviderRegistry } from "../../provider/ProviderRegistry.ts";
@@ -105,6 +106,7 @@ const measureNestedRuntimeBuilds = (nested: "http" | "mcp") =>
           Layer.provide(Layer.mock(OrchestratorV2)({})),
           Layer.provide(Layer.mock(EffectOutboxV2)({ listByCommandId: () => Effect.succeed([]) })),
           Layer.provide(archiveDependencies),
+          Layer.provide(AnalyticsService.layerTest),
           Layer.provide(Layer.mock(ProjectService)({})),
           Layer.provide(Layer.mock(GitWorkflowService)({})),
           Layer.provide(Layer.mock(EnvironmentAuth)({})),
@@ -235,6 +237,7 @@ it.effect("shares one runtime and outbox across the production HTTP and MCP regi
               ),
             ),
             Layer.provide(archiveDependencies),
+            Layer.provide(AnalyticsService.layerTest),
             Layer.provide(
               ServerConfig.layerTest(process.cwd(), {
                 prefix: "j5-a2a-production-runtime-",
