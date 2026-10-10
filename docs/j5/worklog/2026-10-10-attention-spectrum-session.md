@@ -48,6 +48,15 @@ What already moves an agent, as Jackson listed it:
 - **Snooze is not the way into the middle.** The agent proposed reading a snoozed agent as a middle agent, since it leaves the sidebar and stays a row on the Fleet page. Jackson: snooze is upstream's and is left alone. A snoozed agent is meant to disappear for a short while and come back. The person's action sends it to the background, and the platform brings it to the foreground when the time is up.
 - **The signals are defined before the middle is.** What sending an agent to the middle means, and when a person wants to, follows from exactly which signals reach the person from an agent there. Whether a person can choose to move an agent into the middle waits on that.
 
+## Rulings: what counts as a signal
+
+A signal can come from three sources: the platform measured it; the agent declared it through a tool and the platform recorded the declaration, as with a Playbook step; or the platform inferred it.
+
+- **Signals are measured or declared, never inferred.** Jackson: the Fleet page is left with data-based signals.
+- **Where an inference is tempting, the row shows the fact beneath it.** "Stalled" is how long the current command has run plus a guess about whether that is bad; "looping" is how many times in a row a run failed plus the same guess. The fact is shown and the person judges.
+- **No model-written judgment or summary on the Fleet page.** A description of what an agent is doing is what the [catch-up](2026-10-10-catch-up-session.md) summary gives, when asked for.
+- **"Done" is not a fact the platform can measure.** The facts are that a turn ended, a pull request merged, a Playbook run was completed by the agent, or a person settled the thread. Each is shown as what it is.
+
 ## Rulings: the Fleet page
 
 - **The middle belongs on the Fleet page.** Its definition already gives each row four questions answered from measurements, and the Playbooks definition adds the step.
