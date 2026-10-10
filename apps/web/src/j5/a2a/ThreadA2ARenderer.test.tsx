@@ -8,9 +8,7 @@ import {
   J5_A2A_DELIVERY_MESSAGE_PREFIX,
   formatThreadA2AQueuedDelivery,
   isThreadA2ADeliveryMessage,
-  presentThreadA2AOutboundTool,
   presentThreadA2ADelivery,
-  renderThreadA2AOutboundTool,
   renderThreadA2ADelivery,
   ThreadA2ADeliveryRenderer,
 } from "./ThreadA2ARenderer";
@@ -474,111 +472,6 @@ describe("ThreadA2ADeliveryRenderer", () => {
     expect(formatTimeSinceSent(sentAt, Date.parse(sentAt) + 3 * 60 * 60_000)).toBe("3h");
     expect(formatTimeSinceSent(sentAt, Date.parse(sentAt) + 2 * 24 * 60 * 60_000)).toBe("2d");
   });
-
-  it("renders an accepted, completed J5 send as an awaiting-reply card", () => {
-    const tool = {
-      id: "tool:send-open",
-      createdAt: CREATED_AT,
-      toolLifecycleStatus: "completed",
-      structuredPayload: {
-        type: "dynamic_tool",
-        toolName: "t3-code.j5_send_message",
-        input: { to: "agent:receiver", message: "Please check the deployment." },
-        output: {
-          messageId: "message:j5:a2a:send-open",
-          exchangeId: "exchange:send-open",
-          exchangeState: "open",
-          joinedExistingExchange: false,
-          durableAtSeq: 1,
-        },
-      },
-    };
-    const presentation = presentThreadA2AOutboundTool(tool);
-    const markup = renderToStaticMarkup(renderThreadA2AOutboundTool(tool) ?? <p>generic</p>);
-
-    expect(presentation).toMatchObject({
-      kind: "sent",
-      recipientId: "agent:receiver",
-      body: "Please check the deployment.",
-      exchangeId: "exchange:send-open",
-      exchangeState: "open",
-      isReply: false,
-    });
-    expect(markup).toContain('data-j5-a2a-renderer="sent"');
-    expect(markup).toContain("To");
-    expect(markup).toContain("agent:receiver");
-    expect(markup).toContain("Awaiting reply");
-    expect(markup).not.toContain("exchange:send-open");
-  });
-
-  it("renders an accepted closed exchange reply with the neutral Reply chip", () => {
-    const tool = {
-      id: "tool:reply-closed",
-      createdAt: CREATED_AT,
-      toolLifecycleStatus: "completed",
-      structuredPayload: {
-        type: "dynamic_tool",
-        toolName: "mcp__t3-code__j5_send_message",
-        input: {
-          to: "agent:sender",
-          message: "Deployment verified.",
-          exchange_id: "exchange:ask",
-        },
-        output: {
-          messageId: "message:j5:a2a:reply-closed",
-          exchangeId: "exchange:ask",
-          exchangeState: "closed",
-          joinedExistingExchange: false,
-          durableAtSeq: 2,
-        },
-      },
-    };
-    const markup = renderToStaticMarkup(renderThreadA2AOutboundTool(tool) ?? <p>generic</p>);
-
-    expect(markup).toContain('data-j5-a2a-renderer="sent"');
-    expect(markup).toContain(">Reply<");
-    expect(markup).not.toContain("Awaiting reply");
-  });
-
-  it("leaves a non-send dynamic tool untouched by the outbound delegate", () => {
-    const tool = {
-      id: "tool:list-participants",
-      createdAt: CREATED_AT,
-      toolLifecycleStatus: "completed",
-      structuredPayload: {
-        type: "dynamic_tool",
-        toolName: "t3-code.j5_list_participants",
-        input: {},
-        output: {},
-      },
-    };
-    const rendered = renderThreadA2AOutboundTool(tool);
-    const markup = renderToStaticMarkup(rendered ?? <p data-generic-work-row="true">generic</p>);
-
-    expect(rendered).toBeNull();
-    expect(markup).toContain('data-generic-work-row="true"');
-    expect(markup).not.toContain("data-j5-a2a-renderer");
-  });
-
-  it("leaves a malformed send tool untouched rather than hiding or guessing", () => {
-    const tool = {
-      id: "tool:send-malformed",
-      createdAt: CREATED_AT,
-      toolLifecycleStatus: "completed",
-      structuredPayload: {
-        type: "dynamic_tool",
-        toolName: "t3-code.j5_send_message",
-        input: { to: "agent:receiver", message: "Could be a send." },
-        output: { messageId: "message:j5:a2a:malformed", exchangeState: "open" },
-      },
-    };
-    const rendered = renderThreadA2AOutboundTool(tool);
-    const markup = renderToStaticMarkup(rendered ?? <p data-generic-work-row="true">generic</p>);
-
-    expect(rendered).toBeNull();
-    expect(markup).toContain('data-generic-work-row="true"');
-    expect(markup).not.toContain("data-j5-a2a-renderer");
-  });
 });
 
 const machineInstruction =
@@ -686,42 +579,9 @@ describe("envelope headers across formats", () => {
 });
 
 // J5's tools gained a `j5_` prefix (#508). Threads recorded before that keep the old name in
-// their tool calls and in the delivery text, and must still render as cards.
+// the delivery text, and must still render as cards.
 describe("history recorded before the j5_ prefix", () => {
   const withOldName = (text: string) => text.replaceAll("j5_send_message", "send_message");
-
-  it.each(["t3-code.send_message", "mcp__t3-code__send_message"])(
-    "renders a recorded %s call as the outbound card",
-    (toolName) => {
-      const tool = {
-        id: "tool:send-old-name",
-        createdAt: CREATED_AT,
-        toolLifecycleStatus: "completed",
-        structuredPayload: {
-          type: "dynamic_tool",
-          toolName,
-          input: { to: "agent:receiver", message: "Please check the deployment." },
-          output: {
-            messageId: "message:j5:a2a:send-old-name",
-            exchangeId: "exchange:send-old-name",
-            exchangeState: "open",
-            joinedExistingExchange: false,
-            durableAtSeq: 1,
-          },
-        },
-      };
-
-      expect(presentThreadA2AOutboundTool(tool)).toMatchObject({
-        kind: "sent",
-        recipientId: "agent:receiver",
-        body: "Please check the deployment.",
-        exchangeState: "open",
-      });
-      expect(renderToStaticMarkup(renderThreadA2AOutboundTool(tool) ?? <p>generic</p>)).toContain(
-        'data-j5-a2a-renderer="sent"',
-      );
-    },
-  );
 
   it("reads a stored ask, plain send and automation delivery that name send_message", () => {
     const present = (text: string) =>
