@@ -4,7 +4,10 @@ import {
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   CLIENT_GUARDED_RPC_SCOPES,
+  J5_AGENT_PERSONA_WS_METHODS,
   J5_ARTIFACT_WS_METHODS,
+  J5_SKILL_CATALOG_WS_METHODS,
+  J5_SKILL_LINK_WS_METHODS,
   ProjectId,
   RuntimeRequestId,
   ThreadId,
@@ -45,6 +48,19 @@ const tested = [
 ] as const;
 type Tested = (typeof tested)[number];
 type Untested = Exclude<keyof typeof RpcAuthorization.RPC_REQUIRED_SCOPES, Tested>;
+/**
+ * Methods the server requires operate scope for that back queries. The client guard wraps
+ * commands only, so these stay out of it and the server alone refuses them.
+ */
+const UNGUARDED_QUERIES = [
+  J5_AGENT_PERSONA_WS_METHODS.listAgentPersonaImportFiles,
+  J5_AGENT_PERSONA_WS_METHODS.readAgentPersonaImportFiles,
+  J5_SKILL_CATALOG_WS_METHODS.getSkillCatalogStatus,
+  J5_SKILL_LINK_WS_METHODS.preview,
+  J5_SKILL_LINK_WS_METHODS.list,
+  J5_SKILL_LINK_WS_METHODS.inspect,
+  J5_SKILL_LINK_WS_METHODS.deletePreview,
+] as const satisfies ReadonlyArray<keyof typeof J5_RPC_SCOPES>;
 const group = WsRpcGroup.omit(
   ...[...WsRpcGroup.requests.keys()].filter(
     (tag): tag is Untested => !(tested as ReadonlyArray<string>).includes(tag),
@@ -215,78 +231,85 @@ const outcome = <A, E extends { readonly _tag: string }>(call: Effect.Effect<A, 
     }),
   );
 
-/** One valid call of each method, for the scope checks. */
-const callEach = (client: Effect.Success<ReturnType<typeof clientFor>>["client"]) => ({
-  [ACTIONS.previewCrewProposal]: outcome(
-    client[ACTIONS.previewCrewProposal]({ proposalId: "proposal:1" }),
-  ),
-  [ACTIONS.resolveCrewProposal]: outcome(
-    client[ACTIONS.resolveCrewProposal]({
-      proposalId: "proposal:1",
-      decision: "decline",
-    }),
-  ),
-  [ACTIONS.stopCrew]: outcome(client[ACTIONS.stopCrew]({ crewInstanceId: "crew:1" })),
-  [ACTIONS.archiveCrew]: outcome(client[ACTIONS.archiveCrew]({ crewInstanceId: "crew:1" })),
-  [ACTIONS.respondCrewRuntimeRequest]: outcome(
-    client[ACTIONS.respondCrewRuntimeRequest]({
-      threadId,
-      requestId,
-      decision: "accept",
-    }),
-  ),
-  [ACTIONS.answerHumanExchange]: outcome(
-    client[ACTIONS.answerHumanExchange]({
-      ...answer,
-      exchangeId: "ask:1",
-    }),
-  ),
-  [ACTIONS.issuePeerCredential]: outcome(
-    client[ACTIONS.issuePeerCredential]({
-      environmentId: "environment-home",
-    }),
-  ),
-  [ACTIONS.addPeer]: outcome(
-    client[ACTIONS.addPeer]({
-      origin: "https://dark.example",
-      credential: "token",
-    }),
-  ),
-  [ACTIONS.removePeer]: outcome(client[ACTIONS.removePeer]({ environmentId: "environment-home" })),
-  [ACTIONS.listPeerAddresses]: outcome(client[ACTIONS.listPeerAddresses]({})),
-  [ACTIONS.probePeer]: outcome(client[ACTIONS.probePeer]({ origin: "https://vm.example:3773" })),
-  [J5_ARTIFACT_WS_METHODS.deleteArtifact]: outcome(
-    client[J5_ARTIFACT_WS_METHODS.deleteArtifact]({
-      projectId,
-      path: "plan.md",
-    }),
-  ),
-  [J5_PLAYBOOK_WS_METHODS.deletePlaybook]: outcome(
-    client[J5_PLAYBOOK_WS_METHODS.deletePlaybook]({
-      projectId,
-      name: "release",
-    }),
-  ),
-  [J5_PLAYBOOK_WS_METHODS.renamePlaybook]: outcome(
-    client[J5_PLAYBOOK_WS_METHODS.renamePlaybook]({
-      projectId,
-      name: "release",
-      title: "Release",
-    }),
-  ),
-});
+/** One valid call of each method, for the scope checks. A method missing here is a type error. */
+const callEach = (client: Effect.Success<ReturnType<typeof clientFor>>["client"]) =>
+  ({
+    [ACTIONS.previewCrewProposal]: outcome(
+      client[ACTIONS.previewCrewProposal]({ proposalId: "proposal:1" }),
+    ),
+    [ACTIONS.resolveCrewProposal]: outcome(
+      client[ACTIONS.resolveCrewProposal]({
+        proposalId: "proposal:1",
+        decision: "decline",
+      }),
+    ),
+    [ACTIONS.stopCrew]: outcome(client[ACTIONS.stopCrew]({ crewInstanceId: "crew:1" })),
+    [ACTIONS.archiveCrew]: outcome(client[ACTIONS.archiveCrew]({ crewInstanceId: "crew:1" })),
+    [ACTIONS.respondCrewRuntimeRequest]: outcome(
+      client[ACTIONS.respondCrewRuntimeRequest]({
+        threadId,
+        requestId,
+        decision: "accept",
+      }),
+    ),
+    [ACTIONS.answerHumanExchange]: outcome(
+      client[ACTIONS.answerHumanExchange]({
+        ...answer,
+        exchangeId: "ask:1",
+      }),
+    ),
+    [ACTIONS.issuePeerCredential]: outcome(
+      client[ACTIONS.issuePeerCredential]({
+        environmentId: "environment-home",
+      }),
+    ),
+    [ACTIONS.addPeer]: outcome(
+      client[ACTIONS.addPeer]({
+        origin: "https://dark.example",
+        credential: "token",
+      }),
+    ),
+    [ACTIONS.removePeer]: outcome(
+      client[ACTIONS.removePeer]({ environmentId: "environment-home" }),
+    ),
+    [ACTIONS.listPeerAddresses]: outcome(client[ACTIONS.listPeerAddresses]({})),
+    [ACTIONS.probePeer]: outcome(client[ACTIONS.probePeer]({ origin: "https://vm.example:3773" })),
+    [J5_ARTIFACT_WS_METHODS.deleteArtifact]: outcome(
+      client[J5_ARTIFACT_WS_METHODS.deleteArtifact]({
+        projectId,
+        path: "plan.md",
+      }),
+    ),
+    [J5_PLAYBOOK_WS_METHODS.deletePlaybook]: outcome(
+      client[J5_PLAYBOOK_WS_METHODS.deletePlaybook]({
+        projectId,
+        name: "release",
+      }),
+    ),
+    [J5_PLAYBOOK_WS_METHODS.renamePlaybook]: outcome(
+      client[J5_PLAYBOOK_WS_METHODS.renamePlaybook]({
+        projectId,
+        name: "release",
+        title: "Release",
+      }),
+    ),
+  }) satisfies Record<Tested, unknown>;
 
 describe("J5 client action RPC scopes", () => {
-  it("guards every J5 mutation on the client with the scope the server requires", () => {
-    const serverScopes: Readonly<Record<string, AuthEnvironmentScope>> = J5_RPC_SCOPES;
+  it("guards every J5 method that needs more than read on the client, with the server's scope", () => {
     const guarded: Readonly<Record<string, AuthEnvironmentScope>> = CLIENT_GUARDED_RPC_SCOPES;
-    for (const method of tested) {
-      if (method === ACTIONS.previewCrewProposal) continue;
-      assert.equal(guarded[method], serverScopes[method], method);
+    for (const [method, scope] of Object.entries(J5_RPC_SCOPES)) {
+      const unguarded =
+        scope === AuthOrchestrationReadScope ||
+        (UNGUARDED_QUERIES as ReadonlyArray<string>).includes(method);
+      assert.equal(guarded[method], unguarded ? undefined : scope, method);
+    }
+    // The allowlist names only methods it is needed for.
+    for (const method of UNGUARDED_QUERIES) {
+      assert.equal(J5_RPC_SCOPES[method], AuthOrchestrationOperateScope, method);
     }
     // The preview only reads, so a read-only session sees the roster it cannot approve.
-    assert.equal(serverScopes[ACTIONS.previewCrewProposal], AuthOrchestrationReadScope);
-    assert.isUndefined(guarded[ACTIONS.previewCrewProposal]);
+    assert.equal(J5_RPC_SCOPES[ACTIONS.previewCrewProposal], AuthOrchestrationReadScope);
     for (const method of [
       ACTIONS.issuePeerCredential,
       ACTIONS.addPeer,
@@ -294,7 +317,7 @@ describe("J5 client action RPC scopes", () => {
       ACTIONS.listPeerAddresses,
       ACTIONS.probePeer,
     ]) {
-      assert.equal(serverScopes[method], AuthAccessWriteScope, method);
+      assert.equal(J5_RPC_SCOPES[method], AuthAccessWriteScope, method);
     }
   });
 

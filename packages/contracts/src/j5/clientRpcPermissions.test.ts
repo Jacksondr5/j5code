@@ -14,6 +14,8 @@ describe("J5 client RPC permissions", () => {
       expect(rpc, method).toBeDefined();
       // A guarded method backs a command; a subscription is a read.
       expect(method, method).not.toMatch(/subscribe/i);
+      // Tests that walk J5's entries of the merged map find them by this prefix.
+      expect(method, method).toMatch(/^j5\./);
     }
   });
 

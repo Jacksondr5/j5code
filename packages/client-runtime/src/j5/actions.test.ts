@@ -239,43 +239,23 @@ describe("J5 client permission guards", () => {
       const { registry, runtime } = yield* fixture(() => Effect.succeed({}));
       registry.set(sessions(work), AsyncResult.success(granting([AuthOrchestrationReadScope])));
       const guards: Readonly<Record<string, AuthEnvironmentScope>> = CLIENT_GUARDED_RPC_SCOPES;
-      const mutations = [
-        J5_AGENT_PERSONA_WS_METHODS.importAgentPersonas,
-        J5_AGENT_PERSONA_WS_METHODS.editImportedAgentPersona,
-        J5_AGENT_PERSONA_WS_METHODS.setImportedAgentPersonaEnabled,
-        J5_AGENT_PERSONA_WS_METHODS.removeImportedAgentPersona,
-        J5_AGENT_PERSONA_WS_METHODS.removeSourceAgentPersona,
-        J5_AGENT_PERSONA_WS_METHODS.removeAgentPersona,
-        J5_AGENT_PERSONA_WS_METHODS.restoreSourceAgentPersona,
-        J5_AGENT_PERSONA_WS_METHODS.createAgentPersona,
-        J5_AGENT_PERSONA_WS_METHODS.setAgentPersonaLibraryFolders,
-        J5_AGENT_PERSONA_WS_METHODS.setAgentPersonaEnabled,
-        J5_SKILL_CATALOG_WS_METHODS.applySkillCatalogGroups,
-        J5_SKILL_CATALOG_WS_METHODS.updateSkillCatalog,
-        J5_SKILL_LINK_WS_METHODS.create,
-        J5_SKILL_LINK_WS_METHODS.remove,
-        J5_SKILL_LINK_WS_METHODS.unlink,
-        J5_SKILL_LINK_WS_METHODS.delete,
-        J5_PLAYBOOK_WS_METHODS.deletePlaybook,
-        J5_PLAYBOOK_WS_METHODS.renamePlaybook,
-        J5_ARTIFACT_WS_METHODS.deleteArtifact,
-        ACTIONS.resolveCrewProposal,
-        ACTIONS.stopCrew,
-        ACTIONS.archiveCrew,
-        ACTIONS.respondCrewRuntimeRequest,
-        ACTIONS.answerHumanExchange,
-      ];
-      for (const method of mutations) {
+      // Every J5 method in the guard map, so a newly guarded one is exercised without a list
+      // here. The server's `wsRpc.test.ts` proves the map names every method it must.
+      const guarded = Object.entries(guards).filter(([method]) => method.startsWith("j5."));
+      expect(guarded.length).toBeGreaterThan(Object.keys(ACTIONS).length);
+      for (const [method, scope] of guarded) {
         const permissions = createCommandPermissions(runtime, method);
-        expect(guards[method], method).toBe(AuthOrchestrationOperateScope);
         expect(registry.get(permissions.permissionAtom(work)), method).toBe(false);
         expect(
           (yield* permissions.authorize(registry, work).pipe(Effect.flip)).requiredPermission,
           method,
-        ).toBe(AuthOrchestrationOperateScope);
+        ).toBe(scope);
       }
-      registry.set(sessions(work), AsyncResult.success(granting([AuthOrchestrationOperateScope])));
-      for (const method of mutations) {
+      registry.set(
+        sessions(work),
+        AsyncResult.success(granting([AuthOrchestrationOperateScope, AuthAccessWriteScope])),
+      );
+      for (const [method] of guarded) {
         const permissions = createCommandPermissions(runtime, method);
         expect(registry.get(permissions.permissionAtom(work)), method).toBe(true);
         yield* permissions.authorize(registry, work);
