@@ -92,9 +92,11 @@ The most common defect in this repo is a change that works on the path you teste
 
 An empty database is a bad test. Seed your worktree's `.j5code` with a copy of real data instead of pointing at live state:
 
+- `vp run migrate-dev-db` from a worktree makes a copy that is safe to start a server on, in one command: recent stopped threads only, with pending work, schedules, peer servers and their credentials, undelivered agent messages and live Crews stood down. Its threads still point at the real checkouts, so a message you send to one runs a real agent there.
+- For a whole database, copy it yourself. Nothing in a raw copy is stood down: a server started on it resumes real deliveries and polls real peers.
 - Copy from `~/.j5code/userdata` (the developer's real data, the most realistic test set) or `~/.j5code/dev`. Worktree state lives at `<worktree>/.j5code/userdata`.
 - The server reads `statev2.sqlite`. A home that has not yet run a V2 server has only `state.sqlite`; once it has, `state.sqlite` is a frozen pre-V2 copy, so take `statev2.sqlite`.
-- Snapshot the database with `VACUUM INTO`, which is safe even while a server has the source open and yields one consistent file:
+- Snapshot a raw copy with `VACUUM INTO`, which is safe even while a server has the source open and yields one consistent file:
 
   ```bash
   mkdir -p .j5code/userdata
