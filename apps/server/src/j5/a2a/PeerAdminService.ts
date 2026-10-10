@@ -34,7 +34,7 @@ import { peerAddressOrigins } from "./peerReachability.ts";
  * "until removed or rotated"; the expiry is recorded on the holder's peer
  * record and shown in Settings, so it is never a surprise.
  */
-export const PEER_SESSION_TTL = Duration.days(3650);
+const PEER_SESSION_TTL = Duration.days(3650);
 
 export class PeerCredentialForSelfError extends Schema.TaggedError<PeerCredentialForSelfError>()(
   "PeerCredentialForSelfError",
