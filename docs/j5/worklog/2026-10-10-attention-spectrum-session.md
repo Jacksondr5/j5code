@@ -63,6 +63,13 @@ A signal can come from three sources: the platform measured it; the agent declar
 - **No new tool for an agent to declare a status line.** It is one more thing for every agent to remember, and a line left stale is worse than none.
 - Not checked: whether a task list resets at each turn in each adapter. A task count is how much of the agent's own plan is ticked, and is labelled as tasks so it does not read as how much of the work is finished.
 
+## Rulings: what an agent has produced
+
+- **A row shows the facts of the agent's pull request**: open, draft, merged or closed, the state of its checks, the review decision, whether it can merge. Upstream already syncs these for each thread's linked pull requests; the Fleet page does not read them today.
+- **A row also shows the size of work not yet in a pull request**, as lines added and removed, which upstream records with each turn's checkpoint.
+- **Artifacts are not shown per agent.** The store does not record which thread wrote a file.
+- **Failing checks do not count toward the badge.** They are shown on the row. The badge keeps to a failed run, a delivery alarm and a run that never started.
+
 ## Rulings: the Fleet page
 
 - **The middle belongs on the Fleet page.** Its definition already gives each row four questions answered from measurements, and the Playbooks definition adds the step.
