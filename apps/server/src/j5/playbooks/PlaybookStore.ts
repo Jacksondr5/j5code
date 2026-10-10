@@ -239,7 +239,7 @@ export const makePlaybookStore = Effect.gen(function* () {
     if (!row)
       return yield* playbookError(
         "run_not_found",
-        "No playbook run was found. Use playbook_list and playbook_start.",
+        "No playbook run was found. Use j5_playbook_list and j5_playbook_start.",
       );
     if (row.owner_thread_id !== owner)
       return yield* playbookError(
@@ -268,7 +268,7 @@ export const makePlaybookStore = Effect.gen(function* () {
         run.status === "active" && index < 0
           ? playbookError(
               "step_missing",
-              `Step '${run.currentStepId}' no longer exists. Call playbook_reselect with expectedStepId '${run.currentStepId}' and one of the available step IDs, or cancel.`,
+              `Step '${run.currentStepId}' no longer exists. Call j5_playbook_reselect with expectedStepId '${run.currentStepId}' and one of the available step IDs, or cancel.`,
               definition.steps.map((step) => step.id),
             )
           : null,
@@ -389,7 +389,7 @@ export const makePlaybookStore = Effect.gen(function* () {
     return { playbooks };
   }, Effect.mapError(storageError));
 
-  /** The definition file for a name as playbook_start accepts it; a trailing .yaml is allowed. */
+  /** The definition file for a name as j5_playbook_start accepts it; a trailing .yaml is allowed. */
   const definitionPathFor = Effect.fn("PlaybookStore.definitionPathFor")(function* (
     workspaceRoot: string,
     name: string,
@@ -398,7 +398,7 @@ export const makePlaybookStore = Effect.gen(function* () {
     if (!PLAYBOOK_NAME_PATTERN.test(stem))
       return yield* playbookError(
         "invalid_name",
-        "Pass a playbook name from playbook_list: lowercase letters, digits, and hyphens, without directories or spaces.",
+        "Pass a playbook name from j5_playbook_list: lowercase letters, digits, and hyphens, without directories or spaces.",
       );
     return { stem, definitionPath: path.resolve(workspaceRoot, ".j5/playbooks", `${stem}.yaml`) };
   });
@@ -409,7 +409,7 @@ export const makePlaybookStore = Effect.gen(function* () {
     if (!(yield* fs.exists(definitionPath)))
       return yield* playbookError(
         "not_found",
-        `No playbook named ${stem} in this workspace. Use playbook_list.`,
+        `No playbook named ${stem} in this workspace. Use j5_playbook_list.`,
       );
     const definition = yield* readDefinition(definitionPath);
     return {
@@ -614,7 +614,7 @@ export const makePlaybookStore = Effect.gen(function* () {
           if ("expectedStepId" in input && input.expectedStepId !== run.currentStepId) {
             return yield* playbookError(
               "step_conflict",
-              `Expected '${input.expectedStepId}', but the run is at '${run.currentStepId}'. Retrieve playbook_current and use a new request ID.`,
+              `Expected '${input.expectedStepId}', but the run is at '${run.currentStepId}'. Retrieve j5_playbook_current and use a new request ID.`,
             );
           }
           let currentStepId = run.currentStepId;
@@ -636,7 +636,7 @@ export const makePlaybookStore = Effect.gen(function* () {
                   return yield* playbookError(
                     "step_boundary",
                     input.operation === "next"
-                      ? "This is the last step. Call playbook_complete when the work is finished."
+                      ? "This is the last step. Call j5_playbook_complete when the work is finished."
                       : "This is the first step. Retrieve it or choose an available step explicitly.",
                     ids,
                   );

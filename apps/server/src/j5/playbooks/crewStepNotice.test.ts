@@ -29,7 +29,7 @@ it("names the playbook, Crew, step, position, and Captain before the live prompt
       "<step_prompt>",
       "Read the change.",
       "</step_prompt>",
-      "Do this step now. When it's done, report back to your Captain with send_message, including what you did and the evidence. The Captain advances the playbook; you don't call playbook tools.",
+      "Do this step now. When it's done, report back to your Captain with j5_send_message, including what you did and the evidence. The Captain advances the playbook; you don't call playbook tools.",
     ].join("\n"),
   );
 });

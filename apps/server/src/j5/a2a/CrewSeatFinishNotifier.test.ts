@@ -327,7 +327,7 @@ it.effect("tells the Captain how each finished seat ended, and settles nothing",
         } as unknown as OrchestrationV2StoredEvent),
       );
       assert.lengthOf(yield* Ref.get(dispatched), 1);
-      // A stopped seat is not a finished seat: stop_crew interrupts so the seat can be briefed
+      // A stopped seat is not a finished seat: j5_stop_crew interrupts so the seat can be briefed
       // again, and nothing reaches the Captain (Crews AC21).
       assert.isNull(
         yield* notifier.handleStoredEvent(terminalRunEvent(scoutThread, "run:s0", "interrupted")),
@@ -1019,7 +1019,7 @@ it.effect(
         assert.include(big, "handoff: written (ReviewHandoff)");
         assert.include(big, "handoff_size: over the read limit");
         assert.notInclude(big, "<handoff_body>");
-        assert.include(big, "Read it with read_artifact");
+        assert.include(big, "Read it with j5_read_artifact");
 
         // A directory at the path is not a handoff, and the notice says so.
         yield* Ref.set(failure, "not_a_file");

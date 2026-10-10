@@ -10,7 +10,7 @@ import {
 } from "./ParticipantIdentity";
 
 /**
- * `spawn_agent` starts a Peer Agent's thread with one user-role message whose
+ * `j5_spawn_agent` starts a Peer Agent's thread with one user-role message whose
  * id is `message:j5:a2a:mcp:<session>:spawn-brief:<request key>` (server
  * `spawnMessageId`). The id shape is the only gate; envelope-looking text alone
  * is never a spawn brief.

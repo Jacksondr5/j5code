@@ -317,12 +317,12 @@ export const layer = Layer.effect(
             : error.code === "not_found" || error.code === "invalid_name"
               ? new CrewProposalRequestError({
                   detail: `No playbook named ${name} in your workspace.`,
-                  nextStep: "Call playbook_list and pass a name it returns.",
+                  nextStep: "Call j5_playbook_list and pass a name it returns.",
                 })
               : new CrewProposalRequestError({
                   detail: `Playbook ${name} cannot be followed: ${error.message}`,
                   nextStep:
-                    "Fix the definition until playbook_list lists it without an issue, then retry.",
+                    "Fix the definition until j5_playbook_list lists it without an issue, then retry.",
                 });
 
     /** The live definition; a Crew's plan is always checked against the YAML as it is now. */
@@ -364,7 +364,7 @@ export const layer = Layer.effect(
       if (seats.length === 0)
         return yield* new CrewProposalRequestError({
           detail: "A crew request needs at least one seat.",
-          nextStep: "Call list_personas, then propose seats with a reason each.",
+          nextStep: "Call j5_list_personas, then propose seats with a reason each.",
         });
       // The MCP schema already bounds a Captain's seats; the human's card submits the same shape
       // through HTTP, so every door meets the rule here rather than surfacing a storage error.
@@ -411,12 +411,13 @@ export const layer = Layer.effect(
         if (problem === "missing")
           return yield* new CrewProposalRequestError({
             detail: `Seat ${seat.seat} names persona "${seat.agentId}", which is not in this environment's library.`,
-            nextStep: "Call list_personas and pick a persona id it returns.",
+            nextStep: "Call j5_list_personas and pick a persona id it returns.",
           });
         if (problem === "disabled")
           return yield* new CrewProposalRequestError({
             detail: `Seat ${seat.seat} names persona "${seat.agentId}", which is turned off.`,
-            nextStep: "Pick an enabled persona from list_personas, or ask the user to turn it on.",
+            nextStep:
+              "Pick an enabled persona from j5_list_personas, or ask the user to turn it on.",
           });
       }
       const plan = planCrewPlaybook({
@@ -659,7 +660,7 @@ export const layer = Layer.effect(
                   : `You do not command crew ${input.crewInstanceId}.`,
             nextStep:
               commanded.length === 0
-                ? "Propose a crew with propose_crew first."
+                ? "Propose a crew with j5_propose_crew first."
                 : `Retry with crew_instance_id set to one of: ${commanded.map(({ id }) => id).join(", ")}.`,
           });
         const proposalId = lifecycleId({
@@ -754,7 +755,7 @@ export const layer = Layer.effect(
           : yield* crews
               .read(proposal.crewInstanceId)
               .pipe(Effect.mapError(operationError("reading the crew")));
-      // A request left open past archive_crew must not seat agents into a retired Crew.
+      // A request left open past j5_archive_crew must not seat agents into a retired Crew.
       if (existingCrew !== null && existingCrew.archivedAt !== null)
         return yield* new CrewProposalRequestError({
           detail: `Proposal ${proposal.id} adds to crew ${existingCrew.id}, which has been retired.`,

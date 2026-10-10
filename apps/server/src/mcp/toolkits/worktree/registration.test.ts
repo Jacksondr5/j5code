@@ -153,7 +153,7 @@ it.effect("production mcp layer lists worktree tools over http", () =>
           authorization: foreignCredential.config.authorizationHeader,
         },
         body: HttpBody.text(
-          `{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{"name":"list_participants","arguments":{}}}`,
+          `{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{"name":"j5_list_participants","arguments":{}}}`,
           "application/json",
         ),
       });
@@ -223,14 +223,12 @@ it.effect("production mcp layer lists worktree tools over http", () =>
       }
       // J5 uses the same authenticated transport and one shared registration
       // that later J5 milestones extend inside the fork-owned toolkit.
-      expect(toolNames).toContain("send_message");
-      expect(toolNames).toContain("list_participants");
-      expect(tools.find((tool) => tool.name === "send_message")?.description).toBe(
+      expect(toolNames).toContain("j5_send_message");
+      expect(toolNames).toContain("j5_list_participants");
+      expect(tools.find((tool) => tool.name === "j5_send_message")?.description).toBe(
         A2A_SEND_TOOL_DESCRIPTION,
       );
       expect(toolNames.toSorted()).toEqual([
-        "archive_crew",
-        "clear_own_ask",
         "delegate_task",
         "delete_scheduled_task",
         "device_close",
@@ -239,22 +237,32 @@ it.effect("production mcp layer lists worktree tools over http", () =>
         "device_screenshot",
         "html_preview",
         "html_render",
+        "j5_archive_crew",
+        "j5_clear_own_ask",
+        "j5_list_artifacts",
+        "j5_list_participants",
+        "j5_list_personas",
+        "j5_playbook_back",
+        "j5_playbook_cancel",
+        "j5_playbook_complete",
+        "j5_playbook_current",
+        "j5_playbook_list",
+        "j5_playbook_next",
+        "j5_playbook_read",
+        "j5_playbook_reselect",
+        "j5_playbook_start",
+        "j5_propose_crew",
+        "j5_read_artifact",
+        "j5_request_crew_member",
+        "j5_send_message",
+        "j5_spawn_agent",
+        "j5_stop_agent",
+        "j5_stop_crew",
+        "j5_write_artifact",
         "link_pull_request",
-        "list_artifacts",
-        "list_participants",
-        "list_personas",
         "list_scheduled_tasks",
         "list_thread_pull_requests",
         "orchestrator_capabilities",
-        "playbook_back",
-        "playbook_cancel",
-        "playbook_complete",
-        "playbook_current",
-        "playbook_list",
-        "playbook_next",
-        "playbook_read",
-        "playbook_reselect",
-        "playbook_start",
         "preview_click",
         "preview_dialog",
         "preview_drag",
@@ -274,16 +282,9 @@ it.effect("production mcp layer lists worktree tools over http", () =>
         "preview_type",
         "preview_upload",
         "preview_wait_for",
-        "propose_crew",
-        "read_artifact",
-        "request_crew_member",
         "request_secret",
         "run_scheduled_task_now",
         "schedule_task",
-        "send_message",
-        "spawn_agent",
-        "stop_agent",
-        "stop_crew",
         "t3_attachment_discard",
         "t3_attachment_prepare_upload",
         "t3_environment_read",
@@ -317,7 +318,6 @@ it.effect("production mcp layer lists worktree tools over http", () =>
         "unwatch_pull_request",
         "update_scheduled_task",
         "watch_pull_request",
-        "write_artifact",
       ]);
 
       const restricted = yield* McpSessionRegistry.issueActiveMcpCredential({
@@ -402,10 +402,38 @@ it.effect("production mcp layer lists worktree tools over http", () =>
         expect(refused.error.code).toBe(-32602);
         expect(refused.error.message).toContain(name);
       }
+      // J5's tools were renamed with a `j5_` prefix and kept no aliases. An agent resumed from
+      // before the rename may still call an old name; it gets the unknown-tool error by name.
+      const j5ToolNames = toolNames.filter((name) => name.startsWith("j5_"));
+      expect(j5ToolNames).toHaveLength(22);
+      for (const [index, name] of j5ToolNames.map((name) => name.slice("j5_".length)).entries()) {
+        expect(toolNames).not.toContain(name);
+        const response = yield* httpClient.post("/mcp", {
+          headers: {
+            accept: "application/json, text/event-stream",
+            authorization: restricted!.config.authorizationHeader,
+            "mcp-protocol-version": "2025-06-18",
+            ...(restrictedSessionId ? { "mcp-session-id": restrictedSessionId } : {}),
+          },
+          body: HttpBody.text(
+            encodeJson({
+              jsonrpc: "2.0",
+              id: 200 + index,
+              method: "tools/call",
+              params: { name, arguments: {} },
+            }),
+            "application/json",
+          ),
+        });
+        const responseText = yield* response.text;
+        const refused = yield* decodeRpcFailure(decodeJson(responseText.match(/\{.*\}/s)![0]));
+        expect(refused.error.code).toBe(-32602);
+        expect(refused.error.message).toBe(`Tool '${name}' not found`);
+      }
       const deniedPreview = yield* callRestricted(3, "preview_status");
       expect(deniedPreview.result.isError).toBe(true);
       expect(deniedPreview.result.content[0]?.text).toContain("preview");
-      const allowedDirectory = yield* callRestricted(4, "list_participants");
+      const allowedDirectory = yield* callRestricted(4, "j5_list_participants");
       expect(allowedDirectory.result.isError).not.toBe(true);
       expect(decodeJson(allowedDirectory.result.content[0]!.text)).toEqual({
         participants: [],

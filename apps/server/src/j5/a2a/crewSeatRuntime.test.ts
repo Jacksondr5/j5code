@@ -131,7 +131,7 @@ it.layer(testLayer)("crew seat runtime policy", (it) => {
       });
       assert.isTrue(seat.crewSeat);
       assert.equal(seat.agentPersonaInstructions, CREW_SEAT_QUESTION_INSTRUCTIONS);
-      assert.include(seat.agentPersonaInstructions!, "ask your Captain with `send_message`");
+      assert.include(seat.agentPersonaInstructions!, "ask your Captain with `j5_send_message`");
 
       const captain = yield* policy.resolve({
         thread: makeThread(now, captainThreadId),

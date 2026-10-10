@@ -36,7 +36,7 @@ const brief = [
   "",
   "TASK: Review both repos: agent-ops and obs-sentinel.",
   "",
-  'REPLY: send_message(to="agent:director") when done.',
+  'REPLY: j5_send_message(to="agent:director") when done.',
 ].join("\n");
 
 const currentRaw = [

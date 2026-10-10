@@ -85,7 +85,7 @@ export class A2AParticipantNotFoundError extends Schema.TaggedError<A2AParticipa
   { participantId: Schema.String },
 ) {
   override get message(): string {
-    return `Participant ${this.participantId} is not currently reachable. Call list_participants and choose an agent row with canReceiveMessage=true, or a human row with canOpenExchange=true to open an ask.`;
+    return `Participant ${this.participantId} is not currently reachable. Call j5_list_participants and choose an agent row with canReceiveMessage=true, or a human row with canOpenExchange=true to open an ask.`;
   }
 }
 
@@ -94,7 +94,7 @@ export class A2AAmbiguousParticipantError extends Schema.TaggedError<A2AAmbiguou
   { participantId: Schema.String },
 ) {
   override get message(): string {
-    return `Participant ${this.participantId} is active in more than one project and cannot be addressed unambiguously. Call list_participants and choose a participantId with canReceiveMessage=true, or tell the human.`;
+    return `Participant ${this.participantId} is active in more than one project and cannot be addressed unambiguously. Call j5_list_participants and choose a participantId with canReceiveMessage=true, or tell the human.`;
   }
 }
 
@@ -119,7 +119,7 @@ export class A2APeersUnreadError extends Schema.TaggedError<A2APeersUnreadError>
   },
 ) {
   override get message(): string {
-    return `Participant ${this.participantId} is not homed on this server and has never been seen here, and ${String(this.unreadPeerCount)} peer server(s) could not be read just now (${this.reasons.join("; ")}). Retry shortly; list_participants reports how many peers are currently unread.`;
+    return `Participant ${this.participantId} is not homed on this server and has never been seen here, and ${String(this.unreadPeerCount)} peer server(s) could not be read just now (${this.reasons.join("; ")}). Retry shortly; j5_list_participants reports how many peers are currently unread.`;
   }
 }
 
@@ -149,7 +149,7 @@ export class A2AIntentRequiredError extends Schema.TaggedError<A2AIntentRequired
   {},
 ) {
   override get message(): string {
-    return "Opening an exchange requires intent. Retry send_message with a one-line intent summary.";
+    return "Opening an exchange requires intent. Retry j5_send_message with a one-line intent summary.";
   }
 }
 
@@ -158,7 +158,7 @@ export class A2AUrgencyRequiredError extends Schema.TaggedError<A2AUrgencyRequir
   {},
 ) {
   override get message(): string {
-    return "Opening an exchange to the human requires urgency=blocking|soon|fyi. Retry send_message with urgency.";
+    return "Opening an exchange to the human requires urgency=blocking|soon|fyi. Retry j5_send_message with urgency.";
   }
 }
 
@@ -167,7 +167,7 @@ export class A2AUrgencyNotAcceptedError extends Schema.TaggedError<A2AUrgencyNot
   { participantId: Schema.String },
 ) {
   override get message(): string {
-    return `Participant ${this.participantId} does not accept urgency. Retry send_message without urgency.`;
+    return `Participant ${this.participantId} does not accept urgency. Retry j5_send_message without urgency.`;
   }
 }
 
@@ -194,7 +194,7 @@ export class A2AHumanFollowupNotAllowedError extends Schema.TaggedError<A2AHuman
   { participantId: Schema.String },
 ) {
   override get message(): string {
-    return `A follow-up to human participant ${this.participantId} is refused. To the human, use an ask with expect_reply=true, intent, and urgency=blocking|soon|fyi, or a reply with exchange_id; after an ask is open, wait for its reply, or clear_own_ask on the open exchange and re-ask with the combined content. If nobody needs to act, say it in your own thread instead.`;
+    return `A follow-up to human participant ${this.participantId} is refused. To the human, use an ask with expect_reply=true, intent, and urgency=blocking|soon|fyi, or a reply with exchange_id; after an ask is open, wait for its reply, or j5_clear_own_ask on the open exchange and re-ask with the combined content. If nobody needs to act, say it in your own thread instead.`;
   }
 }
 
@@ -203,7 +203,7 @@ export class A2AExchangeNotOpenError extends Schema.TaggedError<A2AExchangeNotOp
   { exchangeId: Schema.String },
 ) {
   override get message(): string {
-    return `Exchange ${this.exchangeId} is not open. Call send_message without exchange_id to start a new message or exchange.`;
+    return `Exchange ${this.exchangeId} is not open. Call j5_send_message without exchange_id to start a new message or exchange.`;
   }
 }
 
@@ -216,7 +216,7 @@ export class A2AExchangeParticipantMismatchError extends Schema.TaggedError<A2AE
   },
 ) {
   override get message(): string {
-    return `Exchange ${this.exchangeId} does not connect ${this.senderId} to ${this.receiverId}. Call list_participants and use the exchange's original peer.`;
+    return `Exchange ${this.exchangeId} does not connect ${this.senderId} to ${this.receiverId}. Call j5_list_participants and use the exchange's original peer.`;
   }
 }
 
@@ -225,7 +225,7 @@ export class A2AExchangeAlreadyAnsweredError extends Schema.TaggedError<A2AExcha
   { exchangeId: Schema.String },
 ) {
   override get message(): string {
-    return `Exchange ${this.exchangeId} already has its one durable reply and is closing or closed. Call send_message without exchange_id to start a new message or exchange.`;
+    return `Exchange ${this.exchangeId} already has its one durable reply and is closing or closed. Call j5_send_message without exchange_id to start a new message or exchange.`;
   }
 }
 
@@ -238,7 +238,7 @@ export class A2AClearOwnAskSenderMismatchError extends Schema.TaggedError<A2ACle
   },
 ) {
   override get message(): string {
-    return `Exchange ${this.exchangeId} was opened by ${this.senderId}, not ${this.callerId}. Only that sender may withdraw this exchange. Do not retry clear_own_ask for exchange ${this.exchangeId} from this thread; other exchanges are unaffected.`;
+    return `Exchange ${this.exchangeId} was opened by ${this.senderId}, not ${this.callerId}. Only that sender may withdraw this exchange. Do not retry j5_clear_own_ask for exchange ${this.exchangeId} from this thread; other exchanges are unaffected.`;
   }
 }
 
@@ -247,7 +247,7 @@ export class A2AClearOwnAskAlreadyClosedError extends Schema.TaggedError<A2AClea
   { exchangeId: Schema.String },
 ) {
   override get message(): string {
-    return `Exchange ${this.exchangeId} is already closed; clear_own_ask made no change.`;
+    return `Exchange ${this.exchangeId} is already closed; j5_clear_own_ask made no change.`;
   }
 }
 
@@ -256,7 +256,7 @@ export class A2AClearOwnAskUnknownExchangeError extends Schema.TaggedError<A2ACl
   { exchangeId: Schema.String },
 ) {
   override get message(): string {
-    return `Exchange ${this.exchangeId} does not exist in the messaging ledger; clear_own_ask made no change. There is no agent-facing own-open-asks read at this head, so use only an exchange_id retained from the original send_message result; do not retry this unknown id.`;
+    return `Exchange ${this.exchangeId} does not exist in the messaging ledger; j5_clear_own_ask made no change. There is no agent-facing own-open-asks read at this head, so use only an exchange_id retained from the original j5_send_message result; do not retry this unknown id.`;
   }
 }
 
@@ -265,7 +265,7 @@ export class A2AClearOwnAskCommandConflictError extends Schema.TaggedError<A2ACl
   { commandId: Schema.String, exchangeId: Schema.String },
 ) {
   override get message(): string {
-    return `The client_request_id behind command ${this.commandId} is already bound to a different request. This clear_own_ask call did not close exchange ${this.exchangeId}. Reusing a client_request_id for the same clear replays its original success; retry this different request with a unique client_request_id.`;
+    return `The client_request_id behind command ${this.commandId} is already bound to a different request. This j5_clear_own_ask call did not close exchange ${this.exchangeId}. Reusing a client_request_id for the same clear replays its original success; retry this different request with a unique client_request_id.`;
   }
 }
 
@@ -274,7 +274,7 @@ export class A2AMachineCannotReceiveError extends Schema.TaggedError<A2AMachineC
   { participantId: Schema.String },
 ) {
   override get message(): string {
-    return `Participant ${this.participantId} is an automated sender with no thread and cannot receive messages. Call list_participants and choose a row with canReceiveMessage=true.`;
+    return `Participant ${this.participantId} is an automated sender with no thread and cannot receive messages. Call j5_list_participants and choose a row with canReceiveMessage=true.`;
   }
 }
 

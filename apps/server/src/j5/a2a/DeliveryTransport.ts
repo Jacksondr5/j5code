@@ -52,7 +52,7 @@ export class A2ADeliveryTargetError extends Schema.TaggedError<A2ADeliveryTarget
   },
 ) {
   override get message(): string {
-    return `Cannot deliver to ${this.participantId}: ${this.state}. Call list_participants before sending again.`;
+    return `Cannot deliver to ${this.participantId}: ${this.state}. Call j5_list_participants before sending again.`;
   }
 }
 

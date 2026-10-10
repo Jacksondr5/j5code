@@ -39,7 +39,7 @@ const peerRaw = [
   "",
   "Please verify the worker.",
   "",
-  'Reply once with send_message(to="agent:delivery-sender", exchange_id="exchange:one", message="...") to close the exchange. Follow-ups from the asker carrying this id join the same exchange.',
+  'Reply once with j5_send_message(to="agent:delivery-sender", exchange_id="exchange:one", message="...") to close the exchange. Follow-ups from the asker carrying this id join the same exchange.',
 ].join("\n");
 
 const peerPlainRaw = [
@@ -47,7 +47,7 @@ const peerPlainRaw = [
   "",
   "Nothing further is needed.",
   "",
-  "No reply is required. Use send_message without exchange_id only if a new message is needed.",
+  "No reply is required. Use j5_send_message without exchange_id only if a new message is needed.",
 ].join("\n");
 
 const closedInstruction =
@@ -68,7 +68,7 @@ const humanRaw = [
   "",
   "This person is not watching this chat. They see only what you send back on this exchange.",
   "",
-  'Reply once with send_message(to="human:viewer", exchange_id="exchange:human", message="...") to close the exchange. Follow-ups from the asker carrying this id join the same exchange.',
+  'Reply once with j5_send_message(to="human:viewer", exchange_id="exchange:human", message="...") to close the exchange. Follow-ups from the asker carrying this id join the same exchange.',
 ].join("\n");
 
 const humanClosedRaw = [
@@ -482,7 +482,7 @@ describe("ThreadA2ADeliveryRenderer", () => {
       toolLifecycleStatus: "completed",
       structuredPayload: {
         type: "dynamic_tool",
-        toolName: "t3-code.send_message",
+        toolName: "t3-code.j5_send_message",
         input: { to: "agent:receiver", message: "Please check the deployment." },
         output: {
           messageId: "message:j5:a2a:send-open",
@@ -518,7 +518,7 @@ describe("ThreadA2ADeliveryRenderer", () => {
       toolLifecycleStatus: "completed",
       structuredPayload: {
         type: "dynamic_tool",
-        toolName: "mcp__t3-code__send_message",
+        toolName: "mcp__t3-code__j5_send_message",
         input: {
           to: "agent:sender",
           message: "Deployment verified.",
@@ -547,7 +547,7 @@ describe("ThreadA2ADeliveryRenderer", () => {
       toolLifecycleStatus: "completed",
       structuredPayload: {
         type: "dynamic_tool",
-        toolName: "t3-code.list_participants",
+        toolName: "t3-code.j5_list_participants",
         input: {},
         output: {},
       },
@@ -567,7 +567,7 @@ describe("ThreadA2ADeliveryRenderer", () => {
       toolLifecycleStatus: "completed",
       structuredPayload: {
         type: "dynamic_tool",
-        toolName: "t3-code.send_message",
+        toolName: "t3-code.j5_send_message",
         input: { to: "agent:receiver", message: "Could be a send." },
         output: { messageId: "message:j5:a2a:malformed", exchangeState: "open" },
       },
@@ -582,7 +582,7 @@ describe("ThreadA2ADeliveryRenderer", () => {
 });
 
 const machineInstruction =
-  "This message came from an automated sender outside any agent session. It cannot receive a reply; act on it directly, and take any question to a person or a peer agent with send_message.";
+  "This message came from an automated sender outside any agent session. It cannot receive a reply; act on it directly, and take any question to a person or a peer agent with j5_send_message.";
 
 const machineRaw = [
   "[Message from automation machine:watchdog in project project-monitoring (Monitoring)]",
@@ -640,7 +640,7 @@ describe("ThreadA2ADeliveryRenderer machine senders", () => {
 describe("envelope headers across formats", () => {
   const present = (text: string) => presentThreadA2ADelivery({ message: message({ text }) });
   const plain =
-    "No reply is required. Use send_message without exchange_id only if a new message is needed.";
+    "No reply is required. Use j5_send_message without exchange_id only if a new message is needed.";
 
   it("reads a header that names a project by id alone, as a peer server's is", () => {
     expect(
@@ -682,5 +682,68 @@ describe("envelope headers across formats", () => {
       body: "canary 42",
       automated: true,
     });
+  });
+});
+
+// J5's tools gained a `j5_` prefix (#508). Threads recorded before that keep the old name in
+// their tool calls and in the delivery text, and must still render as cards.
+describe("history recorded before the j5_ prefix", () => {
+  const withOldName = (text: string) => text.replaceAll("j5_send_message", "send_message");
+
+  it.each(["t3-code.send_message", "mcp__t3-code__send_message"])(
+    "renders a recorded %s call as the outbound card",
+    (toolName) => {
+      const tool = {
+        id: "tool:send-old-name",
+        createdAt: CREATED_AT,
+        toolLifecycleStatus: "completed",
+        structuredPayload: {
+          type: "dynamic_tool",
+          toolName,
+          input: { to: "agent:receiver", message: "Please check the deployment." },
+          output: {
+            messageId: "message:j5:a2a:send-old-name",
+            exchangeId: "exchange:send-old-name",
+            exchangeState: "open",
+            joinedExistingExchange: false,
+            durableAtSeq: 1,
+          },
+        },
+      };
+
+      expect(presentThreadA2AOutboundTool(tool)).toMatchObject({
+        kind: "sent",
+        recipientId: "agent:receiver",
+        body: "Please check the deployment.",
+        exchangeState: "open",
+      });
+      expect(renderToStaticMarkup(renderThreadA2AOutboundTool(tool) ?? <p>generic</p>)).toContain(
+        'data-j5-a2a-renderer="sent"',
+      );
+    },
+  );
+
+  it("reads a stored ask, plain send and automation delivery that name send_message", () => {
+    const present = (text: string) =>
+      presentThreadA2ADelivery({ message: message({ text: withOldName(text) }) });
+
+    expect(withOldName(peerRaw)).not.toContain("j5_send_message");
+    expect(present(peerRaw)).toMatchObject({
+      kind: "peer",
+      exchange: "expects-reply",
+      exchangeId: "exchange:one",
+      body: "Please verify the worker.",
+    });
+    expect(present(peerPlainRaw)).toMatchObject({ kind: "peer", exchange: "plain" });
+    expect(present(machineRaw)).toMatchObject({ kind: "peer", automated: true });
+    expect(
+      presentThreadA2ADelivery({
+        message: message({
+          id: deliveryId("human-old-name"),
+          createdBy: "user",
+          text: withOldName(humanRaw),
+        }),
+      }),
+    ).toMatchObject({ kind: "human", exchange: "expects-reply" });
   });
 });

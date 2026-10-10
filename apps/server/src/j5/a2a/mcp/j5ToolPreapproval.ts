@@ -11,12 +11,12 @@ export interface J5RuntimePolicy {
  * Harnesses gate every MCP tool that is not annotated read-only behind an approval prompt, and a
  * turn whose approval policy is `never` (Codex 0.153+: "MCP tool call requires approval, but
  * approval policy is never") rejects the call outright. Full-access mode and every saved-agent
- * runtime policy send exactly that, so without help `send_message`, `spawn_agent`, and
- * `propose_crew` all fail there. Only the J5 verbs are pre-approved, by name: their handlers
- * authorize each call and their real gates live server-side, plus `write_artifact`, which a saved
+ * runtime policy send exactly that, so without help `j5_send_message`, `j5_spawn_agent`, and
+ * `j5_propose_crew` all fail there. Only the J5 verbs are pre-approved, by name: their handlers
+ * authorize each call and their real gates live server-side, plus `j5_write_artifact`, which a saved
  * agent needs for its declared handoff file (application storage, never the workspace), plus the
  * provider-native Subagent verbs (`delegate_task`, `task_status`, `task_cancel`): a Crew member is
- * refused `spawn_agent` and told to run its own helpers as Subagents, so those must work under
+ * refused `j5_spawn_agent` and told to run its own helpers as Subagents, so those must work under
  * the same policy, and a child inherits its parent's sandbox through the escalation check. The
  * rest of the t3-code server (worktree handoff, browser preview, scheduling) keeps the harness's
  * own verdict, so a read-only persona under `never` still cannot reach those. Kept as a leaf
@@ -24,31 +24,31 @@ export interface J5RuntimePolicy {
  * J5Toolkit.
  */
 export const J5_PREAPPROVED_TOOLS: ReadonlyArray<string> = [
-  "send_message",
-  "list_participants",
-  "spawn_agent",
-  "list_personas",
-  "propose_crew",
-  "request_crew_member",
+  "j5_send_message",
+  "j5_list_participants",
+  "j5_spawn_agent",
+  "j5_list_personas",
+  "j5_propose_crew",
+  "j5_request_crew_member",
   // Declared handoffs are files the seat writes itself into application storage.
-  "write_artifact",
+  "j5_write_artifact",
   // Provider-native Subagents: the one way a Crew member gets more hands.
   "delegate_task",
   "task_status",
   "task_cancel",
-  "stop_agent",
-  "stop_crew",
-  "archive_crew",
-  "clear_own_ask",
-  "playbook_list",
-  "playbook_read",
-  "playbook_start",
-  "playbook_current",
-  "playbook_next",
-  "playbook_back",
-  "playbook_reselect",
-  "playbook_complete",
-  "playbook_cancel",
+  "j5_stop_agent",
+  "j5_stop_crew",
+  "j5_archive_crew",
+  "j5_clear_own_ask",
+  "j5_playbook_list",
+  "j5_playbook_read",
+  "j5_playbook_start",
+  "j5_playbook_current",
+  "j5_playbook_next",
+  "j5_playbook_back",
+  "j5_playbook_reselect",
+  "j5_playbook_complete",
+  "j5_playbook_cancel",
 ];
 
 /**
@@ -57,16 +57,16 @@ export const J5_PREAPPROVED_TOOLS: ReadonlyArray<string> = [
  * Lifecycle and spawning tools keep the harness's prompting in those modes.
  */
 export const J5_COORDINATION_TOOLS: ReadonlyArray<string> = [
-  "send_message",
-  "clear_own_ask",
-  "propose_crew",
-  "request_crew_member",
-  "playbook_start",
-  "playbook_next",
-  "playbook_back",
-  "playbook_reselect",
-  "playbook_complete",
-  "playbook_cancel",
+  "j5_send_message",
+  "j5_clear_own_ask",
+  "j5_propose_crew",
+  "j5_request_crew_member",
+  "j5_playbook_start",
+  "j5_playbook_next",
+  "j5_playbook_back",
+  "j5_playbook_reselect",
+  "j5_playbook_complete",
+  "j5_playbook_cancel",
 ];
 
 /** Mirrors the adapters' runtime-mode default: only full-access resolves to `never` on its own. */

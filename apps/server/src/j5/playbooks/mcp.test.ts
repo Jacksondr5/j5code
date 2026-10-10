@@ -198,39 +198,39 @@ const TestLayer = Layer.mergeAll(
 it.effect("runs a scripted three-step sample through the real J5Toolkit handlers", () =>
   Effect.gen(function* () {
     const { call } = yield* fixture;
-    const first = yield* call("playbook_start", { name: "demo", client_request_id: "start-a" });
+    const first = yield* call("j5_playbook_start", { name: "demo", client_request_id: "start-a" });
     assert.isFalse(first.isFailure);
     const run = yield* decodeStep(first.result);
     assert.equal(run.currentStep?.prompt, "Record ALPHA.");
     const notes = ["ALPHA"];
     const recovered = yield* call(
-      "playbook_current",
+      "j5_playbook_current",
       {},
       scopeFor(owner, "session:after-compaction"),
     );
     assert.equal((yield* decodeStep(recovered.result)).runId, run.runId);
 
     const nextInput = { runId: run.runId, expectedStepId: "research", client_request_id: "next-1" };
-    const second = yield* call("playbook_next", nextInput);
+    const second = yield* call("j5_playbook_next", nextInput);
     assert.equal(
       (yield* decodeStep(second.result)).currentStep?.prompt,
       "Append BETA to your notes.",
     );
     notes.push("BETA");
-    const back = yield* call("playbook_back", {
+    const back = yield* call("j5_playbook_back", {
       runId: run.runId,
       expectedStepId: "implement",
       client_request_id: "back-1",
     });
     assert.equal((yield* decodeStep(back.result)).currentStep?.prompt, "Record ALPHA.");
-    const retry = yield* call("playbook_next", nextInput);
+    const retry = yield* call("j5_playbook_next", nextInput);
     const replayed = yield* decodeStep(retry.result);
     assert.isTrue(replayed.replayed);
     assert.equal(replayed.currentStepId, "research");
     assert.deepStrictEqual(notes, ["ALPHA", "BETA"]);
 
-    yield* call("playbook_next", { ...nextInput, client_request_id: "next-2" });
-    const third = yield* call("playbook_next", {
+    yield* call("j5_playbook_next", { ...nextInput, client_request_id: "next-2" });
+    const third = yield* call("j5_playbook_next", {
       runId: run.runId,
       expectedStepId: "implement",
       client_request_id: "next-3",
@@ -239,22 +239,28 @@ it.effect("runs a scripted three-step sample through the real J5Toolkit handlers
     assert.equal(review.currentStep?.prompt, "Report ALPHA BETA.");
     assert.equal(review.position, 3);
     assert.equal(notes.join(" "), "ALPHA BETA");
-    const completed = yield* call("playbook_complete", {
+    const completed = yield* call("j5_playbook_complete", {
       runId: run.runId,
       expectedStepId: "review",
       client_request_id: "complete-a",
     });
     assert.equal((yield* decodeStep(completed.result)).status, "completed");
 
-    const secondRun = yield* call("playbook_start", { name: "demo", client_request_id: "start-b" });
+    const secondRun = yield* call("j5_playbook_start", {
+      name: "demo",
+      client_request_id: "start-b",
+    });
     const runB = yield* decodeStep(secondRun.result);
     assert.notEqual(runB.runId, run.runId);
-    const cancelled = yield* call("playbook_cancel", {
+    const cancelled = yield* call("j5_playbook_cancel", {
       runId: runB.runId,
       client_request_id: "cancel-b",
     });
     assert.equal((yield* decodeStep(cancelled.result)).status, "cancelled");
-    const thirdRun = yield* call("playbook_start", { name: "demo", client_request_id: "start-c" });
+    const thirdRun = yield* call("j5_playbook_start", {
+      name: "demo",
+      client_request_id: "start-c",
+    });
     assert.equal((yield* decodeStep(thirdRun.result)).status, "active");
   }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );
@@ -263,8 +269,8 @@ it.effect("discovers and starts from the thread worktree, falling back to its pr
   Effect.gen(function* () {
     const { call, path, worktree, projectRoot } = yield* fixture;
     const decodeDiscovery = Schema.decodeUnknownEffect(PlaybookDiscovery);
-    const worktreeList = yield* call("playbook_list", {});
-    const projectList = yield* call("playbook_list", {}, scopeFor(rootOwner));
+    const worktreeList = yield* call("j5_playbook_list", {});
+    const projectList = yield* call("j5_playbook_list", {}, scopeFor(rootOwner));
     assert.equal(
       (yield* decodeDiscovery(worktreeList.result)).playbooks[0]?.title,
       "Worktree playbook",
@@ -273,9 +279,12 @@ it.effect("discovers and starts from the thread worktree, falling back to its pr
       (yield* decodeDiscovery(projectList.result)).playbooks[0]?.title,
       "Project playbook",
     );
-    const worktreeRun = yield* call("playbook_start", { name: "demo", client_request_id: "start" });
+    const worktreeRun = yield* call("j5_playbook_start", {
+      name: "demo",
+      client_request_id: "start",
+    });
     const projectRun = yield* call(
-      "playbook_start",
+      "j5_playbook_start",
       { name: "demo", client_request_id: "start" },
       scopeFor(rootOwner),
     );
@@ -293,18 +302,18 @@ it.effect("discovers and starts from the thread worktree, falling back to its pr
 it.effect("denies a different owner and every tool when orchestration capability is absent", () =>
   Effect.gen(function* () {
     const { call } = yield* fixture;
-    const started = yield* call("playbook_start", { name: "demo", client_request_id: "start" });
+    const started = yield* call("j5_playbook_start", { name: "demo", client_request_id: "start" });
     const run = yield* decodeStep(started.result);
     const movement = { runId: run.runId, expectedStepId: "research", client_request_id: "denied" };
     for (const scope of [scopeFor(rootOwner), { ...scopeFor(), capabilities: new Set<never>() }]) {
       const expected = scope.thread.threadId === rootOwner ? "not_owner" : "capability_denied";
       const responses = [
-        yield* call("playbook_current", { runId: run.runId }, scope),
-        yield* call("playbook_next", movement, scope),
-        yield* call("playbook_back", movement, scope),
-        yield* call("playbook_complete", movement, scope),
-        yield* call("playbook_reselect", { ...movement, stepId: "review" }, scope),
-        yield* call("playbook_cancel", { runId: run.runId, client_request_id: "denied" }, scope),
+        yield* call("j5_playbook_current", { runId: run.runId }, scope),
+        yield* call("j5_playbook_next", movement, scope),
+        yield* call("j5_playbook_back", movement, scope),
+        yield* call("j5_playbook_complete", movement, scope),
+        yield* call("j5_playbook_reselect", { ...movement, stepId: "review" }, scope),
+        yield* call("j5_playbook_cancel", { runId: run.runId, client_request_id: "denied" }, scope),
       ];
       for (const response of responses) {
         assert.isTrue(response.isFailure);
@@ -312,15 +321,15 @@ it.effect("denies a different owner and every tool when orchestration capability
       }
     }
     const deniedScope = { ...scopeFor(), capabilities: new Set<never>() };
-    const deniedDiscovery = yield* call("playbook_list", {}, deniedScope);
+    const deniedDiscovery = yield* call("j5_playbook_list", {}, deniedScope);
     const deniedStart = yield* call(
-      "playbook_start",
+      "j5_playbook_start",
       { name: "demo", client_request_id: "denied-start" },
       deniedScope,
     );
     assert.equal((yield* decodeFailure(deniedDiscovery.result)).code, "capability_denied");
     assert.equal((yield* decodeFailure(deniedStart.result)).code, "capability_denied");
-    const current = yield* call("playbook_current", { runId: run.runId });
+    const current = yield* call("j5_playbook_current", { runId: run.runId });
     assert.equal((yield* decodeStep(current.result)).currentStepId, "research");
     assert.equal((yield* decodeStep(current.result)).status, "active");
   }).pipe(Effect.scoped, Effect.provide(TestLayer)),
@@ -329,20 +338,20 @@ it.effect("denies a different owner and every tool when orchestration capability
 it.effect("returns actionable live-file errors and recovers or cancels through the toolkit", () =>
   Effect.gen(function* () {
     const { call, fs, path, worktree } = yield* fixture;
-    const started = yield* call("playbook_start", { name: "demo", client_request_id: "start" });
+    const started = yield* call("j5_playbook_start", { name: "demo", client_request_id: "start" });
     const run = yield* decodeStep(started.result);
     const file = path.join(worktree, ".j5/playbooks/demo.yaml");
     yield* fs.writeFileString(
       file,
       stringify({ ...sample("Edited playbook"), steps: sample("Edited").steps.slice(1) }),
     );
-    const missing = yield* call("playbook_current", { runId: run.runId });
+    const missing = yield* call("j5_playbook_current", { runId: run.runId });
     assert.isTrue(missing.isFailure);
     assert.deepStrictEqual((yield* decodeFailure(missing.result)).availableStepIds, [
       "implement",
       "review",
     ]);
-    const recovered = yield* call("playbook_reselect", {
+    const recovered = yield* call("j5_playbook_reselect", {
       runId: run.runId,
       expectedStepId: "research",
       stepId: "implement",
@@ -353,15 +362,15 @@ it.effect("returns actionable live-file errors and recovers or cancels through t
       "Append BETA to your notes.",
     );
     yield* fs.remove(file);
-    const invalid = yield* call("playbook_current", { runId: run.runId });
+    const invalid = yield* call("j5_playbook_current", { runId: run.runId });
     assert.equal((yield* decodeFailure(invalid.result)).code, "invalid_definition");
-    const cancelled = yield* call("playbook_cancel", {
+    const cancelled = yield* call("j5_playbook_cancel", {
       runId: run.runId,
       client_request_id: "cancel",
     });
     assert.isFalse(cancelled.isFailure);
     assert.equal((yield* decodeStep(cancelled.result)).status, "cancelled");
-    const after = yield* call("playbook_current", {});
+    const after = yield* call("j5_playbook_current", {});
     assert.isFalse(after.isFailure);
     assert.equal((yield* decodeStep(after.result)).status, "cancelled");
   }).pipe(Effect.scoped, Effect.provide(TestLayer)),
@@ -387,28 +396,28 @@ it.effect("reads step personas and warnings through the toolkit and still starts
       persona: "planner",
       message: `Step "research" names persona "planner", which is turned off.`,
     };
-    const listed = yield* decodeListed((yield* call("playbook_list", {})).result);
+    const listed = yield* decodeListed((yield* call("j5_playbook_list", {})).result);
     assert.isNull(listed.playbooks[0]?.issue);
     assert.deepStrictEqual(listed.playbooks[0]?.warnings, [warning]);
     assert.equal(listed.playbooks[0]?.steps[0]?.persona, "planner");
 
-    const read = yield* call("playbook_read", { name: "demo" });
+    const read = yield* call("j5_playbook_read", { name: "demo" });
     assert.isFalse(read.isFailure);
     const definition = yield* decodeRead(read.result);
     assert.deepStrictEqual(definition.warnings, [warning]);
     assert.equal(definition.steps[0]?.persona, "planner");
     assert.equal(definition.steps[1]?.prompt, "Append BETA to your notes.");
-    const absent = yield* call("playbook_read", { name: "absent" });
+    const absent = yield* call("j5_playbook_read", { name: "absent" });
     assert.isTrue(absent.isFailure);
     assert.equal((yield* decodeFailure(absent.result)).code, "not_found");
     const denied = yield* call(
-      "playbook_read",
+      "j5_playbook_read",
       { name: "demo" },
       { ...scopeFor(), capabilities: new Set<never>() },
     );
     assert.equal((yield* decodeFailure(denied.result)).code, "capability_denied");
 
-    const started = yield* call("playbook_start", { name: "demo", client_request_id: "start" });
+    const started = yield* call("j5_playbook_start", { name: "demo", client_request_id: "start" });
     assert.isFalse(started.isFailure);
     assert.equal((yield* decodeStep(started.result)).currentStep?.persona, "planner");
   }).pipe(

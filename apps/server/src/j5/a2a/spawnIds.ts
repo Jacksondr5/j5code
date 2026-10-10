@@ -120,13 +120,13 @@ export const spawnFirstTurnText = (input: {
     crew.seatInstructions === undefined
       ? []
       : [`<seat_instructions>\n${crew.seatInstructions}\n</seat_instructions>`];
-  const collaboration = `<crew_collaboration>\nResolve current participants with list_participants and use send_message to coordinate directly with your Captain and other members. Share useful findings, evidence, questions, and blockers immediately; do not wait for an artifact or coordination approval. Send your Captain your final result, supporting evidence, and any remaining blockers before finishing. If the roster lacks expertise needed to address a concern, tell your Captain what is missing and why so they can request_crew_member through the user's inbox. Continue already-approved work and coordination while an addition is pending. A direct result is sufficient unless the user or your persona explicitly requires an artifact.\n</crew_collaboration>`;
+  const collaboration = `<crew_collaboration>\nResolve current participants with j5_list_participants and use j5_send_message to coordinate directly with your Captain and other members. Share useful findings, evidence, questions, and blockers immediately; do not wait for an artifact or coordination approval. Send your Captain your final result, supporting evidence, and any remaining blockers before finishing. If the roster lacks expertise needed to address a concern, tell your Captain what is missing and why so they can j5_request_crew_member through the user's inbox. Continue already-approved work and coordination while an addition is pending. A direct result is sufficient unless the user or your persona explicitly requires an artifact.\n</crew_collaboration>`;
   // A persona's declared deliverable supplements the conversation; it never gates coordination.
   const obligation =
     crew.obligation === undefined
       ? []
       : [
-          `<seat_obligation>\nYour agent definition returns a ${crew.obligation.kind}. Before you finish, write it with write_artifact to exactly \`${crew.obligation.path}\` as Markdown (your instructions list the required contents); this is in addition to direct messages and must not delay sharing findings or results. Your Captain is told when the file appears; rewrite the same path to revise it.\n</seat_obligation>`,
+          `<seat_obligation>\nYour agent definition returns a ${crew.obligation.kind}. Before you finish, write it with j5_write_artifact to exactly \`${crew.obligation.path}\` as Markdown (your instructions list the required contents); this is in addition to direct messages and must not delay sharing findings or results. Your Captain is told when the file appears; rewrite the same path to revise it.\n</seat_obligation>`,
         ];
   const playbook =
     crew.playbook === undefined
@@ -138,7 +138,7 @@ export const spawnFirstTurnText = (input: {
               : crew.playbook.steps
                   .map((step) => `\n- ${briefLine(step.id)}: ${briefLine(step.title)}`)
                   .join("")
-          }\n</seat_playbook>\nThe Captain runs this playbook and hands you each of your steps when the run reaches it. Wait for that hand-off before starting a step, and report back with send_message when it's done.`,
+          }\n</seat_playbook>\nThe Captain runs this playbook and hands you each of your steps when the run reaches it. Wait for that hand-off before starting a step, and report back with j5_send_message when it's done.`,
         ];
   // The web parser needs the crew context first and the brief last, so the playbook sits between.
   return [

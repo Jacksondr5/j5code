@@ -60,7 +60,7 @@ export function planCrewPlaybook(input: CrewPlaybookPlanInput): CrewPlaybookPlan
           problem: {
             detail: `Seat ${claimant.seat} lists steps, but the crew follows no playbook.`,
             nextStep:
-              "Name a playbook from playbook_list when you propose the crew, or leave steps out.",
+              "Name a playbook from j5_playbook_list when you propose the crew, or leave steps out.",
           },
         };
   }
@@ -77,7 +77,7 @@ export function planCrewPlaybook(input: CrewPlaybookPlanInput): CrewPlaybookPlan
         return {
           problem: {
             detail: `Seat ${seat.seat} lists step ${stepId}, which playbook ${definition.name} does not have.`,
-            nextStep: `Call playbook_read for ${definition.name} and use its step ids.`,
+            nextStep: `Call j5_playbook_read for ${definition.name} and use its step ids.`,
           },
         };
       const owner = owners.get(stepId);

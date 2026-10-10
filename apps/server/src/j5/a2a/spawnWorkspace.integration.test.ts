@@ -26,7 +26,7 @@ const spawnLayer = (harness: ReturnType<typeof makeHarness>) =>
     harness.layer,
   );
 
-/** What spawn_agent does for a worktree spawn once the thread's home is recorded. */
+/** What j5_spawn_agent does for a worktree spawn once the thread's home is recorded. */
 const startWorktreeSpawn = Effect.gen(function* () {
   const threads = yield* ThreadManagementService;
   yield* threads.dispatch({

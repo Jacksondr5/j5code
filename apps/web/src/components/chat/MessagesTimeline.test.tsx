@@ -551,7 +551,7 @@ describe("MessagesTimeline", () => {
                       completedAt: null,
                       updatedAt: DateTime.makeUnsafe(MESSAGE_CREATED_AT),
                       type: "dynamic_tool",
-                      toolName: "t3-code.send_message",
+                      toolName: "t3-code.j5_send_message",
                       input: { to: "agent:peer", message: "Integrated peer send" },
                       output: {
                         messageId: "message:sent",

@@ -20,7 +20,7 @@ import { makeCrewSeatLookup, withCrewSeatQuestions } from "../a2a/crewSeatRuntim
  * plainly that platform gates are resolved in the app, not by the sandbox.
  */
 const PLATFORM_TOOLS_NOTE =
-  "Platform tools on the t3-code MCP server stay available under every sandbox and approval policy. Their human gates (for example propose_crew) are resolved by the user in the app, not by a shell approval, so an approval policy of never does not block them.";
+  "Platform tools on the t3-code MCP server stay available under every sandbox and approval policy. Their human gates (for example j5_propose_crew) are resolved by the user in the app, not by a shell approval, so an approval policy of never does not block them.";
 
 /** Persona instructions express behavior; the translated sandbox supplies the actual runtime boundary. */
 export const resolveAgentPersonaRuntime = Effect.fn("resolveAgentPersonaRuntime")(function* (

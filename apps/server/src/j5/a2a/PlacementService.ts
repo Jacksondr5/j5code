@@ -153,7 +153,7 @@ export interface ParticipantPlacementServiceShape {
     readonly projectId: LedgerProjectId;
     readonly participantId: ParticipantId;
   }) => Effect.Effect<ParticipantPlacement | null, PlacementError>;
-  /** Live `list_participants` enrichment read surface. */
+  /** Live `j5_list_participants` enrichment read surface. */
   readonly listParticipants: (
     projectId: LedgerProjectId,
   ) => Effect.Effect<ReadonlyArray<ParticipantPlacementView>, PlacementError>;

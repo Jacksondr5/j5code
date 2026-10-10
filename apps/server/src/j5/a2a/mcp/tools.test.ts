@@ -36,7 +36,7 @@ it("publishes the ratified single-target lifecycle contracts fail-closed", () =>
   const sp4BriefSteering =
     "In your brief, tell the new agent what it should do first and whether it should reply to you.";
   assert.equal(J5SpawnAgentTool.description?.split(sp4BriefSteering).length, 2);
-  assert.notInclude(J5SpawnAgentTool.description ?? "", "send_message");
+  assert.notInclude(J5SpawnAgentTool.description ?? "", "j5_send_message");
   assert.notInclude(J5SpawnAgentTool.description ?? "", "expect_reply");
 
   const spawnSchema = Tool.getJsonSchema(J5SpawnAgentTool) as {
@@ -59,25 +59,25 @@ it("publishes the ratified single-target lifecycle contracts fail-closed", () =>
   assert.include(J5SpawnAgentTool.description ?? "", "one of that persona's declared routes");
   assert.property(stopSchema.properties ?? {}, "client_request_id");
   assert.sameMembers(Object.keys(J5Toolkit.tools), [
-    "playbook_back",
-    "playbook_cancel",
-    "playbook_complete",
-    "playbook_current",
-    "playbook_list",
-    "playbook_next",
-    "playbook_read",
-    "playbook_reselect",
-    "playbook_start",
-    "send_message",
-    "list_personas",
-    "list_participants",
-    "propose_crew",
-    "request_crew_member",
-    "spawn_agent",
-    "stop_agent",
-    "stop_crew",
-    "archive_crew",
-    "clear_own_ask",
+    "j5_playbook_back",
+    "j5_playbook_cancel",
+    "j5_playbook_complete",
+    "j5_playbook_current",
+    "j5_playbook_list",
+    "j5_playbook_next",
+    "j5_playbook_read",
+    "j5_playbook_reselect",
+    "j5_playbook_start",
+    "j5_send_message",
+    "j5_list_personas",
+    "j5_list_participants",
+    "j5_propose_crew",
+    "j5_request_crew_member",
+    "j5_spawn_agent",
+    "j5_stop_agent",
+    "j5_stop_crew",
+    "j5_archive_crew",
+    "j5_clear_own_ask",
   ]);
   assert.include(J5ArchiveCrewTool.description ?? "", "only as a unit");
   assert.include(J5ArchiveCrewTool.description ?? "", "confirmation_token");
@@ -89,14 +89,14 @@ it("publishes the ratified single-target lifecycle contracts fail-closed", () =>
   assert.isFalse(Context.get(J5RequestCrewMemberTool.annotations, Tool.Destructive));
   assert.include(J5ProposeCrewTool.description ?? "", "including approval policy never");
   assert.include(J5RequestCrewMemberTool.description ?? "", "including approval policy never");
-  // Declared handoffs are written by the seat itself with the project write_artifact tool
+  // Declared handoffs are written by the seat itself with the project j5_write_artifact tool
   // (artifacts live in application storage, not the sandboxed workspace), so a read-only Claude
   // persona must have it pre-approved beside the J5 verbs. The artifact reads are upstream's.
   assert.sameMembers(
     [...J5_CLAUDE_MCP_ALLOWED_TOOLS],
     [
       ...Object.keys(J5Toolkit.tools).map((name) => `mcp__t3-code__${name}`),
-      "mcp__t3-code__write_artifact",
+      "mcp__t3-code__j5_write_artifact",
       "mcp__t3-code__delegate_task",
       "mcp__t3-code__task_status",
       "mcp__t3-code__task_cancel",
@@ -109,7 +109,7 @@ it("publishes the ratified single-target lifecycle contracts fail-closed", () =>
 // Claude Code drops EVERY tool of an MCP server when one tool's input schema has no top-level
 // `type: "object"` (verified 2026-09-10 with a probe server: a single top-level `anyOf` tool made
 // the whole server's inventory vanish while it still reported "connected"). `Schema.Struct({})`
-// encodes as exactly that anyOf, which is how `list_personas` silently took the whole t3-code
+// encodes as exactly that anyOf, which is how `j5_list_personas` silently took the whole t3-code
 // toolkit away from every Claude thread. No-input tools must omit `parameters` instead.
 it("publishes every tool with a top-level object input schema", () => {
   for (const tool of [

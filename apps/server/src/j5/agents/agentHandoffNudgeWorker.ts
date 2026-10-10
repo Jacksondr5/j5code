@@ -8,7 +8,7 @@ import { AgentHandoffNudgeQueue, type AgentHandoffNudge } from "./agentHandoffNu
 import { agentHandoffLogicalPath } from "./agentPersonaArtifacts.ts";
 
 export const agentHandoffNudgeText = (nudge: AgentHandoffNudge) =>
-  `Your run ended without the declared ${nudge.artifact} handoff. Write it now with write_artifact to exactly \`${nudge.path}\` (it will appear as \`${agentHandoffLogicalPath(nudge.path)}\`), covering the required contents from your instructions, then finish. This is the only reminder; a run that ends without it is recorded as a missing handoff.`;
+  `Your run ended without the declared ${nudge.artifact} handoff. Write it now with j5_write_artifact to exactly \`${nudge.path}\` (it will appear as \`${agentHandoffLogicalPath(nudge.path)}\`), covering the required contents from your instructions, then finish. This is the only reminder; a run that ends without it is recorded as a missing handoff.`;
 
 /**
  * Drains the nudge queue where ThreadManagement is available and sends the one follow-up
