@@ -50,7 +50,8 @@ Read from the tree at `ff34d7067e`. The counts come from reading the server only
 | The conversation, including agent-to-agent cards     | Yes  | Yes         |
 | Diffs and files the thread's work touched            | Yes  | Yes         |
 | Watching the thread's preview browser tabs           | Yes  | Yes         |
-| Sending, queueing and steering                       | No   | Yes         |
+| Sending and queueing messages                        | No   | Yes         |
+| Steering and stopping the agent                      | No   | No          |
 | Answering the agent's questions and approval prompts | No   | Yes         |
 | Opening and driving preview browser tabs             | No   | Yes         |
 | Changing the thread's model or access mode           | No   | No          |
@@ -109,7 +110,10 @@ In progress.
 - **What that gives up.** A person who is not watching learns of the question only from the thread's ordinary signals, and nothing tracks an unanswered question the way the inbox does. How a shared thread gets a person's attention is left to the attention spectrum session.
 - **Parked for the hosted-server session:** what an ask means on a server with several members, where every thread can be written to by all of them. The rule above is scoped to threads with a guest collaborator so that it does not switch the inbox off across such a server.
 
-Still open: what happens when two people send or steer at once, and what a newly added person sees of the conversation from before they joined.
+- **A guest queues; only a member steers or stops.** A guest's message starts the agent when it is idle and queues behind the current work when it is not. A guest can never interrupt work in progress. The cost was raised and accepted: a guest who watches the agent do something wrong cannot stop it and has to reach a member.
+- **No presence.** Nothing shows that another person is typing or looking at the thread.
+
+Still open: whether a guest can edit or remove their own queued message, and what a newly added person sees of the conversation from before they joined.
 
 ## Not verified
 
