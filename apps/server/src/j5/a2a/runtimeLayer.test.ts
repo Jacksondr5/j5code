@@ -57,7 +57,7 @@ import { PeerRegistryService } from "./PeerRegistryService.ts";
 import { makeJ5A2ARuntimeLayer, peerHttpClient } from "./runtimeLayer.ts";
 
 const archiveDependencies = Layer.mergeAll(
-  // spawn_agent and Crew seats prepare worktrees through upstream's launch and receipts.
+  // j5_spawn_agent and Crew seats prepare worktrees through upstream's launch and receipts.
   Layer.mock(ThreadLaunchService)({}),
   Layer.mock(OrchestrationCommandReceiptRepository)({}),
   Layer.mock(ServerSecretStore)({
@@ -167,7 +167,7 @@ it.effect("shares one runtime and outbox across the production HTTP and MCP regi
       const spawnCompositionConsumer = Layer.effectDiscard(
         SpawnCompositionService.pipe(Effect.asVoid),
       );
-      // spawn_agent reads the workspace service from the route graph; CrewLaunch is built with it.
+      // j5_spawn_agent reads the workspace service from the route graph; CrewLaunch is built with it.
       const spawnWorkspaceConsumer = Layer.effectDiscard(SpawnWorkspaceService.pipe(Effect.asVoid));
       const runtime = makeJ5A2ARuntimeLayer({
         ledger: countedLedger,
@@ -264,7 +264,7 @@ it.effect("shares one runtime and outbox across the production HTTP and MCP regi
       assert.equal(threadManagementBuilds, 1);
       assert.equal(transports.size, 1);
       assert.equal(outboxes.size, 1);
-      // The start guard holds only if spawn_agent and CrewLaunch share one workspace service.
+      // The start guard holds only if j5_spawn_agent and CrewLaunch share one workspace service.
       assert.equal(spawnWorkspaces.size, 1);
       const sql = Context.get(databaseContext, SqlClient.SqlClient);
       const people = yield* sql<{

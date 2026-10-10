@@ -6,7 +6,7 @@ import * as SqlClient from "effect/sql/SqlClient";
  * it. One delivery row per landing (start, next, back, reselect), keyed by the request that
  * caused it, so a retried request never delivers twice. Delivery rows are not tied to
  * `j5_playbook_request`, whose prune trigger drops movement requests when a run ends; they stay
- * as the audit trail and as what `playbook_current` and Fleet read.
+ * as the audit trail and as what `j5_playbook_current` and Fleet read.
  */
 export default Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;

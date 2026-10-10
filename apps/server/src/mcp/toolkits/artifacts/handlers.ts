@@ -11,21 +11,21 @@ const callerScope = McpInvocationContext.pipe(
 );
 
 const handlers = {
-  list_artifacts: McpToolAccess.readsAsCaller(() =>
+  j5_list_artifacts: McpToolAccess.readsAsCaller(() =>
     Effect.gen(function* () {
       const scope = yield* callerScope;
       const service = yield* ArtifactMcpService;
       return yield* service.list(scope);
     }),
   ),
-  read_artifact: McpToolAccess.readsAsCaller(({ path }) =>
+  j5_read_artifact: McpToolAccess.readsAsCaller(({ path }) =>
     Effect.gen(function* () {
       const scope = yield* callerScope;
       const service = yield* ArtifactMcpService;
       return yield* service.read(scope, path);
     }),
   ),
-  write_artifact: McpToolAccess.actsAsCaller((input) =>
+  j5_write_artifact: McpToolAccess.actsAsCaller((input) =>
     Effect.gen(function* () {
       const scope = yield* callerScope;
       const service = yield* ArtifactMcpService;

@@ -23,7 +23,7 @@ const dependencies = [
 /** An artifact refusal, or McpToolAccess's refusal of a caller that is not a live thread. */
 const failure = Schema.Union([ArtifactMcpFailure, OrchestratorMcpFailure]);
 
-export const ListArtifactsTool = Tool.make("list_artifacts", {
+export const ListArtifactsTool = Tool.make("j5_list_artifacts", {
   description:
     "List durable planning artifacts shared by every thread and agent in the current project.",
   success: ArtifactListResponse,
@@ -36,7 +36,7 @@ export const ListArtifactsTool = Tool.make("list_artifacts", {
   .annotate(Tool.Destructive, false)
   .annotate(Tool.Idempotent, true);
 
-export const ReadArtifactTool = Tool.make("read_artifact", {
+export const ReadArtifactTool = Tool.make("j5_read_artifact", {
   description:
     "Read one project artifact by its path relative to artifacts/, such as plan.md or diagrams/flow.svg.",
   parameters: ArtifactReadInput,
@@ -50,9 +50,9 @@ export const ReadArtifactTool = Tool.make("read_artifact", {
   .annotate(Tool.Destructive, false)
   .annotate(Tool.Idempotent, true);
 
-export const WriteArtifactTool = Tool.make("write_artifact", {
+export const WriteArtifactTool = Tool.make("j5_write_artifact", {
   description:
-    "Create or replace a durable, user-consumable planning artifact shared across the current project's threads and agents. Use this for plans, specifications, diagrams, and research notes—not source code, build output, logs, scratch files, or ordinary repository documentation. The path is relative to artifacts/ and content must be UTF-8 text; HTML, Markdown, Mermaid, and SVG are supported. Paths under handoffs/ keep history: writing an existing handoff adds your content as a new version at the top of the same file instead of replacing it, so read_artifact on such a path returns a versions header followed by every kept version, newest first.",
+    "Create or replace a durable, user-consumable planning artifact shared across the current project's threads and agents. Use this for plans, specifications, diagrams, and research notes—not source code, build output, logs, scratch files, or ordinary repository documentation. The path is relative to artifacts/ and content must be UTF-8 text; HTML, Markdown, Mermaid, and SVG are supported. Paths under handoffs/ keep history: writing an existing handoff adds your content as a new version at the top of the same file instead of replacing it, so j5_read_artifact on such a path returns a versions header followed by every kept version, newest first.",
   parameters: ArtifactWriteInput,
   success: ArtifactWriteResult,
   failure,

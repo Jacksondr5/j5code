@@ -449,7 +449,7 @@ it.effect("requires explicit recovery when the current step disappears", () =>
     assert.equal(missing.code, "step_missing");
     assert.include(missing.message, run.runId);
     assert.include(missing.message, "research");
-    assert.include(missing.message, "playbook_reselect");
+    assert.include(missing.message, "j5_playbook_reselect");
     assert.deepStrictEqual(missing.availableStepIds, ["implement", "review"]);
     for (const operation of ["next", "back", "complete"] as const) {
       assert.equal(
@@ -660,7 +660,7 @@ it.effect("rejects first and last step movement and stale back or completion req
       }),
     );
     assert.equal(lastBoundary.code, "step_boundary");
-    assert.include(lastBoundary.message, "playbook_complete");
+    assert.include(lastBoundary.message, "j5_playbook_complete");
     assert.equal((yield* store.current(owner, run.runId)).currentStepId, "review");
     assert.equal(
       (yield* store.mutate(owner, {

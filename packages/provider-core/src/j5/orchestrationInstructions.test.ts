@@ -11,12 +11,12 @@ describe("J5 orchestration instructions", () => {
   it("steers to provider-native Subagents and platform Peer Agents", () => {
     assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "provider-native Subagent");
     assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "your provider's native Subagent mechanism");
-    assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "Use platform `spawn_agent`");
+    assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "Use platform `j5_spawn_agent`");
     assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "what should come back in that brief");
     // Crews are the third shape of help; without this bullet an agent asked for a crew makes subagents.
     assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "A Crew is a group of Peer Agents");
-    assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "Use `propose_crew`");
-    assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "Use `list_participants`");
+    assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "Use `j5_propose_crew`");
+    assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "Use `j5_list_participants`");
     assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "later work owed by an existing participant");
     assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "expect_reply=true");
     assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "open an Exchange");
@@ -35,7 +35,7 @@ describe("J5 orchestration instructions", () => {
       "workspaceStrategy",
       "In your brief, tell the new agent",
       "delegated work must return a result",
-      "then use `send_message",
+      "then use `j5_send_message",
       "cannot create a new Peer Agent yet",
     ]) {
       assert.notInclude(J5_ORCHESTRATION_INSTRUCTIONS, excluded);
@@ -82,11 +82,11 @@ describe("J5 orchestration instructions", () => {
   it("creates mixed crews from chat and keeps coordination independent of approvals and artifacts", () => {
     assert.include(
       J5_ORCHESTRATION_INSTRUCTIONS,
-      "A request to create, start, or assemble a crew must go through `propose_crew` on the `t3-code` MCP server",
+      "A request to create, start, or assemble a crew must go through `j5_propose_crew` on the `t3-code` MCP server",
     );
     assert.include(
       J5_ORCHESTRATION_INSTRUCTIONS,
-      "Never substitute provider-native Subagents, `delegate_task`, or individual `spawn_agent` calls for a requested crew",
+      "Never substitute provider-native Subagents, `delegate_task`, or individual `j5_spawn_agent` calls for a requested crew",
     );
     assert.include(
       J5_ORCHESTRATION_INSTRUCTIONS,
@@ -95,7 +95,7 @@ describe("J5 orchestration instructions", () => {
     assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "asks for a crew in ordinary chat");
     assert.include(
       J5_ORCHESTRATION_INSTRUCTIONS,
-      "saved personas from `list_personas` with custom seats",
+      "saved personas from `j5_list_personas` with custom seats",
     );
     assert.notInclude(J5_ORCHESTRATION_INSTRUCTIONS, "`list_agents`");
     assert.include(
@@ -111,7 +111,7 @@ describe("J5 orchestration instructions", () => {
     );
     assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "Captains of other crews");
     assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "Do not wait for an artifact");
-    assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "`request_crew_member`");
+    assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "`j5_request_crew_member`");
     assert.include(
       J5_ORCHESTRATION_INSTRUCTIONS,
       "reason naming the concern and needed responsibility",
@@ -122,15 +122,15 @@ describe("J5 orchestration instructions", () => {
 
   it("routes durable planning outputs into artifacts and excludes working files", () => {
     assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "durable, user-consumable planning outputs");
-    assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "`write_artifact`");
-    assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "`list_artifacts`");
-    assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "`read_artifact`");
+    assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "`j5_write_artifact`");
+    assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "`j5_list_artifacts`");
+    assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "`j5_read_artifact`");
     assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "across threads and agents");
     assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "source code, build output, logs");
     assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "temporary scratch files");
     assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "Artifacts panel");
     assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "outside the repository");
-    // Handoffs are the one place write_artifact appends instead of replacing; the model is told.
+    // Handoffs are the one place j5_write_artifact appends instead of replacing; the model is told.
     assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "Artifacts under `handoffs/` are versioned");
     assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "rather than replacing it");
   });

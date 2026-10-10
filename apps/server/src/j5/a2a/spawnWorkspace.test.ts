@@ -314,7 +314,7 @@ const spawnHarness = (input: {
       Effect.gen(function* () {
         const toolkit = yield* J5Toolkit;
         return yield* toolkit
-          .handle("spawn_agent", args)
+          .handle("j5_spawn_agent", args)
           .pipe(
             Stream.unwrap,
             Stream.run(Sink.last()),

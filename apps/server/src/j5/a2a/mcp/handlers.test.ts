@@ -190,25 +190,25 @@ const unusedLifecycleDependencies = Layer.mergeAll(
 it.effect("namespaces mutating-tool idempotency and sender identity from authenticated scope", () =>
   Effect.gen(function* () {
     assert.deepStrictEqual(Object.keys(J5Toolkit.tools).sort(), [
-      "archive_crew",
-      "clear_own_ask",
-      "list_participants",
-      "list_personas",
-      "playbook_back",
-      "playbook_cancel",
-      "playbook_complete",
-      "playbook_current",
-      "playbook_list",
-      "playbook_next",
-      "playbook_read",
-      "playbook_reselect",
-      "playbook_start",
-      "propose_crew",
-      "request_crew_member",
-      "send_message",
-      "spawn_agent",
-      "stop_agent",
-      "stop_crew",
+      "j5_archive_crew",
+      "j5_clear_own_ask",
+      "j5_list_participants",
+      "j5_list_personas",
+      "j5_playbook_back",
+      "j5_playbook_cancel",
+      "j5_playbook_complete",
+      "j5_playbook_current",
+      "j5_playbook_list",
+      "j5_playbook_next",
+      "j5_playbook_read",
+      "j5_playbook_reselect",
+      "j5_playbook_start",
+      "j5_propose_crew",
+      "j5_request_crew_member",
+      "j5_send_message",
+      "j5_spawn_agent",
+      "j5_stop_agent",
+      "j5_stop_crew",
     ]);
     const sends = yield* Ref.make<ReadonlyArray<SendMessageInput>>([]);
     const clears = yield* Ref.make<ReadonlyArray<ClearOwnAskInput>>([]);
@@ -248,7 +248,7 @@ it.effect("namespaces mutating-tool idempotency and sender identity from authent
             }),
           ),
         listParticipants: () =>
-          Effect.die(new Error("send_message must not resolve the participant directory")),
+          Effect.die(new Error("j5_send_message must not resolve the participant directory")),
       }),
     );
     const dependencies = Layer.mergeAll(
@@ -269,7 +269,7 @@ it.effect("namespaces mutating-tool idempotency and sender identity from authent
       const toolkit = yield* J5Toolkit;
       const call = (args: J5SendMessageInput) =>
         toolkit
-          .handle("send_message", args)
+          .handle("j5_send_message", args)
           .pipe(
             Stream.unwrap,
             Stream.run(Sink.last()),
@@ -278,7 +278,7 @@ it.effect("namespaces mutating-tool idempotency and sender identity from authent
           );
       const callClear = (exchangeId: ExchangeId, clientRequestId: string) =>
         toolkit
-          .handle("clear_own_ask", {
+          .handle("j5_clear_own_ask", {
             exchange_id: exchangeId,
             client_request_id: clientRequestId,
           })
@@ -315,7 +315,7 @@ it.effect("namespaces mutating-tool idempotency and sender identity from authent
       assert.isTrue(selfSend.isFailure);
       const selfSendMessage = (selfSend.result as unknown as { readonly message: string }).message;
       assert.include(selfSendMessage, callerParticipantId);
-      assert.include(selfSendMessage, "list_participants");
+      assert.include(selfSendMessage, "j5_list_participants");
       assert.include(selfSendMessage, "schedule_task");
       assert.notInclude(selfSendMessage, "Memo");
       const multiMembership = yield* call({
@@ -408,8 +408,8 @@ it.effect("keeps participant listing placement-read-only", () =>
     const sendService = Layer.succeed(
       A2ASendService,
       A2ASendService.of({
-        send: () => Effect.die("send_message is outside this placement-handler test"),
-        clearOwnAsk: () => Effect.die("clear_own_ask is outside this placement-handler test"),
+        send: () => Effect.die("j5_send_message is outside this placement-handler test"),
+        clearOwnAsk: () => Effect.die("j5_clear_own_ask is outside this placement-handler test"),
         sendAsMachine: () => Effect.die("unused"),
         listParticipants: () => Effect.succeed([callerRow, forkedRow, humanRow]),
       }),
@@ -467,7 +467,7 @@ it.effect("keeps participant listing placement-read-only", () =>
       const toolkit = yield* J5Toolkit;
       const callList = () =>
         toolkit
-          .handle("list_participants", {})
+          .handle("j5_list_participants", {})
           .pipe(
             Stream.unwrap,
             Stream.run(Sink.last()),
@@ -622,7 +622,7 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
     const result = yield* Effect.gen(function* () {
       const toolkit = yield* J5Toolkit;
       return yield* toolkit
-        .handle("list_participants", {})
+        .handle("j5_list_participants", {})
         .pipe(
           Stream.unwrap,
           Stream.run(Sink.last()),
@@ -766,7 +766,7 @@ it.effect("returns null display names when the ambient shell snapshot fails", ()
     const result = yield* Effect.gen(function* () {
       const toolkit = yield* J5Toolkit;
       return yield* toolkit
-        .handle("list_participants", {})
+        .handle("j5_list_participants", {})
         .pipe(
           Stream.unwrap,
           Stream.run(Sink.last()),
@@ -817,8 +817,8 @@ it.effect("preflights home before creation and records facts before the one stab
     const sendService = Layer.succeed(
       A2ASendService,
       A2ASendService.of({
-        send: () => Effect.die("send_message is outside this spawn test"),
-        clearOwnAsk: () => Effect.die("clear_own_ask is outside this spawn test"),
+        send: () => Effect.die("j5_send_message is outside this spawn test"),
+        clearOwnAsk: () => Effect.die("j5_clear_own_ask is outside this spawn test"),
         sendAsMachine: () => Effect.die("unused"),
         listParticipants: () => Effect.succeed([callerRow]),
       }),
@@ -983,7 +983,7 @@ it.effect("preflights home before creation and records facts before the one stab
       const toolkit = yield* J5Toolkit;
       const call = (args: J5SpawnAgentInput) =>
         toolkit
-          .handle("spawn_agent", args)
+          .handle("j5_spawn_agent", args)
           .pipe(
             Stream.unwrap,
             Stream.run(Sink.last()),
@@ -1075,7 +1075,7 @@ it.effect("preflights home before creation and records facts before the one stab
       assert.isTrue(optionless.isFailure);
       assert.include(
         (optionless.result as unknown as { readonly message: string }).message,
-        "Model grok-custom-optionless on provider codex-luna exposes no reasoning options; spawn_agent requires explicit reasoning selection",
+        "Model grok-custom-optionless on provider codex-luna exposes no reasoning options; j5_spawn_agent requires explicit reasoning selection",
       );
       assert.lengthOf(yield* Ref.get(commands), 4);
 
@@ -1139,7 +1139,7 @@ it.effect("refuses spawn before thread creation when the caller is a Subagent", 
     yield* Effect.gen(function* () {
       const toolkit = yield* J5Toolkit;
       const result = yield* toolkit
-        .handle("spawn_agent", {
+        .handle("j5_spawn_agent", {
           workspace: { type: "shared" as const },
           brief: "This must never start.",
           provider: ProviderInstanceId.make("codex-luna"),
@@ -1322,7 +1322,7 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
       const toolkit = yield* J5Toolkit;
       const call = (args: J5SpawnAgentInput) =>
         toolkit
-          .handle("spawn_agent", args)
+          .handle("j5_spawn_agent", args)
           .pipe(
             Stream.unwrap,
             Stream.run(Sink.last()),
@@ -1586,7 +1586,7 @@ it.effect("archives a crew only as a unit through its captain with one confirmat
         (response.result as { readonly message: string }).message;
       const run = (args: J5ArchiveCrewInput) =>
         toolkit
-          .handle("archive_crew", args)
+          .handle("j5_archive_crew", args)
           .pipe(
             Stream.unwrap,
             Stream.run(Sink.last()),
@@ -1681,7 +1681,7 @@ it.effect("lists saved agents with purpose, policy, availability, and route", ()
     yield* Effect.gen(function* () {
       const toolkit = yield* J5Toolkit;
       const response = yield* toolkit
-        .handle("list_personas", {})
+        .handle("j5_list_personas", {})
         .pipe(
           Stream.unwrap,
           Stream.run(Sink.last()),
@@ -1838,11 +1838,11 @@ it.effect("routes crew proposals through a captain that is not itself a crew mem
     );
     yield* Effect.gen(function* () {
       const toolkit = yield* J5Toolkit;
-      const run = <K extends "propose_crew" | "request_crew_member" | "spawn_agent">(
+      const run = <K extends "j5_propose_crew" | "j5_request_crew_member" | "j5_spawn_agent">(
         tool: K,
-        args: K extends "propose_crew"
+        args: K extends "j5_propose_crew"
           ? J5ProposeCrewInput
-          : K extends "spawn_agent"
+          : K extends "j5_spawn_agent"
             ? J5SpawnAgentInput
             : J5RequestCrewMemberInput,
       ) =>
@@ -1862,7 +1862,7 @@ it.effect("routes crew proposals through a captain that is not itself a crew mem
         model: "gpt-6-astra",
         options: [{ id: "reasoningEffort", value: "high" }],
       };
-      const proposed = yield* run("propose_crew", {
+      const proposed = yield* run("j5_propose_crew", {
         name: "Login Fix Crew",
         brief: "Fix the flaky login test.",
         seats: [
@@ -1922,7 +1922,7 @@ it.effect("routes crew proposals through a captain that is not itself a crew mem
         },
       ]);
 
-      const added = yield* run("request_crew_member", {
+      const added = yield* run("j5_request_crew_member", {
         workspace: { type: "shared" as const },
         seat: "security",
         reason: "Security pass",
@@ -1953,7 +1953,7 @@ it.effect("routes crew proposals through a captain that is not itself a crew mem
       ]);
 
       yield* Ref.set(membership, { crewInstanceId: "crew:1", seatName: "builder" });
-      const refused = yield* run("propose_crew", {
+      const refused = yield* run("j5_propose_crew", {
         name: "Nested",
         brief: "x",
         seats: [
@@ -1964,7 +1964,7 @@ it.effect("routes crew proposals through a captain that is not itself a crew mem
       assert.include(message(refused), "crew members cannot request crews or seats");
       assert.lengthOf(yield* Ref.get(proposals), 2);
       // Nor may a seat spawn a solo Peer Agent: only the Captain grows a Crew, through the gate.
-      const spawned = yield* run("spawn_agent", {
+      const spawned = yield* run("j5_spawn_agent", {
         workspace: { type: "shared" as const },
         brief: "Help me",
         provider: "codex",
@@ -2026,8 +2026,8 @@ it.effect("stops exactly one placed agent as upstream's Stop, never its placed d
       Layer.succeed(
         A2ASendService,
         A2ASendService.of({
-          send: () => Effect.die("send_message is outside this stop test"),
-          clearOwnAsk: () => Effect.die("clear_own_ask is outside this stop test"),
+          send: () => Effect.die("j5_send_message is outside this stop test"),
+          clearOwnAsk: () => Effect.die("j5_clear_own_ask is outside this stop test"),
           sendAsMachine: () => Effect.die("unused"),
           listParticipants: () => Effect.succeed([callerRow]),
         }),
@@ -2039,7 +2039,7 @@ it.effect("stops exactly one placed agent as upstream's Stop, never its placed d
             agentRow(siblingParticipantId, siblingThreadId, callerParticipantId),
             agentRow(childParticipantId, childThreadId, targetParticipantId),
           ]),
-        listSubtree: () => Effect.die("stop_agent must never resolve placement descendants"),
+        listSubtree: () => Effect.die("j5_stop_agent must never resolve placement descendants"),
       }),
       threadManagementMock({
         getThreadProjection: (threadId) =>
@@ -2063,7 +2063,7 @@ it.effect("stops exactly one placed agent as upstream's Stop, never its placed d
                   threadId: command.threadId,
                 },
               ]).pipe(Effect.as({ sequence: 1, storedEvents: [] }))
-            : Effect.die(`stop_agent must only dispatch thread.stop, not ${command.type}`),
+            : Effect.die(`j5_stop_agent must only dispatch thread.stop, not ${command.type}`),
         stopDelegatedTasks: (input) =>
           Ref.update(stopped, (items) => [
             ...items,
@@ -2073,7 +2073,7 @@ it.effect("stops exactly one placed agent as upstream's Stop, never its placed d
               threadId: input.threadId,
             },
           ]),
-        interruptThread: () => Effect.die("stop_agent sends upstream's Stop, not an interrupt"),
+        interruptThread: () => Effect.die("j5_stop_agent sends upstream's Stop, not an interrupt"),
       }),
       Layer.mock(A2AHomeRegistrar)({}),
       Layer.mock(A2ALedger)({}),
@@ -2101,7 +2101,7 @@ it.effect("stops exactly one placed agent as upstream's Stop, never its placed d
       const toolkit = yield* J5Toolkit;
       const call = (args: J5StopAgentInput) =>
         toolkit
-          .handle("stop_agent", args)
+          .handle("j5_stop_agent", args)
           .pipe(
             Stream.unwrap,
             Stream.run(Sink.last()),
@@ -2256,7 +2256,7 @@ it.effect(
       yield* Effect.gen(function* () {
         const toolkit = yield* J5Toolkit;
         const callList = (include_archived: boolean) =>
-          toolkit.handle("list_participants", { include_archived }).pipe(
+          toolkit.handle("j5_list_participants", { include_archived }).pipe(
             Stream.unwrap,
             Stream.run(Sink.last()),
             Effect.flatMap(Effect.fromOption),

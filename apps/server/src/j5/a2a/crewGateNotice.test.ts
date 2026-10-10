@@ -140,7 +140,7 @@ describe("crew launch report", () => {
     assert.include(text, "playbook: review | Review &#60;a&#62; change\nroster:\n");
     assert.include(
       text,
-      `Start it with playbook_start(name: "review", client_request_id, crew_instance_id: "${instance.id}").`,
+      `Start it with j5_playbook_start(name: "review", client_request_id, crew_instance_id: "${instance.id}").`,
     );
     const plain = crewLaunchReportText({
       proposal,
@@ -233,7 +233,7 @@ describe("crew launch report", () => {
     assert.include(text, "thread_id=thread:punchline start=failed");
     assert.include(text, "seat_not_created: prosecutor | its thread was never created");
     assert.notInclude(text, "thread_id=thread:prosecutor");
-    assert.include(text, "request_crew_member");
+    assert.include(text, "j5_request_crew_member");
     assert.notInclude(text, "Your crew is running");
   });
 

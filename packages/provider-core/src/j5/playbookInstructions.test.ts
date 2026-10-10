@@ -23,11 +23,11 @@ it("the crew procedure text names its trigger, its rulings, and its tools in cal
     assert.include(PLAYBOOK_CREW_INSTRUCTIONS, phrase);
   assert.notInclude(PLAYBOOK_CREW_INSTRUCTIONS, "expect_reply");
   const positions = [
-    "playbook_read",
-    "list_personas",
-    "propose_crew",
+    "j5_playbook_read",
+    "j5_list_personas",
+    "j5_propose_crew",
     "crew_instance_id",
-    "playbook_start",
+    "j5_playbook_start",
   ].map((tool) => PLAYBOOK_CREW_INSTRUCTIONS.indexOf(tool));
   assert.notInclude(positions, -1);
   assert.deepStrictEqual(

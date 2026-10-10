@@ -271,7 +271,7 @@ const callSpawn = (input: J5SpawnAgentInput) =>
   Effect.gen(function* () {
     const toolkit = yield* J5Toolkit;
     const response = yield* toolkit
-      .handle("spawn_agent", input)
+      .handle("j5_spawn_agent", input)
       .pipe(
         Stream.unwrap,
         Stream.run(Sink.last()),
@@ -279,7 +279,7 @@ const callSpawn = (input: J5SpawnAgentInput) =>
         Effect.provideService(McpInvocationContext, scope),
       );
     if (response.isFailure) {
-      return yield* Effect.die(new Error(`Tool spawn_agent failed: ${String(response.result)}`));
+      return yield* Effect.die(new Error(`Tool j5_spawn_agent failed: ${String(response.result)}`));
     }
     return yield* decodeSpawnResult(response.result);
   });
@@ -288,7 +288,7 @@ const callStop = (input: J5StopAgentInput) =>
   Effect.gen(function* () {
     const toolkit = yield* J5Toolkit;
     const response = yield* toolkit
-      .handle("stop_agent", input)
+      .handle("j5_stop_agent", input)
       .pipe(
         Stream.unwrap,
         Stream.run(Sink.last()),
@@ -296,7 +296,7 @@ const callStop = (input: J5StopAgentInput) =>
         Effect.provideService(McpInvocationContext, scope),
       );
     if (response.isFailure) {
-      return yield* Effect.die(new Error(`Tool stop_agent failed: ${String(response.result)}`));
+      return yield* Effect.die(new Error(`Tool j5_stop_agent failed: ${String(response.result)}`));
     }
     return yield* decodeStopResult(response.result);
   });

@@ -39,7 +39,7 @@ export const J5AdaptedThreadToolkit = Toolkit.make(
     parameters: ThreadToolkit.tools.t3_thread_organize.parametersSchema,
     success: ThreadToolkit.tools.t3_thread_organize.successSchema,
     description:
-      "Pin, snooze, settle, archive, or mark a thread unread. Omit threadId for this thread. snooze requires snoozedUntil. Existing thread lifecycle rules apply. Settling this thread takes effect when your turn completes, returning settlesWhenTurnEnds=true; a turn that fails or is interrupted, or a queued message, leaves it active. Archive hides the agent and closes its Exchanges; unarchive restores visibility without reopening Exchanges. Crew seats cannot be archived individually; use archive_crew or the Fleet page. Captain archive retains the crew cascade. Ordinary archive does not interrupt a running turn.",
+      "Pin, snooze, settle, archive, or mark a thread unread. Omit threadId for this thread. snooze requires snoozedUntil. Existing thread lifecycle rules apply. Settling this thread takes effect when your turn completes, returning settlesWhenTurnEnds=true; a turn that fails or is interrupted, or a queued message, leaves it active. Archive hides the agent and closes its Exchanges; unarchive restores visibility without reopening Exchanges. Crew seats cannot be archived individually; use j5_archive_crew or the Fleet page. Captain archive retains the crew cascade. Ordinary archive does not interrupt a running turn.",
   })
     .annotate(Tool.Title, "Organize a thread")
     .annotate(Tool.Destructive, true),

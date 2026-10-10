@@ -587,7 +587,7 @@ export const layer = Layer.effect(
       const created: Array<Planned> = [];
       for (const member of planned) {
         const seatName = member.seat.name;
-        // Seats go through the same start guard as spawn_agent (see `withSpawnStart`), so every
+        // Seats go through the same start guard as j5_spawn_agent (see `withSpawnStart`), so every
         // door that creates a spawn thread keeps its invariant. A Crew's launches are already
         // serialized and its approval binds each seat's workspace type, so neither refusal is
         // expected here; the brief takes the guard again once every seat exists.

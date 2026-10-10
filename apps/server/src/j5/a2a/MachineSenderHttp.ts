@@ -45,7 +45,7 @@ import { CommCommandId, isMachineParticipantId, ParticipantId } from "./contract
  * The machine-sender HTTP surface behind `j5 a2a`. A machine token carries the
  * `a2a:send` scope and its participant id as the session subject; identity is
  * never a request field. Sends drive the same send service and command-id
- * idempotency the MCP `send_message` tool uses.
+ * idempotency the MCP `j5_send_message` tool uses.
  */
 
 const decodeRegisterRequest = Schema.decodeUnknownEffect(RegisterMachineParticipantRequest);
