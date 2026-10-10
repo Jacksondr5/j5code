@@ -12,6 +12,7 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
+import * as Logger from "effect/Logger";
 import * as Path from "effect/Path";
 import * as Scope from "effect/Scope";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -90,6 +91,21 @@ const snapshotsIn = (directory: string) =>
   NodeFS.readdirSync(directory)
     .filter((name) => name.includes(".pre-migration-"))
     .toSorted();
+
+/**
+ * Runs `effect` with `onLog` as its only logger. Loggers run inline, so `onLog` sees the
+ * snapshot's `copyStarts` message after the database's migration history has been read and before
+ * the copy starts.
+ */
+const withLogs = <A, E, R>(effect: Effect.Effect<A, E, R>, onLog: (message: string) => void) =>
+  effect.pipe(
+    Effect.provide(
+      Logger.layer([Logger.make(({ message }) => onLog(String(message)))], {
+        mergeWithExisting: false,
+      }),
+    ),
+  );
+const copyStarts = "Snapshotting the database before its pending migrations";
 
 /** Every row of every table, so two database files are compared by content. */
 const readContent = (filename: string) => {
@@ -372,6 +388,31 @@ it.effect("finishes while another connection keeps committing", () =>
       // Taken while the writer was running: some of its commits, not all of them.
       assert.isAbove(count("commits"), 0);
       assert.isBelow(count("commits"), commits);
+    }),
+  ),
+);
+
+it.effect("discards its copy when another process migrated the database first", () =>
+  withDatabasePath(({ dbPath, directory }) =>
+    Effect.gen(function* () {
+      createDatabase(dbPath, 9, 4);
+      const messages: Array<string> = [];
+
+      // Another process's migrator records migration 10 after this one read the history as 9.
+      yield* withLogs(snapshotBeforeMigrations(dbPath, build), (message) => {
+        messages.push(message);
+        if (!message.startsWith(copyStarts)) return;
+        const other = new NodeSqlite.DatabaseSync(dbPath);
+        try {
+          other.exec("INSERT INTO effect_sql_migrations (migration_id, name) VALUES (10, 'M10')");
+        } finally {
+          other.close();
+        }
+      });
+
+      // Not published as the database "before migration 10", which it no longer is.
+      assert.deepStrictEqual(NodeFS.readdirSync(directory), ["statev2.sqlite"]);
+      assert.isTrue(messages.some((message) => message.startsWith("Snapshot discarded")));
     }),
   ),
 );
