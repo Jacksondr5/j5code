@@ -7,7 +7,7 @@ import {
   ProviderInstanceId,
   ThreadId,
   type OrchestrationV2AppThread,
-  type OrchestrationV2Command,
+  type OrchestrationV2ServerCommand,
   type OrchestrationV2ThreadProjection,
   type ServerProvider,
 } from "@t3tools/contracts";
@@ -36,7 +36,7 @@ import {
   ProjectionStoreThreadNotFoundError,
 } from "../../orchestration-v2/ProjectionStore.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
-import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
+import { ProviderRegistry } from "../../provider/ProviderRegistry.ts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import {
   AgentCrewInstanceService,
@@ -128,7 +128,7 @@ const fixture = Effect.gen(function* () {
     }),
     context,
   );
-  const commands = yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]);
+  const commands = yield* Ref.make<ReadonlyArray<OrchestrationV2ServerCommand>>([]);
   const captain = {
     projectId,
     projectTitle: "Launch project",
@@ -139,13 +139,13 @@ const fixture = Effect.gen(function* () {
 });
 
 const threadManagementFake = (
-  commands: Ref.Ref<ReadonlyArray<OrchestrationV2Command>>,
+  commands: Ref.Ref<ReadonlyArray<OrchestrationV2ServerCommand>>,
   unreadableOnce: Set<string>,
   archived: Set<string>,
   realThreads: boolean,
   failBriefOnce: Set<string>,
   beforeDispatch: (
-    command: OrchestrationV2Command,
+    command: OrchestrationV2ServerCommand,
   ) => Effect.Effect<void, OrchestratorDispatchError>,
 ) =>
   Layer.mock(ThreadManagementService)({
@@ -204,7 +204,7 @@ const threadManagementFake = (
   });
 
 const dependencies = (
-  commands: Ref.Ref<ReadonlyArray<OrchestrationV2Command>>,
+  commands: Ref.Ref<ReadonlyArray<OrchestrationV2ServerCommand>>,
   providers: ReadonlyArray<ServerProvider>,
   /** Seat threads whose first home registration fails, to leave a launch half done. */
   failHomeOnce: Set<string> = new Set(),
@@ -215,7 +215,7 @@ const dependencies = (
   failBriefOnce: Set<string> = new Set(),
   /** Runs before each command lands, so a test can hold a spawn open. */
   beforeDispatch: (
-    command: OrchestrationV2Command,
+    command: OrchestrationV2ServerCommand,
   ) => Effect.Effect<void, OrchestratorDispatchError> = () => Effect.void,
   // The Captain works in a worktree, so every seat shares it unless a test overrides one.
   workspace: Parameters<typeof fakeSpawnWorkspaceLayer>[0] = {
@@ -1257,7 +1257,7 @@ const unitFixture = Effect.gen(function* () {
   const factsRead = yield* Ref.make<ReadonlyArray<ThreadId>>([]);
   const holdArchive = yield* Ref.make<Effect.Effect<void>>(Effect.void);
   const holdDispatch = yield* Ref.make<
-    (command: OrchestrationV2Command) => Effect.Effect<void, OrchestratorDispatchError>
+    (command: OrchestrationV2ServerCommand) => Effect.Effect<void, OrchestratorDispatchError>
   >(() => Effect.void);
   const real = Context.get(context, AgentCrewInstanceService);
   const crews = Layer.succeed(AgentCrewInstanceService, {

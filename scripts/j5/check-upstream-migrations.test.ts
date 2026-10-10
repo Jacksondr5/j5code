@@ -5,9 +5,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { describe, expect, it } from "vite-plus/test";
 
-import collapse from "../../apps/server/src/j5/persistence/reviewed-v2-collapse.v1.json" with { type: "json" };
-import reviewed from "../../apps/server/src/j5/persistence/legacy-upstream-migrations.v1.json" with { type: "json" };
-import renumber from "../../apps/server/src/j5/persistence/reviewed-v2-renumber.v1.json" with { type: "json" };
+import reviewed from "../../apps/server/src/j5/persistence/reviewed-v2-reconcile.v1.json" with { type: "json" };
 import {
   inspectMigrationChanges,
   readMigrationDependencies,
@@ -70,94 +68,50 @@ describe("upstream migration compatibility audit", () => {
       name: "One",
     });
   });
-
-  it("bounds the bridge exception to its reviewed source manifest, mapping, and target", () => {
-    const before = reviewed.migrations;
-    const after = [
-      ...before.map((row) => ({ ...row, id: row.id >= 41 ? row.id + 7 : row.id })),
-      ...[41, 42, 43, 44, 45, 46, 47, 57, 58, 59].map((id) => record(id, `Inserted${id}`)),
-    ];
-    expect(matchesReviewedBridge(before, after, reviewed.targetRef)).toBe(true);
-    expect(matchesReviewedBridge(before, after, "unreviewed-target")).toBe(false);
-    expect(
-      matchesReviewedBridge(
-        before,
-        after.map((row) => (row.id === 50 ? { ...row, sha256: "changed" } : row)),
-        reviewed.targetRef,
-      ),
-    ).toBe(false);
-    expect(matchesReviewedBridge(before.slice(1), after, reviewed.targetRef)).toBe(false);
-    expect(
-      matchesReviewedBridge(
-        before,
-        after.map((row) => (row.id === 50 ? { ...row, id: 60 } : row)),
-        reviewed.targetRef,
-      ),
-    ).toBe(false);
-  });
 });
 
 describe("reviewed pin → upstream V2 renumbering", () => {
   it("accepts only the pin manifest and the exact reviewed upstream target", () => {
+    const { sourceMigrations, targetMigrations, targetRef } = reviewed;
+    expect(matchesReviewedBridge(sourceMigrations, targetMigrations, targetRef)).toBe(true);
+    expect(matchesReviewedBridge(sourceMigrations, targetMigrations, "other")).toBe(false);
+    expect(matchesReviewedBridge(sourceMigrations.slice(0, -1), targetMigrations, targetRef)).toBe(
+      false,
+    );
     expect(
       matchesReviewedBridge(
-        renumber.sourceMigrations,
-        renumber.targetMigrations,
-        renumber.targetRef,
+        sourceMigrations,
+        [...targetMigrations, record(61, "Unreviewed")],
+        targetRef,
       ),
-    ).toBe(true);
-    expect(
-      matchesReviewedBridge(renumber.sourceMigrations, renumber.targetMigrations, "other"),
     ).toBe(false);
-    for (const source of [reviewed.migrations, collapse.sourceMigrations]) {
-      expect(matchesReviewedBridge(source, renumber.targetMigrations, renumber.targetRef)).toBe(
-        false,
-      );
-    }
     expect(
       matchesReviewedBridge(
-        renumber.sourceMigrations,
-        [...renumber.targetMigrations, record(56, "Unreviewed")],
-        renumber.targetRef,
+        sourceMigrations,
+        targetMigrations.map((row) => (row.id === 55 ? { ...row, sha256: "changed" } : row)),
+        targetRef,
       ),
     ).toBe(false);
   });
-  it("records the renumbering, the 050 dependency drift and the inserted migrations", () => {
-    expect(inspectMigrationChanges(renumber.sourceMigrations, renumber.targetMigrations)).toEqual([
+  it("records the renumbering and the inserted migration", () => {
+    expect(
+      inspectMigrationChanges(reviewed.sourceMigrations, reviewed.targetMigrations).filter(
+        ({ kind }) => kind !== "implementation_changed",
+      ),
+    ).toEqual([
+      { kind: "renumbered", name: "OrchestrationV2", oldId: 54, newId: 55 },
+      { kind: "renumbered", name: "RemoveRedundantProjectionIndexes", oldId: 55, newId: 56 },
       {
-        kind: "implementation_changed",
-        name: "ProjectionThreadPullRequests",
-        oldId: 50,
-        newId: 50,
+        kind: "inserted_below_high_water",
+        name: "ProjectionThreadsAutoSettleDisabledAt",
+        newId: 54,
       },
-      { kind: "renumbered", name: "OrchestrationV2", oldId: 51, newId: 54 },
-      { kind: "inserted_below_high_water", name: "ProjectionThreadMessageContext", newId: 51 },
     ]);
   });
-  it("keeps the pin source equal to the previously reviewed composed target", () => {
-    expect(renumber.sourceRef).toBe(collapse.targetRef);
-    expect(renumber.sourceMigrations).toEqual(collapse.targetMigrations);
-  });
-});
-
-describe("reviewed V2 composition", () => {
-  it("accepts only the recorded August/September sources and exact composed target", () => {
-    for (const source of [reviewed.migrations, collapse.sourceMigrations]) {
-      expect(matchesReviewedBridge(source, collapse.targetMigrations, collapse.targetRef)).toBe(
-        true,
-      );
-      expect(
-        matchesReviewedBridge(source.slice(0, -1), collapse.targetMigrations, collapse.targetRef),
-      ).toBe(false);
-      expect(matchesReviewedBridge(source, collapse.targetMigrations, "different-target")).toBe(
-        false,
-      );
-    }
-  });
   it("detects a helper change even when the top-level migration did not change", () => {
-    for (const id of [50, 51]) {
-      const changed = collapse.targetMigrations.map((row) =>
-        row.id === id
+    for (const name of ["ProjectionThreadPullRequests", "OrchestrationV2"]) {
+      const changed = reviewed.targetMigrations.map((row) =>
+        row.name === name
           ? {
               ...row,
               dependencies: (row.dependencies ?? []).map((dep, index) =>
@@ -166,14 +120,15 @@ describe("reviewed V2 composition", () => {
             }
           : row,
       );
-      expect(matchesReviewedBridge(collapse.sourceMigrations, changed, collapse.targetRef)).toBe(
+      expect(matchesReviewedBridge(reviewed.sourceMigrations, changed, reviewed.targetRef)).toBe(
         false,
       );
-      expect(inspectMigrationChanges(collapse.targetMigrations, changed)).toContainEqual({
+      const original = reviewed.targetMigrations.find((row) => row.name === name)!;
+      expect(inspectMigrationChanges(reviewed.targetMigrations, changed)).toContainEqual({
         kind: "implementation_changed",
-        name: collapse.targetMigrations[id - 1]!.name,
-        oldId: id,
-        newId: id,
+        name,
+        oldId: original.id,
+        newId: original.id,
       });
     }
   });
@@ -187,16 +142,6 @@ describe("reviewed V2 composition", () => {
       ).toThrow(/dynamic migration dependency/);
     }
   });
-  it("treats September's self-contained V2 migration as having no helper dependencies", () => {
-    expect(
-      readMigrationDependencies(
-        "unused",
-        "unused",
-        "OrchestrationV2",
-        'import * as Effect from "effect/Effect";',
-      ),
-    ).toEqual([]);
-  });
 });
 
 it("reads helper and backfill dependency changes from Git even with unchanged entry points", () => {
@@ -205,7 +150,7 @@ it("reads helper and backfill dependency changes from Git even with unchanged en
     NodeChildProcess.execFileSync("git", args, { cwd: directory, encoding: "utf8" }).trim();
   try {
     git("init", "--quiet");
-    for (const migration of collapse.targetMigrations.filter(({ id }) => id === 50 || id === 51)) {
+    for (const migration of reviewed.targetMigrations.filter(({ dependencies }) => dependencies)) {
       const dependencies = migration.dependencies ?? [];
       for (const dependency of dependencies) {
         const file = NodePath.join(directory, dependency.path);
@@ -215,7 +160,7 @@ it("reads helper and backfill dependency changes from Git even with unchanged en
       git("add", ".");
       const before = git("write-tree");
       const implementation =
-        migration.id === 51
+        migration.name === "OrchestrationV2"
           ? dependencies
               .map(
                 ({ path }, index) =>

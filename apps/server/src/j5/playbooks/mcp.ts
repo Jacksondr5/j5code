@@ -4,10 +4,12 @@ import {
   PlaybookReadResponse,
   PlaybookStepResponse,
 } from "@t3tools/contracts/j5";
+import { OrchestratorMcpFailure } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { Tool } from "effect/unstable/ai";
-import { McpInvocationContext } from "../../mcp/McpInvocationContext.ts";
+import { Tool } from "effect/ai";
+import { McpInvocationContext, requireThreadScope } from "../../mcp/McpInvocationContext.ts";
+import * as McpToolAccess from "../../mcp/McpToolAccess.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { ProjectService } from "../../project/ProjectService.ts";
 import { PlaybookCrewRelay } from "./PlaybookCrewRelay.ts";
@@ -25,11 +27,19 @@ const Start = Schema.Struct({
 });
 const Current = Schema.Struct({ runId: Schema.optional(Text) });
 const Read = Schema.Struct({ name: Text });
-const dependencies = [McpInvocationContext, PlaybookStore, PlaybookCrewRelay];
-const workspaceDependencies = [...dependencies, ThreadManagementService, ProjectService];
+// McpToolAccess reads the calling thread before each tool, hence ThreadManagementService.
+const dependencies = [
+  McpInvocationContext,
+  ThreadManagementService,
+  PlaybookStore,
+  PlaybookCrewRelay,
+];
+const workspaceDependencies = [...dependencies, ProjectService];
+/** A playbook's own refusal, or McpToolAccess's refusal of a caller that is not a live thread. */
+const Failure = Schema.Union([PlaybookError, OrchestratorMcpFailure]);
 const common = {
   success: PlaybookStepResponse,
-  failure: PlaybookError,
+  failure: Failure,
   failureMode: "return" as const,
   dependencies,
 };
@@ -41,7 +51,7 @@ export const playbookTools = [
     description:
       "Discover live YAML playbooks in your thread workspace's .j5/playbooks directory, with each step's persona. Invalid files include actionable errors; non-blocking warnings name steps whose persona is missing or turned off.",
     success: PlaybookDiscovery,
-    failure: PlaybookError,
+    failure: Failure,
     failureMode: "return",
     dependencies: workspaceDependencies,
   }).annotate(Tool.Readonly, true),
@@ -50,7 +60,7 @@ export const playbookTools = [
       "Read a playbook's live definition, with every step's prompt and persona, without starting a run. Pass the same name as playbook_start. warnings name steps whose persona is missing or turned off; they never block starting.",
     parameters: Read,
     success: PlaybookReadResponse,
-    failure: PlaybookError,
+    failure: Failure,
     failureMode: "return",
     dependencies: workspaceDependencies,
   }).annotate(Tool.Readonly, true),
@@ -112,29 +122,32 @@ const ownerScope = Effect.gen(function* () {
       "capability_denied",
       "This credential does not grant orchestration access.",
     );
-  return scope;
+  // Every playbook tool is declared to need a calling thread, which owns the run.
+  return (yield* requireThreadScope(scope, "A playbook tool")).thread.threadId;
 });
 const workspace = Effect.gen(function* () {
-  const scope = yield* ownerScope;
-  return { owner: scope.threadId, root: yield* playbookWorkspaceRoot(scope.threadId) };
+  const owner = yield* ownerScope;
+  return { owner, root: yield* playbookWorkspaceRoot(owner) };
 });
 
 const mutate = Effect.fn("PlaybookMcp.mutate")(function* (input: PlaybookMutation) {
-  const scope = yield* ownerScope;
-  return yield* (yield* PlaybookCrewRelay).mutate(scope.threadId, input);
+  return yield* (yield* PlaybookCrewRelay).mutate(yield* ownerScope, input);
 });
+
 export const playbookHandlers = {
-  playbook_list: () =>
+  playbook_list: McpToolAccess.readsAsCaller(() =>
     Effect.gen(function* () {
       const { root } = yield* workspace;
       return yield* (yield* PlaybookStore).discover(root);
     }),
-  playbook_read: (input: typeof Read.Type) =>
+  ),
+  playbook_read: McpToolAccess.readsAsCaller((input: typeof Read.Type) =>
     Effect.gen(function* () {
       const { root } = yield* workspace;
       return yield* (yield* PlaybookStore).read(root, input.name);
     }),
-  playbook_start: (input: typeof Start.Type) =>
+  ),
+  playbook_start: McpToolAccess.actsAsCaller((input: typeof Start.Type) =>
     Effect.gen(function* () {
       const { owner, root } = yield* workspace;
       if (input.crew_instance_id === undefined)
@@ -152,15 +165,25 @@ export const playbookHandlers = {
         crewInstanceId: input.crew_instance_id,
       });
     }),
-  playbook_current: (input: typeof Current.Type) =>
+  ),
+  playbook_current: McpToolAccess.readsAsCaller((input: typeof Current.Type) =>
     Effect.gen(function* () {
-      const scope = yield* ownerScope;
-      return yield* (yield* PlaybookCrewRelay).current(scope.threadId, input.runId);
+      return yield* (yield* PlaybookCrewRelay).current(yield* ownerScope, input.runId);
     }),
-  playbook_next: (input: typeof Movement.Type) => mutate({ ...input, operation: "next" }),
-  playbook_back: (input: typeof Movement.Type) => mutate({ ...input, operation: "back" }),
-  playbook_reselect: (input: typeof Reselection.Type) =>
+  ),
+  playbook_next: McpToolAccess.actsAsCaller((input: typeof Movement.Type) =>
+    mutate({ ...input, operation: "next" }),
+  ),
+  playbook_back: McpToolAccess.actsAsCaller((input: typeof Movement.Type) =>
+    mutate({ ...input, operation: "back" }),
+  ),
+  playbook_reselect: McpToolAccess.actsAsCaller((input: typeof Reselection.Type) =>
     mutate({ ...input, operation: "reselect" }),
-  playbook_complete: (input: typeof Movement.Type) => mutate({ ...input, operation: "complete" }),
-  playbook_cancel: (input: typeof Mutation.Type) => mutate({ ...input, operation: "cancel" }),
+  ),
+  playbook_complete: McpToolAccess.actsAsCaller((input: typeof Movement.Type) =>
+    mutate({ ...input, operation: "complete" }),
+  ),
+  playbook_cancel: McpToolAccess.actsAsCaller((input: typeof Mutation.Type) =>
+    mutate({ ...input, operation: "cancel" }),
+  ),
 };

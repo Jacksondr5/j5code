@@ -15,6 +15,7 @@ import {
   dismissVersionMismatch,
   isServerUpdateFailureDismissed,
   isVersionMismatchDismissed,
+  manualServerUpdateCommand,
   resolveServerConfigVersionMismatch,
   resolveServerSelfUpdateCapability,
   resolveVersionMismatch,
@@ -26,6 +27,14 @@ const MISMATCH_HINT =
   "Version mismatch. Try syncing the client and server to the same J5 Code version.";
 
 describe("versionSkew", () => {
+  // J5 (case 40): servers install from release archives, so every kind updates with `j5 update`.
+  it("hands every install kind the j5 update command", () => {
+    expect(manualServerUpdateCommand("0.0.45")).toBe("j5 update 0.0.45");
+    expect(manualServerUpdateCommand("0.0.45", { kind: "npm-global", prefix: "/opt/node" })).toBe(
+      "j5 update 0.0.45",
+    );
+  });
+
   beforeEach(() => {
     branding.APP_VERSION = "0.0.34";
   });

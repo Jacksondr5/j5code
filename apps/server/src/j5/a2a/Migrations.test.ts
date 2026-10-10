@@ -1,11 +1,11 @@
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Migrator from "effect/unstable/sql/Migrator";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as Migrator from "effect/sql/Migrator";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
-import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
+import { layerMemory as SqlitePersistenceMemory } from "../../persistence/Sqlite.ts";
 import {
   migrationManifest as upstreamMigrationManifest,
   runMigrations,
@@ -1435,51 +1435,50 @@ it.effect(
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );
 
-for (const skipped15 of [false, true]) {
-  it.effect(
-    `17 preserves seats when upgrading ${skipped15 ? "through lower-stack 16 without 15" : "from an existing custom-seat database"}`,
-    () =>
-      Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient;
-        const loader = Migrator.fromRecord(
-          Object.fromEntries(
-            migrationEntries
-              .filter(([id]) => (skipped15 ? id <= 16 && id !== 15 : id <= 15))
-              .map(([id, name, migration]) => [`${id}_${name}`, migration]),
-          ),
-        );
-        yield* Migrator.make({})({ table: J5_A2A_MIGRATIONS_TABLE, loader });
-        yield* sql`INSERT INTO j5_a2a_squadron (id,name,created_at) VALUES ('squadron:upgrade','Upgrade','2026-09-18')`;
-        yield* sql`INSERT INTO j5_agent_crew_instance
+it.effect.each([
+  { skipped15: false, label: "from an existing custom-seat database" },
+  { skipped15: true, label: "through lower-stack 16 without 15" },
+])("17 preserves seats when upgrading $label", ({ skipped15 }) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const loader = Migrator.fromRecord(
+      Object.fromEntries(
+        migrationEntries
+          .filter(([id]) => (skipped15 ? id <= 16 && id !== 15 : id <= 15))
+          .map(([id, name, migration]) => [`${id}_${name}`, migration]),
+      ),
+    );
+    yield* Migrator.make({})({ table: J5_A2A_MIGRATIONS_TABLE, loader });
+    yield* sql`INSERT INTO j5_a2a_squadron (id,name,created_at) VALUES ('squadron:upgrade','Upgrade','2026-09-18')`;
+    yield* sql`INSERT INTO j5_agent_crew_instance
         (id,squadron_id,captain_participant_id,captain_thread_id,display_name,brief,version,created_at)
         VALUES ('crew:upgrade','squadron:upgrade','captain','thread:captain','Upgrade','Work',1,'2026-09-18')`;
-        yield* sql`INSERT INTO j5_agent_crew_member
+    yield* sql`INSERT INTO j5_agent_crew_member
         (crew_instance_id,seat_name,agent_id,participant_id,thread_id,ordinal,added_version,reason)
         VALUES ('crew:upgrade','saved','scout','participant:saved','thread:saved',0,1,'Keep this')`;
-        if (!skipped15)
-          yield* sql`INSERT INTO j5_agent_crew_member
+    if (!skipped15)
+      yield* sql`INSERT INTO j5_agent_crew_member
         (crew_instance_id,seat_name,agent_id,participant_id,thread_id,ordinal,added_version)
         VALUES ('crew:upgrade','existing-custom',NULL,'participant:existing','thread:existing',1,1)`;
-        yield* runJ5A2AMigrations(BEFORE_REKEY);
-        yield* runJ5A2AMigrations(BEFORE_REKEY);
-        const saved =
-          yield* sql`SELECT agent_id,reason FROM j5_agent_crew_member WHERE seat_name='saved'`;
-        assert.deepStrictEqual(saved, [{ agent_id: "scout", reason: "Keep this" }]);
-        if (!skipped15)
-          assert.lengthOf(
-            yield* sql`SELECT * FROM j5_agent_crew_member WHERE seat_name='existing-custom' AND agent_id IS NULL`,
-            1,
-          );
-        yield* sql`INSERT INTO j5_agent_crew_member
+    yield* runJ5A2AMigrations(BEFORE_REKEY);
+    yield* runJ5A2AMigrations(BEFORE_REKEY);
+    const saved =
+      yield* sql`SELECT agent_id,reason FROM j5_agent_crew_member WHERE seat_name='saved'`;
+    assert.deepStrictEqual(saved, [{ agent_id: "scout", reason: "Keep this" }]);
+    if (!skipped15)
+      assert.lengthOf(
+        yield* sql`SELECT * FROM j5_agent_crew_member WHERE seat_name='existing-custom' AND agent_id IS NULL`,
+        1,
+      );
+    yield* sql`INSERT INTO j5_agent_crew_member
         (crew_instance_id,seat_name,agent_id,participant_id,thread_id,ordinal,added_version)
         VALUES ('crew:upgrade','new-custom',NULL,'participant:new','thread:new',2,1)`;
-        const columns =
-          yield* sql`SELECT "notnull" FROM pragma_table_info('j5_agent_crew_member') WHERE name='agent_id'`;
-        assert.deepStrictEqual(columns, [{ notnull: 0 }]);
-        assert.lengthOf(yield* sql`SELECT * FROM j5_a2a_migrations WHERE migration_id=17`, 1);
-      }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
-  );
-}
+    const columns =
+      yield* sql`SELECT "notnull" FROM pragma_table_info('j5_agent_crew_member') WHERE name='agent_id'`;
+    assert.deepStrictEqual(columns, [{ notnull: 0 }]);
+    assert.lengthOf(yield* sql`SELECT * FROM j5_a2a_migrations WHERE migration_id=17`, 1);
+  }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+);
 
 it.effect(
   "upgrades existing playbook runs, prunes terminal movement receipts, and indexes both board queries",

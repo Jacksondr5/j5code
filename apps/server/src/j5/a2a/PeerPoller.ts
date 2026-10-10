@@ -18,7 +18,7 @@ import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
-import { HttpClient, HttpClientRequest, type HttpClientResponse } from "effect/unstable/http";
+import { HttpClient, HttpClientRequest, type HttpClientResponse } from "effect/http";
 
 import { EventSinkV2 } from "../../orchestration-v2/EventSink.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";

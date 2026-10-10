@@ -6,8 +6,8 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
 
 import {
   type ClearOwnAskInput,
@@ -482,9 +482,9 @@ const rawLayer: Layer.Layer<
       threadId: ThreadId,
     ) {
       const resolution = yield* resolveThreadHome(sql, threadId).pipe(
-        Effect.catchTag("A2AHomeNotFoundError", () =>
-          Effect.fail(new A2ASenderNotJoinedError({ threadId })),
-        ),
+        Effect.catchTags({
+          A2AHomeNotFoundError: () => Effect.fail(new A2ASenderNotJoinedError({ threadId })),
+        }),
       );
       const matches = resolution.activeMemberships.filter(
         (membership) =>

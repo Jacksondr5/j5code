@@ -1,9 +1,10 @@
-import type { ProviderApprovalDecision } from "@t3tools/contracts";
+import { AuthOrchestrationOperateScope, type ProviderApprovalDecision } from "@t3tools/contracts";
 import { useState } from "react";
 
 import { ComposerPendingApprovalActions } from "../../components/chat/ComposerPendingApprovalActions";
 import { ComposerPendingApprovalPanel } from "../../components/chat/ComposerPendingApprovalPanel";
 import { Badge } from "../../components/ui/badge";
+import { useEnvironmentsWithScope } from "../../state/session";
 import { notifyHumanInboxChanged } from "../a2a/humanInboxRefresh";
 import { toPendingApproval, type ScopedCrewRuntimeRequest } from "./crewRuntimeRequests.logic";
 import { refreshCrewRuntimeRequests, respondCrewRuntimeRequest } from "./crewRuntimeRequestsClient";
@@ -23,6 +24,7 @@ export function CrewRuntimeRequestsSection(props: {
 }) {
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const operableIds = useEnvironmentsWithScope(props.requests, AuthOrchestrationOperateScope);
   if (props.requests.length === 0) return null;
 
   const submit = async (request: ScopedCrewRuntimeRequest, decision: ProviderApprovalDecision) => {
@@ -81,7 +83,7 @@ export function CrewRuntimeRequestsSection(props: {
                 <ComposerPendingApprovalActions
                   requestId={request.requestId}
                   isResponding={busyKey === itemKey(request)}
-                  canRespond
+                  canRespond={operableIds.has(request.environmentId)}
                   options={request.options}
                   onRespondToApproval={(_requestId, decision) => submit(request, decision)}
                 />

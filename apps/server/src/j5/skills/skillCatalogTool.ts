@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off - synchronous hashing and ids for catalog paths.
 import * as NodeCrypto from "node:crypto";
 
 import {

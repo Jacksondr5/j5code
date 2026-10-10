@@ -1,3 +1,4 @@
+import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import type {
   EnvironmentId,
@@ -37,6 +38,7 @@ import { lockedSettingsScopeProject } from "../settingsScopeEnvironment.logic";
 import { useProjects } from "../../state/entities";
 import { EMPTY_SERVER_PROVIDERS, serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { useEnvironmentScope } from "../../state/session";
 import {
   buildSkillInventory,
   filterSkillInventory,
@@ -123,6 +125,7 @@ export function SkillInventoryPanel({ environmentId }: { readonly environmentId:
   const [linkSelection, setLinkSelection] = useState<SkillLinkSelection | null>(null);
   const [collapsedOrigins, setCollapsedOrigins] = useState<ReadonlySet<SkillOrigin>>(new Set());
   const connected = environment?.connection.phase === "connected";
+  const canOperate = useEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
   const refresh = useAtomCommand(serverEnvironment.refreshProviders, { reportFailure: false });
   const attempted = useRef({ selection: "", instances: new Set<ProviderInstanceId>() });
   const [failures, setFailures] = useState<ReadonlySet<string>>(new Set());
@@ -473,7 +476,7 @@ export function SkillInventoryPanel({ environmentId }: { readonly environmentId:
                                           key={action}
                                           variant="ghost"
                                           size="sm"
-                                          disabled={!connected}
+                                          disabled={!connected || !canOperate}
                                           onClick={() =>
                                             setLinkSelection({
                                               action,

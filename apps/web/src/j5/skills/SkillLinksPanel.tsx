@@ -1,3 +1,4 @@
+import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import type {
   EnvironmentId,
@@ -30,6 +31,7 @@ import {
 } from "../../components/ui/select";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { useEnvironmentScope } from "../../state/session";
 import { skillLinkEnvironment } from "./skillLinkAtoms";
 
 function messageOf(error: unknown) {
@@ -54,6 +56,7 @@ type Props = {
 };
 
 export function SkillLinksPanel(props: Props) {
+  const canOperate = useEnvironmentScope(props.environmentId, AuthOrchestrationOperateScope);
   const links = useEnvironmentQuery(
     props.connected
       ? skillLinkEnvironment.list({ environmentId: props.environmentId, input: {} })
@@ -161,7 +164,7 @@ export function SkillLinksPanel(props: Props) {
             <Button
               variant="outline"
               size="sm"
-              disabled={busy || !props.connected}
+              disabled={busy || !props.connected || !canOperate}
               onClick={() => void unlink(link.id, link.status === "changed")}
             >
               {link.status === "changed"

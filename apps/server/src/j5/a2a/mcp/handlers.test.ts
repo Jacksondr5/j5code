@@ -4,7 +4,7 @@ import { resolveAgentPersonaRuntime } from "../../agents/agentPersonaRuntime.ts"
 import { BUILT_IN_AGENT_PERSONAS } from "../../agents/agentPersonas.ts";
 import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { SqlitePersistenceMemory } from "../../../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../../../persistence/Sqlite.ts";
 import {
   EnvironmentId,
   type ModelSelection,
@@ -13,7 +13,8 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   ThreadId,
-  type OrchestrationV2Command,
+  type OrchestrationV2Run,
+  type OrchestrationV2ServerCommand,
   type OrchestrationV2ThreadProjection,
   type ServerProvider,
 } from "@t3tools/contracts";
@@ -26,7 +27,11 @@ import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 
 import { ServerConfig } from "../../../config.ts";
-import { McpInvocationContext } from "../../../mcp/McpInvocationContext.ts";
+import {
+  McpInvocationContext,
+  type McpInvocationScope,
+} from "../../../mcp/McpInvocationContext.ts";
+import { liveThreadShell } from "../../../mcp/McpToolAccess.testkit.ts";
 import { OrchestratorMcpService } from "../../../mcp/OrchestratorMcpService.ts";
 import {
   OrchestratorCommandPreviouslyRejectedError,
@@ -34,7 +39,7 @@ import {
   OrchestratorV2,
 } from "../../../orchestration-v2/Orchestrator.ts";
 import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
-import { ProviderRegistry } from "../../../provider/Services/ProviderRegistry.ts";
+import { ProviderRegistry } from "../../../provider/ProviderRegistry.ts";
 import { AgentCrewInstanceService } from "../AgentCrewInstanceService.ts";
 import {
   ArchiveCrewConfirmationRequiredError,
@@ -107,6 +112,31 @@ const invocation = {
   capabilities: new Set(["orchestration"] as const),
   issuedAt: 1,
 };
+/** The scope the handlers see: `invocation` as an agent calling from its own thread. */
+const scope: McpInvocationScope = {
+  environmentId: invocation.environmentId,
+  capabilities: invocation.capabilities,
+  issuedAt: invocation.issuedAt,
+  requestNamespace: invocation.providerSessionId,
+  thread: {
+    threadId: invocation.threadId,
+    providerSessionId: invocation.providerSessionId,
+    providerInstanceId: invocation.providerInstanceId,
+  },
+  client: undefined,
+};
+/**
+ * `ThreadManagementService` with the one lookup the access gate makes before every tool that
+ * acts as its caller: the calling thread, in the middle of a turn.
+ */
+const threadManagementMock = (
+  service: Partial<ThreadManagementService["Service"]> = {},
+): Layer.Layer<ThreadManagementService> =>
+  Layer.mock(ThreadManagementService)({
+    getThreadShell: (threadId) =>
+      Effect.succeed(threadId === invocation.threadId ? liveThreadShell(threadId) : null),
+    ...service,
+  });
 
 const projectId = ProjectId.make("project:j5:mcp-handler");
 const createdAt = DateTime.makeUnsafe("2026-08-30T16:00:00.000Z");
@@ -144,7 +174,7 @@ const unusedLifecycleDependencies = Layer.mergeAll(
       ]),
   }),
   Layer.mock(SpawnCompositionService)({}),
-  Layer.mock(ThreadManagementService)({}),
+  threadManagementMock({}),
   Layer.mock(OrchestratorMcpService)({}),
   Layer.mock(AgentCrewInstanceService)({
     findMembership: () => Effect.succeed(null),
@@ -228,7 +258,7 @@ it.effect("namespaces mutating-tool idempotency and sender identity from authent
       Layer.mock(OrchestratorV2)({}),
       unusedLifecycleDependencies,
       NodeServices.layer,
-      SqlitePersistenceMemory,
+      SqlitePersistence.layerMemory,
     );
     const layer = J5ToolkitHandlersLive.pipe(
       Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: noRepository })),
@@ -244,7 +274,7 @@ it.effect("namespaces mutating-tool idempotency and sender identity from authent
             Stream.unwrap,
             Stream.run(Sink.last()),
             Effect.flatMap(Effect.fromOption),
-            Effect.provideService(McpInvocationContext, invocation),
+            Effect.provideService(McpInvocationContext, scope),
           );
       const callClear = (exchangeId: ExchangeId, clientRequestId: string) =>
         toolkit
@@ -256,7 +286,7 @@ it.effect("namespaces mutating-tool idempotency and sender identity from authent
             Stream.unwrap,
             Stream.run(Sink.last()),
             Effect.flatMap(Effect.fromOption),
-            Effect.provideService(McpInvocationContext, invocation),
+            Effect.provideService(McpInvocationContext, scope),
           );
       const sendArguments = {
         to: participantId,
@@ -442,7 +472,7 @@ it.effect("keeps participant listing placement-read-only", () =>
             Stream.unwrap,
             Stream.run(Sink.last()),
             Effect.flatMap(Effect.fromOption),
-            Effect.provideService(McpInvocationContext, invocation),
+            Effect.provideService(McpInvocationContext, scope),
           );
       const listed = yield* callList();
       const listedRows = (yield* decodeJ5ListParticipantsResult(listed.encodedResult)).participants;
@@ -597,7 +627,7 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
           Stream.unwrap,
           Stream.run(Sink.last()),
           Effect.flatMap(Effect.fromOption),
-          Effect.provideService(McpInvocationContext, invocation),
+          Effect.provideService(McpInvocationContext, scope),
         );
     }).pipe(Effect.provide(layer));
     const directory = yield* decodeJ5ListParticipantsResult(result.encodedResult);
@@ -741,7 +771,7 @@ it.effect("returns null display names when the ambient shell snapshot fails", ()
           Stream.unwrap,
           Stream.run(Sink.last()),
           Effect.flatMap(Effect.fromOption),
-          Effect.provideService(McpInvocationContext, invocation),
+          Effect.provideService(McpInvocationContext, scope),
         );
     }).pipe(Effect.provide(layer));
     const directory = yield* decodeJ5ListParticipantsResult(result.encodedResult);
@@ -762,7 +792,7 @@ it.effect("preflights home before creation and records facts before the one stab
     const childParticipantId = ParticipantId.make("agent:j5:mcp-spawn-child");
     const failFacts = yield* Ref.make(false);
     const order = yield* Ref.make<ReadonlyArray<string>>([]);
-    const commands = yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]);
+    const commands = yield* Ref.make<ReadonlyArray<OrchestrationV2ServerCommand>>([]);
     const facts = yield* Ref.make<
       ReadonlyArray<{
         readonly homeCommandId: string;
@@ -853,7 +883,7 @@ it.effect("preflights home before creation and records facts before the one stab
           ),
         ),
     });
-    const threadManagement = Layer.mock(ThreadManagementService)({
+    const threadManagement = threadManagementMock({
       getThreadProjection: (threadId) => Effect.succeed(projection(threadId)),
       dispatch: (command) =>
         command.type === "thread.create" && String(command.commandId).includes("spawn-rejected")
@@ -958,7 +988,7 @@ it.effect("preflights home before creation and records facts before the one stab
             Stream.unwrap,
             Stream.run(Sink.last()),
             Effect.flatMap(Effect.fromOption),
-            Effect.provideService(McpInvocationContext, invocation),
+            Effect.provideService(McpInvocationContext, scope),
           );
       const args = {
         workspace: { type: "shared" as const },
@@ -1087,7 +1117,7 @@ it.effect("refuses spawn before thread creation when the caller is a Subagent", 
       Layer.mock(ParticipantPlacementService)({}),
       Layer.mock(OrchestratorMcpService)({}),
       peerDirectoryNoneLayer,
-      Layer.mock(ThreadManagementService)({
+      threadManagementMock({
         dispatch: () => Ref.update(dispatches, (count) => count + 1).pipe(Effect.as({} as never)),
       }),
       Layer.mock(ProviderRegistry)({ getProviders: Effect.succeed([]) }),
@@ -1120,7 +1150,7 @@ it.effect("refuses spawn before thread creation when the caller is a Subagent", 
           Stream.unwrap,
           Stream.run(Sink.last()),
           Effect.flatMap(Effect.fromOption),
-          Effect.provideService(McpInvocationContext, invocation),
+          Effect.provideService(McpInvocationContext, scope),
         );
       assert.isTrue(result.isFailure);
       assert.include(
@@ -1189,7 +1219,7 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
     const ledgerProjectId = LedgerProjectId.make("project:j5:mcp-spawn-persona");
     const callerParticipantId = ParticipantId.make("agent:j5:mcp-spawn-persona-caller");
     const childParticipantId = ParticipantId.make("agent:j5:mcp-spawn-persona-child");
-    const commands = yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]);
+    const commands = yield* Ref.make<ReadonlyArray<OrchestrationV2ServerCommand>>([]);
     const codex = personaProvider("codex", "codex", [
       { slug: "gpt-5.6-terra", options: ["medium", "high"] },
       { slug: "gpt-5.6-sol", options: ["high"] },
@@ -1241,7 +1271,7 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
             },
           }),
       }),
-      Layer.mock(ThreadManagementService)({
+      threadManagementMock({
         getThreadProjection: (threadId) => Effect.succeed(projection(threadId)),
         dispatch: (command) =>
           Ref.update(commands, (items) => [...items, command]).pipe(
@@ -1297,7 +1327,7 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
             Stream.unwrap,
             Stream.run(Sink.last()),
             Effect.flatMap(Effect.fromOption),
-            Effect.provideService(McpInvocationContext, invocation),
+            Effect.provideService(McpInvocationContext, scope),
           );
       const failureMessage = (response: { readonly result: unknown }) =>
         (response.result as { readonly message: string }).message;
@@ -1511,7 +1541,7 @@ it.effect("archives a crew only as a unit through its captain with one confirmat
       Layer.mock(A2AHomeRegistrar)({}),
       Layer.mock(A2ALedger)({}),
       Layer.mock(SpawnCompositionService)({}),
-      Layer.mock(ThreadManagementService)({}),
+      threadManagementMock({}),
       Layer.mock(OrchestratorMcpService)({}),
       Layer.mock(ProviderRegistry)({}),
       Layer.mock(ParticipantPlacementService)({}),
@@ -1561,7 +1591,7 @@ it.effect("archives a crew only as a unit through its captain with one confirmat
             Stream.unwrap,
             Stream.run(Sink.last()),
             Effect.flatMap(Effect.fromOption),
-            Effect.provideService(McpInvocationContext, invocation),
+            Effect.provideService(McpInvocationContext, scope),
           );
       const refused = yield* run({
         crew_instance_id: "crew:j5:test",
@@ -1632,7 +1662,7 @@ it.effect("lists saved agents with purpose, policy, availability, and route", ()
       Layer.mock(A2AHomeRegistrar)({}),
       Layer.mock(A2ALedger)({}),
       Layer.mock(SpawnCompositionService)({}),
-      Layer.mock(ThreadManagementService)({}),
+      threadManagementMock({}),
       Layer.mock(OrchestratorMcpService)({}),
       Layer.mock(ProviderRegistry)({ getProviders: Effect.succeed([codex]) }),
       Layer.mock(AgentCrewInstanceService)({ findMembership: () => Effect.succeed(null) }),
@@ -1656,7 +1686,7 @@ it.effect("lists saved agents with purpose, policy, availability, and route", ()
           Stream.unwrap,
           Stream.run(Sink.last()),
           Effect.flatMap(Effect.fromOption),
-          Effect.provideService(McpInvocationContext, invocation),
+          Effect.provideService(McpInvocationContext, scope),
         );
       assert.isFalse(response.isFailure);
       const { personas } = response.result as {
@@ -1739,7 +1769,7 @@ it.effect("routes crew proposals through a captain that is not itself a crew mem
           }),
       }),
       Layer.mock(SpawnCompositionService)({}),
-      Layer.mock(ThreadManagementService)({
+      threadManagementMock({
         getThreadProjection: (threadId) => Effect.succeed(projection(threadId)),
       }),
       Layer.mock(OrchestratorMcpService)({}),
@@ -1822,7 +1852,7 @@ it.effect("routes crew proposals through a captain that is not itself a crew mem
             Stream.unwrap,
             Stream.run(Sink.last()),
             Effect.flatMap(Effect.fromOption),
-            Effect.provideService(McpInvocationContext, invocation),
+            Effect.provideService(McpInvocationContext, scope),
           );
       const message = (response: { readonly result: unknown }) =>
         (response.result as { readonly message: string }).message;
@@ -1948,7 +1978,7 @@ it.effect("routes crew proposals through a captain that is not itself a crew mem
   }),
 );
 
-it.effect("stops exactly one placed agent without consulting or touching descendants", () =>
+it.effect("stops exactly one placed agent as upstream's Stop, never its placed descendants", () =>
   Effect.gen(function* () {
     const ledgerProjectId = LedgerProjectId.make("project:j5:mcp-stop");
     const callerParticipantId = ParticipantId.make("agent:j5:mcp-stop-caller");
@@ -1959,13 +1989,14 @@ it.effect("stops exactly one placed agent without consulting or touching descend
     const siblingThreadId = ThreadId.make("thread:j5:mcp-stop-sibling");
     const childThreadId = ThreadId.make("thread:j5:mcp-stop-child");
     const targetProjectId = ProjectId.make("project:j5:mcp-stop-target");
-    const interrupted = yield* Ref.make<
+    const stopped = yield* Ref.make<
       ReadonlyArray<{
+        readonly via: "thread.stop" | "stopDelegatedTasks";
         readonly commandId: string;
-        readonly projectId: ProjectId;
         readonly threadId: ThreadId;
       }>
     >([]);
+    const targetRunning = yield* Ref.make(true);
     const callerRow = {
       projectId: ledgerProjectId,
       participantId: callerParticipantId,
@@ -2010,34 +2041,39 @@ it.effect("stops exactly one placed agent without consulting or touching descend
           ]),
         listSubtree: () => Effect.die("stop_agent must never resolve placement descendants"),
       }),
-      Layer.mock(ThreadManagementService)({
+      threadManagementMock({
         getThreadProjection: (threadId) =>
-          Effect.succeed({
-            ...projection(threadId),
-            thread: {
-              ...projection(threadId).thread,
-              projectId: threadId === targetThreadId ? targetProjectId : projectId,
-            },
-          }),
-        interruptThread: (input) =>
-          Ref.update(interrupted, (items) => [
+          Ref.get(targetRunning).pipe(
+            Effect.map((running) => ({
+              ...projection(threadId),
+              thread: {
+                ...projection(threadId).thread,
+                projectId: threadId === targetThreadId ? targetProjectId : projectId,
+              },
+              runs: running ? [{ status: "running" } as OrchestrationV2Run] : [],
+            })),
+          ),
+        dispatch: (command) =>
+          command.type === "thread.stop"
+            ? Ref.update(stopped, (items) => [
+                ...items,
+                {
+                  via: "thread.stop" as const,
+                  commandId: command.commandId,
+                  threadId: command.threadId,
+                },
+              ]).pipe(Effect.as({ sequence: 1, storedEvents: [] }))
+            : Effect.die(`stop_agent must only dispatch thread.stop, not ${command.type}`),
+        stopDelegatedTasks: (input) =>
+          Ref.update(stopped, (items) => [
             ...items,
             {
+              via: "stopDelegatedTasks" as const,
               commandId: input.commandId,
-              projectId: input.projectId,
               threadId: input.threadId,
             },
-          ]).pipe(
-            Effect.as(
-              String(input.commandId).includes("stop-idle")
-                ? ({ type: "no_active_run" } as const)
-                : ({
-                    type: "interrupt_requested" as const,
-                    run: {} as never,
-                    dispatch: {} as never,
-                  } as const),
-            ),
-          ),
+          ]),
+        interruptThread: () => Effect.die("stop_agent sends upstream's Stop, not an interrupt"),
       }),
       Layer.mock(A2AHomeRegistrar)({}),
       Layer.mock(A2ALedger)({}),
@@ -2070,7 +2106,7 @@ it.effect("stops exactly one placed agent without consulting or touching descend
             Stream.unwrap,
             Stream.run(Sink.last()),
             Effect.flatMap(Effect.fromOption),
-            Effect.provideService(McpInvocationContext, invocation),
+            Effect.provideService(McpInvocationContext, scope),
           );
       const args = {
         participant_id: targetParticipantId,
@@ -2080,18 +2116,32 @@ it.effect("stops exactly one placed agent without consulting or touching descend
       const replay = yield* call(args);
       assert.equal(first.result, "interrupt_requested");
       assert.deepStrictEqual(replay.result, first.result);
+      // An idle target is still stopped: Stop also holds its queue and ends its watches.
+      yield* Ref.set(targetRunning, false);
       const idle = yield* call({
         ...args,
         client_request_id: "stop-idle-1",
       });
       assert.equal(idle.result, "already_idle");
-      const calls = yield* Ref.get(interrupted);
+      const calls = yield* Ref.get(stopped);
       assert.deepStrictEqual(
-        calls.map((call) => call.threadId),
-        [targetThreadId, targetThreadId, targetThreadId],
+        calls.map((call) => call.via),
+        [
+          "thread.stop",
+          "stopDelegatedTasks",
+          "thread.stop",
+          "stopDelegatedTasks",
+          "thread.stop",
+          "stopDelegatedTasks",
+        ],
       );
-      assert.equal(calls[0]?.commandId, calls[1]?.commandId);
-      assert.isTrue(calls.every((call) => call.projectId === targetProjectId));
+      assert.isTrue(calls.every((call) => call.threadId === targetThreadId));
+      // A replay reuses the command id, and the delegated-task stops derive theirs from it.
+      assert.deepStrictEqual(
+        calls.slice(0, 4).map((call) => call.commandId),
+        Array.from({ length: 4 }, () => calls[0]!.commandId),
+      );
+      assert.notEqual(calls[4]?.commandId, calls[0]?.commandId);
       assert.notInclude(
         calls.map((call) => call.threadId),
         siblingThreadId,
@@ -2186,7 +2236,7 @@ it.effect(
         Layer.mock(A2AHomeRegistrar)({}),
         Layer.mock(A2ALedger)({ listProjectLedgers: () => Effect.succeed([]) }),
         Layer.mock(SpawnCompositionService)({}),
-        Layer.mock(ThreadManagementService)({}),
+        threadManagementMock({}),
         Layer.mock(OrchestratorMcpService)({}),
         Layer.mock(AgentCrewInstanceService)({
           findMembership: () => Effect.succeed(null),
@@ -2210,7 +2260,7 @@ it.effect(
             Stream.unwrap,
             Stream.run(Sink.last()),
             Effect.flatMap(Effect.fromOption),
-            Effect.provideService(McpInvocationContext, invocation),
+            Effect.provideService(McpInvocationContext, scope),
             Effect.flatMap((response) => decodeJ5ListParticipantsResult(response.encodedResult)),
           );
         const listed = yield* callList(false);

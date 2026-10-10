@@ -1,13 +1,13 @@
 import type { ProviderInstanceId, ServerProvider } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
-import type { ProviderRegistryShape } from "../../provider/Services/ProviderRegistry.ts";
+import type { ProviderRegistry } from "../../provider/ProviderRegistry.ts";
 
 /** Keep a failed inventory probe separate from the provider's ability to run turns. */
 export const recordSkillDiscoveryFailure = Effect.fn("j5.skills.recordDiscoveryFailure")(function* (
   instanceId: ProviderInstanceId,
   cause: Cause.Cause<unknown>,
-  getProviders: ProviderRegistryShape["getProviders"],
+  getProviders: ProviderRegistry["Service"]["getProviders"],
   syncProvider: (provider: ServerProvider) => Effect.Effect<ReadonlyArray<ServerProvider>>,
 ) {
   if (Cause.hasInterruptsOnly(cause)) return yield* Effect.interrupt;
@@ -22,7 +22,7 @@ export const recordSkillDiscoveryFailure = Effect.fn("j5.skills.recordDiscoveryF
 
 /** Explicit refresh and mutations replace cached and pending workspace discovery. */
 export const refreshSkillProviders = Effect.fn("j5.skills.refreshProviders")(function* (
-  registry: ProviderRegistryShape,
+  registry: ProviderRegistry["Service"],
   instanceIds?: ReadonlyArray<ProviderInstanceId>,
   additionalCwds: ReadonlyArray<string> = [],
 ) {

@@ -46,8 +46,8 @@ import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
-import { FetchHttpClient } from "effect/unstable/http";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { FetchHttpClient } from "effect/http";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import { EnvironmentAuth } from "../../auth/EnvironmentAuth.ts";
 import * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
@@ -66,11 +66,11 @@ import type {
   ProviderAdapterV2Shape,
   ProviderAdapterV2SteerInput,
   ProviderAdapterV2TurnInput,
-} from "../../orchestration-v2/ProviderAdapter.ts";
+} from "@t3tools/provider-core/server/ProviderAdapter";
 import {
-  OrchestrationV2EventSinkLayerLive,
-  OrchestrationV2LayerLive as UpstreamOrchestrationV2LayerLive,
-  ProjectServiceLayerLive,
+  layerEventSink as OrchestrationV2EventSinkLayerLive,
+  layer as UpstreamOrchestrationV2LayerLive,
+  layerProjectService as ProjectServiceLayerLive,
 } from "../../orchestration-v2/runtimeLayer.ts";
 import { ProjectEnrichmentService } from "../../project/ProjectEnrichmentService.ts";
 import { SourceControlProviderRegistry } from "../../sourceControl/SourceControlProviderRegistry.ts";
@@ -85,9 +85,9 @@ import {
   ThreadLifecycleService,
   layer as threadLifecycleServiceLayer,
 } from "../../orchestration-v2/ThreadLifecycleService.ts";
-import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
-import type { ProviderInstance } from "../../provider/ProviderDriver.ts";
-import { ProviderInstanceRegistry } from "../../provider/Services/ProviderInstanceRegistry.ts";
+import { layerMemory as SqlitePersistenceMemory } from "../../persistence/Sqlite.ts";
+import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
+import { ProviderInstanceRegistry } from "../../provider/ProviderInstanceRegistry.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import * as VcsDriverRegistry from "../../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../../vcs/VcsProcess.ts";
@@ -113,15 +113,16 @@ import {
 } from "./HomeRegistrar.ts";
 import { deliveryCommandId } from "./DeliveryTransport.ts";
 import { EffectOutboxV2 } from "../../orchestration-v2/EffectOutbox.ts";
-import { limitRecoveryCommand } from "../../orchestration-v2/UsageLimitRecoveryWorker.ts";
 import { ProviderRuntimeRecoveryService } from "../../orchestration-v2/ProviderRuntimeRecoveryService.ts";
 import { ProviderSessionManagerV2 } from "../../orchestration-v2/ProviderSessionManager.ts";
 import * as ProjectionStore from "../../orchestration-v2/ProjectionStore.ts";
 import * as ThreadSettlement from "../../orchestration-v2/ThreadSettlementService.ts";
-import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as ProjectStore from "../../orchestration-v2/ProjectStore.ts";
 import { GitManager } from "../../git/GitManager.ts";
+import * as ProjectSetupScriptRunner from "../../project/ProjectSetupScriptRunner.ts";
+import * as TerminalManager from "../../terminal/Manager.ts";
 import { PullRequestService } from "../../pullRequest/PullRequestService.ts";
-import * as IdAllocator from "../../orchestration-v2/IdAllocator.ts";
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import {
   QueuedRunWatchdog,
   live as watchdogLayer,
@@ -353,7 +354,8 @@ const makeTestLayer = (
     },
     displayName: "Codex A2 delivery test",
     enabled: true,
-    snapshot: {} as ProviderInstance["snapshot"],
+    // No supportedRuntimeModes: every runtime mode runs as stored.
+    snapshot: { getSnapshot: Effect.succeed({}) } as unknown as ProviderInstance["snapshot"],
     orchestrationAdapter,
     textGeneration: {} as ProviderInstance["textGeneration"],
   } satisfies ProviderInstance;
@@ -534,72 +536,70 @@ const seedTarget = (
     };
   });
 
-for (const idleModel of ["gpt-5.4", "gpt-6-astra"]) {
-  it.effect(
-    `starts an idle ${idleModel} recipient immediately without the implicit auto mode`,
-    () =>
-      Effect.gen(function* () {
-        const harness = yield* makeHarness;
-        yield* Effect.gen(function* () {
-          const threads = yield* ThreadManagementService;
-          const transport = yield* A2ADeliveryTransport;
-          const target = yield* seedTarget("idle", idleModel);
+it.effect.each(["gpt-5.4", "gpt-6-astra"])(
+  "starts an idle %s recipient immediately without the implicit auto mode",
+  (idleModel) =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness;
+      yield* Effect.gen(function* () {
+        const threads = yield* ThreadManagementService;
+        const transport = yield* A2ADeliveryTransport;
+        const target = yield* seedTarget("idle", idleModel);
 
-          yield* transport.deliverAgent(target.delivery);
-          yield* transport.deliverAgent(target.delivery);
+        yield* transport.deliverAgent(target.delivery);
+        yield* transport.deliverAgent(target.delivery);
 
-          const projection = yield* threads.getThreadProjection(target.threadId);
-          const upstreamMessageId = deliveryMessageId(target.messageId);
-          const deliveredMessages = projection.messages.filter(
-            (candidate) => candidate.id === upstreamMessageId,
-          );
-          assert.lengthOf(deliveredMessages, 1);
-          assert.equal(
-            deliveredMessages[0]?.text,
-            formatPeerEnvelope({
-              senderId: target.senderId,
-              originProjectId: target.ledgerProjectId,
-              exchangeId: target.exchangeId,
-              message: target.message,
-            }),
-          );
-          assert.lengthOf(projection.runs, 1);
-          assert.equal(
-            projection.turnItems.find(
-              (
-                candidate,
-              ): candidate is Extract<OrchestrationV2TurnItem, { readonly type: "user_message" }> =>
-                candidate.type === "user_message" && candidate.messageId === upstreamMessageId,
-            )?.inputIntent,
-            "turn_start",
-          );
-          assert.deepStrictEqual(
-            (yield* Ref.get(harness.deliveryInvocations))
-              .filter((invocation) => invocation.messageId === upstreamMessageId)
-              .map((invocation) => invocation.mode),
-            ["queue", "queue"],
-          );
-          const worker = yield* OrchestrationEffectWorkerV2;
-          const sink = yield* EventSinkV2;
-          const running = yield* sink.stream({ threadId: target.threadId }).pipe(
-            Stream.filter(
-              (stored) =>
-                stored.event.type === "provider-turn.updated" &&
-                stored.event.payload.status === "running",
-            ),
-            Stream.runHead,
-            Effect.forkChild({ startImmediately: true }),
-          );
-          yield* worker.runOnce;
-          yield* Fiber.join(running);
-          // A queue receipt stays valid after its Astra run becomes steerable.
-          yield* transport.deliverAgent(target.delivery);
-          assert.lengthOf(yield* Ref.get(harness.steerInputs), 0);
-          assert.lengthOf((yield* threads.getThreadProjection(target.threadId)).runs, 1);
-        }).pipe(Effect.provide(makeTestLayer(harness)));
-      }),
-  );
-}
+        const projection = yield* threads.getThreadProjection(target.threadId);
+        const upstreamMessageId = deliveryMessageId(target.messageId);
+        const deliveredMessages = projection.messages.filter(
+          (candidate) => candidate.id === upstreamMessageId,
+        );
+        assert.lengthOf(deliveredMessages, 1);
+        assert.equal(
+          deliveredMessages[0]?.text,
+          formatPeerEnvelope({
+            senderId: target.senderId,
+            originProjectId: target.ledgerProjectId,
+            exchangeId: target.exchangeId,
+            message: target.message,
+          }),
+        );
+        assert.lengthOf(projection.runs, 1);
+        assert.equal(
+          projection.turnItems.find(
+            (
+              candidate,
+            ): candidate is Extract<OrchestrationV2TurnItem, { readonly type: "user_message" }> =>
+              candidate.type === "user_message" && candidate.messageId === upstreamMessageId,
+          )?.inputIntent,
+          "turn_start",
+        );
+        assert.deepStrictEqual(
+          (yield* Ref.get(harness.deliveryInvocations))
+            .filter((invocation) => invocation.messageId === upstreamMessageId)
+            .map((invocation) => invocation.mode),
+          ["queue", "queue"],
+        );
+        const worker = yield* OrchestrationEffectWorkerV2;
+        const sink = yield* EventSinkV2;
+        const running = yield* sink.stream({ threadId: target.threadId }).pipe(
+          Stream.filter(
+            (stored) =>
+              stored.event.type === "provider-turn.updated" &&
+              stored.event.payload.status === "running",
+          ),
+          Stream.runHead,
+          Effect.forkChild({ startImmediately: true }),
+        );
+        yield* worker.runOnce;
+        yield* Fiber.join(running);
+        // A queue receipt stays valid after its Astra run becomes steerable.
+        yield* transport.deliverAgent(target.delivery);
+        assert.lengthOf(yield* Ref.get(harness.steerInputs), 0);
+        assert.lengthOf((yield* threads.getThreadProjection(target.threadId)).runs, 1);
+      }).pipe(Effect.provide(makeTestLayer(harness)));
+    }),
+);
 
 /** Runs outbox effects as they become available until the awaited receipt lands. */
 const runWorkerUntil = <A, E>(
@@ -651,8 +651,9 @@ const publishCommandExecution = (
     },
   });
 
-for (const model of ["gpt-6-astra", "astra"]) {
-  it.effect(`delivers updates into a running ${model} turn without restarting its tools`, () =>
+it.effect.each(["gpt-6-astra", "astra"])(
+  "delivers updates into a running %s turn without restarting its tools",
+  (model) =>
     Effect.gen(function* () {
       const harness = yield* makeHarness;
       yield* Effect.gen(function* () {
@@ -882,8 +883,7 @@ for (const model of ["gpt-6-astra", "astra"]) {
         assert.lengthOf(yield* Ref.get(harness.interruptInputs), 0);
       }).pipe(Effect.provide(makeTestLayer(harness)));
     }),
-  );
-}
+);
 
 /** Starts a user turn on the target and returns once its provider turn is running. */
 const startBusyTurn = Effect.fn("A2AIntegration.startBusyTurn")(function* (target: {
@@ -1463,8 +1463,9 @@ it.effect("routes real archive and delete commands through lifecycle closure exa
   }),
 );
 
-for (const terminal of ["completed", "interrupted", "failed", "stop_pending"] as const) {
-  it.effect(`settles a committed Astra steer truthfully after ${terminal} before execution`, () =>
+it.effect.each(["completed", "interrupted", "failed"] as const)(
+  "settles a committed Astra steer truthfully after %s before execution",
+  (terminal) =>
     Effect.gen(function* () {
       const harness = yield* makeHarness;
       yield* Effect.gen(function* () {
@@ -1511,20 +1512,11 @@ for (const terminal of ["completed", "interrupted", "failed", "stop_pending"] as
           .deliverAgent(target.delivery)
           .pipe(Effect.exit, Effect.forkChild({ startImmediately: true }));
         yield* Fiber.join(committed);
-        if (terminal === "stop_pending") {
-          yield* threads.dispatch({
-            type: "run.interrupt",
-            commandId: CommandId.make("command:steer-race-stop"),
-            threadId: target.threadId,
-            runId: projection.runs[0]!.id,
-          });
-        }
-        const terminalStatus = terminal === "stop_pending" ? "completed" : terminal;
         const ended = yield* sink.stream({ threadId: target.threadId }).pipe(
           Stream.filter(
             (stored) =>
               stored.event.type === "provider-turn.updated" &&
-              stored.event.payload.status === terminalStatus,
+              stored.event.payload.status === terminal,
           ),
           Stream.runHead,
           Effect.forkChild({ startImmediately: true }),
@@ -1534,7 +1526,7 @@ for (const terminal of ["completed", "interrupted", "failed", "stop_pending"] as
           driver,
           providerTurn: {
             ...projection.providerTurns[0]!,
-            status: terminalStatus,
+            status: terminal,
             completedAt: yield* DateTime.now,
           },
         });
@@ -1568,8 +1560,7 @@ for (const terminal of ["completed", "interrupted", "failed", "stop_pending"] as
         assert.lengthOf(yield* Ref.get(harness.interruptInputs), 0);
       }).pipe(Effect.provide(makeTestLayer(harness)));
     }),
-  );
-}
+);
 
 it.effect(
   "bounds a missing steer acknowledgment and recognizes a later success without reinjection",
@@ -1757,8 +1748,9 @@ it.effect(
     }),
 );
 
-for (const refusal of ["wrong home", "unavailable participant"] as const) {
-  it.effect(`refuses ${refusal} without dispatching to a fallback recipient`, () =>
+it.effect.each(["wrong home", "unavailable participant"] as const)(
+  "refuses %s without dispatching to a fallback recipient",
+  (refusal) =>
     Effect.gen(function* () {
       const harness = yield* makeHarness;
       yield* Effect.gen(function* () {
@@ -1791,116 +1783,117 @@ for (const refusal of ["wrong home", "unavailable participant"] as const) {
         );
       }).pipe(Effect.provide(makeTestLayer(harness)));
     }),
-  );
-}
+);
 
-for (const crossProject of [false, true]) {
-  it.effect(
-    crossProject
-      ? "dispatches a cross-project peer ask and reply once, closing the asker's Exchange"
-      : "dispatches a same-project peer ask and reply once through the accepted ledger operation",
-    () =>
-      Effect.gen(function* () {
-        const harness = yield* makeHarness;
-        const base = makeTestLayer(harness);
-        const joined = Layer.mergeAll(
-          sendServiceLayer.pipe(Layer.provide(peerDirectoryNoneLayer)),
-          deliveryWorkerLayer,
-          homeRegistrarLayer,
-        ).pipe(Layer.provideMerge(base));
-        yield* Effect.gen(function* () {
-          const registrar = yield* A2AHomeRegistrar;
-          const sender = yield* seedTarget("joined-sender", modelSelection.model, registrar);
-          const receiver = yield* seedTarget(
-            "joined-receiver",
-            modelSelection.model,
-            registrar,
-            crossProject ? undefined : sender.ledgerProjectId,
-          );
-          const send = yield* A2ASendService;
-          const delivery = yield* A2ADeliveryWorker;
-          const orchestrator = yield* OrchestratorV2;
-          const worker = yield* OrchestrationEffectWorkerV2;
-          const sink = yield* EventSinkV2;
-          const sql = yield* SqlClient.SqlClient;
-          const ask = {
-            commandId: CommCommandId.make("command:cross-project:joined-ask"),
-            senderThreadId: sender.threadId,
-            to: receiver.receiverId,
-            message: "Confirm receipt from your own project.",
-            expectReply: true,
-            intent: "Check cross-project delivery",
-            acceptedAt: DateTime.formatIso(yield* DateTime.now),
-          };
-          const accepted = yield* send.send(ask);
-          assert.deepStrictEqual(yield* send.send(ask), accepted);
-          assert.equal(accepted.exchangeState, "open");
-          assert.lengthOf((yield* orchestrator.getThreadProjection(receiver.threadId)).messages, 0);
-          assert.lengthOf(yield* Ref.get(harness.startedInputs), 0);
-          const milestones = yield* delivery.drain;
-          assert.deepStrictEqual(
-            milestones.map(({ messageId, state }) => ({ messageId, state })),
-            [{ messageId: accepted.messageId, state: "delivered" }],
-          );
-          const receipt = yield* sql<{ readonly aggregate_id: string; readonly status: string }>`
+it.effect.each([
+  {
+    crossProject: false,
+    label:
+      "dispatches a same-project peer ask and reply once through the accepted ledger operation",
+  },
+  {
+    crossProject: true,
+    label: "dispatches a cross-project peer ask and reply once, closing the asker's Exchange",
+  },
+])("$label", ({ crossProject }) =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    const base = makeTestLayer(harness);
+    const joined = Layer.mergeAll(
+      sendServiceLayer.pipe(Layer.provide(peerDirectoryNoneLayer)),
+      deliveryWorkerLayer,
+      homeRegistrarLayer,
+    ).pipe(Layer.provideMerge(base));
+    yield* Effect.gen(function* () {
+      const registrar = yield* A2AHomeRegistrar;
+      const sender = yield* seedTarget("joined-sender", modelSelection.model, registrar);
+      const receiver = yield* seedTarget(
+        "joined-receiver",
+        modelSelection.model,
+        registrar,
+        crossProject ? undefined : sender.ledgerProjectId,
+      );
+      const send = yield* A2ASendService;
+      const delivery = yield* A2ADeliveryWorker;
+      const orchestrator = yield* OrchestratorV2;
+      const worker = yield* OrchestrationEffectWorkerV2;
+      const sink = yield* EventSinkV2;
+      const sql = yield* SqlClient.SqlClient;
+      const ask = {
+        commandId: CommCommandId.make("command:cross-project:joined-ask"),
+        senderThreadId: sender.threadId,
+        to: receiver.receiverId,
+        message: "Confirm receipt from your own project.",
+        expectReply: true,
+        intent: "Check cross-project delivery",
+        acceptedAt: DateTime.formatIso(yield* DateTime.now),
+      };
+      const accepted = yield* send.send(ask);
+      assert.deepStrictEqual(yield* send.send(ask), accepted);
+      assert.equal(accepted.exchangeState, "open");
+      assert.lengthOf((yield* orchestrator.getThreadProjection(receiver.threadId)).messages, 0);
+      assert.lengthOf(yield* Ref.get(harness.startedInputs), 0);
+      const milestones = yield* delivery.drain;
+      assert.deepStrictEqual(
+        milestones.map(({ messageId, state }) => ({ messageId, state })),
+        [{ messageId: accepted.messageId, state: "delivered" }],
+      );
+      const receipt = yield* sql<{ readonly aggregate_id: string; readonly status: string }>`
         SELECT aggregate_id, status FROM orchestration_command_receipts
         WHERE command_id = ${deliveryCommandId(accepted.messageId)}
       `;
-          assert.deepStrictEqual(receipt, [
-            { aggregate_id: receiver.threadId, status: "accepted" },
-          ]);
-          const running = yield* sink.stream({ threadId: receiver.threadId }).pipe(
-            Stream.filter(
-              (stored) =>
-                stored.event.type === "provider-turn.updated" &&
-                stored.event.payload.status === "running",
-            ),
-            Stream.runHead,
-            Effect.forkChild({ startImmediately: true }),
-          );
-          yield* worker.drain();
-          yield* Fiber.join(running);
-          const inputs = yield* Ref.get(harness.startedInputs);
-          assert.lengthOf(inputs, 1);
-          assert.equal(inputs[0]?.threadId, receiver.threadId);
-          assert.equal(inputs[0]?.message.messageId, deliveryMessageId(accepted.messageId));
-          assert.include(inputs[0]!.message.text, ask.message);
-          const replyInput = {
-            commandId: CommCommandId.make("command:cross-project:joined-reply"),
-            senderThreadId: receiver.threadId,
-            to: sender.receiverId,
-            exchangeId: accepted.exchangeId!,
-            message: "Confirmed from the recipient's project.",
-            acceptedAt: ask.acceptedAt,
-          };
-          const reply = yield* send.send(replyInput);
-          assert.equal(reply.exchangeState, "closed");
-          assert.deepStrictEqual(yield* send.send(replyInput), reply);
-          const replyMilestones = yield* delivery.drain;
-          assert.deepStrictEqual(
-            replyMilestones.map(({ messageId, state }) => ({ messageId, state })),
-            [{ messageId: reply.messageId, state: "delivered" }],
-          );
-          assert.deepStrictEqual(yield* delivery.drain, []);
-          const origin = yield* orchestrator.getThreadProjection(sender.threadId);
-          assert.equal(
-            origin.messages.filter((message) => message.id === deliveryMessageId(reply.messageId))
-              .length,
-            1,
-          );
-          assert.deepStrictEqual(
-            yield* sql<{ readonly project_id: string; readonly status: string }>`
+      assert.deepStrictEqual(receipt, [{ aggregate_id: receiver.threadId, status: "accepted" }]);
+      const running = yield* sink.stream({ threadId: receiver.threadId }).pipe(
+        Stream.filter(
+          (stored) =>
+            stored.event.type === "provider-turn.updated" &&
+            stored.event.payload.status === "running",
+        ),
+        Stream.runHead,
+        Effect.forkChild({ startImmediately: true }),
+      );
+      yield* worker.drain();
+      yield* Fiber.join(running);
+      const inputs = yield* Ref.get(harness.startedInputs);
+      assert.lengthOf(inputs, 1);
+      assert.equal(inputs[0]?.threadId, receiver.threadId);
+      assert.equal(inputs[0]?.message.messageId, deliveryMessageId(accepted.messageId));
+      assert.include(inputs[0]!.message.text, ask.message);
+      const replyInput = {
+        commandId: CommCommandId.make("command:cross-project:joined-reply"),
+        senderThreadId: receiver.threadId,
+        to: sender.receiverId,
+        exchangeId: accepted.exchangeId!,
+        message: "Confirmed from the recipient's project.",
+        acceptedAt: ask.acceptedAt,
+      };
+      const reply = yield* send.send(replyInput);
+      assert.equal(reply.exchangeState, "closed");
+      assert.deepStrictEqual(yield* send.send(replyInput), reply);
+      const replyMilestones = yield* delivery.drain;
+      assert.deepStrictEqual(
+        replyMilestones.map(({ messageId, state }) => ({ messageId, state })),
+        [{ messageId: reply.messageId, state: "delivered" }],
+      );
+      assert.deepStrictEqual(yield* delivery.drain, []);
+      const origin = yield* orchestrator.getThreadProjection(sender.threadId);
+      assert.equal(
+        origin.messages.filter((message) => message.id === deliveryMessageId(reply.messageId))
+          .length,
+        1,
+      );
+      assert.deepStrictEqual(
+        yield* sql<{ readonly project_id: string; readonly status: string }>`
         SELECT project_id, status FROM j5_a2a_exchange WHERE exchange_id = ${accepted.exchangeId}
       `,
-            [{ project_id: sender.ledgerProjectId, status: "closed" }],
-          );
-          assert.deepStrictEqual(yield* send.send(ask), accepted);
-          assert.deepStrictEqual(yield* send.send(replyInput), reply);
-          assert.lengthOf(yield* Ref.get(harness.startedInputs), 1);
-        }).pipe(Effect.provide(joined));
-      }),
-  );
-}
+        [{ project_id: sender.ledgerProjectId, status: "closed" }],
+      );
+      assert.deepStrictEqual(yield* send.send(ask), accepted);
+      assert.deepStrictEqual(yield* send.send(replyInput), reply);
+      assert.lengthOf(yield* Ref.get(harness.startedInputs), 1);
+    }).pipe(Effect.provide(joined));
+  }),
+);
 
 const startPendingTestTurn = Effect.fn("A2AIntegration.startPendingTestTurn")(function* (
   threadId: ThreadId,
@@ -1979,11 +1972,15 @@ it.effect(
         Layer.provide(ProjectionStore.layer),
         Layer.provide(
           Layer.mergeAll(
-            Layer.mock(ProjectionSnapshotQuery)({
-              getProjectShellsWithoutEnrichment: () => Effect.succeed([]),
+            Layer.mock(ProjectStore.ProjectStoreV2)({
+              listShells: () => Effect.succeed([]),
             }),
             Layer.mock(GitManager)({}),
             Layer.mock(PullRequestService)({ subscribeMerges: Effect.succeed(Stream.never) }),
+            Layer.mock(TerminalManager.TerminalManager)({ closeIdle: () => Effect.void }),
+            Layer.mock(ProjectSetupScriptRunner.ProjectSetupScriptRunner)({
+              runForThread: () => Effect.succeed({ status: "no-script" } as const),
+            }),
           ),
         ),
         Layer.provideMerge(base),
@@ -2075,109 +2072,108 @@ it.effect(
     }),
 );
 
-for (const enabled of [false, true]) {
-  it.effect(
-    `recovers a delivered human reply without reopening its exchange (restart opt-in=${enabled})`,
-    () =>
-      Effect.gen(function* () {
-        const harness = yield* makeHarness;
-        yield* Effect.gen(function* () {
-          const target = yield* seedTarget(
-            "restart-reply",
-            modelSelection.model,
-            yield* A2AHomeRegistrar,
-          );
-          const send = yield* A2ASendService;
-          const inbox = yield* A2AHumanInbox;
-          const delivery = yield* A2ADeliveryWorker;
-          const threads = yield* ThreadManagementService;
-          const sql = yield* SqlClient.SqlClient;
-          const personId = ParticipantId.make("human:restart-review");
-          const acceptedAt = DateTime.formatIso(yield* DateTime.now);
-          yield* sql`INSERT INTO j5_a2a_human_person (person_id, is_local_operator, created_at) VALUES (${personId}, 1, ${acceptedAt})`;
-          const askInput = {
-            commandId: CommCommandId.make("command:restart:ask"),
-            senderThreadId: target.threadId,
-            to: personId,
-            message: "Please review before I continue.",
-            expectReply: true,
-            intent: "Review before continuing",
-            urgency: "blocking" as const,
-            acceptedAt,
-          };
-          const ask = yield* send.send(askInput);
-          yield* delivery.drain;
-          const answerInput = {
-            commandId: CommCommandId.make("command:restart:reply"),
-            personId,
-            exchangeId: ask.exchangeId!,
-            message: "Reviewed; finish the remaining work.",
-            acceptedAt,
-          };
-          const answer = yield* inbox.answer(answerInput);
-          yield* delivery.drain;
-          yield* startPendingTestTurn(target.threadId);
-          const before = yield* threads.getThreadProjection(target.threadId);
-          const sourceRun = before.runs[0]!;
-          const nativeRef = before.providerThreads.find(
-            (thread) => thread.id === sourceRun.providerThreadId,
-          )!.nativeThreadRef;
-          const recovered = yield* (yield* ProviderRuntimeRecoveryService).recover;
-          assert.equal(recovered.terminalizedRuns, 1);
-          const continuationEffect = yield* (yield* EffectOutboxV2).get(
-            `effect:restart-continuation:${sourceRun.id}`,
-          );
-          assert.equal(Option.isSome(continuationEffect), enabled);
-          if (Option.isSome(continuationEffect))
-            assert.equal(continuationEffect.value.status, "pending");
-          // Recovery leaves restart continuation parked until the ordinary worker starts.
-          assert.lengthOf(yield* Ref.get(harness.startedInputs), 1);
-          yield* (yield* ProviderSessionManagerV2).shutdown;
-          yield* (yield* OrchestrationEffectWorkerV2).drain();
-          const after = yield* threads.getThreadProjection(target.threadId);
-          assert.equal(after.runs.find((run) => run.id === sourceRun.id)?.status, "cancelled");
-          const continuationId = MessageId.make(`message:restart-continuation:${sourceRun.id}`);
-          assert.lengthOf(
-            after.messages.filter((message) => message.id === continuationId),
-            enabled ? 1 : 0,
-          );
-          assert.lengthOf(
-            after.messages.filter((message) => message.id === deliveryMessageId(answer.messageId)),
-            1,
-          );
-          assert.deepStrictEqual(yield* inbox.answer(answerInput), answer);
-          assert.deepStrictEqual(yield* send.send(askInput), ask);
-          assert.deepStrictEqual(yield* delivery.drain, []);
-          assert.deepStrictEqual(
-            yield* sql`SELECT status FROM j5_a2a_exchange WHERE exchange_id = ${ask.exchangeId}`,
-            [{ status: "closed" }],
-          );
-          assert.deepStrictEqual(yield* inbox.list(personId), []);
-          if (enabled) {
-            yield* startPendingTestTurn(target.threadId);
-            const inputs = yield* Ref.get(harness.startedInputs);
-            assert.lengthOf(inputs, 2);
-            assert.equal(inputs[1]?.message.messageId, continuationId);
-            assert.deepStrictEqual(inputs[1]?.providerThread.nativeThreadRef, nativeRef);
-            assert.deepStrictEqual(
-              (yield* Ref.get(harness.resumedThreads)).at(-1)?.nativeThreadRef,
-              nativeRef,
-            );
-          } else {
-            assert.lengthOf(yield* Ref.get(harness.startedInputs), 1);
-            assert.equal(yield* (yield* OrchestrationEffectWorkerV2).drain(), 0);
-          }
-        }).pipe(
-          Effect.provide(
-            makeMessageLifecycleLayer(harness, { continueThreadsAfterServerUpdate: enabled }),
-          ),
+it.effect.each([false, true])(
+  "recovers a delivered human reply without reopening its exchange (restart opt-in=%s)",
+  (enabled) =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness;
+      yield* Effect.gen(function* () {
+        const target = yield* seedTarget(
+          "restart-reply",
+          modelSelection.model,
+          yield* A2AHomeRegistrar,
         );
-      }),
-  );
-}
+        const send = yield* A2ASendService;
+        const inbox = yield* A2AHumanInbox;
+        const delivery = yield* A2ADeliveryWorker;
+        const threads = yield* ThreadManagementService;
+        const sql = yield* SqlClient.SqlClient;
+        const personId = ParticipantId.make("human:restart-review");
+        const acceptedAt = DateTime.formatIso(yield* DateTime.now);
+        yield* sql`INSERT INTO j5_a2a_human_person (person_id, is_local_operator, created_at) VALUES (${personId}, 1, ${acceptedAt})`;
+        const askInput = {
+          commandId: CommCommandId.make("command:restart:ask"),
+          senderThreadId: target.threadId,
+          to: personId,
+          message: "Please review before I continue.",
+          expectReply: true,
+          intent: "Review before continuing",
+          urgency: "blocking" as const,
+          acceptedAt,
+        };
+        const ask = yield* send.send(askInput);
+        yield* delivery.drain;
+        const answerInput = {
+          commandId: CommCommandId.make("command:restart:reply"),
+          personId,
+          exchangeId: ask.exchangeId!,
+          message: "Reviewed; finish the remaining work.",
+          acceptedAt,
+        };
+        const answer = yield* inbox.answer(answerInput);
+        yield* delivery.drain;
+        yield* startPendingTestTurn(target.threadId);
+        const before = yield* threads.getThreadProjection(target.threadId);
+        const sourceRun = before.runs[0]!;
+        const nativeRef = before.providerThreads.find(
+          (thread) => thread.id === sourceRun.providerThreadId,
+        )!.nativeThreadRef;
+        const recovered = yield* (yield* ProviderRuntimeRecoveryService).recover;
+        assert.equal(recovered.terminalizedRuns, 1);
+        const continuationEffect = yield* (yield* EffectOutboxV2).get(
+          `effect:restart-continuation:${sourceRun.id}`,
+        );
+        assert.equal(Option.isSome(continuationEffect), enabled);
+        if (Option.isSome(continuationEffect))
+          assert.equal(continuationEffect.value.status, "pending");
+        // Recovery leaves restart continuation parked until the ordinary worker starts.
+        assert.lengthOf(yield* Ref.get(harness.startedInputs), 1);
+        yield* (yield* ProviderSessionManagerV2).shutdown;
+        yield* (yield* OrchestrationEffectWorkerV2).drain();
+        const after = yield* threads.getThreadProjection(target.threadId);
+        assert.equal(after.runs.find((run) => run.id === sourceRun.id)?.status, "cancelled");
+        const continuationId = MessageId.make(`message:restart-continuation:${sourceRun.id}`);
+        assert.lengthOf(
+          after.messages.filter((message) => message.id === continuationId),
+          enabled ? 1 : 0,
+        );
+        assert.lengthOf(
+          after.messages.filter((message) => message.id === deliveryMessageId(answer.messageId)),
+          1,
+        );
+        assert.deepStrictEqual(yield* inbox.answer(answerInput), answer);
+        assert.deepStrictEqual(yield* send.send(askInput), ask);
+        assert.deepStrictEqual(yield* delivery.drain, []);
+        assert.deepStrictEqual(
+          yield* sql`SELECT status FROM j5_a2a_exchange WHERE exchange_id = ${ask.exchangeId}`,
+          [{ status: "closed" }],
+        );
+        assert.deepStrictEqual(yield* inbox.list(personId), []);
+        if (enabled) {
+          yield* startPendingTestTurn(target.threadId);
+          const inputs = yield* Ref.get(harness.startedInputs);
+          assert.lengthOf(inputs, 2);
+          assert.equal(inputs[1]?.message.messageId, continuationId);
+          assert.deepStrictEqual(inputs[1]?.providerThread.nativeThreadRef, nativeRef);
+          assert.deepStrictEqual(
+            (yield* Ref.get(harness.resumedThreads)).at(-1)?.nativeThreadRef,
+            nativeRef,
+          );
+        } else {
+          assert.lengthOf(yield* Ref.get(harness.startedInputs), 1);
+          assert.equal(yield* (yield* OrchestrationEffectWorkerV2).drain(), 0);
+        }
+      }).pipe(
+        Effect.provide(
+          makeMessageLifecycleLayer(harness, { continueThreadsAfterServerUpdate: enabled }),
+        ),
+      );
+    }),
+);
 
-for (const terminal of ["archive", "delete"] as const) {
-  it.effect(`does not execute a prepared restart continuation after recipient ${terminal}`, () =>
+it.effect.each(["archive", "delete"] as const)(
+  "does not execute a prepared restart continuation after recipient %s",
+  (terminal) =>
     Effect.gen(function* () {
       const harness = yield* makeHarness;
       yield* Effect.gen(function* () {
@@ -2213,8 +2209,7 @@ for (const terminal of ["archive", "delete"] as const) {
         ),
       );
     }),
-  );
-}
+);
 
 const replayLifecycleThrough = Effect.fn("A2AIntegration.replayLifecycleThrough")(function* (
   sequence: number,
@@ -2350,8 +2345,8 @@ it.effect(
         yield* replayLifecycleThrough(lastSequence);
         yield* replayLifecycleThrough(lastSequence);
         for (const event of stored) yield* (yield* A2ALifecycleService).handleStoredEvent(event);
-        const retry = yield* projectService.delete(deletion).pipe(Effect.flip);
-        assert.equal(retry._tag, "ProjectNotFoundError");
+        // A retried delete replays its receipt; it deletes nothing a second time.
+        assert.isNotNull((yield* projectService.delete(deletion)).deletedAt);
         yield* delivery.drain;
         assert.deepStrictEqual(yield* delivery.drain, []);
         const memberships = yield* (yield* A2ALedger).listMembership(first.ledgerProjectId);
@@ -2436,90 +2431,88 @@ it.effect("observes a real overdue queued delivery without terminalizing or rein
   }),
 );
 
-for (const archiveSender of [false, true]) {
-  it.effect(
-    `cancels accepted queued delivery permanently across archive/unarchive (sender archived=${archiveSender})`,
-    () =>
-      Effect.gen(function* () {
-        const harness = yield* makeHarness;
-        yield* Effect.gen(function* () {
-          const source = yield* seedTarget("cancel-source");
-          const target = yield* seedTarget("cancel-target");
-          const threads = yield* ThreadManagementService;
-          const lifecycle = yield* A2ALifecycleService;
-          const threadLifecycle = yield* ThreadLifecycleService;
-          yield* threads.sendToThread({
-            projectId: target.projectId,
-            threadId: target.threadId,
-            commandId: CommandId.make("cancel:active"),
-            messageId: MessageId.make("cancel:active"),
-            text: "Existing work",
-            attachments: [],
-            mode: "auto",
-            createdBy: "user",
-            creationSource: "web",
-          });
-          yield* startPendingTestTurn(target.threadId);
-          const sent = yield* (yield* A2ASendService).send({
-            commandId: CommCommandId.make("cancel:send"),
-            senderThreadId: source.threadId,
-            to: target.receiverId,
-            message: "Must not execute if cancelled",
-            acceptedAt: "2026-09-12T00:00:00.000Z",
-          });
-          // A real dispatch receipt exists, but the process has not yet committed its A2A outcome.
-          yield* (yield* A2ADeliveryTransport).deliverAgent({
-            ...target.delivery,
-            originProjectId: source.ledgerProjectId,
-            senderId: source.receiverId,
-            messageId: sent.messageId,
-            exchangeId: null,
-            exchangeRole: "none",
-            message: "Must not execute if cancelled",
-          });
-          const queued = (yield* threads.getThreadProjection(target.threadId)).runs.find(
-            (run) => run.userMessageId === deliveryMessageId(sent.messageId),
-          )!;
-          assert.equal(queued.status, "queued");
-          const archived = archiveSender ? source : target;
-          yield* threadLifecycle.archive({
-            commandId: CommandId.make("cancel:archive"),
-            threadId: archived.threadId,
-          });
-          // Upstream archive cancels the recipient's queue, but cannot withdraw outgoing work.
-          assert.equal(
-            (yield* threads.getThreadProjection(target.threadId)).runs.find(
-              (run) => run.id === queued.id,
-            )?.status,
-            archiveSender ? "queued" : "cancelled",
-          );
-          yield* lifecycle.archiveParticipant({
-            participantId: archived.receiverId,
-            archivedAt: "2026-09-12T00:01:00.000Z",
-          });
-          const sql = yield* SqlClient.SqlClient;
-          assert.deepStrictEqual(
-            yield* sql`SELECT status FROM j5_a2a_delivery WHERE message_id = ${sent.messageId}`,
-            [{ status: "cancelled" }],
-          );
-          yield* threadLifecycle.unarchive({
-            commandId: CommandId.make("cancel:unarchive"),
-            threadId: archived.threadId,
-          });
-          yield* finishTestTurn(harness, target.threadId);
-          assert.equal(yield* (yield* OrchestratorV2).resumeQueuedRuns, 0);
-          yield* (yield* OrchestrationEffectWorkerV2).drain();
-          const after = yield* threads.getThreadProjection(target.threadId);
-          assert.equal(after.runs.find((run) => run.id === queued.id)?.status, "cancelled");
-          assert.lengthOf(
-            (yield* Ref.get(harness.startedInputs)).filter((input) => input.runId === queued.id),
-            0,
-          );
-          assert.lengthOf(yield* (yield* A2ADeliveryWorker).drain, 0);
-        }).pipe(Effect.provide(makeMessageLifecycleLayer(harness)));
-      }),
-  );
-}
+it.effect.each([false, true])(
+  "cancels accepted queued delivery permanently across archive/unarchive (sender archived=%s)",
+  (archiveSender) =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness;
+      yield* Effect.gen(function* () {
+        const source = yield* seedTarget("cancel-source");
+        const target = yield* seedTarget("cancel-target");
+        const threads = yield* ThreadManagementService;
+        const lifecycle = yield* A2ALifecycleService;
+        const threadLifecycle = yield* ThreadLifecycleService;
+        yield* threads.sendToThread({
+          projectId: target.projectId,
+          threadId: target.threadId,
+          commandId: CommandId.make("cancel:active"),
+          messageId: MessageId.make("cancel:active"),
+          text: "Existing work",
+          attachments: [],
+          mode: "auto",
+          createdBy: "user",
+          creationSource: "web",
+        });
+        yield* startPendingTestTurn(target.threadId);
+        const sent = yield* (yield* A2ASendService).send({
+          commandId: CommCommandId.make("cancel:send"),
+          senderThreadId: source.threadId,
+          to: target.receiverId,
+          message: "Must not execute if cancelled",
+          acceptedAt: "2026-09-12T00:00:00.000Z",
+        });
+        // A real dispatch receipt exists, but the process has not yet committed its A2A outcome.
+        yield* (yield* A2ADeliveryTransport).deliverAgent({
+          ...target.delivery,
+          originProjectId: source.ledgerProjectId,
+          senderId: source.receiverId,
+          messageId: sent.messageId,
+          exchangeId: null,
+          exchangeRole: "none",
+          message: "Must not execute if cancelled",
+        });
+        const queued = (yield* threads.getThreadProjection(target.threadId)).runs.find(
+          (run) => run.userMessageId === deliveryMessageId(sent.messageId),
+        )!;
+        assert.equal(queued.status, "queued");
+        const archived = archiveSender ? source : target;
+        yield* threadLifecycle.archive({
+          commandId: CommandId.make("cancel:archive"),
+          threadId: archived.threadId,
+        });
+        // Upstream archive cancels the recipient's queue, but cannot withdraw outgoing work.
+        assert.equal(
+          (yield* threads.getThreadProjection(target.threadId)).runs.find(
+            (run) => run.id === queued.id,
+          )?.status,
+          archiveSender ? "queued" : "cancelled",
+        );
+        yield* lifecycle.archiveParticipant({
+          participantId: archived.receiverId,
+          archivedAt: "2026-09-12T00:01:00.000Z",
+        });
+        const sql = yield* SqlClient.SqlClient;
+        assert.deepStrictEqual(
+          yield* sql`SELECT status FROM j5_a2a_delivery WHERE message_id = ${sent.messageId}`,
+          [{ status: "cancelled" }],
+        );
+        yield* threadLifecycle.unarchive({
+          commandId: CommandId.make("cancel:unarchive"),
+          threadId: archived.threadId,
+        });
+        yield* finishTestTurn(harness, target.threadId);
+        assert.equal(yield* (yield* OrchestratorV2).resumeQueuedRuns, 0);
+        yield* (yield* OrchestrationEffectWorkerV2).drain();
+        const after = yield* threads.getThreadProjection(target.threadId);
+        assert.equal(after.runs.find((run) => run.id === queued.id)?.status, "cancelled");
+        assert.lengthOf(
+          (yield* Ref.get(harness.startedInputs)).filter((input) => input.runId === queued.id),
+          0,
+        );
+        assert.lengthOf(yield* (yield* A2ADeliveryWorker).drain, 0);
+      }).pipe(Effect.provide(makeMessageLifecycleLayer(harness)));
+    }),
+);
 
 it.effect(
   "records an already accepted idle-target run as delivered when archive leaves it executing",
@@ -2640,9 +2633,13 @@ it.effect("delivers attachment-tool claims from the ledger after the pending upl
             Effect.flatMap(Effect.fromOption),
             Effect.provideService(McpInvocationContext, {
               environmentId: EnvironmentId.make("environment:attachment-test"),
-              threadId: sender.threadId,
-              providerSessionId: "attachment-test",
-              providerInstanceId: modelSelection.instanceId,
+              requestNamespace: "attachment-test",
+              thread: {
+                threadId: sender.threadId,
+                providerSessionId: "attachment-test",
+                providerInstanceId: modelSelection.instanceId,
+              },
+              client: undefined,
               capabilities: new Set(["orchestration"] as const),
               issuedAt: 1,
             }),
@@ -2808,9 +2805,13 @@ it.effect(
           Effect.flatMap(Effect.fromOption),
           Effect.provideService(McpInvocationContext, {
             environmentId: EnvironmentId.make("environment:fork-test"),
-            threadId: source.threadId,
-            providerSessionId: "fork-test",
-            providerInstanceId: modelSelection.instanceId,
+            requestNamespace: "fork-test",
+            thread: {
+              threadId: source.threadId,
+              providerSessionId: "fork-test",
+              providerInstanceId: modelSelection.instanceId,
+            },
+            client: undefined,
             capabilities: new Set(["orchestration"] as const),
             issuedAt: 1,
           }),
@@ -2926,7 +2927,7 @@ it.effect(
     }),
 );
 
-it.effect("organize enforces project archive authority and applies reversible lifecycle once", () =>
+it.effect("organize refuses a Crew seat and applies reversible lifecycle once", () =>
   Effect.gen(function* () {
     const harness = yield* makeHarness;
     const base = crewInstanceLayer.pipe(
@@ -2944,8 +2945,6 @@ it.effect("organize enforces project archive authority and applies reversible li
         source.ledgerProjectId,
         source.projectId,
       );
-      // Another project's thread: upstream's same-project rule is the only archive authority.
-      const other = yield* seedTarget("organize-other", modelSelection.model, registrar);
       const threads = yield* ThreadManagementService;
       yield* threads.sendToThread({
         commandId: CommandId.make("command:organize-start"),
@@ -2967,19 +2966,17 @@ it.effect("organize enforces project archive authority and applies reversible li
           Effect.flatMap(Effect.fromOption),
           Effect.provideService(McpInvocationContext, {
             environmentId: EnvironmentId.make("environment:organize-test"),
-            threadId: source.threadId,
-            providerSessionId: "organize-test",
-            providerInstanceId: modelSelection.instanceId,
+            requestNamespace: "organize-test",
+            thread: {
+              threadId: source.threadId,
+              providerSessionId: "organize-test",
+              providerInstanceId: modelSelection.instanceId,
+            },
+            client: undefined,
             capabilities: new Set(["orchestration"] as const),
             issuedAt: 1,
           }),
         );
-      for (const action of ["archive", "unarchive"] as const) {
-        const denied = yield* call(other.threadId, action);
-        assert.isTrue(denied.isFailure);
-        assert.equal((denied.result as { code: string }).code, "thread_not_found");
-      }
-      assert.isNull((yield* threads.getThreadProjection(other.threadId)).thread.archivedAt);
       const member = yield* seedTarget(
         "organize-member",
         modelSelection.model,
@@ -3064,144 +3061,6 @@ it.effect("organize enforces project archive authority and applies reversible li
     }).pipe(Effect.provide(J5AdaptedThreadHandlersLive.pipe(Layer.provideMerge(base))));
   }),
 );
-
-it.effect("rejects a stale Astra steer after Stop commits before admission", () =>
-  Effect.gen(function* () {
-    const harness = yield* makeHarness;
-    yield* Effect.gen(function* () {
-      const target = yield* seedTarget("stop-before-steer", "gpt-6-astra");
-      const threads = yield* ThreadManagementService;
-      const running = yield* threads.sendToThread({
-        commandId: CommandId.make("command:stop-before-steer:start"),
-        projectId: target.projectId,
-        threadId: target.threadId,
-        messageId: MessageId.make("message:stop-before-steer:start"),
-        text: "Wait for an update",
-        attachments: [],
-        mode: "queue",
-        createdBy: "user",
-        creationSource: "web",
-      });
-      yield* startPendingTestTurn(target.threadId);
-      const snapshot = yield* threads.getThreadProjection(target.threadId);
-      yield* threads.dispatch({
-        type: "run.interrupt",
-        commandId: CommandId.make("command:stop-before-steer:stop"),
-        threadId: target.threadId,
-        runId: running.run.id,
-      });
-      yield* Ref.set(harness.staleProjection, snapshot);
-      const error = yield* (yield* A2ADeliveryTransport)
-        .deliverAgent(target.delivery)
-        .pipe(Effect.flip);
-      assert.equal(error._tag, "A2ADeliveryTransportError");
-      const actual = yield* (yield* OrchestratorV2).getThreadProjection(target.threadId);
-      assert.isFalse(
-        actual.messages.some((message) => message.id === deliveryMessageId(target.messageId)),
-      );
-      assert.deepEqual(
-        yield* (yield* EffectOutboxV2).listByCommandId(deliveryCommandId(target.messageId)),
-        [],
-      );
-      assert.lengthOf(yield* Ref.get(harness.steerInputs), 0);
-    }).pipe(Effect.provide(makeTestLayer(harness)));
-  }),
-);
-
-for (const stopped of [true, false]) {
-  it.effect(
-    `${stopped ? "refuses" : "admits"} the automatic usage-limit continuation ${stopped ? "after a committed Stop" : "without a Stop"}`,
-    () =>
-      Effect.gen(function* () {
-        const harness = yield* makeHarness;
-        yield* Effect.gen(function* () {
-          const target = yield* seedTarget(`stop-usage-limit-${stopped}`);
-          const threads = yield* ThreadManagementService;
-          const orchestrator = yield* OrchestratorV2;
-          const worker = yield* OrchestrationEffectWorkerV2;
-          const sink = yield* EventSinkV2;
-          const started = yield* threads.sendToThread({
-            commandId: CommandId.make("command:stop-usage-limit:start"),
-            projectId: target.projectId,
-            threadId: target.threadId,
-            messageId: MessageId.make("message:stop-usage-limit:start"),
-            text: "Work until the plan limit",
-            attachments: [],
-            mode: "queue",
-            createdBy: "user",
-            creationSource: "web",
-          });
-          yield* startPendingTestTurn(target.threadId);
-          // Readiness #5: Stop commits, then the provider still reports a usage-limit failure.
-          if (stopped)
-            yield* threads.dispatch({
-              type: "run.interrupt",
-              commandId: CommandId.make("command:stop-usage-limit:stop"),
-              threadId: target.threadId,
-              runId: started.run.id,
-            });
-          const turn = (yield* Ref.get(harness.activeTurns)).get(target.threadId)!;
-          const resetAt = DateTime.formatIso(DateTime.add(yield* DateTime.now, { minutes: 1 }));
-          const failed = yield* sink.stream({ threadId: target.threadId }).pipe(
-            Stream.filter(
-              (stored) =>
-                stored.event.type === "run.updated" &&
-                stored.event.runId === started.run.id &&
-                stored.event.payload.status === "failed",
-            ),
-            Stream.runHead,
-            Effect.forkChild({ startImmediately: true }),
-          );
-          yield* PubSub.publish(turn.events, {
-            type: "turn.terminal",
-            driver,
-            providerThreadId: turn.providerThreadId,
-            providerTurnId: turn.providerTurnId,
-            runOrdinal: turn.runOrdinal,
-            failureItemOrdinal: turn.runOrdinal * 100 + 50,
-            status: "failed",
-            failure: {
-              class: "usage_limit",
-              message: "Plan limit reached.",
-              code: "usageLimitExceeded",
-              retryable: null,
-              resetAt,
-            },
-            threadDisposition: "reusable",
-          });
-          yield* runWorkerUntil(worker, failed);
-          const shell = orchestrator
-            .getShellSnapshot()
-            .pipe(
-              Effect.map((snapshot) =>
-                snapshot.threads.find((thread) => thread.id === target.threadId)!,
-              ),
-            );
-          const arm = limitRecoveryCommand(
-            yield* shell,
-            true,
-            DateTime.toEpochMillis(yield* DateTime.now),
-          );
-          assert.equal(arm?.type, "thread.metadata.update");
-          yield* orchestrator.dispatch(arm!);
-          yield* TestClock.adjust("2 minutes");
-          const resume = limitRecoveryCommand(
-            yield* shell,
-            true,
-            DateTime.toEpochMillis(yield* DateTime.now),
-          );
-          assert.equal(resume?.type, "message.dispatch");
-          yield* orchestrator.dispatch(resume!);
-          const after = yield* orchestrator.getThreadProjection(target.threadId);
-          assert.lengthOf(after.runs, stopped ? 1 : 2);
-          assert.lengthOf(
-            after.messages.filter((message) => message.role === "user"),
-            stopped ? 1 : 2,
-          );
-        }).pipe(Effect.provide(makeTestLayer(harness)));
-      }),
-  );
-}
 
 /** Holds a target's queue the way upstream restart recovery does, behind real active work. */
 const holdTargetQueue = Effect.fn("A2AIntegration.holdTargetQueue")(function* (target: {

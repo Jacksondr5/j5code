@@ -1,5 +1,5 @@
 import * as Schema from "effect/Schema";
-import { Rpc, RpcGroup } from "effect/unstable/rpc";
+import { Rpc, RpcGroup } from "effect/rpc";
 import { EnvironmentAuthorizationError } from "../auth.ts";
 import { ProjectId, ThreadId } from "../baseSchemas.ts";
 import { AgentPersonaId } from "./agentPersona.ts";

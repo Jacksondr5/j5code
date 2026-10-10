@@ -2,7 +2,7 @@ import { ProviderDriverKind } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { ServerConfig } from "../../config.ts";
 import { runMigrations } from "../../persistence/Migrations.ts";
 import { createAgentPersonaLibrary } from "../agents/agentPersonaLibrary.ts";

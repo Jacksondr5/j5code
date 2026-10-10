@@ -6,7 +6,7 @@ import {
   ProviderInstanceId,
   ThreadId,
   type OrchestrationV2AppThread,
-  type OrchestrationV2Command,
+  type OrchestrationV2ServerCommand,
   type OrchestrationV2ThreadProjection,
   type ServerProvider,
 } from "@t3tools/contracts";
@@ -20,7 +20,7 @@ import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
-import { SqlError, UnknownError } from "effect/unstable/sql/SqlError";
+import { SqlError, UnknownError } from "effect/sql/SqlError";
 import { stringify } from "yaml";
 
 import { ServerConfig } from "../../config.ts";
@@ -33,7 +33,7 @@ import {
   ProjectionStoreThreadNotFoundError,
 } from "../../orchestration-v2/ProjectionStore.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
-import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
+import { ProviderRegistry } from "../../provider/ProviderRegistry.ts";
 import { createAgentPersonaLibrary } from "../agents/agentPersonaLibrary.ts";
 import { buildAgentPersonaCatalog } from "../agents/agentPersonaRouting.ts";
 import { playbookTools } from "../playbooks/mcp.ts";
@@ -310,7 +310,7 @@ const fixture = Effect.gen(function* () {
     context,
   );
   const captainModel = yield* Ref.make("gpt-5.6-sol");
-  const notices = yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]);
+  const notices = yield* Ref.make<ReadonlyArray<OrchestrationV2ServerCommand>>([]);
   // Seat threads whose archive the store refuses, to prove a decline whose cleanup fails stays open.
   const noticeFailure = yield* Ref.make(false);
   const archiveFailures = yield* Ref.make<ReadonlySet<string>>(new Set());
@@ -1612,7 +1612,7 @@ const playbookFixture = Effect.gen(function* () {
     }),
     context,
   );
-  const commands = yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]);
+  const commands = yield* Ref.make<ReadonlyArray<OrchestrationV2ServerCommand>>([]);
   // Armed, provider reads wait until two approvals have both passed validation, so they race
   // for the member store rather than one refusing in the other's wake.
   const barrier = yield* Ref.make<Deferred.Deferred<void> | null>(null);

@@ -3,8 +3,9 @@ import type { ChatMessage } from "~/types";
 import { useNowMinute } from "~/hooks/useNowMinute";
 import type { ScopedThreadRef } from "@t3tools/contracts";
 import { ChevronRightIcon, InboxIcon, SendIcon } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
+import { useFindRevealRef } from "../../components/chat/markdownFindContext";
 import { renderCrewNotice } from "../crew/CrewNoticeRenderer";
 import { participantIdsForCrewNotice } from "../crew/crewNotices.logic";
 import { presentParticipantIdentity } from "./ParticipantIdentity";
@@ -374,6 +375,16 @@ function A2ABodyClamp({ body }: { readonly body: string }) {
   const bodyRef = useRef<HTMLParagraphElement>(null);
   const [expanded, setExpanded] = useState(false);
   const [hiddenLineCount, setHiddenLineCount] = useState(0);
+  // In-thread find opens the body when it selects a match in the clamped part.
+  const revealForFind = useCallback(() => setExpanded(true), []);
+  const findRevealRef = useFindRevealRef(revealForFind);
+  const setBodyRef = useCallback(
+    (element: HTMLParagraphElement | null) => {
+      bodyRef.current = element;
+      return findRevealRef(element);
+    },
+    [findRevealRef],
+  );
 
   useEffect(() => {
     const element = bodyRef.current;
@@ -396,13 +407,15 @@ function A2ABodyClamp({ body }: { readonly body: string }) {
   return (
     <div className="mt-2">
       <p
-        ref={bodyRef}
+        ref={setBodyRef}
         className={
           expanded
             ? "whitespace-pre-wrap break-words text-sm leading-5"
             : "line-clamp-2 whitespace-pre-wrap break-words text-sm leading-5"
         }
         data-j5-a2a-card-body
+        data-thread-find-text="true"
+        data-thread-find-fold={expanded ? undefined : ""}
       >
         {body}
       </p>
@@ -449,7 +462,7 @@ function PeerDeliveryCard({
   const isClosed = exchange === "closed";
   return (
     <section
-      className="max-w-[88%] rounded-[10px] border border-border/70 bg-muted/25 px-3.5 py-2.5"
+      className="max-w-[88%] rounded-lg border border-border/70 bg-muted/25 px-3.5 py-2.5"
       data-j5-a2a-renderer="peer"
     >
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
@@ -469,19 +482,19 @@ function PeerDeliveryCard({
         )}
         {automated ? (
           <span
-            className="rounded-md border border-border/70 px-1.5 py-0.5 text-[11px] font-semibold text-muted-foreground"
+            className="rounded-md border border-border/70 px-1.5 py-0.5 text-2xs font-semibold text-muted-foreground"
             data-j5-a2a-automated
           >
             Automation
           </span>
         ) : null}
         {isOpen ? (
-          <span className="rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300">
+          <span className="rounded-md bg-warning/15 px-1.5 py-0.5 text-2xs font-semibold text-warning-foreground">
             Expects reply
           </span>
         ) : null}
         {isClosed ? (
-          <span className="rounded-md border border-border/70 px-1.5 py-0.5 text-[11px] font-semibold text-muted-foreground">
+          <span className="rounded-md border border-border/70 px-1.5 py-0.5 text-2xs font-semibold text-muted-foreground">
             Closed your exchange
           </span>
         ) : null}
@@ -583,13 +596,13 @@ function SentMessageCard({
   const currentNow = now ?? Date.parse(`${nowMinute}:00.000Z`);
   const badge =
     !presentation.isReply && presentation.exchangeState === "open"
-      ? { label: "Awaiting reply", className: "bg-amber-500/15 text-amber-700 dark:text-amber-300" }
+      ? { label: "Awaiting reply", className: "bg-warning/15 text-warning-foreground" }
       : presentation.isReply && presentation.exchangeState === "closed"
         ? { label: "Reply", className: "border border-border/70 text-muted-foreground" }
         : null;
   return (
     <section
-      className="max-w-[88%] rounded-[10px] border border-border/70 px-3.5 py-2.5"
+      className="max-w-[88%] rounded-lg border border-border/70 px-3.5 py-2.5"
       data-j5-a2a-renderer="sent"
     >
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
@@ -599,7 +612,7 @@ function SentMessageCard({
         </span>
         <span className="font-medium text-foreground">{presentation.recipientId}</span>
         {badge ? (
-          <span className={`rounded-md px-1.5 py-0.5 text-[11px] font-semibold ${badge.className}`}>
+          <span className={`rounded-md px-1.5 py-0.5 text-2xs font-semibold ${badge.className}`}>
             {badge.label}
           </span>
         ) : null}
@@ -672,12 +685,14 @@ export function renderThreadA2ADelivery(props: ThreadA2ADeliveryCompositionInput
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
           <p className="font-medium text-muted-foreground">{attribution}</p>
           {presentation.exchange === "closed" ? (
-            <span className="rounded-md border border-border/70 px-1.5 py-0.5 text-[11px] font-semibold text-muted-foreground">
+            <span className="rounded-md border border-border/70 px-1.5 py-0.5 text-2xs font-semibold text-muted-foreground">
               Closed your exchange
             </span>
           ) : null}
         </div>
-        <p className="mt-1 whitespace-pre-wrap break-words text-sm">{presentation.body}</p>
+        <p className="mt-1 whitespace-pre-wrap break-words text-sm" data-thread-find-text="true">
+          {presentation.body}
+        </p>
       </section>
     );
   }

@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off - a per-attempt file suffix; this step must need nothing beyond FileSystem and Path.
 import * as NodeCrypto from "node:crypto";
 import * as NodeSqlite from "node:sqlite";
 
@@ -67,6 +68,62 @@ const readLatestAppliedMigration = (filename: string) => {
 };
 
 /**
+ * Copies the database to `snapshotPath` before a migration that `reason` names. The copy is
+ * published only if `stillPending` holds for it, so a copy taken after another process already
+ * migrated never replaces a real snapshot. It replaces an older snapshot of the same name.
+ */
+export const publishDatabaseSnapshot = Effect.fn("publishDatabaseSnapshot")(function* <E>(options: {
+  readonly dbPath: string;
+  readonly snapshotPath: string;
+  readonly reason: string;
+  readonly stillPending: (filename: string) => boolean;
+  readonly fail: (cause: unknown) => E;
+}) {
+  const { dbPath, snapshotPath, reason, fail } = options;
+  const fs = yield* FileSystem.FileSystem;
+  // Per attempt: two processes starting together must each publish only their own complete copy.
+  const partialPath = `${snapshotPath}.${process.pid}.${NodeCrypto.randomUUID()}.partial`;
+  const { size } = yield* fs.stat(dbPath).pipe(Effect.mapError(fail));
+  yield* Effect.logInfo(`Snapshotting the database before ${reason}`, {
+    databasePath: dbPath,
+    databaseBytes: Number(size),
+    snapshotPath,
+  });
+  const [elapsed, published] = yield* Effect.gen(function* () {
+    yield* Effect.tryPromise({
+      try: async () => {
+        const database = new NodeSqlite.DatabaseSync(dbPath, { readOnly: true });
+        try {
+          await NodeSqlite.backup(database, partialPath);
+        } finally {
+          database.close();
+        }
+      },
+      catch: fail,
+    });
+    const pending = yield* Effect.try({
+      try: () => options.stillPending(partialPath),
+      catch: fail,
+    });
+    if (!pending) {
+      yield* fs.remove(partialPath, { force: true }).pipe(Effect.mapError(fail));
+      return false;
+    }
+    yield* fs.rename(partialPath, snapshotPath).pipe(Effect.mapError(fail));
+    return true;
+  }).pipe(
+    Effect.tapError(() => fs.remove(partialPath, { force: true }).pipe(Effect.ignore)),
+    Effect.timed,
+  );
+  yield* Effect.logInfo(
+    published
+      ? `Snapshot written before ${reason}`
+      : `Snapshot discarded: another process already ran ${reason}`,
+    { snapshotPath, durationMs: Duration.toMillis(elapsed) },
+  );
+});
+
+/**
  * Call before anything opens the database read-write. When a guarded J5 ledger migration is about
  * to run, this copies the database to `statev2.pre-j5-<id>.sqlite` first, and
  * fails rather than let the migration run without that copy. It replaces an older snapshot of the
@@ -95,65 +152,26 @@ export const snapshotBeforeJ5LedgerMigration = Effect.fn("snapshotBeforeJ5Ledger
           });
     // The migrator skips every id at or below the latest applied one, so that is what pending
     // means. The snapshot is named for the first guarded migration that will actually run.
-    const readFirstPending = (
-      filename: string,
-      fail: (cause: unknown) => LedgerMigrationSnapshotError,
-    ) =>
-      Effect.try({
-        try: () => {
-          const latest = readLatestAppliedMigration(filename);
-          return latest === undefined ? undefined : guardedIds.find((id) => id > latest);
-        },
-        catch: fail,
-      });
+    const readFirstPendingId = (filename: string) => {
+      const latest = readLatestAppliedMigration(filename);
+      return latest === undefined ? undefined : guardedIds.find((id) => id > latest);
+    };
 
     if (!(yield* fs.exists(dbPath).pipe(Effect.mapError(failFor(lowestGuardedId))))) return;
-    const pendingId = yield* readFirstPending(dbPath, failFor(lowestGuardedId));
+    const pendingId = yield* Effect.try({
+      try: () => readFirstPendingId(dbPath),
+      catch: failFor(lowestGuardedId),
+    });
     if (pendingId === undefined) return;
 
     const fail = failFor(pendingId);
-    const snapshotPath = ledgerMigrationSnapshotPath(path, dbPath, pendingId);
-    // Per attempt: two processes starting together must each publish only their own complete copy.
-    const partialPath = `${snapshotPath}.${process.pid}.${NodeCrypto.randomUUID()}.partial`;
-
-    yield* Effect.gen(function* () {
-      const { size } = yield* fs.stat(dbPath);
-      yield* Effect.logInfo("Snapshotting the database before a J5 ledger migration", {
-        databasePath: dbPath,
-        databaseBytes: Number(size),
-        snapshotPath,
-        migrationId: pendingId,
-      });
-      const [elapsed, published] = yield* Effect.gen(function* () {
-        yield* Effect.tryPromise({
-          try: async () => {
-            const database = new NodeSqlite.DatabaseSync(dbPath, { readOnly: true });
-            try {
-              await NodeSqlite.backup(database, partialPath);
-            } finally {
-              database.close();
-            }
-          },
-          catch: fail,
-        });
-        // Another process may have migrated while this one copied. Never publish a
-        // post-migration copy over a real snapshot.
-        if ((yield* readFirstPending(partialPath, fail)) !== pendingId) {
-          yield* fs.remove(partialPath, { force: true });
-          return false;
-        }
-        yield* fs.rename(partialPath, snapshotPath);
-        return true;
-      }).pipe(
-        Effect.tapError(() => fs.remove(partialPath, { force: true }).pipe(Effect.ignore)),
-        Effect.timed,
-      );
-      yield* Effect.logInfo(
-        published
-          ? "Snapshot written before the J5 ledger migration"
-          : "Snapshot discarded: another process already ran the J5 ledger migration",
-        { snapshotPath, durationMs: Duration.toMillis(elapsed) },
-      );
-    }).pipe(Effect.mapError(fail));
+    yield* publishDatabaseSnapshot({
+      dbPath,
+      snapshotPath: ledgerMigrationSnapshotPath(path, dbPath, pendingId),
+      reason: `J5 ledger migration ${pendingId}`,
+      // Another process may have migrated while this one copied.
+      stillPending: (filename) => readFirstPendingId(filename) === pendingId,
+      fail,
+    });
   },
 );

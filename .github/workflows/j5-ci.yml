@@ -77,7 +77,8 @@ jobs:
               subprocess.run(["git", "update-index", "--force-remove", "-z", "--stdin"], input=b"\0".join(paths) + b"\0", check=True)
           PYTHON
 
-  # Every package except `t3` (apps/server), which gets its own sharded job.
+  # Every package except `t3` (apps/server), which gets its own sharded job, and
+  # `@t3tools/web`, which gets its own runner.
   test:
     name: Test
     runs-on: ubuntu-24.04
@@ -108,7 +109,49 @@ jobs:
           sudo apt-get install -y --no-install-recommends libsecret-1-dev pkg-config
 
       - name: Test
-        run: pnpm exec vp run --log grouped --filter '!t3' --filter '!@t3tools/monorepo' test
+        run: pnpm exec vp run --log grouped --filter '!t3' --filter '!@t3tools/web' --filter '!@t3tools/monorepo' test
+
+      # These gitlinks belong to vendored manifests, not this repository.
+      # Remove them only from the disposable index before checkout's cleanup.
+      - name: Exclude vendored gitlinks from checkout cleanup
+        if: always()
+        run: |
+          python3 - <<'PYTHON'
+          import subprocess
+          entries = subprocess.check_output(["git", "ls-files", "--stage", "-z", ".repos"])
+          paths = [entry.split(b"\t", 1)[1] for entry in entries.split(b"\0") if entry.startswith(b"160000 ")]
+          if paths:
+              subprocess.run(["git", "update-index", "--force-remove", "-z", "--stdin"], input=b"\0".join(paths) + b"\0", check=True)
+          PYTHON
+
+  # The web suite imports the whole app into jsdom. Sharing a runner with the
+  # other packages starved it until a setup hook timed out, so it runs alone,
+  # as upstream's `test_web` does.
+  test_web:
+    name: Test Web
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.10.0
+          run_install: false
+
+      - name: Install Node from .nvmrc
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Test
+        run: pnpm exec vp run --log grouped --filter '@t3tools/web' test
 
       # These gitlinks belong to vendored manifests, not this repository.
       # Remove them only from the disposable index before checkout's cleanup.
@@ -154,6 +197,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # src/preview's browser integration tests drive a real headless Chromium.
+      - name: Install Chromium for server browser integration tests
+        run: node apps/server/node_modules/playwright-core/cli.js install --with-deps --only-shell chromium
+
       - name: Test
         run: pnpm exec vp run --filter t3 test --shard ${{ matrix.shard }}/${{ strategy.job-total }}
 
@@ -176,7 +223,7 @@ jobs:
   quality:
     name: Format, lint, typecheck, and unit tests
     if: always()
-    needs: [checks, test, test_server]
+    needs: [checks, test, test_web, test_server]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

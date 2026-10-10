@@ -5,20 +5,14 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { make as makeJsonSchemaGenerator } from "@effect/openapi-generator/JsonSchemaGenerator";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
-import type * as JsonSchema from "effect/JsonSchema";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
-import {
-  FetchHttpClient,
-  HttpClient,
-  HttpClientRequest,
-  HttpClientResponse,
-} from "effect/unstable/http";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
-const UPSTREAM_REF = "5adb68a49933ae446bf11935662c83dba55a0804";
+const UPSTREAM_REF = "687a119f0fcaace47e1f1abcc77cec6c813fd6da";
 const USER_AGENT = "effect-codex-app-server-generator";
 const GITHUB_API_BASE =
   "https://api.github.com/repos/openai/codex/contents/codex-rs/app-server-protocol";
@@ -146,62 +140,12 @@ const ManualSchemas: Record<string, Schema.Json> = {
   },
 };
 
-// Pinned protocol JSON omits later CodexErrorInfo variants. Keep historical
-// thread payloads decodable; do not fold unknown values into "other".
-const CodexErrorInfoCompatibilityValues = [
-  "rateLimitExceeded",
-  "misalignmentPolicyViolation",
-] as const;
-
-const CodexErrorInfoCompatibilityExports = new Set([
-  "V2ThreadReadResponse",
-  "V2ThreadResumeResponse",
-  "V2ThreadRollbackResponse",
-  "V2ThreadForkResponse",
-  "V2TurnCompletedNotification",
-]);
-
-function applyCodex0151DefinitionCompatibility(
-  exportName: string,
-  definitionName: string,
-  definitionSchema: Schema.Json,
-): Schema.Json {
-  if (
-    !CodexErrorInfoCompatibilityExports.has(exportName) ||
-    definitionName !== "CodexErrorInfo" ||
-    typeof definitionSchema !== "object"
-  ) {
-    return definitionSchema;
-  }
-
-  const schema = definitionSchema as {
-    readonly oneOf?: ReadonlyArray<{ readonly enum?: ReadonlyArray<string> }>;
-  };
-  const [firstVariant, ...remainingVariants] = schema.oneOf ?? [];
-  const currentEnum = firstVariant?.enum;
-  if (!currentEnum) {
-    return definitionSchema;
-  }
-
-  const missingValues = CodexErrorInfoCompatibilityValues.filter(
-    (value) => !currentEnum.includes(value),
-  );
-  if (missingValues.length === 0) {
-    return definitionSchema;
-  }
-
-  const enumValues = [...currentEnum];
-  const otherIndex = enumValues.indexOf("other");
-  const nextEnum =
-    otherIndex === -1
-      ? [...enumValues, ...missingValues]
-      : [...enumValues.slice(0, otherIndex), ...missingValues, ...enumValues.slice(otherIndex)];
-
-  return {
-    ...definitionSchema,
-    oneOf: [{ ...firstVariant, enum: nextEnum }, ...remainingVariants],
-  };
-}
+// Codex adds plan slugs between our protocol refreshes (0.159 added `promax`).
+// T3 Code only uses the plan for labels, so an unknown slug must not fail the
+// whole `account/read` decode and take the provider down with it.
+const DefinitionOverrides: Record<string, Schema.Json> = {
+  PlanType: { type: "string" },
+};
 
 const getGeneratedPaths = Effect.fn("getGeneratedPaths")(function* () {
   const path = yield* Path.Path;
@@ -221,8 +165,13 @@ const ensureGeneratedDir = Effect.fn("ensureGeneratedDir")(function* () {
 });
 
 const fetchText = Effect.fn("fetchText")(function* (url: string) {
+  // Unauthenticated GitHub API calls are capped at 60/hour; set GITHUB_TOKEN to lift that.
+  const token = process.env.GITHUB_TOKEN;
   return yield* HttpClientRequest.get(url).pipe(
     HttpClientRequest.setHeader("user-agent", USER_AGENT),
+    token && url.startsWith("https://api.github.com/")
+      ? HttpClientRequest.bearerToken(token)
+      : (request) => request,
     HttpClient.execute,
     Effect.flatMap(HttpClientResponse.filterStatusOk),
     Effect.flatMap((okResponse) => okResponse.text),
@@ -324,71 +273,6 @@ function normalizeNullableTypes(value: Schema.Json): Schema.Json {
   };
 }
 
-// Effect's rc.115 importer reads an object without `additionalProperties` as open and
-// emits `StructWithRest`, which the hand-written client cannot extend. Codex never
-// relies on extra keys, and a plain `Struct` still ignores unknown keys when decoding.
-// Schemas combining variants keep their shape so the variants stay decodable.
-function closeObjectProperties(schema: JsonSchema.JsonSchema): JsonSchema.JsonSchema {
-  const isPlainObject =
-    (schema.type === "object" || "properties" in schema) &&
-    !("oneOf" in schema || "anyOf" in schema || "allOf" in schema);
-  return isPlainObject && !("additionalProperties" in schema)
-    ? { ...schema, additionalProperties: false }
-    : schema;
-}
-
-// Effect's OpenAPI importer cannot intersect a common object with a oneOf.
-// Codex flattens elicitation variants this way. Distribute only disjoint
-// properties; schemas with other object constraints keep their original shape.
-function distributeObjectUnion(value: Schema.Json): Schema.Json {
-  if (Array.isArray(value)) return value.map(distributeObjectUnion);
-  if (value === null || typeof value !== "object") return value;
-  const normalized = Object.fromEntries(
-    Object.entries(value).map(([key, child]) => [key, distributeObjectUnion(child)]),
-  );
-  const { type, properties, required, oneOf, ...rest } = normalized;
-  if (
-    type !== "object" ||
-    properties === null ||
-    typeof properties !== "object" ||
-    Array.isArray(properties) ||
-    !Array.isArray(oneOf) ||
-    (required !== undefined && !Array.isArray(required)) ||
-    Object.keys(rest).some((key) => !["$schema", "title", "description"].includes(key)) ||
-    !oneOf.every(
-      (branch) =>
-        branch !== null &&
-        typeof branch === "object" &&
-        !Array.isArray(branch) &&
-        branch.type === "object" &&
-        branch.properties !== null &&
-        typeof branch.properties === "object" &&
-        !Array.isArray(branch.properties) &&
-        (branch.required === undefined || Array.isArray(branch.required)) &&
-        !Object.keys(branch.properties).some((key) => key in properties) &&
-        !Object.keys(branch).some(
-          (key) => !["type", "properties", "required", "title", "description"].includes(key),
-        ),
-    )
-  )
-    return normalized;
-  return {
-    ...rest,
-    oneOf: oneOf.map((branch) => {
-      // The guard above limits this rewrite to plain object alternatives.
-      const alternative = branch as Record<string, Schema.Json>;
-      return {
-        ...alternative,
-        properties: { ...properties, ...(alternative.properties as Record<string, Schema.Json>) },
-        required: [
-          ...(required ?? []),
-          ...((alternative.required as Schema.Json[] | undefined) ?? []),
-        ],
-      };
-    }),
-  };
-}
-
 function stripNullDefaults(value: Schema.Json): Schema.Json {
   if (Array.isArray(value)) {
     return value.map(stripNullDefaults);
@@ -404,59 +288,82 @@ function stripNullDefaults(value: Schema.Json): Schema.Json {
   ) as Schema.Json;
 }
 
-// Codex 0.153 adds async questions to agent messages. Keep older protocol
-// fields until the next full refresh, including every thread history namespace.
-function addAsyncQuestionFields(value: Schema.Json): Schema.Json {
-  if (Array.isArray(value)) {
-    return value.map(addAsyncQuestionFields);
-  }
-  if (value === null || typeof value !== "object") {
+type JsonSchemaNode = { readonly [key: string]: Schema.Json };
+
+function isJsonSchemaNode(value: Schema.Json | undefined): value is JsonSchemaNode {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+// Adapts Codex's JSON Schema to Effect's importer, visiting only schema
+// positions so a field literally named "properties" is left alone:
+// - Effect imports an object without additionalProperties as an open record.
+//   Codex omits it for plain structs, so close objects that list properties.
+// - Effect cannot intersect shared object fields with object alternatives,
+//   which Codex uses for "one of these keys plus shared fields"
+//   (image_url | file_id). Fold the shared fields into each alternative.
+function adaptSchemaForEffect(value: Schema.Json): Schema.Json {
+  if (!isJsonSchemaNode(value)) {
     return value;
   }
-  const properties = "properties" in value ? value.properties : undefined;
-  const itemType =
-    properties && typeof properties === "object" && "type" in properties
-      ? properties.type
-      : undefined;
-  if (
-    properties &&
-    typeof properties === "object" &&
-    itemType &&
-    typeof itemType === "object" &&
-    "enum" in itemType &&
-    Array.isArray(itemType.enum) &&
-    itemType.enum.includes("agentMessage")
-  ) {
-    return {
-      ...value,
-      properties: {
-        ...Object.fromEntries(Object.entries(properties).filter(([key]) => key !== "type")),
-        delivery: { anyOf: [{ type: "string", enum: ["async"] }, { type: "null" }] },
-        questions: {
-          anyOf: [
-            {
-              type: "array",
-              items: {
-                type: "object",
-                properties: {
-                  title: { type: "string" },
-                  options: {
-                    anyOf: [{ type: "array", items: { type: "string" } }, { type: "null" }],
-                  },
-                },
-                required: ["title"],
-              },
-            },
-            { type: "null" },
-          ],
-        },
-        type: itemType,
-      },
-    };
+  const node: Record<string, Schema.Json> = { ...value };
+  for (const key of ["items", "additionalProperties"]) {
+    const child = node[key];
+    if (isJsonSchemaNode(child)) node[key] = adaptSchemaForEffect(child);
   }
-  return Object.fromEntries(
-    Object.entries(value).map(([key, child]) => [key, addAsyncQuestionFields(child)]),
-  );
+  for (const key of ["anyOf", "oneOf", "allOf"]) {
+    const child = node[key];
+    if (Array.isArray(child)) node[key] = child.map(adaptSchemaForEffect);
+  }
+  for (const key of ["properties", "definitions"]) {
+    const child = node[key];
+    if (isJsonSchemaNode(child)) {
+      node[key] = Object.fromEntries(
+        Object.entries(child).map(([name, schema]) => [name, adaptSchemaForEffect(schema)]),
+      );
+    }
+  }
+
+  const { properties } = node;
+  if (
+    isJsonSchemaNode(properties) &&
+    Object.keys(properties).length > 0 &&
+    !("additionalProperties" in node)
+  ) {
+    node.additionalProperties = false;
+  }
+
+  const alternativesKey = "anyOf" in node ? "anyOf" : "oneOf";
+  const alternatives = node[alternativesKey];
+  if (
+    !isJsonSchemaNode(properties) ||
+    !Array.isArray(alternatives) ||
+    !alternatives.every(
+      (alternative) => isJsonSchemaNode(alternative) && alternative.type === "object",
+    )
+  ) {
+    return node;
+  }
+  const {
+    properties: _shared,
+    required,
+    type: _type,
+    additionalProperties: _closed,
+    ...rest
+  } = node;
+  const sharedRequired = Array.isArray(required) ? required : [];
+  return {
+    ...rest,
+    [alternativesKey]: alternatives.map((alternative) => {
+      const branch = alternative as JsonSchemaNode;
+      const branchProperties = isJsonSchemaNode(branch.properties) ? branch.properties : {};
+      const branchRequired = Array.isArray(branch.required) ? branch.required : [];
+      return {
+        ...branch,
+        properties: { ...properties, ...branchProperties },
+        required: [...new Set([...sharedRequired, ...branchRequired])],
+      };
+    }),
+  };
 }
 
 function toPascalCaseMethod(method: string) {
@@ -470,13 +377,14 @@ function toPascalCaseMethod(method: string) {
 }
 
 function parseRequestEntries(fileContents: string): ReadonlyArray<MethodEntry> {
-  const entryPattern = /\{\s*"method":\s*"([^"]+)",\s*id:\s*RequestId,\s*params:\s*([^,}]+)/g;
+  // Optional params render as `params?: Foo | undefined`; their JSON schema is `NullableFoo`.
+  const entryPattern = /\{\s*"method":\s*"([^"]+)",\s*id:\s*RequestId,\s*params(\??):\s*([^,}|]+)/g;
   const entries: Array<MethodEntry> = [];
   let match: RegExpExecArray | null;
   while ((match = entryPattern.exec(fileContents)) !== null) {
     entries.push({
       method: match[1]!,
-      paramsType: match[2]!.trim(),
+      paramsType: `${match[2] ? "Nullable" : ""}${match[3]!.trim()}`,
     });
   }
   return entries;
@@ -524,6 +432,9 @@ function resolveResponseTypeName(
   generatedSchemaNames: ReadonlySet<string>,
 ): string {
   const overrides: Record<string, string> = {
+    "account/gatewayOAuth/cancel": "GatewayOAuthCancelResponse",
+    "account/gatewayOAuth/login": "GatewayOAuthLoginResponse",
+    "account/gatewayOAuth/read": "GatewayOAuthReadResponse",
     "account/logout": "LogoutAccountResponse",
     "account/rateLimits/read": "GetAccountRateLimitsResponse",
     "account/usage/read": "GetAccountTokenUsageResponse",
@@ -734,15 +645,10 @@ const generateFiles = Effect.fn("generateFiles")(function* () {
     );
 
     for (const [definitionName, definitionSchema] of Object.entries(parsed.definitions ?? {})) {
-      const compatibleDefinitionSchema = applyCodex0151DefinitionCompatibility(
-        file.exportName,
-        definitionName,
-        definitionSchema,
-      );
       aggregateSchemas[localDefinitionNames.get(definitionName)!] = stripNullDefaults(
         normalizeNullableTypes(
           rewriteExternalRefs(
-            compatibleDefinitionSchema,
+            DefinitionOverrides[definitionName] ?? definitionSchema,
             localDefinitionNames,
             file.namespace,
             exportNameByQualifiedName,
@@ -780,16 +686,12 @@ const generateFiles = Effect.fn("generateFiles")(function* () {
   for (const [name, schema] of Object.entries(aggregateSchemas).toSorted(([left], [right]) =>
     left.localeCompare(right),
   )) {
-    // Referenced definitions and registered roots must receive the same extension.
-    const compatibleSchema = distributeObjectUnion(addAsyncQuestionFields(schema));
-    aggregateSchemas[name] = compatibleSchema;
-    generator.addSchema(name, compatibleSchema as never);
+    aggregateSchemas[name] = adaptSchemaForEffect(schema);
+    generator.addSchema(name, aggregateSchemas[name] as never);
   }
 
   const generatedEntries = new Map<string, string>();
-  const output = generator
-    .generate("openapi-3.1", aggregateSchemas as never, false, { onEnter: closeObjectProperties })
-    .trim();
+  const output = generator.generate("openapi-3.1", aggregateSchemas as never, false).trim();
   if (output.length > 0) {
     for (const entry of collectSchemaEntries(output)) {
       if (!generatedEntries.has(entry.name)) {

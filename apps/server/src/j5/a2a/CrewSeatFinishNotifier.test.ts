@@ -5,7 +5,7 @@ import {
   ProviderInstanceId,
   RunId,
   ThreadId,
-  type OrchestrationV2Command,
+  type OrchestrationV2ServerCommand,
   type OrchestrationV2StoredEvent,
   type OrchestrationV2ThreadProjection,
 } from "@t3tools/contracts";
@@ -18,7 +18,7 @@ import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import { ServerConfig } from "../../config.ts";
 import { EventSinkStreamError, EventSinkV2 } from "../../orchestration-v2/EventSink.ts";
@@ -257,7 +257,7 @@ it.effect("tells the Captain how each finished seat ended, and settles nothing",
         1, NULL, ${DateTime.formatIso(createdAt)}, ${DateTime.formatIso(createdAt)}
       )
     `;
-    const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]);
+    const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationV2ServerCommand>>([]);
     // The launch report covers a failed first turn while it is pending; here the builder's.
     const covered = yield* Ref.make<ReadonlySet<string>>(new Set());
     const layer = notifierLayer.pipe(
@@ -459,7 +459,7 @@ it.effect(
           },
         ],
       });
-      const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]);
+      const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationV2ServerCommand>>([]);
       const captain = yield* Ref.make(
         captainProjection({
           running: true,
@@ -614,7 +614,7 @@ it.effect(
           },
         ],
       });
-      const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]);
+      const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationV2ServerCommand>>([]);
       const noticesFail = yield* Ref.make(true);
       const layer = notifierLayer.pipe(
         Layer.provideMerge(
@@ -700,7 +700,7 @@ it.effect(
           },
         ],
       });
-      const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]);
+      const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationV2ServerCommand>>([]);
       const captain = yield* Ref.make(captainProjection({ running: false, messages: [] }));
       const readsFail = yield* Ref.make(false);
       const flakyWorkspace = Layer.effect(
@@ -857,7 +857,7 @@ it.effect("the boot sweep tells the Captain about a finished seat nothing report
         },
       ],
     });
-    const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]);
+    const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationV2ServerCommand>>([]);
     let newestStatus: "failed" | "interrupted" = "interrupted";
     const finished = (threadId: ThreadId) =>
       ({
@@ -961,7 +961,7 @@ it.effect(
           },
         ],
       });
-      const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]);
+      const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationV2ServerCommand>>([]);
       // What sits at the handoff path: facts that never change on a retry.
       const failure = yield* Ref.make<"too_large" | "not_a_file" | "outside_root">("too_large");
       const workspace = Layer.effect(

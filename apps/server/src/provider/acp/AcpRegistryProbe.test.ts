@@ -22,7 +22,7 @@ import {
   normalizeAcpRegistryCommands,
   probeAcpRegistryConfiguration,
 } from "./AcpRegistryProbe.ts";
-import { AcpRegistryCatalog } from "./AcpRegistrySupport.ts";
+import * as AcpRegistrySupport from "./AcpRegistrySupport.ts";
 
 const instanceId = ProviderInstanceId.make("acpRegistry_codex");
 const __dirname = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url));
@@ -222,6 +222,75 @@ describe("ACP Registry probe", () => {
     expect(result.currentModelId).toBeNull();
   });
 
+  it("preserves grouped model values and advertises reasoning choices", () => {
+    const codexModel = '["codex","gpt-6.1-sol"]';
+    const goModel = '["opencode-go","deepseek-v4.1-flash"]';
+    const result = acpRegistryProbeResult(instanceId, {
+      sessionId: "probe-session",
+      initializeResult: { protocolVersion: 1 },
+      sessionSetupResult: {
+        sessionId: "probe-session",
+        configOptions: [
+          {
+            id: "model",
+            name: "Model",
+            category: "model",
+            type: "select",
+            currentValue: goModel,
+            options: [
+              {
+                groupId: "codex",
+                name: "Codex",
+                options: [{ value: codexModel, name: "GPT-6.1 Sol" }],
+              },
+              {
+                groupId: "opencode-go",
+                name: "OpenCode Go",
+                options: [{ value: goModel, name: "DeepSeek V4.1 Flash" }],
+              },
+            ],
+          },
+          {
+            id: "reasoning",
+            name: "Reasoning",
+            category: "thought_level",
+            type: "select",
+            currentValue: "high",
+            options: [
+              {
+                groupId: "effort",
+                name: "Effort",
+                options: [
+                  { value: "medium", name: "Medium" },
+                  { value: "high", name: "High" },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      modelConfigId: "model",
+    } satisfies AcpSessionRuntimeStartResult);
+
+    expect(result.models).toEqual([
+      { id: codexModel, name: "GPT-6.1 Sol", description: null },
+      { id: goModel, name: "DeepSeek V4.1 Flash", description: null },
+    ]);
+    expect(result.currentModelId).toBe(goModel);
+    expect(result.configOptions).toEqual([
+      {
+        id: "reasoning",
+        label: "Reasoning",
+        type: "select",
+        currentValue: "high",
+        options: [
+          { id: "medium", label: "Medium" },
+          { id: "high", label: "High" },
+        ],
+      },
+    ]);
+  });
+
   it("omits a current model that falls outside the bounded model catalog", () => {
     const result = acpRegistryProbeResult(instanceId, {
       sessionId: "probe-session",
@@ -324,8 +393,8 @@ describe("ACP Registry probe", () => {
       ]);
     }).pipe(
       Effect.provideService(
-        AcpRegistryCatalog,
-        AcpRegistryCatalog.of({
+        AcpRegistrySupport.AcpRegistryCatalog,
+        AcpRegistrySupport.AcpRegistryCatalog.of({
           search: () => Effect.die("unused search"),
           prepare: () => Effect.die("unused prepare"),
           inspect: () => Effect.die("unused inspect"),
@@ -359,7 +428,7 @@ describe("ACP Registry probe", () => {
   it.effect("includes package resolution in the probe timeout", () =>
     Effect.gen(function* () {
       const resolveStarted = yield* Deferred.make<void>();
-      const catalog = AcpRegistryCatalog.of({
+      const catalog = AcpRegistrySupport.AcpRegistryCatalog.of({
         search: () => Effect.die("unused search"),
         prepare: () => Effect.die("unused prepare"),
         inspect: () => Effect.die("unused inspect"),
@@ -373,7 +442,7 @@ describe("ACP Registry probe", () => {
         cwd: process.cwd(),
         environment: process.env,
       }).pipe(
-        Effect.provideService(AcpRegistryCatalog, catalog),
+        Effect.provideService(AcpRegistrySupport.AcpRegistryCatalog, catalog),
         Effect.flip,
         Effect.forkChild({ startImmediately: true }),
       );
@@ -389,7 +458,7 @@ describe("ACP Registry probe", () => {
   );
 
   it.effect("lists native sessions and logs out through generic ACP lifecycle methods", () => {
-    const catalog = AcpRegistryCatalog.of({
+    const catalog = AcpRegistrySupport.AcpRegistryCatalog.of({
       search: () => Effect.die("unused search"),
       prepare: () => Effect.die("unused prepare"),
       inspect: () => Effect.die("unused inspect"),
@@ -438,14 +507,14 @@ describe("ACP Registry probe", () => {
       });
       yield* logoutAcpRegistry(input);
     }).pipe(
-      Effect.provideService(AcpRegistryCatalog, catalog),
+      Effect.provideService(AcpRegistrySupport.AcpRegistryCatalog, catalog),
       Effect.provide(NodeServices.layer),
       Effect.scoped,
     );
   });
 
   it.effect("preserves the ACP method error for unsupported session management", () => {
-    const catalog = AcpRegistryCatalog.of({
+    const catalog = AcpRegistrySupport.AcpRegistryCatalog.of({
       search: () => Effect.die("unused search"),
       prepare: () => Effect.die("unused prepare"),
       inspect: () => Effect.die("unused inspect"),
@@ -482,7 +551,7 @@ describe("ACP Registry probe", () => {
         cause: { _tag: "AcpRequestError", code: -32601 },
       });
     }).pipe(
-      Effect.provideService(AcpRegistryCatalog, catalog),
+      Effect.provideService(AcpRegistrySupport.AcpRegistryCatalog, catalog),
       Effect.provide(NodeServices.layer),
       Effect.scoped,
     );

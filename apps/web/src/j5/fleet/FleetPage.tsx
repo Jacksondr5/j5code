@@ -3,7 +3,7 @@ import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environ
 import { j5SourceNotice } from "@t3tools/client-runtime/j5/inbox";
 import { spansMultipleEnvironments } from "@t3tools/client-runtime/j5/readSources";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
-import { ThreadId, type EnvironmentId } from "@t3tools/contracts";
+import { AuthOrchestrationOperateScope, ThreadId, type EnvironmentId } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { ChevronRightIcon, RefreshCwIcon } from "lucide-react";
 import { useCallback, useMemo, useState, type ReactNode } from "react";
@@ -11,6 +11,7 @@ import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { ProjectFavicon } from "../../components/ProjectFavicon";
 import { resolveThreadStatusPill } from "../../components/Sidebar.logic";
 import { WorkspaceBreadcrumb, WorkspaceBreadcrumbItem } from "../../components/WorkspaceBreadcrumb";
+import { WorkspacePageHeader } from "../../components/WorkspacePageHeader";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { ScrollArea } from "../../components/ui/scroll-area";
@@ -20,11 +21,11 @@ import { isElectron } from "../../env";
 import { cn } from "../../lib/utils";
 import type { SidebarProjectSnapshot } from "../../sidebarProjectGrouping";
 import { useAllEnvironmentShellsBootstrapped, useThreadShells } from "../../state/entities";
+import { useEnvironmentScope } from "../../state/session";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { formatElapsedDurationLabel } from "../../timestampFormat";
 import { CaptainMark } from "../crew/CaptainMark";
 import { PlaybookRunsSection } from "../playbooks/PlaybookRunsSection";
-import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "../../workspaceTitlebar";
 import { fleetDetailSourcesAtom } from "../state";
 import { useLogicalProjects } from "../logicalProjects";
 import { requestConfirmDialog } from "../../confirmDialog";
@@ -198,17 +199,11 @@ export function FleetPage() {
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <header
-          className={cn(
-            "flex h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)] shrink-0 items-center px-3 sm:px-5",
-            !isElectron && COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
-            isElectron && "drag-region h-[52px]",
-          )}
-        >
+        <WorkspacePageHeader electron={isElectron}>
           <WorkspaceBreadcrumb ariaLabel="Fleet breadcrumb">
             <WorkspaceBreadcrumbItem current>Fleet</WorkspaceBreadcrumbItem>
           </WorkspaceBreadcrumb>
-        </header>
+        </WorkspacePageHeader>
         <ScrollArea className="min-h-0 flex-1">
           <main className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-8 sm:py-10">
             <div className="flex flex-wrap items-end justify-between gap-4 border-b border-border pb-5">
@@ -345,6 +340,7 @@ function FleetNodeRows(
   const { node, seatBadge, ...rows } = props;
   const { project: ledgerProject } = rows;
   const { environmentId } = ledgerProject;
+  const canOperate = useEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
   // "What is the state of this Crew?" from the seats' measured facts, no Playbook required.
   const crewState = (members: ReadonlyArray<FleetRow>) =>
     summarizeCrewState(
@@ -466,7 +462,7 @@ function FleetNodeRows(
                       </span>
                     )}
                     <span className="ms-auto flex items-center gap-1.5">
-                      {crewHasRunningSeat(state) ? (
+                      {canOperate && crewHasRunningSeat(state) ? (
                         <Button
                           aria-label={`Stop crew ${crew.crewName}`}
                           disabled={busy === crew.crewInstanceId}
@@ -483,7 +479,7 @@ function FleetNodeRows(
                       ) : null}
                       <Button
                         aria-label={`Archive crew ${crew.crewName}`}
-                        disabled={busy === crew.crewInstanceId}
+                        disabled={!canOperate || busy === crew.crewInstanceId}
                         onClick={(event) => {
                           event.preventDefault();
                           event.stopPropagation();
@@ -579,7 +575,7 @@ function RetiredCrewItem(props: FleetRowsProps & FleetProjectCrew<ScopedFleetLed
             )}
           </span>
         </summary>
-        <div className="border-t border-border/40 px-3 py-2 ps-[2.125rem] text-xs">
+        <div className="border-t border-border/40 px-3 py-2 ps-8.5 text-xs">
           <RetiredCrewCaptain {...props} environmentId={ledgerProject.environmentId} />
           <p className="mt-2 whitespace-pre-wrap break-words text-muted-foreground">{crew.brief}</p>
           {crew.playbook == null ? null : (

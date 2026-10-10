@@ -143,7 +143,7 @@ function PlaybookRunCard({
         Updated <time dateTime={run.updatedAt}>{age === "just now" ? age : `${age} ago`}</time>
       </p>
       {run.issue && (
-        <p role="status" className="mt-3 text-sm text-amber-600">
+        <p role="status" className="mt-3 text-sm text-warning">
           {run.issue.message}
         </p>
       )}

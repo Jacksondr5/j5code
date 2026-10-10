@@ -2,7 +2,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
-import { HttpRouter, HttpServerRespondable, HttpServerResponse } from "effect/unstable/http";
+import { HttpRouter, HttpServerRespondable, HttpServerResponse } from "effect/http";
 
 import { annotateEnvironmentRequest } from "../../auth/http.ts";
 import * as J5Contracts from "@t3tools/contracts/j5";

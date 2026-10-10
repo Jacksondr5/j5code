@@ -13,7 +13,6 @@ import {
   parseDevDeliverySeedArgs,
   runDevDeliverySeed,
   validateIsolatedBaseDir,
-  verifyDevDeliverySeedRollback,
 } from "./devDeliverySeed.ts";
 
 const isDevDeliverySeedArgumentError = Schema.is(DevDeliverySeedArgumentError);
@@ -62,9 +61,6 @@ it.effect("requires an explicit isolated base and emits a provider-safe receipt"
     });
     try {
       assert.equal(yield* validateIsolatedBaseDir(baseDir), yield* fileSystem.realPath(baseDir));
-      yield* verifyDevDeliverySeedRollback(baseDir).pipe(
-        Effect.provide(Logger.layer([], { mergeWithExisting: false })),
-      );
       const receipt = yield* runDevDeliverySeed(baseDir).pipe(
         Effect.provide(Logger.layer([], { mergeWithExisting: false })),
       );

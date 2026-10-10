@@ -133,8 +133,6 @@ const fixture = Effect.gen(function* () {
   });
   const handlers = yield* makePlaybookRpcHandlers({
     store,
-    observeStream: (_method, stream) => stream,
-    observe: (_method, effect) => effect,
   }).pipe(Effect.provide(Layer.merge(projects, threads)));
   const exportPlaybook = (input: { projectId: ProjectId; threadId?: ThreadId; name: string }) =>
     handlers[J5_PLAYBOOK_WS_METHODS.exportPlaybook](input);

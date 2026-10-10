@@ -10,7 +10,7 @@ import * as Clock from "effect/Clock";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { Command } from "effect/unstable/cli";
+import { Command } from "effect/cli";
 import { afterEach, beforeEach, vi } from "vite-plus/test";
 
 import { cli } from "../../binCli.ts";

@@ -1,5 +1,5 @@
 import { samePlaybookWorkspaceInputs } from "@t3tools/client-runtime/j5/playbooks";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 import { environmentProjects } from "../../state/projects";
 import { environmentThreadShells } from "../../state/threads";
 

@@ -11,11 +11,10 @@ import * as Path from "effect/Path";
 
 import { ServerConfig } from "../../config.ts";
 import * as ProcessRunner from "../../processRunner.ts";
-import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
+import { ProviderRegistry } from "../../provider/ProviderRegistry.ts";
 import * as ServerSettings from "../../serverSettings.ts";
-import type { ObserveRpcEffect } from "../agents/agentPersonaRpc.ts";
 import { createSkillCatalogTool } from "./skillCatalogTool.ts";
-import { deriveProviderInstanceConfigMap } from "../../provider/Layers/ProviderInstanceRegistryHydration.ts";
+import { deriveProviderInstanceConfigMap } from "../../provider/ProviderInstanceRegistryHydration.ts";
 import { affectedSkillProviderIds, resolveSkillRoot } from "./skillRoots.ts";
 import { canonicalSkillRoot } from "./skillFileSystem.ts";
 import { refreshSkillProviders } from "./skillProviderRefresh.ts";
@@ -32,11 +31,9 @@ export const SKILL_CATALOG_RPC_SCOPES = {
 type Input<K extends keyof typeof J5SkillCatalogRpcSchemas> =
   (typeof J5SkillCatalogRpcSchemas)[K]["input"]["Type"];
 
-const TRACE = { "rpc.aggregate": "j5SkillCatalog" } as const;
-
 /** Handlers for `J5SkillCatalogRpcGroup`; spread once into the upstream handler object. */
 export const makeSkillCatalogRpcHandlers = Effect.fn("j5.makeSkillCatalogRpcHandlers")(
-  function* (deps: { readonly observe: ObserveRpcEffect }) {
+  function* () {
     const config = yield* ServerConfig;
     const serverSettings = yield* ServerSettings.ServerSettingsService;
     const providers = yield* ProviderRegistry;
@@ -47,7 +44,6 @@ export const makeSkillCatalogRpcHandlers = Effect.fn("j5.makeSkillCatalogRpcHand
     const processRunner = yield* ProcessRunner.ProcessRunner.pipe(
       Effect.provide(ProcessRunner.layer),
     );
-    const { observe } = deps;
     const catalogContext = Effect.fn("j5.skills.catalogContext")(function* () {
       const settings = yield* serverSettings.getSettings.pipe(
         Effect.mapError((cause) => new SkillCatalogError({ message: String(cause) })),
@@ -113,43 +109,31 @@ export const makeSkillCatalogRpcHandlers = Effect.fn("j5.makeSkillCatalogRpcHand
 
     return {
       [METHODS.getSkillCatalogStatus]: (input: Input<"getSkillCatalogStatus">) =>
-        observe(
-          METHODS.getSkillCatalogStatus,
-          Effect.gen(function* () {
-            const source = yield* matchingSource(input.expectedSource);
-            const { tool } = yield* catalogContext();
-            return yield* tool.status({ source });
-          }),
-          TRACE,
-        ),
+        Effect.gen(function* () {
+          const source = yield* matchingSource(input.expectedSource);
+          const { tool } = yield* catalogContext();
+          return yield* tool.status({ source });
+        }),
       [METHODS.applySkillCatalogGroups]: (input: Input<"applySkillCatalogGroups">) =>
-        observe(
-          METHODS.applySkillCatalogGroups,
-          Effect.gen(function* () {
-            const source = yield* matchingSource(input.expectedSource);
-            const { tool, refresh } = yield* catalogContext();
-            // Partial failures can still change links. Preserve the apply result
-            // while publishing fresh discovery to every connected client.
-            return yield* tool
-              .apply({
-                source,
-                groups: input.groups,
-                ...(input.replacements ? { replacements: input.replacements } : {}),
-              })
-              .pipe(Effect.ensuring(refresh));
-          }),
-          TRACE,
-        ),
+        Effect.gen(function* () {
+          const source = yield* matchingSource(input.expectedSource);
+          const { tool, refresh } = yield* catalogContext();
+          // Partial failures can still change links. Preserve the apply result
+          // while publishing fresh discovery to every connected client.
+          return yield* tool
+            .apply({
+              source,
+              groups: input.groups,
+              ...(input.replacements ? { replacements: input.replacements } : {}),
+            })
+            .pipe(Effect.ensuring(refresh));
+        }),
       [METHODS.updateSkillCatalog]: (input: Input<"updateSkillCatalog">) =>
-        observe(
-          METHODS.updateSkillCatalog,
-          Effect.gen(function* () {
-            const source = yield* matchingSource(input.expectedSource);
-            const { tool, refresh } = yield* catalogContext();
-            return yield* tool.update({ source }).pipe(Effect.ensuring(refresh));
-          }),
-          TRACE,
-        ),
+        Effect.gen(function* () {
+          const source = yield* matchingSource(input.expectedSource);
+          const { tool, refresh } = yield* catalogContext();
+          return yield* tool.update({ source }).pipe(Effect.ensuring(refresh));
+        }),
     };
   },
 );

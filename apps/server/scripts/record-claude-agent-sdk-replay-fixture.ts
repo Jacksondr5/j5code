@@ -13,9 +13,9 @@ import { claudeRuntimeQueryPolicyForRuntimePolicy } from "../src/orchestration-v
 import {
   ProviderAdapterV2RuntimePolicy,
   type ProviderAdapterV2RuntimePolicy as ProviderAdapterV2RuntimePolicyType,
-} from "../src/orchestration-v2/ProviderAdapter.ts";
+} from "@t3tools/provider-core/server/ProviderAdapter";
 import type { RuntimePolicyV2Override } from "../src/orchestration-v2/RuntimePolicy.ts";
-import { makeCheckpointWorkspace } from "../src/orchestration-v2/testkit/ReplayFixtureWorkspace.ts";
+import { makeCheckpointWorkspace } from "@t3tools/provider-testing/replayWorkspace";
 import { CLAUDE_MODEL_SELECTION } from "../src/orchestration-v2/testkit/fixtures/shared.ts";
 import {
   MESSAGE_STEERING_INITIAL_PROMPT,
@@ -60,6 +60,23 @@ import {
   WORKSPACE_NEVER_POLICY,
   WEB_SEARCH_PROMPT,
 } from "../src/orchestration-v2/testkit/fixtures/shared.ts";
+import { CLAUDE_BACKGROUND_SUBAGENT_AFTER_ROOT_PROMPT } from "../src/orchestration-v2/testkit/fixtures/claude_background_subagent_after_root/input.ts";
+import {
+  CLAUDE_BACKGROUND_SUBAGENT_LIFECYCLE_FINAL_PROMPT,
+  CLAUDE_BACKGROUND_SUBAGENT_LIFECYCLE_LAUNCH_PROMPT,
+  CLAUDE_BACKGROUND_SUBAGENT_LIFECYCLE_RESUME_PROMPT,
+  CLAUDE_BACKGROUND_SUBAGENT_LIFECYCLE_STOP_PROMPT,
+} from "../src/orchestration-v2/testkit/fixtures/claude_background_subagent_lifecycle/input.ts";
+import { CLAUDE_BACKGROUND_MONITOR_WAKE_PROMPT } from "../src/orchestration-v2/testkit/fixtures/claude_background_monitor_wake/input.ts";
+import { CLAUDE_NESTED_BACKGROUND_SUBAGENT_WAKE_PROMPT } from "../src/orchestration-v2/testkit/fixtures/claude_nested_background_subagent_wake/input.ts";
+import { CLAUDE_NESTED_SUBAGENT_MODEL_PROMPT } from "../src/orchestration-v2/testkit/fixtures/claude_nested_subagent_model/input.ts";
+import { CLAUDE_MCP_TOOL_PRESENTATION_PROMPT } from "../src/orchestration-v2/testkit/fixtures/claude_mcp_tool_presentation/input.ts";
+import { CLAUDE_BACKGROUND_TASK_INTERRUPT_PROMPT } from "../src/orchestration-v2/testkit/fixtures/claude_background_task_interrupt/input.ts";
+import { CLAUDE_BACKGROUND_WAKE_BEFORE_QUEUED_PROMPT_LAUNCH_PROMPT } from "../src/orchestration-v2/testkit/fixtures/claude_background_wake_before_queued_prompt/input.ts";
+import {
+  CLAUDE_BACKGROUND_TASK_WAKE_FOLLOW_UP_PROMPT,
+  CLAUDE_BACKGROUND_TASK_WAKE_PROMPT,
+} from "../src/orchestration-v2/testkit/fixtures/claude_background_task_wake/input.ts";
 import {
   DENIED_WRITE_POLICY,
   TOOL_CALL_DENIED_WRITE_PROMPT,
@@ -161,6 +178,87 @@ const CLAUDE_RECORDINGS = {
   web_search: {
     prompts: [WEB_SEARCH_PROMPT],
     defaultTranscriptFile: "fixtures/web_search/claude_transcript.ndjson",
+    queryMode: "streaming",
+    enableTools: true,
+  },
+  claude_background_subagent_after_root: {
+    prompts: [CLAUDE_BACKGROUND_SUBAGENT_AFTER_ROOT_PROMPT],
+    defaultTranscriptFile:
+      "fixtures/claude_background_subagent_after_root/claude_transcript.ndjson",
+    queryMode: "streaming",
+    enableTools: true,
+    backgroundWakeCounts: [1],
+  },
+  claude_background_task_wake: {
+    prompts: [CLAUDE_BACKGROUND_TASK_WAKE_PROMPT, CLAUDE_BACKGROUND_TASK_WAKE_FOLLOW_UP_PROMPT],
+    defaultTranscriptFile: "fixtures/claude_background_task_wake/claude_transcript.ndjson",
+    queryMode: "streaming",
+    enableTools: true,
+    backgroundWakeCounts: [1, 0],
+  },
+  claude_background_monitor_wake: {
+    prompts: [CLAUDE_BACKGROUND_MONITOR_WAKE_PROMPT],
+    defaultTranscriptFile: "fixtures/claude_background_monitor_wake/claude_transcript.ndjson",
+    queryMode: "streaming",
+    enableTools: true,
+    backgroundWakeCounts: [1],
+  },
+  claude_background_subagent_lifecycle: {
+    prompts: [
+      CLAUDE_BACKGROUND_SUBAGENT_LIFECYCLE_LAUNCH_PROMPT,
+      CLAUDE_BACKGROUND_SUBAGENT_LIFECYCLE_STOP_PROMPT,
+      CLAUDE_BACKGROUND_SUBAGENT_LIFECYCLE_RESUME_PROMPT,
+      CLAUDE_BACKGROUND_SUBAGENT_LIFECYCLE_FINAL_PROMPT,
+    ],
+    defaultTranscriptFile: "fixtures/claude_background_subagent_lifecycle/claude_transcript.ndjson",
+    queryMode: "streaming",
+    enableTools: true,
+    backgroundWakeCounts: [1, 0, 1, 0],
+  },
+  // Each prompt is offered as soon as its turn and the wakes counted here
+  // settle, so a wake queued during a turn (Agent B's "stopped" notice) is
+  // still pending in the CLI when the next prompt arrives, and runs first.
+  claude_background_wake_before_queued_prompt: {
+    prompts: [
+      CLAUDE_BACKGROUND_WAKE_BEFORE_QUEUED_PROMPT_LAUNCH_PROMPT,
+      CLAUDE_BACKGROUND_SUBAGENT_LIFECYCLE_STOP_PROMPT,
+      CLAUDE_BACKGROUND_SUBAGENT_LIFECYCLE_RESUME_PROMPT,
+      CLAUDE_BACKGROUND_SUBAGENT_LIFECYCLE_FINAL_PROMPT,
+    ],
+    defaultTranscriptFile:
+      "fixtures/claude_background_wake_before_queued_prompt/claude_transcript.ndjson",
+    queryMode: "streaming",
+    enableTools: true,
+    backgroundWakeCounts: [1, 0, 1, 0],
+    offerNextPromptImmediately: true,
+  },
+  claude_background_task_interrupt: {
+    prompts: [CLAUDE_BACKGROUND_TASK_INTERRUPT_PROMPT],
+    defaultTranscriptFile: "fixtures/claude_background_task_interrupt/claude_transcript.ndjson",
+    queryMode: "interrupt",
+    enableTools: true,
+    interruptAfter: "tool_use",
+    interruptAfterToolUses: 2,
+  },
+  claude_nested_background_subagent_wake: {
+    prompts: [CLAUDE_NESTED_BACKGROUND_SUBAGENT_WAKE_PROMPT],
+    defaultTranscriptFile:
+      "fixtures/claude_nested_background_subagent_wake/claude_transcript.ndjson",
+    queryMode: "streaming",
+    enableTools: true,
+    backgroundWakeCounts: [1],
+  },
+  claude_nested_subagent_model: {
+    prompts: [CLAUDE_NESTED_SUBAGENT_MODEL_PROMPT],
+    defaultTranscriptFile: "fixtures/claude_nested_subagent_model/claude_transcript.ndjson",
+    queryMode: "streaming",
+    enableTools: true,
+  },
+  // Needs the claude.ai Firecrawl connector on the recording account. Claude
+  // Code describes MCP tool uses in an undeclared `tool_use_meta` field.
+  claude_mcp_tool_presentation: {
+    prompts: [CLAUDE_MCP_TOOL_PRESENTATION_PROMPT],
+    defaultTranscriptFile: "fixtures/claude_mcp_tool_presentation/claude_transcript.ndjson",
     queryMode: "streaming",
     enableTools: true,
   },
@@ -466,6 +564,15 @@ try {
       ? { permissionDecision: recording.permissionDecision }
       : {}),
     ...("interruptAfter" in recording ? { interruptAfter: recording.interruptAfter } : {}),
+    ...("interruptAfterToolUses" in recording
+      ? { interruptAfterToolUses: recording.interruptAfterToolUses }
+      : {}),
+    ...("backgroundWakeCounts" in recording
+      ? { backgroundWakeCounts: recording.backgroundWakeCounts }
+      : {}),
+    ...("offerNextPromptImmediately" in recording
+      ? { offerNextPromptImmediately: recording.offerNextPromptImmediately }
+      : {}),
   });
   await assertWorkspacePathsAbsent("after");
   const transcriptWithEvidence =

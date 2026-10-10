@@ -1,5 +1,5 @@
 import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 /** One row per saved-agent task with a declared output artifact; status follows the run-end check. */
 export default Effect.gen(function* () {

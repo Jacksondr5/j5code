@@ -16,17 +16,19 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
-import { makeOrchestratorV2ReplayLayerWithRegistry } from "../../orchestration-v2/testkit/ProviderReplayHarness.ts";
-import { makeLayer } from "../../orchestration-v2/ProviderAdapterRegistry.ts";
-import type { ProviderAdapterV2Shape } from "../../orchestration-v2/ProviderAdapter.ts";
+import { layerMemory as SqlitePersistenceMemory } from "../../persistence/Sqlite.ts";
+import { layerWithRegistry as makeOrchestratorV2ReplayLayerWithRegistry } from "../../orchestration-v2/testkit/ProviderReplayHarness.ts";
+import { layerFromAdapters as makeLayer } from "../../orchestration-v2/ProviderAdapterRegistry.ts";
+import type { ProviderAdapterV2Shape } from "@t3tools/provider-core/server/ProviderAdapter";
 import { CodexProviderCapabilitiesV2 } from "../../orchestration-v2/Adapters/CodexAdapterV2.ts";
 import { OrchestratorV2 } from "../../orchestration-v2/Orchestrator.ts";
 import * as Projections from "../../orchestration-v2/ProjectionStore.ts";
 import * as Threads from "../../orchestration-v2/ThreadManagementService.ts";
 import * as Mcp from "../../mcp/OrchestratorMcpService.ts";
 import { McpInvocationContext } from "../../mcp/McpInvocationContext.ts";
-import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
+import * as ProjectService from "../../project/ProjectService.ts";
+import * as SecretRequests from "../../secrets/SecretRequests.ts";
+import { ProviderRegistry } from "../../provider/ProviderRegistry.ts";
 import { ScheduledTaskService } from "../../scheduledTasks/ScheduledTaskService.ts";
 import { BUILT_IN_AGENT_PERSONAS } from "./agentPersonas.ts";
 import { delegateTask } from "./agentDelegation.ts";
@@ -87,6 +89,8 @@ const mcp = Mcp.layer.pipe(
   Layer.provide(registry),
   Layer.provide(adapters),
   Layer.provide(Layer.mock(ScheduledTaskService)({})),
+  Layer.provide(Layer.mock(ProjectService.ProjectService)({})),
+  Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})),
   Layer.provide(NodeServices.layer),
 );
 const testLayer = Layer.mergeAll(
@@ -168,9 +172,13 @@ it.effect("persists the saved persona on a nested child and reuses that child on
     });
     const scope = {
       environmentId: EnvironmentId.make("environment"),
-      threadId,
-      providerInstanceId: modelSelection.instanceId,
-      providerSessionId: "session",
+      requestNamespace: "session",
+      thread: {
+        threadId,
+        providerInstanceId: modelSelection.instanceId,
+        providerSessionId: "session",
+      },
+      client: undefined,
       capabilities: new Set(["orchestration" as const]),
       issuedAt: 1,
     };

@@ -9,7 +9,7 @@ import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import { HttpClient, HttpClientError, HttpClientResponse } from "effect/unstable/http";
+import { HttpClient, HttpClientError, HttpClientResponse } from "effect/http";
 
 import { PeerDirectory, layer as peerDirectoryLayer } from "./PeerDirectory.ts";
 import { PeerRegistryService, type PeerConnection } from "./PeerRegistryService.ts";

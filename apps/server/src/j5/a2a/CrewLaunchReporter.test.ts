@@ -1,4 +1,4 @@
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
@@ -6,7 +6,7 @@ import {
   ProviderInstanceId,
   RunId,
   ThreadId,
-  type OrchestrationV2Command,
+  type OrchestrationV2ServerCommand,
   type OrchestrationV2Run,
   type OrchestrationV2StoredEvent,
   type OrchestrationV2ThreadProjection,
@@ -21,7 +21,7 @@ import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
-import { SqlError, UnknownError } from "effect/unstable/sql/SqlError";
+import { SqlError, UnknownError } from "effect/sql/SqlError";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
@@ -157,9 +157,9 @@ const makeFixture = Effect.fn("test.j5.crewLaunchReporter.fixture")(function* (
   const threads = yield* Ref.make<ReadonlyMap<string, OrchestrationV2ThreadProjection>>(
     new Map([[captainThread, projection(captainThread, [])]]),
   );
-  const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]);
+  const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationV2ServerCommand>>([]);
   // Each dispatch is also a receipt, so a test waits on the report rather than on the clock.
-  const receipts = yield* Queue.unbounded<OrchestrationV2Command>();
+  const receipts = yield* Queue.unbounded<OrchestrationV2ServerCommand>();
   let onRead: ((threadId: ThreadId) => Effect.Effect<void>) | undefined;
   const proposals = Context.get(context, AgentCrewProposalService);
   const crews = Context.get(context, AgentCrewInstanceService);

@@ -28,10 +28,13 @@
 export const CLI_RUNTIME_EXTERNAL_PREFIXES = [
   // Cursor ships computed Webpack imports and platform helper packages.
   "@cursor/sdk",
+  // Playwright reads package.json and browsers.json beside its runtime modules.
+  "playwright-core",
   "node-pty",
   "ffi-rs",
   "@yuuang/",
   "@ff-labs/",
+  "@napi-rs/keyring",
   "@clerk/electron-passkeys",
   "node-gyp-build",
   "node-addon-api",

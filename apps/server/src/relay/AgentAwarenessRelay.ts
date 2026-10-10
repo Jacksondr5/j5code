@@ -2,6 +2,7 @@ import type {
   EnvironmentId,
   OrchestrationV2DomainEvent,
   OrchestrationV2ThreadShell,
+  OrchestrationV2TurnItem,
   Project,
   ThreadId,
 } from "@t3tools/contracts";
@@ -11,6 +12,7 @@ import {
   type RelayAgentActivityState,
 } from "@t3tools/contracts/relay";
 import { projectThreadAwarenessV2 } from "@t3tools/shared/agentAwareness";
+import { turnItemUpdateCanEndBackgroundWork } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import { withRelayClientTracing } from "@t3tools/shared/relayTracing";
 import {
@@ -26,13 +28,14 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
-import * as HttpClient from "effect/unstable/http/HttpClient";
-import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
-import * as HttpApiClient from "effect/unstable/httpapi/HttpApiClient";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
+import * as HttpClient from "effect/http/HttpClient";
+import * as HttpClientRequest from "effect/http/HttpClientRequest";
+import * as HttpApiClient from "effect/http-api/HttpApiClient";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import {
@@ -53,12 +56,23 @@ export class AgentAwarenessRelay extends Context.Service<
   {
     readonly publishThread: (threadId: ThreadId) => Effect.Effect<void>;
     readonly drain: Effect.Effect<void>;
+    /** Retries a pending catch-up publish now. Call after this process links or enables publishing. */
+    readonly requestCatchUp: () => Effect.Effect<void>;
     readonly start: () => Effect.Effect<void, never, Scope.Scope>;
   }
 >()("t3/relay/AgentAwarenessRelay") {}
 
 function eventThreadId(event: OrchestrationV2DomainEvent): ThreadId {
   return event.threadId;
+}
+
+// The filter takes loosely typed events; a turn-item payload carries both fields.
+function isTurnItemPayload(
+  payload: unknown,
+): payload is Pick<OrchestrationV2TurnItem, "type" | "status"> {
+  return (
+    typeof payload === "object" && payload !== null && "type" in payload && "status" in payload
+  );
 }
 
 export function shouldPublishAgentAwarenessEvent(
@@ -73,8 +87,10 @@ export function shouldPublishAgentAwarenessEvent(
   ) {
     return false;
   }
-  // projectThreadAwarenessV2 reads thread metadata, run status, and pending requests.
-  // Message bodies and tool progress cannot change the published activity.
+  // projectThreadAwarenessV2 reads thread metadata, run status, pending requests,
+  // and pending background work (a finished subagent, a cleared roster, or an
+  // ended background item can release a held completion). Message bodies and
+  // tool progress cannot change the published activity.
   switch (event.type) {
     case "thread.created":
     case "thread.archived":
@@ -87,11 +103,14 @@ export function shouldPublishAgentAwarenessEvent(
     case "run.created":
     case "run.updated":
     case "runtime-request.updated":
+    case "subagent.updated":
+    case "provider-thread.updated":
       return true;
     case "thread.settled":
     case "thread.unsettled":
     case "thread.snoozed":
     case "thread.unsnoozed":
+    case "thread.auto-settle-set":
     case "thread.pinned":
     case "thread.unpinned":
     case "thread.pin-reordered":
@@ -100,17 +119,17 @@ export function shouldPublishAgentAwarenessEvent(
     case "thread.marked-unread":
     case "thread.runtime-mode-updated":
     case "thread.interaction-mode-updated":
+    case "run.background-work-cancelled":
     case "run-attempt.created":
     case "run-attempt.updated":
     case "node.updated":
-    case "subagent.updated":
     case "provider-session.attached":
     case "provider-session.updated":
     case "provider-session.detached":
-    case "provider-thread.updated":
     case "provider-turn.updated":
-    case "message.updated":
     case "turn-item.updated":
+      return isTurnItemPayload(event.payload) && turnItemUpdateCanEndBackgroundWork(event.payload);
+    case "message.updated":
     case "plan.updated":
     case "checkpoint-scope.created":
     case "checkpoint.captured":
@@ -356,6 +375,8 @@ export const make = Effect.gen(function* () {
   const cloudLinkKeyPair = yield* getOrCreateEnvironmentKeyPairFromSecretStore(secrets);
   const startedAt = (yield* DateTime.now).epochMilliseconds;
   const activeSnapshotPublishedRef = yield* Ref.make(false);
+  // Holds at most one pending wake, so a burst of requests costs one retry.
+  const catchUpRequests = yield* Queue.dropping<void>(1);
   const publishedStateByThreadRef = yield* Ref.make(new Map<ThreadId, string>());
 
   const readSecretString = (name: string) =>
@@ -450,6 +471,8 @@ export const make = Effect.gen(function* () {
     }
     const environmentId = yield* serverEnvironment.getEnvironmentId;
 
+    // Only the relay interaction (signing the proof and the call) is exported;
+    // the reads that decide what to publish are the user's local work.
     const publishState = (input: {
       readonly projectId: string | null;
       readonly state: RelayAgentActivityState | null;
@@ -495,12 +518,22 @@ export const make = Effect.gen(function* () {
           ok: response.ok,
           deliveries: deliveryStats(response.deliveries),
         });
-      });
+      }).pipe(Effect.withSpan("relay.agent_activity.publish"), withRelayClientTracing);
 
     // Per-thread shell read: this publish runs for every activity-relevant
     // domain event, so materializing the full shell here would make the cost
     // of one thread's activity proportional to how many threads exist.
     const threadShell = yield* threads.getThreadShell(threadId);
+    if (
+      threadShell?.lineage.relationshipToParent === "subagent" &&
+      !(yield* Ref.get(publishedStateByThreadRef)).has(threadId)
+    ) {
+      // Subagents never project activity, so the relay holds no row to clear.
+      // Their events would otherwise publish a tombstone each, and every
+      // publish re-delivers the user's aggregate. Checked before the archive
+      // filter so archiving one stays quiet too.
+      return;
+    }
     const thread =
       threadShell === null || threadShell.archivedAt !== null
         ? Option.none<OrchestrationV2ThreadShell>()
@@ -628,7 +661,6 @@ export const make = Effect.gen(function* () {
         }).pipe(Effect.andThen(schedulePublishRetry(threadId)));
       }),
       Effect.withSpan("AgentAwarenessRelay.publishThread"),
-      withRelayClientTracing,
     );
   });
 
@@ -669,18 +701,29 @@ export const make = Effect.gen(function* () {
     }
   });
 
+  // Publishes the active threads once. Returns why it did not, so the retry
+  // knows whether it is waiting on a link or on the publish setting.
   const publishActiveThreadsUnsafe = Effect.gen(function* () {
+    // One secret read settles the common never-linked case; the full link
+    // config is read only once publishing is on.
+    const relayUrl = yield* readSecretString(RELAY_URL_SECRET).pipe(
+      Effect.orElseSucceed(() => null),
+    );
+    if (!relayUrl) {
+      yield* Effect.logDebug("agent activity snapshot skipped; relay link credentials unavailable");
+      return "unlinked" as const;
+    }
     const publishAgentActivity = yield* readPublishAgentActivityEnabled.pipe(
       Effect.orElseSucceed(() => false),
     );
     if (!publishAgentActivity) {
       yield* Effect.logDebug("agent activity snapshot skipped; publication disabled");
-      return false;
+      return "disabled" as const;
     }
     const relayConfig = yield* readRelayConfig.pipe(Effect.orElseSucceed(() => null));
     if (!relayConfig) {
       yield* Effect.logDebug("agent activity snapshot skipped; relay link credentials unavailable");
-      return false;
+      return "unlinked" as const;
     }
     const environmentId = yield* serverEnvironment.getEnvironmentId;
     const [projectSnapshot, shellSnapshot] = yield* Effect.all([
@@ -695,21 +738,30 @@ export const make = Effect.gen(function* () {
     });
     if (activeThreadIds.length === 0) {
       yield* Effect.logDebug("agent activity snapshot has no publishable threads");
-      return true;
+      return "published" as const;
     }
     yield* Effect.logInfo("publishing active agent activity snapshot", {
       count: activeThreadIds.length,
     });
     yield* Effect.forEach(activeThreadIds, enqueueThreadPublish, { discard: true });
     yield* worker.drain;
-    return true;
+    return "published" as const;
   });
 
+  // Publishes the catch-up snapshot of active threads once the environment is
+  // linked and publishing is enabled. Many environments never link, so while
+  // unlinked the retry backs off from 5 s to 60 s. Only this process writes
+  // the link, and it calls `requestCatchUp`, which ends the wait early. A
+  // linked environment keeps the 5 s retry, because `t3 connect publish` can
+  // turn publishing on from another process.
   const publishActiveThreadsOnceWhenConfigured = (logEnabledWhenReady: boolean) =>
     Effect.gen(function* () {
+      let unlinkedRetryDelayMs = 5_000;
       while (!(yield* Ref.get(activeSnapshotPublishedRef))) {
-        const published = yield* publishActiveThreadsUnsafe.pipe(Effect.orElseSucceed(() => false));
-        if (published) {
+        const result = yield* publishActiveThreadsUnsafe.pipe(
+          Effect.orElseSucceed(() => "failed" as const),
+        );
+        if (result === "published") {
           yield* Ref.set(activeSnapshotPublishedRef, true);
           if (logEnabledWhenReady) {
             const relayConfig = yield* readRelayConfig.pipe(Effect.orElseSucceed(() => null));
@@ -719,7 +771,11 @@ export const make = Effect.gen(function* () {
           }
           return;
         }
-        yield* Effect.sleep("5 seconds");
+        const retryDelayMs = result === "unlinked" ? unlinkedRetryDelayMs : 5_000;
+        yield* Effect.race(Effect.sleep(retryDelayMs), Queue.take(catchUpRequests));
+        if (result === "unlinked") {
+          unlinkedRetryDelayMs = Math.min(unlinkedRetryDelayMs * 2, 60_000);
+        }
       }
     });
 
@@ -785,6 +841,7 @@ export const make = Effect.gen(function* () {
   return AgentAwarenessRelay.of({
     publishThread,
     drain: worker.drain,
+    requestCatchUp: () => Queue.offer(catchUpRequests, undefined).pipe(Effect.asVoid),
     start,
   });
 });

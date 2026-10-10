@@ -1,5 +1,9 @@
-import { makeProviderFailure } from "../ProviderFailure.ts";
-import { xAiRateLimitedErrorCode } from "../../provider/acp/XAiAcpExtension.ts";
+import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
+import {
+  XAiPromptFailureText,
+  isXAiTaskCompletedWakeNotification,
+  xAiRateLimitedErrorCode,
+} from "../../provider/acp/XAiAcpExtension.ts";
 import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { resolveSelfInvocation, type SelfInvocation } from "@t3tools/shared/nodeRuntime";
 import {
@@ -7,6 +11,7 @@ import {
   GrokSettings,
   ProviderDriverKind,
   type OrchestrationV2ProviderCapabilities,
+  type RuntimeMode,
 } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -15,14 +20,15 @@ import * as Path from "effect/Path";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcessSpawner } from "effect/process";
 import * as EffectAcpErrors from "effect-acp/errors";
 
-import { ServerConfig } from "../../config.ts";
+import * as ServerConfig from "../../config.ts";
 import { makeAcpNativeLoggerFactory } from "../../provider/acp/AcpNativeLogging.ts";
 import {
   applyGrokAcpModelSelection,
   currentGrokModelIdFromSessionSetup,
+  grokApprovalOptions,
   makeGrokAcpRuntime,
   resolveGrokAcpBaseModelId,
 } from "../../provider/acp/GrokAcpSupport.ts";
@@ -38,6 +44,7 @@ import {
   extractXAiMonitorTaskId,
   isXAiPersistentMonitor,
   extractXAiExitPlanMarkdown,
+  registerXAiSubagentFinished,
   makeXAiAskUserQuestionCancelledResponse,
   makeXAiAskUserQuestionResponse,
   makeXAiExitPlanModeCapturedResponse,
@@ -46,17 +53,18 @@ import {
   XAiAskUserQuestionRequest,
   XAiExitPlanModeRequest,
 } from "../../provider/acp/XAiAcpExtension.ts";
-import { mergeProviderInstanceEnvironment } from "../../provider/ProviderInstanceEnvironment.ts";
+import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
+import { acpPermissionDisposition } from "../../provider/acp/AcpClientPolicy.ts";
 import * as AcpSessionRuntime from "../../provider/acp/AcpSessionRuntime.ts";
-import { ProviderEventLoggers } from "../../provider/Layers/ProviderEventLoggers.ts";
-import { IdAllocatorV2 } from "../IdAllocator.ts";
-import { ProviderContinuationRequests } from "../ProviderContinuationRequests.ts";
-import { ProviderAdapterV2 } from "../ProviderAdapter.ts";
+import * as ProviderEventLoggers from "../../provider/ProviderEventLoggers.ts";
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import * as ProviderContinuationRequests from "@t3tools/provider-core/server/continuationRequests";
+import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import {
   ProviderAdapterDriverCreateError,
   type ProviderAdapterDriver,
   type ProviderAdapterDriverCreateInput,
-} from "../ProviderAdapterDriver.ts";
+} from "@t3tools/provider-core/server/adapterDriver";
 import {
   AcpProviderCapabilitiesV2,
   makeAcpAdapterV2,
@@ -108,10 +116,11 @@ export interface GrokAdapterV2Options {
   readonly crypto: Crypto.Crypto;
   readonly selfInvocation: SelfInvocation;
   readonly fileSystem: FileSystem.FileSystem;
-  readonly idAllocator: IdAllocatorV2["Service"];
-  readonly serverConfig: ServerConfig["Service"];
+  readonly idAllocator: IdAllocator.IdAllocatorV2["Service"];
+  readonly serverConfig: ServerConfig.ServerConfig["Service"];
   readonly nativeLogging?: Parameters<typeof makeAcpAdapterV2>[0]["nativeLogging"];
   readonly continuationRequests?: Parameters<typeof makeAcpAdapterV2>[0]["continuationRequests"];
+  readonly testHooks?: Parameters<typeof makeAcpAdapterV2>[0]["testHooks"];
   readonly makeRuntime?: (
     input: AcpAdapterV2RuntimeInput,
   ) => Effect.Effect<
@@ -126,10 +135,12 @@ const registerGrokAcpExtensions: NonNullable<AcpAdapterV2Flavor["registerExtensi
   runtime,
   requestUserInput,
   applyBackgroundTaskMutation,
+  finishSubagent,
   captureProposedPlan,
   lastProposedPlanMarkdown,
 }) =>
   registerXAiBackgroundTaskTracking(runtime, applyBackgroundTaskMutation).pipe(
+    Effect.andThen(registerXAiSubagentFinished(runtime, finishSubagent)),
     Effect.andThen(registerGrokAskUserQuestionExtensions({ runtime, requestUserInput })),
     Effect.andThen(
       registerGrokExitPlanModeExtensions({
@@ -205,6 +216,19 @@ const registerGrokAskUserQuestionExtensions = ({
     { discard: true },
   );
 
+/**
+ * Grok's permission mode is fixed at launch. Explicit approval or sandbox
+ * overrides launch it asking, so every mutating prompt reaches T3's policy
+ * check instead of being bypassed by always-approve or Grok's auto classifier.
+ */
+export function grokLaunchRuntimeMode(
+  runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy,
+): RuntimeMode {
+  return runtimePolicy.approvalPolicy === undefined && runtimePolicy.sandboxPolicy === undefined
+    ? runtimePolicy.runtimeMode
+    : "approval-required";
+}
+
 export function makeGrokAcpAdapterFlavor(options: GrokAdapterV2Options): AcpAdapterV2Flavor {
   return {
     driver: GROK_PROVIDER,
@@ -250,20 +274,31 @@ export function makeGrokAcpAdapterFlavor(options: GrokAdapterV2Options): AcpAdap
       }),
     makeRuntime:
       options.makeRuntime ??
-      ((input) =>
+      (({ runtimePolicy, ...input }) =>
         makeGrokAcpRuntime({
           ...input,
           interruptPromptOnCancel: input.interruptPromptOnCancel ?? false,
           grokSettings: options.settings,
           environment: options.environment,
           childProcessSpawner: options.childProcessSpawner,
+          runtimeMode: grokLaunchRuntimeMode(runtimePolicy),
         })),
+    // In its Auto mode Grok decides routine actions itself and only asks about
+    // what its classifier blocked, so every prompt it sends goes to the user.
+    permissionDisposition: (policy, request) =>
+      grokLaunchRuntimeMode(policy) === "auto" ? "ask" : acpPermissionDisposition(policy, request),
+    approvalOptions: grokApprovalOptions,
     promptFailure: (cause) =>
       makeProviderFailure({
         cause,
         ...(Schema.is(EffectAcpErrors.AcpRequestError)(cause)
           ? {
-              message: cause.errorMessage,
+              // Grok's own failure text rides on the cause; makeProviderFailure
+              // redacts and bounds it before it reaches the user.
+              message:
+                cause.cause instanceof XAiPromptFailureText
+                  ? cause.cause.message
+                  : cause.errorMessage,
               code: String(cause.code),
               class: cause.code === xAiRateLimitedErrorCode ? "usage_limit" : "provider_error",
             }
@@ -287,6 +322,7 @@ export function makeGrokAcpAdapterFlavor(options: GrokAdapterV2Options): AcpAdap
       ...extractXAiKilledBackgroundTasks(toolCall),
     ],
     isPersistentBackgroundTool: isXAiPersistentMonitor,
+    isProviderWakeNotification: isXAiTaskCompletedWakeNotification,
     deferFinalizeForBackgroundWork: true,
     enablePostSettleContinuation: true,
     ...(options.assertComplete === undefined ? {} : { assertComplete: options.assertComplete }),
@@ -307,6 +343,7 @@ export function makeGrokAdapterV2(options: GrokAdapterV2Options) {
     ...(options.continuationRequests === undefined
       ? {}
       : { continuationRequests: options.continuationRequests }),
+    ...(options.testHooks === undefined ? {} : { testHooks: options.testHooks }),
   });
 }
 
@@ -314,10 +351,10 @@ export type GrokAdapterV2DriverEnv =
   | ChildProcessSpawner.ChildProcessSpawner
   | Crypto.Crypto
   | FileSystem.FileSystem
-  | IdAllocatorV2
+  | IdAllocator.IdAllocatorV2
   | Path.Path
-  | ProviderEventLoggers
-  | ServerConfig;
+  | ProviderEventLoggers.ProviderEventLoggers
+  | ServerConfig.ServerConfig;
 
 export const GrokAdapterV2Driver: ProviderAdapterDriver<GrokSettings, GrokAdapterV2DriverEnv> = {
   driverKind: GROK_DRIVER_KIND,
@@ -331,10 +368,10 @@ export const GrokAdapterV2Driver: ProviderAdapterDriver<GrokSettings, GrokAdapte
       const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const crypto = yield* Crypto.Crypto;
       const fileSystem = yield* FileSystem.FileSystem;
-      const idAllocator = yield* IdAllocatorV2;
-      const providerEventLoggers = yield* ProviderEventLoggers;
-      const serverConfig = yield* ServerConfig;
-      const continuationRequests = yield* ProviderContinuationRequests;
+      const idAllocator = yield* IdAllocator.IdAllocatorV2;
+      const providerEventLoggers = yield* ProviderEventLoggers.ProviderEventLoggers;
+      const serverConfig = yield* ServerConfig.ServerConfig;
+      const continuationRequests = yield* ProviderContinuationRequests.ProviderContinuationRequests;
       const makeNativeLogger = yield* makeAcpNativeLoggerFactory();
       return makeGrokAdapterV2({
         instanceId: input.instanceId,
@@ -372,17 +409,17 @@ export const GrokAdapterV2Driver: ProviderAdapterDriver<GrokSettings, GrokAdapte
 };
 
 const layer: Layer.Layer<
-  ProviderAdapterV2,
+  ProviderAdapter.ProviderAdapterV2,
   never,
   | Path.Path
   | ChildProcessSpawner.ChildProcessSpawner
   | Crypto.Crypto
   | FileSystem.FileSystem
-  | IdAllocatorV2
-  | ProviderEventLoggers
-  | ServerConfig
+  | IdAllocator.IdAllocatorV2
+  | ProviderEventLoggers.ProviderEventLoggers
+  | ServerConfig.ServerConfig
 > = Layer.effect(
-  ProviderAdapterV2,
+  ProviderAdapter.ProviderAdapterV2,
   Effect.gen(function* () {
     const hostEnvironment = yield* HostProcessEnvironment;
     const hostPlatform = yield* HostProcessPlatform;
@@ -390,10 +427,10 @@ const layer: Layer.Layer<
     const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const crypto = yield* Crypto.Crypto;
     const fileSystem = yield* FileSystem.FileSystem;
-    const idAllocator = yield* IdAllocatorV2;
-    const providerEventLoggers = yield* ProviderEventLoggers;
-    const serverConfig = yield* ServerConfig;
-    const continuationRequests = yield* ProviderContinuationRequests;
+    const idAllocator = yield* IdAllocator.IdAllocatorV2;
+    const providerEventLoggers = yield* ProviderEventLoggers.ProviderEventLoggers;
+    const serverConfig = yield* ServerConfig.ServerConfig;
+    const continuationRequests = yield* ProviderContinuationRequests.ProviderContinuationRequests;
     const makeNativeLogger = yield* makeAcpNativeLoggerFactory();
     return makeGrokAdapterV2({
       instanceId: GROK_DEFAULT_INSTANCE_ID,

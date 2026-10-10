@@ -7,26 +7,35 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { McpSchema, McpServer } from "effect/unstable/ai";
+import { McpSchema, McpServer } from "effect/ai";
 
-import { McpInvocationContext } from "../../../mcp/McpInvocationContext.ts";
+import * as McpHttpServer from "../../../mcp/McpHttpServer.ts";
+import {
+  McpInvocationContext,
+  type McpInvocationScope,
+} from "../../../mcp/McpInvocationContext.ts";
 import { OrchestratorMcpService } from "../../../mcp/OrchestratorMcpService.ts";
+import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
+import { ProviderRegistry } from "../../../provider/ProviderRegistry.ts";
 import {
   J5OrchestratorSurface,
   J5_ORCHESTRATOR_CAPABILITIES_DESCRIPTION,
-  J5_THREAD_READ_DESCRIPTION,
 } from "./orchestratorSurface.ts";
-import { J5OrchestratorSurfaceHandlersLive } from "./orchestratorSurfaceHandlers.ts";
+import * as J5OrchestratorSurfaceHandlers from "./orchestratorSurfaceHandlers.ts";
 
 const threadId = ThreadId.make("thread:j5:orchestrator-surface");
 const providerInstanceId = ProviderInstanceId.make("codex-j5-orchestrator-surface");
-const invocation = {
+const invocation: McpInvocationScope = {
   environmentId: EnvironmentId.make("environment:j5:orchestrator-surface"),
-  threadId,
-  providerSessionId: "provider-session:j5:orchestrator-surface",
-  providerInstanceId,
   capabilities: new Set(["orchestration"] as const),
   issuedAt: 1,
+  requestNamespace: "provider-session:j5:orchestrator-surface",
+  thread: {
+    threadId,
+    providerSessionId: "provider-session:j5:orchestrator-surface",
+    providerInstanceId,
+  },
+  client: undefined,
 };
 const client = McpSchema.McpServerClient.of({
   clientId: 1,
@@ -86,12 +95,18 @@ const rawCapabilities = {
   },
 };
 
-const TestLayer = McpServer.toolkit(J5OrchestratorSurface).pipe(
-  Layer.provide(J5OrchestratorSurfaceHandlersLive),
+const TestLayer = McpHttpServer.toolkitRegistration(
+  J5OrchestratorSurface,
+  J5OrchestratorSurfaceHandlers.layer,
+).pipe(
   Layer.provide(
-    Layer.mock(OrchestratorMcpService)({
-      capabilities: () => Effect.succeed(rawCapabilities),
-    }),
+    Layer.mergeAll(
+      Layer.mock(OrchestratorMcpService)({
+        capabilities: () => Effect.succeed(rawCapabilities),
+      }),
+      Layer.mock(ThreadManagementService)({}),
+      Layer.mock(ProviderRegistry)({}),
+    ),
   ),
   Layer.provideMerge(McpServer.McpServer.layer),
 );
@@ -103,28 +118,19 @@ const hasKey = (value: unknown, key: string): boolean => {
   return Object.values(value).some((item) => hasKey(item, key));
 };
 
-it.effect("registers the exact fail-closed orchestration surface with factual descriptions", () =>
+it.effect("registers the two orchestrator tools J5 declares, with a factual description", () =>
   Effect.gen(function* () {
     const server = yield* McpServer.McpServer;
     expect(server.tools.map(({ tool }) => tool.name).sort()).toEqual([
       "delegate_task",
-      "delete_scheduled_task",
-      "list_scheduled_tasks",
       "orchestrator_capabilities",
-      "schedule_task",
-      "t3_thread_list",
-      "t3_thread_read",
-      "task_cancel",
-      "task_status",
-      "update_scheduled_task",
     ]);
 
-    expect(
-      server.tools.find(({ tool }) => tool.name === "orchestrator_capabilities")?.tool.description,
-    ).toBe(J5_ORCHESTRATOR_CAPABILITIES_DESCRIPTION);
-    expect(server.tools.find(({ tool }) => tool.name === "t3_thread_read")?.tool.description).toBe(
-      J5_THREAD_READ_DESCRIPTION,
-    );
+    const description = server.tools.find(({ tool }) => tool.name === "orchestrator_capabilities")
+      ?.tool.description;
+    expect(description).toBe(J5_ORCHESTRATOR_CAPABILITIES_DESCRIPTION);
+    // J5 hides upstream's launch tool, so its capabilities text must not point at it.
+    expect(description).not.toContain("t3_thread_launch");
   }).pipe(Effect.provide(TestLayer)),
 );
 

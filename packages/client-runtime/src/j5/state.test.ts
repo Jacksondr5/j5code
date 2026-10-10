@@ -7,8 +7,8 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
-import { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity";
-import { HttpClient, HttpClientResponse } from "effect/unstable/http";
+import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity";
+import { HttpClient, HttpClientResponse } from "effect/http";
 
 import {
   AVAILABLE_CONNECTION_STATE,

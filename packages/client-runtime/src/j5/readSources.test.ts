@@ -7,7 +7,7 @@ import {
 import { J5_LEDGER_CAPABILITIES } from "@t3tools/contracts/j5";
 import * as Cause from "effect/Cause";
 import * as Option from "effect/Option";
-import { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity";
+import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity";
 
 import { J5HttpError } from "./http.ts";
 import {

@@ -1,7 +1,7 @@
 import { EnvironmentId, type ExecutionEnvironmentDescriptor } from "@t3tools/contracts";
 import { J5_LEDGER_CAPABILITIES } from "@t3tools/contracts/j5";
 import * as Cause from "effect/Cause";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 import { describe, expect, it } from "vite-plus/test";
 
 import { J5HttpError } from "./http.ts";

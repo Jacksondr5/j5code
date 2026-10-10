@@ -1,7 +1,11 @@
 import { useAtomValue } from "@effect/atom-react";
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
-import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
+import {
+  AuthOrchestrationOperateScope,
+  type EnvironmentId,
+  type ScopedThreadRef,
+} from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { ChevronRightIcon } from "lucide-react";
 import {
@@ -21,6 +25,7 @@ import { cn } from "../../lib/utils";
 import { deriveProviderInstanceEntries, type ProviderInstanceEntry } from "../../providerInstances";
 import { useThreadShells } from "../../state/entities";
 import { environmentServerConfigsAtom } from "../../state/server";
+import { useEnvironmentScope } from "../../state/session";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { formatElapsedDurationLabel } from "../../timestampFormat";
 import { stopCrew } from "../crew/crewStopClient";
@@ -175,7 +180,8 @@ function SpawnedChildGroupRows(
   },
 ) {
   const { group, isOpen } = props;
-  const stoppable = stoppableCrew(group);
+  const canOperate = useEnvironmentScope(props.environmentId, AuthOrchestrationOperateScope);
+  const stoppable = canOperate ? stoppableCrew(group) : null;
   const [stopping, setStopping] = useState(false);
   return (
     <div data-testid={`spawned-group-${group.key}`}>
@@ -200,7 +206,7 @@ function SpawnedChildGroupRows(
           {group.needsAttention && !isOpen ? (
             <span
               aria-label="An agent needs a human"
-              className="ms-auto size-1.5 shrink-0 rounded-full bg-amber-500 dark:bg-amber-300/90"
+              className="ms-auto size-1.5 shrink-0 rounded-full bg-warning"
             />
           ) : null}
         </button>
@@ -210,7 +216,7 @@ function SpawnedChildGroupRows(
             type="button"
             aria-label={`Stop crew ${stoppable.crewName}`}
             disabled={stopping}
-            className="shrink-0 rounded border border-border/60 px-1.5 py-px text-[10px] leading-4 text-muted-foreground outline-hidden hover:bg-sidebar-row-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+            className="shrink-0 rounded border border-border/60 px-1.5 py-px text-3xs leading-4 text-muted-foreground outline-hidden hover:bg-sidebar-row-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
             onClick={(event) => {
               event.stopPropagation();
               setStopping(true);
@@ -240,7 +246,7 @@ function SpawnedChildGroupRows(
                   className="flex min-w-0 flex-col gap-0.5 px-1.5 py-1 text-xs"
                 >
                   <span className="truncate text-foreground">{child.seat?.seat ?? "Seat"}</span>
-                  <span className="text-[11px] text-muted-foreground">Unknown</span>
+                  <span className="text-2xs text-muted-foreground">Unknown</span>
                 </li>
               );
             const status = resolveThreadStatusPill({ thread });
@@ -272,12 +278,12 @@ function SpawnedChildGroupRows(
                     <span className="truncate text-foreground">{thread.title}</span>
                   )}
                   {elapsed ? (
-                    <span className="ms-auto shrink-0 text-[11px] text-muted-foreground tabular-nums">
+                    <span className="ms-auto shrink-0 text-2xs text-muted-foreground tabular-nums">
                       {elapsed}
                     </span>
                   ) : null}
                 </span>
-                <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <span className="flex items-center gap-1.5 text-2xs text-muted-foreground">
                   {status === null ? (
                     <span>Idle</span>
                   ) : (

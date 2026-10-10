@@ -1,4 +1,4 @@
-import type { OrchestrationV2Command } from "@t3tools/contracts";
+import type { OrchestrationV2ServerCommand } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -30,7 +30,7 @@ export const layer = Layer.effect(
     const composition = yield* SpawnCompositionService;
     // Merge-back needs nothing from J5: upstream scopes it to the calling project.
     const dispatch = Effect.fn("J5ThreadLineage.dispatch")(function* (
-      command: OrchestrationV2Command,
+      command: OrchestrationV2ServerCommand,
     ) {
       if (command.type !== "thread.fork") return yield* inner.dispatch(command);
       const failure = (cause: unknown, phase: "admission" | "registration" = "admission") =>

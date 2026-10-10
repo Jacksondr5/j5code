@@ -27,8 +27,8 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
-import { HttpRouter, HttpServer } from "effect/unstable/http";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { HttpRouter, HttpServer } from "effect/http";
+import * as SqlClient from "effect/sql/SqlClient";
 import { stringify } from "yaml";
 
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";

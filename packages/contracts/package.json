@@ -19,10 +19,6 @@
       "types": "./src/relay.ts",
       "import": "./src/relay.ts"
     },
-    "./legacy-orchestration": {
-      "types": "./src/orchestration.ts",
-      "import": "./src/orchestration.ts"
-    },
     "./j5": {
       "types": "./src/j5.ts",
       "import": "./src/j5.ts"
@@ -30,7 +26,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vp test run"
+    "test": "vp test run --config ../../vite.config.ts --dir ."
   },
   "dependencies": {
     "effect": "catalog:"

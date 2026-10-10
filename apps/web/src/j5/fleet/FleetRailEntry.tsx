@@ -46,7 +46,7 @@ export function FleetRailEntry({ onBackdrop }: { readonly onBackdrop: boolean })
     >
       <RadarIcon aria-hidden className="size-4" />
       {alerts !== null && alerts > 0 ? (
-        <span className="absolute -end-1 -top-1 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[0.625rem] font-semibold leading-none text-primary-foreground tabular-nums ring-2 ring-sidebar">
+        <span className="absolute -end-1 -top-1 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-3xs font-semibold leading-none text-primary-foreground tabular-nums ring-2 ring-sidebar">
           {alerts}
         </span>
       ) : null}

@@ -31,6 +31,21 @@ const baseProviderSnapshot = {
 };
 
 describe("ServerProvider", () => {
+  it.each([undefined, true, false])("decodes workspace command discovery pending=%s", (pending) => {
+    const workspace = {
+      cwd: "/workspace/project",
+      checkedAt: baseProviderSnapshot.checkedAt,
+      slashCommands: [{ name: "compact" }],
+      ...(pending === undefined ? {} : { slashCommandsPending: pending }),
+      skills: [{ name: "project", path: "/workspace/project/SKILL.md", enabled: true }],
+    };
+    const parsed = decodeServerProvider({
+      ...baseProviderSnapshot,
+      workspaceSnapshots: [workspace],
+    });
+    expect(parsed.workspaceSnapshots).toEqual([workspace]);
+  });
+
   it("accepts old skill records and preserves optional inventory metadata and stale workspaces", () => {
     const legacy = { name: "review", path: "/skills/review/SKILL.md", enabled: false };
     const enriched = {
@@ -53,6 +68,7 @@ describe("ServerProvider", () => {
     expect(parsed.skills).toEqual([legacy, enriched]);
     expect(parsed.workspaceSnapshots).toEqual([workspace]);
   });
+
   it("defaults capability arrays when decoding provider snapshots", () => {
     const parsed = decodeServerProvider({
       instanceId: "codex",

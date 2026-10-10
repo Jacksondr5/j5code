@@ -154,8 +154,7 @@ const fixture = Effect.gen(function* () {
         yield* Ref.update(dispatched, (items) => [...items, command]);
         return { sequence: 1, storedEvents: [] };
       }),
-    // Every seat has a turn to interrupt, so a stop touches each of them.
-    interruptThread: () => Effect.succeed({ type: "interrupt_requested" }),
+    stopDelegatedTasks: () => Effect.void,
   } as unknown as ThreadManagementService["Service"]);
   const store = yield* makePlaybookStore;
   const relay = yield* makePlaybookCrewRelay.pipe(
@@ -606,7 +605,7 @@ it.effect("a live definition without the landed step skips that hand-off", () =>
   }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );
 
-it.effect("stopping the Crew interrupts its seats and leaves its run where it is", () =>
+it.effect("stopping the Crew stops its seats and leaves its run where it is", () =>
   Effect.gen(function* () {
     const { start, move, stopCrew, store, notices } = yield* fixture;
     const run = yield* start("start-1");
@@ -614,9 +613,10 @@ it.effect("stopping the Crew interrupts its seats and leaves its run where it is
     const stopped = yield* stopCrew;
     assert.deepStrictEqual(
       stopped.members.map(({ seatName, result }) => [seatName, result]),
+      // Both seats are stopped; neither fixture seat has a turn running.
       [
-        ["a", "interrupt_requested"],
-        ["b", "interrupt_requested"],
+        ["a", "already_idle"],
+        ["b", "already_idle"],
       ],
     );
     const after = yield* store.runById(run.runId);

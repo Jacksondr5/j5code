@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off - synchronous hashing for deterministic ids and digests.
 import { makeCrewFailureAlert } from "./crewFailureAlert.ts";
 import {
   MessageId,
@@ -14,7 +15,7 @@ import * as Effect from "effect/Effect";
 import * as Result from "effect/Result";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import * as NodeCrypto from "node:crypto";
 
 import * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";

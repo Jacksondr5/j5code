@@ -1,7 +1,7 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import type { ThreadId } from "@t3tools/contracts";
 import {
@@ -81,7 +81,7 @@ export const layer: Layer.Layer<ThreadRegistration, never, A2AHomeRegistrar | Sq
         Effect.gen(function* () {
           const existing = yield* registrar
             .getHomeForThread(threadId)
-            .pipe(Effect.catchTag("A2AHomeNotFoundError", () => Effect.succeed(null)));
+            .pipe(Effect.catchTags({ A2AHomeNotFoundError: () => Effect.succeed(null) }));
           if (existing !== null) return existing;
           const thread = yield* readRegistrable(threadId);
           if (thread === null) return null;

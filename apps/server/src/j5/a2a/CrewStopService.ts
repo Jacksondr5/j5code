@@ -4,10 +4,14 @@ import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
-import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
+import {
+  latestActiveRun,
+  ThreadManagementService,
+} from "../../orchestration-v2/ThreadManagementService.ts";
 import { AgentCrewInstanceService, type AgentCrewMember } from "./AgentCrewInstanceService.ts";
 import { A2AArchiveFacts } from "./ArchiveFactsService.ts";
 import type { ParticipantId, LedgerProjectId } from "./contracts.ts";
+import { stopThread } from "./stopThread.ts";
 import { getThreadProjectionIfPresent } from "./threadProjectionReads.ts";
 
 /** `never_created`: the seat's row was recorded but its thread never came to exist. */
@@ -23,7 +27,7 @@ export interface StopCrewInput {
   /** The caller's project when an agent calls; the Crew must live there. */
   readonly projectId: LedgerProjectId | null;
   readonly crewInstanceId: string;
-  /** Deterministic per seat so a retried stop cannot interrupt twice. */
+  /** Deterministic per seat so a retried stop cannot stop twice. */
   readonly commandIds: (seatName: string) => { readonly interruptCommandId: CommandId };
 }
 
@@ -67,8 +71,9 @@ export type CrewStopError = CrewStopNotFoundError | CrewStopRequestError | CrewS
 
 export interface CrewStopServiceShape {
   /**
-   * Interrupt every seat with a running turn; idle seats are untouched, nothing settles or
-   * archives, and the Crew stays live so any seat can be messaged again. Only the Captain or a
+   * Stop every seat the way upstream's Stop does (`thread.stop`: the running turn is interrupted,
+   * its queue held, its delegated tasks stopped); nothing settles or archives, and the Crew stays
+   * live so any seat can be messaged again. Only the Captain or a
    * person may stop a Crew: stopping is a controller's act, and a member owns nothing about its
    * crewmates' turns (Bryant, 2026-09-14).
    */
@@ -159,29 +164,26 @@ export const layer = Layer.effect(
                   participantId: member.participantId,
                   result: "archived" as const,
                 };
-              const result = yield* threads
-                .interruptThread({
-                  projectId: projection.thread.projectId,
-                  commandId: input.commandIds(member.seatName).interruptCommandId,
-                  threadId: member.threadId,
-                })
-                .pipe(
-                  Effect.mapError(
-                    (cause) =>
-                      new CrewStopOperationError({
-                        phase: "interrupting a seat",
-                        seatName: member.seatName,
-                        cause,
-                      }),
-                  ),
-                );
+              yield* stopThread(threads, {
+                commandId: input.commandIds(member.seatName).interruptCommandId,
+                threadId: member.threadId,
+              }).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new CrewStopOperationError({
+                      phase: "stopping a seat",
+                      seatName: member.seatName,
+                      cause,
+                    }),
+                ),
+              );
               return {
                 seatName: member.seatName,
                 participantId: member.participantId,
                 result:
-                  result.type === "interrupt_requested"
-                    ? ("interrupt_requested" as const)
-                    : ("already_idle" as const),
+                  latestActiveRun(projection) === undefined
+                    ? ("already_idle" as const)
+                    : ("interrupt_requested" as const),
               };
             }),
           { concurrency: 1 },

@@ -13,7 +13,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
-import { makeKeyedSerialExecutor } from "../../orchestration-v2/KeyedSerialExecutor.ts";
+import * as KeyedLock from "@t3tools/shared/KeyedLock";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { makeAgentPersonaLibrary, personaCatalogProblem } from "../agents/agentPersonaLibrary.ts";
 import { PlaybookStore } from "../playbooks/PlaybookStore.ts";
@@ -243,7 +243,7 @@ export const layer = Layer.effect(
     const playbooks = yield* PlaybookStore;
     // One resolution of a proposal at a time on this server, so an approval and a decline from
     // two devices cannot interleave; the store's compare-and-set from open decides the winner.
-    const gates = yield* makeKeyedSerialExecutor<string>();
+    const gates = yield* KeyedLock.make<string>();
 
     const operationError = (phase: string) => (cause: unknown) =>
       new CrewProposalOperationError({ phase, cause });
@@ -850,14 +850,15 @@ export const layer = Layer.effect(
           ).pipe(
             // The member store is the last word on ownership: two additions that both passed
             // preview race to it, and the second is refused with nothing written and left open.
-            Effect.catchTag("CrewStepAlreadyOwnedError", (error) =>
-              Effect.fail(
-                new CrewProposalRequestError({
-                  detail: `Step ${error.stepId} is already owned by seat ${error.ownerSeat}.`,
-                  nextStep: "Ask the Captain to request the seat again with only unowned steps.",
-                }),
-              ),
-            ),
+            Effect.catchTags({
+              CrewStepAlreadyOwnedError: (error) =>
+                Effect.fail(
+                  new CrewProposalRequestError({
+                    detail: `Step ${error.stepId} is already owned by seat ${error.ownerSeat}.`,
+                    nextStep: "Ask the Captain to request the seat again with only unowned steps.",
+                  }),
+                ),
+            }),
           );
           const final = yield* proposals
             .read(proposal.id)

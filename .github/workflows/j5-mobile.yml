@@ -65,8 +65,15 @@ jobs:
           fi
           eas build --platform ios --profile j5-testflight --non-interactive --wait "${submit_args[@]}"
 
-      # See the matching cleanup in j5-ci.yml: this gitlink's manifest belongs
-      # to the vendored tree, not the repository root.
-      - name: Exclude vendored gitlink from checkout cleanup
+      # These gitlinks belong to vendored manifests, not this repository.
+      # Remove them only from the disposable index before checkout's cleanup.
+      - name: Exclude vendored gitlinks from checkout cleanup
         if: always()
-        run: git update-index --force-remove -- .repos/alchemy-effect/.vendor/alchemy
+        run: |
+          python3 - <<'PYTHON'
+          import subprocess
+          entries = subprocess.check_output(["git", "ls-files", "--stage", "-z", ".repos"])
+          paths = [entry.split(b"\t", 1)[1] for entry in entries.split(b"\0") if entry.startswith(b"160000 ")]
+          if paths:
+              subprocess.run(["git", "update-index", "--force-remove", "-z", "--stdin"], input=b"\0".join(paths) + b"\0", check=True)
+          PYTHON

@@ -2,7 +2,7 @@ import type { AgentPersonaFolderGitStatus } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 const GIT_TIMEOUT = "5 seconds";
 

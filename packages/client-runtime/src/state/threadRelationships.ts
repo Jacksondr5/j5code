@@ -92,11 +92,14 @@ export function deriveThreadRelationshipGraph(input: {
     const ownerThreadId = input.projection.thread.id;
     for (const subagent of input.projection.subagents) {
       if (subagent.childThreadId === null) continue;
+      // The subagent record settles with the delegated task's first run, but the
+      // parent can keep sending the child follow-ups. A live run on the child
+      // thread outranks that settled status.
       addEdge({
         sourceThreadId: ownerThreadId,
         targetThreadId: subagent.childThreadId,
         kind: "subagent",
-        status: subagent.status,
+        status: threadsById.get(subagent.childThreadId)?.activityRunStatus ?? subagent.status,
       });
     }
     for (const transfer of input.projection.contextTransfers) {
@@ -184,6 +187,18 @@ export function isParentThreadRelationship(
   currentThreadId: ThreadId,
 ): boolean {
   return edge.kind !== "transfer" && edge.targetThreadId === currentThreadId;
+}
+
+/** An incoming parent row shows its own activity, not the child's edge status. */
+export function threadRelationshipRowStatus(
+  graph: ThreadRelationshipGraph,
+  row: Pick<ThreadRelationshipWalkRow, "threadId" | "edge">,
+): string | null {
+  if (row.edge.kind === "transfer" || row.threadId === row.edge.targetThreadId) {
+    return row.edge.status;
+  }
+  const thread = graph.nodes.get(row.threadId)?.thread;
+  return thread?.activityRunStatus ?? thread?.status ?? null;
 }
 
 function threadCreatedAtMillis(node: ThreadRelationshipNode | undefined): number | null {

@@ -2,12 +2,12 @@ import { assert, describe, it } from "@effect/vitest";
 import { EnvironmentId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 
-import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
+import * as McpProviderSession from "@t3tools/provider-core/server/mcpSession";
 import {
   buildCodexTurnStartParams,
   codexThreadRuntimeParams,
 } from "../../orchestration-v2/Adapters/CodexAdapterV2.ts";
-import { ProviderAdapterV2RuntimePolicy } from "../../orchestration-v2/ProviderAdapter.ts";
+import { ProviderAdapterV2RuntimePolicy } from "@t3tools/provider-core/server/ProviderAdapter";
 import { CREW_SEAT_QUESTION_INSTRUCTIONS, J5_CODEX_CREW_SEAT_CONFIG } from "./crewSeatQuestions.ts";
 import { withCrewSeatQuestions } from "./crewSeatRuntime.ts";
 
@@ -43,19 +43,23 @@ describe("Crew seat question tools on Codex", () => {
     }
   });
 
-  it.effect("puts the ask-your-Captain rule after Codex's ask-the-user text", () =>
+  it.effect("sends the ask-your-Captain rule with a seat's turn and no other", () =>
     Effect.gen(function* () {
-      const params = yield* buildCodexTurnStartParams({
-        nativeThreadId: "native-crew-seat",
-        codexInput: [{ type: "text", text: "review the change" }],
-        runtimePolicy: seatPolicy,
-        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.6-sol" },
-        hasT3Mcp: true,
+      const turn = (runtimePolicy: typeof basePolicy) =>
+        buildCodexTurnStartParams({
+          nativeThreadId: "native-crew-seat",
+          codexInput: [{ type: "text", text: "review the change" }],
+          runtimePolicy,
+          modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.6-sol" },
+          hasT3Mcp: true,
+        });
+      const seat = yield* turn(seatPolicy);
+      assert.deepEqual(seat.additionalContext?.j5_agent_persona, {
+        kind: "application",
+        value: CREW_SEAT_QUESTION_INSTRUCTIONS,
       });
-      const developer = params.collaborationMode?.settings.developer_instructions ?? "";
-      const askUser = developer.indexOf("ask the user directly");
-      assert.isAtLeast(askUser, 0);
-      assert.isAbove(developer.indexOf(CREW_SEAT_QUESTION_INSTRUCTIONS), askUser);
+      const captain = yield* turn(basePolicy);
+      assert.notProperty(captain.additionalContext, "j5_agent_persona");
     }),
   );
 });

@@ -40,11 +40,9 @@ exact source and verification limits.
 - **Restarts interrupt active turns.** Automatic continuation is off by default. With
   **Continue threads after restarts** enabled for the environment, upstream recovery may dispatch
   “Continue where you left off.” for eligible interrupted work after an update, crash or machine
-  restart. J5's temporary adaptation prevents a committed Stop from being revived, including a
-  Stop arriving after continuation was prepared. This does not guarantee every interrupted task
-  will resume or complete. A2A deliveries remain in their durable queue and resume delivery on
-  boot with idempotent retries. Prefer updating when the fleet is quiet. At the next upstream
-  merge, favor upstream's revised continuation/Stop handling as recorded in FORK.md.
+  restart. Upstream does not continue a run the person stopped. This does not guarantee every
+  interrupted task will resume or complete. A2A deliveries remain in their durable queue and
+  resume delivery on boot with idempotent retries. Prefer updating when the fleet is quiet.
 - **Native provider history is never silently replaced.** If a provider thread with a native
   reference cannot resume, its turn fails with the recorded cause; only a future explicit
   fall-back act may request a digest re-prime.
@@ -82,11 +80,9 @@ As `j5dev` (Ansible reconciles all of this):
    version in the checkout's `.nvmrc` (currently 24.14.0). Install the pnpm version from the repo's
    `packageManager` field under that
    Node; the server's Node distribution has no Corepack executable. Rust is **not** required —
-   it is only used for desktop packaging. Codex CLI **≥ 0.151.0** is the configured minimum;
-   real 0.151.0 wire compatibility is not established by the fixtures normalized to the generated
-   0.152.1 protocol. The earlier dogfood guidance used tested **0.153.3** for GPT-6 Astra; that
-   evidence does not prove the lower bound. The server refuses an app-server below the configured
-   minimum with a named turn failure before thread requests. The C/C++ toolchain and Python
+   it is only used for desktop packaging. J5 sets no Codex CLI minimum of its own: Settings →
+   Providers warns when the installed version is outside the range upstream's compatibility
+   table supports, and does not block it. The C/C++ toolchain and Python
    support native dependency builds; `gh` supports repository and pull-request work.
 2. **Checkout and first build.**
 

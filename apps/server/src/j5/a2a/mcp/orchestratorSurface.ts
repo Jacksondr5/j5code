@@ -1,8 +1,6 @@
 import { J5DelegateTaskTool } from "../../agents/agentDelegation.ts";
 import {
   OrchestratorMcpFailure,
-  OrchestratorMcpThreadReadInput,
-  OrchestratorMcpThreadReadResult,
   ProviderDriverKind,
   ProviderInstanceId,
   ProviderInteractionMode,
@@ -12,20 +10,10 @@ import {
   type OrchestratorMcpCapabilitiesResult,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
-import { Tool, Toolkit } from "effect/unstable/ai";
+import { Tool, Toolkit } from "effect/ai";
 
 import * as McpInvocationContext from "../../../mcp/McpInvocationContext.ts";
 import { OrchestratorMcpService } from "../../../mcp/OrchestratorMcpService.ts";
-import { OrchestratorToolkit, ScheduleTaskTool } from "../../../mcp/toolkits/orchestrator/tools.ts";
-
-const {
-  task_status: TaskStatusTool,
-  task_cancel: TaskCancelTool,
-  list_scheduled_tasks: ListScheduledTasksTool,
-  update_scheduled_task: UpdateScheduledTaskTool,
-  delete_scheduled_task: DeleteScheduledTaskTool,
-  t3_thread_list: ThreadListTool,
-} = OrchestratorToolkit.tools;
 
 const dependencies = [McpInvocationContext.McpInvocationContext, OrchestratorMcpService];
 
@@ -44,7 +32,8 @@ export const J5OrchestratorProviderCapability = Schema.Struct({
 });
 
 export const J5OrchestratorCapabilitiesResult = Schema.Struct({
-  parentThreadId: ThreadId,
+  /** The calling thread, or null when the caller is not a J5 thread. */
+  parentThreadId: Schema.NullOr(ThreadId),
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
   providers: Schema.Array(J5OrchestratorProviderCapability),
@@ -78,10 +67,7 @@ export const mapJ5OrchestratorCapabilities = (
 });
 
 export const J5_ORCHESTRATOR_CAPABILITIES_DESCRIPTION =
-  "List provider instances, models, selectable model options, provider constraints, and the current runtime and interaction modes available to this J5 thread.";
-
-export const J5_THREAD_READ_DESCRIPTION =
-  "Read durable state and a paginated timeline from a J5 thread in the calling project. The default messages view returns user messages, assistant messages, and proposed plans; activity returns all summarized timeline items. Continue with afterPosition=nextPosition.";
+  "List the provider instances and their current models from the same live catalog as the composer, including configured custom models, with selectable model options, provider constraints, and the runtime and interaction modes available to this caller.";
 
 export const J5OrchestratorCapabilitiesTool = Tool.make("orchestrator_capabilities", {
   description: J5_ORCHESTRATOR_CAPABILITIES_DESCRIPTION,
@@ -95,34 +81,12 @@ export const J5OrchestratorCapabilitiesTool = Tool.make("orchestrator_capabiliti
   .annotate(Tool.Destructive, false)
   .annotate(Tool.Idempotent, true);
 
-export const J5ThreadReadTool = Tool.make("t3_thread_read", {
-  description: J5_THREAD_READ_DESCRIPTION,
-  parameters: OrchestratorMcpThreadReadInput,
-  success: OrchestratorMcpThreadReadResult,
-  failure: OrchestratorMcpFailure,
-  failureMode: "return",
-  dependencies,
-})
-  .annotate(Tool.Title, "Read a J5 thread")
-  .annotate(Tool.Readonly, false)
-  .annotate(Tool.Destructive, false)
-  .annotate(Tool.Idempotent, true);
-
 /**
- * Upstream's `t3_thread_wait` is deliberately absent. Platform notices queue behind a running
- * turn, so a participant that blocks inside its turn waiting for another thread can never receive
- * the notice that thread's finish produces; a Captain that waited on a seat starved itself of its
- * own Crew's news (2026-09-14). A seat's finish arrives as a message once the turn ends.
+ * The two orchestrator tools J5 declares itself: `delegate_task` takes a persona, and
+ * `orchestrator_capabilities` leaves out upstream's claims about tools J5 does not expose. The
+ * upstream tools J5 registers unchanged are in upstreamCatalog.ts.
  */
 export const J5OrchestratorSurface = Toolkit.make(
   J5DelegateTaskTool,
-  TaskStatusTool,
-  TaskCancelTool,
   J5OrchestratorCapabilitiesTool,
-  ScheduleTaskTool,
-  ListScheduledTasksTool,
-  UpdateScheduledTaskTool,
-  DeleteScheduledTaskTool,
-  ThreadListTool,
-  J5ThreadReadTool,
 );

@@ -3,7 +3,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import { resolveThreadHome } from "./HomeRegistrar.ts";
 import { ParticipantPlacementService } from "./PlacementService.ts";
@@ -146,7 +146,7 @@ export const layer = Layer.effect(
     const readForThread: A2AArchiveFactsShape["readForThread"] = (threadId) =>
       Effect.gen(function* () {
         const resolution = yield* resolveThreadHome(sql, threadId).pipe(
-          Effect.catchTag("A2AHomeNotFoundError", () => Effect.succeed(null)),
+          Effect.catchTags({ A2AHomeNotFoundError: () => Effect.succeed(null) }),
         );
         if (resolution === null) {
           return {

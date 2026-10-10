@@ -18,7 +18,7 @@ import * as Path from "effect/Path";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Result from "effect/Result";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
 import { parse, stringify } from "yaml";
 
@@ -82,8 +82,6 @@ it.effect(
       }>();
       const handlers = yield* makePlaybookRpcHandlers({
         store,
-        observeStream: (_method, stream) => stream,
-        observe: (_method, effect) => effect,
       }).pipe(
         Effect.provide(
           Layer.merge(Layer.mock(ProjectService)({}), Layer.mock(ThreadManagementService)({})),

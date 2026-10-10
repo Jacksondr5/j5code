@@ -15,7 +15,7 @@ import {
   HttpServerRequest,
   HttpServerRespondable,
   HttpServerResponse,
-} from "effect/unstable/http";
+} from "effect/http";
 import { annotateEnvironmentRequest, failEnvironmentInternal } from "../../auth/http.ts";
 import { authenticateClientRead, invalidRequest } from "../a2a/ClientReadsHttp.ts";
 import { PlaybookStore } from "./PlaybookStore.ts";

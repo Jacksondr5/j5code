@@ -27,21 +27,15 @@ import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
-import { EventSinkV2, layer as eventSinkLayer } from "./EventSink.ts";
-import { EventStoreV2, layer as eventStoreLayer } from "./EventStore.ts";
-import {
-  IdAllocatorV2,
-  type IdAllocatorV2Error,
-  layer as idAllocatorLayer,
-} from "./IdAllocator.ts";
-import { ProjectionStoreV2, layer as projectionStoreLayer } from "./ProjectionStore.ts";
-import {
-  ProviderEventIngestorV2,
-  ProviderTurnAnalytics,
-  layer as providerEventIngestorLayer,
-} from "./ProviderEventIngestor.ts";
-import { makeProviderFailure } from "./ProviderFailure.ts";
+import { toolOutputImages } from "@t3tools/shared/toolOutput";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
+import * as EventSink from "./EventSink.ts";
+import * as EventStore from "./EventStore.ts";
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import * as ProjectionStore from "./ProjectionStore.ts";
+import * as ProviderEventIngestor from "./ProviderEventIngestor.ts";
+import * as ThreadCommandExecutor from "./ThreadCommandExecutor.ts";
+import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
 import {
   makeProviderEventRoutingState,
   type ProviderEventRouteIdentity,
@@ -49,21 +43,29 @@ import {
   selectInheritedBackgroundTurnItems,
 } from "./RunExecutionService.ts";
 
-const TestDatabaseLayer = SqlitePersistenceMemory;
-const TestStoresLayer = Layer.merge(eventStoreLayer, projectionStoreLayer).pipe(
-  Layer.provide(TestDatabaseLayer),
+const layerTestDatabase = SqlitePersistence.layerMemory;
+const layerTestStores = Layer.merge(EventStore.layer, ProjectionStore.layer).pipe(
+  Layer.provide(layerTestDatabase),
 );
 
-const TestEventSinkLayer = eventSinkLayer.pipe(
-  Layer.provide(Layer.mergeAll(TestStoresLayer, TestDatabaseLayer)),
+const layerTestEventSink = EventSink.layer.pipe(
+  Layer.provide(Layer.mergeAll(layerTestStores, layerTestDatabase)),
 );
 
-const TestLayer = Layer.mergeAll(
-  TestStoresLayer,
-  TestEventSinkLayer,
-  idAllocatorLayer,
-  providerEventIngestorLayer.pipe(
-    Layer.provide(Layer.mergeAll(TestStoresLayer, TestEventSinkLayer, idAllocatorLayer)),
+const layerTest = Layer.mergeAll(
+  layerTestStores,
+  layerTestEventSink,
+  IdAllocator.layer,
+  ThreadCommandExecutor.layer,
+  ProviderEventIngestor.layer.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        layerTestStores,
+        layerTestEventSink,
+        IdAllocator.layer,
+        ThreadCommandExecutor.layer,
+      ),
+    ),
   ),
 );
 const modelSelection = {
@@ -74,9 +76,13 @@ const CODEX_DRIVER = ProviderDriverKind.make("codex");
 
 function threadCreatedEvent(
   now: DateTime.Utc,
-): Effect.Effect<OrchestrationV2DomainEvent, IdAllocatorV2Error, IdAllocatorV2> {
+): Effect.Effect<
+  OrchestrationV2DomainEvent,
+  IdAllocator.IdAllocatorV2Error,
+  IdAllocator.IdAllocatorV2
+> {
   return Effect.gen(function* () {
-    const idAllocator = yield* IdAllocatorV2;
+    const idAllocator = yield* IdAllocator.IdAllocatorV2;
     const projectId = yield* idAllocator.allocate.project({
       fixtureName: "provider-event-ingestor",
     });
@@ -128,11 +134,11 @@ function threadCreatedEvent(
   });
 }
 
-const layer = it.layer(TestLayer);
+const layer = it.layer(layerTest);
 
 it.effect("records accepted billed turn usage once without billing the context window", () => {
   const recorded: Array<Readonly<Record<string, unknown>>> = [];
-  const analytics = Layer.succeed(ProviderTurnAnalytics, {
+  const layerAnalytics = Layer.succeed(ProviderEventIngestor.ProviderTurnAnalytics, {
     record: (properties: Readonly<Record<string, unknown>>) =>
       Effect.sync(() => {
         recorded.push(properties);
@@ -140,9 +146,9 @@ it.effect("records accepted billed turn usage once without billing the context w
   });
   return Effect.gen(function* () {
     const now = yield* DateTime.now;
-    const eventSink = yield* EventSinkV2;
-    const ingestor = yield* ProviderEventIngestorV2;
-    const idAllocator = yield* IdAllocatorV2;
+    const eventSink = yield* EventSink.EventSinkV2;
+    const ingestor = yield* ProviderEventIngestor.ProviderEventIngestorV2;
+    const idAllocator = yield* IdAllocator.IdAllocatorV2;
     const threadEvent = yield* threadCreatedEvent(now);
     yield* eventSink.write({ events: [threadEvent] });
     const providerSessionId = yield* idAllocator.allocate.providerSession({
@@ -227,18 +233,18 @@ it.effect("records accepted billed turn usage once without billing the context w
       interactionMode: "default",
       durationMs: 120,
     });
-  }).pipe(Effect.provide(TestLayer.pipe(Layer.provide(analytics))));
+  }).pipe(Effect.provide(layerTest.pipe(Layer.provide(layerAnalytics))));
 });
 
 layer("ProviderEventIngestorV2", (it) => {
   it.effect("normalizes provider events through the real event log and projection store", () =>
     Effect.gen(function* () {
       const now = yield* DateTime.now;
-      const eventSink = yield* EventSinkV2;
-      const eventStore = yield* EventStoreV2;
-      const projectionStore = yield* ProjectionStoreV2;
-      const ingestor = yield* ProviderEventIngestorV2;
-      const idAllocator = yield* IdAllocatorV2;
+      const eventSink = yield* EventSink.EventSinkV2;
+      const eventStore = yield* EventStore.EventStoreV2;
+      const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
+      const ingestor = yield* ProviderEventIngestor.ProviderEventIngestorV2;
+      const idAllocator = yield* IdAllocator.IdAllocatorV2;
       const threadEvent = yield* threadCreatedEvent(now);
       const providerSessionId = yield* idAllocator.allocate.providerSession({
         providerInstanceId: modelSelection.instanceId,
@@ -316,10 +322,10 @@ layer("ProviderEventIngestorV2", (it) => {
     Effect.gen(function* () {
       yield* TestClock.setTime(Date.parse("2026-09-07T00:00:00.000Z"));
       const now = yield* DateTime.now;
-      const eventSink = yield* EventSinkV2;
-      const projectionStore = yield* ProjectionStoreV2;
-      const ingestor = yield* ProviderEventIngestorV2;
-      const idAllocator = yield* IdAllocatorV2;
+      const eventSink = yield* EventSink.EventSinkV2;
+      const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
+      const ingestor = yield* ProviderEventIngestor.ProviderEventIngestorV2;
+      const idAllocator = yield* IdAllocator.IdAllocatorV2;
       const threadEvent = yield* threadCreatedEvent(now);
       const providerSessionId = yield* idAllocator.allocate.providerSession({
         providerInstanceId: modelSelection.instanceId,
@@ -337,7 +343,10 @@ layer("ProviderEventIngestorV2", (it) => {
         status: "active",
         steps,
       });
-      const ingest = (service: ProviderEventIngestorV2["Service"], steps: TodoListPlan["steps"]) =>
+      const ingest = (
+        service: ProviderEventIngestor.ProviderEventIngestorV2["Service"],
+        steps: TodoListPlan["steps"],
+      ) =>
         service.ingestNormalized({
           providerSessionId,
           providerInstanceId: modelSelection.instanceId,
@@ -358,11 +367,11 @@ layer("ProviderEventIngestorV2", (it) => {
         { id: "fallback", text: "Report", status: "pending" },
       ]);
 
-      const restartedIngestor = yield* ProviderEventIngestorV2.pipe(
+      const restartedIngestor = yield* ProviderEventIngestor.ProviderEventIngestorV2.pipe(
         Effect.provide(
-          Layer.fresh(providerEventIngestorLayer).pipe(
+          Layer.fresh(ProviderEventIngestor.layer).pipe(
             Layer.provide(
-              Layer.succeed(ProjectionStoreV2, {
+              Layer.succeed(ProjectionStore.ProjectionStoreV2, {
                 ...projectionStore,
                 getThreadProjection: () => Effect.die("Plan timing must not load thread history"),
               }),
@@ -429,8 +438,8 @@ layer("ProviderEventIngestorV2", (it) => {
     "treats successful provider terminal markers as non-persisted orchestration control signals",
     () =>
       Effect.gen(function* () {
-        const ingestor = yield* ProviderEventIngestorV2;
-        const idAllocator = yield* IdAllocatorV2;
+        const ingestor = yield* ProviderEventIngestor.ProviderEventIngestorV2;
+        const idAllocator = yield* IdAllocator.IdAllocatorV2;
         const projectId = yield* idAllocator.allocate.project({
           fixtureName: "provider-event-terminal",
         });
@@ -471,10 +480,10 @@ layer("ProviderEventIngestorV2", (it) => {
   it.effect("persists an interrupted run's inherited terminal through the live run router", () =>
     Effect.gen(function* () {
       const now = yield* DateTime.now;
-      const eventSink = yield* EventSinkV2;
-      const projectionStore = yield* ProjectionStoreV2;
-      const ingestor = yield* ProviderEventIngestorV2;
-      const idAllocator = yield* IdAllocatorV2;
+      const eventSink = yield* EventSink.EventSinkV2;
+      const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
+      const ingestor = yield* ProviderEventIngestor.ProviderEventIngestorV2;
+      const idAllocator = yield* IdAllocator.IdAllocatorV2;
       const threadEvent = yield* threadCreatedEvent(now);
       const priorRunId = RunId.make("run:provider-event-inherited:prior");
       const currentRunId = RunId.make("run:provider-event-inherited:current");
@@ -585,10 +594,10 @@ layer("ProviderEventIngestorV2", (it) => {
   it.effect("persists a completed run's late background terminal exactly once", () =>
     Effect.gen(function* () {
       const now = yield* DateTime.now;
-      const eventSink = yield* EventSinkV2;
-      const eventStore = yield* EventStoreV2;
-      const ingestor = yield* ProviderEventIngestorV2;
-      const idAllocator = yield* IdAllocatorV2;
+      const eventSink = yield* EventSink.EventSinkV2;
+      const eventStore = yield* EventStore.EventStoreV2;
+      const ingestor = yield* ProviderEventIngestor.ProviderEventIngestorV2;
+      const idAllocator = yield* IdAllocator.IdAllocatorV2;
       const threadEvent = yield* threadCreatedEvent(now);
       const priorRunId = RunId.make("run:provider-event-completed:prior");
       const currentRunId = RunId.make("run:provider-event-completed:current");
@@ -725,15 +734,16 @@ layer("ProviderEventIngestorV2", (it) => {
     }),
   );
 
-  for (const terminal of ["completed", "interrupted", "failed", "cancelled", "control"] as const) {
-    it.effect(`dismisses only native questions when a provider turn ends with ${terminal}`, () =>
+  it.effect.each(["completed", "interrupted", "failed", "cancelled", "control"] as const)(
+    "dismisses only native questions when a provider turn ends with %s",
+    (terminal) =>
       Effect.gen(function* () {
         const now = yield* DateTime.now;
-        const eventSink = yield* EventSinkV2;
-        const eventStore = yield* EventStoreV2;
-        const projectionStore = yield* ProjectionStoreV2;
-        const ingestor = yield* ProviderEventIngestorV2;
-        const idAllocator = yield* IdAllocatorV2;
+        const eventSink = yield* EventSink.EventSinkV2;
+        const eventStore = yield* EventStore.EventStoreV2;
+        const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
+        const ingestor = yield* ProviderEventIngestor.ProviderEventIngestorV2;
+        const idAllocator = yield* IdAllocator.IdAllocatorV2;
         const threadEvent = yield* threadCreatedEvent(now);
         const threadId = threadEvent.threadId;
         const providerSessionId = yield* idAllocator.allocate.providerSession({
@@ -910,18 +920,17 @@ layer("ProviderEventIngestorV2", (it) => {
         const repeated = yield* ingestor.ingestNormalized(input);
         assert.isFalse(repeated.some((entry) => entry.event.type === "runtime-request.updated"));
       }),
-    );
-  }
+  );
 
   it.effect(
     "preserves an answer committed after terminal normalization reads a pending question",
     () =>
       Effect.scoped(
         Effect.gen(function* () {
-          const eventSink = yield* EventSinkV2;
-          const eventStore = yield* EventStoreV2;
-          const projections = yield* ProjectionStoreV2;
-          const idAllocator = yield* IdAllocatorV2;
+          const eventSink = yield* EventSink.EventSinkV2;
+          const eventStore = yield* EventStore.EventStoreV2;
+          const projections = yield* ProjectionStore.ProjectionStoreV2;
+          const idAllocator = yield* IdAllocator.IdAllocatorV2;
           const now = yield* DateTime.now;
           const threadEvent = yield* threadCreatedEvent(now);
           const threadId = threadEvent.threadId;
@@ -1000,7 +1009,7 @@ layer("ProviderEventIngestorV2", (it) => {
           yield* eventSink.write({ events: seedEvents });
           const normalized = yield* Deferred.make<void>();
           const releaseTerminalWrite = yield* Deferred.make<void>();
-          const gatedSink = EventSinkV2.of({
+          const gatedSink = EventSink.EventSinkV2.of({
             ...eventSink,
             write: (input) =>
               Deferred.succeed(normalized, undefined).pipe(
@@ -1008,9 +1017,9 @@ layer("ProviderEventIngestorV2", (it) => {
                 Effect.andThen(eventSink.write(input)),
               ),
           });
-          const ingestor = yield* ProviderEventIngestorV2.pipe(
-            Effect.provide(Layer.fresh(providerEventIngestorLayer)),
-            Effect.provideService(EventSinkV2, gatedSink),
+          const ingestor = yield* ProviderEventIngestor.ProviderEventIngestorV2.pipe(
+            Effect.provide(Layer.fresh(ProviderEventIngestor.layer)),
+            Effect.provideService(EventSink.EventSinkV2, gatedSink),
           );
           const terminal = yield* ingestor
             .ingestNormalized({
@@ -1089,10 +1098,10 @@ layer("ProviderEventIngestorV2", (it) => {
     Effect.gen(function* () {
       const now = yield* DateTime.now;
       const retryStartedAt = DateTime.makeUnsafe(DateTime.toEpochMillis(now) - 5_000);
-      const eventSink = yield* EventSinkV2;
-      const projectionStore = yield* ProjectionStoreV2;
-      const ingestor = yield* ProviderEventIngestorV2;
-      const idAllocator = yield* IdAllocatorV2;
+      const eventSink = yield* EventSink.EventSinkV2;
+      const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
+      const ingestor = yield* ProviderEventIngestor.ProviderEventIngestorV2;
+      const idAllocator = yield* IdAllocator.IdAllocatorV2;
       const threadEvent = yield* threadCreatedEvent(now);
       const providerSessionId = yield* idAllocator.allocate.providerSession({
         providerInstanceId: modelSelection.instanceId,
@@ -1161,11 +1170,102 @@ layer("ProviderEventIngestorV2", (it) => {
     }),
   );
 
+  it.effect("stores tool image bytes only where a tool-output-image asset serves them", () =>
+    Effect.gen(function* () {
+      const now = yield* DateTime.now;
+      const eventSink = yield* EventSink.EventSinkV2;
+      const eventStore = yield* EventStore.EventStoreV2;
+      const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
+      const ingestor = yield* ProviderEventIngestor.ProviderEventIngestorV2;
+      const idAllocator = yield* IdAllocator.IdAllocatorV2;
+      const threadEvent = yield* threadCreatedEvent(now);
+      const providerSessionId = yield* idAllocator.allocate.providerSession({
+        providerInstanceId: modelSelection.instanceId,
+        threadId: threadEvent.threadId,
+      });
+      const readBase64 = Buffer.alloc(30_000, 7).toString("base64");
+      const screenshotBase64 = Buffer.alloc(20_000, 9).toString("base64");
+      const toolItem = (
+        id: string,
+        ordinal: number,
+        toolName: string,
+        output: unknown,
+      ): OrchestrationV2TurnItem => ({
+        id: TurnItemId.make(id),
+        threadId: threadEvent.threadId,
+        runId: null,
+        nodeId: null,
+        providerThreadId: null,
+        providerTurnId: null,
+        nativeItemRef: null,
+        parentItemId: null,
+        ordinal,
+        status: "completed",
+        title: toolName,
+        startedAt: now,
+        completedAt: now,
+        updatedAt: now,
+        type: "dynamic_tool",
+        toolName,
+        input: {},
+        output,
+      });
+      const read = toolItem("turn-item:read-image", 1, "Read", {
+        type: "image",
+        file: { base64: readBase64, type: "image/png", originalSize: 30_000 },
+      });
+      const screenshot = toolItem("turn-item:screenshot", 2, "mcp__t3-code__device_screenshot", {
+        content: [
+          {
+            type: "image",
+            source: { type: "base64", media_type: "image/png", data: screenshotBase64 },
+          },
+        ],
+      });
+
+      yield* eventSink.write({ events: [threadEvent] });
+      for (const turnItem of [read, screenshot]) {
+        yield* ingestor.ingestNormalized({
+          providerSessionId,
+          providerInstanceId: modelSelection.instanceId,
+          threadId: threadEvent.threadId,
+          event: { type: "turn_item.updated", driver: CODEX_DRIVER, turnItem },
+        });
+      }
+
+      const storedEvents = yield* eventStore
+        .read({ threadId: threadEvent.threadId, eventType: "turn-item.updated" })
+        .pipe(Stream.runCollect);
+      const storedJson = JSON.stringify(Array.from(storedEvents, (stored) => stored.event));
+      const projectedRead = yield* projectionStore.getTurnItem({
+        threadId: threadEvent.threadId,
+        itemId: read.id,
+      });
+      const projectedScreenshot = yield* projectionStore.getTurnItem({
+        threadId: threadEvent.threadId,
+        itemId: screenshot.id,
+      });
+
+      assert.equal(storedJson.includes(readBase64), false);
+      assert.equal(storedJson.includes(screenshotBase64), true);
+      assert.deepEqual(projectedRead?.type === "dynamic_tool" ? projectedRead.output : null, {
+        type: "image",
+        file: { type: "image/png", originalSize: 30_000, sizeBytes: 30_000 },
+      });
+      assert.deepEqual(
+        toolOutputImages(
+          projectedScreenshot?.type === "dynamic_tool" ? projectedScreenshot.output : null,
+        ),
+        [{ mimeType: "image/png", data: screenshotBase64 }],
+      );
+    }),
+  );
+
   it.effect("routes provider-owned child artifacts to their child app thread", () =>
     Effect.gen(function* () {
       const now = yield* DateTime.now;
-      const ingestor = yield* ProviderEventIngestorV2;
-      const idAllocator = yield* IdAllocatorV2;
+      const ingestor = yield* ProviderEventIngestor.ProviderEventIngestorV2;
+      const idAllocator = yield* IdAllocator.IdAllocatorV2;
       const rootEvent = yield* threadCreatedEvent(now);
       if (rootEvent.type !== "thread.created") {
         throw new Error("Expected a thread.created fixture event");
@@ -1233,6 +1333,101 @@ layer("ProviderEventIngestorV2", (it) => {
       assert.equal(threadEvents[0]?.threadId, childThreadId);
       assert.equal(messageEvents[0]?.type, "message.updated");
       assert.equal(messageEvents[0]?.threadId, childThreadId);
+    }),
+  );
+
+  it.effect("moves a native subagent's thread to the model its provider reports later", () =>
+    Effect.gen(function* () {
+      const now = yield* DateTime.now;
+      const eventSink = yield* EventSink.EventSinkV2;
+      const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
+      const ingestor = yield* ProviderEventIngestor.ProviderEventIngestorV2;
+      const idAllocator = yield* IdAllocator.IdAllocatorV2;
+      const rootEvent = yield* threadCreatedEvent(now);
+      if (rootEvent.type !== "thread.created") {
+        throw new Error("Expected a thread.created fixture event");
+      }
+      const childThreadId = idAllocator.derive.threadFromProviderThread({
+        driver: CODEX_DRIVER,
+        nativeThreadId: "native-late-model-subagent",
+      });
+      const providerSessionId = yield* idAllocator.allocate.providerSession({
+        providerInstanceId: modelSelection.instanceId,
+        threadId: rootEvent.threadId,
+      });
+      const ingest = (event: ProviderEventIngestor.ProviderEventIngestInput["event"]) =>
+        ingestor.ingestNormalized({
+          providerSessionId,
+          providerInstanceId: modelSelection.instanceId,
+          threadId: rootEvent.threadId,
+          event,
+        });
+      yield* eventSink.write({ events: [rootEvent] });
+      // The subagent's thread starts on the parent's model and options.
+      yield* ingest({
+        type: "app_thread.created",
+        driver: CODEX_DRIVER,
+        appThread: {
+          ...rootEvent.payload,
+          id: childThreadId,
+          title: "review design",
+          modelSelection: {
+            ...modelSelection,
+            options: [{ id: "reasoningEffort", value: "xhigh" }],
+          },
+          activeProviderThreadId: null,
+          lineage: {
+            parentThreadId: rootEvent.threadId,
+            relationshipToParent: "subagent",
+            rootThreadId: rootEvent.threadId,
+          },
+        },
+      });
+      const subagentUpdated = {
+        type: "subagent.updated",
+        driver: CODEX_DRIVER,
+        subagent: {
+          id: NodeId.make("node:late-model-subagent"),
+          threadId: rootEvent.threadId,
+          runId: null,
+          parentNodeId: NodeId.make("node:root"),
+          origin: "provider_native",
+          createdBy: "agent",
+          driver: CODEX_DRIVER,
+          providerInstanceId: modelSelection.instanceId,
+          providerThreadId: null,
+          childThreadId,
+          nativeTaskRef: null,
+          prompt: "Review the design",
+          title: "review design",
+          model: "gpt-6.1-sol",
+          status: "running",
+          result: null,
+          startedAt: now,
+          completedAt: null,
+          updatedAt: now,
+        },
+      } satisfies ProviderEventIngestor.ProviderEventIngestInput["event"];
+
+      const first = yield* ingest(subagentUpdated);
+      const repeated = yield* ingest(subagentUpdated);
+      const childThread = yield* projectionStore.getThread(childThreadId);
+
+      assert.deepEqual(
+        first.map((stored) => [stored.event.type, stored.event.threadId]),
+        [
+          ["subagent.updated", rootEvent.threadId],
+          ["thread.model-selection-updated", childThreadId],
+        ],
+      );
+      assert.deepEqual(
+        repeated.map((stored) => stored.event.type),
+        ["subagent.updated"],
+      );
+      assert.deepEqual(childThread.modelSelection, {
+        instanceId: modelSelection.instanceId,
+        model: "gpt-6.1-sol",
+      });
     }),
   );
 });

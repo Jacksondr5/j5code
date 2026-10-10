@@ -13,7 +13,6 @@ import {
   resolveBranchToolbarPrBranch,
   resolveBranchToolbarValue,
   resolveLockedWorkspaceLabel,
-  resolveWorkspaceDisplayName,
   resolveLocalCheckoutBranchMismatch,
   resolvePreviousWorktreeLabel,
   resolvePreviousWorktreeSeed,
@@ -515,6 +514,24 @@ describe("resolveEffectiveEnvMode", () => {
       }),
     ).toBe("worktree");
   });
+
+  it("keeps a server thread in worktree mode while its worktree is still being created", () => {
+    expect(
+      resolveEffectiveEnvMode({
+        activeWorktreePath: null,
+        hasServerThread: true,
+        draftThreadEnvMode: undefined,
+        preparingWorktree: true,
+      }),
+    ).toBe("worktree");
+    expect(
+      resolveEffectiveEnvMode({
+        activeWorktreePath: null,
+        hasServerThread: true,
+        draftThreadEnvMode: undefined,
+      }),
+    ).toBe("local");
+  });
 });
 
 describe("resolveEnvModeLabel", () => {
@@ -536,23 +553,17 @@ describe("resolveCurrentWorkspaceLabel", () => {
 
 describe("resolveLockedWorkspaceLabel", () => {
   it("uses a shorter label for the main repo checkout", () => {
-    expect(resolveLockedWorkspaceLabel(null)).toBe("Local checkout");
+    expect(resolveLockedWorkspaceLabel(null, "local")).toBe("Local checkout");
   });
 
   it("uses a shorter label for an attached worktree", () => {
-    expect(resolveLockedWorkspaceLabel("/repo/.t3/worktrees/feature-a")).toBe("Worktree");
-  });
-});
-
-describe("resolveWorkspaceDisplayName", () => {
-  it("returns the final folder for POSIX and Windows paths", () => {
-    expect(resolveWorkspaceDisplayName("/repo/.t3/worktrees/feature-a")).toBe("feature-a");
-    expect(resolveWorkspaceDisplayName("C:\\code\\project\\feature-b\\")).toBe("feature-b");
+    expect(resolveLockedWorkspaceLabel("/repo/.t3/worktrees/feature-a", "worktree")).toBe(
+      "Worktree",
+    );
   });
 
-  it("handles missing and root paths", () => {
-    expect(resolveWorkspaceDisplayName(null)).toBeNull();
-    expect(resolveWorkspaceDisplayName("/")).toBe("/");
+  it("describes a worktree that is still being created as a new worktree", () => {
+    expect(resolveLockedWorkspaceLabel(null, "worktree")).toBe("New worktree");
   });
 });
 

@@ -13,7 +13,7 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import { canonicalSkillRoot } from "./skillFileSystem.ts";
 import { resolveClaudeConfigDirPath } from "../../provider/Drivers/ClaudeSkills.ts";
-import { mergeProviderInstanceEnvironment } from "../../provider/ProviderInstanceEnvironment.ts";
+import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
 
 const decodeCodexSettings = Schema.decodeUnknownEffect(CodexSettings);
 const decodeClaudeSettings = Schema.decodeUnknownEffect(ClaudeSettings);

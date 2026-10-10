@@ -19,7 +19,10 @@ const state = vi.hoisted(() => ({
   updateCalls: [] as Array<unknown>,
   applyImpl: null as null | ((value: unknown) => Promise<unknown>),
   updateImpl: null as null | ((value: unknown) => Promise<unknown>),
+  canOperate: true,
 }));
+
+vi.mock("../../state/session", () => ({ useEnvironmentScope: () => state.canOperate }));
 
 vi.mock("../../state/environments", () => ({
   useEnvironments: () => ({
@@ -251,6 +254,7 @@ describe("SkillCatalogPanel source identity", () => {
     state.status.isPending = true;
     state.status.refresh = vi.fn();
     state.persistImpl = null;
+    state.canOperate = true;
     state.applyImpl = null;
     state.updateImpl = null;
     state.applyCalls = [];
@@ -399,6 +403,15 @@ describe("SkillCatalogPanel source identity", () => {
 
     expect(sourceInput(renderer).props.value).toBe("/catalog/B");
     expect(buttonByText(renderer, "Save source").props.disabled).toBe(true);
+    await act(async () => renderer.unmount());
+  });
+
+  it("keeps apply and update unavailable to a session without the operate scope", async () => {
+    state.canOperate = false;
+    setStatusLoaded("/catalog/A");
+    const renderer = await renderPanel();
+    expect(applyButton(renderer).props.disabled).toBe(true);
+    expect(updateButton(renderer).props.disabled).toBe(true);
     await act(async () => renderer.unmount());
   });
 

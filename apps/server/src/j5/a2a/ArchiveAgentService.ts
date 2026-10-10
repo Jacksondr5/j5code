@@ -32,6 +32,7 @@ import {
 } from "./ArchiveFactsService.ts";
 import { A2ALedger } from "./LedgerService.ts";
 import { A2ALifecycleService } from "./LifecycleService.ts";
+import { stopThread } from "./stopThread.ts";
 import { getThreadProjectionIfPresent } from "./threadProjectionReads.ts";
 import {
   ExchangeDroppedPayload,
@@ -600,15 +601,11 @@ export const layer = Layer.effect(
         const expectedExchangeIds = before.facts.openExchanges.map((fact) => fact.exchangeId);
         let interruptRequested = false;
         if (before.facts.runningTurn !== null) {
-          yield* threadManagement
-            .interruptThread({
-              projectId: before.projection.thread.projectId,
-              commandId: input.interruptCommandId,
-              threadId: input.target.threadId,
-              runId: before.facts.runningTurn.runId,
-              reason: "Peer Agent archived as part of Crew retirement",
-            })
-            .pipe(Effect.mapError(operationError("requesting interruption of the active run")));
+          yield* stopThread(threadManagement, {
+            commandId: input.interruptCommandId,
+            threadId: input.target.threadId,
+            reason: "Peer Agent archived as part of Crew retirement",
+          }).pipe(Effect.mapError(operationError("requesting interruption of the active run")));
           interruptRequested = true;
         }
 

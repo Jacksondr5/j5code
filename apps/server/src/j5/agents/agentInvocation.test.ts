@@ -21,7 +21,7 @@ import { McpInvocationContext } from "../../mcp/McpInvocationContext.ts";
 import { OrchestratorMcpService, resolveRuntimeMode } from "../../mcp/OrchestratorMcpService.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { emptyProjection } from "../../orchestration-v2/ProjectionStore.ts";
-import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
+import { ProviderRegistry } from "../../provider/ProviderRegistry.ts";
 import { InvokeAgentInput, invokeAgent } from "./agentInvocation.ts";
 import { makeAgentPersonaLibrary } from "./agentPersonaLibrary.ts";
 import { BUILT_IN_AGENT_PERSONAS } from "./agentPersonas.ts";
@@ -113,9 +113,13 @@ const fixture = Effect.gen(function* () {
     invokeAgent({ personaId: id, task: "Review the API", clientRequestId: "request" }).pipe(
       Effect.provideService(McpInvocationContext, {
         environmentId: EnvironmentId.make("remote"),
-        threadId,
-        providerInstanceId: ProviderInstanceId.make(driver),
-        providerSessionId: "session",
+        requestNamespace: "session",
+        thread: {
+          threadId,
+          providerInstanceId: ProviderInstanceId.make(driver),
+          providerSessionId: "session",
+        },
+        client: undefined,
         capabilities: new Set(authorized ? ["orchestration" as const] : []),
         issuedAt: 1,
       }),

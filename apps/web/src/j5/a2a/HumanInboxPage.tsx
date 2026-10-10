@@ -20,6 +20,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { WorkspaceBreadcrumb, WorkspaceBreadcrumbItem } from "../../components/WorkspaceBreadcrumb";
+import { WorkspacePageHeader } from "../../components/WorkspacePageHeader";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { ScrollArea } from "../../components/ui/scroll-area";
@@ -27,10 +28,9 @@ import { SidebarInset } from "../../components/ui/sidebar";
 import { Textarea } from "../../components/ui/textarea";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip";
 import { isElectron } from "../../env";
-import { cn } from "../../lib/utils";
+import { randomUUID } from "../../lib/utils";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { formatElapsedDurationLabel } from "../../timestampFormat";
-import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "../../workspaceTitlebar";
 import { answerHumanExchange } from "./humanInboxClient";
 import { useScopedParticipantLabels } from "./ParticipantIdentitiesClient";
 import { presentParticipantIdentity } from "./ParticipantIdentity";
@@ -486,7 +486,7 @@ export function HumanInboxPage() {
       item,
       message,
       attempts: answerAttempts.current,
-      randomUUID: () => window.crypto.randomUUID(),
+      randomUUID,
       send: answerHumanExchange,
       refresh,
       notifyChanged: notifyHumanInboxChanged,
@@ -564,17 +564,11 @@ export function HumanInboxPage() {
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <header
-          className={cn(
-            "flex h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)] shrink-0 items-center px-3 sm:px-5",
-            !isElectron && COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
-            isElectron && "drag-region h-[52px]",
-          )}
-        >
+        <WorkspacePageHeader electron={isElectron}>
           <WorkspaceBreadcrumb ariaLabel="Inbox breadcrumb">
             <WorkspaceBreadcrumbItem current>Inbox</WorkspaceBreadcrumbItem>
           </WorkspaceBreadcrumb>
-        </header>
+        </WorkspacePageHeader>
         <ScrollArea className="min-h-0 flex-1">
           <main className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-8 sm:py-10">
             <div className="flex flex-wrap items-end justify-between gap-4 border-b border-border pb-5">

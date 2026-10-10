@@ -20,8 +20,8 @@ import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
-import * as ChildProcess from "effect/unstable/process/ChildProcess";
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+import * as ChildProcess from "effect/process/ChildProcess";
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import * as EffectAcpClient from "effect-acp/client";
 import * as EffectAcpErrors from "effect-acp/errors";
 import type * as EffectAcpSchema from "effect-acp/compat";
@@ -29,6 +29,7 @@ import type * as EffectAcpProtocol from "effect-acp/protocol";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 
+import { signalProcessGroup } from "@t3tools/provider-core/server/processGroup";
 import { appendAcpStderrTail, sanitizeAcpStderrExcerpt } from "./AcpStderr.ts";
 import {
   collectSessionConfigOptionValues,
@@ -47,6 +48,8 @@ import {
   type AcpSessionModeState,
   type AcpToolCallState,
 } from "./AcpRuntimeModel.ts";
+
+const MAX_SHOWN_TOOL_CALL_IDS = 256;
 
 interface AcpToolCallTrackedState {
   readonly state: AcpToolCallState;
@@ -84,6 +87,7 @@ export interface AcpSpawnInput {
   readonly cwd?: string;
   readonly env?: NodeJS.ProcessEnv;
   readonly extendEnv?: boolean;
+  readonly shell?: false;
 }
 
 export interface AcpSessionRuntimeOptions {
@@ -96,6 +100,8 @@ export interface AcpSessionRuntimeOptions {
   readonly interruptPromptOnCancel?: boolean;
   /** Optional provider metadata forwarded on `session/cancel`. */
   readonly cancelMeta?: EffectAcpSchema.CancelNotification["_meta"];
+  /** Optional provider metadata forwarded on `initialize`. */
+  readonly initializeMeta?: EffectAcpSchema.InitializeRequest["_meta"];
   readonly ownDetachedProcessGroup?: boolean;
   readonly ownDescendantProcessGroups?: boolean;
   readonly processGroupPlatform?: NodeJS.Platform;
@@ -1381,10 +1387,14 @@ export const make = (
   Effect.gen(function* () {
     const crypto = yield* Crypto.Crypto;
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-    const runtimeScope = yield* Scope.Scope;
+    // A child of the caller's scope, so termination can close the runtime without closing the caller's.
+    const runtimeScope = yield* Scope.fork(yield* Scope.Scope);
     const eventQueue = yield* Queue.unbounded<AcpSessionRuntimeEvent>();
     const modeStateRef = yield* Ref.make<AcpSessionModeState | undefined>(undefined);
     const toolCallsRef = yield* Ref.make(new Map<string, AcpToolCallTrackedState>());
+    // Recently shown tool calls. A late update to a finished call is not a new
+    // boundary in the answer, although its progress state is gone.
+    const shownToolCallIds = new Set<string>();
     const assistantItemRuntimeId = yield* crypto.randomUUIDv4.pipe(
       Effect.mapError(
         (cause) =>
@@ -1508,10 +1518,13 @@ export const make = (
         ),
       );
 
-    const spawnCommand = yield* resolveSpawnCommand(options.spawn.command, options.spawn.args, {
-      ...(options.spawn.env ? { env: options.spawn.env } : {}),
-      extendEnv: options.spawn.extendEnv ?? true,
-    });
+    const spawnCommand =
+      options.spawn.shell === false
+        ? { command: options.spawn.command, args: options.spawn.args, shell: false }
+        : yield* resolveSpawnCommand(options.spawn.command, options.spawn.args, {
+            ...(options.spawn.env ? { env: options.spawn.env } : {}),
+            extendEnv: options.spawn.extendEnv ?? true,
+          });
     const linuxCgroupLease =
       options.ownDescendantProcessGroups === true && options.processGroupPlatform === "linux"
         ? yield* Effect.sync(() => {
@@ -1640,7 +1653,7 @@ export const make = (
     const signalOwnedProcessGroup = (signal: NodeJS.Signals) =>
       Effect.try({
         try: () => {
-          process.kill(-Number(child.pid), signal);
+          signalProcessGroup(Number(child.pid), signal);
           return true;
         },
         catch: (cause) =>
@@ -1795,6 +1808,7 @@ export const make = (
         modeStateRef,
         configOptionsRef,
         toolCallsRef,
+        shownToolCallIds,
         assistantSegmentRef,
         assistantItemRuntimeId,
         params: notification,
@@ -2150,6 +2164,7 @@ export const make = (
         protocolVersion: 2,
         clientCapabilities: initializeClientCapabilities,
         clientInfo: options.clientInfo,
+        ...(options.initializeMeta === undefined ? {} : { _meta: options.initializeMeta }),
       } satisfies EffectAcpSchema.InitializeRequest;
 
       const initializeResult = yield* runLoggedRequest(
@@ -2733,18 +2748,36 @@ export const make = (
           ? promptDispatchSemaphore.withPermit(cancel)
           : cancel,
       ...(options.ownDetachedProcessGroup === true ? { terminateProcessGroup } : {}),
+      // A session's mode is its `category: "mode"` config option. ACP v1 agents
+      // that only advertise `modes` (gemini-cli) take `session/set_mode`
+      // instead, which ACP v2 removed.
       setMode: (modeId) =>
-        Ref.get(modeStateRef).pipe(
-          Effect.flatMap((modeState) => {
-            if (modeState?.currentModeId === modeId) {
-              return Effect.succeed({} satisfies EffectAcpSchema.SetSessionModeResponse);
-            }
-            return setConfigOption("mode", modeId).pipe(
-              Effect.tap(() => updateCurrentModeId(modeId)),
-              Effect.as({} satisfies EffectAcpSchema.SetSessionModeResponse),
-            );
-          }),
-        ),
+        Effect.gen(function* () {
+          const modeState = yield* Ref.get(modeStateRef);
+          if (modeState?.currentModeId === modeId) {
+            return {} satisfies EffectAcpSchema.SetSessionModeResponse;
+          }
+          const modeConfigOption = (yield* Ref.get(configOptionsRef))?.find(
+            (option) => option.category === "mode" && option.type === "select",
+          );
+          if (modeConfigOption === undefined && modeState !== undefined) {
+            const started = yield* getStartedState;
+            const payload = { sessionId: started.sessionId, modeId };
+            yield* runLoggedRequest("session/set_mode", payload, acp.agent.setSessionMode(payload));
+            yield* updateCurrentModeId(modeId);
+            return {} satisfies EffectAcpSchema.SetSessionModeResponse;
+          }
+          const response = yield* setConfigOption(modeConfigOption?.id ?? "mode", modeId);
+          // The agent answers with its config options, so the mode it reports
+          // is the mode it runs in, even when it kept another one.
+          const reported = parseSessionModeState({ configOptions: response.configOptions });
+          if (reported === undefined) {
+            yield* updateCurrentModeId(modeId);
+          } else {
+            yield* updateCurrentModeId(reported.currentModeId);
+          }
+          return {} satisfies EffectAcpSchema.SetSessionModeResponse;
+        }),
       setSessionModel: (modelId, meta) =>
         getStartedState.pipe(
           Effect.flatMap((started) => {
@@ -2824,6 +2857,7 @@ const handleSessionUpdate = ({
   modeStateRef,
   configOptionsRef,
   toolCallsRef,
+  shownToolCallIds,
   assistantSegmentRef,
   assistantItemRuntimeId,
   params,
@@ -2832,6 +2866,7 @@ const handleSessionUpdate = ({
   readonly modeStateRef: Ref.Ref<AcpSessionModeState | undefined>;
   readonly configOptionsRef: Ref.Ref<ReadonlyArray<EffectAcpSchema.SessionConfigOption>>;
   readonly toolCallsRef: Ref.Ref<Map<string, AcpToolCallTrackedState>>;
+  readonly shownToolCallIds: Set<string>;
   readonly assistantSegmentRef: Ref.Ref<AcpAssistantSegmentState>;
   readonly assistantItemRuntimeId: string;
   readonly params: EffectAcpSchema.SessionNotification;
@@ -2853,11 +2888,7 @@ const handleSessionUpdate = ({
     }
     for (const event of parsed.events) {
       if (event._tag === "ToolCallUpdated") {
-        yield* closeActiveAssistantSegment({
-          queue,
-          assistantSegmentRef,
-        });
-        const { merged, decision } = yield* Ref.modify(toolCallsRef, (current) => {
+        const { merged, decision, active } = yield* Ref.modify(toolCallsRef, (current) => {
           const tracked = current.get(event.toolCall.toolCallId);
           const previous = tracked?.state;
           const nextToolCall = mergeToolCallState(previous, event.toolCall);
@@ -2879,10 +2910,21 @@ const handleSessionUpdate = ({
               skippedSinceEmit: decision.skippedSinceEmit,
             });
           }
-          return [{ merged: nextToolCall, decision }, next] as const;
+          return [{ merged: nextToolCall, decision, active: tracked !== undefined }, next] as const;
         });
         if (!decision.emit) {
           continue;
+        }
+        // A new tool call is a boundary in the prose. Progress on a call that
+        // is already shown, such as a background command finishing, is not.
+        if (!shownToolCallIds.has(merged.toolCallId)) {
+          shownToolCallIds.add(merged.toolCallId);
+          // Only recent calls get late updates; keep a long session bounded.
+          if (shownToolCallIds.size > MAX_SHOWN_TOOL_CALL_IDS) {
+            shownToolCallIds.delete(shownToolCallIds.values().next().value!);
+          }
+          // A call still running is already on screen, even if it aged out.
+          if (!active) yield* closeActiveAssistantSegment({ queue, assistantSegmentRef });
         }
         yield* Queue.offer(queue, {
           _tag: "ToolCallUpdated",

@@ -1,0 +1,28 @@
+import { describe, expect, it } from "vite-plus/test";
+import { providerAuthReturnUrl } from "./providerAuthReturnUrl.ts";
+
+describe("provider auth return destinations", () => {
+  it.each(["j5code", "j5code-dev"])(
+    "returns to %s Welcome and the selected settings instance",
+    (scheme) => {
+      expect(providerAuthReturnUrl(`${scheme}://app/welcome?code=secret#agents:machine-id`)).toBe(
+        `${scheme}://app/welcome#agents:machine-id`,
+      );
+      expect(
+        providerAuthReturnUrl(`${scheme}://app/settings/providers?instanceId=work&code=secret`),
+      ).toBe(`${scheme}://app/settings/providers?instanceId=work`);
+    },
+  );
+  it.each([
+    "j5code://attacker/welcome",
+    "j5code://app:123/welcome",
+    "j5code://app/auth/callback",
+    "j5code://user@ app/welcome",
+    "j5code://app/welcome/../evil",
+    "https://attacker.example/welcome",
+    "https://app.t3.codes/welcome",
+    "t3code://app/welcome",
+    "file:///welcome",
+    "javascript:alert(1)",
+  ])("rejects %s", (url) => expect(providerAuthReturnUrl(url)).toBeUndefined());
+});

@@ -5,13 +5,14 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import { EffectOutboxV2, layer } from "./EffectOutbox.ts";
 
-const TestLayer = layer.pipe(Layer.provide(SqlitePersistenceMemory));
+const TestLayer = layer.pipe(Layer.provide(SqlitePersistence.layerMemory));
 
-for (const outcome of ["succeeded", "failed", "cancelled", "process-loss"] as const) {
-  it.effect(`awaits ${outcome} durably for concurrent and later subscribers`, () =>
+it.effect.each(["succeeded", "failed", "cancelled", "process-loss"] as const)(
+  "awaits %s durably for concurrent and later subscribers",
+  (outcome) =>
     Effect.gen(function* () {
       const outbox = yield* EffectOutboxV2;
       const effectId = `effect:${outcome}`;
@@ -56,8 +57,7 @@ for (const outcome of ["succeeded", "failed", "cancelled", "process-loss"] as co
       assert.equal((yield* Fiber.join(second)).status, expected);
       assert.equal((yield* outbox.awaitSettled(effectId)).status, expected);
     }).pipe(Effect.provide(TestLayer)),
-  );
-}
+);
 
 it.effect("fails for a missing effect instead of waiting forever", () =>
   Effect.gen(function* () {

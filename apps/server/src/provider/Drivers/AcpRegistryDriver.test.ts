@@ -8,7 +8,7 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
-import { AcpRegistryCatalog, type AcpRegistryInspection } from "../acp/AcpRegistrySupport.ts";
+import * as AcpRegistrySupport from "../acp/AcpRegistrySupport.ts";
 import {
   acpRegistrySnapshotReadiness,
   applyAcpRegistryAvailableCommands,
@@ -34,7 +34,9 @@ const noSessionManagement = {
   canConfigureProviders: false,
 } as const;
 
-function catalogWithInspection(inspection: AcpRegistryInspection): AcpRegistryCatalog["Service"] {
+function catalogWithInspection(
+  inspection: AcpRegistrySupport.AcpRegistryInspection,
+): AcpRegistrySupport.AcpRegistryCatalog["Service"] {
   return {
     search: () => Effect.die("unused search"),
     prepare: () => Effect.die("unused prepare"),
@@ -201,6 +203,19 @@ describe("acpRegistrySnapshotReadiness", () => {
 
     expect(
       acpRegistrySnapshotReadiness({
+        status: "missing_runner",
+        version: null,
+        distribution: "local",
+      }),
+    ).toEqual({
+      installed: false,
+      version: null,
+      status: "error",
+      message: "Local ACP executable is not available on this environment's PATH.",
+    });
+
+    expect(
+      acpRegistrySnapshotReadiness({
         status: "unprepared",
         agentId: "zed-agent",
         version: "2.0.0",
@@ -310,49 +325,57 @@ describe("acpRegistrySnapshotReadiness", () => {
     expect(snapshot.models[0]?.isDefault).toBe(true);
   });
 
-  it("reports failed authentication without hiding successful local inspection", () => {
-    const snapshot = buildCheckedAcpRegistrySnapshot({
-      ...identity,
-      settings: decodeSettings({ agentId: "test-agent", authMethodId: "grok-login" }),
-      checkedAt: "2026-08-13T10:00:00.000Z",
-      inspection: {
-        status: "ready",
-        agentId: "test-agent",
-        version: "1.0.0",
-        distribution: "binary",
-      },
-      probeError: new AcpRegistryOperationError({
-        reason: "authentication_failed",
-        message: "Login required.",
-        authMethods: [
-          {
-            id: "api-key",
-            name: "API key",
-            description: null,
-            type: "env_var",
-          },
-          {
-            id: "grok-login",
-            name: "Log in with Grok",
-            description: null,
-            type: "agent",
-          },
-        ],
-      }),
-    });
+  it.each(["registry", "local"] as const)(
+    "reports failed authentication after successful %s inspection",
+    (source) => {
+      const snapshot = buildCheckedAcpRegistrySnapshot({
+        ...identity,
+        settings: decodeSettings({
+          source,
+          ...(source === "local" ? { commandPath: "test-agent" } : { agentId: "test-agent" }),
+          authMethodId: "grok-login",
+        }),
+        checkedAt: "2026-08-13T10:00:00.000Z",
+        inspection: {
+          status: "ready",
+          agentId: "test-agent",
+          version: source === "local" ? null : "1.0.0",
+          distribution: source === "local" ? "local" : "binary",
+        },
+        probeError: new AcpRegistryOperationError({
+          reason: "authentication_failed",
+          message: "Login required.",
+          authMethods: [
+            {
+              id: "api-key",
+              name: "API key",
+              description: null,
+              type: "env_var",
+            },
+            {
+              id: "grok-login",
+              name: "Log in with Grok",
+              description: null,
+              type: "agent",
+            },
+          ],
+        }),
+      });
 
-    expect(snapshot).toMatchObject({
-      installed: true,
-      version: "1.0.0",
-      status: "warning",
-      auth: {
-        status: "unauthenticated",
-        type: "agent",
-        label: "Log in with Grok",
-      },
-      message: 'Sign in in provider settings using "Log in with Grok".',
-    });
-  });
+      expect(snapshot).toMatchObject({
+        installed: true,
+        version: source === "local" ? null : "1.0.0",
+        status: "warning",
+        setup: { canAuthenticate: true },
+        auth: {
+          status: "unauthenticated",
+          type: "agent",
+          label: "Log in with Grok",
+        },
+        message: 'Sign in in provider settings using "Log in with Grok".',
+      });
+    },
+  );
 
   it.effect("runs the disposable probe only after local inspection is ready", () =>
     Effect.gen(function* () {
@@ -386,7 +409,7 @@ describe("acpRegistrySnapshotReadiness", () => {
           }),
       ).pipe(
         Effect.provideService(
-          AcpRegistryCatalog,
+          AcpRegistrySupport.AcpRegistryCatalog,
           catalogWithInspection({
             status: "ready",
             agentId: "test-agent",
@@ -414,7 +437,7 @@ describe("acpRegistrySnapshotReadiness", () => {
         environment: { PATH: "/provider/bin" },
       }).pipe(
         Effect.provideService(
-          AcpRegistryCatalog,
+          AcpRegistrySupport.AcpRegistryCatalog,
           catalogWithInspection({
             status: "ready",
             agentId: "test-agent",

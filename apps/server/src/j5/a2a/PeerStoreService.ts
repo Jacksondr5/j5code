@@ -5,7 +5,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import type { SqlError } from "effect/sql/SqlError";
 
 import { A2ADeliveryWorker, type A2ADeliveryWorkerError } from "./DeliveryWorker.ts";
 import { A2ALedger } from "./LedgerService.ts";

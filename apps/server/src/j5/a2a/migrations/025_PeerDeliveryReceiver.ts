@@ -1,5 +1,5 @@
 import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 // A delivery whose receiver is homed on a peer server names that server here.
 // NULL means the receiver is on this server, which is every row written before

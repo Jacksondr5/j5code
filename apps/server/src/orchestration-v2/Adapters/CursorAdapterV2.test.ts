@@ -22,12 +22,11 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
-import { ServerConfig, layerTest as serverConfigLayerTest } from "../../config.ts";
-import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
-import { IdAllocatorV2, layer as idAllocatorLayer } from "../IdAllocator.ts";
-import { ProviderAdapterV2RuntimePolicy } from "../ProviderAdapter.ts";
+import * as ServerConfig from "../../config.ts";
+import * as McpProviderSession from "@t3tools/provider-core/server/mcpSession";
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import { ProviderAdapterV2RuntimePolicy } from "@t3tools/provider-core/server/ProviderAdapter";
 import {
-  CursorProviderCapabilitiesV2,
   cursorMcpServers,
   cursorRuntimeAgentPolicy,
   cursorSdkModelSelection,
@@ -40,130 +39,15 @@ import { isCursorCancellationError, loggedCursorAgentOptions } from "./CursorAge
 const decodeCursorSettings = Schema.decodeEffect(CursorSettings);
 
 describe("CursorAdapterV2", () => {
-  it.effect("sends discovered skills as native slash invocations with runtime instructions", () =>
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const workspace = yield* fileSystem.makeTempDirectoryScoped({ prefix: "cursor-v2-skills-" });
-      const skillDirectory = path.join(workspace, ".cursor", "skills", "review");
-      yield* fileSystem.makeDirectory(skillDirectory, { recursive: true });
-      yield* fileSystem.writeFileString(
-        path.join(skillDirectory, "SKILL.md"),
-        "---\nname: review\n---\nReview the changes.",
-      );
-      const sentMessages: Array<string> = [];
-      const instanceId = ProviderInstanceId.make("cursor");
-      const threadId = ThreadId.make("cursor-skills-thread");
-      const modelSelection = { instanceId, model: "composer-2.5" };
-      const runtimePolicy = ProviderAdapterV2RuntimePolicy.make({
-        runtimeMode: "full-access",
-        interactionMode: "default",
-        cwd: workspace,
-      });
-      const adapter = makeCursorAdapterV2({
-        instanceId,
-        settings: yield* decodeCursorSettings({}),
-        environment: { HOME: workspace },
-        fileSystem,
-        path,
-        idAllocator: yield* IdAllocatorV2,
-        serverConfig: yield* ServerConfig.pipe(
-          Effect.provide(serverConfigLayerTest(workspace, { prefix: "cursor-v2-skills-config-" })),
-        ),
-        runner: {
-          assertComplete: Effect.void,
-          open: () =>
-            Effect.succeed({
-              agentId: "native-cursor-skills",
-              listMessages: Effect.succeed([]),
-              close: Effect.void,
-              send: (input) =>
-                Effect.sync(() => {
-                  sentMessages.push(
-                    typeof input.message === "string" ? input.message : input.message.text,
-                  );
-                  return {
-                    agentId: "native-cursor-skills",
-                    runId: "native-cursor-run",
-                    wait: Effect.succeed({
-                      id: "native-cursor-run",
-                      requestId: "native-request",
-                      status: "finished" as const,
-                      model: { id: "composer-2.5" },
-                      durationMs: 1,
-                    }),
-                    cancel: Effect.void,
-                  };
-                }),
-            }),
-        },
-      });
-      const runtime = yield* adapter.openSession({
-        threadId,
-        providerSessionId: ProviderSessionId.make("cursor-skills-session"),
-        modelSelection,
-        runtimePolicy,
-      });
-      const providerThread = yield* runtime.ensureThread({
-        threadId,
-        modelSelection,
-        runtimePolicy,
-      });
-      const now = yield* DateTime.now;
-      yield* runtime.startTurn({
-        threadId,
-        providerThread,
-        modelSelection,
-        runtimePolicy,
-        runId: RunId.make("cursor-skills-run"),
-        runOrdinal: 1,
-        providerTurnOrdinal: 1,
-        attemptId: RunAttemptId.make("cursor-skills-attempt"),
-        rootNodeId: NodeId.make("cursor-skills-root"),
-        appThread: {
-          id: threadId,
-          projectId: ProjectId.make("cursor-skills-project"),
-          createdBy: "user",
-          creationSource: "web",
-          title: "Cursor skills",
-          providerInstanceId: instanceId,
-          modelSelection,
-          runtimeMode: "full-access",
-          interactionMode: "default",
-          branch: null,
-          worktreePath: null,
-          activeProviderThreadId: providerThread.id,
-          lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
-          forkedFrom: null,
-          createdAt: now,
-          updatedAt: now,
-          archivedAt: null,
-          settledOverride: null,
-          settledAt: null,
-          lastVisitedAt: null,
-          deletedAt: null,
-        },
-        message: {
-          messageId: MessageId.make("cursor-skills-message"),
-          createdBy: "user",
-          creationSource: "web",
-          text: "$review this with $HOME and $missing",
-          attachments: [],
-        },
-      });
-      yield* runtime.events.pipe(
-        Stream.filter((event) => event.type === "turn.terminal"),
-        Stream.runHead,
-      );
-      assert.lengthOf(sentMessages, 1);
-      assert.isTrue(sentMessages[0]!.startsWith("/review this with $HOME and $missing\n\n"));
-      assert.include(sentMessages[0]!, "Cursor");
-      assert.include(sentMessages[0]!, "J5 Code");
-    }).pipe(Effect.scoped, Effect.provide(Layer.merge(NodeServices.layer, idAllocatorLayer))),
-  );
-
-  for (const status of ["finished", "cancelled", "error"] as const) {
-    it.effect(`settles missing task completions when the Cursor run is ${status}`, () =>
+  it.effect.each([
+    { status: "finished", model: undefined, lateModel: undefined },
+    { status: "cancelled", model: "claude-opus-4-6", lateModel: undefined },
+    { status: "error", model: "custom-fable", lateModel: undefined },
+    { status: "finished", model: undefined, lateModel: "gpt-6-sol" },
+    { status: "finished", model: "gpt-6-sol", lateModel: null },
+  ] as const)(
+    "projects Cursor tasks: $status, late model $lateModel",
+    ({ status, model, lateModel }) =>
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
@@ -184,10 +68,10 @@ describe("CursorAdapterV2", () => {
           environment: { HOME: workspace },
           fileSystem,
           path,
-          idAllocator: yield* IdAllocatorV2,
-          serverConfig: yield* ServerConfig.pipe(
+          idAllocator: yield* IdAllocator.IdAllocatorV2,
+          serverConfig: yield* ServerConfig.ServerConfig.pipe(
             Effect.provide(
-              serverConfigLayerTest(workspace, { prefix: "cursor-v2-lifecycle-config-" }),
+              ServerConfig.layerTest(workspace, { prefix: "cursor-v2-lifecycle-config-" }),
             ),
           ),
           runner: {
@@ -199,19 +83,41 @@ describe("CursorAdapterV2", () => {
                 close: Effect.void,
                 send: (input) =>
                   Effect.gen(function* () {
-                    yield* input.onDelta!({
-                      type: "tool-call-started",
-                      modelCallId: "model-call",
-                      callId: "task-call",
-                      toolCall: {
-                        type: "task",
-                        args: {
-                          description: "Review",
-                          prompt: "Review the code.",
-                          subagentType: { kind: "generalPurpose" },
-                        },
+                    // Recorded Cursor task calls (see fixtures/subagent) stream a
+                    // partial-tool-call before tool-call-started with the same args.
+                    // The run then ends without tool-call-completed, which a live
+                    // run cannot produce on demand.
+                    const taskToolCall = {
+                      type: "task" as const,
+                      args: {
+                        description: "Review",
+                        prompt: "Review the code.",
+                        subagentType: { kind: "unspecified" },
+                        ...(model === undefined ? {} : { model }),
+                        agentId: "cursor-task-agent",
+                        mode: "unspecified" as const,
                       },
-                    }).pipe(Effect.orDie);
+                    };
+                    const updates =
+                      lateModel !== undefined
+                        ? (["tool-call-started", "tool-call-completed"] as const)
+                        : (["partial-tool-call", "tool-call-started"] as const);
+                    for (const type of updates) {
+                      yield* input.onDelta!({
+                        type,
+                        modelCallId: "model-call",
+                        callId: "task-call",
+                        toolCall: {
+                          ...taskToolCall,
+                          args: {
+                            ...taskToolCall.args,
+                            ...(type === "tool-call-completed"
+                              ? { model: lateModel ?? undefined }
+                              : {}),
+                          },
+                        },
+                      }).pipe(Effect.orDie);
+                    }
                     return {
                       agentId: "native-cursor-lifecycle",
                       runId: "native-cursor-run",
@@ -287,14 +193,21 @@ describe("CursorAdapterV2", () => {
         );
         const rows = events.filter((event) => event.type === "subagent.updated");
         assert.equal(rows[0]?.subagent.status, "running");
+        assert.equal(rows[0]?.subagent.model, model ?? null);
+        assert.equal(rows.at(-1)?.subagent.model, lateModel ?? model ?? null);
         assert.equal(
           rows.at(-1)?.subagent.status,
-          status === "finished" ? "idle" : status === "cancelled" ? "cancelled" : "failed",
+          lateModel !== undefined
+            ? "completed"
+            : status === "finished"
+              ? "idle"
+              : status === "cancelled"
+                ? "cancelled"
+                : "failed",
         );
         assert.isNotNull(rows.at(-1)?.subagent.completedAt);
-      }).pipe(Effect.scoped, Effect.provide(Layer.merge(NodeServices.layer, idAllocatorLayer))),
-    );
-  }
+      }).pipe(Effect.scoped, Effect.provide(Layer.merge(NodeServices.layer, IdAllocator.layer))),
+  );
 
   it.effect("fails standalone SDK transport diagnostics and sends compaction as /compress", () =>
     Effect.gen(function* () {
@@ -317,9 +230,9 @@ describe("CursorAdapterV2", () => {
         environment: { HOME: workspace },
         fileSystem,
         path,
-        idAllocator: yield* IdAllocatorV2,
-        serverConfig: yield* ServerConfig.pipe(
-          Effect.provide(serverConfigLayerTest(workspace, { prefix: "cursor-v2-error-config-" })),
+        idAllocator: yield* IdAllocator.IdAllocatorV2,
+        serverConfig: yield* ServerConfig.ServerConfig.pipe(
+          Effect.provide(ServerConfig.layerTest(workspace, { prefix: "cursor-v2-error-config-" })),
         ),
         runner: {
           assertComplete: Effect.void,
@@ -443,7 +356,7 @@ describe("CursorAdapterV2", () => {
         Stream.runHead,
       );
       assert.equal(sentMessages[1], "/compress");
-    }).pipe(Effect.scoped, Effect.provide(Layer.merge(NodeServices.layer, idAllocatorLayer))),
+    }).pipe(Effect.scoped, Effect.provide(Layer.merge(NodeServices.layer, IdAllocator.layer))),
   );
 
   it.effect("projects Cursor directory trees and lint diagnostics as file search results", () =>
@@ -467,6 +380,35 @@ describe("CursorAdapterV2", () => {
         numFiles: 0,
       };
       const updates: ReadonlyArray<InteractionUpdate> = [
+        ...(["tool-call-started", "tool-call-completed"] as const).map((type) => ({
+          type,
+          modelCallId: "native-model-call",
+          callId: "mcp-weather",
+          toolCall: {
+            type: "mcp" as const,
+            args: {
+              providerIdentifier: "weather",
+              toolName: "get_weather",
+              args: { city: "Berlin" },
+            },
+            ...(type === "tool-call-completed"
+              ? { result: { status: "success" as const, value: { content: [], isError: false } } }
+              : {}),
+          },
+        })),
+        {
+          type: "tool-call-completed",
+          modelCallId: "native-model-call",
+          callId: "read-file",
+          toolCall: {
+            type: "read",
+            args: { path: "src/env.ts" },
+            result: {
+              status: "success",
+              value: { fileSize: 12, content: "---\nfile body", totalLines: 2 },
+            },
+          },
+        },
         {
           type: "tool-call-completed",
           modelCallId: "native-model-call",
@@ -523,6 +465,26 @@ describe("CursorAdapterV2", () => {
             type: "ls",
             args: { path: path.join(workspace, "missing") },
             result: { status: "error", error: "ENOENT" },
+          },
+        },
+        {
+          type: "tool-call-completed",
+          modelCallId: "native-model-call",
+          callId: "grep-failed",
+          toolCall: {
+            type: "grep",
+            args: { pattern: "TODO", path: "src" },
+            result: { status: "error", error: "search failed" },
+          },
+        },
+        {
+          type: "tool-call-completed",
+          modelCallId: "native-model-call",
+          callId: "glob-failed",
+          toolCall: {
+            type: "glob",
+            args: { globPattern: "*.ts" },
+            result: { status: "error", error: "search failed" },
           },
         },
         {
@@ -609,9 +571,9 @@ describe("CursorAdapterV2", () => {
         environment: { HOME: workspace },
         fileSystem,
         path,
-        idAllocator: yield* IdAllocatorV2,
-        serverConfig: yield* ServerConfig.pipe(
-          Effect.provide(serverConfigLayerTest(workspace, { prefix: "cursor-v2-search-config-" })),
+        idAllocator: yield* IdAllocator.IdAllocatorV2,
+        serverConfig: yield* ServerConfig.ServerConfig.pipe(
+          Effect.provide(ServerConfig.layerTest(workspace, { prefix: "cursor-v2-search-config-" })),
         ),
         runner: {
           assertComplete: Effect.void,
@@ -700,12 +662,48 @@ describe("CursorAdapterV2", () => {
         Stream.takeUntil((event) => event.type === "turn.terminal"),
         Stream.runCollect,
       );
+      const mcpItems = events.flatMap((event) =>
+        event.type === "turn_item.updated" &&
+        event.turnItem.type === "dynamic_tool" &&
+        event.turnItem.toolName === "mcp__weather__get_weather"
+          ? [event.turnItem]
+          : [],
+      );
+      assert.deepEqual(
+        mcpItems.map((item) => item.status),
+        ["running", "completed"],
+      );
+      for (const item of mcpItems) {
+        assert.equal(item.title, "get weather");
+        assert.deepEqual(item.toolSource, {
+          key: "mcp:weather",
+          name: "weather",
+          kind: "integration",
+        });
+        assert.deepEqual(item.input, {
+          providerIdentifier: "weather",
+          toolName: "get_weather",
+          args: { city: "Berlin" },
+        });
+      }
       const fileSearchItems = events.flatMap((event) =>
         event.type === "turn_item.updated" &&
         event.turnItem.type === "file_search" &&
         event.turnItem.status !== "running"
           ? [event.turnItem]
           : [],
+      );
+      const readItems = events.flatMap((event) =>
+        event.type === "turn_item.updated" &&
+        event.turnItem.type === "dynamic_tool" &&
+        event.turnItem.toolName === "Read" &&
+        event.turnItem.status === "completed"
+          ? [event.turnItem]
+          : [],
+      );
+      assert.deepEqual(
+        readItems.map((item) => ({ title: item.title, input: item.input })),
+        [{ title: "Read src/env.ts", input: { path: "src/env.ts" } }],
       );
       assert.deepEqual(
         fileSearchItems.map((item) => ({
@@ -731,7 +729,17 @@ describe("CursorAdapterV2", () => {
           {
             pattern: path.join(workspace, "missing"),
             status: "failed",
-            results: undefined,
+            results: [{ fileName: path.join(workspace, "missing"), preview: "ENOENT" }],
+          },
+          {
+            pattern: "TODO",
+            status: "failed",
+            results: [{ fileName: "src", preview: "search failed" }],
+          },
+          {
+            pattern: "*.ts",
+            status: "failed",
+            results: [{ fileName: ".", preview: "search failed" }],
           },
           {
             pattern: "src/a.ts, src/b.ts",
@@ -750,11 +758,11 @@ describe("CursorAdapterV2", () => {
           {
             pattern: "src/a.ts",
             status: "failed",
-            results: undefined,
+            results: [{ fileName: "src/a.ts", preview: "lint failed" }],
           },
         ],
       );
-    }).pipe(Effect.scoped, Effect.provide(Layer.merge(NodeServices.layer, idAllocatorLayer))),
+    }).pipe(Effect.scoped, Effect.provide(Layer.merge(NodeServices.layer, IdAllocator.layer))),
   );
 
   it("maps Cursor auto and model parameters to SDK selections", () => {
@@ -840,18 +848,26 @@ describe("CursorAdapterV2", () => {
     );
   });
 
-  it("advertises only capabilities exposed by the official SDK adapter", () => {
-    assert.isTrue(CursorProviderCapabilitiesV2.threads.canReadThreadSnapshot);
-    assert.isFalse(CursorProviderCapabilitiesV2.threads.canForkThread);
-    assert.isFalse(CursorProviderCapabilitiesV2.threads.canRollbackThread);
-    assert.isTrue(CursorProviderCapabilitiesV2.turns.supportsInterrupt);
-    assert.isFalse(CursorProviderCapabilitiesV2.turns.supportsActiveSteering);
-    assert.isTrue(CursorProviderCapabilitiesV2.turns.supportsSteeringByInterruptRestart);
-    assert.isTrue(CursorProviderCapabilitiesV2.tools.supportsMcpTools);
-    assert.isTrue(CursorProviderCapabilitiesV2.subagents.supportsSubagents);
-    assert.isFalse(CursorProviderCapabilitiesV2.subagents.exposesSubagentThreadIds);
-    assert.equal(CursorProviderCapabilitiesV2.identity.nativeItemIds, "weak");
-    assert.isFalse(CursorProviderCapabilitiesV2.approvals.supportsCommandApproval);
+  it("loads the user's Cursor settings layers in every runtime mode", () => {
+    // The SDK loads no rules, skills, hooks, or MCP config from disk unless
+    // settingSources names them, so an omitted list silently drops AGENTS.md.
+    for (const runtimeMode of ["full-access", "auto-accept-edits", "approval-required"] as const) {
+      const options = makeCursorAgentOptions({
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("cursor"),
+          model: "composer-2.5",
+        },
+        runtimePolicy: { runtimeMode, interactionMode: "default", cwd: "/workspace" },
+        threadId: ThreadId.make("thread-cursor-setting-sources"),
+      });
+      assert.deepEqual(options.local?.settingSources, [
+        "project",
+        "user",
+        "team",
+        "mdm",
+        "plugins",
+      ]);
+    }
   });
 
   it("injects thread-scoped MCP credentials without logging them", () => {

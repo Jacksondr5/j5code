@@ -1,12 +1,13 @@
 import {
   AuthOrchestrationOperateScope,
+  sessionGrantsScope,
   type AuthSessionState,
   type EnvironmentId,
   type ServerConfig,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Option from "effect/Option";
-import { AsyncResult, Atom } from "effect/unstable/reactivity";
+import { AsyncResult, Atom } from "effect/reactivity";
 
 import type { SupervisorConnectionState } from "../connection/model.ts";
 import type { EnvironmentCatalogState } from "../state/connections.ts";
@@ -62,8 +63,8 @@ export function resolveJ5ReadSource<A>(input: {
     connected,
     canOperate:
       connected &&
-      input.session?.authenticated === true &&
-      (input.session.scopes?.includes(AuthOrchestrationOperateScope) ?? true),
+      input.session !== null &&
+      sessionGrantsScope(input.session, AuthOrchestrationOperateScope),
     status,
     data: unsupported ? null : data,
     error:

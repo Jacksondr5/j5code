@@ -1,6 +1,7 @@
-import { ProjectionStoreV2 } from "../../../orchestration-v2/ProjectionStore.ts";
-import { ProjectionSnapshotQuery } from "../../../orchestration/Services/ProjectionSnapshotQuery.ts";
-import { DeviceService } from "../../../device/DeviceService.ts";
+import * as Orchestrator from "../../../orchestration-v2/Orchestrator.ts";
+import * as ProjectionStore from "../../../orchestration-v2/ProjectionStore.ts";
+import * as DeviceService from "../../../device/DeviceService.ts";
+import * as ServerConfig from "../../../config.ts";
 import { expect, it } from "@effect/vitest";
 import { NodeHttpServer } from "@effect/platform-node";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -8,36 +9,32 @@ import { EnvironmentId, ProviderInstanceId, ThreadId } from "@t3tools/contracts"
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import { HttpBody, HttpClient, HttpRouter } from "effect/unstable/http";
+import { HttpBody, HttpClient, HttpRouter } from "effect/http";
 
 import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
-import * as ServerConfig from "../../../config.ts";
 import * as GitWorkflowService from "../../../git/GitWorkflowService.ts";
-import { ProviderAdapterRegistryV2 } from "../../../orchestration-v2/ProviderAdapterRegistry.ts";
-import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
-import { OrchestratorV2 } from "../../../orchestration-v2/Orchestrator.ts";
+import { A2A_SEND_TOOL_DESCRIPTION } from "../../../j5/a2a/EnvelopeFormatter.ts";
 import { A2ALedger } from "../../../j5/a2a/LedgerService.ts";
-import { A2ASendService } from "../../../j5/a2a/SendService.ts";
 import { noneLayer as peerDirectoryNoneLayer } from "../../../j5/a2a/PeerDirectory.ts";
 import { ParticipantPlacementService } from "../../../j5/a2a/PlacementService.ts";
+import { A2ASendService } from "../../../j5/a2a/SendService.ts";
+import * as ProviderAdapterRegistry from "../../../orchestration-v2/ProviderAdapterRegistry.ts";
+import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as ProjectService from "../../../project/ProjectService.ts";
 import * as ProjectSetupScriptRunner from "../../../project/ProjectSetupScriptRunner.ts";
-import { SqlitePersistenceMemory } from "../../../persistence/Layers/Sqlite.ts";
-import { ProviderRegistry } from "../../../provider/Services/ProviderRegistry.ts";
-import { ScheduledTaskService } from "../../../scheduledTasks/ScheduledTaskService.ts";
+import * as SqlitePersistence from "../../../persistence/Sqlite.ts";
+import * as ProviderRegistry from "../../../provider/ProviderRegistry.ts";
+import * as ScheduledTaskService from "../../../scheduledTasks/ScheduledTaskService.ts";
+import * as SecretRequests from "../../../secrets/SecretRequests.ts";
 import * as ServerSettings from "../../../serverSettings.ts";
-import { VcsStatusBroadcaster } from "../../../vcs/VcsStatusBroadcaster.ts";
+import * as VcsStatusBroadcaster from "../../../vcs/VcsStatusBroadcaster.ts";
 import * as McpHttpServer from "../../McpHttpServer.ts";
 import * as McpSessionRegistry from "../../McpSessionRegistry.ts";
 import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
+import * as PreviewBrowser from "../../../preview/PreviewBrowser.ts";
 
-const StubServicesLive = Layer.mergeAll(
-  Layer.mock(OrchestratorV2)({}),
-  Layer.mock(ProjectionStoreV2)({}),
-  Layer.mock(ProjectionSnapshotQuery)({}),
-  Layer.mock(DeviceService)({}),
-  Layer.mock(ThreadManagementService)({}),
-  Layer.mock(OrchestratorV2)({
+const layerStubServices = Layer.mergeAll(
+  Layer.mock(Orchestrator.OrchestratorV2)({
     getShellSnapshot: () =>
       Effect.succeed({
         schemaVersion: 1,
@@ -51,14 +48,18 @@ const StubServicesLive = Layer.mergeAll(
   Layer.mock(ParticipantPlacementService)({ listParticipants: () => Effect.succeed([]) }),
   Layer.mock(A2ALedger)({ listProjectLedgers: () => Effect.succeed([]) }),
   peerDirectoryNoneLayer,
-  Layer.mock(ProviderRegistry)({}),
-  Layer.mock(ProviderAdapterRegistryV2)({}),
-  Layer.mock(ScheduledTaskService)({}),
+  Layer.mock(ProjectionStore.ProjectionStoreV2)({}),
+  Layer.mock(DeviceService.DeviceService)({}),
+  Layer.mock(ThreadManagementService.ThreadManagementService)({}),
+  Layer.mock(ProviderRegistry.ProviderRegistry)({}),
+  Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({}),
+  Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+  Layer.mock(SecretRequests.SecretRequests)({}),
   Layer.mock(ProjectService.ProjectService)({}),
   ServerSettings.layerTest({}),
   Layer.mock(GitWorkflowService.GitWorkflowService)({}),
   Layer.mock(ProjectSetupScriptRunner.ProjectSetupScriptRunner)({}),
-  Layer.mock(VcsStatusBroadcaster)({}),
+  Layer.mock(VcsStatusBroadcaster.VcsStatusBroadcaster)({}),
 );
 
 const ToolsListPayload = Schema.fromJsonString(
@@ -67,6 +68,7 @@ const ToolsListPayload = Schema.fromJsonString(
       tools: Schema.Array(
         Schema.Struct({
           name: Schema.String,
+          description: Schema.optional(Schema.String),
           inputSchema: Schema.Struct({ type: Schema.optional(Schema.String) }),
           annotations: Schema.optional(
             Schema.Struct({
@@ -102,8 +104,8 @@ const decodeToolCallPayload = Schema.decodeUnknownEffect(
 it.effect("production mcp layer lists worktree tools over http", () =>
   Effect.scoped(
     Effect.gen(function* () {
-      const routes = McpHttpServer.layer.pipe(Layer.provide(McpSessionRegistry.layer));
-      yield* HttpRouter.serve(routes, {
+      const layerRoutes = McpHttpServer.layer.pipe(Layer.provide(McpSessionRegistry.layer));
+      yield* HttpRouter.serve(layerRoutes, {
         disableListenLog: true,
         disableLogger: true,
       }).pipe(
@@ -113,8 +115,9 @@ it.effect("production mcp layer lists worktree tools over http", () =>
           }),
         ),
         Layer.provide(PreviewAutomationBroker.layer),
-        Layer.provide(SqlitePersistenceMemory),
-        Layer.provide(StubServicesLive),
+        Layer.provide(PreviewBrowser.layer),
+        Layer.provide(SqlitePersistence.layerMemory),
+        Layer.provide(layerStubServices),
         Layer.build,
       );
 
@@ -222,6 +225,9 @@ it.effect("production mcp layer lists worktree tools over http", () =>
       // that later J5 milestones extend inside the fork-owned toolkit.
       expect(toolNames).toContain("send_message");
       expect(toolNames).toContain("list_participants");
+      expect(tools.find((tool) => tool.name === "send_message")?.description).toBe(
+        A2A_SEND_TOOL_DESCRIPTION,
+      );
       expect(toolNames.toSorted()).toEqual([
         "archive_crew",
         "clear_own_ask",
@@ -231,6 +237,8 @@ it.effect("production mcp layer lists worktree tools over http", () =>
         "device_list",
         "device_open",
         "device_screenshot",
+        "html_preview",
+        "html_render",
         "link_pull_request",
         "list_artifacts",
         "list_participants",
@@ -248,7 +256,10 @@ it.effect("production mcp layer lists worktree tools over http", () =>
         "playbook_reselect",
         "playbook_start",
         "preview_click",
+        "preview_dialog",
+        "preview_drag",
         "preview_evaluate",
+        "preview_hover",
         "preview_navigate",
         "preview_open",
         "preview_press",
@@ -256,14 +267,17 @@ it.effect("production mcp layer lists worktree tools over http", () =>
         "preview_recording_stop",
         "preview_resize",
         "preview_scroll",
+        "preview_select",
         "preview_set_appearance",
         "preview_snapshot",
         "preview_status",
         "preview_type",
+        "preview_upload",
         "preview_wait_for",
         "propose_crew",
         "read_artifact",
         "request_crew_member",
+        "request_secret",
         "run_scheduled_task_now",
         "schedule_task",
         "send_message",
@@ -300,7 +314,9 @@ it.effect("production mcp layer lists worktree tools over http", () =>
         "task_cancel",
         "task_status",
         "unlink_pull_request",
+        "unwatch_pull_request",
         "update_scheduled_task",
+        "watch_pull_request",
         "write_artifact",
       ]);
 

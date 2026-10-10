@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off - synchronous hashing for deterministic ids and digests.
 import * as NodeCrypto from "node:crypto";
 import {
   AgentPersonaId,
@@ -279,7 +280,7 @@ export function createAgentPersonaLibrary(storage?: {
       return yield* new AgentPersonaLibraryError({
         message: "Persona library storage is unavailable.",
       });
-    const { fs, path, stateDir } = storage;
+    const { path, stateDir } = storage;
     const { configured, folders } = yield* resolveFolders();
     const inventory = [];
     for (const folder of folders) {

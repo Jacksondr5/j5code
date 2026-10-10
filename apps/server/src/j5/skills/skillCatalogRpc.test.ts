@@ -11,7 +11,7 @@ import { afterEach, beforeEach, vi } from "vite-plus/test";
 import { layerTest as configLayerTest } from "../../config.ts";
 import * as ProcessRunner from "../../processRunner.ts";
 import { layerTest as settingsLayerTest, ServerSettingsService } from "../../serverSettings.ts";
-import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
+import { ProviderRegistry } from "../../provider/ProviderRegistry.ts";
 import { makeProviderRegistryMock } from "../../provider/testUtils/providerRegistryMock.ts";
 import * as Installer from "./skillCatalogInstaller.ts";
 import { makeSkillCatalogRpcHandlers } from "./skillCatalogRpc.ts";
@@ -96,7 +96,7 @@ const fixture = Effect.gen(function* () {
   ).pipe(Layer.provideMerge(NodeServices.layer));
   const { handlers, settings } = yield* Effect.gen(function* () {
     return {
-      handlers: yield* makeSkillCatalogRpcHandlers({ observe: (_, effect) => effect }),
+      handlers: yield* makeSkillCatalogRpcHandlers(),
       settings: yield* ServerSettingsService,
     };
   }).pipe(Effect.provide(layer));

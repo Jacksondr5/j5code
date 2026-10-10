@@ -18,8 +18,8 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import { HttpClient, HttpClientRequest } from "effect/unstable/http";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { HttpClient, HttpClientRequest } from "effect/http";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
 import { EffectOutboxV2 } from "../../orchestration-v2/EffectOutbox.ts";
@@ -404,6 +404,8 @@ export const live: Layer.Layer<
           }
           // A retry must observe the original steer even if its run has ended.
           // Re-dispatching the stable command as a queue request cannot prove delivery.
+          // Upstream prunes succeeded and cancelled effects after seven days; past that the
+          // steer row is gone and the accepted message in the projection decides below.
           const priorEffects = yield* outbox.listByCommandId(deliveryCommandId(input.messageId));
           const priorSteer = priorEffects.find(
             (effect) => effect.request.type === "provider-turn.steer",
