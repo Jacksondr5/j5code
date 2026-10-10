@@ -10,6 +10,7 @@ import * as Cause from "effect/Cause";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Scope from "effect/Scope";
@@ -230,7 +231,8 @@ it.effect("startup snapshots once before real migrations, and a fresh database n
   ),
 );
 
-it.effect("keeps the newest snapshots and removes the rest", () =>
+// Live: a partial file's age is measured against the real clock.
+it.live("keeps the newest snapshots and removes the rest", () =>
   withDatabasePath(({ dbPath, directory, snapshotAt }) =>
     Effect.gen(function* () {
       createDatabase(dbPath, 9, 4);
@@ -240,14 +242,23 @@ it.effect("keeps the newest snapshots and removes the rest", () =>
         NodeFS.writeFileSync(file, "an earlier snapshot");
         NodeFS.utimesSync(file, 1_000 + index, 1_000 + index);
       });
-      // Not this mechanism's files: an earlier release's snapshot, and an interrupted copy.
+      // Not this mechanism's file: an earlier release's snapshot.
       NodeFS.writeFileSync(`${directory}/statev2.pre-j5-031.sqlite`, "");
-      NodeFS.writeFileSync(`${snapshotAt(1, 1)}.1.partial`, "");
+      // Copies a killed process left behind, and one another process may still be writing.
+      const abandoned = [
+        `${snapshotAt(2, 1)}.7.a.partial`,
+        `${snapshotAt(2, 1)}.7.a.partial-journal`,
+      ];
+      abandoned.forEach((file) => {
+        NodeFS.writeFileSync(file, "");
+        NodeFS.utimesSync(file, 1_000, 1_000);
+      });
+      NodeFS.writeFileSync(`${snapshotAt(1, 1)}.8.b.partial`, "");
 
       yield* snapshotBeforeMigrations(dbPath, { ...build, keep: 3 });
 
       assert.deepStrictEqual(snapshotsIn(directory), [
-        "statev2.pre-migration-u001-j001.sqlite.1.partial",
+        "statev2.pre-migration-u001-j001.sqlite.8.b.partial",
         "statev2.pre-migration-u005-j002.sqlite",
         "statev2.pre-migration-u007-j003.sqlite",
         "statev2.pre-migration-u009-j004.sqlite",
@@ -361,6 +372,38 @@ it.effect("finishes while another connection keeps committing", () =>
       // Taken while the writer was running: some of its commits, not all of them.
       assert.isAbove(count("commits"), 0);
       assert.isBelow(count("commits"), commits);
+    }),
+  ),
+);
+
+it.effect("an interrupted snapshot leaves no partial copy behind", () =>
+  withDatabasePath(({ dbPath, directory }) =>
+    Effect.gen(function* () {
+      const database = new NodeSqlite.DatabaseSync(dbPath);
+      seedHistory(database, 9, 4);
+      // Large enough that the copy is still running when the interruption arrives.
+      database.exec(`
+        CREATE TABLE filler (id INTEGER PRIMARY KEY, body BLOB NOT NULL);
+        WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 10000)
+        INSERT INTO filler (body) SELECT randomblob(3500) FROM n;
+      `);
+      database.close();
+      const partials = () =>
+        NodeFS.readdirSync(directory).filter((name) => name.includes(".partial"));
+
+      const copying = yield* Deferred.make<void>();
+      const watcher = NodeFS.watch(directory, (_event, name) => {
+        if (name?.endsWith(".partial")) Deferred.doneUnsafe(copying, Effect.void);
+      });
+      yield* Effect.addFinalizer(() => Effect.sync(() => watcher.close()));
+      const fiber = yield* Effect.forkChild(snapshotBeforeMigrations(dbPath, build));
+      yield* Deferred.await(copying);
+      assert.isNotEmpty(partials());
+
+      const exit = yield* Fiber.interrupt(fiber).pipe(Effect.andThen(Fiber.await(fiber)));
+
+      assert.isTrue(Exit.hasInterrupts(exit));
+      assert.deepStrictEqual(partials(), []);
     }),
   ),
 );

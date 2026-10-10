@@ -2,8 +2,10 @@
 import * as NodeCrypto from "node:crypto";
 import * as NodeSqlite from "node:sqlite";
 
+import * as Clock from "effect/Clock";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
@@ -52,6 +54,13 @@ export interface SnapshotBeforeMigrationsOptions {
 }
 
 const snapshotSuffix = /\.pre-migration-u\d+-j\d+\.sqlite$/;
+// An unpublished copy, and the journal SQLite keeps beside it while writing.
+const partialSuffix = /\.pre-migration-u\d+-j\d+\.sqlite\..+\.partial(-journal)?$/;
+/**
+ * A copy takes seconds, so a partial file this old belongs to a process that was killed. A newer
+ * one may be another process's copy in progress and is left alone.
+ */
+const PARTIAL_STALE_AFTER_MS = Duration.toMillis(Duration.hours(1));
 
 /**
  * `statev2.sqlite` → `statev2.pre-migration-u<upstream id>-j<J5 ledger id>.sqlite`, beside the
@@ -87,7 +96,10 @@ const readRecordedMigrations = (filename: string): RecordedMigrations => {
   }
 };
 
-/** Keeps `justWritten` and the most recently written others, `keep` in all. */
+/**
+ * Keeps `justWritten` and the most recently written others, `keep` in all, and deletes the partial
+ * files that killed copies left behind.
+ */
 const removeOldSnapshots = Effect.fn("removeOldSnapshots")(function* (
   dbPath: string,
   justWritten: string,
@@ -97,24 +109,33 @@ const removeOldSnapshots = Effect.fn("removeOldSnapshots")(function* (
   const path = yield* Path.Path;
   const directory = path.dirname(dbPath);
   const prefix = `${path.basename(dbPath, ".sqlite")}.pre-migration-`;
-  const others = (yield* fs.readDirectory(directory))
-    .filter((name) => name.startsWith(prefix) && snapshotSuffix.test(name))
-    .map((name) => path.join(directory, name))
-    .filter((file) => file !== justWritten);
-  const written = yield* Effect.forEach(others, (file) =>
-    fs.stat(file).pipe(
-      Effect.map((info) => ({
-        file,
-        at: Option.match(info.mtime, { onNone: () => 0, onSome: (time) => time.getTime() }),
-      })),
-    ),
+  const names = (yield* fs.readDirectory(directory)).filter((name) => name.startsWith(prefix));
+  const writtenAt = (names: ReadonlyArray<string>) =>
+    Effect.forEach(names, (name) => {
+      const file = path.join(directory, name);
+      return fs.stat(file).pipe(
+        Effect.map((info) => ({
+          file,
+          at: Option.match(info.mtime, { onNone: () => 0, onSome: (time) => time.getTime() }),
+        })),
+      );
+    });
+  const snapshots = (yield* writtenAt(names.filter((name) => snapshotSuffix.test(name)))).filter(
+    ({ file }) => file !== justWritten,
   );
-  const expired = written
+  const expired = snapshots
     .toSorted((left, right) => right.at - left.at)
     .slice(Math.max(0, keep - 1));
   for (const { file } of expired) {
     yield* fs.remove(file);
     yield* Effect.logInfo("Removed an old pre-migration snapshot", { snapshotPath: file });
+  }
+  const staleBefore = (yield* Clock.currentTimeMillis) - PARTIAL_STALE_AFTER_MS;
+  const partials = yield* writtenAt(names.filter((name) => partialSuffix.test(name)));
+  for (const { file, at } of partials) {
+    if (at >= staleBefore) continue;
+    yield* fs.remove(file, { force: true });
+    yield* Effect.logInfo("Removed an interrupted pre-migration snapshot", { partialPath: file });
   }
 });
 
@@ -129,6 +150,8 @@ const removeOldSnapshots = Effect.fn("removeOldSnapshots")(function* (
  * It is published only if it still records the same migrations, so a copy taken after another
  * process already migrated never replaces a real snapshot. It replaces an older snapshot of the
  * same name, and the oldest snapshots beyond `MIGRATION_SNAPSHOTS_KEPT` are then deleted.
+ *
+ * Interrupting it waits for the copy in progress, which cannot be abandoned, then removes it.
  */
 export const snapshotBeforeMigrations = Effect.fn("snapshotBeforeMigrations")(function* (
   dbPath: string,
@@ -167,6 +190,8 @@ export const snapshotBeforeMigrations = Effect.fn("snapshotBeforeMigrations")(fu
     newestKnown,
   });
   const [elapsed, published] = yield* Effect.gen(function* () {
+    // Uninterruptible: the copy keeps writing after its promise is abandoned, so the file can
+    // only be removed once the copy has finished.
     yield* Effect.tryPromise({
       try: async () => {
         const database = new NodeSqlite.DatabaseSync(dbPath, { readOnly: true });
@@ -179,7 +204,7 @@ export const snapshotBeforeMigrations = Effect.fn("snapshotBeforeMigrations")(fu
         }
       },
       catch: fail,
-    });
+    }).pipe(Effect.uninterruptible);
     const copied = yield* Effect.try({
       try: () => readRecordedMigrations(partialPath),
       catch: fail,
@@ -191,7 +216,11 @@ export const snapshotBeforeMigrations = Effect.fn("snapshotBeforeMigrations")(fu
     yield* fs.rename(partialPath, snapshotPath).pipe(Effect.mapError(fail));
     return true;
   }).pipe(
-    Effect.tapError(() => fs.remove(partialPath, { force: true }).pipe(Effect.ignore)),
+    Effect.onExit((exit) =>
+      Exit.isSuccess(exit)
+        ? Effect.void
+        : fs.remove(partialPath, { force: true }).pipe(Effect.ignore),
+    ),
     Effect.timed,
   );
   yield* Effect.logInfo(
