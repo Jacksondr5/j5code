@@ -40,6 +40,7 @@ How J5 advances to a new upstream T3 Code. FORK.md holds the rules this depends 
 - Set `J5_UPSTREAM_T3_CODE_VERSION` to the upstream version being pinned (FORK.md case 59).
 - Typecheck every package, including the root `scripts` project, to zero errors. Run the full suites for server, web, client-runtime, shared, contracts, mobile and desktop.
 - Rehearse migrations through the production startup path (`layerConfig`), including the `statev2.sqlite` copy. Check a second boot and J5 table integrity.
+- The release executable embeds its own Node (`SEA_NODE_VERSION` in `apps/server/vite.config.ts`), newer than the `.nvmrc` one tests run on, and the two differ in `node:sqlite`. `J5 Release` runs the database startup tests on the embedded version; run them on it locally too when either version changes (`fnm exec --using <version> … vp test run src/j5/persistence src/persistence` from `apps/server`).
 - **Never touch the live install.** Run service tests with `HOME` and `XDG_CONFIG_HOME` pointed at a temp directory, and check that the live units' hashes are unchanged afterwards. `~/.j5code/userdata` is read-only.
 - Update FORK.md (cases, patches, pin log), BRANDING.md, the register, the watchlist, and the user migration guide if install or data changes.
 
