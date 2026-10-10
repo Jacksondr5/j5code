@@ -34,6 +34,13 @@ Read from the tree at `ff34d7067e`.
 - **It is done on the server.** The server puts each person's own value into the thread list it already sends, and takes the "visited" and "mark unread" commands for that person. The clients are not changed, so every client, including an older one and mobile, gets it, and a person's devices keep agreeing through the feed that already keeps them in step. Not sized.
 - **Considered and not taken**: following upstream and accepting the shared marker; and giving guests no read state at all, which is cheap and leaves collaborators with no unread signal and a server with several members unsolved.
 
+## Rulings: the summary
+
+- **A small, cheap model writes it**, separate from the thread's agent. It reads the stretch the person missed and starts from facts the server has measured, so the summary rests on events and not on an agent's memory.
+- **Not the thread's own agent.** That would spend a turn of an expensive model, add the question and answer to the agent's conversation, wait for the agent to be idle, and get an answer from memory.
+- **Which model is a setting of its own**, beside the ones upstream has for the text helper and for writing commits and pull requests.
+- **The cost is in upstream's code.** The text helper needs a fifth job, in its service and in each provider's implementation, about eight upstream-owned files, and the setting is in upstream's settings. Not sized, and a candidate to offer upstream.
+
 ## Still open
 
-Who writes the summary, how wide it reaches (one thread, or a Captain and everything beneath it), and which model does the writing.
+How wide a summary reaches: one thread, or a Captain and everything beneath it.
