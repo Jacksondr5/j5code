@@ -1,5 +1,5 @@
+import { useAtomValue } from "@effect/atom-react";
 import {
-  AuthOrchestrationOperateScope,
   DEFAULT_SERVER_SETTINGS,
   type EnvironmentId,
   type SkillCatalogApplyResult,
@@ -49,7 +49,6 @@ import { useSettingsScopeEnvironments } from "../settingsScopeEnvironment";
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { useEnvironmentScope } from "../../state/session";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { openCommandPalette } from "../../commandPaletteBus";
 
@@ -189,7 +188,9 @@ export function SkillCatalogPanel({ environmentId }: { readonly environmentId: E
   );
 
   const [busy, setBusy] = useState(false);
-  const canOperate = useEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
+  const canOperate = useAtomValue(
+    skillCatalogEnvironment.applyGroups.permissionAtom(environmentId),
+  );
   const [notice, setNotice] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [applyFailure, setApplyFailure] = useState<ApplyFailure | null>(null);

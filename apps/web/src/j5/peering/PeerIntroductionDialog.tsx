@@ -1,4 +1,5 @@
-import { AuthAccessWriteScope, type EnvironmentId } from "@t3tools/contracts";
+import { useAtomValue } from "@effect/atom-react";
+import type { EnvironmentId } from "@t3tools/contracts";
 import {
   introducePeers,
   introducePollingPeer,
@@ -45,8 +46,7 @@ import {
   useEnvironments,
 } from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";
-import { useEnvironmentScope } from "../../state/session";
-import { peersQueryAtom } from "../state";
+import { j5Environment, peersQueryAtom } from "../state";
 import {
   noRouteMessage,
   peeringServerOf,
@@ -98,7 +98,7 @@ export function PeerIntroductionDialog({
   const other = candidates.find((environment) => environment.environmentId === otherId) ?? null;
   const primaryBaseUrl = useEnvironmentHttpBaseUrl(primaryEnvironmentId);
   const otherBaseUrl = useEnvironmentHttpBaseUrl(otherId);
-  const otherCanWriteAccess = useEnvironmentScope(otherId, AuthAccessWriteScope);
+  const otherCanWriteAccess = useAtomValue(j5Environment.addPeer.permissionAtom(otherId));
 
   const local = useMemo(() => (primary === null ? null : peeringServerOf(primary)), [primary]);
   const remote = useMemo(() => (other === null ? null : peeringServerOf(other)), [other]);
