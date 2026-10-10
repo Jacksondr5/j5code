@@ -142,7 +142,7 @@ prefix, and **outbound A2A** appears as `tool_use` blocks for `mcp__traycer_a2a_
 - **None of that pre-transplant history renders in the J5 timeline** — it is model context only, per
   the honest line. The agent _remembers_ its A2A exchanges; J5 does not _display_ them.
 - **The history references tools that do not exist in J5's toolset.** J5 exposes `j5_send_message`,
-  `j5_list_participants`, `j5_spawn_agent`, `j5_stop_agent`, `archive_agent`, `j5_clear_own_ask` — not the
+  `j5_list_participants`, `j5_spawn_agent`, `j5_stop_agent`, `j5_clear_own_ask` — not the
   `mcp__traycer_a2a__*` or `traycer_*` tools the transcript is full of. **Resuming a session whose
   history contains those dead tool_use blocks works with no API error** — proven in the Stage-1
   live run (the resumed session was dense with `mcp__traycer_a2a__traycer_send_message` blocks and
@@ -161,7 +161,7 @@ before any real work, so the agent re-maps its tools before it acts. Template:
 >    `traycer_create_agent`, `traycer_get_transcript`, every `mcp__traycer_a2a__*`) **no longer
 >    exist**. Your A2A surface is now: `j5_list_participants` (your address book — call it first),
 >    `j5_send_message` (plain send / ask with `expect_reply` / reply with `exchange_id`), `j5_spawn_agent`,
->    `j5_stop_agent`, `archive_agent`, `j5_clear_own_ask`. Do not call any `traycer_*` tool.
+>    `j5_stop_agent`, `j5_clear_own_ask`. Do not call any `traycer_*` tool.
 > 3. **The human is reached through the inbox** — `j5_send_message` to the human participant (with
 >    `urgency` when it is an ask), not a Traycer channel. **Until issue #44 lands, a message a person
 >    must SEE is an ask (`expect_reply` + `urgency`); a plain message to a person is ledger-only and

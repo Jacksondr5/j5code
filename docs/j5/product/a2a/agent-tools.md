@@ -289,8 +289,8 @@ queued behind it. Interrupted and cancelled runs are not finishes: `j5_stop_crew
 they can be briefed again, and nothing is reported then. Ids
 derive from the run, so a redelivered event cannot post twice. Read-only Codex and Claude personas have `j5_write_artifact` pre-approved for this reason, and `delegate_task` with `task_status` and `task_cancel` beside it, because a Crew member refused `j5_spawn_agent` is sent to provider-native Subagents and a verb the sandbox then rejects is no way out:
 handoff artifacts live in application storage, never in the sandboxed workspace. (Withdrawn on 2026-09-14:
-the 2026-09-10 `deliver_artifact` verb, its ledger table, and the crew-only `j5_read_artifact` and
-`j5_list_artifacts`, which collided with the project artifact toolkit's names.)
+the 2026-09-10 `deliver_artifact` verb, its ledger table, and the crew-only `read_artifact` and
+`list_artifacts` of that time, which collided with the project artifact toolkit's names.)
 
 ### `j5_stop_crew`
 
