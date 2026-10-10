@@ -1,0 +1,39 @@
+---
+title: "Catch-up session (2026-10-10)"
+kind: record
+---
+
+# Catch-up session (2026-10-10)
+
+Jackson and an agent worked through a "what happened since I last looked" feature for a thread. This record holds the rulings. They are proposals until a definition carries them, and the change to upstream's read marker needs an entry in the [register of divergences](../product/upstream.md) when it is built. Nothing here is built.
+
+## What prompted it
+
+A lot can happen in a thread between two looks at it. Agents messaging each other make it worse, because they produce traffic no person asked for. Several people on one thread make it worse again: each person has missed a different stretch.
+
+## Where the code stood
+
+Read from the tree at `ff34d7067e`.
+
+- **Upstream keeps one read marker per thread**, on the server: when the thread was last opened. Its own comment says the value is shared across every device connected to the server, so that one person's devices agree.
+- **That marker drives the sidebar.** A thread shows "Completed" when its latest run finished after the marker. "Mark unread" rewinds the marker, and clearing a thread's "Woke" state moves it forward.
+- **Nothing says what happened**, only that something did.
+- **The helper that writes thread titles and commit messages knows four fixed jobs.** It has no general "write text from this" job, and each provider implements the four separately.
+
+## Rulings: the pointers
+
+- **Two pointers per person per thread.** One is the read marker: opened up to here. The other is J5's: caught up to here.
+- **The caught-up pointer moves in two ways**: when the person sends a message in the thread, and when they are given a summary. Sending a message shows the person knew the state of things at that point.
+- **Catching up is a button in the thread.** It is offered when there is activity after the person's caught-up pointer. It asks nothing of a person who does not press it. It stays hidden when only a little has arrived; how little is left to trying it.
+- **Being given a summary moves both pointers.** The read marker has in any case moved, because the person is in the thread.
+
+## Rulings: the read marker
+
+- **The read marker becomes one per person.** Jackson: it is bad if a person's "last read" is moved by someone else. With one marker for everyone, one person opening a thread clears its "Completed" state for the others, and one person marking it unread marks it unread for all.
+- **This changes what upstream's product does**, and is a divergence. A person's own devices still agree with each other, which is what upstream's marker is for. A server with one person behaves as upstream's does.
+- **It is done on the server.** The server puts each person's own value into the thread list it already sends, and takes the "visited" and "mark unread" commands for that person. The clients are not changed, so every client, including an older one and mobile, gets it, and a person's devices keep agreeing through the feed that already keeps them in step. Not sized.
+- **Considered and not taken**: following upstream and accepting the shared marker; and giving guests no read state at all, which is cheap and leaves collaborators with no unread signal and a server with several members unsolved.
+
+## Still open
+
+Who writes the summary, how wide it reaches (one thread, or a Captain and everything beneath it), and which model does the writing.
