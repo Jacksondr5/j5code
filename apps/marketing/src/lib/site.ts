@@ -3,10 +3,14 @@ export const GITHUB_RELEASES_URL = `${GITHUB_REPOSITORY_URL}/releases`;
 export const LICENSE_URL = `${GITHUB_REPOSITORY_URL}/blob/j5/main/LICENSE`;
 export const PRODUCT_DOCS_URL = `${GITHUB_REPOSITORY_URL}/tree/j5/main/docs/j5/product`;
 export const FORK_DISCIPLINE_URL = `${GITHUB_REPOSITORY_URL}/blob/j5/main/FORK.md`;
+/** The register of places J5 deliberately differs from upstream's product. */
+export const DIVERGENCES_URL = `${GITHUB_REPOSITORY_URL}/blob/j5/main/docs/j5/product/upstream.md`;
 
 export const UPSTREAM_REPOSITORY_URL = "https://github.com/pingdotgg/t3code";
-/** Upstream's long-running orchestrator rewrite, the branch the fork tracks. */
-export const UPSTREAM_V2_PR_URL = "https://github.com/pingdotgg/t3code/pull/2829";
+export const UPSTREAM_MAIN_URL = `${UPSTREAM_REPOSITORY_URL}/tree/main`;
+/** Upstream's orchestrator rewrite, the branch stable releases tracked until it merged to main. */
+export const UPSTREAM_V2_BRANCH = "t3code/codex-turn-mapping";
+export const UPSTREAM_V2_PR_URL = `${UPSTREAM_REPOSITORY_URL}/pull/2829`;
 export const T3_SITE_URL = "https://t3.codes";
 
 export const SITE_URL = "https://j5.codes";
