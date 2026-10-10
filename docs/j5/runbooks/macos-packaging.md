@@ -106,17 +106,85 @@ For a preview, to test installs and updates from a branch before it merges:
 A preview is a GitHub pre-release and is never marked latest. The stable installer URL,
 `j5 update`, and desktop updates ignore it.
 
+### Nightly
+
+A nightly is `j5/main` as it stands, published for daily use ahead of a stable release. Nothing is
+committed for one: the version is stamped into the four manifests during the build.
+
+To publish one, run `J5 Nightly` on `j5/main`. It takes no inputs. It names the build
+`<x.y.z>-nightly.<yyyymmdd>.<run>`, where `x.y.z` is the next patch after the version `j5/main`
+commits, then runs the signed macOS build and the release for that commit. The result is a GitHub
+pre-release, never marked latest, tagged `v<version>`. GitHub can refuse to let the
+workflow tag a commit that is no longer a branch head, so if `j5/main` moves during the run and the
+release job fails creating the release, run `J5 Nightly` again.
+
+To move a machine to nightlies:
+
+- **Fresh server:**
+  `curl -fsSL https://github.com/Jacksondr5/j5code/releases/latest/download/install.sh | T3CODE_CHANNEL=nightly sh`.
+- **Installed server:** `j5 update --channel nightly`. A server on a nightly follows nightlies, so
+  later a plain `j5 update` takes the next one.
+- **Mac app:** **Settings → General → Update track → Nightly**. The app then updates itself to the
+  nightly build in place: one install, one profile and one database, as with upstream's.
+
+To return to stable:
+
+- **Server:** `j5 update --channel stable`, adding `--allow-downgrade` while the newest stable is
+  older than the nightly.
+- **Mac app:** **Update track → Stable**.
+
+Start with one server and one Mac. A nightly that changes the client-server or peer protocol splits
+a mixed fleet until every machine has moved.
+
+### Going back to an older build
+
+The policy is to roll forward: a broken nightly is fixed by the next nightly. Returning to stable
+as above is safe only while the stable build knows every migration the nightly ran, which holds
+when that stable was cut from the same commit or a later one. An older build starts against a
+newer database without complaint and fails later, at query time. So going back to a build from
+before a migration needs the database from before that migration too.
+
+The server keeps that database. Before a new version runs any migration it copies the database to
+`~/.j5code/userdata/statev2.pre-migration-u<upstream>-j<j5>.sqlite`, named for the newest upstream
+and J5 migrations the database had recorded, and keeps the three most recent copies. Everything
+written after the copy is lost by restoring it. In an emergency:
+
+1. Stop everything that has the database open: quit the Mac app, and stop the server
+   (`systemctl --user stop j5code.service` on Linux,
+   `launchctl bootout gui/$(id -u)/codes.jackson.j5code.service` on macOS).
+2. Move the newer database aside and the snapshot into its place:
+
+   ```sh
+   cd ~/.j5code/userdata
+   mkdir -p ../db-aside
+   mv statev2.sqlite statev2.sqlite-wal statev2.sqlite-shm ../db-aside/ 2>/dev/null
+   mv statev2.pre-migration-u<upstream>-j<j5>.sqlite statev2.sqlite
+   ```
+
+3. Install the older build, which starts the server on it: `j5 update <stable> --allow-downgrade`.
+   On the Mac, set **Update track → Stable**, or install the stable DMG.
+
+Restore before the older build starts, in that order: an older build must never run against the
+newer database. If the nightly starts again first, it copies and migrates again, which costs only
+the time to repeat step 2.
+
+## What the workflows do
+
 `J5 Release` publishes one GitHub Release, tagged `v<version>` at the build's commit, containing:
 
-- the signed and notarized Apple Silicon DMG and ZIP from the selected build run, with their
-  blockmaps and `latest-mac.yml` (a preview build has no update feed and emits no `latest-mac.yml`);
+- the signed and notarized Apple Silicon DMG and ZIP, with their blockmaps and the update feed for
+  the channel: `latest-mac.yml` for a stable release, `nightly-mac.yml` for a nightly, and none
+  for a preview, which no install updates to;
 - self-contained CLI archives `t3-<version>-darwin-arm64.tar.gz` (Developer ID signed and notarized)
   and `t3-<version>-linux-x64.tar.gz`, built and smoke-tested in the release run from the same
   commit;
 - `install.sh` and `SHA256SUMS` over the archives and the installer.
 
-Its resolve job reads the version from the build commit's four manifests, which must agree on one
-stable or preview version of at least 0.0.44 (0.0.43 and earlier were npm releases). If a release for that
+Run by hand with a build's run ID, its resolve job reads the version from the build commit's four
+manifests, which must agree. Called by `J5 Nightly`, it is given the commit and the version, stamps
+the version before building the CLI archives, and publishes the desktop build made earlier in the
+same run. Either way the version must be stable, preview or nightly, and at least 0.0.44 (0.0.43
+and earlier were npm releases). If a release for that
 version already exists at a different commit, the run fails: bump the version and build again. If
 it is already published from the same commit with `SHA256SUMS` attached, the run does nothing. The
 workflow uses GitHub-hosted runners and does not deploy relay or Vercel services.
@@ -129,9 +197,11 @@ link beside it so a server from before the rename can run the update check that 
 `j5 update`.
 
 `J5 Signed macOS Build` builds an Apple Silicon DMG and ZIP on a GitHub-hosted macOS runner,
-signs with Developer ID, and notarizes the app. It verifies the mounted app's identity, signature,
-notarization ticket, and Gatekeeper assessment before uploading artifacts for 30 days. It does not
-create a GitHub Release. The workflow uses the Apple signing secrets and
+signs with Developer ID, and notarizes the app. It verifies the mounted app's identity (J5 Code, or
+J5 Code (Nightly) for a nightly version), signature, notarization ticket, and Gatekeeper assessment
+before uploading artifacts for 30 days. It does not create a GitHub Release. Run by hand it builds
+the branch it was started on at the version that branch commits; `J5 Nightly` calls it with a
+commit and a version to stamp. The workflow uses the Apple signing secrets and
 `APPLE_TEAM_ID` repository variable; it converts the P12 export to a Keychain-compatible format.
 Clerk passkey provisioning is only required when Clerk/passkey configuration is supplied.
 
