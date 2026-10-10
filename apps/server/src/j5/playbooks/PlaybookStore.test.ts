@@ -25,6 +25,7 @@ import { parse, stringify } from "yaml";
 import { ServerConfig } from "../../config.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { ProjectService } from "../../project/ProjectService.ts";
+import { AnalyticsService } from "../../telemetry/AnalyticsService.ts";
 import { runJ5A2AMigrations } from "../a2a/Migrations.ts";
 import { makePlaybookStore, type PlaybookMutation } from "./PlaybookStore.ts";
 import { makePlaybookRpcHandlers, PLAYBOOK_RPC_SCOPES } from "./playbookRpc.ts";
@@ -326,6 +327,63 @@ it.effect("retains sequential runs and permits a new run after completion or can
       )).code,
       "run_terminal",
     );
+  }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
+);
+
+it.effect("reports each run's start and its end once, with how far it got", () =>
+  Effect.gen(function* () {
+    const recorded: Array<Readonly<Record<string, unknown>>> = [];
+    yield* Effect.gen(function* () {
+      const { store, workspaceRoot } = yield* makeFixture;
+      const finished = yield* store.start(owner, workspaceRoot, "demo", "start-a");
+      // A retried start is the same run.
+      yield* store.start(owner, workspaceRoot, "demo", "start-a");
+      yield* store.mutate(owner, {
+        operation: "next",
+        runId: finished.runId,
+        expectedStepId: "research",
+        client_request_id: "next-a",
+      });
+      const complete = {
+        operation: "complete",
+        runId: finished.runId,
+        expectedStepId: "implement",
+        client_request_id: "complete-a",
+      } as const;
+      yield* store.mutate(owner, complete);
+      yield* store.mutate(owner, complete);
+      const abandoned = yield* store.start(owner, workspaceRoot, "demo", "start-b");
+      yield* store.mutate(owner, {
+        operation: "cancel",
+        runId: abandoned.runId,
+        client_request_id: "cancel-b",
+      });
+    }).pipe(
+      Effect.provide(
+        Layer.succeed(
+          AnalyticsService,
+          AnalyticsService.of({
+            record: (event, properties = {}) =>
+              Effect.sync(() => void recorded.push({ event, ...properties })),
+            flush: Effect.void,
+          }),
+        ),
+      ),
+    );
+    const started = {
+      event: "j5.playbook.run.started",
+      stepCount: 3,
+      stepsWithPersona: 0,
+      crewBound: false,
+    };
+    const ended = { event: "j5.playbook.run.finished", cause: "agent", crewBound: false };
+    assert.deepStrictEqual(recorded, [
+      started,
+      // Completed from the second of three steps: moving between steps records nothing.
+      { ...ended, outcome: "completed", stepCount: 3, position: 2, durationMs: 0 },
+      started,
+      { ...ended, outcome: "cancelled", stepCount: 3, position: 1, durationMs: 0 },
+    ]);
   }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
 );
 

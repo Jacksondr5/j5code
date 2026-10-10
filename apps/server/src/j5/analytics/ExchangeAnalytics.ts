@@ -9,10 +9,8 @@
  * @module ExchangeAnalytics
  */
 import * as Context from "effect/Context";
-import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -29,6 +27,7 @@ import {
   Urgency,
 } from "../a2a/contracts.ts";
 import { A2ALedger } from "../a2a/LedgerService.ts";
+import { durationMsBetween } from "./recorder.ts";
 
 const ExchangeRow = Schema.Struct({
   sender_id: ParticipantId,
@@ -87,21 +86,12 @@ const makeLayer = (daemon: boolean) =>
         `;
         if (rows[0] === undefined) return;
         const exchange = yield* decodeExchangeRow(rows[0]);
-        const opened = DateTime.make(exchange.created_at);
-        const ended = DateTime.make(event.createdAt);
         yield* analytics.record("j5.exchange.closed", {
           ...(yield* outcomeOf(event)),
           senderKind: participantKind(exchange.sender_id),
           receiverKind: participantKind(exchange.receiver_id),
           urgency: exchange.urgency ?? "none",
-          ...(Option.isSome(opened) && Option.isSome(ended)
-            ? {
-                durationMs: Math.max(
-                  0,
-                  DateTime.toEpochMillis(ended.value) - DateTime.toEpochMillis(opened.value),
-                ),
-              }
-            : {}),
+          ...durationMsBetween(exchange.created_at, event.createdAt),
         });
       });
 

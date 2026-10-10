@@ -19,6 +19,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
@@ -27,6 +28,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import { parseDocument } from "yaml";
 
 import { makeAgentPersonaLibrary, personaCatalogProblem } from "../agents/agentPersonaLibrary.ts";
+import { durationMsBetween, j5AnalyticsRecorder } from "../analytics/recorder.ts";
 
 const isPlaybookError = Schema.is(PlaybookError);
 // Any file stem that stays inside the playbook directory; such files are listed and deletable
@@ -156,6 +158,7 @@ export const makePlaybookStore = Effect.gen(function* () {
   // Serialize definition edits and run mutations within this environment.
   const permit = yield* Semaphore.make(1);
   const now = DateTime.now.pipe(Effect.map(DateTime.formatIso));
+  const recordAnalytics = yield* j5AnalyticsRecorder;
 
   /** `unreadable` replaces the default read-failure message, which names the file's absolute path. */
   const readDefinitionDocument = Effect.fn("PlaybookStore.readDefinitionDocument")(
@@ -543,9 +546,40 @@ export const makePlaybookStore = Effect.gen(function* () {
           return { run, replayed: false };
         }),
       );
-      return result.replayed ? yield* view(result.run, true) : present(result.run, definition);
+      if (result.replayed) return yield* view(result.run, true);
+      yield* recordAnalytics("j5.playbook.run.started", {
+        stepCount: definition.steps.length,
+        stepsWithPersona: definition.steps.filter((step) => step.persona !== undefined).length,
+        crewBound: crewInstanceId !== null,
+      });
+      return present(result.run, definition);
     }).pipe(Effect.tap(notifyChange), permit.withPermits(1));
   }, Effect.mapError(storageError));
+
+  /**
+   * `j5.playbook.run.finished`, recorded once a run's end has committed. How far it got is read
+   * from the live file, and is left out when the file can no longer be read.
+   */
+  const recordFinished = Effect.fn("PlaybookStore.recordFinished")(function* (
+    run: PlaybookRun,
+    cause: "agent" | "crew_archive",
+    known: PlaybookDefinition | null,
+  ) {
+    const definition =
+      known ?? Option.getOrNull(yield* Effect.option(readDefinition(run.definitionPath)));
+    const position =
+      definition === null
+        ? -1
+        : definition.steps.findIndex((step) => step.id === run.currentStepId);
+    yield* recordAnalytics("j5.playbook.run.finished", {
+      outcome: run.status,
+      cause,
+      crewBound: run.crewInstanceId !== undefined && run.crewInstanceId !== null,
+      ...(definition === null ? {} : { stepCount: definition.steps.length }),
+      ...(position < 0 ? {} : { position: position + 1 }),
+      ...durationMsBetween(run.createdAt, run.updatedAt),
+    });
+  });
 
   const mutate = Effect.fn("PlaybookStore.mutate")(function* (
     owner: ThreadId,
@@ -623,6 +657,8 @@ export const makePlaybookStore = Effect.gen(function* () {
           return { run: { ...run, currentStepId, status, updatedAt }, replayed: false };
         }),
       );
+      if (!result.replayed && result.run.status !== "active")
+        yield* recordFinished(result.run, "agent", definition);
       return definition && !result.replayed
         ? present(result.run, definition)
         : yield* view(result.run, result.replayed);
@@ -756,18 +792,24 @@ export const makePlaybookStore = Effect.gen(function* () {
       .withTransaction(
         Effect.gen(function* () {
           const timestamp = yield* now;
-          const rows = yield* sql<{ run_id: string }>`UPDATE j5_playbook_run
+          const rows = yield* sql<RunRow>`UPDATE j5_playbook_run
             SET status = 'cancelled', updated_at = ${timestamp}
             WHERE crew_instance_id = ${crewInstanceId} AND status = 'active'
-            RETURNING run_id`;
+            RETURNING *`;
           for (const { run_id } of rows) yield* skipPending(run_id, timestamp);
-          return rows.map(({ run_id }) => run_id);
+          return rows.map(fromRow);
         }),
       )
       .pipe(
-        Effect.tap((runIds) =>
-          runIds.length > 0 ? SubscriptionRef.update(revision, (value) => value + 1) : Effect.void,
+        Effect.tap((runs) =>
+          runs.length > 0 ? SubscriptionRef.update(revision, (value) => value + 1) : Effect.void,
         ),
+        Effect.tap((runs) =>
+          Effect.forEach(runs, (run) => recordFinished(run, "crew_archive", null), {
+            discard: true,
+          }),
+        ),
+        Effect.map((runs) => runs.map((run) => run.runId)),
         permit.withPermits(1),
       );
   }, Effect.mapError(storageError));
