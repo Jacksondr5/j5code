@@ -387,6 +387,8 @@ migrations after upstream migrations.
 
 62. A message from another participant holds a merged thread open (register D30, Jackson's 2026-10-09 decision). Upstream's `pullRequestSettles` in `ThreadSettlementService.ts` settles a thread on a merged or closed pull request unless `latestUserAuthoredMessageAt` is later, and that stamp counts only `createdBy: "user"` messages. J5-owned `apps/server/src/j5/settlementActivity.ts` holds the wider rule: a `role: "user"` message also counts when it is `createdBy: "agent"` with `creationSource: "mcp"` and no `scheduledTaskId`. `apps/server/src/orchestration-v2/ProjectionStore.ts` carries the import and two edits, both in `getSettlementCandidates`: the SQL layer's `latest_user_authored_message_at` subquery includes `SETTLEMENT_ACTIVITY_MESSAGE_SQL` in place of upstream's `createdBy` condition, and the memory layer calls `latestSettlementActivityMessageAt`. `ThreadSettlementService.ts` is not edited, so its comment on `pullRequestSettles` still describes upstream's rule. The shell's stamp of the same name is upstream's, because the client sorts the Working section by it. `apps/server/src/j5/settlementActivity.test.ts` covers both store layers, source by source. On a pin advance, check that settlement still reads the stamp only from `getSettlementCandidates`, that upstream's server wakes are still `creationSource: "server"` or `"provider"`, and that no new upstream sender writes `"agent"` with `"mcp"` for something that is not an agent speaking to a thread. One existing sender is an agent speaking to itself: `t3_worktree_handoff`'s `continuationPrompt` (`apps/server/src/mcp/WorktreeMcpService.ts`) is queued into the caller's own thread with those markers, so it counts. Messages stored as `createdBy: "user"` with `creationSource: "server"` (the usage-limit resume and async-answer replies) count upstream and here.
 
+63. Dev usage data stays out of the real PostHog project, and a tester can label their events ([#513](https://github.com/Jacksondr5/j5code/issues/513), register D27, Jackson's 2026-10-10 decision). `scripts/dev-runner.ts` `createDevRunnerEnv` sets `T3CODE_POSTHOG_KEY` from J5-owned `scripts/lib/j5-dev-telemetry.ts`: the "J5 Code Dev" project's token, unless the developer's shell or `.env` already sets one. `apps/server/src/telemetry/AnalyticsService.ts` reads an optional `J5CODE_TELEMETRY_TAG` and sends its trimmed value as a `telemetryTag` property on every event; unset or blank sends nothing. The identifier and the released default token (branding, B) are unchanged. Proofs: `scripts/dev-runner.test.ts`, "reports usage to the dev PostHog project unless one is already chosen", and the tag assertion in `AnalyticsService.test.ts`. On every rebase, verify both appends survive and that the default token in `AnalyticsService.ts` is still the real project's.
+
 ## Pin and upstream advance runbook
 
 Current pin: `29980a31409234b676f97bd477c4e46fdb61a929`, from upstream `main` (frozen 2026-10-08). The previous pin was `67a2be0fdbee7afb64b691f147ed286a108c706b`, from upstream's V2 branch `t3code/codex-turn-mapping`.
@@ -684,7 +686,7 @@ explicitly marked.
 | `apps/server/src/provider/EventNdjsonLogger.ts`                       | N       | 36                                             |
 | `apps/server/src/server.ts`                                           | A       | 5, 9, MCP idle connection patch, 53            |
 | `apps/server/src/serviceLauncher.ts`                                  | R       | H, 50                                          |
-| `apps/server/src/telemetry/AnalyticsService.ts`                       | N       | B                                              |
+| `apps/server/src/telemetry/AnalyticsService.ts`                       | N       | B, 63                                          |
 | `apps/server/src/telemetry/Identify.ts`                               | R       | H                                              |
 | `apps/server/src/ws.ts`                                               | A       | 37, 42, 58, Role library, Saved-agent mentions |
 | `apps/web/index.html`                                                 | R       | B                                              |
@@ -741,7 +743,7 @@ explicitly marked.
 | `scripts/build-desktop-artifact.test.ts`                              | A       | B, S, 50                                       |
 | `scripts/build-desktop-artifact.ts`                                   | R       | B, S, 50                                       |
 | `scripts/dev-runner.test.ts`                                          | R       | H                                              |
-| `scripts/dev-runner.ts`                                               | R       | H                                              |
+| `scripts/dev-runner.ts`                                               | R       | H, 63                                          |
 | `scripts/export-android-icons.ts`                                     | N       | B                                              |
 | `scripts/install.ps1`                                                 | N       | 40, 50                                         |
 | `scripts/install.sh`                                                  | N       | 40, 50, 52                                     |

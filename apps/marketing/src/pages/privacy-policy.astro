@@ -39,6 +39,10 @@ import { CONTACT_EMAIL } from "../lib/site";
     architecture, and the WSL distribution name if there is one.
   </p>
   <p>
+    If you set <code>J5CODE_TELEMETRY_TAG</code> in the server's environment, its value is sent with
+    every event. It is unset unless you set it.
+  </p>
+  <p>
     Events are tied to an identifier: a one-way hash of your Codex account ID, or of your Claude
     user ID if there is no Codex account, or of a random ID created on your machine if there is
     neither. The original ID is never sent. IP addresses are not stored.

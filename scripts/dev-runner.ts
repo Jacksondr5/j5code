@@ -20,6 +20,7 @@ import { Argument, Command, Flag } from "effect/cli";
 import { ChildProcess } from "effect/process";
 
 import { type DevShareError, shareDevServer, unshareDevServer } from "./lib/dev-share.ts";
+import { j5DevPostHogKey } from "./lib/j5-dev-telemetry.ts";
 import { loadRepoEnv } from "./lib/public-config.ts";
 
 Object.assign(process.env, loadRepoEnv());
@@ -322,6 +323,9 @@ export function createDevRunnerEnv({
         devUrl?.toString() ??
         `http://${isDesktopMode ? DESKTOP_DEV_LOOPBACK_HOST : "localhost"}:${webPort}`,
     };
+
+    // J5: a dev server's usage events go to the dev PostHog project (#513).
+    output.T3CODE_POSTHOG_KEY = j5DevPostHogKey(baseEnv);
 
     if (configuredBaseDir !== undefined) {
       output.J5CODE_HOME = resolvedBaseDir;

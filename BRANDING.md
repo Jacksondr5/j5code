@@ -197,6 +197,8 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
   `T3CODE_POSTHOG_KEY` in `apps/server/src/telemetry/AnalyticsService.ts` is J5's project token,
   not upstream's. Events, identifier, host and the `T3CODE_TELEMETRY_ENABLED=false` opt-out are
   upstream's, unchanged. Keep J5's token when an upstream advance touches that default.
+  Dev servers started by `scripts/dev-runner.ts` report to a second project, "J5 Code Dev"
+  (`scripts/lib/j5-dev-telemetry.ts`).
 
 ## 2026-09-06 verification boundary
 
