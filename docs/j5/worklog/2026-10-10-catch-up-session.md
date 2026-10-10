@@ -41,6 +41,10 @@ Read from the tree at `ff34d7067e`.
 - **Which model is a setting of its own**, beside the ones upstream has for the text helper and for writing commits and pull requests.
 - **The cost is in upstream's code.** The text helper needs a fifth job, in its service and in each provider's implementation, about eight upstream-owned files, and the setting is in upstream's settings. Not sized, and a candidate to offer upstream.
 
-## Still open
-
-How wide a summary reaches: one thread, or a Captain and everything beneath it.
+- **A summary covers the thread the person is in**, and no other. That conversation already holds every message its agent exchanged with other agents, so a Captain's summary covers what its seats reported. Reading every thread beneath it would be many times the text, and would paper over a seat that did something and never reported it.
+- **The measured state of each agent beneath the thread is among the starting facts**: working, idle, finished, waiting on a reply. A Captain's summary can say what its seats are doing without reading their threads.
+- **It starts from the person's last message in the thread.** Jackson's rule. The caught-up pointer decides whether the button is offered; the person's last message decides where the summary begins, so a summary stands on its own even when an earlier one covered part of the same stretch.
+- **It leads with what is new since the person last caught up**, and is briefer about the part an earlier summary covered. The model is given the whole stretch with the caught-up point marked; no earlier summary is stored.
+- **A person who has never written in the thread** gets a summary from their caught-up pointer, or from the start of the thread when they have none. That is a view guest, and anyone looking at an agent another agent started.
+- **A summary is private to the person who asked.** It is not added to the conversation, the agent does not see it, and other people on the thread do not see it.
+- **A guest can ask for one**, for a thread they can see. It spends the server owner's model budget, which was noted and accepted.
