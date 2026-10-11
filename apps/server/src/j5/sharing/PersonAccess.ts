@@ -37,9 +37,11 @@ export interface PersonGrant {
 }
 
 /**
- * The subject a guest's pairing link and sessions carry. It is a second, independent mark beside
- * the session's row in `j5_a2a_person_session`: a session that carries it and has no row is a
- * guest with no grants, never a member.
+ * The subject a guest's pairing link carries, which upstream copies onto every session made from
+ * it and which nothing a client sends can change. It is what marks a connection as a guest's;
+ * `j5_a2a_person_session` then says which guest. A marked session with no person recorded is a
+ * guest with no grants. A session without the mark is a member's own device and is never looked
+ * up, so members pay nothing for guests existing.
  */
 export const GUEST_SESSION_SUBJECT = "j5:guest";
 
@@ -100,9 +102,9 @@ export interface PersonAccessShape {
     readonly personId: ParticipantId;
   }) => Effect.Effect<void, PersonAccessStorageError | PersonNotFoundError>;
   /**
-   * The person a connection belongs to. `null` is a member's own device: every session paired
-   * before guests existed, and every one paired through upstream's own links. A session marked as
-   * a guest's that has no person is reported as a guest with no id, so it reaches nothing.
+   * The guest a connection belongs to, or `null` for a member's own device: every session that
+   * does not carry `GUEST_SESSION_SUBJECT`. A marked session with no person recorded is reported
+   * as a guest with no id, so it reaches nothing.
    */
   readonly sessionPerson: (
     session: SessionIdentity,
@@ -206,16 +208,16 @@ export const layer: Layer.Layer<PersonAccess, never, SqlClient.SqlClient> = Laye
       "j5.sharing.personAccess.sessionPerson",
     )(
       function* (session) {
+        if (session.subject !== GUEST_SESSION_SUBJECT) return null;
         const rows = yield* sql<PersonRow>`
-        SELECT person.person_id, person.kind, person.display_name
-        FROM j5_a2a_person_session AS bound
-        JOIN j5_a2a_human_person AS person ON person.person_id = bound.person_id
-        WHERE bound.session_id = ${session.sessionId}
-      `;
-        if (rows[0] !== undefined) return toPerson(rows[0]);
-        return session.subject === GUEST_SESSION_SUBJECT
+          SELECT person.person_id, person.kind, person.display_name
+          FROM j5_a2a_person_session AS bound
+          JOIN j5_a2a_human_person AS person ON person.person_id = bound.person_id
+          WHERE bound.session_id = ${session.sessionId} AND person.kind = 'guest'
+        `;
+        return rows[0] === undefined
           ? { kind: "guest" as const, personId: null }
-          : null;
+          : toPerson(rows[0]);
       },
       Effect.mapError(storage("read the person a session belongs to")),
     );
@@ -352,7 +354,7 @@ export const layer: Layer.Layer<PersonAccess, never, SqlClient.SqlClient> = Laye
       threadAccess: Effect.fn("j5.sharing.personAccess.threadAccess")(
         function* (session, threadId) {
           const person = yield* sessionPerson(session);
-          if (person === null || person.kind === "member") return "member";
+          if (person === null) return "member";
           if (person.personId === null) return "none";
           return highest((yield* threadLevels(person.personId, threadId)).map((row) => row.level));
         },
@@ -362,7 +364,7 @@ export const layer: Layer.Layer<PersonAccess, never, SqlClient.SqlClient> = Laye
       projectAccess: Effect.fn("j5.sharing.personAccess.projectAccess")(
         function* (session, projectId) {
           const person = yield* sessionPerson(session);
-          if (person === null || person.kind === "member") return "member";
+          if (person === null) return "member";
           if (person.personId === null) return "none";
           const rows = yield* sql<{ readonly level: GrantLevel }>`
           SELECT level
