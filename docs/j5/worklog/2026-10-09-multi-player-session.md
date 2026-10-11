@@ -114,7 +114,7 @@ This is the sketch the rulings were made against, not a plan.
 - **Sharing a thread shares all of it.** A newly added person sees the whole conversation from the start, and the share dialog says so before the sharer confirms. Hiding earlier history would be a promise J5 cannot keep for a collaborator, who can ask the agent what was said. A thread holding something that should not be shared is forked, or the shared work starts in a fresh thread.
 - **Removing a person's access removes the thread from their view.** Their messages stay in it under their name.
 
-Still open: whether a guest can edit or remove their own queued message.
+- **A guest can edit and remove their own queued messages, and nobody else's.** Ruled tentatively on 2026-10-10. If it proves a mess to build, the fallback is all or nothing: a guest gets either the same rights over the queue as a member or none.
 
 ## Not verified
 
