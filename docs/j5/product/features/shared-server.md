@@ -30,7 +30,7 @@ Two constraints are in force on everything built, because retrofitting multiple 
 
 **A grant** is what gives a guest their access. It names a person, a project or a thread, and a level. A guest can hold several, at different levels, and their access changes when a grant is added, changed or removed on the server; nothing is sent to the guest again. A grant on a thread covers that thread and the agents beneath it, its spawned agents and its Crew seats, and nothing the thread has merely exchanged messages with. A grant on a project covers every thread in it and the project's artifacts.
 
-**Two levels.** **View** lets a guest read. **Collaborate** lets a guest also write to the agent: send it messages, answer its approval prompts, and drive the thread's preview browser ([shared conversations](shared-conversations.md) defines what happens once they do). Neither level includes what belongs to the person running the server: a terminal, the file browser, git and pull request actions, the thread's model and access mode, archiving and forking, or any setting.
+**Two levels.** **View** lets a guest read. **Collaborate** lets a guest also write to the agent: send it messages, answer its prompts, and drive the thread's preview browser ([shared conversations](shared-conversations.md) defines what happens once they do). Neither level includes what belongs to the person running the server: a terminal, the file browser, git and pull request actions, the thread's model and access mode, archiving and forking, or any setting.
 
 **What a share promises.** A view grant is a boundary the server enforces: a guest who can view one thread can read nothing else. A collaborate grant is not a boundary. A person who can write to an agent can ask it to read any file, run any command or message any other agent, so the grant shapes what the guest sees and does not contain what they can cause. The product says this in plain words at the moment a share is made, and does not withhold useful things in order to look stricter than it is.
 
@@ -63,8 +63,8 @@ Doors deliberately left open and undesigned: addressing a _duty_ rather than a p
 
 ### Levels
 
-12. With a View grant a guest can read the conversation, including its agent-to-agent cards, the diffs and files the thread's work touched, and watch the thread's preview browser tabs; they can send nothing to the agent.
-13. With a Collaborate grant a guest can also send and queue messages, answer the agent's approval prompts, and open and drive preview browser tabs for the thread.
+12. With a View grant a guest can read the conversation, including its agent-to-agent cards, the diffs and files the thread's work touched, and watch the thread's preview browser tabs. They see the agent's prompts and how each was answered. They can send nothing to the agent and answer nothing.
+13. With a Collaborate grant a guest can also send and queue messages, answer the agent's question, approval and Crew roster prompts, and open and drive preview browser tabs for the thread.
 14. A guest at either level cannot open a terminal, browse or edit files directly, use git or pull request actions, change the thread's model or access mode, archive, fork or merge back a thread, or change any setting, provider, Persona or skill.
 15. A request from a guest for a thread, project or file outside their grants is refused by the server, whatever client sent it.
 16. A preview browser tab a guest opens holds no saved logins, and a guest cannot take control of a tab opened with saved logins.
