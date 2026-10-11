@@ -82,6 +82,14 @@ A signal can come from three sources: the platform measured it; the agent declar
 - **An event on an agent nobody is reading reaches the person through the Fleet page and the badge on its entry.** That is enough. The [Fleet page](../product/features/fleet-page.md) definition already says the badge counts agents with a measured problem.
 - **The middle feels unsolved because the Fleet page is half-built**, not because the product is wrong. It does not work quite right, and in many ways it sends no meaningful signal yet. Jackson: that is unfinished work, not a core product problem. The details were left for later.
 
+## Left open: the agent's side
+
+The session stopped here. Jackson: the thinking had drifted from what he knows he wants into what he was considering for the first time.
+
+- **Where an agent learns its place.** The [Roles](../product/features/roles.md) definition gives each Role a posture on the spectrum, set at spawn; it is not built. That treats an agent's place as a fixed property of its Role, which sits badly with the rulings above: the same Role can be started by a person or seated in a Crew, and an agent moves. The agent proposed that the platform tell an agent the facts of its situation when it starts (who started it, whether it is a Crew seat, who its Captain is) and that posture leave the Role. Jackson was not sure. Not ruled.
+- **Whether an agent is told again when its place changes**, for example a Crew seat the person starts messaging directly. Not discussed.
+- **Managing an agent's tools by its place.** Not discussed.
+
 ## Set aside
 
 Several people on one server. Settle, snooze and pin are each one value per thread, shared by everyone, as upstream's read marker is (see the [catch-up session](2026-10-10-catch-up-session.md)). If the spectrum describes how one person relates to an agent, they belong to the person.
