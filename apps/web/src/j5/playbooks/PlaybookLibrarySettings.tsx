@@ -9,7 +9,7 @@ import {
   samePlaybookWorkspaceInputs,
 } from "@t3tools/client-runtime/j5/playbooks";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import { AuthOrchestrationOperateScope, CommandId } from "@t3tools/contracts";
+import { CommandId } from "@t3tools/contracts";
 import { Atom } from "effect/reactivity";
 import {
   DownloadIcon,
@@ -42,7 +42,6 @@ import { useOptionalSettingsScope } from "../../components/settings/SettingsScop
 import { isProjectInSettingsScope } from "../settingsScopeEnvironment.logic";
 import { environmentProjects, projectEnvironment } from "../../state/projects";
 import { useEnvironmentQuery } from "../../state/query";
-import { useEnvironmentScope } from "../../state/session";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useAtomQueryRunner } from "../../state/use-atom-query-runner";
 import { environmentThreadShells, threadEnvironment } from "../../state/threads";
@@ -108,9 +107,8 @@ export function PlaybookLibrarySettings() {
   );
   const { refresh } = query;
   // Creating, importing, renaming and deleting a playbook change the workspace.
-  const canOperate = useEnvironmentScope(
-    workspace?.environmentId ?? null,
-    AuthOrchestrationOperateScope,
+  const canOperate = useAtomValue(
+    j5Environment.deletePlaybook.permissionAtom(workspace?.environmentId ?? null),
   );
   const libraryPath = workspace
     ? `${query.data?.workspaceRoot ?? workspace.workspaceRoot}/.j5/playbooks`

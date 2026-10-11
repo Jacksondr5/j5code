@@ -84,7 +84,7 @@ export class ArchiveCrewNotFoundError extends Data.TaggedError("ArchiveCrewNotFo
   readonly crewInstanceId: string;
 }> {
   override get message(): string {
-    return `Crew ${this.crewInstanceId} is not recorded in this environment. Call list_participants to inspect the roster; only Crews launched from an approved roster can be archived as a unit.`;
+    return `Crew ${this.crewInstanceId} is not recorded in this environment. Call j5_list_participants to inspect the roster; only Crews launched from an approved roster can be archived as a unit.`;
   }
 }
 
@@ -119,7 +119,7 @@ export class ArchiveCrewConfirmationRequiredError extends Data.TaggedError(
       0,
     );
     const running = this.facts.members.filter((member) => member.facts.runningTurn !== null).length;
-    return `Archiving this Crew would end active work: ${waiting} open exchange(s) and ${running} running turn(s) across its seats. Review every listed member fact, check with the user before retiring a Crew that others are waiting on, then retry archive_crew with the confirmation_token.`;
+    return `Archiving this Crew would end active work: ${waiting} open exchange(s) and ${running} running turn(s) across its seats. Review every listed member fact, check with the user before retiring a Crew that others are waiting on, then retry j5_archive_crew with the confirmation_token.`;
   }
 }
 
@@ -128,8 +128,8 @@ export class ArchiveCrewConfirmationStaleError extends Data.TaggedError(
 )<{ readonly facts: ArchiveCrewConsequenceFacts; readonly confirmationToken: string | null }> {
   override get message(): string {
     return this.confirmationToken === null
-      ? "The confirmation_token is stale because the Crew no longer has consequential work. Retry archive_crew without a token."
-      : "The confirmation_token is stale because the Crew's facts changed. Review the current member facts and retry archive_crew with the new confirmation_token.";
+      ? "The confirmation_token is stale because the Crew no longer has consequential work. Retry j5_archive_crew without a token."
+      : "The confirmation_token is stale because the Crew's facts changed. Review the current member facts and retry j5_archive_crew with the new confirmation_token.";
   }
 }
 
@@ -138,8 +138,8 @@ export class ArchiveCrewConfirmationTokenError extends Data.TaggedError(
 )<{ readonly reason: "malformed" | "unsupported-version" }> {
   override get message(): string {
     return this.reason === "unsupported-version"
-      ? "The confirmation_token uses an unsupported version. Call archive_crew without a token to receive a current refusal."
-      : "The confirmation_token is malformed or has an invalid signature. Call archive_crew without a token to receive a current refusal.";
+      ? "The confirmation_token uses an unsupported version. Call j5_archive_crew without a token to receive a current refusal."
+      : "The confirmation_token is malformed or has an invalid signature. Call j5_archive_crew without a token to receive a current refusal.";
   }
 }
 
@@ -153,7 +153,7 @@ export class ArchiveCrewPartialFailureError extends Data.TaggedError(
 }> {
   override get message(): string {
     const cause = this.cause instanceof Error ? this.cause.message : String(this.cause);
-    return `archive_crew retired seat(s) ${this.archivedSeats.join(", ") || "none"} of Crew ${this.crewInstanceId} but stopped at seat ${this.failedSeat}: ${cause} Retry archive_crew with the same client_request_id and confirmation_token; retired seats replay as already archived and the rest continue.`;
+    return `j5_archive_crew retired seat(s) ${this.archivedSeats.join(", ") || "none"} of Crew ${this.crewInstanceId} but stopped at seat ${this.failedSeat}: ${cause} Retry j5_archive_crew with the same client_request_id and confirmation_token; retired seats replay as already archived and the rest continue.`;
   }
 }
 

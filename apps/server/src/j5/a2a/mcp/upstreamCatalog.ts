@@ -36,8 +36,8 @@ export const J5AttachmentUploadToolkit = Toolkit.make(
 );
 
 /**
- * Upstream's raw send, interrupt and bulk-create tools stay out: J5's `send_message`,
- * `stop_agent` and `spawn_agent` are the doors for those. `t3_thread_wait` is deliberately
+ * Upstream's raw send, interrupt and bulk-create tools stay out: J5's `j5_send_message`,
+ * `j5_stop_agent` and `j5_spawn_agent` are the doors for those. `t3_thread_wait` is deliberately
  * absent. Platform notices queue behind a running turn, so a participant that blocks inside its
  * turn waiting for another thread can never receive the notice that thread's finish produces; a
  * Captain that waited on a seat starved itself of its own Crew's news (2026-09-14). A seat's

@@ -32,8 +32,12 @@ vi.mock("../../state/environments", () => ({
     ],
   }),
 }));
+// The page's only atom is the delete command's permission.
+vi.mock("@effect/atom-react", () => ({ useAtomValue: () => true }));
+vi.mock("../state", () => ({
+  j5Environment: { deleteArtifact: { permissionAtom: () => null } },
+}));
 vi.mock("../../state/session", () => ({
-  useEnvironmentScope: () => true,
   usePreparedConnection: () =>
     testState.connected ? { _tag: "Some", value: {} } : { _tag: "None" },
 }));

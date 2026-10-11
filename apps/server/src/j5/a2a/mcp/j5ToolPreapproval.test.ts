@@ -42,7 +42,7 @@ it("names exactly the J5 verbs plus the artifact and Subagent verbs", () => {
     [...J5_PREAPPROVED_TOOLS],
     [
       ...Object.keys(J5Toolkit.tools),
-      "write_artifact",
+      "j5_write_artifact",
       // Refused members are told to use delegate_task; it must not then be refused by the sandbox.
       "delegate_task",
       "task_status",
@@ -52,16 +52,16 @@ it("names exactly the J5 verbs plus the artifact and Subagent verbs", () => {
   assert.sameMembers(
     [...J5_COORDINATION_TOOLS],
     [
-      "send_message",
-      "clear_own_ask",
-      "propose_crew",
-      "request_crew_member",
-      "playbook_start",
-      "playbook_next",
-      "playbook_back",
-      "playbook_reselect",
-      "playbook_complete",
-      "playbook_cancel",
+      "j5_send_message",
+      "j5_clear_own_ask",
+      "j5_propose_crew",
+      "j5_request_crew_member",
+      "j5_playbook_start",
+      "j5_playbook_next",
+      "j5_playbook_back",
+      "j5_playbook_reselect",
+      "j5_playbook_complete",
+      "j5_playbook_cancel",
     ],
   );
 });
@@ -77,10 +77,10 @@ it("pre-approves the full set only under never, coordination otherwise", () => {
     for (const name of J5_NEVER_PREAPPROVED_TOOLS) assert.notInclude(tools, name, label);
     if (!never)
       for (const name of [
-        "spawn_agent",
-        "stop_agent",
-        "stop_crew",
-        "archive_crew",
+        "j5_spawn_agent",
+        "j5_stop_agent",
+        "j5_stop_crew",
+        "j5_archive_crew",
         "delegate_task",
       ])
         assert.notInclude(tools, name, label);
@@ -88,5 +88,5 @@ it("pre-approves the full set only under never, coordination otherwise", () => {
 });
 
 it("qualifies tool names the way Claude-style harnesses match them", () => {
-  assert.strictEqual(j5T3McpToolName("propose_crew"), "mcp__t3-code__propose_crew");
+  assert.strictEqual(j5T3McpToolName("j5_propose_crew"), "mcp__t3-code__j5_propose_crew");
 });

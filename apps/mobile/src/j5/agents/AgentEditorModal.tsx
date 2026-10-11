@@ -1,3 +1,4 @@
+import { useAtomValue } from "@effect/atom-react";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import type { AgentPersonaEditInput, EnvironmentId } from "@t3tools/contracts";
 import { useEffect, useState } from "react";
@@ -20,6 +21,10 @@ export function AgentEditorModal(props: {
   const [instructions, setInstructions] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The sheet may outlive the grant it was opened with, so its action follows the live answer.
+  const canSave = useAtomValue(
+    agentPersonaEnvironment.editImportedAgentPersona.permissionAtom(props.environmentId),
+  );
   const save = useAtomCommand(agentPersonaEnvironment.editImportedAgentPersona, {
     reportFailure: false,
   });
@@ -149,6 +154,7 @@ export function AgentEditorModal(props: {
               accessibilityRole="button"
               disabled={
                 saving ||
+                !canSave ||
                 instructions === null ||
                 !instructions.trim() ||
                 !draft.displayName.trim() ||

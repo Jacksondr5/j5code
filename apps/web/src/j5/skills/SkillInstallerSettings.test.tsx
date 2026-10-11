@@ -22,7 +22,8 @@ const state = vi.hoisted(() => ({
   canOperate: true,
 }));
 
-vi.mock("../../state/session", () => ({ useEnvironmentScope: () => state.canOperate }));
+// The only atom the panel reads is the apply command's permission.
+vi.mock("@effect/atom-react", () => ({ useAtomValue: () => state.canOperate }));
 
 vi.mock("../../state/environments", () => ({
   useEnvironments: () => ({
@@ -41,24 +42,24 @@ vi.mock("../../state/query", () => ({
 }));
 
 vi.mock("../../state/server", () => ({
-  serverEnvironment: { updateSettings: Symbol("updateSettings") },
+  serverEnvironment: { updateSettings: { description: "updateSettings" } },
 }));
 
 vi.mock("./skillCatalogAtoms", () => ({
   skillCatalogEnvironment: {
     status: () => Symbol("status"),
-    applyGroups: Symbol("applyGroups"),
-    updateCatalog: Symbol("updateCatalog"),
+    applyGroups: { description: "applyGroups", permissionAtom: () => null },
+    updateCatalog: { description: "updateCatalog" },
   },
 }));
 
 vi.mock("../../state/use-atom-command", () => ({
-  useAtomCommand: (command: symbol) => {
-    if (typeof command === "symbol" && command.description === "updateSettings") {
+  useAtomCommand: (command: { readonly description: string }) => {
+    if (command.description === "updateSettings") {
       return (value: unknown) =>
         state.persistImpl ? state.persistImpl(value) : Promise.resolve({ _tag: "Success" });
     }
-    if (typeof command === "symbol" && command.description === "applyGroups") {
+    if (command.description === "applyGroups") {
       return (value: unknown) => {
         state.applyCalls.push(value);
         return state.applyImpl

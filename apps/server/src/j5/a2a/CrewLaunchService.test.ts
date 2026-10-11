@@ -27,6 +27,7 @@ import { resolveAgentPersonaRuntime } from "../agents/agentPersonaRuntime.ts";
 import { guardAgentPersonaThreadCreate } from "../agents/agentPersonaOrchestration.ts";
 import { ServerSecretStore } from "../../auth/ServerSecretStore.ts";
 import { ServerConfig } from "../../config.ts";
+import { AnalyticsService } from "../../telemetry/AnalyticsService.ts";
 import {
   OrchestratorDispatchError,
   OrchestratorProjectionError,
@@ -270,7 +271,18 @@ it.effect("launches an approved roster whole, records it, briefs each seat, then
       { slug: "gpt-5.6-sol", options: ["high"] },
       { slug: "gpt-5.6-terra", options: ["high"] },
     ]);
+    const launches: Array<Readonly<Record<string, unknown>>> = [];
     const layer = crewLaunchLayer.pipe(
+      Layer.provide(
+        Layer.succeed(
+          AnalyticsService,
+          AnalyticsService.of({
+            record: (event, properties = {}) =>
+              Effect.sync(() => void launches.push({ event, ...properties })),
+            flush: Effect.void,
+          }),
+        ),
+      ),
       Layer.provideMerge(dependencies(commands, [codex])),
       Layer.provideMerge(Layer.succeedContext(context)),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-launch-" })),
@@ -383,6 +395,15 @@ it.effect("launches an approved roster whole, records it, briefs each seat, then
         assert.include(sentryBrief.text, "<spawner_brief>\nShip the login fix.");
       }
     }).pipe(Effect.provide(layer));
+    // The refused roster launched nothing, so it reports nothing; the Crew and its addition do.
+    const shape = { event: "j5.crew.launched", hasPlaybook: false, notCreated: 0, notStarted: 0 };
+    assert.deepStrictEqual(
+      launches.map(({ worktreeSeats: _w, fullAccessSeats: _f, models: _m, ...rest }) => rest),
+      [
+        { ...shape, addition: false, seats: 2, personaSeats: 2, created: 2 },
+        { ...shape, addition: true, seats: 1, personaSeats: 1, created: 1 },
+      ],
+    );
   }).pipe(Effect.scoped),
 );
 

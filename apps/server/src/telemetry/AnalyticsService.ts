@@ -79,6 +79,8 @@ const TelemetryEnvConfig = Config.all({
     Config.withDefault(1_000),
   ),
   wslDistroName: Config.String("WSL_DISTRO_NAME").pipe(Config.option),
+  // J5: a label a tester or a verifying agent puts on every event this server sends (#513).
+  telemetryTag: Config.String("J5CODE_TELEMETRY_TAG").pipe(Config.option),
 });
 
 export class AnalyticsService extends Context.Service<
@@ -195,6 +197,7 @@ export const make = Effect.gen(function* () {
           serverWslDistro: Option.getOrUndefined(telemetryConfig.wslDistroName),
           serverAppVersion: packageJson.version,
           serverMode: serverConfig.mode,
+          telemetryTag: Option.getOrUndefined(telemetryConfig.telemetryTag)?.trim() || undefined,
         },
         timestamp: event.capturedAt,
       })),

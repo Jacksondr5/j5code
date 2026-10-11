@@ -51,6 +51,7 @@ import {
   answeredInboxQueryAtom,
   answeredInboxSourcesAtom,
   crewProposalSourcesAtom,
+  j5Environment,
   openInboxQueryAtom,
   openInboxSourcesAtom,
   refreshJ5Sources,
@@ -226,6 +227,10 @@ function OpenInboxItem({
 }) {
   const urgency = urgencyPresentation[item.urgency];
   const openDuration = formatElapsedDurationLabel(item.openedAt);
+  const mayAnswer = useAtomValue(
+    j5Environment.answerHumanExchange.permissionAtom(item.environmentId),
+  );
+  const canAnswer = item.sourceReady && mayAnswer;
   return (
     <li className="border-b border-border/70 last:border-b-0">
       <details className="group/details">
@@ -290,9 +295,9 @@ function OpenInboxItem({
                 onOpen={onOpenThread}
               />
               <Button
-                disabled={!item.canAnswer || pendingExchangeId !== null || answerText.length === 0}
+                disabled={!canAnswer || pendingExchangeId !== null || answerText.length === 0}
                 title={
-                  item.canAnswer
+                  canAnswer
                     ? undefined
                     : "This environment is unavailable or this connection is read-only."
                 }
@@ -481,7 +486,7 @@ export function HumanInboxPage() {
   const answer = async (item: HumanInboxItem) => {
     const itemKey = scopedInboxItemKey(item);
     const message = answers[itemKey] ?? "";
-    if (message.length === 0 || !item.canAnswer) return;
+    if (message.length === 0 || !item.sourceReady) return;
     await submitHumanInboxAnswer({
       item,
       message,

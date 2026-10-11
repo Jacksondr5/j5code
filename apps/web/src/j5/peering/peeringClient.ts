@@ -41,7 +41,7 @@ export async function listPeerAddresses(environmentId: EnvironmentId) {
     input: {},
   });
   if (result._tag === "Failure") throw Cause.squash(result.cause);
-  return result.value;
+  return result.value.origins;
 }
 
 export async function probePeer(environmentId: EnvironmentId, origin: string) {

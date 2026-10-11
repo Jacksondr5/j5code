@@ -28,6 +28,7 @@ import * as HostPowerMonitor from "../../../background/HostPowerMonitor.ts";
 import * as CheckpointStore from "../../../checkpointing/CheckpointStore.ts";
 import { ServerConfig } from "../../../config.ts";
 import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
+import { AnalyticsService } from "../../../telemetry/AnalyticsService.ts";
 import * as GitWorkflow from "../../../git/GitWorkflowService.ts";
 import {
   McpInvocationContext,
@@ -178,6 +179,7 @@ const j5Layer = J5A2ARuntimeLayer.pipe(
   Layer.provideMerge(orchestrationLayer),
   Layer.provide(threadLifecycleLayer),
   Layer.provide(secretStoreLayer),
+  Layer.provide(AnalyticsService.layerTest),
   // The peer registry checks which peer sessions are live; this test has no peers.
   Layer.provide(Layer.mock(EnvironmentAuth)({ listSessions: () => Effect.succeed([]) })),
   Layer.provide(
@@ -269,7 +271,7 @@ const callSpawn = (input: J5SpawnAgentInput) =>
   Effect.gen(function* () {
     const toolkit = yield* J5Toolkit;
     const response = yield* toolkit
-      .handle("spawn_agent", input)
+      .handle("j5_spawn_agent", input)
       .pipe(
         Stream.unwrap,
         Stream.run(Sink.last()),
@@ -277,7 +279,7 @@ const callSpawn = (input: J5SpawnAgentInput) =>
         Effect.provideService(McpInvocationContext, scope),
       );
     if (response.isFailure) {
-      return yield* Effect.die(new Error(`Tool spawn_agent failed: ${String(response.result)}`));
+      return yield* Effect.die(new Error(`Tool j5_spawn_agent failed: ${String(response.result)}`));
     }
     return yield* decodeSpawnResult(response.result);
   });
@@ -286,7 +288,7 @@ const callStop = (input: J5StopAgentInput) =>
   Effect.gen(function* () {
     const toolkit = yield* J5Toolkit;
     const response = yield* toolkit
-      .handle("stop_agent", input)
+      .handle("j5_stop_agent", input)
       .pipe(
         Stream.unwrap,
         Stream.run(Sink.last()),
@@ -294,7 +296,7 @@ const callStop = (input: J5StopAgentInput) =>
         Effect.provideService(McpInvocationContext, scope),
       );
     if (response.isFailure) {
-      return yield* Effect.die(new Error(`Tool stop_agent failed: ${String(response.result)}`));
+      return yield* Effect.die(new Error(`Tool j5_stop_agent failed: ${String(response.result)}`));
     }
     return yield* decodeStopResult(response.result);
   });

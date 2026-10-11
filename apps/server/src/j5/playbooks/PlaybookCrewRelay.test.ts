@@ -316,7 +316,7 @@ it.effect("an unowned step, a never-created seat, and an archived seat are the C
   }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );
 
-it.effect("a retried playbook_next hands its step off once and replays the same delivery", () =>
+it.effect("a retried j5_playbook_next hands its step off once and replays the same delivery", () =>
   Effect.gen(function* () {
     const { start, move, notices, store } = yield* fixture;
     const run = yield* start("start-1");
@@ -441,7 +441,7 @@ it.effect("back and reselect hand the step to its owner again", () =>
   }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );
 
-it.effect("playbook_current reports who holds the step without handing it off again", () =>
+it.effect("j5_playbook_current reports who holds the step without handing it off again", () =>
   Effect.gen(function* () {
     const { start, move, relay, notices } = yield* fixture;
     const run = yield* start("start-1");

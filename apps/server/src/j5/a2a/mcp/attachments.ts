@@ -36,7 +36,7 @@ import { withDeliveryNotice } from "../receiverBacklog.ts";
 export const J5AttachmentSendToolkit = Toolkit.make(
   Tool.make("t3_thread_send_attachments", {
     description:
-      "Send uploaded attachments to another registered agent in the calling project through durable J5 messaging. Specify the target threadId from list_participants. Each call creates a new message. Success means accepted for delivery, not that the agent has received or processed it. Provider attachment support still applies.",
+      "Send uploaded attachments to another registered agent in the calling project through durable J5 messaging. Specify the target threadId from j5_list_participants. Each call creates a new message. Success means accepted for delivery, not that the agent has received or processed it. Provider attachment support still applies.",
     parameters: Schema.Struct({
       threadId: ThreadId,
       message: Schema.optional(Schema.String.check(Schema.isMaxLength(120000))),
@@ -89,7 +89,8 @@ export const layer = McpToolAccess.toLayer(J5AttachmentSendToolkit, {
       if (input.threadId === callerThreadId)
         return yield* new OrchestratorMcpFailure({
           code: "invalid_request",
-          message: "Self-messaging is not supported. Choose another agent from list_participants.",
+          message:
+            "Self-messaging is not supported. Choose another agent from j5_list_participants.",
         });
       const send = yield* A2ASendService;
       const directory = yield* send.listParticipants(callerThreadId);
@@ -103,7 +104,7 @@ export const layer = McpToolAccess.toLayer(J5AttachmentSendToolkit, {
         return yield* new OrchestratorMcpFailure({
           code: "invalid_request",
           message:
-            "The target is not an addressable agent. Call list_participants before retrying.",
+            "The target is not an addressable agent. Call j5_list_participants before retrying.",
         });
       const references = yield* resolveAttachmentReferences(
         input.attachments,

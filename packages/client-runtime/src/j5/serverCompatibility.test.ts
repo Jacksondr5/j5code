@@ -52,7 +52,6 @@ describe("J5 server compatibility", () => {
         environmentId: plain.environmentId,
         environmentLabel: plain.label,
         phase: "connected",
-        session: null,
         result: AsyncResult.failure(
           Cause.fail(new J5HttpError({ status: 404, detail: "Not found" })),
         ),

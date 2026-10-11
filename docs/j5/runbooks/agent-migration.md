@@ -141,8 +141,8 @@ prefix, and **outbound A2A** appears as `tool_use` blocks for `mcp__traycer_a2a_
 
 - **None of that pre-transplant history renders in the J5 timeline** — it is model context only, per
   the honest line. The agent _remembers_ its A2A exchanges; J5 does not _display_ them.
-- **The history references tools that do not exist in J5's toolset.** J5 exposes `send_message`,
-  `list_participants`, `spawn_agent`, `stop_agent`, `archive_agent`, `clear_own_ask` — not the
+- **The history references tools that do not exist in J5's toolset.** J5 exposes `j5_send_message`,
+  `j5_list_participants`, `j5_spawn_agent`, `j5_stop_agent`, `j5_clear_own_ask` — not the
   `mcp__traycer_a2a__*` or `traycer_*` tools the transcript is full of. **Resuming a session whose
   history contains those dead tool_use blocks works with no API error** — proven in the Stage-1
   live run (the resumed session was dense with `mcp__traycer_a2a__traycer_send_message` blocks and
@@ -159,10 +159,10 @@ before any real work, so the agent re-maps its tools before it acts. Template:
 >    are not here; your peers are the participants J5 lists.
 > 2. **Your tools changed.** The Traycer tools you used before (`traycer_send_message`,
 >    `traycer_create_agent`, `traycer_get_transcript`, every `mcp__traycer_a2a__*`) **no longer
->    exist**. Your A2A surface is now: `list_participants` (your address book — call it first),
->    `send_message` (plain send / ask with `expect_reply` / reply with `exchange_id`), `spawn_agent`,
->    `stop_agent`, `archive_agent`, `clear_own_ask`. Do not call any `traycer_*` tool.
-> 3. **The human is reached through the inbox** — `send_message` to the human participant (with
+>    exist**. Your A2A surface is now: `j5_list_participants` (your address book — call it first),
+>    `j5_send_message` (plain send / ask with `expect_reply` / reply with `exchange_id`), `j5_spawn_agent`,
+>    `j5_stop_agent`, `j5_clear_own_ask`. Do not call any `traycer_*` tool.
+> 3. **The human is reached through the inbox** — `j5_send_message` to the human participant (with
 >    `urgency` when it is an ask), not a Traycer channel. **Until issue #44 lands, a message a person
 >    must SEE is an ask (`expect_reply` + `urgency`); a plain message to a person is ledger-only and
 >    invisible. No celebratory check-ins.**
@@ -174,7 +174,7 @@ before any real work, so the agent re-maps its tools before it acts. Template:
 
 Adjust the tool list to the J5 toolset actually installed at migration time.
 
-**Finding (issue #44, measured 2026-09-02):** a plain `send_message` to a person is **ledger-only and invisible** — no inbox row, no exchange; only an ask (`expect_reply` + `urgency`) surfaces. Three migrated agents sent celebratory check-ins that Jackson never saw. The template's item 3 now says so; do not let a migrated agent "check in" with a plain send.
+**Finding (issue #44, measured 2026-09-02):** a plain `j5_send_message` to a person is **ledger-only and invisible** — no inbox row, no exchange; only an ask (`expect_reply` + `urgency`) surfaces. Three migrated agents sent celebratory check-ins that Jackson never saw. The template's item 3 now says so; do not let a migrated agent "check in" with a plain send.
 
 **The per-agent Operating Principles slot (item 4) is required, not optional.** The conduct
 knowledge that lives only in sessions — how Jackson wants each agent to work — is Role-definition

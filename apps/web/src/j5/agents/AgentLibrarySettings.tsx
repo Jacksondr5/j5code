@@ -1,3 +1,4 @@
+import { useAtomValue } from "@effect/atom-react";
 import { toastManager } from "../../components/ui/toast";
 import { requestConfirmDialog } from "../../confirmDialog";
 import { AgentImportConflictSelection } from "./AgentImportConflictSelection";
@@ -27,7 +28,6 @@ import {
   presentAgentPersonaCatalog,
   presentAgentPersonaUsage,
 } from "@t3tools/client-runtime/j5/agent-personas";
-import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
 import type {
   AgentPersonaEditInput,
   AgentPersonaImportConflict,
@@ -43,7 +43,6 @@ import { useSettingsScopeEnvironments } from "../settingsScopeEnvironment";
 import { agentPersonaEnvironment } from "./agentPersonaAtoms";
 import { PlaybookLibrarySettings } from "../playbooks/PlaybookLibrarySettings";
 import { useEnvironmentQuery } from "../../state/query";
-import { useEnvironmentScope } from "../../state/session";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { useAtomCommand } from "../../state/use-atom-command";
 import {
@@ -137,8 +136,10 @@ export function AgentLibrarySettings() {
     (environment) => environment.environmentId !== effectiveEnvironmentId,
   );
   const [busy, setBusy] = useState(false);
-  // Library changes need the operate scope; a session without it can still read and export.
-  const canOperate = useEnvironmentScope(effectiveEnvironmentId, AuthOrchestrationOperateScope);
+  // A session that may not change the library can still read and export it.
+  const canOperate = useAtomValue(
+    agentPersonaEnvironment.createAgentPersona.permissionAtom(effectiveEnvironmentId),
+  );
   const locked = busy || !canOperate;
   const [creating, setCreating] = useState<{ initial?: AgentPersonaCreateDraft } | null>(null);
   const [editing, setEditing] = useState<{

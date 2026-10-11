@@ -31,6 +31,7 @@ import {
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { MachineParticipantService } from "./MachineParticipantService.ts";
 import { PeerInboundService } from "./PeerInboundService.ts";
+import { PeerAdminService } from "./PeerAdminService.ts";
 import { PeerRemovalService } from "./PeerRemovalService.ts";
 import { PeerStoreService } from "./PeerStoreService.ts";
 import { PeerRegistryService } from "./PeerRegistryService.ts";
@@ -161,7 +162,7 @@ it("maps A4 resolver failures without treating a bad person selection as a serve
     assert.deepStrictEqual(await missing.json(), {
       error: "A2AParticipantNotFoundError",
       message:
-        "Participant human:client-reads:missing is not currently reachable. Call list_participants and choose an agent row with canReceiveMessage=true, or a human row with canOpenExchange=true to open an ask.",
+        "Participant human:client-reads:missing is not currently reachable. Call j5_list_participants and choose an agent row with canReceiveMessage=true, or a human row with canOpenExchange=true to open an ask.",
     });
     const absentLocalOperator = await count();
     assert.equal(absentLocalOperator.status, 404);
@@ -245,6 +246,7 @@ it("registers B6 client reads through the authenticated aggregate", async () => 
           Layer.mock(PeerInboundService)({}),
           Layer.mock(PeerStoreService)({}),
           Layer.mock(PeerRemovalService)({}),
+          Layer.mock(PeerAdminService)({}),
         ),
       ),
       Layer.provide(Layer.mock(ProjectService.ProjectService)({})),

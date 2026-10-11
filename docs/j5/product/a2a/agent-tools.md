@@ -13,19 +13,19 @@ An agent learns what it can do from its tools, and it reads a tool's description
 
 ### Conventions for every verb
 
-- **Naming**: snake_case verbs and parameters.
+- **Naming**: snake_case verbs and parameters. Every tool J5 owns carries a `j5_` prefix, so none can be mistaken for a tool the harness ships itself (Claude Code has its own `SendMessage`). Upstream's tools keep upstream's names, including the ones J5 re-declares with its own description. A name without the prefix is not a tool: calling one returns the server's unknown-tool error. Threads recorded before the prefix still render, because the timeline reads both names.
 - **Idempotency**: every mutating verb accepts an optional `client_request_id`. When supplied, retrying the same logical call replays the original result instead of acting twice; when omitted, each call is a fresh command. Every mutating verb's description carries its own one-clause reminder to reuse the id, because the description is the only text an agent reliably reads at call time.
 - **Errors — the toolsmith rule**: a failure returns a code and a message, and the message names the _actual state_ and the _next command_, so a caller never has to discover state by failing twice.
 - **Events**: every mutation commits its ledger and placement events in the same transaction as its state change; the call returns after that commit, and delivery and other side effects continue asynchronously.
 - **Descriptions** are written for the agent reading them mid-turn: trigger first, distinct uses named, positive instruction over negation, and no more than the agent needs to act.
 
-### `send_message`
+### `j5_send_message`
 
-**Description:** "Send one durable message. To another agent, three uses: a **plain send** when you don't need a reply; an **ask** — set expect_reply=true with a one-line intent, opening an exchange the receiver owes a reply to; a **reply** — include the exchange_id from the ask you are answering, which closes that exchange. To the human, only an ask: a plain send to a person is refused — if nobody needs to act, say it in your own thread instead. Set urgency only when asking the human. Use this tool only for participants already returned by list_participants; when creating a Peer Agent, put any reply expectation in spawn_agent's brief instead of sending a follow-up ask. Returns once the message is committed; delivery continues asynchronously — carry on with your work, and the reply arrives later as an incoming message. An agent that is busy usually handles each message as its own turn after its current one ends, so put related updates in one message rather than sending them one by one; the result's deliveryNotice says when your message will wait behind the receiver's current turn. A provider Subagent is not a participant and is refused. Reuse client_request_id to retry the same send safely."
+**Description:** "Send one durable message. To another agent, three uses: a **plain send** when you don't need a reply; an **ask** — set expect_reply=true with a one-line intent, opening an exchange the receiver owes a reply to; a **reply** — include the exchange_id from the ask you are answering, which closes that exchange. To the human, only an ask: a plain send to a person is refused — if nobody needs to act, say it in your own thread instead. Set urgency only when asking the human. Use this tool only for participants already returned by j5_list_participants; when creating a Peer Agent, put any reply expectation in j5_spawn_agent's brief instead of sending a follow-up ask. Returns once the message is committed; delivery continues asynchronously — carry on with your work, and the reply arrives later as an incoming message. An agent that is busy usually handles each message as its own turn after its current one ends, so put related updates in one message rather than sending them one by one; the result's deliveryNotice says when your message will wait behind the receiver's current turn. A provider Subagent is not a participant and is refused. Reuse client_request_id to retry the same send safely."
 
 | Input               | Type              | Required                             | Meaning                                                                         |
 | ------------------- | ----------------- | ------------------------------------ | ------------------------------------------------------------------------------- |
-| `to`                | ParticipantId     | yes                                  | A recipient listed by `list_participants`; a person accepts only an ask         |
+| `to`                | ParticipantId     | yes                                  | A recipient listed by `j5_list_participants`; a person accepts only an ask      |
 | `message`           | string, non-empty | yes                                  | The body; the envelope adds sender identity, project and a remote server        |
 | `expect_reply`      | boolean           | no                                   | Opens an Exchange (or, between agents, joins the open one); requires `intent`   |
 | `intent`            | string            | with `expect_reply`                  | One-line summary shown wherever the Exchange is listed                          |
@@ -38,13 +38,13 @@ An agent learns what it can do from its tools, and it reads a tool's description
 
 **Rules.** A message to the caller itself is refused. A send to a person that is not an ask is refused; a person never opens an Exchange, so there is nothing for an agent to reply to. Between agents, a further ask to a peer that already holds an open Exchange from the caller joins it as a follow-up. To a person, a further ask opens a new Exchange and a new inbox item unless it names an open one in `regarding`, in which case it joins that Exchange and is shown beneath the original ask. An ask to a person without an urgency is refused.
 
-**Errors**, each naming the actual state and the next command: the caller is not a participant (a provider Subagent or a deleted thread); the recipient is not addressable (pointing at `list_participants`); the recipient is the caller (naming the caller's own id, and `schedule_task` for a future trigger to oneself); an ask without an intent; a send to a person that is not an ask (naming the legal move and the own-thread alternative); an ask to a person without urgency; an `exchange_id` or `regarding` that is unknown, already closed, or not the caller's (naming the Exchange's actual state); a first message to a participant on a peer server whose address book cannot be read, or that has not polled yet (naming that reason).
+**Errors**, each naming the actual state and the next command: the caller is not a participant (a provider Subagent or a deleted thread); the recipient is not addressable (pointing at `j5_list_participants`); the recipient is the caller (naming the caller's own id, and `schedule_task` for a future trigger to oneself); an ask without an intent; a send to a person that is not an ask (naming the legal move and the own-thread alternative); an ask to a person without urgency; an `exchange_id` or `regarding` that is unknown, already closed, or not the caller's (naming the Exchange's actual state); a first message to a participant on a peer server whose address book cannot be read, or that has not polled yet (naming that reason).
 
 **Events:** message and Exchange events in the ledger; delivery receipts follow asynchronously.
 
 **Not delivered.** When the recipient's server refuses a message, or the message is cancelled before it was delivered, the sender gets a platform notice saying so, naming the recipient, its server and the reason: "Your message to <B> on Laptop was not delivered: Laptop refused it; the recipient is archived or does not accept messages from this sender." The reason is the platform's own words for each refusal it knows; any other is quoted on one line as what the server said. Removing a peer server cancels everything still waiting for it, with the reason that the server is no longer peered; for a message the server may already hold, the sender is told it may not have been delivered: one a polling server had already picked up, or one sent directly whose answer never came back. A refused ask also ends its Exchange: the same notice says so, the Exchange is dropped as refused rather than as an archive, and the sender owes nothing and should not retry it.
 
-### `list_participants`
+### `j5_list_participants`
 
 **Description:** "Your address book: the participants around you — agents and the human — with the display name to recognize them by, the participant_id to address them with, the project_id and project_title that place them, and what each accepts (messages, exchanges, urgency). Once this server is peered with others, each row also carries `server`: the name of the server the participant lives on, and whether it is this one (`local`), so you can choose a participant by the machine it runs on. When you're told to message someone by name or role, resolve them here first. Your own row is marked self=true and its project_title is the project you work in; it cannot receive messages or open exchanges from you — use schedule_task if you need a future trigger for yourself. Provider Subagents are not participants: they do not appear here and cannot be messaged. Archived agents are hidden by default; set include_archived=true to see them with archived=true. They cannot receive messages or open Exchanges. The roster changes — after you spawn, archive, unarchive, or delete an agent, call this again instead of reusing a stale listing."
 
@@ -56,14 +56,14 @@ Read-only; no events.
 
 **Result rows:** `display_name` (the agent's thread title, or the Role name once Roles exist), `project_id` and `project_title` (on the self row, the caller's own project), `participant_id`, the participant kind, `self`, `archived`, `can_receive_message`, `can_open_exchange`, `accepts_urgency`, plus `provenance` (spawned by whom, forked from what, unrecorded, or not applicable for a person) and `placement_parent_id`. A person's row reports that it cannot receive a plain message and can be asked. A machine participant's row carries kind `machine`, its registered name as `display_name`, provenance `not-applicable`, and reports that it can receive nothing and open no Exchange. An archived agent's row, when requested, reports that it can receive nothing. Participants on peer servers appear beside local ones. Once this server has a peer, every row carries `server`: its `name`, `local` (true for this server), and, for a participant on a peer server that polls this one, `available` and, once that server has polled, `last_available_at`. Nothing measures a peer server this one sends to directly, so its rows carry neither; a server with no peers omits the field. A peer that could not be read is reported as unread in the result rather than omitted, and the rows of a peer server that polls are its last snapshot, kept while it is offline. Provenance and placement are carried for callers and the UI; they are not part of the description's pitch.
 
-### `spawn_agent`
+### `j5_spawn_agent`
 
 **Description (contract):** "Spawn a Peer Agent: a full-citizen teammate with its own top-level
 thread, starting on your brief as its first turn. It joins your project, is placed under you, and
 records you as its immutable spawner; it is addressable the moment this returns. In your brief, tell
 the new agent what it should do first and whether it should reply to you. Choose provider, model,
 and reasoning for the work in the brief — see orchestrator_capabilities for what's available. To run
-a persona from list_personas, set `persona` to its id: the spawn gets that persona's instructions
+a persona from j5_list_personas, set `persona` to its id: the spawn gets that persona's instructions
 and runtime policy, and provider, model, and reasoning must be one of that persona's declared
 routes. Choose its workspace every time (see the workspace field). A new worktree is prepared after
 this returns, and the agent begins once it is bound, possibly while the project's setup script is
@@ -75,7 +75,7 @@ base_ref or worktree_path needs a fresh client_request_id."
 | ------------------- | ------------------------------------ | -------- | ------------------------------------------------- |
 | `brief`             | string, non-empty                    | yes      | The first-turn prompt the new agent starts with   |
 | `title`             | string                               | no       | Thread title; derived from the brief when omitted |
-| `persona`           | persona id from `list_personas`      | no       | Persona spawn: the child carries that persona's   |
+| `persona`           | persona id from `j5_list_personas`   | no       | Persona spawn: the child carries that persona's   |
 |                     |                                      |          | immutable assignment (SP3 below)                  |
 | `provider`          | id from `orchestrator_capabilities`  | yes      | Chosen per task — no inherit default (Jackson,    |
 |                     |                                      |          | 2026-08-29: inheriting is wrong more than right)  |
@@ -87,9 +87,9 @@ base_ref or worktree_path needs a fresh client_request_id."
 |                     | "existing_worktree", worktree_path}` |          |                                                   |
 | `client_request_id` | string, non-empty                    | no       | Supply and reuse to make retries safe             |
 
-**Rules.** The new agent is an ordinary root-lineage thread created through upstream's creation seam, never through delegation. It is created in the caller's project, so it joins the same ledger as the caller. Placement and provenance are recorded atomically with creation; then the brief starts as the first turn. The new agent's first turn also states its own participant id and project as platform-provided facts, beside the brief and never inside it. Provider, model and reasoning are required and explicit even when a Role is given: a Role's allowlist constrains the choice and an out-of-list pick is an error naming the Role, never a silent default. The brief carries the task and the reply expectation; the spawner does not follow a spawn with a reply-expected `send_message` — that form is for later work owed by an existing participant. Selection guidance and brief-writing conventions live in the [Spawning Guide](../features/spawning-guide.md).
+**Rules.** The new agent is an ordinary root-lineage thread created through upstream's creation seam, never through delegation. It is created in the caller's project, so it joins the same ledger as the caller. Placement and provenance are recorded atomically with creation; then the brief starts as the first turn. The new agent's first turn also states its own participant id and project as platform-provided facts, beside the brief and never inside it. Provider, model and reasoning are required and explicit even when a Role is given: a Role's allowlist constrains the choice and an out-of-list pick is an error naming the Role, never a silent default. The brief carries the task and the reply expectation; the spawner does not follow a spawn with a reply-expected `j5_send_message` — that form is for later work owed by an existing participant. Selection guidance and brief-writing conventions live in the [Spawning Guide](../features/spawning-guide.md).
 
-**Workspace.** The spawner chooses where a Peer Agent works every time; there is no default, because the spawner knows whether it is starting a reviewer that must see uncommitted work, a builder that must not collide, or a scout that can't collide at all (Jackson, 2026-10-03). `{type: "shared"}` is the caller's own checkout and branch, and asks nothing of git. `{type: "worktree"}` is a new worktree from `base_ref`, which is required and must resolve to a commit (with `start_from_origin`, its fetched origin copy counts); a `branch` that already exists is refused. `{type: "existing_worktree"}` is one of the project's git worktrees other than its main checkout, named by path; the agent works on the branch git has checked out there, and any other path is refused with the valid ones listed. A choice that needs git is refused when the repository can't be read, before anything is created. A new worktree's thread is created unbound, with its registration and placement committed, so `spawn_agent` returns as soon as the agent is registered and its brief accepted, not once the worktree is ready. Upstream's ThreadLaunch then creates the worktree, names a temporary `j5code/<hash>` branch and renames it from the brief in the background, and holds the brief as a preparing run until the worktree is bound and the project's setup script has started. The setup script is awaited first only when it is set to finish before the agent starts (`async: false`); otherwise the agent may begin while it is still running. If preparation fails, the agent's thread shows the failed preparation, as any upstream launch does; it is not retried or retired, and the spawner is not told. The agent is then unbound, which upstream reads as the project's checkout, so a later message to it runs there, where every Peer Agent worked before workspaces existed. J5 doesn't guard this upstream behaviour: in Jackson's install, 3 of 61 preparations failed, all on the first day, and none was messaged again (Jackson, 2026-10-06). A shared checkout or an existing worktree binds at creation, so its brief starts at once. A `client_request_id` stays bound to the workspace type it was first accepted with: a retry that asks for another type is refused before anything is dispatched, even after a restart, since the type is encoded in the create command's durable receipt. A retry with the same type replays the first spawn, so a different `base_ref` or `worktree_path` has no effect, for an existing worktree too; changing them needs a fresh `client_request_id`. A second start for the same thread while one is in flight is refused with a retry instruction, so two concurrent retries cannot both create it. An existing worktree is looked up in upstream's ref listing, which refreshes every few seconds, so one created moments ago may be refused once; retry in a moment. Closing or archiving a Peer Agent never removes its worktree.
+**Workspace.** The spawner chooses where a Peer Agent works every time; there is no default, because the spawner knows whether it is starting a reviewer that must see uncommitted work, a builder that must not collide, or a scout that can't collide at all (Jackson, 2026-10-03). `{type: "shared"}` is the caller's own checkout and branch, and asks nothing of git. `{type: "worktree"}` is a new worktree from `base_ref`, which is required and must resolve to a commit (with `start_from_origin`, its fetched origin copy counts); a `branch` that already exists is refused. `{type: "existing_worktree"}` is one of the project's git worktrees other than its main checkout, named by path; the agent works on the branch git has checked out there, and any other path is refused with the valid ones listed. A choice that needs git is refused when the repository can't be read, before anything is created. A new worktree's thread is created unbound, with its registration and placement committed, so `j5_spawn_agent` returns as soon as the agent is registered and its brief accepted, not once the worktree is ready. Upstream's ThreadLaunch then creates the worktree, names a temporary `j5code/<hash>` branch and renames it from the brief in the background, and holds the brief as a preparing run until the worktree is bound and the project's setup script has started. The setup script is awaited first only when it is set to finish before the agent starts (`async: false`); otherwise the agent may begin while it is still running. If preparation fails, the agent's thread shows the failed preparation, as any upstream launch does; it is not retried or retired, and the spawner is not told. The agent is then unbound, which upstream reads as the project's checkout, so a later message to it runs there, where every Peer Agent worked before workspaces existed. J5 doesn't guard this upstream behaviour: in Jackson's install, 3 of 61 preparations failed, all on the first day, and none was messaged again (Jackson, 2026-10-06). A shared checkout or an existing worktree binds at creation, so its brief starts at once. A `client_request_id` stays bound to the workspace type it was first accepted with: a retry that asks for another type is refused before anything is dispatched, even after a restart, since the type is encoded in the create command's durable receipt. A retry with the same type replays the first spawn, so a different `base_ref` or `worktree_path` has no effect, for an existing worktree too; changing them needs a fresh `client_request_id`. A second start for the same thread while one is in flight is refused with a retry instruction, so two concurrent retries cannot both create it. An existing worktree is looked up in upstream's ref listing, which refreshes every few seconds, so one created moments ago may be refused once; retry in a moment. Closing or archiving a Peer Agent never removes its worktree.
 
 **Result:** the new agent's `participant_id` and `thread_id`, its `project_id` and `project_title`, and its placement under the caller with the caller recorded as spawner.
 
@@ -97,7 +97,7 @@ base_ref or worktree_path needs a fresh client_request_id."
 
 **Events:** participant joined, placement created.
 
-### `stop_agent`
+### `j5_stop_agent`
 
 **Persona spawn (built 2026-09-09 as the `agent` input, `persona` since 2026-09-17):** the persona's declared routes are the
 allowlist SP3 describes. The explicit provider/model/reasoning pick must equal one route target on
@@ -117,27 +117,27 @@ A plain spawn without `persona` is unchanged and inherits the parent's runtime m
 | `participant_id`    | ParticipantId | yes — the one agent to stop |
 | `client_request_id` | string        | no                          |
 
-**Result:** exactly one of `interrupt_requested` (the agent has an active run, which is being interrupted) or `already_idle` (the agent has no active run; its queue is still held). A run that is preparing, starting, running or waiting is active. An interrupt acknowledgement and an observed terminal run state are separate facts; the tool never claims a turn stopped merely because interruption was requested. A target outside the caller's project is an error pointing at `list_participants`.
+**Result:** exactly one of `interrupt_requested` (the agent has an active run, which is being interrupted) or `already_idle` (the agent has no active run; its queue is still held). A run that is preparing, starting, running or waiting is active. An interrupt acknowledgement and an observed terminal run state are separate facts; the tool never claims a turn stopped merely because interruption was requested. A target outside the caller's project is an error pointing at `j5_list_participants`.
 
-**Rules.** A caller's runtime policy never gates `stop_agent`, `stop_crew`, or `archive_crew`: a read-only persona may run them, because identity (the Captain, its own Crew) and the human's confirmation token are the gates, and the sandbox guards the workspace rather than the platform's verbs (Bryant, 2026-09-14). Stop and archive are single-target; the unit cascade belongs to Crews, which stop and archive as units through their own verbs when they exist. Stop is upstream's Stop. Besides interrupting the turn, it holds the turns queued behind it, ends the thread's pull request watches and stops the tasks it delegated, so a message already queued for a stopped agent waits until a person resumes its queue. No agent tool releases it, and a message sent after the stop runs ahead of it. Upstream does not continue a stopped run after a restart.
+**Rules.** A caller's runtime policy never gates `j5_stop_agent`, `j5_stop_crew`, or `j5_archive_crew`: a read-only persona may run them, because identity (the Captain, its own Crew) and the human's confirmation token are the gates, and the sandbox guards the workspace rather than the platform's verbs (Bryant, 2026-09-14). Stop and archive are single-target; the unit cascade belongs to Crews, which stop and archive as units through their own verbs when they exist. Stop is upstream's Stop. Besides interrupting the turn, it holds the turns queued behind it, ends the thread's pull request watches and stops the tasks it delegated, so a message already queued for a stopped agent waits until a person resumes its queue. No agent tool releases it, and a message sent after the stop runs ahead of it. Upstream does not continue a stopped run after a restart.
 
 **Amendment (Jackson, 2026-08-29):** the A6 build cascaded over the placement subtree; that blast
-radius makes the tool less useful, so `stop_agent` and thread archive are single-target. The
+radius makes the tool less useful, so `j5_stop_agent` and thread archive are single-target. The
 unit-cascade concept already has its home in the crew rulings (2026-08-21: crews spawn and archive
-as units) — `stop_crew`/`archive_crew` arrive with Crews, and the A6 `PlacementCascadeService`
+as units) — `j5_stop_crew`/`j5_archive_crew` arrive with Crews, and the A6 `PlacementCascadeService`
 survives as their engine (a cascade of one is its degenerate case).
 
 ## `t3_thread_organize` — archive and restore
 
-Use `action: "archive"` with an agent's `threadId`, or omit it to archive the calling thread. Upstream's access check is the only rule: the tool reaches any thread in the environment, within the limits upstream sets for the caller. The tool archives one thread, hides it from the active directory, and closes its open Exchanges through the shared lifecycle reactor. It does not interrupt an existing run. Use `stop_agent` when work must stop.
+Use `action: "archive"` with an agent's `threadId`, or omit it to archive the calling thread. Upstream's access check is the only rule: the tool reaches any thread in the environment, within the limits upstream sets for the caller. The tool archives one thread, hides it from the active directory, and closes its open Exchanges through the shared lifecycle reactor. It does not interrupt an existing run. Use `j5_stop_agent` when work must stop.
 
 Use `action: "unarchive"` to restore the same identity. Old Exchanges remain closed and cancelled messages do not replay. Historical permanently retired agents remain retired. The human UI retains its archive warning; this tool uses upstream archive semantics without a separate confirmation-token flow. `archive_agent` has been retired.
 
-**Errors:** upstream's own checks apply: the thread is unknown, or is not in the caller's project. J5 adds one refusal: the target is an active Crew seat, which is retired with its Crew through `archive_crew` or Archive crew on the Fleet page.
+**Errors:** upstream's own checks apply: the thread is unknown, or is not in the caller's project. J5 adds one refusal: the target is an active Crew seat, which is retired with its Crew through `j5_archive_crew` or Archive crew on the Fleet page.
 
 **Events:** the archive, and an obligation-closure event for each Exchange it ended — loud in the ledger, not only in the dialog.
 
-### `clear_own_ask`
+### `j5_clear_own_ask`
 
 **Description:** "Withdraw an ask you sent: closes your open exchange without a reply message. Use when the answer already arrived outside the exchange — for example, the human answered you directly in your thread — so the obligation exits their inbox honestly. Only the exchange's sender may clear it; the closure is recorded as sender-cleared, distinct from an answered exchange. Reuse client_request_id to retry safely."
 
@@ -152,11 +152,11 @@ Use `action: "unarchive"` to restore the same identity. Old Exchanges remain clo
 
 **Events:** an Exchange-closure event distinguishable from a reply's closure, so the inbox, the Exchange projections and the communication graph render the withdrawal honestly.
 
-### `list_personas`
+### `j5_list_personas`
 
 **Description (contract):** "List the personas in this environment: id, purpose, runtime policy,
 whether each can start now, and the provider, model, and reasoning it would run on. Read this
-before choosing a persona for spawn_agent or a crew roster so the choice fits the task and the
+before choosing a persona for j5_spawn_agent or a crew roster so the choice fits the task and the
 user's budget. Read-only."
 
 Named `list_agents` until 2026-09-17. No inputs. Result: `personas[]` with `id`, `display_name`, `description`, `runtime_policy`,
@@ -165,28 +165,28 @@ null when blocked). The same catalog Settings → Personas shows; disabled impor
 unroutable or unenforceable personas as blocked. This is the P-B(a) spawn listing the spawning guide
 asked for.
 
-### `propose_crew`
+### `j5_propose_crew`
 
 **Description (contract):** "Propose the crew you need for the brief you were given. Use it when the
 user asks for a crew or the work splits into distinct responsibilities that should run at once. Mix
-saved personas and custom seats in the same roster: call list_personas when choosing a saved
+saved personas and custom seats in the same roster: call j5_list_personas when choosing a saved
 persona, or leave persona unset for a custom seat with its own instructions (required) and the
 brief. Custom seats inherit your harness, model, and reasoning by default and run with full-access
 unless you set runtime_mode; to choose different ones, set model_selection (instanceId, model,
 options) and/or runtime_mode using orchestrator_capabilities. Saved personas are proposed with their
 own configuration; only the human may override their runtime before approval. To have the crew
-follow a playbook, set playbook to a name from playbook_list and give seats the step ids they own
-(steps, from playbook_read); a step has one owner, steps no seat owns are yours as Captain, and the
+follow a playbook, set playbook to a name from j5_playbook_list and give seats the step ids they own
+(steps, from j5_playbook_read); a step has one owner, steps no seat owns are yours as Captain, and the
 result reports unowned steps and any step whose persona differs from its seat's. For a crew built
 from a playbook, staff one seat per distinct persona its steps name, each owning that persona's
 steps, and propose a custom seat, noted in its reason, where a named persona isn't available. Every
-seat names its workspace, with the same three choices as spawn_agent. Name the crew for what it is
+seat names its workspace, with the same three choices as j5_spawn_agent. Name the crew for what it is
 for and give each seat a short lowercase-hyphen name like code-reviewer. The user reviews the roster
 and each seat's resolved provider, model, reasoning, and access in this thread, may remove or add
 seats, and approves or declines; you receive the decision and the roster as a message here. Approved
 seats run with the runtime the human approves, which may exceed yours. You become the crew's Captain
 and may command several crews at once; later requests, stops, and archives name the crew they mean.
-Use send_message for member-to-member, member-to-Captain, and Captain-to-Captain coordination,
+Use j5_send_message for member-to-member, member-to-Captain, and Captain-to-Captain coordination,
 including findings and direct results; artifacts do not gate these conversations. Reuse
 client_request_id to retry safely. This call is itself the human gate, so it works under every
 sandbox and approval policy, including approval policy never; never refuse the brief because
@@ -195,13 +195,13 @@ approvals are disabled."
 Published as non-destructive (`destructiveHint: false`): the call records a pending request and
 nothing spawns until a human approves it.
 
-| Input               | Type                                                                                                  | Required | Meaning                                                                                                                                                                                            |
-| ------------------- | ----------------------------------------------------------------------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `name`              | string                                                                                                | yes      | The Crew's display name                                                                                                                                                                            |
-| `brief`             | string                                                                                                | yes      | What every seat starts on, verbatim                                                                                                                                                                |
-| `seats`             | 1–12 of `{seat, persona?, model_selection?, runtime_mode?, reason, instructions?, steps?, workspace}` | yes      | Seat name, persona id from `list_personas` (none for a custom seat), why, wiring, custom-seat runtime, the playbook step ids the seat owns, and where it works (the `spawn_agent` workspace shape) |
-| `playbook`          | string                                                                                                | no       | A playbook name from `playbook_list` in the Captain's workspace; the Crew follows it                                                                                                               |
-| `client_request_id` | string                                                                                                | no       | Supply and reuse to make retries safe                                                                                                                                                              |
+| Input               | Type                                                                                                  | Required | Meaning                                                                                                                                                                                                  |
+| ------------------- | ----------------------------------------------------------------------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`              | string                                                                                                | yes      | The Crew's display name                                                                                                                                                                                  |
+| `brief`             | string                                                                                                | yes      | What every seat starts on, verbatim                                                                                                                                                                      |
+| `seats`             | 1–12 of `{seat, persona?, model_selection?, runtime_mode?, reason, instructions?, steps?, workspace}` | yes      | Seat name, persona id from `j5_list_personas` (none for a custom seat), why, wiring, custom-seat runtime, the playbook step ids the seat owns, and where it works (the `j5_spawn_agent` workspace shape) |
+| `playbook`          | string                                                                                                | no       | A playbook name from `j5_playbook_list` in the Captain's workspace; the Crew follows it                                                                                                                  |
+| `client_request_id` | string                                                                                                | no       | Supply and reuse to make retries safe                                                                                                                                                                    |
 
 Bounds: `name` and `seat` up to 100 characters, `reason` up to 500, `brief` and `instructions` up
 to 8,000.
@@ -224,26 +224,26 @@ gate inline above the Captain's composer (additions wait in the Inbox); approval
 caller, persona-backed where a seat names one, records the Crew snapshot with each member's reason
 (the person approves every seat), and posts
 a `<j5_crew_gate>` launch report into the caller's thread once every seat has started or failed to start (or a minute has passed): the roster, what the user changed against the proposal, and per seat `start=started|failed|pending`, with a `seat_failed` line carrying the run's error (`not_started` when the seat's thread exists but its brief never went out) and a `seat_not_created` line for an approved seat whose thread was never created, which is left off the roster. A proposal resolves once: a seat that fails does not stop the others or reopen the gate. Declines post the decline at once.
-Every seat names its workspace, with the same three choices as `spawn_agent`, so there is no Captain-aware default (Jackson, 2026-10-03). Each seat's workspace resolves at preview against the Captain's repository, and the approval token binds it, as it binds the Captain's branch and worktree. Every preview also carries the Captain's current branch, the directory its branch picker searches, and its worktrees, for the roster card's editor; the branches themselves are searched live, so no list is capped. A seat the person adds starts in the Captain's checkout. A seat recorded before workspaces were required stays readable but is refused at preview and approval until one is chosen. A new-worktree seat's brief starts once ThreadLaunch has prepared it, as for `spawn_agent`, so the launch report may read `pending` for a seat whose setup outlasts the report's minute, and a failed preparation arrives as that seat's failure.
+Every seat names its workspace, with the same three choices as `j5_spawn_agent`, so there is no Captain-aware default (Jackson, 2026-10-03). Each seat's workspace resolves at preview against the Captain's repository, and the approval token binds it, as it binds the Captain's branch and worktree. Every preview also carries the Captain's current branch, the directory its branch picker searches, and its worktrees, for the roster card's editor; the branches themselves are searched live, so no list is capped. A seat the person adds starts in the Captain's checkout. A seat recorded before workspaces were required stays readable but is refused at preview and approval until one is chosen. A new-worktree seat's brief starts once ThreadLaunch has prepared it, as for `j5_spawn_agent`, so the launch report may read `pending` for a seat whose setup outlasts the report's minute, and a failed preparation arrives as that seat's failure.
 Human approval is the authority (Bryant, 2026-09-10): seats run with the runtime the person
 approved, their persona's policy when no override was chosen, so a read-only Captain may command
 writing seats once a person approved them; a seat's permissions never come from its Captain's.
 There is no auto-approval: the earlier `runbook_declared` column and `auto_approved` status were
 cut before shipping, since nothing wrote them and runbooks do not exist yet.
 
-### `request_crew_member`
+### `j5_request_crew_member`
 
 **Description (contract):** "Ask the user to add one seat to a crew you command when the work needs
-one the roster lacks: seat name, persona id from list_personas (or none for a custom seat with
+one the roster lacks: seat name, persona id from j5_list_personas (or none for a custom seat with
 required instructions and optional model_selection/runtime_mode overrides; an omitted
 model_selection inherits yours and an omitted runtime_mode is full-access; saved-persona runtime
 changes are made only by the human before approval), a clear reason identifying the concern and
-missing expertise or responsibility, its workspace (the same three choices as propose_crew), and
+missing expertise or responsibility, its workspace (the same three choices as j5_propose_crew), and
 optionally instructions and a brief for the new seat. On a crew that follows a playbook, steps may
-claim step ids from playbook_read that no seat owns yet. The user decides from their inbox; you
+claim step ids from j5_playbook_read that no seat owns yet. The user decides from their inbox; you
 receive the decision and the updated roster as a message here. Continue the already-approved work
 and direct coordination while the addition is pending. Captain-only; a member sends the concern and
-needed expertise to its Captain with send_message. Reuse client_request_id to retry safely. Filing
+needed expertise to its Captain with j5_send_message. Reuse client_request_id to retry safely. Filing
 the request is the human gate itself and works under every approval policy, including approval
 policy never."
 
@@ -256,10 +256,10 @@ policy never."
 | `brief`                           | string         | no       | The new seat's brief; the Crew's brief when omitted                         |
 | `instructions`                    | string         | no       | Seat wiring text, verbatim                                                  |
 | `steps`                           | string[]       | no       | Playbook step ids no seat owns yet; only on a Crew that follows a playbook  |
-| `workspace`                       | object         | yes      | Where the seat works; the same three choices as `propose_crew`              |
+| `workspace`                       | object         | yes      | Where the seat works; the same three choices as `j5_propose_crew`           |
 | `client_request_id`               | string         | no       | Supply and reuse to make retries safe                                       |
 
-Result: as `propose_crew`. Semantics: the caller must command the Crew; the seat name must be new;
+Result: as `j5_propose_crew`. Semantics: the caller must command the Crew; the seat name must be new;
 the cap counts current members plus seats in other open requests for the same Crew. Approval
 reserves the seat inside one store transaction (count, cap, step ownership, version bump, and
 ordinal decided together under an optimistic version check, so two approvals landing at once cannot
@@ -271,7 +271,7 @@ spawning the request is approved, and a seat that was never created is reported,
 ### Handoff artifacts in Crews
 
 There is no Crew-specific artifact verb. A seat whose definition declares an output artifact writes
-it with the project `write_artifact` tool to the same handoff artifact every persona writes
+it with the project `j5_write_artifact` tool to the same handoff artifact every persona writes
 (`handoffs/<agent>/<Artifact>-<task>.md`, see the [persona contract](../agent-personas/index.md));
 its first turn carries `<seat_obligation>` naming that exact path. The handoff gate checks for the
 file when a run ends and reminds the seat once. When a seat's run fails, or completes while the seat owes
@@ -283,16 +283,16 @@ something is at the path that can never be a handoff (a directory, or a link out
 directory) and carries the reason. Only a real read failure sends nothing, and the next finish or the
 boot sweep retries. A written handoff artifact up
 to 4,000 characters rides inline with its size and digest; longer ones name the path for the
-project `read_artifact` tool, and one over the artifact read limit is still `written`, named by path. A notice posts the first time a seat finishes and again only when
+project `j5_read_artifact` tool, and one over the artifact read limit is still `written`, named by path. A notice posts the first time a seat finishes and again only when
 its facts changed, and a notice that arrives while the Captain's turn runs folds into the one
-queued behind it. Interrupted and cancelled runs are not finishes: `stop_crew` interrupts seats so
+queued behind it. Interrupted and cancelled runs are not finishes: `j5_stop_crew` interrupts seats so
 they can be briefed again, and nothing is reported then. Ids
-derive from the run, so a redelivered event cannot post twice. Read-only Codex and Claude personas have `write_artifact` pre-approved for this reason, and `delegate_task` with `task_status` and `task_cancel` beside it, because a Crew member refused `spawn_agent` is sent to provider-native Subagents and a verb the sandbox then rejects is no way out:
+derive from the run, so a redelivered event cannot post twice. Read-only Codex and Claude personas have `j5_write_artifact` pre-approved for this reason, and `delegate_task` with `task_status` and `task_cancel` beside it, because a Crew member refused `j5_spawn_agent` is sent to provider-native Subagents and a verb the sandbox then rejects is no way out:
 handoff artifacts live in application storage, never in the sandboxed workspace. (Withdrawn on 2026-09-14:
 the 2026-09-10 `deliver_artifact` verb, its ledger table, and the crew-only `read_artifact` and
-`list_artifacts`, which collided with the project artifact toolkit's names.)
+`list_artifacts` of that time, which collided with the project artifact toolkit's names.)
 
-### `stop_crew`
+### `j5_stop_crew`
 
 **Description (contract):** "Stop a Crew you command the way a user Stop does, seat by seat: each seat's running turn is interrupted now, turns already queued behind it, messages you sent it included, are held until a person resumes its queue (no tool releases them, and a message sent after the stop runs ahead of them), its pull request watches end, and the tasks it delegated stop too. Nothing settles or is retired, and every seat can be messaged again afterwards. Captain-only. Reuse client_request_id to retry safely."
 
@@ -302,7 +302,7 @@ the 2026-09-10 `deliver_artifact` verb, its ledger table, and the crew-only `rea
 | `client_request_id` | string, non-empty | no       | Supply and reuse to make retries safe          |
 
 Result: `crew_instance_id` and `members` (seat, participant_id, result: `interrupt_requested`,
-`already_idle`, or `archived`). Semantics: the unit form of `stop_agent`. Only the Captain may call
+`already_idle`, or `archived`). Semantics: the unit form of `j5_stop_agent`. Only the Captain may call
 it; anyone else is refused and pointed at asking the Captain; an archived Crew is refused naming
 its state. Every seat is stopped through the ordinary single-agent stop, upstream's Stop; an idle seat is
 reported as such and its queue is held too; nothing settles, nothing is retired, no Exchange closes, and the seats stay addressable.
@@ -310,7 +310,7 @@ The person has the same act as a **Stop crew** control on the Crew's header on t
 the Captain's expander in the sidebar, shown only while a seat is running; it is not a Crew
 participant, so no Captain check applies to it (Bryant, 2026-09-14).
 
-### `archive_crew`
+### `j5_archive_crew`
 
 **Description (contract):** "Retire a whole Crew you command. Crews archive only as a unit —
 members are never retired one by one. A clean archive completes immediately; otherwise the call
@@ -337,13 +337,13 @@ the current facts are a subset of the confirmed ones, so a retry after a partial
 the job; new work on any seat makes it stale and yields a fresh token. Partial failures name the
 seats retired so far and the seat that failed; retry with the same `client_request_id` and token.
 
-**Members are never archived one by one (R14):** `t3_thread_organize` refuses archiving an active Crew seat, just as client archive/delete does. Retire the unit through `archive_crew` or Archive crew on the Fleet page. Archiving its Captain retains the crew cascade. A member that finishes with nothing owed is
-reported to its Captain; the platform never settles a seat because its run finished, and settlement is not archive. `stop_agent` on a member is still allowed;
+**Members are never archived one by one (R14):** `t3_thread_organize` refuses archiving an active Crew seat, just as client archive/delete does. Retire the unit through `j5_archive_crew` or Archive crew on the Fleet page. Archiving its Captain retains the crew cascade. A member that finishes with nothing owed is
+reported to its Captain; the platform never settles a seat because its run finished, and settlement is not archive. `j5_stop_agent` on a member is still allowed;
 stopping retires nothing.
 
 ### Crew playbook runs
 
-A Captain runs the playbook its Crew follows with `playbook_start(name, client_request_id,
+A Captain runs the playbook its Crew follows with `j5_playbook_start(name, client_request_id,
 crew_instance_id)`. The call is refused with `crew_not_linkable` unless the Crew is the caller's,
 is live, and follows that playbook. Each landing (start, next, back, reselect) hands the step's live
 prompt to the seat that owns it, once per landing, as a `<j5_playbook_step>` notice in the seat's
@@ -352,19 +352,19 @@ thread. A step no live seat owns is the Captain's, and no notice is sent for it.
 Every step tool on a Crew-linked run returns `delivery`: `{ state, seat, thread_id }`, where `state`
 is `delivered` (the seat has the step), `captain` (the Captain does it from `currentStep.prompt`),
 or `pending` (the hand-off hasn't finished; nobody should start the step). Only `captain` means
-the Captain does it. `playbook_current` reports the same `delivery` without handing off again.
-While an earlier hand-off is still pending, `playbook_next`, `playbook_back`, `playbook_reselect`,
-and `playbook_complete` refuse with `delivery_pending` and don't move; retry the same call. Nothing
+the Captain does it. `j5_playbook_current` reports the same `delivery` without handing off again.
+While an earlier hand-off is still pending, `j5_playbook_next`, `j5_playbook_back`, `j5_playbook_reselect`,
+and `j5_playbook_complete` refuse with `delivery_pending` and don't move; retry the same call. Nothing
 retries a pending hand-off in the background, including after a restart: the Captain's next step
 call, or a retry of the same one, finishes it.
-`playbook_cancel` always works. The platform never advances on its own: the Captain calls
-`playbook_next` after the seat reports back. Archiving the Crew or its Captain cancels its active
-run; `stop_crew` doesn't, and unarchiving doesn't restart it.
+`j5_playbook_cancel` always works. The platform never advances on its own: the Captain calls
+`j5_playbook_next` after the seat reports back. Archiving the Crew or its Captain cancels its active
+run; `j5_stop_crew` doesn't, and unarchiving doesn't restart it.
 
 ### Kept upstream tools
 
 - `orchestrator_capabilities` — providers and models (ids, labels, option descriptors) for spawn targeting, plus runtime and interaction-mode facts. It deliberately stays silent about delegation even though `delegate_task` is back on the surface: that tool's own description carries its persona use, and J5 verbs are advertised by their own descriptions.
-- `delegate_task`, `task_status`, `task_cancel` — upstream's provider-owned child delegation. J5 re-declares `delegate_task` with its own description, which leads with the optional `persona` (a persona id from an `@persona:ID` mention or the Settings → Personas library) and presents the plain child as the fallback for cross-provider or T3-tracked work rather than the default for any subagent request. With `persona`, the server pins that persona's instructions, model route, reasoning, and runtime policy and refuses `target` and `runtimeMode`; without it, the child is upstream's plain subagent. The child is backing storage under the calling thread, not a Peer Agent; use `spawn_agent` for a participant. Its wait mode is safe where `t3_thread_wait` was not: a child that messages its parent ends its own turn, so the wait returns and the parent reads the message on its next turn (latency, never starvation).
+- `delegate_task`, `task_status`, `task_cancel` — upstream's provider-owned child delegation. J5 re-declares `delegate_task` with its own description, which leads with the optional `persona` (a persona id from an `@persona:ID` mention or the Settings → Personas library) and presents the plain child as the fallback for cross-provider or T3-tracked work rather than the default for any subagent request. With `persona`, the server pins that persona's instructions, model route, reasoning, and runtime policy and refuses `target` and `runtimeMode`; without it, the child is upstream's plain subagent. The child is backing storage under the calling thread, not a Peer Agent; use `j5_spawn_agent` for a participant. Its wait mode is safe where `t3_thread_wait` was not: a child that messages its parent ends its own turn, so the wait returns and the parent reads the message on its next turn (latency, never starvation).
 - `schedule_task`, `list_scheduled_tasks`, `update_scheduled_task`, `delete_scheduled_task` — consumed as-is.
 - `t3_thread_list`, `t3_thread_read` — consumed as-is; if an upstream description mentions delegation, J5 re-declares that tool with corrected prose.
 - `html_preview`, `html_render`, `request_secret`, `preview_dialog`, `preview_hover`, `preview_select`, `preview_drag`, `preview_upload`, `watch_pull_request`, `unwatch_pull_request` — consumed as-is.
@@ -373,28 +373,28 @@ run; `stop_crew` doesn't, and unarchiving doesn't restart it.
 ## Acceptance criteria
 
 1. Every J5 verb's shipped description string is byte-identical to the description in this definition.
-2. A `send_message` to a person that is not an ask is refused with an error naming the legal move; an ask to a person without urgency is refused.
+2. A `j5_send_message` to a person that is not an ask is refused with an error naming the legal move; an ask to a person without urgency is refused.
 3. A further ask to a person opens a new Exchange and inbox item; an ask that names an open Exchange in `regarding` joins it and is shown beneath the original ask.
 4. Between agents, a further ask to a peer holding an open Exchange from the caller joins it as a follow-up.
-5. A `send_message` to the caller itself is refused with an error naming the caller's own id.
-6. `list_participants` marks the caller's row `self`, reports a person's row as unable to receive a plain message and able to be asked, and omits provider Subagents.
-7. `spawn_agent` refuses a call that omits provider, model, or reasoning, refuses a choice outside the Role's allowlist with an error naming the Role, and refuses a caller that sits in a Crew with an error naming escalation to its Captain.
+5. A `j5_send_message` to the caller itself is refused with an error naming the caller's own id.
+6. `j5_list_participants` marks the caller's row `self`, reports a person's row as unable to receive a plain message and able to be asked, and omits provider Subagents.
+7. `j5_spawn_agent` refuses a call that omits provider, model, or reasoning, refuses a choice outside the Role's allowlist with an error naming the Role, and refuses a caller that sits in a Crew with an error naming escalation to its Captain.
 8. A spawned agent's first turn contains its own participant id and project.
-9. `stop_agent` and `t3_thread_organize` act on one target; neither cascades. A stopped run is never resumed after a server restart, even when restart continuation is enabled.
+9. `j5_stop_agent` and `t3_thread_organize` act on one target; neither cascades. A stopped run is never resumed after a server restart, even when restart continuation is enabled.
 10. `t3_thread_organize` archives and restores any thread in the environment that upstream's access check lets the caller act on. Archive closes Exchanges through the shared reactor without a confirmation-token exchange or interrupting an existing run; human archive warnings remain.
-11. `clear_own_ask` closes only an Exchange the caller opened and records the closure as sender-cleared.
+11. `j5_clear_own_ask` closes only an Exchange the caller opened and records the closure as sender-cleared.
 12. Every error from every verb names the actual state and the next command.
-13. `list_participants` omits archived agents unless `include_archived` is set, and then marks each one `archived` and unable to receive a message or an ask.
+13. `j5_list_participants` omits archived agents unless `include_archived` is set, and then marks each one `archived` and unable to receive a message or an ask.
 14. Unarchiving an archived agent restores the same participant id, placement and provenance and makes it addressable again; the Exchanges archiving closed stay closed and no cancelled delivery is replayed.
 15. Retired (see History).
 16. Retired (see History).
-17. `list_personas` returns every persona with its availability and route; `propose_crew` and `request_crew_member` file a human gate and refuse unknown, disabled, duplicate, or over-cap seats before anything is recorded; both succeed under every sandbox and approval policy, including Codex approval policy `never`.
+17. `j5_list_personas` returns every persona with its availability and route; `j5_propose_crew` and `j5_request_crew_member` file a human gate and refuse unknown, disabled, duplicate, or over-cap seats before anything is recorded; both succeed under every sandbox and approval policy, including Codex approval policy `never`.
 18. Approving a proposal spawns exactly once; a second approval finds it resolved; a seat that fails to spawn is reported by name in the launch report and the other seats still start.
-19. `archive_crew` is Captain-only, refuses with per-seat facts and a token when any seat has an open Exchange or a running turn, and finishes a partial archive on retry; `t3_thread_organize` refuses an active Crew member, while Captain archive retains the unit cascade.
-20. `stop_crew` is Captain-only, stops every seat as a user Stop does and reports each seat as interrupted, already idle, or archived; it settles, retires, and closes nothing, and a non-Captain or an archived Crew is refused naming the next step. The person's Stop crew control does the same through the operate scope.
-21. `list_participants` lists participants on peer servers with their project and reports an unreadable peer in the result; `send_message` accepts their ids exactly as local ones.
-22. Once a server has a peer, every `list_participants` row names the server the participant lives on and marks this server's as local, and a row on a peer server that polls this one says whether it is available and when it was last available; a server with no peers adds no server field.
-23. A `send_message` to a participant on a peer server names that server in its result, and, when that server is offline, says the message is waiting for the recipient and when the server was last available.
+19. `j5_archive_crew` is Captain-only, refuses with per-seat facts and a token when any seat has an open Exchange or a running turn, and finishes a partial archive on retry; `t3_thread_organize` refuses an active Crew member, while Captain archive retains the unit cascade.
+20. `j5_stop_crew` is Captain-only, stops every seat as a user Stop does and reports each seat as interrupted, already idle, or archived; it settles, retires, and closes nothing, and a non-Captain or an archived Crew is refused naming the next step. The person's Stop crew control does the same through the operate scope.
+21. `j5_list_participants` lists participants on peer servers with their project and reports an unreadable peer in the result; `j5_send_message` accepts their ids exactly as local ones.
+22. Once a server has a peer, every `j5_list_participants` row names the server the participant lives on and marks this server's as local, and a row on a peer server that polls this one says whether it is available and when it was last available; a server with no peers adds no server field.
+23. A `j5_send_message` to a participant on a peer server names that server in its result, and, when that server is offline, says the message is waiting for the recipient and when the server was last available.
 24. A message refused by the recipient's server, or cancelled before it was delivered, reaches its sender as a not-delivered notice naming the recipient, its server and the reason; a refused ask's Exchange is dropped, and that one notice says so.
 
 ## History
@@ -430,3 +430,4 @@ run; `stop_crew` doesn't, and unarchiving doesn't restart it.
 - 2026-10-06 — a peer whose new worktree fails to prepare is left as upstream leaves any failed launch: its thread shows the failure, and it is not retried, retired, or guarded, and its spawner is not told. Upstream reads an unbound thread as the project's checkout, but in practice no turn has landed there, and each guard tried (a turn guard, then waiting for the checkout and retiring the peer) raised a new edge case. The turn guard and the `<j5_spawn_workspace_failed>` notice are removed, and `spawn_agent` returns once the peer is registered (Jackson on [#396](https://github.com/Jacksondr5/j5code/pull/396)).
 - 2026-10-07 — Squadrons retired: every thread but a provider Subagent is a participant in its project's ledger, so `list_squadrons` and `join_squadron` are removed and AC15 and AC16 retired; `stop_agent`, `stop_crew` and `archive_crew` take no `squadron_id`; `list_participants` rows and the `spawn_agent` result carry `project_id` and `project_title`; archiving another agent follows upstream's same-project rule alone (Jackson, 2026-10-05; [#412](https://github.com/Jacksondr5/j5code/issues/412)).
 - 2026-10-08 — the advance onto upstream `main`: `stop_agent` and `stop_crew` send upstream's Stop, which also holds the queue, ends pull request watches and stops delegated tasks; `t3_thread_organize` follows upstream's reach across the environment (AC10); ten new upstream tools are kept as-is (Jackson's decisions of that day; [register of divergences](../upstream.md), D2).
+- 2026-10-10 — every tool J5 owns gains a `j5_` prefix (`send_message` became `j5_send_message`, and so on for the messaging, agent, Crew, persona, playbook and artifact tools), because agents on Claude reached for the harness's own `SendMessage` instead; the old names are not kept as aliases, and lines above this one use the names of their day (Jackson; [#508](https://github.com/Jacksondr5/j5code/issues/508)).

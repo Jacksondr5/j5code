@@ -1,0 +1,120 @@
+name: J5 Nightly
+
+# Publishes a nightly of `j5/main`: a pre-release tagged
+# `v<x.y.z>-nightly.<yyyymmdd>.<run>`, where `x.y.z` is the next patch after the
+# version the manifests commit. Servers on the nightly channel and desktop apps
+# on the nightly update track follow it. Nothing is committed: the version is
+# stamped into the manifests during each build.
+#
+# Started by hand for now. To run it on a schedule, add a `schedule` trigger and
+# set `due` in the `resolve` job from `shouldReleaseNightly` in upstream's
+# .github/scripts/check-nightly-release.cjs when the event is `schedule`, so a
+# scheduled run with no new commits since the last nightly builds nothing.
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: j5-nightly
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    name: Resolve the nightly version
+    if: github.repository == 'Jacksondr5/j5code'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      ref: ${{ github.sha }}
+      version: ${{ steps.version.outputs.version }}
+      due: ${{ steps.due.outputs.due }}
+    steps:
+      - name: Require the default branch
+        run: |
+          if [[ "$GITHUB_REF" != "refs/heads/j5/main" ]]; then
+            echo "::error::A nightly is built from j5/main; this run was started on $GITHUB_REF."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.10.0
+          run_install: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Upstream's script; its `name` output says "T3 Code" and is not used.
+      - name: Resolve the nightly version
+        id: version
+        env:
+          NIGHTLY_DATE: ${{ github.run_started_at }}
+        run: |
+          set -euo pipefail
+          pnpm exec node scripts/resolve-nightly-release.ts \
+            --date "$(date -u -d "$NIGHTLY_DATE" +%Y%m%d)" \
+            --run-number "$GITHUB_RUN_NUMBER" \
+            --sha "$GITHUB_SHA" \
+            --github-output
+
+      - name: Decide whether a nightly is due
+        id: due
+        run: echo "due=true" >> "$GITHUB_OUTPUT"
+
+      # These gitlinks belong to vendored manifests, not this repository.
+      # Remove them only from the disposable index before checkout's cleanup.
+      - name: Exclude vendored gitlinks from checkout cleanup
+        if: always()
+        run: |
+          python3 - <<'PYTHON'
+          import subprocess
+          entries = subprocess.check_output(["git", "ls-files", "--stage", "-z", ".repos"])
+          paths = [entry.split(b"\t", 1)[1] for entry in entries.split(b"\0") if entry.startswith(b"160000 ")]
+          if paths:
+              subprocess.run(["git", "update-index", "--force-remove", "-z", "--stdin"], input=b"\0".join(paths) + b"\0", check=True)
+          PYTHON
+
+  build:
+    name: Desktop build
+    needs: resolve
+    if: needs.resolve.outputs.due == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/j5-macos-build.yml
+    with:
+      ref: ${{ needs.resolve.outputs.ref }}
+      version: ${{ needs.resolve.outputs.version }}
+    secrets:
+      CSC_LINK: ${{ secrets.CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+      APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+
+  # Builds the CLI archives and publishes them with the desktop build above.
+  release:
+    name: Release
+    needs: [resolve, build]
+    permissions:
+      contents: write
+      actions: read
+    uses: ./.github/workflows/j5-release.yml
+    with:
+      ref: ${{ needs.resolve.outputs.ref }}
+      version: ${{ needs.resolve.outputs.version }}
+    secrets:
+      CSC_LINK: ${{ secrets.CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+      APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}

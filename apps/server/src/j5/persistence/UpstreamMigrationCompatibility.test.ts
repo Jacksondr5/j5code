@@ -15,16 +15,12 @@ import * as SqlClient from "effect/sql/SqlClient";
 import { migrationManifest, runMigrations } from "../../persistence/Migrations.ts";
 import { layerFromPath } from "../../persistence/Sqlite.ts";
 import { migrationEntries as j5MigrationEntries, runJ5A2AMigrations } from "../a2a/Migrations.ts";
-import {
-  pinMigrationHistory,
-  runJ5CompatibleUpstreamMigrations,
-  snapshotBeforeUpstreamRenumber,
-  UpstreamRenumberSnapshotError,
-  upstreamRenumberSnapshotPath,
-} from "./UpstreamMigrationCompatibility.ts";
+import { migrationSnapshotPath } from "./MigrationSnapshot.ts";
+import { runJ5CompatibleUpstreamMigrations } from "./UpstreamMigrationCompatibility.ts";
 import {
   installPin,
   installRetired,
+  pinMigrationHistory,
   retiredHistories,
 } from "./test-support/historicalMigrations.ts";
 
@@ -123,7 +119,7 @@ it.effect.each([40, 47, 50, 53, 54, 55, 56, 59])(
 
 // ---- Pin 67a2be0fdb (`54 = OrchestrationV2`, `55 = RemoveRedundantProjectionIndexes`) ----
 
-it.effect("the pin fixture records exactly the history the wrapper snapshots", () =>
+it.effect("the pin fixture records exactly the history J5 0.0.48 leaves", () =>
   Effect.gen(function* () {
     yield* installPin();
     assert.deepStrictEqual(yield* readManifest(), pinMigrationHistory);
@@ -226,13 +222,19 @@ const withDatabasePath = <A, E>(
     const path = yield* Path.Path;
     const directory = yield* fs.makeTempDirectoryScoped({ prefix: "j5-upstream-renumber-" });
     const dbPath = path.join(directory, "statev2.sqlite");
-    return yield* body({ dbPath, snapshotPath: upstreamRenumberSnapshotPath(path, dbPath) });
+    return yield* body({
+      dbPath,
+      // The pin's history ends at 55, and `seedJ5AndV2State` runs every J5 ledger migration.
+      snapshotPath: migrationSnapshotPath(path, dbPath, {
+        upstream: 55,
+        j5: Math.max(...j5MigrationEntries.map(([id]) => id)),
+      }),
+    });
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
 
 it.effect("startup snapshots a pin database, upgrades it, and the second start is a no-op", () =>
   withDatabasePath(({ dbPath, snapshotPath }) =>
     Effect.gen(function* () {
-      assert.isTrue(snapshotPath.endsWith("statev2.pre-upstream-renumber.sqlite"));
       yield* Effect.gen(function* () {
         yield* installPin();
         yield* seedJ5AndV2State();
@@ -263,44 +265,6 @@ it.effect("startup snapshots a pin database, upgrades it, and the second start i
       NodeFS.rmSync(snapshotPath);
       assert.deepStrictEqual(yield* readStartup, first);
       assert.isFalse(NodeFS.existsSync(snapshotPath));
-    }),
-  ),
-);
-
-it.effect("takes no snapshot of a missing, fresh or current database", () =>
-  withDatabasePath(({ dbPath, snapshotPath }) =>
-    Effect.gen(function* () {
-      yield* snapshotBeforeUpstreamRenumber(dbPath);
-      // A read-only check must not create the database either.
-      assert.isFalse(NodeFS.existsSync(dbPath));
-
-      yield* runMigrations({ toMigrationInclusive: 53 }).pipe(Effect.provide(atFile(dbPath)));
-      yield* snapshotBeforeUpstreamRenumber(dbPath);
-      yield* runMigrations().pipe(Effect.provide(atFile(dbPath)));
-      yield* snapshotBeforeUpstreamRenumber(dbPath);
-      assert.isFalse(NodeFS.existsSync(snapshotPath));
-    }),
-  ),
-);
-
-it.effect("startup does not open the database when the snapshot cannot be written", () =>
-  withDatabasePath(({ dbPath, snapshotPath }) =>
-    Effect.gen(function* () {
-      yield* installPin().pipe(Effect.provide(atFile(dbPath)));
-      const before = readContent(dbPath);
-      // A non-empty directory under the snapshot's name cannot be replaced by the rename.
-      NodeFS.mkdirSync(snapshotPath);
-      NodeFS.writeFileSync(`${snapshotPath}/occupied`, "");
-
-      const error = yield* Effect.flip(snapshotBeforeUpstreamRenumber(dbPath));
-      assert.instanceOf(error, UpstreamRenumberSnapshotError);
-      assert.include(error.message, snapshotPath);
-      assert.include(error.message, "Nothing has been migrated.");
-
-      const startup = yield* Effect.exit(Effect.void.pipe(Effect.provide(layerFromPath(dbPath))));
-      assert.isTrue(Exit.isFailure(startup));
-      if (Exit.isFailure(startup)) assert.isTrue(Cause.hasDies(startup.cause));
-      assert.deepStrictEqual(readContent(dbPath), before);
     }),
   ),
 );

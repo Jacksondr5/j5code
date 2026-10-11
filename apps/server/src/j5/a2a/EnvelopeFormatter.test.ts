@@ -29,10 +29,12 @@ const readDocumentedSendToolDescription = Effect.fn("readDocumentedSendToolDescr
       decodeURIComponent(documentedSendToolContract.pathname),
     );
     const description = document.match(
-      /## `send_message`[\s\S]*?\*\*Description:\*\* "([\s\S]*?)"\n\n\| Input/,
+      /## `j5_send_message`[\s\S]*?\*\*Description:\*\* "([\s\S]*?)"\n\n\| Input/,
     )?.[1];
     if (description === undefined) {
-      return yield* Effect.die("send_message contract description is missing from agent-tools.md");
+      return yield* Effect.die(
+        "j5_send_message contract description is missing from agent-tools.md",
+      );
     }
     return description
       .split("\n")
@@ -50,13 +52,13 @@ it("renders the versioned peer envelope with exact reply semantics", () => {
     message: "Please verify the worker.",
   });
 
-  assert.equal(A2A_ENVELOPE_VERSION, 22);
+  assert.equal(A2A_ENVELOPE_VERSION, 23);
   assert.include(rendered, "Cross-agent message");
   assert.notMatch(rendered, /\b(?:J5|A2A)\b/);
   assert.include(rendered, "agent:sender");
   assert.include(rendered, "project:origin");
   assert.include(rendered, "Please verify the worker.");
-  assert.include(rendered, 'send_message(to="agent:sender", exchange_id="exchange:one"');
+  assert.include(rendered, 'j5_send_message(to="agent:sender", exchange_id="exchange:one"');
   assert.include(rendered, "Reply once");
   assert.notInclude(rendered, "{{");
 });
@@ -83,10 +85,12 @@ it("names a remote sender's server in its sender line and leaves a local one unc
   for (const rendered of [remote, local, closed]) assert.notInclude(rendered, "{{");
 });
 
-it.effect("keeps the send_message runtime description byte-equal to its documented contract", () =>
-  Effect.gen(function* () {
-    assert.equal(yield* readDocumentedSendToolDescription(), A2A_SEND_TOOL_DESCRIPTION);
-  }),
+it.effect(
+  "keeps the j5_send_message runtime description byte-equal to its documented contract",
+  () =>
+    Effect.gen(function* () {
+      assert.equal(yield* readDocumentedSendToolDescription(), A2A_SEND_TOOL_DESCRIPTION);
+    }),
 );
 
 it("renders reply closures without another reply instruction for either channel", () => {
@@ -107,8 +111,8 @@ it("renders reply closures without another reply instruction for either channel"
   for (const rendered of [peer, human]) {
     assert.include(rendered, "The platform closed this exchange when this reply was sent.");
     assert.include(rendered, "No further reply is required.");
-    assert.notInclude(rendered, "send_message(");
-    assert.notInclude(rendered, "Use send_message without exchange_id");
+    assert.notInclude(rendered, "j5_send_message(");
+    assert.notInclude(rendered, "Use j5_send_message without exchange_id");
     assert.notInclude(rendered, "{{");
   }
   assert.notInclude(human, "This person is not watching this chat");
@@ -135,7 +139,7 @@ it("does not interpret caller text as an envelope template", () => {
   });
 
   assert.include(rendered, message);
-  assert.equal(rendered.match(/send_message\(/g)?.length, 1);
+  assert.equal(rendered.match(/j5_send_message\(/g)?.length, 1);
 });
 
 it("renders the receiver backlog notice with its measured counts", () => {
@@ -155,7 +159,7 @@ it("renders the receiver backlog notice with its measured counts", () => {
 it("keeps the tool descriptions on their documented contracts", () => {
   assert.equal(
     A2A_SEND_TOOL_DESCRIPTION,
-    "Send one durable message. To another agent, three uses: a **plain send** when you don't need a reply; an **ask** — set expect_reply=true with a one-line intent, opening an exchange the receiver owes a reply to; a **reply** — include the exchange_id from the ask you are answering, which closes that exchange. To the human, only an ask: a plain send to a person is refused — if nobody needs to act, say it in your own thread instead. Set urgency only when asking the human. Use this tool only for participants already returned by list_participants; when creating a Peer Agent, put any reply expectation in spawn_agent's brief instead of sending a follow-up ask. Returns once the message is committed; delivery continues asynchronously — carry on with your work, and the reply arrives later as an incoming message. An agent that is busy usually handles each message as its own turn after its current one ends, so put related updates in one message rather than sending them one by one; the result's deliveryNotice says when your message will wait behind the receiver's current turn. A provider Subagent is not a participant and is refused. Reuse client_request_id to retry the same send safely.",
+    "Send one durable message. To another agent, three uses: a **plain send** when you don't need a reply; an **ask** — set expect_reply=true with a one-line intent, opening an exchange the receiver owes a reply to; a **reply** — include the exchange_id from the ask you are answering, which closes that exchange. To the human, only an ask: a plain send to a person is refused — if nobody needs to act, say it in your own thread instead. Set urgency only when asking the human. Use this tool only for participants already returned by j5_list_participants; when creating a Peer Agent, put any reply expectation in j5_spawn_agent's brief instead of sending a follow-up ask. Returns once the message is committed; delivery continues asynchronously — carry on with your work, and the reply arrives later as an incoming message. An agent that is busy usually handles each message as its own turn after its current one ends, so put related updates in one message rather than sending them one by one; the result's deliveryNotice says when your message will wait behind the receiver's current turn. A provider Subagent is not a participant and is refused. Reuse client_request_id to retry the same send safely.",
   );
   assert.include(
     A2A_SEND_TOOL_DESCRIPTION,
@@ -184,8 +188,11 @@ it("keeps the tool descriptions on their documented contracts", () => {
   for (const description of [A2A_SEND_TOOL_DESCRIPTION, A2A_LIST_TOOL_DESCRIPTION]) {
     assert.notInclude(description, "wrapper-spawned");
   }
-  assert.include(A2A_SEND_TOOL_DESCRIPTION, "participants already returned by list_participants");
-  assert.include(A2A_SEND_TOOL_DESCRIPTION, "reply expectation in spawn_agent's brief");
+  assert.include(
+    A2A_SEND_TOOL_DESCRIPTION,
+    "participants already returned by j5_list_participants",
+  );
+  assert.include(A2A_SEND_TOOL_DESCRIPTION, "reply expectation in j5_spawn_agent's brief");
   assert.notMatch(A2A_LIST_TOOL_DESCRIPTION, /consult.*(?:spawn|archive)/i);
   assert.notMatch(
     [A2A_SEND_TOOL_DESCRIPTION, A2A_LIST_TOOL_DESCRIPTION].join("\n"),

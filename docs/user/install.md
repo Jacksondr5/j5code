@@ -21,7 +21,9 @@ This puts `j5` in `~/.local/bin` and keeps downloaded versions and your data in
 `~/.j5code` (set `J5CODE_HOME` to use another directory). If `~/.local/bin` isn't
 on your `PATH`, the installer adds one line to your shell's startup file (zsh,
 bash, or fish) that puts the directory at the end of `PATH`, so `j5` works in new
-terminals. `j5 uninstall` removes that line. For other shells, add the directory
+terminals. `j5 uninstall` removes that line, and the `j5` link the desktop app's Settings
+placed in `/opt/homebrew/bin`, `/usr/local/bin` or `~/bin`. If it can't write to
+that folder it says so and leaves the link for you to delete. For other shells, add the directory
 yourself. To keep the installer away from your startup files, set
 `J5CODE_NO_MODIFY_PATH=1` when you run it; it prints the directory to add. Set `T3CODE_VERSION` to pin an exact
 version.

@@ -1,7 +1,31 @@
 name: J5 Signed macOS Build
 
+# Run by hand on a branch, it builds that branch at the version its manifests
+# commit (docs/j5/runbooks/macos-packaging.md). Called by J5 Nightly, it builds
+# `ref` and stamps `version` into the manifests first, so nothing is committed.
 on:
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: Commit to build
+        type: string
+        required: true
+      version:
+        description: Version to stamp into the package manifests before building
+        type: string
+        required: true
+    secrets:
+      CSC_LINK:
+        required: true
+      CSC_KEY_PASSWORD:
+        required: true
+      APPLE_API_KEY:
+        required: true
+      APPLE_API_KEY_ID:
+        required: true
+      APPLE_API_ISSUER:
+        required: true
 
 permissions:
   contents: read
@@ -18,7 +42,10 @@ jobs:
     env:
       T3CODE_DESKTOP_UPDATE_REPOSITORY: Jacksondr5/j5code
     steps:
+      # Empty on a manual run, which checks out the branch it was started on.
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
 
       - uses: pnpm/action-setup@v6
         with:
@@ -39,6 +66,12 @@ jobs:
       - name: Test packaging behavior
         run: pnpm exec vp test run scripts/build-desktop-artifact.test.ts scripts/sign-macos.test.ts
 
+      - name: Stamp the release version
+        if: inputs.version != ''
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: pnpm exec node scripts/update-release-package-versions.ts "$RELEASE_VERSION"
+
       - name: Prepare Apple signing credentials
         env:
           CSC_LINK: ${{ secrets.CSC_LINK }}
@@ -58,16 +91,28 @@ jobs:
       - name: Verify app identity, signature, and notarization ticket
         env:
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          RELEASE_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
           shopt -s nullglob
+          # The version the build read, stamped or committed. A nightly version is
+          # packaged under the nightly name (scripts/build-desktop-artifact.ts).
+          version="$(node -p "require('./apps/server/package.json').version")"
+          if [[ -n "$RELEASE_VERSION" ]]; then
+            test "$version" = "$RELEASE_VERSION"
+          fi
+          app_name="J5 Code"
+          if [[ "$version" =~ -nightly\.[0-9]{8}\.[0-9]+$ ]]; then
+            app_name="J5 Code (Nightly)"
+          fi
           dmgs=(release-j5/J5-Code-*-arm64.dmg)
           test "${#dmgs[@]}" -eq 1
+          test "${dmgs[0]}" = "release-j5/J5-Code-$version-arm64.dmg"
           mount_dir="$(mktemp -d "$RUNNER_TEMP/j5-dmg.XXXXXX")"
           hdiutil attach "${dmgs[0]}" -mountpoint "$mount_dir" -nobrowse -readonly
           trap 'hdiutil detach "$mount_dir"; rmdir "$mount_dir"' EXIT
-          app_path="$mount_dir/J5 Code.app"
-          test "$(plutil -extract CFBundleDisplayName raw "$app_path/Contents/Info.plist")" = "J5 Code"
+          app_path="$mount_dir/$app_name.app"
+          test "$(plutil -extract CFBundleDisplayName raw "$app_path/Contents/Info.plist")" = "$app_name"
           test "$(plutil -extract CFBundleIdentifier raw "$app_path/Contents/Info.plist")" = "codes.jackson.j5code"
           codesign --verify --deep --strict --verbose=2 "$app_path"
           codesign -dv --verbose=4 "$app_path" 2>&1 | grep -Fx "TeamIdentifier=$APPLE_TEAM_ID"
@@ -92,3 +137,16 @@ jobs:
           if [[ -n "${J5_SIGNING_DIR:-}" ]]; then
             rm -rf -- "$J5_SIGNING_DIR"
           fi
+
+      # These gitlinks belong to vendored manifests, not this repository.
+      # Remove them only from the disposable index before checkout's cleanup.
+      - name: Exclude vendored gitlinks from checkout cleanup
+        if: always()
+        run: |
+          python3 - <<'PYTHON'
+          import subprocess
+          entries = subprocess.check_output(["git", "ls-files", "--stage", "-z", ".repos"])
+          paths = [entry.split(b"\t", 1)[1] for entry in entries.split(b"\0") if entry.startswith(b"160000 ")]
+          if paths:
+              subprocess.run(["git", "update-index", "--force-remove", "-z", "--stdin"], input=b"\0".join(paths) + b"\0", check=True)
+          PYTHON

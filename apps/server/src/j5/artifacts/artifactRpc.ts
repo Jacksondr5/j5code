@@ -1,7 +1,9 @@
 import {
   ArtifactWatchError,
+  AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   J5_ARTIFACT_WS_METHODS,
+  type ArtifactDeleteRequest,
   type ArtifactWatchInput,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -9,6 +11,8 @@ import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 
 import type * as ProjectService from "../../project/ProjectService.ts";
+import { failAsJ5ActionError } from "../rpcActionError.ts";
+import type { ArtifactDeletion } from "./ArtifactDeletion.ts";
 import type { ArtifactWorkspace } from "./ArtifactWorkspace.ts";
 
 const METHODS = J5_ARTIFACT_WS_METHODS;
@@ -16,18 +20,30 @@ const METHODS = J5_ARTIFACT_WS_METHODS;
 /** Spread into upstream's scope table beside the persona scopes; every J5 RPC names its scope here. */
 export const ARTIFACT_RPC_SCOPES = {
   [METHODS.subscribeArtifactChanges]: AuthOrchestrationReadScope,
+  [METHODS.deleteArtifact]: AuthOrchestrationOperateScope,
 } as const;
 
 /**
  * The artifact change stream: a first event on subscribe so the client knows the watch is live,
- * then one event per debounced filesystem change with a monotonic revision. The handler is built
- * here and spread into upstream's WebSocket handler map, the same way the persona RPCs are.
+ * then one event per debounced filesystem change with a monotonic revision; and the permanent
+ * delete. The handlers are built here and served beside the persona RPCs (`wsRpc.ts`).
  */
 export function makeArtifactRpcHandlers(input: {
   readonly projects: Pick<ProjectService.ProjectService["Service"], "getById">;
   readonly artifacts: Pick<ArtifactWorkspace["Service"], "watch">;
+  readonly deletion: ArtifactDeletion["Service"];
 }) {
   return {
+    [METHODS.deleteArtifact]: (request: ArtifactDeleteRequest) =>
+      input.deletion.delete(request).pipe(
+        Effect.as({ deleted: true as const }),
+        Effect.catch(
+          failAsJ5ActionError({
+            refusals: ["ArtifactProjectUnavailableError", "ArtifactWorkspaceError"],
+            failed: "Artifact operation failed.",
+          }),
+        ),
+      ),
     [METHODS.subscribeArtifactChanges]: (request: ArtifactWatchInput) =>
       Stream.unwrap(
         input.projects.getById(request.projectId).pipe(

@@ -1,10 +1,4 @@
-import {
-  AuthOrchestrationOperateScope,
-  sessionGrantsScope,
-  type AuthSessionState,
-  type EnvironmentId,
-  type ServerConfig,
-} from "@t3tools/contracts";
+import type { EnvironmentId, ServerConfig } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
@@ -22,7 +16,6 @@ export interface J5ReadSource<A> {
   readonly environmentId: EnvironmentId;
   readonly environmentLabel: string;
   readonly connected: boolean;
-  readonly canOperate: boolean;
   readonly status: "loading" | "ready" | "offline" | "unsupported" | "error";
   readonly data: A | null;
   readonly error: string | null;
@@ -39,7 +32,6 @@ export function resolveJ5ReadSource<A>(input: {
   readonly environmentLabel: string;
   readonly phase: SupervisorConnectionState["phase"];
   readonly supported?: boolean;
-  readonly session: AuthSessionState | null;
   readonly result: AsyncResult.AsyncResult<A, unknown>;
 }): J5ReadSource<A> {
   const connected = input.phase === "connected";
@@ -61,10 +53,6 @@ export function resolveJ5ReadSource<A>(input: {
     environmentId: input.environmentId,
     environmentLabel: input.environmentLabel,
     connected,
-    canOperate:
-      connected &&
-      input.session !== null &&
-      sessionGrantsScope(input.session, AuthOrchestrationOperateScope),
     status,
     data: unsupported ? null : data,
     error:
@@ -86,7 +74,6 @@ export function createJ5ReadSourcesAtom<A>(input: {
     id: EnvironmentId,
   ) => Atom.Atom<AsyncResult.AsyncResult<SupervisorConnectionState, unknown>>;
   readonly configValueAtom: (id: EnvironmentId) => Atom.Atom<ServerConfig | null>;
-  readonly sessionStateValueAtom: (id: EnvironmentId) => Atom.Atom<AuthSessionState | null>;
   readonly queryAtom: (id: EnvironmentId) => Atom.Atom<AsyncResult.AsyncResult<A, unknown>>;
 }): Atom.Atom<J5ReadSources<A>> {
   return Atom.make((get) => {
@@ -103,7 +90,6 @@ export function createJ5ReadSourcesAtom<A>(input: {
           environmentLabel: entry.target.label,
           phase: state?.phase ?? "available",
           ...(supported === undefined ? {} : { supported }),
-          session: get(input.sessionStateValueAtom(environmentId)),
           result:
             supported === false
               ? AsyncResult.initial<A, unknown>(false)

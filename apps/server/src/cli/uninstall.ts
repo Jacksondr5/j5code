@@ -19,7 +19,7 @@ import { Command, Flag, GlobalFlag, Prompt } from "effect/cli";
 
 import * as BootService from "../cloud/bootService.ts";
 import { pinnedRuntimeVersionsDir } from "../cloud/pinnedRuntime.ts";
-import { planShellCleanup, removeJ5PathLines } from "../j5/cli/shellProfile.ts";
+import { planShellCleanup, removeAppLinks, removeJ5PathLines } from "../j5/cli/shellProfile.ts";
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
 import * as CliService from "./service.ts";
 import { findWindowsShim, launcherOwnsVersionsDir, resolveLauncherPath } from "./update.ts";
@@ -149,7 +149,8 @@ const runUninstall = Effect.fn("cli.uninstall.run")(function* (input: {
     plan.launcher === undefined &&
     plan.runtimeDir === undefined &&
     profiles.length === 0 &&
-    installerLink === undefined
+    installerLink === undefined &&
+    cleanup.appLinks.length === 0
   ) {
     yield* Console.log(`Nothing to remove: j5 is not installed for ${input.baseDir}.`);
     if (!(yield* HostProcessIsExecutable)) {
@@ -167,6 +168,7 @@ const runUninstall = Effect.fn("cli.uninstall.run")(function* (input: {
     yield* Console.log(`  every downloaded version under ${plan.runtimeDir}`);
   }
   if (installerLink !== undefined) yield* Console.log(`  the launcher at ${installerLink}`);
+  for (const link of cleanup.appLinks) yield* Console.log(`  the desktop app's link at ${link}`);
   for (const profile of profiles) yield* Console.log(`  the PATH line J5 added to ${profile}`);
   yield* Console.log(
     `Your projects, threads, and settings under ${plan.userdataDir} are kept. Delete that directory yourself if you want them gone too.`,
@@ -214,6 +216,7 @@ const runUninstall = Effect.fn("cli.uninstall.run")(function* (input: {
       );
     yield* Console.log(`Removed ${installerLink}.`);
   }
+  yield* removeAppLinks(cleanup.appLinks);
   if (profiles.length > 0) {
     yield* removeJ5PathLines(profiles).pipe(
       Effect.mapError(

@@ -598,7 +598,7 @@ it.effect("refuses plain human sends while allowing human asks and replies", () 
     assert.equal(implicitFollowup._tag, "A2AHumanFollowupNotAllowedError");
     assert.equal(
       implicitFollowup.message,
-      `A follow-up to human participant ${person.id} is refused. To the human, use an ask with expect_reply=true, intent, and urgency=blocking|soon|fyi, or a reply with exchange_id; after an ask is open, wait for its reply, or clear_own_ask on the open exchange and re-ask with the combined content. If nobody needs to act, say it in your own thread instead.`,
+      `A follow-up to human participant ${person.id} is refused. To the human, use an ask with expect_reply=true, intent, and urgency=blocking|soon|fyi, or a reply with exchange_id; after an ask is open, wait for its reply, or j5_clear_own_ask on the open exchange and re-ask with the combined content. If nobody needs to act, say it in your own thread instead.`,
     );
     const followupWrites = yield* sql<{ readonly count: number }>`
       SELECT COUNT(*) AS count
@@ -706,7 +706,10 @@ it.effect("fails closed for a caller that is not a registrable thread", () =>
       assert.equal(listError._tag, "A2ASenderNotJoinedError");
       assert.include(listError.message, "it is a Subagent, and Subagents are not participants");
       assert.include(listError.message, "Return your result to the agent that started you");
-      assert.notMatch(listError.message, /ask the user|product workflow|list_participants again/i);
+      assert.notMatch(
+        listError.message,
+        /ask the user|product workflow|j5_list_participants again/i,
+      );
 
       const sendError = yield* Effect.flip(
         service.send({

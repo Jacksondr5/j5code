@@ -175,7 +175,7 @@ import {
 } from "./j5/a2a/crewSeatArchiveGuard.ts";
 import { refreshSkillProviders } from "./j5/skills/skillProviderRefresh.ts";
 import { PlaybookStore } from "./j5/playbooks/PlaybookStore.ts";
-import { J5_WS_RPC_METHODS, layerJ5WsRpc } from "./j5/wsRpc.ts";
+import { J5_WS_RPC_METHODS, j5WsRpcServices, layerJ5WsRpc } from "./j5/wsRpc.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import * as ProviderAuthService from "./provider/ProviderAuthService.ts";
 import { makeProviderInstallation } from "./provider/providerInstallation.ts";
@@ -3159,6 +3159,7 @@ export const layer = Layer.unwrap(
     // J5: the revision counter the saved-agent handoff observer bumps; one instance per server.
     const agentHandoffRefreshes = yield* AgentHandoffRefreshes;
     const playbooks = yield* PlaybookStore;
+    const j5RpcServices = yield* j5WsRpcServices;
     return HttpRouter.add(
       "GET",
       "/ws",
@@ -3215,7 +3216,7 @@ export const layer = Layer.unwrap(
               j5CrewSeatArchiveGuard,
             ).pipe(
               // J5: J5's RPC handlers, served on the same socket.
-              Layer.merge(layerJ5WsRpc(artifactWorkspace)),
+              Layer.merge(layerJ5WsRpc(artifactWorkspace, j5RpcServices)),
               Layer.provideMerge(RpcSerialization.layerJson),
               // Request fibers run in the handlers' context, so this reporter sees
               // their defects, not the rest of the server's.

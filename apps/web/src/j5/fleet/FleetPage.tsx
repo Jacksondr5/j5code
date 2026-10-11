@@ -3,7 +3,7 @@ import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environ
 import { j5SourceNotice } from "@t3tools/client-runtime/j5/inbox";
 import { spansMultipleEnvironments } from "@t3tools/client-runtime/j5/readSources";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
-import { AuthOrchestrationOperateScope, ThreadId, type EnvironmentId } from "@t3tools/contracts";
+import { ThreadId, type EnvironmentId } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { ChevronRightIcon, RefreshCwIcon } from "lucide-react";
 import { useCallback, useMemo, useState, type ReactNode } from "react";
@@ -21,12 +21,11 @@ import { isElectron } from "../../env";
 import { cn } from "../../lib/utils";
 import type { SidebarProjectSnapshot } from "../../sidebarProjectGrouping";
 import { useAllEnvironmentShellsBootstrapped, useThreadShells } from "../../state/entities";
-import { useEnvironmentScope } from "../../state/session";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { formatElapsedDurationLabel } from "../../timestampFormat";
 import { CaptainMark } from "../crew/CaptainMark";
 import { PlaybookRunsSection } from "../playbooks/PlaybookRunsSection";
-import { fleetDetailSourcesAtom } from "../state";
+import { fleetDetailSourcesAtom, j5Environment } from "../state";
 import { useLogicalProjects } from "../logicalProjects";
 import { requestConfirmDialog } from "../../confirmDialog";
 import { ArchiveWarningCrewSeats, type ArchiveWarningCrew } from "../a2a/ArchiveWarningContent";
@@ -340,7 +339,8 @@ function FleetNodeRows(
   const { node, seatBadge, ...rows } = props;
   const { project: ledgerProject } = rows;
   const { environmentId } = ledgerProject;
-  const canOperate = useEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
+  // Stop and Archive need the same grant; either command answers for both.
+  const canOperate = useAtomValue(j5Environment.stopCrew.permissionAtom(environmentId));
   // "What is the state of this Crew?" from the seats' measured facts, no Playbook required.
   const crewState = (members: ReadonlyArray<FleetRow>) =>
     summarizeCrewState(

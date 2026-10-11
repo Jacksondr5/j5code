@@ -1,11 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
-import {
-  AuthOrchestrationOperateScope,
-  type EnvironmentId,
-  type ScopedThreadRef,
-} from "@t3tools/contracts";
+import { type EnvironmentId, type ScopedThreadRef } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { ChevronRightIcon } from "lucide-react";
 import {
@@ -25,10 +21,10 @@ import { cn } from "../../lib/utils";
 import { deriveProviderInstanceEntries, type ProviderInstanceEntry } from "../../providerInstances";
 import { useThreadShells } from "../../state/entities";
 import { environmentServerConfigsAtom } from "../../state/server";
-import { useEnvironmentScope } from "../../state/session";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { formatElapsedDurationLabel } from "../../timestampFormat";
 import { stopCrew } from "../crew/crewStopClient";
+import { j5Environment } from "../state";
 import { useSpawnedChildren, type SpawnedChild } from "./SpawnedChildrenClient";
 import {
   groupSpawnedChildren,
@@ -180,7 +176,7 @@ function SpawnedChildGroupRows(
   },
 ) {
   const { group, isOpen } = props;
-  const canOperate = useEnvironmentScope(props.environmentId, AuthOrchestrationOperateScope);
+  const canOperate = useAtomValue(j5Environment.stopCrew.permissionAtom(props.environmentId));
   const stoppable = canOperate ? stoppableCrew(group) : null;
   const [stopping, setStopping] = useState(false);
   return (

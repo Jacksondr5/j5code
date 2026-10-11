@@ -18,13 +18,13 @@ Checked against `pingdotgg/t3code` `main` @ `29980a3140`. V2 has merged there (p
 ## Launch, workspaces and parallel agents
 
 - **Upstream:** workspace-aware launches (new worktree, existing worktree, project root), configurable branch names with a prefix setting, tracked worktree setup and clone progress. A "No project" (Scratch) project exists in each environment for threads started without one; it is hidden when the server's state lives inside a checkout, which includes every J5 dev worktree. Multi-model send starts the same first message on several models, each in its own worktree. There's no coordination between them: it's for comparing outputs.
-- **J5:** `spawn_agent` and Crews create Peer Agents with briefs, in the caller's project. Every Peer Agent and seat names its workspace: the caller's checkout, an existing worktree, or a new worktree prepared through upstream's ThreadLaunch on a thread J5 has already created and placed (#274). J5 still doesn't expose `t3_thread_launch` or `create_threads`. Multi-model send is refused from a saved-agent draft, because a saved agent locks its model. J5 accepts upstream's "No project" project as shipped.
+- **J5:** `j5_spawn_agent` and Crews create Peer Agents with briefs, in the caller's project. Every Peer Agent and seat names its workspace: the caller's checkout, an existing worktree, or a new worktree prepared through upstream's ThreadLaunch on a thread J5 has already created and placed (#274). J5 still doesn't expose `t3_thread_launch` or `create_threads`. Multi-model send is refused from a saved-agent draft, because a saved agent locks its model. J5 accepts upstream's "No project" project as shipped.
 - **Watch for:** grouping or coordination of fanned-out threads, which would come close to Crews.
 
 ## Lineage, subagents and fleet views
 
 - **Upstream:** a thread-details panel with a Lineage section, lineage hover cards, one collapsible subagent card per turn, and subagent history in workspace cards. Stop is now a command of its own (`thread.stop`): it interrupts the turn, holds the queue, ends pull-request watches and stops the thread's delegated children. Lineage has a Stop control, and `task_cancel` stops a child the same way. A beta "Working" shelf in the sidebar groups active threads; upstream's copy calls the active section "the inbox", which is not J5's Inbox.
-- **J5:** placement and provenance, the Fleet page, sidebar spawned-children and Crew chips, persona identity on lineage and subagent rows. `stop_agent` and Crew stop send upstream's `thread.stop`.
+- **J5:** placement and provenance, the Fleet page, sidebar spawned-children and Crew chips, persona identity on lineage and subagent rows. `j5_stop_agent` and Crew stop send upstream's `thread.stop`.
 - **Watch for:** cross-thread grouping beyond native subagents, or an attention queue across threads. Either would mean upstream is approaching the placement tree, the Fleet page or the Inbox.
 
 ## Handoffs and history transfer

@@ -47,7 +47,7 @@ const mutationDescription =
   " Reuse client_request_id only to retry this exact operation; use a fresh ID for each new action. Active-run retries return current live progress without moving again. After completion or cancellation, only start and finish retries are retained.";
 
 export const playbookTools = [
-  Tool.make("playbook_list", {
+  Tool.make("j5_playbook_list", {
     description:
       "Discover live YAML playbooks in your thread workspace's .j5/playbooks directory, with each step's persona. Invalid files include actionable errors; non-blocking warnings name steps whose persona is missing or turned off.",
     success: PlaybookDiscovery,
@@ -55,16 +55,16 @@ export const playbookTools = [
     failureMode: "return",
     dependencies: workspaceDependencies,
   }).annotate(Tool.Readonly, true),
-  Tool.make("playbook_read", {
+  Tool.make("j5_playbook_read", {
     description:
-      "Read a playbook's live definition, with every step's prompt and persona, without starting a run. Pass the same name as playbook_start. warnings name steps whose persona is missing or turned off; they never block starting.",
+      "Read a playbook's live definition, with every step's prompt and persona, without starting a run. Pass the same name as j5_playbook_start. warnings name steps whose persona is missing or turned off; they never block starting.",
     parameters: Read,
     success: PlaybookReadResponse,
     failure: Failure,
     failureMode: "return",
     dependencies: workspaceDependencies,
   }).annotate(Tool.Readonly, true),
-  Tool.make("playbook_start", {
+  Tool.make("j5_playbook_start", {
     ...common,
     dependencies: workspaceDependencies,
     parameters: Start,
@@ -72,41 +72,41 @@ export const playbookTools = [
       "Start a named playbook in your own thread and retrieve its first live prompt. Only one run may be active. You perform the work and control advancement; the playbook never spawns or stops agents. As a Captain, pass crew_instance_id to run the playbook your Crew follows: each step then goes to the seat that owns it, and delivery says who holds it." +
       mutationDescription,
   }),
-  Tool.make("playbook_current", {
+  Tool.make("j5_playbook_current", {
     ...common,
     parameters: Current,
     description:
-      "Retrieve your run's live prompt, purpose and progress without moving. Omit runId to recover your active (or latest) run after compaction or restart. If a current step was deleted, use playbook_reselect.",
+      "Retrieve your run's live prompt, purpose and progress without moving. Omit runId to recover your active (or latest) run after compaction or restart. If a current step was deleted, use j5_playbook_reselect.",
   }).annotate(Tool.Readonly, true),
-  Tool.make("playbook_next", {
+  Tool.make("j5_playbook_next", {
     ...common,
     parameters: Movement,
     description:
-      "Advance one step in the latest YAML order and retrieve its prompt. expectedStepId must equal your current step. At the last step, use playbook_complete." +
+      "Advance one step in the latest YAML order and retrieve its prompt. expectedStepId must equal your current step. At the last step, use j5_playbook_complete." +
       mutationDescription,
   }),
-  Tool.make("playbook_back", {
+  Tool.make("j5_playbook_back", {
     ...common,
     parameters: Movement,
     description:
       "Move back one step in the latest YAML order and retrieve its live prompt. This changes progress only; it does not undo work or file edits. expectedStepId guards against stale calls." +
       mutationDescription,
   }),
-  Tool.make("playbook_reselect", {
+  Tool.make("j5_playbook_reselect", {
     ...common,
     parameters: Reselection,
     description:
       "Explicitly select an available stepId, including recovery when the stored current step was removed. expectedStepId must equal the stored currentStepId, even if that ID is absent from YAML." +
       mutationDescription,
   }),
-  Tool.make("playbook_complete", {
+  Tool.make("j5_playbook_complete", {
     ...common,
     parameters: Movement,
     description:
       "Mark the playbook completed. expectedStepId guards against stale completion. Your agent and thread remain usable; you may start another playbook." +
       mutationDescription,
   }),
-  Tool.make("playbook_cancel", {
+  Tool.make("j5_playbook_cancel", {
     ...common,
     parameters: Mutation,
     description:
@@ -135,19 +135,19 @@ const mutate = Effect.fn("PlaybookMcp.mutate")(function* (input: PlaybookMutatio
 });
 
 export const playbookHandlers = {
-  playbook_list: McpToolAccess.readsAsCaller(() =>
+  j5_playbook_list: McpToolAccess.readsAsCaller(() =>
     Effect.gen(function* () {
       const { root } = yield* workspace;
       return yield* (yield* PlaybookStore).discover(root);
     }),
   ),
-  playbook_read: McpToolAccess.readsAsCaller((input: typeof Read.Type) =>
+  j5_playbook_read: McpToolAccess.readsAsCaller((input: typeof Read.Type) =>
     Effect.gen(function* () {
       const { root } = yield* workspace;
       return yield* (yield* PlaybookStore).read(root, input.name);
     }),
   ),
-  playbook_start: McpToolAccess.actsAsCaller((input: typeof Start.Type) =>
+  j5_playbook_start: McpToolAccess.actsAsCaller((input: typeof Start.Type) =>
     Effect.gen(function* () {
       const { owner, root } = yield* workspace;
       if (input.crew_instance_id === undefined)
@@ -166,24 +166,24 @@ export const playbookHandlers = {
       });
     }),
   ),
-  playbook_current: McpToolAccess.readsAsCaller((input: typeof Current.Type) =>
+  j5_playbook_current: McpToolAccess.readsAsCaller((input: typeof Current.Type) =>
     Effect.gen(function* () {
       return yield* (yield* PlaybookCrewRelay).current(yield* ownerScope, input.runId);
     }),
   ),
-  playbook_next: McpToolAccess.actsAsCaller((input: typeof Movement.Type) =>
+  j5_playbook_next: McpToolAccess.actsAsCaller((input: typeof Movement.Type) =>
     mutate({ ...input, operation: "next" }),
   ),
-  playbook_back: McpToolAccess.actsAsCaller((input: typeof Movement.Type) =>
+  j5_playbook_back: McpToolAccess.actsAsCaller((input: typeof Movement.Type) =>
     mutate({ ...input, operation: "back" }),
   ),
-  playbook_reselect: McpToolAccess.actsAsCaller((input: typeof Reselection.Type) =>
+  j5_playbook_reselect: McpToolAccess.actsAsCaller((input: typeof Reselection.Type) =>
     mutate({ ...input, operation: "reselect" }),
   ),
-  playbook_complete: McpToolAccess.actsAsCaller((input: typeof Movement.Type) =>
+  j5_playbook_complete: McpToolAccess.actsAsCaller((input: typeof Movement.Type) =>
     mutate({ ...input, operation: "complete" }),
   ),
-  playbook_cancel: McpToolAccess.actsAsCaller((input: typeof Mutation.Type) =>
+  j5_playbook_cancel: McpToolAccess.actsAsCaller((input: typeof Mutation.Type) =>
     mutate({ ...input, operation: "cancel" }),
   ),
 };

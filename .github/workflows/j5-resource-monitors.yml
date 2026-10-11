@@ -67,3 +67,13 @@ jobs:
           path: native/resource-monitor/target/${{ matrix.target }}/release/${{ matrix.binary }}
           if-no-files-found: error
           retention-days: 30
+
+      # These gitlinks belong to vendored manifests, not this repository.
+      # Remove them only from the disposable index before checkout's cleanup.
+      # Git and awk rather than the Python the other J5 workflows use, because
+      # this matrix includes a Windows runner.
+      - name: Exclude vendored gitlinks from checkout cleanup
+        if: always()
+        shell: bash
+        run: |
+          git ls-files --stage .repos | awk '$1 == "160000" { print $4 }' | git update-index --force-remove --stdin

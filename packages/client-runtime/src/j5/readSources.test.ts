@@ -1,9 +1,5 @@
 import { expect, it } from "@effect/vitest";
-import {
-  AuthOrchestrationReadScope,
-  EnvironmentId,
-  type AuthSessionState,
-} from "@t3tools/contracts";
+import { EnvironmentId } from "@t3tools/contracts";
 import { J5_LEDGER_CAPABILITIES } from "@t3tools/contracts/j5";
 import * as Cause from "effect/Cause";
 import * as Option from "effect/Option";
@@ -16,32 +12,21 @@ import {
   spansMultipleEnvironments,
 } from "./readSources.ts";
 
-const session: AuthSessionState = {
-  authenticated: true,
-  scopes: [AuthOrchestrationReadScope],
-  auth: {
-    policy: "remote-reachable",
-    bootstrapMethods: ["one-time-token"],
-    sessionMethods: ["bearer-access-token"],
-    sessionCookieName: "session",
-  },
-};
 const source = {
   environmentId: EnvironmentId.make("remote"),
   environmentLabel: "Remote",
   phase: "connected" as const,
-  session,
 };
 
-it("preserves an independently loaded read-only source without permitting mutations", () => {
+it("reports an independently loaded source as ready with its data", () => {
   const result = resolveJ5ReadSource({ ...source, result: AsyncResult.success(["remote-row"]) });
-  expect(result).toMatchObject({ data: ["remote-row"], status: "ready", canOperate: false });
+  expect(result).toMatchObject({ data: ["remote-row"], status: "ready", connected: true });
 });
 
 it("retains data but reports an outage or refresh failure instead of an empty successful source", () => {
   const success = AsyncResult.success(["cached-row"]);
   const offline = resolveJ5ReadSource({ ...source, phase: "offline", result: success });
-  expect(offline).toMatchObject({ status: "offline", data: ["cached-row"], canOperate: false });
+  expect(offline).toMatchObject({ status: "offline", data: ["cached-row"], connected: false });
   const failed = resolveJ5ReadSource({
     ...source,
     result: AsyncResult.failure(
@@ -110,7 +95,6 @@ const readSourceFor = (
       Atom.make({ environment: { capabilities } }) as unknown as ReturnType<
         Input["configValueAtom"]
       >,
-    sessionStateValueAtom: () => Atom.make(session),
     queryAtom: () =>
       Atom.make(() => {
         routeCalls += 1;

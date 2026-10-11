@@ -51,15 +51,15 @@ it("gives custom seats direct result and concern reporting without a mandatory a
   assert.include(text, "- builder: participant_id=agent:builder");
   assert.include(
     text,
-    "use send_message to coordinate directly with your Captain and other members",
+    "use j5_send_message to coordinate directly with your Captain and other members",
   );
   assert.include(text, "final result, supporting evidence, and any remaining blockers");
-  assert.include(text, "request_crew_member through the user's inbox");
+  assert.include(text, "j5_request_crew_member through the user's inbox");
   assert.include(text, "Continue already-approved work and coordination");
   assert.include(text, "A direct result is sufficient");
   assert.include(text, `<seat_instructions>\n${crew.seatInstructions}\n</seat_instructions>`);
   assert.notInclude(text, "<seat_obligation>");
-  assert.notInclude(text, "write_artifact");
+  assert.notInclude(text, "j5_write_artifact");
 });
 
 it("retains declared persona output while allowing conversation before that output exists", () => {
@@ -68,7 +68,7 @@ it("retains declared persona output while allowing conversation before that outp
     crew: { ...crew, obligation: { kind: "ReviewHandoff", path: "handoffs/review.md" } },
   });
   assert.include(text, "do not wait for an artifact or coordination approval");
-  assert.include(text, "write_artifact to exactly `handoffs/review.md`");
+  assert.include(text, "j5_write_artifact to exactly `handoffs/review.md`");
   assert.include(text, "must not delay sharing findings or results");
   assert.notInclude(text, "a chat message is not a delivery");
 });

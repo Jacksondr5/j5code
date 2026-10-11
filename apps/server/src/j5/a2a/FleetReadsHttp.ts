@@ -84,7 +84,7 @@ export const projectFleetProject = (input: {
           "displayName" in row.participant && typeof row.participant.displayName === "string"
             ? row.participant.displayName
             : null,
-        // Every agent-created path (spawn_agent, Crew seats, a fork) records a placement
+        // Every agent-created path (j5_spawn_agent, Crew seats, a fork) records a placement
         // at creation, so an agent with a project home and no placement row is one a person
         // launched through the composer: `unrecorded` is that measured fact, not a guess. Recorded
         // `unknown` (a native thread that joined later) stays `?`.

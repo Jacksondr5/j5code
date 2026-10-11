@@ -388,7 +388,7 @@ export type AgentPersonaLibraryFoldersInput = typeof AgentPersonaLibraryFoldersI
 
 /**
  * A saved agent's declared output artifact, tracked per task. The agent writes it to the
- * project's shared artifacts through write_artifact; the server checks at run end, asks once
+ * project's shared artifacts through j5_write_artifact; the server checks at run end, asks once
  * when it is missing (`nudged`), and marks it `missing` if the follow-up ends without it.
  */
 export const AgentHandoffStatus = Schema.Literals(["written", "nudged", "missing"]);

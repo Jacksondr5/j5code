@@ -80,7 +80,7 @@ const MAX_FOLDER_DEPTH = 16;
 export const definitionDigest = (definition: AgentPersonaDefinition): string =>
   NodeCrypto.createHash("sha256").update(JSON.stringify(definition)).digest("hex");
 
-/** Why a catalog cannot staff `id`, or null when it can; propose_crew and playbooks share this. */
+/** Why a catalog cannot staff `id`, or null when it can; j5_propose_crew and playbooks share this. */
 export const personaCatalogProblem = (
   catalog: {
     readonly definitions: ReadonlyArray<{ readonly id: string }>;

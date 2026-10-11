@@ -137,7 +137,7 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
     const live = yield* store.liveStep(run, landing.stepId).pipe(Effect.result);
     if (live._tag === "Failure")
       return pending(
-        `the playbook can't be read (${live.failure.message}). Fix its YAML, then retry; playbook_cancel still works`,
+        `the playbook can't be read (${live.failure.message}). Fix its YAML, then retry; j5_playbook_cancel still works`,
       );
     // The Captain's own response already reports the step_missing issue.
     if (live.success.step === null)

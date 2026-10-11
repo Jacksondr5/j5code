@@ -24,6 +24,7 @@ import { SqlError, UnknownError } from "effect/sql/SqlError";
 import { stringify } from "yaml";
 
 import { ServerConfig } from "../../config.ts";
+import { AnalyticsService } from "../../telemetry/AnalyticsService.ts";
 import {
   OrchestratorDispatchError,
   OrchestratorProjectionError,
@@ -418,6 +419,68 @@ const fixture = Effect.gen(function* () {
     captainModel,
   };
 });
+
+it.effect("reports what the person decided about a roster, and what they changed first", () =>
+  Effect.gen(function* () {
+    const { layer } = yield* fixture;
+    const recorded: Array<Readonly<Record<string, unknown>>> = [];
+    const analytics = Layer.succeed(
+      AnalyticsService,
+      AnalyticsService.of({
+        record: (event, properties = {}) =>
+          Effect.sync(() => void recorded.push({ event, ...properties })),
+        flush: Effect.void,
+      }),
+    );
+    yield* Effect.gen(function* () {
+      const gate = withPreview(yield* CrewProposalService);
+      const seat = (name: string) => ({
+        workspace: { type: "shared" as const },
+        seat: name,
+        agentId: name,
+        reason: `Does the ${name} work`,
+      });
+      const edited = yield* gate.propose({
+        requestKey: "analytics-edited",
+        captain,
+        displayName: "Edited Crew",
+        brief: "Fix the flaky login test.",
+        seats: [seat("builder"), seat("critic")],
+      });
+      // The person drops the critic and adds a security pass.
+      yield* gate.resolve({
+        proposalId: edited.proposal.id,
+        decision: "approve",
+        seats: [seat("builder"), seat("sentry")],
+      });
+      const refused = yield* gate.propose({
+        requestKey: "analytics-declined",
+        captain,
+        displayName: "Declined Crew",
+        brief: "Rewrite everything.",
+        seats: [seat("builder")],
+      });
+      yield* gate.resolve({ proposalId: refused.proposal.id, decision: "decline" });
+    }).pipe(Effect.provide(layer.pipe(Layer.provide(analytics))));
+
+    const resolved = { event: "j5.crew.proposal.resolved", kind: "roster", hasPlaybook: false };
+    assert.deepStrictEqual(recorded, [
+      {
+        ...resolved,
+        decision: "approved",
+        requestedSeats: 2,
+        durationMs: 0,
+        approvedSeats: 2,
+        seatsAdded: 1,
+        seatsRemoved: 1,
+        seatsRenamed: 0,
+        seatsRuntimeChanged: 0,
+        seatsInstructionsChanged: 0,
+      },
+      { ...resolved, decision: "declined", requestedSeats: 1, durationMs: 0 },
+    ]);
+  }),
+);
 
 it.effect(
   "holds a roster until the human approves, honours human-added seats, and hands the launch to the report",
@@ -900,7 +963,7 @@ it.effect("holds every door to the same seat shape and seats nobody into a retir
       assert.equal(duplicatePreview._tag, "CrewProposalRequestError");
       assert.include(duplicatePreview.message, "already has a seat named builder");
       assert.equal(duplicateApproval.message, duplicatePreview.message);
-      // archive_crew retires the Crew while the request still sits in the inbox.
+      // j5_archive_crew retires the Crew while the request still sits in the inbox.
       yield* crews.markArchived(approved.instance!.id, "2026-09-09T17:00:00.000Z");
       const late = yield* gate
         .resolve({ proposalId: addition.proposal.id, decision: "approve" })
@@ -1146,7 +1209,7 @@ it.effect(
 );
 
 it.effect(
-  "carries a seat's workspace from propose_crew through storage, preview, and approval",
+  "carries a seat's workspace from j5_propose_crew through storage, preview, and approval",
   () =>
     Effect.gen(function* () {
       const { layer } = yield* fixture;
@@ -1583,8 +1646,8 @@ const custom = (seat: string, steps?: ReadonlyArray<string>) => ({
 // The Captain's tool calls go through the tools' own input schemas.
 const decodeProposeCrew = Schema.decodeUnknownEffect(J5ProposeCrewInput);
 const playbookStartTool = playbookTools.find(
-  (tool): tool is Extract<(typeof playbookTools)[number], { readonly name: "playbook_start" }> =>
-    tool.name === "playbook_start",
+  (tool): tool is Extract<(typeof playbookTools)[number], { readonly name: "j5_playbook_start" }> =>
+    tool.name === "j5_playbook_start",
 )!;
 const decodePlaybookStart = Schema.decodeUnknownEffect(playbookStartTool.parametersSchema);
 
@@ -1776,17 +1839,18 @@ it.effect("refuses a playbook Crew it cannot follow, each with a next step", () 
         {
           error: yield* refusal("nope", [custom("planner", ["plan"])]),
           detail: "No playbook named nope in your workspace.",
-          nextStep: "Call playbook_list and pass a name it returns.",
+          nextStep: "Call j5_playbook_list and pass a name it returns.",
         },
         {
           error: yield* refusal("broken", [custom("planner")]),
           detail: "Playbook broken cannot be followed:",
-          nextStep: "Fix the definition until playbook_list lists it without an issue, then retry.",
+          nextStep:
+            "Fix the definition until j5_playbook_list lists it without an issue, then retry.",
         },
         {
           error: yield* refusal("release", [custom("planner", ["ship"])]),
           detail: "Seat planner lists step ship, which playbook release does not have.",
-          nextStep: "Call playbook_read for release and use its step ids.",
+          nextStep: "Call j5_playbook_read for release and use its step ids.",
         },
         {
           error: yield* refusal("release", [
@@ -1995,7 +2059,7 @@ it.effect(
 );
 
 it.effect(
-  "takes a playbook Crew while the Captain runs a playbook; playbook_start keeps one run per thread",
+  "takes a playbook Crew while the Captain runs a playbook; j5_playbook_start keeps one run per thread",
   () =>
     Effect.gen(function* () {
       const { layer, workspaceRoot } = yield* playbookFixture;
@@ -2182,7 +2246,7 @@ it.effect(
           });
         yield* library.setEnabled("reviewer", false);
 
-        // 1) Read: the playbook warns about the disabled persona, and list_personas' own
+        // 1) Read: the playbook warns about the disabled persona, and j5_list_personas' own
         // projection shows it unavailable while the other two are available.
         const read = yield* (yield* PlaybookStore).read(workspaceRoot, "ship");
         assert.deepStrictEqual(
@@ -2305,7 +2369,7 @@ it.effect(
           playbook: { name: "ship", title: read.title },
         });
         assert.include(notice, `crew_instance_id: ${instance.id}\n`);
-        assert.include(notice, 'playbook_start(name: "ship"');
+        assert.include(notice, 'j5_playbook_start(name: "ship"');
 
         // 6) Start: the first step reaches the planner seat.
         const start = yield* decodePlaybookStart({

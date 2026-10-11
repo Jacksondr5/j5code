@@ -1,62 +1,14 @@
-import {
-  AuthOrchestrationOperateScope,
-  AuthOrchestrationReadScope,
-  AuthSessionId,
-} from "@t3tools/contracts";
+import { AuthOrchestrationReadScope, AuthSessionId } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { HttpRouter, HttpServer } from "effect/http";
 
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
-import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { humanInboxHttpRouteLayer } from "./HumanInboxHttp.ts";
 import { A2AHumanInbox } from "./HumanInboxService.ts";
 import { A2AParticipantNotFoundError } from "./SendService.ts";
-import { ExchangeId, LedgerMessageId, ParticipantId } from "./contracts.ts";
-
-it("allows read-only connections to read the inbox but rejects answers", async () => {
-  const auth = Layer.mock(EnvironmentAuth.EnvironmentAuth)({
-    authenticateHttpRequest: () =>
-      Effect.succeed({
-        sessionId: AuthSessionId.make("auth-session:readonly-inbox"),
-        subject: "read-only-test",
-        method: "bearer-access-token",
-        scopes: [AuthOrchestrationReadScope],
-      }),
-  });
-  const routes = humanInboxHttpRouteLayer.pipe(
-    Layer.provide(
-      Layer.mock(A2AHumanInbox)({
-        resolvePersonId: () => Effect.succeed(ParticipantId.make("human:remote")),
-        list: () => Effect.succeed([]),
-        answer: () => Effect.die("Read-only answer reached the service"),
-      }),
-    ),
-    Layer.provide(Layer.mock(A2ADeliveryWorker)({ notify: Effect.void })),
-    Layer.provideMerge(auth),
-    Layer.provide(HttpServer.layerServices),
-  );
-  const { dispose, handler } = HttpRouter.toWebHandler(routes, { disableLogger: true });
-  try {
-    assert.equal((await handler(new Request("http://remote.test/api/j5/a2a/inbox"))).status, 200);
-    const answered = await handler(
-      new Request("http://remote.test/api/j5/a2a/inbox/answer", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          personId: "human:remote",
-          exchangeId: "ask:1",
-          message: "Yes",
-          clientRequestId: "reply:1",
-        }),
-      }),
-    );
-    assert.equal(answered.status, 403);
-  } finally {
-    await dispose();
-  }
-});
+import { ParticipantId } from "./contracts.ts";
 
 it("returns the resolved person above an empty inbox and preserves explicit selection", async () => {
   const localPersonId = ParticipantId.make("human:local-operator");
@@ -64,7 +16,6 @@ it("returns the resolved person above an empty inbox and preserves explicit sele
   const missingPersonId = ParticipantId.make("human:missing-person");
   const requested: Array<string | undefined> = [];
   const requestedStatuses: Array<string | undefined> = [];
-  const answerCommandIds: Array<string> = [];
   const inbox = Layer.mock(A2AHumanInbox)({
     resolvePersonId: (personId) => {
       requested.push(personId);
@@ -77,16 +28,6 @@ it("returns the resolved person above an empty inbox and preserves explicit sele
       requestedStatuses.push(status);
       return Effect.succeed([]);
     },
-    answer: (input) => {
-      answerCommandIds.push(input.commandId);
-      return Effect.succeed({
-        messageId: LedgerMessageId.make(`message:test:${input.exchangeId}`),
-        exchangeId: input.exchangeId,
-        exchangeState: "closed",
-        joinedExistingExchange: false,
-        durableAtSeq: 1,
-      });
-    },
   });
   const auth = Layer.mock(EnvironmentAuth.EnvironmentAuth)({
     authenticateHttpRequest: () =>
@@ -94,12 +35,11 @@ it("returns the resolved person above an empty inbox and preserves explicit sele
         sessionId: AuthSessionId.make("auth-session:human-inbox"),
         subject: "human-inbox-test",
         method: "bearer-access-token",
-        scopes: [AuthOrchestrationReadScope, AuthOrchestrationOperateScope],
+        scopes: [AuthOrchestrationReadScope],
       }),
   });
   const routes = humanInboxHttpRouteLayer.pipe(
     Layer.provide(inbox),
-    Layer.provide(Layer.mock(A2ADeliveryWorker)({ notify: Effect.void })),
     Layer.provideMerge(auth),
     Layer.provide(HttpServer.layerServices),
   );
@@ -134,29 +74,6 @@ it("returns the resolved person above an empty inbox and preserves explicit sele
     assert.equal(invalidStatus.status, 400);
     assert.deepStrictEqual(requested, [undefined, explicitPersonId, missingPersonId, undefined]);
     assert.deepStrictEqual(requestedStatuses, ["open", "open", "answered"]);
-
-    const firstExchangeId = ExchangeId.make("exchange:same-client:first");
-    const secondExchangeId = ExchangeId.make("exchange:same-client:second");
-    const clientRequestId = "reused-client-request";
-    const answer = (exchangeId: ExchangeId) =>
-      handler(
-        new Request("http://environment.test/api/j5/a2a/inbox/answer", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            personId: localPersonId,
-            exchangeId,
-            message: `Answer for ${exchangeId}`,
-            clientRequestId,
-          }),
-        }),
-      );
-    assert.equal((await answer(firstExchangeId)).status, 200);
-    assert.equal((await answer(secondExchangeId)).status, 200);
-    assert.deepStrictEqual(answerCommandIds, [
-      `command:j5:a2a:human:${encodeURIComponent(localPersonId)}:${encodeURIComponent(firstExchangeId)}:${encodeURIComponent(clientRequestId)}`,
-      `command:j5:a2a:human:${encodeURIComponent(localPersonId)}:${encodeURIComponent(secondExchangeId)}:${encodeURIComponent(clientRequestId)}`,
-    ]);
   } finally {
     await dispose();
   }

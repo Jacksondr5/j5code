@@ -1,4 +1,5 @@
-import { AuthAccessWriteScope, type EnvironmentId } from "@t3tools/contracts";
+import { useAtomValue } from "@effect/atom-react";
+import type { EnvironmentId } from "@t3tools/contracts";
 import { PlusIcon } from "lucide-react";
 import { useState } from "react";
 
@@ -8,8 +9,7 @@ import { toastManager } from "../../components/ui/toast";
 import { requestConfirmDialog } from "../../confirmDialog";
 import { useEnvironments } from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";
-import { useEnvironmentScope } from "../../state/session";
-import { peersQueryAtom } from "../state";
+import { j5Environment, peersQueryAtom } from "../state";
 import { PeerIntroductionDialog } from "./PeerIntroductionDialog";
 import { refreshPeers, removePeer, type PeerRecord } from "./peeringClient";
 import {
@@ -107,7 +107,7 @@ function PeerRow({
   /** The peer as one of this client's connected environments, when it is one. */
   readonly otherEnvironmentId: EnvironmentId | null;
 }) {
-  const otherManageable = useEnvironmentScope(otherEnvironmentId, AuthAccessWriteScope);
+  const otherManageable = useAtomValue(j5Environment.removePeer.permissionAtom(otherEnvironmentId));
   const [removing, setRemoving] = useState(false);
 
   const confirmation = removalConfirmation({

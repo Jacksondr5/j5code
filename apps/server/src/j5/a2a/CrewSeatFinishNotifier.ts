@@ -77,7 +77,7 @@ export const INLINE_HANDOFF_MAX_CHARS = 4_000;
 
 /**
  * A seat has finished only when its run completed or failed. Interrupted, cancelled, and rolled
- * back runs are terminal to the orchestrator but not finishes for a Crew: `stop_crew` and the
+ * back runs are terminal to the orchestrator but not finishes for a Crew: `j5_stop_crew` and the
  * person's Stop crew interrupt seats precisely so they can be briefed again, and the definition
  * says nothing is reported then (Crews AC21). Treating those as finishes would wake the Captain
  * to react to its own stop.
@@ -205,7 +205,7 @@ export const seatFinishedNoticeText = (input: {
   if (input.handoff.status !== "written") return head;
   return input.handoff.body !== null && input.handoff.body.length <= INLINE_HANDOFF_MAX_CHARS
     ? `${head}\n\n<handoff_body>\n${noticeBody(input.handoff.body)}\n</handoff_body>`
-    : `${head}\n\nRead it with read_artifact (path: ${input.handoff.path}).`;
+    : `${head}\n\nRead it with j5_read_artifact (path: ${input.handoff.path}).`;
 };
 
 const makeLayer = (daemon: boolean) =>

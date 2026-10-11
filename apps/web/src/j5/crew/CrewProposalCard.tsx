@@ -1,13 +1,14 @@
+import { useAtomValue } from "@effect/atom-react";
 import { presentAgentPersonaCatalog } from "@t3tools/client-runtime/j5/agent-personas";
-import { AuthOrchestrationOperateScope, type EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId } from "@t3tools/contracts";
 import { PencilIcon, PlusIcon, XIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { Badge } from "../../components/ui/badge";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../../components/ui/tooltip";
 import { Button } from "../../components/ui/button";
+import { j5Environment } from "../state";
 import { useEnvironmentQuery } from "../../state/query";
-import { useEnvironmentScope } from "../../state/session";
 import { agentPersonaEnvironment } from "../agents/agentPersonaAtoms";
 import type { CrewProposal, CrewProposalSeat } from "./crewProposalsClient";
 import { addSeat, describeSeatAgent, removeSeat, saveSeat } from "./crewProposalDraft";
@@ -51,8 +52,10 @@ export function CrewProposalCard(props: {
   readonly onOpenCaptain?: (() => void) | undefined;
 }) {
   const { proposal } = props;
-  // Resolving a roster launches or refuses agents, so it needs the operate scope.
-  const canResolve = useEnvironmentScope(props.environmentId, AuthOrchestrationOperateScope);
+  // Resolving a roster launches or refuses agents; the command says whether this session may.
+  const canResolve = useAtomValue(
+    j5Environment.resolveCrewProposal.permissionAtom(props.environmentId),
+  );
   const [seats, setSeats] = useState<ReadonlyArray<CrewProposalSeat>>(proposal.requestedSeats);
   const [editor, setEditor] = useState<{
     readonly seat: CrewProposalSeat | null;

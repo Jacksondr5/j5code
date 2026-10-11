@@ -25,6 +25,7 @@ import { parse, stringify } from "yaml";
 import { ServerConfig } from "../../config.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { ProjectService } from "../../project/ProjectService.ts";
+import { AnalyticsService } from "../../telemetry/AnalyticsService.ts";
 import { runJ5A2AMigrations } from "../a2a/Migrations.ts";
 import { makePlaybookStore, type PlaybookMutation } from "./PlaybookStore.ts";
 import { makePlaybookRpcHandlers, PLAYBOOK_RPC_SCOPES } from "./playbookRpc.ts";
@@ -329,6 +330,63 @@ it.effect("retains sequential runs and permits a new run after completion or can
   }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
 );
 
+it.effect("reports each run's start and its end once, with how far it got", () =>
+  Effect.gen(function* () {
+    const recorded: Array<Readonly<Record<string, unknown>>> = [];
+    yield* Effect.gen(function* () {
+      const { store, workspaceRoot } = yield* makeFixture;
+      const finished = yield* store.start(owner, workspaceRoot, "demo", "start-a");
+      // A retried start is the same run.
+      yield* store.start(owner, workspaceRoot, "demo", "start-a");
+      yield* store.mutate(owner, {
+        operation: "next",
+        runId: finished.runId,
+        expectedStepId: "research",
+        client_request_id: "next-a",
+      });
+      const complete = {
+        operation: "complete",
+        runId: finished.runId,
+        expectedStepId: "implement",
+        client_request_id: "complete-a",
+      } as const;
+      yield* store.mutate(owner, complete);
+      yield* store.mutate(owner, complete);
+      const abandoned = yield* store.start(owner, workspaceRoot, "demo", "start-b");
+      yield* store.mutate(owner, {
+        operation: "cancel",
+        runId: abandoned.runId,
+        client_request_id: "cancel-b",
+      });
+    }).pipe(
+      Effect.provide(
+        Layer.succeed(
+          AnalyticsService,
+          AnalyticsService.of({
+            record: (event, properties = {}) =>
+              Effect.sync(() => void recorded.push({ event, ...properties })),
+            flush: Effect.void,
+          }),
+        ),
+      ),
+    );
+    const started = {
+      event: "j5.playbook.run.started",
+      stepCount: 3,
+      stepsWithPersona: 0,
+      crewBound: false,
+    };
+    const ended = { event: "j5.playbook.run.finished", cause: "agent", crewBound: false };
+    assert.deepStrictEqual(recorded, [
+      started,
+      // Completed from the second of three steps: moving between steps records nothing.
+      { ...ended, outcome: "completed", stepCount: 3, position: 2, durationMs: 0 },
+      started,
+      { ...ended, outcome: "cancelled", stepCount: 3, position: 1, durationMs: 0 },
+    ]);
+  }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
+);
+
 it.effect(
   "reads prompt edits live and navigates the latest order without changing the current ID",
   () =>
@@ -391,7 +449,7 @@ it.effect("requires explicit recovery when the current step disappears", () =>
     assert.equal(missing.code, "step_missing");
     assert.include(missing.message, run.runId);
     assert.include(missing.message, "research");
-    assert.include(missing.message, "playbook_reselect");
+    assert.include(missing.message, "j5_playbook_reselect");
     assert.deepStrictEqual(missing.availableStepIds, ["implement", "review"]);
     for (const operation of ["next", "back", "complete"] as const) {
       assert.equal(
@@ -602,7 +660,7 @@ it.effect("rejects first and last step movement and stale back or completion req
       }),
     );
     assert.equal(lastBoundary.code, "step_boundary");
-    assert.include(lastBoundary.message, "playbook_complete");
+    assert.include(lastBoundary.message, "j5_playbook_complete");
     assert.equal((yield* store.current(owner, run.runId)).currentStepId, "review");
     assert.equal(
       (yield* store.mutate(owner, {

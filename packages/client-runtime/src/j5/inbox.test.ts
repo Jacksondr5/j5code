@@ -31,7 +31,6 @@ const source = <A>(
   environmentId: EnvironmentId.make(id),
   environmentLabel: id,
   connected: true,
-  canOperate: true,
   status: "ready",
   data,
   error: null,
@@ -53,7 +52,7 @@ it("merges obligations by urgency and age while retaining each environment and p
     ["alpha", "human:alpha"],
   ]);
   expect(new Set(items.map(scopedInboxItemKey)).size).toBe(2);
-  expect(items.every((row) => row.canAnswer)).toBe(true);
+  expect(items.every((row) => row.sourceReady)).toBe(true);
 });
 
 it("keeps cached obligations visible but cannot send through their disconnected environment", () => {
@@ -63,11 +62,15 @@ it("keeps cached obligations visible but cannot send through their disconnected 
       source(
         "offline",
         { personId: item.personId, items: [item] },
-        { status: "offline", connected: false, canOperate: false },
+        { status: "offline", connected: false },
       ),
     ],
   });
-  expect(items[0]).toMatchObject({ environmentId: "offline", canAnswer: false, connected: false });
+  expect(items[0]).toMatchObject({
+    environmentId: "offline",
+    sourceReady: false,
+    connected: false,
+  });
 });
 
 it("sums known counts without treating an unavailable source as a known zero", () => {

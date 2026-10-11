@@ -85,15 +85,18 @@ The most common defect in this repo is a change that works on the path you teste
 - Ports derive from the worktree path and are stable across restarts, but read the real ones from the `[dev-runner]` line since occupied ports shift. Confirm its `baseDir=` points inside your worktree.
 - Sharing over the tailnet is three steps: run `env -u T3CODE_PORT -u T3CODE_HOST -u J5CODE_HOME vp run dev --share` in the background, wait for the `pairingUrl:` line in its output, then give that full URL to an unpaired browser. Do not wire up `tailscale serve` by hand, open the URL yourself, or consume the user's pairing link. A browser with the reusable dev cookie can use the bare origin. If a normal one-time token was consumed, mint a fresh one with `node apps/server/src/bin.ts pair`. It carries standard scopes, while the startup URL carries admin scopes needed for Connections settings.
 - To reuse web dev auth across worktrees, configure one fixed `T3CODE_DEV_AUTH_TOKEN` in the main checkout's gitignored `.env`. The `t3.json` setup links that file into worktrees. Never commit or publish the token or a startup URL. See [Reusable dev credential](docs/operations/development.md#reusable-dev-credential).
+- A dev server sends its usage events to the "J5 Code Dev" PostHog project by default, not the real one. A `T3CODE_POSTHOG_KEY` in your shell or `.env` overrides that, so leave it unset. To find your own run's events there, start the server with `J5CODE_TELEMETRY_TAG=<a unique label>` and filter on the `telemetryTag` property.
 - Stop what you started, by the PID you tracked. See rule 1.
 
 ## Test data
 
 An empty database is a bad test. Seed your worktree's `.j5code` with a copy of real data instead of pointing at live state:
 
+- `vp run migrate-dev-db` from a worktree makes a copy that is safe to start a server on, in one command: recent stopped threads only, with pending work, schedules, peer servers and their credentials, undelivered agent messages and live Crews stood down. Its threads still point at the real checkouts, so a message you send to one runs a real agent there.
+- For a whole database, copy it yourself. Nothing in a raw copy is stood down: a server started on it resumes real deliveries and polls real peers.
 - Copy from `~/.j5code/userdata` (the developer's real data, the most realistic test set) or `~/.j5code/dev`. Worktree state lives at `<worktree>/.j5code/userdata`.
 - The server reads `statev2.sqlite`. A home that has not yet run a V2 server has only `state.sqlite`; once it has, `state.sqlite` is a frozen pre-V2 copy, so take `statev2.sqlite`.
-- Snapshot the database with `VACUUM INTO`, which is safe even while a server has the source open and yields one consistent file:
+- Snapshot a raw copy with `VACUUM INTO`, which is safe even while a server has the source open and yields one consistent file:
 
   ```bash
   mkdir -p .j5code/userdata

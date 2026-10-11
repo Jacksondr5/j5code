@@ -1,6 +1,8 @@
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as Struct from "effect/Struct";
+import { Rpc, RpcGroup } from "effect/rpc";
+export * from "./j5/actionError.ts";
 export * from "./j5/peerPoll.ts";
 export * from "./j5/playbook.ts";
 
@@ -11,7 +13,9 @@ import {
   ProviderRequestKind,
   RuntimeMode,
 } from "./providerPolicy.ts";
+import { EnvironmentAuthorizationError } from "./auth.ts";
 import { EnvironmentId, RuntimeRequestId, ThreadId } from "./baseSchemas.ts";
+import { J5ActionError } from "./j5/actionError.ts";
 import { AgentPersonaId } from "./j5/agentPersona.ts";
 
 export const HumanInboxItem = Schema.Struct({
@@ -448,15 +452,9 @@ export const J5_LEDGER_CAPABILITIES = {
 
 export const J5_API_PATHS = {
   inbox: "/api/j5/a2a/inbox",
-  answer: "/api/j5/a2a/inbox/answer",
   openCount: "/api/j5/a2a/client-reads/open-count",
   crewProposals: "/api/j5/a2a/crews/proposals",
-  crewProposalPreview: "/api/j5/a2a/crews/proposals/preview",
-  crewProposalResolve: "/api/j5/a2a/crews/proposals/resolve",
-  crewStop: "/api/j5/a2a/crews/stop",
-  crewArchive: "/api/j5/a2a/crews/archive",
   crewRuntimeRequests: "/api/j5/a2a/crews/runtime-requests",
-  crewRuntimeRequestRespond: "/api/j5/a2a/crews/runtime-requests/respond",
   fleet: "/api/j5/a2a/client-reads/fleet",
   crewMemberships: "/api/j5/a2a/client-reads/crew-memberships",
   spawnedChildren: "/api/j5/a2a/client-reads/spawned-children",
@@ -928,6 +926,83 @@ export const J5_PEER_API_PATHS = {
   roster: "/api/j5/a2a/peers/roster",
   deliver: "/api/j5/a2a/peers/deliver",
   poll: "/api/j5/a2a/peers/poll",
-  addresses: "/api/j5/a2a/peers/addresses",
-  probe: "/api/j5/a2a/peers/probe",
 } as const;
+
+/**
+ * What a person does from a client, as WebSocket RPCs: the socket's scope check and the client's
+ * permission guard (`j5/clientRpcPermissions.ts`) both apply. The reads beside them are still
+ * HTTP routes. One group, merged into `WsRpcGroup` in `rpc.ts`.
+ */
+export const J5_CLIENT_ACTION_WS_METHODS = {
+  previewCrewProposal: "j5.crews.previewProposal",
+  resolveCrewProposal: "j5.crews.resolveProposal",
+  stopCrew: "j5.crews.stop",
+  archiveCrew: "j5.crews.archive",
+  respondCrewRuntimeRequest: "j5.crews.respondRuntimeRequest",
+  answerHumanExchange: "j5.inbox.answer",
+  issuePeerCredential: "j5.peers.issueCredential",
+  addPeer: "j5.peers.add",
+  removePeer: "j5.peers.remove",
+  listPeerAddresses: "j5.peers.addresses",
+  probePeer: "j5.peers.probe",
+} as const;
+
+const clientActionError = Schema.Union([J5ActionError, EnvironmentAuthorizationError]);
+
+export const J5ClientActionRpcGroup = RpcGroup.make(
+  Rpc.make(J5_CLIENT_ACTION_WS_METHODS.previewCrewProposal, {
+    payload: CrewProposalPreviewRequest,
+    success: CrewProposalPreviewResponse,
+    error: clientActionError,
+  }),
+  Rpc.make(J5_CLIENT_ACTION_WS_METHODS.resolveCrewProposal, {
+    payload: CrewProposalResolveRequest,
+    success: CrewProposalResolveResponse,
+    error: clientActionError,
+  }),
+  Rpc.make(J5_CLIENT_ACTION_WS_METHODS.stopCrew, {
+    payload: CrewStopRequest,
+    success: CrewStopResponse,
+    error: clientActionError,
+  }),
+  Rpc.make(J5_CLIENT_ACTION_WS_METHODS.archiveCrew, {
+    payload: CrewArchiveRequest,
+    success: CrewArchiveResponse,
+    error: clientActionError,
+  }),
+  Rpc.make(J5_CLIENT_ACTION_WS_METHODS.respondCrewRuntimeRequest, {
+    payload: CrewRuntimeRequestRespondRequest,
+    success: CrewRuntimeRequestRespondResponse,
+    error: clientActionError,
+  }),
+  Rpc.make(J5_CLIENT_ACTION_WS_METHODS.answerHumanExchange, {
+    payload: AnswerHumanExchangeRequest,
+    success: AnswerHumanExchangeResponse,
+    error: clientActionError,
+  }),
+  Rpc.make(J5_CLIENT_ACTION_WS_METHODS.issuePeerCredential, {
+    payload: IssuePeerCredentialRequest,
+    success: IssuePeerCredentialResponse,
+    error: clientActionError,
+  }),
+  Rpc.make(J5_CLIENT_ACTION_WS_METHODS.addPeer, {
+    payload: AddPeerRequest,
+    success: AddPeerResponse,
+    error: clientActionError,
+  }),
+  Rpc.make(J5_CLIENT_ACTION_WS_METHODS.removePeer, {
+    payload: RemovePeerRequest,
+    success: RemovePeerResponse,
+    error: clientActionError,
+  }),
+  Rpc.make(J5_CLIENT_ACTION_WS_METHODS.listPeerAddresses, {
+    payload: Schema.Struct({}),
+    success: PeerAddressesResponse,
+    error: clientActionError,
+  }),
+  Rpc.make(J5_CLIENT_ACTION_WS_METHODS.probePeer, {
+    payload: PeerProbeRequest,
+    success: PeerProbeResponse,
+    error: clientActionError,
+  }),
+);

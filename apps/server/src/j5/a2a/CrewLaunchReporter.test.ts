@@ -404,7 +404,7 @@ it.effect(
         );
         assert.notInclude(report!, "- second:");
         assert.include(report!, `thread_id=${crewSeatThreadId(id, "third")} start=failed`);
-        assert.include(report!, "request_crew_member");
+        assert.include(report!, "j5_request_crew_member");
       }).pipe(Effect.provide(layer));
     }).pipe(Effect.scoped),
 );

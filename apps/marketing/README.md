@@ -12,5 +12,5 @@ are upstream's.
   `scripts/install.sh` from the repository root.
 
 Status words on the site are deliberate: **Shipped** means ready to use, **Charted** means in dry
-dock and being built, **Horizon** means on the roadmap. The upstream pin and its date are read from
-`FORK.md` at build time.
+dock and being built, **Horizon** means on the roadmap. The latest stable release's upstream pin,
+its date and the branch it tracks are read from `FORK.md`'s `Released pin:` line at build time.

@@ -184,11 +184,11 @@ export const crewLaunchReportText = (input: {
   const prose: Array<string> = [];
   if (failed.length > 0)
     prose.push(
-      `${failed.length} of ${verdicts.size} seats failed; each seat_failed line carries the run's error. The platform raises provider sign-in and permission failures in the human inbox. Re-brief the seat with send_message once the provider works; ask the user about other failures when their help is needed. Seats that started have your brief and this roster.`,
+      `${failed.length} of ${verdicts.size} seats failed; each seat_failed line carries the run's error. The platform raises provider sign-in and permission failures in the human inbox. Re-brief the seat with j5_send_message once the provider works; ask the user about other failures when their help is needed. Seats that started have your brief and this roster.`,
     );
   if (notCreated.length > 0)
     prose.push(
-      `${notCreated.length} ${notCreated.length === 1 ? "seat was" : "seats were"} never created (${notCreated.map(({ seat }) => seat).join(", ")}); each seat_not_created line says why. ${notCreated.length === 1 ? "It is" : "They are"} not on the roster and cannot be messaged. If the work still needs ${notCreated.length === 1 ? "that seat" : "those seats"}, ask for ${notCreated.length === 1 ? "it" : "them"} again with request_crew_member.`,
+      `${notCreated.length} ${notCreated.length === 1 ? "seat was" : "seats were"} never created (${notCreated.map(({ seat }) => seat).join(", ")}); each seat_not_created line says why. ${notCreated.length === 1 ? "It is" : "They are"} not on the roster and cannot be messaged. If the work still needs ${notCreated.length === 1 ? "that seat" : "those seats"}, ask for ${notCreated.length === 1 ? "it" : "them"} again with j5_request_crew_member.`,
     );
   if (pending.length > 0)
     prose.push(
@@ -196,11 +196,11 @@ export const crewLaunchReportText = (input: {
     );
   if (failed.length === 0 && notCreated.length === 0 && pending.length === 0)
     prose.push(
-      "Your crew is running. Each seat has your brief and this roster; coordinate with send_message, and ask the user through the inbox for decisions you cannot make from the brief.",
+      "Your crew is running. Each seat has your brief and this roster; coordinate with j5_send_message, and ask the user through the inbox for decisions you cannot make from the brief.",
     );
   if (playbook !== null && proposal.kind === "roster")
     prose.push(
-      `This Crew follows playbook ${playbook.name}. Start it with playbook_start(name: "${playbook.name}", client_request_id, crew_instance_id: "${instance.id}"). The platform hands each step to the seat that owns it; unowned steps are yours.`,
+      `This Crew follows playbook ${playbook.name}. Start it with j5_playbook_start(name: "${playbook.name}", client_request_id, crew_instance_id: "${instance.id}"). The platform hands each step to the seat that owns it; unowned steps are yours.`,
     );
   prose.push(
     "Seats are told to message you with their results; do not ask for the same results again. End your turn and read them as they arrive.",

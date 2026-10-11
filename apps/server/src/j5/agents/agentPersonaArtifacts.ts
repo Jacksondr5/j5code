@@ -127,7 +127,7 @@ export function agentPersonaArtifactInstructions(
   const lines = ["## Handoff artifacts"];
   if (inputs.length > 0) {
     lines.push(
-      `Your inputs are ${inputs.map((name) => `\`${name}\``).join(", ")}. Look for them with \`list_artifacts\` under \`${AGENT_HANDOFF_ROOT}/\` (or use the artifact paths named in your task) and read them with \`read_artifact\` before you start.`,
+      `Your inputs are ${inputs.map((name) => `\`${name}\``).join(", ")}. Look for them with \`j5_list_artifacts\` under \`${AGENT_HANDOFF_ROOT}/\` (or use the artifact paths named in your task) and read them with \`j5_read_artifact\` before you start.`,
     );
   }
   if (definition.outputArtifact !== undefined) {
@@ -138,7 +138,7 @@ export function agentPersonaArtifactInstructions(
     });
     const template = AGENT_ARTIFACT_TEMPLATES[definition.outputArtifact] ?? GENERIC_TEMPLATE;
     lines.push(
-      `Your output is a \`${definition.outputArtifact}\`. Before you finish, write it with \`write_artifact\` to exactly \`${path}\` as Markdown, then mention \`${agentHandoffLogicalPath(path)}\` in your final message. A task that ends without this file is not complete: the server checks for it, asks you once to write it, and otherwise marks the handoff missing.`,
+      `Your output is a \`${definition.outputArtifact}\`. Before you finish, write it with \`j5_write_artifact\` to exactly \`${path}\` as Markdown, then mention \`${agentHandoffLogicalPath(path)}\` in your final message. A task that ends without this file is not complete: the server checks for it, asks you once to write it, and otherwise marks the handoff missing.`,
       `The ${definition.outputArtifact} must contain:`,
       ...template.map((item) => `- ${item}`),
     );

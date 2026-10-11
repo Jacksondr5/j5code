@@ -1,4 +1,4 @@
-import { AuthAccessWriteScope, EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId } from "@t3tools/contracts";
 import { act, type PropsWithChildren } from "react";
 import { create, type ReactTestInstance, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
@@ -63,11 +63,17 @@ vi.mock("../../state/environments", () => ({
   useEnvironment: (id: EnvironmentId) => environmentOf(id),
   useEnvironmentHttpBaseUrl: () => "http://client.example",
 }));
-vi.mock("../../state/session", () => ({
-  useEnvironmentScope: (environmentId: string | null, scope: string) =>
-    environmentId !== null && scope === AuthAccessWriteScope && state.canManage,
+// The dialog's only atom is the add-peer command's permission on the chosen environment.
+vi.mock("@effect/atom-react", () => ({
+  useAtomValue: (permission: { readonly environmentId: string | null }) =>
+    permission.environmentId !== null && state.canManage,
 }));
-vi.mock("../state", () => ({ peersQueryAtom: (id: string) => id }));
+vi.mock("../state", () => ({
+  peersQueryAtom: (id: string) => id,
+  j5Environment: {
+    addPeer: { permissionAtom: (environmentId: string | null) => ({ environmentId }) },
+  },
+}));
 vi.mock("../../state/query", () => ({
   useEnvironmentQuery: (key: string | null) =>
     key !== null && state.unreadable[key] !== undefined

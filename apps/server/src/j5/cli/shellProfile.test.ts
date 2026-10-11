@@ -1,12 +1,13 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
+import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { J5_PATH_MARKER } from "@t3tools/shared/j5/shellProfile";
 
-import { planShellCleanup, removeJ5PathLines } from "./shellProfile.ts";
+import { planShellCleanup, removeAppLinks, removeJ5PathLines } from "./shellProfile.ts";
 
 // A person's home with an installed J5: the installer's link, a profile
 // carrying J5's line, and one without.
@@ -30,8 +31,10 @@ const makeHome = Effect.gen(function* () {
   return { home, baseDir, command, before };
 });
 
-const plan = (home: string, baseDir: string) =>
-  planShellCleanup(baseDir).pipe(Effect.provideService(HostProcessEnvironment, { HOME: home }));
+const plan = (home: string, baseDir: string, folders?: ReadonlyArray<string>) =>
+  planShellCleanup(baseDir, folders).pipe(
+    Effect.provideService(HostProcessEnvironment, { HOME: home }),
+  );
 
 it.layer(NodeServices.layer)("j5 uninstall's shell cleanup", (it) => {
   it.effect("takes the installer's link and only J5's line, however uninstall was started", () =>
@@ -72,6 +75,7 @@ it.layer(NodeServices.layer)("j5 uninstall's shell cleanup", (it) => {
       assert.deepStrictEqual(yield* plan(home, path.join(home, "scratch/.j5code")), {
         profiles: [],
         installerLink: undefined,
+        appLinks: [],
       });
     }).pipe(Effect.scoped, Effect.provideService(HostProcessPlatform, "linux")),
   );
@@ -93,6 +97,76 @@ it.layer(NodeServices.layer)("j5 uninstall's shell cleanup", (it) => {
 
       yield* removeJ5PathLines(profiles);
       assert.deepStrictEqual([...(yield* fs.readFile(profile))], [...before]);
+    }).pipe(Effect.scoped, Effect.provideService(HostProcessPlatform, "linux")),
+  );
+
+  // The app can link into any of four folders; the tests stand in for the
+  // absolute ones with folders under the temp home.
+  const makeAppFolders = Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const { home, baseDir } = yield* makeHome;
+    const folders = ["brew", "usr-local", "bin"].map((name) => path.join(home, "app", name));
+    for (const folder of folders) yield* fs.makeDirectory(folder, { recursive: true });
+    const launcher = path.join(baseDir, "bin/j5");
+    yield* fs.makeDirectory(path.dirname(launcher), { recursive: true });
+    yield* fs.writeFileString(launcher, "");
+    return { home, baseDir, folders, launcher };
+  });
+
+  it.effect("takes the app's link from each folder that points at this home's launcher", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const { home, baseDir, folders, launcher } = yield* makeAppFolders;
+      for (const folder of folders) yield* fs.symlink(launcher, path.join(folder, "j5"));
+
+      const { appLinks } = yield* plan(home, baseDir, folders);
+      assert.deepStrictEqual(
+        appLinks,
+        folders.map((folder) => path.join(folder, "j5")),
+      );
+      yield* removeAppLinks(appLinks);
+      for (const link of appLinks) assert.isFalse(yield* fs.exists(link));
+    }).pipe(Effect.scoped, Effect.provideService(HostProcessPlatform, "linux")),
+  );
+
+  it.effect("leaves another home's link, and a regular file named j5", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const { home, baseDir, folders } = yield* makeAppFolders;
+      yield* fs.symlink(path.join(home, "other/.j5code/bin/j5"), path.join(folders[0]!, "j5"));
+      yield* fs.writeFileString(path.join(folders[1]!, "j5"), "#!/bin/sh\n");
+
+      assert.deepStrictEqual((yield* plan(home, baseDir, folders)).appLinks, []);
+    }).pipe(Effect.scoped, Effect.provideService(HostProcessPlatform, "linux")),
+  );
+
+  it.effect("reports a folder it can't write to and carries on", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const { home, baseDir, folders, launcher } = yield* makeAppFolders;
+      for (const folder of folders) yield* fs.symlink(launcher, path.join(folder, "j5"));
+      yield* fs.chmod(folders[0]!, 0o555);
+
+      const { appLinks } = yield* plan(home, baseDir, folders);
+      const lines: Array<string> = [];
+      yield* removeAppLinks(appLinks).pipe(
+        Effect.provideService(Console.Console, {
+          ...globalThis.console,
+          log: (m: string) => void lines.push(m),
+        } as Console.Console),
+      );
+      yield* fs.chmod(folders[0]!, 0o755);
+
+      assert.isTrue(yield* fs.exists(path.join(folders[0]!, "j5")));
+      assert.isFalse(yield* fs.exists(path.join(folders[1]!, "j5")));
+      assert.include(
+        lines.join("\n"),
+        `${path.join(folders[0]!, "j5")}; the desktop app's j5 link is left behind`,
+      );
     }).pipe(Effect.scoped, Effect.provideService(HostProcessPlatform, "linux")),
   );
 });

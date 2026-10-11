@@ -1,4 +1,4 @@
-import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
+import { useAtomValue } from "@effect/atom-react";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import type {
   EnvironmentId,
@@ -31,7 +31,6 @@ import {
 } from "../../components/ui/select";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { useEnvironmentScope } from "../../state/session";
 import { skillLinkEnvironment } from "./skillLinkAtoms";
 
 function messageOf(error: unknown) {
@@ -56,7 +55,7 @@ type Props = {
 };
 
 export function SkillLinksPanel(props: Props) {
-  const canOperate = useEnvironmentScope(props.environmentId, AuthOrchestrationOperateScope);
+  const canOperate = useAtomValue(skillLinkEnvironment.remove.permissionAtom(props.environmentId));
   const links = useEnvironmentQuery(
     props.connected
       ? skillLinkEnvironment.list({ environmentId: props.environmentId, input: {} })

@@ -8,9 +8,7 @@ import {
   J5_A2A_DELIVERY_MESSAGE_PREFIX,
   formatThreadA2AQueuedDelivery,
   isThreadA2ADeliveryMessage,
-  presentThreadA2AOutboundTool,
   presentThreadA2ADelivery,
-  renderThreadA2AOutboundTool,
   renderThreadA2ADelivery,
   ThreadA2ADeliveryRenderer,
 } from "./ThreadA2ARenderer";
@@ -39,7 +37,7 @@ const peerRaw = [
   "",
   "Please verify the worker.",
   "",
-  'Reply once with send_message(to="agent:delivery-sender", exchange_id="exchange:one", message="...") to close the exchange. Follow-ups from the asker carrying this id join the same exchange.',
+  'Reply once with j5_send_message(to="agent:delivery-sender", exchange_id="exchange:one", message="...") to close the exchange. Follow-ups from the asker carrying this id join the same exchange.',
 ].join("\n");
 
 const peerPlainRaw = [
@@ -47,7 +45,7 @@ const peerPlainRaw = [
   "",
   "Nothing further is needed.",
   "",
-  "No reply is required. Use send_message without exchange_id only if a new message is needed.",
+  "No reply is required. Use j5_send_message without exchange_id only if a new message is needed.",
 ].join("\n");
 
 const closedInstruction =
@@ -68,7 +66,7 @@ const humanRaw = [
   "",
   "This person is not watching this chat. They see only what you send back on this exchange.",
   "",
-  'Reply once with send_message(to="human:viewer", exchange_id="exchange:human", message="...") to close the exchange. Follow-ups from the asker carrying this id join the same exchange.',
+  'Reply once with j5_send_message(to="human:viewer", exchange_id="exchange:human", message="...") to close the exchange. Follow-ups from the asker carrying this id join the same exchange.',
 ].join("\n");
 
 const humanClosedRaw = [
@@ -474,115 +472,10 @@ describe("ThreadA2ADeliveryRenderer", () => {
     expect(formatTimeSinceSent(sentAt, Date.parse(sentAt) + 3 * 60 * 60_000)).toBe("3h");
     expect(formatTimeSinceSent(sentAt, Date.parse(sentAt) + 2 * 24 * 60 * 60_000)).toBe("2d");
   });
-
-  it("renders an accepted, completed J5 send as an awaiting-reply card", () => {
-    const tool = {
-      id: "tool:send-open",
-      createdAt: CREATED_AT,
-      toolLifecycleStatus: "completed",
-      structuredPayload: {
-        type: "dynamic_tool",
-        toolName: "t3-code.send_message",
-        input: { to: "agent:receiver", message: "Please check the deployment." },
-        output: {
-          messageId: "message:j5:a2a:send-open",
-          exchangeId: "exchange:send-open",
-          exchangeState: "open",
-          joinedExistingExchange: false,
-          durableAtSeq: 1,
-        },
-      },
-    };
-    const presentation = presentThreadA2AOutboundTool(tool);
-    const markup = renderToStaticMarkup(renderThreadA2AOutboundTool(tool) ?? <p>generic</p>);
-
-    expect(presentation).toMatchObject({
-      kind: "sent",
-      recipientId: "agent:receiver",
-      body: "Please check the deployment.",
-      exchangeId: "exchange:send-open",
-      exchangeState: "open",
-      isReply: false,
-    });
-    expect(markup).toContain('data-j5-a2a-renderer="sent"');
-    expect(markup).toContain("To");
-    expect(markup).toContain("agent:receiver");
-    expect(markup).toContain("Awaiting reply");
-    expect(markup).not.toContain("exchange:send-open");
-  });
-
-  it("renders an accepted closed exchange reply with the neutral Reply chip", () => {
-    const tool = {
-      id: "tool:reply-closed",
-      createdAt: CREATED_AT,
-      toolLifecycleStatus: "completed",
-      structuredPayload: {
-        type: "dynamic_tool",
-        toolName: "mcp__t3-code__send_message",
-        input: {
-          to: "agent:sender",
-          message: "Deployment verified.",
-          exchange_id: "exchange:ask",
-        },
-        output: {
-          messageId: "message:j5:a2a:reply-closed",
-          exchangeId: "exchange:ask",
-          exchangeState: "closed",
-          joinedExistingExchange: false,
-          durableAtSeq: 2,
-        },
-      },
-    };
-    const markup = renderToStaticMarkup(renderThreadA2AOutboundTool(tool) ?? <p>generic</p>);
-
-    expect(markup).toContain('data-j5-a2a-renderer="sent"');
-    expect(markup).toContain(">Reply<");
-    expect(markup).not.toContain("Awaiting reply");
-  });
-
-  it("leaves a non-send dynamic tool untouched by the outbound delegate", () => {
-    const tool = {
-      id: "tool:list-participants",
-      createdAt: CREATED_AT,
-      toolLifecycleStatus: "completed",
-      structuredPayload: {
-        type: "dynamic_tool",
-        toolName: "t3-code.list_participants",
-        input: {},
-        output: {},
-      },
-    };
-    const rendered = renderThreadA2AOutboundTool(tool);
-    const markup = renderToStaticMarkup(rendered ?? <p data-generic-work-row="true">generic</p>);
-
-    expect(rendered).toBeNull();
-    expect(markup).toContain('data-generic-work-row="true"');
-    expect(markup).not.toContain("data-j5-a2a-renderer");
-  });
-
-  it("leaves a malformed send tool untouched rather than hiding or guessing", () => {
-    const tool = {
-      id: "tool:send-malformed",
-      createdAt: CREATED_AT,
-      toolLifecycleStatus: "completed",
-      structuredPayload: {
-        type: "dynamic_tool",
-        toolName: "t3-code.send_message",
-        input: { to: "agent:receiver", message: "Could be a send." },
-        output: { messageId: "message:j5:a2a:malformed", exchangeState: "open" },
-      },
-    };
-    const rendered = renderThreadA2AOutboundTool(tool);
-    const markup = renderToStaticMarkup(rendered ?? <p data-generic-work-row="true">generic</p>);
-
-    expect(rendered).toBeNull();
-    expect(markup).toContain('data-generic-work-row="true"');
-    expect(markup).not.toContain("data-j5-a2a-renderer");
-  });
 });
 
 const machineInstruction =
-  "This message came from an automated sender outside any agent session. It cannot receive a reply; act on it directly, and take any question to a person or a peer agent with send_message.";
+  "This message came from an automated sender outside any agent session. It cannot receive a reply; act on it directly, and take any question to a person or a peer agent with j5_send_message.";
 
 const machineRaw = [
   "[Message from automation machine:watchdog in project project-monitoring (Monitoring)]",
@@ -640,7 +533,7 @@ describe("ThreadA2ADeliveryRenderer machine senders", () => {
 describe("envelope headers across formats", () => {
   const present = (text: string) => presentThreadA2ADelivery({ message: message({ text }) });
   const plain =
-    "No reply is required. Use send_message without exchange_id only if a new message is needed.";
+    "No reply is required. Use j5_send_message without exchange_id only if a new message is needed.";
 
   it("reads a header that names a project by id alone, as a peer server's is", () => {
     expect(
@@ -682,5 +575,35 @@ describe("envelope headers across formats", () => {
       body: "canary 42",
       automated: true,
     });
+  });
+});
+
+// J5's tools gained a `j5_` prefix (#508). Threads recorded before that keep the old name in
+// the delivery text, and must still render as cards.
+describe("history recorded before the j5_ prefix", () => {
+  const withOldName = (text: string) => text.replaceAll("j5_send_message", "send_message");
+
+  it("reads a stored ask, plain send and automation delivery that name send_message", () => {
+    const present = (text: string) =>
+      presentThreadA2ADelivery({ message: message({ text: withOldName(text) }) });
+
+    expect(withOldName(peerRaw)).not.toContain("j5_send_message");
+    expect(present(peerRaw)).toMatchObject({
+      kind: "peer",
+      exchange: "expects-reply",
+      exchangeId: "exchange:one",
+      body: "Please verify the worker.",
+    });
+    expect(present(peerPlainRaw)).toMatchObject({ kind: "peer", exchange: "plain" });
+    expect(present(machineRaw)).toMatchObject({ kind: "peer", automated: true });
+    expect(
+      presentThreadA2ADelivery({
+        message: message({
+          id: deliveryId("human-old-name"),
+          createdBy: "user",
+          text: withOldName(humanRaw),
+        }),
+      }),
+    ).toMatchObject({ kind: "human", exchange: "expects-reply" });
   });
 });

@@ -3,21 +3,22 @@ import { executeJ5Request } from "@t3tools/client-runtime/j5/http";
 import {
   ARTIFACT_LIST_PATH,
   ARTIFACT_READ_PATH,
-  ARTIFACT_DELETE_PATH,
   ArtifactContent,
   ArtifactListResponse,
-  ArtifactDeleteResponse,
   type ArtifactContent as ArtifactContentValue,
   type ArtifactEntry,
   type EnvironmentId,
   type ProjectId,
 } from "@t3tools/contracts";
+import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { HttpClientRequest, HttpClientResponse } from "effect/http";
 
 import { runtime } from "../../lib/runtime";
+import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { readPreparedConnection } from "../../state/session";
+import { j5Environment } from "../state";
 
 export class ArtifactHttpError extends Schema.TaggedError<ArtifactHttpError>()(
   "ArtifactHttpError",
@@ -31,7 +32,7 @@ export class ArtifactHttpError extends Schema.TaggedError<ArtifactHttpError>()(
 const REQUEST_TIMEOUT_MS = 10_000;
 
 /**
- * Artifact requests go through the shared J5 request helper, which resolves the credential at
+ * Artifact reads go through the shared J5 request helper, which resolves the credential at
  * request time (cookie, static bearer, or relay access token with a fresh DPoP proof) and refreshes
  * a rejected relay token once. A hand-rolled bearer/DPoP branch here signed with whatever token the
  * prepared connection held at page load, so on T3 Connect the change stream kept flowing while
@@ -87,19 +88,6 @@ export const readArtifactEffect = Effect.fn("j5.artifacts.client.read")(function
   return yield* HttpClientResponse.schemaBodyJson(ArtifactContent)(response);
 });
 
-export const deleteArtifactEffect = Effect.fn("j5.artifacts.client.delete")(function* (input: {
-  readonly environmentId: EnvironmentId;
-  readonly projectId: ProjectId;
-  readonly path: string;
-}) {
-  const response = yield* post({
-    environmentId: input.environmentId,
-    pathname: ARTIFACT_DELETE_PATH,
-    body: { projectId: input.projectId, path: input.path },
-  });
-  yield* HttpClientResponse.schemaBodyJson(ArtifactDeleteResponse)(response);
-});
-
 export const listArtifacts = (input: {
   readonly environmentId: EnvironmentId;
   readonly projectId: ProjectId;
@@ -111,8 +99,15 @@ export const readArtifact = (input: {
   readonly path: string;
 }): Promise<ArtifactContentValue> => runtime.runPromise(readArtifactEffect(input));
 
-export const deleteArtifact = (input: {
+/** Permanently delete one artifact on the environment that holds the project. */
+export async function deleteArtifact(input: {
   readonly environmentId: EnvironmentId;
   readonly projectId: ProjectId;
   readonly path: string;
-}): Promise<void> => runtime.runPromise(deleteArtifactEffect(input));
+}): Promise<void> {
+  const result = await j5Environment.deleteArtifact.run(appAtomRegistry, {
+    environmentId: input.environmentId,
+    input: { projectId: input.projectId, path: input.path },
+  });
+  if (result._tag === "Failure") throw Cause.squash(result.cause);
+}

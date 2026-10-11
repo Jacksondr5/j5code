@@ -30,6 +30,7 @@ import {
   resolveOffset,
   runDevRunnerWithInput,
 } from "./dev-runner.ts";
+import { J5_DEV_POSTHOG_KEY } from "./lib/j5-dev-telemetry.ts";
 
 const emptyConfigLayer = ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} }));
 const netServiceLayer = Layer.succeed(NetService.NetService, {
@@ -171,6 +172,31 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
 
         assert.equal(web.T3CODE_DEV_AUTH_TOKEN, input.baseEnv.T3CODE_DEV_AUTH_TOKEN);
         assert.equal(desktop.T3CODE_DEV_AUTH_TOKEN, undefined);
+      }),
+    );
+    it.effect("reports usage to the dev PostHog project unless one is already chosen", () =>
+      Effect.gen(function* () {
+        const input = {
+          serverOffset: 0,
+          webOffset: 0,
+          t3Home: undefined,
+          browser: undefined,
+          autoBootstrapProjectFromCwd: undefined,
+          logWebSocketEvents: undefined,
+          host: undefined,
+          port: undefined,
+          devUrl: undefined,
+        } as const;
+        for (const mode of ["dev", "dev:server", "dev:desktop"] as const) {
+          const env = yield* createDevRunnerEnv({ ...input, mode, baseEnv: {} });
+          assert.equal(env.T3CODE_POSTHOG_KEY, J5_DEV_POSTHOG_KEY);
+        }
+        const chosen = yield* createDevRunnerEnv({
+          ...input,
+          mode: "dev",
+          baseEnv: { T3CODE_POSTHOG_KEY: "phc_from_env_file" },
+        });
+        assert.equal(chosen.T3CODE_POSTHOG_KEY, "phc_from_env_file");
       }),
     );
     it.effect("leaves the shared home implicit and disables browser auto-open", () =>

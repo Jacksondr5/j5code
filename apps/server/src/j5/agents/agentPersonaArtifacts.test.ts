@@ -43,7 +43,7 @@ describe("saved-agent handoff artifacts", () => {
     const section = agentPersonaArtifactInstructions(BUILT_IN_AGENT_PERSONAS.critic, threadId);
     expect(section).toContain("## Handoff artifacts");
     expect(section).toContain("`handoffs/critic/ReviewHandoff-8f3a2c1d.md`");
-    expect(section).toContain("write_artifact");
+    expect(section).toContain("j5_write_artifact");
     for (const item of AGENT_ARTIFACT_TEMPLATES.ReviewHandoff!) expect(section).toContain(item);
     expect(section).toContain("marks the handoff missing");
   });
@@ -54,7 +54,7 @@ describe("saved-agent handoff artifacts", () => {
       threadId,
     );
     expect(withInputs).toContain("`PlanHandoff`");
-    expect(withInputs).toContain("read_artifact");
+    expect(withInputs).toContain("j5_read_artifact");
     const custom = agentPersonaArtifactInstructions(
       { id: "team", inputArtifacts: [], outputArtifact: "TeamBrief" },
       threadId,

@@ -1,11 +1,8 @@
 import {
   ARTIFACT_LIST_PATH,
   ARTIFACT_READ_PATH,
-  ARTIFACT_DELETE_PATH,
   ArtifactListRequest,
   ArtifactReadRequest,
-  ArtifactDeleteRequest,
-  AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   type AuthEnvironmentScope,
   ProjectId,
@@ -30,12 +27,11 @@ import {
   failEnvironmentScopeRequired,
 } from "../../auth/http.ts";
 import * as ProjectService from "../../project/ProjectService.ts";
-import { AgentHandoffArtifactDelete } from "../agents/agentHandoffArtifactDelete.ts";
+import { ArtifactProjectUnavailableError } from "./ArtifactDeletion.ts";
 import { ArtifactWorkspace } from "./ArtifactWorkspace.ts";
 
 const decodeListRequest = Schema.decodeUnknownEffect(ArtifactListRequest);
 const decodeReadRequest = Schema.decodeUnknownEffect(ArtifactReadRequest);
-const decodeDeleteRequest = Schema.decodeUnknownEffect(ArtifactDeleteRequest);
 
 const authenticate = Effect.fn("j5.artifacts.authenticate")(function* (
   requiredScope: AuthEnvironmentScope,
@@ -56,7 +52,6 @@ const authenticate = Effect.fn("j5.artifacts.authenticate")(function* (
 });
 
 const authenticateRead = authenticate(AuthOrchestrationReadScope);
-const authenticateOperate = authenticate(AuthOrchestrationOperateScope);
 
 const requestFailure = (message: string) =>
   HttpServerResponse.jsonUnsafe({ error: "invalid_request", message }, { status: 400 });
@@ -98,20 +93,10 @@ const requireProject = Effect.fn("j5.artifacts.requireProject")(function* (
   }
 });
 
-class ArtifactProjectUnavailableError extends Schema.TaggedError<ArtifactProjectUnavailableError>()(
-  "ArtifactProjectUnavailableError",
-  { projectId: ProjectId },
-) {
-  override get message(): string {
-    return `Project ${this.projectId} is not available.`;
-  }
-}
-
-/** Authenticated J5 routes expose project artifacts from server-owned application storage. */
+/** Authenticated J5 reads of project artifacts from server-owned application storage. */
 export const artifactHttpRouteLayer = Layer.unwrap(
   Effect.gen(function* () {
     const artifacts = yield* ArtifactWorkspace;
-    const handoffDelete = yield* AgentHandoffArtifactDelete;
     const projects = yield* ProjectService.ProjectService;
 
     const listRoute = HttpRouter.add(
@@ -175,49 +160,6 @@ export const artifactHttpRouteLayer = Layer.unwrap(
       ),
     );
 
-    const deleteRoute = HttpRouter.add(
-      "POST",
-      ARTIFACT_DELETE_PATH,
-      Effect.gen(function* () {
-        yield* annotateEnvironmentRequest("j5.artifacts.delete");
-        yield* authenticateOperate;
-        const request = yield* HttpServerRequest.HttpServerRequest;
-        const body = yield* Effect.result(request.json);
-        if (Result.isFailure(body)) return requestFailure("The request body must be JSON.");
-        const decoded = yield* Effect.result(decodeDeleteRequest(body.success));
-        if (Result.isFailure(decoded))
-          return requestFailure("A valid projectId and artifact path are required.");
-        const input = decoded.success;
-        const result = yield* Effect.result(
-          requireProject(projects, input.projectId).pipe(
-            Effect.flatMap(() =>
-              artifacts.delete({ projectId: input.projectId, relativePath: input.path }),
-            ),
-            Effect.tap((path) =>
-              handoffDelete.reconcile({ projectId: input.projectId, path }).pipe(
-                Effect.catchCause((cause) =>
-                  Effect.logWarning("Deleted artifact handoff state could not be reconciled", {
-                    cause,
-                    projectId: input.projectId,
-                    path: input.path,
-                  }),
-                ),
-              ),
-            ),
-          ),
-        );
-        return Result.isSuccess(result)
-          ? HttpServerResponse.jsonUnsafe({ deleted: true })
-          : yield* operationFailure(result.failure);
-      }).pipe(
-        Effect.catchTags({
-          EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
-          EnvironmentInternalError: HttpServerRespondable.toResponse,
-          EnvironmentScopeRequiredError: HttpServerRespondable.toResponse,
-        }),
-      ),
-    );
-
-    return Layer.mergeAll(listRoute, readRoute, deleteRoute);
+    return Layer.mergeAll(listRoute, readRoute);
   }),
 );

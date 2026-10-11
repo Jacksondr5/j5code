@@ -45,6 +45,7 @@ import { Command, Flag } from "effect/cli";
 
 import * as ProjectionStore from "../src/orchestration-v2/ProjectionStore.ts";
 import { migrationManifest, runMigrations } from "../src/persistence/Migrations.ts";
+import { neutraliseCopiedDatabase } from "../src/j5/persistence/neutraliseCopiedDatabase.ts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 
 export class MigrateDevDbNotInWorktreeError extends Schema.TaggedError<MigrateDevDbNotInWorktreeError>()(
@@ -585,6 +586,10 @@ export const runMigrateDevDb = Effect.fn("runMigrateDevDb")(function* (
           Layer.provideMerge(NodeSqliteClient.layer({ filename: snapshotPath })),
         ),
       ),
+      wrapPhase("prune", snapshotPath),
+    );
+    // J5: the prune above does not know J5's tables (peers, deliveries, Crews).
+    yield* neutraliseCopiedDatabase({ copyPath: snapshotPath, sourcePath }).pipe(
       wrapPhase("prune", snapshotPath),
     );
 

@@ -10,6 +10,7 @@ import HeroScene from "../components/HeroScene.astro";
 import PersonaScene from "../components/PersonaScene.astro";
 import { readForkFacts } from "../lib/forkFacts";
 import {
+  DIVERGENCES_URL,
   FORK_DISCIPLINE_URL,
   GITHUB_RELEASES_URL,
   GITHUB_REPOSITORY_URL,
@@ -17,11 +18,22 @@ import {
   PRODUCT_DOCS_URL,
   STATUS_HELP,
   T3_SITE_URL,
+  UPSTREAM_MAIN_URL,
   UPSTREAM_REPOSITORY_URL,
+  UPSTREAM_V2_BRANCH,
   UPSTREAM_V2_PR_URL,
 } from "../lib/site";
 
 const fork = readForkFacts();
+
+// What the latest stable release tracks, from the branch on FORK.md's
+// `Released pin:` line. An unknown or missing branch makes no claim.
+const tracking =
+  fork?.upstreamBranch === UPSTREAM_V2_BRANCH
+    ? { lead: "tracking the ", label: "V2 orchestration branch", href: UPSTREAM_V2_PR_URL }
+    : fork?.upstreamBranch === "main"
+      ? { lead: "tracking its ", label: "main branch", href: UPSTREAM_MAIN_URL }
+      : undefined;
 
 const harnesses = [
   { name: "Claude Code", icon: "/harnesses/claude-ai-icon.svg" },
@@ -135,7 +147,7 @@ const harnesses = [
               <dt>Upstream</dt>
               <dd>
                 <a href={UPSTREAM_REPOSITORY_URL} target="_blank" rel="noopener noreferrer">pingdotgg/t3code</a>
-                <span class="sync-dim"> · tracking the <a href={UPSTREAM_V2_PR_URL} target="_blank" rel="noopener noreferrer">V2 orchestration branch</a></span>
+                {tracking && <span class="sync-dim"> · {tracking.lead}<a href={tracking.href} target="_blank" rel="noopener noreferrer">{tracking.label}</a></span>}
               </dd>
             </div>
             {fork && (
@@ -143,7 +155,7 @@ const harnesses = [
                 <dt>Pinned upstream commit</dt>
                 <dd>
                   <code>{fork.pin}</code>
-                  {fork.pinSelectedOn && <span class="sync-dim"> · as of {fork.pinSelectedOn}</span>}
+                  <span class="sync-dim"> · as of {fork.pinFrozenOn} · in <a href={`${GITHUB_RELEASES_URL}/tag/v${fork.releaseVersion}`} target="_blank" rel="noopener noreferrer">J5 Code {fork.releaseVersion}</a></span>
                 </dd>
               </div>
             )}
@@ -153,10 +165,10 @@ const harnesses = [
             </div>
             <div class="sync-row">
               <dt>Policy</dt>
-              <dd>Read our <a href={FORK_DISCIPLINE_URL} target="_blank" rel="noopener noreferrer">FORK.md</a> to see how we're merging with T3 Code.</dd>
+              <dd>Read our <a href={FORK_DISCIPLINE_URL} target="_blank" rel="noopener noreferrer">FORK.md</a> to see how we're merging with T3 Code, and the <a href={DIVERGENCES_URL} target="_blank" rel="noopener noreferrer">register of divergences</a> to see where we chose to differ from it.</dd>
             </div>
           </dl>
-          <p class="sync-foot">The commit on this card is read from FORK.md when the site builds.</p>
+          <p class="sync-foot">The commit on this card is the one in the latest stable release, read from FORK.md when the site builds.</p>
         </div>
       </div>
     </div>

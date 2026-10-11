@@ -12,7 +12,6 @@ import { environmentCatalog } from "../connection/catalog";
 import { connectionAtomRuntime } from "../connection/runtime";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { serverEnvironment } from "../state/server";
-import { environmentSession } from "../state/session";
 import { environmentThreadShells } from "../state/threads";
 import { crewApprovalPollPlan, type CrewApprovalPollPlan } from "./crew/crewRuntimeRequests.logic";
 
@@ -22,7 +21,6 @@ const sourcesInput = {
   catalogValueAtom: environmentCatalog.catalogValueAtom,
   stateAtom: environmentCatalog.stateAtom,
   configValueAtom: serverEnvironment.configValueAtom,
-  sessionStateValueAtom: environmentSession.sessionStateValueAtom,
 };
 
 export const openInboxQueryAtom = (environmentId: EnvironmentId) =>

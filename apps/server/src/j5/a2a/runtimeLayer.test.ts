@@ -23,6 +23,7 @@ import * as SecretRequests from "../../secrets/SecretRequests.ts";
 import { EnvironmentAuth } from "../../auth/EnvironmentAuth.ts";
 import { ServerEnvironment } from "../../environment/ServerEnvironment.ts";
 import * as ServerConfig from "../../config.ts";
+import { AnalyticsService } from "../../telemetry/AnalyticsService.ts";
 import { ProjectService } from "../../project/ProjectService.ts";
 import { ProjectSetupScriptRunner } from "../../project/ProjectSetupScriptRunner.ts";
 import { ProviderRegistry } from "../../provider/ProviderRegistry.ts";
@@ -56,7 +57,7 @@ import { PeerRegistryService } from "./PeerRegistryService.ts";
 import { makeJ5A2ARuntimeLayer, peerHttpClient } from "./runtimeLayer.ts";
 
 const archiveDependencies = Layer.mergeAll(
-  // spawn_agent and Crew seats prepare worktrees through upstream's launch and receipts.
+  // j5_spawn_agent and Crew seats prepare worktrees through upstream's launch and receipts.
   Layer.mock(ThreadLaunchService)({}),
   Layer.mock(OrchestrationCommandReceiptRepository)({}),
   Layer.mock(ServerSecretStore)({
@@ -105,6 +106,7 @@ const measureNestedRuntimeBuilds = (nested: "http" | "mcp") =>
           Layer.provide(Layer.mock(OrchestratorV2)({})),
           Layer.provide(Layer.mock(EffectOutboxV2)({ listByCommandId: () => Effect.succeed([]) })),
           Layer.provide(archiveDependencies),
+          Layer.provide(AnalyticsService.layerTest),
           Layer.provide(Layer.mock(ProjectService)({})),
           Layer.provide(Layer.mock(GitWorkflowService)({})),
           Layer.provide(Layer.mock(EnvironmentAuth)({})),
@@ -165,7 +167,7 @@ it.effect("shares one runtime and outbox across the production HTTP and MCP regi
       const spawnCompositionConsumer = Layer.effectDiscard(
         SpawnCompositionService.pipe(Effect.asVoid),
       );
-      // spawn_agent reads the workspace service from the route graph; CrewLaunch is built with it.
+      // j5_spawn_agent reads the workspace service from the route graph; CrewLaunch is built with it.
       const spawnWorkspaceConsumer = Layer.effectDiscard(SpawnWorkspaceService.pipe(Effect.asVoid));
       const runtime = makeJ5A2ARuntimeLayer({
         ledger: countedLedger,
@@ -235,6 +237,7 @@ it.effect("shares one runtime and outbox across the production HTTP and MCP regi
               ),
             ),
             Layer.provide(archiveDependencies),
+            Layer.provide(AnalyticsService.layerTest),
             Layer.provide(
               ServerConfig.layerTest(process.cwd(), {
                 prefix: "j5-a2a-production-runtime-",
@@ -261,7 +264,7 @@ it.effect("shares one runtime and outbox across the production HTTP and MCP regi
       assert.equal(threadManagementBuilds, 1);
       assert.equal(transports.size, 1);
       assert.equal(outboxes.size, 1);
-      // The start guard holds only if spawn_agent and CrewLaunch share one workspace service.
+      // The start guard holds only if j5_spawn_agent and CrewLaunch share one workspace service.
       assert.equal(spawnWorkspaces.size, 1);
       const sql = Context.get(databaseContext, SqlClient.SqlClient);
       const people = yield* sql<{

@@ -1,10 +1,4 @@
-import {
-  AuthOrchestrationOperateScope,
-  AuthOrchestrationReadScope,
-  AuthSessionId,
-  ProviderInstanceId,
-  ThreadId,
-} from "@t3tools/contracts";
+import { AuthOrchestrationReadScope, AuthSessionId, ThreadId } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
@@ -18,7 +12,6 @@ import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
 import { PlaybookStore, playbookStoreLayer } from "../playbooks/PlaybookStore.ts";
 import { AgentCrewProposalService, type CrewProposal } from "./AgentCrewProposalService.ts";
 import { makeCrewProposalsHttpRouteLayer } from "./CrewProposalsHttp.ts";
-import { CrewProposalNotOpenError, CrewProposalService } from "./CrewProposalService.ts";
 import { ParticipantId, LedgerProjectId } from "./contracts.ts";
 
 const proposal: CrewProposal = {
@@ -45,25 +38,7 @@ const proposal: CrewProposal = {
   reportedAt: null,
 };
 
-const customSeat = {
-  workspace: { type: "shared" as const },
-  seat: "critic",
-  agentId: null,
-  reason: "Human added review",
-  instructions: "Review the proposed fix.",
-  modelSelection: {
-    instanceId: ProviderInstanceId.make("claudeAgent"),
-    model: "claude-fable-5-1",
-    options: [{ id: "effort", value: "high" }],
-  },
-  runtimeMode: "approval-required" as const,
-};
-
-const paths = {
-  list: "/raw/crews/proposals",
-  resolve: "/raw/crews/proposals/resolve",
-  preview: "/raw/crews/proposals/preview",
-} as const;
+const paths = { list: "/raw/crews/proposals" } as const;
 
 const authWith = (scopes: ReadonlyArray<string>) =>
   Layer.mock(EnvironmentAuth.EnvironmentAuth)({
@@ -76,76 +51,20 @@ const authWith = (scopes: ReadonlyArray<string>) =>
       }),
   });
 
-it("lists open proposals for readers and resolves them only for operators", async () => {
-  const resolved: Array<{
-    proposalId: string;
-    decision: string;
-    seats?: unknown;
-    approvalToken?: string | undefined;
-  }> = [];
-  const previewed: unknown[] = [];
-  const gate = Layer.mock(CrewProposalService)({
-    preview: (input) => {
-      previewed.push(input);
-      return Effect.succeed({
-        proposalId: input.proposalId,
-        approvalToken: "runtime-token",
-        workspaceOptions: {
-          currentBranch: null,
-          cwd: "/repo",
-          worktrees: [],
-        },
-        seats: [
-          {
-            seat: "critic",
-            provider: "Anthropic",
-            harness: "Claude Code",
-            model: "Claude Fable 5.1",
-            reasoning: "High",
-            access: "Supervised",
-            modelSelection: customSeat.modelSelection,
-            runtimeMode: customSeat.runtimeMode,
-            workspace: { type: "shared" as const },
-          },
-        ],
-      });
-    },
-    resolve: (input) => {
-      resolved.push(input);
-      return input.proposalId === proposal.id
-        ? Effect.succeed({
-            proposal: {
-              ...proposal,
-              status: "approved" as const,
-              approvedSeats: input.seats ?? proposal.requestedSeats,
-            },
-            instance: null,
-          })
-        : Effect.fail(
-            new CrewProposalNotOpenError({ proposalId: input.proposalId, status: "declined" }),
-          );
-    },
-  });
+it("lists open proposals for a reader", async () => {
   const store = Layer.mock(AgentCrewProposalService)({
     listOpen: () => Effect.succeed([proposal]),
   });
-  const routes = (scopes: ReadonlyArray<string>) =>
+  const reader = HttpRouter.toWebHandler(
     makeCrewProposalsHttpRouteLayer(paths).pipe(
-      Layer.provide(Layer.mergeAll(gate, store, Layer.mock(PlaybookStore)({}))),
-      Layer.provideMerge(authWith(scopes)),
+      Layer.provide(Layer.mergeAll(store, Layer.mock(PlaybookStore)({}))),
+      Layer.provideMerge(authWith([AuthOrchestrationReadScope])),
       Layer.provide(HttpServer.layerServices),
-    );
-  const operator = HttpRouter.toWebHandler(
-    routes([AuthOrchestrationReadScope, AuthOrchestrationOperateScope]),
-    {
-      disableLogger: true,
-    },
+    ),
+    { disableLogger: true },
   );
-  const reader = HttpRouter.toWebHandler(routes([AuthOrchestrationReadScope]), {
-    disableLogger: true,
-  });
   try {
-    const list = await operator.handler(
+    const list = await reader.handler(
       new Request(`http://environment.test${paths.list}`, { method: "POST", body: "{}" }),
     );
     assert.equal(list.status, 200);
@@ -154,92 +73,7 @@ it("lists open proposals for readers and resolves them only for operators", asyn
     };
     assert.equal(body.proposals[0]?.id, proposal.id);
     assert.lengthOf(body.proposals[0]?.requestedSeats ?? [], 1);
-
-    const preview = await reader.handler(
-      new Request(`http://environment.test${paths.preview}`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ proposalId: proposal.id, seats: [customSeat] }),
-      }),
-    );
-    assert.equal(preview.status, 200);
-    assert.deepStrictEqual(previewed, [{ proposalId: proposal.id, seats: [customSeat] }]);
-    assert.deepStrictEqual(await preview.json(), {
-      proposalId: proposal.id,
-      approvalToken: "runtime-token",
-      workspaceOptions: {
-        currentBranch: null,
-        cwd: "/repo",
-        worktrees: [],
-      },
-      seats: [
-        {
-          seat: "critic",
-          provider: "Anthropic",
-          harness: "Claude Code",
-          model: "Claude Fable 5.1",
-          reasoning: "High",
-          access: "Supervised",
-          modelSelection: customSeat.modelSelection,
-          runtimeMode: customSeat.runtimeMode,
-          workspace: { type: "shared" },
-        },
-      ],
-    });
-
-    const approved = await operator.handler(
-      new Request(`http://environment.test${paths.resolve}`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          proposalId: proposal.id,
-          decision: "approve",
-          approvalToken: "runtime-token",
-          seats: [...proposal.requestedSeats, customSeat],
-        }),
-      }),
-    );
-    assert.equal(approved.status, 200);
-    assert.equal(resolved[0]?.approvalToken, "runtime-token");
-    assert.deepStrictEqual(resolved[0]?.seats, [...proposal.requestedSeats, customSeat]);
-    const approvedBody = (await approved.json()) as {
-      proposal: { status: string; approvedSeats: unknown[] };
-    };
-    assert.equal(approvedBody.proposal.status, "approved");
-    assert.deepStrictEqual(approvedBody.proposal.approvedSeats, [
-      ...proposal.requestedSeats,
-      customSeat,
-    ]);
-
-    const stale = await operator.handler(
-      new Request(`http://environment.test${paths.resolve}`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ proposalId: "other", decision: "decline" }),
-      }),
-    );
-    assert.equal(stale.status, 409);
-
-    const invalid = await operator.handler(
-      new Request(`http://environment.test${paths.resolve}`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ proposalId: proposal.id, decision: "maybe" }),
-      }),
-    );
-    assert.equal(invalid.status, 400);
-
-    const forbidden = await reader.handler(
-      new Request(`http://environment.test${paths.resolve}`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ proposalId: proposal.id, decision: "decline" }),
-      }),
-    );
-    assert.equal(forbidden.status, 403);
-    assert.lengthOf(resolved, 2);
   } finally {
-    await operator.dispose();
     await reader.dispose();
   }
 });
@@ -286,7 +120,6 @@ it.effect(
       const routes = makeCrewProposalsHttpRouteLayer(paths).pipe(
         Layer.provide(
           Layer.mergeAll(
-            Layer.mock(CrewProposalService)({}),
             store,
             playbookStoreLayer.pipe(
               Layer.provide(NodeSqliteClient.layer({ filename: ":memory:" })),

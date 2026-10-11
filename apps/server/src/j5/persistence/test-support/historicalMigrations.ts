@@ -1,9 +1,20 @@
 import * as Effect from "effect/Effect";
 import * as Migrator from "effect/sql/Migrator";
 import * as SqlClient from "effect/sql/SqlClient";
-import { migrationEntries } from "../../../persistence/Migrations.ts";
+import { migrationEntries, migrationManifest } from "../../../persistence/Migrations.ts";
 
 const run = Migrator.make({});
+
+/**
+ * The history J5 0.0.48 leaves behind (upstream pin `67a2be0fdb`): upstream's 1–53, then V2 at 54
+ * and the index cleanup at 55. Upstream's `reconcileV2PreviewMigration` moves those two up by one
+ * and records the new 054.
+ */
+export const pinMigrationHistory: ReadonlyArray<readonly [number, string]> = [
+  ...migrationManifest.filter(([id]) => id <= 53),
+  [54, "OrchestrationV2"],
+  [55, "RemoveRedundantProjectionIndexes"],
+];
 
 /**
  * A database created at pin 67a2be0fdb: upstream's 1–53, then `54 = OrchestrationV2` and
