@@ -139,3 +139,13 @@ Other findings:
 - **A desktop app can host preview tabs itself**, and the split between watching and driving does not apply to those. A guest's tabs are the server's own, so this is expected not to matter; it was not confirmed.
 
 Still not determined: which J5 reads the mobile client makes for a thread view, and whether upstream's clients hide the controls a session lacks permission for.
+
+## Review of the definitions (2026-10-11)
+
+Jackson reviewed the definitions drafted from this record ([#529](https://github.com/Jacksondr5/j5code/pull/529)). Three things changed what is ruled above.
+
+- **The agent's question prompt is off in a shared conversation.** The table above lets a collaborator answer "the agent's questions and approval prompts". Jackson: with several people on the thread it is not clear how a question prompt would work, so the agent has none there and asks in ordinary words. Approval prompts stay, and a collaborator can answer them. J5 already switches the prompt off for Crew seats on Claude and Codex, which is the mechanism this would use; whether it takes effect on a thread that becomes shared while its agent is already running was not checked.
+- **A guest can leave what they were granted**, from their own client, so that they manage what their own sidebar shows. Coming back takes a new grant from a member. Not ruled: leaving one thread inside a project the guest holds as a whole.
+- **A guest's own inbox and Fleet page are unaffected.** They belong to the client, and still show the guest's own servers. The server a person is a guest on adds nothing to them.
+
+Upstream moved while this was being written. At `2625327090` its permissions are still per connection and server-wide, with no roles and nothing scoped to a project or thread. One change there closes a gap found above: the preview's live stream and upload route now check the dedicated preview permission. Neither checks which thread a tab belongs to.
