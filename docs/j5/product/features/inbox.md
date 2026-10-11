@@ -25,7 +25,7 @@ A person answers in one of two ways. **Reply in place**: the answer, exactly as 
 
 A replied item recedes to a collapsed **Replied** shelf. An ask whose sender is archived leaves the inbox immediately — the archive dialog was the loud moment, and a confirmed archive means the person wants it gone.
 
-The inbox belongs to a member of the server. A guest has none, and an agent reaches a guest in the conversation they share ([shared conversations](shared-conversations.md)).
+A server puts asks only in the inboxes of its members. A person who is a guest on a server still has their inbox, with the asks from servers of their own; the server they are a guest on adds nothing to it, and its agents reach them in the conversation they share ([shared conversations](shared-conversations.md)).
 
 The inbox is reached from a bell in the rail that carries the count of open items and opens a full page.
 
@@ -60,7 +60,7 @@ The inbox is **not** a backlog (a non-blocking note an agent wants to keep is a 
 
 ### Guests
 
-14. A guest has no inbox and no bell, and is not offered to agents as someone who can be asked.
+14. A server adds no item to the inbox of a person who is a guest on it, and its agents are not offered that guest as someone who can be asked.
 
 ## Scenarios
 
@@ -78,4 +78,4 @@ The inbox is **not** a backlog (a non-blocking note an agent wants to keep is a 
 - 2026-09-12 — the inbox merges every connected environment (PR #125; the merge rules are the cross-device definition's).
 - 2026-09-08 — rewritten into the definition shape. Former identifiers: IB1 → Answering, AC8–AC9; IB2 → AC13; IB3–IB4 → AC5–AC6; IB5 → AC10; IB6 → AC11; IB7 → AC12. The "clear-own-ask has no build ticket" note is gone: the verb shipped. The deferred items that lived here (a platform-alerts lane, the asker's current state on items, smaller inbox forms) are backlog candidates, not part of this definition.
 - 2026-10-07 — Squadrons retired: an item names the project its sender works in (Jackson, 2026-10-05; [#412](https://github.com/Jacksondr5/j5code/issues/412)).
-- 2026-10-10 — a guest has no inbox (AC14); an ask in a shared conversation is defined by [shared conversations](shared-conversations.md) (Jackson; [record](../../worklog/2026-10-09-multi-player-session.md)).
+- 2026-10-10 — a server adds nothing to a guest's inbox (AC14); an ask in a shared conversation is defined by [shared conversations](shared-conversations.md) (Jackson; [record](../../worklog/2026-10-09-multi-player-session.md)).
