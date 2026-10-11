@@ -175,6 +175,7 @@ import {
 } from "./j5/a2a/crewSeatArchiveGuard.ts";
 import { refreshSkillProviders } from "./j5/skills/skillProviderRefresh.ts";
 import { PlaybookStore } from "./j5/playbooks/PlaybookStore.ts";
+import { layerRpcAuthorization as j5LayerRpcAuthorization } from "./j5/sharing/GuestGate.ts";
 import { J5_WS_RPC_METHODS, j5WsRpcServices, layerJ5WsRpc } from "./j5/wsRpc.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import * as ProviderAuthService from "./provider/ProviderAuthService.ts";
@@ -3199,7 +3200,11 @@ export const layer = Layer.unwrap(
           yield* RpcServer.make(ServerWsRpcGroup, WS_RPC_SERVER_OPTIONS).pipe(
             Effect.provideService(RpcServer.Protocol, withTerminalOutputWindow(protocol)),
             Effect.provide(
-              Layer.merge(RpcAuthorization.layer(session.scopes), rpcInstrumentationLayer),
+              Layer.merge(
+                // J5: a guest's connection is checked against its grants first (FORK.md case 65).
+                j5LayerRpcAuthorization(session, RpcAuthorization.layer(session.scopes)),
+                rpcInstrumentationLayer,
+              ),
             ),
             Effect.forkScoped,
           );
