@@ -70,6 +70,12 @@ A signal can come from three sources: the platform measured it; the agent declar
 - **Artifacts are not shown per agent.** The store does not record which thread wrote a file.
 - **Failing checks do not count toward the badge.** They are shown on the row. The badge keeps to a failed run, a delivery alarm and a run that never started.
 
+## Rulings: moving into the middle
+
+- **Being in the middle means being followed through the signals above and not through the thread.** The Fleet page shows every agent, so every agent already has its signals there. What separates a middle agent from a foreground one is only that it is not at the top level of the sidebar.
+- **No control for sending an agent to the middle, for now.** An agent is there because of how it was started: spawned by another agent, or seated in a Crew. Jackson: it is not clear what such a control should be, and that needs time with a better Fleet page.
+- **Considered and not taken**: letting a person place an agent under another agent, which the Fleet page definition implies and which appears not to be built; and a control that removes an agent from the sidebar, which changes upstream's sidebar.
+
 ## Rulings: the Fleet page
 
 - **The middle belongs on the Fleet page.** Its definition already gives each row four questions answered from measurements, and the Playbooks definition adds the step.
