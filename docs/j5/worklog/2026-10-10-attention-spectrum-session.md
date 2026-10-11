@@ -68,7 +68,7 @@ A signal can come from three sources: the platform measured it; the agent declar
 - **A row shows the facts of the agent's pull request**: open, draft, merged or closed, the state of its checks, the review decision, whether it can merge. Upstream already syncs these for each thread's linked pull requests; the Fleet page does not read them today.
 - **A row also shows the size of work not yet in a pull request**, as lines added and removed, which upstream records with each turn's checkpoint.
 - **Artifacts are not shown per agent.** The store does not record which thread wrote a file.
-- **Failing checks do not count toward the badge.** They are shown on the row. The badge keeps to a failed run, a delivery alarm and a run that never started.
+- **Failing checks do not count toward the badge.** They are shown on the row. The agent took this to cover a pull request that cannot merge as well, and said so; Jackson did not object. The badge keeps to a failed run, a delivery alarm and a run that never started.
 
 ## Rulings: moving into the middle
 

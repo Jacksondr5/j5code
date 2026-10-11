@@ -5,9 +5,9 @@ kind: record
 
 # Multi-player session (2026-10-09)
 
-Jackson and an agent worked through "multi-player": several people interacting with the agents on one server. It has two parts. Share links let a person give someone else access to a server, a project or a thread. Shared conversations are what happens once two people can write to the same agent. This record holds the rulings from that session. They are proposals until [Shared server](../product/features/shared-server.md) and the [register of divergences](../product/upstream.md) carry them; nothing here is built.
+Jackson and an agent worked through "multi-player": several people interacting with the agents on one server. It has two parts. Share links let a person give someone else access to a server, a project or a thread. Shared conversations are what happens once two people can write to the same agent. This record holds the rulings from that session and from the two days after it. [Shared server](../product/features/shared-server.md) and [shared conversations](../product/features/shared-conversations.md) now carry them, and are the place to read what is current; three rulings below were changed later, and each says so where it stands. Nothing here is built. The build is tracked in [#531](https://github.com/Jacksondr5/j5code/issues/531), [#532](https://github.com/Jacksondr5/j5code/issues/532) and [#533](https://github.com/Jacksondr5/j5code/issues/533), and the [register of divergences](../product/upstream.md) gains its entries with that work.
 
-The session is the first of a set. Hosted servers with agents that run elsewhere, a "what happened since I last looked" view, and the human attention spectrum are still to come, each in its own record.
+The session is the first of a set. The others have their own records: the [hosted server](2026-10-10-hosted-server-session.md), [catching up](2026-10-10-catch-up-session.md) on a thread, and the [attention spectrum](2026-10-10-attention-spectrum-session.md).
 
 ## What prompted it
 
@@ -36,7 +36,7 @@ Read from the tree at `ff34d7067e`. The counts come from reading the server only
 
 ### People and grants
 
-- **A link is made for a named person.** The sharer names them. Whoever opens the link is that person on this server, on every device paired from it.
+- **A link is made for a named person.** The sharer names them. Whoever opens the link is that person on this server, on every device paired from it. (Corrected below: a link pairs one device.)
 - **Access is a list of grants on the server**, not a property of the link. A grant is a person, a project or a thread, and a level. Adding someone to a second thread two days later is a new grant; they need no new link, and their client shows the change.
 - **The level lives on each grant.** A person can view a project and collaborate on one thread inside it.
 - **Two levels: view and collaborate.** Administering a server stays a whole-server role.
@@ -63,7 +63,7 @@ Read from the tree at `ff34d7067e`. The counts come from reading the server only
 
 - **Terminals.** Messaging an agent never grants a terminal. Jackson: guest terminal access is not important, and the risk is acute and easy to control.
 - **Access mode.** The owner decides how much an agent may do. If a collaborator could switch an agent to full access, that setting would mean nothing.
-- **Approvals.** A collaborator can approve a command the owner would have declined. That is accepted, because a collaborator can already ask the agent for anything.
+- **Questions and approvals.** The table's row was agreed with only approvals discussed; the review below rules on question prompts and Crew roster prompts as well. A collaborator can approve a command the owner would have declined. That is accepted, because a collaborator can already ask the agent for anything.
 - **Preview browser.** Jackson wanted it kept: it is useful, and reaching services on the server's network is a lesser risk than messaging an agent. A guest's tabs always use a profile with no saved logins, and a guest never takes control of a tab opened in a signed-in profile. Saved logins are the risk that differs in kind, because they reach accounts outside the server.
 - **Artifacts** come with a project grant only. A thread guest sees a link to an artifact and cannot open it.
 
@@ -76,14 +76,14 @@ Read from the tree at `ff34d7067e`. The counts come from reading the server only
 
 ### What a guest sees
 
-- **Inbox.** A guest has none. An agent asks a guest in the conversation (see shared conversations below). An earlier ruling in the session gave guests an inbox of asks addressed to them by name; it was withdrawn.
+- **Inbox.** A guest has none from this server. An agent asks a guest in the conversation (see shared conversations below). An earlier ruling in the session gave guests an inbox of asks addressed to them by name; it was withdrawn.
 - **Fleet page.** Not shown to guests at first; to be considered for a second version.
 - **Personas and Playbooks.** Not shown. They are only useful to someone who can spawn agents, which a guest cannot.
 - **Memos.** Not built. When they are, a guest sees the Memos of agents in threads they can reach.
 
 ## How it would be built
 
-This is the sketch the rulings were made against, not a plan.
+This is the sketch the rulings were made against, not a plan. A later read of the code corrected it in four places; see "Checked on 2026-10-10" below.
 
 - **Guest sessions are created without the permissions a guest never has**: terminal, file writes, source control, settings, providers and access management. Upstream's own check then refuses those, and upstream's clients already hide controls the session lacks permission for.
 - **A guest session carries "operate" and "drive the preview" from the start**, because a grant can switch those on later and a session's permissions cannot change.
