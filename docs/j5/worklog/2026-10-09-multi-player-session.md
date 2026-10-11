@@ -122,3 +122,20 @@ This is the sketch the rulings were made against, not a plan.
 - Whether the WebSocket check can filter a live feed, or only a single reply.
 - How a session and a pairing link are stored, and so what it takes to attach a person to one.
 - Preview tabs hosted by a desktop app, and the preview's upload and download routes.
+
+## Checked on 2026-10-10
+
+A second read of the code, at `4fe4b6f7df`, took up the list above. It was again a read only; nothing was run. It corrects the sketch in "How it would be built" in four places.
+
+- **A thread view loads over HTTP first.** The sidebar and a thread's conversation each arrive from an HTTP route, and the WebSocket then carries the live changes. Each of those routes checks only that the session may read. So the guard on HTTP routes is the main path for a view guest, not a side cost, and the table at the WebSocket check is half of the filter.
+- **The WebSocket check allows or refuses a whole request.** It sees the request's name and contents, so it can refuse a request for a thread the guest has no grant on. It never sees the items of a stream. The feeds that carry many threads, about a dozen, have to be filtered where each is produced.
+- **A view guest must not be able to drive a preview tab through the picture stream.** The requests that open and navigate a tab use the dedicated preview permission, as the record says. The live stream and the upload route do not: they accept input from any session that holds "operate", and neither checks which thread the tab belongs to. A guest session that carries "operate" from the start, as sketched, could drive any tab the server hosts. Those routes need J5's guard as well.
+- **The size was underestimated.** The filter alone touches about seven upstream-owned files before anything changes in how sessions are stored.
+
+Other findings:
+
+- **A person can be attached to a link without changing upstream's tables.** A link and every session made from it already carry a free-text "subject", copied from one to the other; J5's server-to-server peering uses it the same way.
+- **A link pairs one device.** It is used up when opened. A person's second device needs a second link made for the same person, which changes the ruling above that one link serves every device.
+- **A desktop app can host preview tabs itself**, and the split between watching and driving does not apply to those. A guest's tabs are the server's own, so this is expected not to matter; it was not confirmed.
+
+Still not determined: which J5 reads the mobile client makes for a thread view, and whether upstream's clients hide the controls a session lacks permission for.
