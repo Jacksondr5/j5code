@@ -135,7 +135,7 @@ A second read of the code, at `4fe4b6f7df`, took up the list above. It was again
 Other findings:
 
 - **A person can be attached to a link without changing upstream's tables.** A link and every session made from it already carry a free-text "subject", copied from one to the other; J5's server-to-server peering uses it the same way.
-- **A link pairs one device.** It is used up when opened. A person's second device needs a second link made for the same person, which changes the ruling above that one link serves every device.
+- **A link pairs one device.** It is used up when opened. A person's second device needs a second link made for the same person, which changes the ruling above that one link serves every device. Ruled the same day: an access manager makes the further link, from the People page. Jackson: without something like upstream's relay, nobody but an access manager could make one.
 - **A desktop app can host preview tabs itself**, and the split between watching and driving does not apply to those. A guest's tabs are the server's own, so this is expected not to matter; it was not confirmed.
 
 Still not determined: which J5 reads the mobile client makes for a thread view, and whether upstream's clients hide the controls a session lacks permission for.
