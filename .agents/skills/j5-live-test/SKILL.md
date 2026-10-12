@@ -18,6 +18,9 @@ started from that commit, and keep working while it tests. Tell it:
 - which rows of "What to cover" apply;
 - to follow this skill.
 
+You may send it corrections while it runs, such as a fix to the test method.
+It records them in its report.
+
 Its report comes back as a short message naming an artifact. Put the verdict,
 what was not exercised live, and what the person must test by hand in the PR's
 "Live testing" section.
@@ -95,6 +98,11 @@ A worktree holds one setup at a time. Pass a flag to the first start, or to
   through its own harness tools (`ListAgents`, `SendMessage`). When a test has
   agents message each other, tell the test agent to use J5's tools and the
   participants `j5_list_participants` returns, and check which tool it called.
+- To check that a message was delivered, ask the receiver to write a file,
+  not to reply. A plain message tells its receiver that no reply is needed, so
+  a missing reply does not mean a lost message.
+- The default Haiku cannot be started with `j5_spawn_agent` and has no Auto
+  mode. For an agent that another agent starts, use another authorized model.
 - An agent's own account of what it did is not evidence. Check the tool
   result, the stored row, or the screen.
 - To hold a turn open, ask the agent to run `./scripts/hold.sh` in the test
@@ -169,5 +177,6 @@ Say so in the report instead of implying coverage:
 - the desktop app: Electron, the packaged build, the updater, installers;
 - relay and tunnel connections, a second machine, an unreachable peer;
 - continuing one of the threads the script made;
+- threads without a project: a test home inside a checkout does not offer them;
 - behavior under the developer's real data volume;
 - providers other than Codex and Claude on this host.

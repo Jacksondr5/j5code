@@ -52,7 +52,7 @@ a subagent left running in the background; it is not a browser fault.
   capped, and the sidebar uses the cap up.
 - **Recover.** A call that times out drops the browser for about a second,
   and calls already sent in that second answer "No preview automation host is
-  available". Ignore that message's advice not to retry. Send nothing else
+  available" or "server-browser disconnected". Ignore that message's advice not to retry. Send nothing else
   until one `preview_status` has answered, then carry on with the same tab.
   Send a call that might time out by itself, not in a batch, and find out why
   it timed out before repeating it: a menu left open over the target, or a
