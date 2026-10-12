@@ -9,6 +9,7 @@ import {
   ThreadId,
   WS_METHODS,
 } from "@t3tools/contracts";
+import { J5_SHARING_WS_METHODS } from "@t3tools/contracts/j5";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -297,6 +298,9 @@ it.layer(testLayer)("guest RPC authorization", (it) => {
         WS_METHODS.subscribeServerConfig,
         WS_METHODS.subscribeServerLifecycle,
         ORCHESTRATION_V2_WS_METHODS.subscribeShell,
+        // Answered from the guest's own session by `PersonAccess`.
+        J5_SHARING_WS_METHODS.getConnectionAccess,
+        J5_SHARING_WS_METHODS.subscribeThreadAccess,
       ]) {
         assert.strictEqual(yield* call(GUEST, method, {}), "ran", method);
         assert.strictEqual(yield* call(stray, method, {}), "ran", method);
@@ -312,6 +316,8 @@ it.layer(testLayer)("guest RPC authorization", (it) => {
           WS_METHODS.serverGetConfig,
           WS_METHODS.subscribeServerConfig,
           WS_METHODS.subscribeServerLifecycle,
+          J5_SHARING_WS_METHODS.getConnectionAccess,
+          J5_SHARING_WS_METHODS.subscribeThreadAccess,
         ].toSorted(),
       );
     }),

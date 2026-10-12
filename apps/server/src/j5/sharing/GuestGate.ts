@@ -8,6 +8,7 @@ import {
   type WsRpcGroup,
   authScopeRequiredResponse,
 } from "@t3tools/contracts";
+import { J5_SHARING_WS_METHODS } from "@t3tools/contracts/j5";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
@@ -34,7 +35,7 @@ type WsRpcMethod = RpcGroup.Rpcs<typeof WsRpcGroup>["_tag"];
 /**
  * A request a guest may make. `thread`: for one thread, at the level named, with the thread read
  * from the payload. `narrowed`: for anything, because its handler answers a guest through
- * `GuestView`, with a reduced or filtered answer in place of upstream's.
+ * `GuestView` or `PersonAccess`, with a reduced or filtered answer in place of upstream's.
  */
 type GuestRpcRule =
   | {
@@ -70,6 +71,9 @@ export const GUEST_RPC_RULES: Partial<Record<WsRpcMethod, GuestRpcRule>> = {
   [ORCHESTRATION_V2_WS_METHODS.getTurnItem]: viewThread,
   [ORCHESTRATION_V2_WS_METHODS.searchThread]: viewThread,
   [ORCHESTRATION_V2_WS_METHODS.searchThreadStream]: viewThread,
+  // A guest asking what it holds: answered for its own session, `none` for a thread out of reach.
+  [J5_SHARING_WS_METHODS.getConnectionAccess]: narrowed,
+  [J5_SHARING_WS_METHODS.subscribeThreadAccess]: narrowed,
 };
 
 /** `open`: the route decides what a guest gets. `thread`: allowed when a grant covers the thread. */

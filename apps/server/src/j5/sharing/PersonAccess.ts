@@ -9,6 +9,7 @@ import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
+import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import { ParticipantId } from "../a2a/contracts.ts";
@@ -124,6 +125,15 @@ export interface PersonAccessShape {
     session: SessionIdentity,
     threadId: ThreadId,
   ) => Effect.Effect<Access, PersonAccessStorageError>;
+  /**
+   * A connection's access to a thread now, then again each time a change to its guest's grants
+   * alters it, so a client already showing the thread follows the change (AC10). A member's
+   * connection is told once.
+   */
+  readonly watchThreadAccess: (
+    session: SessionIdentity,
+    threadId: ThreadId,
+  ) => Stream.Stream<Access, PersonAccessStorageError>;
   /** A connection's access to a project as a whole; a grant on one of its threads gives none. */
   readonly projectAccess: (
     session: SessionIdentity,
@@ -285,6 +295,18 @@ export const layer: Layer.Layer<PersonAccess, never, SqlClient.SqlClient> = Laye
         )
     `;
 
+    const threadAccess: PersonAccessShape["threadAccess"] = Effect.fn(
+      "j5.sharing.personAccess.threadAccess",
+    )(
+      function* (session, threadId) {
+        const person = yield* sessionPerson(session);
+        if (person === null) return "member";
+        if (person.personId === null) return "none";
+        return highest((yield* threadLevels(person.personId, threadId)).map((row) => row.level));
+      },
+      Effect.mapError(storage("read a person's access to a thread")),
+    );
+
     return PersonAccess.of({
       createGuest: Effect.fn("j5.sharing.personAccess.createGuest")(
         function* (input) {
@@ -368,15 +390,24 @@ export const layer: Layer.Layer<PersonAccess, never, SqlClient.SqlClient> = Laye
 
       sessionPerson,
 
-      threadAccess: Effect.fn("j5.sharing.personAccess.threadAccess")(
-        function* (session, threadId) {
-          const person = yield* sessionPerson(session);
-          if (person === null) return "member";
-          if (person.personId === null) return "none";
-          return highest((yield* threadLevels(person.personId, threadId)).map((row) => row.level));
-        },
-        Effect.mapError(storage("read a person's access to a thread")),
-      ),
+      threadAccess,
+
+      watchThreadAccess: (session, threadId) =>
+        session.subject !== GUEST_SESSION_SUBJECT
+          ? Stream.make<[Access]>("member")
+          : Stream.unwrap(
+              Effect.gen(function* () {
+                // Subscribed before the first read, so no change between the two is missed.
+                const changes = yield* PubSub.subscribe(grantChanges);
+                const read = threadAccess(session, threadId);
+                return Stream.fromEffect(read).pipe(
+                  Stream.concat(
+                    Stream.fromSubscription(changes).pipe(Stream.mapEffect(() => read)),
+                  ),
+                  Stream.changes,
+                );
+              }),
+            ),
 
       projectAccess: Effect.fn("j5.sharing.personAccess.projectAccess")(
         function* (session, projectId) {
