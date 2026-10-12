@@ -1416,7 +1416,7 @@ async function start(
     return console.log(
       baseOutput === undefined
         ? baseStillPreparing(paths)
-        : `${baseHeading(paths)}\n\n${baseOutput}`,
+        : `${baseHeading(paths)}\n\n${baseOutput}\n${baseCheckoutNote(paths)}`,
     );
   }
   if (mode === "for-dev") {
@@ -1659,6 +1659,10 @@ function baseHeading(paths: LiveTestPaths): string {
   }`;
 }
 
+/** The base checkout stays registered in the real repository until it is removed. */
+const baseCheckoutNote = (paths: LiveTestPaths) =>
+  `The base checkout is a git worktree of this repository (detached, no branch) at ${paths.base}.\nWhen the before and after work is done, remove it with: ${selfCommand(paths, "rebuild")}`;
+
 const baseStillPreparing = (paths: LiveTestPaths) =>
   `The base server is still being prepared (checkout, install, build, start). It carries on in the background.\nCheck it with: ${selfCommand(paths, "status")}\nIts progress: ${basePreparation(paths).log}`;
 
@@ -1693,7 +1697,7 @@ const serversOf = (
       ]
     : [{ name: "", paths }];
 
-async function stop(paths: LiveTestPaths): Promise<void> {
+async function stop(paths: LiveTestPaths, replacing = false): Promise<void> {
   // Classify every server before signalling any, so a refusal leaves both alone.
   const servers = serversOf(paths).map((server) => ({
     ...server,
@@ -1730,6 +1734,13 @@ async function stop(paths: LiveTestPaths): Promise<void> {
     if (stopped.status !== 0) {
       throw new LiveTestRefusal("The base server could not be stopped; see the line above.");
     }
+    // Checked on every command. Here it comes after the stop, so a moved
+    // checkout is reported without leaving its server running. A rebuild is
+    // about to replace the build, which is the way out of a moved checkout.
+    const commit = (readManifest(paths) as DefaultManifest).baseCommit;
+    if (!replacing && builtMode(paths) === "base" && commit !== undefined) {
+      assertBaseCheckout(paths, commit);
+    }
   }
   removeTailnetMapping();
 }
@@ -1743,7 +1754,7 @@ async function status(paths: LiveTestPaths): Promise<void> {
   }
   assertBaseCheckout(paths, commit);
   const base = await baseScript(paths, ["status"]);
-  console.log(`\n${baseHeading(paths)}\n\n${base.output}`);
+  console.log(`\n${baseHeading(paths)}\n\n${base.output}\n${baseCheckoutNote(paths)}`);
   if (base.status !== 0) {
     throw new LiveTestRefusal("The base checkout's status command failed; see its output above.");
   }
@@ -1860,7 +1871,7 @@ async function main(): Promise<void> {
   if (preparingBase) return prepareBase(paths);
   if (command === "status") return status(paths);
   if (command === "stop") return stop(paths);
-  if (command === "restart" || command === "rebuild") await stop(paths);
+  if (command === "restart" || command === "rebuild") await stop(paths, command === "rebuild");
   // resolveLiveTestPaths has confirmed this directory is inside the worktree's own .j5code.
   // Refuse an unusable base before a rebuild deletes the build that is there.
   if (command === "rebuild" && baseRef !== undefined) resolveBase(paths, baseRef);
