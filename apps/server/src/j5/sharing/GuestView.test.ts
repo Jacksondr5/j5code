@@ -16,6 +16,7 @@ import {
   type OrchestrationV2DomainEvent,
   type OrchestrationV2ShellStreamItem,
   ProjectId,
+  ProviderDriverKind,
   ProviderInstanceId,
   ServerConfig,
   type ServerConfigStreamEvent,
@@ -518,8 +519,8 @@ it.effect("a guest's configuration holds nothing of the host, and still decodes"
     // Each enabled provider is named, with its models, and says nothing else.
     assert.deepStrictEqual(reduced.providers, [
       {
-        instanceId: "codex",
-        driver: "codex",
+        instanceId: ProviderInstanceId.make("codex"),
+        driver: ProviderDriverKind.make("codex"),
         displayName: "Codex",
         enabled: true,
         installed: true,
