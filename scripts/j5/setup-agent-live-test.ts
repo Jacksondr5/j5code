@@ -1546,15 +1546,23 @@ const baseHeading = (manifest: Manifest) =>
     ? `Base server, at ${manifest.baseRef} (${manifest.baseCommit?.slice(0, 10)}), as its own script reports it:`
     : "Base server, as its own script reports it:";
 
-/** Removes the base checkout from git's worktree list as well as from disk. */
+/**
+ * Removes the base checkout through git, so the repository keeps no stale
+ * worktree entry. Not forced: if git will not remove it, say why and stop.
+ */
 function removeBaseCheckout(paths: LiveTestPaths): void {
   if (!NodeFS.existsSync(paths.base)) return;
-  const removed = NodeChildProcess.spawnSync("git", ["worktree", "remove", "--force", paths.base], {
+  // The base's own test home is ignored there, but a nested repository's
+  // worktrees are not something `git worktree remove` will delete for us.
+  NodeFS.rmSync(NodePath.join(paths.base, ".j5code"), { recursive: true, force: true });
+  const removed = NodeChildProcess.spawnSync("git", ["worktree", "remove", paths.base], {
     cwd: paths.worktree,
     encoding: "utf8",
   });
   if (removed.status !== 0) {
-    throw new LiveTestRefusal(`Removing the base checkout failed:\n${removed.stderr}`);
+    throw new LiveTestRefusal(
+      `git would not remove the base checkout at ${paths.base}:\n${removed.stderr.trim()}\nNothing else was deleted. Fix that, then run the command again.`,
+    );
   }
 }
 
