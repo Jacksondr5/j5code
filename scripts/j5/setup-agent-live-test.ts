@@ -56,7 +56,12 @@ interface DefaultManifest {
   readonly mode?: "default";
   readonly project: { readonly title: string };
   readonly defaultModel: string;
-  readonly personas: ReadonlyArray<{ readonly id: string; readonly model: string }>;
+  readonly personas: ReadonlyArray<{
+    readonly id: string;
+    readonly model: string;
+    /** The second route. Absent in a home built before the generator recorded it. */
+    readonly fallbackModel?: string;
+  }>;
   readonly playbooks: ReadonlyArray<string>;
   readonly holdScript: string;
 }
@@ -415,7 +420,12 @@ Project to add when the wizard or a test asks for one: a small TODO app (\`pnpm 
   a test reaches a real repository.
 
 New threads default to ${manifest.defaultModel}.
-Personas: ${manifest.personas.map((persona) => `${persona.id} (${persona.model})`).join(", ")}
+Personas: ${manifest.personas
+        .map(
+          (persona) =>
+            `${persona.id} (${persona.model}${persona.fallbackModel === undefined ? "" : `, or ${persona.fallbackModel} as its second route`})`,
+        )
+        .join("; ")}
 Playbooks: ${manifest.playbooks.join(", ")}
 
 Hold a turn open by asking the agent to run: ${manifest.holdScript}
