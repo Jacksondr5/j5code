@@ -39,13 +39,14 @@ type LiveTestCommand = (typeof COMMANDS)[number];
 
 /** The live install's port. A test server must never end up on it. */
 const LIVE_SERVER_PORT = 5773;
-/** Under the two minutes a shell call usually gets, so a failed start is cleaned up by this script. */
 /**
  * How long one start may take from the moment it is asked for, builds included.
- * Every wait in it shares this budget, so the command returns inside the two
- * minutes a shell call usually gets even when it starts two servers and peers them.
+ * Every wait and every peering call in it shares this budget. What follows it
+ * is printing, which mints a pairing URL per server and takes some seconds
+ * more, so the command returns inside the two minutes a shell call usually
+ * gets even when it starts two servers and peers them.
  */
-const START_BUDGET_MS = 110_000;
+const START_BUDGET_MS = 100_000;
 const STOP_TIMEOUT_MS = 20_000;
 /** `scripts/hold.sh` in the test repository waits for this file in the repository root. */
 const HOLD_RELEASE_FILE = ".hold-release";
@@ -594,6 +595,8 @@ function printRunning(
   paths: LiveTestPaths,
   facts: ServerLogFacts,
   remoteFacts: ServerLogFacts | undefined,
+  /** Set by a start that has just peered them, which need not ask the servers again. */
+  justPeered = false,
 ): void {
   console.log(
     formatInstructions({
@@ -606,7 +609,7 @@ function printRunning(
         : {
             remote: {
               facts: remoteFacts,
-              peered: arePeered(paths, facts.serverPort, remoteFacts.serverPort),
+              peered: justPeered || arePeered(paths, facts.serverPort, remoteFacts.serverPort),
               addToBrowserUrl: addRemoteUrl({
                 localWebPort: facts.webPort,
                 remoteServerPort: remoteFacts.serverPort,
@@ -817,6 +820,8 @@ async function startServer(
 function peerCli(
   paths: LiveTestPaths,
   args: ReadonlyArray<string>,
+  /** When the call must have returned; it is killed then. Unbounded when absent. */
+  deadline?: number,
 ): { readonly ok: boolean; readonly output: string; readonly error: string } {
   const result = NodeChildProcess.spawnSync(
     process.execPath,
@@ -825,6 +830,7 @@ function peerCli(
       cwd: paths.worktree,
       env: liveTestEnvironment(process.env, paths.worktree),
       encoding: "utf8",
+      ...(deadline === undefined ? {} : { timeout: Math.max(1, deadline - Date.now()) }),
     },
   );
   return {
@@ -906,8 +912,19 @@ async function peerServers(
     origin: `http://127.0.0.1:${ports.remote}`,
     name: "Remote",
   };
+  const notPeeredYet = (detail: string) =>
+    new LiveTestRefusal(
+      `Local and Remote are both RUNNING, and NOT peered yet: ${detail}\nFinish with: ${selfCommand(paths, MODE_FLAGS[mode])}`,
+    );
+  if (Date.now() > deadline) {
+    throw notPeeredYet("the time for this start ran out before peering began.");
+  }
   const environmentId = async (origin: string) => {
-    const response = await fetch(`${origin}/.well-known/t3/environment`);
+    // A server that accepts and never answers must not hold the command past its budget.
+    const response = await fetch(`${origin}/.well-known/t3/environment`, {
+      signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())),
+    }).catch(() => undefined);
+    if (response === undefined) throw notPeeredYet(`${origin} did not say who it is in time.`);
     return ((await response.json()) as { readonly environmentId: string }).environmentId;
   };
   const withIds = {
@@ -931,12 +948,20 @@ async function peerServers(
     const steps = peerSteps({ issuer, holder, poll });
     // A server that is seconds old can miss the first hello; pr-env.sh retries the same way.
     for (let attempt = 1; ; attempt++) {
-      const credential = peerCli(paths, steps.credential);
-      const added = credential.ok ? peerCli(paths, steps.add(credential.output)) : credential;
+      // Checked before every call, so a direction is never begun on spent time.
+      if (Date.now() > deadline) {
+        throw notPeeredYet(
+          `the time for this start ran out before ${holder.name} recorded ${issuer.name}.`,
+        );
+      }
+      const credential = peerCli(paths, steps.credential, deadline);
+      const added = credential.ok
+        ? peerCli(paths, steps.add(credential.output), deadline)
+        : credential;
       if (added.ok) break;
-      if (attempt === 5 || Date.now() > deadline) {
-        throw new LiveTestRefusal(
-          `Local and Remote are both RUNNING, and NOT peered yet: ${holder.name} could not record ${issuer.name} as a peer (${attempt} attempt${attempt === 1 ? "" : "s"}).\nThe peer command said:\n${added.error || "(nothing)"}\nFinish with: ${selfCommand(paths, MODE_FLAGS[mode])}`,
+      if (attempt === 5) {
+        throw notPeeredYet(
+          `${holder.name} could not record ${issuer.name} as a peer after 5 attempts.\nThe peer command said:\n${added.error || "(nothing)"}`,
         );
       }
       await NodeTimersPromises.setTimeout(3_000);
@@ -1014,7 +1039,7 @@ async function start(paths: LiveTestPaths, mode: LiveTestMode): Promise<void> {
     throw new LiveTestRefusal("A server is running without a reported port; cannot peer.");
   }
   await peerServers(paths, mode, { local: local.serverPort, remote: remote.serverPort }, deadline);
-  printRunning(paths, local, remote);
+  printRunning(paths, local, remote, true);
 }
 
 /** The servers a build has: one, or Local and Remote in the peer modes. */
