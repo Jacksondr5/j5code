@@ -98,13 +98,13 @@ A worktree holds one setup at a time. Pass a flag to the first start, or to
   what you want to see. Do not stack guards such as "do nothing else" or "do
   not message anyone". An agent that wanders is a finding, not something to
   fence off.
-- Keep messaging words for messaging. "Reply" means sending a message back. To
-  see something in an agent's own thread, ask it to "say X in your thread". To
-  prove a message was delivered, ask its receiver to write a file.
+- Keep messaging words for messaging. "Reply" means responding to an A2A
+  message. To see something in an agent's own thread, ask it to "say X in your
+  thread". To prove a message was delivered, ask its receiver to write a file.
 - A test agent on Claude can still reach real Claude sessions on this machine
-  through its own harness tools (`ListAgents`, `SendMessage`). Check which
-  tool it called. Name J5's tools in a prompt only when the test is not about
-  which tool an agent picks.
+  through its own harness tools (`ListAgents`, `SendMessage`). Tell a test
+  agent to use J5's tools when it messages other agents, and check which tool
+  it called.
 - An agent's own account of what it did is not evidence. Check the tool
   result, the stored row, or the screen.
 - To hold a turn open, ask the agent to run `./scripts/hold.sh` in the test
