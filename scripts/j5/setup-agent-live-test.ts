@@ -138,7 +138,8 @@ export async function resolveLiveTestPaths(input: {
   // repository must still be real directories of this root, not links elsewhere.
   const home = NodePath.join(root, "home");
   const testRepo = NodePath.join(root, "test-repo");
-  for (const inside of [home, testRepo]) {
+  // The server keeps its database in <home>/userdata, so that must not be a link either.
+  for (const inside of [home, NodePath.join(home, "userdata"), testRepo]) {
     if (!isInside(canonicalPath(inside), canonicalRoot)) {
       throw new LiveTestRefusal(
         `${inside} resolves to ${canonicalPath(inside)}, outside ${root}. Refusing to use it; remove the link.`,

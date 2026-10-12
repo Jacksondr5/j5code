@@ -114,10 +114,15 @@ describe("resolveLiveTestPaths after a build", () => {
     for (const [name, target] of [
       ["home", (layout: ReturnType<typeof makeLayout>) => layout.liveHome],
       ["test-repo", (layout: ReturnType<typeof makeLayout>) => layout.mainCheckout],
+      // The state directory inside a real home, linked to the live database's directory.
+      [
+        "home/userdata",
+        (layout: ReturnType<typeof makeLayout>) => NodePath.join(layout.liveHome, "userdata"),
+      ],
     ] as const) {
       const layout = makeLayout();
       const root = NodePath.join(layout.worktree, ".j5code", "live-test");
-      NodeFS.mkdirSync(root, { recursive: true });
+      NodeFS.mkdirSync(NodePath.dirname(NodePath.join(root, name)), { recursive: true });
       NodeFS.symlinkSync(target(layout), NodePath.join(root, name));
       assert.include(await refusal(resolve(layout)), `outside ${root}`);
       NodeFS.rmSync(layout.base, { recursive: true, force: true });
