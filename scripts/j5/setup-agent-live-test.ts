@@ -1196,6 +1196,16 @@ export function peerSteps(input: {
 }
 
 /**
+ * The command that finishes a peering that did not complete. With both
+ * servers up, the same start peers them. A start only joins a server that is
+ * already there, so one that is not serving has to be stopped and started
+ * again first, which is `restart`.
+ */
+export function peerRepairCommand(mode: LiveTestMode, local: string, remote: string): string {
+  return local === "RUNNING" && remote === "RUNNING" ? MODE_FLAGS[mode] : "restart";
+}
+
+/**
  * Peers the two running servers, as `scripts/j5/pr-env.sh --peer` does. Safe
  * to repeat: issuing again rotates the credential and re-adding rotates the
  * record, so every start leaves one clean pair.
@@ -1223,10 +1233,13 @@ async function peerServers(
       unverified: "UNVERIFIED",
     }[kind];
   };
-  const notPeeredYet = (detail: string) =>
-    new LiveTestRefusal(
-      `NOT peered yet: ${detail}\nLocal is ${stateNow(paths)} and Remote is ${stateNow(paths.remote)}.\nFinish with: ${selfCommand(paths, MODE_FLAGS[mode])}`,
+  const notPeeredYet = (detail: string) => {
+    const local = stateNow(paths);
+    const remote = stateNow(paths.remote);
+    return new LiveTestRefusal(
+      `NOT peered yet: ${detail}\nLocal is ${local} and Remote is ${remote}.\nFinish with: ${selfCommand(paths, peerRepairCommand(mode, local, remote))}`,
     );
+  };
   if (Date.now() > deadline) {
     throw notPeeredYet("the time for this start ran out before peering began.");
   }

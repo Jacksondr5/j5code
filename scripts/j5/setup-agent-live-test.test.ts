@@ -10,6 +10,7 @@ import {
   LiveTestRefusal,
   addRemoteUrl,
   listsPeer,
+  peerRepairCommand,
   peerSteps,
   isOwnMapping,
   mappingCleanup,
@@ -575,6 +576,18 @@ describe("peerSteps", () => {
     const steps = peerSteps({ issuer: local, holder: remote, poll: true });
     assert.equal(steps.credential.at(-1), "--store");
     assert.equal(steps.add("SECRET").at(-1), "--poll");
+  });
+});
+
+describe("peerRepairCommand", () => {
+  it("is the same start when both servers are up, and restart when either is not", () => {
+    assert.equal(peerRepairCommand("peer", "RUNNING", "RUNNING"), "--peer");
+    assert.equal(peerRepairCommand("peer-poll", "RUNNING", "RUNNING"), "--peer --poll");
+    // A start would only wait on a server that is there but not serving.
+    assert.equal(peerRepairCommand("peer", "RUNNING", "NOT SERVING"), "restart");
+    assert.equal(peerRepairCommand("peer", "NOT SERVING", "RUNNING"), "restart");
+    assert.equal(peerRepairCommand("peer", "RUNNING", "STOPPED"), "restart");
+    assert.equal(peerRepairCommand("peer", "RUNNING", "UNVERIFIED"), "restart");
   });
 });
 
