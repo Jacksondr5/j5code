@@ -10,8 +10,11 @@ import {
   WS_METHODS,
 } from "@t3tools/contracts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Queue from "effect/Queue";
 import type * as HttpServerRequest from "effect/http/HttpServerRequest";
 import * as SqlClient from "effect/sql/SqlClient";
 
@@ -241,6 +244,7 @@ const call = Effect.fn("test.call")(function* (
     Effect.catchTags({
       EnvironmentAuthorizationError: (error) => Effect.succeed(`refused: ${error.message}`),
     }),
+    Effect.scoped,
   );
   return String(outcome);
 });
@@ -337,5 +341,140 @@ it.layer(testLayer)("guest RPC authorization", (it) => {
         assert.match(yield* call(GUEST, method, { threadId: granted }), /^refused: /, method);
       }
     }),
+  );
+});
+
+/**
+ * A guest's open `subscribeThread`, as the RPC server runs one: the handler effect is the whole
+ * feed, delivering what upstream publishes until something ends it. `checked` reports each time
+ * the gate has read the guest's access, so a test can wait for a grant change to be acted on.
+ */
+const openThreadFeed = Effect.fn("test.openThreadFeed")(function* (threadId: ThreadId) {
+  const access = yield* PersonAccess.PersonAccess;
+  const published = yield* Queue.unbounded<string>();
+  const delivered = yield* Queue.unbounded<string>();
+  const checked = yield* Queue.unbounded<PersonAccess.Access>();
+  const stopped = yield* Deferred.make<void>();
+  const observed = PersonAccess.PersonAccess.of({
+    ...access,
+    threadAccess: (who, id) =>
+      access.threadAccess(who, id).pipe(Effect.tap((level) => Queue.offer(checked, level))),
+  });
+  const authorize = yield* RpcScopeAuthorization.pipe(
+    Effect.provide(GuestGate.layerRpcAuthorization(GUEST, RpcAuthorization.layer(GUEST.scopes))),
+    Effect.provideService(PersonAccess.PersonAccess, observed),
+  );
+  type Handler = Parameters<typeof authorize>[0];
+  const feed = Queue.take(published).pipe(
+    Effect.flatMap((event) => Queue.offer(delivered, event)),
+    Effect.forever,
+    Effect.onInterrupt(() => Deferred.succeed(stopped, undefined)),
+  );
+  const request = yield* authorize(
+    feed as unknown as Handler,
+    {
+      rpc: { _tag: ORCHESTRATION_V2_WS_METHODS.subscribeThread },
+      payload: { threadId },
+    } as unknown as Parameters<typeof authorize>[1],
+  ).pipe(
+    Effect.catchTags({
+      EnvironmentAuthorizationError: (error) => Effect.succeed(`refused: ${error.message}`),
+    }),
+    Effect.scoped,
+    Effect.forkScoped({ startImmediately: true }),
+  );
+  assert.strictEqual(yield* Queue.take(checked), "view");
+  /** Publishes one upstream event and waits for the guest's feed to deliver it. */
+  const delivers = Effect.fn("test.delivers")(function* (event: string) {
+    yield* Queue.offer(published, event);
+    assert.strictEqual(yield* Queue.take(delivered), event);
+  });
+  return { request, published, delivered, checked, stopped, delivers };
+});
+
+it.layer(testLayer)("a guest's open thread feed and its grant", (it) => {
+  it.effect("ends when the grant on its thread is removed, and delivers nothing after", () =>
+    Effect.gen(function* () {
+      const access = yield* PersonAccess.PersonAccess;
+      const threadId = yield* thread("thread:feed-removed");
+      yield* grantGuest(threadId, "view");
+      const feed = yield* openThreadFeed(threadId);
+      yield* feed.delivers("before");
+
+      const person = yield* access.sessionPerson(GUEST);
+      yield* access.removeGrant({
+        personId: person!.personId!,
+        target: { kind: "thread", threadId },
+      });
+      assert.strictEqual(
+        yield* Fiber.join(feed.request),
+        "refused: This is not shared with you on this server.",
+      );
+      // Upstream's handler was interrupted, so what it publishes next is taken by no one.
+      yield* Deferred.await(feed.stopped);
+      yield* Queue.offer(feed.published, "after");
+      assert.strictEqual(yield* Queue.size(feed.published), 1);
+      assert.strictEqual(yield* Queue.size(feed.delivered), 0);
+      assert.match(
+        yield* call(GUEST, ORCHESTRATION_V2_WS_METHODS.subscribeThread, { threadId }),
+        /^refused: /,
+      );
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("stays open through grant changes that leave its thread within reach", () =>
+    Effect.gen(function* () {
+      const access = yield* PersonAccess.PersonAccess;
+      const threadId = yield* thread("thread:feed-kept");
+      const other = yield* thread("thread:feed-kept-other");
+      yield* grantGuest(threadId, "view");
+      const personId = (yield* access.sessionPerson(GUEST))!.personId!;
+      const feed = yield* openThreadFeed(threadId);
+      const stillOpen = Effect.fn("test.stillOpen")(function* (held: PersonAccess.Access) {
+        // The gate has acted on the change, and upstream's events still arrive.
+        assert.strictEqual(yield* Queue.take(feed.checked), held);
+        yield* feed.delivers(`after ${held}`);
+        assert.isUndefined(feed.request.pollUnsafe());
+      });
+
+      // A different thread's grant, given and removed.
+      yield* grantGuest(other, "view");
+      yield* stillOpen("view");
+      yield* access.removeGrant({ personId, target: { kind: "thread", threadId: other } });
+      yield* stillOpen("view");
+
+      // Another guest's grant on this same thread, given and removed.
+      const stranger = yield* access.createGuest({ displayName: "Someone else" });
+      yield* access.putGrant({
+        personId: stranger.personId,
+        target: { kind: "thread", threadId },
+        level: "view",
+      });
+      yield* stillOpen("view");
+      yield* access.removeGrant({
+        personId: stranger.personId,
+        target: { kind: "thread", threadId },
+      });
+      yield* stillOpen("view");
+
+      // The same grant raised from View to Collaborate.
+      yield* grantGuest(threadId, "collaborate");
+      yield* stillOpen("collaborate");
+
+      // A grant on the project still covers the thread once the thread's own grant is removed.
+      yield* access.putGrant({
+        personId,
+        target: { kind: "project", projectId: PROJECT },
+        level: "view",
+      });
+      yield* stillOpen("collaborate");
+      yield* access.removeGrant({ personId, target: { kind: "thread", threadId } });
+      yield* stillOpen("view");
+
+      // And it ends when that goes too.
+      yield* access.removeGrant({ personId, target: { kind: "project", projectId: PROJECT } });
+      assert.match(String(yield* Fiber.join(feed.request)), /^refused: /);
+      yield* Deferred.await(feed.stopped);
+    }).pipe(Effect.scoped),
   );
 });

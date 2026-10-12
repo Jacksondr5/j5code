@@ -25,8 +25,10 @@ import { GUEST_SESSION_SUBJECT, PersonAccess, type SessionIdentity } from "./Per
  * What a guest's connection is told (Shared server AC12, AC23). A guest's client cannot connect
  * without the server configuration, the lifecycle welcome and the sidebar feed, so a guest gets
  * each in a reduced form: what a client needs to draw a granted thread, and none of the host's
- * paths, network addresses, provider accounts or settings. A member's connection gets upstream's
- * answer untouched; nothing here looks past the session's subject for one.
+ * paths, network addresses, provider accounts or settings. That holds outside the threads a guest
+ * was granted. A granted thread's own contents are shared whole: its thread load and its feed
+ * carry its worktree path and working directory, as its history already does. A member's
+ * connection gets upstream's answer untouched; nothing here looks past the session's subject.
  */
 
 /** Stands in for every host path a required field would otherwise carry. */

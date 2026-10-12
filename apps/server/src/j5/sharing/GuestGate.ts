@@ -10,6 +10,7 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Stream from "effect/Stream";
 import type * as RpcGroup from "effect/rpc/RpcGroup";
 import type * as HttpServerRequest from "effect/http/HttpServerRequest";
 
@@ -171,7 +172,8 @@ const notSharedError = () =>
  * The per-connection RPC authorization for `ws.ts`. For a member's session it is upstream's own
  * layer, untouched. For a guest's it runs first: a request must be in `GUEST_RPC_RULES`, and
  * unless its answer is narrowed for a guest it must name a thread the guest's grants cover at the
- * rule's level. Only then does upstream's permission check run.
+ * rule's level. Only then does upstream's permission check run, and the request is ended if the
+ * grants stop covering the thread while it is still running.
  */
 export const layerRpcAuthorization = (
   session: Pick<EnvironmentAuth.AuthenticatedSession, "sessionId" | "subject">,
@@ -184,17 +186,36 @@ export const layerRpcAuthorization = (
         Effect.gen(function* () {
           const access = yield* PersonAccess;
           const inner = yield* RpcScopeAuthorization;
+          const reachesThread = (threadId: ThreadId, level: GrantLevel) =>
+            access.threadAccess(session, threadId).pipe(
+              Effect.map((held) => reaches(held, level)),
+              Effect.catch((cause) =>
+                Effect.logError("J5 guest gate could not read a grant; refusing", { cause }).pipe(
+                  Effect.as(false),
+                ),
+              ),
+            );
           return RpcScopeAuthorization.of((effect, options) => {
             const rule = GUEST_RPC_RULES[options.rpc._tag as WsRpcMethod];
             if (rule?.kind === "narrowed") return inner(effect, options);
-            const threadId = rule?.threadId(options.payload);
-            if (rule === undefined || threadId === undefined) return Effect.fail(notSharedError());
-            return access.threadAccess(session, ThreadId.make(threadId)).pipe(
-              Effect.mapError(notSharedError),
-              Effect.flatMap((level) =>
-                reaches(level, rule.level) ? inner(effect, options) : Effect.fail(notSharedError()),
-              ),
-            );
+            const named = rule?.threadId(options.payload);
+            if (rule === undefined || named === undefined) return Effect.fail(notSharedError());
+            const threadId = ThreadId.make(named);
+            return Effect.gen(function* () {
+              // Subscribed before the first check, so no change between the two is missed.
+              const grantChanges = yield* access.subscribeGrantChanges;
+              if (!(yield* reachesThread(threadId, rule.level))) return yield* notSharedError();
+              // `effect` runs a streaming request to its end, so a feed opened while the grant
+              // held would outlive it. It ends, refused as a new request would be, on the first
+              // change to anyone's grants that leaves this thread out of reach (AC10, AC11).
+              const lostAccess = Stream.fromSubscription(grantChanges).pipe(
+                Stream.mapEffect(() => reachesThread(threadId, rule.level)),
+                Stream.filter((stillReaches) => !stillReaches),
+                Stream.runHead,
+                Effect.andThen(Effect.fail(notSharedError())),
+              );
+              return yield* Effect.raceFirst(inner(effect, options), lostAccess);
+            });
           });
         }),
       ).pipe(Layer.provide(upstream));
