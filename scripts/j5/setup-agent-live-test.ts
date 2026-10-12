@@ -471,6 +471,8 @@ Remote, which has no web server of its own:
   Project       ${paths.remote.testRepo}
   Add to the browser, after pairing with Local (works once):
     ${remote.addToBrowserUrl ?? "none could be minted"}
+  A rebuild gives both servers new ids. If the browser still lists a Remote from
+  an earlier build, remove that one first (Settings > Connections).
 
 ${
   remote.peered
