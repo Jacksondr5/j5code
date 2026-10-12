@@ -414,7 +414,9 @@ if (import.meta.main) {
       if (cause instanceof Error && cause.cause !== undefined) {
         process.stderr.write(`Caused by: ${String(cause.cause)}\n`);
       }
-      process.stderr.write(`The build is incomplete. Delete ${root} before running it again.\n`);
+      process.stderr.write(
+        `The build is incomplete. ${root} must be deleted before it runs again.\n`,
+      );
       process.exit(1);
     },
   );

@@ -6,6 +6,7 @@
  *   node scripts/j5/setup-agent-live-test.ts status     say whether it is running, and how to reach it
  *   node scripts/j5/setup-agent-live-test.ts restart    stop, then start on the same home
  *   node scripts/j5/setup-agent-live-test.ts stop       stop the server
+ *   node scripts/j5/setup-agent-live-test.ts rebuild    stop, delete the test home and repository, build and start again
  *
  * Everything lives in this worktree's gitignored `.j5code/live-test`: a small
  * test repository, a J5 home that holds only that project, the server's log
@@ -23,7 +24,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeTimersPromises from "node:timers/promises";
 
-const COMMANDS = ["start", "status", "restart", "stop"] as const;
+const COMMANDS = ["start", "status", "restart", "stop", "rebuild"] as const;
 type LiveTestCommand = (typeof COMMANDS)[number];
 
 /** The live install's port. A test server must never end up on it. */
@@ -327,7 +328,8 @@ Commands:
   ${selfCommand(paths, "status")}
   ${selfCommand(paths, "restart")}   stops, starts on the same home, returns once recovery has run
   ${selfCommand(paths, "stop")}
-Stop the server when you finish. To rebuild from scratch: stop, then rm -rf ${paths.root}
+  ${selfCommand(paths, "rebuild")}   stops, deletes ${paths.root}, builds it again and starts
+Stop the server when you finish.
 `;
 }
 
@@ -366,7 +368,7 @@ function logTail(paths: LiveTestPaths): string {
 function buildHome(paths: LiveTestPaths): void {
   if (NodeFS.existsSync(paths.root)) {
     throw new LiveTestRefusal(
-      `${paths.root} exists but holds no finished build. Delete it and run this again: rm -rf ${paths.root}`,
+      `${paths.root} exists but holds no finished build. Start over with: ${selfCommand(paths, "rebuild")}`,
     );
   }
   console.log("Building the test repository and home (about 30 seconds, no model calls)...");
@@ -385,7 +387,7 @@ function buildHome(paths: LiveTestPaths): void {
   );
   if (build.status !== 0) {
     throw new LiveTestRefusal(
-      `Building the test home failed. Delete ${paths.root} before retrying.`,
+      `Building the test home failed. Retry with: ${selfCommand(paths, "rebuild")}`,
     );
   }
 }
@@ -538,7 +540,9 @@ async function main(): Promise<void> {
   });
   if (command === "status") return status(paths);
   if (command === "stop") return stop(paths);
-  if (command === "restart") await stop(paths);
+  if (command === "restart" || command === "rebuild") await stop(paths);
+  // resolveLiveTestPaths has confirmed this directory is inside the worktree's own .j5code.
+  if (command === "rebuild") NodeFS.rmSync(paths.root, { recursive: true, force: true });
   await start(paths);
 }
 
