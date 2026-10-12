@@ -90,7 +90,9 @@ The most common defect in this repo is a change that works on the path you teste
 
 ## Test data
 
-An empty database is a bad test. Seed your worktree's `.j5code` with a copy of real data instead of pointing at live state:
+For a live test, run `node scripts/j5/setup-agent-live-test.ts` and follow its output (see Verifying). It builds a test home and a test repository in your worktree's `.j5code`, with nothing real in reach.
+
+A copy of real data is for a server the developer will use, or for rehearsing a migration. Take no agent turns on one: its threads point at the real checkouts and resume the real provider sessions.
 
 - `vp run migrate-dev-db` from a worktree makes a copy that is safe to start a server on, in one command: recent stopped threads only, with pending work, schedules, peer servers and their credentials, undelivered agent messages and live Crews stood down. Its threads still point at the real checkouts, so a message you send to one runs a real agent there.
 - For a whole database, copy it yourself. Nothing in a raw copy is stood down: a server started on it resumes real deliveries and polls real peers.
@@ -120,7 +122,10 @@ An empty database is a bad test. Seed your worktree's `.j5code` with a copy of r
 - **Do not run repo-wide checks.** No `vp check`, no `vp run -r test`, no `vp run -r typecheck` unless asked. CI owns the full suite.
 - Backend behavior changes ship with focused tests for that behavior.
 - The server is event-sourced, and side effects run after the command commits. Wait on typed receipts, drain the effect worker (`OrchestrationEffectWorkerV2.drain`), or await the specific persisted event or `Deferred` that marks the milestone. Never wait on sleeps or polling. A test that needs a timeout to pass is wrong.
-- Upon request, user-visible frontend changes should get one integrated pass in a real client: `test-t3-app` for web, `test-t3-mobile` for mobile. The primary agent does this once after integrating. Subagents do not launch their own dev servers. Ask permission before doing computer use or spinning up browsers.
+- Live-test what unit tests cannot prove: UI flows, agent turns, agent messages, peering. The `j5-live-test` skill sets up a safe server and says what to cover and how to report. `test-t3-app` drives the browser, and `test-t3-mobile` the mobile app.
+- Have a Peer Agent in its own worktree do the testing, from a commit. A subagent that outlives your turn cannot use platform tools that act.
+- Live test turns on Claude Haiku and GPT Luna need no permission. Ask before using a more expensive model.
+- The Browser panel on your own test server needs no permission. Ask before mobile testing or other computer use.
 
 For authorized mobile verification, a missing or outdated native client is a build step, not a blocker. Run `node scripts/mobile-native-client.ts ensure <ios|android> <device-id>` on the simulator host before starting Metro. It checks the local Expo fingerprint and builds/installs when needed. See `test-t3-mobile` for the full workflow.
 
@@ -184,5 +189,4 @@ Upstream's architecture and its constraints: `docs/internals/overview.md`. Upstr
 
 ## Additional tips
 
-- Don't verify with browsers or computer use unless the user explicitly agrees or requests it.
 - Security is important, but should not be over-indexed on, especially for dev mode/maintainer-only features.
