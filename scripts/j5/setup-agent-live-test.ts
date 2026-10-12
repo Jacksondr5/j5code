@@ -912,9 +912,20 @@ async function peerServers(
     origin: `http://127.0.0.1:${ports.remote}`,
     name: "Remote",
   };
+  // Says what each server is doing now, not what it was doing when the start began:
+  // peering often fails because one of them has just gone.
+  const stateNow = (server: ServerPaths) => {
+    const { kind } = currentServerState(server);
+    return {
+      running: "RUNNING",
+      notServing: "NOT SERVING",
+      stopped: "STOPPED",
+      unverified: "UNVERIFIED",
+    }[kind];
+  };
   const notPeeredYet = (detail: string) =>
     new LiveTestRefusal(
-      `Local and Remote are both RUNNING, and NOT peered yet: ${detail}\nFinish with: ${selfCommand(paths, MODE_FLAGS[mode])}`,
+      `NOT peered yet: ${detail}\nLocal is ${stateNow(paths)} and Remote is ${stateNow(paths.remote)}.\nFinish with: ${selfCommand(paths, MODE_FLAGS[mode])}`,
     );
   if (Date.now() > deadline) {
     throw notPeeredYet("the time for this start ran out before peering began.");
