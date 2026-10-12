@@ -4,6 +4,7 @@ import {
   ORCHESTRATION_V2_WS_METHODS,
   RpcScopeAuthorization,
   ThreadId,
+  WS_METHODS,
   type WsRpcGroup,
   authScopeRequiredResponse,
 } from "@t3tools/contracts";
@@ -29,11 +30,18 @@ import {
 
 type WsRpcMethod = RpcGroup.Rpcs<typeof WsRpcGroup>["_tag"];
 
-/** A request a guest may make for one thread: the level it needs and where the thread is named. */
-interface GuestThreadRule {
-  readonly level: GrantLevel;
-  readonly threadId: (payload: unknown) => string | undefined;
-}
+/**
+ * A request a guest may make. `thread`: for one thread, at the level named, with the thread read
+ * from the payload. `narrowed`: for anything, because its handler answers a guest through
+ * `GuestView`, with a reduced or filtered answer in place of upstream's.
+ */
+type GuestRpcRule =
+  | {
+      readonly kind: "thread";
+      readonly level: GrantLevel;
+      readonly threadId: (payload: unknown) => string | undefined;
+    }
+  | { readonly kind: "narrowed" };
 
 const payloadThreadId = (payload: unknown) =>
   typeof payload === "object" &&
@@ -43,13 +51,18 @@ const payloadThreadId = (payload: unknown) =>
     ? payload.threadId
     : undefined;
 
-const viewThread: GuestThreadRule = { level: "view", threadId: payloadThreadId };
+const viewThread: GuestRpcRule = { kind: "thread", level: "view", threadId: payloadThreadId };
+const narrowed: GuestRpcRule = { kind: "narrowed" };
 
 /**
  * Every WebSocket request a guest may make. Keyed by method so that a method upstream renames or
  * removes fails to compile here. A method that is absent is refused.
  */
-export const GUEST_RPC_RULES: Partial<Record<WsRpcMethod, GuestThreadRule>> = {
+export const GUEST_RPC_RULES: Partial<Record<WsRpcMethod, GuestRpcRule>> = {
+  [WS_METHODS.serverGetConfig]: narrowed,
+  [WS_METHODS.subscribeServerConfig]: narrowed,
+  [WS_METHODS.subscribeServerLifecycle]: narrowed,
+  [ORCHESTRATION_V2_WS_METHODS.subscribeShell]: narrowed,
   [ORCHESTRATION_V2_WS_METHODS.subscribeThread]: viewThread,
   [ORCHESTRATION_V2_WS_METHODS.getTurnDiff]: viewThread,
   [ORCHESTRATION_V2_WS_METHODS.getFullThreadDiff]: viewThread,
@@ -58,6 +71,7 @@ export const GUEST_RPC_RULES: Partial<Record<WsRpcMethod, GuestThreadRule>> = {
   [ORCHESTRATION_V2_WS_METHODS.searchThreadStream]: viewThread,
 };
 
+/** `open`: the route decides what a guest gets. `thread`: allowed when a grant covers the thread. */
 export type GuestHttpRule =
   | { readonly kind: "open" }
   | { readonly kind: "thread"; readonly threadId: ThreadId }
@@ -75,13 +89,14 @@ const decodeSegment = (segment: string) => {
 
 /**
  * Which HTTP routes keep a guest's permissions. `/ws` is the RPC socket, whose requests
- * `GUEST_RPC_RULES` decides one by one. A route that reads no permission at all, such as the one
+ * `GUEST_RPC_RULES` decides one by one; the sidebar snapshot is filtered in its handler by
+ * `GuestView`. A route that reads no permission at all, such as the one
  * that issues a WebSocket ticket for the caller's own session, is unaffected by the gate and is
  * not listed.
  */
 export const guestHttpRule = (method: string, pathname: string): GuestHttpRule => {
   if (method !== "GET") return { kind: "refuse" };
-  if (pathname === "/ws") return { kind: "open" };
+  if (pathname === "/ws" || pathname === "/api/orchestration/shell") return { kind: "open" };
   const threadLoad = THREAD_LOAD.exec(pathname);
   const threadId = threadLoad?.[1] === undefined ? undefined : decodeSegment(threadLoad[1]);
   return threadId === undefined || threadId.length === 0
@@ -154,9 +169,9 @@ const notSharedError = () =>
 
 /**
  * The per-connection RPC authorization for `ws.ts`. For a member's session it is upstream's own
- * layer, untouched. For a guest's it runs first: a request must be in `GUEST_RPC_RULES` and name a
- * thread the guest's grants cover at the rule's level, and only then does upstream's permission
- * check run.
+ * layer, untouched. For a guest's it runs first: a request must be in `GUEST_RPC_RULES`, and
+ * unless its answer is narrowed for a guest it must name a thread the guest's grants cover at the
+ * rule's level. Only then does upstream's permission check run.
  */
 export const layerRpcAuthorization = (
   session: Pick<EnvironmentAuth.AuthenticatedSession, "sessionId" | "subject">,
@@ -171,6 +186,7 @@ export const layerRpcAuthorization = (
           const inner = yield* RpcScopeAuthorization;
           return RpcScopeAuthorization.of((effect, options) => {
             const rule = GUEST_RPC_RULES[options.rpc._tag as WsRpcMethod];
+            if (rule?.kind === "narrowed") return inner(effect, options);
             const threadId = rule?.threadId(options.payload);
             if (rule === undefined || threadId === undefined) return Effect.fail(notSharedError());
             return access.threadAccess(session, ThreadId.make(threadId)).pipe(

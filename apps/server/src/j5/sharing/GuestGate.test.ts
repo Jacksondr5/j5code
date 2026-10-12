@@ -124,6 +124,9 @@ it("names the few routes a guest keeps permissions on", () => {
     threadId: ThreadId.make(id),
   });
   assert.deepStrictEqual(GuestGate.guestHttpRule("GET", "/ws"), { kind: "open" });
+  assert.deepStrictEqual(GuestGate.guestHttpRule("GET", "/api/orchestration/shell"), {
+    kind: "open",
+  });
   assert.deepStrictEqual(
     GuestGate.guestHttpRule("GET", "/api/orchestration/threads/t1"),
     thread("t1"),
@@ -141,7 +144,9 @@ it("names the few routes a guest keeps permissions on", () => {
     thread("thread:one"),
   );
   for (const [method, path] of [
-    ["GET", "/api/orchestration/shell"],
+    ["GET", "/api/orchestration/shell/archived"],
+    ["GET", "/api/orchestration/shell/"],
+    ["POST", "/api/orchestration/shell"],
     ["GET", "/api/projects"],
     ["GET", "/api/auth/pairing-links"],
     ["GET", "/api/preview-stream/ws"],
@@ -173,6 +178,7 @@ it.layer(testLayer)("guest gate", (it) => {
       yield* grantGuest(granted, "view");
       for (const url of [
         "/ws",
+        "/api/orchestration/shell",
         "/api/orchestration/threads/thread%3Ahttp-granted",
         "/api/orchestration/threads/thread%3Ahttp-granted/bounded?compactTurnItems=1",
         "/api/orchestration/threads/thread%3Ahttp-granted/history?cursor=abc",
@@ -183,7 +189,6 @@ it.layer(testLayer)("guest gate", (it) => {
         "/api/orchestration/threads/thread%3Ahttp-other",
         "/api/orchestration/threads/thread%3Ahttp-other/bounded",
         "/api/orchestration/threads/thread%3Adoes-not-exist",
-        "/api/orchestration/shell",
         "/api/projects",
         "/api/auth/clients",
         "/api/preview-stream/ws?threadId=thread%3Ahttp-granted&tabId=1",
@@ -279,6 +284,35 @@ it.layer(testLayer)("guest RPC authorization", (it) => {
     }),
   );
 
+  it.effect("a guest may ask for the feeds its client cannot connect without", () =>
+    Effect.gen(function* () {
+      // `GuestView` narrows what each of these answers; a guest with no grants may ask too.
+      const stray = session("session:stray", PersonAccess.GUEST_SESSION_SUBJECT);
+      for (const method of [
+        WS_METHODS.serverGetConfig,
+        WS_METHODS.subscribeServerConfig,
+        WS_METHODS.subscribeServerLifecycle,
+        ORCHESTRATION_V2_WS_METHODS.subscribeShell,
+      ]) {
+        assert.strictEqual(yield* call(GUEST, method, {}), "ran", method);
+        assert.strictEqual(yield* call(stray, method, {}), "ran", method);
+        // Upstream's own permission check still runs after the guest's.
+        assert.match(yield* call({ ...GUEST, scopes: [] }, method, {}), /^refused: /, method);
+      }
+      assert.deepStrictEqual(
+        Object.entries(GuestGate.GUEST_RPC_RULES)
+          .flatMap(([method, rule]) => (rule.kind === "narrowed" ? [method] : []))
+          .toSorted(),
+        [
+          ORCHESTRATION_V2_WS_METHODS.subscribeShell,
+          WS_METHODS.serverGetConfig,
+          WS_METHODS.subscribeServerConfig,
+          WS_METHODS.subscribeServerLifecycle,
+        ].toSorted(),
+      );
+    }),
+  );
+
   it.effect("a guest is refused every request that is not listed, whatever it names", () =>
     Effect.gen(function* () {
       const granted = yield* thread("thread:rpc-unlisted");
@@ -288,11 +322,14 @@ it.layer(testLayer)("guest RPC authorization", (it) => {
         ORCHESTRATION_V2_WS_METHODS.dispatchCommand,
         ORCHESTRATION_V2_WS_METHODS.getThreadProjection,
         ORCHESTRATION_V2_WS_METHODS.launchThread,
-        // Feeds and reads that carry every thread or the host's files.
-        ORCHESTRATION_V2_WS_METHODS.subscribeShell,
+        // Feeds and reads that carry every thread, the host's settings or the host's files.
         ORCHESTRATION_V2_WS_METHODS.searchThreads,
         ORCHESTRATION_V2_WS_METHODS.getArchivedShellSnapshot,
-        WS_METHODS.serverGetConfig,
+        ORCHESTRATION_V2_WS_METHODS.subscribeArchivedShell,
+        WS_METHODS.serverGetSettings,
+        WS_METHODS.serverProbe,
+        WS_METHODS.serverRefreshProviders,
+        WS_METHODS.subscribeAuthAccess,
         WS_METHODS.projectsReadFile,
         WS_METHODS.terminalOpen,
         "a.method.upstream.adds.later",

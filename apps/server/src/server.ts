@@ -438,7 +438,7 @@ const layerProjectFaviconResolver = ProjectFaviconResolver.layer.pipe(
 
 const layerServerEnvironment = ServerEnvironment.layer.pipe(Layer.provide(ServerSecretStore.layer));
 
-// J5: a guest's connection is refused everything its grants do not cover (FORK.md case 65).
+// J5: a guest's connection is refused everything its grants do not cover (FORK.md case 68).
 const layerAuth = gateEnvironmentAuth(
   EnvironmentAuth.layer.pipe(
     Layer.provideMerge(layerPersistence),
