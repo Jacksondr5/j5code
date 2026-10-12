@@ -193,10 +193,11 @@ export async function resolveLiveTestPaths(input: {
   for (const [mine, theirs] of [
     [home, remote.home],
     [NodePath.join(home, "userdata"), NodePath.join(remote.home, "userdata")],
+    [testRepo, remote.testRepo],
   ] as const) {
     if (canonicalPath(mine) === canonicalPath(theirs)) {
       throw new LiveTestRefusal(
-        `${theirs} resolves to ${mine}. Local and Remote must have separate homes; remove the link.`,
+        `${theirs} resolves to ${mine}. Local and Remote must have separate homes and repositories; remove the link.`,
       );
     }
   }
@@ -446,7 +447,7 @@ export function formatInstructions(input: {
     readonly facts: ServerLogFacts;
     /** Opened in a browser paired with Local, it adds Remote there. Works once. */
     readonly addToBrowserUrl: string | undefined;
-    /** Whether peering succeeded on the start these servers are running from. */
+    /** Whether each server's own peer list names the other. */
     readonly peered: boolean;
   };
 }): string {
@@ -474,7 +475,7 @@ Remote, which has no web server of its own:
 ${
   remote.peered
     ? `The two are peered${manifest.mode === "peer-poll" ? ": Remote polls Local for its messages, and Local never connects to Remote" : " and send to each other directly"}.`
-    : `The two are NOT peered: peering did not finish on the last start. Redo it with: ${selfCommand(paths, "restart")}`
+    : `The two are NOT peered yet: each server's peer list does not name the other. Finish with: ${selfCommand(paths, MODE_FLAGS[manifest.mode === "peer-poll" ? "peer-poll" : "peer"])}`
 }
 `
 }
@@ -603,7 +604,7 @@ function printRunning(
         : {
             remote: {
               facts: remoteFacts,
-              peered: NodeFS.existsSync(peeredMarker(paths)),
+              peered: arePeered(paths, facts.serverPort, remoteFacts.serverPort),
               addToBrowserUrl: addRemoteUrl({
                 localWebPort: facts.webPort,
                 remoteServerPort: remoteFacts.serverPort,
@@ -933,18 +934,46 @@ async function peerServers(
       if (added.ok) break;
       if (attempt === 5 || Date.now() > deadline) {
         throw new LiveTestRefusal(
-          `${holder.name} could not record ${issuer.name} as a peer (${attempt} attempt${attempt === 1 ? "" : "s"}). Both servers are still running, unpeered.\nThe peer command said:\n${added.error || "(nothing)"}\nTry again with: ${selfCommand(paths, "restart")}`,
+          `Local and Remote are both RUNNING, and NOT peered yet: ${holder.name} could not record ${issuer.name} as a peer (${attempt} attempt${attempt === 1 ? "" : "s"}).\nThe peer command said:\n${added.error || "(nothing)"}\nFinish with: ${selfCommand(paths, MODE_FLAGS[mode])}`,
         );
       }
       await NodeTimersPromises.setTimeout(3_000);
     }
   }
-  // Only now may the output say the two are peered.
-  NodeFS.writeFileSync(peeredMarker(paths), "");
 }
 
-/** Written when peering last succeeded; removed before each attempt and when the servers stop. */
-const peeredMarker = (paths: LiveTestPaths) => NodePath.join(paths.remote.root, "peered");
+/**
+ * Whether a server's own peer list, as `peer list --json` prints it, names
+ * the other server with no error against it.
+ */
+export function listsPeer(peerListJson: string | undefined, name: string): boolean {
+  try {
+    const { peers } = JSON.parse(peerListJson ?? "") as {
+      readonly peers?: ReadonlyArray<{ readonly label: string; readonly lastError: unknown }>;
+    };
+    return (peers ?? []).some((peer) => peer.label === name && peer.lastError === null);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The evidence that the two servers are peered: each one's peer list names
+ * the other. Two listening ports say nothing about it.
+ */
+function arePeered(
+  paths: LiveTestPaths,
+  localPort: number | undefined,
+  remotePort: number | undefined,
+): boolean {
+  const peerList = (home: string, port: number | undefined) =>
+    peerCli(paths, ["list", "--json", "--base-dir", home, "--origin", `http://127.0.0.1:${port}`])
+      .output;
+  return (
+    listsPeer(peerList(paths.home, localPort), "Remote") &&
+    listsPeer(peerList(paths.remote.home, remotePort), "Local")
+  );
+}
 
 async function start(paths: LiveTestPaths, mode: LiveTestMode): Promise<void> {
   const deadline = Date.now() + START_BUDGET_MS;
@@ -966,8 +995,6 @@ async function start(paths: LiveTestPaths, mode: LiveTestMode): Promise<void> {
     return printRunning(paths, await startServer(paths, "dev", {}, deadline), undefined);
   }
   console.log("Starting the two dev servers...");
-  // Peering is redone on every start, so the claim that it holds is withdrawn until it does.
-  NodeFS.rmSync(peeredMarker(paths), { force: true });
   const local = await startServer(paths, "dev", { J5CODE_SERVER_NAME: "Local" }, deadline);
   const remote = await startServer(
     paths.remote,
@@ -1018,7 +1045,6 @@ async function stop(paths: LiveTestPaths): Promise<void> {
     NodeFS.rmSync(server.record, { force: true });
     console.log(`J5 Code live-test server${name}: STOPPED`);
   }
-  NodeFS.rmSync(peeredMarker(paths), { force: true });
 }
 
 function status(paths: LiveTestPaths): void {

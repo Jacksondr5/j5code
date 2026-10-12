@@ -9,6 +9,7 @@ import {
   classifyServer,
   LiveTestRefusal,
   addRemoteUrl,
+  listsPeer,
   peerSteps,
   liveTestEnvironment,
   type LiveTestMode,
@@ -137,17 +138,18 @@ describe("resolveLiveTestPaths after a build", () => {
   });
 
   it("refuses a Remote home that is Local's home under another name", async () => {
-    for (const link of ["remote/home", "remote/home/userdata"]) {
+    for (const link of ["remote/home", "remote/home/userdata", "remote/test-repo"]) {
       const layout = makeLayout();
       const root = NodePath.join(layout.worktree, ".j5code", "live-test");
       NodeFS.mkdirSync(NodePath.join(root, "home", "userdata"), { recursive: true });
+      NodeFS.mkdirSync(NodePath.join(root, "test-repo"), { recursive: true });
       NodeFS.mkdirSync(NodePath.dirname(NodePath.join(root, link)), { recursive: true });
       // Inside the root, so the containment check alone would let it through.
       NodeFS.symlinkSync(
         NodePath.join(root, link.replace("remote/", "")),
         NodePath.join(root, link),
       );
-      assert.include(await refusal(resolve(layout)), "must have separate homes");
+      assert.include(await refusal(resolve(layout)), "must have separate homes and repositories");
       NodeFS.rmSync(layout.base, { recursive: true, force: true });
     }
   });
@@ -428,6 +430,24 @@ describe("peerSteps", () => {
     const steps = peerSteps({ issuer: local, holder: remote, poll: true });
     assert.equal(steps.credential.at(-1), "--store");
     assert.equal(steps.add("SECRET").at(-1), "--poll");
+  });
+});
+
+describe("listsPeer", () => {
+  const list = (peers: ReadonlyArray<object>) => JSON.stringify({ ok: true, peers });
+
+  it("is true only when the server's own list names the other with no error", () => {
+    assert.isTrue(listsPeer(list([{ label: "Remote", lastError: null }]), "Remote"));
+    // Two ports listening is not peering: an empty list is the usual unpeered state.
+    assert.isFalse(listsPeer(list([]), "Remote"));
+    assert.isFalse(listsPeer(list([{ label: "Local", lastError: null }]), "Remote"));
+    assert.isFalse(listsPeer(list([{ label: "Remote", lastError: "hello failed" }]), "Remote"));
+  });
+
+  it("is false when the list could not be read", () => {
+    assert.isFalse(listsPeer(undefined, "Remote"));
+    assert.isFalse(listsPeer("", "Remote"));
+    assert.isFalse(listsPeer("not json", "Remote"));
   });
 });
 
