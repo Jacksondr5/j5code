@@ -124,7 +124,7 @@ A copy of real data is for a server the developer will use, or for rehearsing a 
 - The server is event-sourced, and side effects run after the command commits. Wait on typed receipts, drain the effect worker (`OrchestrationEffectWorkerV2.drain`), or await the specific persisted event or `Deferred` that marks the milestone. Never wait on sleeps or polling. A test that needs a timeout to pass is wrong.
 - Live-test what unit tests cannot prove: UI flows, agent turns, agent messages, peering. The `j5-live-test` skill sets up a safe server and says what to cover and how to report. `test-t3-app` drives the browser, and `test-t3-mobile` the mobile app.
 - Have a Peer Agent in its own worktree do the testing, from a commit. A subagent that outlives your turn cannot use platform tools that act.
-- Live test turns on Claude Haiku and GPT Luna need no permission. Ask before using a more expensive model.
+- You are authorized to use Claude Haiku and GPT Luna for live test turns. Ask before using a more expensive model.
 - The Browser panel on your own test server needs no permission. Ask before mobile testing or other computer use.
 
 For authorized mobile verification, a missing or outdated native client is a build step, not a blocker. Run `node scripts/mobile-native-client.ts ensure <ios|android> <device-id>` on the simulator host before starting Metro. It checks the local Expo fingerprint and builds/installs when needed. See `test-t3-mobile` for the full workflow.

@@ -46,10 +46,13 @@ points at a real repository or at the developer's data.
 
 `stop`, `status`, and `restart` act on the server the script started. `status`
 starts with `RUNNING`, `NOT SERVING`, or `STOPPED`, and prints a fresh pairing
-URL when the server is up.
+URL when the server is up. Run `stop` when you finish.
 `rebuild` stops it, discards the test home, and builds and starts a new one.
 The script does not install dependencies: if it says they are missing, install
 them and run it again.
+
+After a `rebuild`, a tab that was open before it can stay on the pairing form.
+Press "Reload app" there.
 
 The test home, test repository, and logs live under `.j5code/live-test`. Live
 turns also leave provider session files in `~/.claude` and `~/.codex`, and
