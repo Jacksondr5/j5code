@@ -16,9 +16,9 @@
  * is printed. Screenshots never go on the pull request's own branch.
  *
  * `--remote <url>` and `--branch <name>` point it somewhere else, which is how
- * it is tested without touching the real branch. On a GitHub remote the only
- * branches it will push to are `j5/evidence` and a self-test branch named
- * `j5/evidence-selftest-*`; any branch is allowed on a local remote. The link
+ * it is tested without touching the real branch. On any remote that is not a
+ * local path the only branches it will push to are `j5/evidence` and a
+ * self-test branch named `j5/evidence-selftest-*`. The link
  * check runs only for a GitHub remote.
  */
 import * as NodeChildProcess from "node:child_process";
@@ -94,16 +94,20 @@ export function githubRepository(remote: string): string | undefined {
   return /github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?\/?$/.exec(remote)?.[1];
 }
 
+/** A repository on this machine's filesystem, which is what the tests push to. */
+const isLocalRemote = (remote: string) =>
+  remote.startsWith("/") || remote.startsWith("./") || remote.startsWith("file://");
+
 /**
  * Why this script will not push to `branch` on `remote`, or undefined when it
- * may. On GitHub it pushes evidence only to the evidence branch, never to a
- * pull request's own branch or to main; `--branch` exists for local test
- * remotes and for a self-test branch.
+ * may. On any remote that is not a local path it pushes evidence only to the
+ * evidence branch, never to a pull request's own branch or to main; another
+ * branch name is for local test remotes, and for a self-test branch.
  */
 export function branchRefusal(remote: string, branch: string): string | undefined {
-  if (githubRepository(remote) === undefined) return undefined;
+  if (isLocalRemote(remote)) return undefined;
   if (branch === DEFAULT_BRANCH || branch.startsWith(SELFTEST_BRANCH_PREFIX)) return undefined;
-  return `Refusing to push screenshots to ${branch} on ${remote}. On GitHub they go only to ${DEFAULT_BRANCH} (or a ${SELFTEST_BRANCH_PREFIX}* branch for a self test), never to a pull request's own branch.`;
+  return `Refusing to push screenshots to ${branch} on ${remote}. On a remote repository they go only to ${DEFAULT_BRANCH} (or a ${SELFTEST_BRANCH_PREFIX}* branch for a self test), never to a pull request's own branch.`;
 }
 
 /**

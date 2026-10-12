@@ -156,16 +156,27 @@ describe("links and names", () => {
     assert.equal(row?.replaceAll("\\|", "").split("|").length, 5);
   });
 
-  it("pushes to GitHub only on the evidence branch or a self-test branch", () => {
-    const github = "https://github.com/Jacksondr5/j5code.git";
-    assert.isUndefined(branchRefusal(github, "j5/evidence"));
-    assert.isUndefined(branchRefusal(github, "j5/evidence-selftest-123"));
-    for (const branch of ["j5/main", "j5code/some-pr-branch", "j5/evidence2", "main"]) {
-      assert.include(branchRefusal(github, branch) ?? "", "Refusing to push screenshots");
-      assert.include(branchRefusal("git@github.com:Jacksondr5/j5code.git", branch) ?? "", branch);
+  it("pushes to a remote repository only on the evidence branch or a self-test branch", () => {
+    const remotes = [
+      "https://github.com/Jacksondr5/j5code.git",
+      "git@github.com:Jacksondr5/j5code.git",
+      // Not GitHub, and not local either.
+      "ssh://git@example.com/team/repo.git",
+    ];
+    for (const remote of remotes) {
+      assert.isUndefined(branchRefusal(remote, "j5/evidence"));
+      assert.isUndefined(branchRefusal(remote, "j5/evidence-selftest-123"));
+      for (const branch of ["j5/main", "j5code/some-pr-branch", "j5/evidence2", "main"]) {
+        assert.include(
+          branchRefusal(remote, branch) ?? "",
+          `Refusing to push screenshots to ${branch}`,
+        );
+      }
     }
-    // A local repository is a test remote; any branch there is fine.
-    assert.isUndefined(branchRefusal("/tmp/remote.git", "anything"));
+    // A local path is a test remote; any branch there is fine.
+    for (const local of ["/tmp/remote.git", "./remote.git", "file:///tmp/remote.git"]) {
+      assert.isUndefined(branchRefusal(local, "anything"));
+    }
   });
 });
 
