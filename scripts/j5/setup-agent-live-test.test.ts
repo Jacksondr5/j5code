@@ -242,35 +242,49 @@ describe("classifyServer", () => {
   };
   const ours = {
     worktree: "/w",
-    group: 100,
+    record: { processGroup: 100, leaderStartTime: "4242" },
     facts,
     groupMembers: () => [100, 101],
-    listenerOn: () => 101,
-    processGroupOf: () => 100,
-    cwdOf: () => "/w/apps/server",
+    listenerOn: (): number | undefined => 101,
+    processGroupOf: (): number | undefined => 100,
+    startTimeOf: (): string | undefined => "4242",
+    cwdOf: (pid: number): string | undefined => (pid === 100 ? "/w" : "/w/apps/server"),
   };
 
-  it("is running only when the port's listener is in the recorded group and inside the worktree", () => {
+  it("is running when the port's listener is in the recorded group and inside the worktree", () => {
     assert.equal(classifyServer(ours).kind, "running");
   });
 
   it("is stopped with no record, or once the recorded group is empty", () => {
-    assert.equal(classifyServer({ ...ours, group: undefined }).kind, "stopped");
+    assert.equal(classifyServer({ ...ours, record: undefined }).kind, "stopped");
     assert.equal(classifyServer({ ...ours, groupMembers: () => [] }).kind, "stopped");
   });
 
-  it("never treats a live group as ours when the port check fails", () => {
+  it("is ours but not serving while it boots, after its server crashes, or if the port went elsewhere", () => {
     for (const other of [
       { facts: { ...facts, serverPort: undefined } },
       { listenerOn: () => undefined },
       // The port now belongs to another server, such as the live one.
       { processGroupOf: () => 999 },
+      { cwdOf: (pid: number) => (pid === 100 ? "/w" : "/somewhere/else") },
+    ]) {
+      assert.equal(classifyServer({ ...ours, ...other }).kind, "notServing");
+    }
+  });
+
+  it("never treats a live group as ours when its leader is not the process that was spawned", () => {
+    const notServing = { ...ours, listenerOn: () => undefined };
+    for (const other of [
+      // The pid was recycled: same number, later start.
+      { startTimeOf: () => "9999" },
+      // The leader exited and only stragglers remain.
+      { startTimeOf: () => undefined },
       { cwdOf: () => "/somewhere/else" },
       // A sibling directory that shares the worktree's name as a prefix.
-      { cwdOf: () => "/w-other/apps/server" },
+      { cwdOf: () => "/w-other" },
       { cwdOf: () => undefined },
     ]) {
-      assert.equal(classifyServer({ ...ours, ...other }).kind, "unverified");
+      assert.equal(classifyServer({ ...notServing, ...other }).kind, "unverified");
     }
   });
 });
@@ -279,6 +293,7 @@ describe("parseCommand", () => {
   it("defaults to start and refuses anything it does not know", () => {
     assert.equal(parseCommand([]), "start");
     assert.equal(parseCommand(["restart"]), "restart");
+    assert.equal(parseCommand(["rebuild"]), "rebuild");
     assert.throws(() => parseCommand(["--fresh"]), LiveTestRefusal);
     assert.throws(() => parseCommand(["stop", "now"]), LiveTestRefusal);
   });

@@ -14,9 +14,10 @@
  * repository, the developer's data or the live install. It refuses to run
  * outside a linked git worktree.
  *
- * `stop` signals only the process group this script started, and only after
- * confirming that group still owns the server's port from inside this
- * worktree. It never finds a process by name. Linux only: it reads `/proc`.
+ * It signals only the process group it started, and only after confirming
+ * that the group's leader is still the process it spawned (same pid and start
+ * time) running from this worktree. It never finds a process by name. Linux
+ * only: it reads `/proc`.
  */
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
@@ -223,15 +224,29 @@ export function startRefusal(input: {
   return undefined;
 }
 
-/** The process group of `pid`, or undefined when it is gone. */
-function processGroupOf(pid: number): number | undefined {
+/** The fields of /proc/<pid>/stat after "pid (comm) ", or undefined when the process is gone. */
+function statFieldsOf(pid: number): ReadonlyArray<string> | undefined {
   try {
-    // /proc/<pid>/stat is "pid (comm) state ppid pgrp ..."; comm may hold spaces and parentheses.
+    // comm may hold spaces and parentheses, so split after its closing one.
     const stat = NodeFS.readFileSync(`/proc/${pid}/stat`, "utf8");
-    return Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[2]);
+    return stat.slice(stat.lastIndexOf(")") + 2).split(" ");
   } catch {
     return undefined;
   }
+}
+
+/** The process group of `pid`, or undefined when it is gone. */
+function processGroupOf(pid: number): number | undefined {
+  const group = statFieldsOf(pid)?.[2];
+  return group === undefined ? undefined : Number(group);
+}
+
+/**
+ * When `pid` started, in clock ticks since boot. Together with the pid it
+ * names one process for good: a recycled pid has a later start time.
+ */
+function startTimeOf(pid: number): string | undefined {
+  return statFieldsOf(pid)?.[19];
 }
 
 function membersOfGroup(group: number): ReadonlyArray<number> {
@@ -249,70 +264,86 @@ function listenerOn(port: number): number | undefined {
   return pid === undefined ? undefined : Number(pid);
 }
 
+/** What `start` writes when it spawns the server, and all `stop` trusts. */
+interface ServerRecord {
+  /** The dev runner's pid. It is spawned detached, so this is also its process group id. */
+  readonly processGroup: number;
+  readonly leaderStartTime: string;
+}
+
 export type ServerState =
   | { readonly kind: "stopped" }
   | { readonly kind: "running"; readonly group: number; readonly facts: ServerLogFacts }
+  /** Ours, but its port has no listener: still starting, or the server inside it crashed. */
+  | { readonly kind: "notServing"; readonly group: number; readonly reason: string }
   | { readonly kind: "unverified"; readonly group: number; readonly reason: string };
 
 /**
- * Decides whether the recorded process group is this worktree's test server.
- * It is only when the listener on the port its log reports belongs to that
- * group and runs from inside the worktree. A group that is alive but fails
- * that check is reported, never signalled.
+ * Decides whether the recorded process group is this worktree's test server,
+ * and whether it is serving.
+ *
+ * The group is ours when its leader is still the process that was spawned
+ * (same pid and start time) and runs from the worktree. That needs no healthy
+ * server, so a crashed or half-started one can still be stopped. It is
+ * "running" when the listener on the port its log reports is in the group and
+ * runs from inside the worktree. A live group that is neither is reported,
+ * never signalled.
  */
 export function classifyServer(input: {
   readonly worktree: string;
-  readonly group: number | undefined;
+  readonly record: ServerRecord | undefined;
   readonly facts: ServerLogFacts;
   readonly groupMembers: (group: number) => ReadonlyArray<number>;
   readonly listenerOn: (port: number) => number | undefined;
   readonly processGroupOf: (pid: number) => number | undefined;
+  readonly startTimeOf: (pid: number) => string | undefined;
   readonly cwdOf: (pid: number) => string | undefined;
 }): ServerState {
-  const { group, facts } = input;
-  if (group === undefined) return { kind: "stopped" };
+  const { record, facts } = input;
+  if (record === undefined) return { kind: "stopped" };
+  const group = record.processGroup;
   const members = input.groupMembers(group);
   if (members.length === 0) return { kind: "stopped" };
-  const unverified = (reason: string): ServerState => ({
+
+  const insideWorktree = (pid: number) => {
+    const cwd = input.cwdOf(pid);
+    return cwd !== undefined && isInside(cwd, input.worktree);
+  };
+  const listener = facts.serverPort === undefined ? undefined : input.listenerOn(facts.serverPort);
+  const notServing =
+    facts.serverPort === undefined
+      ? "The server log does not report a port yet."
+      : listener === undefined
+        ? `Nothing is listening on port ${facts.serverPort}.`
+        : input.processGroupOf(listener) !== group
+          ? `Port ${facts.serverPort} is owned by process ${listener}, which is not in the recorded group.`
+          : !insideWorktree(listener)
+            ? `The listener on port ${facts.serverPort} does not run from this worktree.`
+            : undefined;
+  if (notServing === undefined) return { kind: "running", group, facts };
+  if (input.startTimeOf(group) === record.leaderStartTime && insideWorktree(group)) {
+    return { kind: "notServing", group, reason: notServing };
+  }
+  return {
     kind: "unverified",
     group,
-    reason: `${reason} Process group ${group} still has processes (${members.join(", ")}); this script will not signal them. Inspect with \`ps -o pid,pgid,args -g ${group}\`.`,
-  });
-  if (facts.serverPort === undefined) {
-    return unverified("The server log does not report a port yet.");
-  }
-  const listener = input.listenerOn(facts.serverPort);
-  if (listener === undefined) {
-    return unverified(`Nothing is listening on port ${facts.serverPort}.`);
-  }
-  if (input.processGroupOf(listener) !== group) {
-    return unverified(
-      `Port ${facts.serverPort} is owned by process ${listener}, which is not in the recorded group.`,
-    );
-  }
-  const cwd = input.cwdOf(listener);
-  if (cwd === undefined || !isInside(cwd, input.worktree)) {
-    return unverified(
-      `The listener on port ${facts.serverPort} runs from ${cwd ?? "an unknown directory"}, not from this worktree.`,
-    );
-  }
-  return { kind: "running", group, facts };
+    reason: `${notServing} Process group ${group} still has processes (${members.join(", ")}), but its leader is not the process this script started, so it will not signal them. Inspect with \`ps -o pid,pgid,args -g ${group}\`.`,
+  };
 }
 
 function currentServerState(paths: LiveTestPaths): ServerState {
-  const group = NodeFS.existsSync(paths.record)
-    ? (JSON.parse(NodeFS.readFileSync(paths.record, "utf8")) as { processGroup: number })
-        .processGroup
-    : undefined;
   return classifyServer({
     worktree: NodeFS.realpathSync(paths.worktree),
-    group,
+    record: NodeFS.existsSync(paths.record)
+      ? (JSON.parse(NodeFS.readFileSync(paths.record, "utf8")) as ServerRecord)
+      : undefined,
     facts: readServerLog(
       NodeFS.existsSync(paths.log) ? NodeFS.readFileSync(paths.log, "utf8") : "",
     ),
     groupMembers: membersOfGroup,
     listenerOn,
     processGroupOf,
+    startTimeOf,
     cwdOf: (pid) => {
       try {
         return NodeFS.readlinkSync(`/proc/${pid}/cwd`);
@@ -435,15 +466,44 @@ function buildHome(paths: LiveTestPaths): void {
   }
 }
 
+/** What to tell an agent about a server that is ours but has no listener on its port. */
+const notServingMessage = (paths: LiveTestPaths, reason: string) =>
+  `J5 Code live-test server: NOT SERVING
+
+${reason}
+This script started it, but it is not answering. If it was started moments ago, check again with:
+  ${selfCommand(paths, "status")}
+Otherwise read the log, then start it again:
+  ${paths.log}
+  ${selfCommand(paths, "restart")}`;
+
+/** Signals this script's own process group and waits for every member to exit. */
+async function stopGroup(group: number): Promise<void> {
+  const waitForExit = async (timeoutMs: number) => {
+    const deadline = Date.now() + timeoutMs;
+    while (membersOfGroup(group).length > 0) {
+      if (Date.now() > deadline) return false;
+      await NodeTimersPromises.setTimeout(200);
+    }
+    return true;
+  };
+  process.kill(-group, "SIGTERM");
+  if (await waitForExit(STOP_TIMEOUT_MS)) return;
+  console.log(`Still running after ${STOP_TIMEOUT_MS / 1000} seconds; killing the group.`);
+  process.kill(-group, "SIGKILL");
+  if (!(await waitForExit(5_000))) {
+    throw new LiveTestRefusal(
+      `Process group ${group} survived SIGKILL: ${membersOfGroup(group).join(", ")}.`,
+    );
+  }
+}
+
 /**
- * Waits until the server has paired-URL and recovery lines in its log and
- * passes the ownership check. `fail` receives the reason when it does not.
+ * Waits for a server this script started to be ready, then prints how to use
+ * it. Returns inside START_TIMEOUT_MS either way: a server that is merely slow
+ * is left running and reported as still starting.
  */
-async function waitUntilReady(
-  paths: LiveTestPaths,
-  group: number,
-  fail: (reason: string) => never,
-): Promise<ServerLogFacts> {
+async function waitUntilReady(paths: LiveTestPaths, group: number): Promise<void> {
   const deadline = Date.now() + START_TIMEOUT_MS;
   for (;;) {
     const facts = readServerLog(NodeFS.readFileSync(paths.log, "utf8"));
@@ -452,14 +512,26 @@ async function waitUntilReady(
       home: paths.home,
       inheritedPort: process.env.T3CODE_PORT,
     });
-    if (refusal !== undefined) fail(refusal);
-    if (facts.pairingUrl !== undefined && facts.recovered) {
-      const state = currentServerState(paths);
-      if (state.kind === "running") return state.facts;
+    if (refusal !== undefined) {
+      await stopGroup(group);
+      NodeFS.rmSync(paths.record, { force: true });
+      throw new LiveTestRefusal(`${refusal} It has been stopped.`);
     }
-    if (membersOfGroup(group).length === 0) fail("The dev server exited while starting.");
+    const state = currentServerState(paths);
+    if (state.kind === "running" && facts.pairingUrl !== undefined && facts.recovered) {
+      return printRunning(paths, state.facts);
+    }
+    if (state.kind === "stopped") {
+      NodeFS.rmSync(paths.record, { force: true });
+      throw new LiveTestRefusal(
+        `The dev server exited while starting.\nLast lines of ${paths.log}:\n${logTail(paths)}`,
+      );
+    }
+    if (state.kind === "unverified") throw new LiveTestRefusal(state.reason);
     if (Date.now() > deadline) {
-      fail(`The dev server was not ready after ${START_TIMEOUT_MS / 1000} seconds.`);
+      throw new LiveTestRefusal(
+        `The dev server is not ready after ${START_TIMEOUT_MS / 1000} seconds. It has been left running.\nIf it is still starting, check again with: ${selfCommand(paths, "status")}\nIf it has failed (see ${paths.log}), start it again with: ${selfCommand(paths, "restart")}`,
+      );
     }
     await NodeTimersPromises.setTimeout(250);
   }
@@ -468,19 +540,13 @@ async function waitUntilReady(
 async function start(paths: LiveTestPaths): Promise<void> {
   const state = currentServerState(paths);
   if (state.kind === "unverified") throw new LiveTestRefusal(state.reason);
-  if (state.kind === "running") {
-    // Another call may have started it moments ago: return only once it is ready.
-    const facts = await waitUntilReady(paths, state.group, (reason) => {
-      throw new LiveTestRefusal(`${reason}\nLast lines of ${paths.log}:\n${logTail(paths)}`);
-    });
-    return printRunning(paths, facts);
-  }
+  // Already started, perhaps by a call that is still waiting: wait with it.
+  if (state.kind !== "stopped") return waitUntilReady(paths, state.group);
   if (!NodeFS.existsSync(paths.manifest)) buildHome(paths);
-  const manifest = readManifest(paths);
 
   const log = NodeFS.openSync(paths.log, "w");
   // Detached makes the child the leader of a new process group, so its pid is
-  // the group id. That group is the only thing `stop` ever signals.
+  // the group id. That group is the only thing this script ever signals.
   const child = NodeChildProcess.spawn(
     process.execPath,
     [NodePath.join(paths.worktree, "scripts/dev-runner.ts"), "dev", "--home-dir", paths.home],
@@ -492,24 +558,16 @@ async function start(paths: LiveTestPaths): Promise<void> {
     },
   );
   NodeFS.closeSync(log);
-  const group = child.pid;
-  if (group === undefined) throw new LiveTestRefusal("The dev server could not be spawned.");
-  NodeFS.writeFileSync(paths.record, `${JSON.stringify({ processGroup: group })}\n`);
+  const leaderStartTime = child.pid === undefined ? undefined : startTimeOf(child.pid);
+  if (child.pid === undefined || leaderStartTime === undefined) {
+    throw new LiveTestRefusal("The dev server could not be spawned.");
+  }
+  const record: ServerRecord = { processGroup: child.pid, leaderStartTime };
+  NodeFS.writeFileSync(paths.record, `${JSON.stringify(record)}\n`);
   child.unref();
 
   console.log("Starting the dev server...");
-  const facts = await waitUntilReady(paths, group, (reason) => {
-    // This is the group spawned a moment ago, so signalling it needs no further proof.
-    try {
-      process.kill(-group, "SIGTERM");
-    } catch {
-      // Already gone.
-    }
-    NodeFS.rmSync(paths.record, { force: true });
-    throw new LiveTestRefusal(`${reason}\nLast lines of ${paths.log}:\n${logTail(paths)}`);
-  });
-  // The startup URL in the log has not been used yet.
-  console.log(formatInstructions({ paths, manifest, facts, pairingUrl: facts.pairingUrl }));
+  await waitUntilReady(paths, child.pid);
 }
 
 async function stop(paths: LiveTestPaths): Promise<void> {
@@ -520,24 +578,7 @@ async function stop(paths: LiveTestPaths): Promise<void> {
     console.log("J5 Code live-test server: STOPPED (it was not running)");
     return;
   }
-  const waitForExit = async (timeoutMs: number) => {
-    const deadline = Date.now() + timeoutMs;
-    while (membersOfGroup(state.group).length > 0) {
-      if (Date.now() > deadline) return false;
-      await NodeTimersPromises.setTimeout(200);
-    }
-    return true;
-  };
-  process.kill(-state.group, "SIGTERM");
-  if (!(await waitForExit(STOP_TIMEOUT_MS))) {
-    console.log(`Still running after ${STOP_TIMEOUT_MS / 1000} seconds; killing the group.`);
-    process.kill(-state.group, "SIGKILL");
-    if (!(await waitForExit(5_000))) {
-      throw new LiveTestRefusal(
-        `Process group ${state.group} survived SIGKILL: ${membersOfGroup(state.group).join(", ")}.`,
-      );
-    }
-  }
+  await stopGroup(state.group);
   NodeFS.rmSync(paths.record, { force: true });
   console.log("J5 Code live-test server: STOPPED");
 }
@@ -546,6 +587,7 @@ function status(paths: LiveTestPaths): void {
   const state = currentServerState(paths);
   if (state.kind === "unverified") throw new LiveTestRefusal(state.reason);
   if (state.kind === "running") return printRunning(paths, state.facts);
+  if (state.kind === "notServing") return console.log(notServingMessage(paths, state.reason));
   console.log(
     `J5 Code live-test server: STOPPED\n\n${
       NodeFS.existsSync(paths.manifest)
