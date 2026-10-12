@@ -10,7 +10,7 @@ import {
   LiveTestRefusal,
   addRemoteUrl,
   baseEnvironment,
-  classifyPreparation,
+  baseProgress,
   listsPeer,
   peerRepairCommand,
   peerSteps,
@@ -654,41 +654,61 @@ describe("addRemoteUrl", () => {
   });
 });
 
-describe("classifyPreparation", () => {
-  const record = { processGroup: 300, leaderStartTime: "777" };
-  const alive = {
-    worktree: "/w",
-    record,
-    startTimeOf: (): string | undefined => "777",
-    cwdOf: (): string | undefined => "/w",
+describe("baseProgress", () => {
+  const ready = {
+    checkoutHead: "abc",
+    sameRepository: true,
+    commit: "abc",
+    installed: true,
+    serverRunning: true,
+    failedStep: undefined,
   };
 
-  it("is running only while the recorded process is the one that was spawned, in this worktree", () => {
-    assert.deepEqual(classifyPreparation(alive), { kind: "running", group: 300 });
+  it("reports each step from what is on disk", () => {
+    assert.deepEqual(baseProgress(ready), { checkout: "done", install: "done", server: "done" });
+    assert.deepEqual(baseProgress({ ...ready, serverRunning: false }), {
+      checkout: "done",
+      install: "done",
+      server: "not done",
+    });
+    assert.deepEqual(
+      baseProgress({ ...ready, checkoutHead: undefined, installed: false, serverRunning: false }),
+      { checkout: "not done", install: "not done", server: "not done" },
+    );
   });
 
-  it("is none with no record, and finished once it has written how it ended", () => {
-    assert.deepEqual(classifyPreparation({ ...alive, record: undefined }), { kind: "none" });
-    assert.deepEqual(classifyPreparation({ ...alive, record: { ...record, exitStatus: 0 } }), {
-      kind: "finished",
-      exitStatus: 0,
+  it("never counts a later step as done on top of an earlier one that is not", () => {
+    // An install marker left beside a checkout that has since gone or moved proves nothing.
+    assert.deepEqual(baseProgress({ ...ready, checkoutHead: undefined }), {
+      checkout: "not done",
+      install: "not done",
+      server: "not done",
     });
-    assert.deepEqual(classifyPreparation({ ...alive, record: { ...record, exitStatus: 1 } }), {
-      kind: "finished",
-      exitStatus: 1,
+    assert.deepEqual(baseProgress({ ...ready, installed: false }), {
+      checkout: "done",
+      install: "not done",
+      server: "not done",
     });
   });
 
-  it("has died, and is never signalled, when the pid is gone, recycled or elsewhere", () => {
-    for (const other of [
-      { startTimeOf: () => undefined },
-      // Same pid, later start: another process now.
-      { startTimeOf: () => "999" },
-      { cwdOf: () => "/somewhere/else" },
-      { cwdOf: () => undefined },
-    ]) {
-      assert.deepEqual(classifyPreparation({ ...alive, ...other }), { kind: "died" });
-    }
+  it("calls a checkout at another commit, or of another repository, failed", () => {
+    assert.equal(baseProgress({ ...ready, checkoutHead: "def" }).checkout, "failed");
+    assert.equal(baseProgress({ ...ready, sameRepository: false }).checkout, "failed");
+  });
+
+  it("shows the step that last failed as failed until it succeeds", () => {
+    assert.deepEqual(
+      baseProgress({ ...ready, installed: false, serverRunning: false, failedStep: "install" }),
+      { checkout: "done", install: "failed", server: "not done" },
+    );
+    assert.equal(
+      baseProgress({ ...ready, serverRunning: false, failedStep: "server" }).server,
+      "failed",
+    );
+    assert.equal(
+      baseProgress({ ...ready, checkoutHead: undefined, failedStep: "checkout" }).checkout,
+      "failed",
+    );
   });
 });
 
