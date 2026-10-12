@@ -137,6 +137,7 @@ For authorized mobile verification, a missing or outdated native client is a bui
 - Conventional commit titles, plain language: `fix(web): new threads no longer spike CPU`.
 - Body: the problem in a sentence or two, then how you fixed it. End with the model and harness that did the work.
 - One concern per PR. If the description says "also", split it.
+- A chain of PRs is a stack: link it with `gh stack link` when you open it, and merge it in one operation from the top PR. See [Stacks](docs/j5/process/pull-requests.md#stacks).
 - When babysitting: poll checks and comments newer than the last push, verify each bot finding against the source, fix real ones, dismiss false positives with a written reason. Stay quiet when nothing is new. Stop when the bots are green on the latest commit.
 
 ## Documentation
