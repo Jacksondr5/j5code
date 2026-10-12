@@ -71,6 +71,13 @@ are missing, install them and run it again.
 A start returns within about two minutes. On a busy machine it can return
 before it has finished, and prints the command that finishes it.
 
+The server takes the script's environment when it starts. To give a running
+server a new variable, set it on `restart`.
+
+To see what a client asked the server for, read the log the script names and
+`server.trace.ndjson` under the test home's `userdata/logs`. They are the best
+evidence for a permission change.
+
 Live turns also leave provider session files in `~/.claude` and `~/.codex`,
 and Browser panel screenshots are saved by the server you are running in.
 
@@ -178,7 +185,7 @@ node scripts/j5/pr-evidence.ts <pr> --pair "<caption>" <before.png> <after.png>
 Repeat `--pair` for each state. For a state the change adds, use
 `--new "<caption>" <after.png>`. It prints the before/after table for the PR
 description. Run `rebuild` with no flag when you are done, which removes the
-base checkout.
+base checkout. It refuses if you edited a file there, so do not.
 
 ## A server for the developer
 
