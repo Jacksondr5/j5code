@@ -29,27 +29,31 @@ type LiveTestCommand = (typeof COMMANDS)[number];
 
 /** The live install's port. A test server must never end up on it. */
 const LIVE_SERVER_PORT = 5773;
-const START_TIMEOUT_MS = 180_000;
+/** Under the two minutes a shell call usually gets, so a failed start is cleaned up by this script. */
+const START_TIMEOUT_MS = 90_000;
 const STOP_TIMEOUT_MS = 20_000;
+/** `scripts/hold.sh` in the test repository waits for this file in the repository root. */
+const HOLD_RELEASE_FILE = ".hold-release";
 const RECOVERY_LOG_LINE = "V2 orchestration recovery completed";
 
 /** A reason this script will not act, printed as-is. */
 export class LiveTestRefusal extends Error {}
 
+/** What the generator records about the build. Paths are never read from it: see LiveTestPaths. */
 interface Manifest {
-  readonly home: string;
-  readonly testRepo: string;
   readonly project: { readonly title: string };
   readonly defaultModel: string;
   readonly personas: ReadonlyArray<{ readonly id: string; readonly model: string }>;
   readonly playbooks: ReadonlyArray<string>;
   readonly holdScript: string;
-  readonly holdReleaseFile: string;
 }
 
+/** Every path the script acts on, derived from the worktree and checked to stay inside it. */
 export interface LiveTestPaths {
   readonly worktree: string;
   readonly root: string;
+  readonly home: string;
+  readonly testRepo: string;
   readonly manifest: string;
   readonly log: string;
   readonly record: string;
@@ -100,6 +104,12 @@ export async function resolveLiveTestPaths(input: {
       `${checkout} is not a linked git worktree. Live tests run only from a worktree, never from the main checkout: create one with \`git worktree add\` and run this script there.`,
     );
   }
+  // The paths below are printed inside shell commands and read back from a log line.
+  if (!/^[\w@%+=:,./-]+$/.test(worktree)) {
+    throw new LiveTestRefusal(
+      `${worktree} contains a space or a shell character. Use a worktree whose path has only letters, digits and @%+=:,./_-`,
+    );
+  }
   const root = NodePath.join(worktree, ".j5code", "live-test");
   const canonicalRoot = canonicalPath(root);
   if (!isInside(canonicalRoot, NodePath.join(NodeFS.realpathSync(worktree), ".j5code"))) {
@@ -123,9 +133,22 @@ export async function resolveLiveTestPaths(input: {
       );
     }
   }
+  // A finished build can be tampered with afterwards: the home and the
+  // repository must still be real directories of this root, not links elsewhere.
+  const home = NodePath.join(root, "home");
+  const testRepo = NodePath.join(root, "test-repo");
+  for (const inside of [home, testRepo]) {
+    if (!isInside(canonicalPath(inside), canonicalRoot)) {
+      throw new LiveTestRefusal(
+        `${inside} resolves to ${canonicalPath(inside)}, outside ${root}. Refusing to use it; remove the link.`,
+      );
+    }
+  }
   return {
     worktree,
     root,
+    home,
+    testRepo,
     manifest: NodePath.join(root, "manifest.json"),
     log: NodePath.join(root, "server.log"),
     record: NodePath.join(root, "server.json"),
@@ -176,6 +199,28 @@ export function readServerLog(log: string): ServerLogFacts {
     pairingUrl: pairingUrls.at(-1)?.[1],
     recovered: text.includes(RECOVERY_LOG_LINE),
   };
+}
+
+/**
+ * Why a server that is coming up must be abandoned, or undefined when it may
+ * continue: it must use the test home, and never the live server's port.
+ */
+export function startRefusal(input: {
+  readonly facts: ServerLogFacts;
+  readonly home: string;
+  readonly inheritedPort: string | undefined;
+}): string | undefined {
+  const { facts } = input;
+  if (facts.baseDir !== undefined && canonicalPath(facts.baseDir) !== canonicalPath(input.home)) {
+    return `The dev server chose ${facts.baseDir}, not the test home ${input.home}.`;
+  }
+  if (
+    facts.serverPort !== undefined &&
+    (facts.serverPort === LIVE_SERVER_PORT || String(facts.serverPort) === input.inheritedPort)
+  ) {
+    return `The dev server chose the live server's port ${facts.serverPort}.`;
+  }
+  return undefined;
 }
 
 /** The process group of `pid`, or undefined when it is gone. */
@@ -290,13 +335,13 @@ export function formatInstructions(input: {
   readonly pairingUrl: string | undefined;
 }): string {
   const { paths, manifest, facts } = input;
-  const pairCommand = `node ${NodePath.join(paths.worktree, "apps/server/src/bin.ts")} pair --base-dir ${manifest.home}`;
+  const pairCommand = `node ${NodePath.join(paths.worktree, "apps/server/src/bin.ts")} pair --base-dir ${paths.home}`;
   return `J5 Code live-test server: RUNNING
 
   Pairing URL   ${input.pairingUrl ?? `none could be minted; run: ${pairCommand}`}
   Web           http://localhost:${facts.webPort}
   Server port   ${facts.serverPort}
-  Home          ${manifest.home}
+  Home          ${paths.home}
   Log           ${paths.log}
 
 Open the pairing URL in the Browser panel, then wait for [data-testid="composer-editor"].
@@ -304,7 +349,7 @@ The pairing URL works once. \`status\` prints a fresh one each time, and so does
   ${pairCommand}
 
 Project to use: "${manifest.project.title}"
-  ${manifest.testRepo}
+  ${paths.testRepo}
   A small TODO app (\`npm test\` runs its suite). Its origin is a local bare
   repository, so pushes go nowhere real. It is the only project in this home.
   Do not add another project: that is how a test reaches a real repository.
@@ -321,7 +366,7 @@ Personas: ${manifest.personas.map((persona) => `${persona.id} (${persona.model})
 Playbooks: ${manifest.playbooks.join(", ")}
 
 To hold a turn open, ask the agent to run: ${manifest.holdScript}
-It blocks until you release it with: touch ${manifest.holdReleaseFile}
+It blocks until you release it with: touch ${NodePath.join(paths.testRepo, HOLD_RELEASE_FILE)}
 The script deletes that file as it exits, so there is nothing to clean up.
 
 Commands:
@@ -337,10 +382,10 @@ Stop the server when you finish.
  * A fresh pairing URL from the running server. The one in the log is the
  * startup URL, which works once and is usually spent by the time anyone asks again.
  */
-function mintPairingUrl(paths: LiveTestPaths, manifest: Manifest): string | undefined {
+function mintPairingUrl(paths: LiveTestPaths): string | undefined {
   const pair = NodeChildProcess.spawnSync(
     process.execPath,
-    [NodePath.join(paths.worktree, "apps/server/src/bin.ts"), "pair", "--base-dir", manifest.home],
+    [NodePath.join(paths.worktree, "apps/server/src/bin.ts"), "pair", "--base-dir", paths.home],
     {
       cwd: paths.worktree,
       env: liveTestEnvironment(process.env, paths.worktree),
@@ -352,9 +397,7 @@ function mintPairingUrl(paths: LiveTestPaths, manifest: Manifest): string | unde
 
 function printRunning(paths: LiveTestPaths, facts: ServerLogFacts): void {
   const manifest = readManifest(paths);
-  console.log(
-    formatInstructions({ paths, manifest, facts, pairingUrl: mintPairingUrl(paths, manifest) }),
-  );
+  console.log(formatInstructions({ paths, manifest, facts, pairingUrl: mintPairingUrl(paths) }));
 }
 
 function readManifest(paths: LiveTestPaths): Manifest {
@@ -392,10 +435,46 @@ function buildHome(paths: LiveTestPaths): void {
   }
 }
 
+/**
+ * Waits until the server has paired-URL and recovery lines in its log and
+ * passes the ownership check. `fail` receives the reason when it does not.
+ */
+async function waitUntilReady(
+  paths: LiveTestPaths,
+  group: number,
+  fail: (reason: string) => never,
+): Promise<ServerLogFacts> {
+  const deadline = Date.now() + START_TIMEOUT_MS;
+  for (;;) {
+    const facts = readServerLog(NodeFS.readFileSync(paths.log, "utf8"));
+    const refusal = startRefusal({
+      facts,
+      home: paths.home,
+      inheritedPort: process.env.T3CODE_PORT,
+    });
+    if (refusal !== undefined) fail(refusal);
+    if (facts.pairingUrl !== undefined && facts.recovered) {
+      const state = currentServerState(paths);
+      if (state.kind === "running") return state.facts;
+    }
+    if (membersOfGroup(group).length === 0) fail("The dev server exited while starting.");
+    if (Date.now() > deadline) {
+      fail(`The dev server was not ready after ${START_TIMEOUT_MS / 1000} seconds.`);
+    }
+    await NodeTimersPromises.setTimeout(250);
+  }
+}
+
 async function start(paths: LiveTestPaths): Promise<void> {
   const state = currentServerState(paths);
   if (state.kind === "unverified") throw new LiveTestRefusal(state.reason);
-  if (state.kind === "running") return printRunning(paths, state.facts);
+  if (state.kind === "running") {
+    // Another call may have started it moments ago: return only once it is ready.
+    const facts = await waitUntilReady(paths, state.group, (reason) => {
+      throw new LiveTestRefusal(`${reason}\nLast lines of ${paths.log}:\n${logTail(paths)}`);
+    });
+    return printRunning(paths, facts);
+  }
   if (!NodeFS.existsSync(paths.manifest)) buildHome(paths);
   const manifest = readManifest(paths);
 
@@ -404,7 +483,7 @@ async function start(paths: LiveTestPaths): Promise<void> {
   // the group id. That group is the only thing `stop` ever signals.
   const child = NodeChildProcess.spawn(
     process.execPath,
-    [NodePath.join(paths.worktree, "scripts/dev-runner.ts"), "dev", "--home-dir", manifest.home],
+    [NodePath.join(paths.worktree, "scripts/dev-runner.ts"), "dev", "--home-dir", paths.home],
     {
       cwd: paths.worktree,
       env: liveTestEnvironment(process.env, paths.worktree),
@@ -418,7 +497,8 @@ async function start(paths: LiveTestPaths): Promise<void> {
   NodeFS.writeFileSync(paths.record, `${JSON.stringify({ processGroup: group })}\n`);
   child.unref();
 
-  const abandon = (reason: string): never => {
+  console.log("Starting the dev server...");
+  const facts = await waitUntilReady(paths, group, (reason) => {
     // This is the group spawned a moment ago, so signalling it needs no further proof.
     try {
       process.kill(-group, "SIGTERM");
@@ -427,45 +507,9 @@ async function start(paths: LiveTestPaths): Promise<void> {
     }
     NodeFS.rmSync(paths.record, { force: true });
     throw new LiveTestRefusal(`${reason}\nLast lines of ${paths.log}:\n${logTail(paths)}`);
-  };
-
-  console.log("Starting the dev server...");
-  const deadline = Date.now() + START_TIMEOUT_MS;
-  for (;;) {
-    const facts = readServerLog(NodeFS.readFileSync(paths.log, "utf8"));
-    if (
-      facts.baseDir !== undefined &&
-      canonicalPath(facts.baseDir) !== canonicalPath(manifest.home)
-    ) {
-      abandon(`The dev server chose ${facts.baseDir}, not the test home ${manifest.home}.`);
-    }
-    if (
-      facts.serverPort === LIVE_SERVER_PORT ||
-      (facts.serverPort !== undefined && String(facts.serverPort) === process.env.T3CODE_PORT)
-    ) {
-      abandon(`The dev server chose the live server's port ${facts.serverPort}.`);
-    }
-    if (facts.pairingUrl !== undefined && facts.recovered) {
-      const running = currentServerState(paths);
-      if (running.kind === "running") {
-        // The startup URL in the log has not been used yet.
-        console.log(
-          formatInstructions({
-            paths,
-            manifest,
-            facts: running.facts,
-            pairingUrl: running.facts.pairingUrl,
-          }),
-        );
-        return;
-      }
-    }
-    if (membersOfGroup(group).length === 0) abandon("The dev server exited while starting.");
-    if (Date.now() > deadline) {
-      abandon(`The dev server was not ready after ${START_TIMEOUT_MS / 1000} seconds.`);
-    }
-    await NodeTimersPromises.setTimeout(250);
-  }
+  });
+  // The startup URL in the log has not been used yet.
+  console.log(formatInstructions({ paths, manifest, facts, pairingUrl: facts.pairingUrl }));
 }
 
 async function stop(paths: LiveTestPaths): Promise<void> {

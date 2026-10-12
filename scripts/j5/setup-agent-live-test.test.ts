@@ -11,6 +11,7 @@ import {
   parseCommand,
   readServerLog,
   resolveLiveTestPaths,
+  startRefusal,
   type ServerLogFacts,
 } from "./setup-agent-live-test.ts";
 
@@ -98,6 +99,90 @@ describe("resolveLiveTestPaths", () => {
       "is the live home",
     );
     NodeFS.rmSync(layout.base, { recursive: true, force: true });
+  });
+});
+
+describe("resolveLiveTestPaths after a build", () => {
+  const resolve = (layout: ReturnType<typeof makeLayout>) =>
+    resolveLiveTestPaths({
+      checkout: layout.worktree,
+      homeDirectory: layout.homeDirectory,
+      environment: { J5CODE_HOME: layout.liveHome },
+    });
+
+  it("refuses a home or repository that has become a link out of the build", async () => {
+    for (const [name, target] of [
+      ["home", (layout: ReturnType<typeof makeLayout>) => layout.liveHome],
+      ["test-repo", (layout: ReturnType<typeof makeLayout>) => layout.mainCheckout],
+    ] as const) {
+      const layout = makeLayout();
+      const root = NodePath.join(layout.worktree, ".j5code", "live-test");
+      NodeFS.mkdirSync(root, { recursive: true });
+      NodeFS.symlinkSync(target(layout), NodePath.join(root, name));
+      assert.include(await refusal(resolve(layout)), `outside ${root}`);
+      NodeFS.rmSync(layout.base, { recursive: true, force: true });
+    }
+  });
+
+  it("derives the home from the worktree, whatever a manifest might say", async () => {
+    const layout = makeLayout();
+    const root = NodePath.join(layout.worktree, ".j5code", "live-test");
+    NodeFS.mkdirSync(NodePath.join(root, "home"), { recursive: true });
+    NodeFS.writeFileSync(
+      NodePath.join(root, "manifest.json"),
+      JSON.stringify({ home: layout.liveHome, testRepo: layout.mainCheckout }),
+    );
+    const paths = await resolve(layout);
+    assert.equal(paths.home, NodePath.join(root, "home"));
+    assert.equal(paths.testRepo, NodePath.join(root, "test-repo"));
+    NodeFS.rmSync(layout.base, { recursive: true, force: true });
+  });
+
+  it("refuses a worktree whose path would break the commands it prints", async () => {
+    for (const name of ["with space", "semi;colon", "dollar$(x)"]) {
+      const layout = makeLayout();
+      const worktree = NodePath.join(NodePath.dirname(layout.worktree), name);
+      NodeFS.renameSync(layout.worktree, worktree);
+      assert.include(
+        await refusal(resolve({ ...layout, worktree })),
+        "contains a space or a shell character",
+      );
+      NodeFS.rmSync(layout.base, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("startRefusal", () => {
+  const facts: ServerLogFacts = {
+    serverPort: 15634,
+    webPort: 7594,
+    baseDir: "/w/.j5code/live-test/home",
+    pairingUrl: undefined,
+    recovered: false,
+  };
+  const input = { facts, home: "/w/.j5code/live-test/home", inheritedPort: "5773" };
+
+  it("lets a server on the test home and its own port continue, before and after it reports", () => {
+    assert.isUndefined(startRefusal(input));
+    assert.isUndefined(
+      startRefusal({ ...input, facts: { ...facts, serverPort: undefined, baseDir: undefined } }),
+    );
+  });
+
+  it("abandons a server on another home", () => {
+    assert.include(
+      startRefusal({ ...input, facts: { ...facts, baseDir: "/w/.j5code" } }) ?? "",
+      "not the test home",
+    );
+  });
+
+  it("abandons a server on the live port or the port the shell inherited", () => {
+    assert.include(
+      startRefusal({ ...input, inheritedPort: undefined, facts: { ...facts, serverPort: 5773 } }) ??
+        "",
+      "live server's port",
+    );
+    assert.include(startRefusal({ ...input, inheritedPort: "15634" }) ?? "", "live server's port");
   });
 });
 
