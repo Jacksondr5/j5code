@@ -7,7 +7,7 @@ import {
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SubscriptionRef from "effect/SubscriptionRef";
-import { AsyncResult, Atom } from "effect/reactivity";
+import { AsyncResult, Atom, type AtomRegistry } from "effect/reactivity";
 
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 import { EnvironmentSupervisor } from "../connection/supervisor.ts";
@@ -134,6 +134,21 @@ export function createSharingEnvironmentAtoms<R, E>(
   return {
     connectionKind,
     isGuest,
+    /**
+     * The same answer for code that is not rendering, such as a menu built when it is opened.
+     * `permitted` is upstream's own server-wide answer, returned as it is for a connection that is
+     * not a guest's. It reads what the thread's view already holds, and asks nothing.
+     */
+    readCanOperateThread: (
+      registry: AtomRegistry.AtomRegistry,
+      input: {
+        readonly environmentId: EnvironmentId;
+        readonly threadId: ThreadId | null;
+        readonly permitted: boolean;
+      },
+    ): boolean =>
+      input.permitted &&
+      registry.get(threadOperable(threadKey(input.environmentId, input.threadId))),
     /** Whether sharing lets this connection write to the thread; upstream's permission is separate. */
     threadOperable: (environmentId: EnvironmentId, threadId: ThreadId | null) =>
       threadOperable(threadKey(environmentId, threadId)),

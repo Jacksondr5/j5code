@@ -3,13 +3,15 @@ import { createSharingEnvironmentAtoms } from "@t3tools/client-runtime/j5/sharin
 import {
   AuthOrchestrationOperateScope,
   type EnvironmentId,
+  type ScopedThreadRef,
   type ThreadId,
 } from "@t3tools/contracts";
 import { Atom } from "effect/reactivity";
 
 import { environmentCatalog } from "../../connection/catalog";
 import { connectionAtomRuntime } from "../../connection/runtime";
-import { useEnvironmentScope } from "../../state/session";
+import { appAtomRegistry } from "../../rpc/atomRegistry";
+import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
 
 export const j5Sharing = createSharingEnvironmentAtoms(connectionAtomRuntime);
 
@@ -30,6 +32,18 @@ export function useCanOperateThread(
     environmentId === null ? NOTHING_WITHHELD : j5Sharing.threadOperable(environmentId, threadId),
   );
   return permitted && shared;
+}
+
+/**
+ * `useCanOperateThread` for code that runs outside a render: upstream's thread action menu builds
+ * its items when it is opened. It reads the level the open thread's view already holds.
+ */
+export function readCanOperateThread(thread: ScopedThreadRef): boolean {
+  return j5Sharing.readCanOperateThread(appAtomRegistry, {
+    environmentId: thread.environmentId,
+    threadId: thread.threadId,
+    permitted: readEnvironmentScope(thread.environmentId, AuthOrchestrationOperateScope),
+  });
 }
 
 /** The connected servers this person is a guest on, by environment id. */

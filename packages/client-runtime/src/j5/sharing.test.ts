@@ -181,6 +181,33 @@ describe("a guest's connection", () => {
     }),
   );
 
+  it.effect("is offered a thread's actions only where it holds Collaborate", () =>
+    Effect.gen(function* () {
+      const { layer, registry } = yield* environments();
+      const sharing = createSharingEnvironmentAtoms(Atom.runtime(layer));
+      // The open thread's view holds these; the read asks nothing of its own.
+      const viewed = sharing.threadOperable(SHARED_SERVER, VIEWED);
+      const joined = sharing.threadOperable(SHARED_SERVER, JOINED);
+      const own = sharing.threadOperable(MEMBER_SERVER, VIEWED);
+      for (const atom of [viewed, joined, own]) yield* AtomRegistry.mount(registry, atom);
+      expect(yield* settlesAt(registry, joined, true)).toBe(true);
+      expect(yield* settlesAt(registry, sharing.connectionKind(MEMBER_SERVER), "member")).toBe(
+        true,
+      );
+      const read = (environmentId: EnvironmentId, threadId: ThreadId, permitted: boolean) =>
+        sharing.readCanOperateThread(registry, { environmentId, threadId, permitted });
+
+      // A member gets upstream's answer, whichever it is.
+      expect(read(MEMBER_SERVER, VIEWED, true)).toBe(true);
+      expect(read(MEMBER_SERVER, VIEWED, false)).toBe(false);
+      // A guest with View gets no; with Collaborate on that thread, yes.
+      expect(read(SHARED_SERVER, VIEWED, true)).toBe(false);
+      expect(read(SHARED_SERVER, JOINED, true)).toBe(true);
+      // A guest never gets more than upstream's permission allows.
+      expect(read(SHARED_SERVER, JOINED, false)).toBe(false);
+    }),
+  );
+
   it.effect("sends none of J5's reads once the server has said it is a guest's", () =>
     Effect.gen(function* () {
       const { layer, registry, httpCalls } = yield* environments();
