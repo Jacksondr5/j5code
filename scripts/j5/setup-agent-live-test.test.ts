@@ -11,6 +11,7 @@ import {
   addRemoteUrl,
   listsPeer,
   peerSteps,
+  servedTailnetPorts,
   liveTestEnvironment,
   type LiveTestMode,
   modeRefusal,
@@ -189,6 +190,8 @@ describe("startRefusal", () => {
     baseDir: "/w/.j5code/live-test/home",
     pairingUrl: undefined,
     recovered: false,
+    sharedUrl: undefined,
+    shareFailure: undefined,
   };
   const input = { facts, home: "/w/.j5code/live-test/home", inheritedPort: "5773" };
 
@@ -213,6 +216,31 @@ describe("startRefusal", () => {
       "live server's port",
     );
     assert.include(startRefusal({ ...input, inheritedPort: "15634" }) ?? "", "live server's port");
+  });
+
+  it("abandons a server that had to be shared and was not", () => {
+    const unshared = { ...facts, shareFailure: "permission denied" };
+    assert.include(
+      startRefusal({ ...input, facts: unshared, requireShare: true }) ?? "",
+      "could not share on the tailnet: permission denied",
+    );
+    // A test server that nobody asked to share carries on.
+    assert.isUndefined(startRefusal({ ...input, facts: unshared }));
+  });
+});
+
+describe("servedTailnetPorts", () => {
+  it("reads the mapped ports from tailscale's status, and nothing from an empty one", () => {
+    const status = [
+      "https://openclaw.tail477304.ts.net:8444 (tailnet only)",
+      "|-- / proxy http://127.0.0.1:5773",
+      "",
+      "https://openclaw.tail477304.ts.net:7594 (tailnet only)",
+      "|-- / proxy http://127.0.0.1:7594",
+    ].join("\n");
+    // The proxied targets are not mappings: 5773 is the live server, not a served port.
+    assert.deepEqual(servedTailnetPorts(status), [8444, 7594]);
+    assert.deepEqual(servedTailnetPorts("No serve config\n"), []);
   });
 });
 
@@ -251,6 +279,8 @@ describe("readServerLog", () => {
       baseDir: "/w/.j5code/live-test/home",
       pairingUrl: "http://localhost:7594/pair#token=NEW",
       recovered: true,
+      sharedUrl: undefined,
+      shareFailure: undefined,
     });
     assert.deepEqual(readServerLog("starting"), {
       serverPort: undefined,
@@ -258,7 +288,24 @@ describe("readServerLog", () => {
       baseDir: undefined,
       pairingUrl: undefined,
       recovered: false,
+      sharedUrl: undefined,
+      shareFailure: undefined,
     });
+  });
+
+  it("reads where the dev runner shared the server, or why it could not", () => {
+    assert.equal(
+      readServerLog(
+        "[23:01:02.003] INFO (#1): [dev-runner] shared on tailnet: https://host.ts.net:7594",
+      ).sharedUrl,
+      "https://host.ts.net:7594",
+    );
+    assert.equal(
+      readServerLog(
+        "[23:01:02.003] WARN (#1): [dev-runner] could not share on the tailnet: permission denied. Continuing unshared.",
+      ).shareFailure,
+      "permission denied. Continuing unshared.",
+    );
   });
 });
 
@@ -269,6 +316,8 @@ describe("classifyServer", () => {
     baseDir: "/w/.j5code/live-test/home",
     pairingUrl: "http://localhost:7594/pair#token=T",
     recovered: true,
+    sharedUrl: undefined,
+    shareFailure: undefined,
   };
   const ours = {
     worktree: "/w",
@@ -340,6 +389,10 @@ describe("parseCommand", () => {
       mode: "peer-poll",
     });
     assert.deepEqual(parseCommand(["--poll", "--peer"]), { command: "start", mode: "peer-poll" });
+    assert.deepEqual(parseCommand(["rebuild", "--for-dev"]), {
+      command: "rebuild",
+      mode: "for-dev",
+    });
   });
 
   it("refuses unknown words and flags, and a mode flag where none applies", () => {
@@ -351,6 +404,7 @@ describe("parseCommand", () => {
       // --poll says how two servers peer; it means nothing alone or with an empty home.
       ["--poll"],
       ["--fresh", "--peer"],
+      ["--for-dev", "--peer"],
       ["status", "--peer"],
       // These act on whatever is built; a flag would suggest they could change it.
       ["status", "--fresh"],
