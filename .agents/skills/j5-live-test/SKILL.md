@@ -25,6 +25,22 @@ Its report comes back as a short message naming an artifact. Put the verdict,
 what was not exercised live, and what the person must test by hand in the PR's
 "Live testing" section.
 
+Record each testing decision there too, with its reason: which rows you
+judged did not apply, and what you re-tested or did not after a later change.
+
+More than one tester can run at once. Each has its own server, and they share
+one browser, so one tester's timed-out call can cost another a single failed
+call.
+
+### When the code changes after the test
+
+A test covers one commit. Before merging, re-test live whatever has changed
+since on a path your change exercises, once, at the head that will merge. Unit
+tests and CI do not show what an agent or a person sees, and nobody else's test
+covers a path only your change uses. Text an agent reads, such as a tool
+description, counts. If no code changed, do not re-test. Either way, name the
+tested commit and the head in the PR.
+
 ## Run a test
 
 ### Set up
@@ -138,16 +154,15 @@ A claim without one of those three labels counts as not verified.
 Always: the change's own flow, including the way back out, and one real turn
 sent through the UI.
 
-| When the change touches                          | Also run                                                 |
-| ------------------------------------------------ | -------------------------------------------------------- |
-| The turn path, provider adapters, or MCP tools   | One turn each on Codex and Claude                        |
-| Stored state, deliveries, or recovery            | `restart` at rest, then use the state                    |
-| Interrupted runs                                 | `restart` during a held turn                             |
-| Migrations                                       | A migration rehearsal on a copy, and a `--fresh` run     |
-| Startup, onboarding, or settings defaults        | A `--fresh` run                                          |
-| Anything an agent is meant to use                | Ask a real agent in plain words, without naming the tool |
-| Peering or cross-server messages                 | A `--peer` run                                           |
-| UI, after a rebase or review fix that touched it | The browser pass again, before merge                     |
+| When the change touches                        | Also run                                                 |
+| ---------------------------------------------- | -------------------------------------------------------- |
+| The turn path, provider adapters, or MCP tools | One turn each on Codex and Claude                        |
+| Stored state, deliveries, or recovery          | `restart` at rest, then use the state                    |
+| Interrupted runs                               | `restart` during a held turn                             |
+| Migrations                                     | A migration rehearsal on a copy, and a `--fresh` run     |
+| Startup, onboarding, or settings defaults      | A `--fresh` run                                          |
+| Anything an agent is meant to use              | Ask a real agent in plain words, without naming the tool |
+| Peering or cross-server messages               | A `--peer` run                                           |
 
 ## PR screenshots
 
