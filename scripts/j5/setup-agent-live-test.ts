@@ -283,12 +283,12 @@ export type ServerState =
  * Decides whether the recorded process group is this worktree's test server,
  * and whether it is serving.
  *
- * The group is ours when its leader is still the process that was spawned
+ * The group is ours only when its leader is still the process that was spawned
  * (same pid and start time) and runs from the worktree. That needs no healthy
- * server, so a crashed or half-started one can still be stopped. It is
- * "running" when the listener on the port its log reports is in the group and
- * runs from inside the worktree. A live group that is neither is reported,
- * never signalled.
+ * server, so a crashed or half-started one can still be stopped. A group that
+ * is ours is "running" when the listener on the port its log reports is in the
+ * group and runs from inside the worktree, and "notServing" otherwise. A live
+ * group that is not ours is reported, never signalled.
  */
 export function classifyServer(input: {
   readonly worktree: string;
@@ -310,6 +310,15 @@ export function classifyServer(input: {
     const cwd = input.cwdOf(pid);
     return cwd !== undefined && isInside(cwd, input.worktree);
   };
+  // Identity first: nothing below may call a group ours unless its leader is
+  // still the process that was spawned, whatever is listening on the port.
+  if (input.startTimeOf(group) !== record.leaderStartTime || !insideWorktree(group)) {
+    return {
+      kind: "unverified",
+      group,
+      reason: `Process group ${group} still has processes (${members.join(", ")}), but its leader is not the process this script started, so it will not signal them. Inspect with \`ps -o pid,pgid,args -g ${group}\`.`,
+    };
+  }
   const listener = facts.serverPort === undefined ? undefined : input.listenerOn(facts.serverPort);
   const notServing =
     facts.serverPort === undefined
@@ -321,15 +330,9 @@ export function classifyServer(input: {
           : !insideWorktree(listener)
             ? `The listener on port ${facts.serverPort} does not run from this worktree.`
             : undefined;
-  if (notServing === undefined) return { kind: "running", group, facts };
-  if (input.startTimeOf(group) === record.leaderStartTime && insideWorktree(group)) {
-    return { kind: "notServing", group, reason: notServing };
-  }
-  return {
-    kind: "unverified",
-    group,
-    reason: `${notServing} Process group ${group} still has processes (${members.join(", ")}), but its leader is not the process this script started, so it will not signal them. Inspect with \`ps -o pid,pgid,args -g ${group}\`.`,
-  };
+  return notServing === undefined
+    ? { kind: "running", group, facts }
+    : { kind: "notServing", group, reason: notServing };
 }
 
 function currentServerState(paths: LiveTestPaths): ServerState {
@@ -541,31 +544,33 @@ async function stopGroup(group: number): Promise<void> {
  * it. Returns inside START_TIMEOUT_MS either way: a server that is merely slow
  * is left running and reported as still starting.
  */
-async function waitUntilReady(paths: LiveTestPaths, group: number): Promise<void> {
+async function waitUntilReady(paths: LiveTestPaths): Promise<void> {
   const deadline = Date.now() + START_TIMEOUT_MS;
   for (;;) {
     const facts = readServerLog(NodeFS.readFileSync(paths.log, "utf8"));
-    const refusal = startRefusal({
-      facts,
-      home: paths.home,
-      inheritedPort: process.env.T3CODE_PORT,
-    });
-    if (refusal !== undefined) {
-      await stopGroup(group);
-      NodeFS.rmSync(paths.record, { force: true });
-      throw new LiveTestRefusal(`${refusal} It has been stopped.`);
-    }
+    // Classify before anything else: a refusal below signals the group, and
+    // only a group proven to be ours may be signalled.
     const state = currentServerState(paths);
-    if (state.kind === "running" && facts.pairingUrl !== undefined && facts.recovered) {
-      return printRunning(paths, state.facts);
-    }
+    if (state.kind === "unverified") throw new LiveTestRefusal(state.reason);
     if (state.kind === "stopped") {
       NodeFS.rmSync(paths.record, { force: true });
       throw new LiveTestRefusal(
         `The dev server exited while starting.\nLast lines of ${paths.log}:\n${logTail(paths)}`,
       );
     }
-    if (state.kind === "unverified") throw new LiveTestRefusal(state.reason);
+    const refusal = startRefusal({
+      facts,
+      home: paths.home,
+      inheritedPort: process.env.T3CODE_PORT,
+    });
+    if (refusal !== undefined) {
+      await stopGroup(state.group);
+      NodeFS.rmSync(paths.record, { force: true });
+      throw new LiveTestRefusal(`${refusal} It has been stopped.`);
+    }
+    if (state.kind === "running" && facts.pairingUrl !== undefined && facts.recovered) {
+      return printRunning(paths, state.facts);
+    }
     if (Date.now() > deadline) {
       throw new LiveTestRefusal(
         `The dev server is not ready after ${START_TIMEOUT_MS / 1000} seconds. It has been left running.\nIf it is still starting, check again with: ${selfCommand(paths, "status")}\nIf it has failed (see ${paths.log}), start it again with: ${selfCommand(paths, "restart")}`,
@@ -579,7 +584,7 @@ async function start(paths: LiveTestPaths): Promise<void> {
   const state = currentServerState(paths);
   if (state.kind === "unverified") throw new LiveTestRefusal(state.reason);
   // Already started, perhaps by a call that is still waiting: wait with it.
-  if (state.kind !== "stopped") return waitUntilReady(paths, state.group);
+  if (state.kind !== "stopped") return waitUntilReady(paths);
   if (!NodeFS.existsSync(paths.manifest)) buildHome(paths);
 
   const log = NodeFS.openSync(paths.log, "w");
@@ -605,7 +610,7 @@ async function start(paths: LiveTestPaths): Promise<void> {
   child.unref();
 
   console.log("Starting the dev server...");
-  await waitUntilReady(paths, child.pid);
+  await waitUntilReady(paths);
 }
 
 async function stop(paths: LiveTestPaths): Promise<void> {

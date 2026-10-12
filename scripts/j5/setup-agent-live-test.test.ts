@@ -279,18 +279,23 @@ describe("classifyServer", () => {
   });
 
   it("never treats a live group as ours when its leader is not the process that was spawned", () => {
-    const notServing = { ...ours, listenerOn: () => undefined };
-    for (const other of [
+    const badLeaders = [
       // The pid was recycled: same number, later start.
       { startTimeOf: () => "9999" },
       // The leader exited and only stragglers remain.
       { startTimeOf: () => undefined },
-      { cwdOf: () => "/somewhere/else" },
+      { cwdOf: (pid: number) => (pid === 100 ? "/somewhere/else" : "/w/apps/server") },
       // A sibling directory that shares the worktree's name as a prefix.
-      { cwdOf: () => "/w-other" },
-      { cwdOf: () => undefined },
-    ]) {
-      assert.equal(classifyServer({ ...notServing, ...other }).kind, "unverified");
+      { cwdOf: (pid: number) => (pid === 100 ? "/w-other" : "/w/apps/server") },
+      { cwdOf: (pid: number) => (pid === 100 ? undefined : "/w/apps/server") },
+    ];
+    for (const other of badLeaders) {
+      // A healthy listener in the group proves nothing about who leads it.
+      assert.equal(classifyServer({ ...ours, ...other }).kind, "unverified");
+      assert.equal(
+        classifyServer({ ...ours, ...other, listenerOn: () => undefined }).kind,
+        "unverified",
+      );
     }
   });
 });
