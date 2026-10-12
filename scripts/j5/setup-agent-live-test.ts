@@ -1669,6 +1669,9 @@ const formatBaseProgress = (paths: LiveTestPaths, progress: BaseProgress) => {
   ).join("\n")}`;
 };
 
+/** How long a step's group has to end after SIGTERM before it is killed. */
+const STEP_KILL_GRACE_MS = 5_000;
+
 /**
  * Runs a command in the foreground, in a process group of its own, and waits
  * for it. If `deadline` passes first, the whole group is ended and waited for
@@ -1708,33 +1711,42 @@ export async function runInOwnGroup(
       // Already gone.
     }
   };
+  // A command that ignores SIGTERM never exits on its own, so the hard kill is
+  // armed when the deadline passes, not after waiting for an exit.
+  let hardKill: NodeJS.Timeout | undefined;
   const timer = setTimeout(
     () => {
       timedOut = true;
       signalGroup("SIGTERM");
+      hardKill = setTimeout(() => signalGroup("SIGKILL"), STEP_KILL_GRACE_MS);
     },
     Math.max(0, options.deadline - Date.now()),
   );
+  // If this command is itself told to stop, the step it is waiting on goes too:
+  // the step is in its own group and would otherwise carry on.
+  const endWithUs = (signal: NodeJS.Signals) => {
+    signalGroup("SIGKILL");
+    process.exit(signal === "SIGINT" ? 130 : 143);
+  };
+  process.once("SIGTERM", endWithUs);
+  process.once("SIGINT", endWithUs);
   const status = await new Promise<number | null>((resolve) => {
     child.on("error", () => resolve(null));
     child.on("exit", (code) => resolve(code));
   });
   clearTimeout(timer);
   if (timedOut && group !== undefined) {
-    // The command is gone; make sure what it started is gone too.
-    const emptied = async (timeoutMs: number) => {
-      const until = Date.now() + timeoutMs;
-      while (membersOfGroup(group).length > 0) {
-        if (Date.now() > until) return false;
-        await NodeTimersPromises.setTimeout(100);
-      }
-      return true;
-    };
-    if (!(await emptied(5_000))) {
-      signalGroup("SIGKILL");
-      await emptied(5_000);
+    // The command is gone; wait until what it started is gone too. The hard
+    // kill stays armed until then.
+    const until = Date.now() + 2 * STEP_KILL_GRACE_MS;
+    while (membersOfGroup(group).length > 0 && Date.now() < until) {
+      await NodeTimersPromises.setTimeout(100);
     }
+    if (membersOfGroup(group).length > 0) signalGroup("SIGKILL");
   }
+  clearTimeout(hardKill);
+  process.removeListener("SIGTERM", endWithUs);
+  process.removeListener("SIGINT", endWithUs);
   const output = NodeFS.readFileSync(capture, "utf8");
   NodeFS.rmSync(NodePath.dirname(capture), { recursive: true, force: true });
   return { status, output, timedOut };

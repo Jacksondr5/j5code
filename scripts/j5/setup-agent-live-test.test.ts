@@ -696,6 +696,20 @@ describe("runInOwnGroup", () => {
   });
 });
 
+describe("runInOwnGroup against a command that will not stop", () => {
+  it("kills a command that ignores the request to end, and returns", async () => {
+    const started = Date.now();
+    const cut = await runInOwnGroup(
+      process.execPath,
+      ["-e", 'process.on("SIGTERM", () => {}); setInterval(() => {}, 1000);'],
+      { cwd: NodeOS.tmpdir(), env: process.env, deadline: Date.now() + 500 },
+    );
+    assert.isTrue(cut.timedOut);
+    // Half a second to the deadline, five more of grace, then the kill.
+    assert.isBelow(Date.now() - started, 15_000);
+  }, 30_000);
+});
+
 describe("baseProgress", () => {
   const ready = {
     checkoutHead: "abc",
