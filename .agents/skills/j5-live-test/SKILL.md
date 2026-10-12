@@ -46,7 +46,9 @@ points at a real repository or at the developer's data.
 
 The script builds one setup per worktree. To change mode, run `rebuild` with
 the new flags. A `--fresh` home has no project and no pinned model: add only
-the test repository the script names, and pick your model by hand.
+the test repository the script names, and pick your model by hand. Open it in
+a tab with `profileId: "incognito"`: the default browser profile may have
+finished onboarding already, and then the wizard does not show.
 
 `stop`, `status`, and `restart` act on the server the script started. `status`
 starts with `RUNNING`, `NOT SERVING`, or `STOPPED`, and prints a fresh pairing
