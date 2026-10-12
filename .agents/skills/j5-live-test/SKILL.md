@@ -44,6 +44,10 @@ points at a real repository or at the developer's data.
 | The same, with Remote polling Local             | `--peer --poll` |
 | A base and a head server for before/after shots | `--base <ref>`  |
 
+The script builds one setup per worktree. To change mode, run `rebuild` with
+the new flags. A `--fresh` home has no project and no pinned model: add only
+the test repository the script names, and pick your model by hand.
+
 `stop`, `status`, and `restart` act on the server the script started. `status`
 starts with `RUNNING`, `NOT SERVING`, or `STOPPED`, and prints a fresh pairing
 URL when the server is up. Run `stop` when you finish.
