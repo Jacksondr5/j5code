@@ -30,7 +30,7 @@ Every upstream mechanism is judged by one question: _does it carry an opinion ab
 
 Upstream's thread-send, and the server seam beneath it, is **transport**: it injects text into a thread and nothing more. Agent-to-agent communication is transport **plus the record**: the envelope naming the sender and its project, the ledger row that makes the message part of the communication graph, the Exchange and what it owes, the delivery receipt, and silence measurement. J5's `j5_send_message` is upstream's thread-send wearing that record. A raw thread-send between agents is untracked peer communication — it can cause the exact silent stall the ledger exists to make visible — so J5 consumes the seam server-side and the raw tool never appears on the agent surface.
 
-Delivery to a busy agent queues behind the active turn; steering is the person's act, with one ruled exception for a peer's update into a running Codex Astra turn ([A2A definition](index.md), Delivery).
+Delivery to a busy agent queues behind the active turn; steering is the person's act, with one ruled exception for a peer's update into a running Codex GPT 6 turn ([A2A definition](index.md), Delivery).
 
 ### The ownership rule
 
@@ -70,7 +70,7 @@ Agents spawned through upstream's delegation path before the spawn verb existed 
 - 2026-08-24 — Subagent and Peer Agent distinguished; delegation excluded from the product surface ([record](../../worklog/2026-08-24-spawn-terminology-session.md)).
 - 2026-08-29 — the substrate line drawn: the four dispositions, the ownership rule, the fail-closed tool subset ([record](../../worklog/2026-08-29-substrate-session.md)).
 - 2026-08-31 — `create_threads` and `t3_thread_start` omitted; `clear_own_ask` built.
-- 2026-09-03 — delivery queues behind an active turn; steering is the person's act ([record](../../worklog/2026-09-03-queue-vs-steer-ruling.md)); 2026-09-04 — the Codex Astra exception ([record](../../worklog/2026-09-04-astra-peer-delivery.md)).
+- 2026-09-03 — delivery queues behind an active turn; steering is the person's act ([record](../../worklog/2026-09-03-queue-vs-steer-ruling.md)); 2026-09-04 — the Codex Astra exception ([record](../../worklog/2026-09-04-astra-peer-delivery.md)); 2026-10-12 — the exception covers every Codex GPT 6 model.
 - 2026-09-12 — `list_squadrons` and `join_squadron` admitted to the surface (issue #129, PR #131).
 - 2026-09-07 — rewritten into the definition shape; stale rows (the open `create_threads` row, "needed-but-unbuilt" `clear_own_ask`, the pending prompt-text edit, Squadron creation as "nothing exists") corrected to the current state.
 - 2026-10-07 — Squadrons retired: a thread's home is its project, every thread but a provider Subagent registers at creation, and `list_squadrons` and `join_squadron` leave the surface (Jackson, 2026-10-05; [#412](https://github.com/Jacksondr5/j5code/issues/412)).

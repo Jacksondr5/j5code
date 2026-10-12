@@ -94,7 +94,7 @@ import * as VcsProcess from "../../vcs/VcsProcess.ts";
 import {
   A2ADeliveryHeldError,
   A2ADeliveryTransport,
-  astraPeerSteeringRun,
+  gpt6PeerSteeringRun,
   deliveryMessageId,
   formatAgentDeliveryEnvelope,
   live as deliveryTransportLive,
@@ -651,7 +651,7 @@ const publishCommandExecution = (
     },
   });
 
-it.effect.each(["gpt-6-astra", "astra"])(
+it.effect.each(["gpt-6-astra", "astra", "gpt-6-luna", "gpt-6-sol", "gpt-6.1-sol"])(
   "delivers updates into a running %s turn without restarting its tools",
   (model) =>
     Effect.gen(function* () {
@@ -675,7 +675,7 @@ it.effect.each(["gpt-6-astra", "astra"])(
         });
         // Starting/preparing is not a live provider turn: never use auto/restart.
         const starting = yield* threads.getThreadProjection(target.threadId);
-        assert.isUndefined(astraPeerSteeringRun(starting, "peer"));
+        assert.isUndefined(gpt6PeerSteeringRun(starting, "peer"));
         const running = yield* sink.stream({ threadId: target.threadId }).pipe(
           Stream.filter(
             (stored) =>
@@ -688,13 +688,13 @@ it.effect.each(["gpt-6-astra", "astra"])(
         yield* worker.runOnce;
         yield* Fiber.join(running);
         const projection = yield* threads.getThreadProjection(target.threadId);
-        assert.equal(astraPeerSteeringRun(projection, "peer")?.id, active.run.id);
+        assert.equal(gpt6PeerSteeringRun(projection, "peer")?.id, active.run.id);
         for (const channel of ["silence_notice", "lifecycle_notice"] as const) {
-          assert.isUndefined(astraPeerSteeringRun(projection, channel));
+          assert.isUndefined(gpt6PeerSteeringRun(projection, channel));
         }
-        for (const otherModel of ["gpt-5.6-sol", "gpt-6-astra-custom", "claude-fable-5-1"]) {
+        for (const otherModel of ["gpt-5.6-sol", "gpt-5.4", "gpt-60-nova", "claude-fable-5-1"]) {
           assert.isUndefined(
-            astraPeerSteeringRun(
+            gpt6PeerSteeringRun(
               {
                 ...projection,
                 runs: projection.runs.map((run) => ({
@@ -707,7 +707,7 @@ it.effect.each(["gpt-6-astra", "astra"])(
           );
         }
         assert.isUndefined(
-          astraPeerSteeringRun(
+          gpt6PeerSteeringRun(
             {
               ...projection,
               providerThreads: projection.providerThreads.map((thread) => ({
@@ -718,15 +718,15 @@ it.effect.each(["gpt-6-astra", "astra"])(
             "peer",
           ),
         );
-        assert.isUndefined(astraPeerSteeringRun({ ...projection, providerSessions: [] }, "peer"));
+        assert.isUndefined(gpt6PeerSteeringRun({ ...projection, providerSessions: [] }, "peer"));
         assert.isUndefined(
-          astraPeerSteeringRun(
+          gpt6PeerSteeringRun(
             { ...projection, thread: { ...projection.thread, archivedAt: yield* DateTime.now } },
             "peer",
           ),
         );
         assert.isUndefined(
-          astraPeerSteeringRun(
+          gpt6PeerSteeringRun(
             {
               ...projection,
               providerSessions: projection.providerSessions.map((session) => ({
@@ -738,7 +738,7 @@ it.effect.each(["gpt-6-astra", "astra"])(
           ),
         );
         assert.isUndefined(
-          astraPeerSteeringRun(
+          gpt6PeerSteeringRun(
             {
               ...projection,
               providerSessions: projection.providerSessions.map((session) => ({
@@ -752,7 +752,7 @@ it.effect.each(["gpt-6-astra", "astra"])(
             "peer",
           ),
         );
-        assert.isUndefined(astraPeerSteeringRun({ ...projection, providerTurns: [] }, "peer"));
+        assert.isUndefined(gpt6PeerSteeringRun({ ...projection, providerTurns: [] }, "peer"));
         const turn = (yield* Ref.get(harness.activeTurns)).get(target.threadId)!;
         const startedAt = yield* DateTime.now;
         yield* publishCommandExecution(turn, {
