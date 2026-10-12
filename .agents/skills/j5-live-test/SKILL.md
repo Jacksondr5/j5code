@@ -94,15 +94,17 @@ A worktree holds one setup at a time. Pass a flag to the first start, or to
   or hang.
 - After editing a Crew roster, check each seat's model again before approving:
   an edit can change it.
+- Write to a test agent the way a person would: say what you want done and
+  what you want to see. Do not stack guards such as "do nothing else" or "do
+  not message anyone". An agent that wanders is a finding, not something to
+  fence off.
+- Keep messaging words for messaging. "Reply" means sending a message back. To
+  see something in an agent's own thread, ask it to "say X in your thread". To
+  prove a message was delivered, ask its receiver to write a file.
 - A test agent on Claude can still reach real Claude sessions on this machine
-  through its own harness tools (`ListAgents`, `SendMessage`). When a test has
-  agents message each other, tell the test agent to use J5's tools and the
-  participants `j5_list_participants` returns, and check which tool it called.
-- To check that a message was delivered, ask the receiver to write a file,
-  not to reply. A plain message tells its receiver that no reply is needed, so
-  a missing reply does not mean a lost message.
-- The default Haiku cannot be started with `j5_spawn_agent` and has no Auto
-  mode. For an agent that another agent starts, use another authorized model.
+  through its own harness tools (`ListAgents`, `SendMessage`). Check which
+  tool it called. Name J5's tools in a prompt only when the test is not about
+  which tool an agent picks.
 - An agent's own account of what it did is not evidence. Check the tool
   result, the stored row, or the screen.
 - To hold a turn open, ask the agent to run `./scripts/hold.sh` in the test
