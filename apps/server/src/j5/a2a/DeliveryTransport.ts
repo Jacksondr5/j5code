@@ -11,7 +11,7 @@ import {
   peerCredentialRejectedReason,
   type PeerDeliveryRequest,
 } from "@t3tools/contracts/j5";
-import { normalizeModelSlug } from "@t3tools/shared/model";
+import { codexModelFamily, normalizeModelSlug } from "@t3tools/shared/model";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -203,7 +203,8 @@ const assertPersonReply = (input: AgentDeliveryInput): never => {
 };
 
 // Every GPT 6 model (Astra, Luna, Sol and their point releases) takes messages during work.
-const isGpt6Model = (model: string | null) => model !== null && /^gpt-6[-.]/.test(model);
+const isGpt6Model = (model: string | null) =>
+  model !== null && /^gpt-6[-.]/.test(codexModelFamily(model));
 
 /** Use the active run's selection, not the picker selection for future runs. */
 export const gpt6PeerSteeringRun = (

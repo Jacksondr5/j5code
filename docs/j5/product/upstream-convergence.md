@@ -74,3 +74,4 @@ Fixes J5 carries that belong upstream are tracked in #276. V2 has merged upstrea
 - 2026-09-23 — started as a research watchlist, rewritten at every upstream advance ([Merging upstream](../process/upstream-merge.md)).
 - 2026-09-29 — moved from `research/` to `product/`: it is kept current at every advance, so it is a maintained document rather than a dated study (Jackson, [#354](https://github.com/Jacksondr5/j5code/pull/354)).
 - 2026-10-08 — rewritten against upstream `main` after V2 merged: outside-agent sign-in, environment-wide thread tools, upstream's Stop, pull-request watches, webhook schedules and provider packages added.
+- 2026-10-12 — divergence D4's exception named as GPT 6, not Astra alone (Jackson, [#569](https://github.com/Jacksondr5/j5code/pull/569)).

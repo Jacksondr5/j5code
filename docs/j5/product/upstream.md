@@ -435,4 +435,4 @@ J5 kept a run from resuming after a usage-limit reset when the person had presse
 - 2026-10-09 — D30 added: a message from another participant holds a merged thread open (Jackson).
 - 2026-10-09 — D1 rewritten: J5's instruction text lives in upstream's shared provider package and reaches Pi (Jackson).
 - 2026-10-11 — D32 added: a server's name can be set with `J5CODE_SERVER_NAME` (Jackson, [#545](https://github.com/Jacksondr5/j5code/issues/545)).
-- 2026-10-12 — D4 widened: its exception covers every Codex GPT 6 model, not Astra alone (Jackson).
+- 2026-10-12 — D4 widened: its exception covers every Codex GPT 6 model, not Astra alone (Jackson, [#569](https://github.com/Jacksondr5/j5code/pull/569)).
