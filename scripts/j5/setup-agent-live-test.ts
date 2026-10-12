@@ -377,7 +377,8 @@ export function formatInstructions(input: {
   Log           ${paths.log}
 
 Open the pairing URL in the Browser panel, then wait for [data-testid="composer-editor"].
-The pairing URL works once. \`status\` prints a fresh one each time, and so does:
+The pairing URL works once. The one printed when the server starts can change
+Connections settings; \`status\` prints a fresh standard one each time, and so does:
   ${pairCommand}
 
 Project to use: "${manifest.project.title}"
@@ -427,9 +428,20 @@ function mintPairingUrl(paths: LiveTestPaths): string | undefined {
   return /Pairing URL: (\S+)/.exec(pair.stdout ?? "")?.[1];
 }
 
-function printRunning(paths: LiveTestPaths, facts: ServerLogFacts): void {
-  const manifest = readManifest(paths);
-  console.log(formatInstructions({ paths, manifest, facts, pairingUrl: mintPairingUrl(paths) }));
+/**
+ * Prints the instructions with a pairing URL nobody has used. The call that
+ * spawned the server passes the startup URL from the log, which carries the
+ * admin scopes Connections settings need; later calls mint a standard one.
+ */
+function printRunning(paths: LiveTestPaths, facts: ServerLogFacts, startupUrl?: string): void {
+  console.log(
+    formatInstructions({
+      paths,
+      manifest: readManifest(paths),
+      facts,
+      pairingUrl: startupUrl ?? mintPairingUrl(paths),
+    }),
+  );
 }
 
 function readManifest(paths: LiveTestPaths): Manifest {
@@ -504,7 +516,11 @@ async function stopGroup(group: number): Promise<void> {
  * it. Returns inside START_TIMEOUT_MS either way: a server that is merely slow
  * is left running and reported as still starting.
  */
-async function waitUntilReady(paths: LiveTestPaths, group: number): Promise<void> {
+async function waitUntilReady(
+  paths: LiveTestPaths,
+  group: number,
+  spawnedHere: boolean,
+): Promise<void> {
   const deadline = Date.now() + START_TIMEOUT_MS;
   for (;;) {
     const facts = readServerLog(NodeFS.readFileSync(paths.log, "utf8"));
@@ -520,7 +536,7 @@ async function waitUntilReady(paths: LiveTestPaths, group: number): Promise<void
     }
     const state = currentServerState(paths);
     if (state.kind === "running" && facts.pairingUrl !== undefined && facts.recovered) {
-      return printRunning(paths, state.facts);
+      return printRunning(paths, state.facts, spawnedHere ? facts.pairingUrl : undefined);
     }
     if (state.kind === "stopped") {
       NodeFS.rmSync(paths.record, { force: true });
@@ -542,7 +558,7 @@ async function start(paths: LiveTestPaths): Promise<void> {
   const state = currentServerState(paths);
   if (state.kind === "unverified") throw new LiveTestRefusal(state.reason);
   // Already started, perhaps by a call that is still waiting: wait with it.
-  if (state.kind !== "stopped") return waitUntilReady(paths, state.group);
+  if (state.kind !== "stopped") return waitUntilReady(paths, state.group, false);
   if (!NodeFS.existsSync(paths.manifest)) buildHome(paths);
 
   const log = NodeFS.openSync(paths.log, "w");
@@ -568,7 +584,7 @@ async function start(paths: LiveTestPaths): Promise<void> {
   child.unref();
 
   console.log("Starting the dev server...");
-  await waitUntilReady(paths, child.pid);
+  await waitUntilReady(paths, child.pid, true);
 }
 
 async function stop(paths: LiveTestPaths): Promise<void> {
