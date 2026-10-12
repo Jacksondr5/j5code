@@ -123,6 +123,8 @@ it.live(
       assert.equal(git("remote", "get-url", "origin").trim(), manifest.testRepoOrigin);
       assert.equal(git("status", "--porcelain", "--branch").trim(), "## main...origin/main");
       assert.equal(git("rev-list", "--count", "HEAD").trim(), "4");
+      // Committed as executable, so every worktree of the repository can run it.
+      assert.match(git("ls-files", "--stage", manifest.holdScript), /^100755 /);
       // The gate times out with no release file; with one it succeeds and removes it,
       // leaving nothing for git to report.
       const hold = (cwd: string) => {

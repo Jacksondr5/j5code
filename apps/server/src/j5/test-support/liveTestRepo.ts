@@ -215,6 +215,14 @@ export function createLiveTestRepo(input: {
       NodeFS.writeFileSync(file, contents, relativePath.endsWith(".sh") ? { mode: 0o755 } : {});
     }
     git(input.repoDir, "add", "--all");
+    // Record the executable bit explicitly: where git is configured not to trust
+    // file modes it would commit the script as a plain file, and a thread's
+    // worktree would then check it out unable to run.
+    for (const relativePath of Object.keys(commit.files)) {
+      if (relativePath.endsWith(".sh")) {
+        git(input.repoDir, "update-index", "--chmod=+x", relativePath);
+      }
+    }
     git(input.repoDir, "commit", "--message", commit.message);
   }
 
