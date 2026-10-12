@@ -757,30 +757,190 @@ Commands:
 `;
 }
 
-/**
- * The HTTPS ports `tailscale serve` currently maps, read from its status
- * output, whose mapping lines look like "https://host.ts.net:8444 (tailnet only)".
- */
-export function servedTailnetPorts(serveStatus: string): ReadonlyArray<number> {
-  return [...serveStatus.matchAll(/^https:\/\/\S+?:(\d+)\b/gm)].map((match) => Number(match[1]));
+/** The live install's tailnet port. A `--for-dev` server must never share on it. */
+const LIVE_TAILNET_PORT = 8444;
+/** The dev runner's server port is its web port plus this (scripts/dev-runner.ts base ports). */
+const SERVER_PORT_ABOVE_WEB = 8040;
+
+export interface TailnetMapping {
+  readonly port: number;
+  /** Where the mapping proxies to, such as "http://localhost:7594". */
+  readonly targets: ReadonlyArray<string>;
 }
 
 /**
- * Makes sure this server's tailnet mapping is gone after it stops. The dev
- * runner removes it on a normal exit; this covers a runner that was killed.
- * It only ever names the one port this server shared on.
+ * The mappings in `tailscale serve status` output, which prints each as
+ *   https://host.ts.net:8444 (tailnet only)
+ *   |-- / proxy http://127.0.0.1:5773
  */
-function removeOwnTailnetMapping(webPort: number): void {
-  const served = () =>
-    servedTailnetPorts(
-      NodeChildProcess.spawnSync("tailscale", ["serve", "status"], { encoding: "utf8" }).stdout ??
-        "",
-    ).includes(webPort);
-  if (!served()) return;
-  NodeChildProcess.spawnSync("tailscale", ["serve", `--https=${webPort}`, "off"]);
-  if (served()) {
+export function tailnetMappings(serveStatus: string): ReadonlyArray<TailnetMapping> {
+  const mappings: Array<{ port: number; targets: Array<string> }> = [];
+  for (const line of serveStatus.split("\n")) {
+    const mapping = /^https:\/\/\S+?:(\d+)\b/.exec(line);
+    if (mapping !== null) {
+      mappings.push({ port: Number(mapping[1]), targets: [] });
+      continue;
+    }
+    const target = /^\|--.*\bproxy\s+(\S+)/.exec(line);
+    if (target !== null) mappings.at(-1)?.targets.push(target[1] ?? "");
+  }
+  return mappings;
+}
+
+/** Whether a mapping is one this server made: it proxies only to this server's web port on loopback. */
+export function isOwnMapping(mapping: TailnetMapping, webPort: number): boolean {
+  const own = new RegExp(`^http://(localhost|127\\.0\\.0\\.1|\\[::1\\]):${webPort}/?$`);
+  return (
+    mapping.port === webPort &&
+    mapping.targets.length > 0 &&
+    mapping.targets.every((target) => own.test(target))
+  );
+}
+
+/**
+ * Why this server must not be shared on `webPort`, or undefined when it may.
+ * `--share` replaces whatever is mapped on the port, so the port must not be
+ * the live install's and must not carry a mapping this server did not make.
+ */
+export function shareRefusal(
+  webPort: number,
+  mappings: ReadonlyArray<TailnetMapping>,
+): string | undefined {
+  if (webPort === LIVE_TAILNET_PORT) {
+    return `This worktree's web port is ${LIVE_TAILNET_PORT}, the live install's tailnet port. Sharing would replace the live mapping. Use a different worktree for --for-dev.`;
+  }
+  const foreign = mappings.find(
+    (mapping) => mapping.port === webPort && !isOwnMapping(mapping, webPort),
+  );
+  return foreign === undefined
+    ? undefined
+    : `Tailnet port ${webPort} is already mapped to ${foreign.targets.join(", ") || "something else"}, which this server did not set up. Sharing would replace it. Use a different worktree for --for-dev.`;
+}
+
+/**
+ * The mappings from a finished `tailscale serve status`. A failed read is an
+ * error, never "nothing is mapped": acting on that would be acting blind.
+ */
+export function mappingsFromStatus(result: {
+  readonly status: number | null;
+  readonly stdout: string;
+  readonly stderr: string;
+}): ReadonlyArray<TailnetMapping> {
+  if (result.status !== 0) {
     throw new LiveTestRefusal(
-      `The tailnet mapping for port ${webPort} is still there. Remove it with: tailscale serve --https=${webPort} off`,
+      `\`tailscale serve status\` failed, so the tailnet mappings cannot be read:\n${result.stderr.trim() || "no output"}`,
+    );
+  }
+  return tailnetMappings(result.stdout);
+}
+
+function readTailnetMappings(): ReadonlyArray<TailnetMapping> {
+  const status = NodeChildProcess.spawnSync("tailscale", ["serve", "status"], { encoding: "utf8" });
+  return mappingsFromStatus({
+    status: status.status,
+    stdout: status.stdout ?? "",
+    stderr: status.stderr ?? String(status.error ?? ""),
+  });
+}
+
+/**
+ * The flags that pin the dev runner to this worktree's own ports and share
+ * it. Unpinned, the runner moves to the next free port pair, which could be
+ * one that was never checked; with both ports given it uses exactly these.
+ * Refuses before anything is started if the web port must not be shared.
+ */
+function pinnedShareArgs(paths: LiveTestPaths): ReadonlyArray<string> {
+  const environment = liveTestEnvironment(process.env, paths.worktree);
+  // With both ports explicit the runner skips its search, so this prints the
+  // web port derived from the worktree path and nothing else.
+  const dryRun = NodeChildProcess.spawnSync(
+    process.execPath,
+    [
+      NodePath.join(paths.worktree, "scripts/dev-runner.ts"),
+      "dev",
+      "--dry-run",
+      "--home-dir",
+      paths.home,
+      "--port",
+      "1",
+      "--dev-url",
+      "http://localhost:1",
+    ],
+    { cwd: paths.worktree, env: environment, encoding: "utf8" },
+  );
+  const webPort = readServerLog(`${dryRun.stdout}${dryRun.stderr}`).webPort;
+  if (webPort === undefined) {
+    throw new LiveTestRefusal(`The dev runner did not report its web port:\n${dryRun.stderr}`);
+  }
+  const refusal = shareRefusal(webPort, readTailnetMappings());
+  if (refusal !== undefined) throw new LiveTestRefusal(refusal);
+  if (listenerOn(webPort) !== undefined) {
+    throw new LiveTestRefusal(
+      `Something is already listening on port ${webPort}; sharing it would publish that instead of this server.`,
+    );
+  }
+  const status = NodeChildProcess.spawnSync("tailscale", ["status", "--json"], {
+    encoding: "utf8",
+  });
+  const dnsName =
+    status.status === 0
+      ? (JSON.parse(status.stdout) as { Self?: { DNSName?: string } }).Self?.DNSName?.replace(
+          /\.$/,
+          "",
+        )
+      : undefined;
+  if (dnsName === undefined || dnsName === "") {
+    throw new LiveTestRefusal("This machine has no tailnet name, so the server cannot be shared.");
+  }
+  return [
+    "--port",
+    String(webPort + SERVER_PORT_ABOVE_WEB),
+    // The address --share will publish; given here so the web port stays the one checked above.
+    "--dev-url",
+    `https://${dnsName}:${webPort}/`,
+    "--share",
+  ];
+}
+
+/**
+ * What a stopped `--for-dev` server should do about the tailnet: nothing,
+ * remove its own mapping, or leave a foreign one alone and say so. It acts
+ * only when this run's log recorded a share, and only on a mapping that
+ * proxies to this server's own web port.
+ */
+export function mappingCleanup(
+  facts: ServerLogFacts,
+  mappings: ReadonlyArray<TailnetMapping>,
+):
+  | { readonly kind: "nothing" }
+  | { readonly kind: "remove"; readonly port: number }
+  | { readonly kind: "foreign"; readonly port: number; readonly targets: ReadonlyArray<string> } {
+  const { webPort } = facts;
+  if (facts.sharedUrl === undefined || webPort === undefined) return { kind: "nothing" };
+  const mapping = mappings.find((candidate) => candidate.port === webPort);
+  if (mapping === undefined) return { kind: "nothing" };
+  return isOwnMapping(mapping, webPort)
+    ? { kind: "remove", port: webPort }
+    : { kind: "foreign", port: webPort, targets: mapping.targets };
+}
+
+/**
+ * After a stop, makes sure this server's tailnet mapping is gone. The dev
+ * runner removes it on a normal exit; this covers a runner that was killed.
+ */
+function removeOwnTailnetMapping(facts: ServerLogFacts): void {
+  if (facts.sharedUrl === undefined) return;
+  const cleanup = mappingCleanup(facts, readTailnetMappings());
+  if (cleanup.kind === "nothing") return;
+  if (cleanup.kind === "foreign") {
+    throw new LiveTestRefusal(
+      `Tailnet port ${cleanup.port} is mapped to ${cleanup.targets.join(", ")}, which this server did not set up. It has been left alone.`,
+    );
+  }
+  NodeChildProcess.spawnSync("tailscale", ["serve", `--https=${cleanup.port}`, "off"]);
+  if (mappingCleanup(facts, readTailnetMappings()).kind !== "nothing") {
+    throw new LiveTestRefusal(
+      `The tailnet mapping for port ${cleanup.port} is still there. Remove it with: tailscale serve --https=${cleanup.port} off`,
     );
   }
 }
@@ -895,8 +1055,9 @@ async function startServer(
   runnerMode: "dev" | "dev:server",
   environment: Readonly<Record<string, string>>,
   deadline: number,
-  share = false,
+  runnerArgs: ReadonlyArray<string> = [],
 ): Promise<ServerLogFacts> {
+  const share = runnerArgs.includes("--share");
   const state = currentServerState(paths);
   if (state.kind === "unverified") throw new LiveTestRefusal(state.reason);
   // Already started, perhaps by a call that is still waiting: wait with it.
@@ -912,7 +1073,7 @@ async function startServer(
       runnerMode,
       "--home-dir",
       paths.home,
-      ...(share ? ["--share"] : []),
+      ...runnerArgs,
     ],
     {
       cwd: paths.worktree,
@@ -1152,7 +1313,17 @@ async function start(paths: LiveTestPaths, mode: LiveTestMode): Promise<void> {
   if (mode === "for-dev") {
     console.log("Starting the dev server and sharing it on the tailnet...");
     return console.log(
-      formatForDeveloper(paths, await startServer(paths, "dev", {}, deadline, true)),
+      formatForDeveloper(
+        paths,
+        // Pinned and checked only when this call is the one that starts it.
+        await startServer(
+          paths,
+          "dev",
+          {},
+          deadline,
+          currentServerState(paths).kind === "stopped" ? pinnedShareArgs(paths) : ["--share"],
+        ),
+      ),
     );
   }
   if (!isPeerMode(mode)) {
@@ -1211,11 +1382,9 @@ async function stop(paths: LiveTestPaths): Promise<void> {
     console.log(`J5 Code live-test server${name}: STOPPED`);
   }
   if (builtMode(paths) === "for-dev") {
-    // The web port in the log is the one the dev runner shared.
-    const webPort = readServerLog(
-      NodeFS.existsSync(paths.log) ? NodeFS.readFileSync(paths.log, "utf8") : "",
-    ).webPort;
-    if (webPort !== undefined) removeOwnTailnetMapping(webPort);
+    removeOwnTailnetMapping(
+      readServerLog(NodeFS.existsSync(paths.log) ? NodeFS.readFileSync(paths.log, "utf8") : ""),
+    );
   }
 }
 

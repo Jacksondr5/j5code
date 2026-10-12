@@ -11,7 +11,11 @@ import {
   addRemoteUrl,
   listsPeer,
   peerSteps,
-  servedTailnetPorts,
+  isOwnMapping,
+  mappingCleanup,
+  mappingsFromStatus,
+  shareRefusal,
+  tailnetMappings,
   liveTestEnvironment,
   type LiveTestMode,
   modeRefusal,
@@ -229,18 +233,89 @@ describe("startRefusal", () => {
   });
 });
 
-describe("servedTailnetPorts", () => {
-  it("reads the mapped ports from tailscale's status, and nothing from an empty one", () => {
-    const status = [
-      "https://openclaw.tail477304.ts.net:8444 (tailnet only)",
-      "|-- / proxy http://127.0.0.1:5773",
-      "",
-      "https://openclaw.tail477304.ts.net:7594 (tailnet only)",
-      "|-- / proxy http://127.0.0.1:7594",
-    ].join("\n");
-    // The proxied targets are not mappings: 5773 is the live server, not a served port.
-    assert.deepEqual(servedTailnetPorts(status), [8444, 7594]);
-    assert.deepEqual(servedTailnetPorts("No serve config\n"), []);
+describe("tailnet mappings", () => {
+  const status = [
+    "https://openclaw.tail477304.ts.net:8444 (tailnet only)",
+    "|-- / proxy http://127.0.0.1:5773",
+    "",
+    "https://openclaw.tail477304.ts.net:7594 (tailnet only)",
+    "|-- / proxy http://localhost:7594",
+  ].join("\n");
+  const mappings = tailnetMappings(status);
+
+  it("reads each mapped port with where it proxies to", () => {
+    assert.deepEqual(mappings, [
+      { port: 8444, targets: ["http://127.0.0.1:5773"] },
+      { port: 7594, targets: ["http://localhost:7594"] },
+    ]);
+    assert.deepEqual(tailnetMappings("No serve config\n"), []);
+  });
+
+  it("calls a mapping ours only when it proxies to our own web port on loopback", () => {
+    for (const target of ["http://localhost:7594", "http://127.0.0.1:7594", "http://[::1]:7594"]) {
+      assert.isTrue(isOwnMapping({ port: 7594, targets: [target] }, 7594));
+    }
+    // The live install's mapping, seen from a worktree whose web port is 8444.
+    assert.isFalse(isOwnMapping({ port: 8444, targets: ["http://127.0.0.1:5773"] }, 8444));
+    assert.isFalse(isOwnMapping({ port: 7594, targets: ["http://10.0.0.5:7594"] }, 7594));
+    assert.isFalse(isOwnMapping({ port: 7594, targets: ["http://localhost:75940"] }, 7594));
+    assert.isFalse(isOwnMapping({ port: 7594, targets: [] }, 7594));
+    // An extra route to somewhere else makes the whole mapping not ours.
+    assert.isFalse(
+      isOwnMapping({ port: 7594, targets: ["http://localhost:7594", "http://localhost:9"] }, 7594),
+    );
+  });
+
+  it("never shares on the live install's tailnet port", () => {
+    assert.include(shareRefusal(8444, []) ?? "", "live install's tailnet port");
+    assert.include(shareRefusal(8444, mappings) ?? "", "live install's tailnet port");
+  });
+
+  it("never shares over a mapping this server did not make", () => {
+    const foreign = [{ port: 7000, targets: ["http://127.0.0.1:3000"] }];
+    assert.include(shareRefusal(7000, foreign) ?? "", "this server did not set up");
+  });
+
+  it("treats a failed status read as an error, not as nothing mapped", () => {
+    assert.throws(
+      () => mappingsFromStatus({ status: 1, stdout: "", stderr: "tailscaled is not running" }),
+      /cannot be read:\ntailscaled is not running/,
+    );
+    assert.throws(
+      () => mappingsFromStatus({ status: null, stdout: "", stderr: "" }),
+      LiveTestRefusal,
+    );
+    assert.deepEqual(mappingsFromStatus({ status: 0, stdout: status, stderr: "" }), mappings);
+  });
+
+  it("on stop removes only a mapping this run made", () => {
+    const shared = {
+      serverPort: 15634,
+      webPort: 7594,
+      baseDir: "/w/.j5code/live-test/home",
+      pairingUrl: "https://host.ts.net:7594/pair#token=T",
+      recovered: true,
+      sharedUrl: "https://host.ts.net:7594/",
+      shareFailure: undefined,
+    };
+    assert.deepEqual(mappingCleanup(shared, mappings), { kind: "remove", port: 7594 });
+    // Already removed by the dev runner on its way out.
+    assert.deepEqual(mappingCleanup(shared, [mappings[0]!]), { kind: "nothing" });
+    // This run's log never recorded a share: whatever is on the port is not ours to touch.
+    assert.deepEqual(mappingCleanup({ ...shared, sharedUrl: undefined }, mappings), {
+      kind: "nothing",
+    });
+    // The port now carries someone else's mapping, such as the live install's.
+    assert.deepEqual(mappingCleanup({ ...shared, webPort: 8444 }, mappings), {
+      kind: "foreign",
+      port: 8444,
+      targets: ["http://127.0.0.1:5773"],
+    });
+  });
+
+  it("shares on a free port, and over its own leftover mapping", () => {
+    assert.isUndefined(shareRefusal(7000, mappings));
+    assert.isUndefined(shareRefusal(7594, mappings));
   });
 });
 
