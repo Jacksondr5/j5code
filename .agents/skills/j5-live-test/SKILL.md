@@ -49,10 +49,14 @@ link the script prints to add Remote. After a `rebuild`, remove the old Remote
 from Settings > Connections first: the browser keeps its own list.
 
 The script builds one setup per worktree. To change mode, run `rebuild` with
-the new flags. A `--fresh` home has no project and no pinned model: add only
-the test repository the script names, and pick your model by hand. Open it in
-a tab with `profileId: "incognito"`: the default browser profile may have
-finished onboarding already, and then the wizard does not show.
+the new flags.
+
+A `--fresh` home has no project and no pinned model. Open it in a tab with
+`profileId: "incognito"`: the default browser profile may have finished
+onboarding already, and then the wizard does not show. After pairing, wait for
+the wizard's own text, since there is no composer yet. In the wizard, add only
+the test repository the script names, or choose "Do not import projects". Pick
+your model by hand.
 
 `stop`, `status`, and `restart` act on the server the script started. `status`
 starts with `RUNNING`, `NOT SERVING`, or `STOPPED`, and prints a fresh pairing
