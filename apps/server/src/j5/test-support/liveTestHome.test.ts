@@ -125,11 +125,19 @@ it.live(
       assert.equal(git("rev-list", "--count", "HEAD").trim(), "4");
       // The gate times out with no release file; with one it succeeds and removes it,
       // leaving nothing for git to report.
-      const hold = (cwd: string) =>
-        NodeChildProcess.spawnSync(NodePath.join(cwd, manifest.holdScript), [], {
+      const hold = (cwd: string) => {
+        const result = NodeChildProcess.spawnSync(NodePath.join(cwd, manifest.holdScript), [], {
           cwd,
           env: { ...process.env, HOLD_MAX_SECONDS: "1" },
-        }).status;
+          encoding: "utf8",
+        });
+        // A null status means the gate never ran or was killed; say which.
+        assert.isNotNull(
+          result.status,
+          `hold.sh in ${cwd} did not exit: error=${String(result.error)} signal=${String(result.signal)} stderr=${result.stderr}`,
+        );
+        return result.status;
+      };
       assert.equal(hold(manifest.testRepo), 1);
       NodeFS.writeFileSync(manifest.holdReleaseFile, "");
       assert.equal(git("status", "--porcelain").trim(), "");
