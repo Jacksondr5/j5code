@@ -91,14 +91,12 @@ const LIVE_TEST_DEFAULT_MODEL = {
   instanceId: "claudeAgent",
   model: "claude-haiku-4-5",
 } as const;
+const HAIKU_ROUTE = { driver: "claudeAgent", model: "claude-haiku-4-5" } as const;
+const LUNA_ROUTE = { driver: "codex", model: "gpt-6-luna" } as const;
+/** A persona names exactly two routes; the second is used only when the first is unavailable. */
 const LIVE_TEST_PERSONAS = [
-  {
-    id: "haiku-helper",
-    displayName: "Haiku helper",
-    driver: "claudeAgent",
-    model: "claude-haiku-4-5",
-  },
-  { id: "luna-helper", displayName: "Luna helper", driver: "codex", model: "gpt-6-luna" },
+  { id: "haiku-helper", displayName: "Haiku helper", routes: [HAIKU_ROUTE, LUNA_ROUTE] },
+  { id: "luna-helper", displayName: "Luna helper", routes: [LUNA_ROUTE, HAIKU_ROUTE] },
 ] as const;
 /** The replayed threads are spaced this far apart, ending just before the build. */
 const REPLAY_SPACING_MS = 20 * 60 * 1000;
@@ -290,12 +288,14 @@ function writeSettingsAndPersonas(home: string): void {
         `id: ${persona.id}`,
         "version: 1",
         `displayName: ${persona.displayName}`,
-        `description: A light persona for live tests, pinned to ${persona.model}.`,
+        `description: A light persona for live tests, pinned to ${persona.routes[0].model}.`,
         "authority:",
         "  defaultPolicy: full-access",
         "  allowedPolicies: [full-access]",
         "modelRoute:",
-        `  - { driver: ${persona.driver}, model: ${persona.model}, reasoningEffort: low }`,
+        ...persona.routes.map(
+          (route) => `  - { driver: ${route.driver}, model: ${route.model}, reasoningEffort: low }`,
+        ),
         "instructions: Keep every reply to one short sentence unless the task needs more.",
         "",
       ].join("\n"),
@@ -374,7 +374,7 @@ export const buildLiveTestHome = Effect.fn("buildLiveTestHome")(function* (input
     testRepoOrigin,
     project: { id: projectId, title: LIVE_TEST_PROJECT_TITLE },
     defaultModel: LIVE_TEST_DEFAULT_MODEL.model,
-    personas: LIVE_TEST_PERSONAS.map(({ id, model }) => ({ id, model })),
+    personas: LIVE_TEST_PERSONAS.map(({ id, routes }) => ({ id, model: routes[0].model })),
     playbooks: LIVE_TEST_PLAYBOOKS,
     holdScript: LIVE_TEST_HOLD_SCRIPT,
     holdReleaseFile: NodePath.join(testRepo, LIVE_TEST_HOLD_RELEASE_FILE),

@@ -9,7 +9,14 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeSqlite from "node:sqlite";
 
+import { PlaybookDefinition } from "@t3tools/contracts/j5";
+import * as Schema from "effect/Schema";
+import { parse as parseYaml } from "yaml";
+
+import { decodeAgentPersonaDefinition } from "../agents/agentPersonas.ts";
 import { buildLiveTestHome } from "./liveTestHome.ts";
+
+const decodePlaybook = Schema.decodeUnknownEffect(PlaybookDefinition);
 
 it.live(
   "builds a home whose only project is the test repository",
@@ -76,21 +83,46 @@ it.live(
       assert.deepEqual(JSON.parse(NodeFS.readFileSync(`${stateDir}/settings.json`, "utf8")), {
         defaultModelSelection: { instanceId: "claudeAgent", model: "claude-haiku-4-5" },
       });
-      assert.deepEqual(NodeFS.readdirSync(`${stateDir}/personas`).toSorted(), [
-        "haiku-helper.yaml",
-        "luna-helper.yaml",
-      ]);
+      // Each persona file must decode as the library decodes it, or Settings shows none at all.
+      assert.deepEqual(
+        NodeFS.readdirSync(`${stateDir}/personas`)
+          .toSorted()
+          .map((file) => {
+            const persona = decodeAgentPersonaDefinition(
+              parseYaml(NodeFS.readFileSync(`${stateDir}/personas/${file}`, "utf8")),
+            );
+            return [file, persona.id, persona.modelRoute[0].model];
+          }),
+        [
+          ["haiku-helper.yaml", "haiku-helper", "claude-haiku-4-5"],
+          ["luna-helper.yaml", "luna-helper", "gpt-6-luna"],
+        ],
+      );
+      // The playbooks decode too, and name only personas the home has.
+      for (const playbook of manifest.playbooks) {
+        const definition = yield* decodePlaybook(
+          parseYaml(
+            NodeFS.readFileSync(
+              NodePath.join(manifest.testRepo, ".j5/playbooks", `${playbook}.yaml`),
+              "utf8",
+            ),
+          ),
+        );
+        for (const step of definition.steps) {
+          if (step.persona !== undefined) {
+            assert.include(
+              manifest.personas.map((persona) => persona.id),
+              step.persona,
+            );
+          }
+        }
+      }
 
       const git = (...args: ReadonlyArray<string>) =>
         NodeChildProcess.execFileSync("git", args, { cwd: manifest.testRepo, encoding: "utf8" });
       assert.equal(git("remote", "get-url", "origin").trim(), manifest.testRepoOrigin);
       assert.equal(git("status", "--porcelain", "--branch").trim(), "## main...origin/main");
       assert.equal(git("rev-list", "--count", "HEAD").trim(), "4");
-      for (const playbook of manifest.playbooks) {
-        assert.isTrue(
-          NodeFS.existsSync(NodePath.join(manifest.testRepo, ".j5/playbooks", `${playbook}.yaml`)),
-        );
-      }
       // The gate times out with no release file; with one it succeeds and removes it,
       // leaving nothing for git to report.
       const hold = (cwd: string) =>
