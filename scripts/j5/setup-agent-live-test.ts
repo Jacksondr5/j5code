@@ -307,9 +307,8 @@ Project to use: "${manifest.project.title}"
 Pre-made threads are for viewing only. They are replayed recordings, so a
 message sent in one fails or starts a new provider conversation. Take live
 turns in a NEW thread in "${manifest.project.title}".
-Known fault: in "New worktree" mode the server can interrupt a thread's first
-turn a few seconds in (it reads "Run interrupted by user"). Use "Current
-checkout" unless the worktree itself is what you are testing.
+Take live turns in "Current checkout" mode. In "New worktree" mode the first
+turn of a thread can be interrupted a few seconds in.
 
 Models: new threads default to ${manifest.defaultModel}. Claude Haiku and GPT Luna
 need no permission. Ask your Captain before a turn on anything more expensive.
