@@ -79,6 +79,10 @@ browser steps.
   or hang.
 - After editing a Crew roster, check each seat's model again before approving:
   an edit can change it.
+- A test agent on Claude can still reach real Claude sessions on this machine
+  through its own harness tools (`ListAgents`, `SendMessage`). When a test has
+  agents message each other, tell the test agent to use J5's tools and the
+  participants `j5_list_participants` returns, and check which tool it called.
 - An agent's own account of what it did is not evidence. Check the tool
   result, the stored row, or the screen.
 - To hold a turn open, ask the agent to run `./scripts/hold.sh` in the test
