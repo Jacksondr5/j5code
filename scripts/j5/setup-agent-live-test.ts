@@ -17,9 +17,6 @@
  * confirming that group still owns the server's port from inside this
  * worktree. It never finds a process by name. Linux only: it reads `/proc`.
  */
-import * as NodeServices from "@effect/platform-node/NodeServices";
-import { resolveGitWorktreePath } from "@t3tools/shared/devHome";
-import * as Effect from "effect/Effect";
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
@@ -87,6 +84,13 @@ export async function resolveLiveTestPaths(input: {
   readonly environment: NodeJS.ProcessEnv;
 }): Promise<LiveTestPaths> {
   const checkout = NodePath.resolve(input.checkout);
+  // Loaded here, not at the top: a checkout with no dependencies installed must
+  // reach the message in main() instead of failing on an import.
+  const [NodeServices, { resolveGitWorktreePath }, Effect] = await Promise.all([
+    import("@effect/platform-node/NodeServices"),
+    import("@t3tools/shared/devHome"),
+    import("effect/Effect"),
+  ]);
   const worktree = await Effect.runPromise(
     resolveGitWorktreePath(checkout).pipe(Effect.provide(NodeServices.layer)),
   );
@@ -365,11 +369,6 @@ function buildHome(paths: LiveTestPaths): void {
       `${paths.root} exists but holds no finished build. Delete it and run this again: rm -rf ${paths.root}`,
     );
   }
-  if (!NodeFS.existsSync(NodePath.join(paths.worktree, "node_modules"))) {
-    throw new LiveTestRefusal(
-      `${paths.worktree} has no node_modules. Install first: vp i (or pnpm install).`,
-    );
-  }
   console.log("Building the test repository and home (about 30 seconds, no model calls)...");
   const build = NodeChildProcess.spawnSync(
     process.execPath,
@@ -526,8 +525,14 @@ async function main(): Promise<void> {
   if (NodeOS.platform() !== "linux") {
     throw new LiveTestRefusal("This script reads /proc and runs only on Linux.");
   }
+  const checkout = NodePath.resolve(import.meta.dirname, "../..");
+  if (!NodeFS.existsSync(NodePath.join(checkout, "node_modules"))) {
+    throw new LiveTestRefusal(
+      `${checkout} has no node_modules. Install the dependencies first: run \`pnpm install\` there (\`vp i\` is the same thing where \`vp\` is on PATH), then run this again.`,
+    );
+  }
   const paths = await resolveLiveTestPaths({
-    checkout: NodePath.resolve(import.meta.dirname, "../.."),
+    checkout,
     homeDirectory: NodeOS.homedir(),
     environment: process.env,
   });
