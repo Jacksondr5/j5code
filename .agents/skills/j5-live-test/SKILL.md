@@ -66,9 +66,8 @@ browser steps.
 
 - Send live turns only in new threads in the test project. The threads the
   script made are for looking at.
-- You are authorized to use Claude Haiku and GPT Luna to run real AI tests.
-  The test home defaults new threads to Haiku. Ask the person before using a
-  more expensive model.
+- Use only the models the person has authorized for live test turns. The test
+  home defaults new threads to Claude Haiku, a cheap one.
 - Take live turns in "Current checkout" mode. In a Crew roster that choice is
   "Captain's checkout". A first turn in "New worktree" mode can be interrupted
   or hang.

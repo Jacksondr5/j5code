@@ -122,10 +122,8 @@ A copy of real data is for a server the developer will use, or for rehearsing a 
 - **Do not run repo-wide checks.** No `vp check`, no `vp run -r test`, no `vp run -r typecheck` unless asked. CI owns the full suite.
 - Backend behavior changes ship with focused tests for that behavior.
 - The server is event-sourced, and side effects run after the command commits. Wait on typed receipts, drain the effect worker (`OrchestrationEffectWorkerV2.drain`), or await the specific persisted event or `Deferred` that marks the milestone. Never wait on sleeps or polling. A test that needs a timeout to pass is wrong.
-- Live-test what unit tests cannot prove: UI flows, agent turns, agent messages, peering. The `j5-live-test` skill sets up a safe server and says what to cover and how to report. `test-t3-app` drives the browser, and `test-t3-mobile` the mobile app.
-- Have a Peer Agent in its own worktree do the testing, from a commit. A subagent that outlives your turn cannot use platform tools that act.
-- You are authorized to use Claude Haiku and GPT Luna for live test turns. Ask before using a more expensive model.
-- The Browser panel on your own test server needs no permission. Ask before mobile testing or other computer use.
+- Upon request, user-visible frontend changes should get one integrated pass in a real client: `test-t3-app` for web, `test-t3-mobile` for mobile. The primary agent does this once after integrating. Subagents do not launch their own dev servers. Ask permission before doing computer use or spinning up browsers.
+- When you are asked or authorized to live-test, the `j5-live-test` skill sets up a safe server and says what to cover and how to report.
 
 For authorized mobile verification, a missing or outdated native client is a build step, not a blocker. Run `node scripts/mobile-native-client.ts ensure <ios|android> <device-id>` on the simulator host before starting Metro. It checks the local Expo fingerprint and builds/installs when needed. See `test-t3-mobile` for the full workflow.
 
@@ -189,4 +187,5 @@ Upstream's architecture and its constraints: `docs/internals/overview.md`. Upstr
 
 ## Additional tips
 
+- Don't verify with browsers or computer use unless the user explicitly agrees or requests it.
 - Security is important, but should not be over-indexed on, especially for dev mode/maintainer-only features.
