@@ -9,6 +9,7 @@ import {
   classifyServer,
   LiveTestRefusal,
   addRemoteUrl,
+  baseEnvironment,
   listsPeer,
   peerRepairCommand,
   peerSteps,
@@ -509,6 +510,11 @@ describe("parseCommand", () => {
       ["--base", "main", "--fresh"],
       ["--base", "main", "--peer"],
       ["status", "--base", "main"],
+      // The ref is printed inside commands; git allows these characters in ref names.
+      ["--base", "main;rm"],
+      ["--base", "$(x)"],
+      ["--base", "a b"],
+      ["--base", "-x"],
       ["--fresh", "--fresh"],
       // --poll says how two servers peer; it means nothing alone or with an empty home.
       ["--poll"],
@@ -642,6 +648,25 @@ describe("addRemoteUrl", () => {
     assert.isUndefined(
       addRemoteUrl({ localWebPort: 7594, remoteServerPort: 15961, remotePairingUrl: undefined }),
     );
+  });
+});
+
+describe("baseEnvironment", () => {
+  const inherited = { T3CODE_PORT: "5773", J5CODE_HOME: "/home/dev/.j5code", PATH: "/usr/bin" };
+
+  it("gives the base the clock the head was built with, on every start", () => {
+    const manifest = { baseClock: 1_760_000_000_000 };
+    const first = baseEnvironment(inherited, "/w", manifest);
+    // A retry in a later invocation has no J5_LIVE_TEST_NOW of its own; the manifest supplies it.
+    const retry = baseEnvironment({ PATH: "/usr/bin" }, "/w", manifest);
+    assert.equal(first.J5_LIVE_TEST_NOW, "1760000000000");
+    assert.equal(retry.J5_LIVE_TEST_NOW, "1760000000000");
+    assert.isUndefined(first.T3CODE_PORT);
+    assert.isUndefined(first.J5CODE_HOME);
+  });
+
+  it("sets no clock for a build that recorded none", () => {
+    assert.isUndefined(baseEnvironment(inherited, "/w", {}).J5_LIVE_TEST_NOW);
   });
 });
 

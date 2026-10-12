@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off globalConsole:off globalDate:off globalFetch:off - a standalone Node CLI that manages one child process group and prints instructions.
+// @effect-diagnostics nodeBuiltinImport:off globalConsole:off globalDate:off globalFetch:off globalTimers:off - a standalone Node CLI that manages one child process group and prints instructions.
 /**
  * One command for an agent that needs to live-test J5 Code:
  *
@@ -84,6 +84,8 @@ interface DefaultManifest {
   /** In base mode: the ref as it was given, and the commit it named then. */
   readonly baseRef?: string;
   readonly baseCommit?: string;
+  /** In base mode: the clock both builds are given, in epoch milliseconds. */
+  readonly baseClock?: number;
   readonly project: { readonly title: string };
   readonly defaultModel: string;
   readonly personas: ReadonlyArray<{
@@ -740,6 +742,7 @@ function buildHome(paths: LiveTestPaths, mode: LiveTestMode, base: BaseTarget | 
         mode: "base",
         baseRef: base.ref,
         baseCommit: base.commit,
+        baseClock: Number(process.env.J5_LIVE_TEST_NOW),
       };
       NodeFS.writeFileSync(paths.manifest, `${JSON.stringify(manifest, null, 2)}\n`);
     }
@@ -1395,7 +1398,7 @@ async function start(
     );
   }
   if (base !== undefined && built === undefined) {
-    // Both builds read this, so the two homes date their replayed threads alike.
+    // The head's generator reads this now; the manifest keeps it for every base start.
     process.env.J5_LIVE_TEST_NOW = String(Date.now());
   }
   if (built === undefined && currentServerState(paths).kind === "stopped") {
@@ -1406,11 +1409,15 @@ async function start(
     console.log(`Starting the head server here and the base server at ${base.ref}...`);
     // The base checks out, installs and builds while the head server starts.
     const [baseOutput, head] = await Promise.all([
-      startBase(paths, base),
+      startBase(paths, deadline),
       startServer(paths, "dev", {}, deadline),
     ]);
     printRunning(paths, head, undefined);
-    return console.log(`${baseHeading(readManifest(paths))}\n\n${baseOutput}`);
+    return console.log(
+      baseOutput === undefined
+        ? baseStillPreparing(paths)
+        : `${baseHeading(paths)}\n\n${baseOutput}`,
+    );
   }
   if (mode === "for-dev") {
     console.log("Starting the dev server and sharing it on the tailnet...");
@@ -1483,7 +1490,7 @@ function resolveBase(paths: LiveTestPaths, ref: string): BaseTarget {
   return target;
 }
 
-/** Runs a command to completion without blocking this process, so two builds can overlap. */
+/** Runs a command to completion without blocking this process. */
 function run(
   command: string,
   args: ReadonlyArray<string>,
@@ -1503,6 +1510,22 @@ function run(
 }
 
 /**
+ * The environment for the base checkout's script: the head's cleaned one,
+ * plus the clock the head was built with, so a base that reads it dates its
+ * threads the same. Given on every base start, not only the first.
+ */
+export function baseEnvironment(
+  environment: NodeJS.ProcessEnv,
+  worktree: string,
+  manifest: { readonly baseClock?: number },
+): NodeJS.ProcessEnv {
+  return {
+    ...liveTestEnvironment(environment, worktree),
+    ...(manifest.baseClock === undefined ? {} : { J5_LIVE_TEST_NOW: String(manifest.baseClock) }),
+  };
+}
+
+/**
  * Runs the base checkout's own copy of this script. The base is a linked
  * worktree, so its script gives it its own ports, its own `.j5code/live-test`,
  * its own generator and its own process record, with the rules of its version.
@@ -1510,41 +1533,134 @@ function run(
 const baseScript = (paths: LiveTestPaths, args: ReadonlyArray<string>) =>
   run(process.execPath, [NodePath.join(paths.base, LIVE_TEST_SCRIPT), ...args], {
     cwd: paths.base,
-    env: liveTestEnvironment(process.env, paths.worktree),
+    env: baseEnvironment(process.env, paths.worktree, readManifest(paths) as DefaultManifest),
   });
 
-/** Checks out and installs the base if it is not there yet, then starts its server. */
-async function startBase(paths: LiveTestPaths, base: BaseTarget): Promise<string> {
-  const environment = liveTestEnvironment(process.env, paths.worktree);
-  if (!NodeFS.existsSync(paths.base)) {
-    const added = await run("git", ["worktree", "add", "--detach", paths.base, base.commit], {
-      cwd: paths.worktree,
-      env: environment,
-    });
-    if (added.status !== 0) {
-      throw new LiveTestRefusal(`Checking out ${base.ref} failed:\n${added.output}`);
-    }
+/** Where the base's preparation writes what it did, and marks its install as finished. */
+const basePreparation = (paths: LiveTestPaths) => ({
+  log: NodePath.join(paths.root, "base-start.log"),
+  installed: NodePath.join(paths.root, "base-installed"),
+});
+
+/**
+ * Refuses unless `<root>/base` is a worktree of this repository checked out
+ * at the commit the build recorded. A checkout that was moved, or a stale
+ * directory, would otherwise be served as the "before". It is never reset.
+ */
+function assertBaseCheckout(paths: LiveTestPaths, commit: string): void {
+  const git = (cwd: string, ...args: ReadonlyArray<string>) =>
+    NodeChildProcess.spawnSync("git", args, { cwd, encoding: "utf8" }).stdout?.trim();
+  const commonDir = (cwd: string) =>
+    git(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir");
+  const head = git(paths.base, "rev-parse", "HEAD");
+  if (head !== commit || commonDir(paths.base) !== commonDir(paths.worktree)) {
+    throw new LiveTestRefusal(
+      `${paths.base} is not this repository checked out at ${commit.slice(0, 10)} (it is at ${head?.slice(0, 10) || "no commit"}). It has not been changed. Replace the build: ${selfCommand(paths, `rebuild ${modeFlags("base", builtBaseRef(paths))}`)}`,
+    );
   }
-  if (!NodeFS.existsSync(NodePath.join(paths.base, "node_modules"))) {
-    const installed = await run("pnpm", ["install", "--frozen-lockfile"], {
-      cwd: paths.base,
-      env: environment,
-    });
-    if (installed.status !== 0) {
-      throw new LiveTestRefusal(`Installing the base checkout failed:\n${installed.output}`);
-    }
-  }
-  const started = await baseScript(paths, []);
-  if (started.status !== 0) {
-    throw new LiveTestRefusal(`The base server did not start:\n${started.output}`);
-  }
-  return started.output;
 }
 
-const baseHeading = (manifest: Manifest) =>
-  "baseRef" in manifest && manifest.baseRef !== undefined
-    ? `Base server, at ${manifest.baseRef} (${manifest.baseCommit?.slice(0, 10)}), as its own script reports it:`
-    : "Base server, as its own script reports it:";
+/** Whether the base's generator reads the shared clock; one from before that change dates its threads itself. */
+function baseHonoursClock(paths: LiveTestPaths, commit: string): boolean {
+  return (
+    NodeChildProcess.spawnSync(
+      "git",
+      ["grep", "--quiet", "J5_LIVE_TEST_NOW", commit, "--", "apps/server/src/j5/test-support"],
+      { cwd: paths.worktree },
+    ).status === 0
+  );
+}
+
+/** The argument that makes this script prepare and start the base instead of acting on the head. */
+const PREPARE_BASE = "__prepare-base";
+
+/**
+ * Checks out and installs the base if needed, then starts its server. Runs in
+ * its own detached process, started by `startBase`, so a slow install outlives
+ * the command that asked for it. Its output is the log `startBase` reads.
+ */
+function prepareBase(paths: LiveTestPaths): void {
+  const manifest = readManifest(paths) as DefaultManifest;
+  const commit = manifest.baseCommit;
+  if (commit === undefined) throw new LiveTestRefusal("This build has no base.");
+  const environment = baseEnvironment(process.env, paths.worktree, manifest);
+  if (!NodeFS.existsSync(paths.base)) {
+    const added = NodeChildProcess.spawnSync(
+      "git",
+      ["worktree", "add", "--detach", paths.base, commit],
+      { cwd: paths.worktree, encoding: "utf8" },
+    );
+    if (added.status !== 0) {
+      throw new LiveTestRefusal(`Checking out the base failed:\n${added.stderr}`);
+    }
+  }
+  assertBaseCheckout(paths, commit);
+  const { installed } = basePreparation(paths);
+  if (!NodeFS.existsSync(installed)) {
+    const install = NodeChildProcess.spawnSync("pnpm", ["install", "--frozen-lockfile"], {
+      cwd: paths.base,
+      env: environment,
+      encoding: "utf8",
+    });
+    if (install.status !== 0) {
+      throw new LiveTestRefusal(
+        `Installing the base checkout failed:\n${install.stdout}${install.stderr}`,
+      );
+    }
+    NodeFS.writeFileSync(installed, "");
+  }
+  const started = NodeChildProcess.spawnSync(
+    process.execPath,
+    [NodePath.join(paths.base, LIVE_TEST_SCRIPT)],
+    { cwd: paths.base, env: environment, stdio: "inherit" },
+  );
+  process.exitCode = started.status ?? 1;
+}
+
+/**
+ * Starts the base's preparation and waits for it until `deadline`. Returns
+ * what it printed, or undefined when it is still going: it carries on in the
+ * background and `status` reports it.
+ */
+function startBase(paths: LiveTestPaths, deadline: number): Promise<string | undefined> {
+  const { log } = basePreparation(paths);
+  const output = NodeFS.openSync(log, "w");
+  const child = NodeChildProcess.spawn(
+    process.execPath,
+    [NodePath.join(paths.worktree, LIVE_TEST_SCRIPT), PREPARE_BASE],
+    { cwd: paths.worktree, env: process.env, detached: true, stdio: ["ignore", output, output] },
+  );
+  NodeFS.closeSync(output);
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => {
+        child.unref();
+        resolve(undefined);
+      },
+      Math.max(0, deadline - Date.now()),
+    );
+    child.on("exit", (status) => {
+      clearTimeout(timer);
+      const said = NodeFS.readFileSync(log, "utf8");
+      if (status === 0) resolve(said);
+      else reject(new LiveTestRefusal(`The base server did not start:\n${said}`));
+    });
+  });
+}
+
+/** What to print above the base's own output: which commit it is, and whether its dates match. */
+function baseHeading(paths: LiveTestPaths): string {
+  const manifest = readManifest(paths) as DefaultManifest;
+  const commit = manifest.baseCommit ?? "";
+  return `Base server, at ${manifest.baseRef} (${commit.slice(0, 10)}), as its own script reports it:${
+    baseHonoursClock(paths, commit)
+      ? ""
+      : "\nThis base predates the shared clock, so its threads are dated from its own build and differ from the head's by the time between the two builds."
+  }`;
+}
+
+const baseStillPreparing = (paths: LiveTestPaths) =>
+  `The base server is still being prepared (checkout, install, build, start). It carries on in the background.\nCheck it with: ${selfCommand(paths, "status")}\nIts progress: ${basePreparation(paths).log}`;
 
 /**
  * Removes the base checkout through git, so the repository keeps no stale
@@ -1620,12 +1736,16 @@ async function stop(paths: LiveTestPaths): Promise<void> {
 
 async function status(paths: LiveTestPaths): Promise<void> {
   statusOfHead(paths);
-  if (
-    builtMode(paths) === "base" &&
-    NodeFS.existsSync(NodePath.join(paths.base, LIVE_TEST_SCRIPT))
-  ) {
-    const base = await baseScript(paths, ["status"]);
-    console.log(`\n${baseHeading(readManifest(paths))}\n\n${base.output}`);
+  if (builtMode(paths) !== "base") return;
+  const commit = (readManifest(paths) as DefaultManifest).baseCommit ?? "";
+  if (!NodeFS.existsSync(basePreparation(paths).installed)) {
+    return console.log(`\n${baseStillPreparing(paths)}`);
+  }
+  assertBaseCheckout(paths, commit);
+  const base = await baseScript(paths, ["status"]);
+  console.log(`\n${baseHeading(paths)}\n\n${base.output}`);
+  if (base.status !== 0) {
+    throw new LiveTestRefusal("The base checkout's status command failed; see its output above.");
   }
 }
 
@@ -1705,7 +1825,9 @@ export function parseCommand(args: ReadonlyArray<string>): {
     words.length > 1 ||
     !COMMANDS.some((known) => known === command) ||
     mode === undefined ||
-    (mode === "base" && (baseRef === undefined || baseRef.startsWith("-"))) ||
+    // The ref is printed inside commands, and git allows shell characters in ref names.
+    (mode === "base" &&
+      (baseRef === undefined || !/^[\w@+=:,./^~][\w@+=:,./^~-]*$/.test(baseRef))) ||
     (mode !== "default" && command !== "start" && command !== "rebuild")
   ) {
     throw new LiveTestRefusal(USAGE);
@@ -1718,7 +1840,8 @@ export function parseCommand(args: ReadonlyArray<string>): {
 }
 
 async function main(): Promise<void> {
-  const { command, mode, baseRef } = parseCommand(process.argv.slice(2));
+  const preparingBase = process.argv[2] === PREPARE_BASE;
+  const { command, mode, baseRef } = parseCommand(preparingBase ? [] : process.argv.slice(2));
   // oxlint-disable-next-line t3code/no-global-process-runtime -- a standalone CLI with no Effect runtime.
   if (NodeOS.platform() !== "linux") {
     throw new LiveTestRefusal("This script reads /proc and runs only on Linux.");
@@ -1734,6 +1857,7 @@ async function main(): Promise<void> {
     homeDirectory: NodeOS.homedir(),
     environment: process.env,
   });
+  if (preparingBase) return prepareBase(paths);
   if (command === "status") return status(paths);
   if (command === "stop") return stop(paths);
   if (command === "restart" || command === "rebuild") await stop(paths);
