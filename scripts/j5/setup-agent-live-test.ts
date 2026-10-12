@@ -48,6 +48,8 @@ const LIVE_SERVER_PORT = 5773;
  */
 const START_BUDGET_MS = 100_000;
 const STOP_TIMEOUT_MS = 20_000;
+/** How long `status` waits for one server's peer list. The call takes about four seconds on a busy host. */
+const PEER_LIST_TIMEOUT_MS = 15_000;
 /** `scripts/hold.sh` in the test repository waits for this file in the repository root. */
 const HOLD_RELEASE_FILE = ".hold-release";
 const RECOVERY_LOG_LINE = "V2 orchestration recovery completed";
@@ -1004,9 +1006,14 @@ function arePeered(
   localPort: number | undefined,
   remotePort: number | undefined,
 ): boolean {
+  // Capped, so a server that accepts and never answers cannot hang `status`.
+  // A list that does not arrive in time counts as no evidence.
   const peerList = (home: string, port: number | undefined) =>
-    peerCli(paths, ["list", "--json", "--base-dir", home, "--origin", `http://127.0.0.1:${port}`])
-      .output;
+    peerCli(
+      paths,
+      ["list", "--json", "--base-dir", home, "--origin", `http://127.0.0.1:${port}`],
+      Date.now() + PEER_LIST_TIMEOUT_MS,
+    ).output;
   return (
     listsPeer(peerList(paths.home, localPort), "Remote") &&
     listsPeer(peerList(paths.remote.home, remotePort), "Local")
