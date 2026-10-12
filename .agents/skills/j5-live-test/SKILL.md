@@ -44,6 +44,10 @@ points at a real repository or at the developer's data.
 | The same, with Remote polling Local             | `--peer --poll` |
 | A base and a head server for before/after shots | `--base <ref>`  |
 
+With `--peer`, pair the browser with Local, then open the "Add to the browser"
+link the script prints to add Remote. After a `rebuild`, remove the old Remote
+from Settings > Connections first: the browser keeps its own list.
+
 The script builds one setup per worktree. To change mode, run `rebuild` with
 the new flags. A `--fresh` home has no project and no pinned model: add only
 the test repository the script names, and pick your model by hand. Open it in
@@ -131,9 +135,15 @@ sent through the UI.
 
 Use `--base <ref>` so base and head show the same data. Open the second server
 in a tab with `profileId: "incognito"`, so the two do not share a login.
-Capture at 1280x800 as test-t3-app describes, then upload with
-`scripts/j5/pr-evidence.sh`, which prints the before/after table for the PR
-description.
+Capture at 1280x800 as test-t3-app describes, then upload:
+
+```bash
+node scripts/j5/pr-evidence.ts <pr> --pair "<caption>" <before.png> <after.png>
+```
+
+Repeat `--pair` for each state, and give `-` as the before image for a state
+the change adds. It prints the before/after table for the PR description. Run
+`rebuild` with no flag when you are done, which removes the base checkout.
 
 ## A server for the developer
 
