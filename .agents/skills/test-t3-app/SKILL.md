@@ -52,11 +52,12 @@ a subagent left running in the background; it is not a browser fault.
   capped, and the sidebar uses the cap up.
 - **Recover.** A call that times out drops the browser for about a second,
   and calls already sent in that second answer "No preview automation host is
-  available" or "server-browser disconnected". Ignore that message's advice not to retry. Send nothing else
-  until one `preview_status` has answered, then carry on with the same tab.
-  Send a call that might time out by itself, not in a batch, and find out why
-  it timed out before repeating it: a menu left open over the target, or a
-  pairing token already used, are the usual causes.
+  available" or "server-browser disconnected". Ignore that message's advice
+  not to retry. Send nothing else until one `preview_status` has answered,
+  then carry on with the same tab. Send a call that might time out by itself,
+  not in a batch, and find out why it timed out before repeating it: a menu
+  left open over the target, or a pairing token already used, are the usual
+  causes.
 - **Capture.** `preview_resize` to 1280x800, then `preview_snapshot` with
   `save: true`; other sizes are scaled to 1280 wide. The file is written to
   the server's own data directory, so copy it out.
