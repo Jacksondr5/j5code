@@ -1209,7 +1209,7 @@ const layerWsRpc = (
   UpstreamWsRpcGroup.toLayer(
     Effect.gen(function* () {
       const currentSessionId = currentSession.sessionId;
-      // J5: a guest's connection is given reduced answers; a member's, upstream's (FORK.md case 68).
+      // J5: a guest's connection is given reduced answers; a member's, upstream's (FORK.md case 69).
       const j5View = yield* j5ConnectionView(currentSession);
       const sql = yield* SqlClient.SqlClient;
       const threadManagement = yield* ThreadManagementService.ThreadManagementService;
@@ -3205,7 +3205,7 @@ export const layer = Layer.unwrap(
             Effect.provideService(RpcServer.Protocol, withTerminalOutputWindow(protocol)),
             Effect.provide(
               Layer.merge(
-                // J5: a guest's connection is checked against its grants first (FORK.md case 68).
+                // J5: a guest's connection is checked against its grants first (FORK.md case 69).
                 j5LayerRpcAuthorization(session, RpcAuthorization.layer(session.scopes)),
                 rpcInstrumentationLayer,
               ),

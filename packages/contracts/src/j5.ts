@@ -10,6 +10,7 @@ import { ModelSelection } from "./modelSelection.ts";
 import {
   ProviderApprovalDecision,
   ProviderApprovalOption,
+  ProviderInteractionMode,
   ProviderRequestKind,
   RuntimeMode,
 } from "./providerPolicy.ts";
@@ -356,6 +357,14 @@ export const FleetAgent = Schema.Struct({
   /** `agent` when another agent spawned it (roster-only in the sidebar); `unknown` when never recorded. */
   origin: Schema.Literals(["human", "agent", "unknown"]),
   placementParentId: Schema.NullOr(Schema.String),
+  /**
+   * Set when an outside agent (an MCP client signed in from outside the app) spawned it. Such an
+   * agent has `origin: "agent"` and no placement parent, so this is the only place its spawner is
+   * named. `name` is the label the client signed in with.
+   */
+  outsideSpawner: Schema.optional(
+    Schema.Struct({ participantId: Schema.String, name: Schema.NullOr(Schema.String) }),
+  ),
   crew: Schema.NullOr(
     Schema.Struct({
       crewInstanceId: Schema.String,
@@ -722,6 +731,8 @@ export const PEER_PROTOCOL_HEADER = "x-j5-peer-protocol";
 export const PeerCapabilities = Schema.Struct({
   /** This server stores messages for a peer that polls for them. */
   poll: Schema.optionalKey(Schema.Boolean),
+  /** This server lands a message as its sender asked: a delivery's `landing` is read, not dropped. */
+  landing: Schema.optionalKey(Schema.Boolean),
 });
 export type PeerCapabilities = typeof PeerCapabilities.Type;
 
@@ -772,8 +783,22 @@ export const PeerSenderLabel = Schema.String.check(
   Schema.isMaxLength(PEER_SENDER_LABEL_MAX_CHARS),
 );
 
+/**
+ * How a sender asked for its message to land on an agent that is mid-turn, with the broadest
+ * modes the sender could touch when it asked. The receiving server refuses the delivery when its
+ * agent runs above that limit. Sent only to a server that advertises the `landing` capability;
+ * a server from before it would queue the message without saying so.
+ */
+export const PeerDeliveryLanding = Schema.Struct({
+  mode: Schema.Literals(["steer", "restart"]),
+  limit: Schema.Struct({ runtimeMode: RuntimeMode, interactionMode: ProviderInteractionMode }),
+});
+export type PeerDeliveryLanding = typeof PeerDeliveryLanding.Type;
+
 export const PeerDeliveryRequest = Schema.Struct({
   messageId: Schema.String.check(Schema.isNonEmpty()),
+  /** Absent for a message that waits its turn, which is every message from an older server. */
+  landing: Schema.optional(PeerDeliveryLanding),
   senderId: Schema.String.check(Schema.isNonEmpty()),
   receiverId: Schema.String.check(Schema.isNonEmpty()),
   exchangeId: Schema.NullOr(Schema.String.check(Schema.isNonEmpty())),
@@ -825,6 +850,8 @@ export const PeerRosterResponse = Schema.Struct({
   agents: Schema.Array(PeerRosterAgent),
   /** The answering server's own name, so a peer that reads the roster keeps its name current. */
   label: Schema.optional(Schema.String),
+  /** What the answering server can do now, so a peer that reads the roster learns of an update. */
+  capabilities: Schema.optional(PeerCapabilities),
 });
 export type PeerRosterResponse = typeof PeerRosterResponse.Type;
 export const PeerDeliveryResponse = Schema.Struct({

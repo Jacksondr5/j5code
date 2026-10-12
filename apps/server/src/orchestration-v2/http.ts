@@ -156,7 +156,7 @@ export const layer = HttpApiBuilder.group(
           yield* annotateEnvironmentRequest(args.endpoint.name);
           const session = yield* requireEnvironmentScope(AuthOrchestrationReadScope);
           return yield* loadShellSnapshot().pipe(
-            // J5: a guest's sidebar lists only what its grants cover (FORK.md case 68).
+            // J5: a guest's sidebar lists only what its grants cover (FORK.md case 69).
             Effect.flatMap((snapshot) => shellSnapshotFor(session, snapshot)),
             traceLocalHandlerWork,
             Effect.catch((cause) =>

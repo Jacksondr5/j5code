@@ -10,6 +10,7 @@ import {
   Participant,
   ParticipantId,
   isHumanParticipantId,
+  isOutsideAgentParticipantId,
   participantId as participantIdOf,
 } from "./contracts.ts";
 import {
@@ -384,11 +385,19 @@ export const layer: Layer.Layer<
     });
 
     const ensureProvenanceParticipant = Effect.fn("j5.a2a.placement.ensureProvenanceParticipant")(
-      function* (projectId: LedgerProjectId, participantId: ParticipantId) {
+      function* (
+        projectId: LedgerProjectId,
+        participantId: ParticipantId,
+        /** A spawner may live in another project on this server; a fork's source may not. */
+        anyProject: boolean,
+      ) {
+        // An outside agent joins no ledger, so there is no join to find. The spawn records its
+        // label in this same transaction.
+        if (anyProject && isOutsideAgentParticipantId(participantId)) return;
         const rows = yield* sql<{ readonly participant_id: string }>`
           SELECT json_extract(payload, '$.participant.id') AS participant_id
           FROM j5_a2a_comm_event
-          WHERE project_id = ${projectId}
+          WHERE (${anyProject ? 1 : 0} = 1 OR project_id = ${projectId})
             AND kind = 'participant.joined'
             AND json_extract(payload, '$.participant.id') = ${participantId}
           LIMIT 1
@@ -429,6 +438,19 @@ export const layer: Layer.Layer<
             SELECT participant_id
             FROM j5_a2a_membership
             WHERE project_id = ${projectId} AND participant_id = ${participantId}
+            LIMIT 1
+          `;
+      return rows[0] !== undefined;
+    });
+
+    /** An agent that is a participant of some project on this server now. */
+    const isParticipantSomewhere = Effect.fn("j5.a2a.placement.isParticipantSomewhere")(function* (
+      participantId: ParticipantId,
+    ) {
+      const rows = yield* sql<{ readonly participant_id: string }>`
+            SELECT participant_id
+            FROM j5_a2a_membership
+            WHERE participant_id = ${participantId}
             LIMIT 1
           `;
       return rows[0] !== undefined;
@@ -529,8 +551,18 @@ export const layer: Layer.Layer<
     )(function* (input: RecordParticipantPlacementInput) {
       switch (input.provenance.kind) {
         case "spawned-by":
-          if (input.provenance.source === "j5_spawn") {
-            return input.provenance.spawnedByParticipantId;
+          if (
+            input.provenance.source === "j5_spawn" &&
+            !(yield* isCurrentParticipant(input.projectId, input.provenance.spawnedByParticipantId))
+          ) {
+            // A spawner may spawn into another project. It is recorded as provenance and is no
+            // parent there: the placement tree is one project's, so the agent is a root in its
+            // own. An outside agent is in no project, so what it spawns is always a root. Any
+            // other spawner that is in no project at all is returned for `ensureParent` to refuse.
+            return isOutsideAgentParticipantId(input.provenance.spawnedByParticipantId) ||
+              (yield* isParticipantSomewhere(input.provenance.spawnedByParticipantId))
+              ? null
+              : input.provenance.spawnedByParticipantId;
           }
           return (yield* isCurrentParticipant(
             input.projectId,
@@ -613,8 +645,14 @@ export const layer: Layer.Layer<
             : null;
       if (provenanceParticipantId !== null) {
         // Immutable provenance may retain a departed source, but it must name
-        // an identity that actually joined this project at least once.
-        yield* ensureProvenanceParticipant(input.projectId, provenanceParticipantId);
+        // an identity that actually joined at least once: this project for a fork's source,
+        // any project on this server for a spawner, which may spawn into another project.
+        // An outside agent spawner joins none.
+        yield* ensureProvenanceParticipant(
+          input.projectId,
+          provenanceParticipantId,
+          input.provenance.kind === "spawned-by" && input.provenance.source === "j5_spawn",
+        );
       }
       if (provenanceParticipantId === input.participantId) {
         return yield* new PlacementCycleError({
