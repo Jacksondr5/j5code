@@ -380,6 +380,7 @@ export function formatInstructions(input: {
   Log           ${paths.log}
 
 Open the pairing URL in the Browser panel, then wait for [data-testid="composer-editor"].
+If a tab that was open before a rebuild stays on the pairing form, open the URL in a new tab.
 The pairing URL works once and has the same access as the server's own startup
 URL, Connections settings included. \`status\` prints a fresh one each time, and so does:
   ${pairCommand}
