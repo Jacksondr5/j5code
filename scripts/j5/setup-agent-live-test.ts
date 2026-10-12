@@ -401,8 +401,9 @@ The pairing URL works once. \`status\` prints a fresh one, and so does:
 
 ${
   manifest.mode === "fresh"
-    ? `Mode: fresh. The home is empty, so the first-run wizard shows, and no
-default model is set.
+    ? `Mode: fresh. The home is empty and no default model is set. The first-run
+wizard shows only in a browser profile that has not completed it: pair in an
+incognito tab.
 
 Project to add when the wizard or a test asks for one: a small TODO app (\`pnpm test\`)
   ${paths.testRepo}
