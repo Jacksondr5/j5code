@@ -59,7 +59,7 @@ function makeRemote() {
 const cloneDirFor = (base: string, name: string) => NodePath.join(base, name);
 
 describe("parseEvidenceArgs", () => {
-  it("reads the pull request, each pair and a missing before", () => {
+  it("reads the pull request, each pair and each new state", () => {
     assert.deepEqual(
       parseEvidenceArgs([
         "551",
@@ -67,9 +67,8 @@ describe("parseEvidenceArgs", () => {
         "Empty state",
         "a.png",
         "b.png",
-        "--pair",
+        "--new",
         "New",
-        "-",
         "c.png",
       ]),
       {
@@ -84,13 +83,13 @@ describe("parseEvidenceArgs", () => {
     );
   });
 
-  it("refuses a missing number, no pairs, a short pair and a pair with no after", () => {
+  it("refuses a missing number, no images, a short pair and a new state with no image", () => {
     for (const args of [
       [],
       ["abc", "--pair", "x", "a.png", "b.png"],
       ["551"],
       ["551", "--pair", "x", "a.png"],
-      ["551", "--pair", "x", "a.png", "-"],
+      ["551", "--new", "x"],
       ["551", "--video", "x.mp4"],
     ]) {
       assert.throws(() => parseEvidenceArgs(args), EvidenceRefusal);
@@ -125,7 +124,7 @@ describe("links and names", () => {
     assert.notEqual(name("abcdef1234"), name("1234abcdef"));
   });
 
-  it("prints one row per pair, with a missing before said plainly", () => {
+  it("prints one row per pair, with a new state marked as new", () => {
     assert.equal(
       evidenceTable(
         [
@@ -138,7 +137,7 @@ describe("links and names", () => {
         "| | Before | After |",
         "| --- | --- | --- |",
         "| Empty | ![Empty, before](https://x/pr-7/a.png) | ![Empty, after](https://x/pr-7/b.png) |",
-        "| New \\| state | did not exist | ![New | state, after](https://x/pr-7/c.png) |",
+        "| New \\| state | new | ![New | state, after](https://x/pr-7/c.png) |",
       ].join("\n"),
     );
   });

@@ -3,9 +3,11 @@
  * Publishes before and after screenshots for a pull request and prints the
  * markdown table for its description:
  *
- *   node scripts/j5/pr-evidence.ts <pr-number> --pair "<caption>" <before.png> <after.png> [--pair ...]
+ *   node scripts/j5/pr-evidence.ts <pr-number> --pair "<caption>" <before.png> <after.png>
+ *                                               --new "<caption>" <after.png> ...
  *
- * Use `-` for the before image of a state that did not exist before the change.
+ * `--pair` is a state the change altered; `--new` is a state the change adds,
+ * which has no before. Both repeat, in the order the rows should appear.
  *
  * Each file is checked to really be a PNG, then copied to `pr-<number>/` on
  * the `j5/evidence` branch from a fresh shallow clone in a temporary directory
@@ -33,7 +35,7 @@ export class EvidenceRefusal extends Error {}
 
 export interface EvidencePair {
   readonly caption: string;
-  /** Undefined when the state did not exist before the change. */
+  /** Undefined for a state the change adds. */
   readonly before: string | undefined;
   readonly after: string;
 }
@@ -45,7 +47,7 @@ export interface EvidenceRequest {
   readonly branch: string;
 }
 
-const USAGE = `Usage: node scripts/j5/pr-evidence.ts <pr-number> --pair "<caption>" <before.png | -> <after.png> [--pair ...]
+const USAGE = `Usage: node scripts/j5/pr-evidence.ts <pr-number> (--pair "<caption>" <before.png> <after.png> | --new "<caption>" <after.png>)...
        [--remote <git url>] [--branch <name>]`;
 
 export function parseEvidenceArgs(args: ReadonlyArray<string>): EvidenceRequest {
@@ -61,11 +63,16 @@ export function parseEvidenceArgs(args: ReadonlyArray<string>): EvidenceRequest 
     const flag = rest[index];
     if (flag === "--pair") {
       const [caption, before, after] = rest.slice(index + 1, index + 4);
-      if (caption === undefined || before === undefined || after === undefined || after === "-") {
+      if (caption === undefined || before === undefined || after === undefined) {
         throw new EvidenceRefusal(USAGE);
       }
-      pairs.push({ caption, before: before === "-" ? undefined : before, after });
+      pairs.push({ caption, before, after });
       index += 4;
+    } else if (flag === "--new") {
+      const [caption, after] = rest.slice(index + 1, index + 3);
+      if (caption === undefined || after === undefined) throw new EvidenceRefusal(USAGE);
+      pairs.push({ caption, before: undefined, after });
+      index += 3;
     } else if ((flag === "--remote" || flag === "--branch") && rest[index + 1] !== undefined) {
       if (flag === "--remote") remote = rest[index + 1];
       else branch = rest[index + 1] ?? branch;
@@ -123,7 +130,7 @@ export function evidenceTable(
   link: (path: string) => string,
 ): string {
   const cell = (caption: string, side: string, path: string | undefined) =>
-    path === undefined ? "did not exist" : `![${caption}, ${side}](${link(path)})`;
+    path === undefined ? "new" : `![${caption}, ${side}](${link(path)})`;
   return [
     "| | Before | After |",
     "| --- | --- | --- |",
