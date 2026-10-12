@@ -44,8 +44,10 @@ points at a real repository or at the developer's data.
 | The same, with Remote polling Local             | `--peer --poll` |
 | A base and a head server for before/after shots | `--base <ref>`  |
 
-`stop`, `status`, and `restart` act on the server the script started. To
-rebuild the test home from scratch, `stop`, then delete `.j5code/live-test`.
+`stop`, `status`, and `restart` act on the server the script started.
+`rebuild` stops it, discards the test home, and builds and starts a new one.
+The script does not install dependencies: if it says they are missing, install
+them and run it again.
 
 Do not seed a test home by hand, copy the live database, or start `vp run dev`
 yourself for a test. Then use [test-t3-app](../test-t3-app/SKILL.md) for the
@@ -61,8 +63,9 @@ browser steps.
 - An agent's own account of what it did is not evidence. Check the tool
   result, the stored row, or the screen.
 - To hold a turn open, ask the agent to run `./scripts/hold.sh` in the test
-  repository. It blocks until you create `.hold-release` there, and deletes
-  that file when it exits.
+  repository. It blocks until you create `.hold-release` in the test
+  repository's root, deletes that file, and exits. It gives up after nine
+  minutes.
 
 ### Restarts
 
