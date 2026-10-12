@@ -16,9 +16,9 @@
  * is printed. Screenshots never go on the pull request's own branch.
  *
  * `--remote <url>` and `--branch <name>` point it somewhere else, which is how
- * it is tested without touching the real branch. On any remote that is not a
- * local path the only branches it will push to are `j5/evidence` and a
- * self-test branch named `j5/evidence-selftest-*`. The link
+ * it is tested without touching the real branch. The only branches it will
+ * push to are `j5/evidence` and a self-test branch named
+ * `j5/evidence-selftest-*`, unless the remote is a local bare repository. The link
  * check runs only for a GitHub remote.
  */
 import * as NodeChildProcess from "node:child_process";
@@ -91,23 +91,33 @@ export function parseEvidenceArgs(args: ReadonlyArray<string>): EvidenceRequest 
 
 /** The owner and repository of a GitHub remote, or undefined for any other remote. */
 export function githubRepository(remote: string): string | undefined {
-  return /github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?\/?$/.exec(remote)?.[1];
+  // Only decides whether image links can be checked; it guards nothing.
+  return /github\.com(?::\d+)?[:/]([^/]+\/[^/]+?)(?:\.git)?\/?$/i.exec(remote)?.[1];
 }
 
-/** A repository on this machine's filesystem, which is what the tests push to. */
-const isLocalRemote = (remote: string) =>
-  remote.startsWith("/") || remote.startsWith("./") || remote.startsWith("file://");
+/**
+ * Whether `remote` is, for certain, a bare repository in a directory on this
+ * machine: what the tests push to. A URL of any kind is not, and neither is a
+ * checkout, which could be a clone of the real repository.
+ */
+function isLocalBareRepository(remote: string): boolean {
+  const directory = remote.startsWith("file://") ? remote.slice("file://".length) : remote;
+  if (!NodePath.isAbsolute(directory) || !NodeFS.existsSync(directory)) return false;
+  return run("git", ["rev-parse", "--is-bare-repository"], directory).output === "true";
+}
 
 /**
  * Why this script will not push to `branch` on `remote`, or undefined when it
- * may. On any remote that is not a local path it pushes evidence only to the
- * evidence branch, never to a pull request's own branch or to main; another
- * branch name is for local test remotes, and for a self-test branch.
+ * may. Evidence goes only to the evidence branch, or to a self-test branch,
+ * never to a pull request's own branch or to main. The one exception is a
+ * remote proved to be a local bare repository. The rule is "refuse unless
+ * proved harmless", because a remote can name the real repository in more
+ * forms than any pattern would catch.
  */
 export function branchRefusal(remote: string, branch: string): string | undefined {
-  if (isLocalRemote(remote)) return undefined;
   if (branch === DEFAULT_BRANCH || branch.startsWith(SELFTEST_BRANCH_PREFIX)) return undefined;
-  return `Refusing to push screenshots to ${branch} on ${remote}. On a remote repository they go only to ${DEFAULT_BRANCH} (or a ${SELFTEST_BRANCH_PREFIX}* branch for a self test), never to a pull request's own branch.`;
+  if (isLocalBareRepository(remote)) return undefined;
+  return `Refusing to push screenshots to ${branch} on ${remote}. They go only to ${DEFAULT_BRANCH} (or a ${SELFTEST_BRANCH_PREFIX}* branch for a self test), never to a pull request's own branch. Another branch is allowed only on a local bare repository.`;
 }
 
 /**

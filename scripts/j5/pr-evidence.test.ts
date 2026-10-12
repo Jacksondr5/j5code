@@ -102,6 +102,11 @@ describe("links and names", () => {
   it("knows a GitHub remote in either form, and nothing else", () => {
     assert.equal(githubRepository("https://github.com/Jacksondr5/j5code.git"), "Jacksondr5/j5code");
     assert.equal(githubRepository("git@github.com:Jacksondr5/j5code.git"), "Jacksondr5/j5code");
+    assert.equal(
+      githubRepository("ssh://git@github.com:22/Jacksondr5/j5code.git"),
+      "Jacksondr5/j5code",
+    );
+    assert.equal(githubRepository("https://GitHub.com/Jacksondr5/j5code"), "Jacksondr5/j5code");
     assert.isUndefined(githubRepository("/tmp/remote.git"));
   });
 
@@ -156,27 +161,37 @@ describe("links and names", () => {
     assert.equal(row?.replaceAll("\\|", "").split("|").length, 5);
   });
 
-  it("pushes to a remote repository only on the evidence branch or a self-test branch", () => {
+  it("pushes only to the evidence branch or a self-test branch, whatever form the remote takes", () => {
+    const { base, remote, seed } = makeRemote();
     const remotes = [
       "https://github.com/Jacksondr5/j5code.git",
       "git@github.com:Jacksondr5/j5code.git",
-      // Not GitHub, and not local either.
+      // Forms a pattern for "GitHub" is likely to miss.
+      "ssh://git@github.com:22/Jacksondr5/j5code.git",
+      "ssh://git@ssh.github.com:443/Jacksondr5/j5code.git",
+      "https://GitHub.com/Jacksondr5/j5code.git",
+      "my-ssh-alias:Jacksondr5/j5code.git",
       "ssh://git@example.com/team/repo.git",
+      // A checkout on this machine could be a clone of the real repository.
+      seed,
+      "./relative/path.git",
+      NodePath.join(base, "does-not-exist.git"),
     ];
-    for (const remote of remotes) {
-      assert.isUndefined(branchRefusal(remote, "j5/evidence"));
-      assert.isUndefined(branchRefusal(remote, "j5/evidence-selftest-123"));
+    for (const candidate of remotes) {
+      assert.isUndefined(branchRefusal(candidate, "j5/evidence"));
+      assert.isUndefined(branchRefusal(candidate, "j5/evidence-selftest-123"));
       for (const branch of ["j5/main", "j5code/some-pr-branch", "j5/evidence2", "main"]) {
         assert.include(
-          branchRefusal(remote, branch) ?? "",
+          branchRefusal(candidate, branch) ?? "",
           `Refusing to push screenshots to ${branch}`,
+          candidate,
         );
       }
     }
-    // A local path is a test remote; any branch there is fine.
-    for (const local of ["/tmp/remote.git", "./remote.git", "file:///tmp/remote.git"]) {
-      assert.isUndefined(branchRefusal(local, "anything"));
-    }
+    // Only a repository proved to be local and bare takes another branch.
+    assert.isUndefined(branchRefusal(remote, "anything"));
+    assert.isUndefined(branchRefusal(`file://${remote}`, "anything"));
+    NodeFS.rmSync(base, { recursive: true, force: true });
   });
 });
 
