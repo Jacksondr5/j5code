@@ -44,10 +44,16 @@ points at a real repository or at the developer's data.
 | The same, with Remote polling Local             | `--peer --poll` |
 | A base and a head server for before/after shots | `--base <ref>`  |
 
-`stop`, `status`, and `restart` act on the server the script started.
+`stop`, `status`, and `restart` act on the server the script started. `status`
+starts with `RUNNING`, `NOT SERVING`, or `STOPPED`, and prints a fresh pairing
+URL when the server is up.
 `rebuild` stops it, discards the test home, and builds and starts a new one.
 The script does not install dependencies: if it says they are missing, install
 them and run it again.
+
+The test home, test repository, and logs live under `.j5code/live-test`. Live
+turns also leave provider session files in `~/.claude` and `~/.codex`, and
+Browser panel screenshots are saved by the server you are running in.
 
 Do not seed a test home by hand, copy the live database, or start `vp run dev`
 yourself for a test. Then use [test-t3-app](../test-t3-app/SKILL.md) for the
@@ -60,6 +66,11 @@ browser steps.
 - You are authorized to use Claude Haiku and GPT Luna to run real AI tests.
   The test home defaults new threads to Haiku. Ask the person before using a
   more expensive model.
+- Take live turns in "Current checkout" mode. In a Crew roster that choice is
+  "Captain's checkout". A first turn in "New worktree" mode can be interrupted
+  or hang.
+- After editing a Crew roster, check each seat's model again before approving:
+  an edit can change it.
 - An agent's own account of what it did is not evidence. Check the tool
   result, the stored row, or the screen.
 - To hold a turn open, ask the agent to run `./scripts/hold.sh` in the test

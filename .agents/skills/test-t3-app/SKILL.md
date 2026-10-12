@@ -44,8 +44,9 @@ a subagent left running in the background; it is not a browser fault.
   the `pair` command the setup script printed, or with
   `node apps/server/src/bin.ts pair` for a plain dev server. Keep using the
   same tab.
-- **Wait.** A URL changes before its page does. After moving to a new page,
-  wait for text that only the new page has.
+- **Wait.** A URL changes before its page does, and the composer shows before
+  a thread's timeline loads. After moving to a new page or opening a thread,
+  wait for text that only it has.
 - **Read.** Use `preview_evaluate`, for example
   `document.querySelector('main')?.innerText`. `preview_snapshot` text is
   capped, and the sidebar uses the cap up.
