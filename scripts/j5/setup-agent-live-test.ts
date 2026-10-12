@@ -281,18 +281,22 @@ export function formatInstructions(input: {
   readonly paths: LiveTestPaths;
   readonly manifest: Manifest;
   readonly facts: ServerLogFacts;
+  /** A pairing URL nobody has used yet, or undefined when none could be minted. */
+  readonly pairingUrl: string | undefined;
 }): string {
   const { paths, manifest, facts } = input;
+  const pairCommand = `node ${NodePath.join(paths.worktree, "apps/server/src/bin.ts")} pair --base-dir ${manifest.home}`;
   return `J5 Code live-test server: RUNNING
 
-  Pairing URL   ${facts.pairingUrl}
+  Pairing URL   ${input.pairingUrl ?? `none could be minted; run: ${pairCommand}`}
   Web           http://localhost:${facts.webPort}
   Server port   ${facts.serverPort}
   Home          ${manifest.home}
   Log           ${paths.log}
 
 Open the pairing URL in the Browser panel, then wait for [data-testid="composer-editor"].
-The pairing URL works once. For another: node apps/server/src/bin.ts pair --base-dir ${manifest.home}
+The pairing URL works once. \`status\` prints a fresh one each time, and so does:
+  ${pairCommand}
 
 Project to use: "${manifest.project.title}"
   ${manifest.testRepo}
@@ -322,6 +326,30 @@ Commands:
   ${selfCommand(paths, "stop")}
 Stop the server when you finish. To rebuild from scratch: stop, then rm -rf ${paths.root}
 `;
+}
+
+/**
+ * A fresh pairing URL from the running server. The one in the log is the
+ * startup URL, which works once and is usually spent by the time anyone asks again.
+ */
+function mintPairingUrl(paths: LiveTestPaths, manifest: Manifest): string | undefined {
+  const pair = NodeChildProcess.spawnSync(
+    process.execPath,
+    [NodePath.join(paths.worktree, "apps/server/src/bin.ts"), "pair", "--base-dir", manifest.home],
+    {
+      cwd: paths.worktree,
+      env: liveTestEnvironment(process.env, paths.worktree),
+      encoding: "utf8",
+    },
+  );
+  return /Pairing URL: (\S+)/.exec(pair.stdout ?? "")?.[1];
+}
+
+function printRunning(paths: LiveTestPaths, facts: ServerLogFacts): void {
+  const manifest = readManifest(paths);
+  console.log(
+    formatInstructions({ paths, manifest, facts, pairingUrl: mintPairingUrl(paths, manifest) }),
+  );
 }
 
 function readManifest(paths: LiveTestPaths): Manifest {
@@ -367,10 +395,7 @@ function buildHome(paths: LiveTestPaths): void {
 async function start(paths: LiveTestPaths): Promise<void> {
   const state = currentServerState(paths);
   if (state.kind === "unverified") throw new LiveTestRefusal(state.reason);
-  if (state.kind === "running") {
-    console.log(formatInstructions({ paths, manifest: readManifest(paths), facts: state.facts }));
-    return;
-  }
+  if (state.kind === "running") return printRunning(paths, state.facts);
   if (!NodeFS.existsSync(paths.manifest)) buildHome(paths);
   const manifest = readManifest(paths);
 
@@ -423,7 +448,15 @@ async function start(paths: LiveTestPaths): Promise<void> {
     if (facts.pairingUrl !== undefined && facts.recovered) {
       const running = currentServerState(paths);
       if (running.kind === "running") {
-        console.log(formatInstructions({ paths, manifest, facts: running.facts }));
+        // The startup URL in the log has not been used yet.
+        console.log(
+          formatInstructions({
+            paths,
+            manifest,
+            facts: running.facts,
+            pairingUrl: running.facts.pairingUrl,
+          }),
+        );
         return;
       }
     }
@@ -468,10 +501,7 @@ async function stop(paths: LiveTestPaths): Promise<void> {
 function status(paths: LiveTestPaths): void {
   const state = currentServerState(paths);
   if (state.kind === "unverified") throw new LiveTestRefusal(state.reason);
-  if (state.kind === "running") {
-    console.log(formatInstructions({ paths, manifest: readManifest(paths), facts: state.facts }));
-    return;
-  }
+  if (state.kind === "running") return printRunning(paths, state.facts);
   console.log(
     `J5 Code live-test server: STOPPED\n\n${
       NodeFS.existsSync(paths.manifest)
