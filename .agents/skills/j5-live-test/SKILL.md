@@ -44,6 +44,10 @@ points at a real repository or at the developer's data.
 | The same, with Remote polling Local             | `--peer --poll` |
 | A base and a head server for before/after shots | `--base <ref>`  |
 
+A start returns within about two minutes. On a busy machine a `--peer` or
+`--base` start can return before it has finished, and prints the command that
+finishes it.
+
 With `--peer`, pair the browser with Local, then open the "Add to the browser"
 link the script prints to add Remote. After a `rebuild`, remove the old Remote
 from Settings > Connections first: the browser keeps its own list.
