@@ -14,7 +14,10 @@
  * home and test project, peered so their agents can message each other;
  * `--peer --poll` has Remote poll Local instead of being reached by it.
  * `--for-dev` is different in kind: a server for the developer to use, on a
- * copy of their data, shared on the tailnet. Agents take no turns on it. A
+ * copy of their data, shared on the tailnet. Agents take no turns on it.
+ * `--base <ref>` runs a second server from a checkout of this repository at
+ * `<ref>`, on a home built by that checkout's own generator with the same
+ * clock, for before and after screenshots. A
  * worktree has one live-test build at a time and its mode is fixed when it is
  * built: `rebuild` with another flag switches.
  *
@@ -66,14 +69,21 @@ const MODE_FLAGS = {
   peer: "--peer",
   "peer-poll": "--peer --poll",
   "for-dev": "--for-dev",
+  base: "--base",
 } as const;
 export type LiveTestMode = keyof typeof MODE_FLAGS;
 const isPeerMode = (mode: LiveTestMode) => mode === "peer" || mode === "peer-poll";
+/** The flags that ask for `mode`; the base mode's flag carries the ref it was given. */
+const modeFlags = (mode: LiveTestMode, baseRef: string | undefined) =>
+  mode === "base" ? `${MODE_FLAGS.base} ${baseRef ?? "<ref>"}` : MODE_FLAGS[mode];
 
 /** What the generator records about a default build. Paths are never read from it: see LiveTestPaths. */
 interface DefaultManifest {
-  /** Absent in the generator's file; the script adds it for the peer modes. */
-  readonly mode?: "default" | "peer" | "peer-poll";
+  /** Absent in the generator's file; the script adds it for the peer and base modes. */
+  readonly mode?: "default" | "peer" | "peer-poll" | "base";
+  /** In base mode: the ref as it was given, and the commit it named then. */
+  readonly baseRef?: string;
+  readonly baseCommit?: string;
   readonly project: { readonly title: string };
   readonly defaultModel: string;
   readonly personas: ReadonlyArray<{
@@ -105,6 +115,8 @@ export interface ServerPaths {
 export interface LiveTestPaths extends ServerPaths {
   readonly root: string;
   readonly manifest: string;
+  /** In base mode, a git worktree of this repository at the base ref. */
+  readonly base: string;
   readonly remote: ServerPaths & { readonly root: string };
 }
 
@@ -215,6 +227,7 @@ export async function resolveLiveTestPaths(input: {
     remote.home,
     NodePath.join(remote.home, "userdata"),
     remote.testRepo,
+    NodePath.join(root, "base"),
   ]) {
     if (!isInside(canonicalPath(inside), canonicalRoot)) {
       throw new LiveTestRefusal(
@@ -231,6 +244,7 @@ export async function resolveLiveTestPaths(input: {
     log: NodePath.join(root, "server.log"),
     record: NodePath.join(root, "server.json"),
     remote,
+    base: NodePath.join(root, "base"),
   };
 }
 
@@ -536,7 +550,8 @@ Commands:
   ${selfCommand(paths, "rebuild")}   stop, delete ${paths.root}, build and start again
                                       (flags: none for the test project, --fresh for an empty home,
                                       --peer or --peer --poll for two peered servers,
-                                      --for-dev for a server the developer uses)
+                                      --for-dev for a server the developer uses,
+                                      --base <ref> for a second server at that ref)
 
 How to test is in .agents/skills/j5-live-test/SKILL.md.
 `;
@@ -646,8 +661,8 @@ function logTail(paths: ServerPaths): string {
   return NodeFS.readFileSync(paths.log, "utf8").split("\n").slice(-40).join("\n");
 }
 
-function buildHome(paths: LiveTestPaths, mode: LiveTestMode): void {
-  const rebuild = selfCommand(paths, `rebuild ${MODE_FLAGS[mode]}`);
+function buildHome(paths: LiveTestPaths, mode: LiveTestMode, base: BaseTarget | undefined): void {
+  const rebuild = selfCommand(paths, `rebuild ${modeFlags(mode, base?.ref)}`);
   if (NodeFS.existsSync(paths.root)) {
     throw new LiveTestRefusal(
       `${paths.root} exists but holds no finished build. Start over with: ${rebuild}`,
@@ -718,7 +733,17 @@ function buildHome(paths: LiveTestPaths, mode: LiveTestMode): void {
   };
   if (!isPeerMode(mode)) {
     console.log("Building the test repository and home (about 30 seconds, no model calls)...");
-    return generate(paths.root);
+    generate(paths.root);
+    if (base !== undefined) {
+      const manifest: Manifest = {
+        ...(readManifest(paths) as DefaultManifest),
+        mode: "base",
+        baseRef: base.ref,
+        baseCommit: base.commit,
+      };
+      NodeFS.writeFileSync(paths.manifest, `${JSON.stringify(manifest, null, 2)}\n`);
+    }
+    return;
   }
   console.log("Building two test repositories and homes (about a minute, no model calls)...");
   // Remote first: Local's manifest is the mark of a finished build, so it comes last.
@@ -1065,6 +1090,13 @@ export function modeRefusal(input: {
   return `The live-test home here was built in ${input.built} mode, not ${input.requested} mode.\nUse it as built: ${input.startCommand(input.built)}\nOr replace it: ${input.rebuildCommand(input.requested)}`;
 }
 
+/** The ref a base build was given, or undefined for any other build. */
+function builtBaseRef(paths: LiveTestPaths): string | undefined {
+  if (!NodeFS.existsSync(paths.manifest)) return undefined;
+  const manifest = readManifest(paths);
+  return "baseRef" in manifest ? manifest.baseRef : undefined;
+}
+
 function builtMode(paths: LiveTestPaths): LiveTestMode | undefined {
   return NodeFS.existsSync(paths.manifest) ? (readManifest(paths).mode ?? "default") : undefined;
 }
@@ -1332,21 +1364,54 @@ function arePeered(
   );
 }
 
-async function start(paths: LiveTestPaths, mode: LiveTestMode): Promise<void> {
+async function start(
+  paths: LiveTestPaths,
+  mode: LiveTestMode,
+  baseRef: string | undefined,
+): Promise<void> {
   const deadline = Date.now() + START_BUDGET_MS;
   const built = builtMode(paths);
+  const builtManifest = built === undefined ? undefined : readManifest(paths);
+  const builtRef = builtBaseRef(paths);
   const refusal =
     built === undefined
       ? undefined
       : modeRefusal({
           requested: mode,
           built,
-          startCommand: (other) => selfCommand(paths, MODE_FLAGS[other]),
-          rebuildCommand: (other) => selfCommand(paths, `rebuild ${MODE_FLAGS[other]}`),
+          startCommand: (other) => selfCommand(paths, modeFlags(other, builtRef)),
+          rebuildCommand: (other) => selfCommand(paths, `rebuild ${modeFlags(other, baseRef)}`),
         });
   if (refusal !== undefined) throw new LiveTestRefusal(refusal);
-  if (built === undefined && currentServerState(paths).kind === "stopped") buildHome(paths, mode);
+  const base = mode === "base" ? resolveBase(paths, baseRef ?? builtRef ?? "") : undefined;
+  if (
+    base !== undefined &&
+    builtManifest !== undefined &&
+    "baseCommit" in builtManifest &&
+    builtManifest.baseCommit !== base.commit
+  ) {
+    throw new LiveTestRefusal(
+      `The base here was built at ${builtManifest.baseCommit?.slice(0, 10)}, and ${base.ref} is now ${base.commit.slice(0, 10)}.\nReplace it: ${selfCommand(paths, `rebuild ${modeFlags("base", base.ref)}`)}`,
+    );
+  }
+  if (base !== undefined && built === undefined) {
+    // Both builds read this, so the two homes date their replayed threads alike.
+    process.env.J5_LIVE_TEST_NOW = String(Date.now());
+  }
+  if (built === undefined && currentServerState(paths).kind === "stopped") {
+    buildHome(paths, mode, base);
+  }
 
+  if (base !== undefined) {
+    console.log(`Starting the head server here and the base server at ${base.ref}...`);
+    // The base checks out, installs and builds while the head server starts.
+    const [baseOutput, head] = await Promise.all([
+      startBase(paths, base),
+      startServer(paths, "dev", {}, deadline),
+    ]);
+    printRunning(paths, head, undefined);
+    return console.log(`${baseHeading(readManifest(paths))}\n\n${baseOutput}`);
+  }
   if (mode === "for-dev") {
     console.log("Starting the dev server and sharing it on the tailnet...");
     return console.log(
@@ -1388,6 +1453,109 @@ async function start(paths: LiveTestPaths, mode: LiveTestMode): Promise<void> {
   }
   await peerServers(paths, mode, { local: local.serverPort, remote: remote.serverPort }, deadline);
   printRunning(paths, local, remote, true);
+}
+
+/** A base ref as the caller gave it, and the commit it names now. */
+interface BaseTarget {
+  readonly ref: string;
+  readonly commit: string;
+}
+
+const LIVE_TEST_SCRIPT = "scripts/j5/setup-agent-live-test.ts";
+
+/**
+ * Resolves `ref` in this repository and checks the base can run at all: it
+ * needs this script, which starts its server and carries its own generator.
+ */
+function resolveBase(paths: LiveTestPaths, ref: string): BaseTarget {
+  const git = (...args: ReadonlyArray<string>) =>
+    NodeChildProcess.spawnSync("git", args, { cwd: paths.worktree, encoding: "utf8" });
+  const commit = git("rev-parse", "--verify", "--quiet", `${ref}^{commit}`);
+  if (commit.status !== 0) {
+    throw new LiveTestRefusal(`${ref} does not name a commit in this repository. Fetch it first.`);
+  }
+  const target = { ref, commit: commit.stdout.trim() };
+  if (git("cat-file", "-e", `${target.commit}:${LIVE_TEST_SCRIPT}`).status !== 0) {
+    throw new LiveTestRefusal(
+      `${ref} (${target.commit.slice(0, 10)}) has no ${LIVE_TEST_SCRIPT}, so it cannot build a test home or start a server on one. Pick a base that contains it.`,
+    );
+  }
+  return target;
+}
+
+/** Runs a command to completion without blocking this process, so two builds can overlap. */
+function run(
+  command: string,
+  args: ReadonlyArray<string>,
+  options: { readonly cwd: string; readonly env: NodeJS.ProcessEnv },
+): Promise<{ readonly status: number | null; readonly output: string }> {
+  return new Promise((resolve) => {
+    const child = NodeChildProcess.spawn(command, [...args], {
+      ...options,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let output = "";
+    child.stdout.on("data", (chunk: Buffer) => (output += chunk.toString()));
+    child.stderr.on("data", (chunk: Buffer) => (output += chunk.toString()));
+    child.on("error", (cause) => resolve({ status: null, output: `${output}${String(cause)}` }));
+    child.on("close", (status) => resolve({ status, output }));
+  });
+}
+
+/**
+ * Runs the base checkout's own copy of this script. The base is a linked
+ * worktree, so its script gives it its own ports, its own `.j5code/live-test`,
+ * its own generator and its own process record, with the rules of its version.
+ */
+const baseScript = (paths: LiveTestPaths, args: ReadonlyArray<string>) =>
+  run(process.execPath, [NodePath.join(paths.base, LIVE_TEST_SCRIPT), ...args], {
+    cwd: paths.base,
+    env: liveTestEnvironment(process.env, paths.worktree),
+  });
+
+/** Checks out and installs the base if it is not there yet, then starts its server. */
+async function startBase(paths: LiveTestPaths, base: BaseTarget): Promise<string> {
+  const environment = liveTestEnvironment(process.env, paths.worktree);
+  if (!NodeFS.existsSync(paths.base)) {
+    const added = await run("git", ["worktree", "add", "--detach", paths.base, base.commit], {
+      cwd: paths.worktree,
+      env: environment,
+    });
+    if (added.status !== 0) {
+      throw new LiveTestRefusal(`Checking out ${base.ref} failed:\n${added.output}`);
+    }
+  }
+  if (!NodeFS.existsSync(NodePath.join(paths.base, "node_modules"))) {
+    const installed = await run("pnpm", ["install", "--frozen-lockfile"], {
+      cwd: paths.base,
+      env: environment,
+    });
+    if (installed.status !== 0) {
+      throw new LiveTestRefusal(`Installing the base checkout failed:\n${installed.output}`);
+    }
+  }
+  const started = await baseScript(paths, []);
+  if (started.status !== 0) {
+    throw new LiveTestRefusal(`The base server did not start:\n${started.output}`);
+  }
+  return started.output;
+}
+
+const baseHeading = (manifest: Manifest) =>
+  "baseRef" in manifest && manifest.baseRef !== undefined
+    ? `Base server, at ${manifest.baseRef} (${manifest.baseCommit?.slice(0, 10)}), as its own script reports it:`
+    : "Base server, as its own script reports it:";
+
+/** Removes the base checkout from git's worktree list as well as from disk. */
+function removeBaseCheckout(paths: LiveTestPaths): void {
+  if (!NodeFS.existsSync(paths.base)) return;
+  const removed = NodeChildProcess.spawnSync("git", ["worktree", "remove", "--force", paths.base], {
+    cwd: paths.worktree,
+    encoding: "utf8",
+  });
+  if (removed.status !== 0) {
+    throw new LiveTestRefusal(`Removing the base checkout failed:\n${removed.stderr}`);
+  }
 }
 
 /** The servers a build has: one, or Local and Remote in the peer modes. */
@@ -1432,10 +1600,28 @@ async function stop(paths: LiveTestPaths): Promise<void> {
     NodeFS.rmSync(server.record, { force: true });
     console.log(`J5 Code live-test server${name}: STOPPED`);
   }
+  if (NodeFS.existsSync(NodePath.join(paths.base, LIVE_TEST_SCRIPT))) {
+    const stopped = await baseScript(paths, ["stop"]);
+    console.log(`Base: ${stopped.output.trim()}`);
+    if (stopped.status !== 0) {
+      throw new LiveTestRefusal("The base server could not be stopped; see the line above.");
+    }
+  }
   removeTailnetMapping();
 }
 
-function status(paths: LiveTestPaths): void {
+async function status(paths: LiveTestPaths): Promise<void> {
+  statusOfHead(paths);
+  if (
+    builtMode(paths) === "base" &&
+    NodeFS.existsSync(NodePath.join(paths.base, LIVE_TEST_SCRIPT))
+  ) {
+    const base = await baseScript(paths, ["status"]);
+    console.log(`\n${baseHeading(readManifest(paths))}\n\n${base.output}`);
+  }
+}
+
+function statusOfHead(paths: LiveTestPaths): void {
   const servers = serversOf(paths).map((server) => ({
     ...server,
     state: currentServerState(server.paths),
@@ -1473,12 +1659,12 @@ function status(paths: LiveTestPaths): void {
       built === undefined
         ? "No test home is built yet."
         : `The test home is built at ${paths.root}, in ${built} mode.`
-    }\nStart it with: ${selfCommand(paths, MODE_FLAGS[built ?? "default"])}`,
+    }\nStart it with: ${selfCommand(paths, modeFlags(built ?? "default", builtBaseRef(paths)))}`,
   );
 }
 
-const USAGE = `Usage: node scripts/j5/setup-agent-live-test.ts [--fresh | --peer [--poll] | --for-dev]
-       node scripts/j5/setup-agent-live-test.ts rebuild [--fresh | --peer [--poll] | --for-dev]
+const USAGE = `Usage: node scripts/j5/setup-agent-live-test.ts [--fresh | --peer [--poll] | --for-dev | --base <ref>]
+       node scripts/j5/setup-agent-live-test.ts rebuild [--fresh | --peer [--poll] | --for-dev | --base <ref>]
        node scripts/j5/setup-agent-live-test.ts status | restart | stop`;
 
 /**
@@ -1488,29 +1674,43 @@ const USAGE = `Usage: node scripts/j5/setup-agent-live-test.ts [--fresh | --peer
 export function parseCommand(args: ReadonlyArray<string>): {
   readonly command: LiveTestCommand;
   readonly mode: LiveTestMode;
+  /** The ref given with `--base`. */
+  readonly baseRef?: string;
 } {
-  const flags = args
+  // --base is the one flag with a value; take the pair out before sorting the rest.
+  const baseIndex = args.indexOf(MODE_FLAGS.base);
+  const baseRef = baseIndex === -1 ? undefined : args[baseIndex + 1];
+  const rest = baseIndex === -1 ? args : args.toSpliced(baseIndex, 2);
+  const flags = rest
     .filter((argument) => argument.startsWith("--"))
     .toSorted()
     .join(" ");
-  const words = args.filter((argument) => !argument.startsWith("--"));
+  const words = rest.filter((argument) => !argument.startsWith("--"));
   const command = words[0] ?? "start";
-  const mode = (Object.keys(MODE_FLAGS) as ReadonlyArray<LiveTestMode>).find(
-    (candidate) => MODE_FLAGS[candidate].split(" ").toSorted().join(" ") === flags,
+  const plainMode = (Object.keys(MODE_FLAGS) as ReadonlyArray<LiveTestMode>).find(
+    (candidate) =>
+      candidate !== "base" && MODE_FLAGS[candidate].split(" ").toSorted().join(" ") === flags,
   );
+  // A base is compared with the default build, so --base goes with no other mode flag.
+  const mode = baseIndex === -1 ? plainMode : plainMode === "default" ? "base" : undefined;
   if (
     words.length > 1 ||
     !COMMANDS.some((known) => known === command) ||
     mode === undefined ||
+    (mode === "base" && (baseRef === undefined || baseRef.startsWith("-"))) ||
     (mode !== "default" && command !== "start" && command !== "rebuild")
   ) {
     throw new LiveTestRefusal(USAGE);
   }
-  return { command: command as LiveTestCommand, mode };
+  return {
+    command: command as LiveTestCommand,
+    mode,
+    ...(mode === "base" && baseRef !== undefined ? { baseRef } : {}),
+  };
 }
 
 async function main(): Promise<void> {
-  const { command, mode } = parseCommand(process.argv.slice(2));
+  const { command, mode, baseRef } = parseCommand(process.argv.slice(2));
   // oxlint-disable-next-line t3code/no-global-process-runtime -- a standalone CLI with no Effect runtime.
   if (NodeOS.platform() !== "linux") {
     throw new LiveTestRefusal("This script reads /proc and runs only on Linux.");
@@ -1530,9 +1730,18 @@ async function main(): Promise<void> {
   if (command === "stop") return stop(paths);
   if (command === "restart" || command === "rebuild") await stop(paths);
   // resolveLiveTestPaths has confirmed this directory is inside the worktree's own .j5code.
-  if (command === "rebuild") NodeFS.rmSync(paths.root, { recursive: true, force: true });
+  // Refuse an unusable base before a rebuild deletes the build that is there.
+  if (command === "rebuild" && baseRef !== undefined) resolveBase(paths, baseRef);
+  if (command === "rebuild") {
+    // A base checkout is a registered git worktree: unregister it, not just delete it.
+    removeBaseCheckout(paths);
+    NodeFS.rmSync(paths.root, { recursive: true, force: true });
+  }
   // A restart keeps the mode that is built; only a start or rebuild chooses one.
-  await start(paths, command === "restart" ? (builtMode(paths) ?? "default") : mode);
+  if (command === "restart") {
+    return start(paths, builtMode(paths) ?? "default", builtBaseRef(paths));
+  }
+  await start(paths, mode, baseRef);
 }
 
 if (import.meta.main) {

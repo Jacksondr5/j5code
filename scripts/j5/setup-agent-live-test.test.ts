@@ -128,6 +128,8 @@ describe("resolveLiveTestPaths after a build", () => {
       ["test-repo", (layout: ReturnType<typeof makeLayout>) => layout.mainCheckout],
       // The second server's home in the peer modes is held to the same rule.
       ["remote/home", (layout: ReturnType<typeof makeLayout>) => layout.liveHome],
+      // The base checkout is deleted by rebuild, so it must be a directory of this build.
+      ["base", (layout: ReturnType<typeof makeLayout>) => layout.mainCheckout],
       // The state directory inside a real home, linked to the live database's directory.
       [
         "home/userdata",
@@ -485,13 +487,28 @@ describe("parseCommand", () => {
       command: "rebuild",
       mode: "for-dev",
     });
+    assert.deepEqual(parseCommand(["--base", "origin/j5/main"]), {
+      command: "start",
+      mode: "base",
+      baseRef: "origin/j5/main",
+    });
+    assert.deepEqual(parseCommand(["rebuild", "--base", "v1"]), {
+      command: "rebuild",
+      mode: "base",
+      baseRef: "v1",
+    });
   });
 
   it("refuses unknown words and flags, and a mode flag where none applies", () => {
     for (const args of [
       ["bogus"],
       ["stop", "now"],
+      // --base needs a ref, compares against the default build only, and is not a ref named "rebuild".
       ["--base"],
+      ["--base", "--fresh"],
+      ["--base", "main", "--fresh"],
+      ["--base", "main", "--peer"],
+      ["status", "--base", "main"],
       ["--fresh", "--fresh"],
       // --poll says how two servers peer; it means nothing alone or with an empty home.
       ["--poll"],
