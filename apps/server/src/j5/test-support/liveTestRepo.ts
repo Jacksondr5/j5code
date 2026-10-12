@@ -27,7 +27,7 @@ Change anything here; it is a disposable copy.
     node src/cli.js add "Buy milk"
     node src/cli.js done 1
     node src/cli.js list
-    npm test
+    pnpm test
 
 \`scripts/hold.sh\` blocks until \`.hold-release\` exists in this directory, then
 deletes it. Ask an agent to run it to hold a turn open, then
@@ -155,7 +155,7 @@ steps:
   - id: build
     title: Build
     persona: haiku-helper
-    prompt: Add a "remove <id>" command to src/cli.js with a test, and run npm test.
+    prompt: Add a "remove <id>" command to src/cli.js with a test, and run pnpm test.
   - id: review
     title: Review
     persona: luna-helper

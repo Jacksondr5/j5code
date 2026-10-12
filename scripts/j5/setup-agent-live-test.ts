@@ -362,7 +362,10 @@ function currentServerState(paths: LiveTestPaths): ServerState {
 const selfCommand = (paths: LiveTestPaths, command: string) =>
   `node ${NodePath.join(paths.worktree, "scripts/j5/setup-agent-live-test.ts")} ${command}`.trimEnd();
 
-/** Everything an agent needs to use the running server, with no other guidance. */
+/**
+ * What only this script knows about the running server. How to test with it
+ * is the j5-live-test skill's job and is not repeated here.
+ */
 export function formatInstructions(input: {
   readonly paths: LiveTestPaths;
   readonly manifest: Manifest;
@@ -380,40 +383,28 @@ export function formatInstructions(input: {
   Home          ${paths.home}
   Log           ${paths.log}
 
-Open the pairing URL in the Browser panel, then wait for [data-testid="composer-editor"].
-If a tab that was open before a rebuild stays on the pairing form, press "Reload app" there.
-The pairing URL works once and has the same access as the server's own startup
-URL, Connections settings included. \`status\` prints a fresh one each time, and so does:
+The pairing URL works once. \`status\` prints a fresh one, and so does:
   ${pairCommand}
 
-Project to use: "${manifest.project.title}"
+Project to use: "${manifest.project.title}", a small TODO app (\`pnpm test\`)
   ${paths.testRepo}
-  A small TODO app (\`npm test\` runs its suite). Its origin is a local bare
-  repository, so pushes go nowhere real. It is the only project in this home.
-  Do not add another project: that is how a test reaches a real repository.
+  It is the only project in this home. Do not add another project: that is how
+  a test reaches a real repository.
 
-Pre-made threads are for viewing only. They are replayed recordings, so a
-message sent in one fails or starts a new provider conversation. Take live
-turns in a NEW thread in "${manifest.project.title}".
-Take live turns in "Current checkout" mode; for a Crew seat that is "Captain's
-checkout". In "New worktree" mode the first turn of a thread can be interrupted
-a few seconds in, or stay on "Thinking" after its work is done.
-
-Models: new threads default to ${manifest.defaultModel}. Claude Haiku and GPT Luna
-need no permission. Ask your Captain before a turn on anything more expensive.
+New threads default to ${manifest.defaultModel}.
 Personas: ${manifest.personas.map((persona) => `${persona.id} (${persona.model})`).join(", ")}
 Playbooks: ${manifest.playbooks.join(", ")}
 
-To hold a turn open, ask the agent to run: ${manifest.holdScript}
-It blocks until you release it with: touch ${NodePath.join(paths.testRepo, HOLD_RELEASE_FILE)}
-The script deletes that file as it exits, so there is nothing to clean up.
+Hold a turn open by asking the agent to run: ${manifest.holdScript}
+Release it with: touch ${NodePath.join(paths.testRepo, HOLD_RELEASE_FILE)}
 
 Commands:
-  ${selfCommand(paths, "status")}
-  ${selfCommand(paths, "restart")}   stops, starts on the same home, returns once recovery has run
-  ${selfCommand(paths, "stop")}
-  ${selfCommand(paths, "rebuild")}   stops, deletes ${paths.root}, builds it again and starts
-Stop the server when you finish.
+  ${selfCommand(paths, "status")}    say whether it is running
+  ${selfCommand(paths, "restart")}   stop, then start on the same home
+  ${selfCommand(paths, "stop")}      stop the server
+  ${selfCommand(paths, "rebuild")}   stop, delete ${paths.root}, build and start again
+
+How to test is in .agents/skills/j5-live-test/SKILL.md.
 `;
 }
 
