@@ -16,8 +16,10 @@
  * is printed. Screenshots never go on the pull request's own branch.
  *
  * `--remote <url>` and `--branch <name>` point it somewhere else, which is how
- * it is tested without touching the real branch. The link check runs only for
- * a GitHub remote.
+ * it is tested without touching the real branch. On a GitHub remote the only
+ * branches it will push to are `j5/evidence` and a self-test branch named
+ * `j5/evidence-selftest-*`; any branch is allowed on a local remote. The link
+ * check runs only for a GitHub remote.
  */
 import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
@@ -27,6 +29,8 @@ import * as NodePath from "node:path";
 import * as NodeTimersPromises from "node:timers/promises";
 
 const DEFAULT_BRANCH = "j5/evidence";
+/** A throwaway branch for trying the real push path; whoever makes one deletes it. */
+const SELFTEST_BRANCH_PREFIX = "j5/evidence-selftest-";
 const PUSH_ATTEMPTS = 4;
 const LINK_ATTEMPTS = 6;
 
@@ -91,6 +95,18 @@ export function githubRepository(remote: string): string | undefined {
 }
 
 /**
+ * Why this script will not push to `branch` on `remote`, or undefined when it
+ * may. On GitHub it pushes evidence only to the evidence branch, never to a
+ * pull request's own branch or to main; `--branch` exists for local test
+ * remotes and for a self-test branch.
+ */
+export function branchRefusal(remote: string, branch: string): string | undefined {
+  if (githubRepository(remote) === undefined) return undefined;
+  if (branch === DEFAULT_BRANCH || branch.startsWith(SELFTEST_BRANCH_PREFIX)) return undefined;
+  return `Refusing to push screenshots to ${branch} on ${remote}. On GitHub they go only to ${DEFAULT_BRANCH} (or a ${SELFTEST_BRANCH_PREFIX}* branch for a self test), never to a pull request's own branch.`;
+}
+
+/**
  * The link that renders an image inline. The `refs/heads/` form is used
  * because the plain form can return 404 for a few seconds after a push.
  */
@@ -129,14 +145,18 @@ export function evidenceTable(
   pairs: ReadonlyArray<PublishedPair>,
   link: (path: string) => string,
 ): string {
+  // A raw pipe ends a table cell even inside alt text, and a bracket or a
+  // newline ends the alt text, so none may reach the row unescaped.
+  const inCell = (caption: string) => caption.replaceAll(/\s*\n\s*/g, " ").replaceAll("|", "\\|");
+  const inAlt = (caption: string) => inCell(caption).replaceAll(/[[\]]/g, "");
   const cell = (caption: string, side: string, path: string | undefined) =>
-    path === undefined ? "new" : `![${caption}, ${side}](${link(path)})`;
+    path === undefined ? "new" : `![${inAlt(caption)}, ${side}](${link(path)})`;
   return [
     "| | Before | After |",
     "| --- | --- | --- |",
     ...pairs.map(
       (pair) =>
-        `| ${pair.caption.replaceAll("|", "\\|")} | ${cell(pair.caption, "before", pair.before)} | ${cell(pair.caption, "after", pair.after)} |`,
+        `| ${inCell(pair.caption)} | ${cell(pair.caption, "before", pair.before)} | ${cell(pair.caption, "after", pair.after)} |`,
     ),
   ].join("\n");
 }
@@ -248,6 +268,8 @@ async function main(): Promise<void> {
   }
   const checkout = NodePath.resolve(import.meta.dirname, "../..");
   const remote = request.remote ?? run("git", ["remote", "get-url", "origin"], checkout).output;
+  const refusal = branchRefusal(remote, request.branch);
+  if (refusal !== undefined) throw new EvidenceRefusal(refusal);
   const cloneDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "j5-pr-evidence-"));
   try {
     const published = stageEvidence({ request, remote, cloneDir });

@@ -8,6 +8,7 @@ import * as NodePath from "node:path";
 import {
   EvidenceRefusal,
   assertPng,
+  branchRefusal,
   evidencePath,
   evidenceTable,
   githubRepository,
@@ -129,7 +130,7 @@ describe("links and names", () => {
       evidenceTable(
         [
           { caption: "Empty", before: "pr-7/a.png", after: "pr-7/b.png" },
-          { caption: "New | state", before: undefined, after: "pr-7/c.png" },
+          { caption: "New", before: undefined, after: "pr-7/c.png" },
         ],
         (path) => `https://x/${path}`,
       ),
@@ -137,9 +138,34 @@ describe("links and names", () => {
         "| | Before | After |",
         "| --- | --- | --- |",
         "| Empty | ![Empty, before](https://x/pr-7/a.png) | ![Empty, after](https://x/pr-7/b.png) |",
-        "| New \\| state | new | ![New | state, after](https://x/pr-7/c.png) |",
+        "| New | new | ![New, after](https://x/pr-7/c.png) |",
       ].join("\n"),
     );
+  });
+
+  it("keeps a caption from breaking its row or its image", () => {
+    const [, , row] = evidenceTable(
+      [{ caption: "A | B [dark]\nmode", before: "a.png", after: "b.png" }],
+      (path) => path,
+    ).split("\n");
+    // Every pipe that is not a cell boundary is escaped, in the alt text too.
+    assert.equal(
+      row,
+      "| A \\| B [dark] mode | ![A \\| B dark mode, before](a.png) | ![A \\| B dark mode, after](b.png) |",
+    );
+    assert.equal(row?.replaceAll("\\|", "").split("|").length, 5);
+  });
+
+  it("pushes to GitHub only on the evidence branch or a self-test branch", () => {
+    const github = "https://github.com/Jacksondr5/j5code.git";
+    assert.isUndefined(branchRefusal(github, "j5/evidence"));
+    assert.isUndefined(branchRefusal(github, "j5/evidence-selftest-123"));
+    for (const branch of ["j5/main", "j5code/some-pr-branch", "j5/evidence2", "main"]) {
+      assert.include(branchRefusal(github, branch) ?? "", "Refusing to push screenshots");
+      assert.include(branchRefusal("git@github.com:Jacksondr5/j5code.git", branch) ?? "", branch);
+    }
+    // A local repository is a test remote; any branch there is fine.
+    assert.isUndefined(branchRefusal("/tmp/remote.git", "anything"));
   });
 });
 
