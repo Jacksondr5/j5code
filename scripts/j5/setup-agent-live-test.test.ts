@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off - builds throwaway directory layouts to exercise the path guards.
+// @effect-diagnostics nodeBuiltinImport:off globalDate:off - builds throwaway directory layouts to exercise the path guards.
 import { assert, describe, it } from "@effect/vitest";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
@@ -25,6 +25,7 @@ import {
   parseCommand,
   readServerLog,
   resolveLiveTestPaths,
+  runInOwnGroup,
   startRefusal,
   type ServerLogFacts,
 } from "./setup-agent-live-test.ts";
@@ -651,6 +652,47 @@ describe("addRemoteUrl", () => {
     assert.isUndefined(
       addRemoteUrl({ localWebPort: 7594, remoteServerPort: 15961, remotePairingUrl: undefined }),
     );
+  });
+});
+
+describe("runInOwnGroup", () => {
+  const options = (deadline: number) => ({ cwd: NodeOS.tmpdir(), env: process.env, deadline });
+
+  it("returns a finished command's status and what it printed", async () => {
+    const done = await runInOwnGroup(
+      process.execPath,
+      ["-e", "console.log('built'); console.error('warned'); process.exit(3)"],
+      options(Date.now() + 20_000),
+    );
+    assert.deepEqual(
+      { status: done.status, timedOut: done.timedOut },
+      { status: 3, timedOut: false },
+    );
+    assert.include(done.output, "built");
+    assert.include(done.output, "warned");
+  });
+
+  it("at the deadline ends the command and everything it started", async () => {
+    const pidFile = NodePath.join(
+      NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "j5-live-test-group-")),
+      "grandchild.pid",
+    );
+    // A step whose child starts a grandchild that would outlive it, as an
+    // install or a build does. Killing the child alone would leave it running.
+    const step = `
+      const { spawn } = require("node:child_process");
+      const grandchild = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+      require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(grandchild.pid));
+      setInterval(() => {}, 1000);
+    `;
+    const started = Date.now();
+    const cut = await runInOwnGroup(process.execPath, ["-e", step], options(Date.now() + 1_500));
+    assert.isTrue(cut.timedOut);
+    assert.isBelow(Date.now() - started, 10_000);
+    const grandchild = Number(NodeFS.readFileSync(pidFile, "utf8"));
+    assert.isAbove(grandchild, 0);
+    assert.isFalse(NodeFS.existsSync(`/proc/${grandchild}`), "the grandchild is still running");
+    NodeFS.rmSync(NodePath.dirname(pidFile), { recursive: true, force: true });
   });
 });
 

@@ -1413,7 +1413,7 @@ async function start(
     let baseOutput: string | undefined;
     let baseFailure: unknown;
     try {
-      baseOutput = advanceBase(paths, deadline);
+      baseOutput = await advanceBase(paths, deadline);
     } catch (cause) {
       baseFailure = cause;
     }
@@ -1423,7 +1423,7 @@ async function start(
       return console.log(`${baseHeading(paths)}\n\n${baseOutput}\n${baseCheckoutNote(paths)}`);
     }
     throw new LiveTestRefusal(
-      `${formatBaseProgress(paths, readBaseProgress(paths).progress)}\nThe time for this command ran out before the base was ready. Nothing is running in the background.\nRun the same command again to continue: ${selfCommand(paths, modeFlags("base", base.ref))}`,
+      `${formatBaseProgress(paths, readBaseProgress(paths, false).progress)}\nThe time for this command ran out before the base was ready. The step that was running has been ended, with everything it started.\nRun the same command again to continue: ${selfCommand(paths, modeFlags("base", base.ref))}`,
     );
   }
   if (mode === "for-dev") {
@@ -1623,7 +1623,11 @@ function baseScriptNow(paths: LiveTestPaths, args: ReadonlyArray<string>, timeou
 /** How long `status` waits for the base's own status. */
 const BASE_STATUS_TIMEOUT_MS = 30_000;
 
-function readBaseProgress(paths: LiveTestPaths): {
+function readBaseProgress(
+  paths: LiveTestPaths,
+  /** False when there is no time left to ask the base about its server: its step then reads "not done". */
+  askServer = true,
+): {
   readonly progress: BaseProgress;
   /** What the base's own `status` printed, when its install is finished. */
   readonly serverStatus: string | undefined;
@@ -1640,7 +1644,9 @@ function readBaseProgress(paths: LiveTestPaths): {
   const checkedOut = NodeFS.existsSync(paths.base);
   const installed = NodeFS.existsSync(files.installed);
   const status =
-    checkedOut && installed ? baseScriptNow(paths, ["status"], BASE_STATUS_TIMEOUT_MS) : undefined;
+    askServer && checkedOut && installed
+      ? baseScriptNow(paths, ["status"], BASE_STATUS_TIMEOUT_MS)
+      : undefined;
   return {
     progress: baseProgress({
       checkoutHead: checkedOut ? gitIn(paths.base, "rev-parse", "HEAD") : undefined,
@@ -1664,14 +1670,86 @@ const formatBaseProgress = (paths: LiveTestPaths, progress: BaseProgress) => {
 };
 
 /**
+ * Runs a command in the foreground, in a process group of its own, and waits
+ * for it. If `deadline` passes first, the whole group is ended and waited for
+ * before this returns, so nothing the command started is left running. The
+ * group was spawned here a moment ago, so signalling it needs no further proof.
+ */
+export async function runInOwnGroup(
+  command: string,
+  args: ReadonlyArray<string>,
+  options: { readonly cwd: string; readonly env: NodeJS.ProcessEnv; readonly deadline: number },
+): Promise<{
+  readonly status: number | null;
+  readonly output: string;
+  readonly timedOut: boolean;
+}> {
+  // Output goes to a file, not a pipe: a grandchild holding a pipe open would
+  // keep this waiting after the command itself had gone.
+  const capture = NodePath.join(
+    NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "j5-live-test-step-")),
+    "output",
+  );
+  const sink = NodeFS.openSync(capture, "w");
+  const child = NodeChildProcess.spawn(command, [...args], {
+    cwd: options.cwd,
+    env: options.env,
+    detached: true,
+    stdio: ["ignore", sink, sink],
+  });
+  NodeFS.closeSync(sink);
+  const group = child.pid;
+  let timedOut = false;
+  const signalGroup = (signal: NodeJS.Signals) => {
+    if (group === undefined) return;
+    try {
+      process.kill(-group, signal);
+    } catch {
+      // Already gone.
+    }
+  };
+  const timer = setTimeout(
+    () => {
+      timedOut = true;
+      signalGroup("SIGTERM");
+    },
+    Math.max(0, options.deadline - Date.now()),
+  );
+  const status = await new Promise<number | null>((resolve) => {
+    child.on("error", () => resolve(null));
+    child.on("exit", (code) => resolve(code));
+  });
+  clearTimeout(timer);
+  if (timedOut && group !== undefined) {
+    // The command is gone; make sure what it started is gone too.
+    const emptied = async (timeoutMs: number) => {
+      const until = Date.now() + timeoutMs;
+      while (membersOfGroup(group).length > 0) {
+        if (Date.now() > until) return false;
+        await NodeTimersPromises.setTimeout(100);
+      }
+      return true;
+    };
+    if (!(await emptied(5_000))) {
+      signalGroup("SIGKILL");
+      await emptied(5_000);
+    }
+  }
+  const output = NodeFS.readFileSync(capture, "utf8");
+  NodeFS.rmSync(NodePath.dirname(capture), { recursive: true, force: true });
+  return { status, output, timedOut };
+}
+
+/**
  * Takes the base as far towards a running server as fits before `deadline`:
  * check it out, install it, start its server. Every step runs in the
- * foreground and leaves its result on disk, so a run that is out of time just
- * stops, and the same command picks up at the first step that is not done.
- * Returns the base's own start output once its server is up, or undefined
- * when time ran out first. A step that fails is recorded and refused.
+ * foreground, in its own process group, and leaves its result on disk. A run
+ * that is out of time ends the step's whole group and stops, and the same
+ * command picks up at the first step that is not done. Returns the base's own
+ * start output once its server is up, or undefined when time ran out first.
+ * A step that fails is recorded and refused.
  */
-function advanceBase(paths: LiveTestPaths, deadline: number): string | undefined {
+async function advanceBase(paths: LiveTestPaths, deadline: number): Promise<string | undefined> {
   const files = baseFiles(paths);
   const manifest = readManifest(paths) as DefaultManifest;
   const commit = manifest.baseCommit;
@@ -1680,39 +1758,29 @@ function advanceBase(paths: LiveTestPaths, deadline: number): string | undefined
   const again = selfCommand(paths, modeFlags("base", manifest.baseRef));
 
   /** Runs one step's command within the time left. Undefined means it ran out of time. */
-  const step = (
+  const step = async (
     name: BaseStep,
     command: string,
     args: ReadonlyArray<string>,
     cwd: string,
-  ): string | undefined => {
-    const timeLeft = deadline - Date.now();
-    if (timeLeft <= 0) return undefined;
-    const result = NodeChildProcess.spawnSync(command, [...args], {
-      cwd,
-      env: environment,
-      encoding: "utf8",
-      timeout: timeLeft,
-    });
-    // Killed by the timeout above: not a failure, just not finished.
-    if (result.status === null && Date.now() >= deadline) return undefined;
+  ): Promise<string | undefined> => {
+    if (Date.now() >= deadline) return undefined;
+    const result = await runInOwnGroup(command, args, { cwd, env: environment, deadline });
+    // Ended by the deadline: not a failure, just not finished.
+    if (result.timedOut) return undefined;
     if (result.status !== 0) {
-      const said =
-        `${result.stdout ?? ""}${result.stderr ?? ""}${result.error ? String(result.error) : ""}`
-          .split("\n")
-          .slice(-40)
-          .join("\n");
+      const said = result.output.split("\n").slice(-40).join("\n");
       NodeFS.writeFileSync(files.failure, `${JSON.stringify({ step: name, said })}\n`);
       throw new LiveTestRefusal(
         `The base's ${name} step failed:\n${said}\nWhen that is fixed, run the same command again: ${again}`,
       );
     }
     NodeFS.rmSync(files.failure, { force: true });
-    return result.stdout ?? "";
+    return result.output;
   };
 
   if (!NodeFS.existsSync(paths.base)) {
-    const added = step(
+    const added = await step(
       "checkout",
       "git",
       ["worktree", "add", "--detach", paths.base, commit],
@@ -1722,15 +1790,20 @@ function advanceBase(paths: LiveTestPaths, deadline: number): string | undefined
   }
   assertBaseCheckout(paths, commit);
   if (!NodeFS.existsSync(files.installed)) {
-    const installed = step("install", "pnpm", ["install", "--frozen-lockfile"], paths.base);
+    const installed = await step("install", "pnpm", ["install", "--frozen-lockfile"], paths.base);
     if (installed === undefined) return undefined;
     NodeFS.writeFileSync(files.installed, "");
   }
   // Its own script builds its home if needed and starts or rejoins its server.
+  // A build that an earlier run cut off part-way leaves a directory with no
+  // manifest, which that script refuses to build over, so it is rebuilt.
+  const baseRoot = NodePath.join(paths.base, ".j5code", "live-test");
+  const cutOff =
+    NodeFS.existsSync(baseRoot) && !NodeFS.existsSync(NodePath.join(baseRoot, "manifest.json"));
   return step(
     "server",
     process.execPath,
-    [NodePath.join(paths.base, LIVE_TEST_SCRIPT)],
+    [NodePath.join(paths.base, LIVE_TEST_SCRIPT), ...(cutOff ? ["rebuild"] : [])],
     paths.base,
   );
 }
