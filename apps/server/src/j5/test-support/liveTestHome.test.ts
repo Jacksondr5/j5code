@@ -28,6 +28,16 @@ it.live(
       yield* Effect.addFinalizer(() =>
         Effect.sync(() => NodeFS.rmSync(root, { recursive: true, force: true })),
       );
+      // A base and a head build are given the same clock so their threads are dated alike.
+      const fixedNow = Math.floor((yield* Clock.currentTimeMillis) / 1000) * 1000 - 60 * 60 * 1000;
+      const previousNow = process.env.J5_LIVE_TEST_NOW;
+      process.env.J5_LIVE_TEST_NOW = String(fixedNow);
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          if (previousNow === undefined) delete process.env.J5_LIVE_TEST_NOW;
+          else process.env.J5_LIVE_TEST_NOW = previousNow;
+        }),
+      );
       const build = buildLiveTestHome({
         root,
         replays: [
@@ -40,8 +50,8 @@ it.live(
       assert.equal(manifest.home, NodePath.join(root, "home"));
       // Each persona's second route is recorded too: a launch can resolve to it.
       assert.deepEqual(manifest.personas, [
-        { id: "haiku-helper", model: "claude-haiku-4-5", fallbackModel: "gpt-6-luna" },
-        { id: "luna-helper", model: "gpt-6-luna", fallbackModel: "claude-haiku-4-5" },
+        { id: "haiku-helper", model: "claude-haiku-5-5", fallbackModel: "gpt-6-luna" },
+        { id: "luna-helper", model: "gpt-6-luna", fallbackModel: "claude-haiku-5-5" },
       ]);
       assert.deepEqual(
         JSON.parse(NodeFS.readFileSync(NodePath.join(root, "manifest.json"), "utf8")),
@@ -68,6 +78,8 @@ it.live(
         assert.include(titles, "Replay fixture: multi_turn (Claude)");
         assert.include(titles, "Replay fixture: subagent (Codex)");
         assert.include(titles, "J5 disposable A2A receiver seed");
+        // Two replays, twenty minutes apart, ending twenty minutes before the given clock.
+        assert.equal(Date.parse(String(threads[0]?.created_at)), fixedNow - 2 * 20 * 60 * 1000);
         const dayAgo = (yield* Clock.currentTimeMillis) - 24 * 60 * 60 * 1000;
         for (const thread of threads) {
           assert.equal(thread.project_id, manifest.project.id);
@@ -86,7 +98,11 @@ it.live(
 
       const stateDir = NodePath.join(manifest.home, "userdata");
       assert.deepEqual(JSON.parse(NodeFS.readFileSync(`${stateDir}/settings.json`, "utf8")), {
-        defaultModelSelection: { instanceId: "claudeAgent", model: "claude-haiku-4-5" },
+        defaultModelSelection: {
+          instanceId: "claudeAgent",
+          model: "claude-haiku-5-5",
+          options: [{ id: "effort", value: "low" }],
+        },
       });
       // Each persona file must decode as the library decodes it, or Settings shows none at all.
       assert.deepEqual(
@@ -99,7 +115,7 @@ it.live(
             return [file, persona.id, persona.modelRoute[0].model];
           }),
         [
-          ["haiku-helper.yaml", "haiku-helper", "claude-haiku-4-5"],
+          ["haiku-helper.yaml", "haiku-helper", "claude-haiku-5-5"],
           ["luna-helper.yaml", "luna-helper", "gpt-6-luna"],
         ],
       );

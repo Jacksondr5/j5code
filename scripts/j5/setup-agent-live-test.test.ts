@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off - builds throwaway directory layouts to exercise the path guards.
+// @effect-diagnostics nodeBuiltinImport:off globalDate:off - builds throwaway directory layouts to exercise the path guards.
 import { assert, describe, it } from "@effect/vitest";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
@@ -8,12 +8,24 @@ import {
   PAIRING_SCOPES,
   classifyServer,
   LiveTestRefusal,
+  addRemoteUrl,
+  baseEnvironment,
+  baseProgress,
+  listsPeer,
+  peerRepairCommand,
+  peerSteps,
+  isOwnMapping,
+  mappingCleanup,
+  mappingsFromStatus,
+  shareRefusal,
+  tailnetMappings,
   liveTestEnvironment,
   type LiveTestMode,
   modeRefusal,
   parseCommand,
   readServerLog,
   resolveLiveTestPaths,
+  runInOwnGroup,
   startRefusal,
   type ServerLogFacts,
 } from "./setup-agent-live-test.ts";
@@ -117,6 +129,10 @@ describe("resolveLiveTestPaths after a build", () => {
     for (const [name, target] of [
       ["home", (layout: ReturnType<typeof makeLayout>) => layout.liveHome],
       ["test-repo", (layout: ReturnType<typeof makeLayout>) => layout.mainCheckout],
+      // The second server's home in the peer modes is held to the same rule.
+      ["remote/home", (layout: ReturnType<typeof makeLayout>) => layout.liveHome],
+      // The base checkout is deleted by rebuild, so it must be a directory of this build.
+      ["base", (layout: ReturnType<typeof makeLayout>) => layout.mainCheckout],
       // The state directory inside a real home, linked to the live database's directory.
       [
         "home/userdata",
@@ -128,6 +144,23 @@ describe("resolveLiveTestPaths after a build", () => {
       NodeFS.mkdirSync(NodePath.dirname(NodePath.join(root, name)), { recursive: true });
       NodeFS.symlinkSync(target(layout), NodePath.join(root, name));
       assert.include(await refusal(resolve(layout)), `outside ${root}`);
+      NodeFS.rmSync(layout.base, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a Remote home that is Local's home under another name", async () => {
+    for (const link of ["remote/home", "remote/home/userdata", "remote/test-repo"]) {
+      const layout = makeLayout();
+      const root = NodePath.join(layout.worktree, ".j5code", "live-test");
+      NodeFS.mkdirSync(NodePath.join(root, "home", "userdata"), { recursive: true });
+      NodeFS.mkdirSync(NodePath.join(root, "test-repo"), { recursive: true });
+      NodeFS.mkdirSync(NodePath.dirname(NodePath.join(root, link)), { recursive: true });
+      // Inside the root, so the containment check alone would let it through.
+      NodeFS.symlinkSync(
+        NodePath.join(root, link.replace("remote/", "")),
+        NodePath.join(root, link),
+      );
+      assert.include(await refusal(resolve(layout)), "must have separate homes and repositories");
       NodeFS.rmSync(layout.base, { recursive: true, force: true });
     }
   });
@@ -167,6 +200,8 @@ describe("startRefusal", () => {
     baseDir: "/w/.j5code/live-test/home",
     pairingUrl: undefined,
     recovered: false,
+    sharedUrl: undefined,
+    shareFailure: undefined,
   };
   const input = { facts, home: "/w/.j5code/live-test/home", inheritedPort: "5773" };
 
@@ -191,6 +226,118 @@ describe("startRefusal", () => {
       "live server's port",
     );
     assert.include(startRefusal({ ...input, inheritedPort: "15634" }) ?? "", "live server's port");
+  });
+
+  it("abandons a server that had to be shared and was not", () => {
+    const unshared = { ...facts, shareFailure: "permission denied" };
+    assert.include(
+      startRefusal({ ...input, facts: unshared, requireShare: true }) ?? "",
+      "could not share on the tailnet: permission denied",
+    );
+    // A test server that nobody asked to share carries on.
+    assert.isUndefined(startRefusal({ ...input, facts: unshared }));
+  });
+});
+
+describe("tailnet mappings", () => {
+  const status = [
+    "https://openclaw.tail477304.ts.net:8444 (tailnet only)",
+    "|-- / proxy http://127.0.0.1:5773",
+    "",
+    "https://openclaw.tail477304.ts.net:7594 (tailnet only)",
+    "|-- / proxy http://localhost:7594",
+  ].join("\n");
+  const mappings = tailnetMappings(status);
+
+  it("reads each mapped port with where it proxies to", () => {
+    assert.deepEqual(mappings, [
+      { port: 8444, targets: ["http://127.0.0.1:5773"] },
+      { port: 7594, targets: ["http://localhost:7594"] },
+    ]);
+    assert.deepEqual(tailnetMappings("No serve config\n"), []);
+  });
+
+  it("calls a mapping ours only when it proxies to our own web port on loopback", () => {
+    for (const target of ["http://localhost:7594", "http://127.0.0.1:7594", "http://[::1]:7594"]) {
+      assert.isTrue(isOwnMapping({ port: 7594, targets: [target] }, 7594));
+    }
+    // The live install's mapping, seen from a worktree whose web port is 8444.
+    assert.isFalse(isOwnMapping({ port: 8444, targets: ["http://127.0.0.1:5773"] }, 8444));
+    assert.isFalse(isOwnMapping({ port: 7594, targets: ["http://10.0.0.5:7594"] }, 7594));
+    assert.isFalse(isOwnMapping({ port: 7594, targets: ["http://localhost:75940"] }, 7594));
+    assert.isFalse(isOwnMapping({ port: 7594, targets: [] }, 7594));
+    // An extra route to somewhere else makes the whole mapping not ours.
+    assert.isFalse(
+      isOwnMapping({ port: 7594, targets: ["http://localhost:7594", "http://localhost:9"] }, 7594),
+    );
+  });
+
+  const allowed = () => true;
+
+  it("never shares on a port browsers refuse, using the dev runner's own list", async () => {
+    // Pinning the port skips the runner's check, so the script applies it.
+    const runner = (await import(NodePath.join(import.meta.dirname, "../dev-runner.ts"))) as {
+      readonly isBrowserAllowedPort: (port: number) => boolean;
+    };
+    for (const port of [6000, 6566, 6667, 6697]) {
+      assert.include(
+        shareRefusal(port, [], runner.isBrowserAllowedPort) ?? "",
+        "browsers refuse to open",
+      );
+    }
+    assert.isUndefined(shareRefusal(7594, [], runner.isBrowserAllowedPort));
+  });
+
+  it("never shares on the live install's tailnet port", () => {
+    assert.include(shareRefusal(8444, [], allowed) ?? "", "live install's tailnet port");
+    assert.include(shareRefusal(8444, mappings, allowed) ?? "", "live install's tailnet port");
+  });
+
+  it("never shares over a mapping this server did not make", () => {
+    const foreign = [{ port: 7000, targets: ["http://127.0.0.1:3000"] }];
+    assert.include(shareRefusal(7000, foreign, allowed) ?? "", "this server did not set up");
+  });
+
+  it("treats a failed status read as an error, not as nothing mapped", () => {
+    assert.throws(
+      () => mappingsFromStatus({ status: 1, stdout: "", stderr: "tailscaled is not running" }),
+      /cannot be read:\ntailscaled is not running/,
+    );
+    assert.throws(
+      () => mappingsFromStatus({ status: null, stdout: "", stderr: "" }),
+      LiveTestRefusal,
+    );
+    assert.deepEqual(mappingsFromStatus({ status: 0, stdout: status, stderr: "" }), mappings);
+  });
+
+  it("on stop removes only a mapping this run made", () => {
+    const shared = {
+      serverPort: 15634,
+      webPort: 7594,
+      baseDir: "/w/.j5code/live-test/home",
+      pairingUrl: "https://host.ts.net:7594/pair#token=T",
+      recovered: true,
+      sharedUrl: "https://host.ts.net:7594/",
+      shareFailure: undefined,
+    };
+    assert.deepEqual(mappingCleanup(shared, mappings), { kind: "remove", port: 7594 });
+    // Already removed by the dev runner on its way out.
+    assert.deepEqual(mappingCleanup(shared, [mappings[0]!]), { kind: "nothing" });
+    // This run's log never recorded a share: whatever is on the port is not ours to touch.
+    assert.deepEqual(mappingCleanup({ ...shared, sharedUrl: undefined }, mappings), {
+      kind: "nothing",
+    });
+    // The port now carries someone else's mapping, such as the live install's.
+    assert.deepEqual(mappingCleanup({ ...shared, webPort: 8444 }, mappings), {
+      kind: "foreign",
+      port: 8444,
+      targets: ["http://127.0.0.1:5773"],
+    });
+  });
+
+  it("shares on a free port, and over its own leftover mapping", () => {
+    assert.isUndefined(shareRefusal(7000, mappings, allowed));
+    assert.isUndefined(shareRefusal(7594, mappings, allowed));
   });
 });
 
@@ -229,6 +376,8 @@ describe("readServerLog", () => {
       baseDir: "/w/.j5code/live-test/home",
       pairingUrl: "http://localhost:7594/pair#token=NEW",
       recovered: true,
+      sharedUrl: undefined,
+      shareFailure: undefined,
     });
     assert.deepEqual(readServerLog("starting"), {
       serverPort: undefined,
@@ -236,7 +385,24 @@ describe("readServerLog", () => {
       baseDir: undefined,
       pairingUrl: undefined,
       recovered: false,
+      sharedUrl: undefined,
+      shareFailure: undefined,
     });
+  });
+
+  it("reads where the dev runner shared the server, or why it could not", () => {
+    assert.equal(
+      readServerLog(
+        "[23:01:02.003] INFO (#1): [dev-runner] shared on tailnet: https://host.ts.net:7594",
+      ).sharedUrl,
+      "https://host.ts.net:7594",
+    );
+    assert.equal(
+      readServerLog(
+        "[23:01:02.003] WARN (#1): [dev-runner] could not share on the tailnet: permission denied. Continuing unshared.",
+      ).shareFailure,
+      "permission denied. Continuing unshared.",
+    );
   });
 });
 
@@ -247,6 +413,8 @@ describe("classifyServer", () => {
     baseDir: "/w/.j5code/live-test/home",
     pairingUrl: "http://localhost:7594/pair#token=T",
     recovered: true,
+    sharedUrl: undefined,
+    shareFailure: undefined,
   };
   const ours = {
     worktree: "/w",
@@ -312,14 +480,51 @@ describe("parseCommand", () => {
     assert.deepEqual(parseCommand(["--fresh"]), { command: "start", mode: "fresh" });
     assert.deepEqual(parseCommand(["rebuild", "--fresh"]), { command: "rebuild", mode: "fresh" });
     assert.deepEqual(parseCommand(["--fresh", "rebuild"]), { command: "rebuild", mode: "fresh" });
+    assert.deepEqual(parseCommand(["--peer"]), { command: "start", mode: "peer" });
+    assert.deepEqual(parseCommand(["rebuild", "--peer", "--poll"]), {
+      command: "rebuild",
+      mode: "peer-poll",
+    });
+    assert.deepEqual(parseCommand(["--poll", "--peer"]), { command: "start", mode: "peer-poll" });
+    assert.deepEqual(parseCommand(["rebuild", "--for-dev"]), {
+      command: "rebuild",
+      mode: "for-dev",
+    });
+    assert.deepEqual(parseCommand(["--base", "origin/j5/main"]), {
+      command: "start",
+      mode: "base",
+      baseRef: "origin/j5/main",
+    });
+    assert.deepEqual(parseCommand(["rebuild", "--base", "v1"]), {
+      command: "rebuild",
+      mode: "base",
+      baseRef: "v1",
+    });
   });
 
   it("refuses unknown words and flags, and a mode flag where none applies", () => {
     for (const args of [
       ["bogus"],
       ["stop", "now"],
-      ["--peer"],
+      // --base needs a ref, compares against the default build only, and is not a ref named "rebuild".
+      ["--base"],
+      ["--base", "--fresh"],
+      ["--base", "main", "--fresh"],
+      ["--base", "main", "--peer"],
+      ["status", "--base", "main"],
+      // The ref is printed inside commands; git allows these characters in ref names.
+      ["--base", "main;rm"],
+      ["--base", "$(x)"],
+      ["--base", "a b"],
+      ["--base", "-x"],
+      // A shell expands a leading tilde when the printed command is pasted.
+      ["--base", "~user"],
       ["--fresh", "--fresh"],
+      // --poll says how two servers peer; it means nothing alone or with an empty home.
+      ["--poll"],
+      ["--fresh", "--peer"],
+      ["--for-dev", "--peer"],
+      ["status", "--peer"],
       // These act on whatever is built; a flag would suggest they could change it.
       ["status", "--fresh"],
       ["restart", "--fresh"],
@@ -350,6 +555,235 @@ describe("modeRefusal", () => {
     const fresh = modeRefusal({ requested: "fresh", built: "default", ...commands }) ?? "";
     assert.include(fresh, "start:default");
     assert.include(fresh, "rebuild:fresh");
+  });
+});
+
+describe("peerSteps", () => {
+  const local = {
+    home: "/w/home",
+    origin: "http://127.0.0.1:1",
+    environmentId: "L",
+    name: "Local",
+  };
+  const remote = {
+    home: "/w/remote/home",
+    origin: "http://127.0.0.1:2",
+    environmentId: "R",
+    name: "Remote",
+  };
+
+  it("has the issuer mint for the holder's environment, and the holder record the issuer's origin", () => {
+    const steps = peerSteps({ issuer: remote, holder: local, poll: false });
+    assert.deepEqual(steps.credential, [
+      "credential",
+      "--base-dir",
+      "/w/remote/home",
+      "--origin",
+      "http://127.0.0.1:2",
+      "--for",
+      "L",
+      "--label",
+      "Local",
+      "--credential-only",
+    ]);
+    assert.deepEqual(steps.add("SECRET"), [
+      "add",
+      "--base-dir",
+      "/w/home",
+      "--origin",
+      "http://127.0.0.1:1",
+      "--peer-origin",
+      "http://127.0.0.1:2",
+      "--credential",
+      "SECRET",
+    ]);
+  });
+
+  it("in poll mode has the issuer store messages and the holder poll for them", () => {
+    const steps = peerSteps({ issuer: local, holder: remote, poll: true });
+    assert.equal(steps.credential.at(-1), "--store");
+    assert.equal(steps.add("SECRET").at(-1), "--poll");
+  });
+});
+
+describe("peerRepairCommand", () => {
+  it("is the same start when both servers are up, and restart when either is not", () => {
+    assert.equal(peerRepairCommand("peer", "RUNNING", "RUNNING"), "--peer");
+    assert.equal(peerRepairCommand("peer-poll", "RUNNING", "RUNNING"), "--peer --poll");
+    // A start would only wait on a server that is there but not serving.
+    assert.equal(peerRepairCommand("peer", "RUNNING", "NOT SERVING"), "restart");
+    assert.equal(peerRepairCommand("peer", "NOT SERVING", "RUNNING"), "restart");
+    assert.equal(peerRepairCommand("peer", "RUNNING", "STOPPED"), "restart");
+    assert.equal(peerRepairCommand("peer", "RUNNING", "UNVERIFIED"), "restart");
+  });
+});
+
+describe("listsPeer", () => {
+  const list = (peers: ReadonlyArray<object>) => JSON.stringify({ ok: true, peers });
+
+  it("is true only when the server's own list names the other with no error", () => {
+    assert.isTrue(listsPeer(list([{ label: "Remote", lastError: null }]), "Remote"));
+    // Two ports listening is not peering: an empty list is the usual unpeered state.
+    assert.isFalse(listsPeer(list([]), "Remote"));
+    assert.isFalse(listsPeer(list([{ label: "Local", lastError: null }]), "Remote"));
+    assert.isFalse(listsPeer(list([{ label: "Remote", lastError: "hello failed" }]), "Remote"));
+  });
+
+  it("is false when the list could not be read", () => {
+    assert.isFalse(listsPeer(undefined, "Remote"));
+    assert.isFalse(listsPeer("", "Remote"));
+    assert.isFalse(listsPeer("not json", "Remote"));
+  });
+});
+
+describe("addRemoteUrl", () => {
+  it("points Local's web app at Remote's server with Remote's token", () => {
+    assert.equal(
+      addRemoteUrl({
+        localWebPort: 7594,
+        remoteServerPort: 15961,
+        remotePairingUrl: "http://localhost:7921/pair#token=ABC123",
+      }),
+      "http://localhost:7594/pair?host=http%3A%2F%2Flocalhost%3A15961&label=Remote#token=ABC123",
+    );
+  });
+
+  it("is absent when no token could be minted for Remote", () => {
+    assert.isUndefined(
+      addRemoteUrl({ localWebPort: 7594, remoteServerPort: 15961, remotePairingUrl: undefined }),
+    );
+  });
+});
+
+describe("runInOwnGroup", () => {
+  const options = (deadline: number) => ({ cwd: NodeOS.tmpdir(), env: process.env, deadline });
+
+  it("returns a finished command's status and what it printed", async () => {
+    const done = await runInOwnGroup(
+      process.execPath,
+      ["-e", "console.log('built'); console.error('warned'); process.exit(3)"],
+      options(Date.now() + 20_000),
+    );
+    assert.deepEqual(
+      { status: done.status, timedOut: done.timedOut },
+      { status: 3, timedOut: false },
+    );
+    assert.include(done.output, "built");
+    assert.include(done.output, "warned");
+  });
+
+  it("at the deadline ends the command and everything it started", async () => {
+    const pidFile = NodePath.join(
+      NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "j5-live-test-group-")),
+      "grandchild.pid",
+    );
+    // A step whose child starts a grandchild that would outlive it, as an
+    // install or a build does. Killing the child alone would leave it running.
+    const step = `
+      const { spawn } = require("node:child_process");
+      const grandchild = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+      require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(grandchild.pid));
+      setInterval(() => {}, 1000);
+    `;
+    const started = Date.now();
+    const cut = await runInOwnGroup(process.execPath, ["-e", step], options(Date.now() + 1_500));
+    assert.isTrue(cut.timedOut);
+    assert.isBelow(Date.now() - started, 10_000);
+    const grandchild = Number(NodeFS.readFileSync(pidFile, "utf8"));
+    assert.isAbove(grandchild, 0);
+    assert.isFalse(NodeFS.existsSync(`/proc/${grandchild}`), "the grandchild is still running");
+    NodeFS.rmSync(NodePath.dirname(pidFile), { recursive: true, force: true });
+  });
+});
+
+describe("runInOwnGroup against a command that will not stop", () => {
+  it("kills a command that ignores the request to end, and returns", async () => {
+    const started = Date.now();
+    const cut = await runInOwnGroup(
+      process.execPath,
+      ["-e", 'process.on("SIGTERM", () => {}); setInterval(() => {}, 1000);'],
+      { cwd: NodeOS.tmpdir(), env: process.env, deadline: Date.now() + 500 },
+    );
+    assert.isTrue(cut.timedOut);
+    // Half a second to the deadline, five more of grace, then the kill.
+    assert.isBelow(Date.now() - started, 15_000);
+  }, 30_000);
+});
+
+describe("baseProgress", () => {
+  const ready = {
+    checkoutHead: "abc",
+    sameRepository: true,
+    commit: "abc",
+    installed: true,
+    serverRunning: true,
+    failedStep: undefined,
+  };
+
+  it("reports each step from what is on disk", () => {
+    assert.deepEqual(baseProgress(ready), { checkout: "done", install: "done", server: "done" });
+    assert.deepEqual(baseProgress({ ...ready, serverRunning: false }), {
+      checkout: "done",
+      install: "done",
+      server: "not done",
+    });
+    assert.deepEqual(
+      baseProgress({ ...ready, checkoutHead: undefined, installed: false, serverRunning: false }),
+      { checkout: "not done", install: "not done", server: "not done" },
+    );
+  });
+
+  it("never counts a later step as done on top of an earlier one that is not", () => {
+    // An install marker left beside a checkout that has since gone or moved proves nothing.
+    assert.deepEqual(baseProgress({ ...ready, checkoutHead: undefined }), {
+      checkout: "not done",
+      install: "not done",
+      server: "not done",
+    });
+    assert.deepEqual(baseProgress({ ...ready, installed: false }), {
+      checkout: "done",
+      install: "not done",
+      server: "not done",
+    });
+  });
+
+  it("calls a checkout at another commit, or of another repository, failed", () => {
+    assert.equal(baseProgress({ ...ready, checkoutHead: "def" }).checkout, "failed");
+    assert.equal(baseProgress({ ...ready, sameRepository: false }).checkout, "failed");
+  });
+
+  it("shows the step that last failed as failed until it succeeds", () => {
+    assert.deepEqual(
+      baseProgress({ ...ready, installed: false, serverRunning: false, failedStep: "install" }),
+      { checkout: "done", install: "failed", server: "not done" },
+    );
+    assert.equal(
+      baseProgress({ ...ready, serverRunning: false, failedStep: "server" }).server,
+      "failed",
+    );
+    assert.equal(
+      baseProgress({ ...ready, checkoutHead: undefined, failedStep: "checkout" }).checkout,
+      "failed",
+    );
+  });
+});
+
+describe("baseEnvironment", () => {
+  const inherited = { T3CODE_PORT: "5773", J5CODE_HOME: "/home/dev/.j5code", PATH: "/usr/bin" };
+
+  it("gives the base the clock the head was built with, on every start", () => {
+    const manifest = { baseClock: 1_760_000_000_000 };
+    const first = baseEnvironment(inherited, "/w", manifest);
+    // A retry in a later invocation has no J5_LIVE_TEST_NOW of its own; the manifest supplies it.
+    const retry = baseEnvironment({ PATH: "/usr/bin" }, "/w", manifest);
+    assert.equal(first.J5_LIVE_TEST_NOW, "1760000000000");
+    assert.equal(retry.J5_LIVE_TEST_NOW, "1760000000000");
+    assert.isUndefined(first.T3CODE_PORT);
+    assert.isUndefined(first.J5CODE_HOME);
+  });
+
+  it("sets no clock for a build that recorded none", () => {
+    assert.isUndefined(baseEnvironment(inherited, "/w", {}).J5_LIVE_TEST_NOW);
   });
 });
 

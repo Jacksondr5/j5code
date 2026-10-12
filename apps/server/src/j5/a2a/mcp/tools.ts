@@ -3,6 +3,7 @@ import { playbookTools } from "../../playbooks/mcp.ts";
 import * as Schema from "effect/Schema";
 import { PLAYBOOK_MAX_STEPS } from "@t3tools/contracts/j5";
 import { PlaybookStore } from "../../playbooks/PlaybookStore.ts";
+import { ManagedProjectFolders } from "../../../project/ManagedProjectFolders.ts";
 import { ProjectService } from "../../../project/ProjectService.ts";
 
 import {
@@ -10,13 +11,17 @@ import {
   ModelSelection,
   OrchestrationV2RunStatus,
   ProviderInstanceId,
+  ProviderInteractionMode,
   RunId,
   RuntimeMode,
   ThreadId,
 } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
+import * as FileSystem from "effect/FileSystem";
 import * as SqlClient from "effect/sql/SqlClient";
+import { ServerConfig } from "../../../config.ts";
 import * as McpInvocationContext from "../../../mcp/McpInvocationContext.ts";
+import { McpAttachmentInput } from "../../../mcp/toolkits/attachment/input.ts";
 import { OrchestratorMcpService } from "../../../mcp/OrchestratorMcpService.ts";
 import { OrchestratorV2 } from "../../../orchestration-v2/Orchestrator.ts";
 import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
@@ -42,6 +47,7 @@ import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
 import { A2AHomeRegistrar } from "../HomeRegistrar.ts";
 import { A2ALedger } from "../LedgerService.ts";
 import { PeerDirectory } from "../PeerDirectory.ts";
+import { PeerRegistryService } from "../PeerRegistryService.ts";
 import { ParticipantPlacementService } from "../PlacementService.ts";
 import { A2ASendService } from "../SendService.ts";
 import { SpawnCompositionService } from "../SpawnCompositionService.ts";
@@ -56,6 +62,7 @@ import {
   ParticipantId,
   SendMessageResult,
   LedgerProjectId,
+  SendMode,
   Urgency,
 } from "../contracts.ts";
 import {
@@ -76,8 +83,33 @@ export const J5SendMessageInput = Schema.Struct({
   client_request_id: Schema.optional(Schema.NullOr(Schema.String.check(Schema.isNonEmpty()))),
   expect_reply: Schema.optional(Schema.NullOr(Schema.Boolean)),
   exchange_id: Schema.optional(Schema.NullOr(ExchangeId)),
-  intent: Schema.optional(Schema.NullOr(Schema.String.check(Schema.isNonEmpty()))),
+  intent: Schema.optional(
+    Schema.NullOr(
+      Schema.String.check(Schema.isNonEmpty()).annotate({
+        description:
+          "One line saying what an ask (expect_reply=true) is about. It labels the ask and does not change how the message is delivered; to interrupt a busy agent, set mode.",
+      }),
+    ),
+  ),
   urgency: Schema.optional(Schema.NullOr(Urgency)),
+  attachments: Schema.optional(
+    Schema.NullOr(
+      Schema.Array(McpAttachmentInput)
+        .check(Schema.isMinLength(1), Schema.isMaxLength(8))
+        .annotate({
+          description:
+            "Files for an agent on this server: pending uploads from t3_attachment_prepare_upload, or attachments its thread already holds.",
+        }),
+    ),
+  ),
+  mode: Schema.optional(
+    Schema.NullOr(
+      SendMode.annotate({
+        description:
+          "Set this to interrupt an agent that is mid-turn. steer puts your message into the turn it is running now. restart stops that turn and starts it again on your message. queue, the default, is ordinary delivery: after the turn ends for most agents, and into the running turn for Codex GPT 6 agents.",
+      }),
+    ),
+  ),
 });
 export type J5SendMessageInput = typeof J5SendMessageInput.Type;
 
@@ -141,8 +173,56 @@ export const J5ParticipantDirectoryRow = Schema.Struct({
 });
 export type J5ParticipantDirectoryRow = typeof J5ParticipantDirectoryRow.Type;
 
+/** The most rows one listing returns, and how many it returns when `limit` is omitted. */
+export const J5_LIST_PARTICIPANTS_MAX_LIMIT = 100;
+export const J5_LIST_PARTICIPANTS_DEFAULT_LIMIT = 50;
+
+/**
+ * One page of one project's address book, shaped as upstream's `t3_thread_list` is: an offset
+ * cursor, a capped limit and optional filters, read from current state on every call.
+ */
+export const J5ListParticipantsInput = Schema.Struct({
+  project_id: Schema.optional(
+    LedgerProjectId.annotate({
+      description:
+        "Project to list. Omit for your own project; find other projects with t3_project_list.",
+    }),
+  ),
+  server: Schema.optional(
+    Schema.String.check(Schema.isNonEmpty()).annotate({
+      description:
+        "Name of a peer server, from the result's servers, to list its agents. Omit for this server.",
+    }),
+  ),
+  name_contains: Schema.optional(
+    Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(256)).annotate({
+      description: "Keep agents and machines whose display name contains this text.",
+    }),
+  ),
+  settled: Schema.optional(
+    Schema.Boolean.annotate({
+      description:
+        "true keeps only settled agents, false only active ones; omit for both. This server only.",
+    }),
+  ),
+  include_archived: Schema.optional(Schema.Boolean),
+  cursor: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+  limit: Schema.optional(
+    Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: J5_LIST_PARTICIPANTS_MAX_LIMIT })),
+  ),
+});
+export type J5ListParticipantsInput = typeof J5ListParticipantsInput.Type;
+
 export const J5ListParticipantsResult = Schema.Struct({
   participants: Schema.Array(J5ParticipantDirectoryRow),
+  /** Pass as `cursor` for the next page; null on the last page. */
+  next_cursor: Schema.NullOr(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+  /** How many rows match the filters across every page. */
+  total: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  /** Every server whose agents can be listed, once this server has a peer. */
+  servers: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ name: Schema.String, local: Schema.Boolean })),
+  ),
   /** Peer servers whose address books could not be read: their agents are absent, not gone. */
   unread_peer_count: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 });
@@ -194,9 +274,48 @@ export const spawnWorkspaceFromInput = (workspace: J5SpawnWorkspace) =>
             : { startFromOrigin: workspace.start_from_origin }),
         };
 
+/**
+ * A spawn's workspace choice: a Crew seat's three, and the project's own checkout, which is
+ * upstream's `root`. A spawn into another project has no "your own checkout" to share.
+ */
+export const J5SpawnAgentWorkspace = Schema.Union([
+  ...J5SpawnWorkspace.members,
+  Schema.Struct({ type: Schema.Literal("root") }),
+]);
+export type J5SpawnAgentWorkspace = typeof J5SpawnAgentWorkspace.Type;
+
 export const J5SpawnAgentInput = Schema.Struct({
   brief: NonEmptyString,
   title: Schema.optional(NonEmptyString),
+  project_id: Schema.optional(
+    LedgerProjectId.annotate({
+      description:
+        "Project the Peer Agent joins. Omit for your own; find others with t3_project_list.",
+    }),
+  ),
+  scratch: Schema.optional(
+    Schema.Boolean.annotate({
+      description:
+        'Spawn without a project: the agent joins the "No project" project and works in a fresh folder of its own, outside any repository. Not with project_id; workspace must be {"type":"root"}.',
+    }),
+  ),
+  runtime_mode: Schema.optional(
+    RuntimeMode.annotate({
+      description:
+        "The agent's permission mode. Omit to give it yours. Not broader than your own, and not with persona, whose policy sets it.",
+    }),
+  ),
+  interaction_mode: Schema.optional(
+    ProviderInteractionMode.annotate({
+      description:
+        "The agent's interaction mode. Omit to give it yours. Not broader than your own.",
+    }),
+  ),
+  attachments: Schema.optional(
+    Schema.Array(McpAttachmentInput).check(Schema.isMinLength(1), Schema.isMaxLength(8)).annotate({
+      description: "Files for the brief: pending uploads from t3_attachment_prepare_upload.",
+    }),
+  ),
   persona: Schema.optional(
     AgentPersonaId.annotate({
       description:
@@ -206,9 +325,9 @@ export const J5SpawnAgentInput = Schema.Struct({
   provider: ProviderInstanceId,
   model: NonEmptyString,
   reasoning: NonEmptyString,
-  workspace: J5SpawnWorkspace.annotate({
+  workspace: J5SpawnAgentWorkspace.annotate({
     description:
-      'Where the Peer Agent works, chosen every time: {"type":"shared"} is your own checkout and branch; {"type":"worktree","base_ref":...} a new worktree and branch from base_ref; {"type":"existing_worktree","worktree_path":...} one of this project\'s worktrees, on its branch.',
+      'Where the Peer Agent works, chosen every time: {"type":"shared"} is your own checkout and branch, in your own project only; {"type":"root"} the project\'s main checkout; {"type":"worktree","base_ref":...} a new worktree and branch from base_ref; {"type":"existing_worktree","worktree_path":...} one of the project\'s worktrees, on its branch.',
   }),
   client_request_id: Schema.optional(NonEmptyString),
 });
@@ -220,7 +339,11 @@ export const J5SpawnAgentResult = Schema.Struct({
   project_id: LedgerProjectId,
   project_title: Schema.String,
   placement: Schema.Struct({
-    placement_parent_id: ParticipantId,
+    /**
+     * The spawner, when the agent joined the spawner's own project; null in another project, and
+     * for every agent an outside agent starts.
+     */
+    placement_parent_id: Schema.NullOr(ParticipantId),
     provenance: Schema.Struct({
       kind: Schema.Literal("spawned-by"),
       spawned_by_participant_id: ParticipantId,
@@ -440,7 +563,7 @@ export const J5ArchiveCrewFailure = Schema.Struct({
 export type J5ArchiveCrewFailure = typeof J5ArchiveCrewFailure.Type;
 
 export const J5_SPAWN_AGENT_DESCRIPTION =
-  "Spawn a Peer Agent: a full-citizen teammate with its own top-level thread, starting on your brief as its first turn. It joins your project, is placed under you, and records you as its immutable spawner; it is addressable the moment this returns. In your brief, tell the new agent what it should do first and whether it should reply to you. Choose provider, model, and reasoning for the work in the brief — see orchestrator_capabilities for what's available. To run a persona from j5_list_personas, set `persona` to its id: the spawn gets that persona's instructions and runtime policy, and provider, model, and reasoning must be one of that persona's declared routes. Choose its workspace every time (see the workspace field). A new worktree is prepared after this returns, and the agent begins once it is bound, possibly while the project's setup script is still running; if preparing it fails, the agent's thread shows why, and it is not retried. Reuse client_request_id to retry the same spawn safely; a retry replays the first spawn, so a different base_ref or worktree_path needs a fresh client_request_id.";
+  "Spawn a Peer Agent: a full-citizen teammate with its own top-level thread, starting on your brief as its first turn. It joins your project unless you name another with project_id or set scratch for none, and records you as its immutable spawner; in your own project it is placed under you. It is addressable the moment this returns. In your brief, tell the new agent what it should do first and whether it should reply to you. Choose provider, model, and reasoning for the work in the brief — see orchestrator_capabilities for what's available. To run a persona from j5_list_personas, set `persona` to its id: the spawn gets that persona's instructions and runtime policy, and provider, model, and reasoning must be one of that persona's declared routes. Without a persona it runs in your permission and interaction modes, or in narrower ones you set with runtime_mode and interaction_mode. Attach files to the brief with attachments. Choose its workspace every time (see the workspace field). A new worktree is prepared after this returns, and the agent begins once it is bound, possibly while the project's setup script is still running; if preparing it fails, the agent's thread shows why, and it is not retried. Reuse client_request_id to retry the same spawn safely; a retry replays the first spawn, so a different base_ref or worktree_path needs a fresh client_request_id.";
 
 export const J5_LIST_AGENTS_DESCRIPTION =
   "List the personas in this environment: id, purpose, runtime policy, whether each can start now, and the provider, model, and reasoning it would run on. Read this before choosing a persona for j5_spawn_agent or a crew roster so the choice fits the task and the user's budget. Read-only.";
@@ -452,7 +575,7 @@ export const J5_REQUEST_CREW_MEMBER_DESCRIPTION =
   "Ask the user to add one seat to a crew you command when the work needs one the roster lacks: seat name, persona id from j5_list_personas (or none for a custom seat with required instructions and optional model_selection/runtime_mode overrides; an omitted model_selection inherits yours and an omitted runtime_mode is full-access; saved-persona runtime changes are made only by the human before approval), a clear reason identifying the concern and missing expertise or responsibility, its workspace (the same three choices as j5_propose_crew), and optionally instructions and a brief for the new seat. On a crew that follows a playbook, steps may claim step ids from j5_playbook_read that no seat owns yet. The user decides from their inbox; you receive the decision and the updated roster as a message here. Continue the already-approved work and direct coordination while the addition is pending. Captain-only; a member sends the concern and needed expertise to its Captain with j5_send_message. Reuse client_request_id to retry safely. Filing the request is the human gate itself and works under every approval policy, including approval policy never.";
 
 export const J5_STOP_AGENT_DESCRIPTION =
-  "Stop one Peer Agent the way a user Stop does: its running turn is interrupted now, turns already queued behind it, messages you sent it included, are held until a person resumes its queue (no tool releases them, and a message sent after the stop runs ahead of them), its pull request watches end, and the tasks it delegated stop too. The agent remains, stays readable, and can be messaged again later — stopping halts work, it retires nothing. The agent must be in your project. Reuse client_request_id to retry safely.";
+  "Stop one Peer Agent the way a user Stop does: its running turn is interrupted now, turns already queued behind it, messages you sent it included, are held until a person resumes its queue (no tool releases them, and a message sent after the stop runs ahead of them), its pull request watches end, and the tasks it delegated stop too. The agent remains, stays readable, and can be messaged again later — stopping halts work, it retires nothing. It reaches any agent on this server, in any project. Reuse client_request_id to retry safely.";
 
 export const J5_ARCHIVE_CREW_DESCRIPTION =
   "Retire a whole Crew you command. Crews archive only as a unit — members are never retired one by one. A clean archive completes immediately; otherwise the call refuses with the facts and a confirmation_token. Before retrying with that token, check with the user. Nothing is destroyed: worktrees, branches, and ledgers stay readable. Reuse client_request_id to retry safely.";
@@ -469,6 +592,12 @@ const sendDependencies = [
   OrchestratorV2,
   // The receiver backlog read behind the send result's deliveryNotice.
   SqlClient.SqlClient,
+  // Attachments are claimed into the receiver's thread before the message is committed.
+  ServerConfig,
+  FileSystem.FileSystem,
+  // A steer or restart to an agent on a peer server needs that server to support it.
+  PeerDirectory,
+  PeerRegistryService,
 ];
 
 const placementDependencies = [
@@ -479,6 +608,8 @@ const placementDependencies = [
   OrchestratorV2,
   PeerDirectory,
   A2ALedger,
+  // Tells a project that does not exist from one with nobody in it.
+  ProjectService,
 ];
 
 const spawnDependencies = [
@@ -496,6 +627,11 @@ const spawnDependencies = [
   // A Crew member is refused before anything is created (members never spawn Peer Agents).
   AgentCrewInstanceService,
   ProviderRegistry,
+  // Another project, the "No project" project and its per-thread folder, and brief attachments.
+  ProjectService,
+  ManagedProjectFolders,
+  ServerConfig,
+  FileSystem.FileSystem,
 ];
 
 const crewProposalDependencies = [
@@ -519,8 +655,9 @@ const stopDependencies = [
   McpInvocationContext.McpInvocationContext,
   A2ASendService,
   Crypto.Crypto,
-  ParticipantPlacementService,
   ThreadManagementService,
+  // A Captain stops its own seats whatever their permission modes.
+  AgentCrewInstanceService,
 ];
 
 const stopCrewDependencies = [
@@ -557,7 +694,7 @@ export const J5SendMessageTool = Tool.make("j5_send_message", {
 
 export const J5ListParticipantsTool = Tool.make("j5_list_participants", {
   description: A2A_LIST_TOOL_DESCRIPTION,
-  parameters: Schema.Struct({ include_archived: Schema.optional(Schema.Boolean) }),
+  parameters: J5ListParticipantsInput,
   success: J5ListParticipantsResult,
   failure: J5McpFailure,
   failureMode: "return",

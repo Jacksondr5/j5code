@@ -1,4 +1,4 @@
-import { ChatAttachment, ThreadId } from "@t3tools/contracts";
+import { ChatAttachment, ProviderInteractionMode, RuntimeMode, ThreadId } from "@t3tools/contracts";
 import { PeerSenderLabel } from "@t3tools/contracts/j5";
 import * as Schema from "effect/Schema";
 
@@ -30,6 +30,25 @@ export type LedgerMessageId = typeof LedgerMessageId.Type;
 export const Urgency = Schema.Literals(["blocking", "soon", "fyi"]);
 export type Urgency = typeof Urgency.Type;
 
+/**
+ * How a sender asks for its message to land on an agent, in upstream's words: `queue` is J5's
+ * ordinary delivery (after the receiver's turn ends, or into it for the models D4 excepts),
+ * `steer` joins the running turn, and `restart` interrupts the turn and restarts it with the
+ * message. Upstream's `auto` is left out: it steers whenever it can.
+ */
+export const SendMode = Schema.Literals(["queue", "steer", "restart"]);
+export type SendMode = typeof SendMode.Type;
+
+/**
+ * The broadest modes a sender could touch when it asked for a steer or a restart. Delivery is
+ * later than the send, and the receiver's modes can be raised in between, so the limit is kept
+ * with the message and upstream checks it again when the message is dispatched.
+ */
+export const SendModeLimit = Schema.Struct({
+  runtimeMode: RuntimeMode,
+  interactionMode: ProviderInteractionMode,
+});
+
 export const DeliveryEnvelopeChannel = Schema.Literals([
   "peer",
   "silence_notice",
@@ -52,6 +71,18 @@ export const isMachineParticipantId = (id: ParticipantId): boolean =>
 export const isPlatformParticipantId = (id: string): boolean => id.startsWith("platform:");
 export const machineParticipantIdForName = (name: string) =>
   ParticipantId.make(`${MACHINE_PARTICIPANT_ID_PREFIX}${name}`);
+
+/**
+ * An outside agent: an MCP client signed in through OAuth, one participant per sign-in. It has no
+ * thread and no project, sends plain messages only, and can never receive. It joins no ledger, so
+ * it is not in the `Participant` union; its name is kept in `j5_a2a_outside_agent`.
+ */
+const OUTSIDE_AGENT_PARTICIPANT_ID_PREFIX = "outside:";
+export const isOutsideAgentParticipantId = (id: ParticipantId): boolean =>
+  id.startsWith(OUTSIDE_AGENT_PARTICIPANT_ID_PREFIX) &&
+  id.length > OUTSIDE_AGENT_PARTICIPANT_ID_PREFIX.length;
+export const outsideAgentParticipantId = (sessionId: string) =>
+  ParticipantId.make(`${OUTSIDE_AGENT_PARTICIPANT_ID_PREFIX}${sessionId}`);
 
 export const AgentParticipant = Schema.Struct({
   kind: Schema.Literal("agent"),
@@ -159,6 +190,9 @@ export const MessageReceivedPayload = Schema.Struct({
   injection: Schema.optional(Schema.Literal("none")),
   /** From a peer delivery: the sender's display name its server sent, read by the client identity lookup and nothing else. */
   senderLabel: Schema.optional(PeerSenderLabel),
+  /** From a peer delivery whose sender asked for a steer or a restart, with the sender's limit. */
+  mode: Schema.optional(SendMode),
+  modeLimit: Schema.optional(SendModeLimit),
   message: Schema.Json,
 });
 export type MessageReceivedPayload = typeof MessageReceivedPayload.Type;
@@ -264,6 +298,9 @@ export type TerminalFact = typeof TerminalFact.Type;
 
 export const MessageSentPayload = Schema.Struct({
   attachments: Schema.optional(Schema.Array(ChatAttachment)),
+  /** How the sender asked for the message to land; absent means `queue`. */
+  mode: Schema.optional(SendMode),
+  modeLimit: Schema.optional(SendModeLimit),
   /** Present on a terminal notice headed to a peer server: the fact it carries, fixed when the notice is written. */
   terminal: Schema.optional(TerminalFact),
   messageId: LedgerMessageId,
@@ -344,6 +381,8 @@ export type ClearOwnAskResult = typeof ClearOwnAskResult.Type;
 
 export const SendMessageInput = Schema.Struct({
   attachments: Schema.optional(Schema.Array(ChatAttachment)),
+  mode: Schema.optional(SendMode),
+  modeLimit: Schema.optional(SendModeLimit),
   commandId: CommCommandId,
   senderThreadId: ThreadId,
   to: ParticipantId,
@@ -365,6 +404,23 @@ export const SendAsMachineInput = Schema.Struct({
   acceptedAt: Schema.String,
 });
 export type SendAsMachineInput = typeof SendAsMachineInput.Type;
+
+/** An outside agent commits a plain message only, to an agent on this server. */
+export const SendAsOutsideAgentInput = Schema.Struct({
+  attachments: Schema.optional(Schema.Array(ChatAttachment)),
+  mode: Schema.optional(SendMode),
+  modeLimit: Schema.optional(SendModeLimit),
+  commandId: CommCommandId,
+  senderParticipantId: ParticipantId,
+  /** The label the client signed in with; kept so the envelope can name the sender. */
+  senderName: Schema.String,
+  to: ParticipantId,
+  /** The receiver's project, from `outsideAgentReceiver`: where the message is recorded. */
+  receiverProjectId: LedgerProjectId,
+  message: Schema.String.check(Schema.isNonEmpty()),
+  acceptedAt: Schema.String,
+});
+export type SendAsOutsideAgentInput = typeof SendAsOutsideAgentInput.Type;
 
 export const SendMessageResult = Schema.Struct({
   messageId: LedgerMessageId,

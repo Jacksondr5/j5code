@@ -36,7 +36,9 @@ import {
   ExchangeId,
   isHumanParticipantId,
   isMachineParticipantId,
+  isOutsideAgentParticipantId,
   LedgerMessageId,
+  MessageReceivedPayload,
   MessageSentPayload,
   ParticipantId,
   type DeliveryAlarm,
@@ -60,6 +62,9 @@ export { PEER_POLL_BATCH_COUNT };
 export const PEER_POLL_BATCH_BYTES = 1_000_000;
 
 const decodeSentPayload = Schema.decodeUnknownEffect(Schema.fromJsonString(MessageSentPayload));
+const decodeReceivedPayload = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(MessageReceivedPayload),
+);
 const encodeDeliveryBody = Schema.encodeSync(Schema.fromJsonString(PeerDeliveryRequest));
 
 interface DeliveryRow {
@@ -327,6 +332,18 @@ const makeLayer = (daemon: boolean) =>
                   ),
                 )
               : undefined;
+          // How the sender asked for it to land: on the sent fact for a message from this
+          // server, and on the received fact for one a peer server handed over.
+          const landing =
+            payload ??
+            (sent[0]?.kind === "message.received"
+              ? yield* decodeReceivedPayload(sent[0].payload).pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new A2ADeliveryTransportError({ operation: "read delivery landing", cause }),
+                  ),
+                )
+              : undefined);
           // A message received from a peer server names that server in its
           // envelope, by the name the peer last reported for itself.
           const senderServerName =
@@ -347,6 +364,8 @@ const makeLayer = (daemon: boolean) =>
             exchangeRole: row.exchange_role,
             message: row.message_text,
             ...(payload?.attachments === undefined ? {} : { attachments: payload.attachments }),
+            ...(landing?.mode === undefined ? {} : { mode: landing.mode }),
+            ...(landing?.modeLimit === undefined ? {} : { modeLimit: landing.modeLimit }),
             envelopeChannel: row.envelope_channel,
             ...(senderServerName === undefined ? {} : { senderServerName }),
           });
@@ -541,10 +560,14 @@ const makeLayer = (daemon: boolean) =>
           ...(row.receiver_environment_id == null ? [row.receiver_id] : []),
         ];
         for (const id of ids) {
-          // Humans and machines never hold agent membership, and a registered
-          // machine is never retired, so only agents can become unavailable.
+          // Humans, machines and outside agents never hold agent membership, and a
+          // registered machine is never retired, so only agents can become unavailable.
           const participantId = ParticipantId.make(id);
-          if (isHumanParticipantId(participantId) || isMachineParticipantId(participantId)) {
+          if (
+            isHumanParticipantId(participantId) ||
+            isMachineParticipantId(participantId) ||
+            isOutsideAgentParticipantId(participantId)
+          ) {
             continue;
           }
           const membership =

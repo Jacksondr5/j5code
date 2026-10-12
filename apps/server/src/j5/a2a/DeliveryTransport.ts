@@ -11,7 +11,7 @@ import {
   peerCredentialRejectedReason,
   type PeerDeliveryRequest,
 } from "@t3tools/contracts/j5";
-import { normalizeModelSlug } from "@t3tools/shared/model";
+import { codexModelFamily, normalizeModelSlug } from "@t3tools/shared/model";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -22,23 +22,28 @@ import { HttpClient, HttpClientRequest } from "effect/http";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
+import { DispatchModeLimit, type DispatchModes } from "../../orchestration-v2/DispatchModeLimit.ts";
 import { EffectOutboxV2 } from "../../orchestration-v2/EffectOutbox.ts";
 import { OrchestratorV2 } from "../../orchestration-v2/Orchestrator.ts";
 import {
   formatClosedHumanEnvelope,
   formatClosedPeerEnvelope,
   formatMachineEnvelope,
+  formatOutsideAgentEnvelope,
   formatPeerEnvelope,
 } from "./EnvelopeFormatter.ts";
+import { outsideAgentNameRows } from "./outsideAgentNames.ts";
 import { PeerDeliveryRefusalCode } from "./PeerInboundService.ts";
 import { PeerRegistryService } from "./PeerRegistryService.ts";
 import { peerProtocolHeaders, responseProtocolMismatch } from "./peerProtocol.ts";
 import {
   type DeliveryEnvelopeChannel,
+  type SendMode,
   LedgerProjectId,
   ExchangeId,
   isHumanParticipantId,
   isMachineParticipantId,
+  isOutsideAgentParticipantId,
   Participant,
   ParticipantId,
   type LedgerMessageId,
@@ -111,6 +116,10 @@ export interface AgentDeliveryInput {
   readonly exchangeRole: "none" | "ask" | "followup" | "reply" | "terminal_notice";
   readonly message: string;
   readonly attachments?: ReadonlyArray<ChatAttachment>;
+  /** How the sender asked for the message to land; absent means `queue`. */
+  readonly mode?: SendMode;
+  /** The broadest modes the sender could touch when it asked for a steer or a restart. */
+  readonly modeLimit?: DispatchModes;
   readonly envelopeChannel: DeliveryEnvelopeChannel;
   /** The peer server a received message came from, named in its envelope; absent for a local sender. */
   readonly senderServerName?: string;
@@ -161,6 +170,24 @@ const stablePart = (value: string) => encodeURIComponent(value);
 export const deliveryCommandId = (messageId: LedgerMessageId) =>
   CommandId.make(`command:j5:a2a:delivery:${stablePart(messageId)}`);
 
+/**
+ * The command an asked-for steer or restart is dispatched under. It is not the delivery's own:
+ * upstream records a rejected command for good, and a restart is rejected when the turn it was
+ * aimed at has just ended, so the plain delivery that follows must keep a command id that nothing
+ * has refused.
+ */
+export const askedDeliveryCommandId = (
+  messageId: LedgerMessageId,
+  mode: Exclude<SendMode, "queue">,
+) => CommandId.make(`${deliveryCommandId(messageId)}:${mode}`);
+
+/** Every command one message's delivery may have been dispatched under. */
+const deliveryCommandIds = (messageId: LedgerMessageId) => [
+  deliveryCommandId(messageId),
+  askedDeliveryCommandId(messageId, "steer"),
+  askedDeliveryCommandId(messageId, "restart"),
+];
+
 const DELIVERY_MESSAGE_ID_PREFIX = "message:j5:a2a:delivery:";
 
 export const deliveryMessageId = (messageId: LedgerMessageId) =>
@@ -202,8 +229,12 @@ const assertPersonReply = (input: AgentDeliveryInput): never => {
   );
 };
 
+// Every GPT 6 model (Astra, Luna, Sol and their point releases) takes messages during work.
+const isGpt6Model = (model: string | null) =>
+  model !== null && /^gpt-6[-.]/.test(codexModelFamily(model));
+
 /** Use the active run's selection, not the picker selection for future runs. */
-export const astraPeerSteeringRun = (
+export const gpt6PeerSteeringRun = (
   target: Pick<
     OrchestrationV2ThreadProjection,
     "thread" | "runs" | "providerTurns" | "providerThreads" | "providerSessions"
@@ -222,13 +253,45 @@ export const astraPeerSteeringRun = (
   return providerThread?.driver === "codex" &&
     session?.driver === "codex" &&
     session.capabilities.turns.supportsActiveSteering === true &&
-    normalizeModelSlug(run.modelSelection.model, providerThread.driver) === "gpt-6-astra"
+    isGpt6Model(normalizeModelSlug(run.modelSelection.model, providerThread.driver))
     ? run
     : undefined;
 };
 
+/**
+ * The running turn a `steer` or `restart` lands on, by upstream's own steering policy: a steer
+ * needs a provider that steers a turn directly or by interrupting and restarting it, and a restart
+ * needs the second. Undefined when the receiver has no such turn, and the message is then
+ * delivered as any other: it starts a turn on an idle agent, or waits behind a busy one.
+ */
+export const requestedSteeringRun = (
+  target: Pick<
+    OrchestrationV2ThreadProjection,
+    "thread" | "runs" | "providerTurns" | "providerThreads" | "providerSessions"
+  >,
+  channel: DeliveryEnvelopeChannel,
+  mode: Exclude<SendMode, "queue">,
+) => {
+  if (channel !== "peer" || target.thread.archivedAt !== null) return undefined;
+  const run = ThreadManagement.latestSteerableRun(target);
+  if (run === undefined) return undefined;
+  const providerThread = target.providerThreads.find(
+    (thread) => thread.id === run.providerThreadId,
+  );
+  const turns = target.providerSessions.find(
+    (candidate) => candidate.id === providerThread?.providerSessionId,
+  )?.capabilities.turns;
+  if (turns === undefined) return undefined;
+  const restarts = turns.supportsInterrupt && turns.supportsSteeringByInterruptRestart;
+  return (mode === "steer" ? turns.supportsActiveSteering || restarts : restarts) ? run : undefined;
+};
+
 export const formatAgentDeliveryEnvelope = (
-  input: AgentDeliveryInput & { readonly originProjectTitle?: string | undefined },
+  input: AgentDeliveryInput & {
+    readonly originProjectTitle?: string | undefined;
+    /** The label an outside agent signed in with. */
+    readonly outsideAgentName?: string | undefined;
+  },
 ): string => {
   switch (input.envelopeChannel) {
     case "peer":
@@ -256,16 +319,22 @@ export const formatAgentDeliveryEnvelope = (
                 originProjectTitle: input.originProjectTitle,
                 message: input.message,
               })
-            : formatPeerEnvelope({
-                senderId: input.senderId,
-                originProjectId: input.originProjectId,
-                originProjectTitle: input.originProjectTitle,
-                exchangeId: input.exchangeId,
-                message: input.message,
-                ...(input.senderServerName === undefined
-                  ? {}
-                  : { senderServerName: input.senderServerName }),
-              });
+            : isOutsideAgentParticipantId(input.senderId)
+              ? formatOutsideAgentEnvelope({
+                  senderId: input.senderId,
+                  senderName: input.outsideAgentName,
+                  message: input.message,
+                })
+              : formatPeerEnvelope({
+                  senderId: input.senderId,
+                  originProjectId: input.originProjectId,
+                  originProjectTitle: input.originProjectTitle,
+                  exchangeId: input.exchangeId,
+                  message: input.message,
+                  ...(input.senderServerName === undefined
+                    ? {}
+                    : { senderServerName: input.senderServerName }),
+                });
     case "silence_notice":
     case "lifecycle_notice":
       return input.message;
@@ -333,7 +402,11 @@ export const live: Layer.Layer<
               participantId: input.receiverId,
               state: "not an agent",
             });
-          const priorEffects = yield* outbox.listByCommandId(deliveryCommandId(input.messageId));
+          // A steer may sit under the delivery's own command (Astra) or the one its sender asked
+          // for; its outcome, not the message in the thread, says whether the provider took it.
+          const priorEffects = (yield* Effect.forEach(deliveryCommandIds(input.messageId), (id) =>
+            outbox.listByCommandId(id),
+          )).flat();
           const steer = priorEffects.find(
             (effect) => effect.request.type === "provider-turn.steer",
           );
@@ -411,14 +484,14 @@ export const live: Layer.Layer<
             (effect) => effect.request.type === "provider-turn.steer",
           );
           if (priorSteer !== undefined) return yield* awaitSteeringOutcome(priorSteer.id);
-          // Astra can receive peer updates during its long turns. Other models
+          // GPT 6 models can receive peer updates during their long turns. Other models
           // and platform notices retain QS1's queue policy (Claude issue #73).
           const alreadyAccepted = target.messages.some(
             (message) => message.id === deliveryMessageId(input.messageId),
           );
           const steeringRun = alreadyAccepted
             ? undefined
-            : astraPeerSteeringRun(target, input.envelopeChannel);
+            : gpt6PeerSteeringRun(target, input.envelopeChannel);
           // The header names the sender's project by id, with its title when the sender is on this
           // server. A peer server's project is not one of ours, so it is named by id alone.
           const originProject =
@@ -432,15 +505,26 @@ export const live: Layer.Layer<
                       new A2ADeliveryTransportError({ operation: "read origin project", cause }),
                   ),
                 );
+          const outsideAgent = !isOutsideAgentParticipantId(input.senderId)
+            ? []
+            : yield* outsideAgentNameRows(sql, [input.senderId]).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new A2ADeliveryTransportError({ operation: "read outside agent", cause }),
+                ),
+              );
           const envelope = formatAgentDeliveryEnvelope({
             ...input,
             originProjectTitle: originProject[0]?.title,
+            outsideAgentName: outsideAgent[0]?.display_name,
           });
-          // Upstream links an agent-authored message to its sending thread.
+          // Upstream links an agent-authored message to its sending thread. A machine and an
+          // outside agent have none.
           const senderThreadId =
             input.envelopeChannel === "peer" &&
             !isHumanParticipantId(input.senderId) &&
-            !isMachineParticipantId(input.senderId)
+            !isMachineParticipantId(input.senderId) &&
+            !isOutsideAgentParticipantId(input.senderId)
               ? yield* agentThreadId(input.originProjectId, input.senderId)
               : undefined;
           const sendInput = {
@@ -467,6 +551,68 @@ export const live: Layer.Layer<
                   new A2ADeliveryHeldError({ participantId: input.receiverId, runId: run.id }),
                 )
               : Effect.void;
+          const mode = input.mode ?? "queue";
+          if (mode !== "queue") {
+            // The sender asked for a steer or a restart (see `askedDeliveryCommandId`).
+            const askedCommandId = askedDeliveryCommandId(input.messageId, mode);
+            const landed = Effect.fn("j5.a2a.delivery.landedAsAsked")(function* () {
+              const steer = (yield* outbox.listByCommandId(askedCommandId)).find(
+                (effect) => effect.request.type === "provider-turn.steer",
+              );
+              if (steer !== undefined) {
+                yield* awaitSteeringOutcome(steer.id);
+                return true;
+              }
+              // A restart, and a steer the provider takes by interrupting and restarting, leave
+              // no steer effect: the message in the thread is the proof.
+              const accepted = yield* orchestrator.getThreadProjection(participant.threadId);
+              if (!accepted.messages.some((message) => message.id === sendInput.messageId)) {
+                return false;
+              }
+              yield* heldRun(
+                accepted.runs.find((run) => run.userMessageId === sendInput.messageId),
+              );
+              return true;
+            });
+            if (yield* landed()) return;
+            const askedRun = requestedSteeringRun(target, input.envelopeChannel, mode);
+            if (askedRun !== undefined) {
+              yield* orchestrator
+                .dispatch({
+                  type: "message.dispatch",
+                  commandId: askedCommandId,
+                  threadId: sendInput.threadId,
+                  messageId: sendInput.messageId,
+                  text: sendInput.text,
+                  attachments: sendInput.attachments,
+                  ...(sendInput.senderThreadId === undefined
+                    ? {}
+                    : { senderThreadId: sendInput.senderThreadId }),
+                  createdBy: sendInput.createdBy,
+                  creationSource: sendInput.creationSource,
+                  modelSelection: askedRun.modelSelection,
+                  dispatchMode: {
+                    type: mode === "restart" ? "restart_active" : "steer_active",
+                    targetRunId: askedRun.id,
+                  },
+                })
+                .pipe(
+                  // The sender's limit when it sent. The receiver's user can raise its modes
+                  // before delivery, and upstream checks again under the thread's lock.
+                  Effect.provideService(DispatchModeLimit, input.modeLimit),
+                  // Refused or too late: the message is delivered as any other, below.
+                  Effect.catch((cause) =>
+                    Effect.logInfo("J5 A2A delivery could not land as its sender asked", {
+                      messageId: input.messageId,
+                      mode,
+                      cause,
+                    }),
+                  ),
+                );
+              if (yield* landed()) return;
+            }
+            return yield* heldRun((yield* threads.sendToThread(sendInput)).run);
+          }
           if (steeringRun === undefined) {
             yield* heldRun((yield* threads.sendToThread(sendInput)).run);
           } else {

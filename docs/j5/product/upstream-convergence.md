@@ -18,7 +18,7 @@ Checked against `pingdotgg/t3code` `main` @ `29980a3140`. V2 has merged there (p
 ## Launch, workspaces and parallel agents
 
 - **Upstream:** workspace-aware launches (new worktree, existing worktree, project root), configurable branch names with a prefix setting, tracked worktree setup and clone progress. A "No project" (Scratch) project exists in each environment for threads started without one; it is hidden when the server's state lives inside a checkout, which includes every J5 dev worktree. Multi-model send starts the same first message on several models, each in its own worktree. There's no coordination between them: it's for comparing outputs.
-- **J5:** `j5_spawn_agent` and Crews create Peer Agents with briefs, in the caller's project. Every Peer Agent and seat names its workspace: the caller's checkout, an existing worktree, or a new worktree prepared through upstream's ThreadLaunch on a thread J5 has already created and placed (#274). J5 still doesn't expose `t3_thread_launch` or `create_threads`. Multi-model send is refused from a saved-agent draft, because a saved agent locks its model. J5 accepts upstream's "No project" project as shipped.
+- **J5:** `j5_spawn_agent` and Crews create Peer Agents with briefs. A spawn joins the caller's project, another project, or upstream's "No project" project, and takes a permission choice within the caller's own and attachments, as upstream's launch does (#519). Every Peer Agent and seat names its workspace: the caller's checkout, an existing worktree, or a new worktree prepared through upstream's ThreadLaunch on a thread J5 has already created and placed (#274); a spawn may also name the project's main checkout. J5 still doesn't expose `t3_thread_launch` or `create_threads`. Multi-model send is refused from a saved-agent draft, because a saved agent locks its model. J5 accepts upstream's "No project" project as shipped.
 - **Watch for:** grouping or coordination of fanned-out threads, which would come close to Crews.
 
 ## Lineage, subagents and fleet views
@@ -38,7 +38,7 @@ Two different things share the word "handoff". J5 docs call upstream's history t
 ## Steering and queues
 
 - **Upstream:** a queue-or-steer follow-up setting, a shared composer dispatch, editing, reordering and promoting queued messages, and held queues after a restart. Stop and a provider failure now hold the queue too. Scheduled tasks bound to a thread queue instead of steering. A delegated task's completion steers its parent only when the session says steering doesn't interrupt tools (`activeSteeringInterruptsTools`).
-- **J5:** follows upstream's steering and queues. Agent-to-agent deliveries still queue behind a running turn, with the Astra exception ([divergence D4](upstream.md)). A delivery to a thread whose queue is held waits for a resume (#272). The remaining UX gaps are in the give-back backlog (#276).
+- **J5:** follows upstream's steering and queues. Agent-to-agent deliveries queue behind a running turn by default, with the GPT 6 exception, and a sender may ask for upstream's `steer` or `restart` ([divergence D4](upstream.md)); upstream's `auto` is not offered, and the default is revisited in #538. A delivery to a thread whose queue is held waits for a resume (#272). The remaining UX gaps are in the give-back backlog (#276).
 - **Watch for:** `activeSteeringInterruptsTools` is upstream's first admission that a steer can be harmful. If upstream stops steering where it would abort or restart a turn, D4 can go.
 
 ## Long-running autonomy
@@ -74,3 +74,4 @@ Fixes J5 carries that belong upstream are tracked in #276. V2 has merged upstrea
 - 2026-09-23 — started as a research watchlist, rewritten at every upstream advance ([Merging upstream](../process/upstream-merge.md)).
 - 2026-09-29 — moved from `research/` to `product/`: it is kept current at every advance, so it is a maintained document rather than a dated study (Jackson, [#354](https://github.com/Jacksondr5/j5code/pull/354)).
 - 2026-10-08 — rewritten against upstream `main` after V2 merged: outside-agent sign-in, environment-wide thread tools, upstream's Stop, pull-request watches, webhook schedules and provider packages added.
+- 2026-10-12 — divergence D4's exception named as GPT 6, not Astra alone (Jackson, [#569](https://github.com/Jacksondr5/j5code/pull/569)).
