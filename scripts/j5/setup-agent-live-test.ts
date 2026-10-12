@@ -8,9 +8,10 @@
  *   node scripts/j5/setup-agent-live-test.ts stop       stop the server
  *   node scripts/j5/setup-agent-live-test.ts rebuild    stop, delete the test home and repository, build and start again
  *
- * Everything lives in this worktree's gitignored `.j5code/live-test`: a small
- * test repository, a J5 home that holds only that project, the server's log
- * and the record of its process group. Nothing there points at a real
+ * The test repository, the J5 home that holds only that project, the server's
+ * log and the record of its process group live in this worktree's gitignored
+ * `.j5code/live-test`. (The dev server and the provider CLIs still write their
+ * own caches and session files elsewhere.) Nothing there points at a real
  * repository, the developer's data or the live install. It refuses to run
  * outside a linked git worktree.
  *
