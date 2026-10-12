@@ -40,9 +40,10 @@ a subagent left running in the background; it is not a browser fault.
 - **Pair.** Navigate to the complete startup pairing URL once with
   `preview_navigate`, then `preview_wait_for` the locator
   `[data-testid="composer-editor"]`: navigate returns while the splash screen
-  still shows. If the token was consumed or expired, run
-  `node apps/server/src/bin.ts pair --base-dir <worktree>/.j5code` for a fresh
-  one. Keep using the same tab.
+  still shows. If the token was consumed or expired, mint a fresh one with
+  the `pair` command the setup script printed, or with
+  `node apps/server/src/bin.ts pair` for a plain dev server. Keep using the
+  same tab.
 - **Wait.** A URL changes before its page does. After moving to a new page,
   wait for text that only the new page has.
 - **Read.** Use `preview_evaluate`, for example

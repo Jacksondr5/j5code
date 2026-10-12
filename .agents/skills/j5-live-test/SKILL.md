@@ -32,8 +32,8 @@ From your worktree, run:
 node scripts/j5/setup-agent-live-test.ts
 ```
 
-Follow what it prints. It builds a test home and a small test repository inside
-your worktree's ignored `.j5code`, starts the server, and prints the ports, the
+Follow what it prints. It builds a test home and a small test repository under
+your worktree's ignored `.j5code/live-test`, starts the server, and prints the ports, the
 pairing URL, the project to use, and the stop command. Nothing in that home
 points at a real repository or at the developer's data.
 
@@ -44,7 +44,8 @@ points at a real repository or at the developer's data.
 | The same, with Remote polling Local             | `--peer --poll` |
 | A base and a head server for before/after shots | `--base <ref>`  |
 
-`stop`, `status`, and `restart` act on the server the script started.
+`stop`, `status`, and `restart` act on the server the script started. To
+rebuild the test home from scratch, `stop`, then delete `.j5code/live-test`.
 
 Do not seed a test home by hand, copy the live database, or start `vp run dev`
 yourself for a test. Then use [test-t3-app](../test-t3-app/SKILL.md) for the
