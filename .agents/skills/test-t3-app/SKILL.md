@@ -30,9 +30,9 @@ inspecting or seeding SQLite. Stop the test server before direct fixture writes.
 ## Use the Browser panel
 
 Tools that act on the panel need the calling thread's turn to be live. Drive
-it from the primary agent, from a subagent its parent waits for, or from a
-Peer Agent. "The calling provider no longer owns an active thread run" means
-the parent's turn ended; it is not a browser fault.
+it from the primary agent or from a Peer Agent. "The calling provider no
+longer owns an active thread run" means the caller's turn ended, as happens to
+a subagent left running in the background; it is not a browser fault.
 
 - **Open.** `preview_status` showing `available: false` with a `profiles`
   list means no tab yet. Call `preview_open` with `reuseExistingTab: false`,
@@ -43,21 +43,17 @@ the parent's turn ended; it is not a browser fault.
   still shows. If the token was consumed or expired, run
   `node apps/server/src/bin.ts pair --base-dir <worktree>/.j5code` for a fresh
   one. Keep using the same tab.
-- **Move.** Navigate with `target: {kind: "environment-port", port, path}`.
-  The URL changes before the page does, so wait for text that only the new
-  page has.
+- **Wait.** A URL changes before its page does. After moving to a new page,
+  wait for text that only the new page has.
 - **Read.** Use `preview_evaluate`, for example
   `document.querySelector('main')?.innerText`. `preview_snapshot` text is
   capped, and the sidebar uses the cap up.
-- **Act.** Use role locators or test ids, such as
-  `role=button[name="Submit message"]`.
 - **Recover.** After a timeout, or "No preview automation host is available",
   call `preview_status`. Once it lists `profiles` again, retry once: the
   browser reconnects within a second.
 - **Capture.** `preview_resize` to 1280x800, then `preview_snapshot` with
-  `save: true`. The file is written to the server's own data directory, so
-  copy it out. Open a second tab with `profileId: "incognito"` for a second
-  server.
+  `save: true`; other sizes are scaled to 1280 wide. The file is written to
+  the server's own data directory, so copy it out.
 
 ## Verify and retain
 
