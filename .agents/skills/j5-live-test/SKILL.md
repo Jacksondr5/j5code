@@ -141,7 +141,8 @@ sent through the UI.
 
 ## PR screenshots
 
-Use `--base <ref>` so base and head show the same data. Open the second server
+Use `--base <ref>` so base and head show the same data. The ref is the PR's
+own base, which for a stacked PR is the layer beneath it, not `j5/main`. Open the second server
 in a tab with `profileId: "incognito"`, so the two do not share a login.
 Capture at 1280x800 as test-t3-app describes, then upload:
 
