@@ -5,6 +5,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
 import {
+  PAIRING_SCOPES,
   classifyServer,
   LiveTestRefusal,
   liveTestEnvironment,
@@ -301,5 +302,15 @@ describe("parseCommand", () => {
     assert.equal(parseCommand(["rebuild"]), "rebuild");
     assert.throws(() => parseCommand(["--fresh"]), LiveTestRefusal);
     assert.throws(() => parseCommand(["stop", "now"]), LiveTestRefusal);
+  });
+});
+
+describe("PAIRING_SCOPES", () => {
+  it("is the scope set of the server's startup pairing URL", async () => {
+    // The contracts package is not a dependency of the scripts package, so load it by path.
+    const contracts = (await import(
+      NodePath.join(import.meta.dirname, "../../packages/contracts/src/auth.ts")
+    )) as { readonly AuthAdministrativeScopes: ReadonlyArray<string> };
+    assert.sameMembers([...PAIRING_SCOPES], [...contracts.AuthAdministrativeScopes]);
   });
 });

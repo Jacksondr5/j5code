@@ -367,7 +367,7 @@ export function formatInstructions(input: {
   readonly pairingUrl: string | undefined;
 }): string {
   const { paths, manifest, facts } = input;
-  const pairCommand = `node ${NodePath.join(paths.worktree, "apps/server/src/bin.ts")} pair --base-dir ${paths.home}`;
+  const pairCommand = `node ${pairArguments(paths).join(" ")}`;
   return `J5 Code live-test server: RUNNING
 
   Pairing URL   ${input.pairingUrl ?? `none could be minted; run: ${pairCommand}`}
@@ -377,8 +377,8 @@ export function formatInstructions(input: {
   Log           ${paths.log}
 
 Open the pairing URL in the Browser panel, then wait for [data-testid="composer-editor"].
-The pairing URL works once. The one printed when the server starts can change
-Connections settings; \`status\` prints a fresh standard one each time, and so does:
+The pairing URL works once and has the same access as the server's own startup
+URL, Connections settings included. \`status\` prints a fresh one each time, and so does:
   ${pairCommand}
 
 Project to use: "${manifest.project.title}"
@@ -412,34 +412,59 @@ Stop the server when you finish.
 }
 
 /**
+ * The scopes of the server's startup pairing URL (`AuthAdministrativeScopes`
+ * in packages/contracts/src/auth.ts). A URL minted with `pair` gets only the
+ * standard client scopes unless every scope is named, and without the access
+ * and relay scopes a tester cannot use Connections settings.
+ */
+export const PAIRING_SCOPES = [
+  "orchestration:read",
+  "orchestration:operate",
+  "settings:write",
+  "providers:manage",
+  "environment:maintain",
+  "preview:operate",
+  "diagnostics:read",
+  "terminal:read",
+  "terminal:operate",
+  "source-control:write",
+  "filesystem:read",
+  "filesystem:write",
+  "relay:read",
+  "access:read",
+  "access:write",
+  "relay:write",
+] as const;
+
+/** The `pair` invocation for this home, as arguments to node. */
+const pairArguments = (paths: LiveTestPaths): ReadonlyArray<string> => [
+  NodePath.join(paths.worktree, "apps/server/src/bin.ts"),
+  "pair",
+  "--base-dir",
+  paths.home,
+  ...PAIRING_SCOPES.flatMap((scope) => ["--scope", scope]),
+];
+
+/**
  * A fresh pairing URL from the running server. The one in the log is the
  * startup URL, which works once and is usually spent by the time anyone asks again.
  */
 function mintPairingUrl(paths: LiveTestPaths): string | undefined {
-  const pair = NodeChildProcess.spawnSync(
-    process.execPath,
-    [NodePath.join(paths.worktree, "apps/server/src/bin.ts"), "pair", "--base-dir", paths.home],
-    {
-      cwd: paths.worktree,
-      env: liveTestEnvironment(process.env, paths.worktree),
-      encoding: "utf8",
-    },
-  );
+  const pair = NodeChildProcess.spawnSync(process.execPath, [...pairArguments(paths)], {
+    cwd: paths.worktree,
+    env: liveTestEnvironment(process.env, paths.worktree),
+    encoding: "utf8",
+  });
   return /Pairing URL: (\S+)/.exec(pair.stdout ?? "")?.[1];
 }
 
-/**
- * Prints the instructions with a pairing URL nobody has used. The call that
- * spawned the server passes the startup URL from the log, which carries the
- * admin scopes Connections settings need; later calls mint a standard one.
- */
-function printRunning(paths: LiveTestPaths, facts: ServerLogFacts, startupUrl?: string): void {
+function printRunning(paths: LiveTestPaths, facts: ServerLogFacts): void {
   console.log(
     formatInstructions({
       paths,
       manifest: readManifest(paths),
       facts,
-      pairingUrl: startupUrl ?? mintPairingUrl(paths),
+      pairingUrl: mintPairingUrl(paths),
     }),
   );
 }
@@ -516,11 +541,7 @@ async function stopGroup(group: number): Promise<void> {
  * it. Returns inside START_TIMEOUT_MS either way: a server that is merely slow
  * is left running and reported as still starting.
  */
-async function waitUntilReady(
-  paths: LiveTestPaths,
-  group: number,
-  spawnedHere: boolean,
-): Promise<void> {
+async function waitUntilReady(paths: LiveTestPaths, group: number): Promise<void> {
   const deadline = Date.now() + START_TIMEOUT_MS;
   for (;;) {
     const facts = readServerLog(NodeFS.readFileSync(paths.log, "utf8"));
@@ -536,7 +557,7 @@ async function waitUntilReady(
     }
     const state = currentServerState(paths);
     if (state.kind === "running" && facts.pairingUrl !== undefined && facts.recovered) {
-      return printRunning(paths, state.facts, spawnedHere ? facts.pairingUrl : undefined);
+      return printRunning(paths, state.facts);
     }
     if (state.kind === "stopped") {
       NodeFS.rmSync(paths.record, { force: true });
@@ -558,7 +579,7 @@ async function start(paths: LiveTestPaths): Promise<void> {
   const state = currentServerState(paths);
   if (state.kind === "unverified") throw new LiveTestRefusal(state.reason);
   // Already started, perhaps by a call that is still waiting: wait with it.
-  if (state.kind !== "stopped") return waitUntilReady(paths, state.group, false);
+  if (state.kind !== "stopped") return waitUntilReady(paths, state.group);
   if (!NodeFS.existsSync(paths.manifest)) buildHome(paths);
 
   const log = NodeFS.openSync(paths.log, "w");
@@ -584,7 +605,7 @@ async function start(paths: LiveTestPaths): Promise<void> {
   child.unref();
 
   console.log("Starting the dev server...");
-  await waitUntilReady(paths, child.pid, true);
+  await waitUntilReady(paths, child.pid);
 }
 
 async function stop(paths: LiveTestPaths): Promise<void> {
