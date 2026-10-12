@@ -401,8 +401,13 @@ The pairing URL works once. \`status\` prints a fresh one, and so does:
 
 ${
   manifest.mode === "fresh"
-    ? `Mode: fresh. The home is empty, so the first-run wizard shows. It has no
-project: do not add a real repository as one.`
+    ? `Mode: fresh. The home is empty, so the first-run wizard shows, and no
+default model is set.
+
+Project to add when the wizard or a test asks for one: a small TODO app (\`pnpm test\`)
+  ${paths.testRepo}
+  Add only this directory. Do not add a real repository: that is how a test
+  reaches one.`
     : `Project to use: "${manifest.project.title}", a small TODO app (\`pnpm test\`)
   ${paths.testRepo}
   It is the only project in this home. Do not add another project: that is how
@@ -502,6 +507,20 @@ function buildHome(paths: LiveTestPaths, mode: LiveTestMode): void {
   }
   if (mode === "fresh") {
     NodeFS.mkdirSync(paths.home, { recursive: true });
+    // The same test repository as the default mode, but not registered: it is
+    // there to be added by hand when the wizard or a test asks for a project.
+    const repo = NodeChildProcess.spawnSync(
+      process.execPath,
+      [
+        NodePath.join(paths.worktree, "apps/server/src/j5/test-support/liveTestRepo.ts"),
+        paths.testRepo,
+        NodePath.join(paths.root, "test-repo-origin.git"),
+      ],
+      { cwd: paths.worktree, stdio: ["ignore", "ignore", "inherit"] },
+    );
+    if (repo.status !== 0) {
+      throw new LiveTestRefusal(`Building the test repository failed. Retry with: ${rebuild}`);
+    }
     const manifest: Manifest = { mode: "fresh" };
     NodeFS.writeFileSync(paths.manifest, `${JSON.stringify(manifest)}\n`);
     return;
