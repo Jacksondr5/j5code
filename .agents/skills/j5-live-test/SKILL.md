@@ -141,8 +141,8 @@ Capture at 1280x800 as test-t3-app describes, then upload:
 node scripts/j5/pr-evidence.ts <pr> --pair "<caption>" <before.png> <after.png>
 ```
 
-Repeat `--pair` for each state, and give `-` as the before image for a state
-the change adds. It prints the before/after table for the PR description. Run
+Repeat `--pair` for each state. For a state the change adds, use
+`--new "<caption>" <after.png>`. It prints the before/after table for the PR description. Run
 `rebuild` with no flag when you are done, which removes the base checkout.
 
 ## A server for the developer
