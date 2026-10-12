@@ -10,6 +10,7 @@ import {
   LiveTestRefusal,
   addRemoteUrl,
   baseEnvironment,
+  classifyPreparation,
   listsPeer,
   peerRepairCommand,
   peerSteps,
@@ -515,6 +516,8 @@ describe("parseCommand", () => {
       ["--base", "$(x)"],
       ["--base", "a b"],
       ["--base", "-x"],
+      // A shell expands a leading tilde when the printed command is pasted.
+      ["--base", "~user"],
       ["--fresh", "--fresh"],
       // --poll says how two servers peer; it means nothing alone or with an empty home.
       ["--poll"],
@@ -648,6 +651,44 @@ describe("addRemoteUrl", () => {
     assert.isUndefined(
       addRemoteUrl({ localWebPort: 7594, remoteServerPort: 15961, remotePairingUrl: undefined }),
     );
+  });
+});
+
+describe("classifyPreparation", () => {
+  const record = { processGroup: 300, leaderStartTime: "777" };
+  const alive = {
+    worktree: "/w",
+    record,
+    startTimeOf: (): string | undefined => "777",
+    cwdOf: (): string | undefined => "/w",
+  };
+
+  it("is running only while the recorded process is the one that was spawned, in this worktree", () => {
+    assert.deepEqual(classifyPreparation(alive), { kind: "running", group: 300 });
+  });
+
+  it("is none with no record, and finished once it has written how it ended", () => {
+    assert.deepEqual(classifyPreparation({ ...alive, record: undefined }), { kind: "none" });
+    assert.deepEqual(classifyPreparation({ ...alive, record: { ...record, exitStatus: 0 } }), {
+      kind: "finished",
+      exitStatus: 0,
+    });
+    assert.deepEqual(classifyPreparation({ ...alive, record: { ...record, exitStatus: 1 } }), {
+      kind: "finished",
+      exitStatus: 1,
+    });
+  });
+
+  it("has died, and is never signalled, when the pid is gone, recycled or elsewhere", () => {
+    for (const other of [
+      { startTimeOf: () => undefined },
+      // Same pid, later start: another process now.
+      { startTimeOf: () => "999" },
+      { cwdOf: () => "/somewhere/else" },
+      { cwdOf: () => undefined },
+    ]) {
+      assert.deepEqual(classifyPreparation({ ...alive, ...other }), { kind: "died" });
+    }
   });
 });
 

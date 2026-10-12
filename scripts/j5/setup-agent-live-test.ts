@@ -1540,7 +1540,63 @@ const baseScript = (paths: LiveTestPaths, args: ReadonlyArray<string>) =>
 const basePreparation = (paths: LiveTestPaths) => ({
   log: NodePath.join(paths.root, "base-start.log"),
   installed: NodePath.join(paths.root, "base-installed"),
+  record: NodePath.join(paths.root, "base-prepare.json"),
 });
+
+/**
+ * The preparation process, recorded as servers are: its pid, which is its
+ * process group, and its start time. It adds its exit status when it ends.
+ */
+interface PreparationRecord extends ServerRecord {
+  readonly exitStatus?: number;
+}
+
+export type PreparationState =
+  | { readonly kind: "none" }
+  | { readonly kind: "running"; readonly group: number }
+  | { readonly kind: "finished"; readonly exitStatus: number }
+  /** Recorded, gone, and it never wrote how it ended: it was killed or it crashed. */
+  | { readonly kind: "died" };
+
+/**
+ * What the recorded preparation process is doing. It is running only while
+ * the recorded pid is still the process that was spawned (same start time)
+ * and works from this worktree; that is the proof needed before signalling it.
+ */
+export function classifyPreparation(input: {
+  readonly worktree: string;
+  readonly record: PreparationRecord | undefined;
+  readonly startTimeOf: (pid: number) => string | undefined;
+  readonly cwdOf: (pid: number) => string | undefined;
+}): PreparationState {
+  const { record } = input;
+  if (record === undefined) return { kind: "none" };
+  if (record.exitStatus !== undefined) return { kind: "finished", exitStatus: record.exitStatus };
+  const cwd = input.cwdOf(record.processGroup);
+  return input.startTimeOf(record.processGroup) === record.leaderStartTime &&
+    cwd !== undefined &&
+    isInside(cwd, input.worktree)
+    ? { kind: "running", group: record.processGroup }
+    : { kind: "died" };
+}
+
+function preparationState(paths: LiveTestPaths): PreparationState {
+  const { record } = basePreparation(paths);
+  return classifyPreparation({
+    worktree: NodeFS.realpathSync(paths.worktree),
+    record: NodeFS.existsSync(record)
+      ? (JSON.parse(NodeFS.readFileSync(record, "utf8")) as PreparationRecord)
+      : undefined,
+    startTimeOf,
+    cwdOf: (pid) => {
+      try {
+        return NodeFS.readlinkSync(`/proc/${pid}/cwd`);
+      } catch {
+        return undefined;
+      }
+    },
+  });
+}
 
 /**
  * Refuses unless `<root>/base` is a worktree of this repository checked out
@@ -1580,6 +1636,22 @@ const PREPARE_BASE = "__prepare-base";
  * the command that asked for it. Its output is the log `startBase` reads.
  */
 function prepareBase(paths: LiveTestPaths): void {
+  const { record } = basePreparation(paths);
+  // Whatever happens below, say how it ended, so nothing mistakes this for still running.
+  const finish = (exitStatus: number) => {
+    const recorded = JSON.parse(NodeFS.readFileSync(record, "utf8")) as PreparationRecord;
+    NodeFS.writeFileSync(record, `${JSON.stringify({ ...recorded, exitStatus })}\n`);
+    process.exitCode = exitStatus;
+  };
+  try {
+    finish(prepareBaseSteps(paths));
+  } catch (cause) {
+    finish(1);
+    throw cause;
+  }
+}
+
+function prepareBaseSteps(paths: LiveTestPaths): number {
   const manifest = readManifest(paths) as DefaultManifest;
   const commit = manifest.baseCommit;
   if (commit === undefined) throw new LiveTestRefusal("This build has no base.");
@@ -1614,7 +1686,7 @@ function prepareBase(paths: LiveTestPaths): void {
     [NodePath.join(paths.base, LIVE_TEST_SCRIPT)],
     { cwd: paths.base, env: environment, stdio: "inherit" },
   );
-  process.exitCode = started.status ?? 1;
+  return started.status ?? 1;
 }
 
 /**
@@ -1622,31 +1694,41 @@ function prepareBase(paths: LiveTestPaths): void {
  * what it printed, or undefined when it is still going: it carries on in the
  * background and `status` reports it.
  */
-function startBase(paths: LiveTestPaths, deadline: number): Promise<string | undefined> {
-  const { log } = basePreparation(paths);
-  const output = NodeFS.openSync(log, "w");
-  const child = NodeChildProcess.spawn(
-    process.execPath,
-    [NodePath.join(paths.worktree, LIVE_TEST_SCRIPT), PREPARE_BASE],
-    { cwd: paths.worktree, env: process.env, detached: true, stdio: ["ignore", output, output] },
-  );
-  NodeFS.closeSync(output);
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(
-      () => {
-        child.unref();
-        resolve(undefined);
-      },
-      Math.max(0, deadline - Date.now()),
+async function startBase(paths: LiveTestPaths, deadline: number): Promise<string | undefined> {
+  const { log, record } = basePreparation(paths);
+  // One preparation at a time: a second start joins the one that is running.
+  if (preparationState(paths).kind !== "running") {
+    const output = NodeFS.openSync(log, "w");
+    const child = NodeChildProcess.spawn(
+      process.execPath,
+      [NodePath.join(paths.worktree, LIVE_TEST_SCRIPT), PREPARE_BASE],
+      { cwd: paths.worktree, env: process.env, detached: true, stdio: ["ignore", output, output] },
     );
-    child.on("exit", (status) => {
-      clearTimeout(timer);
-      const said = NodeFS.readFileSync(log, "utf8");
-      if (status === 0) resolve(said);
-      else reject(new LiveTestRefusal(`The base server did not start:\n${said}`));
-    });
-  });
+    NodeFS.closeSync(output);
+    const leaderStartTime = child.pid === undefined ? undefined : startTimeOf(child.pid);
+    if (child.pid === undefined || leaderStartTime === undefined) {
+      throw new LiveTestRefusal("The base preparation could not be spawned.");
+    }
+    const recorded: PreparationRecord = { processGroup: child.pid, leaderStartTime };
+    NodeFS.writeFileSync(record, `${JSON.stringify(recorded)}\n`);
+    child.unref();
+  }
+  for (;;) {
+    const state = preparationState(paths);
+    if (state.kind === "finished" && state.exitStatus === 0)
+      return NodeFS.readFileSync(log, "utf8");
+    if (state.kind !== "running") throw new LiveTestRefusal(basePreparationFailed(paths));
+    if (Date.now() > deadline) return undefined;
+    await NodeTimersPromises.setTimeout(250);
+  }
 }
+
+const basePreparationFailed = (paths: LiveTestPaths) =>
+  `The base server was not prepared. What it said:\n${
+    NodeFS.existsSync(basePreparation(paths).log)
+      ? NodeFS.readFileSync(basePreparation(paths).log, "utf8").split("\n").slice(-40).join("\n")
+      : "(its log is gone: the build was replaced meanwhile)"
+  }\nTry again with: ${selfCommand(paths, "restart")}`;
 
 /** What to print above the base's own output: which commit it is, and whether its dates match. */
 function baseHeading(paths: LiveTestPaths): string {
@@ -1728,6 +1810,14 @@ async function stop(paths: LiveTestPaths, replacing = false): Promise<void> {
     NodeFS.rmSync(server.record, { force: true });
     console.log(`J5 Code live-test server${name}: STOPPED`);
   }
+  // A preparation still at work would go on to start the base server after
+  // this stop had looked, so it is stopped first, on the same proof as a server.
+  const preparation = preparationState(paths);
+  if (preparation.kind === "running") {
+    await stopGroup(preparation.group);
+    console.log("Base: its preparation was still running and has been stopped.");
+  }
+  NodeFS.rmSync(basePreparation(paths).record, { force: true });
   if (NodeFS.existsSync(NodePath.join(paths.base, LIVE_TEST_SCRIPT))) {
     const stopped = await baseScript(paths, ["stop"]);
     console.log(`Base: ${stopped.output.trim()}`);
@@ -1749,8 +1839,18 @@ async function status(paths: LiveTestPaths): Promise<void> {
   statusOfHead(paths);
   if (builtMode(paths) !== "base") return;
   const commit = (readManifest(paths) as DefaultManifest).baseCommit ?? "";
-  if (!NodeFS.existsSync(basePreparation(paths).installed)) {
-    return console.log(`\n${baseStillPreparing(paths)}`);
+  const preparation = preparationState(paths);
+  if (preparation.kind === "running") return console.log(`\n${baseStillPreparing(paths)}`);
+  if (
+    preparation.kind === "died" ||
+    (preparation.kind === "finished" && preparation.exitStatus !== 0)
+  ) {
+    throw new LiveTestRefusal(`\n${basePreparationFailed(paths)}`);
+  }
+  if (preparation.kind === "none") {
+    return console.log(
+      `\nThe base server has not been started. Start it with: ${selfCommand(paths, "restart")}`,
+    );
   }
   assertBaseCheckout(paths, commit);
   const base = await baseScript(paths, ["status"]);
@@ -1837,8 +1937,7 @@ export function parseCommand(args: ReadonlyArray<string>): {
     !COMMANDS.some((known) => known === command) ||
     mode === undefined ||
     // The ref is printed inside commands, and git allows shell characters in ref names.
-    (mode === "base" &&
-      (baseRef === undefined || !/^[\w@+=:,./^~][\w@+=:,./^~-]*$/.test(baseRef))) ||
+    (mode === "base" && (baseRef === undefined || !/^[\w@+=:,./][\w@+=:,./^~-]*$/.test(baseRef))) ||
     (mode !== "default" && command !== "start" && command !== "rebuild")
   ) {
     throw new LiveTestRefusal(USAGE);
