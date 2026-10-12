@@ -344,6 +344,87 @@ const live = <A, E>(
   test: Effect.Effect<A, E, Layer.Success<typeof layerTest> | import("effect/Scope").Scope>,
 ) => it.live(name, () => test.pipe(Effect.provide(layerTest)));
 
+/** A provider with every field set, each host-specific one to a value the tests look for. */
+const HOST_PROVIDER = {
+  skillDiscoveryError: "host-skill-error",
+  instanceId: "codex",
+  driver: "codex",
+  displayName: "Codex",
+  accentColor: "host-accent",
+  iconUrl: `http://${HOST_ADDRESS}/icon.png`,
+  badgeLabel: "host-badge",
+  continuation: { groupKey: "host-group" },
+  showInteractionModeToggle: true,
+  reportsContextWindow: true,
+  supportedRuntimeModes: ["full-access"],
+  requiresNewThreadForModelChange: true,
+  supportsConversationRollback: true,
+  supportsTextGeneration: true,
+  setup: { canAuthenticate: true, canInstall: true, documentationUrl: "https://host-docs" },
+  nativeSessions: { canList: true, canLoad: true, canResume: true },
+  configurableProviders: true,
+  runtimePaths: { homePath: `${HOST_PATH}/codex-home`, shadowHomePath: null },
+  enabled: true,
+  installed: true,
+  version: "9.9.9-host",
+  status: "warning",
+  auth: {
+    status: "authenticated",
+    type: "host-plan",
+    label: "Host Account",
+    email: "host@example.com",
+    canLogout: true,
+    profileId: "host-profile",
+  },
+  checkedAt: "2026-10-11T08:09:10.000Z",
+  message: "host-status-message",
+  availability: "available",
+  models: [
+    {
+      slug: "gpt-test",
+      name: "GPT Test",
+      shortName: "Test",
+      aliases: ["host-alias"],
+      isCustom: false,
+      isDefault: true,
+      capabilities: null,
+    },
+  ],
+  updateRequiredModels: [{ slug: "gpt-next", name: "GPT Next", minVersion: "10.0.0-host" }],
+  slashCommands: [{ name: "host-command" }],
+  skills: [{ name: "host-skill", path: `${HOST_PATH}/skills/host-skill`, enabled: true }],
+  workspaceSnapshots: [
+    {
+      cwd: `${HOST_PATH}/cwd`,
+      checkedAt: "2026-10-11T08:09:10.000Z",
+      slashCommands: [],
+      skills: [],
+    },
+  ],
+  versionAdvisory: {
+    status: "behind_latest",
+    currentVersion: "9.9.9-host",
+    latestVersion: "10.0.0-host",
+    updateCommand: "host-update-command",
+    canUpdate: true,
+    checkedAt: null,
+    message: null,
+  },
+  compatibilityAdvisory: {
+    status: "graceful",
+    message: "host-compatibility",
+    recommendedVersion: null,
+    recommendedRange: null,
+  },
+  updateState: {
+    status: "failed",
+    startedAt: null,
+    finishedAt: null,
+    message: "host-update-failed",
+    output: "host-update-output",
+  },
+};
+
 const fullConfig = {
   environment: {
     environmentId: EnvironmentId.make("environment:real"),
@@ -363,7 +444,7 @@ const fullConfig = {
   keybindingsConfigPath: `${HOST_PATH}/keybindings.json`,
   keybindings: [{ command: "terminal.toggle", shortcut: { key: "j" } }],
   issues: [{ kind: "keybindings.malformed-config", message: `${HOST_PATH}/keybindings.json` }],
-  providers: [{ instanceId: "codex", auth: { email: "host@example.com" } }],
+  providers: [HOST_PROVIDER, { ...HOST_PROVIDER, instanceId: "claude-off", enabled: false }],
   availableEditors: ["cursor"],
   remoteOpenTargets: [{ host: HOST_ADDRESS }],
   directEndpoints: [{ kind: "tailnet", httpBaseUrl: `http://${HOST_ADDRESS}:3773` }],
@@ -395,6 +476,24 @@ const assertNothingOfTheHost = (sent: unknown) => {
     HOST_PATH,
     HOST_ADDRESS,
     "host@example.com",
+    // Everything else a provider's entry says about the host's account, install and health.
+    "Host Account",
+    "host-plan",
+    "host-profile",
+    "9.9.9-host",
+    "10.0.0-host",
+    "host-status-message",
+    "host-skill",
+    "host-command",
+    "host-alias",
+    "host-accent",
+    "host-badge",
+    "host-group",
+    "host-docs",
+    "host-update",
+    "host-compatibility",
+    "2026-10-11T08:09:10.000Z",
+    "claude-off",
     "host-prefix",
     "jackson-workstation",
     "github.example.com",
@@ -416,7 +515,33 @@ it.effect("a guest's configuration holds nothing of the host, and still decodes"
     const view = yield* GuestView.connectionView(GUEST);
     const reduced = view.config(fullConfig);
     assertNothingOfTheHost(reduced);
-    assert.deepStrictEqual(reduced.providers, []);
+    // Each enabled provider is named, with its models, and says nothing else.
+    assert.deepStrictEqual(reduced.providers, [
+      {
+        instanceId: "codex",
+        driver: "codex",
+        displayName: "Codex",
+        enabled: true,
+        installed: true,
+        version: null,
+        status: "ready",
+        auth: { status: "unknown" },
+        checkedAt: "1970-01-01T00:00:00.000Z",
+        models: [
+          {
+            slug: "gpt-test",
+            name: "GPT Test",
+            shortName: "Test",
+            isCustom: false,
+            isDefault: true,
+            capabilities: null,
+          },
+        ],
+        slashCommands: [],
+        skills: [],
+      },
+    ]);
+    assert.strictEqual((yield* GuestView.connectionView(MEMBER)).config(fullConfig), fullConfig);
     assert.deepStrictEqual(reduced.settings, DEFAULT_SERVER_SETTINGS);
     assert.deepStrictEqual(reduced.environment, {
       environmentId: fullConfig.environment.environmentId,
@@ -853,6 +978,5 @@ live(
 
     const view = yield* GuestView.connectionView(STRAY);
     assertNothingOfTheHost(view.config(fullConfig));
-    assert.deepStrictEqual(view.config(fullConfig).providers, []);
   }).pipe(Effect.scoped),
 );
