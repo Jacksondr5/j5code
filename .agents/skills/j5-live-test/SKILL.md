@@ -33,9 +33,32 @@ node scripts/j5/setup-agent-live-test.ts
 ```
 
 Follow what it prints. It builds a test home and a small test repository under
-your worktree's ignored `.j5code/live-test`, starts the server, and prints the ports, the
-pairing URL, the project to use, and the stop command. Nothing in that home
-points at a real repository or at the developer's data.
+your worktree's ignored `.j5code/live-test`, starts the server, and prints the
+ports, the pairing URL, the project to use, and its commands. Nothing in that
+home points at a real repository or at the developer's data. Then use
+[test-t3-app](../test-t3-app/SKILL.md) for the browser steps.
+
+Do not seed a test home by hand, copy the live database, or start `vp run dev`
+yourself for a test. The script does not install dependencies: if it says they
+are missing, install them and run it again.
+
+| Command   | What it does                                                          |
+| --------- | --------------------------------------------------------------------- |
+| `status`  | Says `RUNNING`, `NOT SERVING`, or `STOPPED`, with a fresh pairing URL |
+| `restart` | Stops, then starts on the same home                                   |
+| `stop`    | Stops the server. Run it when you finish                              |
+| `rebuild` | Stops, discards the test home, builds a new one, and starts it        |
+
+A start returns within about two minutes. On a busy machine it can return
+before it has finished, and prints the command that finishes it.
+
+Live turns also leave provider session files in `~/.claude` and `~/.codex`,
+and Browser panel screenshots are saved by the server you are running in.
+
+### Other setups
+
+A worktree holds one setup at a time. Pass a flag to the first start, or to
+`rebuild` to switch.
 
 | If you need                                     | Add             |
 | ----------------------------------------------- | --------------- |
@@ -44,41 +67,18 @@ points at a real repository or at the developer's data.
 | The same, with Remote polling Local             | `--peer --poll` |
 | A base and a head server for before/after shots | `--base <ref>`  |
 
-A start returns within about two minutes. On a busy machine a `--peer` or
-`--base` start can return before it has finished, and prints the command that
-finishes it.
-
-With `--peer`, pair the browser with Local, then open the "Add to the browser"
-link the script prints to add Remote. After a `rebuild`, remove the old Remote
-from Settings > Connections first: the browser keeps its own list.
-
-The script builds one setup per worktree. To change mode, run `rebuild` with
-the new flags.
-
-A `--fresh` home has no project and no pinned model. Open it in a tab with
-`profileId: "incognito"`: the default browser profile may have finished
-onboarding already, and then the wizard does not show. After pairing, wait for
-the wizard's own text, since there is no composer yet. In the wizard, add only
-the test repository the script names, or choose "Do not import projects". Pick
-your model by hand.
-
-`stop`, `status`, and `restart` act on the server the script started. `status`
-starts with `RUNNING`, `NOT SERVING`, or `STOPPED`, and prints a fresh pairing
-URL when the server is up. Run `stop` when you finish.
-`rebuild` stops it, discards the test home, and builds and starts a new one.
-The script does not install dependencies: if it says they are missing, install
-them and run it again.
-
-After a `rebuild`, a tab that was open before it can stay on the pairing form.
-Press "Reload app" there.
-
-The test home, test repository, and logs live under `.j5code/live-test`. Live
-turns also leave provider session files in `~/.claude` and `~/.codex`, and
-Browser panel screenshots are saved by the server you are running in.
-
-Do not seed a test home by hand, copy the live database, or start `vp run dev`
-yourself for a test. Then use [test-t3-app](../test-t3-app/SKILL.md) for the
-browser steps.
+- **After any `rebuild`**, a tab that was open before it can stay on the
+  pairing form. Press "Reload app" there.
+- **`--fresh`.** The home has no project and no pinned model. Open it in a tab
+  with `profileId: "incognito"`: the default browser profile may have finished
+  onboarding already, and then the wizard does not show. After pairing, wait
+  for the wizard's own text, since there is no composer yet. Add only the test
+  repository the script names, or choose "Do not import projects". Pick your
+  model by hand.
+- **`--peer`.** Pair the browser with Local, then open the "Add to the
+  browser" link the script prints to add Remote. After a `rebuild`, remove the
+  old Remote from Settings > Connections first: the browser keeps its own list.
+- **`--base <ref>`.** See "PR screenshots".
 
 ### Live turns
 
@@ -150,8 +150,9 @@ node scripts/j5/pr-evidence.ts <pr> --pair "<caption>" <before.png> <after.png>
 ```
 
 Repeat `--pair` for each state. For a state the change adds, use
-`--new "<caption>" <after.png>`. It prints the before/after table for the PR description. Run
-`rebuild` with no flag when you are done, which removes the base checkout.
+`--new "<caption>" <after.png>`. It prints the before/after table for the PR
+description. Run `rebuild` with no flag when you are done, which removes the
+base checkout.
 
 ## A server for the developer
 
