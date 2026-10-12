@@ -46,6 +46,7 @@ interface Manifest {
   readonly personas: ReadonlyArray<{ readonly id: string; readonly model: string }>;
   readonly playbooks: ReadonlyArray<string>;
   readonly holdScript: string;
+  readonly holdReleaseFile: string;
 }
 
 export interface LiveTestPaths {
@@ -282,7 +283,6 @@ export function formatInstructions(input: {
   readonly facts: ServerLogFacts;
 }): string {
   const { paths, manifest, facts } = input;
-  const release = NodePath.join(paths.root, "release-gate");
   return `J5 Code live-test server: RUNNING
 
   Pairing URL   ${facts.pairingUrl}
@@ -312,10 +312,9 @@ need no permission. Ask your Captain before a turn on anything more expensive.
 Personas: ${manifest.personas.map((persona) => `${persona.id} (${persona.model})`).join(", ")}
 Playbooks: ${manifest.playbooks.join(", ")}
 
-To hold a turn open, ask the agent to run:
-  ${manifest.holdScript} ${release}
-It blocks until that file exists. Let the turn finish with: touch ${release}
-Delete the file before the next hold.
+To hold a turn open, ask the agent to run: ${manifest.holdScript}
+It blocks until you release it with: touch ${manifest.holdReleaseFile}
+The script deletes that file as it exits, so there is nothing to clean up.
 
 Commands:
   ${selfCommand(paths, "status")}

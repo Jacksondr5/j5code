@@ -57,7 +57,12 @@ import {
   runDevDeliverySeed,
   validateIsolatedBaseDir,
 } from "../a2a/test-support/devDeliverySeed.ts";
-import { createLiveTestRepo, LIVE_TEST_HOLD_SCRIPT, LIVE_TEST_PLAYBOOKS } from "./liveTestRepo.ts";
+import {
+  createLiveTestRepo,
+  LIVE_TEST_HOLD_RELEASE_FILE,
+  LIVE_TEST_HOLD_SCRIPT,
+  LIVE_TEST_PLAYBOOKS,
+} from "./liveTestRepo.ts";
 
 type ReplayDriver = "claudeAgent" | "codex";
 
@@ -117,6 +122,7 @@ export interface LiveTestHomeManifest {
   readonly personas: ReadonlyArray<{ readonly id: string; readonly model: string }>;
   readonly playbooks: ReadonlyArray<string>;
   readonly holdScript: string;
+  readonly holdReleaseFile: string;
   readonly replayedThreads: number;
   readonly seedThreads: number;
 }
@@ -371,6 +377,7 @@ export const buildLiveTestHome = Effect.fn("buildLiveTestHome")(function* (input
     personas: LIVE_TEST_PERSONAS.map(({ id, model }) => ({ id, model })),
     playbooks: LIVE_TEST_PLAYBOOKS,
     holdScript: LIVE_TEST_HOLD_SCRIPT,
+    holdReleaseFile: NodePath.join(testRepo, LIVE_TEST_HOLD_RELEASE_FILE),
     replayedThreads: replays.length,
     seedThreads: Object.keys(seed.threads).length,
   };

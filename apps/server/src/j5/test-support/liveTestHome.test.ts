@@ -91,12 +91,21 @@ it.live(
           NodeFS.existsSync(NodePath.join(manifest.testRepo, ".j5/playbooks", `${playbook}.yaml`)),
         );
       }
-      // The gate blocks until its file exists, then succeeds; a missing file times out.
-      const hold = NodePath.join(manifest.testRepo, manifest.holdScript);
-      const release = NodePath.join(root, "release");
-      assert.equal(NodeChildProcess.spawnSync(hold, [release, "1"]).status, 1);
-      NodeFS.writeFileSync(release, "");
-      assert.equal(NodeChildProcess.spawnSync(hold, [release, "1"]).status, 0);
+      // The gate times out with no release file; with one it succeeds and removes it,
+      // leaving nothing for git to report.
+      const hold = (cwd: string) =>
+        NodeChildProcess.spawnSync(NodePath.join(cwd, manifest.holdScript), [], {
+          cwd,
+          env: { ...process.env, HOLD_MAX_SECONDS: "1" },
+        }).status;
+      assert.equal(hold(manifest.testRepo), 1);
+      NodeFS.writeFileSync(manifest.holdReleaseFile, "");
+      assert.equal(git("status", "--porcelain").trim(), "");
+      // A thread's worktree waits on the main checkout's file, not its own.
+      const threadWorktree = NodePath.join(root, "thread-worktree");
+      git("worktree", "add", "--quiet", threadWorktree, "-b", "thread");
+      assert.equal(hold(threadWorktree), 0);
+      assert.isFalse(NodeFS.existsSync(manifest.holdReleaseFile));
 
       // A second build never writes over the first.
       assert.equal((yield* Effect.exit(build))._tag, "Failure");

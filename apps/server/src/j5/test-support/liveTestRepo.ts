@@ -11,6 +11,8 @@ import * as NodePath from "node:path";
 
 export const LIVE_TEST_PLAYBOOKS = ["two-step", "add-a-feature"] as const;
 export const LIVE_TEST_HOLD_SCRIPT = "scripts/hold.sh";
+/** Created in the test repository root to release `scripts/hold.sh`, which then deletes it. */
+export const LIVE_TEST_HOLD_RELEASE_FILE = ".hold-release";
 
 interface RepoCommit {
   readonly message: string;
@@ -27,8 +29,9 @@ Change anything here; it is a disposable copy.
     node src/cli.js list
     npm test
 
-\`scripts/hold.sh <file>\` blocks until \`<file>\` exists. Ask an agent to run it to
-hold a turn open, then \`touch <file>\` to let the turn finish.
+\`scripts/hold.sh\` blocks until \`.hold-release\` exists in this directory, then
+deletes it. Ask an agent to run it to hold a turn open, then
+\`touch .hold-release\` here to let the turn finish.
 `;
 
 const PACKAGE_JSON = `{
@@ -107,21 +110,25 @@ if (command === "add" && argument) {
 `;
 
 const HOLD_SH = `#!/usr/bin/env bash
-# Holds a turn open: blocks until the named file exists, then exits 0.
+# Holds a turn open: blocks until ${LIVE_TEST_HOLD_RELEASE_FILE} exists in the root of the test
+# repository, then deletes that file and exits 0.
 #
-#   scripts/hold.sh <file> [max-seconds]
+#   scripts/hold.sh
 #
-# Release it from outside the turn with: touch <file>
-# Use an absolute path, so it is the same file from any worktree of this
-# repository. Gives up with exit 1 after max-seconds (default 540), so a
-# forgotten gate cannot hold a turn forever.
+# Release it from outside the turn, in the test repository root, with:
+#   touch ${LIVE_TEST_HOLD_RELEASE_FILE}
+# From a thread's worktree it still waits on the main checkout's file. It gives
+# up with exit 1 after 540 seconds, so a forgotten gate cannot hold a turn forever.
 set -euo pipefail
 
-file="\${1:?Usage: scripts/hold.sh <file> [max-seconds]}"
-max_seconds="\${2:-540}"
+here="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
+root="$(dirname "$(git -C "$here" rev-parse --path-format=absolute --git-common-dir)")"
+file="$root/${LIVE_TEST_HOLD_RELEASE_FILE}"
+max_seconds="\${HOLD_MAX_SECONDS:-540}"
 echo "holding until $file exists"
 for ((waited = 0; waited < max_seconds; waited++)); do
   if [ -e "$file" ]; then
+    rm -f "$file"
     echo "released"
     exit 0
   fi
@@ -164,7 +171,7 @@ const COMMITS: ReadonlyArray<RepoCommit> = [
     files: {
       "README.md": README,
       "package.json": PACKAGE_JSON,
-      ".gitignore": "todos.json\n",
+      ".gitignore": `todos.json\n${LIVE_TEST_HOLD_RELEASE_FILE}\n`,
       "src/todo.js": TODO_JS,
       "test/todo.test.js": TODO_TEST_JS,
     },
