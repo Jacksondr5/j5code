@@ -136,6 +136,22 @@ describe("resolveLiveTestPaths after a build", () => {
     }
   });
 
+  it("refuses a Remote home that is Local's home under another name", async () => {
+    for (const link of ["remote/home", "remote/home/userdata"]) {
+      const layout = makeLayout();
+      const root = NodePath.join(layout.worktree, ".j5code", "live-test");
+      NodeFS.mkdirSync(NodePath.join(root, "home", "userdata"), { recursive: true });
+      NodeFS.mkdirSync(NodePath.dirname(NodePath.join(root, link)), { recursive: true });
+      // Inside the root, so the containment check alone would let it through.
+      NodeFS.symlinkSync(
+        NodePath.join(root, link.replace("remote/", "")),
+        NodePath.join(root, link),
+      );
+      assert.include(await refusal(resolve(layout)), "must have separate homes");
+      NodeFS.rmSync(layout.base, { recursive: true, force: true });
+    }
+  });
+
   it("derives the home from the worktree, whatever a manifest might say", async () => {
     const layout = makeLayout();
     const root = NodePath.join(layout.worktree, ".j5code", "live-test");

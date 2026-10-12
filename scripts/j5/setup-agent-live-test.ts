@@ -40,7 +40,12 @@ type LiveTestCommand = (typeof COMMANDS)[number];
 /** The live install's port. A test server must never end up on it. */
 const LIVE_SERVER_PORT = 5773;
 /** Under the two minutes a shell call usually gets, so a failed start is cleaned up by this script. */
-const START_TIMEOUT_MS = 90_000;
+/**
+ * How long one start may take from the moment it is asked for, builds included.
+ * Every wait in it shares this budget, so the command returns inside the two
+ * minutes a shell call usually gets even when it starts two servers and peers them.
+ */
+const START_BUDGET_MS = 110_000;
 const STOP_TIMEOUT_MS = 20_000;
 /** `scripts/hold.sh` in the test repository waits for this file in the repository root. */
 const HOLD_RELEASE_FILE = ".hold-release";
@@ -184,6 +189,17 @@ export async function resolveLiveTestPaths(input: {
     log: NodePath.join(remoteRoot, "server.log"),
     record: NodePath.join(remoteRoot, "server.json"),
   };
+  // Two servers on one database would corrupt it, so Remote's home must be its own.
+  for (const [mine, theirs] of [
+    [home, remote.home],
+    [NodePath.join(home, "userdata"), NodePath.join(remote.home, "userdata")],
+  ] as const) {
+    if (canonicalPath(mine) === canonicalPath(theirs)) {
+      throw new LiveTestRefusal(
+        `${theirs} resolves to ${mine}. Local and Remote must have separate homes; remove the link.`,
+      );
+    }
+  }
   // The server keeps its database in <home>/userdata, so that must not be a link either.
   for (const inside of [
     home,
@@ -430,6 +446,8 @@ export function formatInstructions(input: {
     readonly facts: ServerLogFacts;
     /** Opened in a browser paired with Local, it adds Remote there. Works once. */
     readonly addToBrowserUrl: string | undefined;
+    /** Whether peering succeeded on the start these servers are running from. */
+    readonly peered: boolean;
   };
 }): string {
   const { paths, manifest, facts, remote } = input;
@@ -453,7 +471,11 @@ Remote, which has no web server of its own:
   Add to the browser, after pairing with Local (works once):
     ${remote.addToBrowserUrl ?? "none could be minted"}
 
-The two are peered${manifest.mode === "peer-poll" ? ": Remote polls Local for its messages, and Local never connects to Remote" : " and send to each other directly"}.
+${
+  remote.peered
+    ? `The two are peered${manifest.mode === "peer-poll" ? ": Remote polls Local for its messages, and Local never connects to Remote" : " and send to each other directly"}.`
+    : `The two are NOT peered: peering did not finish on the last start. Redo it with: ${selfCommand(paths, "restart")}`
+}
 `
 }
 The pairing URL works once. \`status\` prints a fresh one, and so does:
@@ -581,6 +603,7 @@ function printRunning(
         : {
             remote: {
               facts: remoteFacts,
+              peered: NodeFS.existsSync(peeredMarker(paths)),
               addToBrowserUrl: addRemoteUrl({
                 localWebPort: facts.webPort,
                 remoteServerPort: remoteFacts.serverPort,
@@ -691,11 +714,10 @@ async function stopGroup(group: number): Promise<void> {
 
 /**
  * Waits for a server this script started to be ready and returns what its log
- * says. Returns inside START_TIMEOUT_MS either way: a server that is merely
+ * says. Returns by `deadline` either way: a server that is merely
  * slow is left running and reported as still starting.
  */
-async function waitUntilReady(paths: ServerPaths): Promise<ServerLogFacts> {
-  const deadline = Date.now() + START_TIMEOUT_MS;
+async function waitUntilReady(paths: ServerPaths, deadline: number): Promise<ServerLogFacts> {
   for (;;) {
     const facts = readServerLog(NodeFS.readFileSync(paths.log, "utf8"));
     // Classify before anything else: a refusal below signals the group, and
@@ -723,7 +745,7 @@ async function waitUntilReady(paths: ServerPaths): Promise<ServerLogFacts> {
     }
     if (Date.now() > deadline) {
       throw new LiveTestRefusal(
-        `The dev server is not ready after ${START_TIMEOUT_MS / 1000} seconds. It has been left running.\nIf it is still starting, check again with: ${selfCommand(paths, "status")}\nIf it has failed (see ${paths.log}), start it again with: ${selfCommand(paths, "restart")}`,
+        `The dev server was not ready in time. It has been left running.\nIf it is still starting, check again with: ${selfCommand(paths, "status")}\nIf it has failed (see ${paths.log}), start it again with: ${selfCommand(paths, "restart")}`,
       );
     }
     await NodeTimersPromises.setTimeout(250);
@@ -757,11 +779,12 @@ async function startServer(
   paths: ServerPaths,
   runnerMode: "dev" | "dev:server",
   environment: Readonly<Record<string, string>>,
+  deadline: number,
 ): Promise<ServerLogFacts> {
   const state = currentServerState(paths);
   if (state.kind === "unverified") throw new LiveTestRefusal(state.reason);
   // Already started, perhaps by a call that is still waiting: wait with it.
-  if (state.kind !== "stopped") return waitUntilReady(paths);
+  if (state.kind !== "stopped") return waitUntilReady(paths, deadline);
 
   const log = NodeFS.openSync(paths.log, "w");
   // Detached makes the child the leader of a new process group, so its pid is
@@ -784,11 +807,14 @@ async function startServer(
   const record: ServerRecord = { processGroup: child.pid, leaderStartTime };
   NodeFS.writeFileSync(paths.record, `${JSON.stringify(record)}\n`);
   child.unref();
-  return waitUntilReady(paths);
+  return waitUntilReady(paths, deadline);
 }
 
-/** Runs the server's own `j5` CLI against one of the two homes and returns its output. */
-function peerCli(paths: LiveTestPaths, args: ReadonlyArray<string>): string | undefined {
+/** Runs the server's own `j5` CLI against one of the two homes. */
+function peerCli(
+  paths: LiveTestPaths,
+  args: ReadonlyArray<string>,
+): { readonly ok: boolean; readonly output: string; readonly error: string } {
   const result = NodeChildProcess.spawnSync(
     process.execPath,
     [NodePath.join(paths.worktree, "apps/server/src/bin.ts"), "a2a", "peer", ...args],
@@ -798,7 +824,16 @@ function peerCli(paths: LiveTestPaths, args: ReadonlyArray<string>): string | un
       encoding: "utf8",
     },
   );
-  return result.status === 0 ? result.stdout.trim() : undefined;
+  return {
+    ok: result.status === 0,
+    output: (result.stdout ?? "").trim(),
+    // Node's own warnings go to stderr too; the CLI's reason is what is left.
+    error: (result.stderr ?? "")
+      .split("\n")
+      .filter((line) => !/ExperimentalWarning|--trace-warnings/.test(line))
+      .join("\n")
+      .trim(),
+  };
 }
 
 /**
@@ -860,6 +895,7 @@ async function peerServers(
   paths: LiveTestPaths,
   mode: LiveTestMode,
   ports: { readonly local: number; readonly remote: number },
+  deadline: number,
 ): Promise<void> {
   const local = { home: paths.home, origin: `http://127.0.0.1:${ports.local}`, name: "Local" };
   const remote = {
@@ -893,18 +929,25 @@ async function peerServers(
     // A server that is seconds old can miss the first hello; pr-env.sh retries the same way.
     for (let attempt = 1; ; attempt++) {
       const credential = peerCli(paths, steps.credential);
-      if (credential !== undefined && peerCli(paths, steps.add(credential)) !== undefined) break;
-      if (attempt === 5) {
+      const added = credential.ok ? peerCli(paths, steps.add(credential.output)) : credential;
+      if (added.ok) break;
+      if (attempt === 5 || Date.now() > deadline) {
         throw new LiveTestRefusal(
-          `${holder.name} could not record ${issuer.name} as a peer after 5 attempts. Both servers are still running; see ${paths.log} and ${paths.remote.log}.`,
+          `${holder.name} could not record ${issuer.name} as a peer (${attempt} attempt${attempt === 1 ? "" : "s"}). Both servers are still running, unpeered.\nThe peer command said:\n${added.error || "(nothing)"}\nTry again with: ${selfCommand(paths, "restart")}`,
         );
       }
       await NodeTimersPromises.setTimeout(3_000);
     }
   }
+  // Only now may the output say the two are peered.
+  NodeFS.writeFileSync(peeredMarker(paths), "");
 }
 
+/** Written when peering last succeeded; removed before each attempt and when the servers stop. */
+const peeredMarker = (paths: LiveTestPaths) => NodePath.join(paths.remote.root, "peered");
+
 async function start(paths: LiveTestPaths, mode: LiveTestMode): Promise<void> {
+  const deadline = Date.now() + START_BUDGET_MS;
   const built = builtMode(paths);
   const refusal =
     built === undefined
@@ -920,21 +963,28 @@ async function start(paths: LiveTestPaths, mode: LiveTestMode): Promise<void> {
 
   if (!isPeerMode(mode)) {
     console.log("Starting the dev server...");
-    return printRunning(paths, await startServer(paths, "dev", {}), undefined);
+    return printRunning(paths, await startServer(paths, "dev", {}, deadline), undefined);
   }
   console.log("Starting the two dev servers...");
-  const local = await startServer(paths, "dev", { J5CODE_SERVER_NAME: "Local" });
-  const remote = await startServer(paths.remote, "dev:server", {
-    J5CODE_SERVER_NAME: "Remote",
-    // Without an instance of its own, Remote would derive Local's ports from the worktree path.
-    T3CODE_DEV_INSTANCE: `${paths.worktree}#remote`,
-    // The browser reaches Remote from Local's web origin.
-    T3CODE_DEV_ALLOWED_ORIGINS: `http://localhost:${local.webPort}`,
-  });
+  // Peering is redone on every start, so the claim that it holds is withdrawn until it does.
+  NodeFS.rmSync(peeredMarker(paths), { force: true });
+  const local = await startServer(paths, "dev", { J5CODE_SERVER_NAME: "Local" }, deadline);
+  const remote = await startServer(
+    paths.remote,
+    "dev:server",
+    {
+      J5CODE_SERVER_NAME: "Remote",
+      // Without an instance of its own, Remote would derive Local's ports from the worktree path.
+      T3CODE_DEV_INSTANCE: `${paths.worktree}#remote`,
+      // The browser reaches Remote from Local's web origin.
+      T3CODE_DEV_ALLOWED_ORIGINS: `http://localhost:${local.webPort}`,
+    },
+    deadline,
+  );
   if (local.serverPort === undefined || remote.serverPort === undefined) {
     throw new LiveTestRefusal("A server is running without a reported port; cannot peer.");
   }
-  await peerServers(paths, mode, { local: local.serverPort, remote: remote.serverPort });
+  await peerServers(paths, mode, { local: local.serverPort, remote: remote.serverPort }, deadline);
   printRunning(paths, local, remote);
 }
 
@@ -968,6 +1018,7 @@ async function stop(paths: LiveTestPaths): Promise<void> {
     NodeFS.rmSync(server.record, { force: true });
     console.log(`J5 Code live-test server${name}: STOPPED`);
   }
+  NodeFS.rmSync(peeredMarker(paths), { force: true });
 }
 
 function status(paths: LiveTestPaths): void {
