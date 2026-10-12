@@ -31,27 +31,56 @@ export const sharingAllowsOperate = (input: {
 }): boolean => input.connection !== "guest" || input.level === "collaborate";
 
 // One answer per connection: a session's kind is fixed when it is paired and never changes.
-const connectionKinds = new WeakMap<RpcSession, Effect.Effect<SharingConnectionKind>>();
+interface ConnectionKindAnswer {
+  /** `null` until the server has answered. */
+  kind: SharingConnectionKind | null;
+  readonly ask: Effect.Effect<SharingConnectionKind>;
+}
+const connectionKinds = new WeakMap<RpcSession, ConnectionKindAnswer>();
 
-/**
- * Whether the environment's connection is a member's or a guest's, asked once per connection.
- * A server that cannot answer, such as one from before sharing, has no guests.
- */
-export const sharingConnectionKind = Effect.gen(function* () {
+const connectionKindAnswer = Effect.gen(function* () {
   const supervisor = yield* EnvironmentSupervisor;
   const session = yield* SubscriptionRef.get(supervisor.session);
-  if (Option.isNone(session)) return "member" as const;
+  if (Option.isNone(session)) return null;
   const known = connectionKinds.get(session.value);
-  if (known !== undefined) return yield* known;
-  const asked = yield* Effect.cached(
-    request(J5_SHARING_WS_METHODS.getConnectionAccess, {}).pipe(
-      Effect.map((access) => access.kind),
-      Effect.catchCause(() => Effect.succeed("member" as const)),
-      Effect.provideService(EnvironmentSupervisor, supervisor),
+  if (known !== undefined) return known;
+  const answer: ConnectionKindAnswer = {
+    kind: null,
+    ask: yield* Effect.cached(
+      request(J5_SHARING_WS_METHODS.getConnectionAccess, {}).pipe(
+        Effect.map((access) => access.kind),
+        // A server that cannot answer, such as one from before sharing, has no guests.
+        Effect.catchCause(() => Effect.succeed("member" as const)),
+        Effect.tap((kind) =>
+          Effect.sync(() => {
+            answer.kind = kind;
+          }),
+        ),
+        Effect.provideService(EnvironmentSupervisor, supervisor),
+      ),
     ),
-  );
-  connectionKinds.set(session.value, asked);
-  return yield* asked;
+  };
+  connectionKinds.set(session.value, answer);
+  return answer;
+});
+
+/** Whether the environment's connection is a member's or a guest's, asked once per connection. */
+export const sharingConnectionKind = Effect.gen(function* () {
+  const answer = yield* connectionKindAnswer;
+  return answer === null ? ("member" as const) : yield* answer.ask;
+});
+
+/**
+ * Whether the connection is already known to be a guest's. It never waits for the server: a
+ * member's requests are not held behind the question, which is asked in the background the first
+ * time. Until the answer arrives a guest's connection reads as not known, so its first requests
+ * go out and are refused by the server.
+ */
+export const sharingConnectionIsKnownGuest = Effect.gen(function* () {
+  const answer = yield* connectionKindAnswer;
+  if (answer === null) return false;
+  if (answer.kind === null) yield* Effect.forkDetach(answer.ask);
+  return answer.kind === "guest";
 });
 
 const threadKey = (environmentId: EnvironmentId, threadId: ThreadId | null) =>
@@ -95,8 +124,16 @@ export function createSharingEnvironmentAtoms<R, E>(
     }).pipe(Atom.withLabel(`j5:sharing:thread-operable:${key}`));
   });
 
+  /** Whether the connection is known to be a guest's; false until the server has said so. */
+  const isGuest = Atom.family((environmentId: EnvironmentId) =>
+    Atom.make((get) => get(connectionKind(environmentId)) === "guest").pipe(
+      Atom.withLabel(`j5:sharing:is-guest:${environmentId}`),
+    ),
+  );
+
   return {
     connectionKind,
+    isGuest,
     /** Whether sharing lets this connection write to the thread; upstream's permission is separate. */
     threadOperable: (environmentId: EnvironmentId, threadId: ThreadId | null) =>
       threadOperable(threadKey(environmentId, threadId)),

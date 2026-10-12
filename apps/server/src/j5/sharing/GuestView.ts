@@ -16,7 +16,6 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import { identity } from "effect/Function";
-import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
@@ -337,23 +336,3 @@ export const connectionView = (
   session.subject !== GUEST_SESSION_SUBJECT
     ? Effect.succeed(MEMBER_VIEW)
     : Effect.map(PersonAccess, (access) => guestView(access, session));
-
-/**
- * The sidebar snapshot `GET /api/orchestration/shell` answers with: a member's is returned as is.
- * `PersonAccess` is looked up only for a guest, so upstream's route asks for nothing new; where it
- * is not provided a guest's request fails rather than being answered in full.
- */
-export const shellSnapshotFor = (
-  session: SessionIdentity,
-  snapshot: OrchestrationV2ShellSnapshot,
-) =>
-  session.subject !== GUEST_SESSION_SUBJECT
-    ? Effect.succeed(snapshot)
-    : Effect.serviceOption(PersonAccess).pipe(
-        Effect.flatMap(
-          Option.match({
-            onNone: () => Effect.die("PersonAccess is not provided to the sidebar snapshot route"),
-            onSome: (access) => makeShellFilter(access, session).snapshot(snapshot),
-          }),
-        ),
-      );

@@ -50,7 +50,12 @@ const VIEWED = ThreadId.make("thread:viewed");
 const JOINED = ThreadId.make("thread:joined");
 
 /** Two connected environments: one this person's own, one they are a guest on. */
-const environments = Effect.gen(function* () {
+const environments = Effect.fn(function* (
+  // How a server answers "is this connection a guest's?"; by default with its kind.
+  answerKind: (
+    kind: SharingConnectionKind,
+  ) => Effect.Effect<{ readonly kind: SharingConnectionKind }> = (kind) => Effect.succeed({ kind }),
+) {
   const viewedLevel = yield* SubscriptionRef.make<SharingThreadLevel>("view");
   const asked: Array<string> = [];
   const httpCalls: Array<string> = [];
@@ -85,7 +90,7 @@ const environments = Effect.gen(function* () {
           client: {
             [J5_SHARING_WS_METHODS.getConnectionAccess]: () => {
               asked.push(`${environmentId}:connection`);
-              return Effect.succeed({ kind });
+              return answerKind(kind);
             },
             [J5_SHARING_WS_METHODS.subscribeThreadAccess]: (input: { threadId: ThreadId }) => {
               asked.push(`${environmentId}:${input.threadId}`);
@@ -146,7 +151,7 @@ const settlesAt = <A>(registry: AtomRegistry.AtomRegistry, atom: Atom.Atom<A>, e
 describe("a guest's connection", () => {
   it.effect("reads one thread and writes to another on the same server", () =>
     Effect.gen(function* () {
-      const { layer, registry, viewedLevel, asked } = yield* environments;
+      const { layer, registry, viewedLevel, asked } = yield* environments();
       const sharing = createSharingEnvironmentAtoms(Atom.runtime(layer));
       const viewed = sharing.threadOperable(SHARED_SERVER, VIEWED);
       const joined = sharing.threadOperable(SHARED_SERVER, JOINED);
@@ -176,10 +181,15 @@ describe("a guest's connection", () => {
     }),
   );
 
-  it.effect("sends none of J5's reads to the server it is a guest on", () =>
+  it.effect("sends none of J5's reads once the server has said it is a guest's", () =>
     Effect.gen(function* () {
-      const { layer, registry, httpCalls } = yield* environments;
-      const atoms = createJ5EnvironmentAtoms(Atom.runtime(layer));
+      const { layer, registry, httpCalls } = yield* environments();
+      const runtime = Atom.runtime(layer);
+      const sharing = createSharingEnvironmentAtoms(runtime);
+      const atoms = createJ5EnvironmentAtoms(runtime);
+      yield* AtomRegistry.mount(registry, sharing.isGuest(SHARED_SERVER));
+      expect(yield* settlesAt(registry, sharing.isGuest(SHARED_SERVER), true)).toBe(true);
+
       const own = atoms.fleet({ environmentId: MEMBER_SERVER, input: {} });
       const shared = atoms.fleet({ environmentId: SHARED_SERVER, input: {} });
       yield* AtomRegistry.mount(registry, own);
@@ -191,6 +201,48 @@ describe("a guest's connection", () => {
       expect(AsyncResult.isFailure(registry.get(shared))).toBe(true);
       expect(httpCalls).toHaveLength(1);
       expect(httpCalls[0]).toContain(MEMBER_SERVER);
+    }),
+  );
+});
+
+describe("a member's connection", () => {
+  it.effect("reads at once while the server has not answered what kind it is", () =>
+    Effect.gen(function* () {
+      // The server never answers the question: nothing may wait on it.
+      const { layer, registry, httpCalls, asked } = yield* environments(() => Effect.never);
+      const atoms = createJ5EnvironmentAtoms(Atom.runtime(layer));
+      const own = atoms.fleet({ environmentId: MEMBER_SERVER, input: {} });
+      yield* AtomRegistry.mount(registry, own);
+      expect((yield* AtomRegistry.getResult(registry, own)).projects).toEqual([]);
+      expect(httpCalls).toHaveLength(1);
+      // Asked once, in the background, however many reads follow.
+      registry.refresh(own);
+      yield* AtomRegistry.getResult(registry, own);
+      expect(asked).toEqual([`${MEMBER_SERVER}:connection`]);
+    }),
+  );
+
+  it.effect("reads, and may write to its threads, when the server cannot answer", () =>
+    Effect.gen(function* () {
+      // A server from before sharing has no such request, and it has no guests either.
+      const { layer, registry, httpCalls } = yield* environments(() =>
+        Effect.die(new Error("Unknown request tag: j5.sharing.getConnectionAccess")),
+      );
+      const runtime = Atom.runtime(layer);
+      const sharing = createSharingEnvironmentAtoms(runtime);
+      const own = createJ5EnvironmentAtoms(runtime).fleet({
+        environmentId: MEMBER_SERVER,
+        input: {},
+      });
+      const operable = sharing.threadOperable(MEMBER_SERVER, VIEWED);
+      yield* AtomRegistry.mount(registry, own);
+      yield* AtomRegistry.mount(registry, operable);
+      yield* AtomRegistry.getResult(registry, own);
+      expect(httpCalls).toHaveLength(1);
+      expect(yield* settlesAt(registry, sharing.connectionKind(MEMBER_SERVER), "member")).toBe(
+        true,
+      );
+      expect(registry.get(operable)).toBe(true);
     }),
   );
 });

@@ -13,15 +13,15 @@ import { requestSpawnedChildren } from "./SpawnedChildrenClient";
 
 /**
  * Each catalogued environment's prepared connection, or null while it is not connected. A guest's
- * connection is left null too: the server refuses a guest these reads (Shared server AC24), so
- * they wait until the server has said the connection is a member's.
+ * connection is left null too once it is known to be one: the server refuses a guest these reads
+ * (Shared server AC24). Nothing waits for that answer, so a member's rows are read at once.
  */
 export const threadReadConnectionsAtom = Atom.make((get) => {
   const connections = new Map<EnvironmentId, PreparedConnection | null>();
   for (const id of get(environmentCatalog.catalogValueAtom).entries.keys()) {
     const state = Option.getOrNull(AsyncResult.value(get(environmentCatalog.stateAtom(id))));
     const prepared = get(environmentSession.preparedConnectionValueAtom(id));
-    const readable = state?.phase === "connected" && get(j5Sharing.connectionKind(id)) === "member";
+    const readable = state?.phase === "connected" && !get(j5Sharing.isGuest(id));
     connections.set(id, readable ? Option.getOrNull(prepared) : null);
   }
   return connections;

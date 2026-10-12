@@ -27,6 +27,14 @@ export type GrantTarget =
 /** What a person may do with one thread or project: a member's reach, a guest's level, or none. */
 export type Access = "member" | GrantLevel | "none";
 
+/**
+ * Something a message in a thread carries, which a client asks the server for a URL to. The server
+ * finds the thread in its own records: a client's word for which thread it belongs to is not used.
+ */
+export type MessageAsset =
+  | { readonly kind: "attachment"; readonly attachmentId: string }
+  | { readonly kind: "tool-output-image"; readonly threadId: ThreadId; readonly itemId: string };
+
 export interface Person {
   readonly personId: ParticipantId;
   readonly kind: PersonKind;
@@ -134,6 +142,15 @@ export interface PersonAccessShape {
     session: SessionIdentity,
     threadId: ThreadId,
   ) => Stream.Stream<Access, PersonAccessStorageError>;
+  /**
+   * A connection's access to an attachment or a tool's image, through a thread that holds it: an
+   * attachment by the messages that carry its id, a tool's image by the thread its turn item is
+   * stored under. Something no thread holds, or held only by threads out of reach, gives `none`.
+   */
+  readonly messageAssetAccess: (
+    session: SessionIdentity,
+    asset: MessageAsset,
+  ) => Effect.Effect<Access, PersonAccessStorageError>;
   /** A connection's access to a project as a whole; a grant on one of its threads gives none. */
   readonly projectAccess: (
     session: SessionIdentity,
@@ -307,6 +324,24 @@ export const layer: Layer.Layer<PersonAccess, never, SqlClient.SqlClient> = Laye
       Effect.mapError(storage("read a person's access to a thread")),
     );
 
+    // The threads whose messages carry the attachment. The text search narrows the rows before
+    // each one's attachment list is read; only a guest's request for an attachment runs it.
+    const attachmentThreads = (attachmentId: string) => sql<{ readonly thread_id: string }>`
+      SELECT DISTINCT message.thread_id
+      FROM orchestration_v2_projection_messages AS message,
+        json_each(message.payload_json, '$.attachments') AS attachment
+      WHERE instr(message.payload_json, ${attachmentId}) > 0
+        AND json_extract(attachment.value, '$.id') = ${attachmentId}
+    `;
+
+    const turnItemThreads = (threadId: ThreadId, itemId: string) => sql<{
+      readonly thread_id: string;
+    }>`
+      SELECT thread_id
+      FROM orchestration_v2_projection_turn_items
+      WHERE turn_item_id = ${itemId} AND thread_id = ${threadId}
+    `;
+
     return PersonAccess.of({
       createGuest: Effect.fn("j5.sharing.personAccess.createGuest")(
         function* (input) {
@@ -391,6 +426,24 @@ export const layer: Layer.Layer<PersonAccess, never, SqlClient.SqlClient> = Laye
       sessionPerson,
 
       threadAccess,
+
+      messageAssetAccess: Effect.fn("j5.sharing.personAccess.messageAssetAccess")(
+        function* (session, asset) {
+          const person = yield* sessionPerson(session);
+          if (person === null) return "member";
+          const { personId } = person;
+          if (personId === null) return "none";
+          const holders =
+            asset.kind === "attachment"
+              ? yield* attachmentThreads(asset.attachmentId)
+              : yield* turnItemThreads(asset.threadId, asset.itemId);
+          const levels = yield* Effect.forEach(holders, (holder) =>
+            threadLevels(personId, holder.thread_id as ThreadId),
+          );
+          return highest(levels.flat().map((row) => row.level));
+        },
+        Effect.mapError(storage("read a person's access to an attachment")),
+      ),
 
       watchThreadAccess: (session, threadId) =>
         session.subject !== GUEST_SESSION_SUBJECT
