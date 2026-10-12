@@ -266,14 +266,30 @@ describe("tailnet mappings", () => {
     );
   });
 
+  const allowed = () => true;
+
+  it("never shares on a port browsers refuse, using the dev runner's own list", async () => {
+    // Pinning the port skips the runner's check, so the script applies it.
+    const runner = (await import(NodePath.join(import.meta.dirname, "../dev-runner.ts"))) as {
+      readonly isBrowserAllowedPort: (port: number) => boolean;
+    };
+    for (const port of [6000, 6566, 6667, 6697]) {
+      assert.include(
+        shareRefusal(port, [], runner.isBrowserAllowedPort) ?? "",
+        "browsers refuse to open",
+      );
+    }
+    assert.isUndefined(shareRefusal(7594, [], runner.isBrowserAllowedPort));
+  });
+
   it("never shares on the live install's tailnet port", () => {
-    assert.include(shareRefusal(8444, []) ?? "", "live install's tailnet port");
-    assert.include(shareRefusal(8444, mappings) ?? "", "live install's tailnet port");
+    assert.include(shareRefusal(8444, [], allowed) ?? "", "live install's tailnet port");
+    assert.include(shareRefusal(8444, mappings, allowed) ?? "", "live install's tailnet port");
   });
 
   it("never shares over a mapping this server did not make", () => {
     const foreign = [{ port: 7000, targets: ["http://127.0.0.1:3000"] }];
-    assert.include(shareRefusal(7000, foreign) ?? "", "this server did not set up");
+    assert.include(shareRefusal(7000, foreign, allowed) ?? "", "this server did not set up");
   });
 
   it("treats a failed status read as an error, not as nothing mapped", () => {
@@ -314,8 +330,8 @@ describe("tailnet mappings", () => {
   });
 
   it("shares on a free port, and over its own leftover mapping", () => {
-    assert.isUndefined(shareRefusal(7000, mappings));
-    assert.isUndefined(shareRefusal(7594, mappings));
+    assert.isUndefined(shareRefusal(7000, mappings, allowed));
+    assert.isUndefined(shareRefusal(7594, mappings, allowed));
   });
 });
 

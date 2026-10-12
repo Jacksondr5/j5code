@@ -805,7 +805,12 @@ export function isOwnMapping(mapping: TailnetMapping, webPort: number): boolean 
 export function shareRefusal(
   webPort: number,
   mappings: ReadonlyArray<TailnetMapping>,
+  /** The dev runner's own test for ports browsers refuse to open. Pinning the port skips the runner's use of it. */
+  isBrowserAllowedPort: (port: number) => boolean,
 ): string | undefined {
+  if (!isBrowserAllowedPort(webPort)) {
+    return `This worktree's web port is ${webPort}, which browsers refuse to open, so a shared URL on it would be useless. Use a different worktree for --for-dev.`;
+  }
   if (webPort === LIVE_TAILNET_PORT) {
     return `This worktree's web port is ${LIVE_TAILNET_PORT}, the live install's tailnet port. Sharing would replace the live mapping. Use a different worktree for --for-dev.`;
   }
@@ -834,8 +839,14 @@ export function mappingsFromStatus(result: {
   return tailnetMappings(result.stdout);
 }
 
-function readTailnetMappings(): ReadonlyArray<TailnetMapping> {
-  const status = NodeChildProcess.spawnSync("tailscale", ["serve", "status"], { encoding: "utf8" });
+/** How long one `tailscale` read may take outside a start, which has its own deadline. */
+const TAILSCALE_TIMEOUT_MS = 15_000;
+
+function readTailnetMappings(deadline?: number): ReadonlyArray<TailnetMapping> {
+  const status = NodeChildProcess.spawnSync("tailscale", ["serve", "status"], {
+    encoding: "utf8",
+    timeout: Math.max(1, (deadline ?? Date.now() + TAILSCALE_TIMEOUT_MS) - Date.now()),
+  });
   return mappingsFromStatus({
     status: status.status,
     stdout: status.stdout ?? "",
@@ -849,8 +860,14 @@ function readTailnetMappings(): ReadonlyArray<TailnetMapping> {
  * one that was never checked; with both ports given it uses exactly these.
  * Refuses before anything is started if the web port must not be shared.
  */
-function pinnedShareArgs(paths: LiveTestPaths): ReadonlyArray<string> {
+async function pinnedShareArgs(
+  paths: LiveTestPaths,
+  deadline: number,
+): Promise<ReadonlyArray<string>> {
   const environment = liveTestEnvironment(process.env, paths.worktree);
+  // Each child here is given only the time the start has left.
+  const timeLeft = () => ({ timeout: Math.max(1, deadline - Date.now()) });
+  const { isBrowserAllowedPort } = await import("../dev-runner.ts");
   // With both ports explicit the runner skips its search, so this prints the
   // web port derived from the worktree path and nothing else.
   const dryRun = NodeChildProcess.spawnSync(
@@ -866,13 +883,13 @@ function pinnedShareArgs(paths: LiveTestPaths): ReadonlyArray<string> {
       "--dev-url",
       "http://localhost:1",
     ],
-    { cwd: paths.worktree, env: environment, encoding: "utf8" },
+    { cwd: paths.worktree, env: environment, encoding: "utf8", ...timeLeft() },
   );
   const webPort = readServerLog(`${dryRun.stdout}${dryRun.stderr}`).webPort;
   if (webPort === undefined) {
     throw new LiveTestRefusal(`The dev runner did not report its web port:\n${dryRun.stderr}`);
   }
-  const refusal = shareRefusal(webPort, readTailnetMappings());
+  const refusal = shareRefusal(webPort, readTailnetMappings(deadline), isBrowserAllowedPort);
   if (refusal !== undefined) throw new LiveTestRefusal(refusal);
   if (listenerOn(webPort) !== undefined) {
     throw new LiveTestRefusal(
@@ -881,6 +898,7 @@ function pinnedShareArgs(paths: LiveTestPaths): ReadonlyArray<string> {
   }
   const status = NodeChildProcess.spawnSync("tailscale", ["status", "--json"], {
     encoding: "utf8",
+    ...timeLeft(),
   });
   const dnsName =
     status.status === 0
@@ -933,11 +951,16 @@ function removeOwnTailnetMapping(facts: ServerLogFacts): void {
   const cleanup = mappingCleanup(facts, readTailnetMappings());
   if (cleanup.kind === "nothing") return;
   if (cleanup.kind === "foreign") {
-    throw new LiveTestRefusal(
+    // Said and passed over, not refused: a refusal here would stop every later
+    // rebuild too, and the mapping is not this server's to act on.
+    console.log(
       `Tailnet port ${cleanup.port} is mapped to ${cleanup.targets.join(", ")}, which this server did not set up. It has been left alone.`,
     );
+    return;
   }
-  NodeChildProcess.spawnSync("tailscale", ["serve", `--https=${cleanup.port}`, "off"]);
+  NodeChildProcess.spawnSync("tailscale", ["serve", `--https=${cleanup.port}`, "off"], {
+    timeout: TAILSCALE_TIMEOUT_MS,
+  });
   if (mappingCleanup(facts, readTailnetMappings()).kind !== "nothing") {
     throw new LiveTestRefusal(
       `The tailnet mapping for port ${cleanup.port} is still there. Remove it with: tailscale serve --https=${cleanup.port} off`,
@@ -1321,7 +1344,9 @@ async function start(paths: LiveTestPaths, mode: LiveTestMode): Promise<void> {
           "dev",
           {},
           deadline,
-          currentServerState(paths).kind === "stopped" ? pinnedShareArgs(paths) : ["--share"],
+          currentServerState(paths).kind === "stopped"
+            ? await pinnedShareArgs(paths, deadline)
+            : ["--share"],
         ),
       ),
     );
@@ -1368,8 +1393,20 @@ async function stop(paths: LiveTestPaths): Promise<void> {
     ...server,
     state: currentServerState(server.paths),
   }));
+  const removeTailnetMapping = () => {
+    if (builtMode(paths) !== "for-dev") return;
+    removeOwnTailnetMapping(
+      readServerLog(NodeFS.existsSync(paths.log) ? NodeFS.readFileSync(paths.log, "utf8") : ""),
+    );
+  };
   for (const { state } of servers) {
-    if (state.kind === "unverified") throw new LiveTestRefusal(state.reason);
+    if (state.kind === "unverified") {
+      // A runner killed outright leaves a group this script will not signal.
+      // Its tailnet mapping can still go: that signals nothing, and is limited
+      // to a mapping this run made.
+      removeTailnetMapping();
+      throw new LiveTestRefusal(state.reason);
+    }
   }
   for (const { name, paths: server, state } of servers) {
     if (state.kind === "stopped" || state.kind === "unverified") {
@@ -1381,11 +1418,7 @@ async function stop(paths: LiveTestPaths): Promise<void> {
     NodeFS.rmSync(server.record, { force: true });
     console.log(`J5 Code live-test server${name}: STOPPED`);
   }
-  if (builtMode(paths) === "for-dev") {
-    removeOwnTailnetMapping(
-      readServerLog(NodeFS.existsSync(paths.log) ? NodeFS.readFileSync(paths.log, "utf8") : ""),
-    );
-  }
+  removeTailnetMapping();
 }
 
 function status(paths: LiveTestPaths): void {
