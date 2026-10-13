@@ -94,21 +94,26 @@ export type JoinPageState =
   | { readonly kind: "dead" }
   | { readonly kind: "described"; readonly description: SharingLinkDescription };
 
+/** How long the page waits to be told what a share link opens before upstream's page takes it. */
+export const DESCRIBE_TIMEOUT_MS = 5_000;
+
 /**
- * Reads the lookup's answer. A link the server describes gets the guest's page whether or not it
- * carries J5's mark, so one made by an older build or typed by hand still works. The server gives
- * one refusal for every link it will not describe, an ordinary pairing link among them, so only
- * the mark says that an undescribed link was a share link, and so one that no longer works.
+ * What the pairing page does with a link. Only a link carrying J5's mark is J5's: every link J5
+ * makes carries it, and an ordinary pairing link is handed to upstream's page at once, with no
+ * request made about it. A marked link the server describes gets the guest's page; one the server
+ * refuses to describe no longer works; and when the server cannot be asked or does not answer in
+ * time (`status` is `null`), upstream's page takes the link as it would any other.
  */
 export function joinPageState(input: {
   readonly marked: boolean;
   readonly status: number | null;
   readonly body: unknown;
 }): JoinPageState {
+  if (!input.marked) return { kind: "upstream" };
   if (input.status === 200 && isDescription(input.body)) {
     return { kind: "described", description: input.body };
   }
-  if (input.status === 404 && input.marked) return { kind: "dead" };
+  if (input.status === 404) return { kind: "dead" };
   return { kind: "upstream" };
 }
 

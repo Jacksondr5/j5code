@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 
 import {
   firstRunSetupOffered,
+  pairThroughShareLink,
   rememberPairedThroughShareLink,
   wasPairedThroughShareLink,
 } from "./pairedThroughShareLink";
@@ -46,6 +47,22 @@ describe("first-run setup and a browser paired through a share link", () => {
         },
       },
     });
+    expect(offered(true)).toBe(true);
+  });
+
+  it("is remembered only once the server has paired the browser through the link", async () => {
+    await pairThroughShareLink("credential", async () => undefined);
+    expect(wasPairedThroughShareLink()).toBe(true);
+  });
+
+  it("is left unset when the server refuses the link, as it does a member who opens a guest's", async () => {
+    await expect(
+      pairThroughShareLink("credential", async () => {
+        throw new Error("You are already signed in to this server as a member.");
+      }),
+    ).rejects.toThrow("already signed in");
+    expect(wasPairedThroughShareLink()).toBe(false);
+    // The member's first run and first screen stay upstream's.
     expect(offered(true)).toBe(true);
   });
 });

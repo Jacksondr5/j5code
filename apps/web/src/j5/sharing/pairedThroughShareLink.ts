@@ -27,6 +27,19 @@ export function rememberPairedThroughShareLink(paired: boolean): void {
   for (const listener of listeners) listener();
 }
 
+/**
+ * Pairs this browser with a share link's credential, and remembers that it did only once the
+ * server has accepted it. A link the server refuses, such as a guest's link opened by a signed-in
+ * member, leaves the browser as it was: still a member's, with upstream's first screen.
+ */
+export async function pairThroughShareLink(
+  credential: string,
+  submit: (credential: string) => Promise<unknown>,
+): Promise<void> {
+  await submit(credential);
+  rememberPairedThroughShareLink(true);
+}
+
 const subscribe = (listener: () => void) => {
   listeners.add(listener);
   return () => {

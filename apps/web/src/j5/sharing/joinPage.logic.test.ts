@@ -95,22 +95,23 @@ describe("what the join page says a link opens", () => {
 });
 
 describe("what the page does with the lookup's answer", () => {
-  it("shows what a working link opens, marked or not", () => {
+  it("shows what a working share link opens", () => {
     const description = link({ opens: [project("Live test repo")] });
-    for (const marked of [true, false]) {
-      expect(joinPageState({ marked, status: 200, body: description })).toEqual({
-        kind: "described",
-        description,
-      });
-    }
+    expect(joinPageState({ marked: true, status: 200, body: description })).toEqual({
+      kind: "described",
+      description,
+    });
   });
 
   it("says a share link does not work when the lookup gives nothing, named or join alike", () => {
     expect(joinPageState({ marked: true, status: 404, body: {} })).toEqual({ kind: "dead" });
   });
 
-  it("leaves an unmarked token the lookup does not know to upstream's page", () => {
+  it("leaves a link without J5's mark to upstream's page, whatever a lookup would say", () => {
     expect(joinPageState({ marked: false, status: 404, body: {} })).toEqual({ kind: "upstream" });
+    expect(joinPageState({ marked: false, status: 200, body: link({}) })).toEqual({
+      kind: "upstream",
+    });
   });
 
   it("leaves everything to upstream's page when the server cannot be asked", () => {

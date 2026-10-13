@@ -33,10 +33,11 @@ import {
 } from "../../environments/primary";
 import { APP_DISPLAY_NAME } from "../../branding";
 import { projectIconColorClassName } from "../../projectIconColors";
-import { rememberPairedThroughShareLink } from "./pairedThroughShareLink";
+import { pairThroughShareLink } from "./pairedThroughShareLink";
 import { isMarkedShareLink, NAME_NOT_USABLE } from "./shareLink.logic";
 import {
   invitationFor,
+  DESCRIBE_TIMEOUT_MS,
   invitationList,
   joinPageState,
   type InvitationLine as ListedLine,
@@ -48,9 +49,10 @@ const DynamicIcon = lazy(() =>
   import("lucide-react/dynamic").then((module) => ({ default: module.DynamicIcon })),
 );
 
-const post = (path: string, body: unknown) =>
+const post = (path: string, body: unknown, signal?: AbortSignal) =>
   fetch(resolvePrimaryEnvironmentHttpUrl(path), {
     method: "POST",
+    ...(signal === undefined ? {} : { signal }),
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
     credentials: "include",
@@ -67,14 +69,17 @@ const messageOf = (error: unknown) =>
  */
 export function GuestAwarePairingSurface(props: ComponentProps<typeof PairingRouteSurface>) {
   const [secret] = useState(() => peekPairingTokenFromUrl());
+  // Only a link J5 made is asked about. An ordinary pairing link goes to upstream's page at once
+  // and its token is sent nowhere else.
+  const [marked] = useState(() => isMarkedShareLink(window.location.href));
   const [state, setState] = useState<JoinPageState | null>(
-    secret === null ? { kind: "upstream" } : null,
+    secret === null || !marked ? { kind: "upstream" } : null,
   );
 
   useEffect(() => {
-    if (secret === null) return;
+    if (secret === null || !marked) return;
     let cancelled = false;
-    void post(SHARING_DESCRIBE_PATH, { link: secret })
+    void post(SHARING_DESCRIBE_PATH, { link: secret }, AbortSignal.timeout(DESCRIBE_TIMEOUT_MS))
       .then(async (response) => ({
         status: response.status as number | null,
         body: (await response.json().catch(() => null)) as unknown,
@@ -82,16 +87,12 @@ export function GuestAwarePairingSurface(props: ComponentProps<typeof PairingRou
       .catch(() => ({ status: null, body: null }))
       .then((answer) => {
         if (cancelled) return;
-        const next = joinPageState({ marked: isMarkedShareLink(window.location.href), ...answer });
-        // This browser is about to be a guest's: the first screen then waits for the server to
-        // say so instead of starting a draft.
-        if (next.kind === "described") rememberPairedThroughShareLink(true);
-        setState(next);
+        setState(joinPageState({ marked, ...answer }));
       });
     return () => {
       cancelled = true;
     };
-  }, [secret]);
+  }, [marked, secret]);
 
   if (state === null) return <PairingPendingSurface />;
   if (state.kind === "upstream" || secret === null) return <PairingRouteSurface {...props} />;
@@ -204,8 +205,10 @@ function NamedLinkSurface({
     if (started.current) return;
     started.current = true;
     stripPairingTokenFromUrl();
-    void submitServerAuthCredential(credential).then(onAuthenticated, (cause: unknown) =>
-      setError(messageOf(cause)),
+    // The browser is remembered as a guest's only once the server has paired it as one.
+    void pairThroughShareLink(credential, submitServerAuthCredential).then(
+      onAuthenticated,
+      (cause: unknown) => setError(messageOf(cause)),
     );
   }, [credential, onAuthenticated]);
 
@@ -290,7 +293,7 @@ function JoinLinkSurface({
         return;
       }
       stripPairingTokenFromUrl();
-      await submitServerAuthCredential(body.credential);
+      await pairThroughShareLink(body.credential, submitServerAuthCredential);
       onAuthenticated();
     } catch (cause) {
       setError(messageOf(cause));

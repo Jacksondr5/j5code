@@ -21,10 +21,12 @@ export function GuestRevokedThreadRedirect() {
   const environmentId =
     params.threadId === undefined ? null : ((params.environmentId ?? null) as EnvironmentId | null);
   const isGuest = useIsGuest(environmentId);
+  // Asked only for a guest's connection: a member is never moved, so nothing is read for one.
+  const guestEnvironmentId = isGuest ? environmentId : null;
   const shell = useEnvironmentQuery(
-    environmentId === null ? null : environmentShell.stateAtom(environmentId),
+    guestEnvironmentId === null ? null : environmentShell.stateAtom(guestEnvironmentId),
   );
-  const threadCount = useEnvironmentThreadRefs(environmentId).length;
+  const threadCount = useEnvironmentThreadRefs(guestEnvironmentId).length;
   const navigate = useNavigate();
   const leftOnNothing = guestIsLeftOnNothing({
     isGuest,
