@@ -234,9 +234,10 @@ function MemberRow({
   readonly member: SharingPerson;
   readonly canManage: boolean;
 }) {
-  // A name set from this client is shown at once, before the list is read again.
-  const setHere = useOwnerName(environmentId);
-  const name = member.you ? (setHere ?? member.displayName) : member.displayName;
+  // The list is read again whenever a name changes, on this client or another, so it is the
+  // name shown. What this client knows only fills the moment before the list has it.
+  const known = useOwnerName(environmentId);
+  const name = member.displayName ?? (member.you ? (known ?? null) : null);
   const label = name ?? (member.you ? "You have not set a name" : "Member");
   return (
     <div className={ITEM_ROW_CLASSNAME}>
