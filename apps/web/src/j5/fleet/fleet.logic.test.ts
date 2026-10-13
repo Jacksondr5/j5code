@@ -171,38 +171,35 @@ describe("sidebar rows following the roster", () => {
 
   it("re-reads Crew chips and children for the involved rows when the crew revision moves", () => {
     const { memberships, children, refresh } = setup();
-    // The first roster read sets the baseline; the rows were read as they appeared.
+    // The first revisions heard may already count a change the rows were read before.
     refresh(environmentId, projects, { crew: 3, fleet: 5 });
-    expect(memberships).not.toHaveBeenCalled();
-    expect(children).not.toHaveBeenCalled();
-    refresh(environmentId, projects, { crew: 4, fleet: 5 });
-    expect(memberships).toHaveBeenCalledTimes(1);
-    expect(memberships.mock.calls[0]![0]).toEqual(involved);
+    expect(memberships.mock.calls).toEqual([[involved]]);
     expect(children.mock.calls).toEqual([[involved]]);
+    refresh(environmentId, projects, { crew: 4, fleet: 5 });
+    expect(memberships.mock.calls).toEqual([[involved], [involved]]);
+    expect(children.mock.calls).toEqual([[involved], [involved]]);
   });
 
   it("re-reads only the children when the fleet revision moves, and nothing when neither does", () => {
     const { memberships, children, refresh } = setup();
     refresh(environmentId, projects, { crew: 3, fleet: 5 });
     refresh(environmentId, projects, { crew: 3, fleet: 6 });
-    expect(memberships).not.toHaveBeenCalled();
-    expect(children.mock.calls).toEqual([[involved]]);
+    expect(memberships).toHaveBeenCalledTimes(1);
+    expect(children).toHaveBeenCalledTimes(2);
     // A roster read for any other reason, such as the tab's focus, is not a change.
     refresh(environmentId, projects, { crew: 3, fleet: 6 });
-    expect(children).toHaveBeenCalledTimes(1);
+    expect(children).toHaveBeenCalledTimes(2);
   });
 
   it("keeps each environment's revisions apart", () => {
     const { memberships, refresh } = setup();
     const other = EnvironmentId.make("env:b");
+    const otherInvolved = involved.map((ref) => ({ ...ref, environmentId: other }));
     refresh(environmentId, projects, { crew: 3, fleet: 5 });
     // Another server counts from its own start.
     refresh(other, projects, { crew: 0, fleet: 0 });
-    expect(memberships).not.toHaveBeenCalled();
     refresh(other, projects, { crew: 1, fleet: 0 });
-    expect(memberships.mock.calls).toEqual([
-      [involved.map((ref) => ({ ...ref, environmentId: other }))],
-    ]);
+    expect(memberships.mock.calls).toEqual([[involved], [otherInvolved], [otherInvolved]]);
   });
 });
 

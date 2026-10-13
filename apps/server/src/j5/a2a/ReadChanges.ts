@@ -1,4 +1,5 @@
 import type { J5ReadRevisionKey, J5ReadRevisions } from "@t3tools/contracts/j5";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -16,7 +17,8 @@ export const COALESCE_WINDOW = "500 millis";
  * Says which of J5's client reads went out of date, never what changed. A writer calls `notify`
  * after its commit; every connected client follows `changes` and re-reads what moved. One
  * instance serves the whole server, shared by layer reference between the writers and the
- * WebSocket handler, and its counters restart with the server.
+ * WebSocket handler. Its counters start from the time the server started, so a client that
+ * reconnects after a restart sees them moved and re-reads what it would not on its own.
  */
 export class ReadChanges extends Context.Service<
   ReadChanges,
@@ -32,11 +34,12 @@ export class ReadChanges extends Context.Service<
 >()("t3/j5/a2a/ReadChanges") {}
 
 const make = Effect.gen(function* () {
+  const startedAt = yield* Clock.currentTimeMillis;
   const revisions = yield* SubscriptionRef.make<J5ReadRevisions>({
-    inbox: 0,
-    crew: 0,
-    fleet: 0,
-    runtimeRequests: 0,
+    inbox: startedAt,
+    crew: startedAt,
+    fleet: startedAt,
+    runtimeRequests: startedAt,
   });
   return ReadChanges.of({
     notify: (...keys) =>

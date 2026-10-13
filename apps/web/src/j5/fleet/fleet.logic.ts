@@ -350,7 +350,7 @@ export function fleetInvolvedThreadRefs(
  * changed. Call it with each roster read an environment settles and the revisions that read was
  * made under: a moved `crew` revision re-reads both for the rows the roster names, a moved `fleet`
  * revision re-reads the children alone, and an unmoved pair re-reads nothing. The first read of
- * an environment only sets the baseline, since the rows were read as they appeared.
+ * an environment re-reads both.
  */
 export function createFleetRowRefresher(refresh: {
   readonly memberships: (refs: ReadonlyArray<ScopedThreadRef>) => void;
@@ -364,9 +364,10 @@ export function createFleetRowRefresher(refresh: {
   ) => {
     const previous = readUnder.get(environmentId);
     readUnder.set(environmentId, { crew: revisions.crew, fleet: revisions.fleet });
-    if (previous === undefined) return;
-    const crewMoved = previous.crew !== revisions.crew;
-    if (!crewMoved && previous.fleet === revisions.fleet) return;
+    // The first revisions heard are not a baseline: the rows were read as their shells appeared,
+    // which can be before a change these revisions already count.
+    const crewMoved = previous?.crew !== revisions.crew;
+    if (!crewMoved && previous?.fleet === revisions.fleet) return;
     const involved = fleetInvolvedThreadRefs(
       projects.map((project) => ({ ...project, environmentId })),
     );

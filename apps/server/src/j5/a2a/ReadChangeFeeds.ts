@@ -61,6 +61,7 @@ const RUNTIME_REQUEST_EVENT_TYPES = [
   "thread.archived",
   "thread.unarchived",
   "thread.deleted",
+  "thread.metadata-updated",
 ] as const satisfies ReadonlyArray<OrchestrationV2StoredEvent["event"]["type"]>;
 
 /**
@@ -73,7 +74,9 @@ export const changesRuntimeRequests = ({ event }: OrchestrationV2StoredEvent) =>
     : event.type === "runtime-request.updated" ||
       event.type === "thread.archived" ||
       event.type === "thread.unarchived" ||
-      event.type === "thread.deleted";
+      event.type === "thread.deleted" ||
+      // The approval's card names its thread by title.
+      event.type === "thread.metadata-updated";
 
 /**
  * The daemons that feed `ReadChanges`. They hold nothing a caller could ask for, so the layer
@@ -103,29 +106,34 @@ export const layer = Layer.effectDiscard(
     // Only what happens from here on: the revisions start with the server, and a client reads
     // when it connects. The store filters by type before it queues, so the turn items this
     // daemon drops are the only traffic it sees beyond what it acts on.
-    const follow = Effect.gen(function* () {
-      const afterSequence = yield* readEventStoreHighWater("J5 read change feed").pipe(
-        Effect.provideService(EventSinkV2, events),
-      );
-      yield* Stream.mergeAll(
+    const follow = (resumed: boolean) =>
+      Effect.gen(function* () {
+        const afterSequence = yield* readEventStoreHighWater("J5 read change feed").pipe(
+          Effect.provideService(EventSinkV2, events),
+        );
+        // Whatever a broken stream did not deliver is at or below this mark and will not be
+        // replayed, so one notify covers it. It comes after the mark is read: an event stored
+        // any later is past the mark and is streamed.
+        if (resumed) yield* changes.notify("runtimeRequests");
+        yield* followFrom(afterSequence);
+      });
+    const followFrom = (afterSequence: number) =>
+      Stream.mergeAll(
         RUNTIME_REQUEST_EVENT_TYPES.map((eventType) => events.stream({ afterSequence, eventType })),
         { concurrency: "unbounded" },
       ).pipe(
         Stream.filter(changesRuntimeRequests),
         Stream.runForEach(() => changes.notify("runtimeRequests")),
       );
-    });
-    yield* Effect.forever(
-      follow.pipe(
+    const resume = (resumed: boolean): Effect.Effect<never> =>
+      follow(resumed).pipe(
         Effect.catchCause((cause) =>
-          // Whatever the broken stream did not deliver is covered by one notify; the next
-          // follow starts from the store's mark at that moment.
           Effect.logWarning("J5 read change feed lost the event stream; resuming", { cause }).pipe(
             Effect.andThen(Effect.sleep(Duration.seconds(1))),
-            Effect.andThen(changes.notify("runtimeRequests")),
           ),
         ),
-      ),
-    ).pipe(Effect.forkScoped);
+        Effect.andThen(Effect.suspend(() => resume(true))),
+      );
+    yield* resume(false).pipe(Effect.forkScoped);
   }),
 );

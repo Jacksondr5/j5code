@@ -1128,7 +1128,7 @@ export const J5_CLIENT_READ_WS_METHODS = {
 /**
  * One counter per kind of J5 read, moved when something that read shows changed. It says which
  * reads are out of date and never what changed: a client re-reads when the counter for a read
- * it holds moves. The counters restart with the server.
+ * it holds moves. The counters start from the time the server started.
  */
 export const J5ReadRevisions = Schema.Struct({
   /** Questions waiting on a person, and the answered ones. */

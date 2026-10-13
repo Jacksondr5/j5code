@@ -1,10 +1,13 @@
 import { assert, it } from "@effect/vitest";
 import { ThreadId, type OrchestrationV2StoredEvent } from "@t3tools/contracts";
 import type { J5ReadRevisionKey } from "@t3tools/contracts/j5";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 
 import { EventSinkV2 } from "../../orchestration-v2/EventSink.ts";
 import { PlaybookStore } from "../playbooks/PlaybookStore.ts";
@@ -127,6 +130,7 @@ it.effect("notifies from the ledger, the event store and the playbook store", ()
         "runtime-request.updated",
         "thread.archived",
         "thread.deleted",
+        "thread.metadata-updated",
         "thread.unarchived",
         "turn-item.updated",
       ].map((eventType) => ({ afterSequence: 41, eventType })),
@@ -136,4 +140,53 @@ it.effect("notifies from the ledger, the event store and the playbook store", ()
     yield* Queue.offer(playbookRevisions, 8);
     assert.deepStrictEqual(yield* Queue.take(notified), ["fleet"]);
   }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "after losing the event stream, takes a new mark before saying requests may have changed",
+  () =>
+    Effect.gen(function* () {
+      const marksReadAtNotify = yield* Queue.unbounded<number>();
+      const broke = yield* Deferred.make<void>();
+      const marks = [41, 50];
+      let marksRead = 0;
+      const followedFrom: Array<number | undefined> = [];
+      yield* Layer.build(
+        layer.pipe(
+          Layer.provide(
+            Layer.mergeAll(
+              Layer.succeed(
+                ReadChanges,
+                ReadChanges.of({
+                  // An event stored after this notify must be past the mark already taken.
+                  notify: () => Queue.offer(marksReadAtNotify, marksRead).pipe(Effect.asVoid),
+                  changes: Stream.never,
+                }),
+              ),
+              Layer.mock(A2ALedger)({ subscribeCommitted: Effect.succeed(Stream.never) }),
+              Layer.mock(EventSinkV2)({
+                latestSequence: () => Effect.sync(() => marks[marksRead++]!),
+                stream: (input) => {
+                  followedFrom.push(input?.afterSequence);
+                  return input?.afterSequence === 41 && input.eventType === "turn-item.updated"
+                    ? Stream.fromEffect(Deferred.succeed(broke, undefined)).pipe(
+                        Stream.flatMap(() => Stream.die("the event stream broke")),
+                      )
+                    : Stream.never;
+                },
+              }),
+              Layer.mock(PlaybookStore)({ changes: Stream.never }),
+            ),
+          ),
+        ),
+      );
+      yield* Deferred.await(broke);
+      // The follower waits a second before it resumes.
+      const heard = yield* Queue.take(marksReadAtNotify).pipe(
+        Effect.forkChild({ startImmediately: true }),
+      );
+      yield* TestClock.adjust("1 second");
+      assert.strictEqual(yield* Fiber.join(heard), 2);
+      assert.includeMembers(followedFrom, [41, 50]);
+    }),
 );
