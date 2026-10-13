@@ -4,17 +4,19 @@
  * WebSocket requests the People page makes:
  *
  *   node apps/server/src/j5/test-support/liveTestOwnerClient.ts --origin http://127.0.0.1:<server port> \
- *     --token <pairing token> --name <name> (--project <id> | --thread <id>) [--level view|collaborate]
+ *     --token <pairing token> --name <name> (--project <id> | --thread <id>) [--level view|collaborate] \
+ *     [--web-origin http://localhost:<web port>]
  *
  * The token is a one-time owner pairing token (`setup-agent-live-test.ts`
  * prints the `pair` command that mints one; the token follows `#token=`). It
- * prints one line of JSON: the person, the grant, and the credential of a
- * share link for them. `setup-agent-live-test.ts guest` runs this and adds the
- * guards.
+ * prints one line of JSON: the person, the grant, and their share link, as the
+ * Share dialog would give it, at `--web-origin` (the address a browser opens;
+ * `--origin` when left out). `setup-agent-live-test.ts guest` runs this and
+ * adds the guards.
  *
  * It is for a disposable test server only: run directly, it acts on whatever
- * server `--origin` names, and the pairing token and the returned credential
- * pass on the command line and through stdout.
+ * server `--origin` names, and the pairing token and the returned link pass on
+ * the command line and through stdout.
  */
 import {
   ORCHESTRATION_PROTOCOL_QUERY_PARAM,
@@ -23,9 +25,11 @@ import {
 import {
   J5_SHARING_WS_METHODS,
   J5SharingRpcGroup,
+  markedAsShareLink,
   SharingGrantLevel,
   SharingGrantTarget,
 } from "@t3tools/contracts/j5";
+import { setPairingTokenOnUrl } from "@t3tools/shared/remote";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -64,6 +68,14 @@ const ownerConnection = (origin: string, token: string) =>
     }),
   );
 
+/**
+ * The link a member would copy from the Share dialog for a server reached at `webOrigin`:
+ * upstream's pairing address for the credential, with J5's mark on it. Without the mark the
+ * page takes upstream's pairing path and a guest does not land on what was shared.
+ */
+export const guestShareLink = (webOrigin: string, credential: string) =>
+  markedAsShareLink(setPairingTokenOnUrl(new URL("/pair", webOrigin), credential).toString());
+
 const decodeTarget = Schema.decodeUnknownEffect(SharingGrantTarget);
 const decodeLevel = Schema.decodeUnknownEffect(SharingGrantLevel);
 
@@ -72,6 +84,7 @@ const addGuest = Effect.fn("liveTestOwnerClient.addGuest")(function* (input: {
   readonly name: string;
   readonly target: unknown;
   readonly level: unknown;
+  readonly webOrigin: string;
 }) {
   // Checked before anyone is made, so a mistyped level leaves no guest behind.
   const target = yield* decodeTarget(input.target);
@@ -84,21 +97,31 @@ const addGuest = Effect.fn("liveTestOwnerClient.addGuest")(function* (input: {
     Effect.andThen(owner[J5_SHARING_WS_METHODS.createLink]({ personId })),
     Effect.tapError(() => Effect.ignore(owner[J5_SHARING_WS_METHODS.removePerson]({ personId }))),
   );
-  return { personId, displayName, target, level, credential: link.credential };
+  const pairingUrl = guestShareLink(input.webOrigin, link.credential);
+  return { personId, displayName, target, level, pairingUrl };
 });
 
 if (import.meta.main) {
   const text = { type: "string" } as const;
   const { values } = NodeUtil.parseArgs({
-    options: { origin: text, token: text, name: text, project: text, thread: text, level: text },
+    options: {
+      origin: text,
+      "web-origin": text,
+      token: text,
+      name: text,
+      project: text,
+      thread: text,
+      level: text,
+    },
   });
   const { origin = "", token = "", name = "", project, thread, level = "view" } = values;
+  const webOrigin = values["web-origin"] ?? origin;
   const target =
     thread === undefined
       ? { kind: "project", projectId: project }
       : { kind: "thread", threadId: thread };
   Effect.runPromise(
-    addGuest({ name, target, level }).pipe(
+    addGuest({ name, target, level, webOrigin }).pipe(
       Effect.provide(ownerConnection(origin, token)),
       Effect.scoped,
     ),

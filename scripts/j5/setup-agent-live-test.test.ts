@@ -945,7 +945,7 @@ describe("formatGuest", () => {
     displayName: "Priya",
     level: "view",
     target: { kind: "project", id: "p-1" },
-    pairingUrl: "http://localhost:5000/pair#token=T",
+    pairingUrl: "http://localhost:5000/pair#token=T&j5share=1",
   } as const;
 
   it("states who was added, the level, the URL and how to open it, and nothing else", () => {
@@ -956,7 +956,7 @@ describe("formatGuest", () => {
   Name          Priya
   Person id     human:1
   Granted       view on project p-1
-  Pairing URL   http://localhost:5000/pair#token=T
+  Pairing URL   http://localhost:5000/pair#token=T&j5share=1
 
 Open the pairing URL in a new incognito tab, one tab per person.
 `,

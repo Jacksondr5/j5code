@@ -2134,6 +2134,9 @@ function guest(paths: LiveTestPaths, request: GuestRequest): void {
       NodePath.join(paths.worktree, "apps/server/src/j5/test-support/liveTestOwnerClient.ts"),
       "--origin",
       `http://127.0.0.1:${state.facts.serverPort}`,
+      // The address a browser opens; the client builds the link there, as the Share dialog would.
+      "--web-origin",
+      `http://localhost:${state.facts.webPort}`,
       "--token",
       token,
       "--name",
@@ -2161,10 +2164,10 @@ function guest(paths: LiveTestPaths, request: GuestRequest): void {
       }`,
     );
   }
-  const { personId, displayName, credential } = JSON.parse(added.stdout) as {
+  const { personId, displayName, pairingUrl } = JSON.parse(added.stdout) as {
     readonly personId: string;
     readonly displayName: string;
-    readonly credential: string;
+    readonly pairingUrl: string;
   };
   console.log(
     formatGuest({
@@ -2173,7 +2176,7 @@ function guest(paths: LiveTestPaths, request: GuestRequest): void {
       displayName,
       level: request.level,
       target: grantOn,
-      pairingUrl: `http://localhost:${state.facts.webPort}/pair#token=${credential}`,
+      pairingUrl,
     }),
   );
 }
