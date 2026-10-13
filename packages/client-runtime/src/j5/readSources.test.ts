@@ -145,7 +145,7 @@ it("shows nothing from a server once its connection is known to be a guest's", (
       Atom.make(() => {
         routeCalls += 1;
         return AsyncResult.failure<ReadonlyArray<string>, unknown>(
-          Cause.fail(new J5HttpError({ status: 403, detail: "Not shared" })),
+          Cause.fail(new J5ActionError({ code: "forbidden", message: "Not shared" })),
         );
       }),
     guestAtom: () => guest,
