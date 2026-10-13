@@ -22,6 +22,7 @@ import { ConnectionStatusDot } from "../../components/ConnectionStatusDot";
 import { ProjectFavicon } from "../../components/ProjectFavicon";
 import { ITEM_ROW_CLASSNAME } from "../../components/settings/itemRows";
 import { SettingsPageContainer, SettingsSection } from "../../components/settings/settingsLayout";
+import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../../components/ui/menu";
 import { toastManager } from "../../components/ui/toast";
@@ -36,6 +37,7 @@ import { useEnvironmentScope } from "../../state/session";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { ConfirmNameTag } from "./ConfirmNameTag";
 import { LevelControl } from "./LevelControl";
+import { useOwnerName } from "./ownerName";
 import {
   deviceLabel,
   guestSummary,
@@ -205,24 +207,66 @@ function People({ environmentId }: { readonly environmentId: EnvironmentId }) {
         title="Members"
         titleAction={people.data === null ? null : countLabel(members.length, "person", "people")}
       >
-        {members.map((member) => {
-          const name = member.displayName ?? "Member";
-          return (
-            <div key={member.personId} className={ITEM_ROW_CLASSNAME}>
-              <div className="flex items-center gap-2.5">
-                <Avatar name={name} />
-                <div className="min-w-0">
-                  <h3 className="truncate text-sm font-medium text-foreground">{name}</h3>
-                  <p className="text-xs text-muted-foreground">
-                    Reaches everything on this server · devices in Connections
-                  </p>
-                </div>
-              </div>
-            </div>
-          );
-        })}
+        {members.map((member) => (
+          <MemberRow
+            key={member.personId}
+            environmentId={environmentId}
+            member={member}
+            canManage={canManage}
+          />
+        ))}
       </SettingsSection>
     </SettingsPageContainer>
+  );
+}
+
+/**
+ * A member reaches everything and has no controls here. The row that is the person asking, the
+ * server's owner, carries a "You" chip and the way to set or change the name guests and agents
+ * know them by.
+ */
+function MemberRow({
+  environmentId,
+  member,
+  canManage,
+}: {
+  readonly environmentId: EnvironmentId;
+  readonly member: SharingPerson;
+  readonly canManage: boolean;
+}) {
+  // A name set from this client is shown at once, before the list is read again.
+  const setHere = useOwnerName(environmentId);
+  const name = member.you ? (setHere ?? member.displayName) : member.displayName;
+  const label = name ?? (member.you ? "You have not set a name" : "Member");
+  return (
+    <div className={ITEM_ROW_CLASSNAME}>
+      <div className="flex items-center gap-2.5">
+        <Avatar name={name ?? "?"} />
+        <div className="min-w-0 flex-1">
+          <div className="flex min-h-5 items-center gap-1.5">
+            <h3 className="truncate text-sm font-medium text-foreground">{label}</h3>
+            {member.you ? (
+              <Badge variant="outline" size="sm">
+                You
+              </Badge>
+            ) : null}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Reaches everything on this server · devices in Connections
+          </p>
+        </div>
+        {member.you ? (
+          <Button
+            size="xs"
+            variant="outline"
+            disabled={!canManage}
+            onClick={() => openSharingDialog({ kind: "owner-name", environmentId })}
+          >
+            {name === null ? "Set your name" : "Change name"}
+          </Button>
+        ) : null}
+      </div>
+    </div>
   );
 }
 
