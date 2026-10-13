@@ -948,7 +948,7 @@ describe("formatGuest", () => {
     pairingUrl: "http://localhost:5000/pair#token=T",
   } as const;
 
-  it("states who was added, the level, the URL and the two browser profiles, and nothing else", () => {
+  it("states who was added, the level, the URL and how to open it, and nothing else", () => {
     assert.equal(
       formatGuest({ ...added, peer: false }),
       `Added a guest to the live-test server:
@@ -958,7 +958,7 @@ describe("formatGuest", () => {
   Granted       view on project p-1
   Pairing URL   http://localhost:5000/pair#token=T
 
-The browser has only the default and incognito profiles, so a third person at the same time needs a script client.
+Open the pairing URL in a new incognito tab, one tab per person.
 `,
     );
   });

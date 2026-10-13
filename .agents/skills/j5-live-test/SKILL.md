@@ -54,8 +54,9 @@ are missing, install them and run it again.
 
 `guest "<name>" [--thread <id> | --project <id>] [--level view|collaborate]`
 adds a second person to the running test server and prints their pairing URL.
-Open it in the incognito profile. A third person at the same time needs a
-script client.
+Open it in a new incognito tab (`profileId: "incognito"`,
+`reuseExistingTab: false`). Each incognito tab is its own person, so open one
+per person and never pair a second person in a tab that already has one.
 
 A start returns within about two minutes. On a busy machine it can return
 before it has finished, and prints the command that finishes it.

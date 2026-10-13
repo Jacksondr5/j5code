@@ -2095,7 +2095,7 @@ export function formatGuest(input: {
   Granted       ${input.level} on ${input.target.kind} ${input.target.id}
   Pairing URL   ${input.pairingUrl}
 ${input.peer ? "\nGuests are added to Local only; this command does not reach Remote.\n" : ""}
-The browser has only the default and incognito profiles, so a third person at the same time needs a script client.
+Open the pairing URL in a new incognito tab, one tab per person.
 `;
 }
 
