@@ -83,7 +83,7 @@ export class LinkNotAGuestsError extends Schema.TaggedError<LinkNotAGuestsError>
 
 export class PersonNameError extends Schema.TaggedError<PersonNameError>()("PersonNameError", {}) {
   override get message(): string {
-    return "A name is one line of ordinary, visible characters, up to 80 of them.";
+    return "A name is one line of ordinary, visible characters, up to 80 of them, with no square brackets.";
   }
 }
 

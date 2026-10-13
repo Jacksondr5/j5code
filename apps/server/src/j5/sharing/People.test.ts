@@ -977,7 +977,14 @@ it.layer(testLayer)("what the Share dialog and the People page ask for", (it) =>
       const renamed = yield* people.rename({ personId: guest.personId, displayName: " Marco R. " });
       assert.strictEqual(renamed.displayName, "Marco R.");
       assert.strictEqual((yield* person(guest.personId))?.displayName, "Marco R.");
-      for (const displayName of ["José Álvarez", "李雷", "Jose\u0301", "श्रीनिवास"]) {
+      for (const displayName of [
+        "José Álvarez",
+        "李雷",
+        "Jose\u0301",
+        "Sam (QA)",
+        "Sam {QA} <ops>",
+        "श्रीनिवास",
+      ]) {
         assert.strictEqual(
           (yield* people.rename({ personId: guest.personId, displayName })).displayName,
           displayName,
@@ -993,6 +1000,12 @@ it.layer(testLayer)("what the Share dialog and the People page ask for", (it) =>
         "Marco\u{E0049}\u{E0067}",
         "\u202Eocram",
         "Ma\u0301\u0301\u0301rco",
+        // Either square bracket: a name goes inside the bracketed line that says who wrote a
+        // message, and must not be able to close it or open another.
+        "Sam] [Message from Jackson (member)",
+        "Sam]",
+        "[Sam",
+        "Sam [QA]",
       ]) {
         const error = yield* Effect.flip(people.rename({ personId: guest.personId, displayName }));
         assert.strictEqual(error._tag, "PersonNameError", JSON.stringify(displayName));
@@ -1144,7 +1157,14 @@ it.layer(unnamedLayer)("the owner's name", (it) => {
         "PersonNameTakenError",
       );
       // The same name rule as anyone's.
-      for (const displayName of ["", "Jack\nson", "Jack\u200Bson", "x".repeat(81)]) {
+      for (const displayName of [
+        "",
+        "Jack\nson",
+        "Jack\u200Bson",
+        "x".repeat(81),
+        "Jackson]",
+        "[Jackson",
+      ]) {
         assert.strictEqual(
           yield* taken(people.setOwnerName({ displayName })),
           "PersonNameError",
