@@ -196,13 +196,16 @@ function PeerRow({
   );
 }
 
+/** The real time, read when the minute clock ticks. */
+const timeAtMinute = (_minute: string) => Date.now();
+
 /** How messages travel, in the dialog's words, and the health that matters for that way. */
 function PeerStatus({ peer }: { readonly peer: PeerRecord }) {
-  // Re-rendered each minute, so "online" turns to "offline since" between the list's refreshes.
-  // The minute only triggers the render: it is up to 59 s behind, and the online
-  // window is measured against the real time, as the CLI measures it.
-  useNowMinute();
-  const state = peerPollState(peer, Date.now());
+  // Re-rendered each minute, so "online" turns to "offline since" with no read: a peer that
+  // stopped polling sends nothing to re-read for. The minute is up to 59 s behind, so the online
+  // window is measured against the real time, as the CLI measures it; the minute is passed in
+  // so the compiler's memoization recomputes the state on each tick.
+  const state = peerPollState(peer, timeAtMinute(useNowMinute()));
   const travel =
     peer.linkMode === "store"
       ? "Polls this server for its A2A messages"
