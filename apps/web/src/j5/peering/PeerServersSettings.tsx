@@ -1,7 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { PlusIcon } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 
 import { SettingsRow, SettingsSection } from "../../components/settings/settingsLayout";
 import { Button } from "../../components/ui/button";
@@ -19,6 +19,7 @@ import {
 } from "@t3tools/contracts/j5";
 import { removalConfirmation } from "@t3tools/client-runtime/j5/peering";
 import { useNowMinute } from "../../hooks/useNowMinute";
+import { useVisibleRefresh } from "../useVisibleRefresh";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 
 /**
@@ -38,6 +39,12 @@ export function PeerServersSettings({
   const peers = useEnvironmentQuery(
     primaryEnvironmentId === null ? null : peersQueryAtom(primaryEnvironmentId),
   );
+  // A peer's session revoked or expired elsewhere moves no revision, and a server too old to
+  // have the change stream moves none at all; reading again on focus covers both.
+  const refreshOnFocus = useCallback(() => {
+    if (primaryEnvironmentId !== null) refreshPeers(primaryEnvironmentId);
+  }, [primaryEnvironmentId]);
+  useVisibleRefresh(refreshOnFocus, primaryEnvironmentId !== null);
   const { environments } = useEnvironments();
   const [dialogOpen, setDialogOpen] = useState(false);
   // Each opening mounts a fresh dialog, so a previous introduction's fields and steps never carry over.

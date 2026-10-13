@@ -1,6 +1,6 @@
 import { assert, it } from "@effect/vitest";
 import { ThreadId, type OrchestrationV2StoredEvent } from "@t3tools/contracts";
-import type { J5ReadRevisionKey, PeerRecord } from "@t3tools/contracts/j5";
+import type { J5ReadRevisionKey } from "@t3tools/contracts/j5";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -92,7 +92,7 @@ it.effect(
       const stored = yield* Queue.unbounded<OrchestrationV2StoredEvent>();
       const playbookRevisions = yield* Queue.unbounded<number>();
       const peerListChanges = yield* Queue.unbounded<void>();
-      let recordedPeers: ReadonlyArray<PeerRecord> = [];
+      let recordedPeers = false;
       const followed: Array<{ readonly afterSequence?: number; readonly eventType?: string }> = [];
       yield* Layer.build(
         layer.pipe(
@@ -127,7 +127,7 @@ it.effect(
               Layer.mock(PeerRegistryService)({
                 subscribeListChanges: Effect.succeed(Stream.fromQueue(peerListChanges)),
                 // No peer at first; the registry's change below is its first.
-                list: () => Effect.sync(() => recordedPeers),
+                hasPeers: Effect.sync(() => recordedPeers),
               }),
             ),
           ),
@@ -165,7 +165,7 @@ it.effect(
       assert.deepStrictEqual(yield* Queue.take(notified), ["fleet"]);
 
       // The registry says one of its writes changed what the peer list reports: a peer was added.
-      recordedPeers = [{} as PeerRecord];
+      recordedPeers = true;
       yield* Queue.offer(peerListChanges, undefined);
       assert.deepStrictEqual(yield* Queue.take(notified), ["peers"]);
       // From then on a delivery may change how many messages wait for a peer.
@@ -210,7 +210,7 @@ it.effect(
               Layer.mock(PlaybookStore)({ changes: Stream.never }),
               Layer.mock(PeerRegistryService)({
                 subscribeListChanges: Effect.succeed(Stream.never),
-                list: () => Effect.succeed([]),
+                hasPeers: Effect.succeed(false),
               }),
             ),
           ),

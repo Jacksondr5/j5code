@@ -962,6 +962,12 @@ it.effect("says the peer list changed after each write the list shows, and after
     // The heartbeat and the last error, each only when a row changed.
     yield* registry.recordPolled(home, "2026-10-02T12:00:00.000Z");
     assert.equal(yield* signals, 1, "a heartbeat");
+    // A client reads online from the last heartbeat it was given against a two-minute window,
+    // so it is told of one a minute, not of each.
+    yield* registry.recordPolled(home, "2026-10-02T12:00:25.000Z");
+    yield* registry.recordPolled(home, "2026-10-02T12:00:50.000Z");
+    yield* registry.recordPolled(home, "2026-10-02T12:01:15.000Z");
+    assert.equal(yield* signals, 1, "the next heartbeat a minute on, and none between");
     yield* registry.recordPolled("environment-unknown", timestamp);
     yield* registry.recordLastError(home, null);
     yield* registry.recordLastError(home, "could not reach Home: ECONNREFUSED");

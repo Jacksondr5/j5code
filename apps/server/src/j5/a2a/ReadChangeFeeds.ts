@@ -104,12 +104,19 @@ export const layer = Layer.effectDiscard(
     const peers = yield* PeerRegistryService;
 
     // A server with no peer has no peer list for a delivery to change, which is most servers:
-    // their clients are not told about `peers` on every message an agent sends.
+    // their clients are not told about `peers` on every message an agent sends. Not knowing
+    // counts as having one: a needless message, never a missed change.
     const hasPeers = yield* Ref.make(true);
-    const countPeers = peers.list().pipe(
-      Effect.flatMap((listed) => Ref.set(hasPeers, listed.length > 0)),
-      // Not knowing counts as having one: a needless message, never a missed change.
-      Effect.catch(() => Ref.set(hasPeers, true)),
+    const countPeers = peers.hasPeers.pipe(
+      Effect.catchCause(() => Effect.succeed(true)),
+      Effect.flatMap((some) => Ref.set(hasPeers, some)),
+    );
+    // The registry says when one of its writes changed what the peer list reports. Followed
+    // before the first count, so a peer recorded meanwhile is counted by its own signal.
+    const peerListChanges = yield* peers.subscribeListChanges;
+    yield* peerListChanges.pipe(
+      Stream.runForEach(() => countPeers.pipe(Effect.andThen(changes.notify("peers")))),
+      Effect.forkScoped,
     );
     yield* countPeers;
 
@@ -132,13 +139,6 @@ export const layer = Layer.effectDiscard(
     yield* playbooks.changes.pipe(
       Stream.drop(1),
       Stream.runForEach(() => changes.notify("fleet")),
-      Effect.forkScoped,
-    );
-
-    // The registry says when one of its writes changed what the peer list reports.
-    const peerListChanges = yield* peers.subscribeListChanges;
-    yield* peerListChanges.pipe(
-      Stream.runForEach(() => countPeers.pipe(Effect.andThen(changes.notify("peers")))),
       Effect.forkScoped,
     );
 
