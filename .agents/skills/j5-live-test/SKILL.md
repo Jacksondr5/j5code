@@ -112,6 +112,21 @@ A worktree holds one setup at a time. Pass a flag to the first start, or to
   old Remote from Settings > Connections first: the browser keeps its own list.
 - **`--base <ref>`.** See "PR screenshots".
 
+### An image, a question, an approval
+
+The home has a thread named "Message with an image" and one named "Question
+waiting for an answer". Both survive `restart`. The image is for looking at:
+its agent never saw it. The question is the one pre-made thread to act in. It
+can be answered once, which starts a real GPT Luna turn; `rebuild` brings it
+back.
+
+No restart keeps a pending approval or a question from Claude, so the home has
+neither. Make one live, in a new thread:
+
+- **Approval.** Set the thread's access to "Supervised" and ask for a file
+  edit. The request shows within seconds.
+- **Claude question.** Ask the agent to ask you a question with two options.
+
 ### Live turns
 
 - Send live turns only in new threads in the test project. The threads the
