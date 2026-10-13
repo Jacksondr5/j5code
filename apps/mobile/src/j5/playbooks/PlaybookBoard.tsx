@@ -26,8 +26,8 @@ export function PlaybookBoard(props: { environmentId: EnvironmentId; threadId: T
   const thread = useThreadShell(scopeThreadRef(props.environmentId, props.threadId));
   // A guest is shown none of a server's Playbooks (Shared server AC24), so none is read.
   const guest = useGuestEnvironmentIds().has(props.environmentId);
-  const supported =
-    !guest && j5LedgerSupported(useEnvironmentServerConfig(props.environmentId)) !== false;
+  const serverConfig = useEnvironmentServerConfig(props.environmentId);
+  const supported = !guest && j5LedgerSupported(serverConfig) !== false;
   const query = useEnvironmentQuery(
     supported
       ? j5Environment.playbooks({
