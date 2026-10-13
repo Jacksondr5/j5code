@@ -36,6 +36,11 @@ export const sharingManage = {
   createLink: command(J5_SHARING_WS_METHODS.createLink),
   createOpenLink: command(J5_SHARING_WS_METHODS.createOpenLink),
   revokeOpenLink: command(J5_SHARING_WS_METHODS.revokeOpenLink),
+  removeGrant: command(J5_SHARING_WS_METHODS.removeGrant),
+  removePerson: command(J5_SHARING_WS_METHODS.removePerson),
+  revokeDevice: command(J5_SHARING_WS_METHODS.revokeDevice),
+  revokeLink: command(J5_SHARING_WS_METHODS.revokeLink),
+  confirmGuestName: command(J5_SHARING_WS_METHODS.confirmGuestName),
 };
 
 export const peopleQuery = (environmentId: EnvironmentId) =>
