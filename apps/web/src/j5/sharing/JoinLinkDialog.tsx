@@ -2,7 +2,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import type { SharingOpenLink, SharingPerson } from "@t3tools/contracts/j5";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Alert, AlertDescription } from "../../components/ui/alert";
 import { Badge } from "../../components/ui/badge";
@@ -58,6 +58,8 @@ export function JoinLinkDialog({
   const canManage = useAtomValue(sharingManage.createOpenLink.permissionAtom(environmentId));
   const links = useEnvironmentQuery(canManage ? openLinksQuery(environmentId) : null);
   const people = useEnvironmentQuery(canManage ? peopleQuery(environmentId) : null);
+  // People join through the link without this client doing anything, so each opening reads again.
+  useEffect(() => refreshSharing(environmentId), [environmentId]);
   const createOpenLink = useAtomCommand(sharingManage.createOpenLink, { reportFailure: false });
   const revokeOpenLink = useAtomCommand(sharingManage.revokeOpenLink, { reportFailure: false });
 

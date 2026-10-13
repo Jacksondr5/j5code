@@ -39,7 +39,7 @@ export function useSharingPaletteItems(input: {
     items.push({
       kind: "action",
       value: "action:j5-share-thread",
-      searchTerms: ["share", "invite", "guest", "people", "link", "collaborate"],
+      searchTerms: ["share thread", "invite", "guest", "people", "link", "view", "collaborate"],
       title: "Share thread",
       description: activeThread.title,
       disabled: !canManage,
@@ -57,7 +57,7 @@ export function useSharingPaletteItems(input: {
     items.push({
       kind: "action",
       value: "action:j5-share-project",
-      searchTerms: ["share", "invite", "guest", "people", "link", "project"],
+      searchTerms: ["share project", "invite", "guest", "people", "link"],
       title: "Share project",
       description: project.title,
       disabled: !canManage,
@@ -75,7 +75,7 @@ export function useSharingPaletteItems(input: {
     items.push({
       kind: "action",
       value: "action:j5-join-link",
-      searchTerms: ["join link", "open link", "share", "invite", "several people"],
+      searchTerms: ["make a join link", "open link", "share thread", "invite", "people"],
       title: "Make a join link",
       description: activeThread.title,
       disabled: !canManage,

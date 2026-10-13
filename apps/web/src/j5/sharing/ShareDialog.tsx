@@ -7,7 +7,7 @@ import type {
   SharingLink,
   SharingPerson,
 } from "@t3tools/contracts/j5";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Alert, AlertDescription } from "../../components/ui/alert";
 import {
@@ -100,6 +100,8 @@ export function ShareDialog({
   const targetTitle = useTargetTitle(environmentId, target);
   const canManage = useAtomValue(sharingManage.putGrant.permissionAtom(environmentId));
   const people = useEnvironmentQuery(canManage ? peopleQuery(environmentId) : null);
+  // People join and leave without this client doing anything, so each opening reads them again.
+  useEffect(() => refreshSharing(environmentId), [environmentId]);
   const createGuest = useAtomCommand(sharingManage.createGuest, { reportFailure: false });
   const putGrant = useAtomCommand(sharingManage.putGrant, { reportFailure: false });
   const createLink = useAtomCommand(sharingManage.createLink, { reportFailure: false });
@@ -287,7 +289,7 @@ export function ShareDialog({
                         <span className="flex items-center gap-1.5 text-xs font-medium text-foreground">
                           {levelLabel(option.level)}
                           {unavailable ? (
-                            <Badge variant="secondary" size="sm">
+                            <Badge variant="outline" size="sm">
                               coming soon
                             </Badge>
                           ) : null}

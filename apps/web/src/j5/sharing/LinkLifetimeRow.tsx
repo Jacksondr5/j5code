@@ -25,7 +25,7 @@ export function LinkLifetimeRow({
         <p className="text-xs font-medium text-foreground">Link expires in</p>
         <p className="text-xs text-muted-foreground">{helper}</p>
       </div>
-      <div className="w-32 shrink-0">
+      <div className="w-36 shrink-0">
         <Select
           value={value}
           disabled={disabled || !LINK_LIFETIME_IS_CHOSEN}
