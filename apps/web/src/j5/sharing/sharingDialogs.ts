@@ -28,6 +28,11 @@ export type SharingDialogRequest =
       readonly threadId: ThreadId | null;
     }
   | {
+      readonly kind: "rename";
+      readonly environmentId: EnvironmentId;
+      readonly person: { readonly personId: string; readonly name: string };
+    }
+  | {
       readonly kind: "device-link";
       readonly environmentId: EnvironmentId;
       readonly person: { readonly personId: string; readonly name: string };

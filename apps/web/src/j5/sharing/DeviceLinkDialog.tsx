@@ -43,7 +43,10 @@ export function DeviceLinkDialog({
   const make = async () => {
     setBusy(true);
     setError(null);
-    const created = await createLink({ environmentId, input: { personId: person.personId } });
+    const created = await createLink({
+      environmentId,
+      input: { personId: person.personId, lifetime },
+    });
     if (created._tag === "Failure") {
       setError(`The link could not be made. ${refusalMessage(created)}`);
     } else {

@@ -304,6 +304,11 @@ function GuestRow({
               <MenuItem onClick={() => setConfirmingName(true)}>Confirm name…</MenuItem>
             ) : null}
             <MenuItem
+              onClick={() => openSharingDialog({ kind: "rename", environmentId, person: asPerson })}
+            >
+              Rename…
+            </MenuItem>
+            <MenuItem
               onClick={() =>
                 openSharingDialog({ kind: "device-link", environmentId, person: asPerson })
               }

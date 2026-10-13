@@ -40,7 +40,8 @@ export const sharingManage = {
   removePerson: command(J5_SHARING_WS_METHODS.removePerson),
   revokeDevice: command(J5_SHARING_WS_METHODS.revokeDevice),
   revokeLink: command(J5_SHARING_WS_METHODS.revokeLink),
-  confirmGuestName: command(J5_SHARING_WS_METHODS.confirmGuestName),
+  // Renaming also confirms a name a guest gave themselves; the two are one request.
+  renamePerson: command(J5_SHARING_WS_METHODS.renamePerson),
 };
 
 export const peopleQuery = (environmentId: EnvironmentId) =>

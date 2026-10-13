@@ -6,6 +6,7 @@ import { type ReactNode, useSyncExternalStore } from "react";
 import { environmentCatalog } from "../../connection/catalog";
 import { j5Sharing } from "./guestAccess";
 import { DeviceLinkDialog } from "./DeviceLinkDialog";
+import { RenameDialog } from "./RenameDialog";
 import { JoinLinkDialog } from "./JoinLinkDialog";
 import {
   askForOwnerNameLater,
@@ -53,6 +54,15 @@ export function SharingDialogHost() {
     case "device-link":
       return (
         <DeviceLinkDialog
+          key={opening}
+          environmentId={request.environmentId}
+          person={request.person}
+          onClose={closeSharingDialog}
+        />
+      );
+    case "rename":
+      return (
+        <RenameDialog
           key={opening}
           environmentId={request.environmentId}
           person={request.person}

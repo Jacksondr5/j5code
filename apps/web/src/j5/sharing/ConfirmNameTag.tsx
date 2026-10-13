@@ -1,5 +1,5 @@
 import type { EnvironmentId } from "@t3tools/contracts";
-import type { SharingPerson } from "@t3tools/contracts/j5";
+import { isPersonName, type SharingPerson } from "@t3tools/contracts/j5";
 import { useState } from "react";
 
 import { Badge } from "../../components/ui/badge";
@@ -7,6 +7,7 @@ import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Popover, PopoverPopup, PopoverTitle, PopoverTrigger } from "../../components/ui/popover";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { NAME_NOT_USABLE } from "./shareLink.logic";
 import { refreshSharing, refusalMessage, sharingManage } from "./sharingManage";
 
 /**
@@ -28,12 +29,16 @@ export function ConfirmNameTag({
   readonly onOpenChange: (open: boolean) => void;
 }) {
   const given = person.displayName ?? "";
-  const confirm = useAtomCommand(sharingManage.confirmGuestName, { reportFailure: false });
+  const confirm = useAtomCommand(sharingManage.renamePerson, { reportFailure: false });
   const [name, setName] = useState(given);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const save = async () => {
+    if (!isPersonName(name.trim())) {
+      setError(NAME_NOT_USABLE);
+      return;
+    }
     setBusy(true);
     setError(null);
     const result = await confirm({
@@ -42,7 +47,7 @@ export function ConfirmNameTag({
     });
     setBusy(false);
     if (result._tag === "Failure") {
-      setError(`That name was refused. ${refusalMessage(result)}`);
+      setError(refusalMessage(result));
       return;
     }
     refreshSharing(environmentId);
