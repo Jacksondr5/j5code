@@ -30,6 +30,18 @@ export function withSharingMenuItems<Id extends string>(
     : [...items.slice(0, after + 1), share, ...items.slice(after + 1)];
 }
 
+/**
+ * `withSharingMenuItems` around a builder of upstream's, for a call site that builds the list
+ * inside the call that shows it: wrapping the builder leaves that call's arguments where they are.
+ */
+export const buildWithSharingMenuItems =
+  <State, Id extends string>(
+    build: (state: State) => ReadonlyArray<ContextMenuItem<Id>>,
+    thread: ScopedThreadRef,
+  ) =>
+  (state: State) =>
+    withSharingMenuItems(build(state), thread);
+
 /** Runs the item J5 added and says so, leaving every other id to upstream's own handling. */
 export function runSharingMenuAction<Id extends string>(
   action: Id | SharingMenuActionId,
