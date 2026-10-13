@@ -3,8 +3,11 @@ import type { SharingOpenLink, SharingPerson } from "@t3tools/contracts/j5";
 import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
+import { getPairingTokenFromUrl } from "../../pairingUrl";
 import {
   activeOpenLinkFor,
+  isMarkedShareLink,
+  markedAsShareLink,
   guestsMatchingName,
   joinLinkMeta,
   lifetimeLeft,
@@ -60,7 +63,17 @@ const person = (overrides: Partial<SharingPerson>): SharingPerson =>
 describe("link routes", () => {
   it("puts the credential in a pairing address on the route's own host", () => {
     const [route] = linkRoutesFromEndpoints([endpoint({})]);
-    expect(route?.urlFor("SECRET")).toBe("http://192.168.1.20:3773/pair#token=SECRET");
+    expect(route?.urlFor("SECRET")).toBe("http://192.168.1.20:3773/pair#token=SECRET&j5share=1");
+  });
+
+  it("marks a share link where upstream's pairing code still finds the token and nothing else", () => {
+    const address = markedAsShareLink(
+      "https://app.example/pair?host=https%3A%2F%2Fa.ts.net#token=SECRET",
+    );
+    expect(isMarkedShareLink(address)).toBe(true);
+    expect(getPairingTokenFromUrl(new URL(address))).toBe("SECRET");
+    expect(new URL(address).searchParams.get("host")).toBe("https://a.ts.net");
+    expect(isMarkedShareLink("https://app.example/pair#token=SECRET")).toBe(false);
   });
 
   it("leaves out an address the server is not reachable at now", () => {
@@ -91,7 +104,9 @@ describe("link routes", () => {
   it("treats the address a remote client reached the server at as shareable", () => {
     const route = linkRouteFromBaseUrl("https://openclaw.tail1234.ts.net");
     expect(route).toMatchObject({ loopback: false, qrShareable: true });
-    expect(route.urlFor("SECRET")).toBe("https://openclaw.tail1234.ts.net/pair#token=SECRET");
+    expect(route.urlFor("SECRET")).toBe(
+      "https://openclaw.tail1234.ts.net/pair#token=SECRET&j5share=1",
+    );
   });
 });
 
