@@ -71,15 +71,10 @@ describe("a guest's thread menu", () => {
     { id: "delete", label: "Delete", destructive: true },
   ];
 
-  it("has Leave thread where Archive was, and neither Archive, Delete nor Share", () => {
+  it("has Leave thread where Archive was, and no Archive, Delete, Share or Project settings", () => {
     provideSharingMenuGuestRead(() => true);
     const items = withSharingMenuItems(withLifecycle, thread);
-    expect(items.map((item) => item.label)).toEqual([
-      "Rename thread",
-      "Copy",
-      "Project settings",
-      "Leave thread",
-    ]);
+    expect(items.map((item) => item.label)).toEqual(["Rename thread", "Copy", "Leave thread"]);
     expect(items.at(-1)).toMatchObject({ separatorBefore: true });
   });
 

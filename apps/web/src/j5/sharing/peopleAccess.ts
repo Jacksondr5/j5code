@@ -13,12 +13,16 @@ export function useCanSeePeople(): boolean {
   return useEnvironmentScope(usePrimaryEnvironmentId(), AuthAccessReadScope);
 }
 
-// Upstream's Settings pages that only show a guest a failure: each asks the server for something
-// a guest is not given. A guest who types one of their addresses still gets upstream's error.
+// Settings pages a guest has no use for. Scheduled Tasks, Source Control and Archive are
+// upstream's and only show a guest a failure, since each asks the server for something a guest is
+// not given; a guest who types one of their addresses still gets upstream's error. Personas and
+// Skills are J5's and say plainly that they are not available to a guest.
 const HIDDEN_FROM_A_GUEST: ReadonlySet<string> = new Set([
   "/settings/scheduled-tasks",
   "/settings/source-control",
   "/settings/archived",
+  "/settings/personas",
+  "/settings/skills",
 ]);
 
 /**

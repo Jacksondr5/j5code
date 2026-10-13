@@ -23,7 +23,7 @@ export function provideSharingMenuGuestRead(read: (thread: ScopedThreadRef) => b
  * Upstream's thread menu as sharing changes it. For a member, "Share thread…" goes after "Copy"
  * (Shared server AC18), shown to everyone and disabled for a connection without "Manage access",
  * as upstream shows an action a connection lacks. For a guest, who can neither archive nor delete
- * nor share onward, those items go and "Leave thread" takes Archive's place (AC25). Upstream's own
+ * nor share onward nor change a project's settings, those items go and "Leave thread" takes Archive's place (AC25). Upstream's own
  * list is left as it was built.
  */
 export function withSharingMenuItems<Id extends string>(
@@ -36,10 +36,14 @@ export function withSharingMenuItems<Id extends string>(
       label: "Leave thread",
       separatorBefore: true,
     };
-    const kept = items.filter((item) => item.id !== "archive" && item.id !== "delete");
+    // Archive and Delete are not a guest's to do, and Project settings opens a page a guest can
+    // change nothing on.
+    const notAGuests = (item: ContextMenuItem<Id>) =>
+      item.id === "archive" || item.id === "delete" || item.id === "project-settings";
+    const kept = items.filter((item) => !notAGuests(item));
     const archive = items.findIndex((item) => item.id === "archive");
     if (archive === -1) return [...kept, leave];
-    const before = items.slice(0, archive).filter((item) => item.id !== "delete");
+    const before = items.slice(0, archive).filter((item) => !notAGuests(item));
     return [...before, leave, ...kept.slice(before.length)];
   }
   const share: ContextMenuItem<SharingMenuActionId> = {
