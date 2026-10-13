@@ -24,7 +24,13 @@ import {
 } from "../../environments/primary";
 import { APP_DISPLAY_NAME } from "../../branding";
 import { NAME_NOT_USABLE } from "./shareLink.logic";
-import { invitationFor, invitationList, joinPageState, type JoinPageState } from "./joinPage.logic";
+import {
+  invitationFor,
+  invitationList,
+  joinPageState,
+  type InvitationLine as ListedLine,
+  type JoinPageState,
+} from "./joinPage.logic";
 
 const post = (path: string, body: unknown) =>
   fetch(resolvePrimaryEnvironmentHttpUrl(path), {

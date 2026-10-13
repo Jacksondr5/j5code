@@ -1,7 +1,11 @@
 import { useAtomValue } from "@effect/atom-react";
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { AuthAccessReadScope, type EnvironmentId, type ThreadId } from "@t3tools/contracts";
-import type { SharingGrantLevel } from "@t3tools/contracts/j5";
+import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import type {
+  SharingGrantLevel,
+  SharingThreadGuest,
+  SharingThreadPeople,
+} from "@t3tools/contracts/j5";
 import { useNavigate } from "@tanstack/react-router";
 import {
   ChevronDownIcon,
@@ -35,31 +39,25 @@ import {
   derivePhysicalProjectKey,
   selectProjectGroupingSettings,
 } from "../../logicalProject";
+import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { useProject, useProjects, useThreadShell } from "../../state/entities";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";
-import { useEnvironmentScope } from "../../state/session";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { buildPhysicalToLogicalProjectKeyMap } from "../../sidebarProjectGrouping";
 import { ConfirmNameTag } from "./ConfirmNameTag";
 import { j5Sharing } from "./guestAccess";
-import { removeGrantWarning } from "./people.logic";
-import { activeOpenLinkFor, initialsOf, levelLabel, lifetimeLeft } from "./shareLink.logic";
+import { initialsOf, levelLabel, lifetimeLeft } from "./shareLink.logic";
 import { openSharingDialog } from "./sharingDialogs";
-import {
-  openLinksQuery,
-  peopleQuery,
-  refreshSharing,
-  refusalMessage,
-  sharingManage,
-} from "./sharingManage";
+import { refreshSharing, refusalMessage, sharingManage } from "./sharingManage";
 import {
   chipLabel,
+  guestName,
+  memberName,
   othersLabel,
-  sharedWith,
-  threadPeopleFrom,
-  type Holder,
-  type ThreadPeople,
+  removeFromThreadWarning,
+  threadPeopleView,
+  type ThreadPeopleView,
 } from "./threadPeople.logic";
 
 function Avatar({ name }: { readonly name: string }) {
@@ -74,20 +72,21 @@ function Avatar({ name }: { readonly name: string }) {
 }
 
 /**
- * Who reaches a thread, for a connection that can read the server's people. A guest's connection
- * cannot, and is told by the server only its own level: it gets `null` here until the server has
- * a request that says who else is on a thread.
+ * Who reaches a thread, as the server tells anyone who can reach it: a member, or a guest it was
+ * shared with. The server counts each time its answer changes, and the answer is asked again then.
  */
-function useThreadPeople(environmentId: EnvironmentId, threadId: ThreadId): ThreadPeople | null {
-  const canRead = useEnvironmentScope(environmentId, AuthAccessReadScope);
-  const people = useEnvironmentQuery(canRead ? peopleQuery(environmentId) : null);
-  const thread = useThreadShell(scopeThreadRef(environmentId, threadId));
-  const projectId = thread?.projectId ?? null;
-  return useMemo(
-    () =>
-      people.data === null ? null : threadPeopleFrom(people.data.people, { threadId, projectId }),
-    [people.data, projectId, threadId],
-  );
+function useThreadPeople(
+  environmentId: EnvironmentId,
+  threadId: ThreadId,
+): SharingThreadPeople | null {
+  const target = useMemo(() => ({ environmentId, input: { threadId } }), [environmentId, threadId]);
+  const query = sharingManage.threadPeople(target);
+  const people = useEnvironmentQuery(query);
+  const revision = useEnvironmentQuery(sharingManage.threadPeopleChanges(target)).data?.revision;
+  useEffect(() => {
+    if (revision !== undefined && revision > 0) appAtomRegistry.refresh(query);
+  }, [query, revision]);
+  return people.data;
 }
 
 /**
@@ -106,12 +105,14 @@ export function ThreadPeopleChip({
   const canManage = useAtomValue(sharingManage.putGrant.permissionAtom(environmentId));
   const label = people === null ? null : chipLabel(people);
   if (people === null || label === null) return null;
-  const shown = sharedWith(people).slice(0, 3);
+  const shown = people.guests.slice(0, 3);
   const content = (
     <>
       <span className="flex -space-x-1.5">
-        {shown.map(({ person }) => (
-          <Avatar key={person.personId} name={person.displayName ?? "?"} />
+        {shown.map((guest, index) => (
+          // A guest asking is told no ids, and two people may share initials.
+          // oxlint-disable-next-line react/no-array-index-key -- the list is replaced whole on every change
+          <Avatar key={index} name={guestName(guest)} />
         ))}
       </span>
       {label}
@@ -167,8 +168,8 @@ function useOpenProjectSharing(environmentId: EnvironmentId, threadId: ThreadId)
 /**
  * The People section of a thread's details panel: who holds a grant on the thread, the join link
  * when there is one, and one line for everyone who reaches it some other way. A member who
- * manages access changes it here; anyone else reads it. A guest sees their own place on the
- * thread and the way to leave it (Shared server AC25).
+ * manages access changes it here; anyone else reads it. A guest sees members first, then everyone
+ * with a grant, their own name marked, and the way to leave (Shared server AC25).
  */
 export function ThreadPeopleSection({
   environmentId,
@@ -177,130 +178,97 @@ export function ThreadPeopleSection({
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
 }) {
-  const isGuest = useAtomValue(j5Sharing.isGuest(environmentId));
-  return isGuest ? (
-    <GuestSection environmentId={environmentId} threadId={threadId} />
-  ) : (
-    <MemberSection environmentId={environmentId} threadId={threadId} />
-  );
-}
-
-const ROW_CLASSNAME = "flex min-h-8 items-center gap-2 px-1.5 text-xs";
-const MUTED_ROW_CLASSNAME = `${ROW_CLASSNAME} text-muted-foreground`;
-
-function GuestSection({
-  environmentId,
-  threadId,
-}: {
-  readonly environmentId: EnvironmentId;
-  readonly threadId: ThreadId;
-}) {
-  const canWrite = useAtomValue(j5Sharing.threadOperable(environmentId, threadId));
-  return (
-    <ThreadDetailsSection headingId="j5-thread-people-heading" title="People">
-      <div className={ROW_CLASSNAME}>
-        <Avatar name="You" />
-        <span className="min-w-0 flex-1 truncate text-foreground">You</span>
-        <span className="text-muted-foreground">{canWrite ? "Collaborate" : "View"}</span>
-      </div>
-      <Button
-        size="xs"
-        variant="ghost-muted"
-        onClick={() => openSharingDialog({ kind: "leave", environmentId, threadId })}
-      >
-        <LogOutIcon className="size-3" />
-        Leave this thread
-      </Button>
-    </ThreadDetailsSection>
-  );
-}
-
-function MemberSection({
-  environmentId,
-  threadId,
-}: {
-  readonly environmentId: EnvironmentId;
-  readonly threadId: ThreadId;
-}) {
   const navigate = useNavigate();
-  const canRead = useEnvironmentScope(environmentId, AuthAccessReadScope);
+  const isGuest = useAtomValue(j5Sharing.isGuest(environmentId));
   const canManage = useAtomValue(sharingManage.putGrant.permissionAtom(environmentId));
   const people = useThreadPeople(environmentId, threadId);
-  const links = useEnvironmentQuery(canRead ? openLinksQuery(environmentId) : null);
-  useEffect(() => {
-    if (canRead) refreshSharing(environmentId);
-  }, [canRead, environmentId, threadId]);
+  const view = useMemo(() => (people === null ? null : threadPeopleView(people)), [people]);
   const nowMs = Date.parse(useNowMinute());
-  const joinLink =
-    links.data === null ? null : activeOpenLinkFor(links.data.links, threadId, nowMs);
+  const joinLink = people?.openLinks[0] ?? null;
   const joinLinkLeft =
     joinLink === null ? null : lifetimeLeft(joinLink.expiresAt.epochMilliseconds, nowMs);
   const projectSharing = useOpenProjectSharing(environmentId, threadId);
   const [othersOpen, setOthersOpen] = useState(false);
   const thread = useThreadShell(scopeThreadRef(environmentId, threadId));
+  const threadTitle = thread?.title ?? "this thread";
   const share = () =>
     openSharingDialog({ kind: "share", environmentId, target: { kind: "thread", threadId } });
   const openJoinLink = () => openSharingDialog({ kind: "join-link", environmentId, threadId });
+  const others = view === null ? null : othersLabel(view);
 
-  if (!canRead) return null;
-  const others = people === null ? null : othersLabel(people);
   return (
     <ThreadDetailsSection
       headingId="j5-thread-people-heading"
       title="People"
       actions={
-        <>
-          <Button
-            size="icon-xs"
-            variant="ghost-muted"
-            disabled={!canManage}
-            aria-label="Share thread"
-            onClick={share}
-          >
-            <UserPlusIcon className="size-3.5" />
-          </Button>
-          <Menu>
-            <MenuTrigger
-              render={
-                <Button size="icon-xs" variant="ghost-muted" aria-label="More sharing actions" />
-              }
+        isGuest ? null : (
+          <>
+            <Button
+              size="icon-xs"
+              variant="ghost-muted"
+              disabled={!canManage}
+              aria-label="Share thread"
+              onClick={share}
             >
-              <EllipsisIcon className="size-3.5" />
-            </MenuTrigger>
-            <MenuPopup align="end">
-              {joinLink === null ? (
-                <MenuItem disabled={!canManage} onClick={openJoinLink}>
-                  Make a join link…
+              <UserPlusIcon className="size-3.5" />
+            </Button>
+            <Menu>
+              <MenuTrigger
+                render={
+                  <Button size="icon-xs" variant="ghost-muted" aria-label="More sharing actions" />
+                }
+              >
+                <EllipsisIcon className="size-3.5" />
+              </MenuTrigger>
+              <MenuPopup align="end">
+                {joinLink === null ? (
+                  <MenuItem disabled={!canManage} onClick={openJoinLink}>
+                    Make a join link…
+                  </MenuItem>
+                ) : (
+                  <MenuItem onClick={openJoinLink}>Join link…</MenuItem>
+                )}
+                {view !== null && view.throughProject.length > 0 ? (
+                  <MenuItem onClick={projectSharing.open}>Manage project sharing</MenuItem>
+                ) : null}
+                <MenuSeparator />
+                <MenuItem onClick={() => void navigate({ to: "/settings/people" })}>
+                  Open People settings
                 </MenuItem>
-              ) : (
-                <MenuItem onClick={openJoinLink}>Join link…</MenuItem>
-              )}
-              {people !== null && people.throughProject.length > 0 ? (
-                <MenuItem onClick={projectSharing.open}>Manage project sharing</MenuItem>
-              ) : null}
-              <MenuSeparator />
-              <MenuItem onClick={() => void navigate({ to: "/settings/people" })}>
-                Open People settings
-              </MenuItem>
-            </MenuPopup>
-          </Menu>
-        </>
+              </MenuPopup>
+            </Menu>
+          </>
+        )
       }
     >
-      {people === null ? (
+      {view === null ? (
         <p className={MUTED_ROW_CLASSNAME}>Reading who is on this thread…</p>
       ) : (
         <>
-          {people.direct.map((holder) => (
-            <HolderRow
-              key={holder.person.personId}
+          {isGuest
+            ? view.members.map((member, index) => (
+                // A guest is told no ids.
+                // oxlint-disable-next-line react/no-array-index-key -- the list is replaced whole on every change
+                <div key={index} className={ROW_CLASSNAME}>
+                  <Avatar name={memberName(member)} />
+                  <span className="min-w-0 flex-1 truncate text-foreground">
+                    {memberName(member)}
+                  </span>
+                  <span className="text-muted-foreground">Member</span>
+                </div>
+              ))
+            : null}
+          {view.direct.map((guest, index) => (
+            <GuestRow
+              key={guest.personId ?? index}
               environmentId={environmentId}
-              threadTitle={thread?.title ?? "this thread"}
-              holder={holder}
+              threadId={threadId}
+              threadTitle={threadTitle}
+              guest={guest}
               canManage={canManage}
             />
           ))}
-          {people.direct.length === 0 && joinLink === null ? (
+          {!isGuest && view.direct.length === 0 && joinLink === null ? (
             <p className={MUTED_ROW_CLASSNAME}>Only members reach this thread.</p>
           ) : null}
           <div className="flex flex-col items-start">
@@ -310,18 +278,31 @@ function MemberSection({
                 Join link · {joinLinkLeft} left
               </Button>
             ) : null}
-            {others === null ? null : (
+            {others === null ||
+            (isGuest && view.throughProject.length + view.throughAncestor.length === 0) ? null : (
               <Button size="xs" variant="ghost-muted" onClick={() => setOthersOpen(true)}>
-                {others}
+                {isGuest ? othersLabel({ ...view, members: [] }) : others}
                 <ChevronRightIcon className="size-3" />
               </Button>
             )}
+            {/* Leaving is of a grant: only a grant on this thread is left from the thread. */}
+            {view.you !== null && view.you.grants.some((grant) => grant.via === "thread") ? (
+              <Button
+                size="xs"
+                variant="ghost-muted"
+                onClick={() => openSharingDialog({ kind: "leave", environmentId, threadId })}
+              >
+                <LogOutIcon className="size-3" />
+                Leave this thread
+              </Button>
+            ) : null}
           </div>
           <OthersDialog
             open={othersOpen}
             onClose={() => setOthersOpen(false)}
-            people={people}
+            view={isGuest ? { ...view, members: [] } : view}
             projectTitle={projectSharing.projectTitle}
+            gears={!isGuest}
             onOpenPeople={() => void navigate({ to: "/settings/people" })}
             onOpenProjectSharing={projectSharing.open}
           />
@@ -331,31 +312,38 @@ function MemberSection({
   );
 }
 
-function HolderRow({
+const ROW_CLASSNAME = "flex min-h-8 items-center gap-2 px-1.5 text-xs";
+const MUTED_ROW_CLASSNAME = `${ROW_CLASSNAME} text-muted-foreground`;
+
+function GuestRow({
   environmentId,
+  threadId,
   threadTitle,
-  holder: { person, grant },
+  guest,
   canManage,
 }: {
   readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
   readonly threadTitle: string;
-  readonly holder: Holder;
+  readonly guest: SharingThreadGuest;
   readonly canManage: boolean;
 }) {
-  const name = person.displayName ?? "Unnamed guest";
+  const name = guestName(guest);
+  const { personId } = guest;
   const [confirmingName, setConfirmingName] = useState(false);
   const removeGrant = useAtomCommand(sharingManage.removeGrant, { reportFailure: false });
 
   const remove = async () => {
+    if (personId === null) return;
     const confirmed = await requestConfirmDialog(
-      removeGrantWarning(name, threadTitle),
+      removeFromThreadWarning(guest, threadTitle),
       { variant: "destructive" },
       { confirmLabel: "Remove from thread" },
     );
     if (confirmed !== true) return;
     const result = await removeGrant({
       environmentId,
-      input: { personId: person.personId, target: grant.target },
+      input: { personId, target: { kind: "thread", threadId } },
     });
     if (result._tag === "Failure") {
       toastManager.add({
@@ -371,33 +359,40 @@ function HolderRow({
     <div className={ROW_CLASSNAME}>
       <Avatar name={name} />
       <span className="min-w-0 truncate text-foreground">{name}</span>
-      {person.nameSelfGiven ? (
-        <ConfirmNameTag
-          environmentId={environmentId}
-          person={person}
-          canManage={canManage}
-          open={confirmingName}
-          onOpenChange={setConfirmingName}
-        />
+      {guest.you ? <span className="shrink-0 text-muted-foreground">(you)</span> : null}
+      {guest.nameSelfGiven ? (
+        personId === null ? (
+          <Badge variant="warning" size="sm">
+            name they gave
+          </Badge>
+        ) : (
+          <ConfirmNameTag
+            environmentId={environmentId}
+            person={{ personId, displayName: guest.displayName }}
+            canManage={canManage}
+            open={confirmingName}
+            onOpenChange={setConfirmingName}
+          />
+        )
       ) : null}
       <span className="flex-1" />
-      {canManage ? (
+      {canManage && personId !== null ? (
         <Menu>
           <MenuTrigger
             render={<Button size="xs" variant="outline" aria-label={`Level for ${name}`} />}
           >
-            {levelLabel(grant.level)}
+            {levelLabel(guest.level)}
             <ChevronDownIcon className="size-3" />
           </MenuTrigger>
           <MenuPopup align="end">
-            <LevelItems current={grant.level} />
+            <LevelItems current={guest.level} />
             <MenuSeparator />
             <MenuItem
               onClick={() =>
                 openSharingDialog({
                   kind: "device-link",
                   environmentId,
-                  person: { personId: person.personId, name },
+                  person: { personId, name },
                 })
               }
             >
@@ -409,7 +404,7 @@ function HolderRow({
           </MenuPopup>
         </Menu>
       ) : (
-        <span className="text-muted-foreground">{levelLabel(grant.level)}</span>
+        <span className="text-muted-foreground">{levelLabel(guest.level)}</span>
       )}
     </div>
   );
@@ -433,15 +428,18 @@ function LevelItems({ current }: { readonly current: SharingGrantLevel }) {
 function OthersDialog({
   open,
   onClose,
-  people,
+  view,
   projectTitle,
+  gears,
   onOpenPeople,
   onOpenProjectSharing,
 }: {
   readonly open: boolean;
   readonly onClose: () => void;
-  readonly people: ThreadPeople;
+  readonly view: ThreadPeopleView;
   readonly projectTitle: string | null;
+  /** A guest reads the lists and is offered no way into settings. */
+  readonly gears: boolean;
   readonly onOpenPeople: () => void;
   readonly onOpenProjectSharing: () => void;
 }) {
@@ -456,22 +454,39 @@ function OthersDialog({
           <DialogTitle>Others on this thread</DialogTitle>
         </DialogHeader>
         <DialogPanel>
-          <OthersGroup heading="Members" gearLabel="Open People settings" onGear={go(onOpenPeople)}>
-            {people.members.map((member) => (
-              <OthersRow key={member.personId} name={member.displayName ?? "Member"} level={null} />
-            ))}
-          </OthersGroup>
-          {people.throughProject.length > 0 ? (
+          {view.members.length > 0 ? (
+            <OthersGroup
+              heading="Members"
+              gear={gears ? { label: "Open People settings", run: go(onOpenPeople) } : null}
+            >
+              {view.members.map((member, index) => (
+                <OthersRow key={member.personId ?? index} name={memberName(member)} level={null} />
+              ))}
+            </OthersGroup>
+          ) : null}
+          {view.throughProject.length > 0 ? (
             <OthersGroup
               heading={projectTitle ?? "This thread's project"}
-              gearLabel="Manage project sharing"
-              onGear={go(onOpenProjectSharing)}
+              gear={
+                gears ? { label: "Manage project sharing", run: go(onOpenProjectSharing) } : null
+              }
             >
-              {people.throughProject.map(({ person, grant }) => (
+              {view.throughProject.map((guest, index) => (
                 <OthersRow
-                  key={person.personId}
-                  name={person.displayName ?? "Unnamed guest"}
-                  level={grant.level}
+                  key={guest.personId ?? index}
+                  name={guestName(guest)}
+                  level={guest.level}
+                />
+              ))}
+            </OthersGroup>
+          ) : null}
+          {view.throughAncestor.length > 0 ? (
+            <OthersGroup heading="Through the thread this one works for" gear={null}>
+              {view.throughAncestor.map((guest, index) => (
+                <OthersRow
+                  key={guest.personId ?? index}
+                  name={guestName(guest)}
+                  level={guest.level}
                 />
               ))}
             </OthersGroup>
@@ -489,22 +504,22 @@ function OthersDialog({
 
 function OthersGroup({
   heading,
-  gearLabel,
-  onGear,
+  gear,
   children,
 }: {
   readonly heading: string;
-  readonly gearLabel: string;
-  readonly onGear: () => void;
+  readonly gear: { readonly label: string; readonly run: () => void } | null;
   readonly children: React.ReactNode;
 }) {
   return (
     <section>
       <div className="flex min-h-6 items-center justify-between">
         <h3 className="min-w-0 truncate text-2xs font-medium text-muted-foreground">{heading}</h3>
-        <Button size="icon-xs" variant="ghost-muted" aria-label={gearLabel} onClick={onGear}>
-          <SettingsIcon className="size-3.5" />
-        </Button>
+        {gear === null ? null : (
+          <Button size="icon-xs" variant="ghost-muted" aria-label={gear.label} onClick={gear.run}>
+            <SettingsIcon className="size-3.5" />
+          </Button>
+        )}
       </div>
       {children}
     </section>

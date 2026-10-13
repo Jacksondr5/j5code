@@ -1,45 +1,80 @@
-import type { ProjectId, ThreadId } from "@t3tools/contracts";
-import type { SharingPerson } from "@t3tools/contracts/j5";
+import type { SharingThreadGuest, SharingThreadPeople } from "@t3tools/contracts/j5";
 import { describe, expect, it } from "vite-plus/test";
 
-import { chipLabel, othersLabel, threadPeopleFrom } from "./threadPeople.logic";
+import {
+  chipLabel,
+  memberName,
+  othersLabel,
+  removeFromThreadWarning,
+  threadPeopleView,
+} from "./threadPeople.logic";
 
-const person = (personId: string, grants: ReadonlyArray<unknown>, kind = "guest") =>
-  ({ personId, kind, displayName: personId, nameSelfGiven: false, grants }) as SharingPerson;
-const onThread = (threadId: string, level = "view") => ({
-  target: { kind: "thread", threadId },
-  level,
+const guest = (
+  displayName: string,
+  via: ReadonlyArray<"thread" | "ancestor" | "project">,
+  overrides: Partial<SharingThreadGuest> = {},
+): SharingThreadGuest => ({
+  personId: displayName,
+  displayName,
+  level: "view",
+  grants: via.map((reach) => ({ via: reach, level: "view" as const })),
+  you: false,
+  nameSelfGiven: false,
+  joinedByOpenLink: false,
+  ...overrides,
 });
-const onProject = (projectId: string, level = "view") => ({
-  target: { kind: "project", projectId },
-  level,
+const people = (guests: ReadonlyArray<SharingThreadGuest>): SharingThreadPeople => ({
+  members: [{ personId: "owner", displayName: null }],
+  guests,
+  openLinks: [],
 });
-const thread = { threadId: "t1" as ThreadId, projectId: "p1" as ProjectId };
 
 describe("who reaches a thread", () => {
-  const people = [
-    person("member", [], "member"),
-    person("direct", [onThread("t1", "collaborate")]),
-    person("both", [onProject("p1"), onThread("t1")]),
-    person("project", [onProject("p1")]),
-    person("elsewhere", [onThread("t2"), onProject("p2")]),
-  ];
-  const reached = threadPeopleFrom(people, thread);
+  const answer = people([
+    guest("direct", ["thread"]),
+    guest("both", ["project", "thread"]),
+    guest("project", ["project"]),
+    guest("agent's parent", ["ancestor"]),
+    guest("me", ["thread"], { you: true, personId: null }),
+  ]);
+  const view = threadPeopleView(answer);
 
-  it("puts a grant on the thread before one on its project, and lists a person once", () => {
-    expect(reached.direct.map((held) => held.person.personId)).toEqual(["direct", "both"]);
-    expect(reached.throughProject.map((held) => held.person.personId)).toEqual(["project"]);
-    expect(reached.members.map((member) => member.personId)).toEqual(["member"]);
+  it("lists a guest with a grant on the thread under the thread, whatever else covers them", () => {
+    expect(view.direct.map((held) => held.displayName)).toEqual(["direct", "both", "me"]);
+    expect(view.throughProject.map((held) => held.displayName)).toEqual(["project"]);
+    expect(view.throughAncestor.map((held) => held.displayName)).toEqual(["agent's parent"]);
   });
 
-  it("counts guests for the chip, and members and project guests as the others", () => {
-    expect(chipLabel(reached)).toBe("3 people");
-    expect(othersLabel(reached)).toBe("2 others");
+  it("knows which guest is asking", () => {
+    expect(view.you?.displayName).toBe("me");
+  });
+
+  it("counts every guest for the chip, and everyone without a grant on the thread as others", () => {
+    expect(chipLabel(answer)).toBe("5 people");
+    expect(othersLabel(view)).toBe("3 others");
   });
 
   it("shows no chip for a thread only members reach", () => {
-    const membersOnly = threadPeopleFrom([person("member", [], "member")], thread);
-    expect(chipLabel(membersOnly)).toBeNull();
-    expect(othersLabel(membersOnly)).toBe("1 other");
+    expect(chipLabel(people([]))).toBeNull();
+    expect(othersLabel(threadPeopleView(people([])))).toBe("1 other");
+  });
+
+  it("words a member the server has no name for", () => {
+    expect(memberName({ personId: "owner", displayName: null })).toBe("A member of this server");
+    expect(memberName({ personId: "owner", displayName: "Jackson M." })).toBe("Jackson M.");
+  });
+});
+
+describe("removing a guest from a thread", () => {
+  it("says it leaves their list when nothing else covers them", () => {
+    expect(removeFromThreadWarning(guest("Marco", ["thread"]), "the plan")).toBe(
+      "Remove Marco from the plan? It leaves their list. An image or file they already opened can stay readable for up to an hour.",
+    );
+  });
+
+  it("says they will still reach it when the project is shared with them too", () => {
+    const warning = removeFromThreadWarning(guest("Marco", ["thread", "project"]), "the plan");
+    expect(warning).toContain("will still reach it through its project");
+    expect(warning).not.toContain("leaves their list");
   });
 });

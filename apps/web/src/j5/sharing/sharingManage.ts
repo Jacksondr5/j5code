@@ -1,6 +1,7 @@
 import {
   createEnvironmentRpcCommand,
   createEnvironmentRpcQueryAtomFamily,
+  createEnvironmentRpcSubscriptionAtomFamily,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId } from "@t3tools/contracts";
@@ -54,6 +55,16 @@ export const sharingManage = {
     staleTimeMs: 0,
   }),
   leaveGrant: command(J5_SHARING_WS_METHODS.leaveGrant),
+  // Who can reach one thread, for anyone who can reach it: a member, or a guest it was shared with.
+  threadPeople: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
+    label: "environment-data:j5-sharing:thread-people",
+    tag: J5_SHARING_WS_METHODS.listThreadPeople,
+    staleTimeMs: 0,
+  }),
+  threadPeopleChanges: createEnvironmentRpcSubscriptionAtomFamily(connectionAtomRuntime, {
+    label: "environment-data:j5-sharing:thread-people-changes",
+    tag: J5_SHARING_WS_METHODS.subscribeThreadPeopleChanges,
+  }),
 };
 
 export const peopleQuery = (environmentId: EnvironmentId) =>
