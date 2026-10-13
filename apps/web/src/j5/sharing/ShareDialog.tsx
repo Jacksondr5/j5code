@@ -65,8 +65,10 @@ const LEVELS: ReadonlyArray<{
 }> = [
   {
     level: "view",
+    // The design's line also promised the right panel's diffs and the in-app browser, which a
+    // guest is not served today; this says what a View guest can read now.
     description:
-      "Read the conversation, the diffs and the in-app browser. Cannot send anything to the agent.",
+      "Read the conversation and the changes each turn made. Cannot send anything to the agent.",
   },
   {
     level: "collaborate",
