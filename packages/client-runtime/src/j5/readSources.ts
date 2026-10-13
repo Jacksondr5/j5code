@@ -74,7 +74,7 @@ export function resolveJ5ReadSource<A>(input: {
 /**
  * Merge read models through the existing catalog; each source keeps its own data and failure state.
  * A server whose config does not report the capability has no J5 ledger: its source is unsupported
- * and its read is never made.
+ * and this read is never made.
  */
 export function createJ5ReadSourcesAtom<A>(input: {
   readonly label: string;

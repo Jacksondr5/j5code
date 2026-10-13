@@ -71,6 +71,3 @@ export const readJsonBody = Effect.gen(function* () {
   const request = yield* HttpServerRequest.HttpServerRequest;
   return yield* Effect.result(request.json);
 });
-
-/** True when the body could not be read as JSON. */
-export const isBodyFailure = Result.isFailure;
