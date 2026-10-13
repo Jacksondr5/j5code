@@ -61,7 +61,9 @@ export function RenameDialog({
   return (
     <Dialog open onOpenChange={(open) => (open ? undefined : onClose())}>
       <DialogPopup className="max-w-sm">
+        {/* `contents`: the popup lays out its header, panel and footer itself. */}
         <form
+          className="contents"
           onSubmit={(event) => {
             event.preventDefault();
             void save();
