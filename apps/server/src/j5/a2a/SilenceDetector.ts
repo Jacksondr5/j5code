@@ -18,6 +18,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import { EventSinkV2 } from "../../orchestration-v2/EventSink.ts";
 import * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
 import { AgentCrewInstanceService } from "./AgentCrewInstanceService.ts";
+import { canBeNotified } from "./deliveryNotices.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { deliveryMessageId, ledgerMessageIdOfDelivery } from "./DeliveryTransport.ts";
 import { formatSilenceNoticeEnvelope } from "./EnvelopeFormatter.ts";
@@ -29,8 +30,6 @@ import {
   LedgerProjectId,
   ExchangeId,
   isHumanParticipantId,
-  isMachineParticipantId,
-  isOutsideAgentParticipantId,
   LedgerMessageId,
   MessageDeliveredPayload,
   ParticipantId,
@@ -516,14 +515,8 @@ const makeLayer = (daemon: boolean) =>
         `;
         const row = rows[0];
         if (rows.length !== 1 || row === undefined) return [];
+        if (!canBeNotified(row.sender_id)) return [];
         const senderId = ParticipantId.make(row.sender_id);
-        if (
-          isHumanParticipantId(senderId) ||
-          isMachineParticipantId(senderId) ||
-          isOutsideAgentParticipantId(senderId)
-        ) {
-          return [];
-        }
         const records = yield* readRunsAndMessages(threadId);
         if (
           records.thread.archivedAt !== null ||
