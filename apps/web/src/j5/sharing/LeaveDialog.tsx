@@ -17,7 +17,7 @@ import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { useProject, useThreadShell } from "../../state/entities";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { leaveChoiceFor, leaveWording } from "./leave.logic";
+import { grantsToLeave, leaveChoiceFor, leaveWording } from "./leave.logic";
 import { ownGrantsQuery, refusalMessage, sharingManage } from "./sharingManage";
 
 /**
@@ -60,12 +60,15 @@ export function LeaveDialog({
     if (choice === null || choice.kind === "through-another-thread") return;
     setBusy(true);
     setError(null);
-    const left = await leaveGrant({ environmentId, input: { target: choice.target } });
-    setBusy(false);
-    if (left._tag === "Failure") {
-      setError(`You could not leave. ${refusalMessage(left)}`);
-      return;
+    for (const target of grantsToLeave(choice)) {
+      const left = await leaveGrant({ environmentId, input: { target } });
+      if (left._tag === "Failure") {
+        setBusy(false);
+        setError(`You could not leave. ${refusalMessage(left)}`);
+        return;
+      }
     }
+    setBusy(false);
     onClose();
     // What was left is gone from this client; the landing shows what is still shared.
     void navigate({ to: "/", replace: true });
@@ -94,7 +97,11 @@ export function LeaveDialog({
                 Cancel
               </Button>
               <Button disabled={busy || choice === null} onClick={() => void leave()}>
-                {busy ? "Leaving…" : "Leave"}
+                {busy
+                  ? "Leaving…"
+                  : choice?.kind === "thread-and-project"
+                    ? "Leave project"
+                    : "Leave"}
               </Button>
             </>
           )}
