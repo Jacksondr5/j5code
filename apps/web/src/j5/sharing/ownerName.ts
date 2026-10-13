@@ -5,18 +5,25 @@ import { useSyncExternalStore } from "react";
 
 import { j5Sharing } from "./guestAccess";
 
-// The server tells a member's connection the owner's name once, when it connects. A name set or
-// changed from this client afterwards is kept here, so the client does not ask for it again
-// before the next connection is told the new one.
-const setHere = new Map<EnvironmentId, string>();
-// Servers this client was told "Not now" for. Kept only until the client is closed, so the
-// question comes back at the next start.
-const notNow = new Set<EnvironmentId>();
-const listeners = new Set<() => void>();
-let version = 0;
+interface OwnerNames {
+  /**
+   * Names set or changed from this client. The server tells a member's connection the owner's
+   * name once, when it connects, so a later change is kept here until the next connection.
+   */
+  readonly setHere: ReadonlyMap<EnvironmentId, string>;
+  /**
+   * Servers the person answered "Not now" for. Kept only until the client is closed, so the
+   * question comes back at the next start.
+   */
+  readonly askedLater: ReadonlySet<EnvironmentId>;
+}
 
-const changed = () => {
-  version += 1;
+// Replaced whole on every change: a reader that holds the old value sees that it is old.
+let state: OwnerNames = { setHere: new Map(), askedLater: new Set() };
+const listeners = new Set<() => void>();
+
+const publish = (next: OwnerNames) => {
+  state = next;
   for (const listener of listeners) listener();
 };
 const subscribe = (listener: () => void) => {
@@ -25,16 +32,14 @@ const subscribe = (listener: () => void) => {
     listeners.delete(listener);
   };
 };
-const readVersion = () => version;
+const read = () => state;
 
 export function rememberOwnerName(environmentId: EnvironmentId, name: string) {
-  setHere.set(environmentId, name);
-  changed();
+  publish({ ...state, setHere: new Map(state.setHere).set(environmentId, name) });
 }
 
 export function askForOwnerNameLater(environmentId: EnvironmentId) {
-  notNow.add(environmentId);
-  changed();
+  publish({ ...state, askedLater: new Set(state.askedLater).add(environmentId) });
 }
 
 const NOT_TOLD = Atom.make<string | null | undefined>(undefined);
@@ -45,13 +50,12 @@ const NOT_TOLD = Atom.make<string | null | undefined>(undefined);
  * a guest's, or the server is from before owners had names).
  */
 export function useOwnerName(environmentId: EnvironmentId | null): string | null | undefined {
-  useSyncExternalStore(subscribe, readVersion, readVersion);
+  const { setHere } = useSyncExternalStore(subscribe, read, read);
   const told = useAtomValue(environmentId === null ? NOT_TOLD : j5Sharing.ownerName(environmentId));
   return environmentId === null ? undefined : (setHere.get(environmentId) ?? told);
 }
 
-/** Whether "Not now" was chosen for a server since this client was opened. */
+/** The servers "Not now" was chosen for since this client was opened. */
 export function useOwnerNameAskedLater(): ReadonlySet<EnvironmentId> {
-  useSyncExternalStore(subscribe, readVersion, readVersion);
-  return notNow;
+  return useSyncExternalStore(subscribe, read, read).askedLater;
 }
