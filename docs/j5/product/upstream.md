@@ -108,13 +108,13 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 #### D34. An agent's browser tab is private unless it names a profile
 
-**Upstream:** when an agent opens a Browser panel tab without naming a profile, the tab uses the person's default browser profile. A profile is one stored browser state per server, so that tab shares cookies and site storage with the person's own tabs and with every other agent's.
+**Upstream:** when an agent opens a Browser panel tab without naming a profile, the tab uses the default profile of the Browser panel. A profile is one stored browser state per server, kept apart from the browsers on the person's own machine, so that tab shares cookies and site storage with the person's panel tabs and with every other agent's.
 
-**J5:** a tab an agent opens without naming a profile is incognito: it has its own storage, which is discarded when the tab closes. An agent that names a profile gets that profile and its saved logins, as upstream's does.
+**J5:** a tab an agent opens without naming a profile is incognito: it has its own storage, which is discarded when the tab closes. An agent that names a profile gets that profile and the logins saved in it, as upstream's does.
 
-**Why:** J5 runs many agents at once, and they test web apps in parallel. In the shared profile two agents on one origin share a sign-in, each test server leaves its cookies behind until requests to `localhost` are refused as too large, and an agent can reach any site the person signed into without having asked to. A rule in the testing skill only protects agents that read it.
+**Why:** J5 runs many agents at once, and they test web apps in parallel. In the shared profile two agents on one origin share a sign-in, each test server leaves its cookies behind until requests to `localhost` are refused as too large, and an agent can reach any site the person signed into in the panel, or imported a login for, without having asked to. A rule in the testing skill only protects agents that read it.
 
-**Consequences:** one changed return in `ServerBrowser.ts` and one clause of the `preview_open` description (`FORK.md` case 74). An agent that needs the person's logins must pass a profile from `preview_status`; the instructions upstream gives agents already say how. An agent's sign-in to a site no longer carries over to its next tab. The person's own tabs, and the tabs the desktop app renders, are unchanged.
+**Consequences:** one changed return in `ServerBrowser.ts` and one clause of the `preview_open` description (`FORK.md` case 74). An agent that needs a profile's logins must pass a profile from `preview_status`; the instructions upstream gives agents already say how. An agent's sign-in to a site no longer carries over to its next tab. The person's own tabs, and the tabs the desktop app renders, are unchanged.
 
 **Decided:** Jackson, 2026-10-13. Recorded in FORK.md case 74.
 

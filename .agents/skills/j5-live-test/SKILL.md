@@ -58,8 +58,8 @@ home points at a real repository or at the developer's data. Then use
 [test-t3-app](../test-t3-app/SKILL.md) for the browser steps.
 
 Each tab you open has its own storage, so it is one signed-in person and
-nothing else can sign it out. Do not pass a `profileId`: a named profile holds
-the developer's saved logins, and every agent that names it shares them.
+nothing else can sign it out. Do not pass a `profileId`: every tab that names
+a profile shares that profile's cookies, across all agents on the server.
 
 Do not seed a test home by hand, copy the live database, or start `vp run dev`
 yourself for a test. The script does not install dependencies: if it says they
