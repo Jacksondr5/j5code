@@ -75,8 +75,11 @@ const addGuest = Effect.fn("liveTestOwnerClient.addGuest")(function* (input: {
   const owner = yield* RpcClient.make(J5SharingRpcGroup);
   const guest = yield* owner[J5_SHARING_WS_METHODS.createGuest]({ displayName: input.name });
   const { personId, displayName } = guest;
-  yield* owner[J5_SHARING_WS_METHODS.putGrant]({ personId, target, level });
-  const link = yield* owner[J5_SHARING_WS_METHODS.createLink]({ personId });
+  // A refused grant takes the person back out, so their name is free for the next try.
+  const link = yield* owner[J5_SHARING_WS_METHODS.putGrant]({ personId, target, level }).pipe(
+    Effect.andThen(owner[J5_SHARING_WS_METHODS.createLink]({ personId })),
+    Effect.tapError(() => Effect.ignore(owner[J5_SHARING_WS_METHODS.removePerson]({ personId }))),
+  );
   return { personId, displayName, target, level, credential: link.credential };
 });
 
