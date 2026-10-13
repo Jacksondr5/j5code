@@ -1,6 +1,5 @@
 import type { AuthEnvironmentScope } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
-import * as Result from "effect/Result";
 import { HttpServerRequest, HttpServerRespondable, HttpServerResponse } from "effect/http";
 
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
