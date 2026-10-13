@@ -46,7 +46,7 @@ import {
   isOutsideAgentParticipantId,
   Participant,
   ParticipantId,
-  type LedgerMessageId,
+  LedgerMessageId,
 } from "./contracts.ts";
 
 export class A2ADeliveryTargetError extends Schema.TaggedError<A2ADeliveryTargetError>()(
@@ -196,6 +196,12 @@ export const deliveryMessageId = (messageId: LedgerMessageId) =>
 /** Whether a thread message is an A2A delivery (a peer message or a platform notice). */
 export const isDeliveryMessageId = (messageId: string) =>
   messageId.startsWith(DELIVERY_MESSAGE_ID_PREFIX);
+
+/** The ledger message a thread's delivery message carries; undefined for any other message. */
+export const ledgerMessageIdOfDelivery = (messageId: string) =>
+  isDeliveryMessageId(messageId)
+    ? LedgerMessageId.make(decodeURIComponent(messageId.slice(DELIVERY_MESSAGE_ID_PREFIX.length)))
+    : undefined;
 
 interface MembershipRow {
   readonly payload: string;

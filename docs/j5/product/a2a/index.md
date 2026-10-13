@@ -79,6 +79,8 @@ The **agent-side policy** is J5's default: a message from an agent **queues** be
 
 A queued message costs its receiver a whole turn, so a stream of small updates becomes a stream of turns. When a sender's message will wait behind the receiver's running turn, the platform tells the sender at once, with the measured backlog, and advises one message in place of many. It advises; it never refuses or holds a send.
 
+The receipt for a queued message records that it **joined the receiver's queue**, not that its turn started. Whether it is waiting, held, running or gone is the state of the run it became, read from that run when something needs it; the ledger keeps no second copy. A queued message that leaves the queue unread, because a person removed it or its run was cancelled before it started, is told to its sender in a platform notice that quotes how the message began, so the sender can send it again. An ask is reported on its Exchange instead, as a stopped receiver. Nothing is told for a message promoted into the running turn, which was read, or for one that went with an archived receiver. A sender on a peer server is not told: a peer server accepts a platform notice only for an Exchange (Jackson, 2026-10-12, [#504](https://github.com/Jacksondr5/j5code/issues/504)).
+
 The **person-side policy** is upstream's: whether the person's own send steers or queues, the shortcuts for choosing, and how the composer and the queued rows present a steer follow upstream on every client (documented in upstream's `docs/user/composer.md`). J5 adds nothing to the person's steer.
 
 ## The person as a participant
@@ -158,6 +160,8 @@ message, ask, reply, plain message, Exchange, intent, urgency, obligation, envel
 
 29. A send to an agent whose turn is running, and which will not take the message into that turn, returns a notice stating how many messages are waiting for it, how many of them the caller sent, and that each will run as its own turn; a send to an idle agent or to a running Codex GPT 6 turn returns no notice, and no send is refused because of the backlog.
 
+30. A queued message from an agent on the same server that is removed from the receiver's queue before its turn starts is reported to its sender once, in a platform notice naming the receiver and quoting how the message began. A message promoted into the running turn, an ask, and a message that went with an archived receiver produce no such notice.
+
 ### Outside agents
 
 30. An outside agent is one participant for each sign-in. Its id is `outside:` followed by the session id, it is shown by the label its client registered, and it needs no registration.
@@ -203,3 +207,4 @@ message, ask, reply, plain message, Exchange, intent, urgency, obligation, envel
 - 2026-10-07 — Squadrons retired: a thread's home is its project, which upstream fixes when the thread is created, and the ledger is keyed by project (Jackson, 2026-10-05; [#412](https://github.com/Jacksondr5/j5code/issues/412)).
 - 2026-10-11 — a sending agent may ask for a steer or a restart; the queue stays the default and the GPT 6 exception stands. AC13 and AC14 rewritten: AC14 no longer says only a person steers (Jackson, [#519](https://github.com/Jacksondr5/j5code/issues/519)).
 - 2026-10-12 — outside agents: an agent signed in from outside the app is a participant for each sign-in, with no thread and no project. It sends plain messages to agents on its own server, recorded in the receiver's project and capped on every send by the level the sign-in was approved at. Nothing is delivered to it. It starts agents in a project it names, at the top level, under the same cap, personas included. AC30–AC40 and the two terminal scenarios (Jackson, 2026-10-11; [#498](https://github.com/Jacksondr5/j5code/issues/498)).
+- 2026-10-12 — a queued message removed before it ran is told to its sender; the delivery receipt is stated as joining the queue, with no stored queued status; AC41 (Jackson, [#504](https://github.com/Jacksondr5/j5code/issues/504)).
