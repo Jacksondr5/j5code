@@ -51,18 +51,17 @@ const subscribe = (listener: () => void) => {
  * Whether a signed-in browser is offered first-run setup. A browser never paired through a share
  * link gets upstream's answer. One that was is a guest's until the server says otherwise, and a
  * guest has no server to set up; when the server says "member" the flag clears and setup is
- * offered again.
+ * offered again. A person who is a guest here and a member of another connected server is
+ * offered it as upstream would, for the server that is theirs: only someone who is a guest
+ * everywhere is passed over.
  */
 export const firstRunSetupOffered = (input: {
   readonly authenticated: boolean;
   readonly pairedThroughShareLink: boolean;
-}) => input.authenticated && !input.pairedThroughShareLink;
+  readonly memberSomewhere: boolean;
+}) => input.authenticated && (!input.pairedThroughShareLink || input.memberSomewhere);
 
-export function useFirstRunSetupOffered(authenticated: boolean): boolean {
-  const pairedThroughShareLink = useSyncExternalStore(
-    subscribe,
-    wasPairedThroughShareLink,
-    () => false,
-  );
-  return firstRunSetupOffered({ authenticated, pairedThroughShareLink });
+/** The remembered flag, read again whenever it is written. */
+export function usePairedThroughShareLink(): boolean {
+  return useSyncExternalStore(subscribe, wasPairedThroughShareLink, () => false);
 }

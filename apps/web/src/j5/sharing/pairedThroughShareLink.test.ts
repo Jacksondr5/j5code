@@ -21,7 +21,11 @@ describe("first-run setup and a browser paired through a share link", () => {
   afterEach(() => vi.unstubAllGlobals());
 
   const offered = (authenticated: boolean) =>
-    firstRunSetupOffered({ authenticated, pairedThroughShareLink: wasPairedThroughShareLink() });
+    firstRunSetupOffered({
+      authenticated,
+      pairedThroughShareLink: wasPairedThroughShareLink(),
+      memberSomewhere: false,
+    });
 
   it("is upstream's answer in a browser never paired through a share link", () => {
     expect(offered(true)).toBe(true);
@@ -37,6 +41,17 @@ describe("first-run setup and a browser paired through a share link", () => {
     rememberPairedThroughShareLink(true);
     rememberPairedThroughShareLink(false);
     expect(offered(true)).toBe(true);
+  });
+
+  it("is offered to someone paired as a guest here who is a member of another connected server", () => {
+    rememberPairedThroughShareLink(true);
+    expect(
+      firstRunSetupOffered({
+        authenticated: true,
+        pairedThroughShareLink: wasPairedThroughShareLink(),
+        memberSomewhere: true,
+      }),
+    ).toBe(true);
   });
 
   it("is upstream's answer where storage cannot be read", () => {

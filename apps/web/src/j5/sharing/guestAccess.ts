@@ -80,6 +80,18 @@ export const GUEST_SKILLS_UNAVAILABLE = "Skills are not available on a server yo
 export const GUEST_LIBRARY_UNAVAILABLE =
   "Personas and Playbooks are not available on a server you are a guest on.";
 
+const memberSomewhereAtom = Atom.make((get) => {
+  for (const id of get(environmentCatalog.catalogValueAtom).entries.keys()) {
+    if (get(j5Sharing.connectionKind(id)) === "member") return true;
+  }
+  return false;
+});
+
+/** Whether some connected server has said this person is a member of it. */
+export function useIsMemberSomewhere(): boolean {
+  return useAtomValue(memberSomewhereAtom);
+}
+
 /** Whether there is at least one server and this person is a guest on all of them. */
 export function useIsGuestEverywhere(): boolean {
   const guests = useAtomValue(guestEnvironmentIdsAtom);

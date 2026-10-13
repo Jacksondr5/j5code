@@ -175,7 +175,7 @@ import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { cn } from "~/lib/utils";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { ProjectEnvironmentBadge } from "./ProjectEnvironmentBadge";
-import { useIsGuest } from "../j5/sharing/guestAccess";
+import { useIsGuestEverywhere } from "../j5/sharing/guestAccess";
 import { buildWithSharingMenuItems, runSharingMenuAction } from "../j5/sharing/sharingMenu";
 import {
   buildDraftActionMenuItems,
@@ -2495,7 +2495,7 @@ export default function Sidebar() {
   const environments = useEnvironmentIdentities();
   const serverConfigs = useAtomValue(environmentServerConfigsAtom);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
-  const isGuest = useIsGuest(primaryEnvironmentId);
+  const isGuest = useIsGuestEverywhere();
   const clearSelection = useThreadSelectionStore((s) => s.clearSelection);
   const setSelectionAnchor = useThreadSelectionStore((s) => s.setAnchor);
   const toggleThreadSelection = useThreadSelectionStore((s) => s.toggleThread);

@@ -21,7 +21,7 @@ import { CommandPalette } from "../components/CommandPalette";
 import { CustomSnoozeDialogHost } from "../components/CustomSnoozeDialog";
 import { ConfirmDialogHost } from "../components/ConfirmDialogHost";
 import { SharingDialogHost } from "../j5/sharing/SharingDialogHost";
-import { useFirstRunSetupOffered } from "../j5/sharing/pairedThroughShareLink";
+import { useFirstRunSetupOffered } from "../j5/sharing/firstRunSetup";
 import { KeybindingsConfigWarning } from "../components/KeybindingsConfigWarning";
 import { FirstRunGate } from "../components/onboarding/FirstRunGate";
 import { ConnectOnboardingDialog } from "../components/cloud/ConnectOnboardingDialog";
