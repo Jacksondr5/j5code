@@ -1,9 +1,13 @@
 import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { Atom } from "effect/reactivity";
-import { useSyncExternalStore } from "react";
+import { useEffect, useSyncExternalStore } from "react";
+
+import { appAtomRegistry } from "../../rpc/atomRegistry";
+import { useEnvironmentQuery } from "../../state/query";
 
 import { j5Sharing } from "./guestAccess";
+import { peopleQuery } from "./sharingManage";
 
 interface OwnerNames {
   /**
@@ -53,6 +57,29 @@ export function useOwnerName(environmentId: EnvironmentId | null): string | null
   const { setHere } = useSyncExternalStore(subscribe, read, read);
   const told = useAtomValue(environmentId === null ? NOT_TOLD : j5Sharing.ownerName(environmentId));
   return environmentId === null ? undefined : (setHere.get(environmentId) ?? told);
+}
+
+/**
+ * The owner's name as the server holds it now, for a flow about to ask for one or show it: the
+ * list of people is read again, since what the connection was told is as old as the connection.
+ * `listed` is `undefined` until the list answers. Only a connection that manages access reads it.
+ */
+export function useOwnerNameNow(environmentId: EnvironmentId, enabled: boolean) {
+  const known = useOwnerName(environmentId);
+  const people = useEnvironmentQuery(enabled ? peopleQuery(environmentId) : null);
+  // Read again each time a flow opens: the cached list may be as old as the connection too.
+  useEffect(() => {
+    if (enabled) appAtomRegistry.refresh(peopleQuery(environmentId));
+  }, [enabled, environmentId]);
+  const owner = people.data?.people.find((person) => person.kind === "member" && person.you);
+  const listed =
+    people.data === null || people.isPending ? undefined : (owner?.displayName ?? null);
+  // A name the list holds is kept as this client's own knowledge, so the flow that asked does not
+  // wait again each time the list is re-read.
+  useEffect(() => {
+    if (enabled && typeof listed === "string") rememberOwnerName(environmentId, listed);
+  }, [enabled, environmentId, listed]);
+  return { known, listed, listFailed: people.error !== null };
 }
 
 /** The servers "Not now" was chosen for since this client was opened. */

@@ -773,6 +773,7 @@ explicitly marked.
 | `apps/web/src/confirmDialog.ts`                                       | R       | 22                                             |
 | `apps/web/src/contextMenuFallback.ts`                                 | N       | 71                                             |
 | `apps/web/src/hooks/useThreadActionMenu.ts`                           | A       | 21, 69, 71                                     |
+| `apps/web/src/hooks/useThreadActionMenu.test.ts`                      | A       | 71                                             |
 | `apps/web/src/routes/__root.tsx`                                      | N       | 71                                             |
 | `apps/web/src/routes/_chat.index.tsx`                                 | R       | B                                              |
 | `apps/web/src/routes/_chat.tsx`                                       | R       | B                                              |

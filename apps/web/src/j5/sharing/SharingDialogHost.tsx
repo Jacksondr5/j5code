@@ -6,8 +6,13 @@ import { type ReactNode, useSyncExternalStore } from "react";
 import { environmentCatalog } from "../../connection/catalog";
 import { j5Sharing } from "./guestAccess";
 import { JoinLinkDialog } from "./JoinLinkDialog";
-import { askForOwnerNameLater, useOwnerName, useOwnerNameAskedLater } from "./ownerName";
-import { serverToAskOwnerNameFor } from "./ownerName.logic";
+import {
+  askForOwnerNameLater,
+  useOwnerName,
+  useOwnerNameAskedLater,
+  useOwnerNameNow,
+} from "./ownerName";
+import { ownerNameCheck, serverToAskOwnerNameFor } from "./ownerName.logic";
 import { OwnerNameDialog } from "./OwnerNameDialog";
 import { ShareDialog } from "./ShareDialog";
 import { closeSharingDialog, sharingDialogStore } from "./sharingDialogs";
@@ -60,9 +65,14 @@ function OwnerNameFirst({
   readonly environmentId: EnvironmentId;
   readonly children: ReactNode;
 }) {
-  const ownerName = useOwnerName(environmentId);
   const canManage = useAtomValue(sharingManage.setOwnerName.permissionAtom(environmentId));
-  if (ownerName !== null || !canManage) return children;
+  // Another client may have named the owner since this connection was told there was no name.
+  const told = useOwnerName(environmentId);
+  const now = useOwnerNameNow(environmentId, canManage && told === null);
+  const check = canManage ? ownerNameCheck(now) : "proceed";
+  // "proceed" on the list's word alone lasts one render: the name is then this client's own.
+  if (check === "wait" || (canManage && now.known === null && check === "proceed")) return null;
+  if (check === "proceed") return children;
   return (
     <OwnerNameDialog
       environmentId={environmentId}
@@ -75,11 +85,13 @@ function OwnerNameFirst({
 }
 
 function ChangeOwnerName({ environmentId }: { readonly environmentId: EnvironmentId }) {
-  const ownerName = useOwnerName(environmentId);
+  // The name is shown to be changed, so it is the server's now, not what the connection was told.
+  const now = useOwnerNameNow(environmentId, true);
+  if (now.listed === undefined && !now.listFailed) return null;
   return (
     <OwnerNameDialog
       environmentId={environmentId}
-      current={ownerName ?? null}
+      current={now.listed ?? now.known ?? null}
       dismissLabel="Cancel"
       onDismiss={closeSharingDialog}
       onSaved={closeSharingDialog}

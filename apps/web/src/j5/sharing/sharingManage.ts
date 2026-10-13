@@ -78,8 +78,3 @@ const refusalCode = (error: unknown) => {
 
 /** Whether a refusal is the server's "that name is someone else's", by the refusal's stable name. */
 export const nameIsInUse = (error: unknown) => refusalCode(error) === "PersonNameTakenError";
-
-/** Whether the server refused because the person it belongs to has no name yet. */
-export function ownerNameIsRequired(result: Parameters<typeof squashAtomCommandFailure>[0]) {
-  return refusalCode(squashAtomCommandFailure(result)) === "OwnerNameRequiredError";
-}

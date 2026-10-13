@@ -1,4 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
+import { Atom } from "effect/reactivity";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentId, ScopedProjectRef, ThreadId } from "@t3tools/contracts";
 import { Link2Icon, UsersIcon } from "lucide-react";
@@ -17,6 +18,8 @@ import { sharingManage } from "./sharingManage";
  * link for the open thread (Shared server AC18). A connection without "Manage access" sees them
  * disabled; a guest, who shares nothing onward, does not see them.
  */
+const NOT_A_GUEST = Atom.make(false);
+
 export function useSharingPaletteItems(input: {
   readonly activeThread: {
     readonly environmentId: EnvironmentId;
@@ -28,7 +31,9 @@ export function useSharingPaletteItems(input: {
   const { activeThread, projectRef } = input;
   const environmentId = activeThread?.environmentId ?? projectRef?.environmentId ?? null;
   const canManage = useAtomValue(sharingManage.putGrant.permissionAtom(environmentId));
-  const isGuest = useAtomValue(j5Sharing.isGuest(environmentId ?? ("" as EnvironmentId)));
+  const isGuest = useAtomValue(
+    environmentId === null ? NOT_A_GUEST : j5Sharing.isGuest(environmentId),
+  );
   const project = useProject(
     projectRef === null ? null : scopeProjectRef(projectRef.environmentId, projectRef.projectId),
   );
