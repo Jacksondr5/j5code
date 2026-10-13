@@ -12,6 +12,7 @@ import {
   AutocompletePopup,
 } from "../../components/ui/autocomplete";
 import { useProjects, useThreadShells } from "../../state/entities";
+import { formatRelativeTimeLabel } from "../../timestampFormat";
 
 interface PickerItem {
   readonly key: string;
@@ -66,7 +67,13 @@ export function TargetPicker({
           return {
             key: `thread:${thread.id}`,
             title: thread.title,
-            detail: project === null ? "Thread" : `Thread · ${project.title}`,
+            // Two threads in a project can share a title; when each was last active tells them
+            // apart, as it does in the sidebar.
+            detail: [
+              "Thread",
+              ...(project === null ? [] : [project.title]),
+              formatRelativeTimeLabel(thread.latestUserMessageAt ?? thread.updatedAt),
+            ].join(" · "),
             target: { kind: "thread" as const, threadId: thread.id },
             project,
           };
