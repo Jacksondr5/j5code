@@ -1,8 +1,13 @@
+import { useSyncExternalStore } from "react";
+
 // Whether this browser was last paired to its server through a share link. It is one flag in the
 // browser's own storage, which is already per server: a browser reaches one server per origin.
 // It decides nothing about access. It only lets the first screen wait for the server to say the
-// connection is a guest's, instead of starting a draft a guest could not send.
+// connection is a guest's, instead of starting a draft a guest could not send or offering them
+// the setup a member gets on a new server.
 const KEY = "j5:sharing:paired-through-share-link";
+
+const listeners = new Set<() => void>();
 
 export function wasPairedThroughShareLink(): boolean {
   try {
@@ -19,4 +24,32 @@ export function rememberPairedThroughShareLink(paired: boolean): void {
   } catch {
     // Storage that cannot be written costs a guest one draft screen, which the server refuses.
   }
+  for (const listener of listeners) listener();
+}
+
+const subscribe = (listener: () => void) => {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+};
+
+/**
+ * Whether a signed-in browser is offered first-run setup. A browser never paired through a share
+ * link gets upstream's answer. One that was is a guest's until the server says otherwise, and a
+ * guest has no server to set up; when the server says "member" the flag clears and setup is
+ * offered again.
+ */
+export const firstRunSetupOffered = (input: {
+  readonly authenticated: boolean;
+  readonly pairedThroughShareLink: boolean;
+}) => input.authenticated && !input.pairedThroughShareLink;
+
+export function useFirstRunSetupOffered(authenticated: boolean): boolean {
+  const pairedThroughShareLink = useSyncExternalStore(
+    subscribe,
+    wasPairedThroughShareLink,
+    () => false,
+  );
+  return firstRunSetupOffered({ authenticated, pairedThroughShareLink });
 }
