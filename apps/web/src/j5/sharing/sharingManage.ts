@@ -29,6 +29,8 @@ export const sharingManage = {
     tag: J5_SHARING_WS_METHODS.listOpenLinks,
     staleTimeMs: 0,
   }),
+  // Names the person the server belongs to; a guest and an agent know them by it.
+  setOwnerName: command(J5_SHARING_WS_METHODS.setOwnerName),
   createGuest: command(J5_SHARING_WS_METHODS.createGuest),
   putGrant: command(J5_SHARING_WS_METHODS.putGrant),
   createLink: command(J5_SHARING_WS_METHODS.createLink),
@@ -69,8 +71,15 @@ export function refusalMessage(result: Parameters<typeof squashAtomCommandFailur
     : "The server did not say why.";
 }
 
-/** Whether a refusal is the server's "that name is someone else's", by the refusal's stable name. */
-export function nameIsInUse(error: unknown): boolean {
+const refusalCode = (error: unknown) => {
   const code = (error as { readonly code?: unknown } | null)?.code;
-  return typeof code === "string" && /name.*(in.?use|taken)/iu.test(code);
+  return typeof code === "string" ? code : null;
+};
+
+/** Whether a refusal is the server's "that name is someone else's", by the refusal's stable name. */
+export const nameIsInUse = (error: unknown) => refusalCode(error) === "PersonNameTakenError";
+
+/** Whether the server refused because the person it belongs to has no name yet. */
+export function ownerNameIsRequired(result: Parameters<typeof squashAtomCommandFailure>[0]) {
+  return refusalCode(squashAtomCommandFailure(result)) === "OwnerNameRequiredError";
 }

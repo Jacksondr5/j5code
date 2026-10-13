@@ -14,6 +14,11 @@ export type SharingDialogRequest =
       readonly target: SharingGrantTarget;
     }
   | {
+      /** The person the server belongs to sets or changes the name they are known by on it. */
+      readonly kind: "owner-name";
+      readonly environmentId: EnvironmentId;
+    }
+  | {
       readonly kind: "join-link";
       readonly environmentId: EnvironmentId;
       readonly threadId: ThreadId;
