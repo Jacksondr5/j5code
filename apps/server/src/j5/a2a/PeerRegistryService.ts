@@ -223,6 +223,17 @@ export interface PeerRegistryServiceShape {
   ) => Effect.Effect<PeerConnection | null, SqlError | PeerSessionReadError>;
   /** A signal each time a peer is recorded, rotated or removed, for the pollers to follow. */
   readonly subscribeChanges: Effect.Effect<Stream.Stream<void>, never, Scope.Scope>;
+  /**
+   * A signal each time a write changed something `list` reports, for the clients' `peers`
+   * revision. It is apart from `subscribeChanges` because a heartbeat moves it and no poller
+   * should be reconciled by one.
+   */
+  readonly subscribeListChanges: Effect.Effect<Stream.Stream<void>, never, Scope.Scope>;
+  /**
+   * Says a session a peer holds on this server was issued: `list` reports whether one is live,
+   * and sessions are the auth database's, which this registry does not watch.
+   */
+  readonly sessionChanged: Effect.Effect<void>;
   /** Proves the credential at the origin, then upserts; re-adding the same peer rotates its origin and credential. */
   readonly add: (
     input: AddPeerInput,
@@ -436,6 +447,16 @@ export const layer: Layer.Layer<
     const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
     const changes = yield* PubSub.unbounded<void>();
     const changed = PubSub.publish(changes, undefined);
+    // Published by each write below that changes what `list` reports: a peer recorded, rotated,
+    // adopted or removed, a heartbeat, the last error and a peer's name. A write `list` does not
+    // show publishes nothing: a store grant, capabilities, and a roster snapshot apart from the
+    // heartbeat it arrives with. Waiting messages are deliveries, which `ReadChangeFeeds` follows
+    // in the ledger. A session revoked or expired in the auth database by some other path has no
+    // signal; a client's read on focus covers it.
+    const listChanges = yield* PubSub.unbounded<void>();
+    const listChanged = PubSub.publish(listChanges, undefined).pipe(Effect.asVoid);
+    const listChangedWhen = (rows: ReadonlyArray<unknown>) =>
+      rows.length > 0 ? listChanged : Effect.void;
 
     /** The subjects that currently hold a live session here; a peer without one cannot deliver to us. */
     const liveSubjects = serverAuth.listSessions().pipe(
@@ -565,6 +586,7 @@ export const layer: Layer.Layer<
                   updated_at = ${input.acceptedAt}
               WHERE environment_id = ${hello.environmentId}
             `;
+            yield* listChanged;
           }
           return yield* new PeerOriginConflictError({
             environmentId: hello.environmentId,
@@ -601,6 +623,7 @@ export const layer: Layer.Layer<
         `;
         const row = rows[0]!;
         yield* changed;
+        yield* listChanged;
         const live = yield* liveSubjects;
         const waiting = yield* waitingByEnvironment(row.environment_id);
         return { peer: recordFromRow(row, live, waiting), created: existing === null };
@@ -672,7 +695,10 @@ export const layer: Layer.Layer<
             return { removed: rows.length > 0 };
           }),
         )
-        .pipe(Effect.tap(() => changed));
+        .pipe(
+          Effect.tap(() => changed),
+          Effect.tap(({ removed }) => (removed ? listChanged : Effect.void)),
+        );
 
     const probe: PeerRegistryServiceShape["probe"] = (origin) =>
       Effect.gen(function* () {
@@ -734,23 +760,28 @@ export const layer: Layer.Layer<
       `.pipe(Effect.asVoid);
 
     const adoptStorePeer: PeerRegistryServiceShape["adoptStorePeer"] = (input) =>
-      sql.withTransaction(
-        Effect.gen(function* () {
-          if ((yield* readRow(input.environmentId)) !== null) return true;
-          const grant = yield* sql`
-            SELECT 1 FROM j5_a2a_peer_store_grant
-            WHERE session_id = ${input.sessionId} AND environment_id = ${input.environmentId}
-          `;
-          if (grant.length === 0) return false;
-          // Its name is its environment id until its first poll tells this server its own.
-          yield* sql`
-            INSERT INTO j5_a2a_peer (environment_id, label, link_mode, created_at, updated_at)
-            VALUES (${input.environmentId}, ${input.environmentId}, 'store', ${input.at}, ${input.at})
-          `;
-          yield* sql`DELETE FROM j5_a2a_peer_store_grant WHERE environment_id = ${input.environmentId}`;
-          return true;
-        }),
-      );
+      sql
+        .withTransaction(
+          Effect.gen(function* () {
+            if ((yield* readRow(input.environmentId)) !== null) return "recorded" as const;
+            const grant = yield* sql`
+              SELECT 1 FROM j5_a2a_peer_store_grant
+              WHERE session_id = ${input.sessionId} AND environment_id = ${input.environmentId}
+            `;
+            if (grant.length === 0) return "refused" as const;
+            // Its name is its environment id until its first poll tells this server its own.
+            yield* sql`
+              INSERT INTO j5_a2a_peer (environment_id, label, link_mode, created_at, updated_at)
+              VALUES (${input.environmentId}, ${input.environmentId}, 'store', ${input.at}, ${input.at})
+            `;
+            yield* sql`DELETE FROM j5_a2a_peer_store_grant WHERE environment_id = ${input.environmentId}`;
+            return "adopted" as const;
+          }),
+        )
+        .pipe(
+          Effect.tap((outcome) => (outcome === "adopted" ? listChanged : Effect.void)),
+          Effect.map((outcome) => outcome !== "refused"),
+        );
 
     const recordPoll: PeerRegistryServiceShape["recordPoll"] = (facts) =>
       Effect.gen(function* () {
@@ -774,6 +805,7 @@ export const layer: Layer.Layer<
           WHERE environment_id = ${facts.environmentId} AND link_mode IN ('store', 'poll')
           RETURNING roster_hash
         `;
+        yield* listChangedWhen(rows);
         return { rosterHash: rows[0]?.roster_hash ?? null };
       });
 
@@ -781,7 +813,8 @@ export const layer: Layer.Layer<
       sql`
         UPDATE j5_a2a_peer SET last_polled_at = ${at}, last_error = NULL
         WHERE environment_id = ${environmentId}
-      `.pipe(Effect.asVoid);
+        RETURNING environment_id
+      `.pipe(Effect.flatMap(listChangedWhen));
 
     const recordLastError: PeerRegistryServiceShape["recordLastError"] = (environmentId, error) =>
       sql`
@@ -792,16 +825,19 @@ export const layer: Layer.Layer<
             OR substr(last_error, 1, ${PEER_POLL_STOPPED_PREFIX.length}) <> ${PEER_POLL_STOPPED_PREFIX}
             OR substr(${error}, 1, ${PEER_POLL_STOPPED_PREFIX.length}) = ${PEER_POLL_STOPPED_PREFIX}
           )
-      `.pipe(Effect.asVoid);
+        RETURNING environment_id
+      `.pipe(Effect.flatMap(listChangedWhen));
 
     const recordLabel: PeerRegistryServiceShape["recordLabel"] = (environmentId, reported) =>
       Effect.gen(function* () {
         const label = reportedLabel(reported);
         if (label !== undefined) {
-          yield* sql`
+          const renamed = yield* sql`
             UPDATE j5_a2a_peer SET label = ${label}
             WHERE environment_id = ${environmentId} AND label <> ${label}
+            RETURNING environment_id
           `;
+          yield* listChangedWhen(renamed);
         }
         return (yield* readRow(environmentId))?.label ?? null;
       });
@@ -828,6 +864,8 @@ export const layer: Layer.Layer<
 
     return PeerRegistryService.of({
       subscribeChanges: PubSub.subscribe(changes).pipe(Effect.map(Stream.fromSubscription)),
+      subscribeListChanges: PubSub.subscribe(listChanges).pipe(Effect.map(Stream.fromSubscription)),
+      sessionChanged: listChanged,
       selfEnvironmentId: identity.getEnvironmentId,
       // Cleaned and capped as a peer will store it: a long computer name must not fail every exchange.
       selfLabel: identity.getDescriptor.pipe(
