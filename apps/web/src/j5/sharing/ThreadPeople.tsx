@@ -201,7 +201,8 @@ export function ThreadPeopleSection({
       headingId="j5-thread-people-heading"
       title="People"
       actions={
-        isGuest ? null : (
+        // Only a connection that can manage access gets controls; anyone else reads the section.
+        isGuest || !canManage ? null : (
           <>
             <Button
               size="icon-xs"

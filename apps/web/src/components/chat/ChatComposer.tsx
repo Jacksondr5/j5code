@@ -7044,7 +7044,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     : prompt.trim() ||
                       (showProviderUnavailable
                         ? "Enable a provider in Settings"
-                        : "Ask anything...")}
+                        : // J5 (case 73): the collapsed composer says the same to a guest with View.
+                          (viewOnlyComposerProps.placeholder ?? "Ask anything..."))}
                 </button>
                 {collapsedComposerImagePreviews}
                 <button
