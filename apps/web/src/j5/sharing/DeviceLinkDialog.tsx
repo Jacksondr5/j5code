@@ -64,7 +64,7 @@ export function DeviceLinkDialog({
           </DialogTitle>
           <DialogDescription>
             {link === null
-              ? `A link that pairs one more device as ${person.name}. They reach what they already reach.`
+              ? `One more device for ${person.name}, who reaches what they already reach.`
               : `Send this to ${person.name} over a channel you trust. Whoever opens it becomes ${person.name} on this server, on that one device.`}
           </DialogDescription>
         </DialogHeader>
