@@ -207,9 +207,12 @@ function SharedProject({
 }) {
   const projectId = grant.target.kind === "project" ? grant.target.projectId : null;
   const project = useProject(projectId === null ? null : scopeProjectRef(environmentId, projectId));
-  const threads = useThreadShells().filter(
-    (thread) => thread.environmentId === environmentId && thread.projectId === projectId,
-  );
+  // Most recently active first, as the sidebar lists them.
+  const lastActive = (thread: { latestUserMessageAt?: string | null; updatedAt: string }) =>
+    thread.latestUserMessageAt ?? thread.updatedAt;
+  const threads = useThreadShells()
+    .filter((thread) => thread.environmentId === environmentId && thread.projectId === projectId)
+    .toSorted((left, right) => lastActive(right).localeCompare(lastActive(left)));
   if (project === null) return null;
   return (
     <div className="flex flex-col gap-1 py-1">
