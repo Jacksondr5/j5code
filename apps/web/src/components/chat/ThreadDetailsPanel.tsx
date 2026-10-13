@@ -21,6 +21,7 @@ import { OpenInPicker } from "./OpenInPicker";
 import { ThreadDetailsSection } from "./ThreadDetailsSection";
 import { ThreadAutomationsPanel } from "./ThreadAutomationsPanel";
 import { ThreadRelationshipsPanel } from "./ThreadRelationshipsControl";
+import { ThreadPeopleSection } from "../../j5/sharing/ThreadPeople";
 
 export interface ThreadDetailsPanelProps extends Pick<
   ComponentProps<typeof ThreadDetailsCard>,
@@ -181,6 +182,10 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
               environmentId={props.environmentId}
               threadId={props.threadId}
             />
+          ) : null}
+
+          {density === "full" && !props.draftId ? (
+            <ThreadPeopleSection environmentId={props.environmentId} threadId={props.threadId} />
           ) : null}
         </>
       )}

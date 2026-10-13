@@ -249,6 +249,7 @@ function ActiveJoinLink({
         <ShareLinkPanel
           environmentId={environmentId}
           secret={token}
+          kind="join"
           whoCannotOpen="People"
           meta={meta}
         />

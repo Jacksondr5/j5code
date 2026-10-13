@@ -47,12 +47,22 @@ export const sharingManage = {
   revokeLink: command(J5_SHARING_WS_METHODS.revokeLink),
   // Renaming also confirms a name a guest gave themselves; the two are one request.
   renamePerson: command(J5_SHARING_WS_METHODS.renamePerson),
+  // What a guest's own connection asks and does about the grants it holds (AC25).
+  ownGrants: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
+    label: "environment-data:j5-sharing:own-grants",
+    tag: J5_SHARING_WS_METHODS.listOwnGrants,
+    staleTimeMs: 0,
+  }),
+  leaveGrant: command(J5_SHARING_WS_METHODS.leaveGrant),
 };
 
 export const peopleQuery = (environmentId: EnvironmentId) =>
   sharingManage.people({ environmentId, input: {} });
 export const openLinksQuery = (environmentId: EnvironmentId) =>
   sharingManage.openLinks({ environmentId, input: {} });
+
+export const ownGrantsQuery = (environmentId: EnvironmentId) =>
+  sharingManage.ownGrants({ environmentId, input: {} });
 
 /** Reads both lists again after a change this client made. */
 export function refreshSharing(environmentId: EnvironmentId) {

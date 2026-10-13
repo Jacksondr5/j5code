@@ -7,6 +7,7 @@ import { environmentCatalog } from "../../connection/catalog";
 import { j5Sharing } from "./guestAccess";
 import { DeviceLinkDialog } from "./DeviceLinkDialog";
 import { RenameDialog } from "./RenameDialog";
+import { LeaveDialog } from "./LeaveDialog";
 import { JoinLinkDialog } from "./JoinLinkDialog";
 import {
   askForOwnerNameLater,
@@ -66,6 +67,15 @@ export function SharingDialogHost() {
           key={opening}
           environmentId={request.environmentId}
           person={request.person}
+          onClose={closeSharingDialog}
+        />
+      );
+    case "leave":
+      return (
+        <LeaveDialog
+          key={opening}
+          environmentId={request.environmentId}
+          threadId={request.threadId}
           onClose={closeSharingDialog}
         />
       );

@@ -11,6 +11,7 @@ import { environmentCatalog } from "../../connection/catalog";
 import { connectionAtomRuntime } from "../../connection/runtime";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { useEnvironmentScope } from "../../state/session";
+import { provideSharingMenuGuestRead } from "./sharingMenu";
 import { provideSharingThreadOperability } from "./threadOperability";
 
 export const j5Sharing = createSharingEnvironmentAtoms(connectionAtomRuntime);
@@ -42,6 +43,10 @@ provideSharingThreadOperability((thread) =>
     threadId: thread.threadId,
     permitted: true,
   }),
+);
+
+provideSharingMenuGuestRead((thread) =>
+  appAtomRegistry.get(j5Sharing.isGuest(thread.environmentId)),
 );
 
 /** The connected servers this person is a guest on, by environment id. */
