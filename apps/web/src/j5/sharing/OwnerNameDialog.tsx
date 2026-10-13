@@ -69,7 +69,9 @@ export function OwnerNameDialog({
   return (
     <Dialog open onOpenChange={(open) => (open ? undefined : onDismiss())}>
       <DialogPopup className="max-w-md">
+        {/* `contents`: the popup lays out its header, panel and footer itself. */}
         <form
+          className="contents"
           onSubmit={(event) => {
             event.preventDefault();
             void save();
