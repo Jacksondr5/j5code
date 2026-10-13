@@ -10,7 +10,11 @@
  * prints the `pair` command that mints one; the token follows `#token=`). It
  * prints one line of JSON: the person, the grant, and the credential of a
  * share link for them. `setup-agent-live-test.ts guest` runs this and adds the
- * guards; run directly, it acts on whatever server `--origin` names.
+ * guards.
+ *
+ * It is for a disposable test server only: run directly, it acts on whatever
+ * server `--origin` names, and the pairing token and the returned credential
+ * pass on the command line and through stdout.
  */
 import {
   ORCHESTRATION_PROTOCOL_QUERY_PARAM,
