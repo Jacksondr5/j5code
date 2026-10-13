@@ -22,6 +22,7 @@ export function withSharingMenuItems<Id extends string>(
   const share: ContextMenuItem<SharingMenuActionId> = {
     id: SHARE_THREAD,
     label: "Share thread…",
+    icon: "users",
     disabled: !readEnvironmentScope(thread.environmentId, AuthAccessWriteScope),
   };
   const after = items.findIndex((item) => item.id === "copy");
