@@ -6,6 +6,7 @@ import { type ReactNode, useSyncExternalStore } from "react";
 import { environmentCatalog } from "../../connection/catalog";
 import { j5Sharing } from "./guestAccess";
 import { DeviceLinkDialog } from "./DeviceLinkDialog";
+import { GuestRevokedThreadRedirect } from "./GuestRevokedThreadRedirect";
 import { RenameDialog } from "./RenameDialog";
 import { LeaveDialog } from "./LeaveDialog";
 import { JoinLinkDialog } from "./JoinLinkDialog";
@@ -21,8 +22,20 @@ import { ShareDialog } from "./ShareDialog";
 import { closeSharingDialog, sharingDialogStore } from "./sharingDialogs";
 import { sharingManage } from "./sharingManage";
 
-/** Draws whichever of sharing's dialogs was asked for. Mounted once, at the root. */
+/**
+ * Draws whichever of sharing's dialogs was asked for. Mounted once, at the root, so it also holds
+ * the one thing sharing does on every page: taking a guest off a thread that is no longer theirs.
+ */
 export function SharingDialogHost() {
+  return (
+    <>
+      <GuestRevokedThreadRedirect />
+      <SharingDialogs />
+    </>
+  );
+}
+
+function SharingDialogs() {
   const { request, opening } = useSyncExternalStore(
     sharingDialogStore.subscribe,
     sharingDialogStore.read,

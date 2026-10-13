@@ -136,3 +136,15 @@ function isDescription(body: unknown): body is SharingLinkDescription {
     Array.isArray(value.opens)
   );
 }
+
+/**
+ * Whether a guest is on a thread's address with nothing left that they can read. With a thread
+ * left, upstream takes them off a missing thread's address itself.
+ */
+export const guestIsLeftOnNothing = (input: {
+  readonly isGuest: boolean;
+  readonly onThreadAddress: boolean;
+  /** The server has said which threads this connection reaches. */
+  readonly listed: boolean;
+  readonly threadCount: number;
+}) => input.isGuest && input.onThreadAddress && input.listed && input.threadCount === 0;

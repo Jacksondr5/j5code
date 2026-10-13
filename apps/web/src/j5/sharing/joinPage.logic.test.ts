@@ -2,7 +2,13 @@ import type { SharingLinkDescription } from "@t3tools/contracts/j5";
 import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
-import { invitationFor, invitationList, joinPageState, landingFor } from "./joinPage.logic";
+import {
+  invitationFor,
+  invitationList,
+  joinPageState,
+  landingFor,
+  guestIsLeftOnNothing,
+} from "./joinPage.logic";
 
 const noIcon = { projectIcon: null, projectFaviconUrl: null };
 const thread = (threadTitle: string, projectTitle: string | null = "Live test repo") =>
@@ -132,5 +138,23 @@ describe("the first screen", () => {
 
   it("is the guest's own once the server says so", () => {
     expect(landingFor({ kind: "guest", pairedThroughShareLink: false })).toBe("guest");
+  });
+});
+
+describe("a guest whose last share is taken away while they have it open", () => {
+  const onThread = { isGuest: true, onThreadAddress: true, listed: true, threadCount: 0 };
+
+  it("is taken off the thread's address", () => {
+    expect(guestIsLeftOnNothing(onThread)).toBe(true);
+  });
+
+  it("is left to upstream while another thread remains, and before the server has listed any", () => {
+    expect(guestIsLeftOnNothing({ ...onThread, threadCount: 1 })).toBe(false);
+    expect(guestIsLeftOnNothing({ ...onThread, listed: false })).toBe(false);
+  });
+
+  it("never moves a member, or a guest who is somewhere else", () => {
+    expect(guestIsLeftOnNothing({ ...onThread, isGuest: false })).toBe(false);
+    expect(guestIsLeftOnNothing({ ...onThread, onThreadAddress: false })).toBe(false);
   });
 });
