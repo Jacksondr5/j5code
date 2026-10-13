@@ -57,6 +57,12 @@ ports, the pairing URL, the project to use, and its commands. Nothing in that
 home points at a real repository or at the developer's data. Then use
 [test-t3-app](../test-t3-app/SKILL.md) for the browser steps.
 
+Open every test tab with `profileId: "incognito"`. Each incognito tab has its
+own storage, so it is one signed-in person and nothing else can sign it out. A
+tab opened without a profile uses the default browser profile, which every
+agent on the server shares with the developer, and which keeps the cookies of
+every test server before yours.
+
 Do not seed a test home by hand, copy the live database, or start `vp run dev`
 yourself for a test. The script does not install dependencies: if it says they
 are missing, install them and run it again.
@@ -101,9 +107,7 @@ A worktree holds one setup at a time. Pass a flag to the first start, or to
 
 - **After any `rebuild`**, a tab that was open before it can stay on the
   pairing form. Press "Reload app" there.
-- **`--fresh`.** The home has no project and no pinned model. Open it in a tab
-  with `profileId: "incognito"`: the default browser profile may have finished
-  onboarding already, and then the wizard does not show. After pairing, wait
+- **`--fresh`.** The home has no project and no pinned model. After pairing, wait
   for the wizard's own text, since there is no composer yet. Add only the test
   repository the script names, or choose "Do not import projects". Pick your
   model by hand.
@@ -181,8 +185,7 @@ sent through the UI.
 
 Use `--base <ref>` so base and head show the same data. The ref is the PR's
 own base, which for a stacked PR is the layer beneath it, not `j5/main`. Open
-the second server in a tab with `profileId: "incognito"`, so the two do not
-share a login. Capture at 1280x800 as test-t3-app describes, then upload:
+each server in its own tab. Capture at 1280x800 as test-t3-app describes, then upload:
 
 ```bash
 node scripts/j5/pr-evidence.ts <pr> --pair "<caption>" <before.png> <after.png>
