@@ -24,7 +24,7 @@ import {
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { threadEnvironment } from "../state/threads";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
-import { readCanOperateThread } from "../j5/sharing/guestAccess";
+import { readCanOperateThread } from "../j5/sharing/threadOperability";
 import { readEnvironmentScope } from "../state/session";
 import {
   readEnvironmentSupportsAutoSettleOptOut,
