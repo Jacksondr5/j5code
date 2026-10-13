@@ -103,7 +103,8 @@ describe("how long a link has left", () => {
   it("counts hours and minutes below a day", () => {
     expect(lifetimeLeft(NOW + 23 * HOUR + 59 * 60_000, NOW)).toBe("23 hours");
     expect(lifetimeLeft(NOW + HOUR, NOW)).toBe("1 hour");
-    expect(lifetimeLeft(NOW + 90_000, NOW)).toBe("1 minute");
+    expect(lifetimeLeft(NOW + HOUR - 2_000, NOW)).toBe("1 hour");
+    expect(lifetimeLeft(NOW + 30_000, NOW)).toBe("1 minute");
   });
 
   it("has nothing left once it has passed", () => {

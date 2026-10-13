@@ -7,6 +7,7 @@ import type {
   SharingLink,
   SharingPerson,
 } from "@t3tools/contracts/j5";
+import { isPersonName } from "@t3tools/contracts/j5";
 import { useEffect, useState } from "react";
 
 import { Alert, AlertDescription } from "../../components/ui/alert";
@@ -38,6 +39,7 @@ import {
   DEFAULT_LINK_LIFETIME,
   guestsMatchingName,
   levelLabel,
+  NAME_NOT_USABLE,
   namedLinkMeta,
   type LinkLifetime,
 } from "./shareLink.logic";
@@ -124,7 +126,7 @@ export function ShareDialog({
   const noun = target.kind === "thread" ? "thread" : "project";
 
   const makeLink = async (personId: string) => {
-    const created = await createLink({ environmentId, input: { personId } });
+    const created = await createLink({ environmentId, input: { personId, lifetime } });
     if (created._tag === "Failure") {
       setError(`The link could not be made. ${refusalMessage(created)}`);
       return;
@@ -140,9 +142,14 @@ export function ShareDialog({
     try {
       let person = existing ?? made;
       if (person === null) {
+        // The contract refuses such a name before the server sees it, with no words for a person.
+        if (!isPersonName(typedName)) {
+          setError(NAME_NOT_USABLE);
+          return;
+        }
         const guest = await createGuest({ environmentId, input: { displayName: typedName } });
         if (guest._tag === "Failure") {
-          setError(`That name was refused. ${refusalMessage(guest)}`);
+          setError(refusalMessage(guest));
           return;
         }
         person = guest.value;

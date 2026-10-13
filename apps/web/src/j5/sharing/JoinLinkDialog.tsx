@@ -74,7 +74,7 @@ export function JoinLinkDialog({
   const make = async () => {
     setBusy(true);
     setError(null);
-    const created = await createOpenLink({ environmentId, input: { threadId } });
+    const created = await createOpenLink({ environmentId, input: { threadId, lifetime } });
     if (created._tag === "Failure") {
       setError(`The link could not be made. ${refusalMessage(created)}`);
     } else {

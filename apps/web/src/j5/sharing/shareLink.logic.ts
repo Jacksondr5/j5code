@@ -1,5 +1,10 @@
 import type { AdvertisedEndpoint } from "@t3tools/contracts";
-import type { SharingGrantLevel, SharingOpenLink, SharingPerson } from "@t3tools/contracts/j5";
+import type {
+  SharingGrantLevel,
+  SharingLinkLifetime,
+  SharingOpenLink,
+  SharingPerson,
+} from "@t3tools/contracts/j5";
 
 import {
   isQrShareableEndpoint,
@@ -12,21 +17,23 @@ import {
 } from "../../components/settings/pairingUrls";
 
 /** How long a link stays usable, as the Share and Join link dialogs offer it. */
-export const LINK_LIFETIMES = [
+export const LINK_LIFETIMES: ReadonlyArray<{
+  readonly id: SharingLinkLifetime;
+  readonly label: string;
+}> = [
   { id: "1h", label: "1 hour" },
   { id: "24h", label: "24 hours" },
   { id: "7d", label: "7 days" },
   { id: "30d", label: "30 days" },
-] as const;
-export type LinkLifetime = (typeof LINK_LIFETIMES)[number]["id"];
+];
+export type LinkLifetime = SharingLinkLifetime;
 export const DEFAULT_LINK_LIFETIME: LinkLifetime = "7d";
 
-/**
- * Whether the server takes a chosen lifetime. Until it does, every link lasts seven days and the
- * dialogs show that choice without letting it be changed, so they never promise a life the link
- * will not have.
- */
-export const LINK_LIFETIME_IS_CHOSEN = false;
+/** What a person is told when a name is not one the server will take, before it is sent. */
+export const NAME_NOT_USABLE =
+  "Use a name of one line, up to 80 characters, with no invisible characters.";
+/** What a person is told when the name they chose is someone else's on this server. */
+export const NAME_IN_USE = "That name is already in use on this server. Choose another.";
 
 const LEVEL_LABELS: Record<SharingGrantLevel, string> = {
   view: "View",
@@ -138,7 +145,8 @@ const plural = (count: number, one: string, many: string) => (count === 1 ? one 
 
 /** "7 days", "23 hours", "40 minutes": how long until a link stops working, in whole units. */
 export function lifetimeLeft(expiresAtMs: number, nowMs: number): string | null {
-  const minutes = Math.floor((expiresAtMs - nowMs) / 60_000);
+  // Rounded up, so a link made for an hour reads "1 hour" and not "59 minutes" a moment later.
+  const minutes = Math.ceil((expiresAtMs - nowMs) / 60_000);
   if (minutes < 1) return null;
   if (minutes < 60) return `${minutes} ${plural(minutes, "minute", "minutes")}`;
   const hours = Math.floor(minutes / 60);

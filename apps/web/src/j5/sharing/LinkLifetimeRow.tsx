@@ -5,7 +5,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../../components/ui/select";
-import { LINK_LIFETIME_IS_CHOSEN, LINK_LIFETIMES, type LinkLifetime } from "./shareLink.logic";
+import { LINK_LIFETIMES, type LinkLifetime } from "./shareLink.logic";
 
 /** "Link expires in", with the line under it that says what expiry means for this kind of link. */
 export function LinkLifetimeRow({
@@ -28,7 +28,7 @@ export function LinkLifetimeRow({
       <div className="w-36 shrink-0">
         <Select
           value={value}
-          disabled={disabled || !LINK_LIFETIME_IS_CHOSEN}
+          disabled={disabled}
           onValueChange={(next) => onChange(next as LinkLifetime)}
         >
           <SelectTrigger size="sm" aria-label="Link expires in">

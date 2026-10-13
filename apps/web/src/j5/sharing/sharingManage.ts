@@ -8,6 +8,7 @@ import { J5_SHARING_WS_METHODS } from "@t3tools/contracts/j5";
 
 import { connectionAtomRuntime } from "../../connection/runtime";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
+import { NAME_IN_USE } from "./shareLink.logic";
 
 const command = <Tag extends Parameters<typeof createEnvironmentRpcCommand>[1]["tag"]>(tag: Tag) =>
   createEnvironmentRpcCommand(connectionAtomRuntime, { label: `environment-data:${tag}`, tag });
@@ -56,10 +57,20 @@ export const rememberLinkSecret = (linkId: string, secret: string) => {
 };
 export const linkSecretMadeHere = (linkId: string) => madeHere.get(linkId) ?? null;
 
-/** What the server said when it refused, shown to the person as it is. */
+/**
+ * What the server said when it refused, shown to the person as it is. A name that is someone
+ * else's gets one wording wherever a name is typed.
+ */
 export function refusalMessage(result: Parameters<typeof squashAtomCommandFailure>[0]): string {
   const error = squashAtomCommandFailure(result);
+  if (nameIsInUse(error)) return NAME_IN_USE;
   return error instanceof Error && error.message.trim() !== ""
     ? error.message
     : "The server did not say why.";
+}
+
+/** Whether a refusal is the server's "that name is someone else's", by the refusal's stable name. */
+export function nameIsInUse(error: unknown): boolean {
+  const code = (error as { readonly code?: unknown } | null)?.code;
+  return typeof code === "string" && /name.*(in.?use|taken)/iu.test(code);
 }
