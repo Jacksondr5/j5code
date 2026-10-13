@@ -89,7 +89,7 @@ describe("link routes", () => {
       "https://openclaw.tail1234.ts.net",
     );
     expect(route!.directUrlFor("SECRET")).toBe(
-      "https://openclaw.tail1234.ts.net/pair#token=SECRET",
+      "https://openclaw.tail1234.ts.net/pair#token=SECRET&j5share=1",
     );
     expect(route!.directDetail).toBe("Devices on your private network");
   });

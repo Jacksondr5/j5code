@@ -2,7 +2,7 @@ import type { SharingLinkDescription } from "@t3tools/contracts/j5";
 import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
-import { invitationFor, invitationList, joinPageState } from "./joinPage.logic";
+import { invitationFor, invitationList, joinPageState, landingFor } from "./joinPage.logic";
 
 const noIcon = { projectIcon: null, projectFaviconUrl: null };
 const thread = (threadTitle: string, projectTitle: string | null = "Live test repo") =>
@@ -21,8 +21,6 @@ const say = (description: SharingLinkDescription) => {
   const { before, title, after } = invitationFor(description);
   return `${before}${title ?? ""}${after}`;
 };
-
-const JOIN_TOKEN = "FaN2zzZcHNjWY9YJ3GgAqdYAX5De95LcwuGr3gODLLk";
 
 describe("what the join page says a link opens", () => {
   it("names the one thread, its project and the server", () => {
@@ -91,30 +89,48 @@ describe("what the join page says a link opens", () => {
 });
 
 describe("what the page does with the lookup's answer", () => {
-  it("shows what a working link opens", () => {
+  it("shows what a working link opens, marked or not", () => {
     const description = link({ opens: [project("Live test repo")] });
-    expect(joinPageState({ secret: "38K4MX4628G4", status: 200, body: description })).toEqual({
-      kind: "described",
-      description,
-    });
+    for (const marked of [true, false]) {
+      expect(joinPageState({ marked, status: 200, body: description })).toEqual({
+        kind: "described",
+        description,
+      });
+    }
   });
 
-  it("says a join link does not work when the lookup gives nothing", () => {
-    expect(joinPageState({ secret: JOIN_TOKEN, status: 404, body: {} })).toEqual({ kind: "dead" });
+  it("says a share link does not work when the lookup gives nothing, named or join alike", () => {
+    expect(joinPageState({ marked: true, status: 404, body: {} })).toEqual({ kind: "dead" });
   });
 
-  it("leaves a pairing token the lookup does not know to upstream's page", () => {
-    expect(joinPageState({ secret: "38K4MX4628G4", status: 404, body: {} })).toEqual({
-      kind: "upstream",
-    });
+  it("leaves an unmarked token the lookup does not know to upstream's page", () => {
+    expect(joinPageState({ marked: false, status: 404, body: {} })).toEqual({ kind: "upstream" });
   });
 
   it("leaves everything to upstream's page when the server cannot be asked", () => {
-    expect(joinPageState({ secret: JOIN_TOKEN, status: null, body: null })).toEqual({
+    expect(joinPageState({ marked: true, status: null, body: null })).toEqual({ kind: "upstream" });
+    expect(joinPageState({ marked: true, status: 200, body: "<html>" })).toEqual({
       kind: "upstream",
     });
-    expect(joinPageState({ secret: JOIN_TOKEN, status: 200, body: "<html>" })).toEqual({
-      kind: "upstream",
-    });
+  });
+});
+
+describe("the first screen", () => {
+  it("draws upstream's landing for a member at once, before the server has answered", () => {
+    expect(landingFor({ kind: null, pairedThroughShareLink: false })).toBe("upstream");
+  });
+
+  it("keeps drawing upstream's landing when the answer is a member's, or never comes", () => {
+    // A request that fails is answered as a member's: a server without sharing has no guests.
+    expect(landingFor({ kind: "member", pairedThroughShareLink: false })).toBe("upstream");
+    expect(landingFor({ kind: "member", pairedThroughShareLink: true })).toBe("upstream");
+  });
+
+  it("holds the frame only for a browser that was paired through a share link", () => {
+    expect(landingFor({ kind: null, pairedThroughShareLink: true })).toBe("hold");
+  });
+
+  it("is the guest's own once the server says so", () => {
+    expect(landingFor({ kind: "guest", pairedThroughShareLink: false })).toBe("guest");
   });
 });

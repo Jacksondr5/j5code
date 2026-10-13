@@ -23,7 +23,8 @@ import {
   submitServerAuthCredential,
 } from "../../environments/primary";
 import { APP_DISPLAY_NAME } from "../../branding";
-import { NAME_NOT_USABLE } from "./shareLink.logic";
+import { rememberPairedThroughShareLink } from "./pairedThroughShareLink";
+import { isMarkedShareLink, NAME_NOT_USABLE } from "./shareLink.logic";
 import {
   invitationFor,
   invitationList,
@@ -65,7 +66,12 @@ export function GuestAwarePairingSurface(props: ComponentProps<typeof PairingRou
       }))
       .catch(() => ({ status: null, body: null }))
       .then((answer) => {
-        if (!cancelled) setState(joinPageState({ secret, ...answer }));
+        if (cancelled) return;
+        const next = joinPageState({ marked: isMarkedShareLink(window.location.href), ...answer });
+        // This browser is about to be a guest's: the first screen then waits for the server to
+        // say so instead of starting a draft.
+        if (next.kind === "described") rememberPairedThroughShareLink(true);
+        setState(next);
       });
     return () => {
       cancelled = true;

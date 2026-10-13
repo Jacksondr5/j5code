@@ -23,11 +23,16 @@ import { usePrimaryEnvironmentId } from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { j5Sharing } from "./guestAccess";
+import { landingFor } from "./joinPage.logic";
+import {
+  rememberPairedThroughShareLink,
+  wasPairedThroughShareLink,
+} from "./pairedThroughShareLink";
 import { ownGrantsQuery } from "./sharingManage";
 
 /**
- * The first screen. A member gets `children`, upstream's own landing. A guest never starts a
- * draft, which they could not send: they land on the one thread they were given, on a list when
+ * The first screen. A member gets `children`, upstream's own landing, at once and without
+ * waiting on the server. A guest never starts a draft, which they could not send: they land on the one thread they were given, on a list when
  * they hold several things, and on a plain statement when nothing is shared with them
  * (Shared server AC23).
  */
@@ -45,9 +50,19 @@ function KnownServerLanding({
   readonly children: ReactNode;
 }) {
   const kind = useAtomValue(j5Sharing.connectionKind(environmentId));
-  // Until the server has said which kind this connection is, nothing is started for it.
-  if (kind === null) return null;
-  return kind === "guest" ? <GuestHome environmentId={environmentId} /> : children;
+  const [pairedThroughShareLink] = useState(wasPairedThroughShareLink);
+  // What the server says replaces what this browser remembered, for the next time it opens.
+  useEffect(() => {
+    if (kind !== null) rememberPairedThroughShareLink(kind === "guest");
+  }, [kind]);
+  switch (landingFor({ kind, pairedThroughShareLink })) {
+    case "upstream":
+      return children;
+    case "hold":
+      return null;
+    case "guest":
+      return <GuestHome environmentId={environmentId} />;
+  }
 }
 
 function Frame({ children }: { readonly children: ReactNode }) {

@@ -1,13 +1,5 @@
 import type { SharingLinkDescription, SharingLinkOpens } from "@t3tools/contracts/j5";
 
-/**
- * Whether a link's secret is a join link's token. A join link's token is 32 random bytes in
- * base64url, 43 characters; upstream's pairing credential, which a named person's link carries,
- * is 12. A client can therefore tell a dead join link from a pairing token it should leave to
- * upstream's pairing page.
- */
-export const looksLikeJoinToken = (secret: string) => secret.length >= 40;
-
 const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 // A thread is named with its project after it; only the thing itself is set in bold.
@@ -102,19 +94,37 @@ export type JoinPageState =
   | { readonly kind: "dead" }
   | { readonly kind: "described"; readonly description: SharingLinkDescription };
 
-/** Reads the lookup's answer: a description, a link that does not work, or one to leave alone. */
+/**
+ * Reads the lookup's answer. A link the server describes gets the guest's page whether or not it
+ * carries J5's mark, so one made by an older build or typed by hand still works. The server gives
+ * one refusal for every link it will not describe, an ordinary pairing link among them, so only
+ * the mark says that an undescribed link was a share link, and so one that no longer works.
+ */
 export function joinPageState(input: {
-  readonly secret: string;
+  readonly marked: boolean;
   readonly status: number | null;
   readonly body: unknown;
 }): JoinPageState {
   if (input.status === 200 && isDescription(input.body)) {
     return { kind: "described", description: input.body };
   }
-  // The lookup gives one refusal for every link it will not describe, an ordinary pairing link
-  // among them. Only a join link's token is surely not one of upstream's.
-  if (input.status === 404 && looksLikeJoinToken(input.secret)) return { kind: "dead" };
+  if (input.status === 404 && input.marked) return { kind: "dead" };
   return { kind: "upstream" };
+}
+
+/**
+ * What the first screen does while the server has or has not yet said which kind the connection
+ * is. A member is never kept waiting: upstream's landing is drawn at once unless this browser was
+ * paired through a share link, in which case the frame is held so a guest is not first dropped
+ * into a draft they cannot send.
+ */
+export function landingFor(input: {
+  readonly kind: "member" | "guest" | null;
+  readonly pairedThroughShareLink: boolean;
+}): "upstream" | "hold" | "guest" {
+  if (input.kind === "guest") return "guest";
+  if (input.kind === "member") return "upstream";
+  return input.pairedThroughShareLink ? "hold" : "upstream";
 }
 
 function isDescription(body: unknown): body is SharingLinkDescription {
