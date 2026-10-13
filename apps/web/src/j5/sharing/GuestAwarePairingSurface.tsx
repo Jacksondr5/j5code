@@ -5,7 +5,16 @@ import {
   type SharingLinkDescription,
 } from "@t3tools/contracts/j5";
 import { FolderCodeIcon } from "lucide-react";
-import { type ComponentProps, type ReactNode, useEffect, useRef, useState } from "react";
+import type { IconName } from "lucide-react/dynamic";
+import {
+  type ComponentProps,
+  lazy,
+  type ReactNode,
+  Suspense,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
 import {
   PairingPendingSurface,
@@ -23,6 +32,7 @@ import {
   submitServerAuthCredential,
 } from "../../environments/primary";
 import { APP_DISPLAY_NAME } from "../../branding";
+import { projectIconColorClassName } from "../../projectIconColors";
 import { rememberPairedThroughShareLink } from "./pairedThroughShareLink";
 import { isMarkedShareLink, NAME_NOT_USABLE } from "./shareLink.logic";
 import {
@@ -32,6 +42,11 @@ import {
   type InvitationLine as ListedLine,
   type JoinPageState,
 } from "./joinPage.logic";
+
+// Loaded only for a project whose chosen icon is a named glyph, as upstream's own icon does.
+const DynamicIcon = lazy(() =>
+  import("lucide-react/dynamic").then((module) => ({ default: module.DynamicIcon })),
+);
 
 const post = (path: string, body: unknown) =>
   fetch(resolvePrimaryEnvironmentHttpUrl(path), {
@@ -133,6 +148,23 @@ function JoinPageIcon({ line }: { readonly line: ListedLine }) {
   }
   if (line.icon?.kind === "monogram") {
     return <ProjectMonogram text={line.icon.text} color={line.icon.color} className={className} />;
+  }
+  if (line.icon?.kind === "lucide") {
+    const fallback = () => <FolderCodeIcon aria-hidden className="size-full" />;
+    return (
+      <span
+        aria-hidden
+        className={`${className} inline-flex ${projectIconColorClassName(line.icon.color)}`}
+      >
+        <Suspense fallback={fallback()}>
+          <DynamicIcon
+            name={line.icon.name as IconName}
+            className="size-full"
+            fallback={fallback}
+          />
+        </Suspense>
+      </span>
+    );
   }
   if (line.icon === null && line.faviconUrl !== null && !faviconFailed) {
     return (
