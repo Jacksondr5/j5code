@@ -216,8 +216,9 @@ function ActiveJoinLink({
         <>
           <p className="text-xs text-muted-foreground">{meta}</p>
           <p className="text-xs text-muted-foreground">
-            This link was made on another device, so it cannot be copied here. Make a new link to
-            copy it from this device; the earlier one keeps working until it expires or is revoked.
+            A link's address is shown only on the page that made it, until that page is closed or
+            reloaded. To copy one from here, make a new link; the earlier one keeps working until it
+            expires or is revoked.
           </p>
           <div>
             <Button size="xs" variant="outline" disabled={busy} onClick={onMakeAnother}>
