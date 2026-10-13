@@ -75,8 +75,8 @@ The server takes the script's environment when it starts. To give a running
 server a new variable, set it on `restart`.
 
 To see what a client asked the server for, read the log the script names and
-`server.trace.ndjson` under the test home's `userdata/logs`. They are the best
-evidence for a permission change.
+`server.trace.ndjson` under the test home's `userdata/logs`. The trace is
+sampled, so it shows that a request happened but cannot show that one did not.
 
 Live turns also leave provider session files in `~/.claude` and `~/.codex`,
 and Browser panel screenshots are saved by the server you are running in.
