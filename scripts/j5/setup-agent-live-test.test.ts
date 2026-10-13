@@ -7,6 +7,10 @@ import * as NodePath from "node:path";
 import {
   PAIRING_SCOPES,
   classifyServer,
+  formatGuest,
+  formatInstructions,
+  guestRefusal,
+  parseGuest,
   LiveTestRefusal,
   addRemoteUrl,
   baseEnvironment,
@@ -794,5 +798,175 @@ describe("PAIRING_SCOPES", () => {
       NodePath.join(import.meta.dirname, "../../packages/contracts/src/auth.ts")
     )) as { readonly AuthAdministrativeScopes: ReadonlyArray<string> };
     assert.sameMembers([...PAIRING_SCOPES], [...contracts.AuthAdministrativeScopes]);
+  });
+});
+
+describe("formatInstructions", () => {
+  const worktree = "/w";
+  const server = (root: string) => ({
+    worktree,
+    home: `${root}/home`,
+    testRepo: `${root}/test-repo`,
+    log: `${root}/server.log`,
+    record: `${root}/server.json`,
+  });
+  const paths = {
+    ...server("/w/.j5code/live-test"),
+    root: "/w/.j5code/live-test",
+    manifest: "/w/.j5code/live-test/manifest.json",
+    base: "/w/.j5code/live-test/base",
+    remote: { ...server("/w/.j5code/live-test/remote"), root: "/w/.j5code/live-test/remote" },
+  };
+  const facts: ServerLogFacts = {
+    serverPort: 13000,
+    webPort: 5000,
+    baseDir: paths.home,
+    pairingUrl: undefined,
+    recovered: true,
+    sharedUrl: undefined,
+    shareFailure: undefined,
+  };
+  const built = {
+    project: { id: "project-1", title: "Live test repo" },
+    defaultModel: "claude-haiku-5-5",
+    personas: [],
+    playbooks: [],
+    holdScript: "scripts/hold.sh",
+  };
+  const ownerLines = (output: string) =>
+    output.split("\n").filter((line) => line.trimStart().startsWith("Owner "));
+
+  it("names the owner the home was built with", () => {
+    const output = formatInstructions({
+      paths,
+      manifest: { ...built, ownerName: "Test owner" },
+      facts,
+      pairingUrl: "http://localhost:5000/pair#token=T",
+    });
+    assert.deepEqual(ownerLines(output), ["  Owner         Test owner"]);
+    assert.include(output, 'guest "<name>"');
+  });
+
+  it("names each server's owner in a peer build", () => {
+    const output = formatInstructions({
+      paths,
+      manifest: { ...built, mode: "peer", ownerName: "Local owner" },
+      facts,
+      pairingUrl: undefined,
+      remote: { facts, ownerName: "Remote owner", addToBrowserUrl: undefined, peered: true },
+    });
+    assert.deepEqual(ownerLines(output), [
+      "  Owner         Local owner",
+      "  Owner         Remote owner",
+    ]);
+  });
+
+  it("has no owner line for a home built without one, and no guest command for a fresh home", () => {
+    // A home an older generator built, as a base checkout's can be.
+    assert.deepEqual(
+      ownerLines(formatInstructions({ paths, manifest: built, facts, pairingUrl: undefined })),
+      [],
+    );
+    const fresh = formatInstructions({
+      paths,
+      manifest: { mode: "fresh" },
+      facts,
+      pairingUrl: undefined,
+    });
+    assert.deepEqual(ownerLines(fresh), []);
+    assert.notInclude(fresh, "guest");
+  });
+});
+
+describe("parseGuest", () => {
+  it("defaults to a view grant on the test project of the one server", () => {
+    assert.deepEqual(parseGuest(["Priya"]), { name: "Priya", level: "view", remote: false });
+  });
+
+  it("takes a thread or a project, a level, and Remote", () => {
+    assert.deepEqual(parseGuest(["Sam (QA)", "--thread", "t-1", "--level", "collaborate"]), {
+      name: "Sam (QA)",
+      level: "collaborate",
+      remote: false,
+      target: { kind: "thread", id: "t-1" },
+    });
+    assert.deepEqual(parseGuest(["--project", "p-1", "--remote", "Priya"]), {
+      name: "Priya",
+      level: "view",
+      remote: true,
+      target: { kind: "project", id: "p-1" },
+    });
+  });
+
+  it("refuses no name, two names, both targets, an unknown level and an unknown flag", () => {
+    for (const args of [
+      [],
+      ["  "],
+      ["Priya", "Sam"],
+      ["Priya", "--thread", "t-1", "--project", "p-1"],
+      ["Priya", "--level", "admin"],
+      ["Priya", "--fresh"],
+    ]) {
+      assert.throws(() => parseGuest(args), LiveTestRefusal, /Usage: .* guest "<name>"/);
+    }
+  });
+
+  it("refuses the base server", () => {
+    assert.throws(() => parseGuest(["Priya", "--base"]), LiveTestRefusal, /head server only/);
+  });
+});
+
+describe("guestRefusal", () => {
+  const startCommand = "node script";
+  const ask = (built: LiveTestMode | undefined, remote = false, serving = true) =>
+    guestRefusal({ built, remote, serving, startCommand });
+
+  it("lets a guest be added to a running default, base or peer server", () => {
+    for (const built of ["default", "base", "peer", "peer-poll"] as const) {
+      assert.isUndefined(ask(built));
+    }
+    assert.isUndefined(ask("peer", true));
+    assert.isUndefined(ask("peer-poll", true));
+  });
+
+  it("refuses a fresh home and a server for the developer, running or not", () => {
+    assert.include(ask("fresh"), "--fresh");
+    assert.include(ask("for-dev", false, false), "--for-dev");
+  });
+
+  it("refuses when no server is running, and says how to start one", () => {
+    assert.include(ask("default", false, false), "Start it with: node script");
+    assert.include(ask(undefined, false, false), "Start it with: node script");
+    assert.include(ask("peer", true, false), "Start it with: node script");
+  });
+
+  it("refuses Remote where there is none, and never reaches the base server", () => {
+    assert.include(ask("default", true), "This build has one server");
+    assert.include(ask(undefined, true, false), "This build has one server");
+    assert.include(ask("base", true), "head server only");
+  });
+});
+
+describe("formatGuest", () => {
+  it("states who was added, the level, the URL and the two browser profiles, and nothing else", () => {
+    assert.equal(
+      formatGuest({
+        server: "",
+        personId: "human:1",
+        displayName: "Priya",
+        level: "view",
+        target: { kind: "project", id: "p-1" },
+        pairingUrl: "http://localhost:5000/pair#token=T",
+      }),
+      `Added a guest to the live-test server:
+
+  Name          Priya
+  Person id     human:1
+  Granted       view on project p-1
+  Pairing URL   http://localhost:5000/pair#token=T
+
+The browser has only the default and incognito profiles, so a third person at the same time needs a script client.
+`,
+    );
   });
 });

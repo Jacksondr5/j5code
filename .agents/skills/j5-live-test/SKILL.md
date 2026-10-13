@@ -52,6 +52,11 @@ are missing, install them and run it again.
 | `stop`    | Stops the server. Run it when you finish                              |
 | `rebuild` | Stops, discards the test home, builds a new one, and starts it        |
 
+`guest "<name>" [--thread <id> | --project <id>] [--level view|collaborate]`
+adds a second person to the running test server and prints their pairing URL.
+Open it in the incognito profile. A third person at the same time needs a
+script client.
+
 A start returns within about two minutes. On a busy machine it can return
 before it has finished, and prints the command that finishes it.
 
