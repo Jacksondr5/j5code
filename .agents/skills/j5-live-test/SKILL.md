@@ -184,6 +184,7 @@ Say so in the report instead of implying coverage:
 - the desktop app: Electron, the packaged build, the updater, installers;
 - relay and tunnel connections, a second machine, an unreachable peer;
 - continuing one of the threads the script made;
+- a guest on the Remote server of a peer build;
 - threads without a project: a test home inside a checkout does not offer them;
 - behavior under the developer's real data volume;
 - providers other than Codex and Claude on this host.

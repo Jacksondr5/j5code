@@ -879,21 +879,19 @@ describe("formatInstructions", () => {
 });
 
 describe("parseGuest", () => {
-  it("defaults to a view grant on the test project of the one server", () => {
-    assert.deepEqual(parseGuest(["Priya"]), { name: "Priya", level: "view", remote: false });
+  it("defaults to a view grant on the test project", () => {
+    assert.deepEqual(parseGuest(["Priya"]), { name: "Priya", level: "view" });
   });
 
-  it("takes a thread or a project, a level, and Remote", () => {
+  it("takes a thread or a project, and a level", () => {
     assert.deepEqual(parseGuest(["Sam (QA)", "--thread", "t-1", "--level", "collaborate"]), {
       name: "Sam (QA)",
       level: "collaborate",
-      remote: false,
       target: { kind: "thread", id: "t-1" },
     });
-    assert.deepEqual(parseGuest(["--project", "p-1", "--remote", "Priya"]), {
+    assert.deepEqual(parseGuest(["--project", "p-1", "Priya"]), {
       name: "Priya",
       level: "view",
-      remote: true,
       target: { kind: "project", id: "p-1" },
     });
   });
@@ -906,6 +904,8 @@ describe("parseGuest", () => {
       ["Priya", "--thread", "t-1", "--project", "p-1"],
       ["Priya", "--level", "admin"],
       ["Priya", "--fresh"],
+      // Guests go to Local in every mode.
+      ["Priya", "--remote"],
     ]) {
       assert.throws(() => parseGuest(args), LiveTestRefusal, /Usage: .* guest "<name>"/);
     }
@@ -918,46 +918,39 @@ describe("parseGuest", () => {
 
 describe("guestRefusal", () => {
   const startCommand = "node script";
-  const ask = (built: LiveTestMode | undefined, remote = false, serving = true) =>
-    guestRefusal({ built, remote, serving, startCommand });
+  const ask = (built: LiveTestMode | undefined, serving = true) =>
+    guestRefusal({ built, serving, startCommand });
 
   it("lets a guest be added to a running default, base or peer server", () => {
     for (const built of ["default", "base", "peer", "peer-poll"] as const) {
       assert.isUndefined(ask(built));
     }
-    assert.isUndefined(ask("peer", true));
-    assert.isUndefined(ask("peer-poll", true));
   });
 
   it("refuses a fresh home and a server for the developer, running or not", () => {
     assert.include(ask("fresh"), "--fresh");
-    assert.include(ask("for-dev", false, false), "--for-dev");
+    assert.include(ask("for-dev", false), "--for-dev");
   });
 
   it("refuses when no server is running, and says how to start one", () => {
-    assert.include(ask("default", false, false), "Start it with: node script");
-    assert.include(ask(undefined, false, false), "Start it with: node script");
-    assert.include(ask("peer", true, false), "Start it with: node script");
-  });
-
-  it("refuses Remote where there is none, and never reaches the base server", () => {
-    assert.include(ask("default", true), "This build has one server");
-    assert.include(ask(undefined, true, false), "This build has one server");
-    assert.include(ask("base", true), "head server only");
+    assert.include(ask("default", false), "Start it with: node script");
+    assert.include(ask(undefined, false), "Start it with: node script");
+    assert.include(ask("peer", false), "Start it with: node script");
   });
 });
 
 describe("formatGuest", () => {
+  const added = {
+    personId: "human:1",
+    displayName: "Priya",
+    level: "view",
+    target: { kind: "project", id: "p-1" },
+    pairingUrl: "http://localhost:5000/pair#token=T",
+  } as const;
+
   it("states who was added, the level, the URL and the two browser profiles, and nothing else", () => {
     assert.equal(
-      formatGuest({
-        server: "",
-        personId: "human:1",
-        displayName: "Priya",
-        level: "view",
-        target: { kind: "project", id: "p-1" },
-        pairingUrl: "http://localhost:5000/pair#token=T",
-      }),
+      formatGuest({ ...added, peer: false }),
       `Added a guest to the live-test server:
 
   Name          Priya
@@ -968,5 +961,11 @@ describe("formatGuest", () => {
 The browser has only the default and incognito profiles, so a third person at the same time needs a script client.
 `,
     );
+  });
+
+  it("in a peer build says the guest went to Local, and that Remote is not reached", () => {
+    const output = formatGuest({ ...added, peer: true });
+    assert.include(output, "Added a guest to the live-test server Local:");
+    assert.include(output, "Guests are added to Local only; this command does not reach Remote.");
   });
 });

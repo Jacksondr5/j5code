@@ -562,7 +562,7 @@ Commands:
     manifest.mode === "fresh" || manifest.mode === "for-dev"
       ? ""
       : `\n  ${selfCommand(paths, 'guest "<name>"')}   add a second person, with their pairing URL
-                                      (flags: --thread <id> or --project <id>, --level view|collaborate${remote === undefined ? "" : ", --remote"})`
+                                      (flags: --thread <id> or --project <id>, --level view|collaborate)`
   }
   ${selfCommand(paths, "rebuild")}   stop, delete ${paths.root}, build and start again
                                       (flags: none for the test project, --fresh for an empty home,
@@ -2010,11 +2010,9 @@ export interface GuestRequest {
   /** Absent means the test project of the server it is added to. */
   readonly target?: { readonly kind: "project" | "thread"; readonly id: string };
   readonly level: "view" | "collaborate";
-  /** In a peer build, add the guest to Remote instead of Local. */
-  readonly remote: boolean;
 }
 
-const GUEST_USAGE = `Usage: node scripts/j5/setup-agent-live-test.ts guest "<name>" [--thread <id> | --project <id>] [--level view|collaborate] [--remote]`;
+const GUEST_USAGE = `Usage: node scripts/j5/setup-agent-live-test.ts guest "<name>" [--thread <id> | --project <id>] [--level view|collaborate]`;
 const GUEST_NOT_ON_BASE =
   "`guest` adds a person to the head server only. The base server belongs to the base checkout's own script, which this command does not reach.";
 
@@ -2030,7 +2028,6 @@ export function parseGuest(args: ReadonlyArray<string>): GuestRequest {
           thread: { type: "string" },
           project: { type: "string" },
           level: { type: "string", default: "view" },
-          remote: { type: "boolean", default: false },
         },
       });
     } catch {
@@ -2038,7 +2035,7 @@ export function parseGuest(args: ReadonlyArray<string>): GuestRequest {
     }
   })();
   const [name] = parsed.positionals;
-  const { thread, project, level, remote } = parsed.values;
+  const { thread, project, level } = parsed.values;
   if (
     parsed.positionals.length !== 1 ||
     name === undefined ||
@@ -2051,7 +2048,6 @@ export function parseGuest(args: ReadonlyArray<string>): GuestRequest {
   return {
     name,
     level,
-    remote,
     ...(thread !== undefined
       ? { target: { kind: "thread", id: thread } }
       : project !== undefined
@@ -2066,8 +2062,7 @@ export function parseGuest(args: ReadonlyArray<string>): GuestRequest {
  */
 export function guestRefusal(input: {
   readonly built: LiveTestMode | undefined;
-  readonly remote: boolean;
-  /** The server the guest would be added to, and Local too when that is Remote. */
+  /** Whether the server the guest goes to, Local in a peer build, is running. */
   readonly serving: boolean;
   readonly startCommand: string;
 }): string | undefined {
@@ -2078,10 +2073,6 @@ export function guestRefusal(input: {
   if (built === "for-dev") {
     return "`guest` does not run on a --for-dev server: it holds a copy of the developer's data.";
   }
-  if (input.remote && built === "base") return GUEST_NOT_ON_BASE;
-  if (input.remote && (built === undefined || !isPeerMode(built))) {
-    return "--remote picks the Remote server of a --peer build. This build has one server.";
-  }
   return input.serving
     ? undefined
     : `No live-test server is running here to add a guest to. Start it with: ${input.startCommand}`;
@@ -2089,53 +2080,52 @@ export function guestRefusal(input: {
 
 /** What `guest` prints: who was added, what they were granted, and the URL that pairs a browser as them. */
 export function formatGuest(input: {
-  readonly server: string;
+  /** Whether the build has a Remote server too. */
+  readonly peer: boolean;
   readonly personId: string;
   readonly displayName: string;
   readonly level: string;
   readonly target: { readonly kind: "project" | "thread"; readonly id: string };
   readonly pairingUrl: string;
 }): string {
-  return `Added a guest to the live-test server${input.server}:
+  return `Added a guest to the live-test server${input.peer ? " Local" : ""}:
 
   Name          ${input.displayName}
   Person id     ${input.personId}
   Granted       ${input.level} on ${input.target.kind} ${input.target.id}
   Pairing URL   ${input.pairingUrl}
-
+${input.peer ? "\nGuests are added to Local only; this command does not reach Remote.\n" : ""}
 The browser has only the default and incognito profiles, so a third person at the same time needs a script client.
 `;
 }
 
-/** Adds a guest to the running server as its owner, through the same requests the People page makes. */
+/**
+ * Adds a guest to the running server as its owner, through the same requests
+ * the People page makes. In a peer build that server is Local: a browser not
+ * paired with Local is not served the app, so a guest of Remote could not open it.
+ */
 function guest(paths: LiveTestPaths, request: GuestRequest): void {
   const built = builtMode(paths);
-  const server = request.remote ? paths.remote : paths;
   // Identity first, as for a stop: only a server proven to be this script's is acted on.
-  const states = [currentServerState(paths), currentServerState(server)];
-  for (const state of states) {
-    if (state.kind === "unverified") throw new LiveTestRefusal(state.reason);
-  }
-  const [local, target] = states;
+  const state = currentServerState(paths);
+  if (state.kind === "unverified") throw new LiveTestRefusal(state.reason);
   const refusal = guestRefusal({
     built,
-    remote: request.remote,
-    // Remote has no web server of its own: its guest pairs through Local's.
-    serving: local?.kind === "running" && target?.kind === "running",
+    serving: state.kind === "running",
     startCommand: selfCommand(paths, modeFlags(built ?? "default", builtBaseRef(paths))),
   });
   if (refusal !== undefined) throw new LiveTestRefusal(refusal);
   // The refusal above covers this; it is here to tell the compiler so.
-  if (local?.kind !== "running" || target?.kind !== "running") return;
+  if (state.kind !== "running") return;
   const grantOn = request.target ?? {
     kind: "project" as const,
-    id: readDefaultManifest(request.remote ? paths.remote.root : paths.root).project.id,
+    id: readDefaultManifest(paths.root).project.id,
   };
   // The owner's requests are WebSocket only, so the script pairs as a client of its own.
-  const token = mintPairingUrl(server)?.split("#token=")[1];
+  const token = mintPairingUrl(paths)?.split("#token=")[1];
   if (token === undefined) {
     throw new LiveTestRefusal(
-      `No pairing token could be minted for the server. Try: node ${pairArguments(server).join(" ")}`,
+      `No pairing token could be minted for the server. Try: node ${pairArguments(paths).join(" ")}`,
     );
   }
   const added = NodeChildProcess.spawnSync(
@@ -2143,7 +2133,7 @@ function guest(paths: LiveTestPaths, request: GuestRequest): void {
     [
       NodePath.join(paths.worktree, "apps/server/src/j5/test-support/liveTestOwnerClient.ts"),
       "--origin",
-      `http://127.0.0.1:${target.facts.serverPort}`,
+      `http://127.0.0.1:${state.facts.serverPort}`,
       "--token",
       token,
       "--name",
@@ -2176,21 +2166,14 @@ function guest(paths: LiveTestPaths, request: GuestRequest): void {
     readonly displayName: string;
     readonly credential: string;
   };
-  const pairingUrl = request.remote
-    ? addRemoteUrl({
-        localWebPort: local.facts.webPort,
-        remoteServerPort: target.facts.serverPort,
-        remotePairingUrl: `#token=${credential}`,
-      })
-    : `http://localhost:${local.facts.webPort}/pair#token=${credential}`;
   console.log(
     formatGuest({
-      server: request.remote ? " Remote" : isPeerMode(built ?? "default") ? " Local" : "",
+      peer: isPeerMode(built ?? "default"),
       personId,
       displayName,
       level: request.level,
       target: grantOn,
-      pairingUrl: pairingUrl ?? "",
+      pairingUrl: `http://localhost:${state.facts.webPort}/pair#token=${credential}`,
     }),
   );
 }
