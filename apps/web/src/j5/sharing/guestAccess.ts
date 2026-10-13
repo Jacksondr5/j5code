@@ -66,6 +66,16 @@ export function useGuestEnvironmentIds(): ReadonlySet<EnvironmentId> {
   return useAtomValue(guestEnvironmentIdsAtom);
 }
 
+const NOT_A_GUEST = Atom.make(false);
+
+/** Whether the connection to one server is known to be a guest's; false until the server says so. */
+export function useIsGuest(environmentId: EnvironmentId | null): boolean {
+  return useAtomValue(environmentId === null ? NOT_A_GUEST : j5Sharing.isGuest(environmentId));
+}
+
+/** What J5's Skills page says when every connected server is a guest one. */
+export const GUEST_SKILLS_UNAVAILABLE = "Skills are not available on a server you are a guest on.";
+
 /** What J5's Personas and Playbooks pages say when every connected server is a guest one. */
 export const GUEST_LIBRARY_UNAVAILABLE =
   "Personas and Playbooks are not available on a server you are a guest on.";
