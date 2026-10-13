@@ -147,6 +147,8 @@ export function JoinLinkDialog({
               link={active}
               people={people.data?.people ?? []}
               nowMs={nowMs}
+              busy={busy}
+              onMakeAnother={() => void make()}
             />
           )}
           {error !== null ? <p className="text-xs text-destructive">{error}</p> : null}
@@ -187,11 +189,15 @@ function ActiveJoinLink({
   link,
   people,
   nowMs,
+  busy,
+  onMakeAnother,
 }: {
   readonly environmentId: EnvironmentId;
   readonly link: SharingOpenLink;
   readonly people: ReadonlyArray<SharingPerson>;
   readonly nowMs: number;
+  readonly busy: boolean;
+  readonly onMakeAnother: () => void;
 }) {
   const token = linkSecretMadeHere(link.linkId);
   const joined = link.joined.flatMap(
@@ -208,9 +214,14 @@ function ActiveJoinLink({
         <>
           <p className="text-xs text-muted-foreground">{meta}</p>
           <p className="text-xs text-muted-foreground">
-            The link itself is shown only on the device that made it. To send it from here, revoke
-            it and make a new one.
+            This link was made on another device, so it cannot be copied here. Make a new link to
+            copy it from this device; the earlier one keeps working until it expires or is revoked.
           </p>
+          <div>
+            <Button size="xs" variant="outline" disabled={busy} onClick={onMakeAnother}>
+              Make a new link
+            </Button>
+          </div>
         </>
       ) : (
         <ShareLinkPanel
