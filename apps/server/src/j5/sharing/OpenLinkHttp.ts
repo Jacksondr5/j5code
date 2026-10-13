@@ -100,7 +100,7 @@ export const openLinkHttpRouteLayer = Layer.unwrap(
           return refusal(
             400,
             "invalid_request",
-            "A link is needed, and a name: one line of ordinary characters, up to 80 of them.",
+            "A link is needed, and a name: one line of ordinary characters, up to 80 of them, with no square brackets.",
           );
         }
         return yield* openLinks.join(decoded.value).pipe(

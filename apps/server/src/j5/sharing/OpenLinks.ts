@@ -71,7 +71,7 @@ export class OpenLinkNameError extends Schema.TaggedError<OpenLinkNameError>()(
   {},
 ) {
   override get message(): string {
-    return "A name is one line of ordinary characters, up to 80 of them.";
+    return "A name is one line of ordinary characters, up to 80 of them, with no square brackets.";
   }
 }
 
