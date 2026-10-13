@@ -57,11 +57,9 @@ ports, the pairing URL, the project to use, and its commands. Nothing in that
 home points at a real repository or at the developer's data. Then use
 [test-t3-app](../test-t3-app/SKILL.md) for the browser steps.
 
-Open every test tab with `profileId: "incognito"`. Each incognito tab has its
-own storage, so it is one signed-in person and nothing else can sign it out. A
-tab opened without a profile uses the default browser profile, which every
-agent on the server shares with the developer, and which keeps the cookies of
-every test server before yours.
+Each tab you open has its own storage, so it is one signed-in person and
+nothing else can sign it out. Do not pass a `profileId`: a named profile holds
+the developer's saved logins, and every agent that names it shares them.
 
 Do not seed a test home by hand, copy the live database, or start `vp run dev`
 yourself for a test. The script does not install dependencies: if it says they
@@ -76,9 +74,9 @@ are missing, install them and run it again.
 
 `guest "<name>" [--thread <id> | --project <id>] [--level view|collaborate]`
 adds a second person to the running test server and prints their pairing URL.
-Open it in a new incognito tab (`profileId: "incognito"`,
-`reuseExistingTab: false`). Each incognito tab is its own person, so open one
-per person and never pair a second person in a tab that already has one.
+Open it in a new tab (`reuseExistingTab: false`). Each tab is its own person,
+so open one per person and never pair a second person in a tab that already
+has one.
 
 A start returns within about two minutes. On a busy machine it can return
 before it has finished, and prints the command that finishes it.
