@@ -34,6 +34,7 @@ import {
 } from "../../environments/primary";
 import { APP_DISPLAY_NAME } from "../../branding";
 import { projectIconColorClassName } from "../../projectIconColors";
+import { rememberLandingThread } from "./landingThread";
 import { pairThroughShareLink } from "./pairedThroughShareLink";
 import { NAME_NOT_USABLE } from "./shareLink.logic";
 import {
@@ -288,17 +289,13 @@ function JoinLinkSurface({
       );
       const body = (await response.json().catch(() => null)) as {
         readonly credential?: unknown;
-        readonly environmentId?: unknown;
         readonly threadId?: unknown;
         readonly message?: unknown;
       } | null;
       if (response.ok && typeof body?.threadId === "string") {
-        // Already paired: the thread just given is opened, and the app starts afresh on it.
-        window.location.replace(
-          typeof body.environmentId === "string"
-            ? `/${encodeURIComponent(body.environmentId)}/${encodeURIComponent(body.threadId)}`
-            : "/",
-        );
+        // Already paired: the app starts afresh, and the first screen opens the thread just given.
+        rememberLandingThread(body.threadId);
+        window.location.replace("/");
         return;
       }
       if (!response.ok || typeof body?.credential !== "string") {

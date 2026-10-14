@@ -132,20 +132,14 @@ export const openLinkHttpRouteLayer = Layer.unwrap(
         }
         const { token, displayName } = decoded.value;
         return yield* openLinks.join({ token, displayName, session }).pipe(
-          Effect.flatMap((joined) =>
-            Effect.gen(function* () {
-              if (joined.kind === "new") {
-                return HttpServerResponse.jsonUnsafe({
+          Effect.map((joined) =>
+            joined.kind === "new"
+              ? HttpServerResponse.jsonUnsafe({
                   credential: joined.link.credential,
                   expiresAt: joined.link.expiresAt,
-                });
-              }
-              // Already paired: the browser goes straight to the thread it was just given.
-              const environmentId = Option.isNone(environment)
-                ? null
-                : (yield* environment.value.getDescriptor).environmentId;
-              return HttpServerResponse.jsonUnsafe({ environmentId, threadId: joined.threadId });
-            }),
+                })
+              : // Already paired: the browser goes on to the thread it was just given.
+                HttpServerResponse.jsonUnsafe({ threadId: joined.threadId }),
           ),
           Effect.catchTags({
             OpenLinkRefusedError: (error) =>
