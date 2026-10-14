@@ -525,10 +525,40 @@ it.layer(testLayer)("joining by an open link", (it) => {
       assert.strictEqual(taken.status, 409);
       assert.match(taken.body.message!, /open this link on the device you joined with/);
 
+      // A full link still lets in, and offers itself to, a guest it already counts.
+      const sql = yield* SqlClient.SqlClient;
+      for (let index = 1; index < OpenLinks.OPEN_LINK_MAX_PEOPLE; index += 1) {
+        yield* sql`
+          INSERT INTO j5_a2a_open_link_join (link_id, person_id, joined_at)
+          VALUES (${secondLink.linkId}, ${`human:self-full-${index}`}, ${AT})
+        `;
+      }
+      const offered = yield* route.describe(secondLink.token, cookie);
+      assert.strictEqual((offered.body as { joiningAs?: string }).joiningAs, "Bob Self");
+      assert.strictEqual((yield* route.describe(secondLink.token)).status, 404);
+      assert.strictEqual((yield* joinAsSelf(secondLink.token, cookie)).status, 200);
+      assert.strictEqual((yield* route.join(secondLink.token, "One Too Many")).status, 404);
+
+      // A guest's session bound to no one is no one: it is offered nothing and gives a name.
+      const loose = yield* route.join(latest.token, "Loose End");
+      const looseSession = yield* auth.createBrowserSession(loose.body.credential!, {
+        deviceType: "desktop",
+      });
+      const looseCookie = `${sessions.cookieName}=${looseSession.sessionToken}`;
+      const looseIdentity = yield* auth.authenticateHttpRequest({
+        method: "GET",
+        url: "/ws",
+        cookies: { [sessions.cookieName]: looseSession.sessionToken },
+        headers: {},
+      } as unknown as Parameters<typeof auth.authenticateHttpRequest>[0]);
+      yield* access.unbindSession(looseIdentity.sessionId);
+      assert.notProperty((yield* route.describe(latest.token, looseCookie)).body, "joiningAs");
+      assert.strictEqual((yield* joinAsSelf(latest.token, looseCookie)).status, 400);
+
       // Removed, they leave every link's list, and free their places on them.
       yield* people.removePerson(bob.personId);
       assert.deepStrictEqual(yield* joinsOf(firstLink.linkId), []);
-      assert.deepStrictEqual(yield* joinsOf(secondLink.linkId), []);
+      assert.notInclude((yield* joinsOf(secondLink.linkId))!, bob.personId);
     }).pipe(Effect.scoped),
   );
 

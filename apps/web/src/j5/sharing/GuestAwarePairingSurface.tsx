@@ -302,6 +302,8 @@ function JoinLinkSurface({
         return;
       }
       if (!response.ok || typeof body?.credential !== "string") {
+        // A browser no longer signed in as that guest gives a name like anyone else.
+        setJoiningAs(null);
         setError(
           typeof body?.message === "string"
             ? body.message

@@ -127,7 +127,7 @@ export const openLinkHttpRouteLayer = Layer.unwrap(
           return refusal(
             400,
             "invalid_request",
-            "A link is needed, and a name: one line of ordinary characters, up to 80 of them, with no square brackets.",
+            "A link is needed, and any name given is one line of ordinary characters, up to 80 of them, with no square brackets.",
           );
         }
         const { token, displayName } = decoded.value;

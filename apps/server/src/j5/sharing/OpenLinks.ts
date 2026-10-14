@@ -368,17 +368,16 @@ const make: Layer.Layer<
           FROM j5_a2a_open_link WHERE token_hash = ${hashToken(token).toString("hex")}
         `.pipe(Effect.mapError(storage("read an open link")));
       const row = rows[0];
-      if (
-        row === undefined ||
-        row.revoked_at !== null ||
-        Date.parse(row.expires_at) <= nowMs ||
-        (yield* joined(row.link_id)).length >= OPEN_LINK_MAX_PEOPLE
-      ) {
+      if (row === undefined || row.revoked_at !== null || Date.parse(row.expires_at) <= nowMs) {
         return null;
       }
+      // A full link still works for a guest it already counts, as joining does.
+      const joins = yield* joined(row.link_id);
+      const guest = yield* guestOf(session);
+      const counted = guest !== null && joins.some((join) => join.person_id === guest.personId);
+      if (!counted && joins.length >= OPEN_LINK_MAX_PEOPLE) return null;
       const opens = yield* opened({ kind: "thread", threadId: row.thread_id as ThreadId }, "view");
       if (opens.length === 0) return null;
-      const guest = yield* guestOf(session);
       return {
         kind: "open",
         personName: null,
@@ -477,9 +476,12 @@ const make: Layer.Layer<
         // person under the name given. The route's schema checks the name too.
         const { displayName } = input;
         const guest = displayName === undefined ? yield* guestOf(input.session) : null;
-        if (displayName === undefined ? guest === null : !isPersonName(displayName)) {
-          return yield* new OpenLinkNameError({});
-        }
+        const who =
+          guest ??
+          (displayName !== undefined && isPersonName(displayName)
+            ? { newName: displayName }
+            : null);
+        if (who === null) return yield* new OpenLinkNameError({});
         const nowMs = yield* Clock.currentTimeMillis;
         const tokenHash = hashToken(input.token).toString("hex");
         const admit = Effect.gen(function* () {
@@ -507,11 +509,12 @@ const make: Layer.Layer<
           const threadId = row.thread_id as ThreadId;
           const target = { kind: "thread", threadId } as const;
           const person =
-            guest ??
-            (yield* access.createGuest({
-              displayName: displayName ?? "",
-              joinedOpenLinkId: row.link_id,
-            }));
+            "newName" in who
+              ? yield* access.createGuest({
+                  displayName: who.newName,
+                  joinedOpenLinkId: row.link_id,
+                })
+              : who;
           const joinedAt = DateTime.formatIso(yield* DateTime.now);
           yield* sql`
               INSERT INTO j5_a2a_open_link_join (link_id, person_id, joined_at)
