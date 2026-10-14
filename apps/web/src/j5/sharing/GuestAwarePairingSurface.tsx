@@ -270,21 +270,37 @@ function JoinLinkSurface({
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // A guest already signed in on this browser joins as themselves, unless they say they are not.
+  const [joiningAs, setJoiningAs] = useState(description.joiningAs ?? null);
 
   const join = async () => {
     const displayName = name.trim();
-    if (!isPersonName(displayName)) {
+    if (joiningAs === null && !isPersonName(displayName)) {
       setError(NAME_NOT_USABLE);
       return;
     }
     setBusy(true);
     setError(null);
     try {
-      const response = await post(SHARING_JOIN_PATH, { token, displayName });
+      const response = await post(
+        SHARING_JOIN_PATH,
+        joiningAs === null ? { token, displayName } : { token },
+      );
       const body = (await response.json().catch(() => null)) as {
         readonly credential?: unknown;
+        readonly environmentId?: unknown;
+        readonly threadId?: unknown;
         readonly message?: unknown;
       } | null;
+      if (response.ok && typeof body?.threadId === "string") {
+        // Already paired: the thread just given is opened, and the app starts afresh on it.
+        window.location.replace(
+          typeof body.environmentId === "string"
+            ? `/${encodeURIComponent(body.environmentId)}/${encodeURIComponent(body.threadId)}`
+            : "/",
+        );
+        return;
+      }
       if (!response.ok || typeof body?.credential !== "string") {
         setError(
           typeof body?.message === "string"
@@ -317,29 +333,55 @@ function JoinLinkSurface({
           void join();
         }}
       >
-        <div className="space-y-2">
-          <label className="text-sm font-medium" htmlFor="join-name">
-            Your name
-          </label>
-          <Input
-            id="join-name"
-            autoComplete="name"
-            autoFocus
-            disabled={busy}
-            maxLength={80}
-            nativeInput
-            onChange={(event) => setName(event.currentTarget.value)}
-            value={name}
-          />
-        </div>
+        {joiningAs === null ? (
+          <div className="space-y-2">
+            <label className="text-sm font-medium" htmlFor="join-name">
+              Your name
+            </label>
+            <Input
+              id="join-name"
+              autoComplete="name"
+              autoFocus
+              disabled={busy}
+              maxLength={80}
+              nativeInput
+              onChange={(event) => setName(event.currentTarget.value)}
+              value={name}
+            />
+          </div>
+        ) : (
+          <p className="text-sm">
+            You are signed in here as <strong className="font-semibold">{joiningAs}</strong>.
+          </p>
+        )}
         {error === null ? null : (
           <Alert variant="error">
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}
-        <Button disabled={busy || name.trim() === ""} size="sm" type="submit">
-          {busy ? "Joining…" : "Join"}
-        </Button>
+        <div className="flex items-center gap-3">
+          <Button
+            disabled={busy || (joiningAs === null && name.trim() === "")}
+            size="sm"
+            type="submit"
+          >
+            {busy ? "Joining…" : joiningAs === null ? "Join" : `Join as ${joiningAs}`}
+          </Button>
+          {joiningAs === null ? null : (
+            <Button
+              disabled={busy}
+              size="sm"
+              type="button"
+              variant="ghost-muted"
+              onClick={() => {
+                setJoiningAs(null);
+                setError(null);
+              }}
+            >
+              Not {joiningAs}?
+            </Button>
+          )}
+        </div>
       </form>
       <InfoBox>
         This link can be opened by several people. Each one joins on one device, and a member of the
