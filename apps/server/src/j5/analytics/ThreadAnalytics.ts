@@ -54,14 +54,13 @@ const threadKind = (thread: OrchestrationV2AppThread) => {
   return thread.createdBy === "user" ? "person" : "system";
 };
 
-export interface ThreadAnalyticsShape {
-  /** Records a `thread.created` or `run.created` event; every other event is ignored. */
-  readonly handleStoredEvent: (stored: OrchestrationV2StoredEvent) => Effect.Effect<void>;
-}
-
-export class ThreadAnalytics extends Context.Service<ThreadAnalytics, ThreadAnalyticsShape>()(
-  "t3/j5/analytics/ThreadAnalytics",
-) {}
+export class ThreadAnalytics extends Context.Service<
+  ThreadAnalytics,
+  {
+    /** Records a `thread.created` or `run.created` event; every other event is ignored. */
+    readonly handleStoredEvent: (stored: OrchestrationV2StoredEvent) => Effect.Effect<void>;
+  }
+>()("t3/j5/analytics/ThreadAnalytics") {}
 
 const makeLayer = (daemon: boolean) =>
   Layer.effect(
@@ -118,7 +117,7 @@ const makeLayer = (daemon: boolean) =>
         });
       });
 
-      const handleStoredEvent: ThreadAnalyticsShape["handleStoredEvent"] = (stored) => {
+      const handleStoredEvent: ThreadAnalytics["Service"]["handleStoredEvent"] = (stored) => {
         const recorded =
           stored.event.type === "thread.created"
             ? recordThread(stored.event.payload)
