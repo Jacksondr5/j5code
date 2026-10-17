@@ -83,7 +83,7 @@ export function PlaybookComposerControl(props: {
           </View>
           <View className="items-end gap-1">
             <Text
-              className={`text-xs ${run.status === "completed" ? "text-success" : "text-foreground-muted"}`}
+              className={`text-xs ${run.status === "completed" ? "text-adaptive-emerald-600-400" : "text-foreground-muted"}`}
             >
               {run.position ?? "?"}/{run.total}
             </Text>
@@ -99,7 +99,7 @@ export function PlaybookComposerControl(props: {
                     className={`h-[3px] min-w-0 flex-1 rounded-full ${
                       run.status === "completed" &&
                       (step.state === "earlier" || step.state === "last")
-                        ? "bg-success"
+                        ? "bg-adaptive-emerald-600-400"
                         : step.current
                           ? "bg-primary"
                           : step.state === "earlier"
