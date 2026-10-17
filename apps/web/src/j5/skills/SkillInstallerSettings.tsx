@@ -281,7 +281,16 @@ export function SkillCatalogPanel({ environmentId }: { readonly environmentId: E
         environmentId,
         input: { patch: { skillCatalogSource: trimmed } },
       });
-      if (selectionScopeRef.current !== originScope) return;
+      if (selectionScopeRef.current !== originScope) {
+        // The settings echo can precede the receipt for our own save.
+        if (
+          result._tag === "Success" &&
+          selectionScopeRef.current === catalogScopeFor(environmentId, trimmed)
+        ) {
+          setSourceEditorOpen(false);
+        }
+        return;
+      }
       if (result._tag === "Failure") {
         // The draft stays visible against the old settings; actions stay
         // disabled until the displayed source has matching loaded status.

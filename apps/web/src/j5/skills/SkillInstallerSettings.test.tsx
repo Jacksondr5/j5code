@@ -408,6 +408,27 @@ describe("SkillCatalogPanel source identity", () => {
     },
   );
 
+  it("closes the source editor when acknowledged settings arrive before the save receipt", async () => {
+    setStatusLoaded("/catalog/A");
+    const renderer = await renderPanel();
+    let finish!: (result: unknown) => void;
+    state.persistImpl = () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      });
+    await act(async () =>
+      sourceInput(renderer).props.onChange({ target: { value: "/catalog/B" } }),
+    );
+    await act(async () => buttonByText(renderer, "Save source").props.onClick());
+    state.configuredSource = "/catalog/B";
+    setStatusLoaded("/catalog/B");
+    await rerender(renderer);
+    await act(async () => finish({ _tag: "Success" }));
+    expect(renderer.root.findAllByProps({ "aria-label": "Catalog source" })).toHaveLength(0);
+    expect(applyButton(renderer).props.disabled).toBe(false);
+    await act(async () => renderer.unmount());
+  });
+
   it("ignores a picker result after another client changes the catalog source", async () => {
     setStatusLoaded("/catalog/A");
     const renderer = await renderPanel();
