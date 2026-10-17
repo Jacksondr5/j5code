@@ -68,7 +68,8 @@ it("starts collapsed, follows pointer changes, and preserves disclosure when mov
   await render([]);
   expect(container.textContent).toBe("");
   await render([active]);
-  expect(toggle().textContent).toContain("Build the change");
+  expect(toggle().textContent).toContain("Release");
+  expect(toggle().getAttribute("aria-label")).toContain("Build the change");
   expect(stages()).toBeNull();
 
   await act(() => toggle().click());
@@ -115,9 +116,13 @@ it("keeps stale, unavailable, and terminal states visible while collapsed", asyn
 
   await render([{ ...active, status: "completed" }]);
   expect(toggle().textContent).toContain("Completed");
+  expect(toggle().textContent).toContain("2/3");
   await act(() => toggle().click());
   expect(stages()?.textContent).toContain("Build the changeLast position");
   expect(stages()?.querySelector('[aria-current="step"]')).toBeNull();
+  await render([{ ...active, currentStepId: "review", position: 3, status: "completed" }]);
+  expect(toggle().textContent).toContain("3/3");
+  expect(stages()?.textContent).toContain("Review the changeLast position");
   await act(() => toggle().click());
   await render([{ ...active, status: "cancelled" }]);
   expect(toggle().textContent).toContain("Cancelled");
@@ -149,5 +154,5 @@ it("inspects history without confusing it with the latest run, then returns to l
   )!;
   await act(() => latestOption.click());
   expect(toggle().textContent).not.toContain("History");
-  expect(toggle().textContent).toContain("Build the change");
+  expect(toggle().textContent).toContain("Release");
 });

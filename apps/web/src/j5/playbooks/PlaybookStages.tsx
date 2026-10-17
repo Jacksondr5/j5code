@@ -47,28 +47,61 @@ export function PlaybookStages({
             {warning ? <AlertTriangleIcon /> : <BookOpenIcon />}
           </ComposerBanner.Icon>
           <ComposerBanner.Content>
-            <span className="shrink-0 text-muted-foreground">
-              {historical ? "History" : "Playbook"}
-            </span>
             <span className="min-w-0 flex-1 truncate font-medium text-foreground/80">
-              {display.currentTitle}
-            </span>
-            <span className="hidden min-w-0 max-w-1/2 truncate text-muted-foreground @min-[560px]:inline">
               {run.title}
             </span>
           </ComposerBanner.Content>
           <ComposerBanner.Actions>
+            {historical && (
+              <span className="hidden text-muted-foreground @min-[400px]:inline">History</span>
+            )}
             {stale ? (
               <span className="text-warning">Out of date</span>
             ) : run.status !== "active" || run.issue ? (
-              <span className={warning ? "text-warning" : "text-muted-foreground"}>
+              <span
+                className={
+                  warning
+                    ? "text-warning"
+                    : run.status === "completed"
+                      ? "text-success"
+                      : "text-muted-foreground"
+                }
+              >
                 {display.status}
               </span>
             ) : null}
-            <ComposerBanner.Count aria-label={display.position}>
+            <ComposerBanner.Count
+              aria-label={display.position}
+              className={run.status === "completed" ? "text-success" : undefined}
+            >
               <span className="sr-only">Stage </span>
               {run.position ?? "?"}/{run.total}
             </ComposerBanner.Count>
+            {display.steps.length > 1 && display.steps.length <= 10 && (
+              <span
+                aria-hidden
+                className="hidden w-20 shrink-0 items-center gap-0.5 @min-[560px]:flex"
+              >
+                {display.steps.map((step) => (
+                  <span
+                    key={step.id}
+                    className={cn(
+                      "h-[3px] min-w-0 flex-1 rounded-full",
+                      run.status === "completed" &&
+                        (step.state === "earlier" || step.state === "last")
+                        ? "bg-success"
+                        : step.current
+                          ? "bg-primary"
+                          : step.state === "earlier"
+                            ? "bg-primary/35"
+                            : step.state === "last"
+                              ? "bg-muted-foreground/60"
+                              : "bg-muted-foreground/25",
+                    )}
+                  />
+                ))}
+              </span>
+            )}
             <ComposerBanner.ToggleIcon expanded={expanded} />
           </ComposerBanner.Actions>
         </ComposerBanner.Row>

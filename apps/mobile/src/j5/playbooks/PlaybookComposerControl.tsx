@@ -69,7 +69,7 @@ export function PlaybookComposerControl(props: {
           />
           <View className="min-w-0 flex-1">
             <Text numberOfLines={1} className="text-xs text-foreground">
-              {run.runId !== runs[0]?.runId ? "History" : "Playbook"} · {display.currentTitle}
+              {run.title}
             </Text>
             {(run.status !== "active" ||
               run.issue ||
@@ -81,9 +81,38 @@ export function PlaybookComposerControl(props: {
               </Text>
             )}
           </View>
-          <Text className="text-xs text-foreground-muted">
-            {run.position ?? "?"}/{run.total}
-          </Text>
+          <View className="items-end gap-1">
+            <Text
+              className={`text-xs ${run.status === "completed" ? "text-success" : "text-foreground-muted"}`}
+            >
+              {run.position ?? "?"}/{run.total}
+            </Text>
+            {display.steps.length > 1 && display.steps.length <= 10 && (
+              <View
+                className="w-10 flex-row gap-0.5"
+                accessibilityElementsHidden
+                importantForAccessibility="no-hide-descendants"
+              >
+                {display.steps.map((step) => (
+                  <View
+                    key={step.id}
+                    className={`h-[3px] min-w-0 flex-1 rounded-full ${
+                      run.status === "completed" &&
+                      (step.state === "earlier" || step.state === "last")
+                        ? "bg-success"
+                        : step.current
+                          ? "bg-primary"
+                          : step.state === "earlier"
+                            ? "bg-primary/35"
+                            : step.state === "last"
+                              ? "bg-foreground-muted/60"
+                              : "bg-subtle-strong"
+                    }`}
+                  />
+                ))}
+              </View>
+            )}
+          </View>
           <SymbolView
             name={expanded ? "chevron.up" : "chevron.down"}
             size={12}
