@@ -1664,6 +1664,8 @@ export interface ChatComposerProps {
 
   // Queued runs strip rendered above the composer (v2 queue/steer).
   queuedRunsControl?: ReactNode;
+  /** Thread-owned progress attached above the composer. */
+  threadProgressControl?: ReactNode;
   // Queued-message edit mode: attachments already stored on the message being
   // edited. Rendered in the attachment strip with a remove control; removal is
   // client state in ChatView until the edit is saved.
@@ -6822,6 +6824,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         : null}
       <ComposerBanner.Dock>
         <ComposerBanner.Column>
+          {!hasBlockingComposerTopDrawer && props.threadProgressControl}
           <ComposerBannerStack
             key={activeThreadId}
             className="relative z-0"

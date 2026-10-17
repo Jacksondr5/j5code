@@ -41,7 +41,7 @@ import { usageLimitsBannerItem } from "./chat/ComposerUsageLimits";
 import { CrewRosterGate } from "../j5/crew/CrewRosterGate";
 import { useCanOperateThread } from "../j5/sharing/guestAccess";
 import { expandPlaybookPrompt } from "@t3tools/client-runtime/j5/playbooks";
-import { PlaybookBoard } from "../j5/playbooks/PlaybookBoard";
+import { PlaybookComposerControl } from "../j5/playbooks/PlaybookComposerControl";
 import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
 import * as Schema from "effect/Schema";
 import {
@@ -11356,14 +11356,6 @@ export default function ChatView(props: ChatViewProps) {
           />
         </header>
 
-        {isServerThread && (
-          <PlaybookBoard
-            key={`${activeThread.environmentId}:${activeThread.id}`}
-            environmentId={activeThread.environmentId}
-            threadId={activeThread.id}
-          />
-        )}
-
         {/* Main content area with optional plan sidebar */}
         <div className="relative flex min-h-0 min-w-0 flex-1">
           {/* Chat column */}
@@ -11705,6 +11697,15 @@ export default function ChatView(props: ChatViewProps) {
                                     editingRunId={editingQueuedRun?.runId ?? null}
                                     onEditQueuedRun={beginEditingQueuedRun}
                                     onCancelEdit={cancelEditingQueuedRun}
+                                  />
+                                ) : null
+                              }
+                              threadProgressControl={
+                                isServerThread ? (
+                                  <PlaybookComposerControl
+                                    key={`${activeThread.environmentId}:${activeThread.id}`}
+                                    environmentId={activeThread.environmentId}
+                                    threadId={activeThread.id}
                                   />
                                 ) : null
                               }
