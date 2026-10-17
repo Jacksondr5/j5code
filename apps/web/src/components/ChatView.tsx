@@ -41,6 +41,7 @@ import { usageLimitsBannerItem } from "./chat/ComposerUsageLimits";
 import { CrewRosterGate } from "../j5/crew/CrewRosterGate";
 import { useCanOperateThread } from "../j5/sharing/guestAccess";
 import { useMayInterruptThread } from "../j5/sharing/guestComposer";
+import { sharedMessageTypedText } from "../j5/sharing/sharedTimeline";
 import { expandPlaybookPrompt } from "@t3tools/client-runtime/j5/playbooks";
 import { PlaybookBoard } from "../j5/playbooks/PlaybookBoard";
 import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
@@ -8476,6 +8477,9 @@ export default function ChatView(props: ChatViewProps) {
             "Make room for this message's attachments in the composer before rewinding.",
           );
         }
+        // J5: a reverted message of a shared conversation comes back without the agent's author
+        // line. Read before the rewind, which takes the message out of the author record.
+        const typedText = sharedMessageTypedText(message);
         const commandId = CommandId.make(randomUUID());
         await waitForRevertedMessage(routeThreadRef, messageId, turnCount, commandId, async () => {
           const result = await revertThreadCheckpoint({
@@ -8485,7 +8489,7 @@ export default function ChatView(props: ChatViewProps) {
           if (result._tag === "Failure") throw squashAtomCommandFailure(result);
         });
         const currentPrompt = store.getComposerDraft(composerDraftTarget)?.prompt ?? "";
-        const restoredPrompt = recallableComposerPrompt(message.text);
+        const restoredPrompt = recallableComposerPrompt(typedText);
         const nextPrompt =
           restoredPrompt.length === 0
             ? currentPrompt
