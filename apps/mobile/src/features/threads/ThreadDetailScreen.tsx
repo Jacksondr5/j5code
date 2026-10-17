@@ -1224,11 +1224,13 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                   }}
                 />
                 <View className="w-full self-center" style={{ maxWidth: contentMaxWidth }}>
-                  <PlaybookComposerControl
-                    key={selectedThreadKey}
-                    environmentId={props.environmentId}
-                    threadId={props.selectedThread.id}
-                  />
+                  {!props.activePendingApproval && !props.activePendingUserInput && (
+                    <PlaybookComposerControl
+                      key={selectedThreadKey}
+                      environmentId={props.environmentId}
+                      threadId={props.selectedThread.id}
+                    />
+                  )}
                   {props.queuedRunEdit !== null ? (
                     <Animated.View
                       className="shrink-0"

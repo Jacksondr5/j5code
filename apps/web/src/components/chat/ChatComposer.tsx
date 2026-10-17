@@ -6824,7 +6824,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         : null}
       <ComposerBanner.Dock>
         <ComposerBanner.Column>
-          {props.threadProgressControl}
+          {!hasBlockingComposerTopDrawer && props.threadProgressControl}
           <ComposerBannerStack
             key={activeThreadId}
             className="relative z-0"
