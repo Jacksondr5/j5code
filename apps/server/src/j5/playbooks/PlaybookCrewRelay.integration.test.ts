@@ -125,7 +125,7 @@ const TestLayer = Layer.mergeAll(
       ),
     ),
   ),
-  Layer.provide(ServerConfigLayer),
+  Layer.provideMerge(ServerConfigLayer),
   Layer.provide(ServerSettingsService.layerTest()),
   Layer.provide(
     Layer.succeed(ProviderInstanceRegistry, {
@@ -158,8 +158,8 @@ it.layer(TestLayer)("Crew playbook hand-off through the real orchestrator", (it)
       const now = DateTime.formatIso(yield* DateTime.now);
       yield* runJ5A2AMigrations();
 
-      const root = yield* fs.makeTempDirectoryScoped({ prefix: "j5-playbook-relay-it-" });
-      const definitionPath = path.join(root, ".j5/playbooks/review.yaml");
+      const { stateDir: root } = yield* ServerConfig;
+      const definitionPath = path.join(root, "playbooks/review.yaml");
       yield* fs.makeDirectory(path.dirname(definitionPath), { recursive: true });
       yield* fs.writeFileString(
         definitionPath,
@@ -241,7 +241,6 @@ it.layer(TestLayer)("Crew playbook hand-off through the real orchestrator", (it)
 
       const started = yield* relay.start({
         owner: captainThread,
-        root,
         name: "review",
         key: "start-1",
         crewInstanceId: "crew:playbook-relay",

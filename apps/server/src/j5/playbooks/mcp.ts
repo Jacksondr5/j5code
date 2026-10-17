@@ -13,11 +13,9 @@ import { Tool } from "effect/ai";
 import { McpInvocationContext, requireThreadScope } from "../../mcp/McpInvocationContext.ts";
 import { actsAsThreadCaller, readsAsThreadCaller, spawnAndBrief } from "../a2a/mcp/outsideAgent.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
-import { ProjectService } from "../../project/ProjectService.ts";
 import { PlaybookCrewRelay } from "./PlaybookCrewRelay.ts";
 import { PlaybookStore, playbookError, type PlaybookMutation } from "./PlaybookStore.ts";
 import { readCaller } from "../../mcp/threadAccess.ts";
-import { playbookWorkspaceRoot } from "./workspace.ts";
 
 const Text = Schema.String.check(Schema.isNonEmpty());
 const Mutation = Schema.Struct({ runId: Text, client_request_id: Text });
@@ -37,7 +35,6 @@ const dependencies = [
   PlaybookStore,
   PlaybookCrewRelay,
 ];
-const workspaceDependencies = [...dependencies, ProjectService];
 /** A playbook's own refusal, or McpToolAccess's refusal of a caller that is not a live thread. */
 const Failure = Schema.Union([PlaybookError, OrchestratorMcpFailure]);
 const common = {
@@ -52,7 +49,7 @@ const mutationDescription =
 export const playbookTools = [
   Tool.make("j5_playbook_save", {
     description:
-      "Save a new playbook YAML definition to this environment's library, available across all its projects and worktrees. This writes application data. Use for creation unless the user explicitly requests workspace-only storage. Existing names are never overwritten; identical content is a safe retry. Report a save failure instead of claiming a workspace draft is shared.",
+      "Save a new playbook YAML definition to this environment's library, available across all its projects and worktrees. This writes application data. Use for all playbook creation. Workspace-local playbooks are not supported. Existing names are never overwritten; identical content is a safe retry. Report a save failure instead of claiming a workspace draft is shared.",
     parameters: PlaybookSaveRequest,
     success: PlaybookSaveResponse,
     failure: Failure,
@@ -61,11 +58,11 @@ export const playbookTools = [
   }),
   Tool.make("j5_playbook_list", {
     description:
-      "Discover live YAML playbooks from this environment's libraries and your thread workspace's .j5/playbooks directory, with each step's persona. Invalid files include actionable errors; non-blocking warnings name steps whose persona is missing or turned off.",
+      "Discover live YAML playbooks from this environment's library and configured source folders, with each step's persona. Invalid files include actionable errors; non-blocking warnings name steps whose persona is missing or turned off.",
     success: PlaybookDiscovery,
     failure: Failure,
     failureMode: "return",
-    dependencies: workspaceDependencies,
+    dependencies,
   }).annotate(Tool.Readonly, true),
   Tool.make("j5_playbook_read", {
     description:
@@ -74,11 +71,11 @@ export const playbookTools = [
     success: PlaybookReadResponse,
     failure: Failure,
     failureMode: "return",
-    dependencies: workspaceDependencies,
+    dependencies,
   }).annotate(Tool.Readonly, true),
   Tool.make("j5_playbook_start", {
     ...common,
-    dependencies: workspaceDependencies,
+    dependencies,
     parameters: Start,
     description:
       "Start a named playbook in your own thread and retrieve its first live prompt. Only one run may be active. You perform the work and control advancement; the playbook never spawns or stops agents. As a Captain, pass crew_instance_id to run the playbook your Crew follows: each step then goes to the seat that owns it, and delivery says who holds it." +
@@ -137,11 +134,6 @@ const ownerScope = Effect.gen(function* () {
   // Every playbook tool is declared to need a calling thread, which owns the run.
   return (yield* requireThreadScope(scope, "A playbook tool")).thread.threadId;
 });
-const workspace = Effect.gen(function* () {
-  const owner = yield* ownerScope;
-  return { owner, root: yield* playbookWorkspaceRoot(owner) };
-});
-
 const mutate = Effect.fn("PlaybookMcp.mutate")(function* (input: PlaybookMutation) {
   return yield* (yield* PlaybookCrewRelay).mutate(yield* ownerScope, input);
 });
@@ -150,11 +142,11 @@ const mutate = Effect.fn("PlaybookMcp.mutate")(function* (input: PlaybookMutatio
 const runsPlaybook = <P, A, E, R>(handle: (params: P) => Effect.Effect<A, E, R>) =>
   actsAsThreadCaller("A playbook tool", spawnAndBrief("run the playbook"), handle);
 
-/** Playbooks are read from the calling thread's workspace, and a run is read by its owner. */
+/** Definitions are environment-wide; run state belongs to its calling thread. */
 const readsPlaybooks = <P, A, E, R>(handle: (params: P) => Effect.Effect<A, E, R>) =>
   readsAsThreadCaller(
     "A playbook tool",
-    spawnAndBrief("read or run the playbook, since playbooks live in an agent's workspace"),
+    spawnAndBrief("read or run the environment playbook"),
     handle,
   );
 
@@ -180,29 +172,23 @@ export const playbookHandlers = {
   ),
   j5_playbook_list: readsPlaybooks(() =>
     Effect.gen(function* () {
-      const { root } = yield* workspace;
-      return yield* (yield* PlaybookStore).discover(root);
+      yield* ownerScope;
+      return yield* (yield* PlaybookStore).discover();
     }),
   ),
   j5_playbook_read: readsPlaybooks((input: typeof Read.Type) =>
     Effect.gen(function* () {
-      const { root } = yield* workspace;
-      return yield* (yield* PlaybookStore).read(root, input.name);
+      yield* ownerScope;
+      return yield* (yield* PlaybookStore).read(input.name);
     }),
   ),
   j5_playbook_start: runsPlaybook((input: typeof Start.Type) =>
     Effect.gen(function* () {
-      const { owner, root } = yield* workspace;
+      const owner = yield* ownerScope;
       if (input.crew_instance_id === undefined)
-        return yield* (yield* PlaybookStore).start(
-          owner,
-          root,
-          input.name,
-          input.client_request_id,
-        );
+        return yield* (yield* PlaybookStore).start(owner, input.name, input.client_request_id);
       return yield* (yield* PlaybookCrewRelay).start({
         owner,
-        root,
         name: input.name,
         key: input.client_request_id,
         crewInstanceId: input.crew_instance_id,

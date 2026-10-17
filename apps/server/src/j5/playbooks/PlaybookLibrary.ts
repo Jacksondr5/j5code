@@ -18,7 +18,7 @@ const FolderConfig = Schema.fromJsonString(PlaybookFoldersInput);
 const decodeFolders = Schema.decodeUnknownEffect(FolderConfig);
 const encodeFolders = Schema.encodeEffect(FolderConfig);
 
-/** Discovery and name lookup must choose the same file, including a broken local override. */
+/** Discovery and name lookup use the same environment catalog. */
 export const selectPlaybookSource = (
   inventory: ReadonlyArray<{
     source: PlaybookSource;
@@ -30,19 +30,17 @@ export const selectPlaybookSource = (
   explicitSource = false,
 ) => {
   const candidates = inventory.filter((entry) => entry.names.includes(name));
-  const local = candidates.find((entry) => entry.source.kind === "workspace");
-  const entry = local ?? candidates[0];
-  const issue =
-    local || explicitSource
-      ? null
-      : (inventory.find((entry) => entry.issue !== null)?.issue ??
-        (candidates.length > 1
-          ? playbookError(
-              "duplicate_name",
-              `Playbook ${name} exists in multiple libraries: ${candidates.map((entry) => entry.path).join(", ")}. Rename a copy or remove a source.`,
-            )
-          : null));
-  return { entry, issue, overridesLibrary: local !== undefined && candidates.length > 1 };
+  const entry = candidates[0];
+  const issue = explicitSource
+    ? null
+    : (inventory.find((entry) => entry.issue !== null)?.issue ??
+      (candidates.length > 1
+        ? playbookError(
+            "duplicate_name",
+            `Playbook ${name} exists in multiple libraries: ${candidates.map((entry) => entry.path).join(", ")}. Rename a copy or remove a source.`,
+          )
+        : null));
+  return { entry, issue };
 };
 
 /** Server-local libraries; callers never supply a filesystem write destination. */
@@ -69,15 +67,8 @@ export const makePlaybookLibrary = Effect.gen(function* () {
       );
     return (yield* decodeFolders(text)).folders;
   });
-  const sources = Effect.fn("PlaybookLibrary.sources")(function* (
-    workspaceRoot: string | undefined,
-  ) {
+  const sources = Effect.fn("PlaybookLibrary.sources")(function* () {
     const entries: Array<{ source: PlaybookSource; path: string }> = [];
-    if (workspaceRoot)
-      entries.push({
-        source: { kind: "workspace" },
-        path: path.resolve(workspaceRoot, ".j5/playbooks"),
-      });
     if (managed !== null) entries.push({ source: { kind: "environment" }, path: managed });
     const configured = yield* Effect.result(folders);
     for (const folder of configured._tag === "Success" ? configured.success : [])
@@ -122,14 +113,9 @@ export const makePlaybookLibrary = Effect.gen(function* () {
     return result;
   }, Effect.mapError(storageError));
   const directoryFor = Effect.fn("PlaybookLibrary.directoryFor")(function* (
-    workspaceRoot: string,
     source: PlaybookSource,
   ) {
     if (source.kind === "environment") return yield* requireManaged();
-    if (source.kind === "workspace") {
-      if (!workspaceRoot) return yield* playbookError("workspace_not_found", "Select a workspace.");
-      return path.resolve(workspaceRoot, ".j5/playbooks");
-    }
     if (!(yield* folders).includes(source.path))
       return yield* playbookError(
         "source_not_found",
@@ -138,7 +124,6 @@ export const makePlaybookLibrary = Effect.gen(function* () {
     return path.resolve(stateDir!, source.path);
   }, Effect.mapError(storageError));
   const resolve = Effect.fn("PlaybookLibrary.resolve")(function* (
-    workspaceRoot: string,
     name: string,
     source?: PlaybookSource,
   ) {
@@ -151,9 +136,9 @@ export const makePlaybookLibrary = Effect.gen(function* () {
     if (source)
       return {
         stem,
-        definitionPath: path.join(yield* directoryFor(workspaceRoot, source), `${stem}.yaml`),
+        definitionPath: path.join(yield* directoryFor(source), `${stem}.yaml`),
       };
-    const selected = selectPlaybookSource(yield* sources(workspaceRoot || undefined), stem);
+    const selected = selectPlaybookSource(yield* sources(), stem);
     if (selected.issue) return yield* selected.issue;
     if (!selected.entry)
       return yield* playbookError("not_found", `No playbook named ${stem}. Use j5_playbook_list.`);
@@ -208,7 +193,7 @@ export const makePlaybookLibrary = Effect.gen(function* () {
         "A playbook with this name already exists. Choose another name.",
       );
     }
-    const inventory = yield* sources(undefined);
+    const inventory = yield* sources();
     if (inventory.some((entry) => entry.names.includes(input.name)))
       return yield* playbookError(
         "already_exists",

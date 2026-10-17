@@ -32,10 +32,13 @@ import { makePlaybookRpcHandlers, PLAYBOOK_RPC_SCOPES } from "./playbookRpc.ts";
 
 const owner = ThreadId.make("thread:playbook:owner");
 const otherOwner = ThreadId.make("thread:playbook:other");
-const MemoryLayer = Layer.mergeAll(
+const BaseLayer = Layer.mergeAll(
   NodeSqliteClient.layer({ filename: ":memory:" }),
   NodeServices.layer,
 );
+const MemoryLayer = ServerConfig.layerTest(process.cwd(), {
+  prefix: "j5-playbook-test-state-",
+}).pipe(Layer.provideMerge(BaseLayer));
 const definition = (ids = ["research", "implement", "review"]): PlaybookDefinition => ({
   title: "Test playbook",
   description: "Verify that an agent receives live ordered prompts.",
@@ -45,8 +48,8 @@ const definition = (ids = ["research", "implement", "review"]): PlaybookDefiniti
 const makeWorkspace = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "j5-playbook-test-" });
-  const directory = path.join(workspaceRoot, ".j5", "playbooks");
+  const { stateDir: workspaceRoot } = yield* ServerConfig;
+  const directory = path.join(workspaceRoot, "playbooks");
   yield* fs.makeDirectory(directory, { recursive: true });
   const filename = (name: string) => path.join(directory, `${name}.yaml`);
   const write = (name: string, value = definition()) =>
@@ -76,7 +79,7 @@ it.effect(
   "publishes committed playbook changes during a turn and ignores failures and retries",
   () =>
     Effect.gen(function* () {
-      const { store, workspaceRoot } = yield* makeFixture;
+      const { store } = yield* makeFixture;
       const snapshots = yield* Queue.unbounded<{
         revision: number;
         runs: ReadonlyArray<PlaybookProgress>;
@@ -102,13 +105,13 @@ it.effect(
         Effect.forkScoped,
       );
       assert.deepStrictEqual(yield* Queue.take(snapshots), { revision: 0, runs: [] });
-      const run = yield* store.start(owner, workspaceRoot, "demo", "start");
+      const run = yield* store.start(owner, "demo", "start");
       const started = yield* Queue.take(snapshots);
       assert.equal(started.revision, 1);
       assert.equal(started.runs[0]?.runId, run.runId);
       assert.equal(started.runs[0]?.status, "active");
-      yield* store.start(owner, workspaceRoot, "demo", "start");
-      yield* Effect.flip(store.start(owner, workspaceRoot, "demo", "duplicate"));
+      yield* store.start(owner, "demo", "start");
+      yield* Effect.flip(store.start(owner, "demo", "duplicate"));
       yield* Effect.flip(
         store.mutate(otherOwner, {
           operation: "cancel",
@@ -140,7 +143,7 @@ it.effect(
         yield* store.mutate(owner, input);
         assert.deepStrictEqual(yield* Stream.runHead(store.changes), Option.some(index + 2));
       }
-      const second = yield* store.start(owner, workspaceRoot, "demo", "second");
+      const second = yield* store.start(owner, "demo", "second");
       assert.equal((yield* Queue.take(snapshots)).revision, 6);
       yield* store.mutate(owner, {
         operation: "cancel",
@@ -159,7 +162,7 @@ it.effect(
   "lists owners together, filters active runs, and reads shared live definitions once per page",
   () =>
     Effect.gen(function* () {
-      const { workspaceRoot, fs, write, filename } = yield* makeFixture;
+      const { fs, write, filename } = yield* makeFixture;
       let reads = 0;
       const store = yield* makePlaybookStore.pipe(
         Effect.provideService(FileSystem.FileSystem, {
@@ -170,8 +173,8 @@ it.effect(
           },
         }),
       );
-      const first = yield* store.start(owner, workspaceRoot, "demo", "first");
-      const second = yield* store.start(otherOwner, workspaceRoot, "demo", "second");
+      const first = yield* store.start(owner, "demo", "first");
+      const second = yield* store.start(otherOwner, "demo", "second");
       yield* store.mutate(otherOwner, {
         operation: "complete",
         runId: second.runId,
@@ -201,7 +204,7 @@ it.effect(
       yield* write("demo", { ...definition(), title: "Edited live" });
       assert.isTrue((yield* store.listAll({})).runs.every((run) => run.title === "Edited live"));
       yield* write("healthy");
-      yield* store.start(ThreadId.make("healthy-owner"), workspaceRoot, "healthy", "healthy");
+      yield* store.start(ThreadId.make("healthy-owner"), "healthy", "healthy");
       yield* fs.writeFileString(filename("demo"), "title: [invalid");
       reads = 0;
       const broken = yield* store.listAll({});
@@ -214,7 +217,7 @@ it.effect(
 
 it.effect("reads one definition for twenty thread runs on each request", () =>
   Effect.gen(function* () {
-    const { workspaceRoot, fs, write, filename } = yield* makeFixture;
+    const { fs, write, filename } = yield* makeFixture;
     let reads = 0;
     const store = yield* makePlaybookStore.pipe(
       Effect.provideService(FileSystem.FileSystem, {
@@ -226,7 +229,7 @@ it.effect("reads one definition for twenty thread runs on each request", () =>
       }),
     );
     for (let index = 0; index < 20; index++) {
-      const run = yield* store.start(owner, workspaceRoot, "demo", `start-${index}`);
+      const run = yield* store.start(owner, "demo", `start-${index}`);
       yield* store.mutate(owner, {
         operation: "complete",
         runId: run.runId,
@@ -252,11 +255,10 @@ it.effect("reads one definition for twenty thread runs on each request", () =>
 
 it.effect("pages beyond 100 runs without losing older active owners", () =>
   Effect.gen(function* () {
-    const { store, workspaceRoot } = yield* makeFixture;
+    const { store } = yield* makeFixture;
     const runs = yield* Effect.forEach(
       Array.from({ length: PLAYBOOK_RUNS_PAGE_SIZE + 1 }, (_, index) => index),
-      (index) =>
-        store.start(ThreadId.make(`owner-${index}`), workspaceRoot, "demo", `start-${index}`),
+      (index) => store.start(ThreadId.make(`owner-${index}`), "demo", `start-${index}`),
     );
     const first = yield* store.listAll({ status: "active" });
     const second = yield* store.listAll({ status: "active", offset: PLAYBOOK_RUNS_PAGE_SIZE });
@@ -274,18 +276,18 @@ it.effect("pages beyond 100 runs without losing older active owners", () =>
 
 it.effect("retains sequential runs and permits a new run after completion or cancellation", () =>
   Effect.gen(function* () {
-    const { store, workspaceRoot } = yield* makeFixture;
-    const first = yield* store.start(owner, workspaceRoot, "demo", "start-a");
+    const { store } = yield* makeFixture;
+    const first = yield* store.start(owner, "demo", "start-a");
     assert.equal(first.currentStep?.prompt, "Follow research.");
     assert.equal(first.position, 1);
     assert.equal(first.total, 3);
     assert.equal(first.ownerThreadId, owner);
 
-    const replay = yield* store.start(owner, workspaceRoot, "demo.yaml", "start-a");
+    const replay = yield* store.start(owner, "demo.yaml", "start-a");
     assert.equal(replay.runId, first.runId);
     assert.isTrue(replay.replayed);
     assert.equal(
-      (yield* Effect.flip(store.start(owner, workspaceRoot, "demo", "start-overlap"))).code,
+      (yield* Effect.flip(store.start(owner, "demo", "start-overlap"))).code,
       "already_active",
     );
 
@@ -296,7 +298,7 @@ it.effect("retains sequential runs and permits a new run after completion or can
       client_request_id: "complete-a",
     });
     assert.equal(completed.status, "completed");
-    const second = yield* store.start(owner, workspaceRoot, "demo", "start-b");
+    const second = yield* store.start(owner, "demo", "start-b");
     assert.notEqual(second.runId, first.runId);
     assert.equal((yield* store.current(owner)).runId, second.runId);
     const cancelled = yield* store.mutate(owner, {
@@ -305,7 +307,7 @@ it.effect("retains sequential runs and permits a new run after completion or can
       client_request_id: "cancel-b",
     });
     assert.equal(cancelled.status, "cancelled");
-    const third = yield* store.start(owner, workspaceRoot, "demo", "start-c");
+    const third = yield* store.start(owner, "demo", "start-c");
     assert.notEqual(third.runId, second.runId);
     assert.deepStrictEqual(
       (yield* store.listForThread(owner)).runs.map(({ runId, status }) => ({ runId, status })),
@@ -334,10 +336,10 @@ it.effect("reports each run's start and its end once, with how far it got", () =
   Effect.gen(function* () {
     const recorded: Array<Readonly<Record<string, unknown>>> = [];
     yield* Effect.gen(function* () {
-      const { store, workspaceRoot } = yield* makeFixture;
-      const finished = yield* store.start(owner, workspaceRoot, "demo", "start-a");
+      const { store } = yield* makeFixture;
+      const finished = yield* store.start(owner, "demo", "start-a");
       // A retried start is the same run.
-      yield* store.start(owner, workspaceRoot, "demo", "start-a");
+      yield* store.start(owner, "demo", "start-a");
       yield* store.mutate(owner, {
         operation: "next",
         runId: finished.runId,
@@ -352,7 +354,7 @@ it.effect("reports each run's start and its end once, with how far it got", () =
       } as const;
       yield* store.mutate(owner, complete);
       yield* store.mutate(owner, complete);
-      const abandoned = yield* store.start(owner, workspaceRoot, "demo", "start-b");
+      const abandoned = yield* store.start(owner, "demo", "start-b");
       yield* store.mutate(owner, {
         operation: "cancel",
         runId: abandoned.runId,
@@ -391,8 +393,8 @@ it.effect(
   "reads prompt edits live and navigates the latest order without changing the current ID",
   () =>
     Effect.gen(function* () {
-      const { store, workspaceRoot, write } = yield* makeFixture;
-      const run = yield* store.start(owner, workspaceRoot, "demo", "start");
+      const { store, write } = yield* makeFixture;
+      const run = yield* store.start(owner, "demo", "start");
       yield* store.mutate(owner, {
         operation: "next",
         runId: run.runId,
@@ -442,8 +444,8 @@ it.effect(
 
 it.effect("requires explicit recovery when the current step disappears", () =>
   Effect.gen(function* () {
-    const { store, workspaceRoot, write } = yield* makeFixture;
-    const run = yield* store.start(owner, workspaceRoot, "demo", "start");
+    const { store, write } = yield* makeFixture;
+    const run = yield* store.start(owner, "demo", "start");
     yield* write("demo", definition(["implement", "review"]));
     const missing = yield* Effect.flip(store.current(owner));
     assert.equal(missing.code, "step_missing");
@@ -509,10 +511,10 @@ it.effect("requires explicit recovery when the current step disappears", () =>
 
 it.effect("preserves progress for invalid or missing YAML and always permits cancellation", () =>
   Effect.gen(function* () {
-    const { store, workspaceRoot, fs, filename, write } = yield* makeFixture;
+    const { store, fs, filename, write } = yield* makeFixture;
     for (const broken of ["invalid", "missing"] as const) {
       yield* write("demo");
-      const run = yield* store.start(owner, workspaceRoot, "demo", `start-${broken}`);
+      const run = yield* store.start(owner, "demo", `start-${broken}`);
       if (broken === "invalid") yield* fs.writeFileString(filename("demo"), "title: [broken");
       else yield* fs.remove(filename("demo"));
       assert.equal(
@@ -552,7 +554,7 @@ it.effect(
   "discovers malformed definitions without hiding valid files or creating invalid runs",
   () =>
     Effect.gen(function* () {
-      const { store, workspaceRoot, fs, filename, path } = yield* makeFixture;
+      const { store, fs, filename } = yield* makeFixture;
       const invalidFiles = {
         duplicate: stringify(definition(["research", "research"])),
         empty: stringify(definition([])),
@@ -563,7 +565,7 @@ it.effect(
       for (const [name, content] of Object.entries(invalidFiles)) {
         yield* fs.writeFileString(filename(name), content);
       }
-      const discovered = yield* store.discover(workspaceRoot);
+      const discovered = yield* store.discover();
       assert.deepStrictEqual(
         discovered.playbooks.map(({ name }) => name),
         ["demo", "duplicate", "empty", "malformed", "missing-prompt"],
@@ -576,17 +578,13 @@ it.effect(
           "invalid_definition",
         );
         assert.equal(
-          (yield* Effect.flip(store.start(owner, workspaceRoot, name, name))).code,
+          (yield* Effect.flip(store.start(owner, name, name))).code,
           "invalid_definition",
         );
       }
       assert.deepStrictEqual((yield* store.listForThread(owner)).runs, []);
-      assert.deepStrictEqual(
-        (yield* store.discover(path.join(workspaceRoot, "empty-workspace"))).playbooks,
-        [],
-      );
       assert.equal(
-        (yield* Effect.flip(store.start(owner, workspaceRoot, "../demo", "outside"))).code,
+        (yield* Effect.flip(store.start(owner, "../demo", "outside"))).code,
         "invalid_name",
       );
     }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
@@ -596,27 +594,25 @@ it.effect(
   "lists a misnamed file with a rename hint, refuses to start it, and still deletes it",
   () =>
     Effect.gen(function* () {
-      const { store, workspaceRoot, fs, filename, write } = yield* makeFixture;
+      const { store, fs, filename, write } = yield* makeFixture;
       yield* write("Release Plan");
-      const entry = (yield* store.discover(workspaceRoot)).playbooks.find(
-        ({ name }) => name === "Release Plan",
-      );
+      const entry = (yield* store.discover()).playbooks.find(({ name }) => name === "Release Plan");
       assert.equal(entry?.title, "Test playbook");
       assert.equal(entry?.issue?.code, "invalid_name");
       assert.include(entry?.issue?.message, "release-plan.yaml");
       assert.equal(
-        (yield* Effect.flip(store.start(owner, workspaceRoot, "Release Plan", "misnamed"))).code,
+        (yield* Effect.flip(store.start(owner, "Release Plan", "misnamed"))).code,
         "invalid_name",
       );
-      yield* store.removeDefinition(workspaceRoot, "Release Plan");
+      yield* store.removeDefinition("Release Plan");
       assert.isFalse(yield* fs.exists(filename("Release Plan")));
     }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
 );
 
 it.effect("rejects first and last step movement and stale back or completion requests", () =>
   Effect.gen(function* () {
-    const { store, workspaceRoot } = yield* makeFixture;
-    const run = yield* store.start(owner, workspaceRoot, "demo", "start");
+    const { store } = yield* makeFixture;
+    const run = yield* store.start(owner, "demo", "start");
     const firstBoundary = yield* Effect.flip(
       store.mutate(owner, {
         operation: "back",
@@ -677,11 +673,9 @@ it.effect("rejects first and last step movement and stale back or completion req
 
 it.effect("serializes concurrent starts and advancement without double-advancing", () =>
   Effect.gen(function* () {
-    const { store, workspaceRoot } = yield* makeFixture;
+    const { store } = yield* makeFixture;
     const starts = yield* Effect.all(
-      ["start-1", "start-2"].map((key) =>
-        store.start(owner, workspaceRoot, "demo", key).pipe(Effect.result),
-      ),
+      ["start-1", "start-2"].map((key) => store.start(owner, "demo", key).pipe(Effect.result)),
       { concurrency: "unbounded" },
     );
     assert.equal(starts.filter(Result.isSuccess).length, 1);
@@ -728,9 +722,9 @@ it.effect("serializes concurrent starts and advancement without double-advancing
 
 it.effect("serializes concurrent back and completion requests", () =>
   Effect.gen(function* () {
-    const { store, workspaceRoot } = yield* makeFixture;
+    const { store } = yield* makeFixture;
     for (const operation of ["back", "complete"] as const) {
-      const run = yield* store.start(owner, workspaceRoot, "demo", `start-${operation}`);
+      const run = yield* store.start(owner, "demo", `start-${operation}`);
       yield* store.mutate(owner, {
         operation: "next",
         runId: run.runId,
@@ -773,8 +767,8 @@ it.effect(
   "isolates owners for every operation including another owner's successful request key",
   () =>
     Effect.gen(function* () {
-      const { store, workspaceRoot } = yield* makeFixture;
-      const run = yield* store.start(owner, workspaceRoot, "demo", "start");
+      const { store } = yield* makeFixture;
+      const run = yield* store.start(owner, "demo", "start");
       yield* store.mutate(owner, {
         operation: "next",
         runId: run.runId,
@@ -816,7 +810,7 @@ it.effect(
       assert.deepStrictEqual((yield* store.listForThread(otherOwner)).runs, []);
       assert.equal((yield* store.current(owner, run.runId)).currentStepId, "implement");
       assert.equal((yield* store.current(owner, run.runId)).status, "active");
-      const separate = yield* store.start(otherOwner, workspaceRoot, "demo", "start");
+      const separate = yield* store.start(otherOwner, "demo", "start");
       assert.notEqual(separate.runId, run.runId);
       assert.equal(separate.ownerThreadId, otherOwner);
     }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
@@ -830,7 +824,7 @@ it.effect(
       const databasePath = path.join(workspaceRoot, "state.sqlite");
       const runId = yield* Effect.gen(function* () {
         const store = yield* initializeStore;
-        const run = yield* store.start(owner, workspaceRoot, "demo", "start");
+        const run = yield* store.start(owner, "demo", "start");
         const next = {
           operation: "next",
           runId: run.runId,
@@ -893,24 +887,31 @@ it.effect(
         const newStore = yield* makePlaybookStore;
         assert.equal((yield* newStore.current(owner, runId)).currentStepId, "implement");
       }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: databasePath })));
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        ServerConfig.layerTest(process.cwd(), { prefix: "j5-playbook-restart-" }).pipe(
+          Layer.provideMerge(NodeServices.layer),
+        ),
+      ),
+    ),
 );
 
 it.effect(
   "cancels deleted and missing owners before reads or deletion, while archived owners remain active",
   () =>
     Effect.gen(function* () {
-      const { store, workspaceRoot, write, fs, filename } = yield* makeFixture;
+      const { store, write, fs, filename } = yield* makeFixture;
       const sql = yield* SqlClient.SqlClient;
       yield* write("archived");
-      const archived = yield* store.start(otherOwner, workspaceRoot, "archived", "archived");
+      const archived = yield* store.start(otherOwner, "archived", "archived");
       yield* sql`UPDATE orchestration_v2_projection_threads SET archived_at = '2026-09-23' WHERE thread_id = ${otherOwner}`;
       for (const entry of ["current", "thread", "active", "delete"] as const) {
         for (const missing of [false, true]) {
           yield* seedPlaybookOwners([owner]);
           yield* sql`UPDATE orchestration_v2_projection_threads SET deleted_at = NULL WHERE thread_id = ${owner}`;
           yield* write("demo");
-          const run = yield* store.start(owner, workspaceRoot, "demo", `${entry}-${missing}`);
+          const run = yield* store.start(owner, "demo", `${entry}-${missing}`);
           if (missing)
             yield* sql`DELETE FROM orchestration_v2_projection_threads WHERE thread_id = ${owner}`;
           else
@@ -924,34 +925,29 @@ it.effect(
               (yield* store.listAll({ status: "active" })).runs.map((run) => run.runId),
               [archived.runId],
             );
-          yield* store.removeDefinition(workspaceRoot, "demo");
+          yield* store.removeDefinition("demo");
           assert.isFalse(yield* fs.exists(filename("demo")));
           const history = yield* store.current(owner, run.runId);
           assert.equal(history.status, "cancelled");
           assert.isNull(history.issue);
           yield* write("demo");
           assert.equal(
-            (yield* Effect.flip(
-              store.start(owner, workspaceRoot, "demo", `deleted-${entry}-${missing}`),
-            )).code,
+            (yield* Effect.flip(store.start(owner, "demo", `deleted-${entry}-${missing}`))).code,
             "thread_not_found",
           );
         }
       }
       assert.equal((yield* store.current(otherOwner, archived.runId)).status, "active");
-      assert.equal(
-        (yield* Effect.flip(store.removeDefinition(workspaceRoot, "archived"))).code,
-        "in_use",
-      );
+      assert.equal((yield* Effect.flip(store.removeDefinition("archived"))).code, "in_use");
     }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
 );
 
 it.effect("keeps completed and cancelled history warning-free after steps or files disappear", () =>
   Effect.gen(function* () {
-    const { store, workspaceRoot, write, fs, filename } = yield* makeFixture;
+    const { store, write, fs, filename } = yield* makeFixture;
     for (const operation of ["complete", "cancel"] as const) {
       yield* write("demo");
-      const run = yield* store.start(owner, workspaceRoot, "demo", `start-${operation}`);
+      const run = yield* store.start(owner, "demo", `start-${operation}`);
       yield* store.mutate(owner, {
         operation,
         runId: run.runId,
@@ -972,10 +968,10 @@ it.effect(
   "prunes movement receipts only after termination and preserves start and finish retries",
   () =>
     Effect.gen(function* () {
-      const { store, workspaceRoot } = yield* makeFixture;
+      const { store } = yield* makeFixture;
       const sql = yield* SqlClient.SqlClient;
       for (const operation of ["complete", "cancel"] as const) {
-        const run = yield* store.start(owner, workspaceRoot, "demo", `start-${operation}`);
+        const run = yield* store.start(owner, "demo", `start-${operation}`);
         const next = {
           operation: "next",
           runId: run.runId,
@@ -1006,10 +1002,7 @@ it.effect(
           2,
         );
         assert.isTrue((yield* store.mutate(owner, finish)).replayed);
-        assert.equal(
-          (yield* store.start(owner, workspaceRoot, "demo", `start-${operation}`)).runId,
-          run.runId,
-        );
+        assert.equal((yield* store.start(owner, "demo", `start-${operation}`)).runId, run.runId);
         assert.equal((yield* Effect.flip(store.mutate(owner, next))).code, "run_terminal");
       }
     }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
@@ -1017,7 +1010,7 @@ it.effect(
 
 it.effect("reads YAML outside SQL transactions and rechecks the pointer after the read", () =>
   Effect.gen(function* () {
-    const { workspaceRoot, fs } = yield* makeFixture;
+    const { fs } = yield* makeFixture;
     const sql = yield* SqlClient.SqlClient;
     let moveDuringRead = false;
     const store = yield* makePlaybookStore.pipe(
@@ -1034,8 +1027,8 @@ it.effect("reads YAML outside SQL transactions and rechecks the pointer after th
           }),
       }),
     );
-    const run = yield* store.start(owner, workspaceRoot, "demo", "start");
-    yield* store.start(owner, workspaceRoot, "demo", "start");
+    const run = yield* store.start(owner, "demo", "start");
+    yield* store.start(owner, "demo", "start");
     const next = {
       operation: "next",
       runId: run.runId,
@@ -1062,21 +1055,21 @@ it.effect("reads YAML outside SQL transactions and rechecks the pointer after th
 
 it.effect("enforces the shared byte and step limits at their boundaries", () =>
   Effect.gen(function* () {
-    const { store, workspaceRoot, fs, filename, write } = yield* makeFixture;
+    const { store, fs, filename, write } = yield* makeFixture;
     const ids = Array.from({ length: PLAYBOOK_MAX_STEPS }, (_, index) => `step-${index}`);
     yield* write("demo", definition(ids));
-    assert.isNull((yield* store.discover(workspaceRoot)).playbooks[0]?.issue);
+    assert.isNull((yield* store.discover()).playbooks[0]?.issue);
     yield* write("demo", definition([...ids, "too-many"]));
     assert.equal(
-      (yield* Effect.flip(store.start(owner, workspaceRoot, "demo", "steps"))).code,
+      (yield* Effect.flip(store.start(owner, "demo", "steps"))).code,
       "invalid_definition",
     );
     const yaml = stringify(definition()) + "#";
     yield* fs.writeFileString(filename("demo"), yaml.padEnd(PLAYBOOK_MAX_BYTES, " "));
-    assert.isNull((yield* store.discover(workspaceRoot)).playbooks[0]?.issue);
+    assert.isNull((yield* store.discover()).playbooks[0]?.issue);
     yield* fs.writeFileString(filename("demo"), yaml.padEnd(PLAYBOOK_MAX_BYTES + 1, " "));
     assert.equal(
-      (yield* Effect.flip(store.start(owner, workspaceRoot, "demo", "bytes"))).code,
+      (yield* Effect.flip(store.start(owner, "demo", "bytes"))).code,
       "invalid_definition",
     );
   }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
@@ -1084,7 +1077,7 @@ it.effect("enforces the shared byte and step limits at their boundaries", () =>
 
 it.effect("exports the stem file name and a YAML body that imports back unchanged", () =>
   Effect.gen(function* () {
-    const { fs, store, workspaceRoot, filename, write } = yield* makeFixture;
+    const { fs, store, filename, write } = yield* makeFixture;
     const original: PlaybookDefinition = {
       title: "Title that is not the file name",
       description: "Colons: quotes \" and 'apostrophes' # not a comment",
@@ -1094,7 +1087,7 @@ it.effect("exports the stem file name and a YAML body that imports back unchange
       ],
     };
     yield* write("stem", original);
-    const exported = yield* store.exportDefinition(workspaceRoot, "stem");
+    const exported = yield* store.exportDefinition("stem");
     assert.equal(exported.fileName, "stem.yaml");
     assert.notInclude(exported.fileName, "Title");
     // Importing writes the exported bytes under the file's stem, so the copy must decode identically.
@@ -1104,9 +1097,7 @@ it.effect("exports the stem file name and a YAML body that imports back unchange
       parse(yield* fs.readFileString(filename("copy"))),
       parse(yield* fs.readFileString(filename("stem"))),
     );
-    const copy = (yield* store.discover(workspaceRoot)).playbooks.find(
-      ({ name }) => name === "copy",
-    );
+    const copy = (yield* store.discover()).playbooks.find(({ name }) => name === "copy");
     assert.isNull(copy?.issue);
     assert.deepStrictEqual(
       copy?.steps.map(({ id }) => id),
@@ -1117,9 +1108,9 @@ it.effect("exports the stem file name and a YAML body that imports back unchange
 
 it.effect("rejects exports of missing, misnamed, and invalid definitions", () =>
   Effect.gen(function* () {
-    const { fs, store, workspaceRoot, filename } = yield* makeFixture;
+    const { fs, store, filename } = yield* makeFixture;
     const code = (name: string) =>
-      store.exportDefinition(workspaceRoot, name).pipe(
+      store.exportDefinition(name).pipe(
         Effect.flip,
         Effect.map((error) => (error as { code?: string }).code),
       );
@@ -1141,7 +1132,7 @@ it.effect("keeps the workspace path out of export read failures", () =>
   Effect.gen(function* () {
     const { fs, store, workspaceRoot, filename } = yield* makeFixture;
     yield* fs.writeFileString(filename("broken"), "title: [broken");
-    const error = yield* store.exportDefinition(workspaceRoot, "broken").pipe(Effect.flip);
+    const error = yield* store.exportDefinition("broken").pipe(Effect.flip);
     assert.equal((error as { code?: string }).code, "invalid_definition");
     assert.notInclude(error.message, workspaceRoot);
     assert.notInclude(error.message, "cancellation");
@@ -1150,11 +1141,11 @@ it.effect("keeps the workspace path out of export read failures", () =>
 
 it.effect("exports a near-limit definition byte-for-byte so it stays importable", () =>
   Effect.gen(function* () {
-    const { fs, store, workspaceRoot, filename } = yield* makeFixture;
+    const { fs, store, filename } = yield* makeFixture;
     const source = `title: Demo\ndescription: Demo\nsteps:\n- id: one\n  title: One\n  prompt: "${"word ".repeat(50000)}end"\n`;
     assert.isBelow(Buffer.byteLength(source), PLAYBOOK_MAX_BYTES);
     yield* fs.writeFileString(filename("big"), source);
-    const exported = yield* store.exportDefinition(workspaceRoot, "big");
+    const exported = yield* store.exportDefinition("big");
     assert.equal(exported.yaml, source);
     assert.isAtMost(Buffer.byteLength(exported.yaml), PLAYBOOK_MAX_BYTES);
   }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
@@ -1162,20 +1153,18 @@ it.effect("exports a near-limit definition byte-for-byte so it stays importable"
 
 it.effect("refuses to export a playbook symlinked outside the workspace", () =>
   Effect.gen(function* () {
-    const { fs, path, store, workspaceRoot, filename } = yield* makeFixture;
+    const { fs, path, store, filename } = yield* makeFixture;
     const outside = yield* fs.makeTempDirectoryScoped({ prefix: "j5-playbook-outside-" });
     const target = path.join(outside, "secret.yaml");
     yield* fs.writeFileString(target, stringify(definition()));
     yield* fs.symlink(target, filename("leak"));
-    const error = yield* store.exportDefinition(workspaceRoot, "leak").pipe(Effect.flip);
+    const error = yield* store.exportDefinition("leak").pipe(Effect.flip);
     assert.equal((error as { code?: string }).code, "invalid_path");
   }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
 );
 
 // A real environment catalog on a temp state directory, as the running server reads it.
-const CatalogLayer = ServerConfig.layerTest(process.cwd(), {
-  prefix: "j5-playbook-personas-",
-}).pipe(Layer.provideMerge(MemoryLayer));
+const CatalogLayer = MemoryLayer;
 const staffed = (): PlaybookDefinition => ({
   ...definition(),
   steps: [
@@ -1187,15 +1176,15 @@ const staffed = (): PlaybookDefinition => ({
 
 it.effect("reads a definition without personas exactly as before, with no warnings", () =>
   Effect.gen(function* () {
-    const { store, workspaceRoot } = yield* makeFixture;
-    const [entry] = (yield* store.discover(workspaceRoot)).playbooks;
+    const { store } = yield* makeFixture;
+    const [entry] = (yield* store.discover()).playbooks;
     assert.deepStrictEqual(entry?.warnings, []);
     assert.deepStrictEqual(entry?.steps, [
       { id: "research", title: "Step research" },
       { id: "implement", title: "Step implement" },
       { id: "review", title: "Step review" },
     ]);
-    const read = yield* store.read(workspaceRoot, "demo.yaml");
+    const read = yield* store.read("demo.yaml");
     assert.deepStrictEqual(read, { name: "demo", ...definition(), warnings: [] });
     assert.isFalse(read.steps.some((step) => "persona" in step));
   }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
@@ -1203,22 +1192,22 @@ it.effect("reads a definition without personas exactly as before, with no warnin
 
 it.effect("returns step personas from discover, read, and every step tool", () =>
   Effect.gen(function* () {
-    const { store, workspaceRoot, write } = yield* makeFixture;
+    const { store, write } = yield* makeFixture;
     yield* seedPersonas([
       { id: "planner", enabled: true },
       { id: "builder-bot", enabled: true },
     ]);
     yield* write("demo", staffed());
-    const [entry] = (yield* store.discover(workspaceRoot)).playbooks;
+    const [entry] = (yield* store.discover()).playbooks;
     assert.deepStrictEqual(entry?.steps, [
       { id: "research", title: "Research", persona: "planner" },
       { id: "implement", title: "Implement", persona: "builder-bot" },
       { id: "review", title: "Review" },
     ]);
     assert.deepStrictEqual(entry?.warnings, []);
-    assert.deepStrictEqual((yield* store.read(workspaceRoot, "demo")).steps, staffed().steps);
+    assert.deepStrictEqual((yield* store.read("demo")).steps, staffed().steps);
 
-    const run = yield* store.start(owner, workspaceRoot, "demo", "start");
+    const run = yield* store.start(owner, "demo", "start");
     assert.equal(run.currentStep?.persona, "planner");
     assert.equal((yield* store.current(owner)).currentStep?.persona, "planner");
     const next = yield* store.mutate(owner, {
@@ -1250,7 +1239,7 @@ it.effect("returns step personas from discover, read, and every step tool", () =
 
 it.effect("warns about a disabled or missing persona without invalidating the definition", () =>
   Effect.gen(function* () {
-    const { store, workspaceRoot, write } = yield* makeFixture;
+    const { store, write } = yield* makeFixture;
     yield* seedPersonas([{ id: "planner", enabled: false }]);
     yield* write("demo", staffed());
     const expected = [
@@ -1267,24 +1256,24 @@ it.effect("warns about a disabled or missing persona without invalidating the de
         message: `Step "implement" names persona "builder-bot", which is not in this environment's library.`,
       },
     ];
-    const [entry] = (yield* store.discover(workspaceRoot)).playbooks;
+    const [entry] = (yield* store.discover()).playbooks;
     assert.isNull(entry?.issue);
     assert.deepStrictEqual(entry?.warnings, expected);
-    const read = yield* store.read(workspaceRoot, "demo");
+    const read = yield* store.read("demo");
     assert.deepStrictEqual(read.warnings, expected);
-    assert.equal((yield* store.start(owner, workspaceRoot, "demo", "start")).status, "active");
+    assert.equal((yield* store.start(owner, "demo", "start")).status, "active");
   }).pipe(Effect.scoped, Effect.provide(CatalogLayer)),
 );
 
 it.effect("reports personas as unverified when the catalog cannot be read", () =>
   Effect.gen(function* () {
-    const { store, workspaceRoot, write, fs, path } = yield* makeFixture;
+    const { store, write, fs, path } = yield* makeFixture;
     const { stateDir } = yield* ServerConfig;
     // An invalid file in the default persona folder fails every catalog read.
     yield* fs.makeDirectory(path.join(stateDir, "personas"));
     yield* fs.writeFileString(path.join(stateDir, "personas/broken.yaml"), "id: [");
     yield* write("demo", staffed());
-    const [entry] = (yield* store.discover(workspaceRoot)).playbooks;
+    const [entry] = (yield* store.discover()).playbooks;
     assert.isNull(entry?.issue);
     assert.deepStrictEqual(
       entry?.warnings?.map(({ code, stepId }) => [code, stepId]),
@@ -1294,14 +1283,14 @@ it.effect("reports personas as unverified when the catalog cannot be read", () =
       ],
     );
     assert.include(entry?.warnings?.[0]?.message, "could not be checked");
-    assert.lengthOf((yield* store.read(workspaceRoot, "demo")).warnings, 2);
+    assert.lengthOf((yield* store.read("demo")).warnings, 2);
   }).pipe(Effect.scoped, Effect.provide(CatalogLayer)),
 );
 
 it.effect("reads a playbook without creating a run or moving an active one", () =>
   Effect.gen(function* () {
-    const { store, workspaceRoot } = yield* makeFixture;
-    const run = yield* store.start(owner, workspaceRoot, "demo", "start");
+    const { store } = yield* makeFixture;
+    const run = yield* store.start(owner, "demo", "start");
     yield* store.mutate(owner, {
       operation: "next",
       runId: run.runId,
@@ -1310,7 +1299,7 @@ it.effect("reads a playbook without creating a run or moving an active one", () 
     });
     const revision = yield* Stream.runHead(store.changes);
     const runs = (yield* store.listForThread(owner)).runs.length;
-    const read = yield* store.read(workspaceRoot, "demo");
+    const read = yield* store.read("demo");
     assert.deepStrictEqual(
       read.steps.map(({ prompt }) => prompt),
       ["Follow research.", "Follow implement.", "Follow review."],
@@ -1318,8 +1307,8 @@ it.effect("reads a playbook without creating a run or moving an active one", () 
     assert.equal((yield* store.current(owner)).currentStepId, "implement");
     assert.lengthOf((yield* store.listForThread(owner)).runs, runs);
     assert.deepStrictEqual(yield* Stream.runHead(store.changes), revision);
-    assert.equal((yield* Effect.flip(store.read(workspaceRoot, "absent"))).code, "not_found");
-    assert.equal((yield* Effect.flip(store.read(workspaceRoot, "../demo"))).code, "invalid_name");
+    assert.equal((yield* Effect.flip(store.read("absent"))).code, "not_found");
+    assert.equal((yield* Effect.flip(store.read("../demo"))).code, "invalid_name");
   }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
 );
 
@@ -1339,19 +1328,19 @@ it.effect(
         });
 
       // A playbook's title is shown on every run of it, active or finished.
-      assert.equal(yield* moved(store.renameDefinition(workspaceRoot, "demo", "Renamed")), 1);
-      assert.equal(yield* moved(store.renameDefinition(workspaceRoot, "demo", "Renamed")), 0);
+      assert.equal(yield* moved(store.renameDefinition("demo", "Renamed")), 1);
+      assert.equal(yield* moved(store.renameDefinition("demo", "Renamed")), 0);
       yield* write("unused");
-      assert.equal(yield* moved(store.removeDefinition(workspaceRoot, "unused")), 1);
-      assert.equal(yield* moved(Effect.flip(store.removeDefinition(workspaceRoot, "unused"))), 0);
+      assert.equal(yield* moved(store.removeDefinition("unused")), 1);
+      assert.equal(yield* moved(Effect.flip(store.removeDefinition("unused"))), 0);
 
       // A Crew-linked run's landing gets its target once; Fleet shows the seat it is headed to.
       assert.deepStrictEqual(yield* store.activeDefinitionDirectories(), []);
-      const run = yield* store.start(owner, workspaceRoot, "demo", "start", {
+      const run = yield* store.start(owner, "demo", "start", {
         crewInstanceId: "crew:watch",
       });
       assert.deepStrictEqual(yield* store.activeDefinitionDirectories(), [
-        path.join(workspaceRoot, ".j5", "playbooks"),
+        path.join(workspaceRoot, "playbooks"),
       ]);
       const target = { seat: "builder", threadId: "thread:builder" };
       assert.equal(yield* moved(store.targetLanding(run.runId, "start", target)), 1);
@@ -1391,102 +1380,66 @@ it.effect(
         path.join(workspaceRoot, "other-project"),
         path.join(workspaceRoot, "worktree"),
       ]) {
-        const discovered = yield* store.discover(root);
+        const discovered = yield* store.discover();
         assert.equal(
           discovered.playbooks.find((entry) => entry.name === "shared")?.source.kind,
           "environment",
         );
-        assert.equal((yield* store.read(root, "shared")).title, "Test playbook");
+        assert.equal((yield* store.read("shared")).title, "Test playbook");
         assert.isFalse(yield* fs.exists(path.join(root, ".j5/playbooks/shared.yaml")));
       }
-      assert.equal(
-        (yield* store.exportDefinition("", "shared", { kind: "environment" })).yaml,
-        yaml,
-      );
-      const run = yield* store.start(owner, workspaceRoot, "shared", "start-shared");
+      assert.equal((yield* store.exportDefinition("shared", { kind: "environment" })).yaml, yaml);
+      const run = yield* store.start(owner, "shared", "start-shared");
       assert.equal(run.definitionPath, path.join(stateDir, "playbooks/shared.yaml"));
       assert.deepStrictEqual(yield* store.activeDefinitionDirectories(), [
         path.join(stateDir, "playbooks"),
       ]);
       assert.equal(
-        (yield* Effect.flip(store.removeDefinition("", "shared", { kind: "environment" }))).code,
+        (yield* Effect.flip(store.removeDefinition("shared", { kind: "environment" }))).code,
         "in_use",
       );
     }).pipe(Effect.scoped, Effect.provide(CatalogLayer)),
 );
 
-it.effect(
-  "keeps environment run retries pinned when a workspace override appears, including legacy start receipts",
-  () =>
-    Effect.gen(function* () {
-      const { store, workspaceRoot, write, fs, path } = yield* makeFixture;
-      yield* store.saveDefinition({ name: "shared", yaml: stringify(definition()) });
-      const run = yield* store.start(owner, workspaceRoot, "shared", "retry-shared");
-      yield* write("shared", { ...definition(), title: "Workspace override" });
-      assert.equal((yield* store.read(workspaceRoot, "shared")).title, "Workspace override");
-      const replayed = yield* store.start(owner, workspaceRoot, "shared", "retry-shared");
-      assert.equal(replayed.runId, run.runId);
-      assert.equal(replayed.definitionPath, run.definitionPath);
-      assert.isTrue(replayed.replayed);
-      assert.equal(replayed.title, "Test playbook");
-      assert.equal(
-        (yield* Effect.flip(store.start(owner, workspaceRoot, "demo", "retry-shared"))).code,
-        "request_conflict",
-      );
-      // Existing workspace starts use the unchanged path-based receipt shape too.
-      const legacy = yield* store.start(otherOwner, workspaceRoot, "demo", "legacy");
-      yield* fs.remove(path.join(workspaceRoot, ".j5/playbooks/demo.yaml"));
-      yield* store.saveDefinition({ name: "demo", yaml: stringify(definition(["new"])) });
-      const legacyReplay = yield* store.start(otherOwner, workspaceRoot, "demo", "legacy");
-      assert.equal(legacyReplay.definitionPath, legacy.definitionPath);
-      assert.isNotNull(legacyReplay.issue);
-    }).pipe(Effect.scoped, Effect.provide(CatalogLayer)),
-);
-
-it.effect(
-  "keeps workspace overrides authoritative and management actions on their selected source",
-  () =>
-    Effect.gen(function* () {
-      const { store, workspaceRoot, filename, fs } = yield* makeFixture;
-      yield* store.saveDefinition({
-        name: "demo",
-        yaml: stringify({ ...definition(), title: "Shared demo" }),
-      });
-      const listed = (yield* store.discover(workspaceRoot)).playbooks.find(
-        (entry) => entry.name === "demo",
-      );
-      assert.isTrue(listed?.overridesLibrary);
-      yield* store.renameDefinition(workspaceRoot, "demo", "Renamed environment", {
-        kind: "environment",
-      });
-      assert.equal((yield* store.read(workspaceRoot, "demo")).title, "Test playbook");
-      assert.include(
-        (yield* store.exportDefinition(workspaceRoot, "demo", { kind: "environment" })).yaml,
-        "Renamed environment",
-      );
-      yield* fs.writeFileString(filename("demo"), "broken: [");
-      assert.equal(
-        (yield* Effect.flip(store.read(workspaceRoot, "demo"))).code,
-        "invalid_definition",
-      );
-      yield* fs.remove(filename("demo"));
-      yield* fs.symlink(`${filename("demo")}.missing`, filename("demo"));
-      assert.equal((yield* Effect.flip(store.read(workspaceRoot, "demo"))).code, "not_found");
-      assert.equal(
-        (yield* store.discover(workspaceRoot)).playbooks.find((entry) => entry.name === "demo")
-          ?.issue?.code,
-        "invalid_definition",
-      );
-      yield* store.removeDefinition("", "demo", { kind: "environment" });
-      assert.include(yield* fs.readDirectory(`${workspaceRoot}/.j5/playbooks`), "demo.yaml");
-    }).pipe(Effect.scoped, Effect.provide(CatalogLayer)),
+it.effect("ignores workspace files and retains legacy runs at their recorded path", () =>
+  Effect.gen(function* () {
+    const { store, workspaceRoot, fs, path } = yield* makeFixture;
+    const local = path.join(workspaceRoot, "project/.j5/playbooks");
+    yield* fs.makeDirectory(local, { recursive: true });
+    yield* fs.writeFileString(path.join(local, "demo.yaml"), "broken: [");
+    yield* fs.writeFileString(path.join(local, "local-only.yaml"), stringify(definition()));
+    assert.equal((yield* store.read("demo")).title, "Test playbook");
+    assert.isFalse(
+      (yield* store.discover()).playbooks.some((entry) => entry.name === "local-only"),
+    );
+    const run = yield* store.start(owner, "demo", "legacy");
+    const sql = yield* SqlClient.SqlClient;
+    // A run created before environment libraries keeps reading its original file.
+    const legacyPath = path.join(local, "old.yaml");
+    yield* fs.writeFileString(legacyPath, stringify(definition()));
+    yield* sql`UPDATE j5_playbook_run SET definition_path = ${legacyPath} WHERE run_id = ${run.runId}`;
+    const request = JSON.stringify(["start", legacyPath]);
+    yield* sql`UPDATE j5_playbook_request SET request_json = ${request} WHERE owner_thread_id = ${owner} AND request_id = 'legacy'`;
+    const retry = yield* store.start(owner, "old", "legacy");
+    assert.isTrue(retry.replayed);
+    assert.equal(retry.definitionPath, legacyPath);
+    assert.equal((yield* store.current(owner, run.runId)).definitionPath, legacyPath);
+    assert.isNull((yield* store.current(owner, run.runId)).issue);
+    yield* store.mutate(owner, {
+      operation: "cancel",
+      runId: run.runId,
+      client_request_id: "cancel-legacy",
+    });
+    assert.equal((yield* store.current(owner, run.runId)).status, "cancelled");
+    assert.isTrue(yield* fs.exists(legacyPath));
+  }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
 );
 
 it.effect(
   "reads configured folders, reports ambiguous names, and retains pinned runs after a source is removed",
   () =>
     Effect.gen(function* () {
-      const { store, workspaceRoot, fs, path, write } = yield* makeFixture;
+      const { store, fs, path } = yield* makeFixture;
       const { stateDir } = yield* ServerConfig;
       const folder = path.join(stateDir, "external");
       yield* fs.makeDirectory(folder);
@@ -1495,12 +1448,11 @@ it.effect(
       yield* fs.symlink(folder, alias);
       yield* store.setFolders({ folders: ["external", folder, alias] });
       assert.equal((yield* store.sources()).folders.length, 2);
-      const run = yield* store.start(owner, workspaceRoot, "shared", "folder-run");
+      const run = yield* store.start(owner, "shared", "folder-run");
       assert.equal(run.definitionPath, path.join(folder, "shared.yaml"));
       assert.equal(
-        (yield* Effect.flip(
-          store.removeDefinition("", "shared", { kind: "folder", path: "external" }),
-        )).code,
+        (yield* Effect.flip(store.removeDefinition("shared", { kind: "folder", path: "external" })))
+          .code,
         "read_only",
       );
       yield* fs.makeDirectory(path.join(stateDir, "playbooks"), { recursive: true });
@@ -1508,32 +1460,22 @@ it.effect(
         path.join(stateDir, "playbooks/shared.yaml"),
         stringify(definition()),
       );
+      assert.equal((yield* Effect.flip(store.read("shared"))).code, "duplicate_name");
       assert.equal(
-        (yield* Effect.flip(store.read(workspaceRoot, "shared"))).code,
+        (yield* store.discover()).playbooks.find((entry) => entry.name === "shared")?.issue?.code,
         "duplicate_name",
       );
-      assert.equal(
-        (yield* store.discover(workspaceRoot)).playbooks.find((entry) => entry.name === "shared")
-          ?.issue?.code,
-        "duplicate_name",
-      );
-      assert.equal((yield* store.read(workspaceRoot, "demo")).title, "Test playbook");
-      yield* write("shared", { ...definition(), title: "Local" });
-      assert.equal((yield* store.read(workspaceRoot, "shared")).title, "Local");
+      assert.equal((yield* store.read("demo")).title, "Test playbook");
       yield* store.setFolders({ folders: [] });
       assert.equal(
         (yield* store.current(owner, run.runId)).definitionPath,
         path.join(folder, "shared.yaml"),
       );
       assert.isNull((yield* store.current(owner, run.runId)).issue);
+      assert.equal((yield* store.start(owner, "shared", "folder-run")).runId, run.runId);
       assert.equal(
-        (yield* store.start(owner, workspaceRoot, "shared", "folder-run")).runId,
-        run.runId,
-      );
-      assert.equal(
-        (yield* Effect.flip(
-          store.exportDefinition("", "shared", { kind: "folder", path: "external" }),
-        )).code,
+        (yield* Effect.flip(store.exportDefinition("shared", { kind: "folder", path: "external" })))
+          .code,
         "source_not_found",
       );
       assert.isTrue(yield* fs.exists(path.join(folder, "shared.yaml")));
@@ -1541,10 +1483,10 @@ it.effect(
 );
 
 it.effect(
-  "shows missing folders and malformed config while keeping workspace playbooks usable",
+  "shows missing folders and malformed config without silently using partial libraries",
   () =>
     Effect.gen(function* () {
-      const { store, workspaceRoot, fs, path } = yield* makeFixture;
+      const { store, fs, path } = yield* makeFixture;
       const { stateDir } = yield* ServerConfig;
       yield* store.saveDefinition({ name: "shared", yaml: stringify(definition()) });
       const folder = path.join(stateDir, "missing-later");
@@ -1556,19 +1498,15 @@ it.effect(
           ?.code,
         "source_unavailable",
       );
-      assert.equal(
-        (yield* Effect.flip(store.read(workspaceRoot, "shared"))).code,
-        "source_unavailable",
-      );
-      assert.equal((yield* store.read(workspaceRoot, "demo")).title, "Test playbook");
+      assert.equal((yield* Effect.flip(store.read("shared"))).code, "source_unavailable");
       yield* fs.writeFileString(path.join(stateDir, "playbooks.json"), "bad json");
-      const listed = yield* store.discover(workspaceRoot);
-      assert.equal(listed.playbooks.find((entry) => entry.name === "demo")?.issue, null);
-      assert.isTrue(listed.sources.some((entry) => entry.issue?.code === "invalid_configuration"));
+      const listed = yield* store.discover();
       assert.equal(
-        (yield* Effect.flip(store.read(workspaceRoot, "shared"))).code,
+        listed.playbooks.find((entry) => entry.name === "demo")?.issue?.code,
         "invalid_configuration",
       );
+      assert.isTrue(listed.sources.some((entry) => entry.issue?.code === "invalid_configuration"));
+      assert.equal((yield* Effect.flip(store.read("shared"))).code, "invalid_configuration");
     }).pipe(Effect.scoped, Effect.provide(CatalogLayer)),
 );
 
@@ -1608,6 +1546,6 @@ it.effect(
       assert.isFalse(yield* fs.exists(path.join(stateDir, "playbooks/invalid.yaml")));
       // Recreating the store reloads the same library files.
       const restarted = yield* makePlaybookStore;
-      assert.equal((yield* restarted.read("", "shared")).title, "Test playbook");
+      assert.equal((yield* restarted.read("shared")).title, "Test playbook");
     }).pipe(Effect.scoped, Effect.provide(CatalogLayer)),
 );

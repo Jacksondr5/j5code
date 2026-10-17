@@ -43,6 +43,8 @@ const ACTIONS = J5_CLIENT_ACTION_WS_METHODS;
 const tested = [
   ...Object.values(ACTIONS),
   J5_ARTIFACT_WS_METHODS.deleteArtifact,
+  J5_PLAYBOOK_WS_METHODS.savePlaybook,
+  J5_PLAYBOOK_WS_METHODS.setFolders,
   J5_PLAYBOOK_WS_METHODS.deletePlaybook,
   J5_PLAYBOOK_WS_METHODS.renamePlaybook,
 ] as const;
@@ -203,6 +205,9 @@ const clientFor = (scopes: ReadonlyArray<AuthEnvironmentScope>) =>
             ...(yield* makeClientActionRpcHandlers()),
             [J5_ARTIFACT_WS_METHODS.deleteArtifact]:
               artifacts[J5_ARTIFACT_WS_METHODS.deleteArtifact],
+            [J5_PLAYBOOK_WS_METHODS.savePlaybook]: ({ name }) =>
+              reached("save playbook", { name, saved: true }),
+            [J5_PLAYBOOK_WS_METHODS.setFolders]: () => reached("set playbook folders", undefined),
             [J5_PLAYBOOK_WS_METHODS.deletePlaybook]: () =>
               reached("delete playbook", { deleted: true }),
             [J5_PLAYBOOK_WS_METHODS.renamePlaybook]: () =>
@@ -283,15 +288,19 @@ const callEach = (client: Effect.Success<ReturnType<typeof clientFor>>["client"]
         path: "plan.md",
       }),
     ),
+    [J5_PLAYBOOK_WS_METHODS.savePlaybook]: outcome(
+      client[J5_PLAYBOOK_WS_METHODS.savePlaybook]({ name: "release", yaml: "definition" }),
+    ),
+    [J5_PLAYBOOK_WS_METHODS.setFolders]: outcome(
+      client[J5_PLAYBOOK_WS_METHODS.setFolders]({ folders: [] }),
+    ),
     [J5_PLAYBOOK_WS_METHODS.deletePlaybook]: outcome(
       client[J5_PLAYBOOK_WS_METHODS.deletePlaybook]({
-        projectId,
         name: "release",
       }),
     ),
     [J5_PLAYBOOK_WS_METHODS.renamePlaybook]: outcome(
       client[J5_PLAYBOOK_WS_METHODS.renamePlaybook]({
-        projectId,
         name: "release",
         title: "Release",
       }),

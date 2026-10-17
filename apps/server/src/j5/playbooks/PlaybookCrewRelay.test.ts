@@ -1,3 +1,4 @@
+import { ServerConfig } from "../../config.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
@@ -74,10 +75,10 @@ const projection = (threadId: ThreadId, state: SeatState) =>
 const fixture = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const root = yield* fs.makeTempDirectoryScoped({ prefix: "j5-playbook-relay-" });
-  yield* fs.makeDirectory(path.join(root, ".j5/playbooks"), { recursive: true });
+  const { stateDir: root } = yield* ServerConfig;
+  yield* fs.makeDirectory(path.join(root, "playbooks"), { recursive: true });
   const write = (name: string, value: PlaybookDefinition) =>
-    fs.writeFileString(path.join(root, ".j5/playbooks", `${name}.yaml`), stringify(value));
+    fs.writeFileString(path.join(root, "playbooks", `${name}.yaml`), stringify(value));
   yield* write("review", review);
   yield* write("other", { ...review, title: "Another playbook" });
   yield* runJ5A2AMigrations();
@@ -105,7 +106,7 @@ const fixture = Effect.gen(function* () {
       createdAt,
       playbook: {
         name: playbook,
-        definitionPath: path.resolve(root, ".j5/playbooks", `${playbook}.yaml`),
+        definitionPath: path.resolve(root, "playbooks", `${playbook}.yaml`),
       },
       members: [seat("a", seatAThread, ["inspect"]), seat("b", seatBThread, ["review"])],
     });
@@ -189,7 +190,7 @@ const fixture = Effect.gen(function* () {
     ),
   );
   const start = (key: string, crewInstanceId = crewId, name = "review", owner = captainThread) =>
-    relay.start({ owner, root, name, key, crewInstanceId });
+    relay.start({ owner, name, key, crewInstanceId });
   const move = (
     runId: string,
     operation: "next" | "back" | "complete",
@@ -213,9 +214,12 @@ const fixture = Effect.gen(function* () {
   };
 });
 
-const TestLayer = Layer.mergeAll(
+const BaseLayer = Layer.mergeAll(
   NodeSqliteClient.layer({ filename: ":memory:" }),
   NodeServices.layer,
+);
+const TestLayer = ServerConfig.layerTest(process.cwd(), { prefix: "j5-playbook-relay-" }).pipe(
+  Layer.provideMerge(BaseLayer),
 );
 const failureCode = (error: PlaybookError) => error.code;
 
@@ -554,7 +558,7 @@ it.effect("an unreadable playbook keeps a hand-off pending until the YAML is rep
     const run = yield* start("start-1");
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    yield* fs.writeFileString(path.join(root, ".j5/playbooks/review.yaml"), "title: [unclosed");
+    yield* fs.writeFileString(path.join(root, "playbooks/review.yaml"), "title: [unclosed");
     yield* Ref.set(dispatchFault, null);
     const blocked = yield* move(run.runId, "next", "inspect", "next-1").pipe(Effect.flip);
     assert.equal(failureCode(blocked), "delivery_pending");
