@@ -16,10 +16,12 @@ export function useParticipantIdentities(
   environmentId: EnvironmentId,
   participantIds: ReadonlyArray<string>,
 ): ParticipantIdentities {
-  const key = Array.from(new Set(participantIds)).sort().join("\0");
+  const idsKey = Array.from(new Set(participantIds)).sort().join("\0");
+  // A result answers one environment's ids; another environment's never stands in for it.
+  const key = `${environmentId}\n${idsKey}`;
   const [result, setResult] = useState({ key: "", identities: NO_IDENTITIES });
   useEffect(() => {
-    const ids = key === "" ? [] : key.split("\0");
+    const ids = idsKey === "" ? [] : idsKey.split("\0");
     if (ids.length === 0) {
       setResult({ key, identities: NO_IDENTITIES });
       return;
@@ -31,7 +33,7 @@ export function useParticipantIdentities(
     return () => {
       active = false;
     };
-  }, [environmentId, key]);
+  }, [environmentId, idsKey, key]);
   return result.key === key ? result.identities : NO_IDENTITIES;
 }
 

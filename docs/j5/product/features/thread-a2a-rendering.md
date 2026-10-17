@@ -15,7 +15,7 @@ The person should read the letter, not the envelope: who said what to whom, what
 
 Agent-to-agent traffic in a thread is rendered as **cards** — a distinct treatment from the conversation, which keeps upstream's rendering untouched. Three kinds of item get a card.
 
-A **received message** from another agent shows the sender's name (a link to the sender's thread), a badge for what the message asks of the reader, the time, and the body. There is no envelope on the card: the renderer reads the versioned envelope text and shows the letter. If it meets an envelope version it does not understand, it shows the raw text rather than guessing — a visible fallback, never a plausible fake.
+A **received message** from another agent shows the sender's name (a link to the sender's thread when this client can open it), a badge for what the message asks of the reader, the time, and the body. There is no envelope on the card: the renderer reads the versioned envelope text and shows the letter. If it meets an envelope version it does not understand, it shows the raw text rather than guessing — a visible fallback, never a plausible fake.
 
 A **reply that arrived through the inbox** is rendered as the person who sent it: "You · via Inbox" when the reader is that person, otherwise the person's name. The label comes from the person id, so it is right for any number of people.
 
