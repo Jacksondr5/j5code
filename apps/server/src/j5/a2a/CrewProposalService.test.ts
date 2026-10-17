@@ -1654,10 +1654,13 @@ const decodePlaybookStart = Schema.decodeUnknownEffect(playbookStartTool.paramet
 const playbookFixture = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "j5-crew-playbook-" });
-  yield* fs.makeDirectory(path.join(workspaceRoot, ".j5/playbooks"), { recursive: true });
+  const config = yield* Layer.build(
+    ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-playbook-" }),
+  );
+  const workspaceRoot = Context.get(config, ServerConfig).stateDir;
+  yield* fs.makeDirectory(path.join(workspaceRoot, "playbooks"), { recursive: true });
   const writePlaybook = (name: string, text: string) =>
-    fs.writeFileString(path.join(workspaceRoot, ".j5/playbooks", `${name}.yaml`), text);
+    fs.writeFileString(path.join(workspaceRoot, "playbooks", `${name}.yaml`), text);
   yield* writePlaybook("release", stringify(release()));
   const database = NodeSqliteClient.layer({ filename: ":memory:" });
   const storage = Layer.mergeAll(crewInstanceLayer, proposalStoreLayer, ledgerLayer).pipe(
@@ -1728,9 +1731,7 @@ const playbookFixture = Effect.gen(function* () {
       }),
     ),
     Layer.provideMerge(Layer.succeedContext(context)),
-    Layer.provideMerge(
-      ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-playbook-state-" }),
-    ),
+    Layer.provideMerge(Layer.succeedContext(config)),
     Layer.provideMerge(NodeServices.layer),
   );
   const armBarrier = Effect.gen(function* () {
@@ -1751,7 +1752,7 @@ const proposeRelease = (
     captain,
     displayName: "Release Crew",
     brief: "Ship the change.",
-    playbook: { name: "release", workspaceRoot },
+    playbook: { name: "release" },
     seats: [custom("planner", ["plan"]), custom("builder", ["build"])],
   });
 
@@ -1784,7 +1785,7 @@ it.effect(
         const stored = (yield* store.read(opened.proposal.id))!;
         assert.deepStrictEqual(stored.playbook, {
           name: "release",
-          definitionPath: `${workspaceRoot}/.j5/playbooks/release.yaml`,
+          definitionPath: `${workspaceRoot}/playbooks/release.yaml`,
         });
         assert.deepStrictEqual(
           stored.requestedSeats.map(({ seat, steps }) => [seat, steps]),
@@ -1831,14 +1832,14 @@ it.effect("refuses a playbook Crew it cannot follow, each with a next step", () 
             captain,
             displayName: "Refused Crew",
             brief: "Never launches.",
-            playbook: { name, workspaceRoot },
+            playbook: { name },
             seats,
           })
           .pipe(Effect.flip);
       const cases = [
         {
           error: yield* refusal("nope", [custom("planner", ["plan"])]),
-          detail: "No playbook named nope in your workspace.",
+          detail: "No playbook named nope in this environment.",
           nextStep: "Call j5_playbook_list and pass a name it returns.",
         },
         {
@@ -2065,7 +2066,7 @@ it.effect(
       const { layer, workspaceRoot } = yield* playbookFixture;
       yield* Effect.gen(function* () {
         const gate = yield* CrewProposalService;
-        yield* (yield* PlaybookStore).start(captainThread, workspaceRoot, "release", "run-1");
+        yield* (yield* PlaybookStore).start(captainThread, "release", "run-1");
         const opened = yield* proposeRelease(gate, workspaceRoot);
         assert.equal(opened.proposal.status, "open");
         assert.equal(opened.playbook?.name, "release");
@@ -2093,7 +2094,7 @@ it.effect("a Crew whose playbook file is gone still takes a seat that claims no 
       const crewId = (yield* gate.resolve({ proposalId: opened.proposal.id, decision: "approve" }))
         .instance!.id;
       yield* (yield* FileSystem.FileSystem).remove(
-        (yield* Path.Path).join(workspaceRoot, ".j5/playbooks/release.yaml"),
+        (yield* Path.Path).join(workspaceRoot, "playbooks/release.yaml"),
       );
 
       const claiming = yield* gate
@@ -2171,7 +2172,7 @@ it.effect("records a persona swap in the stored seats and returns it on the prev
 
 it.effect("stores and reads back a step id longer than a seat name", () =>
   Effect.gen(function* () {
-    const { layer, workspaceRoot, writePlaybook } = yield* playbookFixture;
+    const { layer, writePlaybook } = yield* playbookFixture;
     const longId = `s${"x".repeat(120)}`;
     yield* writePlaybook(
       "long",
@@ -2188,7 +2189,7 @@ it.effect("stores and reads back a step id longer than a seat name", () =>
         captain,
         displayName: "Long Crew",
         brief: "Own the long step.",
-        playbook: { name: "long", workspaceRoot },
+        playbook: { name: "long" },
         seats: [custom("owner", [longId])],
       });
       const stored = yield* (yield* AgentCrewProposalService).read(opened.proposal.id);
@@ -2202,7 +2203,7 @@ it.effect(
   "the headline Crew: a playbook with two personas, a persona-less step, and a disabled persona launches with the right owners",
   () =>
     Effect.gen(function* () {
-      const { layer, workspaceRoot, writePlaybook, commands } = yield* playbookFixture;
+      const { layer, writePlaybook, commands } = yield* playbookFixture;
       yield* writePlaybook(
         "ship",
         stringify({
@@ -2248,7 +2249,7 @@ it.effect(
 
         // 1) Read: the playbook warns about the disabled persona, and j5_list_personas' own
         // projection shows it unavailable while the other two are available.
-        const read = yield* (yield* PlaybookStore).read(workspaceRoot, "ship");
+        const read = yield* (yield* PlaybookStore).read("ship");
         assert.deepStrictEqual(
           read.warnings.map(({ code, stepId }) => [code, stepId]),
           [["persona_disabled", "review"]],
@@ -2306,7 +2307,7 @@ it.effect(
           captain,
           displayName: input.name,
           brief: input.brief,
-          playbook: { name: input.playbook!, workspaceRoot },
+          playbook: { name: input.playbook! },
           seats: input.seats.map(crewSeatFromInput),
         });
         const swap = {
@@ -2381,7 +2382,6 @@ it.effect(
         const relay = yield* makePlaybookCrewRelay;
         const started = yield* relay.start({
           owner: captainThread,
-          root: workspaceRoot,
           name: start.name,
           key: start.client_request_id,
           crewInstanceId: start.crew_instance_id!,

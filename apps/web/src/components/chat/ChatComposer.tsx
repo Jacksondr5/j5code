@@ -1741,7 +1741,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeThreadEnvironmentId: _activeThreadEnvironmentId,
     activeThread,
     promptHistoryMessages,
-    isServerThread,
     isLocalDraftThread: _isLocalDraftThread,
     forceExpandedOnMobile,
     projectSelectionRequired,
@@ -2598,13 +2597,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     query: isPathTrigger ? pathTriggerQuery : null,
   });
   const playbookQuery = useEnvironmentQuery(
-    composerTriggerKind === "slash-playbook" && projectId
+    composerTriggerKind === "slash-playbook"
       ? j5Environment.playbookLibrary({
           environmentId,
-          input: {
-            projectId,
-            ...(isServerThread && activeThreadId ? { threadId: activeThreadId } : {}),
-          },
+          input: {},
         })
       : null,
   );

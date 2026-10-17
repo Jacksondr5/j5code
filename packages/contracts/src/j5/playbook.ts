@@ -1,7 +1,7 @@
 import * as Schema from "effect/Schema";
 import { Rpc, RpcGroup } from "effect/rpc";
 import { EnvironmentAuthorizationError } from "../auth.ts";
-import { ProjectId, ThreadId } from "../baseSchemas.ts";
+import { ThreadId } from "../baseSchemas.ts";
 import { AgentPersonaId } from "./agentPersona.ts";
 
 export const PLAYBOOK_MAX_BYTES = 262144;
@@ -55,7 +55,6 @@ export type PlaybookDefinition = typeof PlaybookDefinition.Type;
 
 /** A management target; folder sources are read-only in the app. */
 export const PlaybookSource = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal("workspace") }),
   Schema.Struct({ kind: Schema.Literal("environment") }),
   Schema.Struct({ kind: Schema.Literal("folder"), path: Text }),
 ]);
@@ -141,7 +140,6 @@ export const PlaybookDiscovery = Schema.Struct({
     Schema.Struct({
       name: Text,
       source: Schema.optionalKey(PlaybookSource),
-      overridesLibrary: Schema.optionalKey(Schema.Boolean),
       title: Schema.String,
       description: Schema.String,
       stepCount: Schema.Int,
@@ -175,31 +173,26 @@ export const PlaybookRunsResponse = Schema.Struct({
   runs: Schema.Array(PlaybookProgress),
   total: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 });
-export const PlaybookLibraryRequest = Schema.Struct({
-  projectId: Schema.optionalKey(ProjectId),
-  threadId: Schema.optionalKey(ThreadId),
-  source: Schema.optionalKey(PlaybookSource),
-});
+export const PlaybookLibraryRequest = Schema.Struct({});
 export type PlaybookLibraryRequest = typeof PlaybookLibraryRequest.Type;
 export const PlaybookLibraryResponse = Schema.Struct({
-  workspaceRoot: Schema.String,
   ...PlaybookDiscovery.fields,
 });
 export const PlaybookDeleteRequest = Schema.Struct({
-  ...PlaybookLibraryRequest.fields,
+  source: Schema.optionalKey(PlaybookSource),
   name: Text,
 });
 export type PlaybookDeleteRequest = typeof PlaybookDeleteRequest.Type;
 export const PlaybookDeleteResponse = Schema.Struct({ deleted: Schema.Boolean });
 export const PlaybookRenameRequest = Schema.Struct({
-  ...PlaybookLibraryRequest.fields,
+  source: Schema.optionalKey(PlaybookSource),
   name: Text,
   title: Text,
 });
 export type PlaybookRenameRequest = typeof PlaybookRenameRequest.Type;
 export const PlaybookRenameResponse = Schema.Struct({ renamed: Schema.Boolean });
 export const PlaybookExportRequest = Schema.Struct({
-  ...PlaybookLibraryRequest.fields,
+  source: Schema.optionalKey(PlaybookSource),
   name: Text,
 });
 export type PlaybookExportRequest = typeof PlaybookExportRequest.Type;

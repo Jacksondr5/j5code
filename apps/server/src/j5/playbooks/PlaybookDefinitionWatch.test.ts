@@ -1,3 +1,4 @@
+import { ServerConfig } from "../../config.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import { ThreadId } from "@t3tools/contracts";
@@ -18,10 +19,14 @@ import { seedPlaybookOwners } from "./testFixtures.ts";
 
 const owner = ThreadId.make("thread:playbook:owner");
 const otherOwner = ThreadId.make("thread:playbook:other");
-const MemoryLayer = Layer.mergeAll(
+const BaseLayer = Layer.mergeAll(
   NodeSqliteClient.layer({ filename: ":memory:" }),
   NodeServices.layer,
 );
+
+const MemoryLayer = ServerConfig.layerTest(process.cwd(), {
+  prefix: "j5-playbook-watch-state-",
+}).pipe(Layer.provideMerge(BaseLayer));
 
 /**
  * A store over real playbook files, and a file system whose `watch` the test drives: it says
@@ -34,19 +39,24 @@ const makeFixture = Effect.gen(function* () {
   yield* runJ5A2AMigrations();
   yield* seedPlaybookOwners([owner, otherOwner]);
   const store = yield* makePlaybookStore;
+  let number = 0;
+  const folders: string[] = [];
   const makeWorkspace = Effect.gen(function* () {
     const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "j5-playbook-watch-" });
-    const directory = path.join(workspaceRoot, ".j5", "playbooks");
+    const directory = path.join(workspaceRoot, "playbooks");
+    const name = `demo-${++number}`;
     yield* fs.makeDirectory(directory, { recursive: true });
     yield* fs.writeFileString(
-      path.join(directory, "demo.yaml"),
+      path.join(directory, `${name}.yaml`),
       stringify({
         title: "Test playbook",
         description: "Watched while a run uses it.",
         steps: [{ id: "research", title: "Research", prompt: "Follow research." }],
       }),
     );
-    return { workspaceRoot, directory };
+    folders.push(directory);
+    yield* store.setFolders({ folders });
+    return { workspaceRoot, directory, name };
   });
 
   const started = yield* Queue.unbounded<string>();
@@ -111,15 +121,15 @@ it.live("watches a directory while a run there is active, and says when a file i
   Effect.gen(function* () {
     const fixture = yield* makeFixture;
     const { store, started, stopped, events, watched } = fixture;
-    const { workspaceRoot, directory } = yield* fixture.makeWorkspace;
+    const { directory, name } = yield* fixture.makeWorkspace;
     yield* fixture.startDaemon;
 
     // No run is active, so nothing is watched.
     assert.deepStrictEqual(watched, []);
-    const first = yield* store.start(owner, workspaceRoot, "demo", "first");
+    const first = yield* store.start(owner, name, "first");
     assert.equal(yield* Queue.take(started), directory);
     // A second run in the same directory shares its watcher.
-    const second = yield* store.start(otherOwner, workspaceRoot, "demo", "second");
+    const second = yield* store.start(otherOwner, name, "second");
 
     // An editor's save is several events and one change.
     const before = yield* fixture.revision;
@@ -136,7 +146,7 @@ it.live("watches a directory while a run there is active, and says when a file i
     assert.deepStrictEqual(watched, [directory]);
 
     // A later run there is watched again.
-    yield* store.start(owner, workspaceRoot, "demo", "third");
+    yield* store.start(owner, name, "third");
     assert.equal(yield* Queue.take(started), directory);
     assert.deepStrictEqual(watched, [directory, directory]);
   }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
@@ -145,8 +155,8 @@ it.live("watches a directory while a run there is active, and says when a file i
 it.live("watches the runs already active when the server starts", () =>
   Effect.gen(function* () {
     const fixture = yield* makeFixture;
-    const { workspaceRoot, directory } = yield* fixture.makeWorkspace;
-    yield* fixture.store.start(owner, workspaceRoot, "demo", "before-start");
+    const { directory, name } = yield* fixture.makeWorkspace;
+    yield* fixture.store.start(owner, name, "before-start");
     yield* fixture.startDaemon;
     assert.equal(yield* Queue.take(fixture.started), directory);
   }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
@@ -161,12 +171,12 @@ it.live("does not start a failed watch again while its run stays active", () =>
     unwatchable.add(gone.directory);
     yield* fixture.startDaemon;
 
-    const run = yield* store.start(owner, gone.workspaceRoot, "demo", "gone");
+    const run = yield* store.start(owner, gone.name, "gone");
     // Each of these moves the revision, and each reconcile that follows still finds the failed
     // directory with an active run. A watcher started and stopped elsewhere proves the daemon
     // has reconciled past them.
     yield* store.definitionsChanged;
-    const other = yield* store.start(otherOwner, kept.workspaceRoot, "demo", "kept");
+    const other = yield* store.start(otherOwner, kept.name, "kept");
     assert.equal(yield* Queue.take(started), kept.directory);
     yield* fixture.end("cancel", otherOwner, other);
     assert.equal(yield* Queue.take(stopped), kept.directory);
@@ -175,7 +185,7 @@ it.live("does not start a failed watch again while its run stays active", () =>
     // Once its run has ended, a new run there is a new attempt.
     yield* fixture.end("cancel", owner, run);
     unwatchable.delete(gone.directory);
-    yield* store.start(owner, gone.workspaceRoot, "demo", "back");
+    yield* store.start(owner, gone.name, "back");
     assert.equal(yield* Queue.take(started), gone.directory);
     assert.deepStrictEqual(watched, [gone.directory, kept.directory, gone.directory]);
   }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),

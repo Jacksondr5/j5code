@@ -116,8 +116,8 @@ export interface ProposeCrewInput {
   readonly displayName: string;
   readonly brief: string;
   readonly seats: ReadonlyArray<CrewProposalSeat>;
-  /** The playbook the Crew follows, by name in the Captain's workspace. */
-  readonly playbook?: { readonly name: string; readonly workspaceRoot: string } | undefined;
+  /** The playbook the Crew follows, by name in the environment library. */
+  readonly playbook?: { readonly name: string } | undefined;
 }
 
 export interface RequestCrewMemberInput {
@@ -316,7 +316,7 @@ export const layer = Layer.effect(
               })
             : error.code === "not_found" || error.code === "invalid_name"
               ? new CrewProposalRequestError({
-                  detail: `No playbook named ${name} in your workspace.`,
+                  detail: `No playbook named ${name} in this environment.`,
                   nextStep: "Call j5_playbook_list and pass a name it returns.",
                 })
               : new CrewProposalRequestError({
@@ -589,7 +589,7 @@ export const layer = Layer.effect(
         let playbook: { ref: CrewPlaybookRef; definition: PlaybookReadResponse } | null = null;
         if (input.playbook !== undefined) {
           const { definitionPath } = yield* playbooks
-            .definitionPathFor(input.playbook.workspaceRoot, input.playbook.name)
+            .definitionPathFor(input.playbook.name)
             .pipe(Effect.mapError(playbookRefusal(input.playbook.name, "propose")));
           const definition = yield* readPlaybook(
             { name: input.playbook.name, definitionPath },
