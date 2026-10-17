@@ -1,30 +1,45 @@
-import type { EnvironmentId } from "@t3tools/contracts";
-import { useEffect, useMemo, useState } from "react";
+import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { useEffect, useState } from "react";
 
-import { readParticipantLabels } from "./archiveFlowClient";
+import { readParticipantIdentities, readParticipantLabels } from "./archiveFlowClient";
+
+export interface ParticipantIdentities {
+  readonly labels: ReadonlyMap<string, string>;
+  /** Agents whose thread is on the same server, keyed by participant id. */
+  readonly threadIds: ReadonlyMap<string, ThreadId>;
+}
+
+const NO_IDENTITIES: ParticipantIdentities = { labels: new Map(), threadIds: new Map() };
 
 /** One identity read for every J5 surface; unknowns deliberately stay absent. */
-export function useParticipantLabels(
+export function useParticipantIdentities(
   environmentId: EnvironmentId,
   participantIds: ReadonlyArray<string>,
-) {
+): ParticipantIdentities {
   const key = Array.from(new Set(participantIds)).sort().join("\0");
-  const [result, setResult] = useState({ key: "", labels: new Map<string, string>() });
+  const [result, setResult] = useState({ key: "", identities: NO_IDENTITIES });
   useEffect(() => {
     const ids = key === "" ? [] : key.split("\0");
     if (ids.length === 0) {
-      setResult({ key, labels: new Map() });
+      setResult({ key, identities: NO_IDENTITIES });
       return;
     }
     let active = true;
-    void readParticipantLabels(environmentId, ids).then((next) => {
-      if (active) setResult({ key, labels: next });
+    void readParticipantIdentities(environmentId, ids).then((next) => {
+      if (active) setResult({ key, identities: next });
     });
     return () => {
       active = false;
     };
   }, [environmentId, key]);
-  return useMemo(() => (result.key === key ? result.labels : new Map()), [key, result]);
+  return result.key === key ? result.identities : NO_IDENTITIES;
+}
+
+export function useParticipantLabels(
+  environmentId: EnvironmentId,
+  participantIds: ReadonlyArray<string>,
+) {
+  return useParticipantIdentities(environmentId, participantIds).labels;
 }
 
 export interface ScopedParticipantRef {

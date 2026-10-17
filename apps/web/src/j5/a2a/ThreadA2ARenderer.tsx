@@ -1,7 +1,9 @@
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../../components/ui/tooltip";
 import type { ChatMessage } from "~/types";
 import { useNowMinute } from "~/hooks/useNowMinute";
-import type { ScopedThreadRef } from "@t3tools/contracts";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import type { ScopedThreadRef, ThreadId } from "@t3tools/contracts";
+import { Link } from "@tanstack/react-router";
 import { ChevronRightIcon, InboxIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { shouldPreserveAssistantLineBreaks } from "@t3tools/shared/markdownPipeline";
@@ -10,6 +12,7 @@ import ChatMarkdown from "../../components/ChatMarkdown";
 import { useFindRevealRef } from "../../components/chat/markdownFindContext";
 import { renderCrewNotice } from "../crew/CrewNoticeRenderer";
 import { participantIdsForCrewNotice } from "../crew/crewNotices.logic";
+import { buildThreadRouteParams } from "../../threadRoutes";
 import { presentParticipantIdentity } from "./ParticipantIdentity";
 
 /**
@@ -63,6 +66,8 @@ export interface ThreadA2ADeliveryCompositionInput {
    * explicitly unnamed, with the durable id available only as a tooltip.
    */
   readonly participantLabels?: ReadonlyMap<string, string> | undefined;
+  /** From the same read: senders whose thread is on the shown thread's server. */
+  readonly participantThreadIds?: ReadonlyMap<string, ThreadId> | undefined;
   /** The caller supplies this only when it can prove the authenticated viewer. */
   readonly resolveViewerParticipantId?: (() => string | null) | undefined;
   /** The shown thread, for cards that open seats and render a message's markdown. */
@@ -79,6 +84,8 @@ export type ThreadA2ADeliveryPresentation =
       readonly senderId: string;
       readonly senderLabel: string;
       readonly senderTooltipParticipantId: string | null;
+      /** The sender's thread, which its name opens. Senders on another server have none here. */
+      readonly senderThreadRef: ScopedThreadRef | null;
       readonly body: string;
       readonly exchange: "expects-reply" | "plain" | "closed";
       /** Kept as a pairing fact only; protocol identifiers never render. */
@@ -342,12 +349,17 @@ export function presentThreadA2ADelivery(
         participantId: peer.senderId,
         participantLabels: input.participantLabels ?? new Map(),
       });
+      const senderThreadId = input.participantThreadIds?.get(peer.senderId);
       return {
         kind: "peer",
         rawEnvelope: message.text,
         senderId: peer.senderId,
         senderLabel: sender.label,
         senderTooltipParticipantId: sender.tooltipParticipantId,
+        senderThreadRef:
+          senderThreadId === undefined || !input.threadRef
+            ? null
+            : scopeThreadRef(input.threadRef.environmentId, senderThreadId),
         body: peer.body,
         exchange: peer.exchange,
         exchangeId: peer.exchangeId,
@@ -549,6 +561,7 @@ function PeerDeliveryCard({
   now,
   outsideAgent = false,
   senderLabel,
+  senderThreadRef,
   senderTooltipParticipantId,
   sentAt,
 }: {
@@ -559,6 +572,7 @@ function PeerDeliveryCard({
   readonly now?: number | undefined;
   readonly outsideAgent?: boolean | undefined;
   readonly senderLabel: string;
+  readonly senderThreadRef: ScopedThreadRef | null;
   readonly senderTooltipParticipantId: string | null;
   readonly sentAt: string;
 }) {
@@ -576,7 +590,17 @@ function PeerDeliveryCard({
           <InboxIcon className="size-3.5 shrink-0" aria-hidden />
           From
         </span>
-        {senderTooltipParticipantId === null ? (
+        {senderThreadRef !== null ? (
+          <Link
+            className="font-medium text-foreground hover:underline"
+            data-j5-a2a-sender-link
+            params={buildThreadRouteParams(senderThreadRef)}
+            title="Open the sender's thread"
+            to="/$environmentId/$threadId"
+          >
+            {senderLabel}
+          </Link>
+        ) : senderTooltipParticipantId === null ? (
           <span className="font-medium text-foreground">{senderLabel}</span>
         ) : (
           <Tooltip>
@@ -644,6 +668,7 @@ export function renderThreadA2ADelivery(props: ThreadA2ADeliveryCompositionInput
         now={props.now}
         outsideAgent={presentation.outsideAgent}
         senderLabel={presentation.senderLabel}
+        senderThreadRef={presentation.senderThreadRef}
         senderTooltipParticipantId={presentation.senderTooltipParticipantId}
         sentAt={props.message.createdAt}
       />

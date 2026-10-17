@@ -77,6 +77,11 @@ it.effect("reads total batched identities without participant-id normalization",
       id: ParticipantId.make("agent:j5:a2a:thread%3Aclient-reads%3Abeta"),
       threadId: ThreadId.make("thread:client-reads:beta"),
     };
+    const deleted: AgentParticipant = {
+      kind: "agent",
+      id: ParticipantId.make("agent:j5:a2a:thread:client-reads:deleted"),
+      threadId: ThreadId.make("thread:client-reads:deleted"),
+    };
     const alphaProject = LedgerProjectId.make("project:client-reads:alpha");
     const betaProject = LedgerProjectId.make("project:client-reads:beta");
     const createdAt = "2026-08-29T00:00:00.000Z";
@@ -200,20 +205,43 @@ it.effect("reads total batched identities without participant-id normalization",
           'default', NULL, ${createdAt}, ${createdAt}, NULL, NULL, '{}'
         )
       `;
+    yield* sql`
+        INSERT INTO orchestration_v2_projection_threads (
+          thread_id, project_id, title, default_provider, runtime_mode,
+          interaction_mode, active_provider_thread_id, created_at, updated_at,
+          archived_at, deleted_at, payload_json
+        ) VALUES (
+          (${deleted.threadId}), 'project:client-reads', 'Deleted Thread', 'codex', 'full-access',
+          'default', NULL, ${createdAt}, ${createdAt}, NULL, ${createdAt}, '{}'
+        )
+      `;
 
+    yield* join({
+      projectId: LedgerProjectId.make("project:client-reads:deleted"),
+      agent: deleted,
+    });
     const missing = ParticipantId.make("agent:client-reads:missing");
     const identities = yield* reads.participantIdentities({
-      participantIds: [beta.id, duplicateHistory, missing, alpha.id, beta.id],
+      participantIds: [beta.id, duplicateHistory, missing, alpha.id, beta.id, deleted.id],
     });
     assert.deepStrictEqual(identities, {
       entries: [
         { participantId: beta.id, identity: { kind: "unknown" } },
         {
           participantId: duplicateHistory,
-          identity: { kind: "known", displayName: "Earlier Duplicate Thread" },
+          identity: {
+            kind: "known",
+            displayName: "Earlier Duplicate Thread",
+            threadId: "thread:client-reads:duplicate-history:second",
+          },
         },
         { participantId: missing, identity: { kind: "unknown" } },
-        { participantId: alpha.id, identity: { kind: "known", displayName: "Alpha Thread" } },
+        {
+          participantId: alpha.id,
+          identity: { kind: "known", displayName: "Alpha Thread", threadId: alpha.threadId },
+        },
+        // A deleted thread keeps its name but has nothing to open.
+        { participantId: deleted.id, identity: { kind: "known", displayName: "Deleted Thread" } },
       ],
     });
     assert.deepStrictEqual(yield* reads.participantIdentities({ participantIds: [] }), {

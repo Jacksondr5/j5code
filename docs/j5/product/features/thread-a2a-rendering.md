@@ -35,7 +35,7 @@ This is **not** a change to what agents receive, **not** a summary layer, and **
 
 ### Received messages
 
-1. A message from another agent renders as a card with the sender's name, a badge reflecting only the measured Exchange role, the time since it was sent, and the body; the sender's name navigates to the sender's thread.
+1. A message from another agent renders as a card with the sender's name, a badge reflecting only the measured Exchange role, the time since it was sent, and the body; the sender's name navigates to the sender's thread when that thread is on the same server.
 2. A card never shows the envelope; a message whose envelope version the renderer does not recognize renders as its raw text.
 3. A plain message shows no badge; a received ask shows "Expects reply"; a received message that closed an Exchange shows "Replied"; a follow-up shows "Follow-up".
 

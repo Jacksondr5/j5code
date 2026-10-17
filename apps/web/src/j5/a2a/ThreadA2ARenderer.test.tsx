@@ -1,4 +1,4 @@
-import { MessageId } from "@t3tools/contracts";
+import { EnvironmentId, MessageId, ThreadId } from "@t3tools/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -130,6 +130,25 @@ describe("ThreadA2ADeliveryRenderer", () => {
     expect(
       renderToStaticMarkup(<ThreadA2ADeliveryRenderer message={message({ text: peerRaw })} />),
     ).not.toContain("agent:delivery-sender");
+  });
+
+  it("opens the sender's thread only when the identity read places it on the shown thread's server", () => {
+    const shown = {
+      environmentId: EnvironmentId.make("environment:local"),
+      threadId: ThreadId.make("thread:receiver"),
+    };
+    const threads = new Map([["agent:delivery-sender", ThreadId.make("thread:sender")]]);
+    const present = (input: Partial<Parameters<typeof presentThreadA2ADelivery>[0]>) =>
+      presentThreadA2ADelivery({ message: message({ text: peerRaw }), ...input });
+
+    expect(present({ participantThreadIds: threads, threadRef: shown })).toMatchObject({
+      senderThreadRef: { environmentId: "environment:local", threadId: "thread:sender" },
+    });
+    // A sender on a peer server, or one whose thread is gone, has no thread id in the read.
+    expect(present({ participantThreadIds: new Map(), threadRef: shown })).toMatchObject({
+      senderThreadRef: null,
+    });
+    expect(present({ participantThreadIds: threads })).toMatchObject({ senderThreadRef: null });
   });
 
   it("formats queued peer deliveries with the timeline identity formatter", () => {
@@ -529,6 +548,7 @@ describe("ThreadA2ADeliveryRenderer machine senders", () => {
       senderId: "machine:watchdog",
       senderLabel: "watchdog",
       senderTooltipParticipantId: null,
+      senderThreadRef: null,
       body: "canary 42",
       exchange: "plain",
       exchangeId: null,
@@ -591,6 +611,7 @@ describe("ThreadA2ADeliveryRenderer outside agents", () => {
       senderId: "outside:session-1",
       senderLabel: "Claude Desktop",
       senderTooltipParticipantId: null,
+      senderThreadRef: null,
       body: "Rebase onto main.\n\nThen rerun the suite.",
       exchange: "plain",
       exchangeId: null,

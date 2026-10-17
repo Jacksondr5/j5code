@@ -1,4 +1,4 @@
-import { NonNegativeInt, type ThreadId, TrimmedNonEmptyString } from "@t3tools/contracts";
+import { NonNegativeInt, ThreadId, TrimmedNonEmptyString } from "@t3tools/contracts";
 import type {
   CrewMembershipsResponse,
   CrewProposalsResponse,
@@ -34,7 +34,12 @@ import { makePreArchiveFactsRead } from "./preArchiveFactsRead.ts";
 import { makeSpawnedChildrenRead } from "./spawnedChildrenRead.ts";
 
 export const DisplayIdentity = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal("known"), displayName: TrimmedNonEmptyString }),
+  Schema.Struct({
+    kind: Schema.Literal("known"),
+    displayName: TrimmedNonEmptyString,
+    /** The agent's thread on this server, when it still has one; other senders have none. */
+    threadId: Schema.optionalKey(ThreadId),
+  }),
   Schema.Struct({ kind: Schema.Literal("unknown") }),
 ]);
 export type DisplayIdentity = typeof DisplayIdentity.Type;
@@ -67,6 +72,7 @@ export type ClientReadsError = SqlError | A2AHumanInboxError;
 interface IdentityRow {
   readonly participant_id: string;
   readonly display_name: string | null;
+  readonly thread_id?: string | null;
 }
 
 interface OpenInboxCountRow {
@@ -96,9 +102,12 @@ const unknownIdentity = (): DisplayIdentity => ({ kind: "unknown" });
 const toIdentity = (row: IdentityRow | undefined): DisplayIdentity => {
   if (row === undefined || row.display_name === null) return unknownIdentity();
   const displayName = row.display_name.trim();
-  return displayName.length === 0
-    ? unknownIdentity()
-    : { kind: "known", displayName: TrimmedNonEmptyString.make(displayName) };
+  if (displayName.length === 0) return unknownIdentity();
+  return {
+    kind: "known",
+    displayName: TrimmedNonEmptyString.make(displayName),
+    ...(row.thread_id ? { threadId: ThreadId.make(row.thread_id) } : {}),
+  };
 };
 
 /** The one definition of an agent's display name: the title of the thread its first `participant.joined` named. */
@@ -111,6 +120,7 @@ export const participantIdentityRows = (
       SELECT
         json_extract(event.payload, '$.participant.id') AS participant_id,
         thread.title AS display_name,
+        CASE WHEN thread.deleted_at IS NULL THEN thread.thread_id END AS thread_id,
         ROW_NUMBER() OVER (
           PARTITION BY json_extract(event.payload, '$.participant.id')
           ORDER BY event.created_at ASC, event.project_id ASC, event.seq ASC
@@ -122,7 +132,7 @@ export const participantIdentityRows = (
         AND json_extract(event.payload, '$.participant.kind') = 'agent'
         AND json_extract(event.payload, '$.participant.id') IN ${sql.in(participantIds)}
     )
-    SELECT participant_id, display_name
+    SELECT participant_id, display_name, thread_id
     FROM ranked_identities
     WHERE history_rank = 1
   `;
