@@ -3,6 +3,8 @@ import {
   PlaybookError,
   PlaybookReadResponse,
   PlaybookStepResponse,
+  PlaybookSaveRequest,
+  PlaybookSaveResponse,
 } from "@t3tools/contracts/j5";
 import { OrchestratorMcpFailure } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -14,6 +16,7 @@ import { ThreadManagementService } from "../../orchestration-v2/ThreadManagement
 import { ProjectService } from "../../project/ProjectService.ts";
 import { PlaybookCrewRelay } from "./PlaybookCrewRelay.ts";
 import { PlaybookStore, playbookError, type PlaybookMutation } from "./PlaybookStore.ts";
+import { readCaller } from "../../mcp/threadAccess.ts";
 import { playbookWorkspaceRoot } from "./workspace.ts";
 
 const Text = Schema.String.check(Schema.isNonEmpty());
@@ -47,9 +50,18 @@ const mutationDescription =
   " Reuse client_request_id only to retry this exact operation; use a fresh ID for each new action. Active-run retries return current live progress without moving again. After completion or cancellation, only start and finish retries are retained.";
 
 export const playbookTools = [
+  Tool.make("j5_playbook_save", {
+    description:
+      "Save a new playbook YAML definition to this environment's library, available across all its projects and worktrees. This writes application data. Use for creation unless the user explicitly requests workspace-only storage. Existing names are never overwritten; identical content is a safe retry. Report a save failure instead of claiming a workspace draft is shared.",
+    parameters: PlaybookSaveRequest,
+    success: PlaybookSaveResponse,
+    failure: Failure,
+    failureMode: "return",
+    dependencies,
+  }),
   Tool.make("j5_playbook_list", {
     description:
-      "Discover live YAML playbooks in your thread workspace's .j5/playbooks directory, with each step's persona. Invalid files include actionable errors; non-blocking warnings name steps whose persona is missing or turned off.",
+      "Discover live YAML playbooks from this environment's libraries and your thread workspace's .j5/playbooks directory, with each step's persona. Invalid files include actionable errors; non-blocking warnings name steps whose persona is missing or turned off.",
     success: PlaybookDiscovery,
     failure: Failure,
     failureMode: "return",
@@ -147,6 +159,25 @@ const readsPlaybooks = <P, A, E, R>(handle: (params: P) => Effect.Effect<A, E, R
   );
 
 export const playbookHandlers = {
+  j5_playbook_save: runsPlaybook((input: typeof PlaybookSaveRequest.Type) =>
+    Effect.gen(function* () {
+      yield* ownerScope;
+      const caller = yield* readCaller();
+      const assignment = caller.caller?.agentPersonaAssignment;
+      if (
+        caller.limits.interactionMode === "plan" ||
+        (assignment &&
+          assignment.runtimeModeOverride !== "full-access" &&
+          assignment.authorityPolicy !== "workspace-write" &&
+          assignment.authorityPolicy !== "full-access")
+      )
+        return yield* playbookError(
+          "capability_denied",
+          "This agent's runtime policy cannot save playbook definitions. Use Save YAML in Settings or a writing agent.",
+        );
+      return yield* (yield* PlaybookStore).saveDefinition(input);
+    }),
+  ),
   j5_playbook_list: readsPlaybooks(() =>
     Effect.gen(function* () {
       const { root } = yield* workspace;

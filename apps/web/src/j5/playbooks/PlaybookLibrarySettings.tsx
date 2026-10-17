@@ -24,7 +24,16 @@ import { SettingsRow, SettingsSection } from "../../components/settings/settings
 import { useGuestEnvironmentIds } from "../sharing/guestAccess";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
-import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../../components/ui/menu";
+import {
+  Menu,
+  MenuItem,
+  MenuPopup,
+  MenuSeparator,
+  MenuTrigger,
+  MenuSub,
+  MenuSubTrigger,
+  MenuSubPopup,
+} from "../../components/ui/menu";
 import {
   Select,
   SelectItem,
@@ -52,6 +61,7 @@ import { AgentFolderPickerDialog } from "../agents/AgentFolderPickerDialog";
 import { agentPersonaEnvironment } from "../agents/agentPersonaAtoms";
 import { j5Environment } from "../state";
 import { playbookImportName } from "./importPlaybookFile";
+import { EnvironmentPlaybookLibrary } from "./EnvironmentPlaybookLibrary";
 import { openPlaybookDraft } from "./openPlaybookDraft";
 
 const workspaceInputsAtom = Atom.make((get) => ({
@@ -85,6 +95,7 @@ export function PlaybookLibrarySettings() {
       ),
     [guestEnvironmentIds, settingsScope, workspaceInputs],
   );
+  const [destination, setDestination] = useState<"environment" | "workspace">("environment");
   const [workspaceKey, setWorkspaceKey] = useState("");
   const workspace =
     workspaces.find((entry) => entry.key === workspaceKey) ??
@@ -131,6 +142,12 @@ export function PlaybookLibrarySettings() {
   const createPersona = useAtomCommand(agentPersonaEnvironment.createAgentPersona, {
     reportFailure: false,
   });
+  const readAuthor = useAtomCommand(agentPersonaEnvironment.readAgentPersona, {
+    reportFailure: false,
+  });
+  const editAuthor = useAtomCommand(agentPersonaEnvironment.editImportedAgentPersona, {
+    reportFailure: false,
+  });
   const startTurn = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false });
   const authorStarting = useRef(false);
   const authorLaunch = useRef<{
@@ -142,6 +159,7 @@ export function PlaybookLibrarySettings() {
     reportFailure: false,
     refresh: true,
   });
+  const savePlaybook = useAtomCommand(j5Environment.savePlaybook, { reportFailure: false });
   const writeFile = useAtomCommand(projectEnvironment.writeFile, { reportFailure: false });
   const deletePlaybook = useAtomCommand(j5Environment.deletePlaybook, { reportFailure: false });
   const exportPlaybook = useAtomCommand(j5Environment.exportPlaybook, { reportFailure: false });
@@ -156,7 +174,7 @@ export function PlaybookLibrarySettings() {
     setError(null);
     try {
       const { environmentId } = workspace;
-      const workspaceKey = JSON.stringify([workspace.key, query.data.workspaceRoot]);
+      const workspaceKey = JSON.stringify([workspace.key, query.data.workspaceRoot, destination]);
       // Retain the command on failure: retrying a lost reply must reopen the same thread.
       if (authorLaunch.current?.workspaceKey !== workspaceKey) {
         const modelSelection = await ensurePlaybookAuthor({
@@ -165,6 +183,15 @@ export function PlaybookLibrarySettings() {
             const result = await readCatalog({ environmentId, input: {} });
             if (result._tag === "Failure") throw squashAtomCommandFailure(result);
             return result.value;
+          },
+          readDefinition: async (personaId) => {
+            const result = await readAuthor({ environmentId, input: { personaId } });
+            if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+            return result.value.definition;
+          },
+          editPersona: async (input) => {
+            const result = await editAuthor({ environmentId, input });
+            if (result._tag === "Failure") throw squashAtomCommandFailure(result);
           },
           createPersona: async (input) => {
             const result = await createPersona({ environmentId, input });
@@ -177,6 +204,7 @@ export function PlaybookLibrarySettings() {
           target: playbookAuthorLaunch({
             workspace: { ...workspace, workspaceRoot: query.data.workspaceRoot },
             modelSelection,
+            destination,
             commandId: CommandId.make(randomUUID()),
             threadId: newThreadId(),
             messageId: newMessageId(),
@@ -222,6 +250,19 @@ export function PlaybookLibrarySettings() {
       const read = await readFile({ environmentId, input: { cwd, relativePath: path } });
       if (read._tag === "Failure") throw squashAtomCommandFailure(read);
       const name = playbookImportName(path, read.value.byteLength);
+      if (destination === "environment") {
+        const saved = await savePlaybook({
+          environmentId,
+          input: { name, yaml: read.value.contents },
+        });
+        if (saved._tag === "Failure") throw squashAtomCommandFailure(saved);
+        toastManager.add({
+          type: "success",
+          title: "Available across this environment",
+          description: `${name} is saved in the environment library.`,
+        });
+        return;
+      }
       if (
         query.data.playbooks.some((playbook) => playbook.name === name) &&
         !window.confirm(`Replace ${name}.yaml?`)
@@ -255,6 +296,9 @@ export function PlaybookLibrarySettings() {
           projectId: workspace.projectId,
           ...(workspace.threadId ? { threadId: workspace.threadId } : {}),
           name,
+          source: query.data?.playbooks.find((entry) => entry.name === name)?.source ?? {
+            kind: "workspace",
+          },
         },
       });
       if (result._tag === "Failure") throw squashAtomCommandFailure(result);
@@ -276,6 +320,9 @@ export function PlaybookLibrarySettings() {
           projectId: workspace.projectId,
           ...(workspace.threadId ? { threadId: workspace.threadId } : {}),
           name,
+          source: query.data?.playbooks.find((entry) => entry.name === name)?.source ?? {
+            kind: "workspace",
+          },
         },
       });
       if (result._tag === "Failure") throw squashAtomCommandFailure(result);
@@ -290,6 +337,48 @@ export function PlaybookLibrarySettings() {
       toastManager.add({ type: "success", title: `Exported ${fileName}` });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not export playbook.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function copyPlaybook(
+    name: string,
+    targetEnvironmentId: Parameters<typeof savePlaybook>[0]["environmentId"],
+  ) {
+    if (!workspace || busy) return;
+    const targetName = window.prompt("Name for the copied playbook", name);
+    if (targetName === null) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const exported = await exportPlaybook({
+        environmentId: workspace.environmentId,
+        input: {
+          projectId: workspace.projectId,
+          ...(workspace.threadId ? { threadId: workspace.threadId } : {}),
+          name,
+          source: query.data?.playbooks.find((entry) => entry.name === name)?.source ?? {
+            kind: "workspace",
+          },
+        },
+      });
+      if (exported._tag === "Failure") throw squashAtomCommandFailure(exported);
+      const saved = await savePlaybook({
+        environmentId: targetEnvironmentId,
+        input: { name: targetName, yaml: exported.value.yaml },
+      });
+      if (saved._tag === "Failure") throw squashAtomCommandFailure(saved);
+      refresh();
+      toastManager.add({
+        type: "success",
+        title: "Playbook copied",
+        description:
+          targetEnvironmentId === workspace.environmentId
+            ? "Available across this environment. The workspace copy stays in place and overrides the library here."
+            : "Available across the destination environment. Copies remain independent.",
+      });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not copy playbook.");
     } finally {
       setBusy(false);
     }
@@ -311,6 +400,8 @@ export function PlaybookLibrarySettings() {
           projectId: workspace.projectId,
           ...(workspace.threadId ? { threadId: workspace.threadId } : {}),
           name: renameTarget.name,
+          source: query.data?.playbooks.find((entry) => entry.name === renameTarget.name)
+            ?.source ?? { kind: "workspace" },
           title,
         },
       });
@@ -343,6 +434,7 @@ export function PlaybookLibrarySettings() {
   }
   return (
     <>
+      <EnvironmentPlaybookLibrary />
       {picking && workspace ? (
         <AgentFolderPickerDialog
           environmentId={workspace.environmentId}
@@ -361,7 +453,7 @@ export function PlaybookLibrarySettings() {
         />
       ) : null}
       <SettingsSection
-        title="Playbooks"
+        title="Playbooks in this workspace"
         id="playbooks"
         headerAction={
           <div className="flex flex-wrap items-center justify-end gap-1">
@@ -401,6 +493,31 @@ export function PlaybookLibrarySettings() {
           </div>
         }
       >
+        <SettingsRow
+          title="Save new playbooks to"
+          description="Environment library makes a playbook available to every project and worktree on this environment."
+          control={
+            <Select
+              value={destination}
+              items={[
+                { value: "environment", label: "Environment library" },
+                { value: "workspace", label: "This workspace only" },
+              ]}
+              onValueChange={(value) => {
+                if (value === "environment" || value === "workspace") setDestination(value);
+              }}
+              disabled={busy}
+            >
+              <SelectTrigger size="sm" aria-label="New playbook destination">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectPopup>
+                <SelectItem value="environment">Environment library</SelectItem>
+                <SelectItem value="workspace">This workspace only</SelectItem>
+              </SelectPopup>
+            </Select>
+          }
+        />
         <SettingsRow
           title="Workspace"
           description={
@@ -475,7 +592,15 @@ export function PlaybookLibrarySettings() {
             description={playbook.description}
             status={
               <div className="space-y-1">
-                <span className="block">{playbook.name}.yaml</span>
+                <span className="block">
+                  {playbook.name}.yaml ·{" "}
+                  {playbook.source?.kind === "environment"
+                    ? "Environment"
+                    : playbook.source?.kind === "folder"
+                      ? "Folder"
+                      : "Workspace"}
+                  {playbook.overridesLibrary ? " · overrides library copy" : ""}
+                </span>
                 {playbook.issue ? (
                   <p role="status" className="text-destructive">
                     {playbook.issue.message}
@@ -532,7 +657,13 @@ export function PlaybookLibrarySettings() {
                       Export YAML
                     </MenuItem>
                     <MenuItem
-                      disabled={busy || !canOperate || !!query.error || !!playbook.issue}
+                      disabled={
+                        busy ||
+                        !canOperate ||
+                        !!query.error ||
+                        !!playbook.issue ||
+                        playbook.source?.kind === "folder"
+                      }
                       onClick={() => {
                         setError(null);
                         setRenameTarget({ name: playbook.name, title: playbook.title });
@@ -541,10 +672,46 @@ export function PlaybookLibrarySettings() {
                       <PencilIcon />
                       Rename
                     </MenuItem>
+                    {playbook.source?.kind === "folder" ? (
+                      <MenuItem disabled>
+                        Edit in source folder, or copy to the environment library above
+                      </MenuItem>
+                    ) : null}
+                    {playbook.source?.kind !== "environment" && workspace ? (
+                      <MenuItem
+                        disabled={busy || !canOperate || !!playbook.issue}
+                        onClick={() => void copyPlaybook(playbook.name, workspace.environmentId)}
+                      >
+                        Copy to environment library
+                      </MenuItem>
+                    ) : null}
+                    <MenuSub>
+                      <MenuSubTrigger disabled={busy || !!playbook.issue}>
+                        Copy to environment
+                      </MenuSubTrigger>
+                      <MenuSubPopup>
+                        {environments
+                          .filter(
+                            (entry) =>
+                              entry.environmentId !== workspace?.environmentId &&
+                              !guestEnvironmentIds.has(entry.environmentId),
+                          )
+                          .map((entry) => (
+                            <MenuItem
+                              key={entry.environmentId}
+                              onClick={() => void copyPlaybook(playbook.name, entry.environmentId)}
+                            >
+                              {entry.label}
+                            </MenuItem>
+                          ))}
+                      </MenuSubPopup>
+                    </MenuSub>
                     <MenuSeparator />
                     <MenuItem
                       variant="destructive"
-                      disabled={busy || !canOperate || !!query.error}
+                      disabled={
+                        busy || !canOperate || !!query.error || playbook.source?.kind === "folder"
+                      }
                       onClick={() => void removePlaybook(playbook.name)}
                     >
                       <Trash2Icon />

@@ -1,3 +1,5 @@
+import type { PlaybookSource } from "@t3tools/contracts/j5";
+import { EnvironmentPlaybookLibrary } from "./EnvironmentPlaybookLibrary";
 import { useGuestEnvironmentIds } from "../sharing/guestAccess";
 import {
   ensurePlaybookAuthor,
@@ -39,6 +41,7 @@ export const PlaybookLibrarySettingsSection = memo(function PlaybookLibrarySetti
       ),
     [guestEnvironmentIds, workspaceInputs],
   );
+  const [destination, setDestination] = useState<"environment" | "workspace">("environment");
   const [workspaceKey, setWorkspaceKey] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [renaming, setRenaming] = useState(false);
@@ -63,6 +66,13 @@ export const PlaybookLibrarySettingsSection = memo(function PlaybookLibrarySetti
     j5Environment.deletePlaybook.permissionAtom(workspace?.environmentId ?? null),
   );
   const deletePlaybook = useAtomCommand(j5Environment.deletePlaybook, { reportFailure: false });
+  const savePlaybook = useAtomCommand(j5Environment.savePlaybook, { reportFailure: false });
+  const [copyName, setCopyName] = useState("");
+  const [copyTarget, setCopyTarget] = useState<{
+    name: string;
+    source: PlaybookSource;
+    environmentId: Parameters<typeof savePlaybook>[0]["environmentId"];
+  } | null>(null);
   const exportPlaybook = useAtomCommand(j5Environment.exportPlaybook, { reportFailure: false });
   const renamePlaybook = useAtomCommand(j5Environment.renamePlaybook, { reportFailure: false });
   const serverConfigs = useServerConfigs();
@@ -71,6 +81,12 @@ export const PlaybookLibrarySettingsSection = memo(function PlaybookLibrarySetti
     refresh: true,
   });
   const createPersona = useAtomCommand(agentPersonaEnvironment.createAgentPersona, {
+    reportFailure: false,
+  });
+  const readAuthor = useAtomCommand(agentPersonaEnvironment.readAgentPersona, {
+    reportFailure: false,
+  });
+  const editAuthor = useAtomCommand(agentPersonaEnvironment.editImportedAgentPersona, {
     reportFailure: false,
   });
   const startTurn = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false });
@@ -103,7 +119,7 @@ export const PlaybookLibrarySettingsSection = memo(function PlaybookLibrarySetti
     setCreating(true);
     try {
       const environmentId = workspace.environmentId;
-      const workspaceKey = JSON.stringify([workspace.key, query.data.workspaceRoot]);
+      const workspaceKey = JSON.stringify([workspace.key, query.data.workspaceRoot, destination]);
       if (authorLaunch.current?.workspaceKey !== workspaceKey) {
         const modelSelection = await ensurePlaybookAuthor({
           providers: serverConfigs.get(environmentId)?.providers ?? [],
@@ -111,6 +127,15 @@ export const PlaybookLibrarySettingsSection = memo(function PlaybookLibrarySetti
             const result = await readCatalog({ environmentId, input: {} });
             if (result._tag === "Failure") throw squashAtomCommandFailure(result);
             return result.value;
+          },
+          readDefinition: async (personaId) => {
+            const result = await readAuthor({ environmentId, input: { personaId } });
+            if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+            return result.value.definition;
+          },
+          editPersona: async (input) => {
+            const result = await editAuthor({ environmentId, input });
+            if (result._tag === "Failure") throw squashAtomCommandFailure(result);
           },
           createPersona: async (input) => {
             const result = await createPersona({ environmentId, input });
@@ -123,6 +148,7 @@ export const PlaybookLibrarySettingsSection = memo(function PlaybookLibrarySetti
           target: playbookAuthorLaunch({
             workspace: { ...workspace, workspaceRoot: query.data.workspaceRoot },
             modelSelection,
+            destination,
             commandId: CommandId.make(metadata.commandId),
             threadId: ThreadId.make(metadata.threadId),
             messageId: MessageId.make(metadata.messageId),
@@ -166,6 +192,9 @@ export const PlaybookLibrarySettingsSection = memo(function PlaybookLibrarySetti
                   projectId: selected.projectId,
                   ...(selected.threadId ? { threadId: selected.threadId } : {}),
                   name,
+                  source: query.data?.playbooks.find((entry) => entry.name === name)?.source ?? {
+                    kind: "workspace",
+                  },
                 },
               });
               if (result._tag === "Failure") throw squashAtomCommandFailure(result);
@@ -194,6 +223,9 @@ export const PlaybookLibrarySettingsSection = memo(function PlaybookLibrarySetti
           projectId: workspace.projectId,
           ...(workspace.threadId ? { threadId: workspace.threadId } : {}),
           name,
+          source: query.data?.playbooks.find((entry) => entry.name === name)?.source ?? {
+            kind: "workspace",
+          },
         },
       });
       if (result._tag === "Failure") throw squashAtomCommandFailure(result);
@@ -224,6 +256,37 @@ export const PlaybookLibrarySettingsSection = memo(function PlaybookLibrarySetti
       setExporting(false);
     }
   }
+  async function copyPlaybook() {
+    if (!workspace || !copyTarget || !copyName || exporting) return;
+    setExporting(true);
+    try {
+      const exported = await exportPlaybook({
+        environmentId: workspace.environmentId,
+        input: {
+          projectId: workspace.projectId,
+          ...(workspace.threadId ? { threadId: workspace.threadId } : {}),
+          name: copyTarget.name,
+          source: copyTarget.source,
+        },
+      });
+      if (exported._tag === "Failure") throw squashAtomCommandFailure(exported);
+      const saved = await savePlaybook({
+        environmentId: copyTarget.environmentId,
+        input: { name: copyName, yaml: exported.value.yaml },
+      });
+      if (saved._tag === "Failure") throw squashAtomCommandFailure(saved);
+      setCopyTarget(null);
+      refresh();
+      Alert.alert(
+        "Playbook copied",
+        "Available across the destination environment. Any workspace original stays in place and overrides the library in its own workspace.",
+      );
+    } catch (cause) {
+      Alert.alert("Could not copy playbook", cause instanceof Error ? cause.message : "Try again.");
+    } finally {
+      setExporting(false);
+    }
+  }
   async function submitRename() {
     if (!workspace || !renameTarget || renaming) return;
     const title = renameTarget.title.trim();
@@ -241,6 +304,8 @@ export const PlaybookLibrarySettingsSection = memo(function PlaybookLibrarySetti
           projectId: workspace.projectId,
           ...(workspace.threadId ? { threadId: workspace.threadId } : {}),
           name: renameTarget.name,
+          source: query.data?.playbooks.find((entry) => entry.name === renameTarget.name)
+            ?.source ?? { kind: "workspace" },
           title,
         },
       });
@@ -260,6 +325,70 @@ export const PlaybookLibrarySettingsSection = memo(function PlaybookLibrarySetti
     !workspace || !query.data || !!query.error || deleting || renaming || creating || exporting;
   return (
     <View className="gap-4 p-4">
+      <EnvironmentPlaybookLibrary />
+      {copyTarget ? (
+        <View className="gap-3">
+          <Text>
+            Copy to{" "}
+            {
+              connectedEnvironments.find(
+                (entry) => entry.environmentId === copyTarget.environmentId,
+              )?.environmentLabel
+            }
+          </Text>
+          <TextInput
+            accessibilityLabel="Copied playbook name"
+            value={copyName}
+            onChangeText={setCopyName}
+            autoCapitalize="none"
+            className="rounded-lg border border-border p-3 text-foreground"
+          />
+          <Pressable
+            accessibilityRole="button"
+            disabled={exporting || !copyName}
+            onPress={() => void copyPlaybook()}
+          >
+            <Text>Copy playbook</Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            disabled={exporting}
+            onPress={() => setCopyTarget(null)}
+          >
+            <Text>Cancel</Text>
+          </Pressable>
+        </View>
+      ) : null}
+      <Text className="font-semibold text-foreground">Playbooks in this workspace</Text>
+      <ControlPillMenu
+        actions={[
+          {
+            id: "environment",
+            title: "Environment library",
+            state: destination === "environment" ? "on" : "off",
+          },
+          {
+            id: "workspace",
+            title: "This workspace only",
+            state: destination === "workspace" ? "on" : "off",
+          },
+        ]}
+        onPressAction={({ nativeEvent }) => {
+          if (nativeEvent.event === "environment" || nativeEvent.event === "workspace")
+            setDestination(nativeEvent.event);
+        }}
+      >
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="New playbook destination"
+          className="rounded-lg border border-border p-3"
+        >
+          <Text className="text-foreground">
+            Save new playbooks to:{" "}
+            {destination === "environment" ? "Environment library" : "This workspace only"}
+          </Text>
+        </Pressable>
+      </ControlPillMenu>
       <Text className="text-sm text-muted-foreground">
         Reusable prompts that guide an agent through ordered steps. Create and refine them in a
         conversation.
@@ -273,6 +402,7 @@ export const PlaybookLibrarySettingsSection = memo(function PlaybookLibrarySetti
         onPressAction={({ nativeEvent }) => {
           setRenameTarget(null);
           setWorkspaceKey(nativeEvent.event);
+          setCopyTarget(null);
         }}
       >
         <Pressable
@@ -360,7 +490,13 @@ export const PlaybookLibrarySettingsSection = memo(function PlaybookLibrarySetti
             <Text className="font-semibold text-foreground">{playbook.title}</Text>
           )}
           <Text className="text-xs text-muted-foreground">
-            {playbook.name}.yaml · {playbook.stepCount} steps
+            {playbook.name}.yaml · {playbook.stepCount} steps ·{" "}
+            {playbook.source?.kind === "environment"
+              ? "Environment"
+              : playbook.source?.kind === "folder"
+                ? "Folder"
+                : "Workspace"}
+            {playbook.overridesLibrary ? " · overrides library copy" : ""}
           </Text>
           <Text className="text-sm text-muted-foreground">{playbook.description}</Text>
           {playbook.issue ? (
@@ -384,6 +520,43 @@ export const PlaybookLibrarySettingsSection = memo(function PlaybookLibrarySetti
               ))}
             </>
           )}
+          <ControlPillMenu
+            actions={connectedEnvironments
+              .filter(
+                (entry) =>
+                  !guestEnvironmentIds.has(entry.environmentId) &&
+                  (entry.environmentId !== workspace?.environmentId ||
+                    playbook.source?.kind !== "environment"),
+              )
+              .map((entry) => ({
+                id: entry.environmentId,
+                title:
+                  entry.environmentId === workspace?.environmentId
+                    ? "Copy to environment library"
+                    : `Copy to ${entry.environmentLabel}`,
+              }))}
+            onPressAction={({ nativeEvent }) => {
+              const environment = connectedEnvironments.find(
+                (entry) => entry.environmentId === nativeEvent.event,
+              );
+              if (environment) {
+                setCopyTarget({
+                  name: playbook.name,
+                  environmentId: environment.environmentId,
+                  source: playbook.source ?? { kind: "workspace" },
+                });
+                setCopyName(playbook.name);
+              }
+            }}
+          >
+            <Pressable
+              accessibilityRole="button"
+              disabled={disabled || !!playbook.issue}
+              className="self-start rounded-lg border border-border px-3 py-2 disabled:opacity-40"
+            >
+              <Text>Copy playbook</Text>
+            </Pressable>
+          </ControlPillMenu>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`Export ${playbook.name} playbook as YAML`}
@@ -396,7 +569,9 @@ export const PlaybookLibrarySettingsSection = memo(function PlaybookLibrarySetti
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`Rename ${playbook.name} playbook`}
-            disabled={disabled || !canOperate || !!playbook.issue}
+            disabled={
+              disabled || !canOperate || !!playbook.issue || playbook.source?.kind === "folder"
+            }
             onPress={() => setRenameTarget({ name: playbook.name, title: playbook.title })}
             className="self-start rounded-lg border border-border px-3 py-2 disabled:opacity-40"
           >
@@ -410,10 +585,15 @@ export const PlaybookLibrarySettingsSection = memo(function PlaybookLibrarySetti
           >
             <Text className="text-foreground">Prepare playbook chat</Text>
           </Pressable>
+          {playbook.source?.kind === "folder" ? (
+            <Text className="text-muted-foreground">
+              Edit in the source folder, or copy to the environment library above.
+            </Text>
+          ) : null}
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`Delete ${playbook.name} playbook`}
-            disabled={disabled || !canOperate}
+            disabled={disabled || !canOperate || playbook.source?.kind === "folder"}
             onPress={() => confirmDelete(playbook.name)}
             className="self-start rounded-lg border border-border px-3 py-2 disabled:opacity-40"
           >
