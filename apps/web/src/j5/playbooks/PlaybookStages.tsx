@@ -1,6 +1,12 @@
-import { presentPlaybook } from "@t3tools/client-runtime/j5/playbooks";
+import { presentPlaybookStages } from "@t3tools/client-runtime/j5/playbooks";
 import type { PlaybookProgress } from "@t3tools/contracts/j5";
-import { AlertTriangleIcon, BookOpenIcon, CircleDotIcon, CircleIcon } from "lucide-react";
+import {
+  AlertTriangleIcon,
+  BookOpenIcon,
+  CheckIcon,
+  CircleDotIcon,
+  CircleIcon,
+} from "lucide-react";
 import { useId, useState } from "react";
 import { ComposerBanner } from "../../components/chat/ComposerBanner";
 import {
@@ -12,7 +18,7 @@ import {
 } from "../../components/ui/select";
 import { cn } from "../../lib/utils";
 
-/** Stage positions are navigable; an earlier position does not mean its work is complete. */
+/** A compact Tasks-style view of the playbook's live stage progress. */
 export function PlaybookStages({
   runs,
   stale,
@@ -25,7 +31,7 @@ export function PlaybookStages({
   const contentId = useId();
   const run = runs.find((entry) => entry.runId === selectedRunId) ?? runs[0];
   if (!run) return null;
-  const display = presentPlaybook(run);
+  const display = presentPlaybookStages(run);
   const historical = run.runId !== runs[0]?.runId;
   const warning = stale || Boolean(run.issue);
   const runItems = runs.map((entry, index) => ({
@@ -71,11 +77,11 @@ export function PlaybookStages({
               </span>
             ) : null}
             <ComposerBanner.Count
-              aria-label={display.position}
+              aria-label={`${display.completedSteps} of ${run.total} stages complete`}
               className={run.status === "completed" ? "text-success" : undefined}
             >
               <span className="sr-only">Stage </span>
-              {run.position ?? "?"}/{run.total}
+              {display.completedSteps}/{run.total}
             </ComposerBanner.Count>
             {display.steps.length > 1 && display.steps.length <= 10 && (
               <span
@@ -87,16 +93,11 @@ export function PlaybookStages({
                     key={step.id}
                     className={cn(
                       "h-[3px] min-w-0 flex-1 rounded-full",
-                      run.status === "completed" &&
-                        (step.state === "earlier" || step.state === "last")
+                      step.status === "completed"
                         ? "bg-success"
-                        : step.current
+                        : step.status === "inProgress"
                           ? "bg-primary"
-                          : step.state === "earlier"
-                            ? "bg-primary/35"
-                            : step.state === "last"
-                              ? "bg-muted-foreground/60"
-                              : "bg-muted-foreground/25",
+                          : "bg-muted-foreground/25",
                     )}
                   />
                 ))}
@@ -113,7 +114,6 @@ export function PlaybookStages({
             className="max-h-[min(16rem,30dvh)]"
           >
             <ComposerBanner.Body>
-              <p className="my-2 wrap-anywhere font-medium">{run.title}</p>
               {runs.length > 1 && (
                 <div className="my-2 pe-2">
                   <Select items={runItems} value={run.runId} onValueChange={setSelectedRunId}>
@@ -130,7 +130,6 @@ export function PlaybookStages({
                   </Select>
                 </div>
               )}
-              {run.description && <p className="my-2 text-muted-foreground">{run.description}</p>}
               {stale && (
                 <p role="status" className="my-2 text-warning">
                   Progress could not refresh. Showing the last received state.
@@ -153,22 +152,34 @@ export function PlaybookStages({
                   <ComposerBanner.Icon
                     className={cn(
                       "h-4",
-                      step.current ? "text-primary" : "text-muted-foreground/40",
+                      step.status === "completed"
+                        ? "text-success"
+                        : step.status === "inProgress"
+                          ? "text-primary"
+                          : "text-muted-foreground/40",
                     )}
                   >
-                    {step.current || step.state === "last" ? <CircleDotIcon /> : <CircleIcon />}
+                    {step.status === "completed" ? (
+                      <CheckIcon />
+                    ) : step.status === "inProgress" ? (
+                      <CircleDotIcon />
+                    ) : (
+                      <CircleIcon />
+                    )}
                   </ComposerBanner.Icon>
                   <ComposerBanner.Content
                     className={cn(
                       "block wrap-anywhere",
-                      step.current ? "text-foreground/90" : "text-muted-foreground/70",
+                      step.status === "completed"
+                        ? "text-muted-foreground/55"
+                        : step.status === "inProgress"
+                          ? "text-foreground/90"
+                          : "text-muted-foreground/70",
                     )}
                   >
+                    <span className="sr-only">{step.label}: </span>
                     {index + 1}. {step.title}
                   </ComposerBanner.Content>
-                  <ComposerBanner.Actions>
-                    <span className="text-muted-foreground">{step.label}</span>
-                  </ComposerBanner.Actions>
                 </ComposerBanner.Row>
               ))}
             </ComposerBanner.Children>

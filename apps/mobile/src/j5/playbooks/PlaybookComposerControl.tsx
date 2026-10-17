@@ -1,4 +1,4 @@
-import { presentPlaybook } from "@t3tools/client-runtime/j5/playbooks";
+import { presentPlaybookStages } from "@t3tools/client-runtime/j5/playbooks";
 import { j5LedgerSupported } from "@t3tools/client-runtime/j5/readSources";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
@@ -51,7 +51,7 @@ export function PlaybookComposerControl(props: {
   const runs = query.data?.runs ?? [];
   const run = runs.find((entry) => entry.runId === selectedRunId) ?? runs[0];
   if (!run) return null;
-  const display = presentPlaybook(run);
+  const display = presentPlaybookStages(run);
   return (
     <View className="px-4 pb-2" accessibilityLabel="Playbook progress">
       <View className="rounded-[20px] border-continuous bg-card px-3 py-1">
@@ -85,7 +85,7 @@ export function PlaybookComposerControl(props: {
             <Text
               className={`text-xs ${run.status === "completed" ? "text-adaptive-emerald-600-400" : "text-foreground-muted"}`}
             >
-              {run.position ?? "?"}/{run.total}
+              {display.completedSteps}/{run.total}
             </Text>
             {display.steps.length > 1 && display.steps.length <= 10 && (
               <View
@@ -97,16 +97,11 @@ export function PlaybookComposerControl(props: {
                   <View
                     key={step.id}
                     className={`h-[3px] min-w-0 flex-1 rounded-full ${
-                      run.status === "completed" &&
-                      (step.state === "earlier" || step.state === "last")
+                      step.status === "completed"
                         ? "bg-adaptive-emerald-600-400"
-                        : step.current
+                        : step.status === "inProgress"
                           ? "bg-primary"
-                          : step.state === "earlier"
-                            ? "bg-primary/35"
-                            : step.state === "last"
-                              ? "bg-foreground-muted/60"
-                              : "bg-subtle-strong"
+                          : "bg-foreground-muted/25"
                     }`}
                   />
                 ))}
@@ -121,7 +116,6 @@ export function PlaybookComposerControl(props: {
         </Pressable>
         {expanded && (
           <ScrollView className="max-h-48" nestedScrollEnabled accessibilityLabel="Playbook stages">
-            <Text className="my-2 text-xs font-t3-medium text-foreground">{run.title}</Text>
             {runs.length > 1 && (
               <ScrollView horizontal className="my-2" accessibilityLabel="Playbook runs">
                 {runs.map((entry, index) => (
@@ -140,9 +134,6 @@ export function PlaybookComposerControl(props: {
                 ))}
               </ScrollView>
             )}
-            {run.description && (
-              <Text className="my-2 text-xs text-foreground-muted">{run.description}</Text>
-            )}
             {query.error && (
               <Text accessibilityRole="alert" className="my-2 text-xs text-foreground-muted">
                 Progress could not refresh. Showing the last received state.
@@ -154,13 +145,36 @@ export function PlaybookComposerControl(props: {
               </Text>
             )}
             {display.steps.map((step, index) => (
-              <View key={step.id} className="flex-row items-start gap-2 py-2">
+              <View
+                key={step.id}
+                accessible
+                accessibilityLabel={`${index + 1}. ${step.title}, ${step.label}`}
+                className="flex-row items-start gap-2 py-1"
+              >
+                <View className="h-4 w-6 items-center justify-center">
+                  {step.status === "inProgress" ? (
+                    <View className="size-3 items-center justify-center rounded-full border border-primary">
+                      <View className="size-1 rounded-full bg-primary" />
+                    </View>
+                  ) : (
+                    <View className={step.status === "completed" ? undefined : "opacity-40"}>
+                      <SymbolView
+                        name={step.status === "completed" ? "checkmark" : "circle"}
+                        size={12}
+                        tintColorClassName={
+                          step.status === "completed"
+                            ? "accent-adaptive-emerald-600-400"
+                            : "accent-foreground-muted"
+                        }
+                      />
+                    </View>
+                  )}
+                </View>
                 <Text
-                  className={`min-w-0 flex-1 text-sm ${step.current ? "font-t3-medium text-foreground" : "text-foreground-muted"}`}
+                  className={`min-w-0 flex-1 text-xs ${step.status === "completed" ? "text-foreground-muted/55" : step.status === "inProgress" ? "text-foreground/90" : "text-foreground-muted/70"}`}
                 >
                   {index + 1}. {step.title}
                 </Text>
-                <Text className="text-xs text-foreground-muted">{step.label}</Text>
               </View>
             ))}
           </ScrollView>

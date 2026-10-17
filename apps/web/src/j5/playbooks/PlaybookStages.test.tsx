@@ -73,16 +73,23 @@ it("starts collapsed, follows pointer changes, and preserves disclosure when mov
   expect(stages()).toBeNull();
 
   await act(() => toggle().click());
-  expect(stages()?.textContent).toContain("1. Plan the releaseEarlier");
-  expect(stages()?.textContent).toContain("2. Build the changeCurrent");
-  expect(stages()?.textContent).toContain("3. Review the changeLater");
-  expect(stages()?.textContent).not.toContain("Completed");
+  expect(stages()?.textContent).toContain("Completed: 1. Plan the release");
+  expect(stages()?.textContent).toContain("Running: 2. Build the change");
+  expect(stages()?.textContent).toContain("Pending: 3. Review the change");
+  expect(toggle().textContent).toContain("1/3");
+  expect(container.querySelector('[aria-label="Playbook stages"]')?.textContent).not.toContain(
+    active.description,
+  );
+  expect(container.querySelector('[aria-label="Playbook stages"]')?.textContent).not.toContain(
+    active.title,
+  );
 
   await render([{ ...active, currentStepId: "plan", position: 1 }]);
   expect(stages()?.querySelector('[aria-current="step"]')?.textContent).toContain(
     "Plan the release",
   );
-  expect(stages()?.textContent).toContain("Build the changeLater");
+  expect(stages()?.textContent).toContain("Pending: 2. Build the change");
+  expect(toggle().textContent).toContain("0/3");
   await act(() => toggle().click());
   expect(stages()).toBeNull();
   await render([{ ...active, currentStepId: "review", position: 3 }]);
@@ -116,13 +123,13 @@ it("keeps stale, unavailable, and terminal states visible while collapsed", asyn
 
   await render([{ ...active, status: "completed" }]);
   expect(toggle().textContent).toContain("Completed");
-  expect(toggle().textContent).toContain("2/3");
+  expect(toggle().textContent).toContain("3/3");
   await act(() => toggle().click());
-  expect(stages()?.textContent).toContain("Build the changeLast position");
+  expect(stages()?.textContent).toContain("Completed: 2. Build the change");
   expect(stages()?.querySelector('[aria-current="step"]')).toBeNull();
   await render([{ ...active, currentStepId: "review", position: 3, status: "completed" }]);
   expect(toggle().textContent).toContain("3/3");
-  expect(stages()?.textContent).toContain("Review the changeLast position");
+  expect(stages()?.textContent).toContain("Completed: 3. Review the change");
   await act(() => toggle().click());
   await render([{ ...active, status: "cancelled" }]);
   expect(toggle().textContent).toContain("Cancelled");

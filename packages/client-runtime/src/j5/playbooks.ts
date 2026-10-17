@@ -343,6 +343,29 @@ export function presentPlaybook(run: PlaybookProgress) {
   };
 }
 
+/** Task-style stage progress follows the live order; backtracking reopens following stages. */
+export function presentPlaybookStages(run: PlaybookProgress) {
+  const display = presentPlaybook(run);
+  const steps = display.steps.map((step) => {
+    const status =
+      run.status === "completed" || step.state === "earlier"
+        ? "completed"
+        : step.current
+          ? "inProgress"
+          : "pending";
+    return {
+      ...step,
+      status,
+      label: { completed: "Completed", inProgress: "Running", pending: "Pending" }[status],
+    } as const;
+  });
+  return {
+    ...display,
+    steps,
+    completedSteps: steps.filter((step) => step.status === "completed").length,
+  };
+}
+
 /** Prioritize active runs with issues within a fetched page without mutating the query's runs. */
 export function sortPlaybookRuns(runs: ReadonlyArray<PlaybookProgress>) {
   return [...runs].sort(

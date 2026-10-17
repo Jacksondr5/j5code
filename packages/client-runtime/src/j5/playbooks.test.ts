@@ -23,6 +23,7 @@ import {
   playbookMenuItems,
   playbookSelectionText,
   presentPlaybook,
+  presentPlaybookStages,
   sortPlaybookRuns,
   playbookWorkspaces,
   samePlaybookWorkspaceInputs,
@@ -556,4 +557,29 @@ describe("playbook mention picker", () => {
       "@playbook:code-release ",
     );
   });
+});
+
+it("checks earlier composer stages and reopens stages when going back", () => {
+  const middle = presentPlaybookStages(run);
+  expect(middle.completedSteps).toBe(1);
+  expect(middle.steps.map(({ status }) => status)).toEqual(["completed", "inProgress", "pending"]);
+  const beginning = presentPlaybookStages({ ...run, position: 1, currentStepId: "research" });
+  expect(beginning.completedSteps).toBe(0);
+  expect(beginning.steps.map(({ status }) => status)).toEqual(["inProgress", "pending", "pending"]);
+});
+
+it("checks every composer stage when the playbook completes, even when ended early", () => {
+  const completed = presentPlaybookStages({ ...run, status: "completed" });
+  expect(completed.completedSteps).toBe(3);
+  expect(completed.steps.every((step) => step.status === "completed")).toBe(true);
+  expect(completed.steps.some((step) => step.current)).toBe(false);
+  const cancelled = presentPlaybookStages({ ...run, status: "cancelled" });
+  expect(cancelled.completedSteps).toBe(1);
+  expect(cancelled.steps.map(({ status }) => status)).toEqual(["completed", "pending", "pending"]);
+});
+
+it("leaves stages unchecked when the current position is unavailable", () => {
+  const unavailable = presentPlaybookStages({ ...run, position: null, currentStepId: "removed" });
+  expect(unavailable.completedSteps).toBe(0);
+  expect(unavailable.steps.every((step) => step.status === "pending")).toBe(true);
 });
