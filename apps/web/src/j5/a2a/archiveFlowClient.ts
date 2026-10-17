@@ -1,4 +1,5 @@
-import { type EnvironmentId, type ScopedThreadRef, ThreadId } from "@t3tools/contracts";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { EnvironmentId, type ScopedThreadRef, ThreadId } from "@t3tools/contracts";
 import type { PreArchiveFacts } from "@t3tools/contracts/j5";
 import * as Cause from "effect/Cause";
 
@@ -13,20 +14,25 @@ export async function readParticipantIdentities(
   participantIds: ReadonlyArray<string>,
 ) {
   const labels = new Map<string, string>();
-  const threadIds = new Map<string, ThreadId>();
-  if (participantIds.length === 0) return { labels, threadIds };
+  const threads = new Map<string, ScopedThreadRef>();
+  if (participantIds.length === 0) return { labels, threads };
   const result = await j5Environment.readParticipantIdentities.run(appAtomRegistry, {
     environmentId,
     input: { participantIds },
   });
-  if (result._tag === "Failure") return { labels, threadIds };
+  if (result._tag === "Failure") return { labels, threads };
   for (const entry of result.value.entries) {
-    if (entry.identity.kind !== "known") continue;
-    labels.set(entry.participantId, entry.identity.displayName);
-    if (entry.identity.threadId !== undefined)
-      threadIds.set(entry.participantId, ThreadId.make(entry.identity.threadId));
+    const identity = entry.identity;
+    if (identity.kind !== "known") continue;
+    labels.set(entry.participantId, identity.displayName);
+    if (identity.threadId === undefined) continue;
+    const home =
+      identity.threadEnvironmentId === undefined
+        ? environmentId
+        : EnvironmentId.make(identity.threadEnvironmentId);
+    threads.set(entry.participantId, scopeThreadRef(home, ThreadId.make(identity.threadId)));
   }
-  return { labels, threadIds };
+  return { labels, threads };
 }
 
 export async function readParticipantLabels(

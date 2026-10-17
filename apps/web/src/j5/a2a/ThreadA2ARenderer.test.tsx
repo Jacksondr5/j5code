@@ -132,23 +132,20 @@ describe("ThreadA2ADeliveryRenderer", () => {
     ).not.toContain("agent:delivery-sender");
   });
 
-  it("opens the sender's thread only when the identity read places it on the shown thread's server", () => {
-    const shown = {
-      environmentId: EnvironmentId.make("environment:local"),
-      threadId: ThreadId.make("thread:receiver"),
+  it("places the sender's thread where the identity read put it", () => {
+    const senderThread = {
+      environmentId: EnvironmentId.make("environment:peer"),
+      threadId: ThreadId.make("thread:sender"),
     };
-    const threads = new Map([["agent:delivery-sender", ThreadId.make("thread:sender")]]);
-    const present = (input: Partial<Parameters<typeof presentThreadA2ADelivery>[0]>) =>
-      presentThreadA2ADelivery({ message: message({ text: peerRaw }), ...input });
+    const present = (participantThreads?: ReadonlyMap<string, typeof senderThread>) =>
+      presentThreadA2ADelivery({ message: message({ text: peerRaw }), participantThreads });
 
-    expect(present({ participantThreadIds: threads, threadRef: shown })).toMatchObject({
-      senderThreadRef: { environmentId: "environment:local", threadId: "thread:sender" },
+    expect(present(new Map([["agent:delivery-sender", senderThread]]))).toMatchObject({
+      senderThreadRef: senderThread,
     });
-    // A sender on a peer server, or one whose thread is gone, has no thread id in the read.
-    expect(present({ participantThreadIds: new Map(), threadRef: shown })).toMatchObject({
-      senderThreadRef: null,
-    });
-    expect(present({ participantThreadIds: threads })).toMatchObject({ senderThreadRef: null });
+    // A sender with no thread (or before the read answers) has nothing to open.
+    expect(present(new Map())).toMatchObject({ senderThreadRef: null });
+    expect(present()).toMatchObject({ senderThreadRef: null });
   });
 
   it("formats queued peer deliveries with the timeline identity formatter", () => {

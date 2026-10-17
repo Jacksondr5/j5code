@@ -338,7 +338,7 @@ interface TimelineRowSharedState {
   runs: ReadonlyArray<HandoffTimelineRun>;
   activeThreadEnvironmentId: EnvironmentId;
   participantLabels: ReadonlyMap<string, string>;
-  participantThreadIds: ReadonlyMap<string, ThreadId>;
+  participantThreads: ReadonlyMap<string, ScopedThreadRef>;
   onRevertToTurnCount: (targetTurnCount: number, messageId: MessageId) => void;
   onUseArtifactTemplate: (template: CodexArtifactTemplate) => void;
   /** Sends text an MCP App asked to post, after the user approved it. */
@@ -712,7 +712,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
       ),
     [timelineEntries],
   );
-  const { labels: participantLabels, threadIds: participantThreadIds } = useParticipantIdentities(
+  const { labels: participantLabels, threads: participantThreads } = useParticipantIdentities(
     activeThreadEnvironmentId,
     participantIds,
   );
@@ -1356,7 +1356,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
       runs,
       activeThreadEnvironmentId,
       participantLabels,
-      participantThreadIds,
+      participantThreads,
       onRevertToTurnCount,
       onRunShellCommand,
       findActive,
@@ -1396,7 +1396,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
       runs,
       activeThreadEnvironmentId,
       participantLabels,
-      participantThreadIds,
+      participantThreads,
       onRevertToTurnCount,
       onRunShellCommand,
       findActive,
@@ -2091,7 +2091,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
           message: row.message,
           timestampLabel: formatDayAwareTimestamp(row.message.createdAt, ctx.timestampFormat),
           participantLabels: ctx.participantLabels,
-          participantThreadIds: ctx.participantThreadIds,
+          participantThreads: ctx.participantThreads,
           threadRef: ctx.threadRef,
           markdownCwd: ctx.markdownCwd,
         })

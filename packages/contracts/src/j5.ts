@@ -1084,8 +1084,10 @@ export const ParticipantIdentitiesResponse = Schema.Struct({
         Schema.Struct({
           kind: Schema.Literal("known"),
           displayName: Schema.String,
-          /** An agent's thread on the server that answered, when it still has one. */
+          /** An agent's thread, when it still has one. */
           threadId: Schema.optionalKey(Schema.String),
+          /** The peer server that thread is on. Absent when it is on the server that answered. */
+          threadEnvironmentId: Schema.optionalKey(Schema.String),
         }),
         Schema.Struct({ kind: Schema.Literal("unknown") }),
       ]),
