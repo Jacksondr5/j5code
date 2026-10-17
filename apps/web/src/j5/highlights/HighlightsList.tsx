@@ -1,4 +1,7 @@
-import type { Highlight } from "@t3tools/client-runtime/j5/highlights";
+import type {
+  Highlight,
+  HighlightArt as HighlightArtName,
+} from "@t3tools/client-runtime/j5/highlights";
 import { ExternalLinkIcon, XIcon } from "lucide-react";
 import { Fragment } from "react";
 
@@ -6,12 +9,34 @@ import { APP_BASE_NAME, APP_VERSION } from "../../branding";
 import { Button } from "../../components/ui/button";
 import { toastManager } from "../../components/ui/toast";
 import { ensureLocalApi } from "../../localApi";
-import { HighlightArtTile } from "./HighlightArt";
+import {
+  HIGHLIGHT_ART_BACKGROUND_STYLE,
+  HighlightArtSprite,
+  highlightArtThemeClassName,
+} from "./HighlightArt";
+import { PeeringTile } from "./PeeringTile";
+
+const ART: Record<HighlightArtName, () => React.ReactNode> = {
+  peering: PeeringTile,
+};
 
 function openLearnMore(url: string) {
   ensureLocalApi()
     .shell.openExternal(url)
     .catch(() => toastManager.add({ type: "error", title: "Unable to open the page" }));
+}
+
+/** The 150-wide art column; only it carries the art palette, and its edge fades into the text. */
+function HighlightTile({ art }: { readonly art: HighlightArtName }) {
+  const Scene = ART[art];
+  return (
+    <div
+      className={`relative overflow-hidden before:absolute before:inset-y-0 before:start-0 before:z-1 before:w-5.5 before:bg-linear-to-r before:from-popover before:to-transparent ${highlightArtThemeClassName}`}
+      style={HIGHLIGHT_ART_BACKGROUND_STYLE}
+    >
+      <Scene />
+    </div>
+  );
 }
 
 function HighlightEntry({
@@ -43,11 +68,7 @@ function HighlightEntry({
           </Button>
         ) : null}
       </div>
-      {entry.art ? (
-        <div className="relative overflow-hidden before:absolute before:inset-y-0 before:start-0 before:z-1 before:w-5.5 before:bg-linear-to-r before:from-popover before:to-transparent">
-          <HighlightArtTile art={entry.art} />
-        </div>
-      ) : null}
+      {entry.art ? <HighlightTile art={entry.art} /> : null}
       {onDismiss ? (
         <Button
           aria-label={`Dismiss ${entry.title}`}
@@ -84,6 +105,7 @@ export function HighlightsList({
           {APP_BASE_NAME} {APP_VERSION}
         </span>
       </div>
+      <HighlightArtSprite />
       <div className="min-h-0 overflow-y-auto">
         {entries.length === 0 ? (
           <p className="px-3.5 pt-1 pb-3.5 text-muted-foreground">Nothing yet.</p>
