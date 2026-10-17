@@ -83,6 +83,7 @@ export function SidebarHighlightsButton() {
           <PopoverPopup
             align="end"
             collisionAvoidance={{ align: "shift" }}
+            sideOffset={10}
             aria-label={label}
             padding="none"
             side="top"

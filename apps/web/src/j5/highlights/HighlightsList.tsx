@@ -64,7 +64,7 @@ function HighlightEntry({
             variant="outline"
           >
             Learn more
-            <ExternalLinkIcon aria-hidden />
+            <ExternalLinkIcon aria-hidden className="ms-0.5 size-3" />
           </Button>
         ) : null}
       </div>
