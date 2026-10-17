@@ -72,7 +72,9 @@ progress unchanged; restore the file or ask the agent to cancel the run.
 
 Ask the agent to go back when you want to revisit a phase. Going back changes its
 position, not your files or previous work. Progress survives context compaction and
-provider restarts. Select an earlier run in the thread to inspect its status.
+provider restarts. Expand the playbook above the chat box to see its stages or
+select an earlier run. Stage numbers show the agent's position; earlier stages
+are not a checklist of completed work.
 
 Each run belongs to one thread. Deleting that thread cancels its active run, so
 you can remove the playbook file. Archiving a thread leaves its run available when
