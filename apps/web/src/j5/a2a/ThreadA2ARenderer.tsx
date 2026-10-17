@@ -506,6 +506,9 @@ function A2ABodyClamp({
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(element);
+    // The collapsed wrapper keeps its capped height while the markdown inside grows, as images
+    // load and code blocks highlight, so the markdown root is observed too.
+    if (element.firstElementChild) observer.observe(element.firstElementChild);
     return () => observer.disconnect();
   }, [body]);
 
