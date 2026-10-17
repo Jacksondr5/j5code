@@ -15,7 +15,7 @@ A **Playbook** is user-authored, step-by-step content for a piece of work, follo
 
 **The engine is the platform's; the steps are the user's.** The platform holds the step pointer, keeps instructions fresh, and renders progress. The steps, their content, and the judgment that a step is done belong to the Playbook and the agents following it. This is how a workflow like the PR Group becomes expressible on the platform without being codified into it.
 
-It runs in three moves. **An agent declares when to advance** through a tool call, so "what step are they on" is a cheap, honest, measured fact — asserted by the agent, visibly so, never parsed from output or inferred by the platform. **On each move, the platform delivers the step's instructions to its owner**, fresh in context: the owning seat in a Crew, or the Captain when no seat owns it; this is what defeats read-once-and-forget. **The interface renders progress** from the step pointer: which step each Crew is on, at a glance. Playbook tools only read prompts and move the calling thread's own run; they never run a step or touch the workspace. So J5 pre-approves them wherever it pre-approves its other tools (Codex and Claude, [divergence D3](../upstream.md)), and every other harness keeps its own approval prompts.
+It runs in three moves. **An agent declares when to advance** through a tool call, so "what step are they on" is a cheap, honest, measured fact — asserted by the agent, visibly so, never parsed from output or inferred by the platform. **On each move, the platform delivers the step's instructions to its owner**, fresh in context: the owning seat in a Crew, or the Captain when no seat owns it; this is what defeats read-once-and-forget. **The interface renders progress** from the step pointer: which step each Crew is on, at a glance. Playbook run tools only read prompts and move the calling thread's own run; they never run a step or touch the workspace. Definitions belong to the environment, available from every project and worktree on that server. Libraries can also read configured folders. Workspace-local definitions are not discovered; existing runs retain their original file. Saving a definition is a separate writing operation, available to writing agents; read-only personas and plan-mode callers cannot save definitions. So J5 pre-approves them wherever it pre-approves its other tools (Codex and Claude, [divergence D3](../upstream.md)), and every other harness keeps its own approval prompts.
 
 Playbooks are linear sequences. The initiative-level view — a plan whose nodes are Crews' Playbook positions — is the same idea one level up, with a recorded position for each run. A Playbook is not a workflow engine: no platform-owned branching, retries or step-level automation. Where a step needs judgment, an agent judges.
 
@@ -33,6 +33,10 @@ Playbooks are linear sequences. The initiative-level view — a plan whose nodes
 10. Back navigation changes the recorded position without undoing work, and retries cannot advance an active run twice.
 11. Completing or cancelling a run leaves its participants usable and preserves the run as history.
 12. Deleting the owner thread cancels its active run and stops that run from blocking definition deletion. Archiving a single agent's owner thread leaves its run resumable; archiving a Crew or its Captain cancels the Crew's run, and stopping a Crew doesn't.
+13. New playbooks are saved to the environment library by default and are available across its projects and worktrees without a promotion step.
+14. Workspace-only creation is explicit; existing local files remain local and override same-named library files.
+15. Duplicate library names and unavailable sources are visible errors; running procedures retain their original file when discovery changes.
+16. Copying a definition between environments creates an independent copy without replacing an existing different definition.
 
 ## Scenarios
 
@@ -43,6 +47,8 @@ Playbooks are linear sequences. The initiative-level view — a plan whose nodes
 - **A live single-agent procedure.** In Billing Migration, the user edits the current prompt while a Role follows the Playbook. The agent retrieves the revised prompt, moves back to inspect earlier work, and explicitly reselects when its step is removed. Deleting its owner thread cancels the run so the user can remove the definition. (AC8–AC12)
 
 ## History
+
+- 2026-10-17 — one environment-wide library replaces workspace-local discovery; configurable folders and independent environment copies ([#613](https://github.com/Jacksondr5/j5code/issues/613)).
 
 - 2026-08-22 — the concept; former R27 ([record](../../worklog/2026-08-21-design-review.md)).
 - 2026-09-08 — rewritten into the definition shape. Former identifiers: R27(a) → AC3–AC4; R27(b) → Definition (linear first); R27(c), skills per step → not part of the definition, parked. The questions for the Playbooks design session — the step schema, how a Playbook attaches at spawn, the delivery channel for step advancement, the initiative-level view, what "declared complete" means for a multi-agent step — are that session's, not this definition's.

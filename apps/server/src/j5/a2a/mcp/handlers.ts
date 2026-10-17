@@ -5,7 +5,6 @@ import {
   ProjectId,
 } from "@t3tools/contracts";
 import { playbookHandlers } from "../../playbooks/mcp.ts";
-import { playbookWorkspaceRoot } from "../../playbooks/workspace.ts";
 import * as Crypto from "effect/Crypto";
 import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
@@ -1349,21 +1348,7 @@ const handlers = {
         const crypto = yield* Crypto.Crypto;
         const captain = yield* preflightCrewCaptain(scope, "j5_propose_crew");
         const requestKey = input.client_request_id ?? (yield* crypto.randomUUIDv4);
-        // The Captain's playbooks are the ones its own j5_playbook_list shows.
-        const playbook =
-          input.playbook === undefined
-            ? undefined
-            : {
-                name: input.playbook,
-                workspaceRoot: yield* playbookWorkspaceRoot(captain.thread.id).pipe(
-                  Effect.mapError((error) =>
-                    stateError(
-                      `Your playbook workspace could not be read: ${error.message}`,
-                      "Retry, or propose the crew without a playbook.",
-                    ),
-                  ),
-                ),
-              };
+        const playbook = input.playbook === undefined ? undefined : { name: input.playbook };
         const outcome = yield* (yield* CrewProposalService)
           .propose({
             requestKey: `${scope.thread.providerSessionId}:${requestKey}`,

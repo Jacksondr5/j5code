@@ -81,6 +81,27 @@ const fixture = Effect.gen(function* () {
           Option.some({
             client: {
               [J5_PLAYBOOK_WS_METHODS.subscribeChanges]: () => SubscriptionRef.changes(revision),
+              [J5_PLAYBOOK_WS_METHODS.readLibrary]: answer(J5_PLAYBOOK_WS_METHODS.readLibrary, () =>
+                Effect.gen(function* () {
+                  const current = yield* SubscriptionRef.get(revision);
+                  return {
+                    playbooks:
+                      current === 0
+                        ? []
+                        : [
+                            {
+                              name: "shared",
+                              title: "Shared playbook",
+                              description: "Available to this environment",
+                              stepCount: 1,
+                              steps: [{ id: "first", title: "First" }],
+                              issue: null,
+                              source: { kind: "environment" },
+                            },
+                          ],
+                  };
+                }),
+              ),
               [J5_PLAYBOOK_WS_METHODS.listThreadRuns]: answer(
                 J5_PLAYBOOK_WS_METHODS.listThreadRuns,
                 () =>
@@ -313,5 +334,47 @@ it.effect("tells the person to update a server that does not have the read yet",
       _tag: "EnvironmentRpcUnavailableError",
       environmentId: bravoId,
     });
+  }).pipe(Effect.scoped),
+);
+
+it.effect("refreshes the shared library after a save without refreshing another environment", () =>
+  Effect.gen(function* () {
+    const { atoms, calls, revisions, registry } = yield* fixture;
+    for (const environmentId of [alphaId, bravoId]) {
+      const changes = atoms.playbookChanges({ environmentId, input: {} });
+      yield* AtomRegistry.mount(registry, changes);
+      yield* AtomRegistry.getResult(registry, changes);
+    }
+    const first = atoms.playbookLibrary({
+      environmentId: alphaId,
+      input: {},
+    });
+    const other = atoms.playbookLibrary({
+      environmentId: bravoId,
+      input: {},
+    });
+    for (const query of [first, other]) {
+      yield* AtomRegistry.mount(registry, query);
+      expect((yield* AtomRegistry.getResult(registry, query)).playbooks).toEqual([]);
+    }
+    const otherReads = calls.filter(
+      ([id, method]) => id === bravoId && method === J5_PLAYBOOK_WS_METHODS.readLibrary,
+    ).length;
+    yield* SubscriptionRef.update(revisions.get(alphaId)!, (value) => value + 1);
+    for (const query of [first]) {
+      const refreshed = yield* AtomRegistry.toStream(registry, query).pipe(
+        Stream.filter(
+          (result) => AsyncResult.isSuccess(result) && result.value.playbooks[0]?.name === "shared",
+        ),
+        Stream.runHead,
+      );
+      expect(Option.isSome(refreshed)).toBe(true);
+    }
+    expect((yield* AtomRegistry.getResult(registry, other)).playbooks).toEqual([]);
+    expect(
+      calls.filter(
+        ([id, method]) => id === bravoId && method === J5_PLAYBOOK_WS_METHODS.readLibrary,
+      ),
+    ).toHaveLength(otherReads);
   }).pipe(Effect.scoped),
 );

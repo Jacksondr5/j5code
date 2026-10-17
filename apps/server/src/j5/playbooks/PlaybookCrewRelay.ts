@@ -266,7 +266,6 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
    */
   const start = (input: {
     readonly owner: ThreadId;
-    readonly root: string;
     readonly name: string;
     readonly key: string;
     readonly crewInstanceId: string;
@@ -274,7 +273,12 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
     withCrew(
       input.crewInstanceId,
       Effect.gen(function* () {
-        const { definitionPath } = yield* store.definitionPathFor(input.root, input.name);
+        const { definitionPath } = yield* store.startDefinitionPathFor(
+          input.owner,
+          input.name,
+          input.key,
+          input.crewInstanceId,
+        );
         const instance = yield* readCrew(input.crewInstanceId);
         const refusal =
           instance === null
@@ -287,7 +291,7 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
                   ? `Crew ${instance.id} follows ${instance.playbook ? `playbook ${instance.playbook.name}` : "no playbook"}, not ${input.name}.`
                   : null;
         if (refusal !== null) return yield* playbookError("crew_not_linkable", refusal);
-        const response = yield* store.start(input.owner, input.root, input.name, input.key, {
+        const response = yield* store.start(input.owner, input.name, input.key, {
           crewInstanceId: input.crewInstanceId,
         });
         return yield* respond(response, input.key);

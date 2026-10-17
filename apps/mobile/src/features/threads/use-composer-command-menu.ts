@@ -198,7 +198,6 @@ export function useComposerCommandMenu({
   ownerKey,
   environmentId,
   projectId,
-  threadId,
   threadShells = EMPTY_THREAD_SHELLS,
   currentThreadId = null,
   projectCwd,
@@ -381,10 +380,10 @@ export function useComposerCommandMenu({
     query: trigger?.kind === "path" ? trigger.query : null,
   });
   const playbookQuery = useEnvironmentQuery(
-    trigger?.kind === "slash-playbook" && environmentId && projectId
+    trigger?.kind === "slash-playbook" && environmentId
       ? j5Environment.playbookLibrary({
           environmentId,
-          input: { projectId, ...(threadId ? { threadId } : {}) },
+          input: {},
         })
       : null,
   );
