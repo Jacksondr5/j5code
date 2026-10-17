@@ -190,8 +190,10 @@ it.layer(testLayer)("PersonAccess", (it) => {
         target: { kind: "thread", threadId: captain },
         level: "collaborate",
       });
-      for (const covered of [captain, seat, seatChild, subagent, moved]) {
-        assert.strictEqual(yield* access.threadAccess(session, covered), "collaborate", covered);
+      // Writing is where the grant is; everything beneath it is read.
+      assert.strictEqual(yield* access.threadAccess(session, captain), "collaborate");
+      for (const covered of [seat, seatChild, subagent, moved]) {
+        assert.strictEqual(yield* access.threadAccess(session, covered), "view", covered);
       }
     }),
   );
@@ -318,6 +320,9 @@ it.layer(testLayer)("PersonAccess", (it) => {
         access,
         people: noPeople,
         openLinks: noOpenLinks,
+        conversation: {
+          threadAuthors: () => Effect.succeed([]),
+        },
         session,
       });
       const told = (threadId: ThreadId) =>
@@ -333,10 +338,11 @@ it.layer(testLayer)("PersonAccess", (it) => {
         kind: "guest",
         level: "collaborate",
       });
-      // The agent beneath a granted thread carries its level; only the server can tell.
+      // The agent beneath a thread the guest writes to is read, not written to; only the
+      // server can tell.
       assert.deepStrictEqual(Option.getOrNull(yield* told(beneath)), {
         kind: "guest",
-        level: "collaborate",
+        level: "view",
       });
       assert.deepStrictEqual(Option.getOrNull(yield* told(stranger)), {
         kind: "guest",
@@ -358,6 +364,9 @@ it.layer(testLayer)("PersonAccess", (it) => {
         access,
         people: noPeople,
         openLinks: noOpenLinks,
+        conversation: {
+          threadAuthors: () => Effect.succeed([]),
+        },
         session,
       });
       yield* handlers[J5_SHARING_WS_METHODS.subscribeThreadAccess]({ threadId }).pipe(
@@ -384,6 +393,9 @@ it.layer(testLayer)("PersonAccess", (it) => {
         access,
         people: noPeople,
         openLinks: noOpenLinks,
+        conversation: {
+          threadAuthors: () => Effect.succeed([]),
+        },
         session,
       });
       // A member's connection is told the owner's name, or that there is none yet.
@@ -401,6 +413,7 @@ it.layer(testLayer)("PersonAccess", (it) => {
         access,
         people: noPeople,
         openLinks: noOpenLinks,
+        conversation: { threadAuthors: () => Effect.succeed([]) },
         session: { sessionId: session.sessionId, subject: PersonAccess.GUEST_SESSION_SUBJECT },
       });
       assert.deepStrictEqual(yield* guestHandlers[J5_SHARING_WS_METHODS.getConnectionAccess](), {

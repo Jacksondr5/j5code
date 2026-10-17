@@ -36,6 +36,7 @@ import {
   PersonNotFoundError,
   type PersonRecord,
   type SessionIdentity,
+  writesVia,
 } from "./PersonAccess.ts";
 
 /**
@@ -413,8 +414,12 @@ export const layer: Layer.Layer<
           guests: guests.map((guest) => ({
             personId: toGuest ? null : guest.person.personId,
             displayName: guest.person.displayName,
-            level: higher(guest.grants.map((grant) => grant.level)),
-            grants: guest.grants,
+            // What they may do here: a grant on a thread above this one gives reading only.
+            level: higher(
+              guest.grants.map((grant) => (writesVia(grant.via) ? grant.level : "view")),
+            ),
+            // Field by field: the line a member wrote for the agent is not told to anyone here.
+            grants: guest.grants.map((grant) => ({ via: grant.via, level: grant.level })),
             you: caller !== null && caller.personId === guest.person.personId,
             nameSelfGiven: guest.person.nameSelfGiven,
             joinedByOpenLink: guest.person.joinedOpenLinkId !== null,
