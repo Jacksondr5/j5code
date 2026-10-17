@@ -246,6 +246,13 @@ export interface ClientReadsShape {
     typeof CrewProposalsResponse.Type,
     Effect.Error<ReturnType<AgentCrewProposalService["Service"]["listOpen"]>>
   >;
+  /** The rosters waiting for approval that the agent of one thread proposed, and no other proposal. */
+  readonly threadRosters: (
+    threadId: ThreadId,
+  ) => Effect.Effect<
+    typeof CrewProposalsResponse.Type,
+    Effect.Error<ReturnType<AgentCrewProposalService["Service"]["listOpen"]>>
+  >;
   /** The Inbox's Crew seat approvals: provider requests waiting on live Crew threads. */
   readonly crewRuntimeRequests: Effect.Effect<
     CrewRuntimeRequestsResponse,
@@ -373,6 +380,16 @@ export const layer: Layer.Layer<
         Effect.flatMap((open) => Effect.forEach(open, projectProposal)),
         Effect.map((listed) => ({ proposals: listed })),
       ),
+      threadRosters: (threadId) =>
+        proposals.listOpen().pipe(
+          Effect.map((open) =>
+            open.filter(
+              (proposal) => proposal.kind === "roster" && proposal.captainThreadId === threadId,
+            ),
+          ),
+          Effect.flatMap((open) => Effect.forEach(open, projectProposal)),
+          Effect.map((listed) => ({ proposals: listed })),
+        ),
       crewRuntimeRequests: runtimeRequests.list.pipe(Effect.map((requests) => ({ requests }))),
       crewMemberships: yield* makeCrewMembershipsRead,
       spawnedChildren: yield* makeSpawnedChildrenRead,

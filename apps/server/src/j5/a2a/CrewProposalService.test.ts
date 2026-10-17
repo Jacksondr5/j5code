@@ -68,6 +68,8 @@ import {
   CrewProposalService,
   layer as crewProposalLayer,
   type ResolveCrewProposalInput,
+  proposalForGuest,
+  withoutHostPaths,
 } from "./CrewProposalService.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
@@ -688,7 +690,20 @@ it.effect("gates every roster on the human and gates additions with the seat cap
       });
       assert.equal(custom.proposal.status, "open");
       assert.isNull(custom.proposal.requestedSeats[0]?.agentId);
-      yield* gate.resolve({ proposalId: custom.proposal.id, decision: "decline" });
+      // In a shared conversation the Captain is told who answered, and the record keeps it.
+      const named = yield* gate.resolve({
+        proposalId: custom.proposal.id,
+        decision: "decline",
+        decidedBy: "Priya (guest)",
+      });
+      assert.equal(named.proposal.decidedBy, "Priya (guest)");
+      const namedNotice = (yield* Ref.get(notices)).at(-1);
+      if (namedNotice?.type === "message.dispatch") {
+        assert.include(
+          namedNotice.text,
+          "decision: declined\ndecided_by: Priya (guest)\ncrew_name:",
+        );
+      }
 
       const declined = yield* gate.resolve({
         proposalId: request.proposal.id,
@@ -697,7 +712,11 @@ it.effect("gates every roster on the human and gates additions with the seat cap
       assert.equal(declined.proposal.status, "declined");
       assert.isNull(declined.instance);
       const last = (yield* Ref.get(notices)).at(-1);
-      if (last?.type === "message.dispatch") assert.include(last.text, "decision: declined");
+      // Anywhere else the notice is what it always was.
+      if (last?.type === "message.dispatch") {
+        assert.include(last.text, "decision: declined\ncrew_name:");
+        assert.notInclude(last.text, "decided_by");
+      }
 
       const tooMany = yield* gate
         .propose({
@@ -1246,6 +1265,57 @@ it.effect(
         const first = yield* gate.preview({ proposalId: open.proposal.id });
         // Every preview carries what the card offers: the Captain's branch, where it works, worktrees.
         assert.deepStrictEqual(first.workspaceOptions, fakeWorkspaceOptions);
+        // A guest's connection is shown the same seats and the same approval token, with none
+        // of the host's folders and branches.
+        const forGuest = yield* gate.preview({ proposalId: open.proposal.id }, { forGuest: true });
+        assert.isFalse("workspaceOptions" in forGuest);
+        assert.strictEqual(forGuest.approvalToken, first.approvalToken);
+        assert.deepStrictEqual(
+          forGuest.seats.map((seat) => seat.seat),
+          first.seats.map((seat) => seat.seat),
+        );
+        assert.deepStrictEqual(
+          withoutHostPaths({
+            seat: "builder",
+            workspace: {
+              type: "existing_worktree",
+              worktreePath: "/home/owner/repo-wt",
+              branch: "fix",
+            },
+          }),
+          {
+            seat: "builder",
+            workspace: { type: "existing_worktree", worktreePath: "/", branch: "fix" },
+          },
+        );
+        // What a guest is handed back after answering is reduced the same way, and a problem
+        // reading the playbook is said without the reader's words, which can name a file.
+        const reduced = proposalForGuest({
+          ...open.proposal,
+          requestedSeats: [
+            {
+              ...open.proposal.requestedSeats[0]!,
+              workspace: {
+                type: "existing_worktree",
+                worktreePath: "/home/owner/repo-wt",
+                branch: "fix",
+              },
+            },
+          ],
+          playbook: {
+            name: "review",
+            title: "review",
+            steps: [],
+            issue: "ENOENT: no such file, open '/home/owner/repo/.j5/playbooks/review.yaml'",
+          },
+        });
+        assert.deepStrictEqual(reduced.requestedSeats[0]?.workspace, {
+          type: "existing_worktree",
+          worktreePath: "/",
+          branch: "fix",
+        });
+        assert.isFalse(JSON.stringify(reduced).includes("/home/owner"));
+        assert.isTrue(reduced.playbook?.issue?.startsWith("This roster's playbook has a problem"));
         assert.deepStrictEqual(first.seats[0]?.workspace, {
           type: "worktree",
           baseRef: "release",

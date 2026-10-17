@@ -21,6 +21,7 @@ import * as Effect from "effect/Effect";
 
 import { failAsJ5ActionError } from "../rpcActionError.ts";
 import { ClientActionsService } from "./ClientActionsService.ts";
+import { proposalForGuest } from "./CrewProposalService.ts";
 import { PeerAdminService, peerAdminRefusal } from "./PeerAdminService.ts";
 
 const METHODS = J5_CLIENT_ACTION_WS_METHODS;
@@ -69,14 +70,32 @@ const peerFailure = (operation: string) => (error: Parameters<typeof peerAdminRe
 
 /** Handlers for `J5ClientActionRpcGroup`: each calls one service method and maps its failure. */
 export const makeClientActionRpcHandlers = Effect.fn("j5.makeClientActionRpcHandlers")(
-  function* () {
+  function* (options?: {
+    /**
+     * Names the person on this connection when the proposal's Captain is in a shared
+     * conversation, where the Captain is told who answered; `null` anywhere else.
+     */
+    readonly rosterDecider: (proposalId: string) => Effect.Effect<string | null>;
+    /** The connection is a guest's: a roster is shown without the host's folders and branches. */
+    readonly forGuest?: boolean;
+  }) {
     const actions = yield* ClientActionsService;
     const peers = yield* PeerAdminService;
     return {
       [METHODS.previewCrewProposal]: (input: CrewProposalPreviewRequest) =>
-        actions.previewCrewProposal(input).pipe(Effect.catch(proposalFailure)),
+        actions
+          .previewCrewProposal(input, { forGuest: options?.forGuest === true })
+          .pipe(Effect.catch(proposalFailure)),
       [METHODS.resolveCrewProposal]: (input: CrewProposalResolveRequest) =>
-        actions.resolveCrewProposal(input).pipe(Effect.catch(proposalFailure)),
+        (options?.rosterDecider(input.proposalId) ?? Effect.succeed(null)).pipe(
+          Effect.flatMap((decidedBy) => actions.resolveCrewProposal(input, decidedBy)),
+          Effect.map((result) =>
+            options?.forGuest === true
+              ? { ...result, proposal: proposalForGuest(result.proposal) }
+              : result,
+          ),
+          Effect.catch(proposalFailure),
+        ),
       [METHODS.stopCrew]: (input: CrewStopRequest) =>
         actions.stopCrew(input).pipe(
           Effect.catch(

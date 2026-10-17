@@ -6,23 +6,27 @@ import {
   CommandId,
   MessageId,
   type OrchestrationV2Command,
+  type OrchestrationV2ThreadLaunchInput,
   ThreadId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import * as ThreadLaunch from "../../orchestration-v2/ThreadLaunchService.ts";
+import { isNativeMaintenanceCommand } from "../../orchestration-v2/Orchestrator.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { makeHarness, modelSelection, projectId } from "../test-support/threadLaunchHarness.ts";
 import * as PersonAccess from "./PersonAccess.ts";
-import { sharedConversation } from "./SharedConversation.ts";
+import { guestCommandId, sharedConversation } from "./SharedConversation.ts";
 
 /**
  * A shared conversation over upstream's real orchestrator and its real projections, with no
  * provider running: a run that starts stays active, so what is sent after it queues. The other
  * tests of this module stand in for upstream's dispatch and write its rows by hand; this one is
  * what fails if upstream reshapes what J5 reads from it by SQL: a run's `status` and the
- * `userMessageId` in its payload.
+ * `userMessageId` and `startedAt` in its payload, a message's `run_id`, and the event log's
+ * `command_id`, `aggregate_kind`, `stream_id`, `event_type` and the `id` in its payload.
  */
 
 const SCOPES = [AuthOrchestrationReadScope, AuthOrchestrationOperateScope];
@@ -42,12 +46,12 @@ const layerFor = (harness: ReturnType<typeof makeHarness>) =>
   PersonAccess.layer.pipe(Layer.provideMerge(harness.layer));
 
 let counter = 0;
-const message = (text: string) => {
+const message = (text: string, on = threadId) => {
   counter += 1;
   return {
     type: "message.dispatch",
     commandId: CommandId.make(`command:live:${counter}`),
-    threadId,
+    threadId: on,
     messageId: MessageId.make(`message:live:${counter}`),
     text,
     attachments: [],
@@ -124,6 +128,25 @@ it.effect(
       assert.strictEqual(yield* send(MEMBER, before), before);
       assert.strictEqual((yield* stored).text(before.messageId), "Let us review the plan.");
 
+      // Who answered a prompt is kept only when upstream's log shows the command settled it.
+      // No prompt can be raised here without a provider, so this pins what that check reads, on
+      // an event upstream does write for this command: the log is `orchestration_events`, a
+      // thread's events are its stream, the payload is the changed thing itself with its `id`,
+      // and `command_id` is the command that caused it.
+      const sql = yield* SqlClient.SqlClient;
+      const logged = yield* sql<{ readonly event_type: string; readonly id: string | null }>`
+      SELECT event_type, json_extract(payload_json, '$.id') AS id FROM orchestration_events
+      WHERE command_id = ${before.commandId}
+        AND aggregate_kind = 'thread'
+        AND stream_id = ${threadId}
+    `;
+      assert.isTrue(
+        logged.some(
+          (event) => event.event_type === "message.updated" && event.id === before.messageId,
+        ),
+        JSON.stringify(logged),
+      );
+
       const priya = yield* access.createGuest({ displayName: "Priya" });
       yield* access.bindSession({ sessionId: GUEST.sessionId, personId: priya.personId });
       const target = { kind: "thread" as const, threadId };
@@ -182,12 +205,13 @@ it.effect(
         `${note}\n[Message from Priya (guest), edited by Jackson (member)]\n\nWhat does the plan change?`,
       );
 
-      // A second message while the carrier still waits says nothing more: the agent will be told.
+      // The carrier still waits, so the agent has been told nothing yet and the guest could
+      // withdraw it: a second message carries the note too.
       const second = message("And what does it cost?");
       yield* send(MEMBER, second);
       assert.strictEqual(
         (yield* stored).text(second.messageId),
-        "[Message from Jackson (member)]\n\nAnd what does it cost?",
+        `${note}\n[Message from Jackson (member)]\n\nAnd what does it cost?`,
       );
       // The guest cannot change the member's queued message.
       const secondRun = (yield* stored).projection.runs.find(
@@ -206,8 +230,8 @@ it.effect(
         "EnvironmentAuthorizationError",
       );
 
-      // The guest withdraws the carrier before it runs, so the agent was never told. The next
-      // message a person sends carries the note instead.
+      // The guest withdraws the carrier before it runs. Nothing has reached the agent yet, so
+      // the next message a person sends carries the note as well.
       yield* send(GUEST, {
         type: "queued-run.cancel",
         commandId: CommandId.make("command:live:cancel"),
@@ -220,13 +244,36 @@ it.effect(
         (yield* stored).text(next.messageId),
         `${note}\n[Message from Jackson (member)]\n\nStill reviewing.`,
       );
-      // And the one after it does not.
       const queuedByGuest = message("One more question.");
       yield* send(GUEST, queuedByGuest);
       assert.strictEqual(
         (yield* stored).text(queuedByGuest.messageId),
-        "[Message from Priya (guest)]\n\nOne more question.",
+        `${note}\n[Message from Priya (guest)]\n\nOne more question.`,
       );
+      // A guest's command goes on to upstream under an id that is the guest's own.
+      assert.deepStrictEqual(
+        yield* sql<{ readonly command_id: string }>`
+          SELECT DISTINCT command_id FROM orchestration_events
+          WHERE event_type = 'message.updated' AND stream_id = ${threadId}
+            AND json_extract(payload_json, '$.id') = ${queuedByGuest.messageId}
+        `,
+        [{ command_id: guestCommandId(priya.personId, queuedByGuest.commandId) }],
+      );
+
+      // The guest names, as its own command's id, the id the platform once used to withdraw
+      // this run, so that upstream holds a receipt for it. Upstream answers "accepted" for an
+      // id it has a receipt for and does nothing more, so a withdrawal under that id would
+      // leave the message queued, to run under the guest's name after their access is gone.
+      const guestRun = (yield* stored).projection.runs.find(
+        (run) => run.userMessageId === queuedByGuest.messageId,
+      )!;
+      yield* send(GUEST, {
+        type: "queued-run.edit",
+        commandId: CommandId.make(`command:j5:shared-conversation-withdraw:${guestRun.id}`),
+        threadId,
+        runId: guestRun.id,
+        text: "One more question, please.",
+      });
 
       // Lowered to View: the guest's queued run is withdrawn through upstream's own cancel, and
       // never started. The member's stay queued.
@@ -248,17 +295,177 @@ it.effect(
         "EnvironmentAuthorizationError",
       );
 
-      // With no guest left who can write, the member's next message says so, once, and is the
-      // last to carry an author line.
+      // No guest can write any more, and no note is known to have reached the agent, so there
+      // is nothing to take back: the member's next message is sent as typed.
       const closing = message("Just me now.");
-      yield* send(MEMBER, closing);
-      const closingText = (yield* stored).text(closing.messageId)!;
+      assert.strictEqual(yield* send(MEMBER, closing), closing);
+    }).pipe(Effect.provide(layerFor(harness)));
+  },
+);
+
+it.effect(
+  "every message carries the first note until one is known to have reached the agent",
+  () => {
+    const harness = makeHarness();
+    const on = ThreadId.make("thread:shared-withdrawn");
+    return Effect.gen(function* () {
+      const access = yield* PersonAccess.PersonAccess;
+      const conversation = yield* sharedConversation;
+      const threads = yield* ThreadManagementService;
+      yield* threads.dispatch({
+        type: "thread.create",
+        createdBy: "user",
+        creationSource: "web",
+        commandId: CommandId.make("command:live:create-withdrawn"),
+        threadId: on,
+        projectId,
+        title: "Shared",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+      });
+      yield* access.setOperatorName("Jackson");
+      const note = (messageId: string) =>
+        conversation
+          .threadAuthors(MEMBER, on)
+          .pipe(
+            Effect.map(
+              (authors) => authors.find((author) => author.messageId === messageId)?.note ?? null,
+            ),
+          );
+      // The member's run stays active, so what follows queues.
+      yield* send(MEMBER, message("Let us review the plan.", on));
+      const priya = yield* access.createGuest({ displayName: "Priya" });
+      yield* access.bindSession({ sessionId: GUEST.sessionId, personId: priya.personId });
+      const target = { kind: "thread" as const, threadId: on };
+      yield* access.putGrant({ personId: priya.personId, target, level: "collaborate" });
+
+      // The first note waits in the queue on the guest's message.
+      const first = message("What does the plan change?", on);
+      yield* send(GUEST, first);
+      assert.isTrue((yield* note(first.messageId))?.includes("This thread is now a shared"));
+      // A second guest is added. The agent has not read the first note and may never, so the
+      // member's next message carries the whole of it, not just what changed.
+      const sam = yield* access.createGuest({ displayName: "Sam" });
+      yield* access.putGrant({ personId: sam.personId, target, level: "collaborate" });
+      const second = message("Welcome, Sam.", on);
+      yield* send(MEMBER, second);
+      const told = yield* note(second.messageId);
+      assert.isTrue(told?.includes("This thread is now a shared"));
+      assert.isTrue(told?.includes("Who can write: Jackson (member), Priya (guest), Sam (guest)."));
+
+      // The guest withdraws the first before it runs. Whichever message reaches the agent
+      // first, it has the note.
+      const projection = yield* threads.getThreadProjection(on);
+      yield* send(GUEST, {
+        type: "queued-run.cancel",
+        commandId: CommandId.make("command:live:cancel-withdrawn"),
+        threadId: on,
+        runId: projection.runs.find((run) => run.userMessageId === first.messageId)!.id,
+      });
+      const third = message("Where were we?", on);
+      yield* send(MEMBER, third);
+      assert.strictEqual(yield* note(third.messageId), told);
+    }).pipe(Effect.provide(layerFor(harness)));
+  },
+);
+
+it.effect(
+  "a thread started in a shared project is a shared conversation from its first message",
+  () => {
+    const harness = makeHarness();
+    const on = ThreadId.make("thread:shared-born");
+    return Effect.gen(function* () {
+      const access = yield* PersonAccess.PersonAccess;
+      const conversation = yield* sharedConversation;
+      const threads = yield* ThreadManagementService;
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      yield* access.setOperatorName("Jackson");
+      const priya = yield* access.createGuest({ displayName: "Priya" });
+      yield* access.bindSession({ sessionId: GUEST.sessionId, personId: priya.personId });
+      yield* access.putGrant({
+        personId: priya.personId,
+        target: { kind: "project", projectId },
+        level: "collaborate",
+      });
+
+      // A new thread's first message comes in upstream's launch request, not as a command, and
+      // the thread has no record yet when it is taken in.
+      const launch = {
+        commandId: CommandId.make("command:live:launch"),
+        threadId: on,
+        projectId,
+        title: "Review the plan",
+        generateTitle: true,
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        workspaceStrategy: { type: "root" },
+        initialMessage: {
+          messageId: MessageId.make("message:live:launch"),
+          text: "Let us review the plan.",
+          attachments: [],
+        },
+      } as const satisfies OrchestrationV2ThreadLaunchInput;
+      const admitted = yield* conversation.admitLaunch(MEMBER, launch);
+      yield* launches.launch({
+        ...launch,
+        initialMessage: { ...launch.initialMessage, text: admitted.initialMessage!.text },
+        createdBy: "user",
+        creationSource: "web",
+      });
+      const text = (messageId: string) =>
+        threads
+          .getThreadProjection(on)
+          .pipe(
+            Effect.map(
+              (projection) => projection.messages.find((message) => message.id === messageId)?.text,
+            ),
+          );
+      const first = yield* text(launch.initialMessage.messageId);
       assert.isTrue(
-        closingText.startsWith("<j5_shared_conversation>\nPriya (guest) can no longer"),
+        first?.startsWith("<j5_shared_conversation>\nThis thread is now a shared"),
+        first,
       );
-      assert.isTrue(closingText.endsWith("\n[Message from Jackson (member)]\n\nJust me now."));
-      const plain = message("And on.");
-      assert.strictEqual(yield* send(MEMBER, plain), plain);
+      assert.isTrue(first?.includes("Who can write: Jackson (member), Priya (guest)."));
+      assert.isTrue(
+        first?.endsWith("\n[Message from Jackson (member)]\n\nLet us review the plan."),
+      );
+      // A member's `/compact` goes on as typed, so upstream takes it for the command it is; a
+      // guest's is sent as words under their name, which upstream does not.
+      const compact = message("/compact", on);
+      yield* send(MEMBER, compact);
+      const compactText = yield* text(compact.messageId);
+      assert.strictEqual(compactText, "/compact");
+      assert.isTrue(isNativeMaintenanceCommand({ text: compactText!, attachments: [] }));
+      const guestCompact = message("/compact", on);
+      yield* send(GUEST, guestCompact);
+      const guestText = yield* text(guestCompact.messageId);
+      assert.strictEqual(guestText, "[Message from Priya (guest)]\n\n/compact");
+      assert.isFalse(isNativeMaintenanceCommand({ text: guestText!, attachments: [] }));
+      // The guest's own message on the thread is named, and a guest cannot start a thread.
+      const reply = message("What does the plan change?", on);
+      yield* send(GUEST, reply);
+      assert.isTrue(
+        (yield* text(reply.messageId))?.endsWith(
+          "[Message from Priya (guest)]\n\nWhat does the plan change?",
+        ),
+      );
+      assert.strictEqual(
+        (yield* Effect.flip(conversation.admitLaunch(GUEST, launch)))._tag,
+        "EnvironmentAuthorizationError",
+      );
+
+      // In a project no guest can write to, a launch goes on exactly as it was sent.
+      yield* access.putGrant({
+        personId: priya.personId,
+        target: { kind: "project", projectId },
+        level: "view",
+      });
+      const alone = { ...launch, threadId: ThreadId.make("thread:born-alone") };
+      assert.strictEqual(yield* conversation.admitLaunch(MEMBER, alone), alone);
     }).pipe(Effect.provide(layerFor(harness)));
   },
 );
