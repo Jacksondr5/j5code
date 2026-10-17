@@ -196,7 +196,7 @@ export const crewLaunchReportText = (input: {
     );
   if (failed.length === 0 && notCreated.length === 0 && pending.length === 0)
     prose.push(
-      "Your crew is running. Each seat has your brief and this roster; coordinate with j5_send_message, and ask the user through the inbox for decisions you cannot make from the brief.",
+      "Your crew is running. Each seat has your brief and this roster; coordinate with j5_send_message.",
     );
   if (playbook !== null && proposal.kind === "roster")
     prose.push(

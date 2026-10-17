@@ -284,4 +284,23 @@ describe("crew launch report", () => {
     assert.include(text, "Your crew is running.");
     assert.notInclude(text, "seat_failed");
   });
+
+  it("tells every Captain the crew is running, and says nothing of where to ask a person", () => {
+    const text = crewLaunchReportText({
+      proposal: { ...proposal, approvedSeats: proposal.requestedSeats },
+      instance: { ...instance, members: instance.members.slice(0, 2) } as AgentCrewInstance,
+      verdicts: new Map([
+        ["setup", { kind: "started" }],
+        ["punchline", { kind: "started" }],
+      ]),
+      windowMs: 60_000,
+    });
+    assert.include(
+      text,
+      "Your crew is running. Each seat has your brief and this roster; coordinate with j5_send_message.",
+    );
+    assert.notInclude(text, "j5_send_message, and ask");
+    assert.notInclude(text, "through the inbox");
+    assert.notInclude(text, "ask in this thread");
+  });
 });
