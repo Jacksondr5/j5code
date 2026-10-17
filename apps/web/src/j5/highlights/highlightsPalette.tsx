@@ -1,5 +1,5 @@
 import { useLocation } from "@tanstack/react-router";
-import { SparklesIcon } from "lucide-react";
+import { GiftIcon } from "lucide-react";
 import { useEffect } from "react";
 
 import {
@@ -18,7 +18,7 @@ const WHATS_NEW_ITEM: CommandPaletteActionItem = {
   value: "action:j5-whats-new",
   searchTerms: ["what's new", "whats new", "highlights", "new features", "release", "changelog"],
   title: "What's new",
-  icon: <SparklesIcon className={ITEM_ICON_CLASS} />,
+  icon: <GiftIcon className={ITEM_ICON_CLASS} />,
   run: async () => openHighlights("all"),
 };
 

@@ -1,5 +1,5 @@
 import { unseenHighlights } from "@t3tools/client-runtime/j5/highlights";
-import { SparklesIcon } from "lucide-react";
+import { GiftIcon } from "lucide-react";
 import { useEffect } from "react";
 
 import { Popover, PopoverPopup, PopoverTrigger } from "../../components/ui/popover";
@@ -66,7 +66,7 @@ export function SidebarHighlightsButton() {
                     className="relative inline-flex size-8 cursor-pointer items-center justify-center rounded-full bg-sidebar-control-surface text-sidebar-foreground outline-hidden ring-ring transition-colors hover:bg-sidebar-row-hover focus-visible:ring-2"
                     type="button"
                   >
-                    <SparklesIcon aria-hidden className="size-4" />
+                    <GiftIcon aria-hidden className="size-4" />
                     {unseen.length > 0 ? (
                       <span className="absolute -end-1 -top-1 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-3xs font-semibold leading-none text-primary-foreground tabular-nums ring-2 ring-sidebar">
                         {unseen.length}
