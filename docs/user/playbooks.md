@@ -5,21 +5,46 @@ in its existing thread and decides when to advance. The thread's phase board
 shows the current step and whether the run is active, completed, or cancelled.
 Earlier steps describe position, not a guarantee that their work passed validation.
 
-Open **Settings → Personas → Playbooks** and select a project or thread worktree to see
-its definitions and steps. Playbook Author runs on Codex in the selected workspace. It helps shape the steps,
-writes the YAML, and checks the definition without starting a run. You can
-customize the persona in Settings → Personas. Invalid definitions remain visible
-with their errors.
+Open **Settings → Personas** to manage playbooks. New playbooks save to the selected
+**Environment library** by default and are available across all its projects and worktrees.
+Choose **This workspace only** to keep a procedure in one project's or worktree's
+`.j5/playbooks/` folder. Playbook Author runs on Codex in the selected project, helps
+shape the steps, and saves the definition without starting a run. A failed save is shown
+as an error; a workspace draft is not a shared playbook. You can also paste a finished
+definition into **Save YAML** in the environment library, even without a project.
 
-On web and desktop, **Import YAML** copies a `.yaml` or `.yml` definition into the selected workspace.
-The picker browses the workspace environment's filesystem, one file at a time. The file is
-saved under a valid playbook name, so `Release Plan.yaml` becomes `release-plan.yaml`.
-Importing a file with an existing name asks before replacing it. Changes also apply to runs
-using that definition. An active run must be completed or cancelled before its
-definition can be deleted; completed run history remains.
+The environment library can read additional folders on that server. Use **Add folder**
+to include a folder, and **Remove folder** to stop reading it without deleting its files.
+Folder definitions are read-only in the app: edit the source file, or copy it into the
+managed environment library. Refresh after changing files outside the app.
 
-**Export YAML** downloads `<name>.yaml` on web and desktop and shares the YAML from mobile.
-Web and desktop can import it back into another workspace or environment.
+A workspace playbook overrides a library playbook with the same name. A broken local
+copy shows its error instead of falling back. Two library sources with the same name
+must be renamed or one source removed before that name can run. Other playbooks stay
+available. Existing workspace files are not published automatically.
+
+On web and desktop, **Import YAML** reads a `.yaml` or `.yml` file from the selected
+workspace environment's filesystem. It saves to the environment library by default;
+choose **This workspace only** to import locally. The file is saved under a valid
+playbook name, so `Release Plan.yaml` becomes `release-plan.yaml`. Environment saves
+never replace an existing different definition: choose another name. Workspace imports
+ask before replacing an existing file.
+
+**Copy to environment library** shares an existing workspace playbook with the other
+projects on that server. It leaves the workspace original in place, so that original
+continues to override the shared copy in its own workspace. **Copy to environment**
+saves an independent copy on another connected environment. Later edits are separate.
+**Export YAML** downloads a definition on web and desktop and shares it from mobile.
+
+For ongoing sharing between machines, keep `personas/` and `playbooks/` in a git
+repository and configure each environment to read its local clone's matching folder.
+Commit, push, and pull with your usual git tools, then refresh the library. Creating a
+playbook does not automatically publish it to other environments.
+
+Runs keep the exact file they started with. Adding a local override or removing a
+configured folder does not redirect a running procedure. Changes to that file's contents
+still apply live. Complete or cancel active runs before deleting their managed definition;
+completed run history remains.
 
 On web and desktop, open **Fleet** and use its **Playbook runs** section to follow
 runs across your connected environments. The overview shows
@@ -27,8 +52,8 @@ each run's owner thread, agent activity, and current step. Select a run to open
 its thread, or choose **All** to include completed and cancelled runs.
 Unavailable environments keep their last received progress marked as stale.
 
-Ask your agent to create a playbook, or save a YAML file in your thread's workspace
-under `.j5/playbooks/`. The file name is the playbook's name: lowercase letters, digits,
+Ask your agent to create a playbook in the environment library. For a workspace-only
+playbook, save a YAML file under `.j5/playbooks/` in your thread's workspace. The file name is the playbook's name: lowercase letters, digits,
 and hyphens, such as `release-review`. The `title` is what you see in the app. A file
 with any other name is listed as invalid with a suggested rename. For example,
 `.j5/playbooks/review.yaml`:

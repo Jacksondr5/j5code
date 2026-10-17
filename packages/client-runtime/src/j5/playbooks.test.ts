@@ -1,3 +1,5 @@
+import { LEGACY_PLAYBOOK_AUTHOR_INSTRUCTIONS } from "./playbookAuthorLegacy.ts";
+import type { AgentPersonaEditInput } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import {
   AgentPersonaCreateInput,
@@ -120,9 +122,68 @@ describe("Playbook Author launch", () => {
         },
       },
       message: {
-        text: "Help me create a playbook in this workspace. Start by asking what I want it to accomplish.",
+        text: expect.stringContaining("Environment library"),
       },
     });
+  });
+  it("keeps workspace-only creation explicit in the durable authoring brief", () => {
+    const target = playbookAuthorLaunch({ ...launch, workspace, destination: "workspace" });
+    expect(target.input.message.text).toContain("This workspace only");
+    expect(target.input.message.text).toContain(".j5/playbooks");
+    expect(target.input.message.text).not.toContain("j5_playbook_save");
+  });
+});
+
+describe("saved Playbook Author instructions", () => {
+  it.each([true, false])("updates only unchanged stock instructions (stock=%s)", async (stock) => {
+    const original = stock
+      ? LEGACY_PLAYBOOK_AUTHOR_INSTRUCTIONS
+      : `${LEGACY_PLAYBOOK_AUTHOR_INSTRUCTIONS}\nMy custom rule.`;
+    let instructions = original;
+    const modelRoute = decodePersonaCreate({
+      id: "playbook-author",
+      displayName: "Author",
+      description: "Author",
+      instructions: original,
+      authorityPolicy: "workspace-write",
+      modelRoute: [
+        { driver: "codex", model: "my-model", reasoningEffort: "high" },
+        { driver: "codex", model: "my-model", reasoningEffort: "high" },
+      ],
+    }).modelRoute;
+    const edits: AgentPersonaEditInput[] = [];
+    const input: Parameters<typeof ensurePlaybookAuthor>[0] = {
+      providers: [],
+      readCatalog: async () => ({
+        personas: [{ ...author, editable: { definitionDigest: "a".repeat(64), modelRoute } }],
+      }),
+      createPersona: async () => {
+        throw new Error("must not recreate saved author");
+      },
+      readDefinition: async () => ({
+        id: "playbook-author",
+        version: 1,
+        displayName: author.displayName,
+        description: author.description,
+        instructions,
+        authority: { defaultPolicy: "workspace-write", allowedPolicies: ["workspace-write"] },
+        modelRoute,
+      }),
+      editPersona: async (edit) => {
+        edits.push(edit);
+        instructions = edit.instructions;
+      },
+    };
+    await ensurePlaybookAuthor(input);
+    await ensurePlaybookAuthor(input);
+    expect(edits).toHaveLength(stock ? 1 : 0);
+    if (stock)
+      expect(edits[0]).toMatchObject({
+        expectedDigest: "a".repeat(64),
+        displayName: author.displayName,
+        modelRoute,
+      });
+    else expect(instructions).toBe(original);
   });
 });
 
