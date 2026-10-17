@@ -47,13 +47,17 @@ export function PlaybookStages({
             {warning ? <AlertTriangleIcon /> : <BookOpenIcon />}
           </ComposerBanner.Icon>
           <ComposerBanner.Content>
-            <span className="shrink-0 text-muted-foreground">Playbook</span>
+            <span className="shrink-0 text-muted-foreground">
+              {historical ? "History" : "Playbook"}
+            </span>
             <span className="min-w-0 flex-1 truncate font-medium text-foreground/80">
-              {run.title} · {display.currentTitle}
+              {display.currentTitle}
+            </span>
+            <span className="hidden min-w-0 max-w-1/2 truncate text-muted-foreground @min-[560px]:inline">
+              {run.title}
             </span>
           </ComposerBanner.Content>
           <ComposerBanner.Actions>
-            {historical && <span className="text-muted-foreground">History</span>}
             {stale ? (
               <span className="text-warning">Out of date</span>
             ) : run.status !== "active" || run.issue ? (

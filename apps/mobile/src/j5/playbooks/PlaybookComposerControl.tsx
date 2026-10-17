@@ -69,7 +69,7 @@ export function PlaybookComposerControl(props: {
           />
           <View className="min-w-0 flex-1">
             <Text numberOfLines={1} className="text-xs text-foreground">
-              {run.title} · {display.currentTitle}
+              {run.runId !== runs[0]?.runId ? "History" : "Playbook"} · {display.currentTitle}
             </Text>
             {(run.status !== "active" ||
               run.issue ||
@@ -92,6 +92,7 @@ export function PlaybookComposerControl(props: {
         </Pressable>
         {expanded && (
           <ScrollView className="max-h-48" nestedScrollEnabled accessibilityLabel="Playbook stages">
+            <Text className="my-2 text-xs font-t3-medium text-foreground">{run.title}</Text>
             {runs.length > 1 && (
               <ScrollView horizontal className="my-2" accessibilityLabel="Playbook runs">
                 {runs.map((entry, index) => (
