@@ -390,8 +390,14 @@ export function groupMembersFromPs(output: string, group: number): ReadonlyArray
 }
 
 function membersOfGroup(group: number): ReadonlyArray<number> {
-  if (IS_MACOS)
-    return groupMembersFromPs(probeOutput("ps", ["-A", "-o", "pid=,pgid="]) ?? "", group);
+  if (IS_MACOS) {
+    // `ps -A` always lists something, so a failure must throw: read as an empty
+    // group, it would let stop and rebuild drop a server that is still running.
+    const output = NodeChildProcess.execFileSync("ps", ["-A", "-o", "pid=,pgid="], {
+      encoding: "utf8",
+    });
+    return groupMembersFromPs(output, group);
+  }
   return NodeFS.readdirSync("/proc")
     .filter((entry) => /^\d+$/.test(entry))
     .map(Number)
