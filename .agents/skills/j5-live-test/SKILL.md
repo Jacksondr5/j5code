@@ -129,7 +129,8 @@ A worktree holds one setup at a time. Pass a flag to the first start, or to
   Base's tabs stay signed in: reload them. Run `upgrade` again to start over
   from the same old state; before reloading a tab then, clear its cached state
   with `preview_evaluate`: `indexedDB.deleteDatabase("t3code:connection-runtime")`.
-  After `upgrade`, do not run the base checkout's own script.
+  After `upgrade`, `guest` adds people to the upgraded server; do not run the
+  base checkout's own script.
 
 ### Live turns
 

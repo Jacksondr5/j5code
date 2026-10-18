@@ -33,6 +33,7 @@ import {
   readServerLog,
   resolveLiveTestPaths,
   runInOwnGroup,
+  serverExit,
   startRefusal,
   type ServerLogFacts,
   upgradeRunner,
@@ -369,8 +370,16 @@ describe("liveTestEnvironment", () => {
     assert.deepEqual(environment, {
       KEEP: "1",
       T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "false",
+      NODE_OPTIONS: "--disable-warning=ExperimentalWarning",
       PATH: `/work/tree/node_modules/.bin${NodePath.delimiter}/usr/bin`,
     });
+  });
+
+  it("silences only experimental warnings, keeping the node options it was given", () => {
+    assert.equal(
+      liveTestEnvironment({ NODE_OPTIONS: "--max-old-space-size=4096" }, "/w").NODE_OPTIONS,
+      "--max-old-space-size=4096 --disable-warning=ExperimentalWarning",
+    );
   });
 });
 
@@ -415,6 +424,28 @@ describe("readServerLog", () => {
       ).shareFailure,
       "permission denied. Continuing unshared.",
     );
+  });
+});
+
+describe("serverExit", () => {
+  const exited = [
+    "[dev-runner] mode=dev serverPort=14570 webPort=6530 baseDir=/w/home",
+    "Error: no such column: id",
+    "Failed running 'src/bin.ts'. Waiting for file changes before restarting...",
+    "5:17:26 PM [vite+] http proxy error: /api/auth/session",
+    "Error: connect ECONNREFUSED 127.0.0.1:14570",
+  ].join("\n");
+
+  it("gives the log up to the exit, without the proxy errors after it", () => {
+    const excerpt = serverExit(exited) ?? "";
+    assert.include(excerpt, "no such column: id");
+    assert.isTrue(excerpt.endsWith("Waiting for file changes before restarting..."));
+    assert.notInclude(excerpt, "ECONNREFUSED");
+  });
+
+  it("is undefined before any exit, and once a restart has minted a pairing URL", () => {
+    assert.isUndefined(serverExit("[dev-runner] mode=dev\n  pairingUrl: http://localhost:1/pair"));
+    assert.isUndefined(serverExit(`${exited}\n  pairingUrl: http://localhost:6530/pair#token=T`));
   });
 });
 
@@ -949,8 +980,8 @@ describe("parseGuest", () => {
 
 describe("guestRefusal", () => {
   const startCommand = "node script";
-  const ask = (built: LiveTestMode | undefined, serving = true, upgraded = false) =>
-    guestRefusal({ built, serving, upgraded, startCommand });
+  const ask = (built: LiveTestMode | undefined, serving = true) =>
+    guestRefusal({ built, serving, startCommand });
 
   it("lets a guest be added to a running default, base or peer server", () => {
     for (const built of ["default", "base", "peer", "peer-poll"] as const) {
@@ -961,10 +992,6 @@ describe("guestRefusal", () => {
   it("refuses a fresh home and a server for the developer, running or not", () => {
     assert.include(ask("fresh"), "--fresh");
     assert.include(ask("for-dev", false), "--for-dev");
-  });
-
-  it("refuses after an upgrade, when Head's own server stays stopped", () => {
-    assert.include(ask("base", false, true), "stays stopped after `upgrade`");
   });
 
   it("refuses when no server is running, and says how to start one", () => {
@@ -1158,10 +1185,10 @@ describe("formatUpgrade", () => {
     assert.include(format("again")[2], "clear the tab's cached state");
   });
 
-  it("on status names no next step, and says when the worktree has uncommitted changes", () => {
-    const lines = format(undefined, true);
-    assert.include(lines[0], "7b09506fbc with this worktree's uncommitted changes");
-    assert.equal(lines[2], "");
-    assert.equal(lines[3], "J5 Code live-test server: RUNNING");
+  it("on status and restart says it is running on Base's upgraded home, and no more", () => {
+    assert.deepEqual(format(undefined, true).slice(0, 2), [
+      "J5 Code live-test server: RUNNING",
+      "  Runs          Base's home, upgraded to 7b09506fbc with this worktree's uncommitted changes",
+    ]);
   });
 });

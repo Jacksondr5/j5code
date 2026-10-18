@@ -314,6 +314,11 @@ export function liveTestEnvironment(
     ...rest,
     // Without this the dev server registers <worktree>/apps/server as a project.
     T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "false",
+    // Every node child here opens SQLite, and each process warns once that it is experimental:
+    // dozens of lines that bury what a command prints. Only that kind of warning is silenced.
+    NODE_OPTIONS: [rest.NODE_OPTIONS, "--disable-warning=ExperimentalWarning"]
+      .filter((option) => option !== undefined && option !== "")
+      .join(" "),
     // The dev runner spawns `vp`, which is often not on an agent's PATH.
     PATH: [NodePath.join(worktree, "node_modules", ".bin"), rest.PATH ?? ""].join(
       NodePath.delimiter,
@@ -333,10 +338,12 @@ export interface ServerLogFacts {
   readonly shareFailure: string | undefined;
 }
 
+// eslint-disable-next-line no-control-regex -- the server's pretty logger colours its output.
+const plainLog = (log: string) => log.replaceAll(/\u001B\[[0-9;]*m/g, "");
+
 /** What the dev server's log says so far. The latest pairing URL wins: a file-watch restart mints a new one. */
 export function readServerLog(log: string): ServerLogFacts {
-  // eslint-disable-next-line no-control-regex -- the server's pretty logger colours its output.
-  const text = log.replaceAll(/\u001B\[[0-9;]*m/g, "");
+  const text = plainLog(log);
   const runner = /\[dev-runner\] .*serverPort=(\d+) webPort=(\d+) baseDir=(\S+)/.exec(text);
   const pairingUrls = [...text.matchAll(/pairingUrl: (\S+)/g)];
   return {
@@ -348,6 +355,22 @@ export function readServerLog(log: string): ServerLogFacts {
     sharedUrl: /\[dev-runner\] shared on tailnet: (\S+)/.exec(text)?.[1],
     shareFailure: /\[dev-runner\] could not share on the tailnet: (.*)/.exec(text)?.[1],
   };
+}
+
+/**
+ * The log's last lines up to the server's exit, when the server has exited
+ * since it last minted a pairing URL; undefined while it has not. `node
+ * --watch` prints "Failed running" when the server it runs exits, then waits
+ * for a file to change, so the dev runner stays up with nothing serving. The
+ * lines after it are the web proxy failing to reach the server.
+ */
+export function serverExit(log: string): string | undefined {
+  const lines = plainLog(log).split("\n");
+  const exit = lines.findLastIndex((line) => line.startsWith("Failed running '"));
+  const pairing = lines.findLastIndex((line) => line.includes("pairingUrl: "));
+  return exit === -1 || exit < pairing
+    ? undefined
+    : lines.slice(Math.max(0, exit - 30), exit + 1).join("\n");
 }
 
 /**
@@ -1164,15 +1187,34 @@ async function waitUntilReady(
   requireShare: boolean,
 ): Promise<ServerLogFacts> {
   for (;;) {
-    const facts = readServerLog(NodeFS.readFileSync(paths.log, "utf8"));
+    const log = NodeFS.readFileSync(paths.log, "utf8");
+    const facts = readServerLog(log);
     // Classify before anything else: a refusal below signals the group, and
     // only a group proven to be ours may be signalled.
     const state = currentServerState(paths);
-    if (state.kind === "unverified") throw new LiveTestRefusal(state.reason);
+    if (state.kind === "unverified") {
+      // A leader gone with members left is a group on its way out, most often
+      // because another command, such as `stop`, is ending it.
+      if (startTimeOf(state.group) !== undefined) throw new LiveTestRefusal(state.reason);
+      throw new LiveTestRefusal(
+        "The dev server stopped while this command waited for it to start; another command, such as `stop`, may have ended it.",
+      );
+    }
     if (state.kind === "stopped") {
+      if (!NodeFS.existsSync(paths.record)) {
+        throw new LiveTestRefusal(
+          "The dev server was stopped by another command while this one waited for it to start.",
+        );
+      }
       NodeFS.rmSync(paths.record, { force: true });
       throw new LiveTestRefusal(
         `The dev server exited while starting.\nLast lines of ${paths.log}:\n${logTail(paths)}`,
+      );
+    }
+    const exit = state.kind === "running" ? undefined : serverExit(log);
+    if (exit !== undefined) {
+      throw new LiveTestRefusal(
+        `The dev server exited while starting. Its file watcher is still running and starts it again when a file changes.\nLast lines of ${paths.log} up to the exit:\n${exit}\nTo stop it: ${selfCommand(paths, "stop")}`,
       );
     }
     const refusal = startRefusal({
@@ -2049,7 +2091,10 @@ export function upgradeRunner(ports: UpgradePorts): {
   };
 }
 
-/** What `upgrade` and `status` print about the upgraded server while it runs. */
+/**
+ * What `upgrade`, `restart` and `status` print about the upgraded server while
+ * it runs. Only the command that upgraded says so in its heading.
+ */
 export function formatUpgrade(input: {
   readonly paths: LiveTestPaths;
   readonly facts: ServerLogFacts;
@@ -2064,16 +2109,21 @@ export function formatUpgrade(input: {
   readonly justUpgraded: "first" | "again" | undefined;
 }): string {
   const { paths, facts } = input;
-  return `UPGRADED  Base's home now runs ${input.head.commit.slice(0, 10)}${input.head.changed ? " with this worktree's uncommitted changes" : ""}, at Base's address
-Before    a copy of the home before the upgrade is kept at ${paths.upgrade.before}${
-    input.justUpgraded === "first"
-      ? "\nNext      reload the tab you had on Base"
-      : input.justUpgraded === "again"
-        ? "\nNext      clear the tab's cached state (IndexedDB t3code:connection-runtime), then reload it; otherwise it keeps showing what happened after the copy was made"
-        : ""
-  }
+  const revision = `${input.head.commit.slice(0, 10)}${input.head.changed ? " with this worktree's uncommitted changes" : ""}`;
+  const heading =
+    input.justUpgraded === undefined
+      ? ""
+      : `UPGRADED  Base's home now runs ${revision}, at Base's address
+Before    a copy of the home before the upgrade is kept at ${paths.upgrade.before}
+Next      ${
+          input.justUpgraded === "first"
+            ? "reload the tab you had on Base"
+            : "clear the tab's cached state (IndexedDB t3code:connection-runtime), then reload it; otherwise it keeps showing what happened after the copy was made"
+        }
 
-J5 Code live-test server: RUNNING
+`;
+  return `${heading}J5 Code live-test server: RUNNING
+  Runs          Base's home, upgraded to ${revision}
   Pairing URL   ${input.pairingUrl ?? `none could be minted; run: node ${pairArguments(paths.upgrade).join(" ")}`}
   Web           http://localhost:${facts.webPort}
   Server port   ${facts.serverPort}
@@ -2087,6 +2137,8 @@ Commands:
   ${selfCommand(paths, "status")}    say whether it is running
   ${selfCommand(paths, "restart")}   stop, then start the upgraded server on the same home
   ${selfCommand(paths, "stop")}      stop the server
+  ${selfCommand(paths, 'guest "<name>"')}   add a second person, with their pairing URL
+                                      (flags: --thread <id> or --project <id>, --level view|collaborate)
   ${selfCommand(paths, "rebuild")}   stop, delete ${paths.root} and the base checkout, build and start again
                                       (flags as for a first start)
 
@@ -2143,6 +2195,23 @@ async function startUpgraded(
 }
 
 /**
+ * Turns provider update checks off in a home's settings, as the head's generator
+ * builds its own home: a provider found behind its latest release raises a
+ * toast over the top-right controls tests click. A base whose generator
+ * predates that leaves them on.
+ */
+function withoutProviderUpdateChecks(home: string): void {
+  const file = NodePath.join(home, "userdata", "settings.json");
+  const settings = NodeFS.existsSync(file)
+    ? (JSON.parse(NodeFS.readFileSync(file, "utf8")) as Record<string, unknown>)
+    : {};
+  NodeFS.writeFileSync(
+    file,
+    `${JSON.stringify({ ...settings, enableProviderUpdateChecks: false }, null, 2)}\n`,
+  );
+}
+
+/**
  * Stops every server, then starts this worktree's build on the base's home at
  * the base's address. The first run keeps a copy of that home; every later
  * run puts the copy back first, so each one upgrades the same old state.
@@ -2183,6 +2252,7 @@ async function upgrade(paths: LiveTestPaths): Promise<void> {
     NodeFS.rmSync(paths.upgrade.home, { recursive: true, force: true });
     NodeFS.cpSync(paths.upgrade.before, paths.upgrade.home, { recursive: true });
   }
+  withoutProviderUpdateChecks(paths.upgrade.home);
   await startUpgraded(
     paths,
     ports,
@@ -2403,16 +2473,11 @@ export function parseGuest(args: ReadonlyArray<string>): GuestRequest {
  */
 export function guestRefusal(input: {
   readonly built: LiveTestMode | undefined;
-  /** Whether the server the guest goes to, Local in a peer build, is running. */
+  /** Whether the server the guest goes to, Local in a peer build or the upgraded base, is running. */
   readonly serving: boolean;
-  /** Whether `upgrade` has replaced Head's own server with the upgraded base. */
-  readonly upgraded: boolean;
   readonly startCommand: string;
 }): string | undefined {
   const { built } = input;
-  if (input.upgraded) {
-    return "`guest` adds a person to Head's own server, which stays stopped after `upgrade`. Add guests on the base server before upgrading, with the base checkout's own script.";
-  }
   if (built === "fresh") {
     return "`guest` does not run on a --fresh home: its owner has no name yet, which is what that home is for.";
   }
@@ -2452,13 +2517,16 @@ Open the pairing URL in a new incognito tab, one tab per person.
  */
 function guest(paths: LiveTestPaths, request: GuestRequest): void {
   const built = builtMode(paths);
+  // After `upgrade` the server running here is this worktree's build on the base's home, whose
+  // test project the base's own generator recorded.
+  const upgraded = upgradeOf(paths) !== undefined;
+  const server = upgraded ? paths.upgrade : paths;
   // Identity first, as for a stop: only a server proven to be this script's is acted on.
-  const state = currentServerState(paths);
+  const state = currentServerState(server);
   if (state.kind === "unverified") throw new LiveTestRefusal(state.reason);
   const refusal = guestRefusal({
     built,
     serving: state.kind === "running",
-    upgraded: upgradeOf(paths) !== undefined,
     startCommand: selfCommand(paths, modeFlags(built ?? "default", builtBaseRef(paths))),
   });
   if (refusal !== undefined) throw new LiveTestRefusal(refusal);
@@ -2466,13 +2534,14 @@ function guest(paths: LiveTestPaths, request: GuestRequest): void {
   if (state.kind !== "running") return;
   const grantOn = request.target ?? {
     kind: "project" as const,
-    id: readDefaultManifest(paths.root).project.id,
+    id: readDefaultManifest(upgraded ? NodePath.dirname(paths.upgrade.home) : paths.root).project
+      .id,
   };
   // The owner's requests are WebSocket only, so the script pairs as a client of its own.
-  const token = mintPairingUrl(paths)?.split("#token=")[1];
+  const token = mintPairingUrl(server)?.split("#token=")[1];
   if (token === undefined) {
     throw new LiveTestRefusal(
-      `No pairing token could be minted for the server. Try: node ${pairArguments(paths).join(" ")}`,
+      `No pairing token could be minted for the server. Try: node ${pairArguments(server).join(" ")}`,
     );
   }
   const added = NodeChildProcess.spawnSync(
