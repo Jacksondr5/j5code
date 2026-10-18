@@ -130,9 +130,10 @@ A worktree holds one setup at a time. Pass a flag to the first start, or to
 - **After any `rebuild`**, a tab that was open before it can stay on the
   pairing form. Press "Reload app" there.
 - **`--fresh`.** The home has no project and no pinned model. After pairing, wait
-  for the wizard's own text, since there is no composer yet. Add only the test
-  repository the script names, or choose "Do not import projects". Pick your
-  model by hand.
+  for the wizard's heading, "Set up J5 Code", since there is no composer yet.
+  Its import step pre-selects projects it found on this machine, real ones
+  among them: add only the test repository the script names, or choose "Do
+  not import projects". Pick your model by hand.
 - **`--peer`.** Pair the browser with Local, then open the "Add to the
   browser" link the script prints to add Remote. After a `rebuild`, remove the
   old Remote from Settings > Connections first: the browser keeps its own list.
