@@ -122,9 +122,10 @@ A worktree holds one setup at a time. Pass a flag to the first start, or to
   browser" link the script prints to add Remote. After a `rebuild`, remove the
   old Remote from Settings > Connections first: the browser keeps its own list.
 - **`--base <ref>`.** See "PR screenshots".
-- **`upgrade`.** Make the old state on Base first, in its tab or with the base
-  checkout's own `guest`:
-  `node .j5code/live-test/base/scripts/j5/setup-agent-live-test.ts guest "<name>"`.
+- **`upgrade`.** To test a change that acts on old state, make that state on
+  Base, in its tab or with the base checkout's own `guest`
+  (`node .j5code/live-test/base/scripts/j5/setup-agent-live-test.ts guest "<name>"`),
+  then run `upgrade`. Do not write the state into a test database by hand.
   Base's tabs stay signed in: reload them. Run `upgrade` again to start over
   from the same old state; before reloading a tab then, clear its cached state
   with `preview_evaluate`: `indexedDB.deleteDatabase("t3code:connection-runtime")`.
