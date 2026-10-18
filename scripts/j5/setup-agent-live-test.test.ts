@@ -34,6 +34,8 @@ import {
   runInOwnGroup,
   startRefusal,
   type ServerLogFacts,
+  upgradeRunner,
+  upgradeTarget,
 } from "./setup-agent-live-test.ts";
 
 /** A fake machine: a home with a live `.j5code`, a main checkout, and a linked worktree below the live home. */
@@ -139,6 +141,9 @@ describe("resolveLiveTestPaths after a build", () => {
       ["remote/home", (layout: ReturnType<typeof makeLayout>) => layout.liveHome],
       // The base checkout is deleted by rebuild, so it must be a directory of this build.
       ["base", (layout: ReturnType<typeof makeLayout>) => layout.mainCheckout],
+      // `upgrade` replaces the base's home with its kept copy.
+      ["base/.j5code/live-test/home", (layout: ReturnType<typeof makeLayout>) => layout.liveHome],
+      ["upgrade/home-before", (layout: ReturnType<typeof makeLayout>) => layout.liveHome],
       // The state directory inside a real home, linked to the live database's directory.
       [
         "home/userdata",
@@ -493,6 +498,7 @@ describe("parseCommand", () => {
   it("defaults to a start in default mode", () => {
     assert.deepEqual(parseCommand([]), { command: "start", mode: "default" });
     assert.deepEqual(parseCommand(["restart"]), { command: "restart", mode: "default" });
+    assert.deepEqual(parseCommand(["upgrade"]), { command: "upgrade", mode: "default" });
   });
 
   it("takes a mode flag on a start and on rebuild, in either position", () => {
@@ -548,6 +554,9 @@ describe("parseCommand", () => {
       ["status", "--fresh"],
       ["restart", "--fresh"],
       ["stop", "--fresh"],
+      // upgrade acts on the base build that is there; it builds nothing.
+      ["upgrade", "--base", "main"],
+      ["upgrade", "--fresh"],
     ]) {
       assert.throws(() => parseCommand(args), LiveTestRefusal);
     }
@@ -831,6 +840,12 @@ describe("formatInstructions", () => {
     manifest: "/w/.j5code/live-test/manifest.json",
     base: "/w/.j5code/live-test/base",
     remote: { ...server("/w/.j5code/live-test/remote"), root: "/w/.j5code/live-test/remote" },
+    upgrade: {
+      ...server("/w/.j5code/live-test/base/.j5code/live-test"),
+      root: "/w/.j5code/live-test/upgrade",
+      baseLog: "/w/.j5code/live-test/base/.j5code/live-test/server.log",
+      before: "/w/.j5code/live-test/upgrade/home-before",
+    },
   };
   const facts: ServerLogFacts = {
     serverPort: 13000,
@@ -933,8 +948,8 @@ describe("parseGuest", () => {
 
 describe("guestRefusal", () => {
   const startCommand = "node script";
-  const ask = (built: LiveTestMode | undefined, serving = true) =>
-    guestRefusal({ built, serving, startCommand });
+  const ask = (built: LiveTestMode | undefined, serving = true, upgraded = false) =>
+    guestRefusal({ built, serving, upgraded, startCommand });
 
   it("lets a guest be added to a running default, base or peer server", () => {
     for (const built of ["default", "base", "peer", "peer-poll"] as const) {
@@ -945,6 +960,10 @@ describe("guestRefusal", () => {
   it("refuses a fresh home and a server for the developer, running or not", () => {
     assert.include(ask("fresh"), "--fresh");
     assert.include(ask("for-dev", false), "--for-dev");
+  });
+
+  it("refuses after an upgrade, when Head's own server stays stopped", () => {
+    assert.include(ask("base", false, true), "stays stopped after `upgrade`");
   });
 
   it("refuses when no server is running, and says how to start one", () => {
@@ -983,4 +1002,98 @@ Open the pairing URL in a new incognito tab, one tab per person.
     assert.include(output, "Added a guest to the live-test server Local:");
     assert.include(output, "Guests are added to Local only; this command does not reach Remote.");
   });
+});
+
+describe("upgradeTarget", () => {
+  const baseHome = "/w/.j5code/live-test/base/.j5code/live-test/home";
+  const baseFacts: ServerLogFacts = {
+    serverPort: 14100,
+    webPort: 6060,
+    baseDir: baseHome,
+    pairingUrl: undefined,
+    recovered: true,
+    sharedUrl: undefined,
+    shareFailure: undefined,
+  };
+  const input = {
+    built: "base" as LiveTestMode | undefined,
+    recorded: undefined,
+    baseFacts,
+    baseHome,
+    baseHomeExists: true,
+    inheritedPort: "5773",
+    rebuildCommand: "rebuild --base <ref>",
+    startCommand: "start --base main",
+  };
+
+  it("takes the address the base's own log reports", () => {
+    assert.deepEqual(upgradeTarget(input), { serverPort: 14100, webPort: 6060 });
+  });
+
+  it("keeps the address the first upgrade recorded, whatever the base's log says now", () => {
+    const recorded = { serverPort: 14000, webPort: 5960 };
+    assert.deepEqual(
+      upgradeTarget({ ...input, recorded, baseFacts: { ...baseFacts, serverPort: undefined } }),
+      recorded,
+    );
+  });
+
+  it("refuses a build that is not a --base build, and says how to make one", () => {
+    for (const built of ["default", "fresh", "peer", "for-dev", undefined] as const) {
+      assert.throws(() => upgradeTarget({ ...input, built }), /rebuild --base <ref>/);
+    }
+  });
+
+  it("refuses a base that never started, and says how to start it", () => {
+    for (const other of [
+      { baseHomeExists: false },
+      { baseFacts: { ...baseFacts, serverPort: undefined, webPort: undefined } },
+    ]) {
+      assert.throws(
+        () => upgradeTarget({ ...input, ...other }),
+        /never been started[^]*start --base main/,
+      );
+    }
+  });
+
+  it("refuses a base that ran on another home, or on the live server's port", () => {
+    assert.throws(
+      () => upgradeTarget({ ...input, baseFacts: { ...baseFacts, baseDir: "/elsewhere" } }),
+      /not on its home/,
+    );
+    for (const other of [
+      { baseFacts: { ...baseFacts, serverPort: 5773 }, inheritedPort: undefined },
+      { inheritedPort: "14100" },
+    ]) {
+      assert.throws(() => upgradeTarget({ ...input, ...other }), /live server's port/);
+    }
+  });
+});
+
+describe("upgradeRunner", () => {
+  it("puts the dev runner on exactly the base's ports, without looking for free ones", async () => {
+    // A base whose runner moved off its first choice: its ports are not the head worktree's.
+    const ports = { serverPort: 14211, webPort: 6171 };
+    const runner = upgradeRunner(ports);
+    const worktree = NodePath.resolve(import.meta.dirname, "../..");
+    const { spawnSync } = await import("node:child_process");
+    const dryRun = spawnSync(
+      process.execPath,
+      [
+        NodePath.join(worktree, "scripts/dev-runner.ts"),
+        "dev",
+        "--dry-run",
+        "--home-dir",
+        NodeOS.tmpdir(),
+        ...runner.args,
+      ],
+      {
+        cwd: worktree,
+        env: { ...liveTestEnvironment(process.env, worktree), ...runner.environment },
+        encoding: "utf8",
+      },
+    );
+    const facts = readServerLog(`${dryRun.stdout}${dryRun.stderr}`);
+    assert.deepEqual({ serverPort: facts.serverPort, webPort: facts.webPort }, ports);
+  }, 30_000);
 });
