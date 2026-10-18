@@ -16,17 +16,27 @@ started from that commit, and keep working while it tests. Tell it:
 - the commit, and what changed;
 - what to test;
 - which rows of "What to cover" apply;
+- the rig command for any state the UI cannot create yet, such as a `guest`
+  at a level the UI does not offer;
 - to follow this skill.
+
+Do not restate this skill's rules in the brief: the tester reads them here,
+and a copied rule outlives the fix to it. A plan too large for one tester's
+context goes to several testers at once, each with its own part.
 
 You may send it corrections while it runs, such as a fix to the test method.
 It records them in its report.
 
 Its report comes back as a short message naming an artifact. Put the verdict,
 what was not exercised live, and what the person must test by hand in the PR's
-"Live testing" section.
+"Live testing" section. A row the report calls partial stays partial there.
 
 Record each testing decision there too, with its reason: which rows you
 judged did not apply, and what you re-tested or did not after a later change.
+A small re-test you run yourself is fine; say it was yours.
+
+File each bug the test finds outside your change as an issue, after checking
+that the base has it too.
 
 Put the report's videos in the PR description beside the screenshots. Once
 the description is saved, check each plays for a signed-out viewer: this must
@@ -46,8 +56,9 @@ A test covers one commit. Before merging, re-test live whatever has changed
 since on a path your change exercises, once, at the head that will merge. Unit
 tests and CI do not show what an agent or a person sees, and nobody else's test
 covers a path only your change uses. Text an agent reads, such as a tool
-description, counts. If no code changed, do not re-test. Either way, name the
-tested commit and the head in the PR.
+description, counts. If nothing an agent or a person sees has changed, do not
+re-test. Either way, name the tested commit and the head in the PR. In a stack
+tested as a whole, each layer names the run that covers its head.
 
 ## Run a test
 
@@ -66,8 +77,13 @@ home points at a real repository or at the developer's data. Then use
 [test-t3-app](../test-t3-app/SKILL.md) for the browser steps.
 
 Each tab you open has its own storage, so it is one signed-in person and
-nothing else can sign it out. Do not pass a `profileId`: every tab that names
-a profile shares that profile's cookies, across all agents on the server.
+nothing else can sign it out. Do not pass a `profileId`, except for "PR
+videos": every tab that names a profile shares that profile's cookies, across
+all agents on the server.
+
+The panel refuses clipboard reads. To see what a Copy button wrote, first use
+`preview_evaluate` to replace `navigator.clipboard.writeText` with a function
+that keeps its argument, then click, then read the kept value.
 
 Do not seed a test home by hand, copy the live database, or start `vp run dev`
 yourself for a test. The script does not install dependencies: if it says they
@@ -126,8 +142,11 @@ A worktree holds one setup at a time. Pass a flag to the first start, or to
 
 - Send live turns only in new threads in the test project. The threads the
   script made are for looking at.
-- Use only the models the person has authorized for live test turns. The test
-  home defaults new threads to Claude Haiku, a cheap one.
+- Use only the models the person has authorized for live test turns. If none
+  are, ask the person for one before you start: a test without a real turn
+  misses the change's own flow, so lacking a model does not make those rows
+  not applicable. The test home defaults new threads to Claude Haiku, a cheap
+  one.
 - Take live turns in "Current checkout" mode. In a Crew roster that choice is
   "Captain's checkout". A first turn in "New worktree" mode can be interrupted
   or hang.
@@ -147,8 +166,8 @@ A worktree holds one setup at a time. Pass a flag to the first start, or to
 - An agent's own account of what it did is not evidence. Check the tool
   result, the stored row, or the screen.
 - To hold a turn open, ask the agent to run `./scripts/hold.sh` in the test
-  repository. It blocks until you create `.hold-release` in the test
-  repository's root, deletes that file, and exits. It gives up after nine
+  repository, in the foreground. It blocks until you create `.hold-release` in
+  the test repository's root, deletes that file, and exits. It gives up after nine
   minutes.
 - The thread "Question waiting for an answer" can be answered once; `rebuild`
   brings it back. The image in "Message with an image" is display only.
@@ -162,10 +181,16 @@ Restart only at rest, or during a held turn. Do not try to catch the server in
 a narrow window, such as mid-migration. A bug that needs one gets a
 deterministic test.
 
+A turn a restart interrupts carries on by itself: after `restart`, the server
+sends it "Continue where you left off."
+
 ### Report
 
-Save the report with `j5_write_artifact` at `test-reports/<branch>.md`, then
+Save the report with `j5_write_artifact` at
+`test-reports/<branch>/<commit>.md`, one report for each commit you test, then
 send whoever asked for the test a short message with the verdict and that path.
+Put the verdict first. Quote an agent's words only where they are the
+evidence; a full transcript goes in an appendix, and only when asked for.
 
 1. Verdict: pass, fail, or blocked, with the commit and the script flags.
 2. Not exercised live: each gap, why, and whether it needs the person.
@@ -196,7 +221,8 @@ sent through the UI.
 ## PR screenshots
 
 Use `--base <ref>` so base and head show the same data. The ref is the PR's
-own base, which for a stacked PR is the layer beneath it, not `j5/main`. Open
+own base, which for a stacked PR is the layer beneath it. Fetch, then name the
+remote branch, such as `origin/j5/main`: a local branch can be behind. Open
 each server in its own tab. Capture at 1280x800 as test-t3-app describes, then upload:
 
 ```bash
