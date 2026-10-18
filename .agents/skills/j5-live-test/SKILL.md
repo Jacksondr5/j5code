@@ -28,7 +28,13 @@ what was not exercised live, and what the person must test by hand in the PR's
 Record each testing decision there too, with its reason: which rows you
 judged did not apply, and what you re-tested or did not after a later change.
 
-Put the report's videos in the PR description beside the screenshots.
+Put the report's videos in the PR description beside the screenshots. Once
+the description is saved, check each plays for a signed-out viewer: this must
+print `200 video/mp4`.
+
+```bash
+curl -sL -o /dev/null -w '%{http_code} %{content_type}\n' "<url>"
+```
 
 More than one tester can run at once. Each has its own server, and they share
 one browser, so one tester's timed-out call can cost another a single failed
@@ -223,15 +229,16 @@ with the same steps, each on its own server as for screenshots.
    `preview_evaluate` until the URL is there.
 4. Empty the box (set its value to `""` and dispatch an `input` event), never
    submit it, and close the tab.
-5. Check the URL renders as a player. This must print `<video`:
+5. Check GitHub renders the URL as a player. This must print `<video`:
 
    ```bash
    printf '%s' "<url>" | jq -Rs '{text: ., mode: "gfm", context: "Jacksondr5/j5code"}' \
      | gh api markdown --input - | grep -o '<video'
    ```
 
-   Do not check it with `curl`: the URL refuses signed-out requests until a
-   posted PR or comment contains it, and `curl -sI` gets a 403 even then.
+   This checks rendering only. The URL refuses signed-out requests until a
+   posted PR or comment contains it, so whoever opens the PR checks playback
+   (see "Ask for a test"). `curl -sI` gets a 403 even then; use a GET.
 
 6. Put each URL in the report with its caption. In the PR description, each
    URL goes on a line of its own, which GitHub renders as a player.
