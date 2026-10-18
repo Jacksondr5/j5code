@@ -1513,7 +1513,7 @@ async function start(
   if (refusal !== undefined) throw new LiveTestRefusal(refusal);
   // After `upgrade` the base build never starts again: it would open a home a newer build has migrated.
   const upgraded = upgradeOf(paths);
-  if (upgraded !== undefined) return startUpgraded(paths, upgraded, deadline, false);
+  if (upgraded !== undefined) return startUpgraded(paths, upgraded, deadline, undefined);
   const base = mode === "base" ? resolveBase(paths, baseRef ?? builtRef ?? "") : undefined;
   if (
     base !== undefined &&
@@ -1969,6 +1969,14 @@ const baseCheckoutNote = (paths: LiveTestPaths) =>
  */
 function removeBaseCheckout(paths: LiveTestPaths): void {
   if (!NodeFS.existsSync(paths.base)) return;
+  // Asked before anything is deleted, so a refusal leaves the base's home, or
+  // an upgraded one, in place. Ignored files, such as that home, are not listed.
+  const edited = gitIn(paths.base, "status", "--porcelain");
+  if (edited !== undefined && edited !== "") {
+    throw new LiveTestRefusal(
+      `The base checkout at ${paths.base} has files that were edited or added:\n${edited}\nNothing was deleted. Undo those changes, then run the command again.`,
+    );
+  }
   // The base's own test home is ignored there, but a nested repository's
   // worktrees are not something `git worktree remove` will delete for us.
   NodeFS.rmSync(NodePath.join(paths.base, ".j5code"), { recursive: true, force: true });
@@ -2048,13 +2056,21 @@ export function formatUpgrade(input: {
   readonly pairingUrl: string | undefined;
   /** The head commit, and whether the worktree has changes on top of it. */
   readonly head: { readonly commit: string; readonly changed: boolean };
-  /** Set right after an upgrade, when a tab that was open on the base needs a reload. */
-  readonly justUpgraded: boolean;
+  /**
+   * Set right after an upgrade, when a tab that was open on the base needs a
+   * reload. After a repeat, that tab has also cached state the put-back copy
+   * does not have, and keeps showing it until its cache is cleared.
+   */
+  readonly justUpgraded: "first" | "again" | undefined;
 }): string {
   const { paths, facts } = input;
   return `UPGRADED  Base's home now runs ${input.head.commit.slice(0, 10)}${input.head.changed ? " with this worktree's uncommitted changes" : ""}, at Base's address
 Before    a copy of the home before the upgrade is kept at ${paths.upgrade.before}${
-    input.justUpgraded ? "\nNext      reload the tab you had on Base" : ""
+    input.justUpgraded === "first"
+      ? "\nNext      reload the tab you had on Base"
+      : input.justUpgraded === "again"
+        ? "\nNext      clear the tab's cached state (IndexedDB t3code:connection-runtime), then reload it; otherwise it keeps showing what happened after the copy was made"
+        : ""
   }
 
 J5 Code live-test server: RUNNING
@@ -2100,7 +2116,7 @@ async function startUpgraded(
   paths: LiveTestPaths,
   ports: UpgradePorts,
   deadline: number,
-  justUpgraded: boolean,
+  justUpgraded: "first" | "again" | undefined,
 ): Promise<void> {
   if (currentServerState(paths.upgrade).kind === "stopped") {
     for (const port of [ports.serverPort, ports.webPort]) {
@@ -2167,7 +2183,12 @@ async function upgrade(paths: LiveTestPaths): Promise<void> {
     NodeFS.rmSync(paths.upgrade.home, { recursive: true, force: true });
     NodeFS.cpSync(paths.upgrade.before, paths.upgrade.home, { recursive: true });
   }
-  await startUpgraded(paths, ports, Date.now() + START_BUDGET_MS, true);
+  await startUpgraded(
+    paths,
+    ports,
+    Date.now() + START_BUDGET_MS,
+    recorded === undefined ? "first" : "again",
+  );
 }
 
 /** The servers a build has: one, Local and Remote in the peer modes, or Head and the upgraded base. */
@@ -2268,7 +2289,7 @@ function statusOfUpgrade(paths: LiveTestPaths): void {
         facts: state.facts,
         pairingUrl: mintPairingUrl(paths.upgrade),
         head: headRevision(paths),
-        justUpgraded: false,
+        justUpgraded: undefined,
       }),
     );
   }

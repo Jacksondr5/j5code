@@ -9,6 +9,7 @@ import {
   classifyServer,
   formatGuest,
   formatInstructions,
+  formatUpgrade,
   groupMembersFromPs,
   pathFromLsofFields,
   guestRefusal,
@@ -1096,4 +1097,71 @@ describe("upgradeRunner", () => {
     const facts = readServerLog(`${dryRun.stdout}${dryRun.stderr}`);
     assert.deepEqual({ serverPort: facts.serverPort, webPort: facts.webPort }, ports);
   }, 30_000);
+});
+
+describe("formatUpgrade", () => {
+  const server = (root: string) => ({
+    worktree: "/w",
+    home: `${root}/home`,
+    testRepo: `${root}/test-repo`,
+    log: `${root}/server.log`,
+    record: `${root}/server.json`,
+  });
+  const paths = {
+    ...server("/w/.j5code/live-test"),
+    root: "/w/.j5code/live-test",
+    manifest: "/w/.j5code/live-test/manifest.json",
+    base: "/w/.j5code/live-test/base",
+    remote: { ...server("/w/.j5code/live-test/remote"), root: "/w/.j5code/live-test/remote" },
+    upgrade: {
+      ...server("/w/.j5code/live-test/base/.j5code/live-test"),
+      log: "/w/.j5code/live-test/upgrade/server.log",
+      record: "/w/.j5code/live-test/upgrade/server.json",
+      root: "/w/.j5code/live-test/upgrade",
+      baseLog: "/w/.j5code/live-test/base/.j5code/live-test/server.log",
+      before: "/w/.j5code/live-test/upgrade/home-before",
+    },
+  };
+  const facts: ServerLogFacts = {
+    serverPort: 14570,
+    webPort: 6530,
+    baseDir: paths.upgrade.home,
+    pairingUrl: undefined,
+    recovered: true,
+    sharedUrl: undefined,
+    shareFailure: undefined,
+  };
+  const format = (
+    justUpgraded: "first" | "again" | undefined,
+    changed = false,
+  ): ReadonlyArray<string> =>
+    formatUpgrade({
+      paths,
+      facts,
+      pairingUrl: "http://localhost:6530/pair#token=T",
+      head: { commit: "7b09506fbc0123456789", changed },
+      justUpgraded,
+    })
+      .split("\n")
+      .slice(0, 4);
+
+  it("says which commit runs on Base's home, where the copy is, and to reload the tab", () => {
+    assert.deepEqual(format("first"), [
+      "UPGRADED  Base's home now runs 7b09506fbc, at Base's address",
+      "Before    a copy of the home before the upgrade is kept at /w/.j5code/live-test/upgrade/home-before",
+      "Next      reload the tab you had on Base",
+      "",
+    ]);
+  });
+
+  it("after a repeat, says the tab's cache is ahead of the copy that was put back", () => {
+    assert.include(format("again")[2], "clear the tab's cached state");
+  });
+
+  it("on status names no next step, and says when the worktree has uncommitted changes", () => {
+    const lines = format(undefined, true);
+    assert.include(lines[0], "7b09506fbc with this worktree's uncommitted changes");
+    assert.equal(lines[2], "");
+    assert.equal(lines[3], "J5 Code live-test server: RUNNING");
+  });
 });
