@@ -196,8 +196,9 @@ evidence; a full transcript goes in an appendix, and only when asked for.
 1. Verdict: pass, fail, or blocked, with the commit and the script flags.
 2. Not exercised live: each gap, why, and whether it needs the person.
 3. For the person to test by hand: exact steps. Leave out when empty.
-4. What ran: each row of "What to cover" as run, or not applicable with a
-   reason. Say how each was verified: live, by test, or from code.
+4. What ran: each row of "What to cover" as run, partial with what was
+   missed, or not applicable with a reason. Say how each was verified: live,
+   by test, or from code.
 5. Bugs found, each with steps to reproduce.
 6. Rig problems: anything in the test setup that got in the way.
 7. Videos: each URL with a one-line caption. Leave out when empty.
