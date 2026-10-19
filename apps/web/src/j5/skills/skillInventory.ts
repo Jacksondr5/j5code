@@ -97,7 +97,6 @@ export function inventoryColumnProviders(
   providers: ReadonlyArray<ServerProvider>,
   rows: ReadonlyArray<SkillInventoryRow>,
 ): ReadonlyArray<ServerProvider> {
-  if (rows.length === 0) return providers;
   return providers.filter(
     (provider) =>
       ((provider.driver === "codex" || provider.driver === "claudeAgent") &&

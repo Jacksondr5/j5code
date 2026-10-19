@@ -204,4 +204,17 @@ describe("skill inventory", () => {
       inventoryColumnProviders(providers, buildSkillInventory(providers)).map((p) => p.instanceId),
     ).toEqual(["with-skills", "empty-on", "off-cached"]);
   });
+
+  it("keeps only on and installed Codex and Claude columns when nothing reports skills", () => {
+    const emptyOn = provider("empty-on", []);
+    const emptyOff = { ...provider("empty-off", []), enabled: false };
+    const emptyMissing = { ...provider("empty-missing", []), installed: false };
+    const emptyOther = {
+      ...provider("empty-other", []),
+      driver: ProviderDriverKind.make("cursor"),
+    };
+    const providers = [emptyOn, emptyOff, emptyMissing, emptyOther];
+
+    expect(inventoryColumnProviders(providers, []).map((p) => p.instanceId)).toEqual(["empty-on"]);
+  });
 });
