@@ -2,7 +2,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { playbookStepLabel } from "@t3tools/client-runtime/j5/playbooks";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { PLAYBOOK_MAX_BYTES, type PlaybookSource } from "@t3tools/contracts/j5";
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectId } from "@t3tools/contracts";
 import { MoreHorizontalIcon, PlusIcon, RefreshCwIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { SettingsRow, SettingsSection } from "../../components/settings/settingsLayout";
@@ -17,6 +17,13 @@ import {
   DialogTitle,
 } from "../../components/ui/dialog";
 import { Input } from "../../components/ui/input";
+import {
+  Select,
+  SelectItem,
+  SelectPopup,
+  SelectTrigger,
+  SelectValue,
+} from "../../components/ui/select";
 import { Textarea } from "../../components/ui/textarea";
 
 import {
@@ -31,6 +38,7 @@ import {
 } from "../../components/ui/menu";
 import { toastManager } from "../../components/ui/toast";
 import { useEnvironments } from "../../state/environments";
+import { environmentProjects } from "../../state/projects";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { AgentFolderPickerDialog } from "../agents/AgentFolderPickerDialog";
@@ -39,7 +47,7 @@ import { j5Environment } from "../state";
 import { playbookImportName } from "./importPlaybookFile";
 import { PlaybookConversationDialog } from "./PlaybookConversationDialog";
 
-/** Shares the Personas page's environment selection; there is only one library scope. */
+/** Shares the Personas page's environment selection; a selected project adds its own playbooks. */
 export function PlaybookLibrarySettings({
   environmentId,
 }: {
@@ -72,7 +80,14 @@ function PlaybookLibrary({
   label: string;
   environments: ReadonlyArray<{ environmentId: EnvironmentId; label: string }>;
 }) {
-  const query = useEnvironmentQuery(j5Environment.playbookLibrary({ environmentId, input: {} }));
+  const projects = useAtomValue(environmentProjects.projectsAtom).filter(
+    (project) => project.environmentId === environmentId,
+  );
+  const [projectId, setProjectId] = useState<ProjectId | null>(null);
+  const project = projects.find((entry) => entry.id === projectId) ?? null;
+  // A project's .j5/playbooks files join the list and win over a same-named library copy.
+  const scope = project ? { projectId: project.id } : {};
+  const query = useEnvironmentQuery(j5Environment.playbookLibrary({ environmentId, input: scope }));
   const sources = useEnvironmentQuery(j5Environment.playbookSources({ environmentId, input: {} }));
   const canOperate = useAtomValue(j5Environment.savePlaybook.permissionAtom(environmentId));
   const save = useAtomCommand(j5Environment.savePlaybook, { reportFailure: false });
@@ -92,6 +107,12 @@ function PlaybookLibrary({
     name: string;
     title: string;
     source: PlaybookSource;
+  } | null>(null);
+  const [copyTarget, setCopyTarget] = useState<{
+    name: string;
+    targetName: string;
+    source: PlaybookSource;
+    destination: EnvironmentId;
   } | null>(null);
   const folderPaths = (sources.data?.folders ?? []).flatMap((entry) =>
     entry.source.kind === "folder" ? [entry.source.path] : [],
@@ -120,17 +141,15 @@ function PlaybookLibrary({
     const result = await setFolders({ environmentId, input: { folders } });
     if (result._tag === "Failure") throw squashAtomCommandFailure(result);
   }
-  async function copy(playbookName: string, source: PlaybookSource, destination: EnvironmentId) {
-    const targetName = window.prompt("Name for the copied playbook", playbookName);
-    if (targetName === null) return;
+  async function copy(target: NonNullable<typeof copyTarget>) {
     const exported = await exportDefinition({
       environmentId,
-      input: { name: playbookName, source },
+      input: { ...scope, name: target.name, source: target.source },
     });
     if (exported._tag === "Failure") throw squashAtomCommandFailure(exported);
     const result = await save({
-      environmentId: destination,
-      input: { name: targetName, yaml: exported.value.yaml },
+      environmentId: target.destination,
+      input: { name: target.targetName.trim(), yaml: exported.value.yaml },
     });
     if (result._tag === "Failure") throw squashAtomCommandFailure(result);
     toastManager.add({
@@ -138,7 +157,12 @@ function PlaybookLibrary({
       title: "Playbook copied",
       description: "Available across the destination environment. Copies remain independent.",
     });
+    setCopyTarget(null);
   }
+  const startCopy = (name: string, source: PlaybookSource, destination: EnvironmentId) => {
+    setError(null);
+    setCopyTarget({ name, targetName: name, source, destination });
+  };
   return (
     <>
       <SettingsSection
@@ -195,7 +219,35 @@ function PlaybookLibrary({
           </div>
         }
       >
-        {(error && !importing && !renameTarget) || query.error || sources.error ? (
+        {projects.length > 0 ? (
+          <SettingsRow
+            title="Project"
+            description="Also show a project's own playbooks from its .j5/playbooks folder. They override a library playbook with the same name in that project."
+            control={
+              <Select
+                items={[
+                  { value: "", label: "Library only" },
+                  ...projects.map((entry) => ({ value: entry.id, label: entry.title })),
+                ]}
+                value={project?.id ?? ""}
+                onValueChange={(value) => setProjectId(value ? (value as ProjectId) : null)}
+              >
+                <SelectTrigger aria-label="Project playbooks" className="w-40" size="sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectPopup>
+                  <SelectItem value="">Library only</SelectItem>
+                  {projects.map((entry) => (
+                    <SelectItem key={entry.id} value={entry.id}>
+                      {entry.title}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+            }
+          />
+        ) : null}
+        {(error && !importing && !renameTarget && !copyTarget) || query.error || sources.error ? (
           <SettingsRow
             title="Playbooks unavailable"
             status={
@@ -226,6 +278,8 @@ function PlaybookLibrary({
                   <span>
                     {playbook.stepCount} {playbook.stepCount === 1 ? "step" : "steps"}
                     {source.kind === "folder" ? " · From source folder" : ""}
+                    {source.kind === "workspace" ? ` · From ${project?.title ?? "project"}` : ""}
+                    {playbook.overridesLibrary ? " · Overrides library copy" : ""}
                   </span>
                   {playbook.issue ? (
                     <p role="alert" className="text-destructive">
@@ -274,7 +328,7 @@ function PlaybookLibrary({
                           void act(async () => {
                             const result = await exportDefinition({
                               environmentId,
-                              input: { name: playbook.name, source },
+                              input: { ...scope, name: playbook.name, source },
                             });
                             if (result._tag === "Failure") throw squashAtomCommandFailure(result);
                             const url = URL.createObjectURL(
@@ -301,10 +355,10 @@ function PlaybookLibrary({
                           ? "Rename unavailable: edit source folder"
                           : "Rename"}
                       </MenuItem>
-                      {source.kind === "folder" ? (
+                      {source.kind !== "environment" ? (
                         <MenuItem
                           disabled={!canOperate || !!playbook.issue}
-                          onClick={() => void act(() => copy(playbook.name, source, environmentId))}
+                          onClick={() => startCopy(playbook.name, source, environmentId)}
                         >
                           Copy to library
                         </MenuItem>
@@ -321,7 +375,7 @@ function PlaybookLibrary({
                                 <MenuItem
                                   key={entry.environmentId}
                                   onClick={() =>
-                                    void act(() => copy(playbook.name, source, entry.environmentId))
+                                    startCopy(playbook.name, source, entry.environmentId)
                                   }
                                 >
                                   {entry.label}
@@ -339,7 +393,7 @@ function PlaybookLibrary({
                             void act(async () => {
                               const result = await remove({
                                 environmentId,
-                                input: { name: playbook.name, source },
+                                input: { ...scope, name: playbook.name, source },
                               });
                               if (result._tag === "Failure") throw squashAtomCommandFailure(result);
                             });
@@ -426,6 +480,7 @@ function PlaybookLibrary({
         <PlaybookConversationDialog
           environmentId={environmentId}
           name={conversation.name}
+          projectId={project?.id ?? null}
           onClose={() => setConversation(null)}
         />
       ) : null}
@@ -471,7 +526,7 @@ function PlaybookLibrary({
                 void act(async () => {
                   const result = await rename({
                     environmentId,
-                    input: { ...renameTarget, title: renameTarget.title.trim() },
+                    input: { ...scope, ...renameTarget, title: renameTarget.title.trim() },
                   });
                   if (result._tag === "Failure") throw squashAtomCommandFailure(result);
                   setRenameTarget(null);
@@ -508,6 +563,63 @@ function PlaybookLibrary({
                 </Button>
                 <Button type="submit" disabled={busy || !renameTarget.title.trim()}>
                   Save
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogPopup>
+        </Dialog>
+      ) : null}
+      {copyTarget ? (
+        <Dialog
+          open
+          onOpenChange={(open) => {
+            if (!open && !busy) setCopyTarget(null);
+          }}
+        >
+          <DialogPopup>
+            <form
+              className="flex min-h-0 flex-col"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void act(() => copy(copyTarget));
+              }}
+            >
+              <DialogHeader>
+                <DialogTitle>Copy playbook</DialogTitle>
+                <DialogDescription>
+                  Name the copy. It will be available in every project on{" "}
+                  {environments.find((entry) => entry.environmentId === copyTarget.destination)
+                    ?.label ?? label}
+                  .
+                </DialogDescription>
+              </DialogHeader>
+              <DialogPanel>
+                <Input
+                  autoFocus
+                  aria-label="Name for the copied playbook"
+                  value={copyTarget.targetName}
+                  disabled={busy}
+                  onChange={(event) =>
+                    setCopyTarget({ ...copyTarget, targetName: event.currentTarget.value })
+                  }
+                />
+                {error ? (
+                  <p role="alert" className="mt-3 text-sm text-destructive">
+                    {error}
+                  </p>
+                ) : null}
+              </DialogPanel>
+              <DialogFooter>
+                <Button
+                  variant="outline"
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setCopyTarget(null)}
+                >
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={busy || !copyTarget.targetName.trim()}>
+                  Copy
                 </Button>
               </DialogFooter>
             </form>

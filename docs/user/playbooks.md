@@ -5,11 +5,11 @@ in its existing thread and decides when to advance. The thread's phase board
 shows the current step and whether the run is active, completed, or cancelled.
 Earlier steps describe position, not a guarantee that their work passed validation.
 
-Open **Settings → Personas** to manage playbooks. Every playbook is available across
-all projects and worktrees on its environment. Choose **Create playbook** to work
-with Playbook Author, or **Import YAML** to add a finished definition without a
-project. A project chosen for an authoring or playbook conversation only determines
-where that conversation opens; it does not limit the playbook's availability.
+Open **Settings → Personas** to manage playbooks. Playbooks in the environment
+library are available across all projects and worktrees on its environment. Choose
+**Create playbook** to work with Playbook Author, or **Import YAML** to add a finished
+definition without a project. A project chosen for an authoring or playbook
+conversation only determines where that conversation opens.
 
 On web and desktop, import a YAML file from your device or paste its contents. On
 mobile, paste the YAML. Names use lowercase letters, digits, and hyphens, so
@@ -24,10 +24,11 @@ source file, or copy it into the managed library. Refresh after changing files
 outside the app. Duplicate names across sources show an error until a copy is
 renamed or a source is removed.
 
-Workspace-local playbooks are no longer discovered. Import any existing
-`.j5/playbooks/` files into the environment library once; the originals are left
-untouched. Runs already using those files keep their original path and can finish
-or be cancelled.
+A project can also keep playbooks in its own `.j5/playbooks/` folder, committed with
+its code. They are available only in that project and its worktrees, and override a
+library playbook with the same name there. To see them in Settings, pick the project
+in the **Project** menu above the list. **Copy to library** makes one available
+everywhere.
 
 **Copy to environment** saves an independent copy on another connected environment.
 For ongoing sharing between machines, keep `personas/` and `playbooks/` in a git
@@ -46,9 +47,11 @@ each run's owner thread, agent activity, and current step. Select a run to open
 its thread, or choose **All** to include completed and cancelled runs.
 Unavailable environments keep their last received progress marked as stale.
 
-Ask your agent to create a playbook in the environment library. The playbook's name
-uses lowercase letters, digits, and hyphens, such as `release-review`. The `title` is
-what you see in the app. For example, import this definition as `review`:
+Ask your agent to create or change a playbook. It saves to the environment library
+unless you ask for a project-only playbook, which it writes to `.j5/playbooks/` in that
+project. The playbook's name uses lowercase letters, digits, and hyphens, such as
+`release-review`. The `title` is what you see in the app. For example, import this
+definition as `review`, or save it as `.j5/playbooks/review.yaml`:
 
 ```yaml
 title: Review a change

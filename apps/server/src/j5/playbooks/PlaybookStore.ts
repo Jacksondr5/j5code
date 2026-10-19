@@ -29,7 +29,12 @@ import * as Semaphore from "effect/Semaphore";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import * as SqlClient from "effect/sql/SqlClient";
 import { makePlaybookLibrary, selectPlaybookSource } from "./PlaybookLibrary.ts";
-import { decodePlaybookDocument, playbookError, storageError } from "./definition.ts";
+import {
+  decodePlaybookDocument,
+  playbookDigest,
+  playbookError,
+  storageError,
+} from "./definition.ts";
 export { playbookError } from "./definition.ts";
 
 import { makeAgentPersonaLibrary, personaCatalogProblem } from "../agents/agentPersonaLibrary.ts";
@@ -351,15 +356,27 @@ export const makePlaybookStore = Effect.gen(function* () {
     );
   };
 
-  const discover = Effect.fn("PlaybookStore.discover")(function* () {
-    const sources = yield* library.sources();
-    const names = [...new Set(sources.flatMap((entry) => entry.names))].sort();
+  const discover = Effect.fn("PlaybookStore.discover")(function* (
+    workspaceRoot: string,
+    selectedSource?: PlaybookSource,
+  ) {
+    const sources = yield* library.sources(workspaceRoot);
+    const selected =
+      selectedSource === undefined
+        ? sources
+        : sources.filter(
+            (entry) =>
+              entry.source.kind === selectedSource.kind &&
+              (entry.source.kind !== "folder" ||
+                (selectedSource.kind === "folder" && entry.source.path === selectedSource.path)),
+          );
+    const names = [...new Set(selected.flatMap((entry) => entry.names))].sort();
     const catalog = yield* Effect.cached(personas.catalog());
     const playbooks = yield* Effect.forEach(names, (name) =>
       Effect.gen(function* () {
-        const selection = selectPlaybookSource(sources, name);
+        const selection = selectPlaybookSource(selected, name, selectedSource !== undefined);
         const source = selection.entry!;
-        const base = { name, source: source.source };
+        const base = { name, source: source.source, overridesLibrary: selection.overridesLibrary };
         const issue = selection.issue;
         const read =
           issue === null
@@ -404,6 +421,7 @@ export const makePlaybookStore = Effect.gen(function* () {
   /** Resolve retries against their original receipt before consulting a changed catalog. */
   const startDefinitionPathFor = Effect.fn("PlaybookStore.startDefinitionPathFor")(function* (
     owner: ThreadId,
+    workspaceRoot: string,
     name: string,
     key: string,
     crewInstanceId?: string,
@@ -426,7 +444,7 @@ export const makePlaybookStore = Effect.gen(function* () {
         );
       return { definitionPath: recordedPath };
     }
-    return yield* definitionPathFor(name);
+    return yield* definitionPathFor(workspaceRoot, name);
   }, Effect.mapError(storageError));
 
   /** Reads a live definition without touching run state: no permit, no SQL, no revision bump. */
@@ -443,13 +461,17 @@ export const makePlaybookStore = Effect.gen(function* () {
       warnings: yield* personaWarnings(definition.steps, personas.catalog()),
     } satisfies PlaybookReadResponse;
   }, Effect.mapError(storageError));
-  const read = Effect.fn("PlaybookStore.read")(function* (name: string) {
-    return yield* readPath((yield* definitionPathFor(name)).definitionPath);
+  const read = Effect.fn("PlaybookStore.read")(function* (workspaceRoot: string, name: string) {
+    const { definitionPath, source } = yield* definitionPathFor(workspaceRoot, name);
+    const response = yield* readPath(definitionPath);
+    const digest = playbookDigest(yield* fs.readFileString(definitionPath));
+    return { ...response, source, digest } satisfies PlaybookReadResponse;
   }, Effect.mapError(storageError));
 
   const removeDefinition = Effect.fn("PlaybookStore.removeDefinition")(function* (
+    workspaceRoot: string,
     name: string,
-    source: PlaybookSource = { kind: "environment" },
+    source: PlaybookSource = { kind: "workspace" },
   ) {
     if (source.kind === "folder")
       return yield* playbookError(
@@ -457,20 +479,19 @@ export const makePlaybookStore = Effect.gen(function* () {
         "Edit this playbook in its source folder or copy it to the environment library.",
       );
     if (!PLAYBOOK_FILE_STEM.test(name))
-      return yield* playbookError("invalid_name", "Choose a playbook in this environment.");
-    const directory = yield* library.directoryFor(source);
+      return yield* playbookError("invalid_name", "Choose a playbook in this workspace.");
+    const directory = yield* library.directoryFor(workspaceRoot, source);
     const filename = path.join(directory, `${name}.yaml`);
     return yield* Effect.gen(function* () {
       if (!(yield* fs.exists(filename)))
         return yield* playbookError("not_found", "This playbook no longer exists.");
-      const realRoot = yield* fs.realPath(path.dirname(directory));
+      const realRoot = yield* fs.realPath(
+        source.kind === "workspace" ? workspaceRoot : path.dirname(directory),
+      );
       const realDirectory = yield* fs.realPath(directory);
       const relative = path.relative(realRoot, realDirectory);
-      if (relative !== "playbooks")
-        return yield* playbookError(
-          "invalid_path",
-          "Playbooks must stay inside the environment library.",
-        );
+      if (relative !== (source.kind === "workspace" ? path.join(".j5", "playbooks") : "playbooks"))
+        return yield* playbookError("invalid_path", "Playbooks must stay inside the workspace.");
       const info = yield* fs.stat(filename);
       if (info.type !== "File")
         return yield* playbookError("invalid_path", "Only playbook YAML files can be deleted.");
@@ -491,12 +512,13 @@ export const makePlaybookStore = Effect.gen(function* () {
 
   /** Returns the definition's YAML as a file a user can re-import. */
   const exportDefinition = Effect.fn("PlaybookStore.exportDefinition")(function* (
+    workspaceRoot: string,
     name: string,
-    source: PlaybookSource = { kind: "environment" },
+    source: PlaybookSource = { kind: "workspace" },
   ) {
     if (!PLAYBOOK_NAME_PATTERN.test(name))
-      return yield* playbookError("invalid_name", "Choose a playbook in this environment.");
-    const filename = (yield* library.resolve(name, source)).definitionPath;
+      return yield* playbookError("invalid_name", "Choose a playbook in this workspace.");
+    const filename = (yield* library.resolve(workspaceRoot, name, source)).definitionPath;
     if (!(yield* fs.exists(filename)))
       return yield* playbookError("not_found", "This playbook no longer exists.");
     // Export the validated source text (less any BOM): re-rendering can grow the file past the import limit.
@@ -508,9 +530,10 @@ export const makePlaybookStore = Effect.gen(function* () {
   }, Effect.mapError(storageError));
 
   const renameDefinition = Effect.fn("PlaybookStore.renameDefinition")(function* (
+    workspaceRoot: string,
     name: string,
     title: string,
-    source: PlaybookSource = { kind: "environment" },
+    source: PlaybookSource = { kind: "workspace" },
   ) {
     if (source.kind === "folder")
       return yield* playbookError(
@@ -518,10 +541,10 @@ export const makePlaybookStore = Effect.gen(function* () {
         "Edit this playbook in its source folder or copy it to the environment library.",
       );
     if (!PLAYBOOK_NAME_PATTERN.test(name))
-      return yield* playbookError("invalid_name", "Choose a playbook in this environment.");
+      return yield* playbookError("invalid_name", "Choose a playbook in this workspace.");
     const nextTitle = title.trim();
     if (!nextTitle) return yield* playbookError("invalid_title", "Enter a name for the playbook.");
-    const filename = (yield* library.resolve(name, source)).definitionPath;
+    const filename = (yield* library.resolve(workspaceRoot, name, source)).definitionPath;
     return yield* Effect.gen(function* () {
       if (!(yield* fs.exists(filename)))
         return yield* playbookError("not_found", "This playbook no longer exists.");
@@ -537,12 +560,14 @@ export const makePlaybookStore = Effect.gen(function* () {
 
   const start = Effect.fn("PlaybookStore.start")(function* (
     owner: ThreadId,
+    workspaceRoot: string,
     name: string,
     key: string,
     options: { readonly crewInstanceId?: string } = {},
   ) {
     const { definitionPath } = yield* startDefinitionPathFor(
       owner,
+      workspaceRoot,
       name,
       key,
       options.crewInstanceId,
@@ -884,7 +909,7 @@ export const makePlaybookStore = Effect.gen(function* () {
      */
     definitionsChanged: bumpRevision,
     sources: () =>
-      library.sources().pipe(
+      library.sources(undefined).pipe(
         Effect.map((folders) => ({
           folders: folders.map(({ source, path, issue }) => ({ source, path, issue })),
         })),

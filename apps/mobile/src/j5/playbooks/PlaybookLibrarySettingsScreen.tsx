@@ -2,13 +2,14 @@ import { useAtomValue } from "@effect/atom-react";
 import { useFocusEffect } from "@react-navigation/native";
 import { playbookStepLabel } from "@t3tools/client-runtime/j5/playbooks";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectId } from "@t3tools/contracts";
 import type { PlaybookSource } from "@t3tools/contracts/j5";
 import { useCallback, useState } from "react";
 import { Alert, Modal, Pressable, ScrollView, Share, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AppText as Text, AppTextInput as TextInput } from "../../components/ui/AppText";
 import { Menu } from "../../components/ui/Menu";
+import { environmentProjects } from "../../state/projects";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useRemoteConnectionStatus } from "../../state/use-remote-environment-registry";
@@ -50,7 +51,14 @@ function PlaybookLibrary({
   label: string;
   environments: ReadonlyArray<{ environmentId: EnvironmentId; label: string }>;
 }) {
-  const query = useEnvironmentQuery(j5Environment.playbookLibrary({ environmentId, input: {} }));
+  const projects = useAtomValue(environmentProjects.projectsAtom).filter(
+    (project) => project.environmentId === environmentId,
+  );
+  const [projectId, setProjectId] = useState<ProjectId | null>(null);
+  const project = projects.find((entry) => entry.id === projectId) ?? null;
+  // A project's .j5/playbooks files join the list and win over a same-named library copy.
+  const scope = project ? { projectId: project.id } : {};
+  const query = useEnvironmentQuery(j5Environment.playbookLibrary({ environmentId, input: scope }));
   const sources = useEnvironmentQuery(j5Environment.playbookSources({ environmentId, input: {} }));
   const canOperate = useAtomValue(j5Environment.savePlaybook.permissionAtom(environmentId));
   const save = useAtomCommand(j5Environment.savePlaybook, { reportFailure: false });
@@ -120,7 +128,31 @@ function PlaybookLibrary({
   return (
     <>
       <View className="flex-row items-center justify-between gap-3 p-4">
-        <Text className="flex-1 text-sm text-muted-foreground">Available in every project.</Text>
+        {projects.length > 0 ? (
+          <Menu
+            actions={[
+              { id: "", title: "Library only", state: project ? "off" : "on" },
+              ...projects.map((entry) => ({
+                id: entry.id,
+                title: entry.title,
+                state: entry.id === project?.id ? ("on" as const) : ("off" as const),
+              })),
+            ]}
+            onPressAction={({ nativeEvent }) =>
+              setProjectId(nativeEvent.event ? (nativeEvent.event as ProjectId) : null)
+            }
+          >
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Project playbooks"
+              className="flex-1"
+            >
+              <Text className="text-sm text-foreground">{project?.title ?? "Library only"} ▾</Text>
+            </Pressable>
+          </Menu>
+        ) : (
+          <Text className="flex-1 text-sm text-muted-foreground">Available in every project.</Text>
+        )}
         <Menu
           actions={[
             {
@@ -154,6 +186,12 @@ function PlaybookLibrary({
           </Pressable>
         </Menu>
       </View>
+      {project ? (
+        <Text className="px-4 pb-3 text-xs text-muted-foreground">
+          Includes {project.title}'s .j5/playbooks folder. Those override a library playbook with
+          the same name in that project.
+        </Text>
+      ) : null}
       {error || sources.error || query.error ? (
         <Text accessibilityRole="alert" className="px-4 pb-3 text-destructive">
           {error ?? sources.error ?? query.error}
@@ -199,7 +237,8 @@ function PlaybookLibrary({
                   },
                   ...environments
                     .filter(
-                      (entry) => entry.environmentId !== environmentId || source.kind === "folder",
+                      (entry) =>
+                        entry.environmentId !== environmentId || source.kind !== "environment",
                     )
                     .map((entry) => ({
                       id: `copy:${entry.environmentId}`,
@@ -242,7 +281,7 @@ function PlaybookLibrary({
                     void act(async () => {
                       const result = await exportDefinition({
                         environmentId,
-                        input: { name: playbook.name, source },
+                        input: { ...scope, name: playbook.name, source },
                       });
                       if (result._tag === "Failure") throw squashAtomCommandFailure(result);
                       await Share.share({
@@ -260,7 +299,7 @@ function PlaybookLibrary({
                           void act(async () => {
                             const result = await remove({
                               environmentId,
-                              input: { name: playbook.name, source },
+                              input: { ...scope, name: playbook.name, source },
                             });
                             if (result._tag === "Failure") throw squashAtomCommandFailure(result);
                           }),
@@ -280,6 +319,8 @@ function PlaybookLibrary({
             <Text className="text-xs text-muted-foreground">
               {playbook.stepCount} {playbook.stepCount === 1 ? "step" : "steps"}
               {source.kind === "folder" ? " · From source folder" : ""}
+              {source.kind === "workspace" ? ` · From ${project?.title ?? "project"}` : ""}
+              {playbook.overridesLibrary ? " · Overrides library copy" : ""}
             </Text>
             {playbook.issue ? (
               <Text accessibilityRole="alert" className="text-destructive">
@@ -344,6 +385,7 @@ function PlaybookLibrary({
         <PlaybookConversationModal
           environmentId={environmentId}
           name={conversation.name}
+          projectId={project?.id ?? null}
           onClose={() => setConversation(null)}
         />
       ) : null}
@@ -432,7 +474,7 @@ function PlaybookLibrary({
                       if (renameTarget) {
                         const result = await rename({
                           environmentId,
-                          input: { ...renameTarget, title: renameTarget.title.trim() },
+                          input: { ...scope, ...renameTarget, title: renameTarget.title.trim() },
                         });
                         if (result._tag === "Failure") throw squashAtomCommandFailure(result);
                         setRenameTarget(null);
@@ -441,7 +483,7 @@ function PlaybookLibrary({
                         if (copyTarget) {
                           const result = await exportDefinition({
                             environmentId,
-                            input: { name: copyTarget.name, source: copyTarget.source },
+                            input: { ...scope, name: copyTarget.name, source: copyTarget.source },
                           });
                           if (result._tag === "Failure") throw squashAtomCommandFailure(result);
                           text = result.value.yaml;

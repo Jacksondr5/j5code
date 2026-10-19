@@ -107,12 +107,6 @@ const makeFixture = (
         stringify(sample(title)),
       );
     }
-    const { stateDir } = yield* ServerConfig;
-    yield* fs.makeDirectory(path.join(stateDir, "playbooks"), { recursive: true });
-    yield* fs.writeFileString(
-      path.join(stateDir, "playbooks/demo.yaml"),
-      stringify(sample("Environment playbook")),
-    );
     yield* runJ5A2AMigrations();
     yield* seedPlaybookOwners([owner, rootOwner]);
     const store = yield* makePlaybookStore;
@@ -211,16 +205,12 @@ const makeFixture = (
           Effect.provide(dependencies),
           Effect.provideService(McpInvocationContext, scope),
         );
-    return { call, fs, path, worktree, projectRoot, stateDir };
+    return { call, fs, path, worktree, projectRoot };
   });
 const fixture = makeFixture();
-const BaseLayer = Layer.mergeAll(
+const TestLayer = Layer.mergeAll(
   NodeSqliteClient.layer({ filename: ":memory:" }),
   NodeServices.layer,
-);
-
-const TestLayer = ServerConfig.layerTest(process.cwd(), { prefix: "j5-playbook-mcp-state-" }).pipe(
-  Layer.provideMerge(BaseLayer),
 );
 
 it.effect("runs a scripted three-step sample through the real J5Toolkit handlers", () =>
@@ -293,19 +283,19 @@ it.effect("runs a scripted three-step sample through the real J5Toolkit handlers
   }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );
 
-it.effect("discovers and starts the same environment definition from unrelated workspaces", () =>
+it.effect("discovers and starts from the thread worktree, falling back to its project root", () =>
   Effect.gen(function* () {
-    const { call, path, stateDir } = yield* fixture;
+    const { call, path, worktree, projectRoot } = yield* fixture;
     const decodeDiscovery = Schema.decodeUnknownEffect(PlaybookDiscovery);
     const worktreeList = yield* call("j5_playbook_list", {});
     const projectList = yield* call("j5_playbook_list", {}, scopeFor(rootOwner));
     assert.equal(
       (yield* decodeDiscovery(worktreeList.result)).playbooks[0]?.title,
-      "Environment playbook",
+      "Worktree playbook",
     );
     assert.equal(
       (yield* decodeDiscovery(projectList.result)).playbooks[0]?.title,
-      "Environment playbook",
+      "Project playbook",
     );
     const worktreeRun = yield* call("j5_playbook_start", {
       name: "demo",
@@ -318,11 +308,11 @@ it.effect("discovers and starts the same environment definition from unrelated w
     );
     assert.equal(
       (yield* decodeStep(worktreeRun.result)).definitionPath,
-      path.join(stateDir, "playbooks/demo.yaml"),
+      path.join(worktree, ".j5/playbooks/demo.yaml"),
     );
     assert.equal(
       (yield* decodeStep(projectRun.result)).definitionPath,
-      path.join(stateDir, "playbooks/demo.yaml"),
+      path.join(projectRoot, ".j5/playbooks/demo.yaml"),
     );
   }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );
@@ -365,10 +355,10 @@ it.effect("denies a different owner and every tool when orchestration capability
 
 it.effect("returns actionable live-file errors and recovers or cancels through the toolkit", () =>
   Effect.gen(function* () {
-    const { call, fs, path, stateDir } = yield* fixture;
+    const { call, fs, path, worktree } = yield* fixture;
     const started = yield* call("j5_playbook_start", { name: "demo", client_request_id: "start" });
     const run = yield* decodeStep(started.result);
-    const file = path.join(stateDir, "playbooks/demo.yaml");
+    const file = path.join(worktree, ".j5/playbooks/demo.yaml");
     yield* fs.writeFileString(
       file,
       stringify({ ...sample("Edited playbook"), steps: sample("Edited").steps.slice(1) }),
@@ -406,11 +396,11 @@ it.effect("returns actionable live-file errors and recovers or cancels through t
 
 it.effect("reads step personas and warnings through the toolkit and still starts the run", () =>
   Effect.gen(function* () {
-    const { call, fs, path, stateDir } = yield* fixture;
+    const { call, fs, path, worktree } = yield* fixture;
     yield* seedPersonas([{ id: "planner", enabled: false }]);
     const staffed = sample("Staffed playbook");
     yield* fs.writeFileString(
-      path.join(stateDir, "playbooks/demo.yaml"),
+      path.join(worktree, ".j5/playbooks/demo.yaml"),
       stringify({
         ...staffed,
         steps: staffed.steps.map((step, index) =>

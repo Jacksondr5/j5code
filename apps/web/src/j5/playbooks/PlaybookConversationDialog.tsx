@@ -7,7 +7,7 @@ import {
   playbookWorkspaces,
 } from "@t3tools/client-runtime/j5/playbooks";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import { CommandId, type EnvironmentId } from "@t3tools/contracts";
+import { CommandId, type EnvironmentId, type ProjectId } from "@t3tools/contracts";
 import { useRef, useState } from "react";
 import { Button } from "../../components/ui/button";
 import {
@@ -44,10 +44,13 @@ import { openPlaybookDraft } from "./openPlaybookDraft";
 export function PlaybookConversationDialog({
   environmentId,
   name,
+  projectId = null,
   onClose,
 }: {
   environmentId: EnvironmentId;
   name: string | null;
+  /** The project Settings is showing, so a project playbook's chat opens where it lives. */
+  projectId?: ProjectId | null;
   onClose: () => void;
 }) {
   const projects = useAtomValue(environmentProjects.projectsAtom);
@@ -55,7 +58,9 @@ export function PlaybookConversationDialog({
     projects.filter((project) => project.environmentId === environmentId),
     [],
   );
-  const [selected, setSelected] = useState(workspaces[0]?.key ?? "");
+  const [selected, setSelected] = useState(
+    (workspaces.find((entry) => entry.projectId === projectId) ?? workspaces[0])?.key ?? "",
+  );
   const workspace = workspaces.find((entry) => entry.key === selected) ?? workspaces[0];
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -162,8 +167,9 @@ export function PlaybookConversationDialog({
         <DialogHeader>
           <DialogTitle>{name === null ? "Create playbook" : "Prepare chat"}</DialogTitle>
           <DialogDescription>
-            Choose a project for the conversation. Playbooks are available across the entire
-            environment.
+            {name === null
+              ? "Choose a project for the conversation. New playbooks are saved to the environment library."
+              : "Choose the project to run the playbook in."}
           </DialogDescription>
         </DialogHeader>
         <DialogPanel>

@@ -6,12 +6,18 @@ import {
   playbookWorkspaces,
 } from "@t3tools/client-runtime/j5/playbooks";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import { CommandId, MessageId, ThreadId, type EnvironmentId } from "@t3tools/contracts";
+import {
+  CommandId,
+  MessageId,
+  ThreadId,
+  type EnvironmentId,
+  type ProjectId,
+} from "@t3tools/contracts";
 import { useRef, useState } from "react";
 import { Modal, Pressable, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { AppText as Text } from "../../components/AppText";
-import { ControlPillMenu } from "../../components/ControlPill";
+import { AppText as Text } from "../../components/ui/AppText";
+import { Menu } from "../../components/ui/Menu";
 import { makeTurnCommandMetadata } from "../../lib/commandMetadata";
 import { useServerConfigs } from "../../state/entities";
 import { environmentProjects } from "../../state/projects";
@@ -25,10 +31,13 @@ import { preparePlaybookDraft } from "./preparePlaybookDraft";
 export function PlaybookConversationModal({
   environmentId,
   name,
+  projectId = null,
   onClose,
 }: {
   environmentId: EnvironmentId;
   name: string | null;
+  /** The project Settings is showing, so a project playbook's chat opens where it lives. */
+  projectId?: ProjectId | null;
   onClose: () => void;
 }) {
   const navigation = useNavigation();
@@ -37,7 +46,9 @@ export function PlaybookConversationModal({
     projects.filter((project) => project.environmentId === environmentId),
     [],
   );
-  const [selected, setSelected] = useState(workspaces[0]?.key ?? "");
+  const [selected, setSelected] = useState(
+    (workspaces.find((entry) => entry.projectId === projectId) ?? workspaces[0])?.key ?? "",
+  );
   const workspace = workspaces.find((entry) => entry.key === selected) ?? workspaces[0];
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -136,11 +147,12 @@ export function PlaybookConversationModal({
             {name === null ? "Create playbook" : "Prepare chat"}
           </Text>
           <Text className="text-muted-foreground">
-            Choose a project for the conversation. Playbooks are available across the entire
-            environment.
+            {name === null
+              ? "Choose a project for the conversation. New playbooks are saved to the environment library."
+              : "Choose the project to run the playbook in."}
           </Text>
           {workspace ? (
-            <ControlPillMenu
+            <Menu
               actions={workspaces.map((entry) => ({
                 id: entry.key,
                 title: entry.title,
@@ -155,7 +167,7 @@ export function PlaybookConversationModal({
               >
                 <Text>{workspace.title}</Text>
               </Pressable>
-            </ControlPillMenu>
+            </Menu>
           ) : (
             <Text>Add a project to open a conversation. You can import playbooks without one.</Text>
           )}

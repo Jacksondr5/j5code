@@ -1,7 +1,7 @@
 import * as Schema from "effect/Schema";
 import { Rpc, RpcGroup } from "effect/rpc";
 import { EnvironmentAuthorizationError } from "../auth.ts";
-import { ThreadId } from "../baseSchemas.ts";
+import { ProjectId, ThreadId } from "../baseSchemas.ts";
 import { AgentPersonaId } from "./agentPersona.ts";
 
 export const PLAYBOOK_MAX_BYTES = 262144;
@@ -55,6 +55,7 @@ export type PlaybookDefinition = typeof PlaybookDefinition.Type;
 
 /** A management target; folder sources are read-only in the app. */
 export const PlaybookSource = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("workspace") }),
   Schema.Struct({ kind: Schema.Literal("environment") }),
   Schema.Struct({ kind: Schema.Literal("folder"), path: Text }),
 ]);
@@ -63,7 +64,13 @@ export const PlaybookFoldersInput = Schema.Struct({
   folders: Schema.Array(Text.check(Schema.isMaxLength(4096))).check(Schema.isMaxLength(32)),
 });
 export type PlaybookFoldersInput = typeof PlaybookFoldersInput.Type;
-export const PlaybookSaveRequest = Schema.Struct({ name: Text, yaml: Schema.String });
+const PlaybookDigest = Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/));
+export const PlaybookSaveRequest = Schema.Struct({
+  name: Text,
+  yaml: Schema.String,
+  /** Replaces an existing environment-library definition only while it still has this digest. */
+  expectedDigest: Schema.optionalKey(PlaybookDigest),
+});
 export type PlaybookSaveRequest = typeof PlaybookSaveRequest.Type;
 export const PlaybookSaveResponse = Schema.Struct({ name: Text, saved: Schema.Boolean });
 
@@ -140,6 +147,7 @@ export const PlaybookDiscovery = Schema.Struct({
     Schema.Struct({
       name: Text,
       source: Schema.optionalKey(PlaybookSource),
+      overridesLibrary: Schema.optionalKey(Schema.Boolean),
       title: Schema.String,
       description: Schema.String,
       stepCount: Schema.Int,
@@ -159,6 +167,9 @@ export const PlaybookReadResponse = Schema.Struct({
   description: Text,
   steps: Schema.Array(PlaybookStep),
   warnings: Schema.Array(PlaybookWarning),
+  /** Where the definition lives, and its content digest for an edit through j5_playbook_save. */
+  source: Schema.optionalKey(PlaybookSource),
+  digest: Schema.optionalKey(PlaybookDigest),
 });
 export type PlaybookReadResponse = typeof PlaybookReadResponse.Type;
 export const ThreadPlaybooksRequest = Schema.Struct({ threadId: ThreadId });
@@ -173,26 +184,31 @@ export const PlaybookRunsResponse = Schema.Struct({
   runs: Schema.Array(PlaybookProgress),
   total: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 });
-export const PlaybookLibraryRequest = Schema.Struct({});
+export const PlaybookLibraryRequest = Schema.Struct({
+  projectId: Schema.optionalKey(ProjectId),
+  threadId: Schema.optionalKey(ThreadId),
+  source: Schema.optionalKey(PlaybookSource),
+});
 export type PlaybookLibraryRequest = typeof PlaybookLibraryRequest.Type;
 export const PlaybookLibraryResponse = Schema.Struct({
+  workspaceRoot: Schema.String,
   ...PlaybookDiscovery.fields,
 });
 export const PlaybookDeleteRequest = Schema.Struct({
-  source: Schema.optionalKey(PlaybookSource),
+  ...PlaybookLibraryRequest.fields,
   name: Text,
 });
 export type PlaybookDeleteRequest = typeof PlaybookDeleteRequest.Type;
 export const PlaybookDeleteResponse = Schema.Struct({ deleted: Schema.Boolean });
 export const PlaybookRenameRequest = Schema.Struct({
-  source: Schema.optionalKey(PlaybookSource),
+  ...PlaybookLibraryRequest.fields,
   name: Text,
   title: Text,
 });
 export type PlaybookRenameRequest = typeof PlaybookRenameRequest.Type;
 export const PlaybookRenameResponse = Schema.Struct({ renamed: Schema.Boolean });
 export const PlaybookExportRequest = Schema.Struct({
-  source: Schema.optionalKey(PlaybookSource),
+  ...PlaybookLibraryRequest.fields,
   name: Text,
 });
 export type PlaybookExportRequest = typeof PlaybookExportRequest.Type;

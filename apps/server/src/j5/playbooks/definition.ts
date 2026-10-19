@@ -1,3 +1,5 @@
+// @effect-diagnostics nodeBuiltinImport:off - synchronous hashing for edit digests.
+import * as NodeCrypto from "node:crypto";
 import { PlaybookDefinition, PlaybookError, PLAYBOOK_MAX_BYTES } from "@t3tools/contracts/j5";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -15,6 +17,10 @@ export const storageError = (error: unknown) =>
   isPlaybookError(error)
     ? error
     : playbookError("operation_failed", error instanceof Error ? error.message : String(error));
+
+/** The digest j5_playbook_read reports and an edit through j5_playbook_save must match. */
+export const playbookDigest = (text: string) =>
+  NodeCrypto.createHash("sha256").update(text).digest("hex");
 
 /** Validate the original YAML without serializing it, preserving comments and byte limits. */
 export const decodePlaybookDocument = Effect.fn("decodePlaybookDocument")(
