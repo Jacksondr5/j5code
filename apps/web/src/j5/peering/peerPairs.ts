@@ -13,6 +13,8 @@ export interface ManagedPeerList {
 export interface PeerPairSide {
   readonly environmentId: EnvironmentId;
   readonly label: string;
+  /** This client manages this server, whether or not its peers could be read. */
+  readonly managed: boolean;
   /** This server's record of the other one; null when it holds none, or when `read` is false. */
   readonly record: PeerRecord | null;
   /** This client read this server's peers, so a null record means it holds none. */
@@ -42,6 +44,7 @@ export function peerPairs(lists: ReadonlyArray<ManagedPeerList>): ReadonlyArray<
         return {
           environmentId,
           label: managed?.label ?? record.label,
+          managed: managed !== undefined,
           record: managed?.peers?.find((peer) => peer.environmentId === other) ?? null,
           read: (managed?.peers ?? null) !== null,
         };

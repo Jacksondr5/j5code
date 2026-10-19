@@ -143,14 +143,17 @@ const otherSide = (pair: PeerPair, side: PeerPairSide) =>
 
 function PeerPairRow({ pair }: { readonly pair: PeerPair }) {
   const [removing, setRemoving] = useState(false);
-  // Each side this client read and found a record on; the pair exists because there is one.
-  const held = pair.sides.filter(
+  // A side this client read and found a record on; the pair exists because there is one.
+  const holder = pair.sides.find(
     (side): side is PeerPairSide & { readonly record: PeerRecord } => side.record !== null,
+  )!;
+  // A managed server whose peers could not be read may still hold its side, so removal tries it too.
+  const removable = pair.sides.filter(
+    (side) => side.record !== null || (side.managed && !side.read),
   );
-  const holder = held[0]!;
   const other = otherSide(pair, holder);
   const confirmation = removalConfirmation({
-    otherManageable: held.length === 2,
+    otherManageable: removable.includes(other),
     ended: other.read || isPeerCredentialRejected(holder.record),
   });
 
@@ -189,7 +192,7 @@ function PeerPairRow({ pair }: { readonly pair: PeerPair }) {
     if (!confirmed) return;
     setRemoving(true);
     const removed: Array<PeerPairSide> = [];
-    for (const side of held) {
+    for (const side of removable) {
       try {
         await removePeer(side.environmentId, otherSide(pair, side).environmentId);
         removed.push(side);
@@ -207,7 +210,7 @@ function PeerPairRow({ pair }: { readonly pair: PeerPair }) {
         break;
       }
     }
-    for (const side of held) refreshPeers(side.environmentId);
+    for (const side of removable) refreshPeers(side.environmentId);
     setRemoving(false);
   };
 

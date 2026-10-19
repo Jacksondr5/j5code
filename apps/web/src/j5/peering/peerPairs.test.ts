@@ -42,6 +42,11 @@ describe("peerPairs", () => {
 
     const [withRemote, withVm] = peerPairs(lists);
     expect(withRemote!.sides[1]).toMatchObject({ label: "Remote", record: null, read: true });
-    expect(withVm!.sides[1]).toMatchObject({ label: "Work VM", record: null, read: false });
+    expect(withVm!.sides[1]).toMatchObject({
+      label: "Work VM",
+      managed: true,
+      record: null,
+      read: false,
+    });
   });
 });
