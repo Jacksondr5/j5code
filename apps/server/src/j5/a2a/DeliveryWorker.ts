@@ -553,11 +553,12 @@ const makeLayer = (daemon: boolean) =>
       });
 
       /**
-       * What the sender is told of an alarm: one not-delivered notice, naming the
-       * receiver and what the last attempt failed with. An alarmed ask's Exchange
-       * stays open (a2a AC12): the ask may have arrived, through a peer server's
-       * lost answer or a steer acknowledged late, and the alarm stays a problem
-       * until the sender withdraws it. A sender on a peer server is not told, as
+       * What the sender is told of an alarm: one notice that the message may not
+       * have been delivered, naming the receiver and what the last attempt failed
+       * with. It may have: a peer server's answer can be lost, and a steer can be
+       * acknowledged after the wait for it timed out. So an alarmed ask's Exchange
+       * stays open (a2a AC12), and the alarm stays a problem until the sender
+       * withdraws it. A sender on a peer server is not told, as
        * with a removed queued message, and nobody is told of a platform notice's alarm.
        */
       const alarmNotices = Effect.fn("j5.a2a.delivery.alarmNotices")(function* (
@@ -588,7 +589,8 @@ const makeLayer = (daemon: boolean) =>
         return [
           notDeliveredNoticeEvent({
             message: row,
-            ...(serverName === undefined ? {} : { serverName, mayHaveArrived: true }),
+            ...(serverName === undefined ? {} : { serverName }),
+            mayHaveArrived: true,
             reason: deliveryAlarmReason({
               ...(serverName === undefined ? {} : { serverName }),
               attempts,

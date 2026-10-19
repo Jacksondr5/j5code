@@ -530,7 +530,7 @@ it.effect.each([false, true])(
         assert.equal(notices[0]!.receiver_id, sender.id);
         assert.include(
           notices[0]!.message_text,
-          `Your message to ${receiver.id} was not delivered: delivery failed 3 times, and it will not be tried again. The last attempt failed with: "recipient unavailable"`,
+          `Your message to ${receiver.id} may not have been delivered: delivery failed 3 times, and it will not be tried again. The last attempt failed with: "recipient unavailable"`,
         );
         const exchanges = yield* sql<{ readonly status: string }>`
           SELECT status FROM j5_a2a_exchange
@@ -559,6 +559,44 @@ it.effect.each([false, true])(
         assert.equal(after.length, 1, "an alarmed notice tells nobody");
       }).pipe(Effect.provide(makeTestLayer(transport)));
     }),
+);
+
+it.effect("tells nobody when a message from a peer server alarms on its local delivery", () =>
+  Effect.gen(function* () {
+    const failure = new A2ADeliveryTransportError({
+      operation: "forced failure",
+      cause: "recipient unavailable",
+    });
+    const transport: A2ADeliveryTransportShape = {
+      deliverAgent: () => Effect.fail(failure),
+      cancelAgent: () => Effect.succeed("cancelled" as const),
+      deliverPeer: () => Effect.die("peer delivery is not under test"),
+      deliverHuman: () => Effect.fail(failure),
+    };
+    yield* Effect.gen(function* () {
+      const { sent } = yield* seedSend(false);
+      const sql = yield* SqlClient.SqlClient;
+      // As a message a peer server handed over: its sender is on that server.
+      yield* sql`
+        UPDATE j5_a2a_delivery SET origin_environment_id = 'environment-peer'
+        WHERE message_id = ${sent.messageId}
+      `;
+      const worker = yield* A2ADeliveryWorker;
+      assert.equal((yield* worker.runOnce)?.state, "retry_scheduled");
+      yield* TestClock.adjust("250 millis");
+      assert.equal((yield* worker.runOnce)?.state, "retry_scheduled");
+      yield* TestClock.adjust("500 millis");
+      assert.equal((yield* worker.runOnce)?.state, "alarmed");
+      const notices = yield* sql`
+        SELECT 1 FROM j5_a2a_delivery WHERE envelope_channel = 'lifecycle_notice'
+      `;
+      assert.equal(
+        notices.length,
+        0,
+        "a peer server accepts a platform notice only for an Exchange",
+      );
+    }).pipe(Effect.provide(makeTestLayer(transport)));
+  }),
 );
 
 it.effect("keeps a message queued behind a held receiver queue undelivered until resumed", () =>
