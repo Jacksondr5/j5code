@@ -16,8 +16,6 @@ started from that commit, and keep working while it tests. Tell it:
 - the commit, and what changed;
 - what to test;
 - which rows of "What to cover" apply;
-- the rig command for any state the UI cannot create yet, such as a `guest`
-  at a level the UI does not offer;
 - to follow this skill.
 
 Do not restate this skill's rules in the brief: the tester reads them here,
@@ -80,10 +78,6 @@ Each tab you open has its own storage, so it is one signed-in person and
 nothing else can sign it out. Do not pass a `profileId`, except for "PR
 videos": every tab that names a profile shares that profile's cookies, across
 all agents on the server.
-
-The panel refuses clipboard reads. To see what a Copy button wrote, first use
-`preview_evaluate` to replace `navigator.clipboard.writeText` with a function
-that keeps its argument, then click, then read the kept value.
 
 Do not seed a test home by hand, copy the live database, or start `vp run dev`
 yourself for a test. The script does not install dependencies: if it says they
@@ -168,8 +162,8 @@ A worktree holds one setup at a time. Pass a flag to the first start, or to
   result, the stored row, or the screen.
 - To hold a turn open, ask the agent to run `./scripts/hold.sh` in the test
   repository, in the foreground. It blocks until you create `.hold-release` in
-  the test repository's root, deletes that file, and exits. It gives up after nine
-  minutes.
+  the test repository's root, deletes that file, and exits. It gives up after
+  nine minutes.
 - The thread "Question waiting for an answer" can be answered once; `rebuild`
   brings it back. The image in "Message with an image" is display only.
 - A pending approval or a question from Claude does not survive a restart, so
@@ -225,7 +219,8 @@ sent through the UI.
 Use `--base <ref>` so base and head show the same data. The ref is the PR's
 own base, which for a stacked PR is the layer beneath it. Fetch, then name the
 remote branch, such as `origin/j5/main`: a local branch can be behind. Open
-each server in its own tab. Capture at 1280x800 as test-t3-app describes, then upload:
+each server in its own tab. Capture at 1280x800 as test-t3-app describes,
+then upload:
 
 ```bash
 node scripts/j5/pr-evidence.ts <pr> --pair "<caption>" <before.png> <after.png>
