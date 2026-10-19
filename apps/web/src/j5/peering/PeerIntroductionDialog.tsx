@@ -77,46 +77,47 @@ interface StepReport {
 export function PeerIntroductionDialog({
   open,
   onOpenChange,
-  primaryEnvironmentId,
+  thisServerId,
   onPeered,
 }: {
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
-  readonly primaryEnvironmentId: EnvironmentId;
+  readonly thisServerId: EnvironmentId;
   readonly onPeered: (otherEnvironmentId: EnvironmentId) => void;
 }) {
   const { environments } = useEnvironments();
-  const primary = useEnvironment(primaryEnvironmentId);
+  const thisServer = useEnvironment(thisServerId);
   const candidates = useMemo(
     () =>
       environments
-        .filter((environment) => environment.environmentId !== primaryEnvironmentId)
+        .filter((environment) => environment.environmentId !== thisServerId)
         .toSorted((left, right) => left.label.localeCompare(right.label)),
-    [environments, primaryEnvironmentId],
+    [environments, thisServerId],
   );
   const [otherId, setOtherId] = useState<EnvironmentId | null>(null);
   const other = candidates.find((environment) => environment.environmentId === otherId) ?? null;
-  const primaryBaseUrl = useEnvironmentHttpBaseUrl(primaryEnvironmentId);
+  const thisServerBaseUrl = useEnvironmentHttpBaseUrl(thisServerId);
   const otherBaseUrl = useEnvironmentHttpBaseUrl(otherId);
   const otherCanWriteAccess = useAtomValue(j5Environment.addPeer.permissionAtom(otherId));
 
-  const local = useMemo(() => (primary === null ? null : peeringServerOf(primary)), [primary]);
+  const local = useMemo(
+    () => (thisServer === null ? null : peeringServerOf(thisServer)),
+    [thisServer],
+  );
   const remote = useMemo(() => (other === null ? null : peeringServerOf(other)), [other]);
   const otherReady =
     other !== null && other.connection.phase === "connected" && otherCanWriteAccess;
   const bothSupportPoll = local?.supportsPoll === true && remote?.supportsPoll === true;
   // Whether each server supports poll mode is known only once its descriptor is.
   const described =
-    (primary?.serverConfig ?? null) !== null && (other?.serverConfig ?? null) !== null;
+    (thisServer?.serverConfig ?? null) !== null && (other?.serverConfig ?? null) !== null;
 
   // Each server's record of the other. One here is a peering this server still
   // holds: it is removed under Peer servers first. One held only by the other
   // server is a leftover, such as from a removal made on this side only.
   const otherConnected = other !== null && other.connection.phase === "connected";
   // Both are read while the remote is connected, even unmanaged, so a leftover can name where to clear it.
-  const localPeers = useEnvironmentQuery(
-    otherConnected ? peersQueryAtom(primaryEnvironmentId) : null,
-  );
+  const localPeers = useEnvironmentQuery(otherConnected ? peersQueryAtom(thisServerId) : null);
   const remotePeers = useEnvironmentQuery(
     otherConnected && otherId !== null ? peersQueryAtom(otherId) : null,
   );
@@ -127,7 +128,7 @@ export function PeerIntroductionDialog({
   const { heldHere, leftover } =
     herePeers !== null && therePeers !== null
       ? peeringRecords({
-          thisServer: primaryEnvironmentId,
+          thisServer: thisServerId,
           otherServer: otherId ?? "",
           here: herePeers,
           there: therePeers,
@@ -135,7 +136,7 @@ export function PeerIntroductionDialog({
       : { heldHere: false, leftover: false };
   const recordsError =
     localPeers.error !== null
-      ? { server: local?.label ?? primaryEnvironmentId, error: localPeers.error }
+      ? { server: local?.label ?? thisServerId, error: localPeers.error }
       : remotePeers.error !== null
         ? { server: remote?.label ?? otherId, error: remotePeers.error }
         : null;
@@ -169,7 +170,7 @@ export function PeerIntroductionDialog({
     if (checkKey === null || local === null || remote === null) return;
     let cancelled = false;
     void runPeeringCheck(
-      { server: local, clientUrl: primaryBaseUrl },
+      { server: local, clientUrl: thisServerBaseUrl },
       { server: remote, clientUrl: otherBaseUrl },
     ).then((result) => {
       if (!cancelled) setChecked({ key: checkKey, result });
@@ -178,7 +179,7 @@ export function PeerIntroductionDialog({
       cancelled = true;
     };
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Keyed on the pair and its addresses: the server objects are rebuilt on every environment refresh.
-  }, [checkKey, primaryBaseUrl, otherBaseUrl]);
+  }, [checkKey, thisServerBaseUrl, otherBaseUrl]);
   const check = checked !== null && checked.key === checkKey ? checked.result : null;
 
   const recommendation: PeeringRecommendation | null =
@@ -328,7 +329,7 @@ export function PeerIntroductionDialog({
               <div className="flex flex-col gap-1.5 text-sm">
                 <span className="font-medium text-foreground">This server</span>
                 <span className="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-foreground">
-                  {local?.label ?? primaryEnvironmentId}
+                  {local?.label ?? thisServerId}
                 </span>
               </div>
               <label className="flex flex-col gap-1.5 text-sm font-medium text-foreground">

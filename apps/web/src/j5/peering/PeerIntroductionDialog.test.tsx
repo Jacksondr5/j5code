@@ -130,12 +130,7 @@ afterEach(async () => {
 });
 
 const dialog = () => (
-  <PeerIntroductionDialog
-    open
-    onOpenChange={() => {}}
-    primaryEnvironmentId={LOCAL}
-    onPeered={() => {}}
-  />
+  <PeerIntroductionDialog open onOpenChange={() => {}} thisServerId={LOCAL} onPeered={() => {}} />
 );
 const button = (label: string): ReactTestInstance =>
   renderer!.root.findAllByType("button").find((found) => found.props.children === label)!;

@@ -1,12 +1,20 @@
 import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { PlusIcon } from "lucide-react";
+import { Atom } from "effect/reactivity";
 import { useCallback, useState } from "react";
 
 import { SettingsRow, SettingsSection } from "../../components/settings/settingsLayout";
 import { Button } from "../../components/ui/button";
 import { toastManager } from "../../components/ui/toast";
 import { requestConfirmDialog } from "../../confirmDialog";
+import {
+  Select,
+  SelectItem,
+  SelectPopup,
+  SelectTrigger,
+  SelectValue,
+} from "../../components/ui/select";
 import { useEnvironments } from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";
 import { j5Environment, peersQueryAtom } from "../state";
@@ -22,30 +30,52 @@ import { useNowMinute } from "../../hooks/useNowMinute";
 import { useVisibleRefresh } from "../useVisibleRefresh";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 
+/** The connected servers this client can peer from; the key is their ids, joined with commas. */
+const manageableServersAtom = Atom.family((ids: string) =>
+  Atom.make((get) =>
+    ids
+      .split(",")
+      .filter(
+        (id): id is EnvironmentId =>
+          id !== "" && get(j5Environment.addPeer.permissionAtom(id as EnvironmentId)),
+      ),
+  ),
+);
+
 /**
- * The servers this environment exchanges agent messages with. A peer is also
+ * The servers a chosen server exchanges agent messages with. A peer is also
  * an authorized session in the list above; this section is where the pairing
- * is made and where it is taken apart. Removal is mutual when this client can
- * manage the other server too, as the introduction was; removing one side only
- * is a choice the person is warned about, never an accident.
+ * is made and where it is taken apart. The chosen server is the client's own
+ * by default, and can be any connected server this client manages, so a client
+ * can peer two servers that are neither of them its own. Removal is mutual when
+ * this client can manage the other server too, as the introduction was;
+ * removing one side only is a choice the person is warned about, never an accident.
  */
 export function PeerServersSettings({
   primaryEnvironmentId,
-  canManage,
 }: {
   readonly primaryEnvironmentId: EnvironmentId | null;
-  readonly canManage: boolean;
 }) {
-  const peers = useEnvironmentQuery(
-    primaryEnvironmentId === null ? null : peersQueryAtom(primaryEnvironmentId),
+  const { environments } = useEnvironments();
+  const connected = environments
+    .filter((environment) => environment.connection.phase === "connected")
+    .toSorted((left, right) => left.label.localeCompare(right.label));
+  // Peering is an administrative act on a server, like pairing links and sessions.
+  const manageable = useAtomValue(
+    manageableServersAtom(connected.map((environment) => environment.environmentId).join(",")),
   );
+  const [chosenId, setChosenId] = useState<EnvironmentId | null>(null);
+  const thisServerId =
+    [chosenId, primaryEnvironmentId].find((id) => id !== null && manageable.includes(id)) ??
+    manageable[0] ??
+    null;
+  const peers = useEnvironmentQuery(thisServerId === null ? null : peersQueryAtom(thisServerId));
   // A peer's session revoked or expired elsewhere moves no revision, and a server too old to
   // have the change stream moves none at all; reading again on focus covers both.
   const refreshOnFocus = useCallback(() => {
-    if (primaryEnvironmentId !== null) refreshPeers(primaryEnvironmentId);
-  }, [primaryEnvironmentId]);
-  useVisibleRefresh(refreshOnFocus, primaryEnvironmentId !== null);
-  const { environments } = useEnvironments();
+    if (thisServerId !== null) refreshPeers(thisServerId);
+  }, [thisServerId]);
+  useVisibleRefresh(refreshOnFocus, thisServerId !== null);
   const [dialogOpen, setDialogOpen] = useState(false);
   // Each opening mounts a fresh dialog, so a previous introduction's fields and steps never carry over.
   const [dialogGeneration, setDialogGeneration] = useState(0);
@@ -54,8 +84,9 @@ export function PeerServersSettings({
     setDialogOpen(true);
   };
 
-  // Peering is an administrative act on this server, like pairing links and sessions.
-  if (primaryEnvironmentId === null || !canManage) return null;
+  if (thisServerId === null) return null;
+  const labelOf = (id: EnvironmentId) =>
+    connected.find((environment) => environment.environmentId === id)?.label ?? id;
 
   return (
     <SettingsSection
@@ -67,17 +98,39 @@ export function PeerServersSettings({
         </Button>
       }
     >
+      {manageable.length > 1 || thisServerId !== primaryEnvironmentId ? (
+        <SettingsRow
+          title="Server"
+          description="The server whose peers are listed here and that Add peer peers with another."
+          control={
+            <Select
+              value={thisServerId}
+              onValueChange={(value) => {
+                if (value !== null) setChosenId(value as EnvironmentId);
+              }}
+            >
+              <SelectTrigger size="xs" className="w-40" aria-label="Server to manage peers for">
+                <SelectValue>{labelOf(thisServerId)}</SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                {manageable.map((id) => (
+                  <SelectItem key={id} value={id}>
+                    {labelOf(id)}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+          }
+        />
+      ) : null}
       {(peers.data ?? []).map((peer) => (
         <PeerRow
           key={peer.environmentId}
           peer={peer}
-          primaryEnvironmentId={primaryEnvironmentId}
+          thisServerId={thisServerId}
           otherEnvironmentId={
-            environments.find(
-              (environment) =>
-                environment.environmentId === peer.environmentId &&
-                environment.connection.phase === "connected",
-            )?.environmentId ?? null
+            connected.find((environment) => environment.environmentId === peer.environmentId)
+              ?.environmentId ?? null
           }
         />
       ))}
@@ -91,12 +144,12 @@ export function PeerServersSettings({
         <SettingsRow title="Couldn't read peers" description={peers.error} />
       ) : null}
       <PeerIntroductionDialog
-        key={dialogGeneration}
+        key={`${thisServerId}|${String(dialogGeneration)}`}
         open={dialogOpen}
         onOpenChange={setDialogOpen}
-        primaryEnvironmentId={primaryEnvironmentId}
+        thisServerId={thisServerId}
         onPeered={(otherEnvironmentId) => {
-          refreshPeers(primaryEnvironmentId);
+          refreshPeers(thisServerId);
           refreshPeers(otherEnvironmentId);
         }}
       />
@@ -106,11 +159,11 @@ export function PeerServersSettings({
 
 function PeerRow({
   peer,
-  primaryEnvironmentId,
+  thisServerId,
   otherEnvironmentId,
 }: {
   readonly peer: PeerRecord;
-  readonly primaryEnvironmentId: EnvironmentId;
+  readonly thisServerId: EnvironmentId;
   /** The peer as one of this client's connected environments, when it is one. */
   readonly otherEnvironmentId: EnvironmentId | null;
 }) {
@@ -157,8 +210,8 @@ function PeerRow({
     if (!confirmed) return;
     setRemoving(true);
     try {
-      await removePeer(primaryEnvironmentId, peer.environmentId);
-      refreshPeers(primaryEnvironmentId);
+      await removePeer(thisServerId, peer.environmentId);
+      refreshPeers(thisServerId);
     } catch (cause) {
       toastManager.add({
         type: "error",
@@ -170,7 +223,7 @@ function PeerRow({
     }
     if (confirmation === "both" && otherEnvironmentId !== null) {
       try {
-        await removePeer(otherEnvironmentId, primaryEnvironmentId);
+        await removePeer(otherEnvironmentId, thisServerId);
         refreshPeers(otherEnvironmentId);
       } catch (cause) {
         toastManager.add({

@@ -7,7 +7,7 @@ Only peer servers you trust. Peering lets the other server see this server's age
 ## Peer two servers
 
 1. Connect this app to both servers with administrator access. Add the second one under **Settings → Connections** with **Add environment** if it isn't there yet, and turn on **Manage access** when you create its pairing link (or use the server's own startup pairing link).
-2. In **Settings → Connections → Peer servers**, choose **Add peer** and pick the other server.
+2. In **Settings → Connections → Peer servers**, choose **Add peer** and pick the other server. Neither server has to be the one this app runs: when the app manages more than one, choose under **Server** which one to peer from, and its peers are listed there.
 3. J5 checks which way each server can reach the other and proposes a setup. It says, in plain lines, how messages will travel in each direction, and asks only what it couldn't work out. Confirm it, or choose **Set up differently** to pick the direction and addresses yourself. Use an https address, or one on a private network such as Tailscale.
 
 Both servers need a version of J5 that supports peering. If one doesn't, the dialog names the server to update. Update peered servers together: while one is behind, no message crosses between them, and messages already sent wait until both are up to date.
