@@ -191,23 +191,17 @@ function PeerPairRow({ pair }: { readonly pair: PeerPair }) {
           )) ?? Promise.resolve(false));
     if (!confirmed) return;
     setRemoving(true);
-    const removed: Array<PeerPairSide> = [];
+    // Each side is tried, so one that fails never keeps the other from being removed.
     for (const side of removable) {
       try {
         await removePeer(side.environmentId, otherSide(pair, side).environmentId);
-        removed.push(side);
       } catch (cause) {
         const reason = cause instanceof Error ? cause.message : String(cause);
-        toastManager.add(
-          removed.length === 0
-            ? { type: "error", title: "Could not remove the peer", description: reason }
-            : {
-                type: "error",
-                title: `Removed on ${removed[0]!.label}, but not on ${side.label}`,
-                description: `${side.label} still lists ${otherSide(pair, side).label} as a peer. Remove it there. ${reason}`,
-              },
-        );
-        break;
+        toastManager.add({
+          type: "error",
+          title: `Could not remove the peering on ${side.label}`,
+          description: `${side.label} may still list ${otherSide(pair, side).label} as a peer. ${reason}`,
+        });
       }
     }
     for (const side of removable) refreshPeers(side.environmentId);
