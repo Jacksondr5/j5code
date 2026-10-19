@@ -1,4 +1,11 @@
-import { presentPlaybookStages } from "@t3tools/client-runtime/j5/playbooks";
+import {
+  type PlaybookStagesView,
+  playbookRunSelection,
+  playbookStagesView,
+  presentPlaybookStages,
+  rememberPlaybookStagesView,
+  selectedPlaybookRun,
+} from "@t3tools/client-runtime/j5/playbooks";
 import type { PlaybookProgress } from "@t3tools/contracts/j5";
 import {
   AlertTriangleIcon,
@@ -22,14 +29,21 @@ import { cn } from "../../lib/utils";
 export function PlaybookStages({
   runs,
   stale,
+  viewKey,
 }: {
   runs: readonly PlaybookProgress[];
   stale: boolean;
+  /** The thread the bar belongs to, so its view survives being hidden for a question. */
+  viewKey: string;
 }) {
-  const [expanded, setExpanded] = useState(false);
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [view, setViewState] = useState(() => playbookStagesView(viewKey));
+  const setView = (next: PlaybookStagesView) => {
+    rememberPlaybookStagesView(viewKey, next);
+    setViewState(next);
+  };
+  const { expanded } = view;
   const contentId = useId();
-  const run = runs.find((entry) => entry.runId === selectedRunId) ?? runs[0];
+  const run = selectedPlaybookRun(runs, view.selectedRunId);
   if (!run) return null;
   const display = presentPlaybookStages(run);
   const historical = run.runId !== runs[0]?.runId;
@@ -46,7 +60,7 @@ export function PlaybookStages({
           aria-expanded={expanded}
           aria-controls={expanded ? contentId : undefined}
           aria-label={`${expanded ? "Collapse" : "Expand"} playbook: ${run.title}. ${display.status}. ${display.position}. ${display.currentTitle}${historical ? ". Earlier run" : ""}${stale ? ". Progress out of date" : ""}`}
-          onClick={() => setExpanded(!expanded)}
+          onClick={() => setView({ ...view, expanded: !expanded })}
           onPointerDown={(event) => event.preventDefault()}
         >
           <ComposerBanner.Icon>
@@ -116,7 +130,14 @@ export function PlaybookStages({
             <ComposerBanner.Body>
               {runs.length > 1 && (
                 <div className="my-2 pe-2">
-                  <Select items={runItems} value={run.runId} onValueChange={setSelectedRunId}>
+                  <Select
+                    items={runItems}
+                    value={run.runId}
+                    onValueChange={(runId) =>
+                      runId &&
+                      setView({ ...view, selectedRunId: playbookRunSelection(runs, runId) })
+                    }
+                  >
                     <SelectTrigger size="xs" aria-label="Playbook run">
                       <SelectValue />
                     </SelectTrigger>

@@ -366,6 +366,42 @@ export function presentPlaybookStages(run: PlaybookProgress) {
   };
 }
 
+/**
+ * The progress bar's expanded state and picked run, by `environmentId:threadId`. The composer
+ * unmounts the bar while a question or approval is pending; this lets it come back as it was.
+ */
+export interface PlaybookStagesView {
+  readonly expanded: boolean;
+  /** An earlier run the person picked; `null` follows the latest run. */
+  readonly selectedRunId: string | null;
+}
+
+const playbookStagesViews = new Map<string, PlaybookStagesView>();
+
+export function playbookStagesView(key: string): PlaybookStagesView {
+  return playbookStagesViews.get(key) ?? { expanded: false, selectedRunId: null };
+}
+
+export function rememberPlaybookStagesView(key: string, view: PlaybookStagesView) {
+  playbookStagesViews.set(key, view);
+}
+
+/** The run the bar shows: the picked one while it is still listed, otherwise the latest. */
+export function selectedPlaybookRun<Run extends { readonly runId: string }>(
+  runs: ReadonlyArray<Run>,
+  selectedRunId: string | null,
+): Run | undefined {
+  return runs.find((entry) => entry.runId === selectedRunId) ?? runs[0];
+}
+
+/** Picking the latest run clears the choice, so the bar follows the next run that starts. */
+export function playbookRunSelection(
+  runs: ReadonlyArray<{ readonly runId: string }>,
+  runId: string,
+): string | null {
+  return runId === runs[0]?.runId ? null : runId;
+}
+
 /** Prioritize active runs with issues within a fetched page without mutating the query's runs. */
 export function sortPlaybookRuns(runs: ReadonlyArray<PlaybookProgress>) {
   return [...runs].sort(

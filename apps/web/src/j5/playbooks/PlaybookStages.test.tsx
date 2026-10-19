@@ -29,7 +29,9 @@ const active: PlaybookProgress = {
 
 let container: HTMLDivElement;
 let root: Root;
+let viewKey = 0;
 beforeEach(() => {
+  viewKey += 1;
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   Object.defineProperty(Element.prototype, "getAnimations", {
     configurable: true,
@@ -55,7 +57,9 @@ afterEach(async () => {
 });
 
 async function render(runs: readonly PlaybookProgress[], stale = false) {
-  await act(() => root.render(<PlaybookStages runs={runs} stale={stale} />));
+  await act(() =>
+    root.render(<PlaybookStages runs={runs} stale={stale} viewKey={`env:thread-${viewKey}`} />),
+  );
 }
 function toggle() {
   return container.querySelector<HTMLButtonElement>("button[aria-expanded]")!;
@@ -162,4 +166,27 @@ it("inspects history without confusing it with the latest run, then returns to l
   await act(() => latestOption.click());
   expect(toggle().textContent).not.toContain("History");
   expect(toggle().textContent).toContain("Release");
+
+  const next = { ...active, runId: "next", title: "Next release" };
+  await render([next, active, previous]);
+  expect(toggle().textContent).toContain("Next release");
+  expect(toggle().textContent).not.toContain("History");
+});
+
+it("comes back expanded on the same run after the composer hides it for a question", async () => {
+  const previous = { ...active, runId: "previous", title: "Earlier release" };
+  await render([active, previous]);
+  await act(() => toggle().click());
+  await act(() =>
+    container.querySelector<HTMLButtonElement>('[aria-label="Playbook run"]')!.click(),
+  );
+  const oldOption = Array.from(document.querySelectorAll<HTMLElement>('[role="option"]')).find(
+    (node) => node.textContent?.includes("Earlier release"),
+  )!;
+  await act(() => oldOption.click());
+
+  await act(() => root.render(null));
+  await render([active, previous]);
+  expect(stages()).not.toBeNull();
+  expect(toggle().textContent).toContain("Earlier release");
 });

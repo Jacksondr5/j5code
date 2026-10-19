@@ -1,12 +1,19 @@
-import { presentPlaybookStages } from "@t3tools/client-runtime/j5/playbooks";
+import {
+  type PlaybookStagesView,
+  playbookRunSelection,
+  playbookStagesView,
+  presentPlaybookStages,
+  rememberPlaybookStagesView,
+  selectedPlaybookRun,
+} from "@t3tools/client-runtime/j5/playbooks";
 import { j5LedgerSupported } from "@t3tools/client-runtime/j5/readSources";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { useIsFocused } from "@react-navigation/native";
 import { useState } from "react";
 import { Pressable, ScrollView, View } from "react-native";
-import { SymbolView } from "../../components/AppSymbol";
-import { AppText as Text } from "../../components/AppText";
+import { SymbolView } from "../../components/ui/AppSymbol";
+import { AppText as Text } from "../../components/ui/AppText";
 import { useEnvironmentServerConfig, useThreadShell } from "../../state/entities";
 import { useEnvironmentQuery } from "../../state/query";
 import { useRemoteEnvironmentRuntime } from "../../state/use-remote-environment-registry";
@@ -33,8 +40,14 @@ export function PlaybookComposerControl(props: {
         })
       : null,
   );
-  const [expanded, setExpanded] = useState(false);
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  // The thread screen unmounts this bar while a question or approval is pending.
+  const viewKey = `${props.environmentId}:${props.threadId}`;
+  const [view, setViewState] = useState(() => playbookStagesView(viewKey));
+  const setView = (next: PlaybookStagesView) => {
+    rememberPlaybookStagesView(viewKey, next);
+    setViewState(next);
+  };
+  const { expanded } = view;
   const changes = useEnvironmentQuery(
     focused && query.data
       ? j5Environment.playbookChanges({ environmentId: props.environmentId, input: {} })
@@ -49,7 +62,7 @@ export function PlaybookComposerControl(props: {
     refresh: query.refresh,
   });
   const runs = query.data?.runs ?? [];
-  const run = runs.find((entry) => entry.runId === selectedRunId) ?? runs[0];
+  const run = selectedPlaybookRun(runs, view.selectedRunId);
   if (!run) return null;
   const display = presentPlaybookStages(run);
   return (
@@ -59,7 +72,7 @@ export function PlaybookComposerControl(props: {
           accessibilityRole="button"
           accessibilityState={{ expanded }}
           accessibilityLabel={`${run.title}. ${display.status}. ${display.position}. ${display.currentTitle}${query.error ? ". Progress out of date" : ""}${run.runId !== runs[0]?.runId ? ". Earlier run" : ""}`}
-          onPress={() => setExpanded(!expanded)}
+          onPress={() => setView({ ...view, expanded: !expanded })}
           className="min-h-11 flex-row items-center gap-2"
         >
           <SymbolView
@@ -123,7 +136,9 @@ export function PlaybookComposerControl(props: {
                     key={entry.runId}
                     accessibilityRole="button"
                     accessibilityState={{ selected: entry.runId === run.runId }}
-                    onPress={() => setSelectedRunId(entry.runId)}
+                    onPress={() =>
+                      setView({ ...view, selectedRunId: playbookRunSelection(runs, entry.runId) })
+                    }
                     className="mr-3 min-h-11 justify-center rounded border border-border p-2"
                   >
                     <Text className="text-xs text-foreground">

@@ -24,6 +24,10 @@ import {
   playbookSelectionText,
   presentPlaybook,
   presentPlaybookStages,
+  playbookRunSelection,
+  playbookStagesView,
+  rememberPlaybookStagesView,
+  selectedPlaybookRun,
   sortPlaybookRuns,
   playbookWorkspaces,
   samePlaybookWorkspaceInputs,
@@ -582,4 +586,26 @@ it("leaves stages unchecked when the current position is unavailable", () => {
   const unavailable = presentPlaybookStages({ ...run, position: null, currentStepId: "removed" });
   expect(unavailable.completedSteps).toBe(0);
   expect(unavailable.steps.every((step) => step.status === "pending")).toBe(true);
+});
+
+it("follows new runs again once the latest run is picked from history", () => {
+  const first = { runId: "run-1" };
+  const second = { runId: "run-2" };
+  const third = { runId: "run-3" };
+  const picked = playbookRunSelection([second, first], first.runId);
+  expect(selectedPlaybookRun([second, first], picked)).toBe(first);
+  const latest = playbookRunSelection([second, first], second.runId);
+  expect(latest).toBeNull();
+  expect(selectedPlaybookRun([third, second, first], latest)).toBe(third);
+});
+
+it("falls back to the latest run when the picked run is no longer listed", () => {
+  expect(selectedPlaybookRun([{ runId: "run-3" }], "run-1")).toEqual({ runId: "run-3" });
+});
+
+it("keeps a thread's stage view while the bar is away for a question", () => {
+  expect(playbookStagesView("env:thread-a")).toEqual({ expanded: false, selectedRunId: null });
+  rememberPlaybookStagesView("env:thread-a", { expanded: true, selectedRunId: "run-1" });
+  expect(playbookStagesView("env:thread-a")).toEqual({ expanded: true, selectedRunId: "run-1" });
+  expect(playbookStagesView("env:thread-b")).toEqual({ expanded: false, selectedRunId: null });
 });

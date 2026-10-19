@@ -41,5 +41,11 @@ export function PlaybookComposerControl(props: {
     environment?.connection.phase === "connected" && !unsupported && !query.isPending,
     `${thread?.latestRun?.runId}:${thread?.latestRun?.status}:${changes.data}`,
   );
-  return <PlaybookStages runs={runs} stale={Boolean(query.error)} />;
+  return (
+    <PlaybookStages
+      runs={runs}
+      stale={Boolean(query.error)}
+      viewKey={`${props.environmentId}:${props.threadId}`}
+    />
+  );
 }
