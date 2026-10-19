@@ -27,7 +27,7 @@ A machine participant belongs to one project, which never changes, has a server-
    chmod 0600 ~/.config/j5/watchdog.token
    ```
 
-   A mistyped flag fails before the command runs and prints the help text to stdout (see [Exit codes](#exit-codes)), so check the exit status before trusting the file: `… > ~/.config/j5/watchdog.token || exit`. A token file holding anything but the token fails every verb with exit 3 `token_malformed`.
+   A mistyped flag fails before the command runs and prints the help text to stdout (see [Exit codes](#exit-codes)), so check the exit status before trusting the file: `… > ~/.config/j5/watchdog.token || exit`. A token file with spaces or more than one line, such as captured help text, makes every verb that sends the token exit 3 `token_malformed`.
 
    Tokens are sessions in the local auth database: they survive server restarts and appear in Settings → Connections under their label. Revoke one with `j5 auth session revoke <session-id>`; `j5 auth session list` shows the id.
 
