@@ -371,8 +371,9 @@ it.each(["ready", "unchecked", "failed"])(
       state.providers[0]!,
       {
         ...claude,
-        enabled: discovery !== "unchecked",
-        status: discovery === "failed" ? "error" : "ready",
+        // An instance that is off is hidden when empty, so "unchecked" is one
+        // that is on but has not reported ready yet.
+        status: discovery === "failed" ? "error" : discovery === "unchecked" ? "warning" : "ready",
       },
     ];
     await renderPanel();

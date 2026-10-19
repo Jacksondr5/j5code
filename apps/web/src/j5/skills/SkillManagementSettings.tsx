@@ -51,6 +51,7 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import {
   buildSkillInventory,
   filterSkillInventory,
+  inventoryColumnProviders,
   missingSkillLabel,
   SKILL_ORIGINS,
   skillDiscoveryState,
@@ -185,18 +186,10 @@ export function SkillInventoryPanel({ environmentId }: { readonly environmentId:
   );
   const visibleRows = filterSkillInventory(rows, query, selectedProvider?.instanceId);
   const details = visibleRows.find((row) => row.key === detailsKey);
-  // Keep supported providers visible even when they report no skills, so a
-  // missing record can be distinguished from unknown discovery.
   const displayedProviders = useMemo(
     () =>
-      selectedProvider || rows.length === 0
-        ? selectedProviders
-        : selectedProviders.filter(
-            (provider) =>
-              providerOptions.includes(provider) ||
-              rows.some((row) => row.records.has(provider.instanceId)),
-          ),
-    [selectedProvider, selectedProviders, providerOptions, rows],
+      selectedProvider ? selectedProviders : inventoryColumnProviders(selectedProviders, rows),
+    [selectedProvider, selectedProviders, rows],
   );
   const providerDetails = useMemo(
     () =>

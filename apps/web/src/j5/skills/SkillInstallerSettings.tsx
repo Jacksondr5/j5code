@@ -170,7 +170,15 @@ function MemberSkillInstallerSettings() {
             title="Installed"
             variant="plain"
             headerAction={
-              <Button variant="ghost" size="xs" render={<a href="#skill-catalog" />}>
+              // Scroll instead of linking to #skill-catalog: Electron's hash router
+              // would read the fragment as a route and leave Settings.
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={() =>
+                  document.getElementById("skill-catalog")?.scrollIntoView({ block: "start" })
+                }
+              >
                 Manage catalog
               </Button>
             }
