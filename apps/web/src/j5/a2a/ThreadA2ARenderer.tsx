@@ -1,7 +1,9 @@
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../../components/ui/tooltip";
+import { observeResize } from "~/lib/observeResize";
 import type { ChatMessage } from "~/types";
 import { useNowMinute } from "~/hooks/useNowMinute";
 import type { ScopedThreadRef } from "@t3tools/contracts";
+import { Link } from "@tanstack/react-router";
 import { ChevronRightIcon, InboxIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { shouldPreserveAssistantLineBreaks } from "@t3tools/shared/markdownPipeline";
@@ -10,6 +12,8 @@ import ChatMarkdown from "../../components/ChatMarkdown";
 import { useFindRevealRef } from "../../components/chat/markdownFindContext";
 import { renderCrewNotice } from "../crew/CrewNoticeRenderer";
 import { participantIdsForCrewNotice } from "../crew/crewNotices.logic";
+import { useThreadShell } from "../../state/entities";
+import { buildThreadRouteParams } from "../../threadRoutes";
 import { presentParticipantIdentity } from "./ParticipantIdentity";
 
 /**
@@ -63,6 +67,8 @@ export interface ThreadA2ADeliveryCompositionInput {
    * explicitly unnamed, with the durable id available only as a tooltip.
    */
   readonly participantLabels?: ReadonlyMap<string, string> | undefined;
+  /** From the same read: each agent sender's thread, on this server or a peer. */
+  readonly participantThreads?: ReadonlyMap<string, ScopedThreadRef> | undefined;
   /** The caller supplies this only when it can prove the authenticated viewer. */
   readonly resolveViewerParticipantId?: (() => string | null) | undefined;
   /** The shown thread, for cards that open seats and render a message's markdown. */
@@ -79,6 +85,8 @@ export type ThreadA2ADeliveryPresentation =
       readonly senderId: string;
       readonly senderLabel: string;
       readonly senderTooltipParticipantId: string | null;
+      /** The sender's thread. Its name opens it when this client has that thread. */
+      readonly senderThreadRef: ScopedThreadRef | null;
       readonly body: string;
       readonly exchange: "expects-reply" | "plain" | "closed";
       /** Kept as a pairing fact only; protocol identifiers never render. */
@@ -348,6 +356,7 @@ export function presentThreadA2ADelivery(
         senderId: peer.senderId,
         senderLabel: sender.label,
         senderTooltipParticipantId: sender.tooltipParticipantId,
+        senderThreadRef: input.participantThreads?.get(peer.senderId) ?? null,
         body: peer.body,
         exchange: peer.exchange,
         exchangeId: peer.exchangeId,
@@ -504,12 +513,12 @@ function A2ABodyClamp({
     };
 
     measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(element);
     // The collapsed wrapper keeps its capped height while the markdown inside grows, as images
     // load and code blocks highlight, so the markdown root is observed too.
-    if (element.firstElementChild) observer.observe(element.firstElementChild);
-    return () => observer.disconnect();
+    return observeResize(
+      element.firstElementChild ? [element, element.firstElementChild] : element,
+      measure,
+    );
   }, [body]);
 
   return (
@@ -527,7 +536,7 @@ function A2ABodyClamp({
         <button
           type="button"
           aria-expanded={expanded}
-          className="mt-1 inline-flex cursor-pointer items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70"
+          className="mt-1 inline-flex cursor-pointer items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
           onClick={() => setExpanded((current) => !current)}
         >
           <ChevronRightIcon
@@ -549,6 +558,7 @@ function PeerDeliveryCard({
   now,
   outsideAgent = false,
   senderLabel,
+  senderThreadRef,
   senderTooltipParticipantId,
   sentAt,
 }: {
@@ -559,11 +569,15 @@ function PeerDeliveryCard({
   readonly now?: number | undefined;
   readonly outsideAgent?: boolean | undefined;
   readonly senderLabel: string;
+  readonly senderThreadRef: ScopedThreadRef | null;
   readonly senderTooltipParticipantId: string | null;
   readonly sentAt: string;
 }) {
   const nowMinute = useNowMinute();
   const currentNow = now ?? Date.parse(`${nowMinute}:00.000Z`);
+  // A peer's thread opens only from a client connected to that peer, and only if the
+  // person can see it there; the client's own thread list answers both.
+  const senderThread = useThreadShell(senderThreadRef);
   const isOpen = exchange === "expects-reply";
   const isClosed = exchange === "closed";
   return (
@@ -576,7 +590,17 @@ function PeerDeliveryCard({
           <InboxIcon className="size-3.5 shrink-0" aria-hidden />
           From
         </span>
-        {senderTooltipParticipantId === null ? (
+        {senderThreadRef !== null && senderThread !== null ? (
+          <Link
+            className="font-medium text-foreground hover:underline"
+            data-j5-a2a-sender-link
+            params={buildThreadRouteParams(senderThreadRef)}
+            title="Open the sender's thread"
+            to="/$environmentId/$threadId"
+          >
+            {senderLabel}
+          </Link>
+        ) : senderTooltipParticipantId === null ? (
           <span className="font-medium text-foreground">{senderLabel}</span>
         ) : (
           <Tooltip>
@@ -644,6 +668,7 @@ export function renderThreadA2ADelivery(props: ThreadA2ADeliveryCompositionInput
         now={props.now}
         outsideAgent={presentation.outsideAgent}
         senderLabel={presentation.senderLabel}
+        senderThreadRef={presentation.senderThreadRef}
         senderTooltipParticipantId={presentation.senderTooltipParticipantId}
         sentAt={props.message.createdAt}
       />
