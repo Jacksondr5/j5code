@@ -30,6 +30,11 @@ const canonical = (value: unknown): unknown => {
   );
 };
 
+export const requestDigest = (request: unknown) =>
+  NodeCrypto.createHash("sha256")
+    .update(JSON.stringify(canonical(request)))
+    .digest("hex");
+
 export interface RequestReplayServiceShape {
   readonly check: (
     id: string,
@@ -53,10 +58,6 @@ export const layer = Layer.effect(
   RequestReplayService,
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    const digestOf = (request: unknown) =>
-      NodeCrypto.createHash("sha256")
-        .update(JSON.stringify(canonical(request)))
-        .digest("hex");
     const check: RequestReplayServiceShape["check"] = Effect.fn("j5.requestReplay.check")(
       function* (id, request) {
         const rows = yield* sql<{ readonly target: string; readonly request_digest: string }>`
@@ -64,7 +65,7 @@ export const layer = Layer.effect(
         `;
         const original = rows[0];
         if (original === undefined) return false;
-        if (original.request_digest !== digestOf(request))
+        if (original.request_digest !== requestDigest(request))
           return yield* new RequestReplayConflictError({ target: original.target, legacy: false });
         return true;
       },
@@ -72,7 +73,7 @@ export const layer = Layer.effect(
     const bind: RequestReplayServiceShape["bind"] = Effect.fn("j5.requestReplay.bind")(function* (
       input,
     ) {
-      const digest = digestOf(input.request);
+      const digest = requestDigest(input.request);
       if (!input.legacy) {
         yield* sql`
             INSERT INTO j5_a2a_request_replay (id, target, request_digest)

@@ -14,6 +14,7 @@ import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
@@ -292,8 +293,16 @@ const assertCrewFull = (error: { readonly _tag: string; readonly message: string
   assert.include(error.message, "propose a new crew");
 };
 
-const fixture = Effect.gen(function* () {
-  const database = NodeSqliteClient.layer({ filename: ":memory:" });
+const fixtureWithDatabase = Effect.fn("test.crewProposal.fixture")(function* (
+  filename: string,
+  options: {
+    readonly beforeCreate?: Effect.Effect<void>;
+    readonly beforeAdmit?: Effect.Effect<void>;
+    readonly afterCreate?: Effect.Effect<void, SqlError>;
+    readonly afterAdmit?: Effect.Effect<void, SqlError>;
+  } = {},
+) {
+  const database = NodeSqliteClient.layer({ filename });
   const storage = Layer.mergeAll(crewInstanceLayer, proposalStoreLayer, ledgerLayer).pipe(
     Layer.provideMerge(database),
   );
@@ -331,6 +340,16 @@ const fixture = Effect.gen(function* () {
   const store = Context.get(context, AgentCrewProposalService);
   const flakyStore = Layer.succeed(AgentCrewProposalService, {
     ...store,
+    create: (input) =>
+      (options.beforeCreate ?? Effect.void).pipe(
+        Effect.andThen(store.create(input)),
+        Effect.tap(() => options.afterCreate ?? Effect.void),
+      ),
+    admit: (input, limits) =>
+      (options.beforeAdmit ?? Effect.void).pipe(
+        Effect.andThen(store.admit(input, limits)),
+        Effect.tap(() => options.afterAdmit ?? Effect.void),
+      ),
     resolve: (input) =>
       Ref.get(resolveFailure).pipe(
         Effect.flatMap((failing) => (failing ? Effect.succeed(null) : store.resolve(input))),
@@ -340,7 +359,9 @@ const fixture = Effect.gen(function* () {
         Effect.flatMap((failing) =>
           failing
             ? Effect.fail(
-                new SqlError({ reason: new UnknownError({ cause: new Error("disk I/O error") }) }),
+                new SqlError({
+                  reason: new UnknownError({ cause: new Error("disk I/O error") }),
+                }),
               )
             : store.attachInstance(id, crewInstanceId),
         ),
@@ -419,6 +440,8 @@ const fixture = Effect.gen(function* () {
     captainModel,
   };
 });
+
+const fixture = fixtureWithDatabase(":memory:");
 
 it.effect("reports what the person decided about a roster, and what they changed first", () =>
   Effect.gen(function* () {
@@ -2411,4 +2434,510 @@ it.effect(
         );
       }).pipe(Effect.provide(layer));
     }).pipe(Effect.scoped),
+);
+
+it.effect.each(["approve", "decline"] as const)(
+  "replays the requested roster after %s and human edits",
+  (decision) =>
+    Effect.gen(function* () {
+      const { layer, notices } = yield* fixture;
+      yield* Effect.gen(function* () {
+        const gate = withPreview(yield* CrewProposalService);
+        const store = yield* AgentCrewProposalService;
+        const input = {
+          requestKey: "roster-replay",
+          captain,
+          displayName: "Replay Crew",
+          brief: "Original brief",
+          seats: [custom("writer")],
+        };
+        const original = yield* gate.propose(input);
+        const replay = yield* gate.propose(input);
+        assert.equal(replay.proposal.id, original.proposal.id);
+        for (const change of [
+          { displayName: "Changed" },
+          { brief: "Changed" },
+          { seats: [{ ...input.seats[0]!, reason: "Changed" }] },
+          { seats: [{ ...input.seats[0]!, instructions: "Changed" }] },
+          {
+            seats: [
+              {
+                ...input.seats[0]!,
+                modelSelection: { instanceId: ProviderInstanceId.make("other"), model: "other" },
+              },
+            ],
+          },
+          {
+            seats: [
+              { ...input.seats[0]!, workspace: { type: "worktree" as const, baseRef: "main" } },
+            ],
+          },
+        ]) {
+          const refused = yield* gate.propose({ ...input, ...change }).pipe(Effect.flip);
+          assert.equal(refused._tag, "CrewProposalRequestError");
+          assert.include(refused.message, original.proposal.id);
+          assert.include(refused.message, "fresh client_request_id");
+        }
+        assert.lengthOf(yield* store.listForCaptain(captainId), 1);
+        assert.lengthOf(yield* Ref.get(notices), 0);
+        const resolved = yield* gate.resolve({
+          proposalId: original.proposal.id,
+          decision,
+          ...(decision === "approve" ? { seats: [custom("editor")] } : {}),
+        });
+        const noticesBefore = yield* Ref.get(notices);
+        const finalReplay = yield* gate.propose(input);
+        assert.equal(finalReplay.proposal.id, original.proposal.id);
+        assert.equal(finalReplay.proposal.status, resolved.proposal.status);
+        assert.equal(finalReplay.instance?.id ?? null, resolved.instance?.id ?? null);
+        assert.deepStrictEqual(yield* Ref.get(notices), noticesBefore);
+        if (decision === "approve") {
+          assert.equal(finalReplay.proposal.approvedSeats?.[0]?.seat, "editor");
+          const changed = yield* gate
+            .propose({ ...input, seats: [custom("editor")] })
+            .pipe(Effect.flip);
+          assert.include(changed.message, "different request");
+        }
+      }).pipe(Effect.provide(layer));
+    }),
+);
+
+it.effect.each(["approve", "decline"] as const)(
+  "replays an addition after %s with the original crew and omitted brief",
+  (decision) =>
+    Effect.gen(function* () {
+      const { layer, notices } = yield* fixture;
+      yield* Effect.gen(function* () {
+        const gate = withPreview(yield* CrewProposalService);
+        const firstCrew = yield* seedCrew(gate, "first-crew", 1);
+        const secondCrew = yield* seedCrew(gate, "second-crew", 1);
+        const input = {
+          requestKey: "addition-replay",
+          captain,
+          crewInstanceId: firstCrew.id,
+          brief: null,
+          seat: custom("writer"),
+        };
+        const original = yield* gate.requestMember(input);
+        assert.equal(original.proposal.brief, firstCrew.brief);
+        for (const change of [
+          { crewInstanceId: secondCrew.id },
+          { brief: "Changed" },
+          { seat: { ...input.seat, reason: "Changed" } },
+          { seat: { ...input.seat, instructions: "Changed" } },
+          { seat: { ...input.seat, workspace: { type: "worktree" as const, baseRef: "main" } } },
+        ]) {
+          const refused = yield* gate.requestMember({ ...input, ...change }).pipe(Effect.flip);
+          assert.equal(refused._tag, "CrewProposalRequestError");
+          assert.include(refused.message, original.proposal.id);
+          assert.include(refused.message, firstCrew.id);
+          assert.include(refused.message, "fresh client_request_id");
+        }
+        const resolved = yield* gate.resolve({
+          proposalId: original.proposal.id,
+          decision,
+          ...(decision === "approve" ? { seats: [custom("editor")] } : {}),
+        });
+        const noticesBefore = yield* Ref.get(notices);
+        const replay = yield* gate.requestMember(input);
+        assert.equal(replay.proposal.id, original.proposal.id);
+        assert.equal(replay.proposal.status, resolved.proposal.status);
+        assert.equal(replay.instance?.id, firstCrew.id);
+        assert.deepStrictEqual(yield* Ref.get(notices), noticesBefore);
+        assert.lengthOf(yield* (yield* AgentCrewProposalService).listForCaptain(captainId), 3);
+      }).pipe(Effect.provide(layer));
+    }),
+);
+
+it.effect(
+  "an identical roster retry survives a disabled persona, while a fresh request is still validated",
+  () =>
+    Effect.gen(function* () {
+      const { layer } = yield* fixture;
+      yield* Effect.gen(function* () {
+        const stateDir = yield* seedPersonas([{ id: "replay-persona", enabled: true }]);
+        const library = createAgentPersonaLibrary({
+          fs: yield* FileSystem.FileSystem,
+          path: yield* Path.Path,
+          stateDir,
+        });
+        const gate = yield* CrewProposalService;
+        const input = {
+          requestKey: "persona-replay",
+          captain,
+          displayName: "Persona Crew",
+          brief: "Original",
+          seats: [{ ...custom("writer"), agentId: "replay-persona" }],
+        };
+        const original = yield* gate.propose(input);
+        yield* library.setEnabled("replay-persona", false);
+        assert.equal((yield* gate.propose(input)).proposal.id, original.proposal.id);
+        const fresh = yield* gate
+          .propose({ ...input, requestKey: "fresh-persona" })
+          .pipe(Effect.flip);
+        assert.equal(fresh._tag, "CrewProposalRequestError");
+        assert.include(fresh.message, "turned off");
+        const corrected = yield* gate.propose({
+          ...input,
+          requestKey: "fresh-persona",
+          seats: [custom("writer")],
+        });
+        assert.notEqual(corrected.proposal.id, original.proposal.id);
+        const changed = yield* gate.propose({ ...input, brief: "Changed" }).pipe(Effect.flip);
+        assert.include(changed.message, "different request");
+      }).pipe(Effect.provide(layer));
+    }),
+);
+
+it.effect(
+  "replays a playbook proposal before live reads and treats its yaml suffix as equivalent",
+  () =>
+    Effect.gen(function* () {
+      const { layer, workspaceRoot, writePlaybook } = yield* playbookFixture;
+      yield* Effect.gen(function* () {
+        const gate = yield* CrewProposalService;
+        const original = yield* proposeRelease(gate, workspaceRoot);
+        assert.isNotEmpty(original.proposal.requestedSeats[0]?.personaSwaps ?? []);
+        yield* writePlaybook("release", "title: [");
+        const replay = yield* gate.propose({
+          requestKey: "release",
+          captain,
+          displayName: "Release Crew",
+          brief: "Ship the change.",
+          playbook: { name: "release.yaml", workspaceRoot },
+          seats: [custom("planner", ["plan"]), custom("builder", ["build"])],
+        });
+        assert.equal(replay.proposal.id, original.proposal.id);
+        assert.deepStrictEqual(replay.proposal.requestedSeats, original.proposal.requestedSeats);
+        const fresh = yield* proposeRelease(gate, workspaceRoot, "fresh-release").pipe(Effect.flip);
+        assert.equal(fresh._tag, "CrewProposalRequestError");
+        assert.include(fresh.message, "release");
+        assert.lengthOf(yield* (yield* AgentCrewProposalService).listForCaptain(captainId), 1);
+        yield* writePlaybook("release", stringify(release()));
+        const corrected = yield* proposeRelease(gate, workspaceRoot, "fresh-release");
+        assert.notEqual(corrected.proposal.id, original.proposal.id);
+        assert.lengthOf(yield* (yield* AgentCrewProposalService).listForCaptain(captainId), 2);
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
+);
+
+it.effect.each([
+  { kind: "roster", different: false },
+  { kind: "roster", different: true },
+  { kind: "addition", different: false },
+  { kind: "addition", different: true },
+] as const)(
+  "concurrent $kind requests (different=$different) retain one proposal and compare the winning row",
+  ({ kind, different }) =>
+    Effect.gen(function* () {
+      const entered = yield* Ref.make(0);
+      const both = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      const barrier = Ref.updateAndGet(entered, (count) => count + 1).pipe(
+        Effect.tap((count) => (count === 2 ? Deferred.succeed(both, undefined) : Effect.void)),
+        Effect.andThen(Deferred.await(release)),
+      );
+      const { layer } = yield* fixtureWithDatabase(
+        ":memory:",
+        kind === "roster" ? { beforeCreate: barrier } : { beforeAdmit: barrier },
+      );
+      yield* Effect.gen(function* () {
+        const gate = withPreview(yield* CrewProposalService);
+        const crew = kind === "addition" ? yield* seedCrew(gate, "nearly-full", 11) : null;
+        const call = (brief: string) =>
+          kind === "roster"
+            ? gate.propose({
+                requestKey: "same-key",
+                captain,
+                displayName: "Concurrent Crew",
+                brief,
+                seats: [custom("writer")],
+              })
+            : gate.requestMember({
+                requestKey: "same-key",
+                captain,
+                crewInstanceId: crew!.id,
+                brief,
+                seat: custom("writer"),
+              });
+        const calls = yield* Effect.all(
+          [
+            call("Original").pipe(Effect.result),
+            call(different ? "Changed" : "Original").pipe(Effect.result),
+          ],
+          { concurrency: "unbounded" },
+        ).pipe(Effect.forkChild({ startImmediately: true }));
+        yield* Effect.raceFirst(
+          Deferred.await(both),
+          Fiber.join(calls).pipe(
+            Effect.flatMap(() =>
+              Effect.die(new Error("Requests completed before reaching both writes")),
+            ),
+          ),
+        );
+        yield* Deferred.succeed(release, undefined);
+        const results = yield* Fiber.join(calls);
+        const successes = results.filter(Result.isSuccess);
+        const failures = results.filter(Result.isFailure);
+        assert.lengthOf(successes, different ? 1 : 2);
+        assert.lengthOf(failures, different ? 1 : 0);
+        const original = successes[0]!.success.proposal;
+        if (different) {
+          assert.equal(failures[0]?.failure._tag, "CrewProposalRequestError");
+          assert.include(failures[0]!.failure.message, original.id);
+          assert.include(failures[0]!.failure.message, "fresh client_request_id");
+          if (crew !== null) assert.include(failures[0]!.failure.message, crew.id);
+        }
+        const proposals = yield* (yield* AgentCrewProposalService).listForCaptain(captainId);
+        assert.lengthOf(proposals, kind === "addition" ? 2 : 1);
+        assert.lengthOf(
+          proposals.filter((proposal) => proposal.id === original.id),
+          1,
+        );
+        const replay =
+          original.kind === "roster"
+            ? yield* gate.propose({
+                requestKey: "same-key",
+                captain,
+                displayName: "Concurrent Crew",
+                brief: original.brief,
+                seats: [custom("writer")],
+              })
+            : yield* gate.requestMember({
+                requestKey: "same-key",
+                captain,
+                crewInstanceId: crew!.id,
+                brief: original.brief,
+                seat: custom("writer"),
+              });
+        assert.equal(replay.proposal.id, original.id);
+        if (crew !== null)
+          assert.lengthOf((yield* (yield* AgentCrewInstanceService).read(crew.id))!.members, 11);
+      }).pipe(Effect.provide(layer));
+    }),
+);
+
+it.effect.each(["roster", "addition"] as const)(
+  "replays a committed %s after a lost response and database reopen",
+  (kind) =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const filename = path.join(yield* fs.makeTempDirectoryScoped(), "crew-replay.sqlite");
+      const failResponse = yield* Ref.make(false);
+      const loseResponse = Ref.get(failResponse).pipe(
+        Effect.flatMap((fail) =>
+          fail
+            ? Effect.fail(
+                new SqlError({
+                  reason: new UnknownError({ cause: new Error("response lost after commit") }),
+                }),
+              )
+            : Effect.void,
+        ),
+      );
+      const saved = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const { layer } = yield* fixtureWithDatabase(filename, {
+            afterCreate: loseResponse,
+            afterAdmit: loseResponse,
+          });
+          return yield* Effect.gen(function* () {
+            const gate = withPreview(yield* CrewProposalService);
+            const crew = kind === "addition" ? yield* seedCrew(gate, "persisted-crew", 1) : null;
+            const request = {
+              requestKey: "persisted-request",
+              captain,
+              displayName: "Persisted Crew",
+              brief: "Original persisted brief",
+              seats: [custom("writer")],
+            };
+            const memberRequest = {
+              requestKey: request.requestKey,
+              captain,
+              crewInstanceId: crew?.id ?? null,
+              brief: null,
+              seat: custom("writer"),
+            };
+            yield* Ref.set(failResponse, true);
+            const failure = yield* (
+              kind === "roster" ? gate.propose(request) : gate.requestMember(memberRequest)
+            ).pipe(Effect.flip);
+            assert.equal(failure._tag, "CrewProposalOperationError");
+            assert.include(failure.message, "recording the proposal");
+            const rows = yield* (yield* AgentCrewProposalService).listForCaptain(captainId);
+            const original = rows.find((proposal) => proposal.kind === kind)!;
+            assert.isDefined(original);
+            assert.equal(original.status, "open");
+            assert.lengthOf(rows, kind === "roster" ? 1 : 2);
+            return { original, request, memberRequest };
+          }).pipe(Effect.provide(layer));
+        }),
+      );
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const { layer, notices } = yield* fixtureWithDatabase(filename, {
+            beforeCreate: Effect.die(
+              new Error("A persisted retry must read the original instead of creating again"),
+            ),
+            beforeAdmit: Effect.die(
+              new Error("A persisted retry must read the original instead of admitting again"),
+            ),
+          });
+          yield* Effect.gen(function* () {
+            const gate = yield* CrewProposalService;
+            const replay =
+              kind === "roster"
+                ? yield* gate.propose(saved.request)
+                : yield* gate.requestMember(saved.memberRequest);
+            assert.equal(replay.proposal.id, saved.original.id);
+            assert.equal(replay.proposal.brief, saved.original.brief);
+            const changed = yield* (
+              kind === "roster"
+                ? gate.propose({ ...saved.request, brief: "Changed" })
+                : gate.requestMember({ ...saved.memberRequest, brief: "Changed" })
+            ).pipe(Effect.flip);
+            assert.equal(changed._tag, "CrewProposalRequestError");
+            assert.include(changed.message, saved.original.id);
+            assert.include(changed.message, "fresh client_request_id");
+            assert.lengthOf(yield* Ref.get(notices), 0);
+            assert.lengthOf(
+              yield* (yield* AgentCrewProposalService).listForCaptain(captainId),
+              kind === "roster" ? 1 : 2,
+            );
+          }).pipe(Effect.provide(layer));
+        }),
+      );
+    }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect("validation refusals leave proposal retry keys available for a corrected request", () =>
+  Effect.gen(function* () {
+    const { layer } = yield* fixture;
+    yield* Effect.gen(function* () {
+      const gate = withPreview(yield* CrewProposalService);
+      const roster = {
+        requestKey: "corrected-roster",
+        captain,
+        displayName: "Corrected Crew",
+        brief: "Original",
+        seats: [{ ...custom("writer"), instructions: undefined }],
+      };
+      const refused = yield* gate.propose(roster).pipe(Effect.flip);
+      assert.equal(refused._tag, "CrewProposalRequestError");
+      assert.include(refused.message, "instructions");
+      assert.lengthOf(yield* (yield* AgentCrewProposalService).listForCaptain(captainId), 0);
+      const opened = yield* gate.propose({ ...roster, seats: [custom("writer")] });
+      const approved = yield* gate.resolve({ proposalId: opened.proposal.id, decision: "approve" });
+      const addition = {
+        requestKey: "corrected-addition",
+        captain,
+        crewInstanceId: approved.instance!.id,
+        brief: null,
+        seat: custom("writer"),
+      };
+      const duplicate = yield* gate.requestMember(addition).pipe(Effect.flip);
+      assert.equal(duplicate._tag, "CrewProposalRequestError");
+      assert.include(duplicate.message, "already has a seat");
+      const corrected = yield* gate.requestMember({ ...addition, seat: custom("editor") });
+      assert.equal(corrected.proposal.requestedSeats[0]?.seat, "editor");
+      assert.lengthOf(yield* (yield* AgentCrewProposalService).listForCaptain(captainId), 2);
+    }).pipe(Effect.provide(layer));
+  }),
+);
+
+it.effect("compares normalized workspace defaults while preserving requested roster order", () =>
+  Effect.gen(function* () {
+    const { layer } = yield* fixture;
+    yield* Effect.gen(function* () {
+      const gate = yield* CrewProposalService;
+      const input = {
+        requestKey: "normalized-roster",
+        captain,
+        displayName: "Workspace Crew",
+        brief: "Original",
+        seats: [
+          { ...custom("writer"), workspace: { type: "worktree" as const, baseRef: "main" } },
+          {
+            ...custom("editor"),
+            workspace: {
+              type: "existing_worktree" as const,
+              worktreePath: "/repo-worktrees/editor/",
+            },
+          },
+        ],
+      };
+      const original = yield* gate.propose(input);
+      const replay = yield* gate.propose({
+        ...input,
+        seats: [
+          {
+            ...input.seats[0]!,
+            workspace: { type: "worktree", baseRef: "main", startFromOrigin: false },
+          },
+          {
+            ...input.seats[1]!,
+            workspace: { type: "existing_worktree", worktreePath: "/repo-worktrees/editor" },
+          },
+        ],
+      });
+      assert.equal(replay.proposal.id, original.proposal.id);
+      const reordered = yield* gate
+        .propose({ ...input, seats: input.seats.toReversed() })
+        .pipe(Effect.flip);
+      assert.equal(reordered._tag, "CrewProposalRequestError");
+      assert.include(reordered.message, original.proposal.id);
+      assert.lengthOf(yield* (yield* AgentCrewProposalService).listForCaptain(captainId), 1);
+    }).pipe(Effect.provide(layer));
+  }),
+);
+
+it.effect("identical richly populated custom seats replay after their stored JSON round trip", () =>
+  Effect.gen(function* () {
+    const { layer, workspaceRoot } = yield* playbookFixture;
+    yield* Effect.gen(function* () {
+      const gate = yield* CrewProposalService;
+      const input = yield* decodeProposeCrew({
+        name: "Rich Replay",
+        brief: "Preserve every seat choice",
+        playbook: "release",
+        seats: [
+          {
+            seat: "writer",
+            reason: "Write the implementation",
+            instructions: "Keep the launch choices exactly as requested.",
+            model_selection: {
+              instanceId: "codex",
+              model: "gpt-5.6-sol",
+              options: [{ id: "reasoningEffort", value: "high" }],
+            },
+            runtime_mode: "approval-required",
+            steps: ["build"],
+            workspace: {
+              type: "worktree",
+              base_ref: "main",
+              branch: "feature/replay",
+              start_from_origin: false,
+            },
+          },
+        ],
+      });
+      const request = {
+        requestKey: "rich-replay",
+        captain,
+        displayName: input.name,
+        brief: input.brief,
+        playbook: { name: input.playbook!, workspaceRoot },
+        seats: input.seats.map(crewSeatFromInput),
+      };
+      const original = yield* gate.propose(request);
+      const stored = yield* (yield* AgentCrewProposalService).read(original.proposal.id);
+      assert.deepStrictEqual(stored?.requestedSeats[0]?.modelSelection?.options, [
+        { id: "reasoningEffort", value: "high" },
+      ]);
+      const replay = yield* gate.propose(request);
+      assert.deepStrictEqual(replay.proposal, original.proposal);
+      assert.lengthOf(yield* (yield* AgentCrewProposalService).listForCaptain(captainId), 1);
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
 );
