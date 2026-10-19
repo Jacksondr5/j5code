@@ -1,9 +1,10 @@
 # Playbooks
 
 Playbooks give an agent an ordered sequence of prompts. The agent does the work
-in its existing thread and decides when to advance. The thread's phase board
-shows the current step and whether the run is active, completed, or cancelled.
-Earlier steps describe position, not a guarantee that their work passed validation.
+in its existing thread and decides when to advance. The progress bar above the
+chat box shows the current stage and whether the run is active, completed, or
+cancelled. A checked stage means the agent moved past it, not that its work was
+verified.
 
 Open **Settings → Personas → Playbooks** and select a project or thread worktree to see
 its definitions and steps. Playbook Author runs on Codex in the selected workspace. It helps shape the steps,
