@@ -469,7 +469,7 @@ export function SkillInventoryPanel({ environmentId }: { readonly environmentId:
                                         <span
                                           role="img"
                                           tabIndex={0}
-                                          className="inline-flex items-center gap-1.5 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                          className="inline-flex items-center gap-1.5 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                                           aria-label={statusLabel}
                                         >
                                           <ProviderInstanceIcon
