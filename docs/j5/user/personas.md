@@ -85,4 +85,4 @@ The task's persona control (web, desktop, and mobile) and, on web and desktop, t
 
 The persona library is separate from the Lineage section and subagent cards, which show runtime activity.
 
-For environment setup, see [Configure a persona library](../operations/persona-library.md).
+For environment setup, see [Configure a persona library](../runbooks/persona-library.md).
