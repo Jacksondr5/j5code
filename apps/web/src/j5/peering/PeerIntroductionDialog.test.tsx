@@ -130,7 +130,13 @@ afterEach(async () => {
 });
 
 const dialog = () => (
-  <PeerIntroductionDialog open onOpenChange={() => {}} thisServerId={LOCAL} onPeered={() => {}} />
+  <PeerIntroductionDialog
+    open
+    onOpenChange={() => {}}
+    servers={[LOCAL]}
+    defaultServerId={LOCAL}
+    onPeered={() => {}}
+  />
 );
 const button = (label: string): ReactTestInstance =>
   renderer!.root.findAllByType("button").find((found) => found.props.children === label)!;
@@ -147,7 +153,7 @@ const chooseRemote = async () => {
   await act(async () => {
     renderer = create(dialog());
   });
-  await act(async () => renderer!.root.findByType(Select).props.onValueChange(REMOTE));
+  await act(async () => renderer!.root.findAllByType(Select)[1]!.props.onValueChange(REMOTE));
 };
 const clickPeer = async () => {
   await act(async () => button("Peer").props.onClick());
