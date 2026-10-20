@@ -111,13 +111,16 @@ export const makeClientReadRpcHandlers = Effect.fn("j5.makeClientReadRpcHandlers
           Effect.catch(failed("Reading crew requests failed.")),
         );
         const mayAnswer = yield* writes;
-        return {
-          // A seat's approval is the seat's own prompt: whoever writes to the seat's thread
-          // answers it, everyone who writes to its Captain's included.
-          requests: yield* Effect.filter(listed.requests, (request) =>
-            mayAnswer(Effect.succeed(request.threadId)),
-          ),
-        };
+        // A seat's approval or question is the seat's own prompt: whoever writes to the seat's
+        // thread answers it, everyone who writes to its Captain's included.
+        const requests = yield* Effect.filter(listed.requests, (request) =>
+          mayAnswer(Effect.succeed(request.threadId)),
+        );
+        if (listed.questions === undefined) return { requests };
+        const questions = yield* Effect.filter(listed.questions, (question) =>
+          mayAnswer(Effect.succeed(question.threadId)),
+        );
+        return { requests, questions };
       }),
     [METHODS.listCrewMemberships]: (input: ThreadHomesRequest) =>
       Effect.gen(function* () {
