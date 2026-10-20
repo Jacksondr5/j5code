@@ -2972,54 +2972,44 @@ it.effect.each(["delete", "rename"] as const)(
     }).pipe(Effect.scoped),
 );
 
-it.effect("replays the requested playbook identity when library selection changes", () =>
+it.effect("replays a folder-library proposal after local overrides and source removal", () =>
   Effect.gen(function* () {
     const { layer, workspaceRoot } = yield* playbookFixture;
     yield* Effect.gen(function* () {
       const store = yield* PlaybookStore;
+      const gate = yield* CrewProposalService;
       const path = yield* Path.Path;
       const fs = yield* FileSystem.FileSystem;
       const library = yield* fs.makeTempDirectoryScoped();
-      yield* fs.makeDirectory(path.join(library, ".j5/playbooks"), { recursive: true });
-      const libraryFile = path.join(library, ".j5/playbooks/release.yaml");
-      yield* fs.copyFile(path.join(workspaceRoot, ".j5/playbooks/release.yaml"), libraryFile);
-      const shadowed = yield* Ref.make(false);
-      const selectedStore = {
-        ...store,
-        definitionPathFor: (root: string, name: string) =>
-          Ref.get(shadowed).pipe(
-            Effect.flatMap((local) =>
-              local
-                ? store.definitionPathFor(root, name)
-                : store
-                    .definitionPathFor(root, name)
-                    .pipe(
-                      Effect.map((selection) => ({ ...selection, definitionPath: libraryFile })),
-                    ),
-            ),
-          ),
-      };
-      yield* Effect.gen(function* () {
-        const gate = yield* CrewProposalService;
-        const original = yield* proposeRelease(gate, workspaceRoot);
-        assert.equal(original.proposal.playbook?.definitionPath, libraryFile);
-        yield* Ref.set(shadowed, true);
-        const replay = yield* proposeRelease(gate, workspaceRoot);
-        assert.deepStrictEqual(replay.proposal, original.proposal);
-        const stored = yield* (yield* AgentCrewProposalService).read(original.proposal.id);
-        assert.equal(stored?.playbook?.requestWorkspaceRoot, path.resolve(workspaceRoot));
-        const fresh = yield* proposeRelease(gate, workspaceRoot, "fresh");
-        assert.equal(
-          fresh.proposal.playbook?.definitionPath,
-          path.join(workspaceRoot, ".j5/playbooks/release.yaml"),
-        );
-      }).pipe(
-        Effect.provide(
-          Layer.fresh(crewProposalLayer).pipe(
-            Layer.provide(Layer.succeed(PlaybookStore, selectedStore)),
-          ),
-        ),
+      const libraryFile = path.join(library, "release.yaml");
+      const localFile = path.join(workspaceRoot, ".j5/playbooks/release.yaml");
+      const yaml = yield* fs.readFileString(localFile);
+      yield* fs.writeFileString(libraryFile, yaml);
+      yield* store.setFolders({ folders: [library] });
+      yield* fs.remove(localFile);
+
+      const original = yield* proposeRelease(gate, workspaceRoot);
+      assert.equal(original.proposal.playbook?.definitionPath, libraryFile);
+      assert.equal(original.proposal.playbook?.requestWorkspaceRoot, path.resolve(workspaceRoot));
+      assert.equal(
+        (yield* store.definitionPathFor(`${workspaceRoot}/other`, "release")).definitionPath,
+        libraryFile,
       );
+      const changed = yield* proposeRelease(gate, `${workspaceRoot}/other`).pipe(Effect.flip);
+      assert.equal(changed._tag, "CrewProposalRequestError");
+      assert.include(changed.message, "different request");
+
+      yield* fs.writeFileString(localFile, yaml);
+      const replay = yield* proposeRelease(gate, workspaceRoot);
+      assert.deepStrictEqual(replay.proposal, original.proposal);
+      const fresh = yield* proposeRelease(gate, workspaceRoot, "fresh");
+      assert.equal(fresh.proposal.playbook?.definitionPath, localFile);
+
+      yield* store.setFolders({ folders: [] });
+      yield* fs.remove(libraryFile);
+      const afterRemoval = yield* proposeRelease(gate, workspaceRoot);
+      assert.deepStrictEqual(afterRemoval.proposal, original.proposal);
+      assert.lengthOf(yield* (yield* AgentCrewProposalService).listForCaptain(captainId), 2);
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.scoped),
 );
