@@ -48,10 +48,12 @@ export const CrewProposalSeat = Schema.Struct({
 });
 export type CrewProposalSeat = typeof CrewProposalSeat.Type;
 
-/** The resolved playbook a Crew follows. */
+/** The resolved playbook a Crew follows, with optional original request context for replay. */
 export interface CrewPlaybookRef {
   readonly name: string;
   readonly definitionPath: string;
+  /** Normalized request workspace, independent of the live library selection. */
+  readonly requestWorkspaceRoot?: string | undefined;
 }
 
 const Seats = Schema.Array(CrewProposalSeat);
@@ -175,6 +177,7 @@ interface Row {
   readonly reported_at: string | null;
   readonly playbook_name: string | null;
   readonly playbook_definition_path: string | null;
+  readonly playbook_request_workspace_root: string | null;
 }
 
 const fromRow = (row: Row): CrewProposal => ({
@@ -198,6 +201,9 @@ const fromRow = (row: Row): CrewProposal => ({
       : {
           name: row.playbook_name,
           definitionPath: row.playbook_definition_path,
+          ...(row.playbook_request_workspace_root === null
+            ? {}
+            : { requestWorkspaceRoot: row.playbook_request_workspace_root }),
         },
 });
 
@@ -221,13 +227,13 @@ export const layer: Layer.Layer<AgentCrewProposalService, never, SqlClient.SqlCl
           INSERT OR IGNORE INTO j5_agent_crew_proposal (
             id, project_id, captain_participant_id, captain_thread_id, crew_instance_id, kind,
             status, brief, display_name, requested_seats, approved_seats, created_at, resolved_at,
-            reported_at, playbook_name, playbook_definition_path
+            reported_at, playbook_name, playbook_definition_path, playbook_request_workspace_root
           ) VALUES (
             ${input.id}, ${input.projectId}, ${input.captainParticipantId},
             ${input.captainThreadId}, ${input.crewInstanceId}, ${input.kind}, 'open',
             ${input.brief}, ${input.displayName}, ${encodeSeats(input.requestedSeats)}, NULL,
             ${input.createdAt}, NULL, NULL, ${input.playbook?.name ?? null},
-            ${input.playbook?.definitionPath ?? null}
+            ${input.playbook?.definitionPath ?? null}, ${input.playbook?.requestWorkspaceRoot ?? null}
           )
         `;
         return (yield* read(input.id))!;

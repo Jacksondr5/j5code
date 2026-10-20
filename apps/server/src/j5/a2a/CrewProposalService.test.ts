@@ -20,6 +20,7 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
+import * as SqlClient from "effect/sql/SqlClient";
 import * as Schema from "effect/Schema";
 import { SqlError, UnknownError } from "effect/sql/SqlError";
 import { stringify } from "yaml";
@@ -1808,6 +1809,7 @@ it.effect(
         assert.deepStrictEqual(stored.playbook, {
           name: "release",
           definitionPath: `${workspaceRoot}/.j5/playbooks/release.yaml`,
+          requestWorkspaceRoot: workspaceRoot,
         });
         assert.deepStrictEqual(
           stored.requestedSeats.map(({ seat, steps }) => [seat, steps]),
@@ -2970,6 +2972,58 @@ it.effect.each(["delete", "rename"] as const)(
     }).pipe(Effect.scoped),
 );
 
+it.effect("replays the requested playbook identity when library selection changes", () =>
+  Effect.gen(function* () {
+    const { layer, workspaceRoot } = yield* playbookFixture;
+    yield* Effect.gen(function* () {
+      const store = yield* PlaybookStore;
+      const path = yield* Path.Path;
+      const fs = yield* FileSystem.FileSystem;
+      const library = yield* fs.makeTempDirectoryScoped();
+      yield* fs.makeDirectory(path.join(library, ".j5/playbooks"), { recursive: true });
+      const libraryFile = path.join(library, ".j5/playbooks/release.yaml");
+      yield* fs.copyFile(path.join(workspaceRoot, ".j5/playbooks/release.yaml"), libraryFile);
+      const shadowed = yield* Ref.make(false);
+      const selectedStore = {
+        ...store,
+        definitionPathFor: (root: string, name: string) =>
+          Ref.get(shadowed).pipe(
+            Effect.flatMap((local) =>
+              local
+                ? store.definitionPathFor(root, name)
+                : store
+                    .definitionPathFor(root, name)
+                    .pipe(
+                      Effect.map((selection) => ({ ...selection, definitionPath: libraryFile })),
+                    ),
+            ),
+          ),
+      };
+      yield* Effect.gen(function* () {
+        const gate = yield* CrewProposalService;
+        const original = yield* proposeRelease(gate, workspaceRoot);
+        assert.equal(original.proposal.playbook?.definitionPath, libraryFile);
+        yield* Ref.set(shadowed, true);
+        const replay = yield* proposeRelease(gate, workspaceRoot);
+        assert.deepStrictEqual(replay.proposal, original.proposal);
+        const stored = yield* (yield* AgentCrewProposalService).read(original.proposal.id);
+        assert.equal(stored?.playbook?.requestWorkspaceRoot, path.resolve(workspaceRoot));
+        const fresh = yield* proposeRelease(gate, workspaceRoot, "fresh");
+        assert.equal(
+          fresh.proposal.playbook?.definitionPath,
+          path.join(workspaceRoot, ".j5/playbooks/release.yaml"),
+        );
+      }).pipe(
+        Effect.provide(
+          Layer.fresh(crewProposalLayer).pipe(
+            Layer.provide(Layer.succeed(PlaybookStore, selectedStore)),
+          ),
+        ),
+      );
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
 it.effect("refuses changed playbook names, workspaces and authority before catalog lookup", () =>
   Effect.gen(function* () {
     const { layer, workspaceRoot } = yield* playbookFixture;
@@ -3007,18 +3061,20 @@ it.effect("refuses changed playbook names, workspaces and authority before catal
   }).pipe(Effect.scoped),
 );
 
-it.effect("replays persisted local playbook proposals without consulting the live catalog", () =>
+it.effect("replays legacy local playbook proposals without consulting the live catalog", () =>
   Effect.gen(function* () {
     const { layer, workspaceRoot } = yield* playbookFixture;
     yield* Effect.gen(function* () {
       const gate = yield* CrewProposalService;
       const original = yield* proposeRelease(gate, workspaceRoot);
-      const persisted = yield* (yield* AgentCrewProposalService).read(original.proposal.id);
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`UPDATE j5_agent_crew_proposal SET playbook_request_workspace_root = NULL WHERE id = ${original.proposal.id}`;
+      const legacy = yield* (yield* AgentCrewProposalService).read(original.proposal.id);
       yield* (yield* FileSystem.FileSystem).remove(
         (yield* Path.Path).join(workspaceRoot, ".j5/playbooks/release.yaml"),
       );
       const replay = yield* proposeRelease(gate, workspaceRoot);
-      assert.deepStrictEqual(replay.proposal, persisted);
+      assert.deepStrictEqual(replay.proposal, legacy);
       const changed = yield* proposeRelease(gate, `${workspaceRoot}/other`).pipe(Effect.flip);
       assert.equal(changed._tag, "CrewProposalRequestError");
       assert.include(changed.message, "different request");

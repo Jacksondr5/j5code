@@ -244,7 +244,10 @@ const proposalRequest = (proposal: CreateCrewProposalInput | CrewProposal) => ({
   crewInstanceId: proposal.kind === "addition" ? proposal.crewInstanceId : null,
   brief: proposal.brief,
   displayName: proposal.displayName,
-  playbook: proposal.playbook?.definitionPath ?? null,
+  playbook:
+    proposal.playbook?.requestWorkspaceRoot === undefined
+      ? { path: proposal.playbook?.definitionPath ?? null }
+      : { name: proposal.playbook.name, workspaceRoot: proposal.playbook.requestWorkspaceRoot },
   seats: proposal.requestedSeats.map(({ personaSwaps: _swaps, workspace, ...seat }) => ({
     ...seat,
     workspace:
@@ -643,17 +646,34 @@ export const layer = Layer.effect(
         let playbookRef: CrewPlaybookRef | null = null;
         if (input.playbook !== undefined) {
           const { name, workspaceRoot } = input.playbook;
+          const requestWorkspaceRoot = path.resolve(workspaceRoot);
           if (original === null) {
             playbookRef = yield* playbooks.definitionPathFor(workspaceRoot, name).pipe(
-              Effect.map(({ stem, definitionPath }) => ({ name: stem, definitionPath })),
+              Effect.map(({ stem, definitionPath }) => ({
+                name: stem,
+                definitionPath,
+                requestWorkspaceRoot,
+              })),
               Effect.mapError(playbookRefusal(name, "propose")),
             );
           } else {
             const stem = name.endsWith(".yaml") ? name.slice(0, -5) : name;
-            playbookRef = {
-              name: stem,
-              definitionPath: path.resolve(workspaceRoot, ".j5/playbooks", `${stem}.yaml`),
-            };
+            // Library paths do not identify the caller workspace; old rows can only prove local intent.
+            playbookRef =
+              original.playbook?.requestWorkspaceRoot === undefined
+                ? {
+                    name: stem,
+                    definitionPath: path.resolve(
+                      requestWorkspaceRoot,
+                      ".j5/playbooks",
+                      `${stem}.yaml`,
+                    ),
+                  }
+                : {
+                    name: stem,
+                    definitionPath: original.playbook.definitionPath,
+                    requestWorkspaceRoot,
+                  };
           }
         }
         const request = {
