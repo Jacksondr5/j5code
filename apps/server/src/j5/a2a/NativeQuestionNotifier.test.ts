@@ -523,6 +523,65 @@ it.effect("notifies about an unresumable pending question without promising an a
   }),
 );
 
+it.effect.each(["waiting", "completed", "failed"] as const)(
+  "skips parent reads on a %s run with no pending native question",
+  (status) =>
+    Effect.gen(function* () {
+      const fixture = yield* setup;
+      fixture.state.set(childId, {
+        ...fixture.state.get(childId)!,
+        runtimeRequests: [
+          { ...question(), status: "resolved", resolvedAt: now },
+          { ...question(), id: RuntimeRequestId.make("approval:pending"), kind: "command" },
+        ],
+      });
+      yield* fixture.notifier.handleStoredEvent({
+        sequence: 2,
+        commandId: null,
+        event: {
+          id: EventId.make(`event:idle-run:${status}`),
+          type: "run.updated",
+          threadId: childId,
+          occurredAt: now,
+          payload: run(childId, status),
+        },
+      });
+      assert.deepEqual(fixture.dispatched, []);
+      assert.deepEqual(fixture.reads, [{ threadId: childId, records: ["runtimeRequests"] }]);
+    }),
+);
+
+it.effect("a spawned live Captain still notifies its placement parent about its own question", () =>
+  Effect.gen(function* () {
+    const fixture = yield* setup;
+    yield* Context.get(fixture.context, Crews.AgentCrewInstanceService).record({
+      id: "crew:spawned-captain",
+      projectId,
+      captainParticipantId: Homes.participantIdForThread(childId),
+      captainThreadId: childId,
+      displayName: "Nested Crew",
+      brief: "Do the task",
+      createdAt: timestamp,
+      members: [
+        {
+          seatName: "builder",
+          agentId: null,
+          participantId: Homes.participantIdForThread(ThreadId.make("thread:nested-seat")),
+          threadId: ThreadId.make("thread:nested-seat"),
+          reason: null,
+        },
+      ],
+    });
+    const request = question();
+    fixture.setRequest(request);
+    yield* fixture.notifier.handleStoredEvent(storedRequest(request));
+    assert.equal(fixture.dispatched.length, 1);
+    const notice = fixture.dispatched[0];
+    assert.equal(notice?.type, "message.dispatch");
+    if (notice?.type === "message.dispatch") assert.equal(notice.threadId, parentId);
+  }),
+);
+
 it.effect.each(["live", "retired"] as const)(
   "notifies the Captain only for a live Crew seat: %s Crew",
   (lifecycle) =>

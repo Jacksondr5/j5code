@@ -15,6 +15,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as Statement from "effect/sql/Statement";
 
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
@@ -419,5 +420,38 @@ it.effect("leaves a placed live Captain's question inline in its own thread", ()
     yield* fixture.crew("crew:captains", seat, captain);
     assert.deepEqual(yield* fixture.read, []);
     assert.deepEqual(fixture.reads, []);
+  }),
+);
+
+it.effect("bounds placement query results to threads with a pending request", () =>
+  Effect.gen(function* () {
+    const fixture = yield* setup;
+    const pending = ThreadId.make("thread:only-pending-peer");
+    yield* fixture.add(pending, [question("pending-question")]);
+    for (const id of ["idle-one", "idle-two", "idle-three"])
+      yield* fixture.add(ThreadId.make(`thread:${id}`));
+    const queries: Array<readonly [string, ReadonlyArray<unknown>]> = [];
+    const listed = yield* fixture.read.pipe(
+      Effect.provideService(Statement.CurrentTransformer, (statement) =>
+        Effect.sync(() => {
+          const compiled = statement.compile();
+          if (compiled[0].includes("JOIN j5_a2a_participant_placement")) queries.push(compiled);
+          return statement;
+        }),
+      ),
+    );
+    assert.deepEqual(
+      listed.map((item) => item.threadId),
+      [pending],
+    );
+    assert.equal(queries.length, 1);
+    const [query, parameters] = queries[0]!;
+    const sql = Context.get(fixture.context, SqlClient.SqlClient);
+    // Inspect the executed query's result size, before any in-memory filtering.
+    const rows = yield* sql.unsafe<{ count: number }>(
+      `SELECT COUNT(*) AS count FROM (${query})`,
+      parameters,
+    );
+    assert.equal(rows[0]?.count, 1);
   }),
 );

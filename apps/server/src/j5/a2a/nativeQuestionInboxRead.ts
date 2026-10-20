@@ -31,15 +31,15 @@ export const makeNativeQuestionInboxRead = Effect.gen(function* () {
         .map((thread) => thread.id),
     );
     if (pending.size === 0) return [];
-    const placed = yield* sql<{ readonly thread_id: string; readonly project_id: string }>`
+    const candidates = yield* sql<{ readonly thread_id: string; readonly project_id: string }>`
       SELECT m.thread_id, m.project_id
       FROM j5_a2a_membership m
       JOIN j5_a2a_participant_placement p
         ON p.project_id = m.project_id AND p.participant_id = m.participant_id
       WHERE m.archived_at IS NULL AND m.thread_id IS NOT NULL
+        AND m.thread_id IN ${sql.in([...pending])}
         AND p.provenance_kind = 'spawned-by' AND p.provenance_source = 'j5_spawn'
     `;
-    const candidates = placed.filter((row) => pending.has(ThreadId.make(row.thread_id)));
     const memberships = yield* crews.listInvolving({
       threadIds: candidates.map((row) => ThreadId.make(row.thread_id)),
       participantIds: [],
