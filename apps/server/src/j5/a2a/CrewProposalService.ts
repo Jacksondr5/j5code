@@ -12,6 +12,7 @@ import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
 
 import * as KeyedLock from "@t3tools/shared/KeyedLock";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
@@ -242,7 +243,10 @@ const proposalRequest = (proposal: CreateCrewProposalInput | CrewProposal) => ({
   crewInstanceId: proposal.kind === "addition" ? proposal.crewInstanceId : null,
   brief: proposal.brief,
   displayName: proposal.displayName,
-  playbookPath: proposal.playbook?.definitionPath ?? null,
+  playbook:
+    proposal.playbook?.requestWorkspaceRoot === undefined
+      ? { path: proposal.playbook?.definitionPath ?? null }
+      : { name: proposal.playbook.name, workspaceRoot: proposal.playbook.requestWorkspaceRoot },
   seats: proposal.requestedSeats.map(({ personaSwaps: _swaps, workspace, ...seat }) => ({
     ...seat,
     workspace:
@@ -291,6 +295,7 @@ export const layer = Layer.effect(
     const ledger = yield* A2ALedger;
     const agents = yield* makeAgentPersonaLibrary;
     const playbooks = yield* PlaybookStore;
+    const path = yield* Path.Path;
     // One resolution of a proposal at a time on this server, so an approval and a decline from
     // two devices cannot interleave; the store's compare-and-set from open decides the winner.
     const gates = yield* KeyedLock.make<string>();
@@ -636,15 +641,39 @@ export const layer = Layer.effect(
         const original = yield* proposals
           .read(id)
           .pipe(Effect.mapError(operationError("reading the proposal")));
-        const playbookRef =
-          input.playbook === undefined
-            ? null
-            : yield* playbooks
-                .definitionPathFor(input.playbook.workspaceRoot, input.playbook.name)
-                .pipe(
-                  Effect.map(({ stem, definitionPath }) => ({ name: stem, definitionPath })),
-                  Effect.mapError(playbookRefusal(input.playbook.name, "propose")),
-                );
+        let playbookRef: CrewPlaybookRef | null = null;
+        if (input.playbook !== undefined) {
+          const { name, workspaceRoot } = input.playbook;
+          const requestWorkspaceRoot = path.resolve(workspaceRoot);
+          if (original === null) {
+            playbookRef = yield* playbooks.definitionPathFor(workspaceRoot, name).pipe(
+              Effect.map(({ stem, definitionPath }) => ({
+                name: stem,
+                definitionPath,
+                requestWorkspaceRoot,
+              })),
+              Effect.mapError(playbookRefusal(name, "propose")),
+            );
+          } else {
+            const stem = name.endsWith(".yaml") ? name.slice(0, -5) : name;
+            // Older rows can prove a workspace-local path, but cannot prove a library workspace.
+            playbookRef =
+              original.playbook?.requestWorkspaceRoot === undefined
+                ? {
+                    name: stem,
+                    definitionPath: path.resolve(
+                      requestWorkspaceRoot,
+                      ".j5/playbooks",
+                      `${stem}.yaml`,
+                    ),
+                  }
+                : {
+                    name: stem,
+                    definitionPath: original.playbook.definitionPath,
+                    requestWorkspaceRoot,
+                  };
+          }
+        }
         const request = {
           id,
           projectId: input.captain.projectId,
