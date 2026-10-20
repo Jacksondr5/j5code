@@ -67,10 +67,19 @@ const make = Effect.gen(function* () {
           child.thread.lineage.relationshipToParent === "subagent")
       )
         return;
+      if (
+        event.type === "run.updated" &&
+        !child.runtimeRequests.some(
+          (request) => request.kind === "user_input" && request.status === "pending",
+        )
+      )
+        return;
       const memberships = yield* crews.listInvolving({
         threadIds: [event.threadId],
         participantIds: [],
       });
+      // A spawned Captain still owes its parent an update. Only the human Inbox
+      // excludes Captains, whose own questions stay in the thread the person watches.
       const seats = memberships.filter((crew) =>
         crew.members.some((seat) => seat.threadId === event.threadId),
       );
