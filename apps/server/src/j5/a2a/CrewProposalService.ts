@@ -44,7 +44,8 @@ import { crewSeatShapeProblem } from "./crewLimits.ts";
 import { CREW_PROPOSAL_SESSION } from "./crewSeatIds.ts";
 import { A2ALedger } from "./LedgerService.ts";
 import { lifecycleCommandId, lifecycleId } from "./spawnIds.ts";
-import { requestDigest } from "./RequestReplayService.ts";
+import { requestDigest, requestReplayConflict } from "./RequestReplayService.ts";
+import { worktreePathKey } from "./spawnWorkspace.ts";
 import { getThreadProjectionIfPresent } from "./threadProjectionReads.ts";
 
 /** Hard cap on seats per Crew, initial roster and additions together. */
@@ -243,17 +244,14 @@ const proposalRequest = (proposal: CreateCrewProposalInput | CrewProposal) => ({
   crewInstanceId: proposal.kind === "addition" ? proposal.crewInstanceId : null,
   brief: proposal.brief,
   displayName: proposal.displayName,
-  playbook:
-    proposal.playbook?.requestWorkspaceRoot === undefined
-      ? { path: proposal.playbook?.definitionPath ?? null }
-      : { name: proposal.playbook.name, workspaceRoot: proposal.playbook.requestWorkspaceRoot },
+  playbook: proposal.playbook?.definitionPath ?? null,
   seats: proposal.requestedSeats.map(({ personaSwaps: _swaps, workspace, ...seat }) => ({
     ...seat,
     workspace:
       workspace?.type === "worktree"
         ? { ...workspace, startFromOrigin: workspace.startFromOrigin ?? false }
         : workspace?.type === "existing_worktree"
-          ? { ...workspace, worktreePath: workspace.worktreePath.replace(/[\\/]+$/, "") }
+          ? { ...workspace, worktreePath: worktreePathKey(workspace.worktreePath) }
           : workspace,
   })),
 });
@@ -617,10 +615,11 @@ export const layer = Layer.effect(
       request: CreateCrewProposalInput,
     ) {
       if (requestDigest(proposalRequest(original)) !== requestDigest(proposalRequest(request)))
-        return yield* new CrewProposalRequestError({
-          detail: `client_request_id is already bound to a different request for proposal ${original.id}${original.crewInstanceId === null ? "" : ` and crew ${original.crewInstanceId}`}.`,
-          nextStep: "Retry the original request, or use a fresh client_request_id for new work.",
-        });
+        return yield* new CrewProposalRequestError(
+          requestReplayConflict(
+            `proposal ${original.id}${original.crewInstanceId === null ? "" : ` and crew ${original.crewInstanceId}`}`,
+          ),
+        );
       const instance =
         original.crewInstanceId === null
           ? null
@@ -644,34 +643,17 @@ export const layer = Layer.effect(
         let playbookRef: CrewPlaybookRef | null = null;
         if (input.playbook !== undefined) {
           const { name, workspaceRoot } = input.playbook;
-          const requestWorkspaceRoot = path.resolve(workspaceRoot);
           if (original === null) {
             playbookRef = yield* playbooks.definitionPathFor(workspaceRoot, name).pipe(
-              Effect.map(({ stem, definitionPath }) => ({
-                name: stem,
-                definitionPath,
-                requestWorkspaceRoot,
-              })),
+              Effect.map(({ stem, definitionPath }) => ({ name: stem, definitionPath })),
               Effect.mapError(playbookRefusal(name, "propose")),
             );
           } else {
             const stem = name.endsWith(".yaml") ? name.slice(0, -5) : name;
-            // Older rows can prove a workspace-local path, but cannot prove a library workspace.
-            playbookRef =
-              original.playbook?.requestWorkspaceRoot === undefined
-                ? {
-                    name: stem,
-                    definitionPath: path.resolve(
-                      requestWorkspaceRoot,
-                      ".j5/playbooks",
-                      `${stem}.yaml`,
-                    ),
-                  }
-                : {
-                    name: stem,
-                    definitionPath: original.playbook.definitionPath,
-                    requestWorkspaceRoot,
-                  };
+            playbookRef = {
+              name: stem,
+              definitionPath: path.resolve(workspaceRoot, ".j5/playbooks", `${stem}.yaml`),
+            };
           }
         }
         const request = {

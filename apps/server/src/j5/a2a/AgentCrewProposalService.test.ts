@@ -300,9 +300,9 @@ it.effect(
     ),
 );
 
-it.effect("upgrades playbook proposals without inventing their request workspace", () =>
+it.effect("preserves stored playbook paths across migration and proposal persistence", () =>
   Effect.gen(function* () {
-    yield* runJ5A2AMigrations({ toMigrationInclusive: 39 });
+    yield* runJ5A2AMigrations({ toMigrationInclusive: 38 });
     yield* (yield* A2ALedger).ensureProject({ projectId, createdAt });
     const sql = yield* SqlClient.SqlClient;
     yield* sql`INSERT INTO j5_agent_crew_proposal (
@@ -324,14 +324,12 @@ it.effect("upgrades playbook proposals without inventing their request workspace
       kind: "roster",
       crewInstanceId: null,
       playbook: {
-        name: "release",
-        definitionPath: "/library/release.yaml",
-        requestWorkspaceRoot: "/repo",
+        name: "current",
+        definitionPath: "/repo/.j5/playbooks/current.yaml",
       },
     });
     const reloaded = yield* proposals.read(current.id);
     assert.deepStrictEqual(reloaded?.playbook, current.playbook);
-    assert.equal(reloaded?.playbook?.requestWorkspaceRoot, "/repo");
     yield* runJ5A2AMigrations();
     assert.deepStrictEqual(yield* proposals.read("legacy"), legacy);
   }).pipe(Effect.provide(testLayer)),

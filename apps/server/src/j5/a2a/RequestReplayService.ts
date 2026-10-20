@@ -8,14 +8,20 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 
+export const requestReplayConflict = (target: string) => ({
+  detail: `client_request_id is already bound to a different request for ${target}.`,
+  nextStep: "Retry the original request, or use a fresh client_request_id for new work.",
+});
+
 export class RequestReplayConflictError extends Schema.TaggedError<RequestReplayConflictError>()(
   "RequestReplayConflictError",
   { target: Schema.String, legacy: Schema.Boolean },
 ) {
   override get message() {
-    return this.legacy
-      ? `The original request for ${this.target} predates replay verification and cannot be compared. Inspect that target and use a fresh client_request_id for new work.`
-      : `client_request_id is already bound to a different request for ${this.target}. Retry the original request, or use a fresh client_request_id for new work.`;
+    if (this.legacy)
+      return `The original request for ${this.target} predates replay verification and cannot be compared. Inspect that target and use a fresh client_request_id for new work.`;
+    const { detail, nextStep } = requestReplayConflict(this.target);
+    return `${detail} ${nextStep}`;
   }
 }
 
