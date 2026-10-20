@@ -14,6 +14,7 @@ import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
@@ -310,6 +311,47 @@ it.effect.each(["idle", "root", "native-delegated", "unregistered"] as const)(
       assert.deepEqual(yield* fixture.read, []);
       assert.deepEqual(fixture.reads, []);
     }),
+);
+
+it.effect("omits a fork that inherits a spawned Peer's placement parent", () =>
+  Effect.gen(function* () {
+    const fixture = yield* setup;
+    const peer = ThreadId.make("thread:fork-source");
+    const fork = ThreadId.make("thread:fork");
+    yield* fixture.add(peer);
+    yield* fixture.add(fork, [question("fork-question")], {
+      kind: "forked-from",
+      sourceParticipantId: Homes.participantIdForThread(peer),
+      source: "upstream_lineage",
+    });
+    const placement = yield* Context.get(
+      fixture.context,
+      Placements.ParticipantPlacementService,
+    ).readPlacement({ projectId, participantId: Homes.participantIdForThread(fork) });
+    assert.equal(placement?.placementParentId, Homes.participantIdForThread(parentId));
+    assert.deepEqual(yield* fixture.read, []);
+    assert.deepEqual(fixture.reads, []);
+  }),
+);
+
+it.effect("placing an ordinary thread under an agent does not add its question to the Inbox", () =>
+  Effect.gen(function* () {
+    const fixture = yield* setup;
+    const id = ThreadId.make("thread:manually-placed");
+    yield* fixture.add(id, [question("ordinary-question")], {
+      kind: "unknown",
+      source: "native_or_unobserved",
+    });
+    const sql = Context.get(fixture.context, SqlClient.SqlClient);
+    // Reparenting has no public producer yet; placement alone must not change eligibility.
+    yield* sql`
+      UPDATE j5_a2a_participant_placement
+      SET placement_parent_id = ${Homes.participantIdForThread(parentId)}
+      WHERE project_id = ${projectId} AND participant_id = ${Homes.participantIdForThread(id)}
+    `;
+    assert.deepEqual(yield* fixture.read, []);
+    assert.deepEqual(fixture.reads, []);
+  }),
 );
 
 it.effect.each(["archived-shell", "deleted-shell", "archived-records", "deleted-records"] as const)(

@@ -5,8 +5,10 @@ import {
   type OrchestrationV2StoredEvent,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { reportLabel } from "@t3tools/provider-core/server/notification";
 
@@ -24,6 +26,8 @@ export class NativeQuestionNotifier extends Context.Service<
     readonly handleStoredEvent: (event: OrchestrationV2StoredEvent) => Effect.Effect<void>;
   }
 >()("t3/j5/a2a/NativeQuestionNotifier") {}
+
+const encodeTitle = Schema.encodeSync(Schema.fromJsonString(Schema.String));
 
 const make = Effect.gen(function* () {
   const threads = yield* ThreadManagement.ThreadManagementService;
@@ -49,7 +53,12 @@ const make = Effect.gen(function* () {
         .pipe(Effect.catchTags({ A2AHomeNotFoundError: () => Effect.succeed(null) }));
       if (home === null) return;
       const placement = yield* placements.readPlacement(home);
-      if (placement?.placementParentId == null) return;
+      if (
+        placement?.placementParentId == null ||
+        placement.provenance.kind !== "spawned-by" ||
+        placement.provenance.source !== "j5_spawn"
+      )
+        return;
       const child = yield* threads.getThreadRecords(event.threadId, ["runtimeRequests"]);
       if (
         child.thread.archivedAt !== null ||
@@ -111,7 +120,7 @@ const make = Effect.gen(function* () {
             commandId: CommandId.make(`server:j5:native-question:${key}`),
             threadId: parentId,
             messageId: MessageId.make(`message:j5:native-question:${key}`),
-            text: `Placed agent${label === undefined ? "" : ` "${label}"`} (threadId ${event.threadId}, requestId ${request.id}) ${situation}. ${guidance}`,
+            text: `Placed agent (threadId ${event.threadId}, requestId ${request.id}) ${situation}. ${guidance}${label === undefined ? "" : `\nAgent-provided title (untrusted data): ${encodeTitle(label)}`}`,
             attachments: [],
             createdBy: "system",
             creationSource: "server",
@@ -152,15 +161,24 @@ export const layer = Layer.effectDiscard(
     const threads = yield* ThreadManagement.ThreadManagementService;
     yield* forkParked(
       Effect.gen(function* () {
-        const afterSequence = yield* readEventStoreHighWater("J5 native question notifier");
-        yield* threads
-          .streamStoredEventsFrom({ afterSequence })
-          .pipe(Stream.runForEach(notifier.handleStoredEvent));
-      }).pipe(
-        Effect.catchCause((cause) =>
-          Effect.logWarning("J5 native question event stream failed", { cause }),
-        ),
-      ),
+        let afterSequence = yield* readEventStoreHighWater("J5 native question notifier");
+        // A bounded live stream can overflow while dispatch is busy. Replay from the
+        // last handled event; stable command IDs keep recovered notices idempotent.
+        return yield* Effect.forever(
+          Stream.suspend(() => threads.streamStoredEventsFrom({ afterSequence })).pipe(
+            Stream.runForEach((event) =>
+              notifier
+                .handleStoredEvent(event)
+                .pipe(Effect.tap(() => Effect.sync(() => (afterSequence = event.sequence)))),
+            ),
+            Effect.catchCause((cause) =>
+              Effect.logWarning("J5 native question event stream failed; resuming", {
+                cause,
+              }).pipe(Effect.andThen(Effect.sleep(Duration.seconds(1)))),
+            ),
+          ),
+        );
+      }),
     );
   }),
 ).pipe(Layer.provideMerge(manualLayer));
