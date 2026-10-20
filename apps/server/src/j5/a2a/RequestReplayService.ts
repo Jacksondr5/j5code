@@ -41,62 +41,59 @@ export const requestDigest = (request: unknown) =>
     .update(JSON.stringify(canonical(request)))
     .digest("hex");
 
-export interface RequestReplayServiceShape {
-  readonly check: (
-    id: string,
-    request: unknown,
-  ) => Effect.Effect<boolean, SqlError | RequestReplayConflictError>;
-  /** Binds before side effects; an existing target without a binding cannot prove its intent. */
-  readonly bind: (input: {
-    readonly id: string;
-    readonly target: string;
-    readonly request: unknown;
-    readonly legacy: boolean;
-  }) => Effect.Effect<void, SqlError | RequestReplayConflictError>;
-}
-
 export class RequestReplayService extends Context.Service<
   RequestReplayService,
-  RequestReplayServiceShape
+  {
+    readonly check: (
+      id: string,
+      request: unknown,
+    ) => Effect.Effect<void, SqlError | RequestReplayConflictError>;
+    /** Binds before side effects; an existing target without a binding cannot prove its intent. */
+    readonly bind: (input: {
+      readonly id: string;
+      readonly target: string;
+      readonly request: unknown;
+      readonly legacy: boolean;
+    }) => Effect.Effect<void, SqlError | RequestReplayConflictError>;
+  }
 >()("t3/j5/a2a/RequestReplayService") {}
 
 export const layer = Layer.effect(
   RequestReplayService,
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    const check: RequestReplayServiceShape["check"] = Effect.fn("j5.requestReplay.check")(
+    const check: RequestReplayService["Service"]["check"] = Effect.fn("j5.requestReplay.check")(
       function* (id, request) {
         const rows = yield* sql<{ readonly target: string; readonly request_digest: string }>`
           SELECT target, request_digest FROM j5_a2a_request_replay WHERE id = ${id}
         `;
         const original = rows[0];
-        if (original === undefined) return false;
-        if (original.request_digest !== requestDigest(request))
+        if (original !== undefined && original.request_digest !== requestDigest(request))
           return yield* new RequestReplayConflictError({ target: original.target, legacy: false });
-        return true;
       },
     );
-    const bind: RequestReplayServiceShape["bind"] = Effect.fn("j5.requestReplay.bind")(function* (
-      input,
-    ) {
-      const digest = requestDigest(input.request);
-      if (!input.legacy) {
-        yield* sql`
+    const bind: RequestReplayService["Service"]["bind"] = Effect.fn("j5.requestReplay.bind")(
+      function* (input) {
+        const digest = requestDigest(input.request);
+        if (!input.legacy) {
+          yield* sql`
             INSERT INTO j5_a2a_request_replay (id, target, request_digest)
             VALUES (${input.id}, ${input.target}, ${digest})
             ON CONFLICT (id) DO NOTHING
           `;
-      }
-      const rows = yield* sql<{ readonly target: string; readonly request_digest: string }>`
+        }
+        const rows = yield* sql<{ readonly target: string; readonly request_digest: string }>`
           SELECT target, request_digest FROM j5_a2a_request_replay WHERE id = ${input.id}
         `;
-      const original = rows[0];
-      if (original === undefined || original.request_digest !== digest)
-        return yield* new RequestReplayConflictError({
-          target: original?.target ?? input.target,
-          legacy: original === undefined,
-        });
-    }, sql.withTransaction);
+        const original = rows[0];
+        if (original === undefined || original.request_digest !== digest)
+          return yield* new RequestReplayConflictError({
+            target: original?.target ?? input.target,
+            legacy: original === undefined,
+          });
+      },
+      sql.withTransaction,
+    );
     return RequestReplayService.of({ bind, check });
   }),
 );
