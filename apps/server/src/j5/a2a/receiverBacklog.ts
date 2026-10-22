@@ -6,7 +6,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import { OrchestratorV2 } from "../../orchestration-v2/Orchestrator.ts";
 import { latestActiveRun } from "../../orchestration-v2/ThreadManagementService.ts";
 import {
-  gpt6PeerSteeringRun,
+  peerSteeringRun,
   deliveryMessageId,
   isDeliveryMessageId,
   requestedSteeringRun,
@@ -87,7 +87,7 @@ export const readReceiverBacklog = Effect.fn("j5.a2a.readReceiverBacklog")(
     if (
       sentRun === undefined &&
       (mode === "queue"
-        ? gpt6PeerSteeringRun(target, "peer")
+        ? peerSteeringRun(target, "peer")
         : requestedSteeringRun(target, "peer", mode)) !== undefined
     )
       return undefined;

@@ -98,7 +98,7 @@ import * as VcsProcess from "../../vcs/VcsProcess.ts";
 import {
   A2ADeliveryHeldError,
   A2ADeliveryTransport,
-  gpt6PeerSteeringRun,
+  peerSteeringRun,
   deliveryMessageId,
   formatAgentDeliveryEnvelope,
   live as deliveryTransportLive,
@@ -690,7 +690,7 @@ it.effect.each([
       });
       // Starting/preparing is not a live provider turn: never use auto/restart.
       const starting = yield* threads.getThreadProjection(target.threadId);
-      assert.isUndefined(gpt6PeerSteeringRun(starting, "peer"));
+      assert.isUndefined(peerSteeringRun(starting, "peer"));
       const running = yield* sink.stream({ threadId: target.threadId }).pipe(
         Stream.filter(
           (stored) =>
@@ -703,9 +703,9 @@ it.effect.each([
       yield* worker.runOnce;
       yield* Fiber.join(running);
       const projection = yield* threads.getThreadProjection(target.threadId);
-      assert.equal(gpt6PeerSteeringRun(projection, "peer")?.id, active.run.id);
+      assert.equal(peerSteeringRun(projection, "peer")?.id, active.run.id);
       for (const channel of ["silence_notice", "lifecycle_notice"] as const) {
-        assert.isUndefined(gpt6PeerSteeringRun(projection, channel));
+        assert.isUndefined(peerSteeringRun(projection, channel));
       }
       for (const otherModel of [
         "gpt-5.6-sol",
@@ -715,7 +715,7 @@ it.effect.each([
         "claude-fable-5-1",
       ]) {
         assert.isUndefined(
-          gpt6PeerSteeringRun(
+          peerSteeringRun(
             {
               ...projection,
               runs: projection.runs.map((run) => ({
@@ -728,7 +728,7 @@ it.effect.each([
         );
       }
       assert.isUndefined(
-        gpt6PeerSteeringRun(
+        peerSteeringRun(
           {
             ...projection,
             providerThreads: projection.providerThreads.map((thread) => ({
@@ -739,15 +739,15 @@ it.effect.each([
           "peer",
         ),
       );
-      assert.isUndefined(gpt6PeerSteeringRun({ ...projection, providerSessions: [] }, "peer"));
+      assert.isUndefined(peerSteeringRun({ ...projection, providerSessions: [] }, "peer"));
       assert.isUndefined(
-        gpt6PeerSteeringRun(
+        peerSteeringRun(
           { ...projection, thread: { ...projection.thread, archivedAt: yield* DateTime.now } },
           "peer",
         ),
       );
       assert.isUndefined(
-        gpt6PeerSteeringRun(
+        peerSteeringRun(
           {
             ...projection,
             providerSessions: projection.providerSessions.map((session) => ({
@@ -759,7 +759,7 @@ it.effect.each([
         ),
       );
       assert.isUndefined(
-        gpt6PeerSteeringRun(
+        peerSteeringRun(
           {
             ...projection,
             providerSessions: projection.providerSessions.map((session) => ({
@@ -773,7 +773,7 @@ it.effect.each([
           "peer",
         ),
       );
-      const asClaude = (activeSteeringInterruptsTools: boolean | undefined) => ({
+      const asClaude = (supportsActiveSteering: boolean) => ({
         ...projection,
         providerThreads: projection.providerThreads.map((thread) => ({
           ...thread,
@@ -784,13 +784,17 @@ it.effect.each([
           driver: CLAUDE_PROVIDER,
           capabilities: {
             ...session.capabilities,
-            turns: { ...session.capabilities.turns, activeSteeringInterruptsTools },
+            turns: {
+              ...session.capabilities.turns,
+              supportsActiveSteering,
+              activeSteeringInterruptsTools: true,
+            },
           },
         })),
       });
-      assert.equal(gpt6PeerSteeringRun(asClaude(undefined), "peer")?.id, active.run.id);
-      assert.isUndefined(gpt6PeerSteeringRun(asClaude(true), "peer"));
-      assert.isUndefined(gpt6PeerSteeringRun({ ...projection, providerTurns: [] }, "peer"));
+      assert.equal(peerSteeringRun(asClaude(true), "peer")?.id, active.run.id);
+      assert.isUndefined(peerSteeringRun(asClaude(false), "peer"));
+      assert.isUndefined(peerSteeringRun({ ...projection, providerTurns: [] }, "peer"));
       const turn = (yield* Ref.get(harness.activeTurns)).get(target.threadId)!;
       const startedAt = yield* DateTime.now;
       yield* publishCommandExecution(turn, {

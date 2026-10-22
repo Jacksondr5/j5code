@@ -176,6 +176,12 @@ import {
 import { agentPersonaPromptSuffix } from "../../j5/agents/agentPersonaPrompts.ts";
 import { J5_CLAUDE_MCP_ALLOWED_TOOLS } from "../../j5/a2a/mcp/claudeAllowedTools.ts";
 import { j5ClaudeCrewSeatQueryOverrides } from "../../j5/a2a/crewSeatQuestions.ts";
+import {
+  j5ClaudeSteerFields,
+  j5ClaudeSteerHoldsResult,
+  j5ObserveClaudeSteer,
+  j5OfferClaudeSteer,
+} from "../../j5/a2a/claudeAgentSteers.ts";
 
 export const CLAUDE_PROVIDER = ProviderDriverKind.make("claudeAgent");
 export const CLAUDE_AGENT_SDK_QUERY_PROTOCOL = "claude-agent-sdk.query" as const;
@@ -281,6 +287,7 @@ export const ClaudeProviderCapabilitiesV2 = {
     emitsTurnCompleted: true,
     supportsInterrupt: true,
     supportsActiveSteering: true,
+    activeSteeringInterruptsTools: true,
     supportsSteeringByInterruptRestart: false,
     supportsQueuedMessages: true,
     terminalStatusQuality: "strong",
@@ -3005,11 +3012,6 @@ interface ActiveClaudeTurnContext {
   // Usage of the results that steers ended, oldest first. The final result's
   // usage covers only its own segment, so the turn bills these as well.
   readonly steeredSegmentUsage: Array<SDKResultMessage["usage"]>;
-  // Steers by uuid. Claude reads a "next" steer at the turn's next tool result;
-  // one sent after the last tool call is still queued at the turn's result and
-  // runs as the next native turn, which belongs to this one. Without lifecycle
-  // frames that native turn reaches the thread as a wake turn instead.
-  readonly steers: Map<string, "offered" | "queued" | "dequeued">;
   readonly subagentsByTaskId: Map<string, ActiveClaudeSubagent>;
   readonly subagentsByToolUseId: Map<string, ActiveClaudeSubagent>;
   readonly subagentNodesByTaskId: Map<string, OrchestrationV2ExecutionNode["id"]>;
@@ -3055,9 +3057,6 @@ interface ClaudeLiveQueryContext {
   // ("early") or only on its result. "acknowledged": the CLI confirmed it took a prompt's uuid
   // before any echo, so it echoes, but a resume's own turns can still run ahead of that prompt.
   promptEchoMode: "unknown" | "acknowledged" | "early" | "result_only";
-  // Whether this CLI process reports command_lifecycle frames, so a steer it hasn't
-  // acknowledged yet is known to be on its way.
-  reportsCommandLifecycle: boolean;
   readonly openedPermissionMode: PermissionMode;
   permissionMode: PermissionMode;
   stopping: boolean;
@@ -7455,17 +7454,12 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             const completedAt = yield* DateTime.now;
             const interrupted = (yield* Ref.get(interruptedTurns)).has(context.providerTurnId);
             const wasSteered = (yield* Ref.get(steeredTurns)).has(context.providerTurnId);
-            const reportsLifecycle = liveQuery.reportsCommandLifecycle;
-            const steerWaiting = [...context.steers.values()].some(
-              (state) => state === "queued" || (state === "offered" && reportsLifecycle),
-            );
-            // A failed result ends the turn so its error shows; a steer still queued
-            // then runs as a wake turn.
+            // J5: case 82 holds a segment whose agent steer is still to run.
             if (
               !interrupted &&
               wasSteered &&
-              ((steerWaiting && terminalStatusFromResult(message) === "completed") ||
-                isClaudeActiveSteeringAbortResult(message))
+              (isClaudeActiveSteeringAbortResult(message) ||
+                j5ClaudeSteerHoldsResult(liveQuery.query, context.providerTurnId, message))
             ) {
               context.steeredSegmentUsage.push(message.usage);
               return;
@@ -7588,16 +7582,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           const message = input.message;
           const context = yield* Ref.get(activeTurn);
           const liveQuery = yield* Ref.get(queryContext);
-          const steerLifecycle = claudePromptLifecycle(message);
-          if (steerLifecycle !== null && liveQuery?.query === input.query) {
-            liveQuery.reportsCommandLifecycle = true;
-          }
-          if (steerLifecycle !== null && context?.steers.has(steerLifecycle.uuid)) {
-            context.steers.set(
-              steerLifecycle.uuid,
-              steerLifecycle.state === "queued" ? "queued" : "dequeued",
-            );
-          }
+          // J5: case 82.
+          j5ObserveClaudeSteer(input.query, message);
           if (
             context === null ||
             context.promptUuid === null ||
@@ -8211,7 +8197,6 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             closed,
             lastTurn: null,
             promptEchoMode: "unknown",
-            reportsCommandLifecycle: false,
             openedPermissionMode: queryOptions.permissionMode,
             permissionMode: queryOptions.permissionMode,
             stopping: false,
@@ -8346,7 +8331,6 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               rateLimitResetTimes: new Map(),
               latestAssistantRateLimited: false,
               steeredSegmentUsage: [],
-              steers: new Map(),
               subagentsByTaskId: new Map(),
               subagentsByToolUseId: new Map(),
               subagentNodesByTaskId: new Map(),
@@ -8572,11 +8556,10 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             ),
         );
 
-        // A person's steer is sent with priority "now", which cancels the root
-        // turn's running tool calls, and any other steer waits for them. A
-        // subagent the root launched in the foreground is one of them, so it
-        // moves to the background first and keeps running; its result arrives
-        // as a task notification like any background agent.
+        // A steer is sent with priority "now", which cancels the root turn's
+        // running tool calls. A subagent the root launched in the foreground is
+        // one of them, so it moves to the background first and keeps running;
+        // its result arrives as a task notification like any background agent.
         const backgroundForegroundSubagents = Effect.fnUntraced(function* (
           live: ClaudeLiveQueryContext,
         ) {
@@ -8653,28 +8636,15 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 detail: `Claude provider turn ${turnInput.providerTurnId} is not the active turn.`,
               });
             }
-            const steerUuid = yield* crypto.randomUUIDv4().pipe(
-              Effect.filterOrFail(isClaudePromptUuid),
-              Effect.mapError(
-                (cause) =>
-                  new ProviderAdapter.ProviderAdapterProtocolError({
-                    driver: CLAUDE_PROVIDER,
-                    detail: "Failed to allocate a Claude steer uuid.",
-                    payload: cause,
-                  }),
-              ),
-            );
+            // J5: case 82 sends a steer that isn't a person's with priority "next".
+            const j5Steer = yield* j5ClaudeSteerFields(turnInput.message, crypto);
             const userMessage = yield* makeClaudeUserMessageWithAttachments({
               text: applyClaudePromptEffortPrefix(
                 turnInput.message.text,
                 compileClaudeModelSelection(currentTurn.input.modelSelection).promptEffort,
               ),
               attachments: turnInput.message.attachments,
-              // A person's steer cuts in at once. Anything else waits for the
-              // running tool calls and is added to the turn, so an agent's
-              // update doesn't cancel them or read as the person's refusal.
-              priority: turnInput.message.createdBy === "user" ? "now" : "next",
-              uuid: steerUuid,
+              ...j5Steer,
               attachmentsDir,
               fileSystem,
               skillNames: yield* userInvocableSkillNames(currentTurn.input.runtimePolicy.cwd),
@@ -8697,8 +8667,12 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               next.add(turnInput.providerTurnId);
               return next;
             });
-            currentTurn.steers.set(steerUuid, "offered");
-            yield* existing.query.offer(userMessage);
+            yield* j5OfferClaudeSteer({
+              query: existing.query,
+              providerTurnId: turnInput.providerTurnId,
+              steer: j5Steer,
+              offer: existing.query.offer(userMessage),
+            });
           },
           (effect, turnInput) =>
             effect.pipe(
