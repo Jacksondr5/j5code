@@ -855,6 +855,9 @@ it.effect.each(["waiting when the turn stopped", "already read"] as const)(
         notices[0]?.message_text,
         unreadSteerNoticeMessage(subject.id, sent.messageId, "Steered update"),
       );
+      // A re-sent message would undo the person's Stop.
+      assert.include(notices[0]?.message_text, STOPPED_NOTICE_INSTRUCTION);
+      assert.notInclude(notices[0]?.message_text, "Send it again");
     }).pipe(Effect.provide(Layer.merge(makeTestLayer(), NodeCrypto.layer))),
 );
 

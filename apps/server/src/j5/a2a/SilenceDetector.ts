@@ -209,7 +209,12 @@ export const removedNoticeMessage = (
   return `Your message ${messageId} to ${subjectId} was removed from its queue before it ran, so ${subjectId} never read it. Send it again if it still matters. The message began: ${excerpt}`;
 };
 
-/** Told to the sender of a message steered into a turn that was stopped before Claude read it. */
+/**
+ * Told to the sender of a message steered into a turn that was stopped before Claude read it.
+ * A person stopped the receiver on purpose, so it carries the stopped notice's instruction rather
+ * than an invitation to send again. "Probably": Claude can take the message just as the Stop
+ * lands, after the last frame J5 reads (the steer-and-Stop race register D5 leaves unguarded).
+ */
 export const unreadSteerNoticeMessage = (
   subjectId: ParticipantId,
   messageId: string,
@@ -219,7 +224,7 @@ export const unreadSteerNoticeMessage = (
     text.length > REMOVED_NOTICE_EXCERPT_LENGTH
       ? `${text.slice(0, REMOVED_NOTICE_EXCERPT_LENGTH)}…`
       : text;
-  return `Your message ${messageId} to ${subjectId} was waiting for its running tool calls to finish when its turn was stopped, so ${subjectId} never read it. Send it again if it still matters. The message began: ${excerpt}`;
+  return `Your message ${messageId} to ${subjectId} was waiting for ${subjectId}'s running tool calls when a person stopped ${subjectId}, so ${subjectId} probably never read it. ${STOPPED_NOTICE_INSTRUCTION} The message began: ${excerpt}`;
 };
 
 const noticeMessage = (payload: SilenceNoticePayload, exchangeId: ExchangeId): string => {
