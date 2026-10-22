@@ -142,8 +142,8 @@ it.effect(
         0,
       );
       yield* sql`INSERT INTO j5_a2a_human_person
-        (person_id, is_local_operator, created_at, kind, display_name, name_key)
-        VALUES ('human:operator', 1, ${at}, 'member', 'Operator', 'operator')`;
+        (person_id, is_local_operator, created_at, display_name, name_key)
+        VALUES ('human:operator', 1, ${at}, 'Operator', 'operator')`;
       const participant = (id: string, project: string): ParticipantPlacementView => ({
         projectId: LedgerProjectId.make(project),
         participantId: ParticipantId.make(id),
@@ -195,6 +195,20 @@ it.effect(
           (problem) => problem.kind === "delivery-failed" && problem.receiverName,
         ),
         ["Remote receiver", "Remote receiver"],
+      );
+      yield* sql`INSERT INTO j5_a2a_human_person
+        (person_id, is_local_operator, created_at, display_name, name_key, removed_at)
+        VALUES ('human:viewer', 0, ${at}, 'Viewer', 'viewer', NULL),
+               ('human:removed', 0, ${at}, 'Removed person', NULL, ${at})`;
+      yield* sql`INSERT INTO j5_a2a_person_level
+        (person_id, scope_kind, scope_id, level, created_at, updated_at)
+        VALUES ('human:viewer', 'project', 'p', 'viewer', ${at}, ${at})`;
+      yield* exchange("viewer-ask", "other", "human:viewer", sender);
+      yield* exchange("removed-ask", "other", "human:removed", sender);
+      const withPeople = yield* fleetRead(false);
+      assert.deepStrictEqual(
+        withPeople.projects[0]?.agents[0]?.facts?.asks.owed.map((ask) => ask.counterpartyName),
+        ["Operator", "Removed person", "Viewer"],
       );
     }).pipe(Effect.provide(database)),
 );
