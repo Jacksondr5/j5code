@@ -1649,7 +1649,7 @@ describe("ClaudeAdapterV2 attachments", () => {
           },
         });
 
-        assert.equal(offeredMessages[1]?.priority, "next");
+        assert.equal(offeredMessages[1]?.priority, "now");
         assert.deepEqual(offeredMessages[1]?.message.content, [
           expectedImageBlock,
           {
@@ -3049,7 +3049,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
               attachments: [],
             },
           });
-          assert.equal(harness.offeredMessages[1]?.priority, "next");
+          assert.equal(harness.offeredMessages[1]?.priority, "now");
         }
         yield* Queue.offer(
           harness.sdkMessages,
@@ -3122,7 +3122,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
   it.effect.each([
     { case: "takes it at a tool result", late: false },
     { case: "runs it after its last tool call", late: true },
-  ])("ends a steered turn once Claude $case", ({ late }) =>
+  ])("ends an agent-steered turn once Claude $case", ({ late }) =>
     Effect.scoped(
       Effect.gen(function* () {
         const harness = yield* makeWakeHarness;
@@ -3146,8 +3146,8 @@ describe("ClaudeAdapterV2 background wake turns", () => {
             nativeTurnId: `turn:${attemptId}`,
           }),
           message: {
-            createdBy: "user",
-            creationSource: "web",
+            createdBy: "agent",
+            creationSource: "server",
             messageId: MessageId.make("message-steering-next"),
             text: "Include the hierarchy mock.",
             attachments: [],
@@ -14077,7 +14077,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           }
           assert.isTrue(Exit.isSuccess(steered));
           assert.equal(harness.offeredMessages.length, offered + 1);
-          assert.equal(harness.offeredMessages.at(-1)?.priority, "next");
+          assert.equal(harness.offeredMessages.at(-1)?.priority, "now");
           if (backgrounding === "never answers") {
             for (let repeat = 1; repeat <= 2; repeat++) {
               const again = yield* Effect.forkScoped(steer);

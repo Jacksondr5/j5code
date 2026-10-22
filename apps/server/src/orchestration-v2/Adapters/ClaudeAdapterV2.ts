@@ -8558,10 +8558,11 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             ),
         );
 
-        // A steer waits for the root turn's running tool calls. A subagent the
-        // root launched in the foreground is one of them and can run for a long
-        // time, so it moves to the background first and keeps running; its
-        // result arrives as a task notification like any background agent.
+        // A person's steer is sent with priority "now", which cancels the root
+        // turn's running tool calls, and any other steer waits for them. A
+        // subagent the root launched in the foreground is one of them, so it
+        // moves to the background first and keeps running; its result arrives
+        // as a task notification like any background agent.
         const backgroundForegroundSubagents = Effect.fnUntraced(function* (
           live: ClaudeLiveQueryContext,
         ) {
@@ -8655,9 +8656,10 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 compileClaudeModelSelection(currentTurn.input.modelSelection).promptEffort,
               ),
               attachments: turnInput.message.attachments,
-              // "next" waits for the running tool calls and adds the message
-              // to the turn; "now" would cancel them.
-              priority: "next",
+              // A person's steer cuts in at once. Anything else waits for the
+              // running tool calls and is added to the turn, so an agent's
+              // update doesn't cancel them or read as the person's refusal.
+              priority: turnInput.message.createdBy === "user" ? "now" : "next",
               uuid: steerUuid,
               attachmentsDir,
               fileSystem,
