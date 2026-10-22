@@ -988,6 +988,57 @@ it.effect(
     }),
 );
 
+it.effect.each(["size", "type"] as const)(
+  "refuses incorrect upload %s before binding and accepts a corrected same-key retry",
+  (mismatch) =>
+    Effect.gen(function* () {
+      const { layer, call, commands } = yield* spawnHarness({
+        checkout: { isRepo: true, refName: "j5/main" },
+      });
+      yield* Effect.gen(function* () {
+        const config = yield* ServerConfig;
+        const fs = yield* FileSystem.FileSystem;
+        const attachment = {
+          type: "image" as const,
+          id: ChatAttachmentId.make(createPendingAttachmentId()!),
+          name: "screen.png",
+          mimeType: "image/png",
+          sizeBytes: 3,
+        };
+        yield* fs.writeFile(
+          resolveAttachmentPath({ attachmentsDir: config.attachmentsDir, attachment })!,
+          new Uint8Array([1, 2, 3]),
+        );
+        const args = {
+          ...spawnArgs,
+          workspace: { type: "shared" as const },
+          client_request_id: `incorrect-upload-${mismatch}`,
+        };
+        const incorrect =
+          mismatch === "size"
+            ? { ...attachment, sizeBytes: 2 }
+            : { ...attachment, mimeType: "image/jpeg" };
+        const refused = yield* call({ ...args, attachments: [incorrect] });
+        assert.isTrue(refused.isFailure);
+        assert.include(
+          message(refused),
+          mismatch === "size" ? "stored size does not match" : "type does not match",
+        );
+        assert.lengthOf(yield* Ref.get(commands), 0, "nothing is created");
+
+        const corrected = yield* call({ ...args, attachments: [attachment] });
+        assert.isFalse(corrected.isFailure);
+        const brief = (yield* Ref.get(commands)).find(
+          (command) => command.type === "message.dispatch",
+        );
+        assert.lengthOf(brief?.type === "message.dispatch" ? brief.attachments : [], 1);
+        const changed = yield* call({ ...args, attachments: [incorrect] });
+        assert.isTrue(changed.isFailure);
+        assert.include(message(changed), "different request");
+      }).pipe(Effect.provide(layer));
+    }),
+);
+
 it.effect("tells a caller to retry the same key when the replay store cannot be read", () =>
   Effect.gen(function* () {
     const unreadable = Effect.fail(

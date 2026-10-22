@@ -73,7 +73,7 @@ import { ParticipantPlacementService } from "../PlacementService.ts";
 import { withDeliveryNotice } from "../receiverBacklog.ts";
 import { A2ASendService } from "../SendService.ts";
 import { stopThread } from "../stopThread.ts";
-import { sendClaimingAttachments } from "./attachments.ts";
+import { preflightSpawnUploads, sendClaimingAttachments } from "./attachments.ts";
 import {
   assertPersonaWithinApprovedLevel,
   outsideAgentCaller,
@@ -1052,8 +1052,7 @@ const handlers = {
       const replayable = input.client_request_id !== undefined;
       if (replayable)
         yield* replayService.check(threadId, request).pipe(Effect.mapError(replayFailure));
-      // What the request alone decides about its attachments is refused before the key is bound,
-      // so a corrected list can be retried under the same client_request_id.
+      // Refuse invalid uploads before acceptance so corrected metadata can reuse the key.
       if (input.attachments !== undefined) {
         const attachments = input.attachments;
         yield* resolveAttachmentReferences(attachments, []).pipe(
@@ -1062,6 +1061,10 @@ const handlers = {
             new Set(attachments.map((attachment) => attachment.id)).size === attachments.length
               ? Effect.void
               : new AttachmentClaimError({ message: "Duplicate attachment ids are not allowed." }),
+          ),
+          // Accepted retries may outlive their pending upload; only a new child needs preflight.
+          Effect.andThen(
+            existing === null ? preflightSpawnUploads(threadId, attachments) : Effect.void,
           ),
           Effect.mapError((error) =>
             stateError(
