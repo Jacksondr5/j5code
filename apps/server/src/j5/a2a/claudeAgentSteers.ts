@@ -18,26 +18,29 @@ import type { ClaudeAgentSdkQuerySession } from "../../orchestration-v2/Adapters
  * following the steer's `command_lifecycle` frames. A CLI that sends none never holds a turn
  * open: the steer's native turn then reaches the thread through upstream's wake-turn path.
  *
- * Kept as a leaf module so the Claude adapter carries only its hook calls. State is keyed by the
- * live query, so it goes when the query does.
+ * When a person's Stop ends the turn while a steer still waits, Claude never reads it, and the
+ * silence detector tells its sender (`j5TakeUnreadClaudeSteers`).
+ *
+ * Kept as a leaf module so the Claude adapter carries only its hook calls. A turn's steers are
+ * forgotten when the turn ends.
  */
 
-type SteerState = "offered" | "queued" | "dequeued";
+type SteerState = "offered" | "queued" | "taken" | "cancelled";
 
-interface QuerySteers {
-  reportsLifecycle: boolean;
-  readonly byTurn: Map<string, Map<string, SteerState>>;
+interface TrackedSteer {
+  state: SteerState;
+  /** The thread message the steer carries, so J5 can tell its sender it went unread. */
+  readonly messageId: string;
+  readonly query: ClaudeAgentSdkQuerySession;
 }
 
-const steersByQuery = new WeakMap<ClaudeAgentSdkQuerySession, QuerySteers>();
+/** Steers by provider turn, then uuid. A turn's entry goes when the turn ends. */
+const steersByTurn = new Map<string, Map<string, TrackedSteer>>();
+/** Queries whose CLI has sent a command_lifecycle frame. */
+const reportsLifecycle = new WeakSet<ClaudeAgentSdkQuerySession>();
 
-const querySteers = (query: ClaudeAgentSdkQuerySession) => {
-  const existing = steersByQuery.get(query);
-  if (existing !== undefined) return existing;
-  const created: QuerySteers = { reportsLifecycle: false, byTurn: new Map() };
-  steersByQuery.set(query, created);
-  return created;
-};
+const stillToRun = (steer: TrackedSteer) =>
+  steer.state === "queued" || (steer.state === "offered" && reportsLifecycle.has(steer.query));
 
 export interface J5ClaudeSteerFields {
   readonly priority: "now" | "next";
@@ -65,19 +68,19 @@ export const j5ClaudeSteerFields = Effect.fnUntraced(function* (
 export const j5OfferClaudeSteer = <E>(input: {
   readonly query: ClaudeAgentSdkQuerySession;
   readonly providerTurnId: string;
+  readonly messageId: string;
   readonly steer: J5ClaudeSteerFields;
   readonly offer: Effect.Effect<void, E>;
 }): Effect.Effect<void, E> => {
   const uuid = input.steer.uuid;
   if (uuid === undefined) return input.offer;
   const withdraw = Effect.sync(() => {
-    querySteers(input.query).byTurn.get(input.providerTurnId)?.delete(uuid);
+    steersByTurn.get(input.providerTurnId)?.delete(uuid);
   });
   return Effect.sync(() => {
-    const { byTurn } = querySteers(input.query);
-    const steers = byTurn.get(input.providerTurnId) ?? new Map<string, SteerState>();
-    steers.set(uuid, "offered");
-    byTurn.set(input.providerTurnId, steers);
+    const steers = steersByTurn.get(input.providerTurnId) ?? new Map<string, TrackedSteer>();
+    steers.set(uuid, { state: "offered", messageId: input.messageId, query: input.query });
+    steersByTurn.set(input.providerTurnId, steers);
   }).pipe(
     Effect.andThen(input.offer),
     Effect.onError(() => withdraw),
@@ -92,10 +95,11 @@ export const j5ObserveClaudeSteer = (query: ClaudeAgentSdkQuerySession, message:
   const uuid: unknown = Reflect.get(message, "command_uuid");
   const state: unknown = Reflect.get(message, "state");
   if (typeof uuid !== "string" || typeof state !== "string") return;
-  const steers = querySteers(query);
-  steers.reportsLifecycle = true;
-  for (const turn of steers.byTurn.values()) {
-    if (turn.has(uuid)) turn.set(uuid, state === "queued" ? "queued" : "dequeued");
+  reportsLifecycle.add(query);
+  for (const turn of steersByTurn.values()) {
+    const steer = turn.get(uuid);
+    if (steer === undefined) continue;
+    steer.state = state === "queued" ? "queued" : state === "cancelled" ? "cancelled" : "taken";
   }
 };
 
@@ -111,19 +115,38 @@ export const j5ClaudeSteerHoldsResult = (
   providerTurnId: string,
   result: SDKResultMessage,
 ): boolean => {
-  const steers = steersByQuery.get(query);
-  const turn = steers?.byTurn.get(providerTurnId);
-  if (steers === undefined || turn === undefined) return false;
+  const turn = steersByTurn.get(providerTurnId);
+  if (turn === undefined) return false;
   // A person's "now" steer aborts the segment and the turn carries on, still owning its steers.
   if (isAbortResult(result)) return false;
-  const waiting = [...turn.values()].some(
-    (state) => state === "queued" || (state === "offered" && steers.reportsLifecycle),
-  );
+  const waiting = [...turn.values()].some(stillToRun);
   const completed =
     result.subtype === "success" &&
     !result.is_error &&
     (result.terminal_reason === undefined || result.terminal_reason === "completed");
   if (waiting && completed) return true;
-  steers.byTurn.delete(providerTurnId);
+  steersByTurn.delete(providerTurnId);
   return false;
+};
+
+/**
+ * The thread messages among `messageIds` that were steered into a turn Claude never read:
+ * the turn was interrupted while they waited, or the CLI cancelled them. Called once a run has
+ * ended, it forgets those turns. A steer on a CLI that reports no lifecycle is not counted,
+ * because whether Claude read it is unknown.
+ */
+export const j5TakeUnreadClaudeSteers = (messageIds: ReadonlyArray<string>): Array<string> => {
+  const wanted = new Set(messageIds);
+  const unread: Array<string> = [];
+  for (const [providerTurnId, turn] of steersByTurn) {
+    const steers = [...turn.values()];
+    if (!steers.some((steer) => wanted.has(steer.messageId))) continue;
+    for (const steer of steers) {
+      if (wanted.has(steer.messageId) && (stillToRun(steer) || steer.state === "cancelled")) {
+        unread.push(steer.messageId);
+      }
+    }
+    steersByTurn.delete(providerTurnId);
+  }
+  return unread;
 };
