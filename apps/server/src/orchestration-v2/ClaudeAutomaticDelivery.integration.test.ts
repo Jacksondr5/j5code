@@ -393,10 +393,8 @@ it.effect.each(deliveries)(
           yield* worker.drain();
           const explicitSteer =
             delivery === "user steering" || delivery === "promoted queued message";
-          // A child's completion joins the running turn without cancelling it.
-          const joinsTurn = delivery === "child completion";
           assert.equal(batchAbort.signal.aborted, explicitSteer);
-          assert.equal(offers.length, explicitSteer || joinsTurn ? 2 : 1);
+          assert.equal(offers.length, explicitSteer ? 2 : 1);
           const finished = yield* watch(
             (event) =>
               event.type === "run.updated" &&
@@ -412,7 +410,7 @@ it.effect.each(deliveries)(
           yield* worker.drain();
           yield* orchestrator.resumeQueuedRuns;
           yield* worker.drain();
-          if (!explicitSteer && !joinsTurn) {
+          if (!explicitSteer) {
             const queued = (yield* orchestrator.getThreadProjection(threadId)).runs[1]!;
             const noticeFinished = yield* watch(
               (event) =>
@@ -420,9 +418,18 @@ it.effect.each(deliveries)(
                 event.payload.id === queued.id &&
                 event.payload.status === "waiting",
             );
+            const delivered =
+              delivery === "child completion"
+                ? yield* watch(
+                    (event) =>
+                      event.type === "subagent.updated" &&
+                      event.payload.completionDelivery?.state === "delivered",
+                  )
+                : null;
             yield* Queue.offer(sdkMessages, result("notice-completed", false));
             yield* Fiber.join(noticeFinished);
             yield* worker.drain();
+            if (delivered !== null) yield* Fiber.join(delivered);
           }
           const after = yield* orchestrator.getThreadProjection(threadId);
           const reads = after.turnItems.filter((item) =>
@@ -439,12 +446,8 @@ it.effect.each(deliveries)(
             offers.filter((offer) => offer.priority === "now").length,
             explicitSteer ? 1 : 0,
           );
-          assert.equal(
-            offers.filter((offer) => offer.priority === "next").length,
-            joinsTurn ? 1 : 0,
-          );
           if (!explicitSteer) {
-            assert.equal(after.runs.length, joinsTurn ? 1 : 2);
+            assert.equal(after.runs.length, 2);
             if (delivery === "child completion") {
               assert.equal(after.messages.filter((message) => message.id === messageId).length, 1);
               assert.equal(after.subagents[0]?.completionDelivery?.state, "delivered");

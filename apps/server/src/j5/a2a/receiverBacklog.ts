@@ -11,7 +11,7 @@ import {
 } from "@t3tools/shared/orchestrationV2ThreadError";
 
 import {
-  gpt6PeerSteeringRun,
+  peerSteeringRun,
   deliveryMessageId,
   idleQueueHold,
   isDeliveryMessageId,
@@ -138,7 +138,7 @@ export const readReceiverBacklog = Effect.fn("j5.a2a.readReceiverBacklog")(
     if (
       sentRun === undefined &&
       (mode === "queue"
-        ? gpt6PeerSteeringRun(target, "peer")
+        ? peerSteeringRun(target, "peer")
         : requestedSteeringRun(target, "peer", mode)) !== undefined
     )
       return undefined;
