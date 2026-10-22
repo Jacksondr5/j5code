@@ -89,6 +89,7 @@ import {
 import { ProjectEnrichmentService } from "../../project/ProjectEnrichmentService.ts";
 import { SourceControlProviderRegistry } from "../../sourceControl/SourceControlProviderRegistry.ts";
 import { WorkspacePaths } from "../../workspace/WorkspacePaths.ts";
+import { CLAUDE_PROVIDER } from "../../orchestration-v2/Adapters/ClaudeAdapterV2.ts";
 import { CodexProviderCapabilitiesV2 } from "../../orchestration-v2/Adapters/CodexAdapterV2.ts";
 import {
   latestSteerableRun,
@@ -790,11 +791,11 @@ it.effect.each([
         ...projection,
         providerThreads: projection.providerThreads.map((thread) => ({
           ...thread,
-          driver: ProviderDriverKind.make("claude"),
+          driver: CLAUDE_PROVIDER,
         })),
         providerSessions: projection.providerSessions.map((session) => ({
           ...session,
-          driver: ProviderDriverKind.make("claude"),
+          driver: CLAUDE_PROVIDER,
           capabilities: {
             ...session.capabilities,
             turns: { ...session.capabilities.turns, activeSteeringInterruptsTools },
