@@ -274,7 +274,7 @@ export const gpt6PeerSteeringRun = (
   const turns = session.capabilities.turns;
   // Claude reads a steer once its running tool calls finish, when its session says so.
   const claudeTakesPeerUpdates =
-    providerThread.driver === "claude" &&
+    providerThread.driver === "claudeAgent" &&
     turns.supportsActiveSteering === true &&
     turns.activeSteeringInterruptsTools !== true;
   const gpt6TakesPeerUpdates =
