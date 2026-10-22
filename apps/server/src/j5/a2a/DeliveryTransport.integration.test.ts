@@ -786,6 +786,23 @@ it.effect.each([
           "peer",
         ),
       );
+      const asClaude = (activeSteeringInterruptsTools: boolean | undefined) => ({
+        ...projection,
+        providerThreads: projection.providerThreads.map((thread) => ({
+          ...thread,
+          driver: ProviderDriverKind.make("claude"),
+        })),
+        providerSessions: projection.providerSessions.map((session) => ({
+          ...session,
+          driver: ProviderDriverKind.make("claude"),
+          capabilities: {
+            ...session.capabilities,
+            turns: { ...session.capabilities.turns, activeSteeringInterruptsTools },
+          },
+        })),
+      });
+      assert.equal(gpt6PeerSteeringRun(asClaude(undefined), "peer")?.id, active.run.id);
+      assert.isUndefined(gpt6PeerSteeringRun(asClaude(true), "peer"));
       assert.isUndefined(gpt6PeerSteeringRun({ ...projection, providerTurns: [] }, "peer"));
       const turn = (yield* Ref.get(harness.activeTurns)).get(target.threadId)!;
       const startedAt = yield* DateTime.now;
