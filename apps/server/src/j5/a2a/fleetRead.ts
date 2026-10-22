@@ -8,7 +8,6 @@ import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewIns
 import { A2ALedger } from "./LedgerService.ts";
 import { ParticipantPlacementService } from "./PlacementService.ts";
 import { LedgerProjectId, isOutsideAgentParticipantId } from "./contracts.ts";
-import { listRegisteredHumanPersonNames } from "./HumanPersonRegistry.ts";
 import { clientReadBatches } from "./clientReadBatches.ts";
 import { readFleetLedgerFacts } from "./fleetFacts.ts";
 import { outsideAgentNameRows } from "./outsideAgentNames.ts";
@@ -154,7 +153,12 @@ export const makeFleetRead = Effect.gen(function* () {
       const projects = yield* ledger.listProjectLedgers();
       const result: Array<FleetResponse["projects"][number]> = [];
       const participantsByProject = new Map<string, ReadonlyArray<ParticipantPlacementView>>();
-      const names = yield* listRegisteredHumanPersonNames(sql);
+      // Removed people keep their names on historical Exchange and delivery facts.
+      const people = yield* sql<{ readonly person_id: string; readonly display_name: string }>`
+        SELECT person_id, display_name FROM j5_a2a_human_person
+        WHERE display_name IS NOT NULL
+      `;
+      const names = new Map(people.map((person) => [person.person_id, person.display_name]));
       for (const project of projects) {
         const participants = yield* placements.listParticipants(project.id);
         participantsByProject.set(project.id, participants);
