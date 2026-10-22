@@ -8670,6 +8670,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             yield* j5OfferClaudeSteer({
               query: existing.query,
               providerTurnId: turnInput.providerTurnId,
+              messageId: turnInput.message.messageId,
               steer: j5Steer,
               offer: existing.query.offer(userMessage),
             });
