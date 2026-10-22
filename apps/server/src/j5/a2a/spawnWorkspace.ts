@@ -1,3 +1,4 @@
+import type { J5SpawnWorkspace } from "./mcp/tools.ts";
 import type {
   ChatAttachment,
   CommandId,
@@ -544,3 +545,18 @@ export const layerFromReceiptStore = Layer.effect(SpawnWorkspaceService, make);
 
 /** The receipt store is a stateless reader over the shared receipt table, built here for J5. */
 export const layer = layerFromReceiptStore.pipe(Layer.provide(commandReceiptStoreLayer));
+
+/** The stored camelCase form of an MCP workspace choice; unset fields stay unset. */
+export const spawnWorkspaceFromInput = (workspace: J5SpawnWorkspace) =>
+  workspace.type === "shared"
+    ? { type: "shared" as const }
+    : workspace.type === "existing_worktree"
+      ? { type: "existing_worktree" as const, worktreePath: workspace.worktree_path }
+      : {
+          type: "worktree" as const,
+          baseRef: workspace.base_ref,
+          ...(workspace.branch === undefined ? {} : { branch: workspace.branch }),
+          ...(workspace.start_from_origin === undefined
+            ? {}
+            : { startFromOrigin: workspace.start_from_origin }),
+        };

@@ -1,15 +1,9 @@
-import {
-  ChatAttachmentId,
-  type ChatAttachment,
-  OrchestratorMcpFailure,
-  type ThreadId,
-} from "@t3tools/contracts";
+import { type ChatAttachment, OrchestratorMcpFailure, type ThreadId } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import { Tool, Toolkit } from "effect/ai";
 
-import { planAttachmentClaim, resolveAttachmentPath } from "../../../attachmentStore.ts";
 import { ServerSecretStore } from "../../../auth/ServerSecretStore.ts";
 import { ServerConfig } from "../../../config.ts";
 import { McpInvocationContext } from "../../../mcp/McpInvocationContext.ts";
@@ -18,7 +12,6 @@ import { resolveAttachmentReferences } from "../../../mcp/toolkits/attachment/ha
 import type { McpAttachmentInput } from "../../../mcp/toolkits/attachment/input.ts";
 import { AttachmentToolkit } from "../../../mcp/toolkits/attachment/tools.ts";
 import {
-  AttachmentClaimError,
   claimPendingAttachments,
   releaseClaimedAttachments,
 } from "../../../orchestration-v2/AttachmentClaims.ts";
@@ -50,56 +43,6 @@ export const J5AttachmentUploadToolkit = Toolkit.make(
   }).annotate(Tool.Destructive, true),
   AttachmentToolkit.tools.t3_attachment_discard,
 );
-
-/** Read-only preflight; claiming repeats the checks because uploads can change before dispatch. */
-export const preflightSpawnUploads = Effect.fn("j5.a2a.mcp.preflightSpawnUploads")(function* (
-  threadId: ThreadId,
-  attachments: ReadonlyArray<ChatAttachment>,
-) {
-  const config = yield* ServerConfig;
-  const fs = yield* FileSystem.FileSystem;
-  yield* Effect.forEach(
-    attachments,
-    (attachment) =>
-      Effect.gen(function* () {
-        const claim = planAttachmentClaim({
-          attachmentsDir: config.attachmentsDir,
-          threadId,
-          attachmentId: attachment.id,
-        });
-        if (!claim.ok)
-          return yield* new AttachmentClaimError({
-            message: `Attachment '${attachment.name}' cannot be sent: ${claim.reason}.`,
-          });
-        const info = yield* fs.stat(claim.currentPath).pipe(
-          Effect.mapError(
-            (cause) =>
-              new AttachmentClaimError({
-                message: `Attachment '${attachment.name}' cannot be sent: attachment not found.`,
-                cause,
-              }),
-          ),
-        );
-        if (Number(info.size) !== attachment.sizeBytes)
-          return yield* new AttachmentClaimError({
-            message: `Attachment '${attachment.name}' cannot be sent: stored size does not match.`,
-          });
-        const expectedPath = resolveAttachmentPath({
-          attachmentsDir: config.attachmentsDir,
-          attachment: {
-            ...attachment,
-            id: ChatAttachmentId.make(claim.finalId),
-            mimeType: attachment.mimeType.toLowerCase(),
-          },
-        });
-        if (expectedPath !== claim.finalPath)
-          return yield* new AttachmentClaimError({
-            message: `Attachment '${attachment.name}' cannot be sent: attachment type does not match the upload.`,
-          });
-      }),
-    { concurrency: 1, discard: true },
-  );
-});
 
 /**
  * Sends a message with files for an agent on this server. Each attachment is a pending upload,

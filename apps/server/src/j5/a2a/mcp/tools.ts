@@ -1,3 +1,4 @@
+import * as SpawnAgentService from "../SpawnAgentService.ts";
 import { RequestReplayService } from "../RequestReplayService.ts";
 import { Tool, Toolkit } from "effect/ai";
 import { playbookTools } from "../../playbooks/mcp.ts";
@@ -259,21 +260,6 @@ export const J5SpawnWorkspace = Schema.Union([
   }),
 ]);
 export type J5SpawnWorkspace = typeof J5SpawnWorkspace.Type;
-
-/** The stored camelCase form of an MCP workspace choice; unset fields stay unset. */
-export const spawnWorkspaceFromInput = (workspace: J5SpawnWorkspace) =>
-  workspace.type === "shared"
-    ? { type: "shared" as const }
-    : workspace.type === "existing_worktree"
-      ? { type: "existing_worktree" as const, worktreePath: workspace.worktree_path }
-      : {
-          type: "worktree" as const,
-          baseRef: workspace.base_ref,
-          ...(workspace.branch === undefined ? {} : { branch: workspace.branch }),
-          ...(workspace.start_from_origin === undefined
-            ? {}
-            : { startFromOrigin: workspace.start_from_origin }),
-        };
 
 /**
  * A spawn's workspace choice: a Crew seat's three, and the project's own checkout, which is
@@ -614,6 +600,7 @@ const placementDependencies = [
 ];
 
 const spawnDependencies = [
+  SpawnAgentService.SpawnAgentService,
   McpInvocationContext.McpInvocationContext,
   A2ASendService,
   Crypto.Crypto,

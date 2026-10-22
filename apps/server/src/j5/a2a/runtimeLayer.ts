@@ -1,3 +1,4 @@
+import * as SpawnAgentService from "./SpawnAgentService.ts";
 import * as Layer from "effect/Layer";
 import { layerEventSink as OrchestrationV2EventSinkLayerLive } from "../../orchestration-v2/runtimeLayer.ts";
 import { layer as playbookCrewRelayLayer } from "../playbooks/PlaybookCrewRelay.ts";
@@ -232,6 +233,7 @@ export const makeJ5A2AAuxiliaryLayer = (
     archiveFactsProvided,
     spawnWorkspaceProvided,
     requestReplayLayer,
+    SpawnAgentService.layer,
     agentCrewInstanceLayer,
     archiveCrewProvided,
     crewProposalProvided,

@@ -1,3 +1,4 @@
+import * as SpawnAgentService from "./SpawnAgentService.ts";
 import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
@@ -459,9 +460,17 @@ const spawnHarness = (input: {
             Effect.provideService(McpInvocationContext, input.scope ?? invocation),
           );
       });
+    const serviceCall = (args: J5SpawnAgentInput) =>
+      Effect.gen(function* () {
+        const service = yield* SpawnAgentService.SpawnAgentService;
+        return yield* service
+          .spawn(args, input.scope ?? invocation)
+          .pipe(Effect.provideService(McpInvocationContext, input.scope ?? invocation));
+      });
     return {
       layer,
       call,
+      serviceCall,
       log,
       commands,
       launches,
@@ -484,6 +493,32 @@ const spawnArgs = {
 
 const message = (response: { readonly result: unknown }) =>
   (response.result as { readonly message: string }).message;
+
+it.effect("accepts and replays a direct domain-service spawn", () =>
+  Effect.gen(function* () {
+    const { layer, serviceCall, commands } = yield* spawnHarness({
+      checkout: { isRepo: true, refName: "j5/main" },
+    });
+    yield* Effect.gen(function* () {
+      const args = {
+        ...spawnArgs,
+        workspace: { type: "shared" as const },
+        client_request_id: "domain-service",
+      };
+      const original = yield* serviceCall(args);
+      assert.deepStrictEqual(yield* serviceCall(args), original);
+      const beforeRefusal = yield* Ref.get(commands);
+      const refused = yield* serviceCall({ ...args, brief: "Different work" }).pipe(Effect.flip);
+      assert.include(refused.message, "different request");
+      assert.deepStrictEqual(yield* Ref.get(commands), beforeRefusal);
+      const briefIds = beforeRefusal.flatMap((command) =>
+        command.type === "message.dispatch" ? [command.commandId] : [],
+      );
+      assert.isAbove(briefIds.length, 0);
+      assert.lengthOf([...new Set(briefIds)], 1, "retries keep the same dispatch identity");
+    }).pipe(Effect.provide(layer));
+  }),
+);
 
 it.effect("spawns into another project's main checkout, as a root of that project", () =>
   Effect.gen(function* () {
@@ -1020,6 +1055,7 @@ it.effect.each(["size", "type"] as const)(
             : { ...attachment, mimeType: "image/jpeg" };
         const refused = yield* call({ ...args, attachments: [incorrect] });
         assert.isTrue(refused.isFailure);
+        assert.notInclude(message(refused), attachment.name);
         assert.include(
           message(refused),
           mismatch === "size" ? "stored size does not match" : "type does not match",
