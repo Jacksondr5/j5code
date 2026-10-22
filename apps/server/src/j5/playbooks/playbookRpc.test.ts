@@ -1,16 +1,21 @@
+import { ServerConfig } from "../../config.ts";
 import { seedPlaybookOwners } from "./testFixtures.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
-  AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
+  AuthSettingsWriteScope,
   EventId,
   ProjectId,
   ProviderInstanceId,
   ThreadId,
 } from "@t3tools/contracts";
 import { requiredScopeForRpcMethod } from "../../auth/RpcAuthorization.ts";
-import { J5_PLAYBOOK_WS_METHODS, type PlaybookError } from "@t3tools/contracts/j5";
+import {
+  J5_PLAYBOOK_WS_METHODS,
+  LEVEL_PERMISSIONS,
+  type PlaybookError,
+} from "@t3tools/contracts/j5";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -174,6 +179,7 @@ const fixture = Effect.gen(function* () {
     };
   });
   return {
+    handlers,
     exportPlaybook,
     deletePlaybook,
     renamePlaybook,
@@ -196,13 +202,16 @@ const codeOf = <A>(call: Effect.Effect<A, { readonly code: string }>) =>
     Effect.map((error) => error.code),
   );
 
-it("requires operate scope to delete or rename a playbook", () => {
+it("requires an Owner's settings permission to change the library or read its folders", () => {
   for (const method of [
+    J5_PLAYBOOK_WS_METHODS.savePlaybook,
+    J5_PLAYBOOK_WS_METHODS.setFolders,
     J5_PLAYBOOK_WS_METHODS.deletePlaybook,
     J5_PLAYBOOK_WS_METHODS.renamePlaybook,
+    J5_PLAYBOOK_WS_METHODS.readSources,
   ]) {
-    assert.equal(requiredScopeForRpcMethod(method), AuthOrchestrationOperateScope);
-    assert.equal(PLAYBOOK_RPC_SCOPES[method], AuthOrchestrationOperateScope);
+    assert.equal(requiredScopeForRpcMethod(method), AuthSettingsWriteScope);
+    assert.notInclude(LEVEL_PERMISSIONS.collaborator, AuthSettingsWriteScope);
   }
 });
 
@@ -523,6 +532,9 @@ it.effect("tells a storage failure in the action's general words, never the stor
     );
     const handlers = yield* handlersFor({
       changes: store.changes,
+      sources: () => refused,
+      saveDefinition: () => refused,
+      setFolders: () => refused,
       discover: () => refused,
       listForThread: () => refused,
       listAll: () => refused,
@@ -563,4 +575,44 @@ it.effect("tells a storage failure in the action's general words, never the stor
       message: "Reading playbook runs failed.",
     });
   }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+);
+
+it.effect("manages the environment library over RPC without a project", () =>
+  Effect.gen(function* () {
+    const { handlers, store } = yield* fixture;
+    const save = J5_PLAYBOOK_WS_METHODS.savePlaybook;
+    const yaml = stringify(definition("Shared library"));
+    yield* handlers[save]({ name: "shared", yaml });
+    const library = yield* handlers[J5_PLAYBOOK_WS_METHODS.readLibrary]({
+      source: { kind: "environment" },
+    });
+    assert.equal(library.workspaceRoot, "");
+    assert.equal(library.playbooks[0]?.title, "Shared library");
+    assert.equal(
+      (yield* handlers[J5_PLAYBOOK_WS_METHODS.exportPlaybook]({
+        name: "shared",
+        source: { kind: "environment" },
+      })).yaml,
+      yaml,
+    );
+    yield* handlers[J5_PLAYBOOK_WS_METHODS.renamePlaybook]({
+      name: "shared",
+      title: "Renamed shared library",
+      source: { kind: "environment" },
+    });
+    assert.equal((yield* store.read("", "shared")).title, "Renamed shared library");
+    yield* handlers[J5_PLAYBOOK_WS_METHODS.deletePlaybook]({
+      name: "shared",
+      source: { kind: "environment" },
+    });
+    assert.equal((yield* handlers[J5_PLAYBOOK_WS_METHODS.readLibrary]({})).playbooks.length, 0);
+    assert.equal((yield* handlers[J5_PLAYBOOK_WS_METHODS.readSources]()).folders.length, 1);
+  }).pipe(
+    Effect.scoped,
+    Effect.provide(
+      ServerConfig.layerTest(process.cwd(), { prefix: "j5-playbook-rpc-library-" }).pipe(
+        Layer.provideMerge(TestLayer),
+      ),
+    ),
+  ),
 );

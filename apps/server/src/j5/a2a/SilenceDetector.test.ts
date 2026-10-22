@@ -43,6 +43,7 @@ import {
 } from "./DeliveryTransport.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { noneLayer as peerDirectoryNoneLayer } from "./PeerDirectory.ts";
+import { runMigrations } from "../../persistence/Migrations.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import { A2ASendService, layer as sendLayer } from "./SendService.ts";
 import {
@@ -234,12 +235,18 @@ const join = Effect.fn("test.j5.a2a.silence.join")(function* (
 });
 
 const seed = Effect.fn("test.j5.a2a.silence.seed")(function* () {
+  yield* runMigrations();
   yield* runJ5A2AMigrations();
   const ledger = yield* A2ALedger;
   const sql = yield* SqlClient.SqlClient;
   yield* sql`
     INSERT INTO j5_a2a_human_person (person_id, is_local_operator, created_at)
     VALUES (${person.id}, 1, ${iso(0)})
+  `;
+  // The first owner writes to every thread, as the server records them at startup.
+  yield* sql`
+    INSERT INTO j5_a2a_person_level (person_id, scope_kind, scope_id, level, created_at, updated_at)
+    VALUES (${person.id}, 'server', '', 'owner', ${iso(0)}, ${iso(0)})
   `;
   yield* ledger.ensureProject({ projectId: projectId, createdAt: iso(0) });
   yield* join(waiter, "waiter");
@@ -723,7 +730,7 @@ const seedQueuedMessage = Effect.fn("test.j5.a2a.silence.seedQueuedMessage")(fun
     false,
   );
   thread.runs = [runOf(removed)];
-  return removed;
+  return { removed, messageId: sent.messageId };
 });
 
 const readRemovedNotices = Effect.fn("test.j5.a2a.silence.readRemovedNotices")(function* () {
@@ -740,7 +747,7 @@ const readRemovedNotices = Effect.fn("test.j5.a2a.silence.readRemovedNotices")(f
 it.effect("tells the sender once when its queued message is removed before it runs", () =>
   Effect.gen(function* () {
     yield* seed();
-    const removed = yield* seedQueuedMessage();
+    const { removed, messageId } = yield* seedQueuedMessage();
     const detector = yield* A2ASilenceDetector;
 
     yield* detector.handleStoredEvent(removed);
@@ -755,7 +762,12 @@ it.effect("tells the sender once when its queued message is removed before it ru
     );
     assert.include(
       notices[0]?.message_text,
-      removedNoticeMessage(subject.id, "Queued update that never ran"),
+      removedNoticeMessage(subject.id, messageId, "Queued update that never ran"),
+    );
+    assert.include(
+      notices[0]?.message_text,
+      `Your message ${messageId} to ${subject.id} was removed`,
+      "it names the message by the id its send returned",
     );
   }).pipe(Effect.provide(makeTestLayer())),
 );
@@ -765,7 +777,7 @@ it.effect.each(["promoted into the running turn", "archived with its receiver"] 
   (reason) =>
     Effect.gen(function* () {
       yield* seed();
-      const removed = yield* seedQueuedMessage();
+      const { removed } = yield* seedQueuedMessage();
       if (reason === "archived with its receiver") {
         thread.thread = { archivedAt: iso(3), deletedAt: null };
       } else {
@@ -1146,6 +1158,7 @@ it.effect(
   "emits nothing for a reply to another project that is accepted but not yet delivered",
   () =>
     Effect.gen(function* () {
+      yield* runMigrations();
       yield* runJ5A2AMigrations();
       const ledger = yield* A2ALedger;
       const subjectProjectId = LedgerProjectId.make("project:silence-test:subject");

@@ -49,9 +49,10 @@ import {
   TYPE_TO_FOCUS_FLOATING_LAYER_SELECTOR,
 } from "./chat/composerFocusRedirect";
 import { CrewRosterGate } from "../j5/crew/CrewRosterGate";
-import { useCanOperateThread } from "../j5/sharing/guestAccess";
+import { useCanOperateThread } from "../j5/sharing/access";
+import { sharedMessageTypedText } from "../j5/sharing/sharedTimeline";
 import { expandPlaybookPrompt } from "@t3tools/client-runtime/j5/playbooks";
-import { PlaybookBoard } from "../j5/playbooks/PlaybookBoard";
+import { PlaybookComposerControl } from "../j5/playbooks/PlaybookComposerControl";
 import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
 import * as Schema from "effect/Schema";
 import {
@@ -787,6 +788,9 @@ async function rewindToMessage(input: {
     ) {
       throw new Error("Make room for this message's attachments in the composer before rewinding.");
     }
+    // J5 (case 80): a rewound message of a shared conversation comes back without the lines the
+    // server put on it for the agent. Read before the rewind takes it out of the author record.
+    const typedText = sharedMessageTypedText(input.routeThreadRef, message);
     const commandId = CommandId.make(randomUUID());
     await waitForRevertedMessage(
       input.routeThreadRef,
@@ -807,7 +811,7 @@ async function rewindToMessage(input: {
       },
     );
     const currentPrompt = store.getComposerDraft(draftTarget)?.prompt ?? "";
-    const restoredPrompt = recallableComposerPrompt(message.text);
+    const restoredPrompt = recallableComposerPrompt(typedText);
     const nextPrompt =
       restoredPrompt.length === 0
         ? currentPrompt
@@ -2355,7 +2359,7 @@ export default function ChatView(props: ChatViewProps) {
         title: `${activeEnvironmentUnavailableState.label} is ${environmentReconnecting ? "reconnecting" : "offline"}`,
         actions: (
           <>
-            {!environmentReconnecting ? (
+            {unavailableConnection.phase !== "connecting" ? (
               <Button
                 size="xs"
                 variant="ghost"
@@ -8050,14 +8054,6 @@ export default function ChatView(props: ChatViewProps) {
           />
         </header>
 
-        {isServerThread && (
-          <PlaybookBoard
-            key={`${activeThread.environmentId}:${activeThread.id}`}
-            environmentId={activeThread.environmentId}
-            threadId={activeThread.id}
-          />
-        )}
-
         <div className="relative flex min-h-0 min-w-0 flex-1">
           <ThreadFindCanvas
             findOptions={{
@@ -8399,6 +8395,15 @@ export default function ChatView(props: ChatViewProps) {
                               }
                               isPreparingWorktree={isPreparingWorktree && !sendQueuesBehindSetup}
                               queuedRunsControl={queuedRunsControl}
+                              threadProgressControl={
+                                isServerThread ? (
+                                  <PlaybookComposerControl
+                                    key={`${activeThread.environmentId}:${activeThread.id}`}
+                                    environmentId={activeThread.environmentId}
+                                    threadId={activeThread.id}
+                                  />
+                                ) : null
+                              }
                               bannerItems={composerBannerItems}
                               resumeCompactionTokens={resumeCompactionTokens}
                               keepFullHistory={keepFullHistory}

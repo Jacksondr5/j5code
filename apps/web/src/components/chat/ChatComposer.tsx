@@ -1608,6 +1608,8 @@ export interface ChatComposerProps {
   onPageScrollRelease: () => void;
 
   queuedRunsControl?: ReactNode;
+  /** Thread-owned progress attached above the composer. */
+  threadProgressControl?: ReactNode;
   editingQueuedAttachments: ReadonlyArray<{
     readonly attachment: ContractChatAttachment;
     readonly url: string | null;
@@ -6420,6 +6422,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         : null}
       <ComposerBanner.Dock>
         <ComposerBanner.Column>
+          {!hasBlockingComposerTopDrawer && props.threadProgressControl}
           <ComposerBannerStack
             key={activeThreadId}
             className="relative z-0"
@@ -6646,7 +6649,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     : prompt.trim() ||
                       (showProviderUnavailable
                         ? "Enable a provider in Settings"
-                        : // J5 (case 73): the collapsed composer says the same to a guest with View.
+                        : // J5 (case 73): the collapsed composer says the same to a Viewer.
                           (viewOnlyComposerProps.placeholder ?? "Ask anything..."))}
                 </button>
                 {collapsedComposerImagePreviews}
@@ -7208,7 +7211,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                                   ? DISCONNECTED_COMPOSER_PLACEHOLDER
                                   : "Ask anything, @tag files/folders, $use skills, or / for commands"
                     }
-                    // J5 (case 73): a guest with View is told so here; for anyone else this is empty.
+                    // J5 (case 73): a Viewer is told so here; for anyone else this is empty.
                     {...viewOnlyComposerProps}
                     disabled={
                       isConnecting ||
