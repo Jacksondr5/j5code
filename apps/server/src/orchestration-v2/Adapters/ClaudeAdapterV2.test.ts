@@ -3220,6 +3220,115 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     ),
   );
 
+  it.effect.each([
+    { case: "the result beats the steer's acknowledgement", gap: "unacknowledged" },
+    { case: "the result fails while the steer is queued", gap: "failed" },
+    { case: "the CLI reports no lifecycle", gap: "no-lifecycle" },
+  ] as const)("ends an agent-steered turn correctly when $case", ({ gap }) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const harness = yield* makeWakeHarness;
+        const idAllocator = yield* IdAllocator.IdAllocatorV2;
+        const attemptId = RunAttemptId.make(`attempt-steering-${gap}`);
+        const input = makeClaudeTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now: yield* DateTime.now,
+          attemptId,
+          text: "Audit the settings pages.",
+          attachments: [],
+        });
+        yield* harness.runtime.startTurn(input);
+        const lifecycle = (commandUuid: string, state: string, uuid: string) =>
+          claudeSdkFrame({
+            type: "command_lifecycle",
+            command_uuid: commandUuid,
+            state,
+            uuid,
+            session_id: WAKE_NATIVE_SESSION,
+          });
+        if (gap !== "no-lifecycle") {
+          yield* harness.offerAndWait(
+            lifecycle(harness.promptUuid(0), "started", "00000000-0000-4000-8000-000000000921"),
+          );
+        }
+        yield* harness.runtime.steerTurn({
+          threadId: harness.threadId,
+          runId: input.runId,
+          providerThread: harness.providerThread,
+          providerTurnId: idAllocator.derive.providerTurn({
+            driver: ClaudeAdapterV2.CLAUDE_PROVIDER,
+            nativeTurnId: `turn:${attemptId}`,
+          }),
+          message: {
+            createdBy: "agent",
+            creationSource: "server",
+            messageId: MessageId.make(`message-steering-${gap}`),
+            text: "Include the hierarchy mock.",
+            attachments: [],
+          },
+        });
+        const steerUuid = harness.offeredMessages[1]?.uuid ?? assert.fail("The steer has no uuid.");
+        if (gap === "failed") {
+          yield* Queue.offer(
+            harness.sdkMessages,
+            lifecycle(steerUuid, "queued", "00000000-0000-4000-8000-000000000922"),
+          );
+        }
+        yield* Queue.offer(
+          harness.sdkMessages,
+          gap === "failed"
+            ? makeResultFrame({
+                uuid: "00000000-0000-4000-8000-000000000923",
+                result: "",
+                subtype: "error_during_execution",
+                isError: true,
+                errors: ["Claude stopped unexpectedly."],
+              })
+            : makeResultFrame({ uuid: "00000000-0000-4000-8000-000000000923", result: "" }),
+        );
+        if (gap === "unacknowledged") {
+          // The turn stays open for the steer Claude acknowledged after its result.
+          yield* Queue.offer(
+            harness.sdkMessages,
+            lifecycle(steerUuid, "queued", "00000000-0000-4000-8000-000000000924"),
+          );
+          yield* Queue.offer(
+            harness.sdkMessages,
+            lifecycle(steerUuid, "started", "00000000-0000-4000-8000-000000000925"),
+          );
+          yield* Queue.offer(harness.sdkMessages, wakeAssistant);
+          yield* Queue.offer(
+            harness.sdkMessages,
+            makeResultFrame({ uuid: "00000000-0000-4000-8000-000000000926", result: "Done." }),
+          );
+        }
+        const terminal = yield* Queue.take(harness.terminalReceipts);
+        assert.equal(terminal.status, gap === "failed" ? "failed" : "completed");
+        assert.lengthOf(harness.terminalEvents(), 1);
+        if (gap === "unacknowledged") {
+          assert.isTrue(
+            harness.events.some(
+              (event) =>
+                event.type === "turn_item.updated" &&
+                event.turnItem.type === "assistant_message" &&
+                event.turnItem.text === WAKE_ASSISTANT_TEXT,
+            ),
+          );
+        }
+        if (gap === "no-lifecycle") {
+          // Claude runs the steer as its own turn, which reaches the thread as a wake turn.
+          yield* harness.offerAndWait(wakeTurnInit);
+          assert.lengthOf(harness.continuationRequests, 1);
+        }
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+    ),
+  );
+
   // J5: a Crew seat asks its Captain instead of the person (j5/a2a/crewSeatQuestions.ts).
   it.effect.each([false, true])(
     "withholds AskUserQuestion only from a Crew seat (seat=%s)",

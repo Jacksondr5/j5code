@@ -3005,10 +3005,11 @@ interface ActiveClaudeTurnContext {
   // Usage of the results that steers ended, oldest first. The final result's
   // usage covers only its own segment, so the turn bills these as well.
   readonly steeredSegmentUsage: Array<SDKResultMessage["usage"]>;
-  // Steers by uuid. Claude reads a steer at the turn's next tool result; one
-  // sent after the last tool call is still queued at the turn's result and
-  // runs as the next native turn, which belongs to this one.
-  readonly steers: Map<string, "offered" | "queued" | "taken">;
+  // Steers by uuid. Claude reads a "next" steer at the turn's next tool result;
+  // one sent after the last tool call is still queued at the turn's result and
+  // runs as the next native turn, which belongs to this one. Without lifecycle
+  // frames that native turn reaches the thread as a wake turn instead.
+  readonly steers: Map<string, "offered" | "queued" | "dequeued">;
   readonly subagentsByTaskId: Map<string, ActiveClaudeSubagent>;
   readonly subagentsByToolUseId: Map<string, ActiveClaudeSubagent>;
   readonly subagentNodesByTaskId: Map<string, OrchestrationV2ExecutionNode["id"]>;
@@ -3054,6 +3055,9 @@ interface ClaudeLiveQueryContext {
   // ("early") or only on its result. "acknowledged": the CLI confirmed it took a prompt's uuid
   // before any echo, so it echoes, but a resume's own turns can still run ahead of that prompt.
   promptEchoMode: "unknown" | "acknowledged" | "early" | "result_only";
+  // Whether this CLI process reports command_lifecycle frames, so a steer it hasn't
+  // acknowledged yet is known to be on its way.
+  reportsCommandLifecycle: boolean;
   readonly openedPermissionMode: PermissionMode;
   permissionMode: PermissionMode;
   stopping: boolean;
@@ -7451,11 +7455,17 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             const completedAt = yield* DateTime.now;
             const interrupted = (yield* Ref.get(interruptedTurns)).has(context.providerTurnId);
             const wasSteered = (yield* Ref.get(steeredTurns)).has(context.providerTurnId);
-            const steerWaiting = [...context.steers.values()].includes("queued");
+            const reportsLifecycle = liveQuery.reportsCommandLifecycle;
+            const steerWaiting = [...context.steers.values()].some(
+              (state) => state === "queued" || (state === "offered" && reportsLifecycle),
+            );
+            // A failed result ends the turn so its error shows; a steer still queued
+            // then runs as a wake turn.
             if (
               !interrupted &&
               wasSteered &&
-              (steerWaiting || isClaudeActiveSteeringAbortResult(message))
+              ((steerWaiting && terminalStatusFromResult(message) === "completed") ||
+                isClaudeActiveSteeringAbortResult(message))
             ) {
               context.steeredSegmentUsage.push(message.usage);
               return;
@@ -7579,10 +7589,13 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           const context = yield* Ref.get(activeTurn);
           const liveQuery = yield* Ref.get(queryContext);
           const steerLifecycle = claudePromptLifecycle(message);
+          if (steerLifecycle !== null && liveQuery?.query === input.query) {
+            liveQuery.reportsCommandLifecycle = true;
+          }
           if (steerLifecycle !== null && context?.steers.has(steerLifecycle.uuid)) {
             context.steers.set(
               steerLifecycle.uuid,
-              steerLifecycle.state === "queued" ? "queued" : "taken",
+              steerLifecycle.state === "queued" ? "queued" : "dequeued",
             );
           }
           if (
@@ -8198,6 +8211,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             closed,
             lastTurn: null,
             promptEchoMode: "unknown",
+            reportsCommandLifecycle: false,
             openedPermissionMode: queryOptions.permissionMode,
             permissionMode: queryOptions.permissionMode,
             stopping: false,
