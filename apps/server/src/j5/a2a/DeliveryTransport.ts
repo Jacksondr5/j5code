@@ -270,12 +270,18 @@ export const gpt6PeerSteeringRun = (
   const session = target.providerSessions.find(
     (candidate) => candidate.id === providerThread?.providerSessionId,
   );
-  return providerThread?.driver === "codex" &&
-    session?.driver === "codex" &&
-    session.capabilities.turns.supportsActiveSteering === true &&
-    isGpt6Model(normalizeModelSlug(run.modelSelection.model, providerThread.driver))
-    ? run
-    : undefined;
+  if (providerThread === undefined || session?.driver !== providerThread.driver) return undefined;
+  const turns = session.capabilities.turns;
+  // Claude reads a steer once its running tool calls finish, when its session says so.
+  const claudeTakesPeerUpdates =
+    providerThread.driver === "claude" &&
+    turns.supportsActiveSteering === true &&
+    turns.activeSteeringInterruptsTools !== true;
+  const gpt6TakesPeerUpdates =
+    providerThread.driver === "codex" &&
+    turns.supportsActiveSteering === true &&
+    isGpt6Model(normalizeModelSlug(run.modelSelection.model, providerThread.driver));
+  return claudeTakesPeerUpdates || gpt6TakesPeerUpdates ? run : undefined;
 };
 
 /**

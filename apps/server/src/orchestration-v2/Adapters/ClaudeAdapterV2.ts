@@ -281,7 +281,6 @@ export const ClaudeProviderCapabilitiesV2 = {
     emitsTurnCompleted: true,
     supportsInterrupt: true,
     supportsActiveSteering: true,
-    activeSteeringInterruptsTools: true,
     supportsSteeringByInterruptRestart: false,
     supportsQueuedMessages: true,
     terminalStatusQuality: "strong",
@@ -3006,6 +3005,10 @@ interface ActiveClaudeTurnContext {
   // Usage of the results that steers ended, oldest first. The final result's
   // usage covers only its own segment, so the turn bills these as well.
   readonly steeredSegmentUsage: Array<SDKResultMessage["usage"]>;
+  // Steers by uuid. Claude reads a steer at the turn's next tool result; one
+  // sent after the last tool call is still queued at the turn's result and
+  // runs as the next native turn, which belongs to this one.
+  readonly steers: Map<string, "offered" | "queued" | "taken">;
   readonly subagentsByTaskId: Map<string, ActiveClaudeSubagent>;
   readonly subagentsByToolUseId: Map<string, ActiveClaudeSubagent>;
   readonly subagentNodesByTaskId: Map<string, OrchestrationV2ExecutionNode["id"]>;
@@ -7448,7 +7451,12 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             const completedAt = yield* DateTime.now;
             const interrupted = (yield* Ref.get(interruptedTurns)).has(context.providerTurnId);
             const wasSteered = (yield* Ref.get(steeredTurns)).has(context.providerTurnId);
-            if (!interrupted && wasSteered && isClaudeActiveSteeringAbortResult(message)) {
+            const steerWaiting = [...context.steers.values()].includes("queued");
+            if (
+              !interrupted &&
+              wasSteered &&
+              (steerWaiting || isClaudeActiveSteeringAbortResult(message))
+            ) {
               context.steeredSegmentUsage.push(message.usage);
               return;
             }
@@ -7570,6 +7578,13 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           const message = input.message;
           const context = yield* Ref.get(activeTurn);
           const liveQuery = yield* Ref.get(queryContext);
+          const steerLifecycle = claudePromptLifecycle(message);
+          if (steerLifecycle !== null && context?.steers.has(steerLifecycle.uuid)) {
+            context.steers.set(
+              steerLifecycle.uuid,
+              steerLifecycle.state === "queued" ? "queued" : "taken",
+            );
+          }
           if (
             context === null ||
             context.promptUuid === null ||
@@ -8317,6 +8332,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               rateLimitResetTimes: new Map(),
               latestAssistantRateLimited: false,
               steeredSegmentUsage: [],
+              steers: new Map(),
               subagentsByTaskId: new Map(),
               subagentsByToolUseId: new Map(),
               subagentNodesByTaskId: new Map(),
@@ -8542,10 +8558,10 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             ),
         );
 
-        // A steer is sent with priority "now", which cancels the root turn's
-        // running tool calls. A subagent the root launched in the foreground is
-        // one of them, so it moves to the background first and keeps running;
-        // its result arrives as a task notification like any background agent.
+        // A steer waits for the root turn's running tool calls. A subagent the
+        // root launched in the foreground is one of them and can run for a long
+        // time, so it moves to the background first and keeps running; its
+        // result arrives as a task notification like any background agent.
         const backgroundForegroundSubagents = Effect.fnUntraced(function* (
           live: ClaudeLiveQueryContext,
         ) {
@@ -8622,13 +8638,27 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 detail: `Claude provider turn ${turnInput.providerTurnId} is not the active turn.`,
               });
             }
+            const steerUuid = yield* crypto.randomUUIDv4().pipe(
+              Effect.filterOrFail(isClaudePromptUuid),
+              Effect.mapError(
+                (cause) =>
+                  new ProviderAdapter.ProviderAdapterProtocolError({
+                    driver: CLAUDE_PROVIDER,
+                    detail: "Failed to allocate a Claude steer uuid.",
+                    payload: cause,
+                  }),
+              ),
+            );
             const userMessage = yield* makeClaudeUserMessageWithAttachments({
               text: applyClaudePromptEffortPrefix(
                 turnInput.message.text,
                 compileClaudeModelSelection(currentTurn.input.modelSelection).promptEffort,
               ),
               attachments: turnInput.message.attachments,
-              priority: "now",
+              // "next" waits for the running tool calls and adds the message
+              // to the turn; "now" would cancel them.
+              priority: "next",
+              uuid: steerUuid,
               attachmentsDir,
               fileSystem,
               skillNames: yield* userInvocableSkillNames(currentTurn.input.runtimePolicy.cwd),
@@ -8651,6 +8681,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               next.add(turnInput.providerTurnId);
               return next;
             });
+            currentTurn.steers.set(steerUuid, "offered");
             yield* existing.query.offer(userMessage);
           },
           (effect, turnInput) =>

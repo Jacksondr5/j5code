@@ -1649,7 +1649,7 @@ describe("ClaudeAdapterV2 attachments", () => {
           },
         });
 
-        assert.equal(offeredMessages[1]?.priority, "now");
+        assert.equal(offeredMessages[1]?.priority, "next");
         assert.deepEqual(offeredMessages[1]?.message.content, [
           expectedImageBlock,
           {
@@ -3049,7 +3049,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
               attachments: [],
             },
           });
-          assert.equal(harness.offeredMessages[1]?.priority, "now");
+          assert.equal(harness.offeredMessages[1]?.priority, "next");
         }
         yield* Queue.offer(
           harness.sdkMessages,
@@ -3110,6 +3110,107 @@ describe("ClaudeAdapterV2 background wake turns", () => {
             },
           );
         }
+        assert.lengthOf(harness.terminalEvents(), 1);
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+    ),
+  );
+
+  it.effect.each([
+    { case: "takes it at a tool result", late: false },
+    { case: "runs it after its last tool call", late: true },
+  ])("ends a steered turn once Claude $case", ({ late }) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const harness = yield* makeWakeHarness;
+        const idAllocator = yield* IdAllocator.IdAllocatorV2;
+        const attemptId = RunAttemptId.make("attempt-steering-next");
+        const input = makeClaudeTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now: yield* DateTime.now,
+          attemptId,
+          text: "Audit the settings pages.",
+          attachments: [],
+        });
+        yield* harness.runtime.startTurn(input);
+        yield* harness.runtime.steerTurn({
+          threadId: harness.threadId,
+          runId: input.runId,
+          providerThread: harness.providerThread,
+          providerTurnId: idAllocator.derive.providerTurn({
+            driver: ClaudeAdapterV2.CLAUDE_PROVIDER,
+            nativeTurnId: `turn:${attemptId}`,
+          }),
+          message: {
+            createdBy: "user",
+            creationSource: "web",
+            messageId: MessageId.make("message-steering-next"),
+            text: "Include the hierarchy mock.",
+            attachments: [],
+          },
+        });
+        const steer = harness.offeredMessages[1];
+        assert.equal(steer?.priority, "next");
+        const steerUuid = steer?.uuid;
+        assert.isString(steerUuid);
+        const lifecycle = (state: string, uuid: string) =>
+          claudeSdkFrame({
+            type: "command_lifecycle",
+            command_uuid: steerUuid,
+            state,
+            uuid,
+            session_id: WAKE_NATIVE_SESSION,
+          });
+        const usage = {
+          input_tokens: 600,
+          output_tokens: 40,
+          cache_creation_input_tokens: 500,
+          cache_read_input_tokens: 2000,
+        };
+        yield* Queue.offer(
+          harness.sdkMessages,
+          lifecycle("queued", "00000000-0000-4000-8000-000000000911"),
+        );
+        if (!late) {
+          yield* Queue.offer(
+            harness.sdkMessages,
+            lifecycle("started", "00000000-0000-4000-8000-000000000912"),
+          );
+        }
+        yield* Queue.offer(
+          harness.sdkMessages,
+          makeResultFrame({ uuid: "00000000-0000-4000-8000-000000000913", result: "", usage }),
+        );
+        if (late) {
+          yield* Queue.offer(
+            harness.sdkMessages,
+            lifecycle("started", "00000000-0000-4000-8000-000000000914"),
+          );
+          yield* Queue.offer(harness.sdkMessages, wakeAssistant);
+          yield* Queue.offer(
+            harness.sdkMessages,
+            makeResultFrame({
+              uuid: "00000000-0000-4000-8000-000000000915",
+              result: "Audit finished after the steer.",
+              usage,
+            }),
+          );
+        }
+        const terminal = yield* Queue.take(harness.terminalReceipts);
+        assert.equal(terminal.status, "completed");
+        const completed = harness.events.findLast(
+          (event) => event.type === "provider_turn.updated",
+        );
+        assert.equal(
+          completed?.type === "provider_turn.updated"
+            ? completed.providerTurn.turnTokenUsage?.outputTokens
+            : undefined,
+          late ? 80 : 40,
+        );
         assert.lengthOf(harness.terminalEvents(), 1);
       }).pipe(
         Effect.provide(
@@ -13976,7 +14077,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           }
           assert.isTrue(Exit.isSuccess(steered));
           assert.equal(harness.offeredMessages.length, offered + 1);
-          assert.equal(harness.offeredMessages.at(-1)?.priority, "now");
+          assert.equal(harness.offeredMessages.at(-1)?.priority, "next");
           if (backgrounding === "never answers") {
             for (let repeat = 1; repeat <= 2; repeat++) {
               const again = yield* Effect.forkScoped(steer);
