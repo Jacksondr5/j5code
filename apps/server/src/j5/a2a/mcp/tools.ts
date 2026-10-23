@@ -1,3 +1,5 @@
+import * as SpawnAgentService from "../SpawnAgentService.ts";
+import * as RequestReplayService from "../RequestReplayService.ts";
 import { Tool, Toolkit } from "effect/ai";
 import { playbookTools } from "../../playbooks/mcp.ts";
 import * as Schema from "effect/Schema";
@@ -258,21 +260,6 @@ export const J5SpawnWorkspace = Schema.Union([
   }),
 ]);
 export type J5SpawnWorkspace = typeof J5SpawnWorkspace.Type;
-
-/** The stored camelCase form of an MCP workspace choice; unset fields stay unset. */
-export const spawnWorkspaceFromInput = (workspace: J5SpawnWorkspace) =>
-  workspace.type === "shared"
-    ? { type: "shared" as const }
-    : workspace.type === "existing_worktree"
-      ? { type: "existing_worktree" as const, worktreePath: workspace.worktree_path }
-      : {
-          type: "worktree" as const,
-          baseRef: workspace.base_ref,
-          ...(workspace.branch === undefined ? {} : { branch: workspace.branch }),
-          ...(workspace.start_from_origin === undefined
-            ? {}
-            : { startFromOrigin: workspace.start_from_origin }),
-        };
 
 /**
  * A spawn's workspace choice: a Crew seat's three, and the project's own checkout, which is
@@ -563,7 +550,7 @@ export const J5ArchiveCrewFailure = Schema.Struct({
 export type J5ArchiveCrewFailure = typeof J5ArchiveCrewFailure.Type;
 
 export const J5_SPAWN_AGENT_DESCRIPTION =
-  "Spawn a Peer Agent: a full-citizen teammate with its own top-level thread, starting on your brief as its first turn. It joins your project unless you name another with project_id or set scratch for none, and records you as its immutable spawner; in your own project it is placed under you. It is addressable the moment this returns. In your brief, tell the new agent what it should do first and whether it should reply to you. Choose provider, model, and reasoning for the work in the brief — see orchestrator_capabilities for what's available. To run a persona from j5_list_personas, set `persona` to its id: the spawn gets that persona's instructions and runtime policy, and provider, model, and reasoning must be one of that persona's declared routes. Without a persona it runs in your permission and interaction modes, or in narrower ones you set with runtime_mode and interaction_mode. Attach files to the brief with attachments. Choose its workspace every time (see the workspace field). A new worktree is prepared after this returns, and the agent begins once it is bound, possibly while the project's setup script is still running; if preparing it fails, the agent's thread shows why, and it is not retried. Reuse client_request_id to retry the same spawn safely; a retry replays the first spawn, so a different base_ref or worktree_path needs a fresh client_request_id.";
+  "Spawn a Peer Agent: a full-citizen teammate with its own top-level thread, starting on your brief as its first turn. It joins your project unless you name another with project_id or set scratch for none, and records you as its immutable spawner; in your own project it is placed under you. It is addressable the moment this returns. In your brief, tell the new agent what it should do first and whether it should reply to you. Choose provider, model, and reasoning for the work in the brief — see orchestrator_capabilities for what's available. To run a persona from j5_list_personas, set `persona` to its id: the spawn gets that persona's instructions and runtime policy, and provider, model, and reasoning must be one of that persona's declared routes. Without a persona it runs in your permission and interaction modes, or in narrower ones you set with runtime_mode and interaction_mode. Attach files to the brief with attachments. Choose its workspace every time (see the workspace field). A new worktree is prepared after this returns, and the agent begins once it is bound, possibly while the project's setup script is still running; if preparing it fails, the agent's thread shows why, and it is not retried. Reuse client_request_id to retry the same spawn safely; reusing it with any change to the request is refused, so use a fresh one for new work.";
 
 export const J5_LIST_AGENTS_DESCRIPTION =
   "List the personas in this environment: id, purpose, runtime policy, whether each can start now, and the provider, model, and reasoning it would run on. Read this before choosing a persona for j5_spawn_agent or a crew roster so the choice fits the task and the user's budget. Read-only.";
@@ -613,6 +600,7 @@ const placementDependencies = [
 ];
 
 const spawnDependencies = [
+  SpawnAgentService.SpawnAgentService,
   McpInvocationContext.McpInvocationContext,
   A2ASendService,
   Crypto.Crypto,
@@ -620,6 +608,7 @@ const spawnDependencies = [
   ThreadRegistration,
   A2ALedger,
   SpawnCompositionService,
+  RequestReplayService.RequestReplayService,
   // Resolves the workspace, binds the request key to it, and starts the brief.
   SpawnWorkspaceService,
   ThreadManagementService,
