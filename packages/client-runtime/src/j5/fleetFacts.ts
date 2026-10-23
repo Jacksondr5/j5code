@@ -102,7 +102,12 @@ export const deriveFleetFacts = (input: {
   );
   const lastActivity: FleetActivityFact = missingRunTimes
     ? { state: "unknown", reason: "This environment does not report run timestamps." }
-    : { state: "known", ...latest };
+    : input.ledger === undefined
+      ? {
+          state: "unknown",
+          reason: "This environment does not report Exchange or delivery activity.",
+        }
+      : { state: "known", ...latest };
   const activity = shell.activityRunStatus ?? shell.status;
   const approval =
     input.pendingSubagentRequest === "approval" ||
