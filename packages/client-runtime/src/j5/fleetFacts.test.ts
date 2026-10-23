@@ -489,10 +489,34 @@ describe("Fleet runtime measurements", () => {
     });
     expect(old.asOf).toBeUndefined();
     expect(old.projects[0]!.agents[0]!.facts).toBeUndefined();
-    expect(
-      deriveFleetFacts({ shell: shell(), ledger: old.projects[0]!.agents[0]!.facts, now }).facts
-        .asks,
-    ).toBeUndefined();
+    const source = shell({
+      status: "completed",
+      activityRunStatus: null,
+      latestRunStartedAt: date,
+      latestRunCompletedAt: date,
+    });
+    const partial = deriveFleetFacts({
+      shell: source,
+      ledger: old.projects[0]!.agents[0]!.facts,
+      now,
+    }).facts;
+    expect(partial.asks).toBeUndefined();
+    expect(partial.runtime).toMatchObject({ state: "known", status: "idle" });
+    expect(partial.lastActivity).toEqual({
+      state: "unknown",
+      reason: "This environment does not report Exchange or delivery activity.",
+    });
+    const later = "2026-10-19T10:01:00.000Z";
+    const restored = deriveFleetFacts({
+      shell: source,
+      ledger: { ...ledger, problems: [{ ...alarm, at: later }] },
+      now: Date.parse(later),
+    }).facts;
+    expect(restored.lastActivity).toEqual({
+      state: "known",
+      label: "Delivery failed",
+      at: later,
+    });
   });
 });
 

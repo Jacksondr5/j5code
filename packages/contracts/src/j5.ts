@@ -748,6 +748,8 @@ export const PEER_PROTOCOL_VERSION = 2;
 /** Every peer request and response states its sender's version here; a server from before versioning sends none. */
 export const PEER_PROTOCOL_HEADER = "x-j5-peer-protocol";
 export const PeerCapabilities = Schema.Struct({
+  /** Accepts authenticated facts about a previously accepted message's later thread delivery. */
+  deliveryAlarms: Schema.optionalKey(Schema.Boolean),
   /** This server stores messages for a peer that polls for them. */
   poll: Schema.optionalKey(Schema.Boolean),
   /** This server lands a message as its sender asked: a delivery's `landing` is read, not dropped. */
@@ -814,7 +816,15 @@ export const PeerDeliveryLanding = Schema.Struct({
 });
 export type PeerDeliveryLanding = typeof PeerDeliveryLanding.Type;
 
+/** A diagnostic fact, never an authored message; the origin supplies identities and receipt time. */
+export const PeerDeliveryAlarm = Schema.Struct({
+  messageId: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(4096)),
+  code: Schema.Literal("attempts-exhausted"),
+});
+export type PeerDeliveryAlarm = typeof PeerDeliveryAlarm.Type;
+
 export const PeerDeliveryRequest = Schema.Struct({
+  deliveryAlarm: Schema.optional(PeerDeliveryAlarm),
   messageId: Schema.String.check(Schema.isNonEmpty()),
   /** Absent for a message that waits its turn, which is every message from an older server. */
   landing: Schema.optional(PeerDeliveryLanding),

@@ -80,6 +80,10 @@ export const neutraliseJ5State = Effect.fn("j5.neutraliseJ5State")(function* () 
         sql`DELETE FROM j5_a2a_peer RETURNING environment_id`,
       );
 
+      // The copied server has no live peer whose measurements remain current here.
+      if (tables.has("j5_a2a_peer_delivery_alarm"))
+        yield* sql`DELETE FROM j5_a2a_peer_delivery_alarm`;
+
       // The same projection an archive's `message.cancelled` writes (LedgerService).
       const deliveries = yield* count(
         "j5_a2a_delivery",
