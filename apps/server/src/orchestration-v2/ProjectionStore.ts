@@ -1,3 +1,4 @@
+import type { LimitFailure } from "../j5/failover/usageLimitFailover.ts";
 import { applyThreadPullRequestLinkUpdate } from "@t3tools/shared/threadPullRequests";
 import { projectTurnItemForWire } from "./WireProjection.ts";
 import * as Stream from "effect/Stream";
@@ -415,10 +416,15 @@ export interface ProjectionStoreV2Shape {
   readonly getThread: (
     threadId: ThreadId,
   ) => Effect.Effect<OrchestrationV2AppThread, ProjectionStoreV2Error>;
+  readonly getUsageLimitFailures: Effect.Effect<
+    ReadonlyArray<LimitFailure>,
+    ProjectionStoreV2Error
+  >;
   readonly getLimitRecoveryCandidates: (options: {
     readonly now: DateTime.Utc;
     readonly autoResume: boolean;
     readonly snooze: boolean;
+    readonly failover?: boolean;
   }) => Effect.Effect<ReadonlyArray<ProjectionLimitRecoveryCandidate>, ProjectionStoreV2Error>;
   readonly getSettlementCandidates: (
     threadId?: ThreadId,
@@ -3545,6 +3551,30 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         ),
       );
 
+    const getUsageLimitFailures = sql<{
+      readonly provider_instance_id: string;
+      readonly failed_at: string;
+      readonly reset_at: string | null;
+    }>`
+      SELECT r.provider_instance_id, r.completed_at AS failed_at,
+        json_extract(item.payload_json, '$.failure.resetAt') AS reset_at
+      FROM orchestration_v2_projection_runs r
+      JOIN orchestration_v2_projection_turn_items item ON item.run_id = r.run_id
+        AND item.node_id IS json_extract(r.payload_json, '$.rootNodeId')
+      WHERE r.status = 'failed' AND r.completed_at IS NOT NULL
+        AND item.type = 'error' AND item.status = 'failed'
+        AND json_extract(item.payload_json, '$.failure.class') = 'usage_limit'
+    `.pipe(
+      Effect.map((rows) =>
+        rows.map((row) => ({
+          providerInstanceId: ProviderInstanceId.make(row.provider_instance_id),
+          failedAt: Date.parse(row.failed_at),
+          resetAt: row.reset_at === null ? null : Date.parse(row.reset_at),
+        })),
+      ),
+      Effect.mapError((cause) => new ProjectionStoreSetupError({ cause })),
+    );
+
     const getLimitRecoveryCandidates = Effect.fn("ProjectionStore.getLimitRecoveryCandidates")(
       function* (options: Parameters<ProjectionStoreV2Shape["getLimitRecoveryCandidates"]>[0]) {
         const rows = yield* sql<{
@@ -3593,7 +3623,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             AND json_extract(t.payload_json, '$.archivedAt') IS NULL
             AND json_extract(t.payload_json, '$.settledOverride') IS NOT 'settled'
             AND json_extract(item.payload_json, '$.failure.class') = 'usage_limit'
-            AND json_extract(item.payload_json, '$.failure.resetAt') IS NOT NULL
+            AND (${booleanInt(options.failover === true)} OR (
+            json_extract(item.payload_json, '$.failure.resetAt') IS NOT NULL
             AND julianday(json_extract(item.payload_json, '$.failure.resetAt')) > julianday(COALESCE(r.completed_at, json_extract(t.payload_json, '$.updatedAt')))
             AND (
               (
@@ -3617,6 +3648,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 )
               )
             )
+            ))
             AND NOT EXISTS (
               SELECT 1 FROM orchestration_v2_projection_runtime_requests request
               WHERE request.thread_id = t.thread_id AND request.status = 'pending'
@@ -6102,6 +6134,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       getRuntimeRequest,
       getPlan,
       getProviderControlContext,
+      getUsageLimitFailures,
       getLimitRecoveryCandidates,
       getRecoveryThreadIds,
       getUnreadableThreadIds,
@@ -6271,6 +6304,26 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
               })),
           ),
         ),
+      getUsageLimitFailures: Ref.get(replayState).pipe(
+        Effect.map((state) =>
+          [...state.projections.values()].flatMap((projection) =>
+            projection.runs.flatMap((run) => {
+              const failure = latestRootProviderFailure(run, projection.turnItems);
+              return run.status === "failed" &&
+                run.completedAt !== null &&
+                failure?.class === "usage_limit"
+                ? [
+                    {
+                      providerInstanceId: run.providerInstanceId,
+                      failedAt: DateTime.toEpochMillis(run.completedAt),
+                      resetAt: failure.resetAt == null ? null : Date.parse(failure.resetAt),
+                    },
+                  ]
+                : [];
+            }),
+          ),
+        ),
+      ),
       getLimitRecoveryCandidates: (options) =>
         Ref.get(replayState).pipe(
           Effect.map((state) =>
@@ -6286,10 +6339,11 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
                 (thread) =>
                   thread.status === "failed" &&
                   thread.lastErrorClass === "usage_limit" &&
-                  thread.usageLimitResetAt !== null &&
+                  (options.failover === true || thread.usageLimitResetAt !== null) &&
                   thread.pendingRuntimeRequest === null,
               )
               .filter((thread) => {
+                if (options.failover === true) return true;
                 const resetMs = Date.parse(thread.usageLimitResetAt!);
                 const nowMs = DateTime.toEpochMillis(options.now);
                 if (

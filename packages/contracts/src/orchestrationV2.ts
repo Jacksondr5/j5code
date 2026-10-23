@@ -367,6 +367,7 @@ export const OrchestrationV2AppThread = Schema.Struct({
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
+  usageLimitFailoverHops: Schema.optional(NonNegativeInt),
   agentPersonaAssignment: Schema.optional(OrchestrationV2AgentPersonaAssignment),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
@@ -1804,6 +1805,7 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
+  usageLimitFailoverHops: Schema.optional(NonNegativeInt),
   agentPersonaAssignment: Schema.optional(OrchestrationV2AgentPersonaAssignment),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
@@ -2989,6 +2991,13 @@ export type OrchestrationV2Command = typeof OrchestrationV2Command.Type;
  * send them.
  */
 const OrchestrationV2InternalCommand = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literal("thread.provider-failover"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    failedRunId: RunId,
+    phase: Schema.Literals(["switch", "continue", "notice"]),
+  }),
   Schema.Struct({
     type: Schema.Literal("thread.pull-request-watch.sync"),
     commandId: CommandId,

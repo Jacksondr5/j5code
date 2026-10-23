@@ -443,6 +443,27 @@ migrations after upstream migrations.
 
 81. A scheduled task's run in a shared conversation names who scheduled it ([#636](https://github.com/Jacksondr5/j5code/issues/636), Shared conversations AC20). `orchestration-v2/runtimeLayer.ts` provides J5-owned `scheduledRuns.layer` (`apps/server/src/j5/sharing/scheduledRuns.ts`) to `layerScheduledTaskProvided` alone (one import and one `Layer.provide`), so upstream's scheduled-task service sees thread management and thread launch decorated, and nothing else does. The decorator acts only on a send or launch that carries a `scheduledTaskId`: on a shared conversation it puts the scheduler's line and any note due on the run's text, recorded as a person's message is (case 80 strips it for display), and gives a launch into a shared project a thread id derived from its command id, so the run is recorded under its thread. When the scheduler can no longer write there, it fails the run, so upstream records the reason as the run's error; it writes nothing to upstream's tables, and the task stays enabled, so each run fails the same way until someone who can write changes its prompt. Who scheduled a task is J5's own table `j5_a2a_task_scheduler` (J5 migration 43), written by case 78's upsert wrap. On a pin advance: if upstream's service stops sending runs through `sendToThread` and `launch` with `scheduledTaskId`, or renames `scheduled_tasks.prompt`, which the decorator reads, move the decorator with it.
 
+### Opt-in usage-limit failover (case 82)
+
+The downstream operator requested provider-independent in-place recovery; [D38](docs/j5/product/upstream.md#d38-opt-in-usage-limit-provider-failover) records its scope and approval boundary. J5-owned planners live under `apps/server/src/j5/failover`. `UsageLimitRecoveryWorker` calls them instead of the reset-only continuation path when enabled; it retains existing arm/snooze handling. `ProjectionStore` includes no-reset failures and reads shared-instance failure facts. `Orchestrator` handles a server-only recovery command, updates the provider and persona assignment in the same event, preserves delegated-task ownership, and defers a limited child's terminal result while automatic recovery is enabled. Transient failover rejection does not consume a phase receipt. Public persona-route guards remain intact.
+
+Contracts add a disabled-by-default setting, optional hop count, full-probe freshness evidence and paid-usage flags. Codex/Claude usage mappers retain signals needed by the gate; sparse update merging cannot refresh a full probe or erase paid-usage warnings. On upstream advances, verify serialized command checks, event/projection field preservation, task completion semantics, and sparse/full usage provenance together. Reuse upstream recovery and handoff mechanisms; do not replace them with an external supervisor.
+
+| Upstream-owned file                                                           | Case                               |
+| ----------------------------------------------------------------------------- | ---------------------------------- |
+| `apps/server/src/orchestration-v2/Orchestrator.ts`                            | 82                                 |
+| `apps/server/src/orchestration-v2/ProjectionStore.ts`                         | 82                                 |
+| `apps/server/src/orchestration-v2/UsageLimitRecoveryWorker.ts`                | 82                                 |
+| `apps/server/src/orchestration-v2/ProviderTurnControlService.test.ts`         | 82, test service fixture           |
+| `apps/server/src/orchestration-v2/testkit/ProviderReplayHarness.ts`           | 82, isolated test dependencies     |
+| `apps/server/src/orchestration-v2/testkit/ProviderSwitch.integration.test.ts` | 82, synthetic recovery regressions |
+| `apps/server/src/provider/codexUsageLimits.ts` and `.test.ts`                 | 82                                 |
+| `apps/server/src/provider/claudeUsageLimits.ts` and `.test.ts`                | 82                                 |
+| `packages/contracts/src/orchestrationV2.ts`                                   | 82                                 |
+| `packages/contracts/src/providerUsageLimits.ts`                               | 82                                 |
+| `packages/contracts/src/settings.ts` and `.test.ts`                           | 82                                 |
+| `packages/provider-core/src/server/usageLimits.ts` and `.test.ts`             | 82                                 |
+
 ## Pin and upstream advance runbook
 
 Current pin: `70d60e03a7a35c6fa131825bbfa05ec893e69912`, upstream's nightly tag `v0.1.1-nightly.20261017.3238` on `main` (frozen 2026-10-17). The previous pin was `29980a31409234b676f97bd477c4e46fdb61a929`, from upstream `main`.

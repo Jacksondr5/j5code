@@ -37,6 +37,9 @@ export type ServerProviderResetCredits = typeof ServerProviderResetCredits.Type;
  * last good bars for the latter and clear them for the former.
  */
 export const ServerProviderUsageLimits = Schema.Struct({
+  completeCheckedAt: Schema.optional(IsoDateTime),
+  paidUsageEnabled: Schema.optional(Schema.Boolean),
+  paidUsageObserved: Schema.optional(Schema.Boolean),
   checkedAt: IsoDateTime,
   windows: ForwardCompatibleArray(ServerProviderUsageWindow),
   credentialFingerprint: Schema.optional(TrimmedNonEmptyString),
@@ -62,6 +65,8 @@ export type ServerProviderUsageLimits = typeof ServerProviderUsageLimits.Type;
  * the instance's published snapshot; omitted windows are unchanged.
  */
 export const ProviderUsageLimitsUpdate = Schema.Struct({
+  paidUsageEnabled: Schema.optional(Schema.Boolean),
+  paidUsageObserved: Schema.optional(Schema.Boolean),
   windows: Schema.Array(ServerProviderUsageWindow),
 });
 export type ProviderUsageLimitsUpdate = typeof ProviderUsageLimitsUpdate.Type;

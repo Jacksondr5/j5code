@@ -1,3 +1,4 @@
+import { makeFailoverPlanner } from "../j5/failover/planUsageLimitFailover.ts";
 import { CommandId, MessageId, type OrchestrationV2Command } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -70,10 +71,11 @@ export function limitRecoveryCommand(
   };
 }
 
-const makeSweep = Effect.gen(function* () {
+export const makeSweep = Effect.gen(function* () {
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const threads = yield* ThreadManagement.ThreadManagementService;
   const settings = yield* ServerSettings.ServerSettingsService;
+  const planFailover = yield* makeFailoverPlanner;
   return Effect.fn("UsageLimitRecoveryWorker.sweep")(function* () {
     const preferences = yield* settings.getSettings;
     const now = yield* DateTime.now;
@@ -81,9 +83,58 @@ const makeSweep = Effect.gen(function* () {
       now,
       autoResume: preferences.autoResumeLimitedThreads,
       snooze: preferences.snoozeLimitedThreads,
+      failover: preferences.usageLimitFailover.enabled,
     });
     const nowMs = DateTime.toEpochMillis(now);
     for (const thread of candidates) {
+      if (preferences.usageLimitFailover.enabled) {
+        yield* Effect.gen(function* () {
+          const projection = yield* projections.getThreadProjection(thread.id);
+          const planned = yield* planFailover(projection, preferences.usageLimitFailover, nowMs);
+          if (planned === null) return;
+          if (projection.thread.providerInstanceId === planned.run.providerInstanceId) {
+            const arm = limitRecoveryCommand(
+              thread,
+              preferences.autoResumeLimitedThreads,
+              nowMs,
+              preferences.snoozeLimitedThreads,
+            );
+            if (arm?.type === "thread.metadata.update") yield* threads.dispatch(arm);
+          }
+          const phase = planned.decision.phase === "suspended" ? "notice" : planned.decision.phase;
+          yield* threads.dispatch({
+            type: "thread.provider-failover",
+            commandId: CommandId.make(
+              `limit-failover:${thread.id}:${planned.run.id}:${phase}${planned.decision.phase === "suspended" ? `:${planned.decision.reason}` : ""}`,
+            ),
+            threadId: thread.id,
+            failedRunId: planned.run.id,
+            phase,
+          });
+        }).pipe(
+          Effect.catchCause((cause) =>
+            Effect.gen(function* () {
+              yield* Effect.logWarning("j5.limit-failover.dispatch-failed", {
+                threadId: thread.id,
+                cause,
+              });
+              if (thread.latestRunId !== null)
+                yield* threads
+                  .dispatch({
+                    type: "thread.provider-failover",
+                    commandId: CommandId.make(
+                      `limit-failover:${thread.id}:${thread.latestRunId}:stalled`,
+                    ),
+                    threadId: thread.id,
+                    failedRunId: thread.latestRunId,
+                    phase: "notice",
+                  })
+                  .pipe(Effect.ignore);
+            }),
+          ),
+        );
+        continue;
+      }
       const command = limitRecoveryCommand(
         thread,
         preferences.autoResumeLimitedThreads,

@@ -1237,3 +1237,10 @@ describe("server model preferences", () => {
     });
   });
 });
+
+it("keeps usage-limit failover opt-in and never inserts a default into unrelated patches", () => {
+  expect(DEFAULT_SERVER_SETTINGS.usageLimitFailover.enabled).toBe(false);
+  expect(decodeFailoverSettingsPatch({})).not.toHaveProperty("usageLimitFailover");
+});
+
+const decodeFailoverSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);

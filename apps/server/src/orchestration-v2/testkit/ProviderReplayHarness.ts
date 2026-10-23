@@ -1,3 +1,5 @@
+import type { ServerSettings as Settings, ServerProvider } from "@t3tools/contracts";
+import * as ProviderCatalog from "../../provider/ProviderRegistry.ts";
 import * as OtelEnvironment from "@t3tools/shared/otelEnvironment";
 import { DEFAULT_SIGNAL_EXPORT } from "@t3tools/shared/observability";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -195,6 +197,10 @@ export function runOrchestratorV2ProviderReplayScenario<
     readonly runContinuationWorker?: boolean;
     readonly recoverOnStartup?: boolean;
     readonly continueThreadsAfterServerUpdate?: boolean;
+    readonly failover?: {
+      readonly settings: Settings["usageLimitFailover"];
+      readonly providers: Effect.Effect<ReadonlyArray<ServerProvider>>;
+    };
   } = {},
 ): Effect.Effect<
   OrchestratorV2ScenarioResult,
@@ -237,10 +243,15 @@ export function layerProviderReplay<Transcript extends ProviderReplayTranscript,
     readonly runContinuationWorker?: boolean;
     readonly recoverOnStartup?: boolean;
     readonly continueThreadsAfterServerUpdate?: boolean;
+    readonly failover?: {
+      readonly settings: Settings["usageLimitFailover"];
+      readonly providers: Effect.Effect<ReadonlyArray<ServerProvider>>;
+    };
     readonly replayGate?: ProviderReplayGate;
   } = {},
 ): Layer.Layer<
   | Orchestrator.OrchestratorV2
+  | ProjectionStore.ProjectionStoreV2
   | EffectWorker.OrchestrationEffectWorkerV2
   | EventSink.EventSinkV2
   | CommandOutputRecorder.CommandOutputRecorder
@@ -270,9 +281,14 @@ export function layerWithRegistry<Error>(
     readonly runContinuationWorker?: boolean;
     readonly recoverOnStartup?: boolean;
     readonly continueThreadsAfterServerUpdate?: boolean;
+    readonly failover?: {
+      readonly settings: Settings["usageLimitFailover"];
+      readonly providers: Effect.Effect<ReadonlyArray<ServerProvider>>;
+    };
   } = {},
 ): Layer.Layer<
   | Orchestrator.OrchestratorV2
+  | ProjectionStore.ProjectionStoreV2
   | EffectWorker.OrchestrationEffectWorkerV2
   | EventSink.EventSinkV2
   | ProviderSessionManager.ProviderSessionManagerV2
@@ -299,6 +315,7 @@ export function layerWithRegistry<Error>(
   );
   const layerServerSettings = ServerSettings.layerTest({
     responseStreamingMode: "turn",
+    ...(options.failover === undefined ? {} : { usageLimitFailover: options.failover.settings }),
     ...(options.continueThreadsAfterServerUpdate === undefined
       ? {}
       : { continueThreadsAfterServerUpdate: options.continueThreadsAfterServerUpdate }),
@@ -445,6 +462,11 @@ export function layerWithRegistry<Error>(
   const layerOrchestratorProvided = Orchestrator.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
+        options.failover === undefined
+          ? Layer.empty
+          : Layer.mock(ProviderCatalog.ProviderRegistry)({
+              getProviders: options.failover.providers,
+            }),
         layerCheckpointServiceProvided,
         CommandPolicy.layer,
         layerContextHandoffServiceProvided,
@@ -503,6 +525,7 @@ export function layerWithRegistry<Error>(
     Layer.provide(Layer.merge(layerStores, layerEffectExecutorProvided)),
   );
   const layerReplayRuntime = Layer.mergeAll(
+    layerStores,
     layerOrchestratorProvided,
     layerProviderSessionManagerProvided,
     layerEffectWorkerProvided,

@@ -117,19 +117,45 @@ export function claudeRateLimitEventToUpdate(
   info: SDKRateLimitInfo,
   names: ClaudeScopedLimitNames,
 ): ProviderUsageLimitsUpdate | undefined {
+  const paid = {
+    ...(info.overageStatus === "allowed" || info.overageStatus === "allowed_warning"
+      ? { paidUsageEnabled: true }
+      : {}),
+    ...(info.isUsingOverage || info.overageInUse ? { paidUsageObserved: true } : {}),
+  };
+  const update = (
+    windows: ReadonlyArray<ServerProviderUsageWindow>,
+  ): ProviderUsageLimitsUpdate | undefined =>
+    windows.length > 0 || Object.keys(paid).length > 0 ? { windows, ...paid } : undefined;
   const type: string | undefined = info.rateLimitType;
-  if (!type || typeof info.utilization !== "number") {
-    return undefined;
-  }
+  if (!type || typeof info.utilization !== "number") return update([]);
   const usedPercent = info.utilization * 100;
   const resetsAt = isoFromEpochSeconds(info.resetsAt);
-  if (type in WINDOWS) {
-    return { windows: [makeWindow(type, usedPercent, resetsAt)] };
-  }
-  if (type === OVERAGE_INCLUDED_EVENT_TYPE && names.overageIncluded) {
-    return { windows: [scopedWindow(names.overageIncluded, usedPercent, resetsAt)] };
-  }
-  return undefined;
+  if (type in WINDOWS) return update([makeWindow(type, usedPercent, resetsAt)]);
+  if (["seven_day_opus", "seven_day_sonnet", "seven_day_oauth_apps"].includes(type))
+    return update([
+      {
+        id: type,
+        kind: "weekly",
+        label: `Weekly · ${type.slice(10)}`,
+        windowDurationMins: WEEK_MINS,
+        usedPercent: clampPercent(usedPercent),
+        ...(resetsAt === undefined ? {} : { resetsAt }),
+      },
+    ]);
+  if (type === "overage")
+    return update([
+      {
+        id: type,
+        kind: "other",
+        label: "Extra usage",
+        usedPercent: clampPercent(usedPercent),
+        ...(resetsAt === undefined ? {} : { resetsAt }),
+      },
+    ]);
+  if (type === OVERAGE_INCLUDED_EVENT_TYPE && names.overageIncluded)
+    return update([scopedWindow(names.overageIncluded, usedPercent, resetsAt)]);
+  return update([]);
 }
 
 /**
@@ -147,23 +173,64 @@ export function claudeUsageResponseToLimits(input: {
     };
   }
   const windows: ServerProviderUsageWindow[] = [];
+  const raw: Readonly<Record<string, unknown>> = response.rate_limits;
+  let complete = Array.isArray(raw.model_scoped);
+  for (const [id, value] of Object.entries(raw)) {
+    if (!id.startsWith("seven_day_") || value === null || typeof value !== "object") continue;
+    const bucket = value as { readonly utilization?: unknown; readonly resets_at?: string | null };
+    if (typeof bucket.utilization !== "number") {
+      complete = false;
+      continue;
+    }
+    windows.push({
+      id,
+      kind: "weekly",
+      label: `Weekly · ${id.slice(10)}`,
+      windowDurationMins: WEEK_MINS,
+      usedPercent: clampPercent(bucket.utilization),
+      ...(isoFromString(bucket.resets_at) === undefined
+        ? {}
+        : { resetsAt: isoFromString(bucket.resets_at)! }),
+    });
+  }
+  const extra = raw.extra_usage as
+    | {
+        readonly is_enabled?: boolean;
+        readonly used_credits?: number | null;
+        readonly utilization?: number | null;
+      }
+    | undefined;
+
   for (const id of Object.keys(WINDOWS)) {
     const window = response.rate_limits[id as "five_hour" | "seven_day"];
-    if (!window || typeof window.utilization !== "number") continue;
+    if (!window || typeof window.utilization !== "number") {
+      complete = false;
+      continue;
+    }
     windows.push(makeWindow(id, window.utilization, isoFromString(window.resets_at)));
   }
   // The CLI filters `model_scoped` to the overage-included allowlist, which
   // today holds one model; the first entry is the one the event refers to.
   let overageIncluded: string | undefined;
   for (const entry of readModelScoped(response.rate_limits)) {
-    if (typeof entry.utilization !== "number") continue;
+    if (typeof entry.utilization !== "number") {
+      complete = false;
+      continue;
+    }
     windows.push(
       scopedWindow(entry.display_name, entry.utilization, isoFromString(entry.resets_at)),
     );
     overageIncluded ??= entry.display_name;
   }
   return {
-    limits: makeUsageLimits({ checkedAt, windows }),
+    limits: {
+      ...makeUsageLimits({ checkedAt, windows }),
+      ...(complete ? { completeCheckedAt: checkedAt } : {}),
+      ...(extra?.is_enabled === undefined ? {} : { paidUsageEnabled: extra.is_enabled }),
+      ...(extra === undefined
+        ? {}
+        : { paidUsageObserved: (extra.used_credits ?? 0) > 0 || (extra.utilization ?? 0) > 0 }),
+    },
     names: { overageIncluded },
   };
 }

@@ -1,3 +1,11 @@
+import { makeSweep } from "../UsageLimitRecoveryWorker.ts";
+import * as ThreadManagement from "../ThreadManagementService.ts";
+import * as ServerPreferences from "../../serverSettings.ts";
+import * as ProviderCatalog from "../../provider/ProviderRegistry.ts";
+import { getBuiltInAgentPersona } from "../../j5/agents/agentPersonas.ts";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as FileSystem from "effect/FileSystem";
+import type { ServerProvider, ServerSettings } from "@t3tools/contracts";
 import { vi } from "vite-plus/test";
 import { historyResponseItems } from "@t3tools/provider-core/server/handoffBudget";
 import { assert, describe, it } from "@effect/vitest";
@@ -6,6 +14,7 @@ import {
   type ChatAttachment,
   EventId,
   MessageId,
+  NodeId,
   type ModelSelection,
   type OrchestrationV2Command,
   type OrchestrationV2ProviderCapabilities,
@@ -113,6 +122,7 @@ function makeTestAdapter(input: {
     Record<number, Omit<OrchestrationV2ProviderTurnTokenUsage, "updatedAt">>
   >;
   readonly failedRunOrdinals?: ReadonlySet<number>;
+  readonly limitChildFirstRun?: ThreadId;
   readonly interruptedRunOrdinals?: ReadonlySet<number>;
   readonly holdRunOrdinal?: number;
   readonly holdFirstTurn?: Deferred.Deferred<void>;
@@ -270,11 +280,16 @@ function makeTestAdapter(input: {
               const providerTurnId = ProviderTurnId.make(
                 `provider-turn:${input.driver}:${turnInput.threadId}:${turnInput.runOrdinal}`,
               );
-              const terminalStatus = input.failedRunOrdinals?.has(turnInput.runOrdinal)
-                ? "failed"
-                : input.interruptedRunOrdinals?.has(turnInput.runOrdinal)
-                  ? "interrupted"
-                  : "completed";
+              const limited =
+                input.limitChildFirstRun !== undefined &&
+                turnInput.threadId !== input.limitChildFirstRun &&
+                turnInput.runOrdinal === 1;
+              const terminalStatus =
+                limited || input.failedRunOrdinals?.has(turnInput.runOrdinal)
+                  ? "failed"
+                  : input.interruptedRunOrdinals?.has(turnInput.runOrdinal)
+                    ? "interrupted"
+                    : "completed";
               const response =
                 input.responseByThreadId?.[turnInput.threadId]?.[turnInput.runOrdinal] ??
                 input.responseByRunOrdinal[turnInput.runOrdinal] ??
@@ -339,8 +354,8 @@ function makeTestAdapter(input: {
                         failureItemOrdinal: turnInput.runOrdinal * 100 + 2,
                         failure: makeProviderFailure({
                           message: "Simulated provider failure.",
-                          code: "simulated_failure",
-                          class: "provider_error",
+                          code: limited ? "usageLimitExceeded" : "simulated_failure",
+                          class: limited ? "usage_limit" : "provider_error",
                         }),
                       }
                     : { status: terminalStatus, failure: null }),
@@ -3546,3 +3561,530 @@ describe("orchestration v2 provider switching", () => {
     ),
   );
 });
+
+it.effect.each(["ordinary", "builder", "critic"] as const)(
+  "automatic quota recovery for %s preserves dirty work, retries phases, and suppresses duplicate continuations",
+  (kind) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const definition = kind === "ordinary" ? undefined : getBuiltInAgentPersona(kind);
+        const primary = definition?.modelRoute[0],
+          fallback = definition?.modelRoute[1];
+        const sourceDriver =
+          primary === undefined ? CODEX_DRIVER : ProviderDriverKind.make(primary.driver);
+        const targetDriver =
+          fallback === undefined ? CLAUDE_DRIVER : ProviderDriverKind.make(fallback.driver);
+        const sourceSelection: ModelSelection =
+          primary === undefined
+            ? CODEX_MODEL_SELECTION
+            : {
+                instanceId: ProviderInstanceId.make(primary.driver),
+                model: primary.model,
+                options: [
+                  {
+                    id: primary.driver === "codex" ? "reasoningEffort" : "effort",
+                    value: primary.reasoningEffort,
+                  },
+                ],
+              };
+        const targetSelection: ModelSelection =
+          fallback === undefined
+            ? CLAUDE_MODEL_SELECTION
+            : {
+                instanceId: ProviderInstanceId.make(fallback.driver),
+                model: fallback.model,
+                options: [
+                  {
+                    id: fallback.driver === "codex" ? "reasoningEffort" : "effort",
+                    value: fallback.reasoningEffort,
+                  },
+                ],
+              };
+        const assignment =
+          definition === undefined
+            ? undefined
+            : {
+                personaId: definition.id,
+                definitionVersion: definition.version,
+                authorityPolicy: definition.authority.defaultPolicy,
+                resolvedRoute: "primary" as const,
+                resolvedDriver: sourceDriver,
+                resolvedModelSelection: sourceSelection,
+                ...(kind === "builder" ? { runtimeModeOverride: "full-access" as const } : {}),
+              };
+        const cwd = yield* checkpointWorkspace("quota-failover");
+        const fs = yield* FileSystem.FileSystem;
+        const capturedTurns = yield* Ref.make<ReadonlyArray<CapturedTurn>>([]);
+        const now = yield* DateTime.now;
+        const stamp = DateTime.formatIso(now);
+        const snapshot = (
+          selection: ModelSelection,
+          driver: ProviderDriverKind,
+          blocked: boolean,
+        ): ServerProvider => ({
+          instanceId: selection.instanceId,
+          driver,
+          enabled: true,
+          installed: true,
+          version: null,
+          status: "ready",
+          availability: "available",
+          auth: { status: "authenticated" },
+          checkedAt: stamp,
+          supportedRuntimeModes: ["full-access", "approval-required", "auto-accept-edits"],
+          slashCommands: [],
+          skills: [],
+          models: [
+            {
+              slug: selection.model,
+              name: selection.model,
+              isCustom: false,
+              capabilities: {
+                optionDescriptors: (selection.options ?? []).map((o) => ({
+                  id: o.id,
+                  label: o.id,
+                  type: "select" as const,
+                  options: [{ id: String(o.value), label: String(o.value) }],
+                })),
+              },
+            },
+          ],
+          usageLimits: {
+            checkedAt: stamp,
+            completeCheckedAt: stamp,
+            windows: [
+              {
+                id: driver === "codex" ? "primary" : "five_hour",
+                kind: "session",
+                label: "session",
+                usedPercent: blocked ? 100 : 0,
+              },
+              {
+                id: driver === "codex" ? "secondary" : "seven_day",
+                kind: "weekly",
+                label: "weekly",
+                usedPercent: 0,
+              },
+            ],
+          },
+        });
+        const providers = yield* Ref.make<ReadonlyArray<ServerProvider>>([
+          snapshot(sourceSelection, sourceDriver, true),
+          snapshot(targetSelection, targetDriver, false),
+        ]);
+        const settings: ServerSettings["usageLimitFailover"] = {
+          enabled: true,
+          maxHops: 4,
+          routes: [sourceSelection, targetSelection],
+          subscriptionOnlyInstances: [sourceSelection.instanceId, targetSelection.instanceId],
+        };
+        const registry = ProviderAdapterRegistry.layerFromAdapters([
+          makeTestAdapter({
+            instanceId: sourceSelection.instanceId,
+            driver: sourceDriver,
+            capabilities: CodexProviderCapabilitiesV2,
+            modelSelection: sourceSelection,
+            responseByRunOrdinal: { 1: "Partial work" },
+            capturedTurns,
+          }),
+          makeTestAdapter({
+            instanceId: targetSelection.instanceId,
+            driver: targetDriver,
+            capabilities: ClaudeProviderCapabilitiesV2,
+            modelSelection: targetSelection,
+            responseByRunOrdinal: { 2: "Recovered" },
+            capturedTurns,
+          }),
+        ]);
+        yield* Effect.gen(function* () {
+          const orchestrator = yield* Orchestrator.OrchestratorV2;
+          const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+          const sink = yield* EventSink.EventSinkV2;
+          const projections = yield* ProjectionStore.ProjectionStoreV2;
+          const wait = (ordinal: number) =>
+            orchestrator.streamStoredEvents.pipe(
+              Stream.filter(
+                ({ event }) =>
+                  event.type === "run.updated" &&
+                  event.threadId === threadId &&
+                  event.payload.ordinal === ordinal &&
+                  event.payload.status === "completed",
+              ),
+              Stream.runHead,
+              Effect.andThen(worker.drain()),
+            );
+          yield* orchestrator.dispatch({
+            type: "thread.create",
+            commandId: CommandId.make("quota:create"),
+            threadId,
+            projectId,
+            createdBy: "user",
+            creationSource: "web",
+            title: "Quota recovery",
+            modelSelection: sourceSelection,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: "quota-test",
+            worktreePath: cwd,
+            ...(assignment === undefined ? {} : { agentPersonaAssignment: assignment }),
+          });
+          yield* orchestrator.dispatch({
+            type: "message.dispatch",
+            commandId: CommandId.make("quota:first"),
+            threadId,
+            messageId: MessageId.make("quota:first"),
+            text: "Preserve my objective",
+            attachments: [],
+            dispatchMode: { type: "start_immediately" },
+            createdBy: "user",
+            creationSource: "web",
+          });
+          yield* wait(1);
+          const before = yield* orchestrator.getThreadProjection(threadId);
+          const source = before.runs[0]!;
+          yield* fs.writeFileString(`${cwd}/dirty.txt`, "Uncommitted work must survive.\n");
+          yield* sink.write({
+            events: [
+              {
+                id: EventId.make("quota:failed"),
+                type: "run.updated",
+                threadId,
+                occurredAt: now,
+                payload: {
+                  ...source,
+                  status: "failed",
+                  completedAt: now,
+                  delegatedTaskId: NodeId.make("quota:task"),
+                },
+              },
+              {
+                id: EventId.make("quota:error"),
+                type: "turn-item.updated",
+                threadId,
+                occurredAt: now,
+                payload: {
+                  id: TurnItemId.make("quota:error"),
+                  threadId,
+                  runId: source.id,
+                  nodeId: source.rootNodeId,
+                  providerThreadId: source.providerThreadId,
+                  providerTurnId: null,
+                  nativeItemRef: null,
+                  parentItemId: null,
+                  ordinal: 1000,
+                  status: "failed",
+                  title: "Usage limit",
+                  startedAt: now,
+                  completedAt: now,
+                  updatedAt: now,
+                  type: "error",
+                  failure: {
+                    class: "usage_limit",
+                    message: "Synthetic limit",
+                    code: "usageLimitExceeded",
+                    retryable: null,
+                    resetAt: null,
+                  },
+                },
+              },
+            ],
+          });
+          assert.lengthOf(
+            yield* projections.getLimitRecoveryCandidates({
+              now,
+              autoResume: false,
+              snooze: false,
+              failover: true,
+            }),
+            1,
+          );
+          assert.lengthOf(
+            yield* projections.getLimitRecoveryCandidates({
+              now,
+              autoResume: false,
+              snooze: false,
+            }),
+            0,
+          );
+          const sweep = yield* makeSweep.pipe(
+            Effect.provide(
+              Layer.mergeAll(
+                Layer.succeed(ProjectionStore.ProjectionStoreV2, projections),
+                Layer.mock(ThreadManagement.ThreadManagementService)({
+                  dispatch: orchestrator.dispatch,
+                }),
+                ServerPreferences.layerTest({ usageLimitFailover: settings }),
+                Layer.mock(ProviderCatalog.ProviderRegistry)({ getProviders: Ref.get(providers) }),
+              ),
+            ),
+          );
+          const phase = (name: "switch" | "continue") => ({
+            type: "thread.provider-failover" as const,
+            commandId: CommandId.make(`limit-failover:${threadId}:${source.id}:${name}`),
+            threadId,
+            failedRunId: source.id,
+            phase: name,
+          });
+          yield* sweep();
+          const switched = yield* orchestrator.getThreadProjection(threadId);
+          assert.equal(switched.thread.providerInstanceId, targetSelection.instanceId);
+          assert.equal(switched.thread.worktreePath, before.thread.worktreePath);
+          assert.deepEqual(switched.thread.lineage, before.thread.lineage);
+          assert.equal(switched.thread.branch, before.thread.branch);
+          assert.equal(switched.thread.runtimeMode, before.thread.runtimeMode);
+          assert.equal(switched.thread.usageLimitFailoverHops, 1);
+          if (assignment !== undefined) {
+            const next = switched.thread.agentPersonaAssignment!;
+            assert.equal(next.resolvedDriver, targetDriver);
+            assert.deepEqual(next.resolvedModelSelection, targetSelection);
+            assert.equal(next.resolvedRoute, "fallback");
+            assert.equal(next.runtimeModeOverride, assignment.runtimeModeOverride);
+            assert.equal(next.authorityPolicy, assignment.authorityPolicy);
+            const locked = yield* orchestrator
+              .dispatch({
+                type: "provider.switch",
+                commandId: CommandId.make("quota:public-lock"),
+                threadId,
+                modelSelection: sourceSelection,
+              })
+              .pipe(Effect.flip);
+            assert.equal(locked._tag, "OrchestratorDispatchError");
+          }
+          // A crash here leaves only the committed switch. A stale legacy reset cannot start Codex.
+          yield* orchestrator.dispatch(phase("switch"));
+          assert.equal(
+            (yield* orchestrator.getThreadProjection(threadId)).thread.usageLimitFailoverHops,
+            1,
+          );
+          yield* Ref.update(providers, (ps) => ps.map((p) => ({ ...p, enabled: false })));
+          yield* sink.write({
+            events: [
+              {
+                id: EventId.make("quota:archive"),
+                type: "thread.archived",
+                threadId,
+                occurredAt: now,
+                payload: { ...switched.thread, archivedAt: now },
+              },
+            ],
+          });
+          const refused = yield* orchestrator.dispatch(phase("continue")).pipe(Effect.flip);
+          assert.equal(refused._tag, "OrchestratorDispatchError");
+          yield* sink.write({
+            events: [
+              {
+                id: EventId.make("quota:unarchive"),
+                type: "thread.unarchived",
+                threadId,
+                occurredAt: now,
+                payload: { ...switched.thread, archivedAt: null },
+              },
+            ],
+          });
+          yield* Ref.update(providers, (ps) => ps.map((p) => ({ ...p, enabled: true })));
+          yield* sweep();
+          yield* wait(2);
+          yield* orchestrator.dispatch(phase("continue"));
+          const recovered = yield* orchestrator.getThreadProjection(threadId);
+          assert.lengthOf(recovered.runs, 2);
+          assert.equal(recovered.runs[1]!.delegatedTaskId, NodeId.make("quota:task"));
+          assert.equal(recovered.runs[1]!.providerInstanceId, targetSelection.instanceId);
+          assert.isNotNull(recovered.runs[1]!.contextHandoffId);
+          assert.include((yield* Ref.get(capturedTurns)).at(-1)!.text, "Preserve my objective");
+          assert.equal(
+            yield* fs.readFileString(`${cwd}/dirty.txt`),
+            "Uncommitted work must survive.\n",
+          );
+        }).pipe(
+          Effect.provide(
+            ProviderReplayHarness.layerWithRegistry(
+              { name: "quota-failover", runtimePolicyOverride: { cwd } },
+              registry,
+              { failover: { settings, providers: Ref.get(providers) } },
+            ),
+          ),
+        );
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect(
+  "keeps an exhausted delegated task pending and publishes the recovered child result to its parent",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const cwd = yield* checkpointWorkspace("delegated-quota");
+        const capturedTurns = yield* Ref.make<ReadonlyArray<CapturedTurn>>([]);
+        const stamp = DateTime.formatIso(yield* DateTime.now);
+        const providers: ReadonlyArray<ServerProvider> = [
+          CODEX_MODEL_SELECTION,
+          CLAUDE_MODEL_SELECTION,
+        ].map((selection, i) => ({
+          instanceId: selection.instanceId,
+          driver: i === 0 ? CODEX_DRIVER : CLAUDE_DRIVER,
+          enabled: true,
+          installed: true,
+          version: null,
+          status: "ready",
+          availability: "available",
+          auth: { status: "authenticated" },
+          checkedAt: stamp,
+          supportedRuntimeModes: ["full-access"],
+          models: [
+            { slug: selection.model, name: selection.model, isCustom: false, capabilities: {} },
+          ],
+          slashCommands: [],
+          skills: [],
+          usageLimits: {
+            checkedAt: stamp,
+            completeCheckedAt: stamp,
+            windows: [
+              {
+                id: i === 0 ? "primary" : "five_hour",
+                kind: "session",
+                label: "session",
+                usedPercent: i === 0 ? 100 : 0,
+              },
+              {
+                id: i === 0 ? "secondary" : "seven_day",
+                kind: "weekly",
+                label: "weekly",
+                usedPercent: 0,
+              },
+            ],
+          },
+        }));
+        const settings: ServerSettings["usageLimitFailover"] = {
+          enabled: true,
+          maxHops: 4,
+          routes: [CODEX_MODEL_SELECTION, CLAUDE_MODEL_SELECTION],
+          subscriptionOnlyInstances: providers.map((p) => p.instanceId),
+        };
+        const adapters = ProviderAdapterRegistry.layerFromAdapters([
+          makeTestAdapter({
+            instanceId: CODEX_MODEL_SELECTION.instanceId,
+            driver: CODEX_DRIVER,
+            capabilities: CodexProviderCapabilitiesV2,
+            modelSelection: CODEX_MODEL_SELECTION,
+            responseByRunOrdinal: {},
+            capturedTurns,
+            limitChildFirstRun: threadId,
+          }),
+          makeTestAdapter({
+            instanceId: CLAUDE_MODEL_SELECTION.instanceId,
+            driver: CLAUDE_DRIVER,
+            capabilities: ClaudeProviderCapabilitiesV2,
+            modelSelection: CLAUDE_MODEL_SELECTION,
+            responseByRunOrdinal: { 2: "Recovered delegated result" },
+            capturedTurns,
+          }),
+        ]);
+        yield* Effect.gen(function* () {
+          const orchestrator = yield* Orchestrator.OrchestratorV2;
+          const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+          const sink = yield* EventSink.EventSinkV2;
+          const wait = (id: ThreadId, ordinal: number, status: "failed" | "completed") =>
+            orchestrator.streamStoredEvents.pipe(
+              Stream.filter(
+                ({ event }) =>
+                  event.type === "run.updated" &&
+                  event.threadId === id &&
+                  event.payload.ordinal === ordinal &&
+                  event.payload.status === status,
+              ),
+              Stream.runHead,
+              Effect.andThen(worker.drain()),
+            );
+          yield* orchestrator.dispatch({
+            type: "thread.create",
+            commandId: CommandId.make("dq:create"),
+            threadId,
+            projectId,
+            createdBy: "user",
+            creationSource: "web",
+            title: "Parent",
+            modelSelection: CODEX_MODEL_SELECTION,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: cwd,
+          });
+          yield* orchestrator.dispatch({
+            type: "message.dispatch",
+            commandId: CommandId.make("dq:parent"),
+            threadId,
+            messageId: MessageId.make("dq:parent"),
+            text: "Parent objective",
+            attachments: [],
+            dispatchMode: { type: "start_immediately" },
+            createdBy: "user",
+            creationSource: "web",
+          });
+          yield* wait(threadId, 1, "completed");
+          const parent = yield* orchestrator.getThreadProjection(threadId);
+          const source = parent.runs[0]!;
+          const now = yield* DateTime.now;
+          // A projection fixture for a parent awaiting a delegated task; no supervising agent runs.
+          yield* sink.write({
+            events: [
+              {
+                id: EventId.make("dq:active"),
+                type: "run.updated",
+                threadId,
+                occurredAt: now,
+                payload: { ...source, status: "running", completedAt: null },
+              },
+            ],
+          });
+          yield* orchestrator.dispatch({
+            type: "delegated_task.request",
+            commandId: CommandId.make("dq:delegate"),
+            parentThreadId: threadId,
+            parentRunId: source.id,
+            parentNodeId: source.rootNodeId!,
+            task: "Finish child objective",
+            title: "Child",
+            modelSelection: CODEX_MODEL_SELECTION,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            createdBy: "user",
+            creationSource: "server",
+          });
+          const task = (yield* orchestrator.getThreadProjection(threadId)).subagents[0]!;
+          const childId = task.childThreadId!;
+          yield* wait(childId, 1, "failed");
+          yield* orchestrator.recoverDelegatedTask(
+            childId,
+            (yield* orchestrator.getThreadProjection(childId)).runs[0]!.id,
+          );
+          const pending = yield* orchestrator.getThreadProjection(threadId);
+          assert.isNull(pending.subagents[0]!.result);
+          const child = yield* orchestrator.getThreadProjection(childId);
+          for (const phase of ["switch", "continue"] as const)
+            yield* orchestrator.dispatch({
+              type: "thread.provider-failover",
+              commandId: CommandId.make(`limit-failover:${childId}:${child.runs[0]!.id}:${phase}`),
+              threadId: childId,
+              failedRunId: child.runs[0]!.id,
+              phase,
+            });
+          yield* wait(childId, 2, "completed");
+          const recovered = yield* orchestrator.getThreadProjection(childId);
+          assert.equal(recovered.runs[1]!.delegatedTaskId, task.id);
+          yield* orchestrator.recoverDelegatedTask(childId, recovered.runs[1]!.id);
+          const result = yield* orchestrator.getThreadProjection(threadId);
+          assert.equal(result.subagents[0]!.status, "completed");
+          assert.include(result.subagents[0]!.result!, "Recovered delegated result");
+          assert.equal(recovered.thread.lineage.parentThreadId, threadId);
+        }).pipe(
+          Effect.provide(
+            ProviderReplayHarness.layerWithRegistry(
+              { name: "delegated-quota", runtimePolicyOverride: { cwd } },
+              adapters,
+              { failover: { settings, providers: Effect.succeed(providers) } },
+            ),
+          ),
+        );
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
+);

@@ -17,6 +17,11 @@ interface CodexRateLimitWindow {
 }
 
 export interface CodexRateLimitSnapshot {
+  readonly credits?: {
+    readonly hasCredits: boolean;
+    readonly unlimited: boolean;
+    readonly balance?: string | null;
+  } | null;
   readonly limitId?: string | null;
   readonly planType?: string | null;
   readonly rateLimitReachedType?: string | null;
@@ -113,8 +118,16 @@ export function codexRateLimitsToLimits(input: {
   readonly checkedAt: string;
 }): ServerProviderUsageLimits {
   const resetCredits = codexResetCreditsToContract(input.resetCredits);
+  const credits = (input.rateLimitsByLimitId?.codex ?? input.snapshot).credits;
   const windows = codexRateLimitsToWindows(input.rateLimitsByLimitId?.codex ?? input.snapshot);
   return {
+    completeCheckedAt: input.checkedAt,
+    ...(credits == null
+      ? {}
+      : {
+          paidUsageEnabled:
+            credits.hasCredits || credits.unlimited || Number(credits.balance ?? 0) > 0,
+        }),
     ...makeUsageLimits({
       checkedAt: input.checkedAt,
       windows,

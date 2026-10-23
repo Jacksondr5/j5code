@@ -37,6 +37,8 @@ describe("claudeUsageResponseToLimits", () => {
       names: { overageIncluded: "Fable" },
       limits: {
         checkedAt,
+        paidUsageEnabled: false,
+        paidUsageObserved: false,
         windows: [
           {
             id: "five_hour",
@@ -61,6 +63,13 @@ describe("claudeUsageResponseToLimits", () => {
             usedPercent: 73,
             windowDurationMins: 10080,
             resetsAt: "2026-07-24T08:59:00.000Z",
+          },
+          {
+            id: "seven_day_opus",
+            kind: "weekly",
+            label: "Weekly · opus",
+            usedPercent: 3,
+            windowDurationMins: 10080,
           },
         ],
       },
@@ -165,15 +174,73 @@ describe("claudeRateLimitEventToUpdate", () => {
     });
   });
 
-  it("ignores windows the page does not render and events without a utilization", () => {
+  it("keeps model-scoped exhaustion and ignores events without utilization", () => {
     expect(
       claudeRateLimitEventToUpdate(
         { status: "allowed", rateLimitType: "seven_day_opus", utilization: 0.1 },
         noNames,
       ),
-    ).toBeUndefined();
+    ).toEqual({
+      windows: [
+        {
+          id: "seven_day_opus",
+          kind: "weekly",
+          label: "Weekly · opus",
+          usedPercent: 10,
+          windowDurationMins: 10080,
+        },
+      ],
+    });
     expect(
       claudeRateLimitEventToUpdate({ status: "rejected", rateLimitType: "five_hour" }, noNames),
     ).toBeUndefined();
   });
+});
+
+it("retains every explicit quota bucket and exposes enabled or observed paid usage", () => {
+  const result = claudeUsageResponseToLimits({
+    checkedAt,
+    response: {
+      rate_limits_available: true,
+      rate_limits: {
+        five_hour: { utilization: 10, resets_at: null },
+        seven_day: { utilization: 10, resets_at: null },
+        ...({
+          seven_day_opus: { utilization: 100, resets_at: null },
+          seven_day_sonnet: { utilization: 80, resets_at: null },
+          extra_usage: { is_enabled: true, used_credits: 1, utilization: 2 },
+        } as object),
+      },
+    },
+  }).limits;
+  expect(result.windows.find((w) => w.id === "seven_day_opus")?.usedPercent).toBe(100);
+  expect(result.windows.find((w) => w.id === "seven_day_sonnet")?.usedPercent).toBe(80);
+  expect(result.paidUsageEnabled).toBe(true);
+  expect(result.paidUsageObserved).toBe(true);
+});
+
+it("does not mark incomplete base or explicit scoped buckets as a complete probe", () => {
+  for (const rate_limits of [
+    { five_hour: { utilization: 1, resets_at: null } },
+    {
+      five_hour: { utilization: 1, resets_at: null },
+      seven_day: { utilization: 1, resets_at: null },
+      seven_day_opus: { utilization: null, resets_at: null },
+    },
+  ])
+    expect(
+      claudeUsageResponseToLimits({
+        checkedAt,
+        response: { rate_limits_available: true, rate_limits },
+      }).limits.completeCheckedAt,
+    ).toBeUndefined();
+});
+
+it("retains streamed paid-usage signals even without a utilization value", () => {
+  expect(
+    claudeRateLimitEventToUpdate(
+      { status: "allowed", overageStatus: "allowed", isUsingOverage: true },
+      noNames,
+    ),
+  ).toEqual({ windows: [], paidUsageEnabled: true, paidUsageObserved: true });
 });

@@ -1,3 +1,4 @@
+import { makeFailoverPlanner } from "../j5/failover/planUsageLimitFailover.ts";
 import type {
   OrchestrationV2SearchThreadInput,
   OrchestrationV2SearchThreadResult,
@@ -59,7 +60,7 @@ import {
   RuntimeMode,
   ThreadLinkedPullRequest,
   ThreadId,
-  type TurnItemId,
+  TurnItemId,
 } from "@t3tools/contracts";
 import { modelSelectionsEqual } from "@t3tools/shared/model";
 import {
@@ -472,6 +473,7 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "thread.background-work.settle":
     case "thread.stop":
     case "provider.switch":
+    case "thread.provider-failover":
       return command.threadId;
     case "delegated_task.request":
     case "delegated_task.wake-policy":
@@ -837,6 +839,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   const providerSessions = yield* ProviderSessionManagerV2;
   const providerSwitchService = yield* ProviderSwitchServiceV2;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
+  const planFailover = yield* makeFailoverPlanner;
   const runtimePolicy = yield* RuntimePolicyV2;
   const threadForkService = yield* ThreadForkServiceV2;
   const threadDispatch = yield* ThreadCommandExecutor.ThreadCommandExecutor;
@@ -2436,6 +2439,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     >,
     events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
     effects: Ref.Ref<Array<PendingOrchestrationEffectV2>>,
+    failoverUpdate?: Pick<
+      OrchestrationV2AppThread,
+      "usageLimitFailoverHops" | "agentPersonaAssignment"
+    >,
   ) {
     const thread = yield* projectionStore.getThread(command.threadId).pipe(
       Effect.mapError(
@@ -2587,7 +2594,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         cause: `Thread ${command.threadId} is not pinned and cannot be reordered.`,
       });
     }
-    yield* personaGuards.routeLocked(thread, command);
+    if (failoverUpdate === undefined) yield* personaGuards.routeLocked(thread, command);
     if (
       command.type === "thread.active.reorder" &&
       (thread.pinnedAt != null || thread.settledOverride === "settled")
@@ -3223,6 +3230,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         case "provider.switch":
           return {
             ...thread,
+            ...failoverUpdate,
             providerInstanceId: command.modelSelection.instanceId,
             modelSelection: command.modelSelection,
             updatedAt: now,
@@ -4520,6 +4528,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     command: Extract<OrchestrationV2Command, { readonly type: "message.dispatch" }>,
     events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
     effects: Ref.Ref<Array<PendingOrchestrationEffectV2>>,
+    failoverContinuationOf?: RunId,
   ) =>
     Effect.gen(function* () {
       let projection = yield* getProjectionWithPendingEvents(command.threadId, events);
@@ -4549,6 +4558,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         const recovery = projection.thread.limitRecovery;
         const now = yield* DateTime.now;
         if (
+          (yield* serverSettings.getSettings.pipe(mapDispatchError(command))).usageLimitFailover
+            .enabled ||
           run?.id !== command.usageLimitContinuationOfRunId ||
           failure?.class !== "usage_limit" ||
           threadShellFromProjection(projection).lastErrorClass !== "usage_limit" ||
@@ -4620,9 +4631,15 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       }
 
       yield* personaGuards.modelMismatch(projection.thread, command);
-      const continuedTaskId = projection.runs.find(
-        (run) => run.id === command.restartContinuationOfRunId,
-      )?.delegatedTaskId;
+      const continuedTaskId =
+        projection.runs.find(
+          (run) => run.id === (command.restartContinuationOfRunId ?? failoverContinuationOf),
+        )?.delegatedTaskId ??
+        (failoverContinuationOf !== undefined &&
+        projection.thread.lineage.relationshipToParent === "subagent" &&
+        projection.thread.forkedFrom?.type === "node"
+          ? projection.thread.forkedFrom.nodeId
+          : undefined);
       if (projection.thread.settledOverride !== null) {
         const now = yield* DateTime.now;
         const thread: OrchestrationV2AppThread = {
@@ -10062,6 +10079,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         messages: childResult.messages,
         turnItems: childResult.turnItems,
       };
+      if (
+        (yield* serverSettings.getSettings.pipe(Effect.orDie)).usageLimitFailover.enabled &&
+        childControls.thread.archivedAt === null &&
+        childControls.thread.deletedAt === null &&
+        latestRootProviderFailure(childRun, childResult.turnItems)?.class === "usage_limit"
+      )
+        return;
+
       const parentThreadId = childControls.thread.lineage.parentThreadId;
       const parentProjection = yield* projectionStore.getThreadRecords(
         parentThreadId,
@@ -10771,6 +10796,126 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "thread.pull-request-watch.sync":
         yield* dispatchPullRequestWatchSync(command, events, effects);
         break;
+      case "thread.provider-failover": {
+        const projection = yield* projectionStore
+          .getThreadProjection(command.threadId)
+          .pipe(mapDispatchError(command));
+        const now = yield* DateTime.now;
+        const planned = yield* planFailover(
+          projection,
+          (yield* serverSettings.getSettings.pipe(mapDispatchError(command))).usageLimitFailover,
+          DateTime.toEpochMillis(now),
+        ).pipe(mapDispatchError(command));
+        if (planned === null && latestExecutedRun(projection.runs)?.id === command.failedRunId) {
+          return yield* new OrchestratorDispatchError({
+            commandId: command.commandId,
+            commandType: command.type,
+            cause: "Failover is temporarily ineligible.",
+          });
+        }
+        if (planned === null || planned.run.id !== command.failedRunId) {
+          yield* emit(
+            events,
+            command,
+          )({
+            type: "thread.metadata-updated",
+            threadId: command.threadId,
+            occurredAt: now,
+            payload: projection.thread,
+          });
+          break;
+        }
+        const { decision } = planned;
+        const notice = (message: string, suffix: string) =>
+          emit(
+            events,
+            command,
+          )({
+            type: "turn-item.updated",
+            threadId: command.threadId,
+            occurredAt: now,
+            payload: {
+              id: TurnItemId.make(
+                `limit-failover:${command.threadId}:${command.failedRunId}:${suffix}`,
+              ),
+              threadId: command.threadId,
+              runId: command.failedRunId,
+              nodeId: null,
+              providerThreadId: null,
+              providerTurnId: null,
+              nativeItemRef: null,
+              parentItemId: null,
+              ordinal: projection.turnItems.reduce((n, item) => Math.max(n, item.ordinal + 1), 0),
+              status: "completed",
+              title: "Automatic provider recovery",
+              startedAt: now,
+              completedAt: now,
+              updatedAt: now,
+              type: "system_notice",
+              message,
+            },
+          });
+        if (command.phase === "notice") {
+          yield* notice(
+            decision.phase === "suspended"
+              ? `Automatic provider recovery suspended: ${decision.reason}. Availability will be checked again automatically.`
+              : "Automatic provider recovery is pending; a switch or continuation could not yet be accepted and will be retried.",
+            "notice",
+          );
+          break;
+        }
+        if (decision.phase === "suspended" || decision.phase !== command.phase) {
+          // Eligibility may change after the sweep. Do not consume the phase's receipt.
+          return yield* new OrchestratorDispatchError({
+            commandId: command.commandId,
+            commandType: command.type,
+            cause: "Failover route is not currently eligible.",
+          });
+        }
+        if (decision.phase === "switch") {
+          yield* dispatchThreadMutation(
+            {
+              type: "provider.switch",
+              commandId: command.commandId,
+              threadId: command.threadId,
+              modelSelection: decision.selection,
+            },
+            events,
+            effects,
+            {
+              ...(decision.assignment === undefined
+                ? {}
+                : { agentPersonaAssignment: decision.assignment }),
+              usageLimitFailoverHops: (projection.thread.usageLimitFailoverHops ?? 0) + 1,
+            },
+          );
+          yield* notice(
+            `Automatic provider recovery switched from ${projection.thread.providerInstanceId} to ${decision.selection.instanceId}. The thread and its approved access policy are preserved.`,
+            "switched",
+          );
+        } else {
+          yield* dispatchMessage(
+            {
+              type: "message.dispatch",
+              commandId: command.commandId,
+              messageId: MessageId.make(
+                `limit-failover:${command.threadId}:${command.failedRunId}:continue`,
+              ),
+              threadId: command.threadId,
+              manualContinuationOfRunId: command.failedRunId,
+              text: "The previous provider hit its usage limit mid-task. Continue the outstanding objective. First inspect git status and git diff and verify completed external actions before continuing; tool items may be omitted from the context handoff.",
+              attachments: [],
+              dispatchMode: { type: "start_immediately" },
+              createdBy: "user",
+              creationSource: "server",
+            },
+            events,
+            effects,
+            command.failedRunId,
+          );
+        }
+        break;
+      }
       case "provider-session.detach":
         yield* dispatchProviderSessionDetach(command, events, effects);
         break;
@@ -11038,7 +11183,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       ),
       Effect.catch((cause) =>
         Effect.gen(function* () {
-          if (cause._tag === "OrchestratorThreadAboveModeLimitError") return yield* cause;
+          if (
+            cause._tag === "OrchestratorThreadAboveModeLimitError" ||
+            command.type === "thread.provider-failover"
+          )
+            return yield* cause;
           const rejectedAt = yield* DateTime.now;
           const receipt = yield* eventSink
             .commitRejectedCommand({

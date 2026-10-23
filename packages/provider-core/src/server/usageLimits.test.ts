@@ -87,3 +87,19 @@ describe("resolveUsageLimitsAfterProbe", () => {
     expect(resolveUsageLimitsAfterProbe({ published: undefined, probed: failed })).toBe(failed);
   });
 });
+
+it("partial updates cannot refresh complete-probe evidence or erase paid-usage warnings", () => {
+  const next = applyUsageLimitsUpdate({
+    previous: {
+      ...published,
+      completeCheckedAt: checkedAt,
+      paidUsageEnabled: true,
+      paidUsageObserved: true,
+    },
+    checkedAt: "2026-09-03T12:01:00.000Z",
+    update: { windows: [{ ...session, usedPercent: 20 }] },
+  });
+  expect(next?.completeCheckedAt).toBe(checkedAt);
+  expect(next?.paidUsageEnabled).toBe(true);
+  expect(next?.paidUsageObserved).toBe(true);
+});

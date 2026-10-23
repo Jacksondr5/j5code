@@ -25,6 +25,7 @@ describe("codexRateLimitsToLimits", () => {
       }),
     ).toEqual({
       checkedAt,
+      completeCheckedAt: checkedAt,
       windows: [
         {
           id: "primary",
@@ -313,4 +314,13 @@ describe("codexUsageLimitResetAt", () => {
       codexUsageLimitResetAt({ primary: { usedPercent: 50, resetsAt: 2000000000 } }),
     ).toBeNull();
   });
+});
+
+it("exposes purchased credits as a paid-usage gate without redeeming reset credits", () => {
+  expect(
+    codexRateLimitsToLimits({
+      checkedAt,
+      snapshot: { credits: { hasCredits: true, unlimited: false, balance: "5" } },
+    }).paidUsageEnabled,
+  ).toBe(true);
 });

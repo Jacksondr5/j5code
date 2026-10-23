@@ -541,6 +541,15 @@ J5 hid Undo on an archive that might retire a Captain's Crews, because unarchivi
 
 J5 kept a run from resuming after a usage-limit reset when the person had pressed Stop on it first. It was added during the 2026-09-24 advance without its own decision, as an extension of D5. Jackson ruled on 2026-09-28 that it is an edge case J5 doesn't design for. Removed 2026-10-08 ([#343](https://github.com/Jacksondr5/j5code/issues/343)) with D5.
 
+#### D38. Opt-in usage-limit provider failover
+
+- **Upstream:** reset recovery continues the same provider; explicit persona model routes remain immutable.
+- **J5:** an owner-enabled server recovery path chooses an available authorized Codex/Claude route and continues the same limited thread. A server-only command can atomically move a persona to its other declared route, retaining its exact authority and approved runtime override. Public route-changing commands remain rejected.
+- **Trade-off:** J5 carries small orchestration, projection and usage-signal seams through upstream advances. Availability can be unknown; missing reset times remain suspended until a fresh complete positive probe. Paid-usage configuration still needs owner confirmation.
+- **Alternatives:** follow upstream's wait-for-reset behavior (the default), or leave cross-provider recovery unsupported.
+- **Decision:** the downstream VR Lab operator explicitly requested implementation on 2026-10-23 after a completed manual failover trial. This records downstream authorization to prepare the change, not J5 maintainer approval to merge or deploy it. Failover remains disabled by default and the installed runtime is unchanged pending review and controlled validation.
+- **Code:** FORK.md case 82; `apps/server/src/j5/failover/`.
+
 ## History
 
 - 2026-09-26 — created: the three zones, the decision protocol, and the register, seeded from FORK.md and the worklog records (Jackson, [#327](https://github.com/Jacksondr5/j5code/issues/327)).
