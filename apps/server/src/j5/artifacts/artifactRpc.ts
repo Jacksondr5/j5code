@@ -23,6 +23,7 @@ export const ARTIFACT_RPC_SCOPES = {
   [METHODS.subscribeArtifactChanges]: AuthOrchestrationReadScope,
   [METHODS.listArtifacts]: AuthOrchestrationReadScope,
   [METHODS.deleteArtifact]: AuthOrchestrationOperateScope,
+  [METHODS.deleteAllArtifacts]: AuthOrchestrationOperateScope,
 } as const;
 
 /**
@@ -54,6 +55,16 @@ export function makeArtifactRpcHandlers(input: {
       ),
     [METHODS.deleteArtifact]: (request: ArtifactDeleteRequest) =>
       input.deletion.delete(request).pipe(
+        Effect.as({ deleted: true as const }),
+        Effect.catch(
+          failAsJ5ActionError({
+            refusals: ["ArtifactProjectUnavailableError", "ArtifactWorkspaceError"],
+            failed: "Artifact operation failed.",
+          }),
+        ),
+      ),
+    [METHODS.deleteAllArtifacts]: (request: ArtifactListRequest) =>
+      input.deletion.deleteAll(request).pipe(
         Effect.as({ deleted: true as const }),
         Effect.catch(
           failAsJ5ActionError({

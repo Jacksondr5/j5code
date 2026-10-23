@@ -1,4 +1,9 @@
-import { AuthOrchestrationReadScope, J5_ARTIFACT_WS_METHODS, ProjectId } from "@t3tools/contracts";
+import {
+  AuthOrchestrationOperateScope,
+  AuthOrchestrationReadScope,
+  J5_ARTIFACT_WS_METHODS,
+  ProjectId,
+} from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -13,6 +18,13 @@ it("requires read scope to list artifacts", () => {
   assert.equal(
     requiredScopeForRpcMethod(J5_ARTIFACT_WS_METHODS.listArtifacts),
     AuthOrchestrationReadScope,
+  );
+});
+
+it("requires operate scope to delete all artifacts", () => {
+  assert.equal(
+    requiredScopeForRpcMethod(J5_ARTIFACT_WS_METHODS.deleteAllArtifacts),
+    AuthOrchestrationOperateScope,
   );
 });
 
@@ -36,7 +48,7 @@ it.effect("lists a project's artifacts, and refuses a project that is not availa
             return [{ path: "plan.md", byteLength: 7, modifiedAt: null }];
           }),
       },
-      deletion: { delete: () => Effect.die("unused") },
+      deletion: { delete: () => Effect.die("unused"), deleteAll: () => Effect.die("unused") },
     });
     const list = handlers[J5_ARTIFACT_WS_METHODS.listArtifacts];
 

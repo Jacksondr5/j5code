@@ -49,6 +49,7 @@ export interface ArtifactWorkspaceShape {
   readonly prepare: (projectId: ProjectId) => Effect.Effect<void, ArtifactWorkspaceError>;
   readonly list: (
     projectId: ProjectId,
+    options?: { readonly all: boolean },
   ) => Effect.Effect<ReadonlyArray<ArtifactEntry>, ArtifactWorkspaceError>;
   readonly read: (input: {
     readonly projectId: ProjectId;
@@ -372,7 +373,7 @@ export const layer = Layer.effect(
     );
 
     const list: ArtifactWorkspaceShape["list"] = Effect.fn("ArtifactWorkspace.list")(
-      function* (projectId) {
+      function* (projectId, options) {
         yield* prepare(projectId);
         const workspace = yield* resolveExistingArtifactRoot(projectId);
         if (workspace.realArtifactRoot === null) return [];
@@ -385,7 +386,7 @@ export const layer = Layer.effect(
           );
         // Fail fast on an absurd directory rather than stat and sort tens of thousands of entries
         // for a 500-row page; the cap below still sorts before it truncates.
-        if (names.length > MAX_ARTIFACT_COUNT * 4) {
+        if (!options?.all && names.length > MAX_ARTIFACT_COUNT * 4) {
           return yield* new ArtifactWorkspaceError({
             operation: "list-artifacts",
             detail: `The artifacts directory is too large to browse (maximum ${MAX_ARTIFACT_COUNT} files).`,
@@ -421,7 +422,7 @@ export const layer = Layer.effect(
         return entries
           .filter((entry): entry is ArtifactEntry => entry !== null)
           .toSorted((left, right) => left.path.localeCompare(right.path))
-          .slice(0, MAX_ARTIFACT_COUNT);
+          .slice(0, options?.all ? undefined : MAX_ARTIFACT_COUNT);
       },
     );
 

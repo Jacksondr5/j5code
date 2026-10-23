@@ -30,7 +30,7 @@ import { useEnvironmentQuery } from "../../state/query";
 import { usePreparedConnection } from "../../state/session";
 import { artifactEnvironment } from "./artifactChanges";
 import { j5Environment } from "../state";
-import { listArtifacts, readArtifact, deleteArtifact } from "./artifactClient";
+import { listArtifacts, readArtifact, deleteArtifact, deleteAllArtifacts } from "./artifactClient";
 import { artifactPreviewRevision } from "./artifactPreview.logic";
 import { nextArtifactRefreshGeneration } from "./artifactRefresh";
 
@@ -149,6 +149,9 @@ export function ArtifactsPage({
   const selectedEnvironmentId = selectedProject?.environmentId ?? null;
   const canDelete = useAtomValue(
     j5Environment.deleteArtifact.permissionAtom(selectedEnvironmentId),
+  );
+  const canDeleteAll = useAtomValue(
+    j5Environment.deleteAllArtifacts.permissionAtom(selectedEnvironmentId),
   );
   const selectedProjectId = selectedProject?.id ?? null;
   const selectedWorkspaceRoot = selectedProject?.workspaceRoot;
@@ -276,6 +279,10 @@ export function ArtifactsPage({
   const selectionKey = JSON.stringify([selectedEnvironmentId, selectedProjectId, selectedPath]);
   const currentSelection = useRef(selectionKey);
   currentSelection.current = selectionKey;
+  const currentProjectKey = useRef(selectedKey);
+  useEffect(() => {
+    currentProjectKey.current = selectedKey;
+  }, [selectedKey]);
 
   const refresh = useCallback(() => setManualRefreshes((count) => count + 1), []);
   const deleteSelectedArtifact = useCallback(async () => {
@@ -315,6 +322,44 @@ export function ArtifactsPage({
       setDeleting(false);
     }
   }, [selectedEnvironmentId, selectedPath, selectedProjectId, deleting, selectionKey]);
+  const canDeleteProjectArtifacts =
+    selectedProject !== null &&
+    connected &&
+    canDeleteAll &&
+    !deleting &&
+    listState === "ready" &&
+    listedProjectKey === selectedKey &&
+    entries.length > 0;
+  const deleteProjectArtifacts = useCallback(async () => {
+    if (selectedProject === null || !canDeleteProjectArtifacts) {
+      return;
+    }
+    const requestProjectKey = selectedKey;
+    const confirmation = requestConfirmDialog(
+      `Permanently delete all artifacts in “${selectedProject.title}” from the environment host? This includes all handoff versions and cannot be undone.`,
+      { variant: "destructive" },
+      { confirmLabel: "Delete all permanently" },
+    );
+    if (confirmation === undefined || !(await confirmation)) return;
+    if (currentProjectKey.current !== requestProjectKey) return;
+
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await deleteAllArtifacts({
+        environmentId: selectedProject.environmentId,
+        projectId: selectedProject.id,
+      });
+    } catch (cause) {
+      if (currentProjectKey.current !== requestProjectKey) return;
+      const detail = cause instanceof Error ? cause.message : "Artifacts could not be deleted.";
+      setDeleteError(`${detail} Some artifacts may already have been deleted.`);
+    } finally {
+      // A failed bulk delete may have removed some files, so refresh on failure too.
+      setListGeneration((generation) => generation + 1);
+      setDeleting(false);
+    }
+  }, [selectedProject, canDeleteProjectArtifacts, selectedKey]);
   const selectedExtension = selectedPath === null ? "" : extensionOf(selectedPath);
   const selectedName = selectedPath?.split("/").at(-1) ?? null;
   const image = IMAGE_MEDIA_TYPES[selectedExtension] !== undefined;
@@ -410,22 +455,32 @@ export function ArtifactsPage({
           >
             <ScrollArea className="min-h-0">
               <div className="p-2">
-                <div className="flex items-center px-2 py-1.5">
+                <div className="flex flex-wrap items-center gap-x-1 px-2 py-1.5">
                   <p className="text-xs font-medium text-muted-foreground">Files</p>
-                  {embedded ? (
+                  <div className="ms-auto flex items-center gap-1">
+                    {embedded ? (
+                      <Button
+                        aria-label="Refresh artifacts"
+                        disabled={listState === "loading" || selectedProject === null}
+                        onClick={refresh}
+                        size="icon-xs"
+                        variant="ghost"
+                      >
+                        <RefreshCwIcon
+                          className={cn("size-3.5", listState === "loading" && "animate-spin")}
+                        />
+                      </Button>
+                    ) : null}
                     <Button
-                      aria-label="Refresh artifacts"
-                      className="ms-auto"
-                      disabled={listState === "loading" || selectedProject === null}
-                      onClick={refresh}
-                      size="icon-xs"
-                      variant="ghost"
+                      aria-label="Delete all artifacts permanently"
+                      disabled={!canDeleteProjectArtifacts}
+                      onClick={() => void deleteProjectArtifacts()}
+                      size="xs"
+                      variant="ghost-destructive"
                     >
-                      <RefreshCwIcon
-                        className={cn("size-3.5", listState === "loading" && "animate-spin")}
-                      />
+                      Delete all
                     </Button>
-                  ) : null}
+                  </div>
                 </div>
                 {entries.map((entry) => {
                   const Icon = artifactIcon(entry.path);
