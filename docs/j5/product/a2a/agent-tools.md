@@ -87,8 +87,8 @@ runtime_mode and interaction_mode. Attach files to the brief with attachments. C
 every time (see the workspace field). A new worktree is prepared after this returns, and the agent
 begins once it is bound, possibly while the project's setup script is still running; if preparing it
 fails, the agent's thread shows why, and it is not retried. Reuse client_request_id to retry the
-same spawn safely; a retry replays the first spawn, so a different base_ref or worktree_path needs a
-fresh client_request_id."
+same spawn safely; reusing it with any change to the request is refused, so use a fresh one for new
+work."
 
 | Input               | Type                                  | Required | Meaning                                           |
 | ------------------- | ------------------------------------- | -------- | ------------------------------------------------- |
@@ -485,3 +485,4 @@ run; `j5_stop_crew` doesn't, and unarchiving doesn't restart it.
 - 2026-10-12 — review of outside agents: `delegate_task` and the playbook reads name the legal move too; an outside agent's listing reports only what it can do; a project with no thread yet lists its people and no agents; the level is checked when a message is sent (PR #560).
 - 2026-10-12 — Stop: the next message delivered to a stopped agent resumes its queue and runs after the held messages, where it used to run ahead of them; the `j5_stop_agent` and `j5_stop_crew` descriptions say so (Jackson, [#580](https://github.com/Jacksondr5/j5code/issues/580)).
 - 2026-10-17 — the advance onto upstream's nightly `v0.1.1-nightly.20261017.3238`: `t3_workflow_stop`, `write_pull_request_guides` and `read_pull_request_guide` join the kept upstream tools as-is, and `delegate_task`'s description takes upstream's sentences on a child's own worktree, a wait that ends at the child's question, and runtime modes (Jackson's decisions of that day; [register of divergences](../upstream.md), D1 and D2).
+- 2026-10-23 — spawn and Crew retries bind the whole request, refuse changed requests and unverifiable pre-upgrade requests, and replay accepted work; the `j5_spawn_agent` contract description matches the shipped string ([PR #660](https://github.com/Jacksondr5/j5code/pull/660)).

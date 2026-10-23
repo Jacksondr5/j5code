@@ -14,7 +14,7 @@ import {
 import { ProjectService } from "../../../project/ProjectService.ts";
 import { layerFromReceiptStore } from "../spawnWorkspace.ts";
 import { layerMemory } from "../../../persistence/Sqlite.ts";
-import { RequestReplayService, layer as requestReplayLayer } from "../RequestReplayService.ts";
+import * as RequestReplayService from "../RequestReplayService.ts";
 
 export interface FakeCheckout {
   readonly isRepo: boolean;
@@ -57,7 +57,7 @@ const fakeRefs = (checkout: FakeCheckout, workspaceRoot: string) => {
  */
 export const fakeSpawnWorkspaceLayer = (options: {
   readonly checkout: FakeCheckout;
-  readonly replay?: Layer.Layer<RequestReplayService>;
+  readonly replay?: Layer.Layer<RequestReplayService.RequestReplayService>;
   /**
    * When given, git reads this instead, as an agent's shell leaves it. The direct reads see it as
    * it is now, and a checkout's status does once invalidated; `listRefs` keeps serving the
@@ -155,6 +155,6 @@ export const fakeSpawnWorkspaceLayer = (options: {
         }),
       ),
     ),
-    Layer.merge(options.replay ?? requestReplayLayer.pipe(Layer.provide(layerMemory))),
+    Layer.merge(options.replay ?? RequestReplayService.layer.pipe(Layer.provide(layerMemory))),
   );
 };

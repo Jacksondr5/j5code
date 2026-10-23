@@ -51,16 +51,8 @@ import {
 } from "./mcp/outsideAgent.ts";
 import type { J5SpawnAgentInput } from "./mcp/tools.ts";
 
-import { type RequestReplayConflictError, RequestReplayService } from "./RequestReplayService.ts";
-import {
-  SpawnWorkspaceService,
-  namedBaseRefs,
-  namedWorktreePaths,
-  resolveSpawnWorkspace,
-  spawnCreateCommandId,
-  spawnThreadCheckout,
-  spawnWorkspaceFromInput,
-} from "./spawnWorkspace.ts";
+import * as RequestReplayService from "./RequestReplayService.ts";
+import * as SpawnWorkspace from "./spawnWorkspace.ts";
 import {
   spawnThreadId,
   spawnHomeCommandId,
@@ -72,7 +64,7 @@ import {
 import { ChatAttachmentId, type ChatAttachment, type ThreadId } from "@t3tools/contracts";
 import * as FileSystem from "effect/FileSystem";
 import { planAttachmentClaim, resolveAttachmentPath } from "../../attachmentStore.ts";
-import { ServerConfig } from "../../config.ts";
+import * as ServerConfig from "../../config.ts";
 export class SpawnAgentService extends Context.Service<
   SpawnAgentService,
   {
@@ -241,7 +233,7 @@ const preflightSpawnUploads = Effect.fn("j5.a2a.mcp.preflightSpawnUploads")(func
   threadId: ThreadId,
   attachments: ReadonlyArray<ChatAttachment>,
 ) {
-  const config = yield* ServerConfig;
+  const config = yield* ServerConfig.ServerConfig;
   const fs = yield* FileSystem.FileSystem;
   yield* Effect.forEach(
     attachments,
@@ -333,14 +325,24 @@ const spawn = Effect.fn("j5.a2a.spawnAgent")(function* (
     scratch: input.scratch ?? false,
     workspace: workspaceRequest,
   };
-  const replayService = yield* RequestReplayService;
-  const replayFailure = (error: SqlError | RequestReplayConflictError) =>
-    error._tag === "RequestReplayConflictError"
-      ? stateError(error.message, "Inspect the original target before starting new work.")
-      : stateError(
+  const replayService = yield* RequestReplayService.RequestReplayService;
+  const replayFailure = (
+    error:
+      | SqlError
+      | RequestReplayService.RequestReplayConflictError
+      | RequestReplayService.RequestReplayUnverifiableError,
+  ) => {
+    switch (error._tag) {
+      case "SqlError":
+        return stateError(
           `The spawn's client_request_id could not be checked: ${error.message}`,
           "Retry j5_spawn_agent with the same client_request_id.",
         );
+      case "RequestReplayConflictError":
+      case "RequestReplayUnverifiableError":
+        return stateError(error.message, "Inspect the original target before starting new work.");
+    }
+  };
   // A generated key can never be retried, so it has nothing to bind.
   const replayable = input.client_request_id !== undefined;
   if (replayable)
@@ -499,13 +501,13 @@ const spawn = Effect.fn("j5.a2a.spawnAgent")(function* (
       'Retry j5_spawn_agent with workspace {"type":"root"} for that project\'s main checkout, or a worktree of it.',
     );
   }
-  const spawnWorkspace = yield* SpawnWorkspaceService;
+  const spawnWorkspace = yield* SpawnWorkspace.SpawnWorkspaceService;
   // The project's main checkout binds nothing, so it travels as the shared type with no
   // checkout to share: one create command, and nothing asked of git.
   const choice =
     input.workspace.type === "root"
       ? ({ type: "shared" } as const)
-      : spawnWorkspaceFromInput(input.workspace);
+      : SpawnWorkspace.spawnWorkspaceFromInput(input.workspace);
   // A replay must not refuse the branch its own first attempt created, so a named branch is
   // checked for only before the thread exists.
   const checkBranches = choice.type === "worktree" && choice.branch !== undefined && firstAttempt;
@@ -517,13 +519,13 @@ const spawn = Effect.fn("j5.a2a.spawnAgent")(function* (
           projectId: target,
           worktreePath: own?.thread.worktreePath ?? null,
           checkBranches,
-          baseRefs: namedBaseRefs([choice]),
-          existingWorktreePaths: namedWorktreePaths([choice]),
+          baseRefs: SpawnWorkspace.namedBaseRefs([choice]),
+          existingWorktreePaths: SpawnWorkspace.namedWorktreePaths([choice]),
         });
   const workspace = yield* Effect.fromResult(
     checkout === null
       ? Result.succeed({ type: "shared" } as const)
-      : resolveSpawnWorkspace(checkout, choice),
+      : SpawnWorkspace.resolveSpawnWorkspace(checkout, choice),
   ).pipe(
     Effect.mapError((error) =>
       stateError(`Peer Agent was not created: ${error.detail}`, error.nextStep),
@@ -577,7 +579,7 @@ const spawn = Effect.fn("j5.a2a.spawnAgent")(function* (
             type: "thread.create",
             createdBy: "agent",
             creationSource: "mcp",
-            commandId: spawnCreateCommandId(stableInput, workspace.type),
+            commandId: SpawnWorkspace.spawnCreateCommandId(stableInput, workspace.type),
             threadId,
             projectId: target,
             title: spawnTitle(input.brief, input.title),
@@ -586,7 +588,7 @@ const spawn = Effect.fn("j5.a2a.spawnAgent")(function* (
             interactionMode: current?.interactionMode ?? interactionMode,
             ...(persona === undefined ? {} : { agentPersonaAssignment: persona.assignment }),
             ...(current === null
-              ? spawnThreadCheckout(workspace, sharedCheckout)
+              ? SpawnWorkspace.spawnThreadCheckout(workspace, sharedCheckout)
               : { branch: current.branch, worktreePath: current.worktreePath }),
           })
           .pipe(
@@ -643,9 +645,24 @@ const spawn = Effect.fn("j5.a2a.spawnAgent")(function* (
             "Call j5_list_participants to inspect committed placement truth and ask the human operator to repair the inconsistent record.",
           );
         }
-        // The brief's files are claimed into the new thread, which now exists.
+        // The brief's files are claimed into the new thread, which now exists. Once the brief's
+        // receipt shows it accepted, they are the thread's already: claiming again would copy them
+        // a second time, and fails once the pending upload is swept. A thread without that
+        // receipt never got its brief, so a retry still claims.
+        const briefAccepted =
+          current !== null &&
+          (yield* spawnWorkspace
+            .briefAccepted({ stableInput, workspace: workspace.type })
+            .pipe(
+              Effect.mapError((error) =>
+                stateError(
+                  `Peer Agent ${facts.home.participantId} is registered and addressable, but whether its brief started could not be read: ${error.message}`,
+                  "Retry j5_spawn_agent with the same client_request_id.",
+                ),
+              ),
+            ));
         const attachments =
-          input.attachments === undefined
+          input.attachments === undefined || briefAccepted
             ? []
             : (yield* resolveAttachmentReferences(input.attachments, []).pipe(
                 Effect.flatMap((references) =>

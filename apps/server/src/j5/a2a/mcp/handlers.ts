@@ -711,7 +711,7 @@ const handlers = {
     }).pipe(Effect.mapError(failure)),
   ),
   // Declared `writes`, as send and stop are, so an outside agent is admitted and a read-only
-  // client is refused. The handler holds the chosen modes to the caller's limits itself: a
+  // client is refused. The spawn service holds the chosen modes to the caller's limits: a
   // thread's own modes, or the level an outside agent's sign-in was approved at.
   j5_spawn_agent: McpToolAccess.writes((input) =>
     Effect.gen(function* () {

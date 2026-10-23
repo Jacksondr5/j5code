@@ -15,13 +15,21 @@ export const requestReplayConflict = (target: string) => ({
 
 export class RequestReplayConflictError extends Schema.TaggedError<RequestReplayConflictError>()(
   "RequestReplayConflictError",
-  { target: Schema.String, legacy: Schema.Boolean },
+  { target: Schema.String },
 ) {
   override get message() {
-    if (this.legacy)
-      return `The original request for ${this.target} predates replay verification and cannot be compared. Inspect that target and use a fresh client_request_id for new work.`;
     const { detail, nextStep } = requestReplayConflict(this.target);
     return `${detail} ${nextStep}`;
+  }
+}
+
+/** The target exists from before replay binding, so no stored request proves this one is it. */
+export class RequestReplayUnverifiableError extends Schema.TaggedError<RequestReplayUnverifiableError>()(
+  "RequestReplayUnverifiableError",
+  { target: Schema.String },
+) {
+  override get message() {
+    return `The original request for ${this.target} predates replay verification and cannot be compared. Inspect that target and use a fresh client_request_id for new work.`;
   }
 }
 
@@ -54,7 +62,10 @@ export class RequestReplayService extends Context.Service<
       readonly target: string;
       readonly request: unknown;
       readonly legacy: boolean;
-    }) => Effect.Effect<void, SqlError | RequestReplayConflictError>;
+    }) => Effect.Effect<
+      void,
+      SqlError | RequestReplayConflictError | RequestReplayUnverifiableError
+    >;
   }
 >()("t3/j5/a2a/RequestReplayService") {}
 
@@ -69,7 +80,7 @@ export const layer = Layer.effect(
         `;
         const original = rows[0];
         if (original !== undefined && original.request_digest !== requestDigest(request))
-          return yield* new RequestReplayConflictError({ target: original.target, legacy: false });
+          return yield* new RequestReplayConflictError({ target: original.target });
       },
     );
     const bind: RequestReplayService["Service"]["bind"] = Effect.fn("j5.requestReplay.bind")(
@@ -86,11 +97,10 @@ export const layer = Layer.effect(
           SELECT target, request_digest FROM j5_a2a_request_replay WHERE id = ${input.id}
         `;
         const original = rows[0];
-        if (original === undefined || original.request_digest !== digest)
-          return yield* new RequestReplayConflictError({
-            target: original?.target ?? input.target,
-            legacy: original === undefined,
-          });
+        if (original === undefined)
+          return yield* new RequestReplayUnverifiableError({ target: input.target });
+        if (original.request_digest !== digest)
+          return yield* new RequestReplayConflictError({ target: original.target });
       },
       sql.withTransaction,
     );

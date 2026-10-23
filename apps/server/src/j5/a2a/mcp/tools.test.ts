@@ -1,6 +1,9 @@
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import { ProviderInstanceId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Schema from "effect/Schema";
 import { Tool } from "effect/ai";
 
@@ -24,6 +27,31 @@ import {
 
 const decodeProposeCrew = Schema.decodeUnknownSync(J5ProposeCrewInput);
 const decodeRequestCrewMember = Schema.decodeUnknownSync(J5RequestCrewMemberInput);
+
+it.effect("publishes the canonical spawn description byte-for-byte", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const document = yield* fileSystem.readFileString(
+      decodeURIComponent(
+        new URL("../../../../../../docs/j5/product/a2a/agent-tools.md", import.meta.url).pathname,
+      ),
+    );
+    const description = document.match(
+      /### `j5_spawn_agent`[\s\S]*?\*\*Description \(contract\):\*\* "([\s\S]*?)"\n\n\| Input/,
+    )?.[1];
+    if (description === undefined) {
+      return yield* Effect.die(
+        "j5_spawn_agent contract description is missing from agent-tools.md",
+      );
+    }
+    const documentedDescription = description
+      .split("\n")
+      .map((line) => line.trim())
+      .join(" ");
+    assert.equal(J5_SPAWN_AGENT_DESCRIPTION, documentedDescription);
+    assert.equal(J5SpawnAgentTool.description, documentedDescription);
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
 
 it("publishes the ratified single-target lifecycle contracts fail-closed", () => {
   assert.equal(J5SendMessageTool.description, A2A_SEND_TOOL_DESCRIPTION);

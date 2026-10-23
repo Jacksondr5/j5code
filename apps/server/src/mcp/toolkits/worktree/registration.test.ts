@@ -1,5 +1,5 @@
 import * as SpawnAgentService from "../../../j5/a2a/SpawnAgentService.ts";
-import { RequestReplayService } from "../../../j5/a2a/RequestReplayService.ts";
+import * as RequestReplayService from "../../../j5/a2a/RequestReplayService.ts";
 import * as Orchestrator from "../../../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../../../orchestration-v2/ProjectionStore.ts";
 import * as DeviceService from "../../../device/DeviceService.ts";
@@ -101,7 +101,7 @@ const layerStubServices = Layer.mergeAll(
   Layer.mock(PlaybookCrewRelay)({}),
   Layer.mock(PlaybookStore)({}),
   Layer.mock(SpawnCompositionService)({}),
-  Layer.mock(RequestReplayService)({}),
+  Layer.mock(RequestReplayService.RequestReplayService)({}),
   SpawnAgentService.layer,
   Layer.mock(SpawnWorkspaceService)({}),
   Layer.mock(ThreadRegistration)({}),

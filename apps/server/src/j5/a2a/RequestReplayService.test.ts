@@ -8,7 +8,7 @@ import * as Path from "effect/Path";
 import * as Result from "effect/Result";
 import * as SqlClient from "effect/sql/SqlClient";
 import migration from "./migrations/044_RequestReplay.ts";
-import { RequestReplayService, layer } from "./RequestReplayService.ts";
+import * as RequestReplayService from "./RequestReplayService.ts";
 
 it.effect("persists the original request across database reopen and refuses changed reuse", () =>
   Effect.gen(function* () {
@@ -24,12 +24,16 @@ it.effect("persists the original request across database reopen and refuses chan
     yield* Effect.scoped(
       Effect.gen(function* () {
         yield* migration;
-        yield* (yield* RequestReplayService).bind(first);
-      }).pipe(Effect.provide(layer.pipe(Layer.provideMerge(NodeSqliteClient.layer({ filename }))))),
+        yield* (yield* RequestReplayService.RequestReplayService).bind(first);
+      }).pipe(
+        Effect.provide(
+          RequestReplayService.layer.pipe(Layer.provideMerge(NodeSqliteClient.layer({ filename }))),
+        ),
+      ),
     );
     yield* Effect.scoped(
       Effect.gen(function* () {
-        const replay = yield* RequestReplayService;
+        const replay = yield* RequestReplayService.RequestReplayService;
         yield* replay.bind({
           ...first,
           legacy: true,
@@ -57,9 +61,18 @@ it.effect("persists the original request across database reopen and refuses chan
           .bind({ ...first, id: "legacy", legacy: true })
           .pipe(Effect.result);
         assert.isTrue(Result.isFailure(legacy));
-        if (Result.isFailure(legacy))
-          assert.include(legacy.failure.message, "predates replay verification");
-      }).pipe(Effect.provide(layer.pipe(Layer.provideMerge(NodeSqliteClient.layer({ filename }))))),
+        if (Result.isFailure(legacy)) {
+          assert.equal(legacy.failure._tag, "RequestReplayUnverifiableError");
+          assert.equal(
+            legacy.failure.message,
+            "The original request for agent:original predates replay verification and cannot be compared. Inspect that target and use a fresh client_request_id for new work.",
+          );
+        }
+      }).pipe(
+        Effect.provide(
+          RequestReplayService.layer.pipe(Layer.provideMerge(NodeSqliteClient.layer({ filename }))),
+        ),
+      ),
     );
   }).pipe(Effect.provide(NodeServices.layer)),
 );

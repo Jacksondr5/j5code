@@ -50,7 +50,7 @@ import { layer as peerAdminLayer } from "./PeerAdminService.ts";
 import { layer as threadRegistrationLayer } from "./ThreadRegistration.ts";
 import { layer as spawnCompositionLayer } from "./SpawnCompositionService.ts";
 import { layer as spawnWorkspaceLayer } from "./spawnWorkspace.ts";
-import { layer as requestReplayLayer } from "./RequestReplayService.ts";
+import * as RequestReplayService from "./RequestReplayService.ts";
 import { layer as sharedConversationLayer } from "../sharing/SharedConversation.ts";
 import { layer as sharedThreadsLayer } from "../sharing/SharedThreads.ts";
 import { layer as agentHandoffArtifactDeleteLayer } from "../agents/agentHandoffArtifactDelete.ts";
@@ -232,7 +232,7 @@ export const makeJ5A2AAuxiliaryLayer = (
     lifecycleServiceProvided,
     archiveFactsProvided,
     spawnWorkspaceProvided,
-    requestReplayLayer,
+    RequestReplayService.layer,
     SpawnAgentService.layer,
     agentCrewInstanceLayer,
     archiveCrewProvided,
