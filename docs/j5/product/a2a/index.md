@@ -134,7 +134,7 @@ message, ask, reply, plain message, Exchange, intent, urgency, obligation, envel
 
 ### Delivery
 
-12. Every delivery attempt is recorded; a delivery that fails past the retry limit is shown as an alarm attributed to the sender, leaves an ask's Exchange open, and is never marked repaired by time passing or by a different message succeeding. The sender is told once, in a notice that the message may not have been delivered, unless the sender is on a peer server that already holds the receipt. The origin's Fleet row still receives the peer's measured failure, without changing that acceptance receipt or delivering a thread notice.
+12. Every delivery attempt is recorded; a delivery that fails past the retry limit remains an alarm attributed to the sender, leaves an ask's Exchange open, and is never marked repaired by time passing or a different message succeeding; its sender receives one notice that it may not have been delivered, except after a peer acceptance receipt, when the origin's Fleet row receives the failure without changing that receipt or delivering a thread notice.
 13. A message to an agent whose turn is running is queued and delivered when the turn ends, unless its sender asked for a steer or a restart, or it is a peer message into a running Codex GPT 6 turn, which is delivered into the turn as an ordinary envelope with nothing added.
 14. How the person's steer is offered, labeled and sent — in the composer and on a queued row, including whether a send steers or queues by default — follows upstream. An agent's steer or restart is asked for on `j5_send_message` and is defined with that tool ([agent tools](agent-tools.md)).
 15. Platform notices are always queued, never steered.
