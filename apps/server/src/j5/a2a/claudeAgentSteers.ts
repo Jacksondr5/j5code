@@ -96,19 +96,30 @@ export const j5ObserveClaudeSteer = (query: ClaudeAgentSdkQuerySession, message:
   const state: unknown = Reflect.get(message, "state");
   if (typeof uuid !== "string" || typeof state !== "string") return;
   reportsLifecycle.add(query);
+  const next = lifecycleStates.get(state);
+  if (next === undefined) return;
   for (const turn of steersByTurn.values()) {
     const steer = turn.get(uuid);
-    if (steer === undefined) continue;
-    steer.state = state === "queued" ? "queued" : state === "cancelled" ? "cancelled" : "taken";
+    if (steer?.query === query) steer.state = next;
   }
 };
 
-const isAbortResult = (result: SDKResultMessage) =>
-  result.terminal_reason === "aborted_tools" || result.terminal_reason === "aborted_streaming";
+const lifecycleStates = new Map<string, SteerState>([
+  ["queued", "queued"],
+  ["started", "taken"],
+  ["completed", "taken"],
+  ["cancelled", "cancelled"],
+]);
 
 /**
  * Whether the turn's result is one segment of the turn rather than its end: a steer of the turn
- * is still to run. Only a clean completion is held, so a failure ends the turn and shows.
+ * is still to run. Only a clean completion is held, so a failure ends the turn and shows. The
+ * adapter holds a person's aborting "now" steer itself without calling this, so the turn keeps
+ * its steers across it.
+ *
+ * A held turn ends at its steer's own result, which the CLI sends for every queued command it
+ * runs. Neither J5 nor upstream asks the CLI to cancel a queued command, and a person's Stop
+ * closes the query, which ends the turn whether or not it is held.
  */
 export const j5ClaudeSteerHoldsResult = (
   query: ClaudeAgentSdkQuerySession,
@@ -117,8 +128,6 @@ export const j5ClaudeSteerHoldsResult = (
 ): boolean => {
   const turn = steersByTurn.get(providerTurnId);
   if (turn === undefined) return false;
-  // A person's "now" steer aborts the segment and the turn carries on, still owning its steers.
-  if (isAbortResult(result)) return false;
   const waiting = [...turn.values()].some(stillToRun);
   const completed =
     result.subtype === "success" &&
@@ -131,9 +140,9 @@ export const j5ClaudeSteerHoldsResult = (
 
 /**
  * The thread messages among `messageIds` that were steered into a turn Claude never read:
- * the turn was interrupted while they waited, or the CLI cancelled them. Called once a run has
- * ended, it forgets those turns. A steer on a CLI that reports no lifecycle is not counted,
- * because whether Claude read it is unknown.
+ * they still waited, or the CLI cancelled them, when the turn ended without a clean result.
+ * Called once such a run has ended, it forgets those turns. A steer on a CLI that reports no
+ * lifecycle is not counted, because whether Claude read it is unknown.
  */
 export const j5TakeUnreadClaudeSteers = (messageIds: ReadonlyArray<string>): Array<string> => {
   const wanted = new Set(messageIds);

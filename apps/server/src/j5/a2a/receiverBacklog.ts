@@ -47,7 +47,7 @@ const decodeParticipant = Schema.decodeUnknownEffect(Schema.fromJsonString(Parti
  * A2A messages after it, both those already queued as runs and those the delivery
  * worker has not handed over yet; or a held queue or usage limit, which only a resume
  * or a continue lifts (D4). Undefined when the message will not wait: the receiver is
- * idle and takes it now, takes it mid-turn (a GPT 6 model, or a steer or restart), is
+ * idle and takes it now, takes it mid-turn (Claude or a GPT 6 model, or a steer or restart), is
  * not an agent on this server, or the message has already run or will never run.
  * Measured when called and never stored, so it is advice to the sender, not a delivery
  * fact. A failed read is logged and reads as undefined: the message is already
@@ -131,7 +131,7 @@ export const readReceiverBacklog = Effect.fn("j5.a2a.readReceiverBacklog")(
             : null,
       } satisfies ReceiverBacklog;
     }
-    // Not yet handed over, so a running GPT 6 turn, or the turn a steer or restart lands on,
+    // Not yet handed over, so a running Claude or GPT 6 turn, or the turn a steer or restart lands on,
     // will take it mid-turn. Once queued, it stays queued even if the receiver's turn later
     // becomes steerable.
     const mode = input.mode ?? "queue";

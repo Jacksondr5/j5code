@@ -166,7 +166,7 @@ message, ask, reply, plain message, Exchange, intent, urgency, obligation, envel
 
 ### Sending to a busy agent
 
-29. A send to an agent whose turn is running, and which will not take the message into that turn, returns a notice stating how many messages are waiting for it, how many of them the caller sent, and that each will run as its own turn; a send to an idle agent or to a running Codex GPT 6 turn returns no notice, and no send is refused because of the backlog.
+29. A send to an agent whose turn is running, and which will not take the message into that turn, returns a notice stating how many messages are waiting for it, how many of them the caller sent, and that each will run as its own turn; a send to an idle agent or to a running Claude or Codex GPT 6 turn returns no notice, and no send is refused because of the backlog.
 
 ### Outside agents
 
