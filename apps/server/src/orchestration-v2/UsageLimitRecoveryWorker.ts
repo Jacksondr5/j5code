@@ -1,3 +1,6 @@
+import * as Option from "effect/Option";
+import * as Ref from "effect/Ref";
+import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import { makeFailoverPlanner } from "../j5/failover/planUsageLimitFailover.ts";
 import { CommandId, MessageId, type OrchestrationV2Command } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
@@ -76,6 +79,8 @@ export const makeSweep = Effect.gen(function* () {
   const threads = yield* ThreadManagement.ThreadManagementService;
   const settings = yield* ServerSettings.ServerSettingsService;
   const planFailover = yield* makeFailoverPlanner;
+  const registry = yield* Effect.serviceOption(ProviderRegistry.ProviderRegistry);
+  const probes = yield* Ref.make<ReadonlyMap<string, number>>(new Map());
   return Effect.fn("UsageLimitRecoveryWorker.sweep")(function* () {
     const preferences = yield* settings.getSettings;
     const now = yield* DateTime.now;
@@ -86,6 +91,24 @@ export const makeSweep = Effect.gen(function* () {
       failover: preferences.usageLimitFailover.enabled,
     });
     const nowMs = DateTime.toEpochMillis(now);
+    if (
+      preferences.usageLimitFailover.enabled &&
+      candidates.length > 0 &&
+      Option.isSome(registry)
+    ) {
+      for (const instanceId of preferences.usageLimitFailover.subscriptionOnlyInstances) {
+        const previous = (yield* Ref.get(probes)).get(instanceId);
+        if (previous !== undefined && nowMs - previous < 60_000) continue;
+        yield* Ref.update(probes, (values) => new Map(values).set(instanceId, nowMs));
+        // The ordinary health refresh is demand-driven; recovery must work with no client connected.
+        yield* registry.value.refreshInstance(instanceId).pipe(
+          Effect.timeoutOption("15 seconds"),
+          Effect.catchCause((cause) =>
+            Effect.logWarning("j5.limit-failover.probe-failed", { instanceId, cause }),
+          ),
+        );
+      }
+    }
     for (const thread of candidates) {
       if (preferences.usageLimitFailover.enabled) {
         yield* Effect.gen(function* () {

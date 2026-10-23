@@ -43,7 +43,7 @@ export function routeAvailability(
     now - completeAt <= freshnessMs &&
     completeAt <= checked &&
     !limits?.unavailable;
-  const windows = limits?.windows ?? [];
+  const windows = [...(limits?.windows ?? []), ...(limits?.recoveryWindows ?? [])];
   if (limits?.paidUsageEnabled || limits?.paidUsageObserved) return false;
   if (windows.some((w) => w.id === "overage" && w.usedPercent > 0)) return false;
   const failure = failures

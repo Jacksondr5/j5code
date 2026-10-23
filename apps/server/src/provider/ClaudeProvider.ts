@@ -265,6 +265,7 @@ type ClaudeCapabilitiesProbe = {
    * otherwise successful response mean the account has none (API key).
    */
   readonly usage?: Pick<SDKControlGetUsageResponse, "rate_limits_available" | "rate_limits">;
+  readonly usageCheckedAt?: string;
 };
 
 // reload_skills exposes builtin at runtime, but the SDK type omits it.
@@ -456,7 +457,7 @@ const probeClaudeCapabilities = (
           apiProvider: account?.apiProvider,
           slashCommands: parseClaudeInitializationCommands(init.commands),
           bundledSkills,
-          ...(usage ? { usage } : {}),
+          ...(usage ? { usage, usageCheckedAt: DateTime.formatIso(yield* DateTime.now) } : {}),
         } satisfies ClaudeCapabilitiesProbe;
       }),
     ),
@@ -686,9 +687,12 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     : scopedLimitNames
       ? yield* recordClaudeUsageResponse(scopedLimitNames, {
           response: capabilities.usage,
-          checkedAt,
+          checkedAt: capabilities.usageCheckedAt ?? "1970-01-01T00:00:00.000Z",
         })
-      : claudeUsageResponseToLimits({ response: capabilities.usage, checkedAt }).limits;
+      : claudeUsageResponseToLimits({
+          response: capabilities.usage,
+          checkedAt: capabilities.usageCheckedAt ?? "1970-01-01T00:00:00.000Z",
+        }).limits;
   const resetCredits =
     resolveResetCredits &&
     capabilities.subscriptionType &&

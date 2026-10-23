@@ -103,3 +103,39 @@ it("partial updates cannot refresh complete-probe evidence or erase paid-usage w
   expect(next?.paidUsageEnabled).toBe(true);
   expect(next?.paidUsageObserved).toBe(true);
 });
+
+it("an incomplete or paid-usage-omitting probe cannot erase observed restrictions", () => {
+  const prior = { ...published, paidUsageEnabled: true, paidUsageObserved: true };
+  const result = resolveUsageLimitsAfterProbe({
+    published: prior,
+    probed: { checkedAt: "2026-09-03T12:01:00Z", windows: [session] },
+  });
+  expect(result?.paidUsageEnabled).toBe(true);
+  expect(result?.paidUsageObserved).toBe(true);
+  expect(result?.windows).toEqual([session, weekly]);
+});
+
+it("a streamed credit-only update adds a paid-usage warning", () => {
+  expect(
+    applyUsageLimitsUpdate({
+      previous: published,
+      checkedAt,
+      update: { windows: [], paidUsageEnabled: true },
+    })?.paidUsageEnabled,
+  ).toBe(true);
+});
+
+it("cached negative observations cannot clear newer streamed exhaustion or paid-usage warnings", () => {
+  const current = {
+    ...published,
+    checkedAt: "2026-09-03T12:01:00.000Z",
+    paidUsageEnabled: true,
+    windows: [{ ...session, usedPercent: 100 }, weekly],
+  };
+  expect(
+    resolveUsageLimitsAfterProbe({
+      published: current,
+      probed: { ...published, completeCheckedAt: checkedAt, paidUsageEnabled: false },
+    }),
+  ).toBe(current);
+});

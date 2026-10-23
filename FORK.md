@@ -449,20 +449,21 @@ The downstream operator requested provider-independent in-place recovery; [D38](
 
 Contracts add a disabled-by-default setting, optional hop count, full-probe freshness evidence and paid-usage flags. Codex/Claude usage mappers retain signals needed by the gate; sparse update merging cannot refresh a full probe or erase paid-usage warnings. On upstream advances, verify serialized command checks, event/projection field preservation, task completion semantics, and sparse/full usage provenance together. Reuse upstream recovery and handoff mechanisms; do not replace them with an external supervisor.
 
-| Upstream-owned file                                                           | Case                               |
-| ----------------------------------------------------------------------------- | ---------------------------------- |
-| `apps/server/src/orchestration-v2/Orchestrator.ts`                            | 82                                 |
-| `apps/server/src/orchestration-v2/ProjectionStore.ts`                         | 82                                 |
-| `apps/server/src/orchestration-v2/UsageLimitRecoveryWorker.ts`                | 82                                 |
-| `apps/server/src/orchestration-v2/ProviderTurnControlService.test.ts`         | 82, test service fixture           |
-| `apps/server/src/orchestration-v2/testkit/ProviderReplayHarness.ts`           | 82, isolated test dependencies     |
-| `apps/server/src/orchestration-v2/testkit/ProviderSwitch.integration.test.ts` | 82, synthetic recovery regressions |
-| `apps/server/src/provider/codexUsageLimits.ts` and `.test.ts`                 | 82                                 |
-| `apps/server/src/provider/claudeUsageLimits.ts` and `.test.ts`                | 82                                 |
-| `packages/contracts/src/orchestrationV2.ts`                                   | 82                                 |
-| `packages/contracts/src/providerUsageLimits.ts`                               | 82                                 |
-| `packages/contracts/src/settings.ts` and `.test.ts`                           | 82                                 |
-| `packages/provider-core/src/server/usageLimits.ts` and `.test.ts`             | 82                                 |
+| Upstream-owned file                                                                | Case                                                                |
+| ---------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `apps/server/src/orchestration-v2/Orchestrator.ts`                                 | 82                                                                  |
+| `apps/server/src/orchestration-v2/ProjectionStore.ts`                              | 82                                                                  |
+| `apps/server/src/orchestration-v2/UsageLimitRecoveryWorker.ts`                     | 82                                                                  |
+| `apps/server/src/orchestration-v2/ProviderTurnControlService.test.ts`              | 82, test service fixture                                            |
+| `apps/server/src/orchestration-v2/testkit/ProviderReplayHarness.ts`                | 82, isolated test dependencies                                      |
+| `apps/server/src/orchestration-v2/testkit/ProviderSwitch.integration.test.ts`      | 82, synthetic recovery regressions                                  |
+| `apps/server/src/provider/codexUsageLimits.ts` and `.test.ts`                      | 82                                                                  |
+| `apps/server/src/provider/claudeUsageLimits.ts` and `.test.ts`                     | 82                                                                  |
+| `apps/server/src/provider/ClaudeProvider.ts` and `ClaudeCapabilitiesProbe.test.ts` | 82, preserve actual observation time through the capabilities cache |
+| `packages/contracts/src/orchestrationV2.ts`                                        | 82                                                                  |
+| `packages/contracts/src/providerUsageLimits.ts`                                    | 82                                                                  |
+| `packages/contracts/src/settings.ts` and `.test.ts`                                | 82                                                                  |
+| `packages/provider-core/src/server/usageLimits.ts` and `.test.ts`                  | 82                                                                  |
 
 ## Pin and upstream advance runbook
 

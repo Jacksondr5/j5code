@@ -244,3 +244,21 @@ it("retains streamed paid-usage signals even without a utilization value", () =>
     ),
   ).toEqual({ windows: [], paidUsageEnabled: true, paidUsageObserved: true });
 });
+
+it("accepts nullable extra usage without clearing a prior warning by inventing a negative signal", () => {
+  const limits = claudeUsageResponseToLimits({
+    checkedAt,
+    response: {
+      rate_limits_available: true,
+      rate_limits: {
+        five_hour: { utilization: 10, resets_at: null },
+        seven_day: { utilization: 10, resets_at: null },
+        extra_usage: null,
+        ...({ model_scoped: [] } as object),
+      },
+    },
+  }).limits;
+  expect(limits.paidUsageEnabled).toBeUndefined();
+  expect(limits.paidUsageObserved).toBeUndefined();
+  expect(limits.completeCheckedAt).toBe(checkedAt);
+});

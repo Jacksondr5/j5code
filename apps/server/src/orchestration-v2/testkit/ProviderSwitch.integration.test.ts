@@ -3670,7 +3670,7 @@ it.effect.each(["ordinary", "builder", "critic"] as const)(
         });
         const providers = yield* Ref.make<ReadonlyArray<ServerProvider>>([
           snapshot(sourceSelection, sourceDriver, true),
-          snapshot(targetSelection, targetDriver, false),
+          snapshot(targetSelection, targetDriver, true),
         ]);
         const settings: ServerSettings["usageLimitFailover"] = {
           enabled: true,
@@ -3814,7 +3814,26 @@ it.effect.each(["ordinary", "builder", "critic"] as const)(
                   dispatch: orchestrator.dispatch,
                 }),
                 ServerPreferences.layerTest({ usageLimitFailover: settings }),
-                Layer.mock(ProviderCatalog.ProviderRegistry)({ getProviders: Ref.get(providers) }),
+                Layer.mock(ProviderCatalog.ProviderRegistry)({
+                  getProviders: Ref.get(providers),
+                  refreshInstance: () =>
+                    Ref.update(providers, (ps) =>
+                      ps.map((p) =>
+                        p.instanceId === targetSelection.instanceId
+                          ? {
+                              ...p,
+                              usageLimits: {
+                                ...p.usageLimits!,
+                                windows: p.usageLimits!.windows.map((w) => ({
+                                  ...w,
+                                  usedPercent: 0,
+                                })),
+                              },
+                            }
+                          : p,
+                      ),
+                    ).pipe(Effect.andThen(Ref.get(providers))),
+                }),
               ),
             ),
           );
@@ -3825,6 +3844,9 @@ it.effect.each(["ordinary", "builder", "critic"] as const)(
             failedRunId: source.id,
             phase: name,
           });
+          // Both routes are exhausted until a scheduler-owned health refresh discovers recovery.
+          const switchRefused = yield* orchestrator.dispatch(phase("switch")).pipe(Effect.flip);
+          assert.equal(switchRefused._tag, "OrchestratorDispatchError");
           yield* sweep();
           const switched = yield* orchestrator.getThreadProjection(threadId);
           assert.equal(switched.thread.providerInstanceId, targetSelection.instanceId);

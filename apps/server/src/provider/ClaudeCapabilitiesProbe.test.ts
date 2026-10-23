@@ -1,3 +1,4 @@
+import * as DateTime from "effect/DateTime";
 // @effect-diagnostics nodeBuiltinImport:off - cleanup uses Node's retrying rm, which the FileSystem service does not expose.
 import * as ClaudeSdk from "@anthropic-ai/claude-agent-sdk";
 import { vi } from "vite-plus/test";
@@ -311,6 +312,7 @@ it.layer(NodeServices.layer)("Claude capability probe SDK boundary", (it) => {
             input: { hint: "[path]" },
           },
         ],
+        usageCheckedAt: DateTime.formatIso(yield* DateTime.now),
         usage: {
           rate_limits_available: true,
           rate_limits: { five_hour: { utilization: 12, resets_at: "2026-07-18T14:39:00Z" } },

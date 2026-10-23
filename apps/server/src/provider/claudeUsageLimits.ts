@@ -227,7 +227,7 @@ export function claudeUsageResponseToLimits(input: {
       ...makeUsageLimits({ checkedAt, windows }),
       ...(complete ? { completeCheckedAt: checkedAt } : {}),
       ...(extra?.is_enabled === undefined ? {} : { paidUsageEnabled: extra.is_enabled }),
-      ...(extra === undefined
+      ...(extra == null
         ? {}
         : { paidUsageObserved: (extra.used_credits ?? 0) > 0 || (extra.utilization ?? 0) > 0 }),
     },

@@ -280,16 +280,96 @@ describe("usage-limit failover", () => {
   });
 });
 
-it("S6 makes independent recovery decisions for simultaneous Captain, Builder and Critic failures", () => {
-  const failures = [failed(a), failed(b)];
-  const exhausted = [provider(a, 100), provider(b, 100)];
-  const threads = ["captain", "builder", "critic"].map((name) => ({
-    ...thread,
-    id: ThreadId.make(`thread:${name}`),
+it("S6 recovers simultaneous Captain, approved Builder and Critic failures without supervision", () => {
+  const definitions = [getBuiltInAgentPersona("builder"), getBuiltInAgentPersona("critic")];
+  const providers = [provider(a, 100), provider(b, 100)].map((p) => ({
+    ...p,
+    models: [
+      ...p.models,
+      ...definitions.flatMap((d) =>
+        d.modelRoute
+          .filter((target) => target.driver === p.driver)
+          .map((target) => ({
+            slug: target.model,
+            name: target.model,
+            isCustom: false,
+            capabilities: {
+              optionDescriptors: [
+                {
+                  id: target.driver === "codex" ? "reasoningEffort" : "effort",
+                  label: "effort",
+                  type: "select" as const,
+                  options: [{ id: target.reasoningEffort, label: "effort" }],
+                },
+              ],
+            },
+          })),
+      ),
+    ],
   }));
-  for (const t of threads) assert.equal(decide(exhausted, failures, t).phase, "suspended");
-  for (const t of threads)
-    assert.equal(decide([provider(a, 100), provider(b)], failures, t).phase, "switch");
+  const cases = [
+    { thread, definition: undefined },
+    ...definitions.map((definition) => {
+      const primary = definition.modelRoute[0];
+      const selection = {
+        instanceId: primary.driver === "codex" ? a : b,
+        model: primary.model,
+        options: [
+          {
+            id: primary.driver === "codex" ? "reasoningEffort" : "effort",
+            value: primary.reasoningEffort,
+          },
+        ],
+      };
+      return {
+        definition,
+        thread: {
+          ...thread,
+          id: ThreadId.make(`thread:${definition.id}`),
+          providerInstanceId: selection.instanceId,
+          modelSelection: selection,
+          agentPersonaAssignment: {
+            personaId: definition.id,
+            definitionVersion: definition.version,
+            authorityPolicy: definition.authority.defaultPolicy,
+            resolvedRoute: "primary" as const,
+            resolvedDriver: ProviderDriverKind.make(primary.driver),
+            resolvedModelSelection: selection,
+            ...(definition.id === "builder" ? { runtimeModeOverride: "full-access" as const } : {}),
+          },
+        },
+      };
+    }),
+  ];
+  for (const first of [a, b])
+    for (const current of cases) {
+      const input = {
+        thread: current.thread,
+        ...(current.definition === undefined ? {} : { definition: current.definition }),
+        failedRunId: run,
+        failedProvider: current.thread.providerInstanceId,
+        providers,
+        failures: [failed(a), failed(b)],
+        settings,
+        now,
+      };
+      assert.equal(limitFailoverDecision(input).phase, "suspended");
+      const recovered = providers.map((p) =>
+        p.instanceId === first
+          ? {
+              ...p,
+              usageLimits: {
+                ...p.usageLimits!,
+                windows: p.usageLimits!.windows.map((w) => ({ ...w, usedPercent: 0 })),
+              },
+            }
+          : p,
+      );
+      assert.equal(
+        limitFailoverDecision({ ...input, providers: recovered }).phase,
+        current.thread.providerInstanceId === first ? "continue" : "switch",
+      );
+    }
 });
 
 it("S5 waits through staggered failures and resets rather than bouncing between exhausted providers", () => {
@@ -353,4 +433,23 @@ it("unknown unfailed alternatives are eligible; a stale pre-failure snapshot can
     decide(undefined, undefined, { ...thread, interactionMode: "plan" }).phase,
     "suspended",
   );
+});
+
+it("scoped Codex quota exhaustion blocks the whole instance and cannot clear a missing-reset failure", () => {
+  const main = provider();
+  const scoped = {
+    ...main,
+    usageLimits: {
+      ...main.usageLimits!,
+      recoveryWindows: [
+        {
+          id: "codex_bengalfox:primary",
+          kind: "session" as const,
+          label: "Spark",
+          usedPercent: 100,
+        },
+      ],
+    },
+  };
+  assert.isFalse(routeAvailability(scoped, [failed(a, null)], now));
 });

@@ -108,6 +108,13 @@ export function codexResetCreditsToContract(
   };
 }
 
+function scopedRecoveryWindows(snapshot: CodexRateLimitSnapshot, id: string) {
+  return codexRateLimitsToWindows({ ...snapshot, limitId: "codex" }).map((w) => ({
+    ...w,
+    id: `${id}:${w.id}`,
+  }));
+}
+
 export function codexRateLimitsToLimits(input: {
   readonly snapshot: CodexRateLimitSnapshot;
   readonly rateLimitsByLimitId?:
@@ -121,7 +128,20 @@ export function codexRateLimitsToLimits(input: {
   const credits = (input.rateLimitsByLimitId?.codex ?? input.snapshot).credits;
   const windows = codexRateLimitsToWindows(input.rateLimitsByLimitId?.codex ?? input.snapshot);
   return {
-    completeCheckedAt: input.checkedAt,
+    ...(!input.snapshot.limitId ||
+    input.snapshot.limitId === "codex" ||
+    input.rateLimitsByLimitId?.codex !== undefined
+      ? { completeCheckedAt: input.checkedAt }
+      : {}),
+    ...(input.rateLimitsByLimitId == null
+      ? input.snapshot.limitId && input.snapshot.limitId !== "codex"
+        ? { recoveryWindows: scopedRecoveryWindows(input.snapshot, input.snapshot.limitId) }
+        : {}
+      : {
+          recoveryWindows: Object.entries(input.rateLimitsByLimitId)
+            .filter(([id]) => id !== "codex")
+            .flatMap(([id, snapshot]) => scopedRecoveryWindows(snapshot, id)),
+        }),
     ...(credits == null
       ? {}
       : {
@@ -140,7 +160,23 @@ export function codexRateLimitsToUpdate(
   snapshot: CodexRateLimitSnapshot,
 ): ProviderUsageLimitsUpdate | undefined {
   const windows = codexRateLimitsToWindows(snapshot);
-  return windows.length > 0 ? { windows } : undefined;
+  const recoveryWindows =
+    snapshot.limitId && snapshot.limitId !== "codex"
+      ? scopedRecoveryWindows(snapshot, snapshot.limitId)
+      : undefined;
+  const credits = snapshot.credits;
+  return windows.length > 0 || recoveryWindows !== undefined || credits != null
+    ? {
+        windows,
+        ...(recoveryWindows === undefined ? {} : { recoveryWindows }),
+        ...(credits == null
+          ? {}
+          : {
+              paidUsageEnabled:
+                credits.hasCredits || credits.unlimited || Number(credits.balance ?? 0) > 0,
+            }),
+      }
+    : undefined;
 }
 
 export function codexRateLimitsFailureMessage(error: CodexErrors.CodexAppServerError): string {
@@ -172,6 +208,7 @@ export function mergeCodexRateLimits(
   if (!previous) return update;
   return {
     ...previous,
+    ...(update.credits !== undefined ? { credits: update.credits } : {}),
     ...(update.limitId !== undefined ? { limitId: update.limitId } : {}),
     ...(update.planType !== undefined ? { planType: update.planType } : {}),
     ...(update.rateLimitReachedType !== undefined

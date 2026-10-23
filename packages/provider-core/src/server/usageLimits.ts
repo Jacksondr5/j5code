@@ -55,6 +55,7 @@ export function applyUsageLimitsUpdate(input: {
   const { previous, update } = input;
   if (
     (update.windows.length === 0 &&
+      (update.recoveryWindows?.length ?? 0) === 0 &&
       update.paidUsageEnabled === undefined &&
       update.paidUsageObserved === undefined) ||
     previous?.unavailable?.reason === "unsupported"
@@ -66,6 +67,7 @@ export function applyUsageLimitsUpdate(input: {
   // always with unchanged numbers. Decide "nothing changed" per window on
   // the way through so the no-op case never allocates a new snapshot.
   let changed =
+    update.recoveryWindows !== undefined ||
     (update.paidUsageEnabled !== undefined &&
       update.paidUsageEnabled !== previous?.paidUsageEnabled) ||
     (update.paidUsageObserved !== undefined &&
@@ -92,6 +94,18 @@ export function applyUsageLimitsUpdate(input: {
   }
   return {
     ...makeUsageLimits({ checkedAt: input.checkedAt, windows: merged.values() }),
+    ...((update.recoveryWindows ?? previous?.recoveryWindows) === undefined
+      ? {}
+      : {
+          recoveryWindows: [
+            ...new Map(
+              [...(previous?.recoveryWindows ?? []), ...(update.recoveryWindows ?? [])].map((w) => [
+                w.id,
+                w,
+              ]),
+            ).values(),
+          ],
+        }),
     ...((update.paidUsageEnabled ?? previous?.paidUsageEnabled) === undefined
       ? {}
       : { paidUsageEnabled: update.paidUsageEnabled ?? previous?.paidUsageEnabled }),
@@ -123,6 +137,37 @@ export function resolveUsageLimitsAfterProbe(input: {
   const { published, probed } = input;
   if (probed?.unavailable?.reason === "probeFailed" && published && !published.unavailable) {
     return published;
+  }
+  if (published && probed && !probed.unavailable) {
+    if (Date.parse(probed.checkedAt) <= Date.parse(published.checkedAt)) return published;
+    const windows =
+      probed.completeCheckedAt === probed.checkedAt
+        ? probed.windows
+        : [...new Map([...published.windows, ...probed.windows].map((w) => [w.id, w])).values()];
+    return {
+      ...probed,
+      windows,
+      ...((probed.recoveryWindows ?? published.recoveryWindows) === undefined
+        ? {}
+        : {
+            recoveryWindows:
+              probed.completeCheckedAt === probed.checkedAt && probed.recoveryWindows !== undefined
+                ? probed.recoveryWindows
+                : [
+                    ...new Map(
+                      [...(published.recoveryWindows ?? []), ...(probed.recoveryWindows ?? [])].map(
+                        (w) => [w.id, w],
+                      ),
+                    ).values(),
+                  ],
+          }),
+      ...((probed.paidUsageEnabled ?? published.paidUsageEnabled) === undefined
+        ? {}
+        : { paidUsageEnabled: probed.paidUsageEnabled ?? published.paidUsageEnabled }),
+      ...((probed.paidUsageObserved ?? published.paidUsageObserved) === undefined
+        ? {}
+        : { paidUsageObserved: probed.paidUsageObserved ?? published.paidUsageObserved }),
+    };
   }
   return probed;
 }
