@@ -32,6 +32,7 @@ import { EventSinkV2 } from "../../orchestration-v2/EventSink.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { A2ALedger } from "./LedgerService.ts";
 import {
+  A2APeerDeliveryReceiptPendingError,
   A2APeerReceiverNotFoundError,
   PeerInboundService,
   type PeerInboundInput,
@@ -51,7 +52,7 @@ import {
 } from "./PeerRegistryService.ts";
 import { RosterService } from "./RosterService.ts";
 import { peerRosterHash, toPeerRoster } from "./peerRoster.ts";
-import type { StoredCommEvent } from "./contracts.ts";
+import { LIFECYCLE_PARTICIPANT_ID, type StoredCommEvent } from "./contracts.ts";
 
 /**
  * The polling side alone: one laptop polling one work VM. The VM is a scripted
@@ -147,6 +148,7 @@ const rosterEntry = (archived: boolean): A2ARosterEntry => ({
 });
 
 interface Harness {
+  readonly originalAccepted: { value: boolean };
   readonly answers: Array<Answer>;
   readonly requests: Array<PeerPollRequest>;
   readonly received: Array<PeerInboundInput>;
@@ -173,6 +175,7 @@ interface Harness {
 
 const makeHarness = Effect.gen(function* () {
   const harness: Harness = {
+    originalAccepted: { value: false },
     answers: [],
     requests: [],
     received: [],
@@ -321,14 +324,16 @@ const makeTestLayer = (
     }),
     Layer.mock(PeerInboundService)({
       receive: (input) =>
-        input.receiverId === "agent:j5:a2a:thread:gone"
-          ? Effect.fail(new A2APeerReceiverNotFoundError({ participantId: input.receiverId }))
-          : input.receiverId === "agent:j5:a2a:thread:broken"
-            ? Effect.die("the ledger is down")
-            : Effect.sync(() => {
-                harness.received.push(input);
-                return { receivedSeq: harness.received.length, replay: false };
-              }),
+        input.deliveryAlarm !== undefined && !harness.originalAccepted.value
+          ? Effect.fail(new A2APeerDeliveryReceiptPendingError({}))
+          : input.receiverId === "agent:j5:a2a:thread:gone"
+            ? Effect.fail(new A2APeerReceiverNotFoundError({ participantId: input.receiverId }))
+            : input.receiverId === "agent:j5:a2a:thread:broken"
+              ? Effect.die("the ledger is down")
+              : Effect.sync(() => {
+                  harness.received.push(input);
+                  return { receivedSeq: harness.received.length, replay: false };
+                }),
     }),
     Layer.mock(A2ADeliveryWorker)({
       notify: Effect.sync(() => {
@@ -466,6 +471,38 @@ it.effect(
         );
       }).pipe(Effect.provide(makeTestLayer(harness)));
     }),
+);
+
+it.effect("retries an early alarm fact without holding later polled messages", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const report: PeerDeliveryRequest = {
+        ...delivery("early-alarm"),
+        senderId: LIFECYCLE_PARTICIPANT_ID,
+        envelopeChannel: "lifecycle_notice",
+        deliveryAlarm: { messageId: "message:original", code: "attempts-exhausted" },
+      };
+      harness.answers.push(pollAnswer({ deliveries: [report, delivery("after-alarm")] }));
+      assert.equal((yield* pollOnce).kind, "failed", "back off while the fact remains unrecorded");
+      assert.deepStrictEqual(
+        harness.received.map((input) => input.messageId),
+        ["message:after-alarm"],
+      );
+
+      harness.originalAccepted.value = true;
+      harness.answers.push(pollAnswer({ deliveries: [report] }));
+      assert.deepStrictEqual(yield* pollOnce, { kind: "polled", received: 1, more: false });
+      assert.deepStrictEqual(harness.requests[1]!.acks, [
+        { messageId: "message:after-alarm", outcome: "received", receivedSeq: 1, replay: false },
+      ]);
+      harness.answers.push(pollAnswer());
+      yield* pollOnce;
+      assert.deepStrictEqual(harness.requests[2]!.acks, [
+        { messageId: "message:early-alarm", outcome: "received", receivedSeq: 2, replay: false },
+      ]);
+    }).pipe(Effect.provide(makeTestLayer(harness)));
+  }),
 );
 
 it.effect("stops on a rejected credential, sets a protocol mismatch aside, and says why", () =>
