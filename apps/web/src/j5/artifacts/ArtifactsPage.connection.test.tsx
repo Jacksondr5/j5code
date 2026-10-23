@@ -1,4 +1,5 @@
 import { act } from "react";
+import { J5ActionError } from "@t3tools/contracts/j5";
 import { create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
@@ -186,6 +187,78 @@ describe("ArtifactsPage delete all", () => {
     await act(async () => bulkDeleteButton().props.onClick());
     expect(testState.deleteAllArtifacts).not.toHaveBeenCalled();
     expect(bulkDeleteButton().props.disabled).toBe(false);
+  });
+
+  it.each([false, true])(
+    "allows confirmed cleanup after the typed browsing limit error (embedded=%s)",
+    async (embedded) => {
+      testState.listArtifacts.mockRejectedValue(
+        new J5ActionError({
+          code: "ArtifactListTooLargeError",
+          message: "The artifacts directory is too large to browse (maximum 500 files).",
+        }),
+      );
+      testState.deleteAllArtifacts.mockImplementation(async () => {
+        testState.listArtifacts.mockResolvedValue([]);
+      });
+      await act(async () => {
+        renderer = create(
+          <ArtifactsPage
+            embedded={embedded}
+            initialEnvironmentId="environment:artifacts-connection"
+            initialProjectId="project:artifacts-connection"
+          />,
+        );
+      });
+      expect(bulkDeleteButton().props.disabled).toBe(false);
+      testState.confirm.mockResolvedValueOnce(false);
+      await act(async () => bulkDeleteButton().props.onClick());
+      expect(testState.deleteAllArtifacts).not.toHaveBeenCalled();
+      await act(async () => bulkDeleteButton().props.onClick());
+      expect(testState.deleteAllArtifacts).toHaveBeenCalledExactlyOnceWith({
+        environmentId: "environment:artifacts-connection",
+        projectId: "project:artifacts-connection",
+      });
+      expect(bulkDeleteButton().props.disabled).toBe(true);
+    },
+  );
+
+  it.each(["ArtifactWorkspaceError", "EnvironmentAuthorizationError"])(
+    "keeps bulk cleanup disabled for a %s listing failure",
+    async (code) => {
+      testState.listArtifacts.mockRejectedValue(
+        new J5ActionError({ code, message: "Artifacts could not be loaded." }),
+      );
+      await act(async () => {
+        renderer = create(renderPage());
+      });
+      expect(bulkDeleteButton().props.disabled).toBe(true);
+      await act(async () => bulkDeleteButton().props.onClick());
+      expect(testState.confirm).not.toHaveBeenCalled();
+      expect(testState.deleteAllArtifacts).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not carry the size-limit cleanup permission to another project's failure", async () => {
+    testState.listArtifacts.mockImplementation(({ projectId }) =>
+      Promise.reject(
+        new J5ActionError({
+          code:
+            projectId === "project:artifacts-connection"
+              ? "ArtifactListTooLargeError"
+              : "ArtifactWorkspaceError",
+          message: "Artifacts could not be loaded.",
+        }),
+      ),
+    );
+    await act(async () => {
+      renderer = create(<ArtifactsPage />);
+    });
+    expect(bulkDeleteButton().props.disabled).toBe(false);
+    await act(async () => switchProject());
+    expect(bulkDeleteButton().props.disabled).toBe(true);
+    await act(async () => bulkDeleteButton().props.onClick());
+    expect(testState.deleteAllArtifacts).not.toHaveBeenCalled();
   });
 
   it("does not delete a different project when selection changes during confirmation", async () => {

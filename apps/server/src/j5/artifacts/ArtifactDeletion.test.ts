@@ -1,4 +1,5 @@
 import { ProjectId } from "@t3tools/contracts";
+import { symlinksSupported } from "@t3tools/shared/testing/symlinks";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -82,7 +83,7 @@ it.effect(
 );
 
 it.effect(
-  "deletes nested artifacts beyond the browser cap, preserves other projects, and reconciles handoffs",
+  "deletes over 2,000 artifacts without following links, preserves other projects, and reconciles handoffs",
   () => {
     const reconciled: Array<string> = [];
     const testLayer = layer.pipe(
@@ -125,16 +126,24 @@ it.effect(
         Workspace.artifactProjectDirectoryName(projectId),
       );
       yield* Effect.forEach(
-        Array.from({ length: Workspace.MAX_ARTIFACT_COUNT }, (_, index) => index),
+        Array.from({ length: Workspace.MAX_ARTIFACT_COUNT * 4 }, (_, index) => index),
         (index) => fs.writeFileString(path.join(root, `${index}.md`), "Plan"),
         { concurrency: 16, discard: true },
       );
-      assert.equal((yield* artifacts.list(projectId)).length, Workspace.MAX_ARTIFACT_COUNT);
+      const link = path.join(root, "000-link.md");
+      const linkTarget = path.join(root, "handoffs/review.md");
+      if (symlinksSupported) yield* fs.symlink(linkTarget, link);
+      assert.equal(
+        (yield* artifacts.list(projectId).pipe(Effect.flip))._tag,
+        "ArtifactListTooLargeError",
+      );
 
       yield* deletion.deleteAll({ projectId });
       assert.deepStrictEqual(yield* artifacts.list(projectId), []);
-      assert.equal(reconciled.length, Workspace.MAX_ARTIFACT_COUNT + 1);
+      assert.equal(reconciled.length, Workspace.MAX_ARTIFACT_COUNT * 4 + 1);
       assert.include(reconciled, "handoffs/review.md");
+      assert.notInclude(reconciled, "000-link.md");
+      if (symlinksSupported) assert.equal(yield* fs.readLink(link), linkTarget);
       assert.equal(
         (yield* artifacts.read({ projectId: otherProject, relativePath: "keep.md" })).content,
         "Keep this",

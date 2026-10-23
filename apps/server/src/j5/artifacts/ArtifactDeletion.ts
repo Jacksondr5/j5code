@@ -7,7 +7,11 @@ import * as Schema from "effect/Schema";
 
 import * as ProjectService from "../../project/ProjectService.ts";
 import { AgentHandoffArtifactDelete } from "../agents/agentHandoffArtifactDelete.ts";
-import { ArtifactWorkspace, type ArtifactWorkspaceError } from "./ArtifactWorkspace.ts";
+import {
+  ArtifactWorkspace,
+  type ArtifactWorkspaceError,
+  type ArtifactListTooLargeError,
+} from "./ArtifactWorkspace.ts";
 
 export class ArtifactProjectUnavailableError extends Schema.TaggedError<ArtifactProjectUnavailableError>()(
   "ArtifactProjectUnavailableError",
@@ -41,6 +45,7 @@ export class ArtifactDeletion extends Context.Service<
       void,
       | ArtifactProjectUnavailableError
       | ArtifactWorkspaceError
+      | ArtifactListTooLargeError
       | ProjectService.ProjectOperationError
     >;
   }

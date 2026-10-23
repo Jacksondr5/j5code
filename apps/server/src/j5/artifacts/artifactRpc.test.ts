@@ -10,6 +10,7 @@ import * as Option from "effect/Option";
 
 import { requiredScopeForRpcMethod } from "../../auth/RpcAuthorization.ts";
 import { makeArtifactRpcHandlers } from "./artifactRpc.ts";
+import { ArtifactListTooLargeError } from "./ArtifactWorkspace.ts";
 
 const projectId = ProjectId.make("project:artifacts-rpc");
 const missingProjectId = ProjectId.make("project:artifacts-rpc-missing");
@@ -65,5 +66,28 @@ it.effect("lists a project's artifacts, and refuses a project that is not availa
     );
     // Storage is never read for a project the server does not have.
     assert.deepStrictEqual(listed, [projectId]);
+  }),
+);
+
+it.effect("preserves a stable size-limit refusal code for project cleanup", () =>
+  Effect.gen(function* () {
+    const handlers = makeArtifactRpcHandlers({
+      projects: { getById: () => Effect.succeed(Option.some({ id: projectId } as never)) },
+      artifacts: {
+        watch: () => Effect.die("unused") as never,
+        list: () => Effect.fail(new ArtifactListTooLargeError({ maximumFiles: 500 })),
+      },
+      deletion: { delete: () => Effect.die("unused"), deleteAll: () => Effect.die("unused") },
+    });
+    const error = yield* handlers[J5_ARTIFACT_WS_METHODS.listArtifacts]({ projectId }).pipe(
+      Effect.flip,
+    );
+    assert.deepStrictEqual(
+      { code: error.code, message: error.message },
+      {
+        code: "ArtifactListTooLargeError",
+        message: "The artifacts directory is too large to browse (maximum 500 files).",
+      },
+    );
   }),
 );

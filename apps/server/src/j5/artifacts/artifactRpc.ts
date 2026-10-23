@@ -48,7 +48,11 @@ export function makeArtifactRpcHandlers(input: {
         Effect.map((entries) => ({ entries })),
         Effect.catch(
           failAsJ5ActionError({
-            refusals: ["ArtifactProjectUnavailableError", "ArtifactWorkspaceError"],
+            refusals: [
+              "ArtifactProjectUnavailableError",
+              "ArtifactWorkspaceError",
+              "ArtifactListTooLargeError",
+            ],
             failed: "Artifact operation failed.",
           }),
         ),

@@ -1,6 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { type ArtifactContent, type ArtifactEntry } from "@t3tools/contracts";
+import { J5ActionError } from "@t3tools/contracts/j5";
 import {
   FileIcon,
   FileImageIcon,
@@ -10,6 +11,7 @@ import {
   Trash2Icon,
 } from "lucide-react";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import ChatMarkdown from "../../components/ChatMarkdown";
@@ -128,6 +130,7 @@ export function ArtifactsPage({
   const [listGeneration, setListGeneration] = useState(0);
   const [manualRefreshes, setManualRefreshes] = useState(0);
   const [listedProjectKey, setListedProjectKey] = useState<string | null>(null);
+  const [oversizedProjectKey, setOversizedProjectKey] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const filePane = useResizableWidth({
     storageKey: embedded ? "j5:artifacts:embedded-file-pane-width" : "j5:artifacts:file-pane-width",
@@ -185,6 +188,7 @@ export function ArtifactsPage({
   }, [embedded, selectedProject, selectedProjectKey]);
 
   useEffect(() => {
+    setOversizedProjectKey(null);
     if (selectedEnvironmentId === null || selectedProjectId === null) {
       setEntries([]);
       setSelectedPath(null);
@@ -220,6 +224,9 @@ export function ArtifactsPage({
         setEntries([]);
         setSelectedPath(null);
         setError(cause instanceof Error ? cause.message : "Artifacts could not be loaded.");
+        if (Schema.is(J5ActionError)(cause) && cause.code === "ArtifactListTooLargeError") {
+          setOversizedProjectKey(`${selectedEnvironmentId}:${selectedProjectId}`);
+        }
         setListState("error");
       },
     );
@@ -327,9 +334,8 @@ export function ArtifactsPage({
     connected &&
     canDeleteAll &&
     !deleting &&
-    listState === "ready" &&
-    listedProjectKey === selectedKey &&
-    entries.length > 0;
+    ((listState === "ready" && listedProjectKey === selectedKey && entries.length > 0) ||
+      (listState === "error" && oversizedProjectKey === selectedKey));
   const deleteProjectArtifacts = useCallback(async () => {
     if (selectedProject === null || !canDeleteProjectArtifacts) {
       return;
