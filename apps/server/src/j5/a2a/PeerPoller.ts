@@ -23,7 +23,11 @@ import { HttpClient, HttpClientRequest, type HttpClientResponse } from "effect/h
 import { EventSinkV2 } from "../../orchestration-v2/EventSink.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { A2ALedger } from "./LedgerService.ts";
-import { PeerInboundService, peerDeliveryRefusal } from "./PeerInboundService.ts";
+import {
+  A2APeerDeliveryReceiptPendingError,
+  PeerInboundService,
+  peerDeliveryRefusal,
+} from "./PeerInboundService.ts";
 import { PeerRegistryService } from "./PeerRegistryService.ts";
 import { PEER_POLL_HOLD } from "./PeerStoreService.ts";
 import { RosterService } from "./RosterService.ts";
@@ -115,6 +119,7 @@ interface PollState {
 
 const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown));
 const decodePollResponse = Schema.decodeUnknownEffect(PeerPollResponse);
+const isDeliveryReceiptPending = Schema.is(A2APeerDeliveryReceiptPendingError);
 
 const reasonOf = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
 
@@ -172,6 +177,15 @@ const make = (daemon: boolean) =>
           continue;
         }
         const failure = Cause.findErrorOption(received.cause);
+        if (
+          delivery.deliveryAlarm !== undefined &&
+          Option.isSome(failure) &&
+          isDeliveryReceiptPending(failure.value)
+        ) {
+          // A diagnostic has no message-order constraint; retry it without holding later traffic.
+          unrecorded = true;
+          continue;
+        }
         const refusal = Option.isSome(failure) ? peerDeliveryRefusal(failure.value) : null;
         if (refusal === null) {
           // Not a refusal: leave this and every later one unacknowledged, in
