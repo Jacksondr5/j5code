@@ -80,12 +80,15 @@ export const readFleetLedgerFacts = Effect.fn("readFleetLedgerFacts")(function* 
   // their own channels and must never surface as an agent's problem (Fleet AC24).
   for (const batch of batches) {
     const alarms = yield* sql<AlarmRow>`
-    SELECT d.sender_id, d.receiver_id, d.message_id, d.updated_at, d.last_error,
+    SELECT d.sender_id, d.receiver_id, d.message_id, COALESCE(a.reported_at, d.updated_at) AS updated_at,
+      COALESCE(a.reason, d.last_error) AS last_error,
       EXISTS (SELECT 1 FROM j5_a2a_exchange e WHERE e.project_id = d.project_id
         AND e.exchange_id = d.exchange_id AND e.status = 'open') AS exchange_open
     FROM j5_a2a_delivery d
+    LEFT JOIN j5_a2a_peer_delivery_alarm a ON a.project_id = d.project_id AND a.message_id = d.message_id
     WHERE d.project_id = ${projectId} AND d.sender_id IN ${sql.in(batch)}
-      AND d.status = 'alarmed' AND d.envelope_channel = 'peer'
+      AND (d.status = 'alarmed' OR (d.status = 'delivered' AND a.message_id IS NOT NULL))
+      AND d.envelope_channel = 'peer'
       AND (d.exchange_id IS NULL OR d.exchange_id NOT LIKE ${`${CREW_ALERT_EXCHANGE_PREFIX}%`})
     ORDER BY d.sent_seq, d.message_id
   `;

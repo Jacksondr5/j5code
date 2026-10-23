@@ -77,6 +77,9 @@ const seed = Effect.fn("test.j5.neutralise.seed")(function* () {
         ${status === "retry_scheduled" ? at : null}, ${at}, ${at}, 'peer', ${handedOutAt})`;
   }
 
+  yield* sql`INSERT INTO j5_a2a_peer_delivery_alarm(project_id,message_id,reported_at,reason)
+    VALUES ('project','message-delivered',${at},'Peer thread delivery failed')`;
+
   for (const [exchangeId, receiver, status, closedSeq] of [
     ["exchange-open", "agent:b", "open", null],
     ["exchange-human", "human:operator", "open", null],
@@ -188,6 +191,7 @@ it.layer(NodeServices.layer)("neutraliseCopiedDatabase", (it) => {
         playbookStepDeliveries: 1,
       });
       assert.deepEqual(yield* actingRows(), nothingActing);
+      assert.equal((yield* sql`SELECT 1 FROM j5_a2a_peer_delivery_alarm`).length, 0);
 
       // Stood down into states the product already reads, not removed.
       assert.deepEqual(
