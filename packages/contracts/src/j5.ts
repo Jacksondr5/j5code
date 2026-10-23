@@ -3,6 +3,7 @@ import * as Schema from "effect/Schema";
 import * as Struct from "effect/Struct";
 import { Rpc, RpcGroup } from "effect/rpc";
 export * from "./j5/actionError.ts";
+export * from "./j5/fleet.ts";
 export * from "./j5/peerPoll.ts";
 export * from "./j5/playbook.ts";
 export * from "./j5/access.ts";
@@ -10,6 +11,8 @@ export * from "./j5/levels.ts";
 export * from "./j5/people.ts";
 export * from "./j5/sharedConversation.ts";
 export * from "./j5/sharing.ts";
+
+import { FleetAgentFacts } from "./j5/fleet.ts";
 
 import { ModelSelection } from "./modelSelection.ts";
 import {
@@ -384,6 +387,8 @@ export const FleetAgent = Schema.Struct({
   ),
   /** Open Exchanges this agent owes a reply on. */
   openAsks: Schema.Number,
+  /** Absent on older environments; clients must show unknown, never healthy. */
+  facts: Schema.optionalKey(FleetAgentFacts),
 });
 export type FleetAgent = typeof FleetAgent.Type;
 /** One project's agents and Crews. `title` is the server's, for a project the client cannot find. */
@@ -397,7 +402,10 @@ export type FleetProject = typeof FleetProject.Type;
 /** The rail badge reads the live roster only; the Fleet page asks for retired Crews as well. */
 export const FleetReadRequest = Schema.Struct({ includeRetired: Schema.optional(Schema.Boolean) });
 export type FleetReadRequest = typeof FleetReadRequest.Type;
-export const FleetResponse = Schema.Struct({ projects: Schema.Array(FleetProject) });
+export const FleetResponse = Schema.Struct({
+  projects: Schema.Array(FleetProject),
+  asOf: Schema.optionalKey(Schema.String),
+});
 export type FleetResponse = typeof FleetResponse.Type;
 
 /** A person stopping a Crew from the app: every running seat is interrupted, nothing is retired. */
@@ -740,6 +748,8 @@ export const PEER_PROTOCOL_VERSION = 2;
 /** Every peer request and response states its sender's version here; a server from before versioning sends none. */
 export const PEER_PROTOCOL_HEADER = "x-j5-peer-protocol";
 export const PeerCapabilities = Schema.Struct({
+  /** Accepts authenticated facts about a previously accepted message's later thread delivery. */
+  deliveryAlarms: Schema.optionalKey(Schema.Boolean),
   /** This server stores messages for a peer that polls for them. */
   poll: Schema.optionalKey(Schema.Boolean),
   /** This server lands a message as its sender asked: a delivery's `landing` is read, not dropped. */
@@ -806,7 +816,15 @@ export const PeerDeliveryLanding = Schema.Struct({
 });
 export type PeerDeliveryLanding = typeof PeerDeliveryLanding.Type;
 
+/** A diagnostic fact, never an authored message; the origin supplies identities and receipt time. */
+export const PeerDeliveryAlarm = Schema.Struct({
+  messageId: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(4096)),
+  code: Schema.Literal("attempts-exhausted"),
+});
+export type PeerDeliveryAlarm = typeof PeerDeliveryAlarm.Type;
+
 export const PeerDeliveryRequest = Schema.Struct({
+  deliveryAlarm: Schema.optional(PeerDeliveryAlarm),
   messageId: Schema.String.check(Schema.isNonEmpty()),
   /** Absent for a message that waits its turn, which is every message from an older server. */
   landing: Schema.optional(PeerDeliveryLanding),

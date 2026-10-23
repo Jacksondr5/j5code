@@ -72,6 +72,7 @@ import {
 } from "./PeerStoreService.ts";
 import { RosterService } from "./RosterService.ts";
 import { A2ASendService, layer as sendLayer } from "./SendService.ts";
+import { readFleetLedgerFacts } from "./fleetFacts.ts";
 import { A2ASilenceDetector, manualLayer as silenceDetectorLayer } from "./SilenceDetector.ts";
 import {
   CommCommandId,
@@ -236,18 +237,28 @@ const makeCore = <DirectoryError, DirectoryContext>(input: {
 const recordingTransport = (
   delivered: Ref.Ref<Array<AgentDeliveryInput>>,
   deliverPeer: A2ADeliveryTransport["Service"]["deliverPeer"],
+  failLocal = false,
 ) =>
   Layer.succeed(
     A2ADeliveryTransport,
     A2ADeliveryTransport.of({
       cancelAgent: () => Effect.succeed("cancelled" as const),
-      deliverAgent: (input) => Ref.update(delivered, (rows) => [...rows, input]),
+      deliverAgent: (input) =>
+        failLocal
+          ? Effect.fail(
+              new A2ADeliveryTransportError({
+                operation: "forced local delivery failure",
+                cause: "private-local-error",
+              }),
+            )
+          : Ref.update(delivered, (rows) => [...rows, input]),
       deliverHuman: () => Effect.void,
       deliverPeer,
     }),
   );
 
 interface VmOptions {
+  readonly failLocal?: boolean;
   readonly removing?: Effect.Effect<void>;
   /** A database file instead of memory, so a test can read it from a second connection. */
   readonly filename?: string;
@@ -270,8 +281,10 @@ const makeVm = (delivered: Ref.Ref<Array<AgentDeliveryInput>>, options: VmOption
   const core = makeCore({
     database,
     delivered,
-    transport: recordingTransport(delivered, () =>
-      Effect.die("the VM never sends to the laptop; it stores for it"),
+    transport: recordingTransport(
+      delivered,
+      () => Effect.die("the VM never sends to the laptop; it stores for it"),
+      options.failLocal,
     ),
     directory,
   });
@@ -1021,3 +1034,55 @@ const runEnded = (thread: ThreadId, status: "completed" | "failed"): Orchestrati
     },
   } as OrchestrationV2StoredEvent;
 };
+
+it.effect(
+  "returns a receiver's later delivery alarm through the poll queue to its original sender",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const pair = yield* pollPair({ failLocal: true });
+        const sent = yield* pair.laptopServer.send.send({
+          commandId: CommCommandId.make("command:poll-delivery-alarm"),
+          senderThreadId: laptop.agent.threadId,
+          to: vm.agent.id,
+          message: "Inspect the incident",
+          expectReply: true,
+          intent: "incident",
+          acceptedAt: timestamp,
+        });
+        assert.equal((yield* pair.laptopServer.worker.runOnce)?.state, "delivered");
+        assert.equal((yield* pair.vmServer.worker.runOnce)?.state, "retry_scheduled");
+        yield* TestClock.adjust("250 millis");
+        yield* pair.vmServer.worker.runOnce;
+        yield* TestClock.adjust("500 millis");
+        assert.equal((yield* pair.vmServer.worker.runOnce)?.state, "alarmed");
+        assert.isNull(
+          yield* pair.vmServer.worker.runOnce,
+          "the VM stores its fact for the polling origin",
+        );
+        assert.deepStrictEqual(yield* pair.poll, { kind: "polled", received: 1, more: false });
+        const facts = yield* readFleetLedgerFacts(
+          pair.laptopServer.sql,
+          laptop.projectId,
+          [laptop.agent.id],
+          () => null,
+        );
+        const problem = facts.problems.get(laptop.agent.id)![0]!;
+        assert.isTrue(problem.kind === "delivery-failed" && problem.exchangeOpen);
+        assert.equal(
+          (yield* deliveryStatus(pair.laptopServer.sql, sent.messageId))?.status,
+          "delivered",
+        );
+        assert.equal(
+          (yield* Ref.get(pair.laptopDelivered)).length,
+          0,
+          "no authored thread message",
+        );
+        yield* pair.poll;
+        assert.equal(
+          (yield* pair.laptopServer.sql`SELECT 1 FROM j5_a2a_peer_delivery_alarm`).length,
+          1,
+        );
+      }),
+    ),
+);
