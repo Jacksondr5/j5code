@@ -2,8 +2,9 @@ import { useAtomValue } from "@effect/atom-react";
 import type { FleetDerivedFacts } from "@t3tools/client-runtime/j5/fleetFacts";
 import type { EnvironmentId } from "@t3tools/contracts";
 import type { FleetAgent, FleetAgentFacts } from "@t3tools/contracts/j5";
-import type { ReactNode } from "react";
+import { useId, useState, type ReactNode } from "react";
 
+import { Button } from "../../components/ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip";
 import { useNowMinute } from "../../hooks/useNowMinute";
 import { fleetSourcesAtom } from "../state";
@@ -115,6 +116,117 @@ function AskDetails({
           ))}
         </div>
       ))}
+    </div>
+  );
+}
+
+export function FleetFactDetails({
+  environmentId,
+  agent,
+  title,
+}: {
+  readonly environmentId: EnvironmentId;
+  readonly agent: FleetAgent;
+  readonly title: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const contentId = useId();
+  return (
+    <div className="px-3 pb-2 text-xs">
+      <Button
+        aria-label={`Facts for ${title}`}
+        aria-expanded={open}
+        aria-controls={contentId}
+        onClick={() => setOpen((expanded) => !expanded)}
+        variant="ghost"
+        size="xs"
+      >
+        Facts
+      </Button>
+      <div id={contentId} hidden={!open}>
+        {open ? <FleetFactDetailContent environmentId={environmentId} agent={agent} /> : null}
+      </div>
+    </div>
+  );
+}
+
+function FleetFactDetailContent({
+  environmentId,
+  agent,
+}: {
+  readonly environmentId: EnvironmentId;
+  readonly agent: FleetAgent;
+}) {
+  const key = fleetAgentKey(environmentId, agent.participantId);
+  const facts = useAtomValue(fleetAgentFactsAtom(key));
+  const live = useAtomValue(fleetLiveAgentAtom(key));
+  const asOf = useAtomValue(fleetReadTimeAtom(environmentId));
+  const runtime = facts?.runtime;
+  const activity = facts?.lastActivity;
+  return (
+    <div className="mt-2 space-y-2">
+      {!live ? <p>Showing the last measured facts; this environment is unavailable.</p> : null}
+      <p>
+        Status:{" "}
+        {runtime === undefined ? (
+          "The live Fleet read has not provided this fact."
+        ) : runtime.state === "unknown" ? (
+          runtime.reason
+        ) : runtime.status === "waiting-to-start" && runtime.since !== null ? (
+          <>
+            Waiting to start ·{" "}
+            {live ? <WaitingMinutes since={runtime.since} /> : `since ${fleetTime(runtime.since)}`}
+          </>
+        ) : (
+          fleetStatusLabel(runtime)
+        )}
+      </p>
+      <p>
+        Provenance:{" "}
+        {agent.outsideSpawner !== undefined
+          ? `Spawned by ${agent.outsideSpawner.name ?? agent.outsideSpawner.participantId}`
+          : agent.origin === "unknown"
+            ? "This environment has no recorded provenance for this agent."
+            : agent.origin === "agent"
+              ? "Spawned by an agent."
+              : "Unrecorded."}
+      </p>
+      {facts?.asks === undefined ? (
+        <p>This environment does not provide owed and awaited Exchange details.</p>
+      ) : (
+        <AskDetails asks={facts.asks} live={live} asOf={asOf} />
+      )}
+      <p>
+        Last activity:{" "}
+        {activity === undefined
+          ? "The live Fleet read has not provided this fact."
+          : activity.state === "unknown"
+            ? activity.reason
+            : `${activity.label} ${fleetTime(activity.at)}`}
+      </p>
+      <div>
+        <p>Problems</p>
+        {facts?.problems.map((problem) => (
+          <p
+            key={
+              problem.kind === "delivery-failed"
+                ? problem.messageId
+                : `${problem.kind}:${problem.runId}`
+            }
+          >
+            {fleetProblemLabel(problem)}
+          </p>
+        ))}
+        {facts?.asks === undefined ? (
+          <p>This environment does not provide delivery problems.</p>
+        ) : null}
+        {runtime?.state !== "known" ? (
+          <p>{runtime?.reason ?? "Runtime facts are unavailable."}</p>
+        ) : null}
+        {runtime?.state === "known" && facts?.asks !== undefined && facts.problems.length === 0 ? (
+          <p>No measured problems.</p>
+        ) : null}
+      </div>
     </div>
   );
 }

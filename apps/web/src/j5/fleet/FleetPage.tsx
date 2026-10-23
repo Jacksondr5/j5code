@@ -33,7 +33,7 @@ import { useLogicalProjects } from "../logicalProjects";
 import { requestConfirmDialog } from "../../confirmDialog";
 import { ArchiveWarningCrewSeats, type ArchiveWarningCrew } from "../a2a/ArchiveWarningContent";
 import { archiveCrew } from "../crew/crewArchiveClient";
-import { classifyCrewSeat, crewHasRunningSeat, summarizeCrewState } from "../crew/crewState";
+import { crewHasRunningSeat, summarizeCrewState } from "../crew/crewState";
 import { stopCrew } from "../crew/crewStopClient";
 import {
   countFleetProjects,
@@ -59,7 +59,13 @@ import {
 
 import { fleetSeatStatesAtom } from "./fleetState";
 import { fleetAgentKey } from "./fleetPresentation";
-import { FleetFactCells, FleetSourceReadout, FleetFactHint, FleetCrewSummary } from "./FleetFacts";
+import {
+  FleetFactCells,
+  FleetFactDetails,
+  FleetSourceReadout,
+  FleetFactHint,
+  FleetCrewSummary,
+} from "./FleetFacts";
 
 /** Header and rows share one template so the Project, Status, asks, and activity columns line up. */
 const FLEET_GRID_CLASS =
@@ -352,7 +358,7 @@ function FleetNodeRows(
       members.map(({ agent }) => threadFor(props.threadsByKey, environmentId, agent)),
     );
   // The person's Stop crew: interrupts every running seat, retires nothing. The seats' status
-  // pills tell the truth afterwards; a refused or failed call says so, since a button that does
+  // facts reflect the result; a refused or failed call says so, since a button that does
   // nothing visible is a lying spinner.
   const [busy, setBusy] = useState<string | null>(null);
   const stop = async (crew: { crewInstanceId: string; crewName: string }) => {
@@ -676,7 +682,7 @@ function ProjectLabel(
   );
 }
 
-function FleetRowItem(
+export function FleetRowItem(
   props: FleetRowsProps & {
     readonly project: ScopedFleetLedgerProject;
     readonly row: FleetRow;
@@ -743,6 +749,7 @@ function FleetRowItem(
         {props.row.depth === 0 ? <ProjectLabel {...props} agent={agent} /> : <span />}
         <FleetFactCells environmentId={environmentId} agent={agent} />
       </button>
+      <FleetFactDetails environmentId={environmentId} agent={agent} title={title} />
     </li>
   );
 }
