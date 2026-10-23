@@ -43,6 +43,7 @@ import {
   j5ClaudeSteerFields,
   j5ObserveClaudeSteer,
   j5OfferClaudeSteer,
+  j5TakeUnreadClaudeSteers,
 } from "./claudeAgentSteers.ts";
 import { A2ADeliveryWorker, manualLayer as deliveryWorkerLayer } from "./DeliveryWorker.ts";
 import {
@@ -859,6 +860,42 @@ it.effect.each(["waiting when the turn stopped", "already read"] as const)(
       assert.include(notices[0]?.message_text, STOPPED_NOTICE_INSTRUCTION);
       assert.notInclude(notices[0]?.message_text, "Send it again");
     }).pipe(Effect.provide(Layer.merge(makeTestLayer(), NodeCrypto.layer))),
+);
+
+it.effect("releases a failed Claude turn's waiting steer without telling its sender", () =>
+  Effect.gen(function* () {
+    yield* seed();
+    const sent = yield* (yield* A2ASendService).send({
+      commandId: CommCommandId.make("command:silence:send:steered:failed"),
+      senderThreadId: waiter.threadId,
+      to: subject.id,
+      message: "Steered update",
+      acceptedAt: iso(1),
+    });
+    const threadMessageId = deliveryMessageId(sent.messageId);
+    thread.messages.push({ id: threadMessageId, runId: carrierRunId });
+    const query = {} as ClaudeAgentSdkQuerySession;
+    const steer = yield* j5ClaudeSteerFields({ createdBy: "agent" }, yield* Crypto.Crypto);
+    yield* j5OfferClaudeSteer({
+      query,
+      providerTurnId: "provider-turn:silence:failed",
+      messageId: threadMessageId,
+      steer,
+      offer: Effect.void,
+    });
+    j5ObserveClaudeSteer(query, claudeLifecycle(steer.uuid!, "queued"));
+    const failed = terminalEvent("failed", 100, {
+      id: carrierRunId,
+      userMessageId: MessageId.make("message:silence:upstream"),
+      completedAtSecond: 3,
+    });
+    thread.runs = [runOf(failed)];
+
+    yield* (yield* A2ASilenceDetector).handleStoredEvent(failed);
+
+    assert.lengthOf(yield* readRemovedNotices(), 0);
+    assert.deepEqual(j5TakeUnreadClaudeSteers([threadMessageId]), []);
+  }).pipe(Effect.provide(Layer.merge(makeTestLayer(), NodeCrypto.layer))),
 );
 
 it.effect.each(["promoted into the running turn", "archived with its receiver"] as const)(

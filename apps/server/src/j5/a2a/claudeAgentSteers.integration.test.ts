@@ -28,6 +28,7 @@ import * as EffectWorker from "../../orchestration-v2/EffectWorker.ts";
 import * as Orchestrator from "../../orchestration-v2/Orchestrator.ts";
 import * as ProviderAdapterRegistry from "../../orchestration-v2/ProviderAdapterRegistry.ts";
 import * as ProviderReplayHarness from "../../orchestration-v2/testkit/ProviderReplayHarness.ts";
+import { j5TakeUnreadClaudeSteers } from "./claudeAgentSteers.ts";
 
 // Case 82 through the real Claude adapter and orchestrator, with a scripted Claude Code stream.
 
@@ -99,6 +100,7 @@ const lifecycle = (commandUuid: string, state: string) =>
 it.effect.each([
   { case: "an agent's steer joins the turn at the next tool result", steer: "agent-mid" },
   { case: "an agent's late steer keeps the turn open for its own result", steer: "agent-late" },
+  { case: "a person's Stop ends a turn held open for a late steer", steer: "agent-stopped" },
   { case: "a person's steer still uses now", steer: "person" },
 ] as const)("$case", ({ steer }) =>
   Effect.scoped(
@@ -106,6 +108,7 @@ it.effect.each([
       const cwd = yield* checkpointWorkspace("j5-claude-agent-steers");
       const sdkMessages = yield* Queue.unbounded<SDKMessage>();
       const offers: SDKUserMessage[] = [];
+      let interrupts = 0;
       const adapter = yield* ClaudeAdapterV2.makeClaudeAdapterV2({
         instanceId: modelSelection.instanceId,
         settings,
@@ -126,8 +129,8 @@ it.effect.each([
               setPermissionMode: () => Effect.void,
               backgroundTasks: () => Effect.succeed(false),
               stopTask: () => Effect.void,
-              interrupt: Effect.die("a steer must never interrupt"),
-              close: Effect.void,
+              interrupt: Effect.sync(() => void interrupts++),
+              close: Queue.shutdown(sdkMessages),
             }),
           forkSession: () => Effect.die("unused"),
           subagentLaunchToolUseId: () => Effect.succeed(null),
@@ -204,6 +207,47 @@ it.effect.each([
         assert.equal(offered.priority, "next");
         const steerUuid = offered.uuid ?? assert.fail("An agent's steer has a uuid.");
 
+        if (steer === "agent-stopped") {
+          const stopped = yield* watch(
+            (event) =>
+              event.type === "run.updated" &&
+              event.payload.id === parent.id &&
+              event.payload.status === "interrupted",
+          );
+          // A frame after the held result, so the result is known to be processed first.
+          const held = yield* watch(
+            (event) =>
+              event.type === "turn-item.updated" &&
+              event.payload.nativeItemRef?.nativeId === "held",
+          );
+          yield* Queue.offer(sdkMessages, lifecycle(steerUuid, "queued"));
+          yield* Queue.offer(sdkMessages, buildResult);
+          yield* Queue.offer(sdkMessages, result("first-segment"));
+          yield* Queue.offer(
+            sdkMessages,
+            assistant("held-call", [
+              { type: "tool_use", id: "held", name: "Bash", input: { command: "true" } },
+            ]),
+          );
+          yield* Fiber.join(held);
+          assert.equal(
+            (yield* orchestrator.getThreadProjection(threadId)).runs[0]?.status,
+            "running",
+          );
+          yield* orchestrator.dispatch({
+            type: "run.interrupt",
+            commandId: CommandId.make("stop"),
+            threadId,
+            runId: parent.id,
+          });
+          yield* worker.drain();
+          yield* Fiber.join(stopped);
+          assert.equal(interrupts, 1);
+          // The waiting steer is left for the silence detector to report to its sender.
+          assert.deepEqual(j5TakeUnreadClaudeSteers(["steer"]), ["steer"]);
+          return;
+        }
+
         const finished = yield* watch(
           (event) =>
             event.type === "run.updated" &&
@@ -244,6 +288,7 @@ it.effect.each([
           (providerTurn) => providerTurn.status === "completed",
         );
         assert.equal(turn?.turnTokenUsage?.outputTokens, steer === "agent-late" ? 2 : 1);
+        assert.equal(interrupts, 0);
       }).pipe(
         Effect.provide(
           ProviderReplayHarness.layerWithRegistry(

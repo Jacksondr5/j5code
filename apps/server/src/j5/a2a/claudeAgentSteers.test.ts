@@ -82,27 +82,28 @@ it.effect("holds for an unacknowledged steer only once the CLI has reported life
   }).pipe(Effect.provide(NodeCrypto.layer)),
 );
 
-it.effect("never holds a failed result", () =>
+it.effect.each([
+  { failure: "an execution error", overrides: { subtype: "error_during_execution" } },
+  { failure: "a success flagged as an error", overrides: { is_error: true } },
+  { failure: "the turn limit", overrides: { terminal_reason: "max_turns" } },
+] as const)("never holds a result that ends on $failure", ({ overrides }) =>
   Effect.gen(function* () {
     const query = newQuery();
     const turn = newTurn();
     const uuid = yield* offerAgentSteer(query, turn);
     j5ObserveClaudeSteer(query, lifecycle(uuid, "queued"));
-    assert.isFalse(
-      j5ClaudeSteerHoldsResult(query, turn, result({ subtype: "error_during_execution" } as never)),
-    );
+    assert.isFalse(j5ClaudeSteerHoldsResult(query, turn, result(overrides as never)));
   }).pipe(Effect.provide(NodeCrypto.layer)),
 );
 
-it.effect("keeps following its steers across a person's aborting steer", () =>
+it.effect("follows a steer's lifecycle only on its own query, and only for known states", () =>
   Effect.gen(function* () {
     const query = newQuery();
     const turn = newTurn();
     const uuid = yield* offerAgentSteer(query, turn);
     j5ObserveClaudeSteer(query, lifecycle(uuid, "queued"));
-    assert.isFalse(
-      j5ClaudeSteerHoldsResult(query, turn, result({ terminal_reason: "aborted_tools" })),
-    );
+    j5ObserveClaudeSteer(newQuery(), lifecycle(uuid, "started"));
+    j5ObserveClaudeSteer(query, lifecycle(uuid, "paused"));
     assert.isTrue(j5ClaudeSteerHoldsResult(query, turn, result()));
   }).pipe(Effect.provide(NodeCrypto.layer)),
 );

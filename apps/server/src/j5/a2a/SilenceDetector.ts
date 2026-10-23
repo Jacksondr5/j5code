@@ -612,7 +612,9 @@ const makeLayer = (daemon: boolean) =>
 
       /**
        * Messages steered into a Claude turn that a Stop ended before Claude read them: they were
-       * waiting for its running tool calls (FORK.md case 82).
+       * waiting for its running tool calls (FORK.md case 82). Any run that ends without a clean
+       * result releases its turn's steers, but only a Stop is reported (A2A AC30): a failed turn
+       * shows its own failure.
        */
       const noticeUnreadSteers = Effect.fn("j5.a2a.silence.noticeUnreadSteers")(function* (
         run: OrchestrationV2Run,
@@ -620,14 +622,16 @@ const makeLayer = (daemon: boolean) =>
         subjectId: ParticipantId,
         observedAt: string,
       ) {
-        if (run.status !== "interrupted") return [];
+        if (run.status === "completed") return [];
         const records = yield* readRunsAndMessages(threadId);
         const steered = records.messages
           .filter((message) => message.runId === run.id && message.id !== run.userMessageId)
           .map((message) => message.id);
         if (steered.length === 0) return [];
+        const unreadSteers = j5TakeUnreadClaudeSteers(steered);
+        if (run.status !== "interrupted") return [];
         const appended: Array<StoredCommEvent> = [];
-        for (const unread of j5TakeUnreadClaudeSteers(steered)) {
+        for (const unread of unreadSteers) {
           const messageId = ledgerMessageIdOfDelivery(unread);
           if (messageId === undefined) continue;
           appended.push(

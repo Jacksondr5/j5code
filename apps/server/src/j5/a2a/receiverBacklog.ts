@@ -27,8 +27,9 @@ const decodeParticipant = Schema.decodeUnknownEffect(Schema.fromJsonString(Parti
  * What a just-sent message is waiting behind: the receiver's running turn and the
  * A2A messages after it, both those already queued as runs and those the delivery
  * worker has not handed over yet. Undefined when the message will not wait: the
- * receiver is idle, takes it mid-turn (a GPT 6 model, or a steer or restart), holds its queue, is not an agent on
- * this server, or the message has already run or will never run. Measured when
+ * receiver is idle, takes it mid-turn (Claude or a GPT 6 model, or a steer or restart),
+ * holds its queue, is not an agent on this server, or the message has already run or
+ * will never run. Measured when
  * called and never stored, so it is advice to the sender, not a delivery fact. A
  * failed read is logged and reads as undefined: the message is already committed,
  * and the send must not fail over advice.
@@ -80,7 +81,7 @@ export const readReceiverBacklog = Effect.fn("j5.a2a.readReceiverBacklog")(
     const sentRun = runByMessage.get(deliveryMessageId(input.sentMessageId));
     // Already started or finished (a replay reports the current state, not the first one).
     if (sentRun !== undefined && sentRun.status !== "queued") return undefined;
-    // Not yet handed over, so a running GPT 6 turn, or the turn a steer or restart lands on,
+    // Not yet handed over, so a running Claude or GPT 6 turn, or the turn a steer or restart lands on,
     // will take it mid-turn. Once queued, it stays queued even if the receiver's turn later
     // becomes steerable.
     const mode = input.mode ?? "queue";
