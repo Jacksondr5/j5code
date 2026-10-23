@@ -166,7 +166,7 @@ Landing-order collision: two cases landed as `15.`; resolved by the `b` suffix o
 
     Fleet measurements (#360) add the `./j5/fleetFacts` export to `packages/client-runtime/package.json`. The J5-owned module derives runtime, dispatch deadlines and labeled activity from the existing raw live shell; its shared Atom owns one future local deadline and performs no RPC reads. Ledger Exchanges, sender delivery alarms and the read time remain in the J5 Fleet read. Keep this subpath on upstream sync.
 
-    The Fleet command-palette entry is J5-owned `apps/web/src/j5/fleet/fleetPalette.tsx`; `apps/web/src/components/CommandPalette.tsx` adds one import, one hook call and appends those items beside the other J5 delegates. Preserve that mount when upstream moves palette actions. Web and desktop use the same Fleet page; native mobile has no Fleet entry or badge.
+    The Fleet command-palette entry is J5-owned `apps/web/src/j5/fleet/fleetPalette.tsx`; `apps/web/src/components/CommandPalette.tsx` adds one import, one hook call and appends those items beside the other J5 delegates. Preserve that mount when upstream moves palette actions. Web and desktop use the same Fleet page; native mobile has no Fleet entry or badge. `apps/web/package.json` adds the test-only `@testing-library/user-event` dependency for the Fleet row’s keyboard disclosure regression; `pnpm-lock.yaml` records its web importer. Keep it while that interaction test uses it.
     Cases 10, 11 and 12 are retired, so no launch policy remains to verify here.
 
     Client permission guards (Jackson's 2026-10-08 decision 23; [#506](https://github.com/Jacksondr5/j5code/issues/506)). J5's protected actions are registered with upstream's guard and its controls read the guard's answer, as upstream's own do: case 64. A session without the operate scope cannot use Crew approve and decline, Crew runtime answers, Stop and Archive crew, Inbox answers, artifact delete, the playbook and persona library mutations or the skill mutations; peering needs `access:write`. The server remains the authority in every case.
@@ -821,6 +821,7 @@ explicitly marked.
 | `apps/web/src/routes/_chat.tsx`                                       | R       | B                                                  |
 | `apps/web/src/routeTree.gen.ts`                                       | R       | generated route registrations for 6/9              |
 | `apps/web/src/components/onboarding/WelcomeWizard.tsx`                | R       | 39, B                                              |
+| `apps/web/package.json`                                               | N       | 34                                                 |
 | `apps/web/tsconfig.json`                                              | R       | B                                                  |
 | `packages/client-runtime/package.json`                                | R       | 23, 34, 45, 69, 70, 75                             |
 | `packages/client-runtime/src/connection/compatibility.ts`             | A       | 56                                                 |
@@ -838,7 +839,7 @@ explicitly marked.
 | `packages/shared/src/model.test.ts`                                   | A       | 32                                                 |
 | `packages/ssh/src/tunnel.test.ts`                                     | R       | H, 50                                              |
 | `packages/ssh/src/tunnel.ts`                                          | R       | H, 50                                              |
-| `pnpm-lock.yaml`                                                      | N       | 45                                                 |
+| `pnpm-lock.yaml`                                                      | N       | 34, 45                                             |
 | `scripts/build-cli-archive.ts`                                        | N       | 50                                                 |
 | `scripts/build-desktop-artifact.test.ts`                              | A       | B, S, 50                                           |
 | `scripts/build-desktop-artifact.ts`                                   | R       | B, S, 50                                           |
