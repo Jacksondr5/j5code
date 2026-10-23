@@ -18,6 +18,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import { EventSinkV2 } from "../../orchestration-v2/EventSink.ts";
 import * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
 import { AgentCrewInstanceService } from "./AgentCrewInstanceService.ts";
+import { j5TakeUnreadClaudeSteers } from "./claudeAgentSteers.ts";
 import { canBeNotified } from "./deliveryNotices.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { deliveryMessageId, ledgerMessageIdOfDelivery } from "./DeliveryTransport.ts";
@@ -191,6 +192,7 @@ const correlationIdFor = (projectId: string, exchangeId: string, deliveryMessage
   );
 
 export const REMOVED_NOTICE_TYPE = "queued-message-removed" as const;
+export const UNREAD_STEER_NOTICE_TYPE = "steered-message-unread" as const;
 
 const REMOVED_NOTICE_EXCERPT_LENGTH = 200;
 
@@ -205,6 +207,24 @@ export const removedNoticeMessage = (
       ? `${text.slice(0, REMOVED_NOTICE_EXCERPT_LENGTH)}…`
       : text;
   return `Your message ${messageId} to ${subjectId} was removed from its queue before it ran, so ${subjectId} never read it. Send it again if it still matters. The message began: ${excerpt}`;
+};
+
+/**
+ * Told to the sender of a message steered into a turn that was stopped before Claude read it.
+ * A person stopped the receiver on purpose, so it carries the stopped notice's instruction rather
+ * than an invitation to send again. "Probably": Claude can take the message just as the Stop
+ * lands, after the last frame J5 reads (the steer-and-Stop race register D5 leaves unguarded).
+ */
+export const unreadSteerNoticeMessage = (
+  subjectId: ParticipantId,
+  messageId: string,
+  text: string,
+): string => {
+  const excerpt =
+    text.length > REMOVED_NOTICE_EXCERPT_LENGTH
+      ? `${text.slice(0, REMOVED_NOTICE_EXCERPT_LENGTH)}…`
+      : text;
+  return `Your message ${messageId} to ${subjectId} was waiting for ${subjectId}'s running tool calls when a person stopped ${subjectId}, so ${subjectId} probably never read it. ${STOPPED_NOTICE_INSTRUCTION} The message began: ${excerpt}`;
 };
 
 const noticeMessage = (payload: SilenceNoticePayload, exchangeId: ExchangeId): string => {
@@ -490,22 +510,21 @@ const makeLayer = (daemon: boolean) =>
       });
 
       /**
-       * A queued message that leaves the queue unread, whoever removed it, is told to its sender:
-       * the ledger recorded it delivered when it joined the queue (#504). An ask is reported on its
+       * A delivered message that its receiver never read is told to its sender: the ledger recorded
+       * it delivered when it joined the queue (#504) or the running turn. An ask is reported on its
        * Exchange instead, a promoted message moved into the running turn, and an archived receiver
        * is gone altogether. A sender on a peer server is not told: a peer accepts a platform
        * notice only for an Exchange.
        */
-      const noticeRemovedDelivery = Effect.fn("j5.a2a.silence.noticeRemovedDelivery")(function* (
-        run: OrchestrationV2Run,
-        threadId: ThreadId,
-        subjectId: ParticipantId,
-        observedAt: string,
-      ) {
-        const messageId = ledgerMessageIdOfDelivery(run.userMessageId);
-        if (run.status !== "cancelled" || run.startedAt !== null || messageId === undefined) {
-          return [];
-        }
+      const tellSenderUnread = Effect.fn("j5.a2a.silence.tellSenderUnread")(function* (input: {
+        readonly run: OrchestrationV2Run;
+        readonly threadId: ThreadId;
+        readonly subjectId: ParticipantId;
+        readonly observedAt: string;
+        readonly messageId: LedgerMessageId;
+        readonly reason: "removed" | "unread-steer";
+      }) {
+        const { run, threadId, subjectId, observedAt, messageId, reason } = input;
         const rows = yield* sql<RemovedDeliveryRow>`
           SELECT project_id, message_id, sender_id, message_text
           FROM j5_a2a_delivery
@@ -531,7 +550,7 @@ const makeLayer = (daemon: boolean) =>
         }
         const identity = `${stablePart(row.project_id)}:${stablePart(row.message_id)}`;
         const result = yield* ledger.appendEvents({
-          commandId: CommCommandId.make(`command:j5:a2a:removed:${identity}`),
+          commandId: CommCommandId.make(`command:j5:a2a:${reason}:${identity}`),
           projectId: LedgerProjectId.make(row.project_id),
           acceptedAt: observedAt,
           events: [
@@ -540,13 +559,24 @@ const makeLayer = (daemon: boolean) =>
               sender: SILENCE_DETECTOR_PARTICIPANT_ID,
               receiver: senderId,
               exchangeId: null,
-              correlationId: CorrelationId.make(`correlation:j5:a2a:removed:${identity}`),
+              correlationId: CorrelationId.make(`correlation:j5:a2a:${reason}:${identity}`),
               payload: {
-                messageId: LedgerMessageId.make(`message:j5:a2a:removed:${identity}`),
-                text: formatSilenceNoticeEnvelope({
-                  noticeType: REMOVED_NOTICE_TYPE,
-                  message: removedNoticeMessage(subjectId, row.message_id, row.message_text),
-                }),
+                messageId: LedgerMessageId.make(`message:j5:a2a:${reason}:${identity}`),
+                text: formatSilenceNoticeEnvelope(
+                  reason === "removed"
+                    ? {
+                        noticeType: REMOVED_NOTICE_TYPE,
+                        message: removedNoticeMessage(subjectId, row.message_id, row.message_text),
+                      }
+                    : {
+                        noticeType: UNREAD_STEER_NOTICE_TYPE,
+                        message: unreadSteerNoticeMessage(
+                          subjectId,
+                          row.message_id,
+                          row.message_text,
+                        ),
+                      },
+                ),
                 originProjectId: LedgerProjectId.make(row.project_id),
                 receiverProjectId: LedgerProjectId.make(row.project_id),
                 exchangeRole: "none",
@@ -557,6 +587,65 @@ const makeLayer = (daemon: boolean) =>
           ],
         });
         return result.committed ? result.events : [];
+      });
+
+      /** A queued message that leaves the queue unread, whoever removed it. */
+      const noticeRemovedDelivery = Effect.fn("j5.a2a.silence.noticeRemovedDelivery")(function* (
+        run: OrchestrationV2Run,
+        threadId: ThreadId,
+        subjectId: ParticipantId,
+        observedAt: string,
+      ) {
+        const messageId = ledgerMessageIdOfDelivery(run.userMessageId);
+        if (run.status !== "cancelled" || run.startedAt !== null || messageId === undefined) {
+          return [];
+        }
+        return yield* tellSenderUnread({
+          run,
+          threadId,
+          subjectId,
+          observedAt,
+          messageId,
+          reason: "removed",
+        });
+      });
+
+      /**
+       * Messages steered into a Claude turn that a Stop ended before Claude read them: they were
+       * waiting for its running tool calls (FORK.md case 82). Any run that ends without a clean
+       * result releases its turn's steers, but only a Stop is reported (A2A AC30): a failed turn
+       * shows its own failure.
+       */
+      const noticeUnreadSteers = Effect.fn("j5.a2a.silence.noticeUnreadSteers")(function* (
+        run: OrchestrationV2Run,
+        threadId: ThreadId,
+        subjectId: ParticipantId,
+        observedAt: string,
+      ) {
+        if (run.status === "completed") return [];
+        const records = yield* readRunsAndMessages(threadId);
+        const steered = records.messages
+          .filter((message) => message.runId === run.id && message.id !== run.userMessageId)
+          .map((message) => message.id);
+        if (steered.length === 0) return [];
+        const unreadSteers = j5TakeUnreadClaudeSteers(steered);
+        if (run.status !== "interrupted") return [];
+        const appended: Array<StoredCommEvent> = [];
+        for (const unread of unreadSteers) {
+          const messageId = ledgerMessageIdOfDelivery(unread);
+          if (messageId === undefined) continue;
+          appended.push(
+            ...(yield* tellSenderUnread({
+              run,
+              threadId,
+              subjectId,
+              observedAt,
+              messageId,
+              reason: "unread-steer",
+            })),
+          );
+        }
+        return appended;
       });
 
       const inspectOpenDelivery = Effect.fn("j5.a2a.silence.inspectOpenDelivery")(function* (
@@ -683,6 +772,12 @@ const makeLayer = (daemon: boolean) =>
         const subjectId = ParticipantId.make(memberships[0]!.participant_id);
         const appended: Array<StoredCommEvent> = [
           ...(yield* noticeRemovedDelivery(
+            run,
+            stored.event.threadId,
+            subjectId,
+            DateTime.formatIso(stored.event.occurredAt),
+          )),
+          ...(yield* noticeUnreadSteers(
             run,
             stored.event.threadId,
             subjectId,

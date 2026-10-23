@@ -1,3 +1,5 @@
+import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { assert, it } from "@effect/vitest";
 import {
   MessageId,
@@ -10,6 +12,7 @@ import {
   RunId,
   ThreadId,
 } from "@t3tools/contracts";
+import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
@@ -35,6 +38,13 @@ import {
   AgentCrewInstanceService,
   layer as crewInstanceLayer,
 } from "./AgentCrewInstanceService.ts";
+import type { ClaudeAgentSdkQuerySession } from "../../orchestration-v2/Adapters/ClaudeAdapterV2.ts";
+import {
+  j5ClaudeSteerFields,
+  j5ObserveClaudeSteer,
+  j5OfferClaudeSteer,
+  j5TakeUnreadClaudeSteers,
+} from "./claudeAgentSteers.ts";
 import { A2ADeliveryWorker, manualLayer as deliveryWorkerLayer } from "./DeliveryWorker.ts";
 import {
   A2ADeliveryTransport,
@@ -52,6 +62,8 @@ import {
   removedNoticeMessage,
   SilenceNoticePayload,
   STOPPED_NOTICE_INSTRUCTION,
+  UNREAD_STEER_NOTICE_TYPE,
+  unreadSteerNoticeMessage,
   layer as liveSilenceDetectorLayer,
   manualLayer as silenceDetectorLayer,
 } from "./SilenceDetector.ts";
@@ -733,6 +745,9 @@ const seedQueuedMessage = Effect.fn("test.j5.a2a.silence.seedQueuedMessage")(fun
   return { removed, messageId: sent.messageId };
 });
 
+const claudeLifecycle = (commandUuid: string, state: string) =>
+  ({ type: "command_lifecycle", command_uuid: commandUuid, state }) as unknown as SDKMessage;
+
 const readRemovedNotices = Effect.fn("test.j5.a2a.silence.readRemovedNotices")(function* () {
   return yield* (yield* SqlClient.SqlClient)<{
     readonly receiver_id: string;
@@ -770,6 +785,117 @@ it.effect("tells the sender once when its queued message is removed before it ru
       "it names the message by the id its send returned",
     );
   }).pipe(Effect.provide(makeTestLayer())),
+);
+
+// FORK.md case 82: a message steered into a Claude turn that a Stop ended before Claude read it.
+it.effect.each(["waiting when the turn stopped", "already read"] as const)(
+  "tells the sender about a message steered into a stopped Claude turn only if it was %s",
+  (fate) =>
+    Effect.gen(function* () {
+      yield* seed();
+      const sent = yield* (yield* A2ASendService).send({
+        commandId: CommCommandId.make(`command:silence:send:steered:${fate}`),
+        senderThreadId: waiter.threadId,
+        to: subject.id,
+        message: "Steered update",
+        acceptedAt: iso(1),
+      });
+      yield* (yield* A2ALedger).append({
+        commandId: CommCommandId.make(`command:silence:delivered:steered:${fate}`),
+        projectId,
+        acceptedAt: iso(2),
+        event: {
+          kind: "message.delivered",
+          sender: waiter.id,
+          receiver: subject.id,
+          exchangeId: null,
+          correlationId: CorrelationId.make(`correlation:silence:delivered:steered:${fate}`),
+          payload: { messageId: sent.messageId, attempt: 1, channel: "agent" },
+          createdAt: iso(2),
+        },
+      });
+      const threadMessageId = deliveryMessageId(sent.messageId);
+      thread.messages.push({ id: threadMessageId, runId: carrierRunId });
+      const query = {} as ClaudeAgentSdkQuerySession;
+      j5ObserveClaudeSteer(query, claudeLifecycle("the-turn-prompt", "started"));
+      const steer = yield* j5ClaudeSteerFields({ createdBy: "agent" }, yield* Crypto.Crypto);
+      yield* j5OfferClaudeSteer({
+        query,
+        providerTurnId: `provider-turn:silence:${fate}`,
+        messageId: threadMessageId,
+        steer,
+        offer: Effect.void,
+      });
+      j5ObserveClaudeSteer(
+        query,
+        claudeLifecycle(steer.uuid!, fate === "already read" ? "started" : "queued"),
+      );
+      const stopped = terminalEvent("interrupted", 100, {
+        id: carrierRunId,
+        userMessageId: MessageId.make("message:silence:upstream"),
+        completedAtSecond: 3,
+      });
+      thread.runs = [runOf(stopped)];
+      const detector = yield* A2ASilenceDetector;
+
+      yield* detector.handleStoredEvent(stopped);
+      yield* detector.handleStoredEvent(stopped);
+
+      const notices = yield* readRemovedNotices();
+      if (fate === "already read") {
+        assert.lengthOf(notices, 0);
+        return;
+      }
+      assert.lengthOf(notices, 1);
+      assert.equal(notices[0]?.receiver_id, waiter.id);
+      assert.include(
+        notices[0]?.message_text,
+        `[Cross-agent messaging system notice: ${UNREAD_STEER_NOTICE_TYPE}]`,
+      );
+      assert.include(
+        notices[0]?.message_text,
+        unreadSteerNoticeMessage(subject.id, sent.messageId, "Steered update"),
+      );
+      // A re-sent message would undo the person's Stop.
+      assert.include(notices[0]?.message_text, STOPPED_NOTICE_INSTRUCTION);
+      assert.notInclude(notices[0]?.message_text, "Send it again");
+    }).pipe(Effect.provide(Layer.merge(makeTestLayer(), NodeCrypto.layer))),
+);
+
+it.effect("releases a failed Claude turn's waiting steer without telling its sender", () =>
+  Effect.gen(function* () {
+    yield* seed();
+    const sent = yield* (yield* A2ASendService).send({
+      commandId: CommCommandId.make("command:silence:send:steered:failed"),
+      senderThreadId: waiter.threadId,
+      to: subject.id,
+      message: "Steered update",
+      acceptedAt: iso(1),
+    });
+    const threadMessageId = deliveryMessageId(sent.messageId);
+    thread.messages.push({ id: threadMessageId, runId: carrierRunId });
+    const query = {} as ClaudeAgentSdkQuerySession;
+    const steer = yield* j5ClaudeSteerFields({ createdBy: "agent" }, yield* Crypto.Crypto);
+    yield* j5OfferClaudeSteer({
+      query,
+      providerTurnId: "provider-turn:silence:failed",
+      messageId: threadMessageId,
+      steer,
+      offer: Effect.void,
+    });
+    j5ObserveClaudeSteer(query, claudeLifecycle(steer.uuid!, "queued"));
+    const failed = terminalEvent("failed", 100, {
+      id: carrierRunId,
+      userMessageId: MessageId.make("message:silence:upstream"),
+      completedAtSecond: 3,
+    });
+    thread.runs = [runOf(failed)];
+
+    yield* (yield* A2ASilenceDetector).handleStoredEvent(failed);
+
+    assert.lengthOf(yield* readRemovedNotices(), 0);
+    assert.deepEqual(j5TakeUnreadClaudeSteers([threadMessageId]), []);
+  }).pipe(Effect.provide(Layer.merge(makeTestLayer(), NodeCrypto.layer))),
 );
 
 it.effect.each(["promoted into the running turn", "archived with its receiver"] as const)(
