@@ -17,6 +17,7 @@ How J5 advances to a new upstream T3 Code. FORK.md holds the rules this depends 
 ## Review before building
 
 - **Real content delta:** diff the pin against the candidate and read the diff, not only the commit log. Summarize what upstream added, especially anything touching J5 areas.
+- **Check the watch lists against the delta.** Test each "Watch for" line in the [upstream convergence watchlist](../product/upstream-convergence.md) and each retirement condition in the [register of divergences](../product/upstream.md) against what upstream shipped. A hit, or a partial one, becomes a decision for the maintainer.
 - **Literal conflicts**, then the **breaks that merge cleanly**, which cause most defects:
   - **J5-owned code** that imports or calls upstream APIs that changed (typecheck an approximate merge).
   - **New upstream lint rules.** Upstream's rules apply to J5 code too: lint `apps/*/src/j5` and `packages/*/src/j5` against the candidate's rules.
@@ -33,7 +34,7 @@ How J5 advances to a new upstream T3 Code. FORK.md holds the rules this depends 
 - **Walk the [register of divergences](../product/upstream.md).** For each entry, check whether upstream's change makes it unnecessary, harder to carry, or wrong. Bring any change to the maintainer; retiring a divergence is the default when upstream now does the job.
 - **Port upstream's edits to the files J5 owns outright** (`AGENTS.md`, the PR template; see FORK.md) and to J5's standing agent instructions, `packages/provider-core/src/j5/orchestrationInstructions.ts` (FORK.md case 8). Keep J5's version and apply what fits. Upstream's changes to its own instruction text show up as a merge conflict in `packages/provider-core/src/server/orchestrationInstructions.ts`, where J5 deleted that text.
 - **Rewrite** the [upstream convergence watchlist](../product/upstream-convergence.md) and check the give-back backlog (#276).
-- **Bring the decisions to the maintainer.** Default to adopting upstream and adjusting later if it proves bad.
+- **Brief the maintainer, then bring the decisions.** First, what J5 picks up: the upstream features and behavior changes a person or an agent would notice, in a few lines each, including those that need no decision. Then the decisions, one at a time with a recommendation: watch-list hits, divergences, and upstream behavior that crosses a J5 policy. Default to adopting upstream and adjusting later if it proves bad.
 
 ## Build and verify
 
