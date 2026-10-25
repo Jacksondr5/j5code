@@ -765,7 +765,10 @@ const sendAt = (from: AgentParticipant, name: string, acceptedAt: string) =>
     });
   });
 
-it.effect("keeps send order to one agent across senders in different projects", () =>
+it.effect.each([
+  ["a millisecond apart", "2026-08-16T12:00:02.000Z"],
+  ["in the same millisecond", "2026-08-16T12:00:01.000Z"],
+] as const)("keeps send order to one agent across projects, sent %s", ([, bAcceptedAt]) =>
   Effect.gen(function* () {
     const script = yield* Ref.make<ReadonlyMap<string, ReadonlyArray<ScriptedStep>>>(
       new Map([["A", ["held"]]]),
@@ -779,7 +782,7 @@ it.effect("keeps send order to one agent across senders in different projects", 
       const a = yield* sendAt(sender, "A", "2026-08-16T12:00:01.000Z");
       yield* worker.drain;
       // The hold lifts; B is sent from the fresh project before anything wakes A.
-      const b = yield* sendAt(otherSender, "B", "2026-08-16T12:00:02.000Z");
+      const b = yield* sendAt(otherSender, "B", bAcceptedAt);
       const seqs = yield* sql<{ readonly message_id: string; readonly sent_seq: number }>`
         SELECT message_id, sent_seq FROM j5_a2a_delivery ORDER BY sent_seq
       `;
@@ -826,6 +829,37 @@ it.effect("does not count waiting behind another message toward a delivery's ala
       yield* worker.drain;
       assert.deepStrictEqual(yield* Ref.get(delivered), ["A", "B"]);
       assert.lengthOf(yield* worker.listAlarms, 0);
+    }).pipe(Effect.provide(makeTestLayer(scriptedTransport(script, delivered))));
+  }),
+);
+
+it.effect("tells the sender how many times the transport failed, not how often it waited", () =>
+  Effect.gen(function* () {
+    const script = yield* Ref.make<ReadonlyMap<string, ReadonlyArray<ScriptedStep>>>(
+      new Map([
+        ["A", ["held", "held"]],
+        ["B", ["fail", "fail", "fail"]],
+      ]),
+    );
+    const delivered = yield* Ref.make<ReadonlyArray<string>>([]);
+    yield* Effect.gen(function* () {
+      yield* seedTwoProjects();
+      const worker = yield* A2ADeliveryWorker;
+      yield* sendAt(sender, "A", "2026-08-16T12:00:01.000Z");
+      yield* sendAt(sender, "B", "2026-08-16T12:00:02.000Z");
+      // B waits twice behind A, then fails three times in transport once A lands.
+      yield* worker.drain;
+      yield* TestClock.adjust(heldQueueRecheckMs(1));
+      yield* worker.drain;
+      yield* TestClock.adjust(heldQueueRecheckMs(2));
+      yield* worker.drain;
+      yield* TestClock.adjust("250 millis");
+      yield* worker.drain;
+      yield* TestClock.adjust("500 millis");
+      yield* worker.drain;
+      assert.lengthOf(yield* worker.listAlarms, 1);
+      const notice = (yield* Ref.get(delivered)).find((text) => text.includes("delivery failed"));
+      assert.include(notice, "delivery failed 3 times");
     }).pipe(Effect.provide(makeTestLayer(scriptedTransport(script, delivered))));
   }),
 );

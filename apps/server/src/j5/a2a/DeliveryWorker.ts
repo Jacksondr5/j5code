@@ -84,6 +84,8 @@ interface DeliveryRow {
   readonly attempts: number;
   /** Of those attempts, the rechecks while the receiver held it. */
   readonly held_attempts: number;
+  /** The order it was accepted on this server, across projects. */
+  readonly accept_order: number;
   readonly created_at: string;
   /** Set when the row came in from a peer server; NULL means the origin is `project_id` here. */
   readonly origin_project_id: string | null;
@@ -252,8 +254,8 @@ const makeLayer = (daemon: boolean) =>
       const deliveryColumns = sql`
         project_id, message_id, sent_seq, sender_id, receiver_id, receiver_project_id,
         exchange_id, exchange_role, envelope_channel, correlation_id, message_text, status,
-        attempts, held_attempts, created_at, origin_project_id, origin_environment_id,
-        receiver_environment_id
+        attempts, held_attempts, accept_order, created_at, origin_project_id,
+        origin_environment_id, receiver_environment_id
       `;
       const storedForPollingPeer = sql`(
         receiver_environment_id IN (SELECT environment_id FROM j5_a2a_peer WHERE link_mode = 'store')
@@ -337,15 +339,13 @@ const makeLayer = (daemon: boolean) =>
         } else {
           // Messages reach an agent in the order they were accepted, from any project: this one
           // waits while an earlier one to the same agent is still waiting, held or in retry. A
-          // wake hands them over together, so it costs nothing once the hold lifts. `sent_seq`
-          // counts within one project's ledger, so it only breaks a tie in acceptance time.
+          // wake hands them over together, so it costs nothing once the hold lifts.
           const earlier = yield* sql<{ readonly message_id: string }>`
             SELECT message_id FROM j5_a2a_delivery
             WHERE receiver_id = ${row.receiver_id}
               AND receiver_environment_id IS NULL
               AND status IN ('pending', 'retry_scheduled')
-              AND (created_at, sent_seq, project_id, message_id)
-                < (${row.created_at}, ${row.sent_seq}, ${row.project_id}, ${row.message_id})
+              AND accept_order < ${row.accept_order}
             LIMIT 1
           `.pipe(
             Effect.mapError(
@@ -507,7 +507,7 @@ const makeLayer = (daemon: boolean) =>
                 refusal !== undefined
                   ? yield* refusalNotices(row, refusal, failedAt)
                   : alarmed
-                    ? yield* alarmNotices(row, attempt, cause, failedAt)
+                    ? yield* alarmNotices(row, transportAttempt, cause, failedAt)
                     : [];
               return yield* writer.appendEventsInTransaction({
                 commandId: commandId("failed", messageId, attempt),
@@ -792,7 +792,7 @@ const makeLayer = (daemon: boolean) =>
             WHERE receiver_id = ${receiverId}
               AND receiver_environment_id IS NULL
               AND status IN ('pending', 'retry_scheduled')
-            ORDER BY created_at, sent_seq, project_id, message_id
+            ORDER BY accept_order
           `;
           for (const row of rows) completed.push(yield* attemptRow(row));
         }
