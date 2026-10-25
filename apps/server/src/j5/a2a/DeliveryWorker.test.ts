@@ -687,6 +687,63 @@ it.effect("keeps a message queued behind a held receiver queue undelivered until
   }),
 );
 
+it.effect("hands the next message over as soon as the one it waited behind lands", () =>
+  Effect.gen(function* () {
+    const delivered = yield* Ref.make<ReadonlyArray<string>>([]);
+    const failNext = yield* Ref.make(true);
+    const transport: A2ADeliveryTransportShape = {
+      // The first attempt fails in transport; every later one lands.
+      deliverAgent: (input) =>
+        Ref.getAndSet(failNext, false).pipe(
+          Effect.flatMap((fail) =>
+            fail
+              ? Effect.fail(
+                  new A2ADeliveryTransportError({ operation: "test delivery", cause: "offline" }),
+                )
+              : Ref.update(delivered, (all) => [...all, input.message]),
+          ),
+        ),
+      cancelAgent: () => Effect.succeed("cancelled" as const),
+      deliverPeer: () => Effect.die("peer delivery is not under test"),
+      deliverHuman: () => Effect.void,
+    };
+    yield* Effect.gen(function* () {
+      yield* runMigrations();
+      yield* runJ5A2AMigrations();
+      const worker = yield* A2ADeliveryWorker;
+      const sql = yield* SqlClient.SqlClient;
+      const sendService = yield* A2ASendService;
+      const projectId = LedgerProjectId.make("project:delivery:in-order");
+      yield* (yield* A2ALedger).ensureProject({ projectId, createdAt: timestamp });
+      yield* join(projectId, sender, "in-order-sender");
+      yield* join(projectId, receiver, "in-order-receiver");
+      const sendUpdate = (name: string) =>
+        sendService.send({
+          commandId: CommCommandId.make(`command:delivery:in-order:${name}`),
+          senderThreadId: sender.threadId,
+          to: receiver.id,
+          message: `Update ${name}`,
+          acceptedAt: timestamp,
+        });
+      yield* sendUpdate("a");
+      const b = yield* sendUpdate("b");
+
+      // A fails in transport and retries soon; B waits behind it on the slower held recheck.
+      yield* worker.drain;
+      assert.deepStrictEqual(yield* Ref.get(delivered), []);
+
+      // Only A's retry is due, yet B follows it at once.
+      yield* TestClock.adjust("250 millis");
+      yield* worker.drain;
+      assert.deepStrictEqual(yield* Ref.get(delivered), ["Update a", "Update b"]);
+      const row = yield* sql<{ readonly status: string }>`
+        SELECT status FROM j5_a2a_delivery WHERE message_id = ${b.messageId}
+      `;
+      assert.equal(row[0]?.status, "delivered");
+    }).pipe(Effect.provide(makeTestLayer(transport)));
+  }),
+);
+
 it.effect("delivers a machine's send to its agent receiver instead of withdrawing it", () =>
   Effect.gen(function* () {
     const delivered = yield* Ref.make<ReadonlyArray<ParticipantId>>([]);

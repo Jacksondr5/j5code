@@ -820,6 +820,14 @@ const makeLayer = (daemon: boolean) =>
             ? exit.value
             : yield* recordFailure(row, attempt, exit.cause, refusalOf(exit.cause));
         }).pipe(Effect.ensuring(Effect.sync(() => peerAttemptsInFlight.delete(inFlight))));
+        // The next message to this agent may be waiting behind this one: hand it over now.
+        if (
+          milestone.state === "delivered" &&
+          row.receiver_environment_id === null &&
+          !isHumanParticipantId(ParticipantId.make(row.receiver_id))
+        ) {
+          wokenReceivers.add(row.receiver_id);
+        }
         yield* PubSub.publish(milestones, milestone);
         return milestone;
       });

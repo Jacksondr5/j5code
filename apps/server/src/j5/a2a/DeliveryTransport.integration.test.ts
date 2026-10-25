@@ -120,7 +120,6 @@ import {
   manualLayer as deliveryWorkerLayer,
 } from "./DeliveryWorker.ts";
 import { A2AHumanInbox, layer as humanInboxLayer } from "./HumanInboxService.ts";
-import { A2ASilenceDetector, manualLayer as silenceDetectorLayer } from "./SilenceDetector.ts";
 import { layer as peerRegistryLayer } from "./PeerRegistryService.ts";
 import {
   A2AHomeRegistrar,
@@ -3620,7 +3619,7 @@ it.effect.each(["upstream", "a person"] as const)(
 
 /** The delivery seam with the silence detector, which wakes held deliveries when a run starts. */
 const makeWakeTestLayer = (harness: DeliveryHarness) =>
-  silenceDetectorLayer.pipe(
+  silenceDetectorManualLayer.pipe(
     Layer.provideMerge(crewInstanceLayer),
     Layer.provideMerge(makeLifecycleTestLayer(harness)),
     Layer.provideMerge(serverConfigLayer),
