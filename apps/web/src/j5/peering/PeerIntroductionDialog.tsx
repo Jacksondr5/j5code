@@ -817,7 +817,7 @@ function ManualForm({
   );
 }
 
-function OriginField({
+export function OriginField({
   title,
   value,
   onChange,

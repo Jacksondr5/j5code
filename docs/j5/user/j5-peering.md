@@ -31,6 +31,10 @@ If both servers can reach each other but one runs in the desktop app, or was sta
 
 A server's name is its computer name; on Windows, or where the machine has none, it's the hostname. To rename it, rename the machine, then restart J5 on it (quit and reopen the desktop app, or restart the server): on macOS, the computer name in System Settings; on Linux, `hostnamectl set-hostname --pretty "Work VM"`. J5 reads the name when it starts, and the new name reaches the other server the next time one of them polls the other, or the other server reads its address book. If you can't rename a machine, such as a managed work laptop, tell your agents in their instructions, for example "JM-LT-04213 is my work laptop".
 
+## When a server's address changes
+
+If you move a server to a new address, such as a new port or hostname, its peers keep trying the old one, and **Peer servers** shows the error. Choose **Change** next to the old address. J5 checks where the other server can reach it, fills in the address it found, and switches only once the server answers there. Nothing waiting is cancelled and the peering itself is unchanged, so there's no need to remove it.
+
 ## Checking and removing a peer
 
 **Peer servers** lists every peering among the servers this app manages, one row per pair. Each row shows how messages travel and whether anything is wrong on each side. If it says the other server ended this peering, choose **Remove**; to peer them again, use **Add peer**. If it names a server to update, update J5 there.

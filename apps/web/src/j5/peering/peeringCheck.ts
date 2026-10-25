@@ -24,7 +24,7 @@ export const peeringServerOf = (environment: EnvironmentPresentation): PeeringSe
 };
 
 export interface PeeringCheckSide {
-  readonly server: PeeringServer;
+  readonly server: Pick<PeeringServer, "environmentId" | "label">;
   /** The address this client uses for the server: a hint, tried first. */
   readonly clientUrl: string | null;
 }
@@ -71,6 +71,14 @@ const reach = async (
     addressesError: offered.error,
   });
 };
+
+/** One direction: where `from` reaches `to`, for moving a peer `from` already records. */
+export async function runReachCheck(
+  from: EnvironmentId,
+  to: PeeringCheckSide,
+): Promise<PeeringReach> {
+  return reach(from, to, await offeredAddresses(to.server.environmentId));
+}
 
 /** Both directions in parallel. Nothing is recorded; the check only informs the setup. */
 export async function runPeeringCheck(
