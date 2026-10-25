@@ -588,6 +588,7 @@ export const layer: Layer.Layer<
             SET
               status = ${payload.alarmed ? "alarmed" : "retry_scheduled"},
               attempts = ${payload.attempt},
+              held_attempts = held_attempts + ${payload.held === true ? 1 : 0},
               last_error = ${payload.error},
               next_attempt_at = ${payload.nextAttemptAt},
               updated_at = ${event.createdAt}
