@@ -173,7 +173,8 @@ const workerError = (operation: string) => (cause: unknown) =>
   new A2ADeliveryWorkerError({ operation, cause });
 
 /**
- * A held receiver queue waits for a person; recheck it slowly and never alarm on it.
+ * A held delivery waits for its receiver to be resumed or continued; recheck it slowly and
+ * never alarm on it.
  * Each recheck appends a ledger event, so the interval doubles from one minute to a
  * fifteen-minute cap: a long hold costs about four events an hour, not sixty.
  */
