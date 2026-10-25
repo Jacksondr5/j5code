@@ -7,11 +7,12 @@ import {
 } from "@t3tools/contracts/j5";
 import { removalConfirmation } from "@t3tools/client-runtime/j5/peering";
 import { Atom } from "effect/reactivity";
-import { PlusIcon } from "lucide-react";
+import { EllipsisIcon, PencilIcon, PlusIcon } from "lucide-react";
 import { useState } from "react";
 
 import { SettingsRow, SettingsSection } from "../../components/settings/settingsLayout";
 import { Button } from "../../components/ui/button";
+import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../../components/ui/menu";
 import { toastManager } from "../../components/ui/toast";
 import { requestConfirmDialog } from "../../confirmDialog";
 import { useNowMinute } from "../../hooks/useNowMinute";
@@ -20,7 +21,7 @@ import { formatEnvironmentQueryError } from "../../state/query";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { j5Environment, peersQueryAtom } from "../state";
 import { useVisibleRefresh } from "../useVisibleRefresh";
-import { PeerAddressDialog } from "./PeerAddressDialog";
+import { editableSides, PeerEditDialog } from "./PeerEditDialog";
 import { PeerIntroductionDialog } from "./PeerIntroductionDialog";
 import { pairTitle, peerPairs, type PeerPair, type PeerPairSide } from "./peerPairs";
 import { refreshPeers, removePeer, type PeerRecord } from "./peeringClient";
@@ -144,10 +145,7 @@ const otherSide = (pair: PeerPair, side: PeerPairSide) =>
 
 function PeerPairRow({ pair }: { readonly pair: PeerPair }) {
   const [removing, setRemoving] = useState(false);
-  // The side whose record of the other is being moved to a new address.
-  const [moving, setMoving] = useState<(PeerPairSide & { readonly record: PeerRecord }) | null>(
-    null,
-  );
+  const [editing, setEditing] = useState(false);
   // A side this client read and found a record on; the pair exists because there is one.
   const holder = pair.sides.find(
     (side): side is PeerPairSide & { readonly record: PeerRecord } => side.record !== null,
@@ -226,9 +224,6 @@ function PeerPairRow({ pair }: { readonly pair: PeerPair }) {
                 peer={side.record}
                 holder={side.label}
                 other={otherSide(pair, side).label}
-                onChangeAddress={
-                  side.managed ? () => setMoving({ ...side, record: side.record! }) : null
-                }
               />
             ) : side.read ? (
               <span key={side.environmentId} className="text-destructive">
@@ -240,19 +235,36 @@ function PeerPairRow({ pair }: { readonly pair: PeerPair }) {
       }
       control={
         <>
-          <Button size="sm" variant="ghost" disabled={removing} onClick={() => void remove()}>
-            {removing ? "Removing…" : "Remove"}
-          </Button>
-          {moving !== null ? (
-            <PeerAddressDialog
-              open
-              onOpenChange={(open) => {
-                if (!open) setMoving(null);
-              }}
-              holder={moving}
-              peer={moving.record}
-            />
-          ) : null}
+          <Menu>
+            <MenuTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="ghost-muted"
+                  size="icon-xs"
+                  disabled={removing}
+                  aria-label={`More actions for ${pairTitle(pair)}`}
+                />
+              }
+            >
+              <EllipsisIcon className="size-3.5" />
+            </MenuTrigger>
+            <MenuPopup align="end">
+              {editableSides(pair).length > 0 ? (
+                <>
+                  <MenuItem onClick={() => setEditing(true)}>
+                    <PencilIcon />
+                    Edit
+                  </MenuItem>
+                  <MenuSeparator />
+                </>
+              ) : null}
+              <MenuItem variant="destructive" onClick={() => void remove()}>
+                {removing ? "Removing…" : "Remove…"}
+              </MenuItem>
+            </MenuPopup>
+          </Menu>
+          {editing ? <PeerEditDialog pair={pair} onClose={() => setEditing(false)} /> : null}
         </>
       }
     />
@@ -275,13 +287,10 @@ function SideStatus({
   peer,
   holder,
   other,
-  onChangeAddress,
 }: {
   readonly peer: PeerRecord;
   readonly holder: string;
   readonly other: string;
-  /** Null when this client cannot manage the holder. */
-  readonly onChangeAddress: (() => void) | null;
 }) {
   // Re-rendered each minute, so "online" turns to "offline since" with no read: a peer that
   // stopped polling sends nothing to re-read for. The minute is up to 59 s behind, so the online
@@ -289,7 +298,9 @@ function SideStatus({
   // so the compiler's memoization recomputes the state on each tick.
   const state = peerPollState(peer, timeAtMinute(useNowMinute()));
   const reaches =
-    peer.linkMode !== "store" && peer.origin !== null ? `reaches ${other} at ${peer.origin}` : null;
+    peer.linkMode !== "store" && peer.origin !== null
+      ? `reaches ${other} at ${peer.origin} · `
+      : "";
   // The other server removed this one: nothing else on the line matters now.
   const ended = isPeerCredentialRejected(peer);
   // Once polling stopped, the last poll that worked says nothing about the peer.
@@ -314,12 +325,6 @@ function SideStatus({
     <>
       <span className={stopped ? "text-destructive" : undefined}>
         {holder}: {reaches}
-        {reaches !== null && onChangeAddress !== null ? (
-          <Button size="xs" variant="link" onClick={onChangeAddress}>
-            Change
-          </Button>
-        ) : null}
-        {reaches !== null ? " · " : null}
         {health}
         {peer.waitingCount > 0 && peer.oldestWaitingAt !== null
           ? ` · ${String(peer.waitingCount)} waiting · oldest ${formatRelativeTimeLabel(peer.oldestWaitingAt)}`

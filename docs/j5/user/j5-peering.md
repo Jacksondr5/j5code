@@ -33,10 +33,10 @@ A server's name is its computer name; on Windows, or where the machine has none,
 
 ## When a server's address changes
 
-If you move a server to a new address, such as a new port or hostname, its peers keep trying the old one, and **Peer servers** shows the error. Choose **Change** next to the old address. J5 checks where the other server can reach it, fills in the address it found, and switches only once the server answers there. Nothing waiting is cancelled and the peering itself is unchanged, so there's no need to remove it.
+If you move a server to a new address, such as a new port or hostname, its peers keep trying the old one, and **Peer servers** shows the error. Open the pair's menu (**⋯**) and choose **Edit**. J5 checks where each server can reach the other, fills in the address it found, and switches only once the server answers there. Nothing waiting is cancelled and the peering itself is unchanged, so there's no need to remove it.
 
 ## Checking and removing a peer
 
-**Peer servers** lists every peering among the servers this app manages, one row per pair. Each row shows how messages travel and whether anything is wrong on each side. If it says the other server ended this peering, choose **Remove**; to peer them again, use **Add peer**. If it names a server to update, update J5 there.
+**Peer servers** lists every peering among the servers this app manages, one row per pair. Each row shows how messages travel and whether anything is wrong on each side. If it says the other server ended this peering, choose **Remove…** from the pair's menu (**⋯**); to peer them again, use **Add peer**. If it names a server to update, update J5 there.
 
 Removing a peer on a server cancels every message waiting there for the other server and ends every open Exchange with its agents, and each agent on that server that was involved is told. If this app can manage both servers, **Remove** removes the peering on both. If it can't, J5 warns that the other server will keep its side, and its messages to this server's agents will fail until you remove it there too; choose **Remove here only** only if that's what you want. Removing a peer revokes the credential it holds here, so it can no longer deliver to this server. Revoking its _Peer:_ session under **Settings → Connections** also stops its messages, but keeps it listed. Peering again starts empty, and **Add peer** clears any old record the other server still holds. To change how messages travel between two servers, remove the peer on both servers, then peer them again.

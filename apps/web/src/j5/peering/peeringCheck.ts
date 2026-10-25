@@ -53,8 +53,14 @@ const reach = async (
   from: EnvironmentId,
   to: PeeringCheckSide,
   offered: OfferedAddresses,
+  current?: string,
 ): Promise<PeeringReach> => {
-  const candidates = peeringCandidates({ addresses: offered.addresses, clientUrl: to.clientUrl });
+  const offeredCandidates = peeringCandidates({
+    addresses: offered.addresses,
+    clientUrl: to.clientUrl,
+  });
+  const candidates =
+    current === undefined ? offeredCandidates : [...new Set([current, ...offeredCandidates])];
   const probes = await Promise.all(
     candidates.map((origin) =>
       probePeer(from, origin).catch((cause: unknown): PeerProbeResponse => ({
@@ -72,12 +78,16 @@ const reach = async (
   });
 };
 
-/** One direction: where `from` reaches `to`, for moving a peer `from` already records. */
+/**
+ * One direction, for a peer `from` already records: the address it uses now is tried first, so
+ * one that still works is kept, then the addresses the introduction would try.
+ */
 export async function runReachCheck(
   from: EnvironmentId,
   to: PeeringCheckSide,
+  current: string,
 ): Promise<PeeringReach> {
-  return reach(from, to, await offeredAddresses(to.server.environmentId));
+  return reach(from, to, await offeredAddresses(to.server.environmentId), current);
 }
 
 /** Both directions in parallel. Nothing is recorded; the check only informs the setup. */
