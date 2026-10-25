@@ -286,7 +286,7 @@ Each advance checks for new upstream reads of `T3CODE_HOME` or `.t3` paths and n
 
 **Consequences:** these are literal edits in a few hundred upstream files, so every upstream advance has to rebrand the strings upstream added or changed; the grep is in [Merging upstream](../process/upstream-merge.md) and `BRANDING.md` lists what stays. J5's artifact links and badges use upstream's theme tokens, which upstream's raw-color lint rule requires, so they follow every theme; artifact links stand apart from file links by their icon and label, not by a color of their own. Temporary branches named `t3/…`, `t3-…` or the older `t3code/…` are still recognized.
 
-**Decided:** Jackson, 2026-10-04, PR #445; the branch prefix against upstream's new `t3/`, 2026-10-08. Recorded in `BRANDING.md`.
+**Decided:** Jackson, 2026-10-04, PR #445; the branch prefix against upstream's new `t3/`, 2026-10-08; J5's colors stay on upstream's theme tokens, 2026-10-24 (#499). Recorded in `BRANDING.md`.
 
 #### D28. The `j5` command
 
