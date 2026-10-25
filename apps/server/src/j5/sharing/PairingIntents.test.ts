@@ -8,7 +8,11 @@ import * as Result from "effect/Result";
 
 import * as SessionStore from "../../auth/SessionStore.ts";
 import { Access } from "./Access.ts";
-import { J5_LINK_PAIRING_SUBJECT, PairingIntents } from "./PairingIntents.ts";
+import {
+  J5_LINK_PAIRING_SUBJECT,
+  PairingIntents,
+  recordConnectionsLinkCreator,
+} from "./PairingIntents.ts";
 import * as PersonAccess from "./PersonAccess.ts";
 import { accessLayer, device, isLive, person } from "./test-support/accessHarness.ts";
 
@@ -244,6 +248,7 @@ it.layer(accessLayer)("PairingIntents", (it) => {
         pairingLinkId: "pairing:connections",
         credential: "credential-connections",
         scopes: [AuthOrchestrationReadScope],
+        creatorLive: Effect.succeed(true),
       });
       const intent = yield* intents.intentOf("credential-connections");
       assert.strictEqual(intent?.personId, maker.personId);
@@ -255,8 +260,37 @@ it.layer(accessLayer)("PairingIntents", (it) => {
         pairingLinkId: "pairing:peer",
         credential: "credential-peer",
         scopes: [AuthOrchestrationReadScope],
+        creatorLive: Effect.succeed(true),
       });
       assert.isNull(yield* intents.intentOf("credential-peer"));
+    }),
+  );
+
+  it.effect("refuses a Connections link whose maker was removed while it was made", () =>
+    Effect.gen(function* () {
+      const intents = yield* PairingIntents;
+      const access = yield* Access;
+      const maker = yield* person("Leaving", [{ scope: { kind: "server" }, level: "owner" }]);
+      const laptop = yield* device(maker.personId, LEVEL_PERMISSIONS.owner);
+      // Upstream has minted the link; the maker is removed before J5 records whose it is.
+      yield* access.removePerson(maker.personId);
+      const refused = yield* recordConnectionsLinkCreator({
+        creator: laptop.identity,
+        link: { id: "pairing:late", credential: "credential-late" },
+        scopes: LEVEL_PERMISSIONS.owner,
+      }).pipe(Effect.flip);
+      // Upstream's handler revokes a link whose maker is not recorded.
+      assert.strictEqual(refused.reason, "no_person");
+      assert.isNull(yield* intents.intentOf("credential-late"));
+
+      // A device no one has claimed still makes links, recorded as no one's.
+      const unclaimed = yield* device(null, LEVEL_PERMISSIONS.owner);
+      yield* recordConnectionsLinkCreator({
+        creator: unclaimed.identity,
+        link: { id: "pairing:unclaimed", credential: "credential-unclaimed" },
+        scopes: LEVEL_PERMISSIONS.owner,
+      });
+      assert.isNull(yield* intents.intentOf("credential-unclaimed"));
     }),
   );
 });
