@@ -120,6 +120,7 @@ import {
   manualLayer as deliveryWorkerLayer,
 } from "./DeliveryWorker.ts";
 import { A2AHumanInbox, layer as humanInboxLayer } from "./HumanInboxService.ts";
+import { A2ASilenceDetector, manualLayer as silenceDetectorLayer } from "./SilenceDetector.ts";
 import { layer as peerRegistryLayer } from "./PeerRegistryService.ts";
 import {
   A2AHomeRegistrar,
@@ -3615,6 +3616,138 @@ it.effect.each(["upstream", "a person"] as const)(
         );
       }).pipe(Effect.provide(makeTestLayer(harness)));
     }),
+);
+
+/** The delivery seam with the silence detector, which wakes held deliveries when a run starts. */
+const makeWakeTestLayer = (harness: DeliveryHarness) =>
+  silenceDetectorLayer.pipe(
+    Layer.provideMerge(crewInstanceLayer),
+    Layer.provideMerge(makeLifecycleTestLayer(harness)),
+    Layer.provideMerge(serverConfigLayer),
+    Layer.provideMerge(NodeServices.layer),
+  );
+
+/** A person continues a usage-limited target; returns the stored event of the run it started. */
+const continueByPerson = Effect.fn("A2AIntegration.continueByPerson")(function* (target: {
+  readonly projectId: ProjectId;
+  readonly threadId: ThreadId;
+}) {
+  const started = yield* (yield* EventSinkV2).stream({ threadId: target.threadId }).pipe(
+    Stream.filter(
+      (stored) =>
+        (stored.event.type === "run.created" || stored.event.type === "run.updated") &&
+        stored.event.payload.status === "starting",
+    ),
+    Stream.runHead,
+    Effect.forkChild({ startImmediately: true }),
+  );
+  yield* (yield* ThreadManagementService).sendToThread({
+    projectId: target.projectId,
+    threadId: target.threadId,
+    commandId: CommandId.make(`command:continue:${target.threadId}`),
+    messageId: MessageId.make(`message:continue:${target.threadId}`),
+    text: "Carry on.",
+    attachments: [],
+    mode: "auto",
+    createdBy: "user",
+    creationSource: "web",
+  });
+  return Option.getOrThrow(yield* Fiber.join(started));
+});
+
+const queuePositionOf = Effect.fn("A2AIntegration.queuePositionOf")(function* (
+  threadId: ThreadId,
+  messageId: LedgerMessageId,
+) {
+  const run = (yield* (yield* ThreadManagementService).getThreadProjection(threadId)).runs.find(
+    (candidate) => candidate.userMessageId === deliveryMessageId(messageId),
+  );
+  return run?.status === "queued" ? run.queuePosition : undefined;
+});
+
+/** A target stopped on a usage limit and a caller in its project that sends it updates. */
+const limitedTargetWithCaller = Effect.fn("A2AIntegration.limitedTargetWithCaller")(function* (
+  harness: DeliveryHarness,
+  suffix: string,
+) {
+  const send = yield* A2ASendService;
+  const target = yield* seedTarget(suffix);
+  const caller = yield* seedTarget(
+    `${suffix}-caller`,
+    modelSelection.model,
+    undefined,
+    target.ledgerProjectId,
+  );
+  yield* idleOnUsageLimit(harness, target, false);
+  const sendUpdate = (name: string) =>
+    send.send({
+      commandId: CommCommandId.make(`command:j5-a2a-delivery-${suffix}-${name}`),
+      senderThreadId: caller.threadId,
+      to: target.receiverId,
+      message: `Update ${name}`,
+      acceptedAt: "2026-09-24T00:00:00.000Z",
+    });
+  return { target, sendUpdate };
+});
+
+it.effect("hands held messages over in send order, together, as soon as the agent continues", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const worker = yield* A2ADeliveryWorker;
+      const { target, sendUpdate } = yield* limitedTargetWithCaller(harness, "wake-order");
+
+      // A is held and rechecked until its next recheck is eight minutes out.
+      const a = yield* sendUpdate("a");
+      yield* worker.drain;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        yield* TestClock.adjust(heldQueueRecheckMs(attempt));
+        yield* worker.drain;
+      }
+      // B, sent later, is held with its first recheck a minute out: before A's.
+      const b = yield* sendUpdate("b");
+      yield* worker.drain;
+      assert.isUndefined(yield* queuePositionOf(target.threadId, a.messageId));
+      assert.isUndefined(yield* queuePositionOf(target.threadId, b.messageId));
+
+      const started = yield* continueByPerson(target);
+      yield* (yield* A2ASilenceDetector).handleStoredEvent(started);
+      // No time passes: the wake hands both over now, A first.
+      yield* worker.drain;
+      const positionA = yield* queuePositionOf(target.threadId, a.messageId);
+      const positionB = yield* queuePositionOf(target.threadId, b.messageId);
+      assert.isDefined(positionA);
+      assert.isDefined(positionB);
+      assert.isBelow(positionA!, positionB!);
+    }).pipe(Effect.provide(makeWakeTestLayer(harness)));
+  }),
+);
+
+it.effect("keeps a message sent just after the agent continues behind the ones held for it", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const worker = yield* A2ADeliveryWorker;
+      const { target, sendUpdate } = yield* limitedTargetWithCaller(harness, "wake-after-lift");
+      const a = yield* sendUpdate("a");
+      yield* worker.drain;
+
+      const started = yield* continueByPerson(target);
+      // Sent between the lift and the wake: it waits behind A instead of overtaking it.
+      const c = yield* sendUpdate("c");
+      yield* worker.drain;
+      assert.isUndefined(yield* queuePositionOf(target.threadId, a.messageId));
+      assert.isUndefined(yield* queuePositionOf(target.threadId, c.messageId));
+
+      yield* (yield* A2ASilenceDetector).handleStoredEvent(started);
+      yield* worker.drain;
+      const positionA = yield* queuePositionOf(target.threadId, a.messageId);
+      const positionC = yield* queuePositionOf(target.threadId, c.messageId);
+      assert.isDefined(positionA);
+      assert.isDefined(positionC);
+      assert.isBelow(positionA!, positionC!);
+    }).pipe(Effect.provide(makeWakeTestLayer(harness)));
+  }),
 );
 
 it.effect(

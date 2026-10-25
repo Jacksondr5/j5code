@@ -85,11 +85,12 @@ export class A2ADeliveryHeldError extends Schema.TaggedError<A2ADeliveryHeldErro
   "A2ADeliveryHeldError",
   {
     participantId: Schema.String,
-    runId: Schema.String,
+    /** The held or limited run it waits on, or the earlier message it waits behind. */
+    waitingOn: Schema.String,
   },
 ) {
   override get message(): string {
-    return `${this.participantId} holds this message until someone resumes its queue or continues it past its usage limit; it waits on run ${this.runId}, not delivered.`;
+    return `${this.participantId} holds this message, not delivered: it waits on ${this.waitingOn}.`;
   }
 }
 
@@ -651,7 +652,10 @@ export const live: Layer.Layer<
           const heldRun = (run: OrchestrationV2Run | undefined) =>
             run?.status === "queued" && run.queueHeld === true
               ? Effect.fail(
-                  new A2ADeliveryHeldError({ participantId: input.receiverId, runId: run.id }),
+                  new A2ADeliveryHeldError({
+                    participantId: input.receiverId,
+                    waitingOn: `run ${run.id}`,
+                  }),
                 )
               : Effect.void;
           // Upstream starts a message sent to an idle thread at once, even past a held queue, and
@@ -674,7 +678,7 @@ export const live: Layer.Layer<
                 ? Effect.fail(
                     new A2ADeliveryHeldError({
                       participantId: input.receiverId,
-                      runId: heldQueueRun?.id ?? hold.run.id,
+                      waitingOn: `run ${heldQueueRun?.id ?? hold.run.id}`,
                     }),
                   )
                 : orchestrator.dispatch({
