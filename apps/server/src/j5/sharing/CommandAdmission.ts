@@ -16,6 +16,7 @@ import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import type { CrewSeatArchiveGuard } from "../a2a/crewSeatArchiveGuard.ts";
+import { claimPersonQueuedEdit } from "../a2a/queuedEdits.ts";
 import {
   PersonAccess,
   type PersonAccessStorageError,
@@ -251,9 +252,21 @@ export const makeCommandAdmission = (
     );
 
     const person = reachPersonId(reach);
+    // A person's edit of a queued agent message is recorded in the ledger under their name
+    // (`queuedEdits.ts`). A failure to claim it names no one and does not stop the edit.
+    const claimEdit = (command: OrchestrationV2Command) =>
+      person === null || command.type !== "queued-run.edit"
+        ? Effect.void
+        : claimPersonQueuedEdit(command, person).pipe(
+            Effect.provideService(SqlClient.SqlClient, sql),
+            Effect.catch((cause) =>
+              Effect.logError("J5 could not record who edited a queued message", { cause }),
+            ),
+          );
     const admit: CommandAdmission["admit"] = (command) =>
       checked(command).pipe(
         Effect.flatMap((admitted) => conversation.admit(person, admitted)),
+        Effect.tap(claimEdit),
         Effect.withSpan("j5.sharing.commandAdmission.admit"),
       );
 

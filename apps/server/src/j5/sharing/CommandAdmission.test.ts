@@ -6,6 +6,7 @@ import {
 } from "@t3tools/contracts";
 import { LEVEL_PERMISSIONS } from "@t3tools/contracts/j5";
 import * as Effect from "effect/Effect";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import { makeCommandAdmission } from "./CommandAdmission.ts";
 import { OTHER_PROJECT, PROJECT, device, person, thread } from "./test-support/accessHarness.ts";
@@ -147,6 +148,47 @@ it.layer(conversationLayer)("CommandAdmission", (it) => {
         );
       assert.strictEqual(yield* launch(PROJECT), "admitted");
       assert.strictEqual(yield* launch(OTHER_PROJECT), "refused");
+    }),
+  );
+
+  it.effect("names the person who edits a queued agent message, for the ledger", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const threadId = yield* thread("thread:queued-edits");
+      const editor = yield* person("Queue editor", [
+        { scope: { kind: "server" }, level: "collaborator" },
+      ]);
+      const session = (yield* device(editor.personId, LEVEL_PERMISSIONS.collaborator)).identity;
+      const queue = (ordinal: number, runId: string, messageId: string) => sql`
+        INSERT INTO orchestration_v2_projection_runs (
+          run_id, thread_id, ordinal, provider, status, requested_at, payload_json
+        ) VALUES (
+          ${runId}, ${threadId}, ${ordinal}, 'codex', 'queued', '2026-10-24T00:00:00.000Z',
+          ${JSON.stringify({ userMessageId: messageId, startedAt: null })}
+        )
+      `;
+      yield* queue(1, "run:agent", "message:j5:a2a:delivery:message%3Aagent");
+      yield* queue(2, "run:typed", "message:typed");
+      const edit = (commandId: string, runId: string) =>
+        command({
+          type: "queued-run.edit",
+          commandId: CommandId.make(commandId),
+          threadId,
+          runId,
+          text: "Edited",
+        });
+      assert.strictEqual(
+        yield* admitted(session, edit("command:edit-agent", "run:agent")),
+        "admitted",
+      );
+      assert.strictEqual(
+        yield* admitted(session, edit("command:edit-typed", "run:typed")),
+        "admitted",
+      );
+      assert.deepStrictEqual(
+        yield* sql`SELECT command_id, editor_id FROM j5_a2a_queued_edit_claim`,
+        [{ command_id: "command:edit-agent", editor_id: editor.personId }],
+      );
     }),
   );
 });
