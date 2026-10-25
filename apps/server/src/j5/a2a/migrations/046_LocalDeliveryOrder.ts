@@ -29,6 +29,9 @@ export default Effect.gen(function* () {
     WHERE receiver_environment_id IS NULL AND status IN ('pending', 'retry_scheduled')
   `;
   yield* sql`ALTER TABLE j5_a2a_delivery ADD COLUMN held_attempts INTEGER NOT NULL DEFAULT 0`;
+  // Whether the latest attempt was held, so a wake retries it early and leaves a row backing off
+  // after a transport failure to its schedule. Rows from before this wait for their recheck.
+  yield* sql`ALTER TABLE j5_a2a_delivery ADD COLUMN last_held INTEGER NOT NULL DEFAULT 0`;
   // A row already waiting may have spent attempts on rechecks while held, which earlier counted
   // toward its alarm. It starts with a fresh transport budget instead.
   yield* sql`

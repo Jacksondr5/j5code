@@ -767,8 +767,10 @@ const makeLayer = (daemon: boolean) =>
       const runOnceEffect = runOnceRaw.pipe(Effect.mapError(workerError("run one delivery")));
       const runOnce: A2ADeliveryWorkerShape["runOnce"] = drainPermit.withPermit(runOnceEffect);
 
-      // Receivers that stopped being held. Their waiting deliveries are attempted at once, in
-      // send order, instead of on each one's own recheck.
+      // Receivers that stopped being held. Their held deliveries are attempted at once, in send
+      // order, instead of on each one's own recheck. One backing off after a transport failure
+      // keeps its schedule, so a busy receiver's wakes don't spend its retries; the guard holds
+      // the deliveries behind it meanwhile.
       const wokenReceivers = new Set<string>();
       const wake = (participantId: string) =>
         Effect.sync(() => wokenReceivers.add(participantId)).pipe(
@@ -782,6 +784,7 @@ const makeLayer = (daemon: boolean) =>
           ? wake(row.receiver_id)
           : Effect.void;
       const runWokenEffect = Effect.gen(function* () {
+        const now = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
         const receivers = [...wokenReceivers];
         wokenReceivers.clear();
         const completed: Array<DeliveryMilestone> = [];
@@ -792,6 +795,7 @@ const makeLayer = (daemon: boolean) =>
             WHERE receiver_id = ${receiverId}
               AND receiver_environment_id IS NULL
               AND status IN ('pending', 'retry_scheduled')
+              AND (last_held = 1 OR next_attempt_at IS NULL OR next_attempt_at <= ${now})
             ORDER BY accept_order
           `;
           for (const row of rows) completed.push(yield* attemptRow(row));

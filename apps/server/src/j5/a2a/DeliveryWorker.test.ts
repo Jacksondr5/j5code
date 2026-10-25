@@ -864,6 +864,54 @@ it.effect("tells the sender how many times the transport failed, not how often i
   }),
 );
 
+const secondReceiver: AgentParticipant = {
+  kind: "agent",
+  id: ParticipantId.make("agent:delivery-second-receiver"),
+  threadId: ThreadId.make("thread:delivery-second-receiver"),
+};
+
+it.effect("wakes a held delivery early but leaves one backing off after a transport failure", () =>
+  Effect.gen(function* () {
+    const script = yield* Ref.make<ReadonlyMap<string, ReadonlyArray<ScriptedStep>>>(
+      new Map([
+        ["Backing off", ["fail"]],
+        ["Held", ["held"]],
+      ]),
+    );
+    const delivered = yield* Ref.make<ReadonlyArray<string>>([]);
+    yield* Effect.gen(function* () {
+      yield* seedTwoProjects();
+      yield* join(LedgerProjectId.make("project:delivery:busy"), secondReceiver, "second-receiver");
+      const worker = yield* A2ADeliveryWorker;
+      const sql = yield* SqlClient.SqlClient;
+      const backingOff = yield* sendAt(sender, "Backing off", "2026-08-16T12:00:01.000Z");
+      yield* (yield* A2ASendService).send({
+        commandId: CommCommandId.make("command:delivery:order:held-second"),
+        senderThreadId: sender.threadId,
+        to: secondReceiver.id,
+        message: "Held",
+        acceptedAt: "2026-08-16T12:00:01.000Z",
+      });
+      yield* worker.drain;
+      assert.deepStrictEqual(yield* Ref.get(delivered), []);
+
+      // Both receivers wake before the failed delivery's retry is due.
+      yield* worker.wake(receiver.id);
+      yield* worker.wake(secondReceiver.id);
+      yield* worker.drain;
+      assert.deepStrictEqual(yield* Ref.get(delivered), ["Held"]);
+      const attempts = yield* sql<{ readonly attempts: number }>`
+        SELECT attempts FROM j5_a2a_delivery WHERE message_id = ${backingOff.messageId}
+      `;
+      assert.equal(attempts[0]?.attempts, 1, "a wake does not spend a transport retry");
+
+      yield* TestClock.adjust("250 millis");
+      yield* worker.drain;
+      assert.deepStrictEqual(yield* Ref.get(delivered), ["Held", "Backing off"]);
+    }).pipe(Effect.provide(makeTestLayer(scriptedTransport(script, delivered))));
+  }),
+);
+
 it.effect("hands the next message over as soon as the one it waited behind alarms", () =>
   Effect.gen(function* () {
     const script = yield* Ref.make<ReadonlyMap<string, ReadonlyArray<ScriptedStep>>>(
