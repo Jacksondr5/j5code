@@ -4,14 +4,15 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import { ServerConfig } from "../../config.ts";
 import { ensureLocalOperatorHumanPerson } from "../a2a/HumanPersonRegistry.ts";
 import { Access } from "./Access.ts";
 import { checkedPersonName } from "./personNames.ts";
 import { PersonAccess } from "./PersonAccess.ts";
 
 /**
- * Set by the dev runner (`scripts/lib/j5-dev-owner.ts`), never by a released server. Blank leaves
- * the first owner unnamed, which is how the live-test rig keeps the naming question testable.
+ * Set by the dev runner (`scripts/lib/j5-dev-owner.ts`). Blank leaves the first owner unnamed,
+ * which is how the live-test rig keeps the naming question testable.
  */
 const DevOwnerName = Config.String("J5CODE_DEV_OWNER_NAME").pipe(Config.option);
 
@@ -23,6 +24,9 @@ const DevOwnerName = Config.String("J5CODE_DEV_OWNER_NAME").pipe(Config.option);
  */
 export const nameDevOwnerAtStartup = Layer.effectDiscard(
   Effect.gen(function* () {
+    // The variable reaches every process a dev server starts, a released server run from its
+    // terminal included, so only a server running from the dev runner reads it.
+    if ((yield* ServerConfig).devUrl === undefined) return;
     const configured = yield* DevOwnerName;
     if (Option.isNone(configured) || configured.value.trim() === "") return;
     const displayName = yield* checkedPersonName(configured.value);
