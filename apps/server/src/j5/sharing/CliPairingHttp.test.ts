@@ -11,7 +11,9 @@ import {
 } from "@t3tools/contracts";
 import { J5_CLI_PAIRING_PATH, type PersonLevel } from "@t3tools/contracts/j5";
 import * as Context from "effect/Context";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
@@ -25,6 +27,7 @@ import {
 } from "effect/http";
 
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
+import { RuntimeFileActivationDelay, runtimeFileActivation } from "../../cli/pair.ts";
 import * as ServerConfig from "../../config.ts";
 import * as ProcessRunner from "../../processRunner.ts";
 import { acquireServerOwnership } from "../../serverOwnership.ts";
@@ -47,13 +50,49 @@ const homeConfig = ServerConfig.ServerConfig.pipe(
   Effect.provide(ServerConfig.layerTest(process.cwd(), { prefix: "j5-cli-pairing-http-" })),
 );
 
-/** The running server for the home in `config`: the route, its auth and its people services. */
-const startServer = Effect.fn("test.startServer")(function* (
+/** Holds the home's lock as a server does, and publishes where it listens when told. */
+const holdHome = Effect.fn("test.holdHome")(function* (
   config: ServerConfig.ServerConfig["Service"],
 ) {
   const ownership = yield* acquireServerOwnership(config.serverRuntimeStatePath).pipe(
     Effect.provide(ProcessRunner.layer),
   );
+  return (port: number, pid?: number) =>
+    makePersistedServerRuntimeState({
+      config: { host: "127.0.0.1", devUrl: undefined },
+      port,
+    }).pipe(
+      Effect.flatMap((state) => ownership.publish(pid === undefined ? state : { ...state, pid })),
+      Effect.orDie,
+      Effect.provide(NodeServices.layer),
+    );
+});
+
+/** A plain HTTP server on a loopback port, closed with the test's scope. */
+const listen = (handler: NodeHttp.RequestListener) =>
+  Effect.acquireRelease(
+    Effect.callback<NodeHttp.Server>((resume) => {
+      const server = NodeHttp.createServer(handler);
+      server.listen(0, "127.0.0.1", () => resume(Effect.succeed(server)));
+    }),
+    (server) =>
+      Effect.sync(() => {
+        server.closeAllConnections();
+        server.close();
+      }),
+  ).pipe(
+    Effect.map((server) => {
+      const address = server.address();
+      return typeof address === "object" && address !== null ? address.port : 0;
+    }),
+  );
+
+/** The running server for the home in `config`: the route, its auth and its people services. */
+const startServer = Effect.fn("test.startServer")(function* (
+  config: ServerConfig.ServerConfig["Service"],
+  options: { readonly published: boolean } = { published: true },
+) {
+  const publish = yield* holdHome(config);
   const services = yield* Layer.build(
     HttpRouter.serve(cliPairingHttpRouteLayer, {
       disableListenLog: true,
@@ -74,13 +113,10 @@ const startServer = Effect.fn("test.startServer")(function* (
   );
   const address = Context.get(services, HttpServer.HttpServer).address;
   const port = "port" in address ? address.port : 0;
-  yield* ownership.publish(
-    yield* makePersistedServerRuntimeState({
-      config: { host: "127.0.0.1", devUrl: undefined },
-      port,
-    }),
-  );
+  if (options.published) yield* publish(port);
   return {
+    port,
+    publish,
     origin: `http://127.0.0.1:${String(port)}`,
     auth: Context.get(services, EnvironmentAuth.EnvironmentAuth),
     people: Context.get(services, PersonAccess),
@@ -122,15 +158,32 @@ const pairFromCli = (
   config: ServerConfig.ServerConfig["Service"],
   input: { readonly person?: string; readonly level?: PersonLevel },
 ) =>
-  pairingLinkFromCli({
-    config,
-    minimumLogLevel: "Error",
-    flags: cliFlags(input),
-    scopes: { scopes: AuthStandardClientScopes, given: false },
-    ttl: Option.none(),
-    label: Option.some("j5 pair"),
-    withoutPerson: "refuse",
+  Effect.gen(function* () {
+    return yield* pairingLinkFromCli({
+      config,
+      minimumLogLevel: "Error",
+      flags: cliFlags(input),
+      scopes: { scopes: AuthStandardClientScopes, given: false },
+      ttl: Option.none(),
+      label: Option.some("j5 pair"),
+      withoutPerson: "refuse",
+      activation: yield* runtimeFileActivation,
+    });
   });
+
+/** Records each activation wait, running `then` for the n-th. */
+const activationWaits = (then: (n: number) => Effect.Effect<void> = () => Effect.void) => {
+  const waits: Array<number> = [];
+  return {
+    waits,
+    provide: Effect.provideService(RuntimeFileActivationDelay, (duration: Duration.Duration) =>
+      Effect.suspend(() => {
+        waits.push(Duration.toMillis(duration));
+        return then(waits.length);
+      }),
+    ),
+  };
+};
 
 const cliSessionsLeft = (auth: EnvironmentAuth.EnvironmentAuth["Service"]) =>
   auth
@@ -206,15 +259,16 @@ it.layer(NodeServices.layer)("j5 pair with a server running", (it) => {
   it.effect("writes nothing behind a server that holds the home but does not answer", () =>
     Effect.gen(function* () {
       const config = yield* homeConfig;
-      const ownership = yield* acquireServerOwnership(config.serverRuntimeStatePath).pipe(
-        Effect.provide(ProcessRunner.layer),
-      );
-      // Still starting: it has not said where it listens.
+      const publish = yield* holdHome(config);
+      // Never says where it listens, however long `j5 pair` waits.
+      const activation = activationWaits();
       const starting = yield* pairFromCli(config, { person: "Priya", level: "viewer" }).pipe(
+        activation.provide,
         Effect.flip,
       );
       assert.strictEqual(starting._tag, "PairingServerUnreachableError");
       assert.include(starting.message, "has not said where it listens");
+      assert.deepStrictEqual(activation.waits, [1_000, 1_000, 1_000]);
 
       // Where it said it listens, nothing does any more.
       const port = yield* Layer.build(
@@ -224,12 +278,7 @@ it.layer(NodeServices.layer)("j5 pair with a server running", (it) => {
         Effect.map((address) => ("port" in address ? address.port : 0)),
         Effect.scoped,
       );
-      yield* ownership.publish(
-        yield* makePersistedServerRuntimeState({
-          config: { host: "127.0.0.1", devUrl: undefined },
-          port,
-        }),
-      );
+      yield* publish(port);
       const silent = yield* pairFromCli(config, { person: "Priya", level: "viewer" }).pipe(
         Effect.flip,
       );
@@ -241,6 +290,101 @@ it.layer(NodeServices.layer)("j5 pair with a server running", (it) => {
         (yield* people.listPeople).some((record) => record.person.displayName === "Priya"),
       );
       assert.deepStrictEqual(yield* cliSessionsLeft(auth), []);
+    }),
+  );
+
+  it.effect("waits for a starting server to say where it listens, past a crashed one's file", () =>
+    Effect.gen(function* () {
+      const config = yield* homeConfig;
+      const server = yield* startServer(config, { published: false });
+      // Left by a server that died: no process has this pid.
+      yield* server.publish(1, 2 ** 31 - 1);
+      const activation = activationWaits((n) =>
+        n === 2 ? server.publish(server.port) : Effect.void,
+      );
+
+      const made = yield* pairFromCli(config, { person: "Priya", level: "viewer" }).pipe(
+        activation.provide,
+      );
+      assert.strictEqual(
+        made.said,
+        "Added Priya (Viewer on the server), and made a link for them.",
+      );
+      assert.deepStrictEqual(activation.waits, [1_000, 1_000]);
+      assert.isTrue(
+        (yield* server.people.listPeople).some((record) => record.person.displayName === "Priya"),
+      );
+    }),
+  );
+
+  it.effect("gives up on a server that stalls partway through its answer", () =>
+    Effect.gen(function* () {
+      const config = yield* homeConfig;
+      const publish = yield* holdHome(config);
+      const port = yield* listen((request, response) => {
+        request.resume();
+        request.on("end", () => {
+          response.writeHead(200, { "content-type": "application/json", "content-length": "100" });
+          response.write('{"id":');
+        });
+      });
+      yield* publish(port);
+      // Only the body is left to read once the CLI holds the answer's headers.
+      const headers = Promise.withResolvers<void>();
+      const fetch = yield* FetchHttpClient.Fetch;
+      const pairing = yield* pairFromCli(config, { person: "Priya", level: "viewer" }).pipe(
+        Effect.provideService(FetchHttpClient.Fetch, (url, init) =>
+          fetch(url, init).then((response) => {
+            headers.resolve();
+            return response;
+          }),
+        ),
+        Effect.flip,
+        Effect.forkChild,
+      );
+      yield* Effect.promise(() => headers.promise);
+      yield* TestClock.adjust(Duration.seconds(10));
+
+      const stalled = yield* Fiber.join(pairing);
+      assert.strictEqual(stalled._tag, "PairingServerUnconfirmedError");
+      const { auth } = yield* homeServices(config);
+      assert.deepStrictEqual(yield* cliSessionsLeft(auth), []);
+    }),
+  );
+
+  it.effect("says it cannot tell when the answer is lost after the server made the change", () =>
+    Effect.gen(function* () {
+      const config = yield* homeConfig;
+      const server = yield* startServer(config);
+      // Passes the request on, then drops the connection instead of the server's answer.
+      const proxy = yield* listen((request, response) => {
+        const forwarded = NodeHttp.request(
+          {
+            host: "127.0.0.1",
+            port: server.port,
+            path: request.url,
+            method: request.method,
+            headers: request.headers,
+          },
+          (answer) => {
+            answer.resume();
+            answer.on("end", () => response.socket?.destroy());
+          },
+        );
+        request.pipe(forwarded);
+      });
+      yield* server.publish(proxy);
+
+      const lost = yield* pairFromCli(config, { person: "Priya", level: "viewer" }).pipe(
+        Effect.flip,
+      );
+      assert.strictEqual(lost._tag, "PairingServerUnconfirmedError");
+      assert.include(lost.message, "may have added the person");
+      assert.include(lost.message, "j5 auth pairing list");
+      assert.isTrue(
+        (yield* server.people.listPeople).some((record) => record.person.displayName === "Priya"),
+      );
+      assert.deepStrictEqual(yield* cliSessionsLeft(server.auth), []);
     }),
   );
 

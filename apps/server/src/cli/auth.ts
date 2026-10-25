@@ -16,6 +16,7 @@ import {
 } from "../cliAuthFormat.ts";
 import * as ServerConfig from "../config.ts";
 import { authScopesFlag } from "./authScopes.ts";
+import { runtimeFileActivation } from "./pair.ts";
 import { cliEnvironmentAuth as j5CliEnvironmentAuth } from "../j5/sharing/AccessGate.ts";
 import {
   pairingLinkFromCli as j5PairingLinkFromCli,
@@ -111,6 +112,7 @@ const pairingCreateCommand = Command.make("create", {
         ttl: flags.ttl,
         label: flags.label,
         withoutPerson: "ask",
+        activation: yield* runtimeFileActivation,
       });
       yield* flags.json ? Console.error(said) : Console.log(said);
       const output = formatIssuedPairingCredential(issued, {

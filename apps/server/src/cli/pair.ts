@@ -68,6 +68,15 @@ export const RuntimeFileActivationDelay = Context.Reference<
   defaultValue: () => Effect.sleep,
 });
 
+// J5: a pairing link made through a starting server waits the same way (FORK.md case 79).
+export const runtimeFileActivation = Effect.gen(function* () {
+  return {
+    attempts: RUNTIME_FILE_RETRY_ATTEMPTS,
+    delay: RUNTIME_FILE_RETRY_DELAY,
+    wait: yield* RuntimeFileActivationDelay,
+  };
+});
+
 // deriveServerPaths only checks devUrl for undefined-ness when picking the
 // dev-vs-userdata state directory; the value itself is not used.
 const DEV_VARIANT_PLACEHOLDER_URL = new URL("http://localhost");
@@ -491,6 +500,7 @@ const mintPairingLink = Effect.fn("pair.mintPairingLink")(function* (input: {
     ttl: input.ttl,
     label: Option.orElse(input.label, () => Option.some("j5 pair")),
     withoutPerson: "refuse",
+    activation: yield* runtimeFileActivation,
   });
 });
 

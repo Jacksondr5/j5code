@@ -29,7 +29,7 @@ import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
 import * as ServerConfig from "../../config.ts";
 import * as ProcessRunner from "../../processRunner.ts";
 import { ServerAlreadyRunningError, acquireServerOwnership } from "../../serverOwnership.ts";
-import { readPersistedServerRuntimeState } from "../../serverRuntimeState.ts";
+import { isProcessAlive, readPersistedServerRuntimeState } from "../../serverRuntimeState.ts";
 import type { ParticipantId } from "../a2a/contracts.ts";
 import { Access } from "./Access.ts";
 import { cliEnvironmentAuth } from "./AccessGate.ts";
@@ -284,7 +284,7 @@ export const CLI_SESSION_SUBJECT = "cli-issued-session";
 const CLI_SESSION_TTL = Duration.minutes(2);
 const LIVE_SERVER_TIMEOUT = Duration.seconds(10);
 
-/** A server holds the home but did not answer, so nothing was written. */
+/** A server holds the home but could not be reached, so nothing was written. */
 export class PairingServerUnreachableError extends Schema.TaggedError<PairingServerUnreachableError>()(
   "PairingServerUnreachableError",
   { origin: Schema.NullOr(Schema.String), cause: Schema.optional(Schema.Defect()) },
@@ -294,6 +294,23 @@ export class PairingServerUnreachableError extends Schema.TaggedError<PairingSer
       ? "A J5 Code server holds this home but has not said where it listens yet, so nothing was written. Retry once it has started."
       : `A J5 Code server is running for this home at ${this.origin}, but it did not answer, so nothing was written. Retry once it answers, or stop it.`;
   }
+}
+
+/** The running server was asked, but its answer never arrived, so it may have made the change. */
+export class PairingServerUnconfirmedError extends Schema.TaggedError<PairingServerUnconfirmedError>()(
+  "PairingServerUnconfirmedError",
+  { origin: Schema.String, cause: Schema.optional(Schema.Defect()) },
+) {
+  override get message(): string {
+    return `The server at ${this.origin} was asked to make the link, but its answer did not arrive, so it may have added the person and made the link. Check the People page or \`j5 auth pairing list\` before you retry.`;
+  }
+}
+
+/** Upstream's bounded wait for a starting server to say where it listens (`cli/pair.ts`). */
+export interface RuntimeFileActivation {
+  readonly attempts: number;
+  readonly delay: Duration.Duration;
+  readonly wait: (duration: Duration.Duration) => Effect.Effect<void>;
 }
 
 /** The running server could not make the link, for a reason that is not one of the flags'. */
@@ -308,6 +325,32 @@ export class PairingServerError extends Schema.TaggedError<PairingServerError>()
 
 const decodeResponse = Schema.decodeUnknownEffect(CliPairingResponse);
 const isServerAlreadyRunning = Schema.is(ServerAlreadyRunningError);
+
+// Errors that mean the request never reached the server: anything else may come after it did.
+const NOT_CONNECTED_CODES = new Set([
+  "ECONNREFUSED",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "ENOTFOUND",
+  "UND_ERR_CONNECT_TIMEOUT",
+]);
+const neverConnected = (cause: unknown): boolean => {
+  for (let at = cause, depth = 0; typeof at === "object" && at !== null && depth < 4; depth += 1) {
+    if ("code" in at && typeof at.code === "string" && NOT_CONNECTED_CODES.has(at.code)) {
+      return true;
+    }
+    at = "cause" in at ? at.cause : undefined;
+  }
+  return false;
+};
+
+const parseJson = (text: string): unknown => {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+};
 
 const field = (body: unknown, name: string) =>
   typeof body === "object" && body !== null && name in body
@@ -331,13 +374,28 @@ const pairThroughServer = (input: {
           HttpClientRequest.acceptJson,
           HttpClientRequest.bodyJson(input.request),
         );
-        const response = yield* client.execute(request).pipe(Effect.timeout(LIVE_SERVER_TIMEOUT));
-        const body = yield* response.json.pipe(Effect.orElseSucceed(() => null));
-        return { status: response.status, body };
+        // The timeout covers the body too: a server that stalls mid-answer must not hold the CLI,
+        // or its session, open.
+        return yield* Effect.gen(function* () {
+          const response = yield* client.execute(request);
+          // An older server's 404 need not be JSON.
+          const body = parseJson(yield* response.text);
+          return { status: response.status, body };
+        }).pipe(
+          Effect.timeout(LIVE_SERVER_TIMEOUT),
+          Effect.mapError((cause) =>
+            cause._tag === "HttpClientError" &&
+            cause.reason._tag === "TransportError" &&
+            neverConnected(cause.reason.cause)
+              ? new PairingServerUnreachableError({ origin: input.origin, cause })
+              : new PairingServerUnconfirmedError({ origin: input.origin, cause }),
+          ),
+        );
       }).pipe(
-        Effect.mapError(
-          (cause) => new PairingServerUnreachableError({ origin: input.origin, cause }),
-        ),
+        Effect.catchTags({
+          HttpBodyError: (cause) =>
+            Effect.fail(new PairingServerUnreachableError({ origin: input.origin, cause })),
+        }),
       );
     const reply = yield* Effect.acquireUseRelease(
       auth.issueSession({
@@ -400,6 +458,7 @@ export const pairingLinkFromCli = Effect.fn("j5.sharing.cliPairing.pairingLinkFr
     readonly ttl: Option.Option<Duration.Duration>;
     readonly label: Option.Option<string>;
     readonly withoutPerson: "refuse" | "ask";
+    readonly activation: RuntimeFileActivation;
   }) {
     const { config } = input;
     const runtime = <A, E, R>(layer: Layer.Layer<A, E, R>) =>
@@ -415,10 +474,21 @@ export const pairingLinkFromCli = Effect.fn("j5.sharing.cliPairing.pairingLinkFr
     );
     if (owned._tag === "Failure") {
       if (!isServerAlreadyRunning(owned.failure)) return yield* owned.failure;
-      const state = yield* readPersistedServerRuntimeState(config.serverRuntimeStatePath);
-      if (Option.isNone(state)) return yield* new PairingServerUnreachableError({ origin: null });
+      // A server says where it listens only once it has started, a moment after taking the lock,
+      // and the file a crashed one left behind stays until then.
+      let origin: string | null = null;
+      for (let attempt = 1; origin === null; attempt += 1) {
+        const state = yield* readPersistedServerRuntimeState(config.serverRuntimeStatePath);
+        if (Option.isSome(state) && isProcessAlive(state.value.pid)) {
+          origin = state.value.origin;
+        } else if (attempt >= input.activation.attempts) {
+          return yield* new PairingServerUnreachableError({ origin: null });
+        } else {
+          yield* input.activation.wait(input.activation.delay);
+        }
+      }
       return yield* pairThroughServer({
-        origin: state.value.origin,
+        origin,
         request: {
           ...(Option.isSome(input.flags.person) ? { person: input.flags.person.value } : {}),
           ...(Option.isSome(input.flags.level) ? { level: input.flags.level.value } : {}),
