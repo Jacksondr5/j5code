@@ -51,7 +51,7 @@ import {
   peopleLayer as peopleRecordsLayer,
 } from "./PairingIntents.ts";
 import { layer as linksLayer } from "./Links.ts";
-import { McpApprovalGeneration } from "./McpApproval.ts";
+import { McpExchangeApproval } from "./McpApproval.ts";
 import { layer as peopleLayer } from "./People.ts";
 import {
   type MessageAsset,
@@ -605,15 +605,16 @@ export const layerGatedEnvironmentAuth = Layer.effect(
           inner.revokeOtherClientSessions(currentSessionId),
         ),
       // An MCP client is approved by an Owner; one approved before an Owner was lowered or
-      // removed is refused its session, and approved again (`Access.issueMcpClient`). Upstream
-      // issues one only from an exchange `McpApproval` gave the approval's generation to.
+      // removed is refused its session, and approved again, and one issued is recorded as its
+      // approver's (`Access.issueMcpClient`). Upstream issues one only from an exchange
+      // `McpApproval` gave the approval to.
       issueMcpClientSession: (input) =>
-        Effect.serviceOption(McpApprovalGeneration).pipe(
+        Effect.serviceOption(McpExchangeApproval).pipe(
           Effect.flatMap(
             Option.match({
               onNone: () => Effect.fail(new StaleMcpApprovalError({})),
-              onSome: (generation) =>
-                changes.issueMcpClient(generation, inner.issueMcpClientSession(input)),
+              onSome: (approval) =>
+                changes.issueMcpClient(approval, inner.issueMcpClientSession(input)),
             }),
           ),
           Effect.mapError((cause) =>
