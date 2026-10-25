@@ -52,6 +52,7 @@ import {
 } from "./PairingIntents.ts";
 import { layer as linksLayer } from "./Links.ts";
 import { McpApprovalGeneration } from "./McpApproval.ts";
+import { nameDevOwnerAtStartup } from "./devOwnerName.ts";
 import { layer as peopleLayer } from "./People.ts";
 import {
   type MessageAsset,
@@ -115,7 +116,7 @@ type AccessRpcRule = (
     }
   | { readonly kind: "collaborator" }
   | { readonly kind: "anyone" }
-  /** Agents' names, each told only when the person may know that agent (`participantVisible`). */
+  /** Participants' names, each told only when the person may know that one (`participantVisible`). */
   | { readonly kind: "identities" }
   /**
    * An MCP app's resource, in a thread the person reaches: a Viewer only the one the app the
@@ -374,8 +375,8 @@ export const ACCESS_RPC_RULES: Partial<Record<WsRpcMethod, AccessRpcRule>> = {
   [J5_CLIENT_ACTION_WS_METHODS.respondCrewRuntimeRequest]: narrowed,
   [J5_CLIENT_ACTION_WS_METHODS.stopCrew]: narrowed,
 
-  // Which J5 reads have moved, which says nothing of what changed; and agents' names, each only
-  // for an agent the person may know.
+  // Which J5 reads have moved, which says nothing of what changed; and participants' names, each
+  // only for one the person may know.
   [J5_CLIENT_READ_WS_METHODS.readParticipantIdentities]: { kind: "identities" },
   [J5_CLIENT_READ_WS_METHODS.subscribeReadChanges]: anyone,
 
@@ -651,6 +652,7 @@ export const gateEnvironmentAuth = <A, E, R>(
   peopleLayer.pipe(
     Layer.provideMerge(linksLayer),
     Layer.provideMerge(renewOutdatedDevicesAtStartup),
+    Layer.provideMerge(nameDevOwnerAtStartup),
     Layer.provideMerge(layerGatedEnvironmentAuth),
     Layer.provideMerge(accessLayer.pipe(Layer.provide(sharedThreadsWriteHook))),
     Layer.provideMerge(upstream),
@@ -832,7 +834,7 @@ export const layerRpcAuthorization = (
             if (rule.kind === "identities") {
               if (reach.kind !== "person") return Effect.fail(notSharedError());
               const personId = reach.person.personId;
-              // An agent the person may not know is told as unknown, as one with no name is.
+              // A participant the person may not know is told as unknown, as one with no name is.
               return inner(effect, options).pipe(
                 Effect.flatMap((answered) => {
                   const response = answered as unknown as ParticipantIdentitiesResponse;
