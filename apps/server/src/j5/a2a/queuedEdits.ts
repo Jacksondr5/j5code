@@ -155,8 +155,8 @@ export const releaseQueuedEditClaim = Effect.fn("j5.a2a.queuedEdits.release")(fu
 
 /**
  * Claims a person's edit of a queued J5 delivery for them, and says whether it did. Any other
- * queued message is not the ledger's, and a run that is not queued in the thread is refused by
- * upstream.
+ * queued message is not the ledger's, a run that is not queued in the thread is refused by
+ * upstream, and a retried command has nothing new to claim.
  */
 export const claimPersonQueuedEdit = Effect.fn("j5.a2a.queuedEdits.claimPerson")(function* (
   command: Extract<OrchestrationV2Command, { readonly type: "queued-run.edit" }>,
@@ -170,43 +170,88 @@ export const claimPersonQueuedEdit = Effect.fn("j5.a2a.queuedEdits.claimPerson")
   `;
   const messageId = rows[0]?.message_id;
   if (messageId == null || !isDeliveryMessageId(messageId)) return false;
+  // A retry of a command upstream already took replays its receipt and makes no new edit to claim.
+  const taken = yield* sql<{ readonly found: number }>`
+    SELECT 1 AS found FROM orchestration_command_receipts WHERE command_id = ${command.commandId}
+  `;
+  if (taken.length > 0) return false;
   yield* claimQueuedEdit({ commandId: command.commandId, editorId: personId });
   return true;
 });
 
+/** Whether upstream took `commandId` as a queued-message edit. */
+const isAcceptedEdit = Effect.fn("j5.a2a.queuedEdits.isAcceptedEdit")(function* (
+  commandId: CommandId,
+) {
+  const sql = yield* SqlClient.SqlClient;
+  const rows = yield* sql<{ readonly found: number }>`
+    SELECT 1 AS found FROM orchestration_command_receipts
+    WHERE command_id = ${commandId}
+      AND command_type = 'queued-run.edit'
+      AND status = 'accepted'
+  `;
+  return rows.length > 0;
+});
+
+/**
+ * The message's text before `sequence`, from upstream's own event log: a delivery joins the queue
+ * as a `message.updated` too, so the latest earlier one holds the text the edit replaced.
+ */
+const previousText = Effect.fn("j5.a2a.queuedEdits.previousText")(function* (
+  threadId: string,
+  messageId: string,
+  sequence: number,
+) {
+  const sql = yield* SqlClient.SqlClient;
+  const rows = yield* sql<{ readonly text: string | null }>`
+    SELECT json_extract(payload_json, '$.text') AS text
+    FROM orchestration_events
+    WHERE aggregate_kind = 'thread'
+      AND stream_id = ${threadId}
+      AND sequence < ${sequence}
+      AND event_type = 'message.updated'
+      AND json_extract(payload_json, '$.id') = ${messageId}
+    ORDER BY sequence DESC
+    LIMIT 1
+  `;
+  return rows[0]?.text ?? undefined;
+});
+
 /**
  * The ledger follows an edit to a queued J5 delivery, whoever made it: upstream's
- * `message.updated` for the delivery's message becomes a `message.edited` event carrying the new
- * body, from the editor its command claimed. Other updates to the message (its run starting, a
- * promotion) leave the body as it was and record nothing. An event at or before the last edit
- * recorded is never applied again, so replaying the stream after a restart cannot roll the text
- * back.
+ * `message.updated` from an accepted `queued-run.edit` command that changed the delivery's text
+ * becomes a `message.edited` event carrying the new body, from the editor its command claimed.
+ * Every other update to the message (joining the queue, its run starting, a promotion) records
+ * nothing. An event at or before the last edit recorded is never applied again, so replaying the
+ * stream after a restart cannot roll the text back. The command's claim is released whatever is
+ * recorded.
  */
 export const recordQueuedEdit = Effect.fn("j5.a2a.queuedEdits.record")(function* (
   stored: OrchestrationV2StoredEvent,
 ) {
   const event = stored.event;
-  if (event.type !== "message.updated" || event.payload.role !== "user") return [];
-  const messageId = ledgerMessageIdOfDelivery(event.payload.id);
-  if (messageId === undefined) return [];
-  const delivery = yield* readDelivery(messageId, event.threadId);
-  if (delivery === undefined) return [];
-  const { row, envelope } = delivery;
-  if (row.edit_source_sequence !== null && stored.sequence <= row.edit_source_sequence) return [];
-  const sql = yield* SqlClient.SqlClient;
-  const body = envelope === undefined ? undefined : bodyInEnvelope(event.payload.text, envelope);
-  const text = body === undefined || body.trim().length === 0 ? event.payload.text : body;
   const commandId = stored.commandId;
-  if (text === row.message_text) {
-    if (commandId !== null) yield* releaseQueuedEditClaim(commandId);
+  if (event.type !== "message.updated" || event.payload.role !== "user" || commandId === null) {
     return [];
   }
-  const claims =
-    commandId === null
-      ? []
-      : yield* sql<{ readonly editor_id: string }>`
-          SELECT editor_id FROM j5_a2a_queued_edit_claim WHERE command_id = ${commandId}
-        `;
+  const messageId = ledgerMessageIdOfDelivery(event.payload.id);
+  if (messageId === undefined || !(yield* isAcceptedEdit(commandId))) return [];
+  const delivery = yield* readDelivery(messageId, event.threadId);
+  const skip = releaseQueuedEditClaim(commandId).pipe(Effect.as([]));
+  if (delivery === undefined) return yield* skip;
+  const { row, envelope } = delivery;
+  if (row.edit_source_sequence !== null && stored.sequence <= row.edit_source_sequence) {
+    return yield* skip;
+  }
+  const before = yield* previousText(event.threadId, event.payload.id, stored.sequence);
+  if (before === event.payload.text) return yield* skip;
+  const body = envelope === undefined ? undefined : bodyInEnvelope(event.payload.text, envelope);
+  const text = body === undefined || body.trim().length === 0 ? event.payload.text : body;
+  if (text === row.message_text) return yield* skip;
+  const sql = yield* SqlClient.SqlClient;
+  const claims = yield* sql<{ readonly editor_id: string }>`
+    SELECT editor_id FROM j5_a2a_queued_edit_claim WHERE command_id = ${commandId}
+  `;
   const editorId = claims[0]?.editor_id;
   const editedAt = DateTime.formatIso(event.occurredAt);
   const writer = yield* A2ALedgerTransactionWriter;
@@ -231,7 +276,7 @@ export const recordQueuedEdit = Effect.fn("j5.a2a.queuedEdits.record")(function*
             },
           ],
         });
-        if (commandId !== null) yield* releaseQueuedEditClaim(commandId);
+        yield* releaseQueuedEditClaim(commandId);
         return appended;
       }),
     ),

@@ -163,6 +163,7 @@ import {
 } from "./SendService.ts";
 import {
   CommCommandId,
+  CorrelationId,
   LedgerProjectId,
   ExchangeId,
   outsideAgentParticipantId,
@@ -4107,21 +4108,8 @@ it.effect(
         );
         assert.match(ownAfter.message.text, /^\[Cross-agent message from /);
         const ownUpdate = yield* latestUpdate(deliveryMessageId(own.messageId), beforeOwnEdit);
-        assert(ownUpdate.event.type === "message.updated");
-        // An earlier update that kept the text, as a run starting does, then the edit; a restart
-        // replays both from the detector's last checkpoint, and the text must stay edited.
-        const keptText = {
-          ...ownUpdate,
-          sequence: ownUpdate.sequence - 1,
-          commandId: null,
-          event: {
-            ...ownUpdate.event,
-            payload: { ...ownUpdate.event.payload, text: ownQueued.message.text },
-          },
-        };
-        for (const stored of [keptText, ownUpdate, keptText, ownUpdate]) {
-          yield* detector.handleStoredEvent(stored);
-        }
+        yield* detector.handleStoredEvent(ownUpdate);
+        yield* detector.handleStoredEvent(ownUpdate);
         assert.deepEqual(yield* ledgerRow(own.messageId), {
           message_text: "Rewritten own",
           edited_by: editor.receiverId,
@@ -4144,9 +4132,12 @@ it.effect(
           (yield* queued(deliveryMessageId(own.messageId))).message.text,
           ownQueued.message.text.replace("Original own", "Rewritten again"),
         );
-        yield* detector.handleStoredEvent(
-          yield* latestUpdate(deliveryMessageId(own.messageId), beforeAgain),
-        );
+        const againUpdate = yield* latestUpdate(deliveryMessageId(own.messageId), beforeAgain);
+        // A restart replays both edits from the detector's last checkpoint: the first must not be
+        // applied over the second.
+        for (const stored of [againUpdate, ownUpdate, againUpdate]) {
+          yield* detector.handleStoredEvent(stored);
+        }
         assert.deepEqual(yield* ledgerRow(own.messageId), {
           message_text: "Rewritten again",
           edited_by: editor.receiverId,
@@ -4275,6 +4266,70 @@ it.effect(
         yield* (yield* OrchestrationEffectWorkerV2).drain();
         yield* detector.handleStoredEvent(yield* terminal(promotedQueued.run.id));
         assert.lengthOf(yield* removedNotices(), 0);
+
+        // Only an edit is recorded: not a message joining the queue (one from a peer server
+        // included, whose envelope J5 cannot render again), not a promotion, and not a rename of
+        // the sender's project since delivery.
+        const fromPeer = LedgerMessageId.make("message:edit:from-peer");
+        yield* (yield* A2ALedger).append({
+          commandId: CommCommandId.make("command:edit:from-peer"),
+          projectId: editor.ledgerProjectId,
+          acceptedAt: "2026-10-24T00:00:00.000Z",
+          event: {
+            kind: "message.received",
+            sender: ParticipantId.make("agent:edit-peer-sender"),
+            receiver: receiver.receiverId,
+            exchangeId: null,
+            correlationId: CorrelationId.make("correlation:edit:from-peer"),
+            payload: {
+              originProjectId: LedgerProjectId.make("project:edit-peer-origin"),
+              originEnvironmentId: "environment:edit-peer",
+              message: {
+                messageId: fromPeer,
+                text: "From a peer server",
+                originProjectId: LedgerProjectId.make("project:edit-peer-origin"),
+                receiverProjectId: editor.ledgerProjectId,
+                exchangeRole: "none",
+                envelopeChannel: "peer",
+              },
+            },
+            createdAt: "2026-10-24T00:00:00.000Z",
+          },
+        });
+        yield* worker.drain;
+        assert.equal(
+          (yield* queued(deliveryMessageId(fromPeer))).run.status,
+          "queued",
+          "the peer's message waits in the receiver's queue",
+        );
+        yield* sql`
+          INSERT INTO projection_projects (
+            project_id, title, workspace_root, scripts_json, created_at, updated_at
+          ) VALUES (
+            ${editor.ledgerProjectId}, 'Renamed since delivery', '/tmp', '[]',
+            '2026-10-24T00:00:00.000Z', '2026-10-24T00:00:00.000Z'
+          )
+        `;
+        const editsSoFar = () =>
+          sql<{ readonly message_id: string; readonly text: string }>`
+            SELECT json_extract(payload, '$.messageId') AS message_id,
+              json_extract(payload, '$.text') AS text
+            FROM j5_a2a_comm_event WHERE kind = 'message.edited' ORDER BY seq
+          `;
+        const recorded = yield* editsSoFar();
+        const heads = yield* sql<{ readonly head: number }>`
+          SELECT MAX(sequence) AS head FROM orchestration_events
+          WHERE stream_id = ${receiver.threadId}
+        `;
+        const everyUpdate = yield* sink.stream({ threadId: receiver.threadId }).pipe(
+          Stream.takeUntil((stored) => stored.sequence >= heads[0]!.head),
+          Stream.filter((stored) => stored.event.type === "message.updated"),
+          Stream.runCollect,
+        );
+        for (const stored of everyUpdate) yield* detector.handleStoredEvent(stored);
+        assert.deepEqual(yield* editsSoFar(), recorded);
+        assert.equal((yield* ledgerRow(fromPeer))?.message_text, "From a peer server");
+        assert.isNull((yield* ledgerRow(promoted.messageId))?.edited_by);
 
         assert.isFalse(
           (yield* asEditor(

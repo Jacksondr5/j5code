@@ -194,6 +194,20 @@ it.layer(conversationLayer)("CommandAdmission", (it) => {
       assert.deepStrictEqual(yield* claims(), [
         { command_id: "command:edit-agent", editor_id: editor.personId },
       ]);
+      // Once upstream took the edit and the ledger recorded it, a retry of the same command
+      // replays upstream's receipt with no new edit, and leaves no claim behind.
+      yield* sql`DELETE FROM j5_a2a_queued_edit_claim`;
+      yield* sql`
+        INSERT INTO orchestration_command_receipts (
+          command_id, aggregate_kind, aggregate_id, command_type, accepted_at, result_sequence,
+          status, error
+        ) VALUES (
+          'command:edit-agent', 'thread', ${threadId}, 'queued-run.edit',
+          '2026-10-24T00:00:00.000Z', 1, 'accepted', NULL
+        )
+      `;
+      yield* admission.dispatchCommand(edit("command:edit-agent", "run:agent"), () => Effect.void);
+      assert.deepStrictEqual(yield* claims(), []);
     }),
   );
 });
