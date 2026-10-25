@@ -177,18 +177,23 @@ it.layer(conversationLayer)("CommandAdmission", (it) => {
           runId,
           text: "Edited",
         });
-      assert.strictEqual(
-        yield* admitted(session, edit("command:edit-agent", "run:agent")),
-        "admitted",
-      );
-      assert.strictEqual(
-        yield* admitted(session, edit("command:edit-typed", "run:typed")),
-        "admitted",
-      );
-      assert.deepStrictEqual(
-        yield* sql`SELECT command_id, editor_id FROM j5_a2a_queued_edit_claim`,
-        [{ command_id: "command:edit-agent", editor_id: editor.personId }],
-      );
+      const admission = yield* makeCommandAdmission(() => Effect.void, session as never);
+      const claims = () => sql`SELECT command_id, editor_id FROM j5_a2a_queued_edit_claim`;
+      yield* admission.dispatchCommand(edit("command:edit-agent", "run:agent"), () => Effect.void);
+      yield* admission.dispatchCommand(edit("command:edit-typed", "run:typed"), () => Effect.void);
+      assert.deepStrictEqual(yield* claims(), [
+        { command_id: "command:edit-agent", editor_id: editor.personId },
+      ]);
+      // Upstream refuses the edit: the claim it took goes with it.
+      const refused = yield* admission
+        .dispatchCommand(edit("command:edit-refused", "run:agent"), () =>
+          Effect.fail("Run run:agent is not queued."),
+        )
+        .pipe(Effect.flip);
+      assert.strictEqual(refused, "Run run:agent is not queued.");
+      assert.deepStrictEqual(yield* claims(), [
+        { command_id: "command:edit-agent", editor_id: editor.personId },
+      ]);
     }),
   );
 });

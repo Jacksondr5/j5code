@@ -4107,8 +4107,21 @@ it.effect(
         );
         assert.match(ownAfter.message.text, /^\[Cross-agent message from /);
         const ownUpdate = yield* latestUpdate(deliveryMessageId(own.messageId), beforeOwnEdit);
-        yield* detector.handleStoredEvent(ownUpdate);
-        yield* detector.handleStoredEvent(ownUpdate);
+        assert(ownUpdate.event.type === "message.updated");
+        // An earlier update that kept the text, as a run starting does, then the edit; a restart
+        // replays both from the detector's last checkpoint, and the text must stay edited.
+        const keptText = {
+          ...ownUpdate,
+          sequence: ownUpdate.sequence - 1,
+          commandId: null,
+          event: {
+            ...ownUpdate.event,
+            payload: { ...ownUpdate.event.payload, text: ownQueued.message.text },
+          },
+        };
+        for (const stored of [keptText, ownUpdate, keptText, ownUpdate]) {
+          yield* detector.handleStoredEvent(stored);
+        }
         assert.deepEqual(yield* ledgerRow(own.messageId), {
           message_text: "Rewritten own",
           edited_by: editor.receiverId,
@@ -4119,6 +4132,25 @@ it.effect(
             AND json_extract(payload, '$.messageId') = ${own.messageId}
         `;
         assert.deepEqual(editEvents, [{ sender: editor.receiverId }]);
+
+        // An agent that hands back the whole envelope it read gets one envelope, not two.
+        const reread = (yield* queued(deliveryMessageId(own.messageId))).message.text;
+        const beforeAgain = yield* sink.latestSequence();
+        assert.isFalse(
+          (yield* edit(ownQueued.run.id, reread.replace("Rewritten own", "Rewritten again")))
+            .isFailure,
+        );
+        assert.equal(
+          (yield* queued(deliveryMessageId(own.messageId))).message.text,
+          ownQueued.message.text.replace("Original own", "Rewritten again"),
+        );
+        yield* detector.handleStoredEvent(
+          yield* latestUpdate(deliveryMessageId(own.messageId), beforeAgain),
+        );
+        assert.deepEqual(yield* ledgerRow(own.messageId), {
+          message_text: "Rewritten again",
+          edited_by: editor.receiverId,
+        });
 
         // Another agent's message and a person's are refused, with what the agent can do instead.
         const othersQueued = yield* queued(deliveryMessageId(others.messageId));
@@ -4159,6 +4191,51 @@ it.effect(
           message_text: "Tidied by a person",
           edited_by: person,
         });
+
+        // A person who rewrites the header leaves an envelope J5 no longer recognises: the ledger
+        // keeps their whole text, and the sender can no longer edit inside it.
+        const beforeRewrite = yield* sink.latestSequence();
+        const rewritten = (yield* queued(deliveryMessageId(own.messageId))).message.text.replace(
+          "[Cross-agent message from ",
+          "[Forwarded from ",
+        );
+        const rewrite = {
+          type: "queued-run.edit" as const,
+          commandId: CommandId.make("command:edit:rewrite"),
+          threadId: receiver.threadId,
+          runId: ownQueued.run.id,
+          text: rewritten,
+        };
+        yield* claimPersonQueuedEdit(rewrite, person);
+        yield* dispatchIntakeCommand(rewrite);
+        const rewriteUpdates = yield* orchestrator
+          .streamStoredEventsFrom({
+            threadId: receiver.threadId,
+            afterSequence: beforeRewrite,
+            eventType: "message.updated",
+          })
+          .pipe(
+            Stream.filter(
+              (stored) =>
+                stored.event.type === "message.updated" &&
+                stored.event.payload.id === deliveryMessageId(own.messageId) &&
+                stored.event.payload.text === rewritten,
+            ),
+            Stream.take(1),
+            Stream.runHead,
+            Effect.flatMap(Effect.fromOption),
+          );
+        yield* detector.handleStoredEvent(rewriteUpdates);
+        assert.deepEqual(yield* ledgerRow(own.messageId), {
+          message_text: rewritten,
+          edited_by: person,
+        });
+        const refusedRewrite = yield* edit(ownQueued.run.id, "Inside a rewritten envelope");
+        assert.isTrue(refusedRewrite.isFailure);
+        assert.include(
+          (yield* decodeToolFailure(refusedRewrite.result)).message,
+          "no longer has the J5 envelope",
+        );
 
         // Cancel and promote are upstream's, for any message, and the sender hears as before.
         const removedNotices = () =>
@@ -4212,6 +4289,8 @@ it.effect(
         yield* detector.handleStoredEvent(yield* terminal(othersQueued.run.id));
         const notices = yield* removedNotices();
         assert.lengthOf(notices, 1);
+        // Every claim went with the edit it named.
+        assert.deepEqual(yield* sql`SELECT command_id FROM j5_a2a_queued_edit_claim`, []);
         assert.equal(notices[0]?.receiver_id, other.receiverId);
         assert.include(
           notices[0]?.message_text,

@@ -324,12 +324,14 @@ export type MessageSentPayload = typeof MessageSentPayload.Type;
 
 /**
  * A queued message's new text, recorded when anyone edits it in the receiver's queue. The event's
- * sender is who edited it, or null when J5 could not tell. For a peer envelope `text` is the body
- * inside it, as `message.sent` records it.
+ * sender is who edited it, or null when J5 could not tell. `text` is the body inside the envelope
+ * the message was delivered with, as `message.sent` records it, or the whole queued text once the
+ * envelope no longer matches. `sourceSequence` is the orchestration event that carried the edit.
  */
 export const MessageEditedPayload = Schema.Struct({
   messageId: LedgerMessageId,
   text: Schema.String.check(Schema.isNonEmpty()),
+  sourceSequence: NonNegativeInt,
 });
 export type MessageEditedPayload = typeof MessageEditedPayload.Type;
 

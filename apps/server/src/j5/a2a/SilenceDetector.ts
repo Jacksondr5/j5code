@@ -23,7 +23,7 @@ import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { deliveryMessageId, ledgerMessageIdOfDelivery } from "./DeliveryTransport.ts";
 import { recordQueuedEdit } from "./queuedEdits.ts";
 import { formatSilenceNoticeEnvelope } from "./EnvelopeFormatter.ts";
-import { A2ALedger } from "./LedgerService.ts";
+import { A2ALedger, A2ALedgerTransactionWriter } from "./LedgerService.ts";
 import { findPeerCounterparty } from "./peerCounterparty.ts";
 import {
   CommCommandId,
@@ -257,6 +257,7 @@ const makeLayer = (daemon: boolean) =>
     A2ASilenceDetector,
     Effect.gen(function* () {
       const ledger = yield* A2ALedger;
+      const ledgerWriter = yield* A2ALedgerTransactionWriter;
       const deliveryWorker = yield* A2ADeliveryWorker;
       const threads = yield* ThreadManagement.ThreadManagementService;
       const events = yield* EventSinkV2;
@@ -695,7 +696,7 @@ const makeLayer = (daemon: boolean) =>
         if (stored.event.type === "message.updated") {
           return yield* recordQueuedEdit(stored).pipe(
             Effect.provideService(SqlClient.SqlClient, sql),
-            Effect.provideService(A2ALedger, ledger),
+            Effect.provideService(A2ALedgerTransactionWriter, ledgerWriter),
           );
         }
         const run = terminalRun(stored);

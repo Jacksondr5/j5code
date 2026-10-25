@@ -19,7 +19,12 @@ import { AgentCrewInstanceService } from "../AgentCrewInstanceService.ts";
 import { makeCrewSeatArchiveGuard } from "../crewSeatArchiveGuard.ts";
 import { ParticipantId } from "../contracts.ts";
 import { ledgerMessageIdOfDelivery } from "../DeliveryTransport.ts";
-import { claimQueuedEdit, splitDeliveryEnvelope } from "../queuedEdits.ts";
+import {
+  bodyInEnvelope,
+  claimQueuedEdit,
+  readDelivery,
+  releaseQueuedEditClaim,
+} from "../queuedEdits.ts";
 import { J5ThreadLineageError } from "../ThreadLineage.ts";
 
 const common = {
@@ -177,40 +182,43 @@ export const layer = McpToolAccess.toLayer(J5AdaptedThreadToolkit, {
           "t3_queue_edit edits a queued message an agent sent from its thread, and this call has no calling thread. t3_queue_cancel, t3_queue_reorder and t3_queue_promote_to_steer still work.",
         );
       }
-      const sql = yield* SqlClient.SqlClient;
-      const delivered = ledgerMessageIdOfDelivery(message.id);
+      const deliveredId = ledgerMessageIdOfDelivery(message.id);
+      const delivery =
+        deliveredId === undefined
+          ? undefined
+          : yield* readDelivery(deliveredId, projection.thread.id).pipe(
+              Effect.mapError(unavailable),
+            );
       if (message.senderThreadId !== caller.id) {
-        if (delivered !== undefined) {
-          const senders = yield* sql<{ readonly sender_id: string }>`
-            SELECT sender_id FROM j5_a2a_delivery WHERE message_id = ${delivered} LIMIT 1
-          `.pipe(Effect.mapError(unavailable));
-          const sender = senders[0]?.sender_id;
-          return yield* refuseEdit(
-            `This queued message is ${sender === undefined ? "another participant's" : `${sender}'s`} J5 message, not yours. ${OTHERS_MESSAGE}`,
-          );
-        }
         return yield* refuseEdit(
-          message.createdBy === "user"
-            ? `A person wrote this queued message. ${OTHERS_MESSAGE}`
-            : `This queued message was not sent by you. ${OTHERS_MESSAGE}`,
+          deliveredId !== undefined
+            ? `This queued message is ${delivery === undefined ? "another participant's" : `${delivery.row.sender_id}'s`} J5 message, not yours. ${OTHERS_MESSAGE}`
+            : message.createdBy === "user"
+              ? `A person wrote this queued message. ${OTHERS_MESSAGE}`
+              : `This queued message was not sent by you. ${OTHERS_MESSAGE}`,
         );
       }
-      const members = yield* sql<{ readonly participant_id: string }>`
-        SELECT participant_id FROM j5_a2a_membership WHERE thread_id = ${caller.id} LIMIT 1
-      `.pipe(Effect.mapError(unavailable));
-      const editorId = members[0]?.participant_id;
       let text = input.text;
-      if (delivered !== undefined) {
-        const envelope =
-          editorId === undefined ? undefined : splitDeliveryEnvelope(message.text, editorId);
-        if (envelope === undefined) {
+      let editorId: string | undefined;
+      if (deliveredId !== undefined) {
+        const envelope = delivery?.envelope;
+        if (envelope === undefined || bodyInEnvelope(message.text, envelope) === undefined) {
           return yield* new OrchestratorMcpFailure({
             code: "invalid_request",
             message:
-              "This message's J5 envelope was changed in the queue, so the new text can't be put inside it. Cancel it with t3_queue_cancel and send it again with j5_send_message.",
+              "This message no longer has the J5 envelope it was delivered with: someone rewrote its header or closing instruction in the queue. Cancel it with t3_queue_cancel and send it again with j5_send_message.",
           });
         }
-        text = `${envelope.prefix}${input.text}${envelope.suffix}`;
+        // An agent that read the message with t3_queue_read may hand back the whole envelope.
+        const body = bodyInEnvelope(input.text, envelope) ?? input.text;
+        if (body.trim().length === 0) {
+          return yield* new OrchestratorMcpFailure({
+            code: "invalid_request",
+            message: "text is empty. To withdraw the message, use t3_queue_cancel.",
+          });
+        }
+        text = `${envelope.prefix}${body}${envelope.suffix}`;
+        editorId = delivery?.row.sender_id;
       }
       const commandId = yield* newCommandId();
       if (editorId !== undefined) {
@@ -226,7 +234,12 @@ export const layer = McpToolAccess.toLayer(J5AdaptedThreadToolkit, {
           runId: run.id,
           text,
         })
-        .pipe(Effect.mapError(dispatchFailure));
+        .pipe(
+          Effect.tapError(() =>
+            editorId === undefined ? Effect.void : Effect.ignore(releaseQueuedEditClaim(commandId)),
+          ),
+          Effect.mapError(dispatchFailure),
+        );
       return { sequence: result.sequence };
     }),
   ),
