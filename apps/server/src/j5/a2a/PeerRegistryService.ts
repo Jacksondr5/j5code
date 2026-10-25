@@ -765,6 +765,7 @@ export const layer: Layer.Layer<
               updated_at = ${input.changedAt}
           WHERE environment_id = ${existing.environment_id}
             AND credential = ${existing.credential}
+            AND created_at = ${existing.created_at}
           RETURNING environment_id, label, link_mode, origin, credential_expires_at, last_polled_at,
             last_error, created_at, updated_at
         `;
