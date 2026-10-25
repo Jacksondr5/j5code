@@ -282,6 +282,22 @@ function setup() {
   return now;
 }
 
+it("keeps the project selection after going back a stage", async () => {
+  using _now = setup();
+  await using _screen = await mountImport();
+  await click("Select none");
+  expect(pageText()).toContain("0 of 2 selected");
+
+  const agentsStage = document.querySelector<HTMLButtonElement>(
+    'button[aria-label="Agents, step 2"]',
+  );
+  expect(agentsStage?.disabled).toBe(false);
+  await act(async () => agentsStage?.click());
+  await click("Continue");
+  expect(pageText()).toContain("Import your projects");
+  expect(pageText()).toContain("0 of 2 selected");
+});
+
 it("rechecks after project creation and can retry its history without recreating the project", async () => {
   using _now = setup();
   const creation = deferred<void>();

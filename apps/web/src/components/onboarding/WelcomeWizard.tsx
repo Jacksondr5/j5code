@@ -124,6 +124,7 @@ export function WelcomeWizard({
   const [setupIds, setSetupIds] = useState<readonly EnvironmentId[]>(
     resumeEnvironmentId ? [resumeEnvironmentId] : [],
   );
+  const [importSelection, setImportSelection] = useState<ReadonlySet<string> | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const finishingPromiseRef = useRef<Promise<boolean> | null>(null);
   const completionErrorToastIdRef = useRef<ReturnType<typeof toastManager.add> | null>(null);
@@ -279,6 +280,8 @@ export function WelcomeWizard({
           ) : (
             <ImportStep
               scans={scans}
+              selectedPaths={importSelection}
+              onSelectedPathsChange={setImportSelection}
               isImporting={isImporting}
               setIsImporting={setIsImporting}
               onDone={finish}
@@ -1174,11 +1177,15 @@ const IMPORT_PERMISSION_MESSAGE = "This connection cannot import projects or thr
 
 function ImportStep({
   scans,
+  selectedPaths,
+  onSelectedPathsChange,
   isImporting,
   setIsImporting,
   onDone,
 }: {
   readonly scans: ReturnType<typeof useProjectScans>;
+  readonly selectedPaths: ReadonlySet<string> | null;
+  readonly onSelectedPathsChange: (next: ReadonlySet<string>) => void;
   readonly isImporting: boolean;
   readonly setIsImporting: (value: boolean) => void;
   readonly onDone: (
@@ -1191,7 +1198,6 @@ function ImportStep({
   const writableEnvironments = useEnvironmentsWithScope(scans, AuthOrchestrationOperateScope);
   const createProject = useAtomCommand(projectEnvironment.create, { reportFailure: false });
   const importThreads = useAtomCommand(agentSessionImport, { reportFailure: false });
-  const [selectedPaths, setSelectedPaths] = useState<ReadonlySet<string> | null>(null);
   const importWarningRef = useRef("");
   const importedThreadCountRef = useRef(0);
   const importedProjectsRef = useRef(new Map<string, ScopedProjectRef>());
@@ -1430,7 +1436,7 @@ function ImportStep({
               variant="ghost"
               size="xs"
               disabled={isImporting || selected.length === candidates.length}
-              onClick={() => setSelectedPaths(new Set(candidates.map((item) => item.key)))}
+              onClick={() => onSelectedPathsChange(new Set(candidates.map((item) => item.key)))}
             >
               Select all
             </Button>
@@ -1438,7 +1444,7 @@ function ImportStep({
               variant="ghost"
               size="xs"
               disabled={isImporting || selected.length === 0}
-              onClick={() => setSelectedPaths(new Set())}
+              onClick={() => onSelectedPathsChange(new Set())}
             >
               Select none
             </Button>
@@ -1491,7 +1497,7 @@ function ImportStep({
                 <ImportCandidateList
                   candidates={scanCandidates}
                   selectedKeys={selectedKeys}
-                  onSelectionChange={setSelectedPaths}
+                  onSelectionChange={onSelectedPathsChange}
                 />
               </fieldset>
             );
