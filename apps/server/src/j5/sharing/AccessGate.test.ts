@@ -31,6 +31,7 @@ import {
   accessLayer,
   device,
   person,
+  placed,
   thread,
 } from "./test-support/accessHarness.ts";
 
@@ -343,6 +344,66 @@ it.layer(testLayer)("access gate", (it) => {
           participantId: "agent:j5:a2a:thread:thread:identity-other",
           identity: { kind: "unknown" },
         },
+      ]);
+    }),
+  );
+
+  it.effect("tells a narrowed person their own name and those asked by agents they read", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const mine = yield* thread("thread:asks-mine");
+      const other = yield* thread("thread:asks-other");
+      yield* placed(mine, null);
+      yield* placed(other, null);
+      const asked = yield* person("Priya");
+      const askedElsewhere = yield* person("Sam");
+      const stranger = yield* person("Quinn");
+      const ask = (exchangeId: string, threadId: string, personId: string) => sql`
+        INSERT INTO j5_a2a_exchange (
+          project_id, exchange_id, sender_id, receiver_id, status, intent, urgency,
+          opened_seq, closed_seq, created_at, updated_at
+        ) VALUES (
+          ${PROJECT}, ${exchangeId}, ${`agent:j5:a2a:thread:${threadId}`}, ${personId}, 'open',
+          'Which vendor?', 'soon', 1, NULL, '2026-10-24T00:00:00.000Z', '2026-10-24T00:00:00.000Z'
+        )
+      `;
+      yield* ask("exchange:asks-mine", mine, asked.personId);
+      yield* ask("exchange:asks-other", other, askedElsewhere.personId);
+      const { session, person: reader } = yield* signed(
+        "Ask reader",
+        [{ scope: { kind: "thread", threadId: mine }, level: "viewer" }],
+        LEVEL_PERMISSIONS.viewer,
+      );
+      const known = (participantId: string, displayName: string) => ({
+        participantId,
+        identity: { kind: "known", displayName },
+      });
+      const unknown = (participantId: string) => ({ participantId, identity: { kind: "unknown" } });
+      const authorize = yield* RpcScopeAuthorization.pipe(
+        Effect.provide(
+          AccessGate.layerRpcAuthorization(session, RpcAuthorization.layer(session.scopes)),
+        ),
+      );
+      type Handler = Parameters<typeof authorize>[0];
+      const answer = yield* authorize(
+        Effect.succeed({
+          entries: [
+            known(asked.personId, "Priya"),
+            known(askedElsewhere.personId, "Sam"),
+            known(stranger.personId, "Quinn"),
+            known(reader.personId, "Ask reader"),
+          ],
+        }) as unknown as Handler,
+        {
+          rpc: { _tag: J5_CLIENT_READ_WS_METHODS.readParticipantIdentities },
+          payload: { participantIds: [] },
+        } as unknown as Parameters<typeof authorize>[1],
+      );
+      assert.deepStrictEqual((answer as unknown as { entries: unknown }).entries, [
+        known(asked.personId, "Priya"),
+        unknown(askedElsewhere.personId),
+        unknown(stranger.personId),
+        known(reader.personId, "Ask reader"),
       ]);
     }),
   );

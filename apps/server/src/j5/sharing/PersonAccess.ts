@@ -263,9 +263,10 @@ export interface PersonAccessShape {
     asset: MessageAsset,
   ) => Effect.Effect<PersonLevel | null, PersonAccessStorageError>;
   /**
-   * Whether a person may be told an agent's name: its own thread is one they reach, or it sent a
-   * message to an agent whose thread they reach. Anything else they are told nothing of, since an
-   * agent's name is its thread's title.
+   * Whether a person may be told a participant's name: its own thread is one they reach, or it
+   * sent a message to an agent whose thread they reach. A person is also told their own name, and
+   * the name of a person an agent whose thread they reach has asked. Anything else they are told
+   * nothing of, since an agent's name is its thread's title.
    */
   readonly participantVisible: (
     personId: ParticipantId,
@@ -741,6 +742,7 @@ const make: Layer.Layer<PersonAccess, never, SqlClient.SqlClient | ReadChanges> 
 
       participantVisible: Effect.fn("j5.sharing.personAccess.participantVisible")(
         function* (personId, participant) {
+          if (participant.participantId === personId) return true;
           if (
             participant.threadId !== null &&
             (yield* coveringThread(participant.threadId as ThreadId, personId)).length > 0
@@ -755,14 +757,27 @@ const make: Layer.Layer<PersonAccess, never, SqlClient.SqlClient | ReadChanges> 
              AND member.participant_id = delivery.receiver_id
             WHERE delivery.sender_id = ${participant.participantId}
           `;
-          for (const receiver of receivers) {
+          // A person asked by an agent: the ask is part of the asking agent's thread, which
+          // addresses them, and anyone who reads a thread is told who reaches it (AC26). Their
+          // answers are deliveries, read above.
+          const askers = participant.participantId.startsWith("human:")
+            ? yield* sql<{ readonly thread_id: string }>`
+                SELECT DISTINCT member.thread_id
+                FROM j5_a2a_exchange AS exchange
+                JOIN j5_a2a_membership AS member
+                  ON member.project_id = exchange.project_id
+                 AND member.participant_id = exchange.sender_id
+                WHERE exchange.receiver_id = ${participant.participantId}
+              `
+            : [];
+          for (const receiver of [...receivers, ...askers]) {
             if ((yield* coveringThread(receiver.thread_id as ThreadId, personId)).length > 0) {
               return true;
             }
           }
           return false;
         },
-        Effect.mapError(storage("read whether a person may know an agent")),
+        Effect.mapError(storage("read whether a person may know a participant")),
       ),
 
       mcpAppResource: Effect.fn("j5.sharing.personAccess.mcpAppResource")(
