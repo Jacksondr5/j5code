@@ -78,15 +78,19 @@ export const readFleetLedgerFacts = Effect.fn("readFleetLedgerFacts")(function* 
     receiverAsks.push(ask(row.sender_id));
     owed.set(row.receiver_id, receiverAsks);
   }
-  // Only local authors belong to this project's agent rows; remote authors are exported below.
+  // Coverage follows the open debt, so acceptance needs no extra Fleet invalidation.
+  // CROSS JOIN keeps the small open-Exchange set ahead of indexed receiver-route lookups.
   for (const batch of batches) {
     const destinations = yield* sql<{ sender_id: string; receiver_environment_id: string }>`
-      SELECT DISTINCT sender_id, receiver_environment_id FROM j5_a2a_delivery
-      WHERE project_id = ${projectId} AND sender_id IN ${sql.in(batch)}
-        AND origin_environment_id IS NULL AND receiver_environment_id IS NOT NULL
-        AND status = 'delivered' AND envelope_channel = 'peer'
-        AND (exchange_id IS NULL OR exchange_id NOT LIKE ${`${CREW_ALERT_EXCHANGE_PREFIX}%`})
-      ORDER BY receiver_environment_id
+      SELECT DISTINCT d.sender_id, d.receiver_environment_id
+      FROM j5_a2a_exchange e CROSS JOIN j5_a2a_delivery d
+        ON d.project_id = e.project_id AND d.exchange_id = e.exchange_id
+          AND d.sender_id = e.sender_id AND d.receiver_id = e.receiver_id
+      WHERE e.status = 'open' AND e.sender_id IN ${sql.in(batch)}
+        AND e.exchange_id NOT LIKE ${`${CREW_ALERT_EXCHANGE_PREFIX}%`}
+        AND d.origin_environment_id IS NULL AND d.receiver_environment_id IS NOT NULL
+        AND d.exchange_role = 'ask' AND d.envelope_channel = 'peer'
+      ORDER BY d.receiver_environment_id
     `;
     for (const row of destinations) {
       const environments = deliveryEnvironmentIds.get(row.sender_id) ?? [];

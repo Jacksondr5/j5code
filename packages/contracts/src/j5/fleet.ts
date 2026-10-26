@@ -72,7 +72,7 @@ export type FleetProblem = typeof FleetProblem.Type;
 export const FleetAgentFacts = Schema.Struct({
   asks: Schema.Struct({ owed: Schema.Array(OpenAsk), awaited: Schema.Array(OpenAsk) }),
   problems: Schema.Array(FleetProblem),
-  /** Receivers whose Fleet reads complete this sender's delivery-alarm coverage. */
+  /** Remote receivers of this sender's open asks whose reads complete badge coverage. */
   deliveryEnvironmentIds: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 export type FleetAgentFacts = typeof FleetAgentFacts.Type;

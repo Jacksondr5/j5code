@@ -23,27 +23,27 @@ export const fleetAgentKey = (environmentId: string, participantId: string) =>
 /** Remote alarms are current only when both independently read environments are readable. */
 export const mergeFleetDeliveryFacts = (
   sources: J5ReadSources<FleetResponse>,
-  live?: ReadonlyMap<string, boolean>,
+  live: ReadonlyMap<string, boolean>,
 ) => {
   const readable = (source: J5ReadSources<FleetResponse>["sources"][number]) =>
     source.connected &&
     source.status === "ready" &&
     source.data !== null &&
-    (live === undefined || live.get(source.environmentId) === true);
-  const receivers = new Map<
+    live.get(source.environmentId) === true;
+  const readableReceivers = new Set<string>();
+  const remoteAlarms = new Map<
     string,
-    Map<string, NonNullable<FleetResponse["remoteDeliveryAlarms"]>[number][]>
+    NonNullable<FleetResponse["remoteDeliveryAlarms"]>[number][]
   >();
   for (const source of sources.sources) {
     if (!readable(source) || source.data?.remoteDeliveryAlarms === undefined) continue;
-    const senders = new Map<string, NonNullable<FleetResponse["remoteDeliveryAlarms"]>[number][]>();
+    readableReceivers.add(source.environmentId);
     for (const alarm of source.data.remoteDeliveryAlarms) {
       const key = fleetAgentKey(alarm.originEnvironmentId, alarm.senderId);
-      const alarms = senders.get(key) ?? [];
+      const alarms = remoteAlarms.get(key) ?? [];
       alarms.push(alarm);
-      senders.set(key, alarms);
+      remoteAlarms.set(key, alarms);
     }
-    receivers.set(source.environmentId, senders);
   }
   const unique = <A>(values: ReadonlyArray<A>, key: (value: A) => string) => [
     ...new Map(values.map((value) => [key(value), value])).values(),
@@ -108,16 +108,14 @@ export const mergeFleetDeliveryFacts = (
       [...(ledger?.asks.owed ?? []), ...(ledger?.asks.awaited ?? [])].map((ask) => ask.exchangeId),
     );
     const remoteProblems = origin.readable
-      ? destinations.flatMap((environmentId) =>
-          (receivers.get(environmentId)?.get(key) ?? []).map((alarm) => ({
-            ...alarm.problem,
-            // The origin owns the Exchange; its closure can precede the receiver's mirror.
-            exchangeOpen:
-              alarm.problem.exchangeOpen &&
-              alarm.problem.exchangeId != null &&
-              openExchanges.has(alarm.problem.exchangeId),
-          })),
-        )
+      ? (remoteAlarms.get(key) ?? []).map((alarm) => ({
+          ...alarm.problem,
+          // The origin owns the Exchange; its closure can precede the receiver's mirror.
+          exchangeOpen:
+            alarm.problem.exchangeOpen &&
+            alarm.problem.exchangeId != null &&
+            openExchanges.has(alarm.problem.exchangeId),
+        }))
       : [];
     result.set(key, {
       ledger:
@@ -130,7 +128,7 @@ export const mergeFleetDeliveryFacts = (
       problemsIncomplete:
         !origin.readable ||
         origin.incomplete ||
-        destinations.some((environmentId) => !receivers.has(environmentId)),
+        destinations.some((environmentId) => !readableReceivers.has(environmentId)),
     });
   }
   return result;
