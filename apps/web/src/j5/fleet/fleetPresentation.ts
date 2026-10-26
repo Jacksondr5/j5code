@@ -1,7 +1,8 @@
 import type { FleetDerivedFacts } from "@t3tools/client-runtime/j5/fleetFacts";
 import type { J5ReadSource } from "@t3tools/client-runtime/j5/readSources";
 import type { FleetProblem, FleetRuntimeFact } from "@t3tools/contracts/j5";
-import { formatChatTimestampTooltip } from "../../timestampFormat";
+import type { TimestampFormat } from "@t3tools/contracts/settings";
+import { formatChatTimestampTooltip, formatElapsedDurationLabel } from "../../timestampFormat";
 import type { CrewSeatState } from "../crew/crewState";
 
 export const fleetAgentKey = (environmentId: string, participantId: string) =>
@@ -12,13 +13,26 @@ export const fleetSourceIsLive = (
   shellStatus: string,
 ) => source.connected && source.status === "ready" && shellStatus === "live";
 
-export const fleetTime = (at: string | null | undefined) =>
-  at == null ? "?" : formatChatTimestampTooltip(at, "locale") || "?";
+// An omitted clock keeps frozen measurements absolute rather than aging an old read.
+export const fleetTime = (
+  at: string | null | undefined,
+  now?: number,
+  timestampFormat: TimestampFormat = "locale",
+) =>
+  at == null
+    ? "?"
+    : (now === undefined
+        ? formatChatTimestampTooltip(at, timestampFormat)
+        : formatElapsedDurationLabel(at, now)) || "?";
 
 export const fleetMinutes = (since: string, now: number) =>
   Math.max(0, Math.floor((now - Date.parse(since)) / 60_000));
 
-export const fleetStatusLabel = (runtime: FleetRuntimeFact) => {
+export const fleetStatusLabel = (
+  runtime: FleetRuntimeFact,
+  now?: number,
+  timestampFormat?: TimestampFormat,
+) => {
   if (runtime.state === "unknown") return "?";
   if (runtime.settled) return "Settled";
   switch (runtime.status) {
@@ -35,7 +49,7 @@ export const fleetStatusLabel = (runtime: FleetRuntimeFact) => {
     case "waiting-to-start":
       return "Waiting to start";
     case "idle":
-      return `Idle since ${fleetTime(runtime.since)}`;
+      return `Idle since ${fleetTime(runtime.since, now, timestampFormat)}`;
   }
 };
 
@@ -52,14 +66,18 @@ export const fleetSeatState = (
   return "running";
 };
 
-export const fleetProblemLabel = (problem: FleetProblem) => {
+export const fleetProblemLabel = (
+  problem: FleetProblem,
+  now?: number,
+  timestampFormat?: TimestampFormat,
+) => {
   switch (problem.kind) {
     case "failed-run":
-      return `Latest run failed · ${problem.at === null ? "time unavailable" : fleetTime(problem.at)}`;
+      return `Latest run failed · ${problem.at === null ? "time unavailable" : fleetTime(problem.at, now, timestampFormat)}`;
     case "dispatch-overdue":
-      return `Run not dispatched · requested ${fleetTime(problem.at)}`;
+      return `Run not dispatched · requested ${fleetTime(problem.at, now, timestampFormat)}`;
     case "delivery-failed":
-      return `Delivery failed · to ${problem.receiverName ?? problem.receiverId} · ${fleetTime(problem.at)} · ${problem.reason ?? "reason unavailable"}`;
+      return `Delivery failed · to ${problem.receiverName ?? problem.receiverId} · ${fleetTime(problem.at, now, timestampFormat)} · ${problem.reason ?? "reason unavailable"}`;
   }
 };
 
