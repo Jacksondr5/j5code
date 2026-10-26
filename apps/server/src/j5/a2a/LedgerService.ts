@@ -369,10 +369,6 @@ export const layer: Layer.Layer<
       }
       if (event.kind === "participant.left" || event.kind === "participant.deleted") {
         if (event.kind === "participant.deleted") {
-          yield* sql`DELETE FROM j5_a2a_peer_delivery_alarm
-            WHERE project_id = ${event.projectId} AND message_id IN (
-              SELECT message_id FROM j5_a2a_delivery WHERE project_id = ${event.projectId}
-                AND sender_id = ${id})`;
           yield* sql`DELETE FROM j5_a2a_participant_placement WHERE project_id = ${event.projectId} AND participant_id = ${id}`;
         }
         yield* sql`
@@ -585,18 +581,6 @@ export const layer: Layer.Layer<
         }
         case "message.delivery_failed": {
           const payload = yield* decodeMessageDeliveryFailed(event.payload);
-          if (payload.peerReported === true) {
-            yield* sql`INSERT INTO j5_a2a_peer_delivery_alarm
-              (project_id, message_id, reported_at, reason)
-              SELECT project_id, message_id, ${event.createdAt}, ${payload.error}
-              FROM j5_a2a_delivery
-              WHERE project_id = ${event.projectId} AND message_id = ${payload.messageId}
-                AND receiver_environment_id = ${payload.peerEnvironmentId ?? null}
-                AND origin_environment_id IS NULL AND envelope_channel = 'peer'
-                AND status = 'delivered'
-              ON CONFLICT(project_id, message_id) DO NOTHING`;
-            return;
-          }
           const rows = yield* sql<{ readonly message_id: string }>`
             UPDATE j5_a2a_delivery
             SET

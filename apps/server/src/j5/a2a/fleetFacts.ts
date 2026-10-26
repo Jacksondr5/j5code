@@ -1,4 +1,4 @@
-import type { FleetAgentFacts, FleetProblem } from "@t3tools/contracts/j5";
+import type { FleetAgentFacts, FleetDeliveryProblem, FleetResponse } from "@t3tools/contracts/j5";
 import * as Effect from "effect/Effect";
 import type * as SqlClient from "effect/sql/SqlClient";
 
@@ -18,6 +18,8 @@ type AlarmRow = {
   readonly sender_id: string;
   readonly receiver_id: string;
   readonly message_id: string;
+  readonly exchange_id: string | null;
+  readonly origin_environment_id: string | null;
   readonly updated_at: string;
   readonly last_error: string | null;
   readonly exchange_open: number;
@@ -32,8 +34,8 @@ export const readFleetLedgerFacts = Effect.fn("readFleetLedgerFacts")(function* 
 ) {
   const owed = new Map<string, Array<Ask>>();
   const awaited = new Map<string, Array<Ask>>();
-  const problems = new Map<string, Array<FleetProblem>>();
-  if (agentIds.length === 0) return { owed, awaited, problems };
+  const problems = new Map<string, Array<FleetDeliveryProblem>>();
+  const deliveryEnvironmentIds = new Map<string, Array<string>>();
   const batches = clientReadBatches([...new Set(agentIds)]);
   const exchanges = new Map<string, Map<string, ExchangeRow>>();
   for (const batch of batches) {
@@ -76,35 +78,56 @@ export const readFleetLedgerFacts = Effect.fn("readFleetLedgerFacts")(function* 
     receiverAsks.push(ask(row.sender_id));
     owed.set(row.receiver_id, receiverAsks);
   }
-  // `peer` is the authored envelope channel, including local delivery. Platform notices have
-  // their own channels and must never surface as an agent's problem (Fleet AC24).
+  // Only local authors belong to this project's agent rows; remote authors are exported below.
   for (const batch of batches) {
-    const alarms = yield* sql<AlarmRow>`
-    SELECT d.sender_id, d.receiver_id, d.message_id, COALESCE(a.reported_at, d.updated_at) AS updated_at,
-      COALESCE(a.reason, d.last_error) AS last_error,
+    const destinations = yield* sql<{ sender_id: string; receiver_environment_id: string }>`
+      SELECT DISTINCT sender_id, receiver_environment_id FROM j5_a2a_delivery
+      WHERE project_id = ${projectId} AND sender_id IN ${sql.in(batch)}
+        AND origin_environment_id IS NULL AND receiver_environment_id IS NOT NULL
+        AND status = 'delivered' AND envelope_channel = 'peer'
+        AND (exchange_id IS NULL OR exchange_id NOT LIKE ${`${CREW_ALERT_EXCHANGE_PREFIX}%`})
+      ORDER BY receiver_environment_id
+    `;
+    for (const row of destinations) {
+      const environments = deliveryEnvironmentIds.get(row.sender_id) ?? [];
+      environments.push(row.receiver_environment_id);
+      deliveryEnvironmentIds.set(row.sender_id, environments);
+    }
+  }
+  const alarms = yield* sql<AlarmRow>`
+    SELECT d.sender_id, d.receiver_id, d.message_id, d.exchange_id, d.origin_environment_id,
+      d.updated_at, d.last_error,
       EXISTS (SELECT 1 FROM j5_a2a_exchange e WHERE e.project_id = d.project_id
         AND e.exchange_id = d.exchange_id AND e.status = 'open') AS exchange_open
     FROM j5_a2a_delivery d
-    LEFT JOIN j5_a2a_peer_delivery_alarm a ON a.project_id = d.project_id AND a.message_id = d.message_id
-    WHERE d.project_id = ${projectId} AND d.sender_id IN ${sql.in(batch)}
-      AND (d.status = 'alarmed' OR (d.status = 'delivered' AND a.message_id IS NOT NULL))
-      AND d.envelope_channel = 'peer'
+    WHERE d.project_id = ${projectId} AND d.status = 'alarmed' AND d.envelope_channel = 'peer'
       AND (d.exchange_id IS NULL OR d.exchange_id NOT LIKE ${`${CREW_ALERT_EXCHANGE_PREFIX}%`})
     ORDER BY d.sent_seq, d.message_id
   `;
-    for (const row of alarms) {
-      const senderProblems = problems.get(row.sender_id) ?? [];
-      senderProblems.push({
-        kind: "delivery-failed",
-        messageId: row.message_id,
-        receiverId: row.receiver_id,
-        receiverName: nameOf(row.receiver_id),
-        at: row.updated_at,
-        reason: row.last_error,
-        exchangeOpen: row.exchange_open === 1,
+  const localAgents = new Set(agentIds);
+  const remoteDeliveryAlarms: NonNullable<FleetResponse["remoteDeliveryAlarms"]>[number][] = [];
+  for (const row of alarms) {
+    const problem: FleetDeliveryProblem = {
+      kind: "delivery-failed",
+      messageId: row.message_id,
+      exchangeId: row.exchange_id,
+      receiverId: row.receiver_id,
+      receiverName: nameOf(row.receiver_id),
+      at: row.updated_at,
+      reason: row.last_error,
+      exchangeOpen: row.exchange_open === 1,
+    };
+    if (row.origin_environment_id !== null) {
+      remoteDeliveryAlarms.push({
+        originEnvironmentId: row.origin_environment_id,
+        senderId: row.sender_id,
+        problem,
       });
+    } else if (localAgents.has(row.sender_id)) {
+      const senderProblems = problems.get(row.sender_id) ?? [];
+      senderProblems.push(problem);
       problems.set(row.sender_id, senderProblems);
     }
   }
-  return { owed, awaited, problems };
+  return { owed, awaited, problems, deliveryEnvironmentIds, remoteDeliveryAlarms };
 });

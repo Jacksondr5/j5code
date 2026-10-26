@@ -1,5 +1,5 @@
 import { ChatAttachment, ProviderInteractionMode, RuntimeMode, ThreadId } from "@t3tools/contracts";
-import { PeerDeliveryAlarm, PeerSenderLabel } from "@t3tools/contracts/j5";
+import { PeerSenderLabel } from "@t3tools/contracts/j5";
 import * as Schema from "effect/Schema";
 
 const Identifier = Schema.String.check(Schema.isNonEmpty());
@@ -303,7 +303,6 @@ export const TerminalFact = Schema.Union([
 export type TerminalFact = typeof TerminalFact.Type;
 
 export const MessageSentPayload = Schema.Struct({
-  deliveryAlarm: Schema.optional(PeerDeliveryAlarm),
   attachments: Schema.optional(Schema.Array(ChatAttachment)),
   /** How the sender asked for the message to land; absent means `queue`. */
   mode: Schema.optional(SendMode),
@@ -329,9 +328,6 @@ export const MessageDeliveredPayload = Schema.Struct({
 export type MessageDeliveredPayload = typeof MessageDeliveredPayload.Type;
 
 export const MessageDeliveryFailedPayload = Schema.Struct({
-  /** Set only after binding an authenticated peer report to this server's outbound delivery. */
-  peerReported: Schema.optional(Schema.Literal(true)),
-  peerEnvironmentId: Schema.optional(Schema.String),
   messageId: LedgerMessageId,
   attempt: PositiveInt,
   error: Schema.String.check(Schema.isNonEmpty()),

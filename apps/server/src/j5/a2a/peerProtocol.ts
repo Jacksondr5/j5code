@@ -5,11 +5,7 @@ import {
 } from "@t3tools/contracts/j5";
 
 /** What this server tells every peer it can do, in a hello and in both directions of a poll. */
-export const ownPeerCapabilities = {
-  poll: true,
-  landing: true,
-  deliveryAlarms: true,
-} satisfies PeerCapabilities;
+export const ownPeerCapabilities = { poll: true, landing: true } satisfies PeerCapabilities;
 
 /**
  * The one compare for both directions of peering. A server states its peer

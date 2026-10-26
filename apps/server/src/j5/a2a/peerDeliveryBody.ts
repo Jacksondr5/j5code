@@ -56,7 +56,6 @@ export const buildPeerDeliveryBody = Effect.fn("j5.a2a.peer.deliveryBody")(funct
     envelopeChannel: row.envelope_channel,
     text: row.message_text,
     originProjectId: row.origin_project_id ?? row.project_id,
-    ...(yield* deliveryAlarm(sql, row)),
     ...(yield* landing(sql, row)),
     ...(yield* exchangeFacts(sql, row)),
     ...(senderLabel.length === 0 ? {} : { senderLabel }),
@@ -120,16 +119,4 @@ const exchangeFacts = Effect.fn("j5.a2a.peer.deliveryBody.exchangeFacts")(functi
     return payload.terminal === undefined ? {} : { terminal: payload.terminal };
   }
   return {};
-});
-
-const deliveryAlarm = Effect.fn("j5.a2a.peer.deliveryBody.alarm")(function* (
-  sql: SqlClient.SqlClient,
-  row: PeerBodyRow,
-) {
-  if (row.envelope_channel !== "lifecycle_notice" || row.exchange_role !== "none") return {};
-  const sent = yield* sql<{ readonly payload: string }>`SELECT payload FROM j5_a2a_comm_event
-    WHERE project_id = ${row.project_id} AND seq = ${row.sent_seq} AND kind = 'message.sent'`;
-  if (sent[0] === undefined) return {};
-  const payload = yield* decodeSentPayload(sent[0].payload);
-  return payload.deliveryAlarm === undefined ? {} : { deliveryAlarm: payload.deliveryAlarm };
 });

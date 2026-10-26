@@ -1,16 +1,29 @@
 import { describe, expect, it, vi, afterEach } from "vite-plus/test";
-import { RunId, RuntimeRequestId, type OrchestrationV2ThreadShell } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  RunId,
+  RuntimeRequestId,
+  type OrchestrationV2ThreadShell,
+} from "@t3tools/contracts";
 import {
   FleetResponse,
   FLEET_DISPATCH_THRESHOLD_MS,
   type FleetAgentFacts,
+  type FleetDeliveryProblem,
 } from "@t3tools/contracts/j5";
 import * as DateTime from "effect/DateTime";
 import * as Schema from "effect/Schema";
 import { Atom, AtomRegistry } from "effect/reactivity";
 
 import { v2ThreadShell } from "../state/orchestrationV2TestFixtures.ts";
-import { createFleetFactsAtom, deriveFleetFacts, type FleetFactRow } from "./fleetFacts.ts";
+import type { J5ReadSource } from "./readSources.ts";
+import {
+  createFleetFactsAtom,
+  deriveFleetFacts,
+  fleetAgentKey,
+  mergeFleetDeliveryFacts,
+  type FleetFactRow,
+} from "./fleetFacts.ts";
 
 const decodeFleet = Schema.decodeUnknownSync(FleetResponse);
 
@@ -395,4 +408,193 @@ it("does not advance offline dispatch facts when unrelated live rows change", ()
   expect(registry.get(facts).get("cached:a")?.runtime.state).toBe("unknown");
   stop();
   registry.dispose();
+});
+
+describe("receiving-environment delivery alarm merge", () => {
+  const senderId = "agent:shared";
+  const ask = (exchangeId: string) => ({
+    exchangeId,
+    counterpartyId: "agent:receiver",
+    counterpartyName: "Receiver",
+    intent: "Review",
+    openedAt: at,
+  });
+  const openLedger: FleetAgentFacts = {
+    ...ledger,
+    asks: { owed: [], awaited: [ask("exchange")] },
+    deliveryEnvironmentIds: ["receiver"],
+  };
+  const problem = {
+    kind: "delivery-failed" as const,
+    messageId: "received-message",
+    exchangeId: "exchange",
+    receiverId: "agent:receiver",
+    receiverName: "Receiver",
+    at,
+    reason: "thread unavailable",
+    exchangeOpen: true,
+  };
+  const project = (facts: FleetAgentFacts | undefined, id = "project") => ({
+    id,
+    title: id,
+    crews: [],
+    agents: [
+      {
+        participantId: senderId,
+        threadId: "thread",
+        displayName: "Sender",
+        origin: "human" as const,
+        placementParentId: null,
+        crew: null,
+        openAsks: 0,
+        ...(facts === undefined ? {} : { facts }),
+      },
+    ],
+  });
+  const source = (id: string, data: FleetResponse): J5ReadSource<FleetResponse> => ({
+    environmentId: EnvironmentId.make(id),
+    environmentLabel: id,
+    connected: true,
+    status: "ready",
+    data,
+    error: null,
+    refreshing: false,
+  });
+  const origin = (facts: FleetAgentFacts | undefined = openLedger, id = "origin") =>
+    source(id, { projects: [project(facts)], remoteDeliveryAlarms: [] });
+  const receiver = (changes: Partial<FleetDeliveryProblem> = {}) =>
+    source("receiver", {
+      projects: [],
+      remoteDeliveryAlarms: [
+        { originEnvironmentId: "origin", senderId, problem: { ...problem, ...changes } },
+      ],
+    });
+  const merge = (...sources: J5ReadSource<FleetResponse>[]) =>
+    mergeFleetDeliveryFacts({ isReady: true, sources });
+  const key = fleetAgentKey("origin", senderId);
+
+  it("attaches remote facts to the origin environment and participant without phantom rows", () => {
+    const receiving = source("receiver", {
+      projects: [],
+      remoteDeliveryAlarms: [
+        ...receiver().data!.remoteDeliveryAlarms!,
+        {
+          originEnvironmentId: "other",
+          senderId,
+          problem: { ...problem, messageId: "other-message" },
+        },
+        { originEnvironmentId: "origin", senderId: "agent:elsewhere", problem },
+      ],
+    });
+    const facts = merge(origin(), origin(openLedger, "other"), receiving);
+    expect(facts.get(key)?.ledger?.problems).toEqual([problem]);
+    expect(facts.get(fleetAgentKey("other", senderId))?.ledger?.problems).toEqual([
+      { ...problem, messageId: "other-message" },
+    ]);
+    expect(facts.get(key)?.problemsIncomplete).toBe(false);
+    expect(merge(receiving).size).toBe(0);
+    expect(facts.size).toBe(2);
+  });
+
+  it("counts a remote alarm only while both Exchange reads say open, preserving closed and plain facts", () => {
+    expect(merge(origin(), receiver()).get(key)?.ledger?.problems).toEqual([problem]);
+    const closedOrigin = { ...openLedger, asks: ledger.asks };
+    expect(merge(origin(closedOrigin), receiver()).get(key)?.ledger?.problems).toEqual([
+      { ...problem, exchangeOpen: false },
+    ]);
+    expect(merge(origin(), receiver({ exchangeOpen: false })).get(key)?.ledger?.problems).toEqual([
+      { ...problem, exchangeOpen: false },
+    ]);
+    expect(merge(origin(), receiver({ exchangeId: null })).get(key)?.ledger?.problems).toEqual([
+      { ...problem, exchangeId: null, exchangeOpen: false },
+    ]);
+  });
+
+  it("reports missing, old, disconnected and unreadable relevant receivers as incomplete", () => {
+    const unavailable: J5ReadSource<FleetResponse>[] = [
+      { ...receiver(), connected: false, status: "offline" },
+      { ...receiver(), status: "error", error: "read failed" },
+      { ...receiver(), status: "loading" },
+      { ...receiver(), status: "unsupported" },
+      source("receiver", { projects: [] }),
+    ];
+    for (const receiving of unavailable) {
+      expect(merge(origin(), receiving).get(key)).toMatchObject({
+        ledger: { problems: [] },
+        problemsIncomplete: true,
+      });
+    }
+    expect(merge(origin()).get(key)?.problemsIncomplete).toBe(true);
+    expect(
+      merge(origin({ ...ledger, deliveryEnvironmentIds: [] }), ...unavailable).get(key)
+        ?.problemsIncomplete,
+    ).toBe(false);
+    expect(merge(origin(ledger), receiver()).get(key)?.problemsIncomplete).toBe(true);
+    const staleOrigin = { ...origin(), connected: false, status: "offline" as const };
+    expect(merge(staleOrigin, receiver()).get(key)).toMatchObject({
+      ledger: { problems: [] },
+      problemsIncomplete: true,
+    });
+    expect(
+      mergeFleetDeliveryFacts(
+        { isReady: true, sources: [origin(), receiver()] },
+        new Map([
+          ["origin", true],
+          ["receiver", false],
+        ]),
+      ).get(key),
+    ).toMatchObject({ ledger: { problems: [] }, problemsIncomplete: true });
+  });
+
+  it("aggregates repeated placements across projects before merging receiver alarms", () => {
+    const first = { ...openLedger, problems: [{ ...problem, messageId: "local-first" }] };
+    const second = {
+      ...openLedger,
+      asks: { owed: [], awaited: [ask("second")] },
+      deliveryEnvironmentIds: ["second-receiver"],
+    };
+    const sending = source("origin", {
+      projects: [project(first, "one"), project(second, "two"), project(first, "three")],
+      remoteDeliveryAlarms: [],
+    });
+    const receiving = source("second-receiver", {
+      projects: [],
+      remoteDeliveryAlarms: [
+        {
+          originEnvironmentId: "origin",
+          senderId,
+          problem: { ...problem, messageId: "second-message", exchangeId: "second" },
+        },
+      ],
+    });
+    const result = merge(sending, receiver(), receiving).get(key)!;
+    expect(result.problemsIncomplete).toBe(false);
+    expect(result.ledger?.deliveryEnvironmentIds).toEqual(["receiver", "second-receiver"]);
+    expect(result.ledger?.asks.awaited.map((entry) => entry.exchangeId)).toEqual([
+      "exchange",
+      "second",
+    ]);
+    expect(
+      result.ledger?.problems.map((entry) => entry.kind === "delivery-failed" && entry.messageId),
+    ).toEqual(["local-first", "received-message", "second-message"]);
+  });
+
+  it("removes a cached receiver alarm from a live origin when receiver coverage is lost", () => {
+    const rows = Atom.make<ReadonlyArray<FleetFactRow>>([]);
+    const facts = createFleetFactsAtom(rows);
+    const registry = AtomRegistry.make();
+    const stop = registry.subscribe(facts, () => {}, { immediate: true });
+    const update = (receiving: J5ReadSource<FleetResponse>) => {
+      const merged = merge(origin(), receiving).get(key)!;
+      registry.set(rows, [
+        { key, shell: shell({ latestRunId: null, status: "completed" }), live: true, ...merged },
+      ]);
+    };
+    update(receiver());
+    expect(registry.get(facts).get(key)?.problems).toEqual([problem]);
+    update({ ...receiver(), connected: false, status: "offline" });
+    expect(registry.get(facts).get(key)).toMatchObject({ problems: [], problemsIncomplete: true });
+    stop();
+    registry.dispose();
+  });
 });

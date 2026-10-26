@@ -38,7 +38,6 @@ import {
   isMachineParticipantId,
   isOutsideAgentParticipantId,
   LedgerMessageId,
-  LIFECYCLE_PARTICIPANT_ID,
   MessageReceivedPayload,
   MessageSentPayload,
   ParticipantId,
@@ -465,7 +464,6 @@ const makeLayer = (daemon: boolean) =>
               // A peer server that refused the message already decided it; a
               // sender retired since cannot take that back, as with a receipt.
               if (yield* deliveryUnavailable(row, refusal !== undefined)) return null;
-              const reported = alarmed ? yield* peerAlarmFact(row, failedAt) : [];
               const told =
                 refusal !== undefined
                   ? yield* refusalNotices(row, refusal, failedAt)
@@ -496,7 +494,6 @@ const makeLayer = (daemon: boolean) =>
                     createdAt: failedAt,
                   },
                   ...told,
-                  ...reported,
                 ],
               });
             }),
@@ -559,51 +556,6 @@ const makeLayer = (daemon: boolean) =>
         ];
       });
 
-      const peerAlarmFact = Effect.fn("j5.a2a.delivery.peerAlarmFact")(function* (
-        row: DeliveryRow,
-        createdAt: string,
-      ) {
-        if (
-          row.envelope_channel !== "peer" ||
-          row.origin_environment_id === null ||
-          row.origin_project_id === null
-        )
-          return [];
-        const supported = yield* sql`SELECT 1 FROM j5_a2a_peer
-          WHERE environment_id = ${row.origin_environment_id}
-            AND json_extract(peer_capabilities, '$.deliveryAlarms') = 1`;
-        if (supported.length === 0) return [];
-        const received = yield* sql<{
-          readonly payload: string;
-        }>`SELECT payload FROM j5_a2a_comm_event
-          WHERE project_id = ${row.project_id} AND seq = ${row.sent_seq} AND kind = 'message.received'`;
-        if (received[0] === undefined) return [];
-        const payload = yield* decodeReceivedPayload(received[0].payload);
-        // Legacy authored ids are unbounded; diagnostic limits must not roll back their alarm.
-        if (payload.originMessageId === undefined || payload.originMessageId.length > 4096)
-          return [];
-        return [
-          {
-            kind: "message.sent",
-            sender: LIFECYCLE_PARTICIPANT_ID,
-            receiver: ParticipantId.make(row.sender_id),
-            exchangeId: null,
-            correlationId: CorrelationId.make(`correlation:peer-delivery-alarm:${row.message_id}`),
-            payload: {
-              messageId: LedgerMessageId.make(`message:peer-delivery-alarm:${row.message_id}`),
-              text: "Peer delivery alarm fact.",
-              originProjectId: LedgerProjectId.make(row.project_id),
-              receiverProjectId: LedgerProjectId.make(row.origin_project_id),
-              receiverEnvironmentId: row.origin_environment_id,
-              exchangeRole: "none",
-              envelopeChannel: "lifecycle_notice",
-              deliveryAlarm: { messageId: payload.originMessageId, code: "attempts-exhausted" },
-            },
-            createdAt,
-          },
-        ] satisfies ReadonlyArray<CommEvent>;
-      });
-
       /**
        * What the sender is told of an alarm: one notice that the message may not
        * have been delivered, naming the receiver and what the last attempt failed
@@ -611,8 +563,7 @@ const makeLayer = (daemon: boolean) =>
        * acknowledged after the wait for it timed out. So an alarmed ask's Exchange
        * stays open (a2a AC12), and the alarm stays a problem until the sender
        * withdraws it. A sender on a peer server is not told, as
-       * with a removed queued message; only the capability-gated Fleet fact crosses back.
-       * Nobody is told of a platform notice's alarm.
+       * with a removed queued message, and nobody is told of a platform notice's alarm.
        */
       const alarmNotices = Effect.fn("j5.a2a.delivery.alarmNotices")(function* (
         row: DeliveryRow,

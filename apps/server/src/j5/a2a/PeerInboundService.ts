@@ -155,12 +155,6 @@ export class A2APeerAskIntentRequiredError extends Schema.TaggedError<A2APeerAsk
   }
 }
 
-/** A genuine outbound awaiting its acceptance receipt may be retried by the report queue. */
-export class A2APeerDeliveryReceiptPendingError extends Schema.TaggedError<A2APeerDeliveryReceiptPendingError>()(
-  "A2APeerDeliveryReceiptPendingError",
-  {},
-) {}
-
 /**
  * A peer speaks only for its agents. It may not deliver as a person, a machine
  * participant or the platform, and an agent's message travels on the peer
@@ -190,7 +184,7 @@ export class A2APeerSenderNotAllowedError extends Schema.TaggedError<A2APeerSend
       case "outside":
         return `${this.senderId} is an outside agent; it reaches agents on its own server only, and a peer server may not deliver as one.`;
       case "platform":
-        return `${this.senderId} is not a platform notice a peer may carry: only the lifecycle's terminal notice or delivery-alarm fact, or the silence detector's notice, each on its own channel and in its own shape.`;
+        return `${this.senderId} is not a platform notice a peer may carry: only the lifecycle's terminal notice or the silence detector's notice, each on its own channel and in its own shape.`;
       case "channel":
         return `${this.senderId} must deliver on the peer envelope channel.`;
       case "role":
@@ -221,8 +215,7 @@ export type PeerInboundError =
   | A2APeerAskIntentRequiredError
   | A2APeerSenderNotAllowedError
   | A2APeerSenderNotOwnedError
-  | A2APeerLandingRefusedError
-  | A2APeerDeliveryReceiptPendingError;
+  | A2APeerLandingRefusedError;
 
 export interface PeerInboundServiceShape {
   readonly receive: (input: PeerInboundInput) => Effect.Effect<PeerInboundResult, PeerInboundError>;
@@ -258,7 +251,7 @@ const localMessageIdFor = (input: {
 /** Refuse the sender kinds, channels and roles a peer may not use, before anything is read. */
 /**
  * Who a peer may speak as. Its agents, on the peer channel, never a terminal
- * notice. Or the platform itself, as a terminal notice, delivery-alarm fact or silence notice in the
+ * notice. Or the platform itself, as exactly one of two notices, each in the
  * shape its producer writes: the lifecycle's terminal notice (the fact that
  * ends an Exchange) or the silence detector's notice (not part of any
  * Exchange, naming the one whose answerer went quiet). The receive path then
@@ -268,19 +261,6 @@ const assertSenderShape = (input: PeerInboundInput) => {
   const senderId = ParticipantId.make(input.senderId);
   const refuse = (reason: A2APeerSenderNotAllowedError["reason"]) =>
     Effect.fail(new A2APeerSenderNotAllowedError({ senderId, reason }));
-  if (input.deliveryAlarm !== undefined) {
-    if (
-      senderId === LIFECYCLE_PARTICIPANT_ID &&
-      input.envelopeChannel === "lifecycle_notice" &&
-      input.exchangeRole === "none" &&
-      input.exchangeId === null &&
-      input.terminal === undefined &&
-      input.regardingExchangeId === undefined &&
-      input.landing === undefined
-    )
-      return Effect.succeed({ senderId, platform: "delivery-alarm" as const });
-    return refuse("platform");
-  }
   if (isHumanParticipantId(senderId)) return refuse("human");
   if (isMachineParticipantId(senderId)) return refuse("machine");
   if (isOutsideAgentParticipantId(senderId)) return refuse("outside");
@@ -407,91 +387,15 @@ export const layer: Layer.Layer<PeerInboundService, never, PeerInboundServiceReq
         }
       });
 
-      const receiveDeliveryAlarm = Effect.fn("j5.a2a.peer.inbound.deliveryAlarm")(function* (
-        input: PeerInboundInput,
-      ) {
-        const report = input.deliveryAlarm!;
-        const commandId = CommCommandId.make(
-          `command:peer-delivery-alarm:${stablePart(input.originEnvironmentId)}:${stablePart(report.messageId)}`,
-        );
-        const outcome = yield* writer.withPermit(
-          sql.withTransaction(
-            Effect.gen(function* () {
-              const recorded =
-                yield* sql`SELECT 1 FROM j5_a2a_peer WHERE environment_id = ${input.originEnvironmentId}`;
-              if (recorded.length === 0)
-                return yield* new A2APeerNotRecordedError({
-                  originEnvironmentId: input.originEnvironmentId,
-                });
-              const previous =
-                yield* sql`SELECT 1 FROM j5_a2a_comm_command_receipt WHERE command_id = ${commandId}`;
-              if (previous.length > 0) return null;
-              const rows = yield* sql<{
-                readonly project_id: string;
-                readonly message_id: string;
-                readonly sender_id: string;
-                readonly receiver_id: string;
-                readonly exchange_id: string | null;
-                readonly correlation_id: string;
-                readonly status: string;
-                readonly attempts: number;
-              }>`SELECT d.project_id, d.message_id, d.sender_id, d.receiver_id, d.exchange_id,
-              d.correlation_id, d.status, d.attempts
-            FROM j5_a2a_delivery d JOIN j5_a2a_membership m
-              ON m.project_id = d.project_id AND m.participant_id = d.sender_id AND m.archived_at IS NULL
-            WHERE d.message_id = ${report.messageId} AND d.receiver_environment_id = ${input.originEnvironmentId}
-              AND d.origin_environment_id IS NULL AND d.envelope_channel = 'peer'
-            LIMIT 2`;
-              const row = rows.length === 1 ? rows[0] : undefined;
-              if (row === undefined) return null;
-              if (row.status === "pending" || row.status === "retry_scheduled")
-                return yield* new A2APeerDeliveryReceiptPendingError({});
-              if (row.status !== "delivered") return null;
-              const receivedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
-              return yield* writer.appendEventsInTransaction({
-                commandId,
-                projectId: LedgerProjectId.make(row.project_id),
-                acceptedAt: receivedAt,
-                events: [
-                  {
-                    kind: "message.delivery_failed",
-                    sender: ParticipantId.make(row.sender_id),
-                    receiver: ParticipantId.make(row.receiver_id),
-                    exchangeId: row.exchange_id === null ? null : ExchangeId.make(row.exchange_id),
-                    correlationId: CorrelationId.make(row.correlation_id),
-                    createdAt: receivedAt,
-                    payload: {
-                      messageId: row.message_id,
-                      attempt: Math.max(1, row.attempts),
-                      error:
-                        "The peer accepted this message, but delivery into its agent's thread failed.",
-                      nextAttemptAt: null,
-                      alarmed: true,
-                      peerReported: true,
-                      peerEnvironmentId: input.originEnvironmentId,
-                    },
-                  },
-                ],
-              });
-            }),
-          ),
-        );
-        if (outcome?.committed) yield* writer.publishCommitted(outcome.events);
-        // Unknown, foreign, retired and replayed messages have the same non-oracular receipt.
-        return { receivedSeq: 1, replay: false } satisfies PeerInboundResult;
-      });
-
       const receive: PeerInboundServiceShape["receive"] = (input) =>
         Effect.gen(function* () {
-          const shape = yield* assertSenderShape(input);
-          if (shape.platform === "delivery-alarm") return yield* receiveDeliveryAlarm(input);
           const commandId = peerReceiveCommandId({
             originEnvironmentId: input.originEnvironmentId,
             messageId: input.messageId,
           });
           const replayed = yield* priorReceipt(commandId);
           if (replayed !== null) return replayed;
-          const { senderId, platform } = shape;
+          const { senderId, platform } = yield* assertSenderShape(input);
           if (platform === null)
             yield* assertSenderOwnedByOrigin(senderId, input.originEnvironmentId);
           const receiverId = ParticipantId.make(input.receiverId);
