@@ -593,16 +593,29 @@ it("does not advance offline dispatch facts when unrelated live rows change", ()
     exchangeOpen: true,
   };
   const rows = Atom.make<ReadonlyArray<FleetFactRow>>([
-    { key: "offline:a", shell: shell(), ledger: { ...ledger, problems: [alarm] }, live: true },
+    {
+      key: "offline:a",
+      shell: shell(),
+      ledger: { ...ledger, problems: [alarm], deliveryEnvironmentIds: [] },
+      live: true,
+    },
     { key: "cached:a", shell: shell(), ledger, live: false },
   ]);
   const facts = createFleetFactsAtom(rows);
   const registry = AtomRegistry.make({ defaultIdleTTL: 0 });
   const stop = registry.subscribe(facts, () => {}, { immediate: true });
+  const measured = registry.get(facts).get("offline:a")!;
+  expect(measured.problemsIncomplete).toBe(false);
   registry.set(
     rows,
     registry.get(rows).map((row) => ({ ...row, live: false })),
   );
+  const frozen = registry.get(facts).get("offline:a")!;
+  expect(frozen.problemsIncomplete).toBe(true);
+  expect(frozen.runtime).toBe(measured.runtime);
+  expect(frozen.lastActivity).toBe(measured.lastActivity);
+  expect(frozen.asks).toBe(measured.asks);
+  expect(frozen.problems).toBe(measured.problems);
   vi.advanceTimersByTime(FLEET_DISPATCH_THRESHOLD_MS * 2);
   registry.set(rows, [
     ...registry.get(rows),
@@ -619,10 +632,16 @@ it("does not advance offline dispatch facts when unrelated live rows change", ()
     },
   ]);
   const stale = registry.get(facts).get("offline:a")!;
+  expect(stale).toBe(frozen);
   expect(stale.runtime).toMatchObject({ state: "known", status: "waiting-to-start" });
   expect(stale.lastActivity.state).toBe("known");
   expect(stale.problems).toEqual([alarm]);
   expect(registry.get(facts).get("cached:a")?.runtime.state).toBe("unknown");
+  registry.set(
+    rows,
+    registry.get(rows).map((row) => (row.key === "offline:a" ? { ...row, live: true } : row)),
+  );
+  expect(registry.get(facts).get("offline:a")?.problemsIncomplete).toBe(false);
   stop();
   registry.dispose();
 });
