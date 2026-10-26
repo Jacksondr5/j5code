@@ -28,6 +28,9 @@ import {
   fleetProblemLabel,
 } from "./fleetPresentation";
 
+const incompleteDeliveryReason =
+  "Delivery problems may be missing because an environment is unavailable or does not provide complete delivery facts.";
+
 export function FleetFactHint({
   reason,
   children,
@@ -334,11 +337,16 @@ function FleetFactDetailContent({
         ))}
         {facts?.asks === undefined ? (
           <p>This environment does not provide delivery problems.</p>
+        ) : facts.problemsIncomplete ? (
+          <p>{incompleteDeliveryReason}</p>
         ) : null}
         {runtime?.state !== "known" ? (
           <p>{runtime?.reason ?? "Runtime facts are unavailable."}</p>
         ) : null}
-        {runtime?.state === "known" && facts?.asks !== undefined && facts.problems.length === 0 ? (
+        {runtime?.state === "known" &&
+        facts?.asks !== undefined &&
+        !facts.problemsIncomplete &&
+        facts.problems.length === 0 ? (
           <p>No measured problems.</p>
         ) : null}
       </div>
@@ -422,7 +430,8 @@ function FleetProblems({
   readonly live: boolean;
 }) {
   const runtimeKnown = facts?.runtime.state === "known";
-  if (facts?.problems.length === 0 && runtimeKnown && ledgerKnown) return null;
+  if (facts?.problems.length === 0 && !facts.problemsIncomplete && runtimeKnown && ledgerKnown)
+    return null;
   return (
     <span className="col-span-full flex flex-wrap gap-x-4 gap-y-1 text-xs">
       {facts?.problems.map((problem) => (
@@ -441,6 +450,11 @@ function FleetProblems({
           />
         </span>
       ))}
+      {ledgerKnown && facts?.problemsIncomplete ? (
+        <FleetFactHint className="text-muted-foreground" reason={incompleteDeliveryReason}>
+          Delivery problems ?
+        </FleetFactHint>
+      ) : null}
       {!ledgerKnown || !runtimeKnown ? (
         <FleetFactHint
           className="text-muted-foreground"

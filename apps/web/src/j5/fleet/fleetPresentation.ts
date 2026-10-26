@@ -5,8 +5,7 @@ import type { TimestampFormat } from "@t3tools/contracts/settings";
 import { formatChatTimestampTooltip, formatElapsedDurationLabel } from "../../timestampFormat";
 import type { CrewSeatState } from "../crew/crewState";
 
-export const fleetAgentKey = (environmentId: string, participantId: string) =>
-  `${environmentId.length}:${environmentId}${participantId}`;
+export { fleetAgentKey } from "@t3tools/client-runtime/j5/fleetFacts";
 
 export const fleetSourceIsLive = (
   source: Pick<J5ReadSource<unknown>, "connected" | "status">,

@@ -1,4 +1,8 @@
-import { createFleetFactsAtom, type FleetFactRow } from "@t3tools/client-runtime/j5/fleetFacts";
+import {
+  createFleetFactsAtom,
+  mergeFleetDeliveryFacts,
+  type FleetFactRow,
+} from "@t3tools/client-runtime/j5/fleetFacts";
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { ThreadId, type EnvironmentId } from "@t3tools/contracts";
 import { Atom } from "effect/reactivity";
@@ -30,7 +34,9 @@ const fleetFactRowsAtom = Atom.make((get): ReadonlyArray<FleetFactRow> => {
     ]),
   );
   const environments = get(fleetEnvironmentLivenessAtom);
-  return get(fleetSourcesAtom).sources.flatMap((source) => {
+  const sources = get(fleetSourcesAtom);
+  const deliveries = mergeFleetDeliveryFacts(sources, environments);
+  return sources.sources.flatMap((source) => {
     const live = environments.get(source.environmentId) === true;
     return (source.data?.projects ?? []).flatMap((project) =>
       project.agents.map((agent) => {
@@ -42,11 +48,14 @@ const fleetFactRowsAtom = Atom.make((get): ReadonlyArray<FleetFactRow> => {
                   scopeThreadRef(source.environmentId, ThreadId.make(agent.threadId)),
                 ),
               );
+        const key = fleetAgentKey(source.environmentId, agent.participantId);
+        const delivery = deliveries.get(key);
         return {
-          key: fleetAgentKey(source.environmentId, agent.participantId),
+          key,
           shell: thread?.source,
           pendingSubagentRequest: thread?.pendingSubagentRequest,
-          ledger: agent.facts,
+          ledger: delivery?.ledger,
+          problemsIncomplete: delivery?.problemsIncomplete ?? true,
           live,
         };
       }),

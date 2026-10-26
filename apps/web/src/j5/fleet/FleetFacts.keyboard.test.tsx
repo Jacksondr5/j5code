@@ -118,6 +118,7 @@ const measured: FleetDerivedFacts = {
     ],
   },
   problems: [],
+  problemsIncomplete: false,
 };
 let root: Root;
 let container: HTMLDivElement;
@@ -367,4 +368,34 @@ it("shows ask ages in one tooltip without nested triggers and refreshes the open
   expect(popup.querySelector('[data-slot="tooltip-trigger"]')).toBeNull();
   await act(() => vi.advanceTimersByTime(60_000));
   expect(popup.textContent).toContain("Captain · Review the patch · opened 11m ago");
+});
+
+it("keeps incomplete delivery coverage visible and keyboard-readable until a complete read", async () => {
+  state.facts = { ...timedFacts, problems: [], problemsIncomplete: true };
+  await render();
+  const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+  expect(navigation().textContent).toContain("Delivery problems ?");
+  summary().focus();
+  await key(user, "{Enter}");
+  expect(disclosure().textContent).toContain("Delivery problems may be missing");
+  expect(disclosure().textContent).not.toContain("No measured problems.");
+
+  state.facts = { ...state.facts, problemsIncomplete: false };
+  await refreshState();
+  expect(navigation().textContent).not.toContain("Delivery problems ?");
+  expect(disclosure().textContent).not.toContain("Delivery problems may be missing");
+  expect(disclosure().textContent).toContain("No measured problems.");
+});
+
+it("preserves measured delivery failures while warning about incomplete coverage", async () => {
+  state.facts = { ...timedFacts, problemsIncomplete: true };
+  await render();
+  const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+  expect(navigation().textContent).toContain("Delivery failed · to Reviewer · 2m ago · offline");
+  expect(navigation().textContent).toContain("Delivery problems ?");
+  summary().focus();
+  await key(user, "{Enter}");
+  expect(disclosure().textContent).toContain("Delivery failed · to Reviewer · 2m ago · offline");
+  expect(disclosure().textContent).toContain("Delivery problems may be missing");
+  expect(disclosure().textContent).not.toContain("No measured problems.");
 });

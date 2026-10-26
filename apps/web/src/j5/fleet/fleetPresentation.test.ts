@@ -23,6 +23,7 @@ const facts = (value: FleetRuntimeFact): FleetDerivedFacts => ({
   asks: undefined,
   lastActivity: { state: "unknown", reason: "old server" },
   problems: [],
+  problemsIncomplete: false,
 });
 
 describe("Fleet presentation", () => {
