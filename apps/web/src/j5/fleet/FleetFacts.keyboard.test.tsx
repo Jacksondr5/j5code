@@ -8,6 +8,8 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
 
+import { formatChatTimestampTooltip } from "../../timestampFormat";
+
 const state = vi.hoisted(() => ({
   facts: undefined as FleetDerivedFacts | undefined,
   live: true,
@@ -83,6 +85,8 @@ vi.mock("../../env", () => ({ isElectron: false }));
 
 import { FleetRowItem } from "./FleetPage";
 import { FleetSourceReadout } from "./FleetFacts";
+
+const absoluteTime = (iso: string) => formatChatTimestampTooltip(iso, state.timestampFormat);
 
 const environmentId = EnvironmentId.make("fleet-test");
 const agent: FleetAgent = {
@@ -282,17 +286,21 @@ it("refreshes live row, expanded facts, asks and environment times on the shared
   expect(disclosure().textContent).toContain("Delivery failed · to Reviewer · 3m ago · offline");
   expect(disclosure().textContent).toContain("opened 11m ago");
   expect(container.querySelector("p")?.textContent).toContain("ledger read 6m ago");
-  expect(disclosure().textContent).toContain("12:00, 23rd October 2026");
-  expect(disclosure().textContent).toContain("12:03, 23rd October 2026");
-  expect(disclosure().textContent).toContain("12:08, 23rd October 2026");
-  expect(disclosure().textContent).toContain("Environment read: 6m ago (12:05, 23rd October 2026)");
-  expect(container.querySelector("p")?.textContent).toContain("6m ago (12:05, 23rd October 2026)");
+  expect(disclosure().textContent).toContain(absoluteTime("2026-10-23T12:00:00Z"));
+  expect(disclosure().textContent).toContain(absoluteTime("2026-10-23T12:03:00Z"));
+  expect(disclosure().textContent).toContain(absoluteTime("2026-10-23T12:08:00Z"));
+  expect(disclosure().textContent).toContain(
+    `Environment read: 6m ago (${absoluteTime(state.asOf)})`,
+  );
+  expect(container.querySelector("p")?.textContent).toContain(
+    `6m ago (${absoluteTime(state.asOf)})`,
+  );
 
   state.timestampFormat = "12-hour";
   await refreshState();
-  expect(disclosure().textContent).toContain("12:00 PM, 23rd October 2026");
-  expect(disclosure().textContent).toContain("12:03 PM, 23rd October 2026");
-  expect(disclosure().textContent).toContain("12:08 PM, 23rd October 2026");
+  expect(disclosure().textContent).toContain(absoluteTime("2026-10-23T12:00:00Z"));
+  expect(disclosure().textContent).toContain(absoluteTime("2026-10-23T12:03:00Z"));
+  expect(disclosure().textContent).toContain(absoluteTime("2026-10-23T12:08:00Z"));
 });
 
 it("stops aging every measurement when a live row freezes, then resumes from the current clock", async () => {
@@ -307,7 +315,7 @@ it("stops aging every measurement when a live row freezes, then resumes from the
   await refreshState();
   const frozen = container.textContent;
   expect(vi.getTimerCount()).toBe(0);
-  expect(frozen).toContain("23rd October 2026");
+  expect(frozen).toContain(absoluteTime("2026-10-23T12:00:00Z"));
   expect(disclosure().textContent).toContain("5m at last read · opened");
   expect(navigation().textContent).not.toContain("Idle 10m");
   expect(navigation().textContent).not.toContain("Last turn ended 7m ago");
@@ -345,9 +353,11 @@ it("advances waiting-to-start ages and freezes their absolute request time", asy
 
   state.live = false;
   await refreshState();
-  expect(navigation().textContent).toContain("Waiting to start · since 12:00, 23rd October 2026");
   expect(navigation().textContent).toContain(
-    "Run not dispatched · requested 12:00, 23rd October 2026",
+    `Waiting to start · since ${absoluteTime("2026-10-23T12:00:00Z")}`,
+  );
+  expect(navigation().textContent).toContain(
+    `Run not dispatched · requested ${absoluteTime("2026-10-23T12:00:00Z")}`,
   );
   const frozen = navigation().textContent;
   await act(() => vi.advanceTimersByTime(60_000));
