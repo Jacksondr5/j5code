@@ -150,6 +150,19 @@ export function useCanStartInAny(
   return useAtomValue(startsAtom, select);
 }
 
+/** `useCanStartInAny` for one project: whether this connection may start a thread in it. */
+export function useCanStartThreadIn(
+  environmentId: EnvironmentId | null,
+  projectId: ProjectId | null,
+): boolean {
+  const select = useCallback(
+    (starts: (environmentId: EnvironmentId, projectId: ProjectId | null) => boolean) =>
+      environmentId === null || projectId === null || starts(environmentId, projectId),
+    [environmentId, projectId],
+  );
+  return useAtomValue(startsAtom, select);
+}
+
 /**
  * Whether this connection may add a project to the server: upstream's server-wide "Operate tasks",
  * which upstream's Add project flow asks, and a Collaborator's or Owner's level at server scope.

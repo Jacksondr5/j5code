@@ -459,6 +459,7 @@ migrations after upstream migrations.
     - `apps/web/src/lib/chatThreadActions.ts`: imports `readCanStartThreadIn` from `startAccess.ts`; `startNewThreadFromContext` also returns `false` when it refuses the context's project, so the `chat.new` and `chat.newLocal` keybindings and the sidebar's Shift+click do nothing there, as upstream's keybindings do for a permission the connection lacks.
     - `apps/web/src/hooks/useScratchProject.ts`: imports and calls `useCanStartIn`; `scratchEnvironmentId` offers a server only where a project can be added, so "New thread without a project", its keybinding and the other scratch doors leave out a server that refuses `projects.openScratch` to a narrowed session.
     - `apps/web/src/components/chat/MessagesTimeline.tsx`: imports `useCanForkThread`; `AssistantForkButton` calls it beside `canForkProjectedAssistantItem` and returns `null` on either, as it did on the one.
+    - `apps/web/src/components/chat/ChatHeader.tsx`: imports `useCanStartThreadIn` and calls it with the active project; the breadcrumb's project-name button, which starts a new thread in that project, is `disabled` when the person can't start one there.
     - `apps/web/src/components/BranchToolbarBranchSelector.tsx`: imports `useCanOperateThread`; `canOperateThread`, which gates only the branch change, is `useCanOperateThread(environmentId, threadId)` in place of upstream's server-wide "Operate tasks".
     - `apps/web/src/components/GitActionsControl.tsx`: imports `useCanOperateThread` and adds `canOperateThisThread` beside upstream's `canOperateThread`; `canChangeThreadBranch` ("Commit on new branch" and "Check out feature branch & continue") reads it in place of `canOperateThread`. Upstream's `canOperateThread` still gates the commit dialog's Open in editor buttons. `GitActionsControl.test.ts` and `GitActionsControl.lifecycle.test.ts` mock the J5 hook as that permission (one `vi.mock` each).
 
@@ -821,7 +822,7 @@ explicitly marked.
 | `apps/web/src/contextMenuFallback.ts`                                 | N       | 71                                                 |
 | `apps/web/src/hooks/useThreadActionMenu.ts`                           | A       | 21, 69, 71                                         |
 | `apps/web/src/hooks/useThreadActionMenu.test.ts`                      | A       | 71                                                 |
-| `apps/web/src/components/chat/ChatHeader.tsx`                         | N       | 73                                                 |
+| `apps/web/src/components/chat/ChatHeader.tsx`                         | N       | 73, 85                                             |
 | `apps/web/src/components/chat/ThreadDetailsPanel.tsx`                 | N       | 73                                                 |
 | `apps/web/src/components/settings/SettingsScopeSentence.tsx`          | N       | 72                                                 |
 | `apps/web/src/components/settings/ProjectSettingsPanel.tsx`           | N       | 72                                                 |
