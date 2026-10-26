@@ -6,7 +6,7 @@ import type {
   ScopedProjectRef,
 } from "@t3tools/contracts";
 import type { ComposerThreadDraftState, DraftThreadEnvMode } from "../composerDraftStore";
-import { readCanStartThreadIn } from "../j5/sharing/threadOperability";
+import { readCanStartThreadIn } from "../j5/sharing/startAccess";
 
 type ComposerModelSelectionState = Pick<
   ComposerThreadDraftState,

@@ -28,7 +28,8 @@ import { useEnvironmentScope } from "../../state/session";
 import { j5Sharing } from "../state";
 import { ownerSomewhereState } from "./settingsAccess.logic";
 import { provideSharingMenuAccess } from "./sharingMenu";
-import { provideSharingStart, provideSharingThreadOperability } from "./threadOperability";
+import { provideSharingStart } from "./startAccess";
+import { provideSharingThreadOperability } from "./threadOperability";
 
 export { j5Sharing };
 

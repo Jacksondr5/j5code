@@ -3,7 +3,13 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { buildSidebarProjectSnapshots } from "../../sidebarProjectGrouping";
 import type { Project } from "../../types";
-import { startableProjectPicker } from "./startableProjects";
+import {
+  openableFromSearch,
+  readStartableProjectRef,
+  startableMemberRef,
+  startableProjectPicker,
+} from "./startableProjects";
+import { provideSharingStart } from "./startAccess";
 
 const LOCAL = EnvironmentId.make("env-local");
 const REMOTE = EnvironmentId.make("env-remote");
@@ -79,5 +85,62 @@ describe("the projects offered a new thread", () => {
     });
     expect(picker.projects.map((entry) => entry.id)).toEqual(["shared-remote"]);
     expect(picker.groupByTargetKey.get(`${REMOTE}:shared-remote`)).toBe(groups[0]);
+  });
+});
+
+describe("a project picked from search", () => {
+  const picked = { environmentId: LOCAL, id: ProjectId.make("shared-local") };
+
+  it("starts a new thread in another checkout of its group when the picked one cannot take one", () => {
+    expect(
+      startableMemberRef({
+        project: picked,
+        group: groups[0],
+        canStartIn: startsOnlyIn("shared-remote"),
+      }),
+    ).toEqual({ environmentId: REMOTE, projectId: "shared-remote" });
+  });
+
+  it("starts nowhere when no checkout of its group can take a thread", () => {
+    expect(
+      startableMemberRef({ project: picked, group: groups[0], canStartIn: startsOnlyIn() }),
+    ).toBeNull();
+  });
+
+  it("can still be picked to open a thread when no checkout can take a new one", () => {
+    expect(
+      openableFromSearch({
+        project: picked,
+        group: groups[0],
+        projectKeysWithThreads: new Set([`${REMOTE}:shared-remote`]),
+        canStartIn: startsOnlyIn(),
+      }),
+    ).toBe(true);
+  });
+
+  it("cannot be picked with no thread to open and no checkout to start one in", () => {
+    expect(
+      openableFromSearch({
+        project: picked,
+        group: groups[0],
+        projectKeysWithThreads: new Set(),
+        canStartIn: startsOnlyIn(),
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("a plain New thread click the open project refuses", () => {
+  it("goes to a checkout the person can start in", () => {
+    provideSharingStart((_environmentId, projectId) => projectId === "shared-remote");
+    expect(readStartableProjectRef(groups)).toEqual({
+      environmentId: REMOTE,
+      projectId: "shared-remote",
+    });
+  });
+
+  it("goes nowhere when no checkout can take a thread", () => {
+    provideSharingStart(() => false);
+    expect(readStartableProjectRef(groups)).toBeNull();
   });
 });

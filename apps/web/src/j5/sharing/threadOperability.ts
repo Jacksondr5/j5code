@@ -1,10 +1,4 @@
-import {
-  AuthOrchestrationOperateScope,
-  type EnvironmentId,
-  type ProjectId,
-  type ScopedProjectRef,
-  type ScopedThreadRef,
-} from "@t3tools/contracts";
+import { AuthOrchestrationOperateScope, type ScopedThreadRef } from "@t3tools/contracts";
 
 import { readEnvironmentScope } from "../../state/session";
 
@@ -27,23 +21,4 @@ export function readCanOperateThread(thread: ScopedThreadRef): boolean {
     readEnvironmentScope(thread.environmentId, AuthOrchestrationOperateScope) &&
     sharingAllowsOperate(thread)
   );
-}
-
-// `useCanStartIn`'s answer, handed over by `access.ts` in the same way. Upstream offers a new
-// thread to any connection, so until then nothing is withheld.
-let sharingAllowsStart: (
-  environmentId: EnvironmentId,
-  projectId: ProjectId | null,
-) => boolean = () => true;
-
-/** Called once by `access.ts` with the read behind `useCanStartIn`. */
-export function provideSharingStart(
-  read: (environmentId: EnvironmentId, projectId: ProjectId | null) => boolean,
-) {
-  sharingAllowsStart = read;
-}
-
-/** `useCanStartIn` for one project, for code that runs outside a render. */
-export function readCanStartThreadIn(project: ScopedProjectRef): boolean {
-  return sharingAllowsStart(project.environmentId, project.projectId);
 }

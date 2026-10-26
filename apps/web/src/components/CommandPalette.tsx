@@ -3,7 +3,11 @@
 import { useHighlightsPaletteItems } from "../j5/highlights/highlightsPalette";
 import { useSharingPaletteItems } from "../j5/sharing/sharingPalette";
 import { useCanAddProject, useCanStartIn } from "../j5/sharing/access";
-import { startableProjectPicker } from "../j5/sharing/startableProjects";
+import {
+  openableFromSearch,
+  startableMemberRef,
+  startableProjectPicker,
+} from "../j5/sharing/startableProjects";
 import { threadPullRequestLinkMode } from "@t3tools/client-runtime/thread-pull-request-compatibility";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 
@@ -1129,6 +1133,11 @@ function OpenCommandPaletteDialog(props: {
     [browseNavigation],
   );
 
+  const searchProjectKeysWithThreads = new Set(
+    threads.flatMap((thread) =>
+      thread.archivedAt === null ? [`${thread.environmentId}:${thread.projectId}`] : [],
+    ),
+  );
   const openProjectFromSearch = async (project: (typeof projects)[number]) => {
     const group = projectGroupByTargetKey.get(`${project.environmentId}:${project.id}`);
     const groupedProjectKeys = group
@@ -1160,7 +1169,8 @@ function OpenCommandPaletteDialog(props: {
       return;
     }
 
-    await handleNewThread(scopeProjectRef(project.environmentId, project.id));
+    const startRef = startableMemberRef({ project, group, canStartIn });
+    if (startRef) await handleNewThread(startRef);
   };
 
   const projectSearchItems = buildProjectActionItems({
@@ -1197,6 +1207,19 @@ function OpenCommandPaletteDialog(props: {
     },
     icon: projectFaviconIcon,
     runProject: openProjectFromSearch,
+  }).map((item, index) => {
+    // J5: a project with no thread to open and no checkout this person may start one in is shown
+    // but cannot be picked, as upstream shows a server that is not connected.
+    const project = pickerProjects[index];
+    const openable =
+      !project ||
+      openableFromSearch({
+        project,
+        group: projectGroupByTargetKey.get(`${project.environmentId}:${project.id}`),
+        projectKeysWithThreads: searchProjectKeysWithThreads,
+        canStartIn,
+      });
+    return openable ? item : { ...item, disabled: true };
   });
 
   const projectThreadItems = (() => {

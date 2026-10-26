@@ -128,7 +128,7 @@ import { useDesktopUpdateState } from "../state/desktopUpdate";
 import { useThreadActions } from "../hooks/useThreadActions";
 import { archiveWithPreflight } from "../j5/a2a/archiveFlow";
 import { useCanStartInAny } from "../j5/sharing/access";
-import { readCanStartThreadIn } from "../j5/sharing/threadOperability";
+import { readCanStartThreadIn } from "../j5/sharing/startAccess";
 import { projectEnvironment } from "../state/projects";
 import { threadEnvironment, useEnvironmentThread } from "../state/threads";
 import { useEnvironment, useEnvironments, usePrimaryEnvironmentId } from "../state/environments";

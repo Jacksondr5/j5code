@@ -181,6 +181,7 @@ import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { ProjectEnvironmentBadge } from "./ProjectEnvironmentBadge";
 import { useCanStartInAny, useIsNarrowEverywhere } from "../j5/sharing/access";
 import { buildWithSharingMenuItems, runSharingMenuAction } from "../j5/sharing/sharingMenu";
+import { readStartableProjectRef } from "../j5/sharing/startableProjects";
 import {
   buildDraftActionMenuItems,
   buildThreadActionMenuItems,
@@ -4498,6 +4499,10 @@ export default function Sidebar() {
         activeThread: newThreadContext.activeThread ?? undefined,
         defaultProjectRef: newThreadContext.defaultProjectRef,
         handleNewThread: newThreadContext.handleNewThread,
+      }).then((started) => {
+        // J5: a project this person cannot start in hands a plain click to one they can.
+        const fallback = started || event?.shiftKey ? null : readStartableProjectRef(projectGroups);
+        if (fallback) void newThreadContext.handleNewThread(fallback);
       });
       return;
     }
