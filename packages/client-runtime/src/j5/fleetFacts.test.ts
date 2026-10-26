@@ -490,7 +490,10 @@ describe("receiving-environment delivery alarm merge", () => {
       ],
     });
   const merge = (...sources: J5ReadSource<FleetResponse>[]) =>
-    mergeFleetDeliveryFacts({ isReady: true, sources });
+    mergeFleetDeliveryFacts(
+      { isReady: true, sources },
+      new Map(sources.map((entry) => [entry.environmentId, true])),
+    );
   const key = fleetAgentKey("origin", senderId);
 
   it("attaches remote facts to the origin environment and participant without phantom rows", () => {
@@ -528,6 +531,36 @@ describe("receiving-environment delivery alarm merge", () => {
     expect(merge(origin(), receiver({ exchangeId: null })).get(key)?.ledger?.problems).toEqual([
       { ...problem, exchangeId: null, exchangeOpen: false },
     ]);
+  });
+
+  it("attaches a later receiver alarm using the unchanged pending-origin snapshot", () => {
+    const pendingOrigin = origin();
+    const before = merge(
+      pendingOrigin,
+      source("receiver", { projects: [], remoteDeliveryAlarms: [] }),
+    );
+    expect(before.get(key)).toMatchObject({ ledger: { problems: [] }, problemsIncomplete: false });
+    const after = merge(pendingOrigin, receiver());
+    expect(after.get(key)).toMatchObject({
+      ledger: { problems: [problem] },
+      problemsIncomplete: false,
+    });
+    expect(pendingOrigin.data?.projects[0]?.agents[0]?.facts?.problems).toEqual([]);
+  });
+
+  it("shows connected plain and closed-Exchange alarms independently of badge coverage dependencies", () => {
+    const noOpenDebt = origin({ ...ledger, deliveryEnvironmentIds: [] });
+    expect(merge(noOpenDebt, receiver({ exchangeId: null })).get(key)).toMatchObject({
+      ledger: { problems: [{ ...problem, exchangeId: null, exchangeOpen: false }] },
+      problemsIncomplete: false,
+    });
+    expect(merge(noOpenDebt, receiver()).get(key)).toMatchObject({
+      ledger: { problems: [{ ...problem, exchangeOpen: false }] },
+      problemsIncomplete: false,
+    });
+    expect(
+      merge(noOpenDebt, { ...receiver(), connected: false, status: "offline" }).get(key),
+    ).toMatchObject({ ledger: { problems: [] }, problemsIncomplete: false });
   });
 
   it("reports missing, old, disconnected and unreadable relevant receivers as incomplete", () => {

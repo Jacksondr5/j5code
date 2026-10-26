@@ -97,6 +97,7 @@ it.effect(
       yield* alarm("retry", "peer", null, null, "retry_scheduled");
       yield* alarm("delivered", "peer", null, null, "delivered");
       yield* alarm("accepted-peer", "peer", "outgoing", "receiver-env", "delivered");
+      yield* sql`UPDATE j5_a2a_delivery SET exchange_role = 'ask' WHERE message_id = 'accepted-peer'`;
       yield* alarm("inbound-peer", "peer", "outgoing");
       yield* sql`UPDATE j5_a2a_delivery SET origin_environment_id = 'origin-env'
         WHERE message_id = 'inbound-peer'`;
@@ -157,6 +158,7 @@ it.effect(
       yield* sql`UPDATE j5_a2a_exchange SET status = 'closed' WHERE exchange_id = 'outgoing'`;
       const closed = yield* read();
       assert.isUndefined(closed.awaited.get(sender));
+      assert.isUndefined(closed.deliveryEnvironmentIds.get(sender));
       assert.equal(closed.problems.get(sender)?.length, 3);
       assert.isTrue(
         closed.problems
@@ -214,9 +216,7 @@ it.effect(
       assert.equal(snapshot.remoteDeliveryAlarms?.[0]?.originEnvironmentId, "origin-env");
       assert.equal(snapshot.remoteDeliveryAlarms?.[0]?.senderId, sender);
       assert.equal(snapshot.remoteDeliveryAlarms?.[0]?.problem.exchangeOpen, false);
-      assert.deepStrictEqual(snapshot.projects[0]?.agents[0]?.facts?.deliveryEnvironmentIds, [
-        "receiver-env",
-      ]);
+      assert.deepStrictEqual(snapshot.projects[0]?.agents[0]?.facts?.deliveryEnvironmentIds, []);
       assert.equal(snapshot.asOf, "1970-01-01T00:00:00.000Z");
       assert.equal(snapshot.projects[0]?.agents[0]?.facts?.asks.owed.length, 1);
       assert.equal(
@@ -277,4 +277,63 @@ it.effect(
       assert.equal(facts.problems.get(agents.at(-1)!)?.length, 1);
       assert.isNull(facts.awaited.get(agents[0]!)?.[0]?.counterpartyName);
     }).pipe(Effect.provide(database)),
+);
+
+it.effect("tracks only open origin-owned ask destinations across projects before acceptance", () =>
+  Effect.gen(function* () {
+    yield* runMigrations();
+    yield* runJ5A2AMigrations();
+    const sql = yield* SqlClient.SqlClient;
+    for (const project of ["p", "other"])
+      yield* sql`INSERT INTO j5_a2a_project_ledger (project_id, created_at) VALUES (${project}, ${at})`;
+    yield* sql`INSERT INTO j5_a2a_peer (environment_id, label, link_mode, origin, credential, created_at, updated_at)
+      VALUES ('removed-peer', 'Removed', 'push', 'https://removed.example', 'test-token', ${at}, ${at})`;
+    const add = Effect.fnUntraced(function* (
+      id: string,
+      status: "open" | "closed",
+      role: "ask" | "followup" | "none",
+      destination: string,
+      originEnvironment: string | null = null,
+      channel = "peer",
+      from = sender,
+    ) {
+      const to = `agent:receiver:${id}`;
+      const exchangeId = role === "none" ? null : id;
+      if (exchangeId !== null)
+        yield* sql`INSERT INTO j5_a2a_exchange
+          (project_id, exchange_id, sender_id, receiver_id, status, intent, opened_seq, created_at, updated_at)
+          VALUES ('other', ${id}, ${from}, ${to}, ${status}, ${id}, 1, ${at}, ${at})`;
+      yield* sql`INSERT INTO j5_a2a_delivery
+        (project_id, message_id, command_id, sent_seq, sender_id, receiver_id, receiver_project_id,
+          exchange_id, exchange_role, correlation_id, message_text, status, attempts,
+          created_at, updated_at, envelope_channel, receiver_environment_id, origin_environment_id)
+        VALUES ('other', ${id}, ${id}, 1, ${from}, ${to}, 'remote-project', ${exchangeId}, ${role},
+          ${id}, 'hello', 'pending', 0, ${at}, ${at}, ${channel}, ${destination}, ${originEnvironment})`;
+    });
+    yield* add("open-ask", "open", "ask", "active-peer");
+    yield* add("old-ask", "closed", "ask", "removed-peer");
+    yield* add("plain", "closed", "none", "plain-peer");
+    yield* add("followup", "open", "followup", "followup-peer");
+    yield* add("received-ask", "open", "ask", "inbound-peer", "foreign-origin");
+    yield* add(`${CREW_ALERT_EXCHANGE_PREFIX}notice`, "open", "ask", "platform-peer");
+    yield* add("lifecycle", "open", "ask", "notice-peer", null, "lifecycle_notice");
+    yield* add("other-sender", "open", "ask", "other-peer", null, "peer", "agent:other");
+    const read = () => readFleetLedgerFacts(sql, "p", [sender], () => null);
+    const pending = yield* read();
+    assert.deepStrictEqual(pending.deliveryEnvironmentIds.get(sender), ["active-peer"]);
+    assert.isTrue(pending.awaited.get(sender)?.some((ask) => ask.exchangeId === "open-ask"));
+    for (const status of ["retry_scheduled", "delivered"]) {
+      yield* sql`UPDATE j5_a2a_delivery SET status = ${status} WHERE message_id = 'open-ask'`;
+      assert.deepStrictEqual((yield* read()).deliveryEnvironmentIds.get(sender), ["active-peer"]);
+    }
+    yield* sql`UPDATE j5_a2a_delivery SET status = 'delivered' WHERE message_id = 'old-ask'`;
+    yield* sql`DELETE FROM j5_a2a_peer WHERE environment_id = 'removed-peer'`;
+    yield* sql`UPDATE j5_a2a_exchange SET status = 'closed' WHERE exchange_id = 'open-ask'`;
+    assert.isUndefined((yield* read()).deliveryEnvironmentIds.get(sender));
+    assert.equal(
+      (yield* sql`SELECT 1 FROM j5_a2a_delivery WHERE message_id = 'old-ask' AND status = 'delivered'`)
+        .length,
+      1,
+    );
+  }).pipe(Effect.provide(database)),
 );
