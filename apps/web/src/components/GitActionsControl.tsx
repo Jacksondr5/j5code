@@ -1004,7 +1004,8 @@ export default function GitActionsControl({
     activeEnvironmentId,
     AuthSourceControlWriteScope,
   );
-  const canOperateThread = useCanOperateThread(
+  const canOperateThread = useEnvironmentScope(activeEnvironmentId, AuthOrchestrationOperateScope);
+  const canOperateThisThread = useCanOperateThread(
     activeEnvironmentId,
     activeThreadRef?.threadId ?? null,
   );
@@ -1032,7 +1033,8 @@ export default function GitActionsControl({
   const activeServerThread =
     activeServerThreadShell ?? activeServerThreadProjection?.projection.thread ?? null;
   const isLocalDraftThread = activeDraftThread !== null && activeServerThread === null;
-  const canChangeThreadBranch = canWriteSourceControl && (isLocalDraftThread || canOperateThread);
+  const canChangeThreadBranch =
+    canWriteSourceControl && (isLocalDraftThread || canOperateThisThread);
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
   const [isCommitDialogOpen, setIsCommitDialogOpen] = useState(false);
   const [dialogCommitMessage, setDialogCommitMessage] = useState("");

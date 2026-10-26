@@ -18,6 +18,7 @@ import {
 import { levelReaches, type PersonLevel } from "@t3tools/contracts/j5";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
+import { useCallback } from "react";
 
 import { useComposerDraftStore } from "../../composerDraftStore";
 import { environmentCatalog } from "../../connection/catalog";
@@ -133,13 +134,29 @@ export function useCanStartIn(): (
 }
 
 /**
+ * Whether this connection may start a thread in at least one of these projects. A row or a button
+ * that needs the one answer asks this, so it renders again only when that answer changes, not on
+ * every server's access refresh.
+ */
+export function useCanStartInAny(
+  projects: ReadonlyArray<{ readonly environmentId: EnvironmentId; readonly id: ProjectId }>,
+): boolean {
+  const select = useCallback(
+    (starts: (environmentId: EnvironmentId, projectId: ProjectId | null) => boolean) =>
+      projects.some((project) => starts(project.environmentId, project.id)),
+    [projects],
+  );
+  return useAtomValue(startsAtom, select);
+}
+
+/**
  * Whether this connection may add a project to the server: upstream's server-wide "Operate tasks",
  * which upstream's Add project flow asks, and a Collaborator's or Owner's level at server scope.
  */
 export function useCanAddProject(environmentId: EnvironmentId | null): boolean {
   const permitted = useEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
-  const starts = useCanStartIn();
-  return permitted && environmentId !== null && starts(environmentId, null);
+  const access = useConnectionAccess(environmentId);
+  return permitted && environmentId !== null && sharingAllowsStart(access, null);
 }
 
 /**
@@ -151,12 +168,12 @@ export function useCanForkThread(
   environmentId: EnvironmentId | null,
   threadId: ThreadId | null,
 ): boolean {
-  const starts = useCanStartIn();
+  const access = useConnectionAccess(environmentId);
   const projectId =
     useThreadShell(
       environmentId === null || threadId === null ? null : scopeThreadRef(environmentId, threadId),
     )?.projectId ?? null;
-  return environmentId !== null && starts(environmentId, projectId);
+  return environmentId !== null && sharingAllowsStart(access, projectId);
 }
 
 // Upstream's thread action menu asks through `threadOperability.ts` and `sharingMenu.ts`, which
