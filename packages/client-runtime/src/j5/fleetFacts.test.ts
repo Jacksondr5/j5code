@@ -746,7 +746,10 @@ describe("receiving-environment delivery alarm merge", () => {
       merge(origin({ ...ledger, deliveryEnvironmentIds: [] }), ...unavailable).get(key)
         ?.problemsIncomplete,
     ).toBe(false);
-    expect(merge(origin(ledger), receiver()).get(key)?.problemsIncomplete).toBe(true);
+    expect(
+      merge(origin({ asks: ledger.asks, problems: ledger.problems }), receiver()).get(key)
+        ?.problemsIncomplete,
+    ).toBe(true);
     const staleOrigin = { ...origin(), connected: false, status: "offline" as const };
     expect(merge(staleOrigin, receiver()).get(key)).toMatchObject({
       ledger: { problems: [] },

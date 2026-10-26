@@ -31,7 +31,7 @@ vi.mock("../../state/threads", async () => {
 });
 
 import { fleetAgentKey } from "./fleetPresentation";
-import { fleetFactsAtom } from "./fleetState";
+import { fleetFactsAtom, fleetProblemSummaryAtom } from "./fleetState";
 
 const at = "2026-10-26T10:00:00.000Z";
 const origin = EnvironmentId.make("origin");
@@ -168,4 +168,26 @@ it("qualifies old receiver reads and creates no phantom sender row", () => {
   expect(registry.get(fleetFactsAtom).get(key)?.problemsIncomplete).toBe(true);
   registry.set(input.sources, sources({ includeOrigin: false }));
   expect(registry.get(fleetFactsAtom).size).toBe(0);
+});
+
+it("updates badge eligibility and coverage through closure, disconnection, old reads and recovery", () => {
+  const stopBadge = registry.mount(fleetProblemSummaryAtom);
+  try {
+    const badge = () => registry.get(fleetProblemSummaryAtom);
+    expect(badge()).toMatchObject({ agentsWithProblems: 1, incompleteSources: false });
+    registry.set(input.sources, sources({ open: false }));
+    expect(badge()).toMatchObject({ agentsWithProblems: 0, incompleteSources: false });
+    registry.set(input.sources, sources({ mirrorOpen: false }));
+    expect(badge()).toMatchObject({ agentsWithProblems: 0, incompleteSources: false });
+    registry.set(input.sources, sources({ connected: false }));
+    expect(badge()).toMatchObject({ agentsWithProblems: 0, incompleteSources: true });
+    registry.set(input.sources, sources({ oldReceiver: true }));
+    expect(badge()).toMatchObject({ agentsWithProblems: 0, incompleteSources: true });
+    registry.set(input.sources, sources());
+    expect(badge()).toMatchObject({ agentsWithProblems: 1, incompleteSources: false });
+    registry.set(input.sources, sources({ includeOrigin: false }));
+    expect(badge().agentsWithProblems).toBe(0);
+  } finally {
+    stopBadge();
+  }
 });
