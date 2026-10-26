@@ -10,7 +10,7 @@ import {
   j5ClaudeSteerHoldsResult,
   j5ObserveClaudeSteer,
   j5OfferClaudeSteer,
-  j5TakeUnreadClaudeSteers,
+  j5ForgetClaudeSteers,
 } from "./claudeAgentSteers.ts";
 
 // Steer state is module-wide, so each test uses turns and messages of its own.
@@ -126,33 +126,20 @@ it.effect("leaves nothing behind when the offer fails", () =>
   }).pipe(Effect.provide(NodeCrypto.layer)),
 );
 
-it.effect("reports the steers a stopped turn never read, once", () =>
+it.effect("releases a terminated turn's steers without clearing another turn", () =>
   Effect.gen(function* () {
     const query = newQuery();
     const turn = newTurn();
-    j5ObserveClaudeSteer(query, lifecycle("the-turn-prompt", "started"));
-    const read = yield* offerAgentSteer(query, turn, "message-read");
+    const otherTurn = newTurn();
     const waiting = yield* offerAgentSteer(query, turn, "message-waiting");
-    const cancelled = yield* offerAgentSteer(query, turn, "message-cancelled");
-    yield* offerAgentSteer(query, turn, "message-unacknowledged");
-    j5ObserveClaudeSteer(query, lifecycle(read, "started"));
+    const other = yield* offerAgentSteer(query, otherTurn, "message-other-turn");
     j5ObserveClaudeSteer(query, lifecycle(waiting, "queued"));
-    j5ObserveClaudeSteer(query, lifecycle(cancelled, "cancelled"));
-    const ids = ["message-read", "message-waiting", "message-cancelled", "message-unacknowledged"];
-    assert.deepEqual(j5TakeUnreadClaudeSteers(ids).toSorted(), [
-      "message-cancelled",
-      "message-unacknowledged",
-      "message-waiting",
-    ]);
-    assert.deepEqual(j5TakeUnreadClaudeSteers(ids), []);
-  }).pipe(Effect.provide(NodeCrypto.layer)),
-);
-
-it.effect("doesn't report a steer whose fate a CLI without lifecycle frames hides", () =>
-  Effect.gen(function* () {
-    const query = newQuery();
-    const turn = newTurn();
-    yield* offerAgentSteer(query, turn, "message-silent-cli");
-    assert.deepEqual(j5TakeUnreadClaudeSteers(["message-silent-cli"]), []);
+    j5ObserveClaudeSteer(query, lifecycle(other, "queued"));
+    assert.isTrue(j5ClaudeSteerHoldsResult(query, turn, result()));
+    j5ForgetClaudeSteers(["message-waiting"]);
+    assert.isFalse(j5ClaudeSteerHoldsResult(query, turn, result()));
+    assert.isTrue(j5ClaudeSteerHoldsResult(query, otherTurn, result()));
+    j5ForgetClaudeSteers(["message-other-turn"]);
+    assert.isFalse(j5ClaudeSteerHoldsResult(query, otherTurn, result()));
   }).pipe(Effect.provide(NodeCrypto.layer)),
 );

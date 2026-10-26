@@ -277,7 +277,7 @@ export const peerSteeringRun = (
   if (providerThread === undefined || session?.driver !== providerThread.driver) return undefined;
   const turns = session.capabilities.turns;
   // Claude's adapter sends an agent's steer with priority "next", which waits for the running
-  // tool calls instead of cancelling them (case 82). Its capability still reports that steering
+  // tool calls instead of cancelling them (case 84). Its capability still reports that steering
   // interrupts tools, because a person's steer does.
   const claudeTakesPeerUpdates =
     providerThread.driver === "claudeAgent" && turns.supportsActiveSteering === true;

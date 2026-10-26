@@ -28,9 +28,8 @@ import * as EffectWorker from "../../orchestration-v2/EffectWorker.ts";
 import * as Orchestrator from "../../orchestration-v2/Orchestrator.ts";
 import * as ProviderAdapterRegistry from "../../orchestration-v2/ProviderAdapterRegistry.ts";
 import * as ProviderReplayHarness from "../../orchestration-v2/testkit/ProviderReplayHarness.ts";
-import { j5TakeUnreadClaudeSteers } from "./claudeAgentSteers.ts";
 
-// Case 82 through the real Claude adapter and orchestrator, with a scripted Claude Code stream.
+// Case 84 through the real Claude adapter and orchestrator, with a scripted Claude Code stream.
 
 const sessionId = "agent-steer-session";
 const settings = Schema.decodeSync(ClaudeSettings)({});
@@ -243,8 +242,6 @@ it.effect.each([
           yield* worker.drain();
           yield* Fiber.join(stopped);
           assert.equal(interrupts, 1);
-          // The waiting steer is left for the silence detector to report to its sender.
-          assert.deepEqual(j5TakeUnreadClaudeSteers(["steer"]), ["steer"]);
           return;
         }
 

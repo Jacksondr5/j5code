@@ -7,7 +7,7 @@ import type { ClaudeAgentSdkQuerySession } from "../../orchestration-v2/Adapters
 
 /**
  * A steer from an agent or the server waits for a Claude turn's running tool calls instead of
- * cancelling them (FORK.md case 82, register D4). Upstream sends every steer with priority
+ * cancelling them (FORK.md case 84, register D4). Upstream sends every steer with priority
  * "now", which cancels the turn's running tool calls and makes Claude report a refusal nobody
  * gave. Priority "next" is Claude Code's own mid-turn path: the CLI lets the running tool calls
  * finish and adds the message to the turn at the next tool result. A person's steer keeps
@@ -18,9 +18,6 @@ import type { ClaudeAgentSdkQuerySession } from "../../orchestration-v2/Adapters
  * following the steer's `command_lifecycle` frames. A CLI that sends none never holds a turn
  * open: the steer's native turn then reaches the thread through upstream's wake-turn path.
  *
- * When a person's Stop ends the turn while a steer still waits, Claude never reads it, and the
- * silence detector tells its sender (`j5TakeUnreadClaudeSteers`).
- *
  * Kept as a leaf module so the Claude adapter carries only its hook calls. A turn's steers are
  * forgotten when the turn ends.
  */
@@ -29,7 +26,7 @@ type SteerState = "offered" | "queued" | "taken" | "cancelled";
 
 interface TrackedSteer {
   state: SteerState;
-  /** The thread message the steer carries, so J5 can tell its sender it went unread. */
+  /** The thread message the steer carries, so terminal runs can release their tracked steers. */
   readonly messageId: string;
   readonly query: ClaudeAgentSdkQuerySession;
 }
@@ -117,8 +114,8 @@ const lifecycleStates = new Map<string, SteerState>([
  * adapter holds a person's aborting "now" steer itself without calling this, so the turn keeps
  * its steers across it.
  *
- * A held turn ends at its steer's own result, which the CLI sends for every queued command it
- * runs. Neither J5 nor upstream asks the CLI to cancel a queued command, and a person's Stop
+ * For a fresh uuid user message, a held turn ends at the result of the turn consuming it.
+ * Neither J5 nor upstream asks the CLI to cancel a queued command, and a person's Stop
  * closes the query, which ends the turn whether or not it is held.
  */
 export const j5ClaudeSteerHoldsResult = (
@@ -138,24 +135,12 @@ export const j5ClaudeSteerHoldsResult = (
   return false;
 };
 
-/**
- * The thread messages among `messageIds` that were steered into a turn Claude never read:
- * they still waited, or the CLI cancelled them, when the turn ended without a clean result.
- * Called once such a run has ended, it forgets those turns. A steer on a CLI that reports no
- * lifecycle is not counted, because whether Claude read it is unknown.
- */
-export const j5TakeUnreadClaudeSteers = (messageIds: ReadonlyArray<string>): Array<string> => {
+/** Releases tracked turns carrying these messages when a run ends without a clean SDK result. */
+export const j5ForgetClaudeSteers = (messageIds: ReadonlyArray<string>): void => {
   const wanted = new Set(messageIds);
-  const unread: Array<string> = [];
   for (const [providerTurnId, turn] of steersByTurn) {
-    const steers = [...turn.values()];
-    if (!steers.some((steer) => wanted.has(steer.messageId))) continue;
-    for (const steer of steers) {
-      if (wanted.has(steer.messageId) && (stillToRun(steer) || steer.state === "cancelled")) {
-        unread.push(steer.messageId);
-      }
+    if ([...turn.values()].some((steer) => wanted.has(steer.messageId))) {
+      steersByTurn.delete(providerTurnId);
     }
-    steersByTurn.delete(providerTurnId);
   }
-  return unread;
 };

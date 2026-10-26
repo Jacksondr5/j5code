@@ -7454,7 +7454,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             const completedAt = yield* DateTime.now;
             const interrupted = (yield* Ref.get(interruptedTurns)).has(context.providerTurnId);
             const wasSteered = (yield* Ref.get(steeredTurns)).has(context.providerTurnId);
-            // J5: case 82 holds a segment whose agent steer is still to run.
+            // J5: case 84 holds a segment whose agent steer is still to run.
             if (
               !interrupted &&
               wasSteered &&
@@ -7582,7 +7582,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           const message = input.message;
           const context = yield* Ref.get(activeTurn);
           const liveQuery = yield* Ref.get(queryContext);
-          // J5: case 82.
+          // J5: case 84.
           j5ObserveClaudeSteer(input.query, message);
           if (
             context === null ||
@@ -8636,7 +8636,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 detail: `Claude provider turn ${turnInput.providerTurnId} is not the active turn.`,
               });
             }
-            // J5: case 82 sends a steer that isn't a person's with priority "next".
+            // J5: case 84 sends a steer that isn't a person's with priority "next".
             const j5Steer = yield* j5ClaudeSteerFields(turnInput.message, crypto);
             const userMessage = yield* makeClaudeUserMessageWithAttachments({
               text: applyClaudePromptEffortPrefix(
