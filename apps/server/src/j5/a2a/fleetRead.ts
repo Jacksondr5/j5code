@@ -68,7 +68,13 @@ export const projectFleetProject = (input: {
             openAsks: 0,
             ...(input.facts === undefined
               ? {}
-              : { facts: { asks: { owed: [], awaited: [] }, problems: [] } }),
+              : {
+                  facts: {
+                    asks: { owed: [], awaited: [] },
+                    problems: [],
+                    deliveryEnvironmentIds: [],
+                  },
+                }),
           })),
   );
   return {
@@ -152,6 +158,7 @@ export const makeFleetRead = Effect.gen(function* () {
     Effect.gen(function* () {
       const projects = yield* ledger.listProjectLedgers();
       const result: Array<FleetResponse["projects"][number]> = [];
+      const remoteDeliveryAlarms: NonNullable<FleetResponse["remoteDeliveryAlarms"]>[number][] = [];
       const participantsByProject = new Map<string, ReadonlyArray<ParticipantPlacementView>>();
       // Removed people keep their names on historical Exchange and delivery facts.
       const people = yield* sql<{ readonly person_id: string; readonly display_name: string }>`
@@ -214,6 +221,7 @@ export const makeFleetRead = Effect.gen(function* () {
           agentIds,
           (id) => names.get(id) ?? outsideAgentNames.get(id) ?? null,
         );
+        remoteDeliveryAlarms.push(...ledgerFacts.remoteDeliveryAlarms);
         const facts = new Map(
           agentIds.map((id) => [
             id,
@@ -223,6 +231,7 @@ export const makeFleetRead = Effect.gen(function* () {
                 awaited: ledgerFacts.awaited.get(id) ?? [],
               },
               problems: ledgerFacts.problems.get(id) ?? [],
+              deliveryEnvironmentIds: ledgerFacts.deliveryEnvironmentIds.get(id) ?? [],
             },
           ]),
         );
@@ -249,6 +258,7 @@ export const makeFleetRead = Effect.gen(function* () {
       }
       return {
         projects: result,
+        remoteDeliveryAlarms,
         asOf: DateTime.formatIso(yield* DateTime.now),
       } satisfies FleetResponse;
     });

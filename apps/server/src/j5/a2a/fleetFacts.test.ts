@@ -96,6 +96,13 @@ it.effect(
       yield* alarm("lifecycle", "lifecycle_notice", null);
       yield* alarm("retry", "peer", null, null, "retry_scheduled");
       yield* alarm("delivered", "peer", null, null, "delivered");
+      yield* alarm("accepted-peer", "peer", "outgoing", "receiver-env", "delivered");
+      yield* alarm("inbound-peer", "peer", "outgoing");
+      yield* sql`UPDATE j5_a2a_delivery SET origin_environment_id = 'origin-env'
+        WHERE message_id = 'inbound-peer'`;
+      yield* alarm("inbound-platform", "lifecycle_notice", null);
+      yield* sql`UPDATE j5_a2a_delivery SET origin_environment_id = 'origin-env'
+        WHERE message_id = 'inbound-platform'`;
       const read = () =>
         readFleetLedgerFacts(sql, "p", [sender, receiver], (id) =>
           id === receiver ? "Receiver" : null,
@@ -126,6 +133,27 @@ it.effect(
         ],
       );
       assert.isUndefined(before.problems.get(receiver));
+      assert.deepStrictEqual(before.deliveryEnvironmentIds.get(sender), ["receiver-env"]);
+      assert.deepStrictEqual(before.remoteDeliveryAlarms, [
+        {
+          originEnvironmentId: "origin-env",
+          senderId: sender,
+          problem: {
+            kind: "delivery-failed",
+            messageId: "inbound-peer",
+            exchangeId: "outgoing",
+            receiverId: receiver,
+            receiverName: "Receiver",
+            at,
+            reason: "transport unavailable",
+            exchangeOpen: true,
+          },
+        },
+      ]);
+      assert.equal(
+        (yield* readFleetLedgerFacts(sql, "p", [], () => null)).remoteDeliveryAlarms.length,
+        1,
+      );
       yield* sql`UPDATE j5_a2a_exchange SET status = 'closed' WHERE exchange_id = 'outgoing'`;
       const closed = yield* read();
       assert.isUndefined(closed.awaited.get(sender));
@@ -183,6 +211,12 @@ it.effect(
         ),
       );
       const snapshot = yield* fleetRead(false);
+      assert.equal(snapshot.remoteDeliveryAlarms?.[0]?.originEnvironmentId, "origin-env");
+      assert.equal(snapshot.remoteDeliveryAlarms?.[0]?.senderId, sender);
+      assert.equal(snapshot.remoteDeliveryAlarms?.[0]?.problem.exchangeOpen, false);
+      assert.deepStrictEqual(snapshot.projects[0]?.agents[0]?.facts?.deliveryEnvironmentIds, [
+        "receiver-env",
+      ]);
       assert.equal(snapshot.asOf, "1970-01-01T00:00:00.000Z");
       assert.equal(snapshot.projects[0]?.agents[0]?.facts?.asks.owed.length, 1);
       assert.equal(

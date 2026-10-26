@@ -72,6 +72,7 @@ export const readsChangedByLedgerEvent = (
     case "participant.deleted":
       return ["fleet"];
     case "message.received":
+    case "message.edited":
     case "silence.notice":
       return [];
   }

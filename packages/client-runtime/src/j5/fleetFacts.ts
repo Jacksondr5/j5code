@@ -5,21 +5,143 @@ import {
   type FleetRuntimeFact,
   type FleetActivityFact,
   type FleetProblem,
+  type FleetResponse,
 } from "@t3tools/contracts/j5";
 import { backgroundWorkHoldsCompletion } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import * as Equal from "effect/Equal";
 import * as Option from "effect/Option";
 import { Atom } from "effect/reactivity";
 import * as DateTime from "effect/DateTime";
+import type { J5ReadSources } from "./readSources.ts";
 
 const iso = (value: DateTime.Utc | null | undefined) =>
   value == null ? null : DateTime.formatIso(value);
+
+export const fleetAgentKey = (environmentId: string, participantId: string) =>
+  `${environmentId.length}:${environmentId}${participantId}`;
+
+/** Remote alarms are current only when both independently read environments are readable. */
+export const mergeFleetDeliveryFacts = (
+  sources: J5ReadSources<FleetResponse>,
+  live?: ReadonlyMap<string, boolean>,
+) => {
+  const readable = (source: J5ReadSources<FleetResponse>["sources"][number]) =>
+    source.connected &&
+    source.status === "ready" &&
+    source.data !== null &&
+    (live === undefined || live.get(source.environmentId) === true);
+  const receivers = new Map<
+    string,
+    Map<string, NonNullable<FleetResponse["remoteDeliveryAlarms"]>[number][]>
+  >();
+  for (const source of sources.sources) {
+    if (!readable(source) || source.data?.remoteDeliveryAlarms === undefined) continue;
+    const senders = new Map<string, NonNullable<FleetResponse["remoteDeliveryAlarms"]>[number][]>();
+    for (const alarm of source.data.remoteDeliveryAlarms) {
+      const key = fleetAgentKey(alarm.originEnvironmentId, alarm.senderId);
+      const alarms = senders.get(key) ?? [];
+      alarms.push(alarm);
+      senders.set(key, alarms);
+    }
+    receivers.set(source.environmentId, senders);
+  }
+  const unique = <A>(values: ReadonlyArray<A>, key: (value: A) => string) => [
+    ...new Map(values.map((value) => [key(value), value])).values(),
+  ];
+  const origins = new Map<
+    string,
+    {
+      readable: boolean;
+      ledger: FleetAgentFacts | undefined;
+      incomplete: boolean;
+    }
+  >();
+  for (const source of sources.sources) {
+    for (const project of source.data?.projects ?? []) {
+      for (const agent of project.agents) {
+        const key = fleetAgentKey(source.environmentId, agent.participantId);
+        const previous = origins.get(key);
+        const left = previous?.ledger;
+        const right = agent.facts;
+        const ledger =
+          left === undefined
+            ? right
+            : right === undefined
+              ? left
+              : {
+                  asks: {
+                    owed: unique([...left.asks.owed, ...right.asks.owed], (ask) => ask.exchangeId),
+                    awaited: unique(
+                      [...left.asks.awaited, ...right.asks.awaited],
+                      (ask) => ask.exchangeId,
+                    ),
+                  },
+                  problems: unique([...left.problems, ...right.problems], (problem) =>
+                    JSON.stringify([
+                      problem.kind,
+                      problem.kind === "delivery-failed" ? problem.messageId : problem.runId,
+                    ]),
+                  ),
+                  deliveryEnvironmentIds: [
+                    ...new Set([
+                      ...(left.deliveryEnvironmentIds ?? []),
+                      ...(right.deliveryEnvironmentIds ?? []),
+                    ]),
+                  ],
+                };
+        origins.set(key, {
+          readable: readable(source),
+          ledger,
+          incomplete: previous?.incomplete === true || right?.deliveryEnvironmentIds === undefined,
+        });
+      }
+    }
+  }
+  const result = new Map<
+    string,
+    { readonly ledger: FleetAgentFacts | undefined; readonly problemsIncomplete: boolean }
+  >();
+  for (const [key, origin] of origins) {
+    const { ledger } = origin;
+    const destinations = ledger?.deliveryEnvironmentIds ?? [];
+    const openExchanges = new Set(
+      [...(ledger?.asks.owed ?? []), ...(ledger?.asks.awaited ?? [])].map((ask) => ask.exchangeId),
+    );
+    const remoteProblems = origin.readable
+      ? destinations.flatMap((environmentId) =>
+          (receivers.get(environmentId)?.get(key) ?? []).map((alarm) => ({
+            ...alarm.problem,
+            // The origin owns the Exchange; its closure can precede the receiver's mirror.
+            exchangeOpen:
+              alarm.problem.exchangeOpen &&
+              alarm.problem.exchangeId != null &&
+              openExchanges.has(alarm.problem.exchangeId),
+          })),
+        )
+      : [];
+    result.set(key, {
+      ledger:
+        ledger === undefined || remoteProblems.length === 0
+          ? ledger
+          : {
+              ...ledger,
+              problems: [...ledger.problems, ...remoteProblems],
+            },
+      problemsIncomplete:
+        !origin.readable ||
+        origin.incomplete ||
+        destinations.some((environmentId) => !receivers.has(environmentId)),
+    });
+  }
+  return result;
+};
 
 export interface FleetDerivedFacts {
   readonly runtime: FleetRuntimeFact;
   readonly asks: FleetAgentFacts["asks"] | undefined;
   readonly lastActivity: FleetActivityFact;
   readonly problems: ReadonlyArray<FleetProblem>;
+  readonly problemsIncomplete: boolean;
 }
 
 export const deriveFleetFacts = (input: {
@@ -27,16 +149,21 @@ export const deriveFleetFacts = (input: {
   readonly ledger: FleetAgentFacts | undefined;
   readonly pendingSubagentRequest?: "approval" | "user_input" | null | undefined;
   readonly now: number;
+  readonly problemsIncomplete?: boolean | undefined;
 }): { readonly facts: FleetDerivedFacts; readonly nextDeadline?: number } => {
   const { shell } = input;
   const problems = [...(input.ledger?.problems ?? [])];
   const asks = input.ledger?.asks;
+  const problemsIncomplete =
+    input.problemsIncomplete ?? input.ledger?.deliveryEnvironmentIds === undefined;
   if (shell === undefined) {
     const unknown = {
       state: "unknown" as const,
       reason: "This environment has no readable thread shell.",
     };
-    return { facts: { runtime: unknown, lastActivity: unknown, asks, problems } };
+    return {
+      facts: { runtime: unknown, lastActivity: unknown, asks, problems, problemsIncomplete },
+    };
   }
   const missingRunTimes =
     shell.latestRunId !== null &&
@@ -77,11 +204,6 @@ export const deriveFleetFacts = (input: {
   if (completedAt !== null) candidates.push({ label: "Turn ended", at: completedAt });
   const receivedAt = iso(shell.latestUserMessageAt);
   if (receivedAt !== null) candidates.push({ label: "Message received", at: receivedAt });
-  if (shell.latestVisibleMessage !== null)
-    candidates.push({
-      label: shell.latestVisibleMessage.role === "assistant" ? "Agent message" : "Message received",
-      at: iso(shell.latestVisibleMessage.updatedAt)!,
-    });
   if (shell.pendingRuntimeRequest !== null)
     candidates.push({
       label:
@@ -165,7 +287,7 @@ export const deriveFleetFacts = (input: {
               (shell.settledOverride !== "active" && shell.settledAt !== null)),
         };
   return {
-    facts: { runtime, asks, lastActivity, problems },
+    facts: { runtime, asks, lastActivity, problems, problemsIncomplete },
     ...(!missingRunTimes && dueIn !== null && dueIn > 0 ? { nextDeadline: input.now + dueIn } : {}),
   };
 };
@@ -176,6 +298,7 @@ export interface FleetFactRow {
   readonly ledger: FleetAgentFacts | undefined;
   readonly live: boolean;
   readonly pendingSubagentRequest?: "approval" | "user_input" | null | undefined;
+  readonly problemsIncomplete?: boolean | undefined;
 }
 
 /** Shared by every consumer in one registry. Only a future dispatch boundary schedules work. */
@@ -196,7 +319,12 @@ export const createFleetFactsAtom = (rows: Atom.Atom<ReadonlyArray<FleetFactRow>
         facts.set(
           row.key,
           cached ?? {
-            ...deriveFleetFacts({ shell: undefined, ledger: row.ledger, now }).facts,
+            ...deriveFleetFacts({
+              shell: undefined,
+              ledger: row.ledger,
+              problemsIncomplete: true,
+              now,
+            }).facts,
             runtime: unknown,
             lastActivity: unknown,
           },
@@ -207,6 +335,7 @@ export const createFleetFactsAtom = (rows: Atom.Atom<ReadonlyArray<FleetFactRow>
         shell: row.shell,
         ledger: row.ledger,
         pendingSubagentRequest: row.pendingSubagentRequest,
+        problemsIncomplete: row.problemsIncomplete,
         now,
       });
       const cached = previous?.get(row.key);
