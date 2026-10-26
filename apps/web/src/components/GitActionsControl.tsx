@@ -99,6 +99,7 @@ import {
 } from "~/lib/sourceControlActions";
 import { useThreadProjection, useThreadShell } from "~/state/entities";
 import { readEnvironmentScope, useEnvironmentScope } from "~/state/session";
+import { useCanOperateThread } from "~/j5/sharing/access";
 import { useEnvironmentQuery } from "~/state/query";
 import { serverEnvironment } from "~/state/server";
 import { sourceControlEnvironment } from "~/state/sourceControl";
@@ -1003,7 +1004,10 @@ export default function GitActionsControl({
     activeEnvironmentId,
     AuthSourceControlWriteScope,
   );
-  const canOperateThread = useEnvironmentScope(activeEnvironmentId, AuthOrchestrationOperateScope);
+  const canOperateThread = useCanOperateThread(
+    activeEnvironmentId,
+    activeThreadRef?.threadId ?? null,
+  );
   const serverConfig = useAtomValue(serverEnvironment.configValueAtom(activeEnvironmentId));
   const openInPreferredEditor = useOpenInPreferredEditor(
     activeEnvironmentId,

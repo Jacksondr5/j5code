@@ -4,12 +4,14 @@ import {
   isOwnerAccess,
   reachesServer,
   sharingAllowsOperate,
+  sharingAllowsStart,
   threadLevelInProject,
   type KnownConnectionAccess,
 } from "@t3tools/client-runtime/j5/sharing";
 import {
   AuthOrchestrationOperateScope,
   type EnvironmentId,
+  type ProjectId,
   type ScopedThreadRef,
   type ThreadId,
 } from "@t3tools/contracts";
@@ -25,7 +27,7 @@ import { useEnvironmentScope } from "../../state/session";
 import { j5Sharing } from "../state";
 import { ownerSomewhereState } from "./settingsAccess.logic";
 import { provideSharingMenuAccess } from "./sharingMenu";
-import { provideSharingThreadOperability } from "./threadOperability";
+import { provideSharingStart, provideSharingThreadOperability } from "./threadOperability";
 
 export { j5Sharing };
 
@@ -106,6 +108,57 @@ export function useCanOperateThread(
   return permitted && sharingAllowsOperate({ access, level });
 }
 
+// Where this connection may start something, read across every server at once so that a list of
+// projects asks one atom. A server not yet in the catalog, or not yet answered, withholds nothing.
+const startsAtom = Atom.make((get) => {
+  const accessById = new Map<EnvironmentId, KnownConnectionAccess>();
+  for (const id of get(environmentCatalog.catalogValueAtom).entries.keys()) {
+    accessById.set(id, get(j5Sharing.connectionAccess(id)));
+  }
+  return (environmentId: EnvironmentId, projectId: ProjectId | null) =>
+    sharingAllowsStart(accessById.get(environmentId) ?? null, projectId);
+}).pipe(Atom.withLabel("j5:access:starts"));
+
+/**
+ * Whether this connection's person may start a thread in a project, or, given no project, add one
+ * to the server. Upstream offers a new thread to any connection, as a draft only sending makes
+ * real; its New thread doors ask this, so a Viewer, or a Collaborator on one thread, is not
+ * offered a thread the server would refuse.
+ */
+export function useCanStartIn(): (
+  environmentId: EnvironmentId,
+  projectId: ProjectId | null,
+) => boolean {
+  return useAtomValue(startsAtom);
+}
+
+/**
+ * Whether this connection may add a project to the server: upstream's server-wide "Operate tasks",
+ * which upstream's Add project flow asks, and a Collaborator's or Owner's level at server scope.
+ */
+export function useCanAddProject(environmentId: EnvironmentId | null): boolean {
+  const permitted = useEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
+  const starts = useCanStartIn();
+  return permitted && environmentId !== null && starts(environmentId, null);
+}
+
+/**
+ * Whether this connection may fork a thread: a fork is a new thread in the thread's project, so
+ * the project's level decides, not the thread's. A thread this client has no shell for is asked
+ * of the server's level.
+ */
+export function useCanForkThread(
+  environmentId: EnvironmentId | null,
+  threadId: ThreadId | null,
+): boolean {
+  const starts = useCanStartIn();
+  const projectId =
+    useThreadShell(
+      environmentId === null || threadId === null ? null : scopeThreadRef(environmentId, threadId),
+    )?.projectId ?? null;
+  return environmentId !== null && starts(environmentId, projectId);
+}
+
 // Upstream's thread action menu asks through `threadOperability.ts` and `sharingMenu.ts`, which
 // hold none of this module's imports; the open thread's view already holds the level, so these
 // reads ask nothing.
@@ -128,12 +181,17 @@ provideSharingThreadOperability((thread) =>
   }),
 );
 
+provideSharingStart((environmentId, projectId) =>
+  appAtomRegistry.get(startsAtom)(environmentId, projectId),
+);
+
 provideSharingMenuAccess((thread) => {
   const access = appAtomRegistry.get(j5Sharing.connectionAccess(thread.environmentId));
   if (access === null || access.kind === "service") return null;
   return {
     owner: isOwnerAccess(access),
     level: readThreadLevelInProject(thread),
+    startsInProject: sharingAllowsStart(access, readThreadShell(thread)?.projectId ?? null),
     holdsThread:
       access.kind === "person" &&
       !access.firstOwner &&

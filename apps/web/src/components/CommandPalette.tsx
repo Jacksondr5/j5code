@@ -2,6 +2,7 @@
 
 import { useHighlightsPaletteItems } from "../j5/highlights/highlightsPalette";
 import { useSharingPaletteItems } from "../j5/sharing/sharingPalette";
+import { useCanAddProject, useCanStartIn } from "../j5/sharing/access";
 import { threadPullRequestLinkMode } from "@t3tools/client-runtime/thread-pull-request-compatibility";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 
@@ -914,6 +915,7 @@ function OpenCommandPaletteDialog(props: {
     defaultProjectRef,
     handleNewThread,
   });
+  const canStartIn = useCanStartIn();
   const projectPickerEntries = buildSidebarProjectPickerEntries({
     groups: projectGroups,
     preferredProjectRef: contextualProjectRef,
@@ -973,7 +975,7 @@ function OpenCommandPaletteDialog(props: {
     }) ?? null;
   const browseEnvironmentId =
     sourcePicker?.environmentId ?? addProjectEnvironmentId ?? defaultAddProjectEnvironmentId;
-  const canCreateProject = useEnvironmentScope(browseEnvironmentId, AuthOrchestrationOperateScope);
+  const canCreateProject = useCanAddProject(browseEnvironmentId);
   const browseEnvironment =
     environments.find((environment) => environment.environmentId === browseEnvironmentId) ?? null;
   const browseEnvironmentIsDesktopLocal =
@@ -1196,7 +1198,9 @@ function OpenCommandPaletteDialog(props: {
       isScratchProject(project, scratchWorkspaceRootFor(project.environmentId));
     const projectItems = enumerateCommandPaletteItems(
       buildProjectActionItems({
-        projects: pickerProjects.filter((project) => !isScratch(project)),
+        projects: pickerProjects.filter(
+          (project) => !isScratch(project) && canStartIn(project.environmentId, project.id),
+        ),
         valuePrefix: "new-thread-in",
         searchTerms: (project) => {
           const group = projectGroupByTargetKey.get(`${project.environmentId}:${project.id}`);
@@ -1654,12 +1658,16 @@ function OpenCommandPaletteDialog(props: {
   });
   const highlightsPaletteItems = useHighlightsPaletteItems();
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
-  if (projects.length > 0) {
+  if (projects.length > 0 && projectThreadItems.length > 0) {
     const activeProjectTitle =
       projectPickerEntries.find((entry) => entry.isPreferred)?.group.displayName ??
       (currentProjectId ? (projectTitleById.get(currentProjectId) ?? null) : null);
 
-    if (activeProjectTitle) {
+    if (
+      activeProjectTitle &&
+      contextualProjectRef !== null &&
+      canStartIn(contextualProjectRef.environmentId, contextualProjectRef.projectId)
+    ) {
       actionItems.push({
         kind: "action",
         value: "action:new-thread",
@@ -2894,10 +2902,7 @@ function OpenCommandPaletteDialog(props: {
     addProjectCloneFlow?.environmentId ?? null,
     AuthSourceControlWriteScope,
   );
-  const canCreateClonedProject = useEnvironmentScope(
-    addProjectCloneFlow?.environmentId ?? null,
-    AuthOrchestrationOperateScope,
-  );
+  const canCreateClonedProject = useCanAddProject(addProjectCloneFlow?.environmentId ?? null);
   const canCloneProject = canWriteSourceControl && canCreateClonedProject;
   const isCloneDestinationStep = addProjectCloneFlow?.step === "confirm";
   const canSubmitBrowsePath =

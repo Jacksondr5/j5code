@@ -179,7 +179,7 @@ import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { cn } from "~/lib/utils";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { ProjectEnvironmentBadge } from "./ProjectEnvironmentBadge";
-import { useIsNarrowEverywhere } from "../j5/sharing/access";
+import { useCanStartIn, useIsNarrowEverywhere } from "../j5/sharing/access";
 import { buildWithSharingMenuItems, runSharingMenuAction } from "../j5/sharing/sharingMenu";
 import {
   buildDraftActionMenuItems,
@@ -2716,6 +2716,7 @@ export default function Sidebar() {
   const newThreadContext = useHandleNewThread();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const isNarrowEverywhere = useIsNarrowEverywhere();
+  const canStartIn = useCanStartIn();
   const clearSelection = useThreadSelectionStore((s) => s.clearSelection);
   const setSelectionAnchor = useThreadSelectionStore((s) => s.setAnchor);
   const toggleThreadSelection = useThreadSelectionStore((s) => s.toggleThread);
@@ -4645,7 +4646,9 @@ export default function Sidebar() {
               }
               onNewProject={openAddProjectCommandPalette}
               onNewThread={handleNewThreadClick}
-              newThreadDisabled={projects.length === 0}
+              newThreadDisabled={
+                !projects.some((project) => canStartIn(project.environmentId, project.id))
+              }
               newThreadShortcutLabel={newThreadShortcutLabel}
               newThreadInProjectShortcutLabel={newThreadInProjectShortcutLabel}
               showNewThreadInProjectHint={projectGroups.length > 1}
