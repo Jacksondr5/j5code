@@ -31,6 +31,7 @@ import * as Result from "effect/Result";
 import * as Sink from "effect/Sink";
 import { SqlError, UnknownError } from "effect/sql/SqlError";
 import * as Stream from "effect/Stream";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import { McpInvocationContext, type McpInvocationScope } from "../../mcp/McpInvocationContext.ts";
 import { OrchestratorMcpService } from "../../mcp/OrchestratorMcpService.ts";
@@ -1839,6 +1840,64 @@ it.effect("an outside agent's narrowed approved level still caps an identical re
       );
     }).pipe(Effect.provide(harness.layer));
   }),
+);
+
+it.effect.each(["shared", "worktree"] as const)(
+  "refuses a cross-type pre-upgrade %s retry without binding or changing the thread",
+  (type) =>
+    Effect.gen(function* () {
+      const replayContext = yield* Layer.build(
+        RequestReplayService.layer.pipe(Layer.provideMerge(layerMemory)),
+      );
+      const replay = Layer.succeed(
+        RequestReplayService.RequestReplayService,
+        Context.get(replayContext, RequestReplayService.RequestReplayService),
+      );
+      const sql = Context.get(replayContext, SqlClient.SqlClient);
+      const harness = yield* spawnHarness({
+        checkout: { isRepo: true, refName: "j5/main" },
+        replay,
+      });
+      yield* Effect.gen(function* () {
+        const args = {
+          ...spawnArgs,
+          title: "Original title",
+          workspace:
+            type === "shared"
+              ? { type: "shared" as const }
+              : { type: "worktree" as const, base_ref: "j5/main" },
+          client_request_id: `pre-upgrade-cross-${type}`,
+        };
+        const original = yield* harness.call(args);
+        assert.isFalse(original.isFailure, message(original));
+        // This thread predates request binding, so only its create receipt survives the upgrade.
+        yield* sql`DELETE FROM j5_a2a_request_replay`;
+        const beforeCommands = yield* Ref.get(harness.commands);
+        const beforeLaunches = yield* Ref.get(harness.launches);
+        const threads = yield* ThreadManagementService;
+        const id = (original.result as { readonly thread_id: ThreadId }).thread_id;
+        const beforeThread = yield* threads.getThreadProjection(id);
+        const refused = yield* harness.call({
+          ...args,
+          title: "Must not overwrite",
+          workspace:
+            type === "shared"
+              ? { type: "worktree" as const, base_ref: "j5/main" }
+              : { type: "shared" as const },
+        });
+        assert.isTrue(refused.isFailure);
+        assert.include(message(refused), "already bound to workspace");
+        assert.deepStrictEqual(yield* Ref.get(harness.commands), beforeCommands);
+        assert.deepStrictEqual(yield* Ref.get(harness.launches), beforeLaunches);
+        assert.deepStrictEqual(yield* threads.getThreadProjection(id), beforeThread);
+        assert.lengthOf(yield* sql`SELECT id FROM j5_a2a_request_replay`, 0);
+
+        const corrected = yield* harness.call(args);
+        assert.isFalse(corrected.isFailure, message(corrected));
+        assert.deepStrictEqual(corrected.result, original.result);
+        assert.lengthOf(yield* sql`SELECT id FROM j5_a2a_request_replay`, 1);
+      }).pipe(Effect.provide(harness.layer));
+    }),
 );
 
 it.effect("binds the first retry of a pre-upgrade spawn and holds its key to it", () =>

@@ -523,14 +523,6 @@ const spawn = Effect.fn("j5.a2a.spawnAgent")(function* (
       stateError(`Peer Agent was not created: ${error.detail}`, error.nextStep),
     ),
   );
-  if (replayable)
-    yield* replayService
-      .bind({
-        id: threadId,
-        target: `Peer Agent ${participantIdForThread(threadId)} on thread ${threadId}`,
-        request,
-      })
-      .pipe(Effect.mapError(replayFailure));
   return yield* spawnWorkspace
     .withSpawnStart(
       { stableInput, threadId },
@@ -544,7 +536,19 @@ const spawn = Effect.fn("j5.a2a.spawnAgent")(function* (
         const current = yield* threadManagement
           .getThreadShell(threadId)
           .pipe(Effect.mapError(spawnReadFailure));
-        if (current !== null) yield* replayExceedsCaller((yield* loadCaller()).limits, current);
+        if (current !== null) {
+          yield* spawnWorkspace.assertExistingWorkspace({ stableInput, workspace: workspace.type });
+          yield* replayExceedsCaller((yield* loadCaller()).limits, current);
+        }
+        if (replayable)
+          yield* replayService
+            .bind({
+              id: threadId,
+              target: `Peer Agent ${participantIdForThread(threadId)} on thread ${threadId}`,
+              request,
+            })
+            .pipe(Effect.mapError(replayFailure));
+
         const sharedCheckout =
           current !== null
             ? current
