@@ -25,6 +25,15 @@ export const fleetTime = (
         ? formatChatTimestampTooltip(at, timestampFormat)
         : formatElapsedDurationLabel(at, now)) || "?";
 
+export const fleetAgo = (
+  at: string | null | undefined,
+  now?: number,
+  timestampFormat?: TimestampFormat,
+) => {
+  const time = fleetTime(at, now, timestampFormat);
+  return now === undefined || time === "just now" || time === "?" ? time : `${time} ago`;
+};
+
 export const fleetMinutes = (since: string, now: number) =>
   Math.max(0, Math.floor((now - Date.parse(since)) / 60_000));
 
@@ -49,7 +58,7 @@ export const fleetStatusLabel = (
     case "waiting-to-start":
       return "Waiting to start";
     case "idle":
-      return `Idle since ${fleetTime(runtime.since, now, timestampFormat)}`;
+      return `Idle${now === undefined ? " since" : ""} ${fleetTime(runtime.since, now, timestampFormat)}`;
   }
 };
 
@@ -73,11 +82,11 @@ export const fleetProblemLabel = (
 ) => {
   switch (problem.kind) {
     case "failed-run":
-      return `Latest run failed · ${problem.at === null ? "time unavailable" : fleetTime(problem.at, now, timestampFormat)}`;
+      return `Latest run failed · ${problem.at === null ? "time unavailable" : fleetAgo(problem.at, now, timestampFormat)}`;
     case "dispatch-overdue":
-      return `Run not dispatched · requested ${fleetTime(problem.at, now, timestampFormat)}`;
+      return `Run not dispatched · requested ${fleetAgo(problem.at, now, timestampFormat)}`;
     case "delivery-failed":
-      return `Delivery failed · to ${problem.receiverName ?? problem.receiverId} · ${fleetTime(problem.at, now, timestampFormat)} · ${problem.reason ?? "reason unavailable"}`;
+      return `Delivery failed · to ${problem.receiverName ?? problem.receiverId} · ${fleetAgo(problem.at, now, timestampFormat)} · ${problem.reason ?? "reason unavailable"}`;
   }
 };
 

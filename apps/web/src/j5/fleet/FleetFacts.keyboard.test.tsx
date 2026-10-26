@@ -4,7 +4,7 @@ import type { FleetDerivedFacts } from "@t3tools/client-runtime/j5/fleetFacts";
 import { EnvironmentId } from "@t3tools/contracts";
 import type { FleetAgent } from "@t3tools/contracts/j5";
 import userEvent from "@testing-library/user-event";
-import { act, type ReactNode } from "react";
+import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
 
@@ -54,11 +54,7 @@ vi.mock("./fleetState", () => ({
   fleetReadTimeAtom: () => ({ read: () => state.asOf }),
   fleetEnvironmentLivenessAtom: { read: () => new Map([["fleet-test", state.live]]) },
 }));
-vi.mock("../../components/ui/tooltip", () => ({
-  Tooltip: ({ children }: { children: ReactNode }) => children,
-  TooltipTrigger: ({ children }: { children: ReactNode }) => children,
-  TooltipPopup: () => null,
-}));
+
 vi.mock("../state", () => ({
   fleetSourcesAtom: {
     read: () => ({
@@ -196,8 +192,8 @@ it("reveals the complete facts with Tab and Enter, closes with Space, and preser
   expect(summary().getAttribute("aria-label")).toBe("Facts for Builder");
   await key(user, "{Enter}");
   expect(disclosure().hidden).toBe(false);
-  expect(disclosure().textContent).toContain("Captain · Review the patch · opened 10m");
-  expect(disclosure().textContent).toContain("Reviewer · Send the result · opened 8m");
+  expect(disclosure().textContent).toContain("Captain · Review the patch · opened 10m ago");
+  expect(disclosure().textContent).toContain("Reviewer · Send the result · opened 8m ago");
   expect(disclosure().textContent).toContain("This environment has no readable thread shell.");
   expect(disclosure().textContent).toContain("Ledger activity is unavailable.");
   expect(disclosure().textContent).toContain(
@@ -269,25 +265,27 @@ it("refreshes live row, expanded facts, asks and environment times on the shared
   await render();
   summary().focus();
   await key(user, "{Enter}");
-  expect(navigation().textContent).toContain("Idle since 10m");
-  expect(navigation().textContent).toContain("Last turn ended 7m");
-  expect(navigation().textContent).toContain("Delivery failed · to Reviewer · 2m · offline");
-  expect(disclosure().textContent).toContain("opened 10m");
-  expect(container.querySelector("p")?.textContent).toContain("ledger as of 5m");
+  expect(navigation().textContent).toContain("Idle 10m");
+  expect(navigation().textContent).toContain("Last turn ended 7m ago");
+  expect(navigation().textContent).toContain("Delivery failed · to Reviewer · 2m ago · offline");
+  expect(disclosure().textContent).toContain("opened 10m ago");
+  expect(container.querySelector("p")?.textContent).toContain("ledger read 5m ago");
 
   await act(() => vi.advanceTimersByTime(60_000));
 
-  expect(navigation().textContent).toContain("Idle since 11m");
-  expect(navigation().textContent).toContain("Last turn ended 8m");
-  expect(navigation().textContent).toContain("Delivery failed · to Reviewer · 3m · offline");
-  expect(disclosure().textContent).toContain("Status: Idle since 11m");
-  expect(disclosure().textContent).toContain("Last activity: Last turn ended 8m");
-  expect(disclosure().textContent).toContain("Delivery failed · to Reviewer · 3m · offline");
-  expect(disclosure().textContent).toContain("opened 11m");
-  expect(container.querySelector("p")?.textContent).toContain("ledger as of 6m");
+  expect(navigation().textContent).toContain("Idle 11m");
+  expect(navigation().textContent).toContain("Last turn ended 8m ago");
+  expect(navigation().textContent).toContain("Delivery failed · to Reviewer · 3m ago · offline");
+  expect(disclosure().textContent).toContain("Status: Idle 11m");
+  expect(disclosure().textContent).toContain("Last activity: Last turn ended 8m ago");
+  expect(disclosure().textContent).toContain("Delivery failed · to Reviewer · 3m ago · offline");
+  expect(disclosure().textContent).toContain("opened 11m ago");
+  expect(container.querySelector("p")?.textContent).toContain("ledger read 6m ago");
   expect(disclosure().textContent).toContain("12:00, 23rd October 2026");
   expect(disclosure().textContent).toContain("12:03, 23rd October 2026");
   expect(disclosure().textContent).toContain("12:08, 23rd October 2026");
+  expect(disclosure().textContent).toContain("Environment read: 6m ago (12:05, 23rd October 2026)");
+  expect(container.querySelector("p")?.textContent).toContain("6m ago (12:05, 23rd October 2026)");
 
   state.timestampFormat = "12-hour";
   await refreshState();
@@ -302,7 +300,7 @@ it("stops aging every measurement when a live row freezes, then resumes from the
   await render();
   summary().focus();
   await key(user, "{Enter}");
-  expect(navigation().textContent).toContain("Idle since 10m");
+  expect(navigation().textContent).toContain("Idle 10m");
 
   state.live = false;
   await refreshState();
@@ -310,8 +308,8 @@ it("stops aging every measurement when a live row freezes, then resumes from the
   expect(vi.getTimerCount()).toBe(0);
   expect(frozen).toContain("23rd October 2026");
   expect(disclosure().textContent).toContain("5m at last read · opened");
-  expect(navigation().textContent).not.toContain("Idle since 10m");
-  expect(navigation().textContent).not.toContain("Last turn ended 7m");
+  expect(navigation().textContent).not.toContain("Idle 10m");
+  expect(navigation().textContent).not.toContain("Last turn ended 7m ago");
   expect(navigation().textContent).not.toContain("Reviewer · 2m");
   expect(container.querySelector("p")?.textContent).toContain("stale");
 
@@ -320,10 +318,10 @@ it("stops aging every measurement when a live row freezes, then resumes from the
 
   state.live = true;
   await refreshState();
-  expect(navigation().textContent).toContain("Idle since 3d");
-  expect(navigation().textContent).toContain("Last turn ended 3d");
-  expect(disclosure().textContent).toContain("opened 3d");
-  expect(container.querySelector("p")?.textContent).toContain("ledger as of 3d");
+  expect(navigation().textContent).toContain("Idle 3d");
+  expect(navigation().textContent).toContain("Last turn ended 3d ago");
+  expect(disclosure().textContent).toContain("opened 3d ago");
+  expect(container.querySelector("p")?.textContent).toContain("ledger read 3d ago");
 });
 
 it("advances waiting-to-start ages and freezes their absolute request time", async () => {
@@ -339,10 +337,10 @@ it("advances waiting-to-start ages and freezes their absolute request time", asy
   };
   await render();
   expect(navigation().textContent).toContain("Waiting to start · 10m");
-  expect(navigation().textContent).toContain("Run not dispatched · requested 10m");
+  expect(navigation().textContent).toContain("Run not dispatched · requested 10m ago");
   await act(() => vi.advanceTimersByTime(60_000));
   expect(navigation().textContent).toContain("Waiting to start · 11m");
-  expect(navigation().textContent).toContain("Run not dispatched · requested 11m");
+  expect(navigation().textContent).toContain("Run not dispatched · requested 11m ago");
 
   state.live = false;
   await refreshState();
@@ -353,4 +351,20 @@ it("advances waiting-to-start ages and freezes their absolute request time", asy
   const frozen = navigation().textContent;
   await act(() => vi.advanceTimersByTime(60_000));
   expect(navigation().textContent).toBe(frozen);
+});
+
+it("shows ask ages in one tooltip without nested triggers and refreshes the open popup", async () => {
+  await render();
+  const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+  const asks = [
+    ...navigation().querySelectorAll<HTMLElement>('[data-slot="tooltip-trigger"]'),
+  ].find((element) => element.textContent === "Owes 1 · Awaiting 1")!;
+  await act(() => user.hover(asks));
+  await act(() => vi.advanceTimersByTime(1_000));
+  const popup = document.querySelector<HTMLElement>('[data-slot="tooltip-popup"]')!;
+  expect(popup).not.toBeNull();
+  expect(popup.textContent).toContain("Captain · Review the patch · opened 10m ago");
+  expect(popup.querySelector('[data-slot="tooltip-trigger"]')).toBeNull();
+  await act(() => vi.advanceTimersByTime(60_000));
+  expect(popup.textContent).toContain("Captain · Review the patch · opened 11m ago");
 });

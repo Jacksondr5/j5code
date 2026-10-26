@@ -6,6 +6,7 @@ import {
   fleetAgentKey,
   fleetMinutes,
   fleetTime,
+  fleetAgo,
   fleetProblemLabel,
   fleetSeatState,
   fleetSourceIsLive,
@@ -45,9 +46,13 @@ describe("Fleet presentation", () => {
     const prior = "2026-10-18T10:00:00.000Z";
     const idle = { ...runtime("idle"), since: prior };
     expect(fleetTime(prior, now)).toBe("1d");
+    expect(fleetAgo(prior, now)).toBe("1d ago");
+    expect(fleetAgo(at, now)).toBe("just now");
+    expect(fleetAgo(undefined, now)).toBe("?");
+    expect(fleetAgo(prior)).toContain("18th October 2026");
     expect(fleetTime(prior, now + 3 * 86_400_000)).toBe("4d");
-    expect(fleetStatusLabel(idle, now)).toBe("Idle since 1d");
-    expect(fleetStatusLabel(idle, now + 3 * 86_400_000)).toBe("Idle since 4d");
+    expect(fleetStatusLabel(idle, now)).toBe("Idle 1d");
+    expect(fleetStatusLabel(idle, now + 3 * 86_400_000)).toBe("Idle 4d");
     expect(fleetTime(prior)).toContain("18th October 2026");
     expect(fleetTime(undefined, now)).toBe("?");
     expect(fleetTime("invalid", now)).toBe("?");
@@ -81,8 +86,8 @@ describe("Fleet presentation", () => {
       },
     ] as const;
     for (const problem of problems) {
-      expect(fleetProblemLabel(problem, now)).toContain("1m");
-      expect(fleetProblemLabel(problem, now + 60_000)).toContain("2m");
+      expect(fleetProblemLabel(problem, now)).toContain("1m ago");
+      expect(fleetProblemLabel(problem, now + 60_000)).toContain("2m ago");
       expect(fleetProblemLabel(problem)).toContain("19th October 2026");
     }
     expect(fleetProblemLabel({ kind: "failed-run", runId: "r", at: null }, now)).toBe(

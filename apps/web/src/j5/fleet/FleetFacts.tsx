@@ -24,6 +24,7 @@ import {
   fleetStatusLabel,
   fleetMinutes,
   fleetTime,
+  fleetAgo,
   fleetProblemLabel,
 } from "./fleetPresentation";
 
@@ -62,7 +63,7 @@ function FleetTimeLabel({
   return (
     <FleetFactHint reason={at == null ? undefined : absolute}>
       <time dateTime={at ?? undefined}>
-        {label?.(now, timestampFormat) ?? fleetTime(at, now, timestampFormat)}
+        {label?.(now, timestampFormat) ?? fleetAgo(at, now, timestampFormat)}
       </time>
       {showAbsolute && now !== undefined && at != null ? ` (${absolute})` : null}
     </FleetFactHint>
@@ -115,13 +116,17 @@ export function FleetSourceReadout() {
     <div className="my-3 space-y-1 text-xs text-muted-foreground">
       {sources.sources.map((source) => (
         <p key={source.environmentId}>
-          {source.environmentLabel} · ledger as of{" "}
+          {source.environmentLabel} · ledger read{" "}
           {source.data?.asOf === undefined ? (
             <FleetFactHint reason="This environment does not report its Fleet read time.">
               ?
             </FleetFactHint>
           ) : (
-            <FleetTimestamp at={source.data.asOf} live={live.get(source.environmentId) === true} />
+            <FleetTimestamp
+              at={source.data.asOf}
+              live={live.get(source.environmentId) === true}
+              showAbsolute
+            />
           )}
           {live.get(source.environmentId) === true
             ? " · runtime live"
@@ -137,12 +142,17 @@ function AskDetails({
   live,
   asOf,
   showAbsolute,
+  plain = false,
+  now,
 }: {
   readonly asks: FleetAgentFacts["asks"];
   readonly live: boolean;
   readonly asOf: string | undefined;
   readonly showAbsolute?: boolean | undefined;
+  readonly plain?: boolean;
+  readonly now?: number | undefined;
 }) {
+  const timestampFormat = useClientSettings((settings) => settings.timestampFormat);
   return (
     <div className="space-y-2">
       {(
@@ -165,7 +175,12 @@ function AskDetails({
               {!live
                 ? `${asOf === undefined ? "age ?" : `${fleetMinutes(ask.openedAt, Date.parse(asOf))}m at last read`} · `
                 : null}
-              opened <FleetTimestamp at={ask.openedAt} live={live} showAbsolute={showAbsolute} />
+              opened{" "}
+              {plain ? (
+                fleetAgo(ask.openedAt, now, timestampFormat)
+              ) : (
+                <FleetTimestamp at={ask.openedAt} live={live} showAbsolute={showAbsolute} />
+              )}
               {!live ? " (stale)" : null}
             </p>
           ))}
@@ -173,6 +188,34 @@ function AskDetails({
       ))}
     </div>
   );
+}
+
+type AskTooltipProps = {
+  readonly asks: FleetAgentFacts["asks"];
+  readonly live: boolean;
+  readonly asOf: string | undefined;
+};
+
+function FleetAskTooltipContent({ now, ...props }: AskTooltipProps & { readonly now?: number }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<span className="text-right text-xs tabular-nums" />}>
+        Owes {props.asks.owed.length} · Awaiting {props.asks.awaited.length}
+      </TooltipTrigger>
+      <TooltipPopup>
+        <AskDetails {...props} plain now={now} />
+      </TooltipPopup>
+    </Tooltip>
+  );
+}
+
+function FleetLiveAskTooltip(props: AskTooltipProps) {
+  const minute = useNowMinute();
+  return <FleetAskTooltipContent {...props} now={Date.parse(`${minute}:00Z`)} />;
+}
+
+function FleetAskTooltip(props: AskTooltipProps) {
+  return props.live ? <FleetLiveAskTooltip {...props} /> : <FleetAskTooltipContent {...props} />;
 }
 
 export function FleetFactDetails({
@@ -232,6 +275,14 @@ function FleetFactDetailContent({
         )}
       </p>
       <p>
+        Environment read:{" "}
+        {asOf === undefined ? (
+          "This environment does not report its Fleet read time."
+        ) : (
+          <FleetTimestamp at={asOf} live={live} showAbsolute />
+        )}
+      </p>
+      <p>
         Provenance:{" "}
         {agent.outsideSpawner !== undefined
           ? `Spawned by ${agent.outsideSpawner.name ?? agent.outsideSpawner.participantId}`
@@ -258,7 +309,7 @@ function FleetFactDetailContent({
             live={live}
             showAbsolute
             label={(now, timestampFormat) =>
-              `${activity.label} ${fleetTime(activity.at, now, timestampFormat)}`
+              `${activity.label} ${fleetAgo(activity.at, now, timestampFormat)}`
             }
           />
         )}
@@ -332,14 +383,7 @@ export function FleetFactCells({
           ?
         </FleetFactHint>
       ) : (
-        <Tooltip>
-          <TooltipTrigger render={<span className="text-right text-xs tabular-nums" />}>
-            Owes {facts.asks.owed.length} · Awaiting {facts.asks.awaited.length}
-          </TooltipTrigger>
-          <TooltipPopup>
-            <AskDetails asks={facts.asks} live={live} asOf={asOf} />
-          </TooltipPopup>
-        </Tooltip>
+        <FleetAskTooltip asks={facts.asks} live={live} asOf={asOf} />
       )}
       <FleetFactHint
         className="text-right text-xs text-muted-foreground"
@@ -356,7 +400,7 @@ export function FleetFactCells({
             at={activity.at}
             live={live}
             label={(now, timestampFormat) =>
-              `${activity.label} ${fleetTime(activity.at, now, timestampFormat)}`
+              `${activity.label} ${fleetAgo(activity.at, now, timestampFormat)}`
             }
           />
         ) : (
