@@ -44,8 +44,10 @@ import Migration0040 from "./migrations/040_Links.ts";
 import Migration0041 from "./migrations/041_SharedConversation.ts";
 import Migration0042 from "./migrations/042_EveryoneHereAsks.ts";
 import Migration0043 from "./migrations/043_TaskSchedulers.ts";
-import Migration0044 from "./migrations/044_RequestReplay.ts";
-import Migration0045 from "./migrations/045_CrewPlaybookRequestWorkspace.ts";
+import Migration0044 from "./migrations/044_QueuedMessageEdits.ts";
+import Migration0045 from "./migrations/045_McpClientApprovers.ts";
+import Migration0046 from "./migrations/046_LocalDeliveryOrder.ts";
+import Migration0047 from "./migrations/047_RequestReplay.ts";
 
 export const J5_A2A_MIGRATIONS_TABLE = "j5_a2a_migrations";
 
@@ -100,8 +102,10 @@ export const migrationEntries = [
   [41, "SharedConversation", Migration0041],
   [42, "EveryoneHereAsks", Migration0042],
   [43, "TaskSchedulers", Migration0043],
-  [44, "RequestReplay", Migration0044],
-  [45, "CrewPlaybookRequestWorkspace", Migration0045],
+  [44, "QueuedMessageEdits", Migration0044],
+  [45, "McpClientApprovers", Migration0045],
+  [46, "LocalDeliveryOrder", Migration0046],
+  [47, "RequestReplay", Migration0047],
 ] as const;
 
 const makeMigrationLoader = (throughId?: number) =>

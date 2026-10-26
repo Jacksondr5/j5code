@@ -486,6 +486,7 @@ const spawnHarness = (input: {
 
 const spawnArgs = {
   brief: "Fix the login bug and report back.",
+  title: "Login fixer",
   provider: ProviderInstanceId.make("codex"),
   model: "gpt-5.6-sol",
   reasoning: "high",
@@ -1840,22 +1841,34 @@ it.effect("an outside agent's narrowed approved level still caps an identical re
   }),
 );
 
-it.effect("refuses an unbound legacy spawn without blessing the current request", () =>
+it.effect("binds the first retry of a pre-upgrade spawn and holds its key to it", () =>
   Effect.gen(function* () {
+    // The agent exists from before replay binding, so its key has no stored request.
     const harness = yield* spawnHarness({
       checkout: { isRepo: false, refName: null },
       existingChildRuntimeMode: "full-access",
     });
     yield* Effect.gen(function* () {
-      const result = yield* harness.call({
+      const args = {
         ...spawnArgs,
-        workspace: { type: "shared" },
-        client_request_id: "legacy",
-      });
-      assert.isTrue(result.isFailure);
-      assert.include(message(result), "predates replay verification");
-      assert.include(message(result), "fresh client_request_id");
-      assert.lengthOf(yield* Ref.get(harness.commands), 0);
+        workspace: { type: "shared" as const },
+        client_request_id: "pre-upgrade",
+      };
+      const first = yield* harness.call(args);
+      assert.isFalse(first.isFailure, message(first));
+      const finished = yield* Ref.get(harness.commands);
+      assert.deepStrictEqual(
+        finished.map((command) => command.type),
+        ["thread.create", "message.dispatch"],
+        "the retry finishes the agent as before",
+      );
+
+      const changed = yield* harness.call({ ...args, brief: "Different work" });
+      assert.isTrue(changed.isFailure);
+      assert.include(message(changed), "different request");
+      assert.deepStrictEqual(yield* Ref.get(harness.commands), finished);
+      const again = yield* harness.call(args);
+      assert.deepStrictEqual(again.result, first.result);
     }).pipe(Effect.provide(harness.layer));
   }),
 );

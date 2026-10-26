@@ -321,17 +321,12 @@ const spawn = Effect.fn("j5.a2a.spawnAgent")(function* (
   const request = {
     ...input,
     client_request_id: undefined,
-    title: input.title ?? null,
+    title: input.title,
     scratch: input.scratch ?? false,
     workspace: workspaceRequest,
   };
   const replayService = yield* RequestReplayService.RequestReplayService;
-  const replayFailure = (
-    error:
-      | SqlError
-      | RequestReplayService.RequestReplayConflictError
-      | RequestReplayService.RequestReplayUnverifiableError,
-  ) => {
+  const replayFailure = (error: SqlError | RequestReplayService.RequestReplayConflictError) => {
     switch (error._tag) {
       case "SqlError":
         return stateError(
@@ -339,7 +334,6 @@ const spawn = Effect.fn("j5.a2a.spawnAgent")(function* (
           "Retry j5_spawn_agent with the same client_request_id.",
         );
       case "RequestReplayConflictError":
-      case "RequestReplayUnverifiableError":
         return stateError(error.message, "Inspect the original target before starting new work.");
     }
   };
@@ -419,9 +413,8 @@ const spawn = Effect.fn("j5.a2a.spawnAgent")(function* (
   // A retry finishes the agent its first attempt created, in the modes it was created with.
   // A caller's modes can be narrowed within one provider session, so those are checked
   // against what the caller may touch now. A persona's agent runs under its own policy,
-  // except for an outside agent, whose approved level caps every agent it starts. This early
-  // check is the only one an unbound legacy agent reaches, since bind refuses it before the
-  // start; the start checks again for an agent a concurrent attempt created since.
+  // except for an outside agent, whose approved level caps every agent it starts. The start
+  // checks, after reading the thread again, so an agent a concurrent attempt created counts too.
   const replayExceedsCaller = (caller: DispatchModes, thread: DispatchModes) => {
     if (personaId !== undefined && outside === undefined) return Effect.void;
     const exceeded = exceededDispatchModeLimit(caller, thread);
@@ -434,7 +427,6 @@ const spawn = Effect.fn("j5.a2a.spawnAgent")(function* (
           ),
         );
   };
-  if (existing !== null) yield* replayExceedsCaller(limits, existing);
 
   // The project the agent joins: the caller's, another one, or upstream's "No project".
   if (input.scratch === true && input.project_id !== undefined) {
@@ -537,12 +529,11 @@ const spawn = Effect.fn("j5.a2a.spawnAgent")(function* (
         id: threadId,
         target: `Peer Agent ${participantIdForThread(threadId)} on thread ${threadId}`,
         request,
-        legacy: existing !== null,
       })
       .pipe(Effect.mapError(replayFailure));
   return yield* spawnWorkspace
     .withSpawnStart(
-      { stableInput, threadId, workspace },
+      { stableInput, threadId },
       Effect.gen(function* () {
         // What a shared-type thread binds: the caller's checkout, or the project's main one.
         // As upstream's launch does, a main-checkout thread asks for a folder of its own, and
@@ -582,7 +573,7 @@ const spawn = Effect.fn("j5.a2a.spawnAgent")(function* (
             commandId: SpawnWorkspace.spawnCreateCommandId(stableInput, workspace.type),
             threadId,
             projectId: target,
-            title: spawnTitle(input.brief, input.title),
+            title: spawnTitle(input.title),
             modelSelection: current?.modelSelection ?? modelSelection,
             runtimeMode: current?.runtimeMode ?? runtimeMode,
             interactionMode: current?.interactionMode ?? interactionMode,
@@ -682,7 +673,7 @@ const spawn = Effect.fn("j5.a2a.spawnAgent")(function* (
             ledgerProjectId: facts.home.projectId,
             projectId: target,
             threadId,
-            title: spawnTitle(input.brief, input.title),
+            title: spawnTitle(input.title),
             messageId: spawnMessageId(stableInput),
             text: spawnFirstTurnText({
               brief: input.brief,

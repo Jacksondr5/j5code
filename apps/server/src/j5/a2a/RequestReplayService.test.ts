@@ -7,7 +7,7 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Result from "effect/Result";
 import * as SqlClient from "effect/sql/SqlClient";
-import migration from "./migrations/044_RequestReplay.ts";
+import migration from "./migrations/047_RequestReplay.ts";
 import * as RequestReplayService from "./RequestReplayService.ts";
 
 it.effect("persists the original request across database reopen and refuses changed reuse", () =>
@@ -19,7 +19,6 @@ it.effect("persists the original request across database reopen and refuses chan
       id: "spawn:1",
       target: "agent:original",
       request: { brief: "first", workspace: { type: "shared" }, omitted: undefined },
-      legacy: false,
     };
     yield* Effect.scoped(
       Effect.gen(function* () {
@@ -36,7 +35,6 @@ it.effect("persists the original request across database reopen and refuses chan
         const replay = yield* RequestReplayService.RequestReplayService;
         yield* replay.bind({
           ...first,
-          legacy: true,
           request: { workspace: { type: "shared" }, brief: "first" },
         });
         const changed = yield* replay
@@ -57,17 +55,17 @@ it.effect("persists the original request across database reopen and refuses chan
         assert.equal(rows[0]?.count, 1);
         yield* replay.check("new-key", {});
         assert.isTrue(Result.isFailure(yield* replay.check(first.id, {}).pipe(Effect.result)));
-        const legacy = yield* replay
-          .bind({ ...first, id: "legacy", legacy: true })
+        // A key from before binding existed binds its first retry, then holds it like any other.
+        const legacy = { ...first, id: "pre-upgrade", target: "agent:pre-upgrade" };
+        yield* replay.check(legacy.id, legacy.request);
+        yield* replay.bind(legacy);
+        yield* replay.bind(legacy);
+        const changedLegacy = yield* replay
+          .bind({ ...legacy, request: { brief: "different" } })
           .pipe(Effect.result);
-        assert.isTrue(Result.isFailure(legacy));
-        if (Result.isFailure(legacy)) {
-          assert.equal(legacy.failure._tag, "RequestReplayUnverifiableError");
-          assert.equal(
-            legacy.failure.message,
-            "The original request for agent:original predates replay verification and cannot be compared. Inspect that target and use a fresh client_request_id for new work.",
-          );
-        }
+        assert.isTrue(Result.isFailure(changedLegacy));
+        if (Result.isFailure(changedLegacy))
+          assert.equal(changedLegacy.failure._tag, "RequestReplayConflictError");
       }).pipe(
         Effect.provide(
           RequestReplayService.layer.pipe(Layer.provideMerge(NodeSqliteClient.layer({ filename }))),

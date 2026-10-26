@@ -12,7 +12,6 @@ import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Path from "effect/Path";
 
 import * as KeyedLock from "@t3tools/shared/KeyedLock";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
@@ -237,8 +236,12 @@ const memberSteps = (instance: AgentCrewInstance | null) =>
     playbookStepIds: member.playbookStepIds ?? [],
   }));
 
+type ProposalRequest = Omit<CreateCrewProposalInput, "playbook"> & {
+  readonly playbook?: Pick<CrewPlaybookRef, "name"> | null | undefined;
+};
+
 // Proposal rows preserve original intent across upgrades; human edits go to approvedSeats.
-const proposalRequest = (proposal: CreateCrewProposalInput | CrewProposal) => ({
+const proposalRequest = (proposal: ProposalRequest) => ({
   projectId: proposal.projectId,
   captainParticipantId: proposal.captainParticipantId,
   captainThreadId: proposal.captainThreadId,
@@ -246,12 +249,10 @@ const proposalRequest = (proposal: CreateCrewProposalInput | CrewProposal) => ({
   crewInstanceId: proposal.kind === "addition" ? proposal.crewInstanceId : null,
   brief: proposal.brief,
   displayName: proposal.displayName,
-  playbook:
-    proposal.playbook?.requestWorkspaceRoot === undefined
-      ? { path: proposal.playbook?.definitionPath ?? null }
-      : { name: proposal.playbook.name, workspaceRoot: proposal.playbook.requestWorkspaceRoot },
+  playbook: proposal.playbook?.name ?? null,
   seats: proposal.requestedSeats.map(({ personaSwaps: _swaps, workspace, ...seat }) => ({
     ...seat,
+    steps: seat.steps ?? [],
     workspace:
       workspace?.type === "worktree"
         ? { ...workspace, startFromOrigin: workspace.startFromOrigin ?? false }
@@ -298,7 +299,6 @@ export const layer = Layer.effect(
     const ledger = yield* A2ALedger;
     const agents = yield* makeAgentPersonaLibrary;
     const playbooks = yield* PlaybookStore;
-    const path = yield* Path.Path;
     // One resolution of a proposal at a time on this server, so an approval and a decline from
     // two devices cannot interleave; the store's compare-and-set from open decides the winner.
     const gates = yield* KeyedLock.make<string>();
@@ -618,7 +618,7 @@ export const layer = Layer.effect(
 
     const replayProposal = Effect.fn("j5.a2a.crewProposal.replay")(function* (
       original: CrewProposal,
-      request: CreateCrewProposalInput,
+      request: ProposalRequest,
     ) {
       if (requestDigest(proposalRequest(original)) !== requestDigest(proposalRequest(request)))
         return yield* new CrewProposalRequestError(
@@ -646,39 +646,6 @@ export const layer = Layer.effect(
         const original = yield* proposals
           .read(id)
           .pipe(Effect.mapError(operationError("reading the proposal")));
-        let playbookRef: CrewPlaybookRef | null = null;
-        if (input.playbook !== undefined) {
-          const { name, workspaceRoot } = input.playbook;
-          const requestWorkspaceRoot = path.resolve(workspaceRoot);
-          if (original === null) {
-            playbookRef = yield* playbooks.definitionPathFor(workspaceRoot, name).pipe(
-              Effect.map(({ stem, definitionPath }) => ({
-                name: stem,
-                definitionPath,
-                requestWorkspaceRoot,
-              })),
-              Effect.mapError(playbookRefusal(name, "propose")),
-            );
-          } else {
-            const stem = name.endsWith(".yaml") ? name.slice(0, -5) : name;
-            // Library paths do not identify the caller workspace; old rows can only prove local intent.
-            playbookRef =
-              original.playbook?.requestWorkspaceRoot === undefined
-                ? {
-                    name: stem,
-                    definitionPath: path.resolve(
-                      requestWorkspaceRoot,
-                      ".j5/playbooks",
-                      `${stem}.yaml`,
-                    ),
-                  }
-                : {
-                    name: stem,
-                    definitionPath: original.playbook.definitionPath,
-                    requestWorkspaceRoot,
-                  };
-          }
-        }
         const request = {
           id,
           projectId: input.captain.projectId,
@@ -690,10 +657,22 @@ export const layer = Layer.effect(
           displayName: input.displayName,
           requestedSeats: input.seats,
           createdAt: DateTime.formatIso(yield* DateTime.now),
-          playbook: playbookRef,
-        } satisfies CreateCrewProposalInput;
+          playbook:
+            input.playbook === undefined
+              ? null
+              : { name: input.playbook.name.replace(/\.yaml$/, "") },
+        } satisfies ProposalRequest;
         // The optional playbook summary describes fresh validation; replay never reads a changed definition.
         if (original !== null) return yield* replayProposal(original, request);
+        const playbookRef =
+          input.playbook === undefined
+            ? null
+            : yield* playbooks
+                .definitionPathFor(input.playbook.workspaceRoot, input.playbook.name)
+                .pipe(
+                  Effect.map(({ stem, definitionPath }) => ({ name: stem, definitionPath })),
+                  Effect.mapError(playbookRefusal(input.playbook.name, "propose")),
+                );
         const definition =
           playbookRef === null ? null : yield* readPlaybook(playbookRef, "propose");
         const plan = yield* validateSeats(
@@ -705,6 +684,7 @@ export const layer = Layer.effect(
         const proposal = yield* proposals
           .create({
             ...request,
+            playbook: playbookRef,
             requestedSeats: withPersonaSwaps(input.seats, plan.swapsBySeat),
           })
           .pipe(Effect.mapError(operationError("recording the proposal")));

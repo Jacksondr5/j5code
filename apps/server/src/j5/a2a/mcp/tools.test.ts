@@ -17,18 +17,29 @@ import {
   J5RequestCrewMemberTool,
   J5RequestCrewMemberInput,
   J5SendMessageTool,
+  J5SpawnAgentInput,
   J5SpawnAgentTool,
   J5StopAgentTool,
   J5Toolkit,
   J5_PROPOSE_CREW_DESCRIPTION,
+  J5_REQUEST_CREW_MEMBER_DESCRIPTION,
   J5_SPAWN_AGENT_DESCRIPTION,
   J5_STOP_AGENT_DESCRIPTION,
 } from "./tools.ts";
 
 const decodeProposeCrew = Schema.decodeUnknownSync(J5ProposeCrewInput);
 const decodeRequestCrewMember = Schema.decodeUnknownSync(J5RequestCrewMemberInput);
+const decodeSpawnAgent = Schema.decodeUnknownSync(J5SpawnAgentInput);
 
-it.effect("publishes the canonical spawn description byte-for-byte", () =>
+it.effect.each([
+  { name: "j5_spawn_agent", description: J5_SPAWN_AGENT_DESCRIPTION, tool: J5SpawnAgentTool },
+  { name: "j5_propose_crew", description: J5_PROPOSE_CREW_DESCRIPTION, tool: J5ProposeCrewTool },
+  {
+    name: "j5_request_crew_member",
+    description: J5_REQUEST_CREW_MEMBER_DESCRIPTION,
+    tool: J5RequestCrewMemberTool,
+  },
+])("publishes the canonical $name description byte-for-byte", ({ name, description, tool }) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
     const document = yield* fileSystem.readFileString(
@@ -36,20 +47,16 @@ it.effect("publishes the canonical spawn description byte-for-byte", () =>
         new URL("../../../../../../docs/j5/product/a2a/agent-tools.md", import.meta.url).pathname,
       ),
     );
-    const description = document.match(
-      /### `j5_spawn_agent`[\s\S]*?\*\*Description \(contract\):\*\* "([\s\S]*?)"\n\n\| Input/,
-    )?.[1];
-    if (description === undefined) {
-      return yield* Effect.die(
-        "j5_spawn_agent contract description is missing from agent-tools.md",
-      );
-    }
-    const documentedDescription = description
+    const section = document.split("### `" + name + "`")[1]?.split("\n### ")[0];
+    const quoted = section?.match(/\*\*Description \(contract\):\*\* "([\s\S]*?)"\n\n/)?.[1];
+    if (quoted === undefined)
+      return yield* Effect.die(`${name} contract description is missing from agent-tools.md`);
+    const documented = quoted
       .split("\n")
       .map((line) => line.trim())
       .join(" ");
-    assert.equal(J5_SPAWN_AGENT_DESCRIPTION, documentedDescription);
-    assert.equal(J5SpawnAgentTool.description, documentedDescription);
+    assert.equal(description, documented);
+    assert.equal(tool.description, documented);
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 
@@ -77,7 +84,7 @@ it("publishes the ratified single-target lifecycle contracts fail-closed", () =>
   };
   assert.sameMembers(
     [...(spawnSchema.required ?? [])],
-    ["brief", "provider", "model", "reasoning", "workspace"],
+    ["brief", "title", "provider", "model", "reasoning", "workspace"],
   );
   assert.sameMembers([...(stopSchema.required ?? [])], ["participant_id"]);
   assert.property(spawnSchema.properties ?? {}, "client_request_id");
@@ -193,6 +200,18 @@ it("accepts explicit custom seat settings through both crew tools without requir
   assert.isDefined(selection);
   assert.sameMembers(selection?.required ?? [], ["instanceId", "model"]);
   assert.property(schema.properties, "runtime_mode");
+});
+
+it("refuses a blank spawn title and stores it trimmed", () => {
+  const spawn = {
+    brief: "Fix the flaky login test and report back.",
+    provider: "codex",
+    model: "gpt-5.6-sol",
+    reasoning: "high",
+    workspace: { type: "shared" },
+  };
+  assert.throws(() => decodeSpawnAgent({ ...spawn, title: "   " }));
+  assert.equal(decodeSpawnAgent({ ...spawn, title: " Login fixer " }).title, "Login fixer");
 });
 
 it("tells a Captain proposing a crew how a playbook shapes the roster", () => {

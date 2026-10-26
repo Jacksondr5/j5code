@@ -300,7 +300,7 @@ it.effect(
     ),
 );
 
-it.effect("upgrades playbook proposals without inventing their request workspace", () =>
+it.effect("preserves library playbook paths in pre-upgrade and current proposals", () =>
   Effect.gen(function* () {
     yield* runJ5A2AMigrations({ toMigrationInclusive: 39 });
     yield* (yield* A2ALedger).ensureProject({ projectId, createdAt });
@@ -310,14 +310,14 @@ it.effect("upgrades playbook proposals without inventing their request workspace
       brief, display_name, requested_seats, created_at, playbook_name, playbook_definition_path
     ) VALUES (
       'legacy', ${projectId}, ${captain}, ${captainThreadId}, 'roster', 'open',
-      'Original', 'Legacy', '[]', ${createdAt}, 'release', '/repo/.j5/playbooks/release.yaml'
+      'Original', 'Legacy', '[]', ${createdAt}, 'release', '/library/release.yaml'
     )`;
     yield* runJ5A2AMigrations();
     const proposals = yield* AgentCrewProposalService;
     const legacy = yield* proposals.read("legacy");
     assert.deepStrictEqual(legacy?.playbook, {
       name: "release",
-      definitionPath: "/repo/.j5/playbooks/release.yaml",
+      definitionPath: "/library/release.yaml",
     });
     const current = yield* proposals.create({
       ...addition("current", "unused", []),
@@ -326,12 +326,10 @@ it.effect("upgrades playbook proposals without inventing their request workspace
       playbook: {
         name: "release",
         definitionPath: "/library/release.yaml",
-        requestWorkspaceRoot: "/repo",
       },
     });
     const reloaded = yield* proposals.read(current.id);
     assert.deepStrictEqual(reloaded?.playbook, current.playbook);
-    assert.equal(reloaded?.playbook?.requestWorkspaceRoot, "/repo");
     yield* runJ5A2AMigrations();
     assert.deepStrictEqual(yield* proposals.read("legacy"), legacy);
   }).pipe(Effect.provide(testLayer)),

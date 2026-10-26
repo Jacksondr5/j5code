@@ -23,16 +23,6 @@ export class RequestReplayConflictError extends Schema.TaggedError<RequestReplay
   }
 }
 
-/** The target exists from before replay binding, so no stored request proves this one is it. */
-export class RequestReplayUnverifiableError extends Schema.TaggedError<RequestReplayUnverifiableError>()(
-  "RequestReplayUnverifiableError",
-  { target: Schema.String },
-) {
-  override get message() {
-    return `The original request for ${this.target} predates replay verification and cannot be compared. Inspect that target and use a fresh client_request_id for new work.`;
-  }
-}
-
 const canonical = (value: unknown): unknown => {
   if (Array.isArray(value)) return value.map(canonical);
   if (value === null || typeof value !== "object") return value;
@@ -56,16 +46,15 @@ export class RequestReplayService extends Context.Service<
       id: string,
       request: unknown,
     ) => Effect.Effect<void, SqlError | RequestReplayConflictError>;
-    /** Binds before side effects; an existing target without a binding cannot prove its intent. */
+    /**
+     * Binds before side effects. A key first used before binding existed binds whichever retry
+     * arrives first (Jackson, 2026-10-24): only a request in flight at the upgrade can hit that.
+     */
     readonly bind: (input: {
       readonly id: string;
       readonly target: string;
       readonly request: unknown;
-      readonly legacy: boolean;
-    }) => Effect.Effect<
-      void,
-      SqlError | RequestReplayConflictError | RequestReplayUnverifiableError
-    >;
+    }) => Effect.Effect<void, SqlError | RequestReplayConflictError>;
   }
 >()("t3/j5/a2a/RequestReplayService") {}
 
@@ -86,20 +75,16 @@ export const layer = Layer.effect(
     const bind: RequestReplayService["Service"]["bind"] = Effect.fn("j5.requestReplay.bind")(
       function* (input) {
         const digest = requestDigest(input.request);
-        if (!input.legacy) {
-          yield* sql`
-            INSERT INTO j5_a2a_request_replay (id, target, request_digest)
-            VALUES (${input.id}, ${input.target}, ${digest})
-            ON CONFLICT (id) DO NOTHING
-          `;
-        }
+        yield* sql`
+          INSERT INTO j5_a2a_request_replay (id, target, request_digest)
+          VALUES (${input.id}, ${input.target}, ${digest})
+          ON CONFLICT (id) DO NOTHING
+        `;
         const rows = yield* sql<{ readonly target: string; readonly request_digest: string }>`
           SELECT target, request_digest FROM j5_a2a_request_replay WHERE id = ${input.id}
         `;
         const original = rows[0];
-        if (original === undefined)
-          return yield* new RequestReplayUnverifiableError({ target: input.target });
-        if (original.request_digest !== digest)
+        if (original !== undefined && original.request_digest !== digest)
           return yield* new RequestReplayConflictError({ target: original.target });
       },
       sql.withTransaction,

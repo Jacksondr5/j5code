@@ -38,6 +38,8 @@ import {
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { ProviderRegistry } from "../../provider/ProviderRegistry.ts";
 import { createAgentPersonaLibrary } from "../agents/agentPersonaLibrary.ts";
+import { BUILT_IN_AGENT_PERSONAS } from "../agents/agentPersonas.ts";
+import { personaLibraryLayer } from "../test-support/personaLibrary.ts";
 import { buildAgentPersonaCatalog } from "../agents/agentPersonaRouting.ts";
 import { playbookTools } from "../playbooks/mcp.ts";
 import { makePlaybookCrewRelay } from "../playbooks/PlaybookCrewRelay.ts";
@@ -78,7 +80,8 @@ import { runJ5A2AMigrations } from "./Migrations.ts";
 import { SpawnCompositionService } from "./SpawnCompositionService.ts";
 import type { ResolvedSpawnWorkspace } from "./spawnWorkspace.ts";
 import { fakeSpawnWorkspaceLayer, noRepository } from "./test-support/spawnWorkspaceFakes.ts";
-import { crewSeatRequestKey, spawnThreadId } from "./spawnIds.ts";
+import { crewSeatRequestKey, lifecycleId, spawnThreadId } from "./spawnIds.ts";
+import { CREW_PROPOSAL_SESSION } from "./crewSeatIds.ts";
 import { ParticipantId, LedgerProjectId } from "./contracts.ts";
 
 const projectId = LedgerProjectId.make("ledger:crew-proposal");
@@ -423,7 +426,9 @@ const fixtureWithDatabase = Effect.fn("test.crewProposal.fixture")(function* (
     ),
     Layer.provideMerge(playbookStoreLayer),
     Layer.provideMerge(Layer.succeedContext(context)),
-    Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-proposal-" })),
+    Layer.provideMerge(
+      personaLibraryLayer("j5-crew-proposal-", Object.values(BUILT_IN_AGENT_PERSONAS)),
+    ),
     Layer.provideMerge(NodeServices.layer),
   );
   return {
@@ -1809,7 +1814,6 @@ it.effect(
         assert.deepStrictEqual(stored.playbook, {
           name: "release",
           definitionPath: `${workspaceRoot}/.j5/playbooks/release.yaml`,
-          requestWorkspaceRoot: workspaceRoot,
         });
         assert.deepStrictEqual(
           stored.requestedSeats.map(({ seat, steps }) => [seat, steps]),
@@ -2251,8 +2255,7 @@ it.effect(
           path: yield* Path.Path,
           stateDir,
         });
-        // builder is bundled; planner and reviewer are added through the library's own API.
-        for (const id of ["planner", "reviewer"])
+        for (const id of ["planner", "builder", "reviewer"])
           yield* library.createPersona({
             id,
             displayName: id,
@@ -2972,49 +2975,61 @@ it.effect.each(["delete", "rename"] as const)(
     }).pipe(Effect.scoped),
 );
 
-it.effect("replays a folder-library proposal after local overrides and source removal", () =>
-  Effect.gen(function* () {
-    const { layer, workspaceRoot } = yield* playbookFixture;
-    yield* Effect.gen(function* () {
-      const store = yield* PlaybookStore;
-      const gate = yield* CrewProposalService;
-      const path = yield* Path.Path;
-      const fs = yield* FileSystem.FileSystem;
-      const library = yield* fs.makeTempDirectoryScoped();
-      const libraryFile = path.join(library, "release.yaml");
-      const localFile = path.join(workspaceRoot, ".j5/playbooks/release.yaml");
-      const yaml = yield* fs.readFileString(localFile);
-      yield* fs.writeFileString(libraryFile, yaml);
-      yield* store.setFolders({ folders: [library] });
-      yield* fs.remove(localFile);
+it.effect(
+  "replays a folder-library proposal after checkout changes, overrides and source removal",
+  () =>
+    Effect.gen(function* () {
+      const { layer, workspaceRoot } = yield* playbookFixture;
+      yield* Effect.gen(function* () {
+        const store = yield* PlaybookStore;
+        const gate = yield* CrewProposalService;
+        const path = yield* Path.Path;
+        const fs = yield* FileSystem.FileSystem;
+        const library = yield* fs.makeTempDirectoryScoped();
+        const libraryFile = path.join(library, "release.yaml");
+        const localFile = path.join(workspaceRoot, ".j5/playbooks/release.yaml");
+        const yaml = yield* fs.readFileString(localFile);
+        yield* fs.writeFileString(libraryFile, yaml);
+        yield* store.setFolders({ folders: [library] });
+        yield* fs.remove(localFile);
 
-      const original = yield* proposeRelease(gate, workspaceRoot);
-      assert.equal(original.proposal.playbook?.definitionPath, libraryFile);
-      assert.equal(original.proposal.playbook?.requestWorkspaceRoot, path.resolve(workspaceRoot));
-      assert.equal(
-        (yield* store.definitionPathFor(`${workspaceRoot}/other`, "release")).definitionPath,
-        libraryFile,
-      );
-      const changed = yield* proposeRelease(gate, `${workspaceRoot}/other`).pipe(Effect.flip);
-      assert.equal(changed._tag, "CrewProposalRequestError");
-      assert.include(changed.message, "different request");
+        const original = yield* proposeRelease(gate, workspaceRoot);
+        assert.equal(original.proposal.playbook?.definitionPath, libraryFile);
+        assert.equal(
+          (yield* store.definitionPathFor(`${workspaceRoot}/other`, "release")).definitionPath,
+          libraryFile,
+        );
+        const moved = yield* gate.propose({
+          requestKey: "release",
+          captain: {
+            ...captain,
+            thread: { ...captain.thread, worktreePath: `${workspaceRoot}/other` },
+          },
+          displayName: "Release Crew",
+          brief: "Ship the change.",
+          playbook: { name: "release.yaml", workspaceRoot: `${workspaceRoot}/other` },
+          seats: [custom("planner", ["plan"]), custom("builder", ["build"])],
+        });
+        assert.deepStrictEqual(moved.proposal, original.proposal);
 
-      yield* fs.writeFileString(localFile, yaml);
-      const replay = yield* proposeRelease(gate, workspaceRoot);
-      assert.deepStrictEqual(replay.proposal, original.proposal);
-      const fresh = yield* proposeRelease(gate, workspaceRoot, "fresh");
-      assert.equal(fresh.proposal.playbook?.definitionPath, localFile);
+        yield* fs.writeFileString(localFile, stringify({ ...release(), title: "Local override" }));
+        const preview = yield* gate.preview({ proposalId: original.proposal.id });
+        assert.equal(preview.playbook?.title, "Release", "preview reads the stored library path");
+        const replay = yield* proposeRelease(gate, workspaceRoot);
+        assert.deepStrictEqual(replay.proposal, original.proposal);
+        const fresh = yield* proposeRelease(gate, workspaceRoot, "fresh");
+        assert.equal(fresh.proposal.playbook?.definitionPath, localFile);
 
-      yield* store.setFolders({ folders: [] });
-      yield* fs.remove(libraryFile);
-      const afterRemoval = yield* proposeRelease(gate, workspaceRoot);
-      assert.deepStrictEqual(afterRemoval.proposal, original.proposal);
-      assert.lengthOf(yield* (yield* AgentCrewProposalService).listForCaptain(captainId), 2);
-    }).pipe(Effect.provide(layer));
-  }).pipe(Effect.scoped),
+        yield* store.setFolders({ folders: [] });
+        yield* fs.remove(libraryFile);
+        const afterRemoval = yield* proposeRelease(gate, workspaceRoot);
+        assert.deepStrictEqual(afterRemoval.proposal, original.proposal);
+        assert.lengthOf(yield* (yield* AgentCrewProposalService).listForCaptain(captainId), 2);
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
 );
 
-it.effect("refuses changed playbook names, workspaces and authority before catalog lookup", () =>
+it.effect("refuses changed playbook names, steps and authority before catalog lookup", () =>
   Effect.gen(function* () {
     const { layer, workspaceRoot } = yield* playbookFixture;
     yield* Effect.gen(function* () {
@@ -3030,9 +3045,10 @@ it.effect("refuses changed playbook names, workspaces and authority before catal
       };
       for (const changed of [
         { ...input, playbook: { ...input.playbook, name: "missing" } },
-        { ...input, playbook: { ...input.playbook, workspaceRoot: `${workspaceRoot}/other` } },
+        { ...input, seats: [custom("planner", ["review"]), custom("builder", ["build"])] },
         { ...input, playbook: undefined },
         { ...input, captain: { ...captain, participantId: ParticipantId.make("other-captain") } },
+        { ...input, captain: { ...captain, thread: thread(ThreadId.make("other-thread")) } },
       ]) {
         const refusal = yield* gate.propose(changed).pipe(Effect.flip);
         assert.equal(refusal._tag, "CrewProposalRequestError");
@@ -3051,23 +3067,81 @@ it.effect("refuses changed playbook names, workspaces and authority before catal
   }).pipe(Effect.scoped),
 );
 
-it.effect("replays legacy local playbook proposals without consulting the live catalog", () =>
+it.effect("replays a pre-field library proposal by name after the Captain changes checkout", () =>
   Effect.gen(function* () {
     const { layer, workspaceRoot } = yield* playbookFixture;
     yield* Effect.gen(function* () {
       const gate = yield* CrewProposalService;
-      const original = yield* proposeRelease(gate, workspaceRoot);
       const sql = yield* SqlClient.SqlClient;
-      yield* sql`UPDATE j5_agent_crew_proposal SET playbook_request_workspace_root = NULL WHERE id = ${original.proposal.id}`;
-      const legacy = yield* (yield* AgentCrewProposalService).read(original.proposal.id);
-      yield* (yield* FileSystem.FileSystem).remove(
-        (yield* Path.Path).join(workspaceRoot, ".j5/playbooks/release.yaml"),
-      );
-      const replay = yield* proposeRelease(gate, workspaceRoot);
-      assert.deepStrictEqual(replay.proposal, legacy);
-      const changed = yield* proposeRelease(gate, `${workspaceRoot}/other`).pipe(Effect.flip);
-      assert.equal(changed._tag, "CrewProposalRequestError");
-      assert.include(changed.message, "different request");
+      const id = lifecycleId({
+        kind: "crew",
+        operation: "proposal",
+        providerSessionId: CREW_PROPOSAL_SESSION,
+        requestKey: "legacy-library",
+      });
+      const seats = [custom("planner", ["plan"]), custom("builder", ["build"])];
+      yield* sql`INSERT INTO j5_agent_crew_proposal (
+        id, project_id, captain_participant_id, captain_thread_id, kind, status,
+        brief, display_name, requested_seats, created_at, playbook_name, playbook_definition_path
+      ) VALUES (
+        ${id}, ${projectId}, ${captainId}, ${captainThread}, 'roster', 'open',
+        'Ship the change.', 'Release Crew', ${JSON.stringify(seats)},
+        ${DateTime.formatIso(createdAt)}, 'release', '/library/release.yaml'
+      )`;
+      const stored = yield* (yield* AgentCrewProposalService).read(id);
+      assert.deepStrictEqual(stored?.playbook, {
+        name: "release",
+        definitionPath: "/library/release.yaml",
+      });
+      const movedRoot = `${workspaceRoot}/other`;
+      const replay = yield* gate.propose({
+        requestKey: "legacy-library",
+        captain: { ...captain, thread: { ...captain.thread, worktreePath: movedRoot } },
+        displayName: "Release Crew",
+        brief: "Ship the change.",
+        playbook: { name: "release.yaml", workspaceRoot: movedRoot },
+        seats,
+      });
+      assert.deepStrictEqual(replay.proposal, stored);
+      assert.lengthOf(yield* (yield* AgentCrewProposalService).listForCaptain(captainId), 1);
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.scoped),
+);
+
+it.effect.each(["roster", "addition"] as const)(
+  "treats omitted and empty seat steps as the same %s request after SQLite round trip",
+  (kind) =>
+    Effect.gen(function* () {
+      const { layer } = yield* fixture;
+      yield* Effect.gen(function* () {
+        const gate = withPreview(yield* CrewProposalService);
+        const crew = kind === "addition" ? yield* seedCrew(gate, "steps-crew", 1) : null;
+        for (const initialSteps of [undefined, []] as const) {
+          const requestKey = `steps-${kind}-${initialSteps === undefined ? "omitted" : "empty"}`;
+          const request = (steps: ReadonlyArray<string> | undefined) =>
+            kind === "roster"
+              ? gate.propose({
+                  requestKey,
+                  captain,
+                  displayName: "Steps Crew",
+                  brief: "Original",
+                  seats: [custom("writer", steps)],
+                })
+              : gate.requestMember({
+                  requestKey,
+                  captain,
+                  crewInstanceId: crew!.id,
+                  brief: null,
+                  seat: custom(`writer-${initialSteps === undefined ? "omitted" : "empty"}`, steps),
+                });
+          const original = yield* request(initialSteps);
+          const replay = yield* request(initialSteps === undefined ? [] : undefined);
+          assert.deepStrictEqual(replay.proposal, original.proposal);
+          const changed = yield* request(["build"]).pipe(Effect.flip);
+          assert.equal(changed._tag, "CrewProposalRequestError");
+          assert.include(changed.message, original.proposal.id);
+          assert.include(changed.message, "different request");
+        }
+      }).pipe(Effect.provide(layer));
+    }),
 );

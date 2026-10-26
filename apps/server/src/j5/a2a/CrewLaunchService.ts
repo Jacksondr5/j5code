@@ -526,7 +526,7 @@ export const layer = Layer.effect(
             threadId: member.threadId,
             projectId: captain.thread.projectId,
             // The seat's name alone: the sidebar group and the Crew chip already say which Crew.
-            title: spawnTitle(seatName, undefined),
+            title: spawnTitle(seatName),
             modelSelection: member.modelSelection,
             runtimeMode: member.runtimeMode,
             interactionMode: captain.thread.interactionMode,
@@ -589,14 +589,13 @@ export const layer = Layer.effect(
         const seatName = member.seat.name;
         // Seats go through the same start guard as j5_spawn_agent (see `withSpawnStart`), so every
         // door that creates a spawn thread keeps its invariant. A Crew's launches are already
-        // serialized and its approval binds each seat's workspace type, so neither refusal is
-        // expected here; the brief takes the guard again once every seat exists.
+        // serialized, so its in-flight refusal is not expected here; the brief takes the guard
+        // again once every seat exists.
         const started = yield* Effect.result(
           spawnWorkspace.withSpawnStart(
             {
               stableInput: member.stableInput,
               threadId: member.threadId,
-              workspace: member.workspace,
             },
             startSeat(captain, member),
           ),
@@ -669,7 +668,6 @@ export const layer = Layer.effect(
             {
               stableInput: member.stableInput,
               threadId: member.threadId,
-              workspace: member.workspace,
             },
             spawnWorkspace.startBrief({
               workspace: member.workspace,
@@ -677,7 +675,7 @@ export const layer = Layer.effect(
               ledgerProjectId: captain.projectId,
               projectId: captain.thread.projectId,
               threadId: member.threadId,
-              title: spawnTitle(member.seat.name, undefined),
+              title: spawnTitle(member.seat.name),
               messageId: spawnMessageId(member.stableInput),
               text,
               modelSelection: member.modelSelection,

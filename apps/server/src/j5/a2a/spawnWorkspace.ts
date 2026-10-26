@@ -228,8 +228,8 @@ export const resolveSpawnWorkspace = (
 };
 
 /**
- * A request key is bound to the workspace type it was first accepted with: the create command id
- * encodes the type. Shared keeps the original id, so spawns already in flight still replay.
+ * The create command id encodes the workspace type. Shared keeps the original id, so spawns
+ * already in flight still replay.
  */
 export const spawnCreateCommandId = (
   stableInput: SpawnStableInput,
@@ -240,8 +240,6 @@ export const spawnCreateCommandId = (
     : workspace === "existing_worktree"
       ? lifecycleCommandId({ ...stableInput, operation: "spawn-create-existing" })
       : lifecycleCommandId({ ...stableInput, operation: "spawn-create-worktree" });
-
-const WORKSPACE_TYPES = ["shared", "worktree", "existing_worktree"] as const;
 
 const spawnLaunchCommandId = (stableInput: SpawnStableInput) =>
   lifecycleCommandId({ ...stableInput, operation: "spawn-launch" });
@@ -313,19 +311,18 @@ export interface SpawnWorkspaceServiceShape {
   }) => Effect.Effect<CrewWorkspaceOptions>;
   /**
    * Runs one spawn's start (create, facts, brief), refusing it while another start for the same
-   * thread is in flight, and refusing a request key already accepted with the other workspace type.
+   * thread is in flight.
    *
    * Invariant: every door that dispatches `thread.create` for a spawn thread id goes through this.
    * The orchestrator has no existing-thread guard and the projection upserts, so a second create
-   * under the other type's command id would overwrite the first thread. With one start in flight
-   * per thread, the receipt check can't race the create it guards. The receipt is durable, so the
-   * binding outlives the in-process guard across a restart.
+   * under another workspace type's command id would overwrite the first thread. A key keeps its
+   * workspace type because its request is bound before the start (`RequestReplayService`), and a
+   * Crew seat's because its approval is recorded before any seat starts.
    */
   readonly withSpawnStart: <A, E, R>(
     input: {
       readonly stableInput: SpawnStableInput;
       readonly threadId: ThreadId;
-      readonly workspace: ResolvedSpawnWorkspace;
     },
     effect: Effect.Effect<A, E, R>,
   ) => Effect.Effect<A, E | SpawnWorkspaceError, R>;
@@ -472,11 +469,14 @@ const make = Effect.gen(function* () {
       };
     }).pipe(Effect.catch(() => Effect.succeed(NO_WORKSPACE_OPTIONS)));
 
-  const withSpawnStart: SpawnWorkspaceServiceShape["withSpawnStart"] = (input, effect) =>
+  const withSpawnStart: SpawnWorkspaceServiceShape["withSpawnStart"] = <A, E, R>(
+    input: Parameters<SpawnWorkspaceServiceShape["withSpawnStart"]>[0],
+    effect: Effect.Effect<A, E, R>,
+  ) =>
     // The check, the add, and the releasing finalizer run with no interruptible gap, so an
     // interrupt can't leak an entry and block every later start of this thread.
     Effect.uninterruptibleMask((restore) =>
-      Effect.suspend(() => {
+      Effect.suspend((): Effect.Effect<A, E | SpawnWorkspaceError, R> => {
         if (startsInFlight.has(input.threadId))
           return Effect.fail(
             new SpawnWorkspaceError({
@@ -485,30 +485,9 @@ const make = Effect.gen(function* () {
             }),
           );
         startsInFlight.add(input.threadId);
-        return restore(
-          Effect.gen(function* () {
-            for (const other of WORKSPACE_TYPES) {
-              if (other === input.workspace.type) continue;
-              const bound = yield* receipts
-                .getByCommandId(spawnCreateCommandId(input.stableInput, other))
-                .pipe(
-                  Effect.mapError(
-                    (error) =>
-                      new SpawnWorkspaceError({
-                        detail: `The spawn's earlier workspace choice could not be read: ${error.message}`,
-                        nextStep: "Retry with the same client_request_id.",
-                      }),
-                  ),
-                );
-              if (Option.isSome(bound))
-                return yield* new SpawnWorkspaceError({
-                  detail: `client_request_id ${input.stableInput.requestKey} is already bound to workspace {"type":"${other}"}.`,
-                  nextStep: `Retry with that workspace, or use a fresh client_request_id.`,
-                });
-            }
-            return yield* effect;
-          }),
-        ).pipe(Effect.ensuring(Effect.sync(() => startsInFlight.delete(input.threadId))));
+        return restore(effect).pipe(
+          Effect.ensuring(Effect.sync(() => startsInFlight.delete(input.threadId))),
+        );
       }),
     );
 
