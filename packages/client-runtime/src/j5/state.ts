@@ -191,6 +191,11 @@ export function createJ5EnvironmentAtoms<R, E>(
       "j5:delete-artifact",
       J5_ARTIFACT_WS_METHODS.deleteArtifact,
     ),
+    deleteAllArtifacts: createJ5ActionCommand(
+      runtime,
+      "j5:delete-all-artifacts",
+      J5_ARTIFACT_WS_METHODS.deleteAllArtifacts,
+    ),
     exportPlaybook: createEnvironmentRpcCommand(runtime, {
       label: "j5:export-playbook",
       tag: J5_PLAYBOOK_WS_METHODS.exportPlaybook,
@@ -327,6 +332,11 @@ export function createJ5EnvironmentAtoms<R, E>(
       runtime,
       "j5:remove-peer",
       J5_CLIENT_ACTION_WS_METHODS.removePeer,
+    ),
+    changePeerOrigin: createJ5ActionCommand(
+      runtime,
+      "j5:change-peer-origin",
+      J5_CLIENT_ACTION_WS_METHODS.changePeerOrigin,
     ),
   };
 }
