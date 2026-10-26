@@ -300,13 +300,17 @@ export const createFleetFactsAtom = (rows: Atom.Atom<ReadonlyArray<FleetFactRow>
     for (const row of get(rows)) {
       if (!row.live) {
         const cached = previous?.get(row.key);
+        const frozen =
+          cached === undefined || cached.problemsIncomplete
+            ? cached
+            : { ...cached, problemsIncomplete: true };
         const unknown = {
           state: "unknown" as const,
           reason: "This environment is unavailable; runtime and activity are not current.",
         };
         facts.set(
           row.key,
-          cached ?? {
+          frozen ?? {
             ...deriveFleetFacts({
               shell: undefined,
               ledger: row.ledger,
