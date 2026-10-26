@@ -23,11 +23,7 @@ import { HttpClient, HttpClientRequest, type HttpClientResponse } from "effect/h
 import { EventSinkV2 } from "../../orchestration-v2/EventSink.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { A2ALedger } from "./LedgerService.ts";
-import {
-  A2APeerDeliveryReceiptPendingError,
-  PeerInboundService,
-  peerDeliveryRefusal,
-} from "./PeerInboundService.ts";
+import { PeerInboundService, peerDeliveryRefusal } from "./PeerInboundService.ts";
 import { PeerRegistryService } from "./PeerRegistryService.ts";
 import { PEER_POLL_HOLD } from "./PeerStoreService.ts";
 import { RosterService } from "./RosterService.ts";
@@ -119,7 +115,6 @@ interface PollState {
 
 const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown));
 const decodePollResponse = Schema.decodeUnknownEffect(PeerPollResponse);
-const isDeliveryReceiptPending = Schema.is(A2APeerDeliveryReceiptPendingError);
 
 const reasonOf = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
 
@@ -177,15 +172,6 @@ const make = (daemon: boolean) =>
           continue;
         }
         const failure = Cause.findErrorOption(received.cause);
-        if (
-          delivery.deliveryAlarm !== undefined &&
-          Option.isSome(failure) &&
-          isDeliveryReceiptPending(failure.value)
-        ) {
-          // A diagnostic has no message-order constraint; retry it without holding later traffic.
-          unrecorded = true;
-          continue;
-        }
         const refusal = Option.isSome(failure) ? peerDeliveryRefusal(failure.value) : null;
         if (refusal === null) {
           // Not a refusal: leave this and every later one unacknowledged, in
@@ -462,11 +448,9 @@ const make = (daemon: boolean) =>
     if (daemon) {
       const scope = yield* Effect.scope;
       // One loop per poll peer. A loop that stopped is restarted only when the
-      // peer is recorded again with a new credential, which is what fixes it.
-      const running = new Map<
-        string,
-        { readonly credential: string | null; fiber: Fiber.Fiber<void> | null }
-      >();
+      // peer is recorded again with a new credential, which is what fixes it, or
+      // moved to a new origin, which also ends any backoff against the old one.
+      const running = new Map<string, { readonly link: string; fiber: Fiber.Fiber<void> | null }>();
       const reconcile = Effect.gen(function* () {
         const read = yield* Effect.result(peers.connections());
         if (read._tag === "Failure") {
@@ -477,17 +461,20 @@ const make = (daemon: boolean) =>
         const polled = new Map(
           read.success
             .filter((peer) => peer.linkMode === "poll")
-            .map((peer) => [peer.environmentId, peer.credential] as const),
+            .map(
+              (peer) =>
+                [peer.environmentId, JSON.stringify([peer.credential, peer.origin])] as const,
+            ),
         );
         for (const [environmentId, entry] of running) {
-          if (polled.get(environmentId) === entry.credential) continue;
+          if (polled.get(environmentId) === entry.link) continue;
           if (entry.fiber !== null) yield* Fiber.interrupt(entry.fiber);
           running.delete(environmentId);
         }
-        for (const [environmentId, credential] of polled) {
+        for (const [environmentId, link] of polled) {
           if (running.has(environmentId)) continue;
-          const entry: { readonly credential: string | null; fiber: Fiber.Fiber<void> | null } = {
-            credential,
+          const entry: { readonly link: string; fiber: Fiber.Fiber<void> | null } = {
+            link,
             fiber: null,
           };
           running.set(environmentId, entry);

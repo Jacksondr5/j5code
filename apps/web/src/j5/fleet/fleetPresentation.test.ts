@@ -9,6 +9,7 @@ import {
   fleetAgentKey,
   fleetMinutes,
   fleetTime,
+  fleetAgo,
   fleetProblemLabel,
   fleetBadgeLabel,
   fleetProblemNotices,
@@ -27,6 +28,7 @@ const facts = (value: FleetRuntimeFact): FleetDerivedFacts => ({
   asks: undefined,
   lastActivity: { state: "unknown", reason: "old server" },
   problems: [],
+  problemsIncomplete: false,
 });
 
 describe("Fleet presentation", () => {
@@ -95,32 +97,58 @@ describe("Fleet presentation", () => {
     expect(fleetStatusLabel({ state: "unknown", reason: "missing runtime" })).toBe("?");
   });
 
-  it("keeps prior-day dates explicit without advancing stale timestamps at midnight", () => {
+  it("uses relative live times and keeps stale measurements absolute across midnight", () => {
+    const now = Date.parse(at);
+    const prior = "2026-10-18T10:00:00.000Z";
+    const idle = { ...runtime("idle"), since: prior };
+    expect(fleetTime(prior, now)).toBe("1d");
+    expect(fleetAgo(prior, now)).toBe("1d ago");
+    expect(fleetAgo(at, now)).toBe("just now");
+    expect(fleetAgo(undefined, now)).toBe("?");
+    expect(fleetAgo(prior)).toContain("18th October 2026");
+    expect(fleetTime(prior, now + 3 * 86_400_000)).toBe("4d");
+    expect(fleetStatusLabel(idle, now)).toBe("Idle 1d");
+    expect(fleetStatusLabel(idle, now + 3 * 86_400_000)).toBe("Idle 4d");
+    expect(fleetTime(prior)).toContain("18th October 2026");
+    expect(fleetTime(undefined, now)).toBe("?");
+    expect(fleetTime("invalid", now)).toBe("?");
+    expect(fleetTime("invalid")).toBe("?");
+
     vi.useFakeTimers();
     try {
-      vi.setSystemTime(new Date("2026-10-19T10:00:00.000Z"));
-      const prior = "2026-10-18T10:00:00.000Z";
-      const idle = { ...runtime("idle"), since: prior };
-      const label = fleetStatusLabel(idle);
-      expect(label).toContain("18th October 2026");
-      expect(fleetTime(prior)).toContain("18th October 2026");
-      expect(
-        fleetProblemLabel({
-          kind: "delivery-failed",
-          messageId: "m",
-          receiverId: "a",
-          receiverName: "Agent",
-          at: prior,
-          reason: "offline",
-          exchangeOpen: false,
-        }),
-      ).toContain("18th October 2026");
+      vi.setSystemTime(now);
+      const stale = fleetStatusLabel(idle);
+      expect(stale).toContain("18th October 2026");
       vi.advanceTimersByTime(3 * 86_400_000);
-      expect(fleetStatusLabel(idle)).toBe(label);
-      expect(vi.getTimerCount()).toBe(0);
+      expect(fleetStatusLabel(idle)).toBe(stale);
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("advances every problem kind with the supplied clock while preserving missing times", () => {
+    const now = Date.parse(at) + 60_000;
+    const problems = [
+      { kind: "failed-run", runId: "r", at },
+      { kind: "dispatch-overdue", runId: "r", at },
+      {
+        kind: "delivery-failed",
+        messageId: "m",
+        receiverId: "a",
+        receiverName: "Agent",
+        at,
+        reason: "offline",
+        exchangeOpen: false,
+      },
+    ] as const;
+    for (const problem of problems) {
+      expect(fleetProblemLabel(problem, now)).toContain("1m ago");
+      expect(fleetProblemLabel(problem, now + 60_000)).toContain("2m ago");
+      expect(fleetProblemLabel(problem)).toContain("19th October 2026");
+    }
+    expect(fleetProblemLabel({ kind: "failed-run", runId: "r", at: null }, now)).toBe(
+      "Latest run failed · time unavailable",
+    );
   });
 
   it("keeps stale or unknown agents Active and respects background Waiting over a settle mark", () => {

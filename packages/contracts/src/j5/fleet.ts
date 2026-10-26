@@ -41,6 +41,19 @@ export const FleetActivityFact = Schema.Union([
 ]);
 export type FleetActivityFact = typeof FleetActivityFact.Type;
 
+export const FleetDeliveryProblem = Schema.Struct({
+  kind: Schema.Literal("delivery-failed"),
+  messageId: Schema.String,
+  exchangeId: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  receiverId: Schema.String,
+  receiverName: Schema.NullOr(Schema.String),
+  at: Schema.String,
+  reason: Schema.NullOr(Schema.String),
+  /** Closing the Exchange changes eligibility, not the delivery fact. */
+  exchangeOpen: Schema.Boolean,
+});
+export type FleetDeliveryProblem = typeof FleetDeliveryProblem.Type;
+
 export const FleetProblem = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("failed-run"),
@@ -52,21 +65,14 @@ export const FleetProblem = Schema.Union([
     runId: Schema.String,
     at: Schema.String,
   }),
-  Schema.Struct({
-    kind: Schema.Literal("delivery-failed"),
-    messageId: Schema.String,
-    receiverId: Schema.String,
-    receiverName: Schema.NullOr(Schema.String),
-    at: Schema.String,
-    reason: Schema.NullOr(Schema.String),
-    /** Closing the Exchange changes eligibility, not the delivery fact. */
-    exchangeOpen: Schema.Boolean,
-  }),
+  FleetDeliveryProblem,
 ]);
 export type FleetProblem = typeof FleetProblem.Type;
 
 export const FleetAgentFacts = Schema.Struct({
   asks: Schema.Struct({ owed: Schema.Array(OpenAsk), awaited: Schema.Array(OpenAsk) }),
   problems: Schema.Array(FleetProblem),
+  /** Receivers whose Fleet reads complete this sender's delivery-alarm coverage. */
+  deliveryEnvironmentIds: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 export type FleetAgentFacts = typeof FleetAgentFacts.Type;
