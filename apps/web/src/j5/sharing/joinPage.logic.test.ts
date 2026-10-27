@@ -114,10 +114,12 @@ describe("what the pairing page does with a link", () => {
 });
 
 describe("a refused join", () => {
-  it("says a name is someone else's in the server's name", () => {
+  it("says a name is taken in the server's name, and what to do if it is theirs", () => {
     const refusal = joinRefusal(409, { error: "name_taken" });
     expect(refusal).toBe("name_taken");
-    expect(refusalWords(refusal!, link({}))).toBe("Someone on openclaw already has that name.");
+    expect(refusalWords(refusal!, link({}))).toBe(
+      "Someone on openclaw already has that name. If it is yours, open the link on the device you paired before, or ask for a link for this device.",
+    );
   });
 
   it("asks for a name when the join needed one", () => {

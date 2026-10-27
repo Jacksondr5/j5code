@@ -145,7 +145,7 @@ export function refusalWords(refusal: JoinRefusal, description: LinkDescription)
     case "dead":
       return "This link does not work. It may have been used, expired or revoked. Ask whoever sent it for a new one.";
     case "name_taken":
-      return `Someone on ${description.serverName} already has that name.`;
+      return `Someone on ${description.serverName} already has that name. If it is yours, open the link on the device you paired before, or ask for a link for this device.`;
     case "paired_as_someone_else":
       return someoneElsesWords(description.personName);
     case "already_yours":
