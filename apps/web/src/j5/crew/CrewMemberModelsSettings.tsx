@@ -8,7 +8,7 @@ import {
   type CrewMemberModels,
 } from "@t3tools/contracts/j5";
 import { Link } from "@tanstack/react-router";
-import { AlertTriangleIcon, CheckIcon, ChevronDownIcon, ChevronRightIcon } from "lucide-react";
+import { AlertTriangleIcon, ChevronDownIcon, ChevronRightIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { ProviderInstanceIcon } from "../../components/chat/ProviderInstanceIcon";
@@ -21,7 +21,6 @@ import {
 } from "../../components/settings/useScopedSettings";
 import { Button } from "../../components/ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../../components/ui/collapsible";
-import { Toggle } from "../../components/ui/toggle";
 import { deriveProviderInstanceEntries } from "../../providerInstances";
 import { serverEnvironment } from "../../state/server";
 import { useEnvironmentQuery } from "../../state/query";
@@ -35,18 +34,25 @@ import {
 
 const NO_ENVIRONMENT = "" as EnvironmentId;
 
-/**
- * The same "New" tag the composer's model picker shows for a model carrying the catalog's `new`
- * badge.
- */
-function NewTag() {
+/** One model: solid when allowed. Every chip fills its grid cell, so they all match in size. */
+function ModelChip(props: {
+  readonly name: string;
+  readonly checked: boolean;
+  readonly onChange: (checked: boolean) => void;
+}) {
   return (
-    <span
-      className="shrink-0 rounded border border-update/35 bg-update/15 px-0.5 py-px text-3xs font-bold uppercase leading-none tracking-wide text-update-foreground"
-      aria-label="New model"
+    <button
+      type="button"
+      aria-pressed={props.checked}
+      onClick={() => props.onChange(!props.checked)}
+      className={`h-7 w-full cursor-pointer truncate rounded-md border px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${
+        props.checked
+          ? "border-primary bg-primary text-primary-foreground"
+          : "border-input bg-background text-muted-foreground hover:bg-accent hover:text-foreground"
+      }`}
     >
-      New
-    </span>
+      {props.name}
+    </button>
   );
 }
 
@@ -92,24 +98,18 @@ function ProviderModels(props: {
           </Button>
         </div>
         <CollapsiblePanel>
-          <ul className="flex flex-wrap gap-1.5 px-3 pb-3">
+          <ul className="grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-1.5 px-3 pb-3">
             {provider.models.map((model) => {
               const pair = { instanceId: provider.instanceId, model: model.slug };
-              const isChecked = isCrewMemberModelChecked(list, pair);
               return (
                 <li key={model.slug}>
-                  <Toggle
-                    variant="outline"
-                    size="compact"
-                    pressed={isChecked}
-                    onPressedChange={(next) =>
+                  <ModelChip
+                    name={model.name}
+                    checked={isCrewMemberModelChecked(list, pair)}
+                    onChange={(next) =>
                       props.onChange(setCrewMemberModelChecked(list, props.providers, pair, next))
                     }
-                  >
-                    {isChecked ? <CheckIcon aria-hidden="true" /> : null}
-                    <span className="min-w-0 truncate">{model.name}</span>
-                    {model.badge === "new" ? <NewTag /> : null}
-                  </Toggle>
+                  />
                 </li>
               );
             })}
@@ -153,7 +153,7 @@ export function CrewMemberModelsSettings() {
     <SettingsRow
       id="crew-member-models"
       title="Models for custom members"
-      description="The models custom Crew members, and agents started without a persona, may run on. Until you save a list every model is allowed, and a model added later starts unchecked."
+      description="Models custom members and persona-less agents may use. All are allowed until you save a list."
       serverScoped
       settingKeys={["crewMemberModels"]}
       mixed={mixed}
@@ -161,7 +161,7 @@ export function CrewMemberModelsSettings() {
         summary.nothingEligible && !mixed ? (
           <span className="inline-flex items-center gap-1.5 text-warning-foreground">
             <AlertTriangleIcon aria-hidden="true" className="size-3.5 shrink-0" />
-            Nothing is checked, so no custom member or plain agent can start.
+            No models allowed, so custom members can't start.
           </span>
         ) : null
       }
@@ -195,7 +195,7 @@ export function CrewMemberModelsSettings() {
         <div id="crew-member-models-panel" className="space-y-2 pb-3 pt-1">
           {mixed ? (
             <p className="text-xs text-muted-foreground">
-              The selected environments differ. Changing a model sets this list on all of them.
+              The environments differ. A change applies to all of them.
             </p>
           ) : null}
           {setUp.map((entry) => (
@@ -214,18 +214,17 @@ export function CrewMemberModelsSettings() {
             <p className="text-xs text-muted-foreground">
               Not set up: {notSetUp.map((entry) => entry.displayName).join(", ")}.{" "}
               <Link to="/settings/providers" className="underline underline-offset-2">
-                Set them up in Providers
+                Set up in Providers
               </Link>
               .
             </p>
           ) : null}
           <p className="text-xs text-muted-foreground">
-            Personas always run on their own model, even one that isn't checked.
+            Personas keep their own model.
             {offList.length > 0
-              ? ` ${offList.join(", ")} ${offList.length === 1 ? "runs" : "run"} on a model that isn't checked.`
+              ? ` ${offList.join(", ")} ${offList.length === 1 ? "uses" : "use"} an unchecked one.`
               : ""}{" "}
-            This list doesn't cover native subagents, which Codex, Claude and Cursor start on a
-            model of their own choosing.
+            Native subagents aren't covered.
           </p>
         </div>
       ) : null}
