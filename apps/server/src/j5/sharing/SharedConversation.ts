@@ -594,7 +594,9 @@ const make = Effect.gen(function* () {
     // told only as far as they could know it otherwise. Its writer is named when the reader may
     // know them (`participantVisible`, AC26). Otherwise a message whose stored text begins with the
     // platform's lines is told with only those lines, to take them off, and one that carries none,
-    // such as a slash command, is not told at all.
+    // such as a slash command, is not told at all. The record keeps only an editor's name, so their
+    // visibility cannot be checked: an inherited editor is told only where the stored text already
+    // names them, which every stored line does and a command's empty prefix does not.
     const known = new Map<string, boolean>();
     const mayKnow = Effect.fn("j5.sharing.sharedConversation.mayKnowWriter")(function* (
       personId: string,
@@ -620,7 +622,10 @@ const make = Effect.gen(function* () {
           note: row.note,
           storedPrefix: row.stored_prefix,
         };
-        if (row.inherited === 0 || (yield* mayKnow(row.person_id))) return [author];
+        if (row.inherited === 0 || viewer === null) return [author];
+        if (yield* mayKnow(row.person_id)) {
+          return [row.stored_prefix === "" ? { ...author, editedBy: null } : author];
+        }
         if (row.stored_prefix === "") return [];
         return [{ ...author, name: null, editedBy: null, note: null }];
       }),

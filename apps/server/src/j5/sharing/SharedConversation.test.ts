@@ -385,6 +385,55 @@ it.effect("a fork tells its reader only what they could know of who wrote before
   }).pipe(Effect.provide(conversationLayer)),
 );
 
+it.effect("a fork names an inherited message's editor only where its stored text does", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const source = yield* thread("thread:fork-editor-source");
+    const priya = yield* personWith("Priya", onThread(source));
+    const alice = yield* personWith("Alice", onThread(source));
+    const command = message(source, "/goal ship the migration");
+    yield* say(priya, command, "queued");
+    yield* send(alice, {
+      type: "queued-run.edit",
+      commandId: CommandId.make("command:edit:fork-editor"),
+      threadId: source,
+      runId: RunId.make(`run:${command.messageId}`),
+      text: "/goal ship it",
+    } as OrchestrationV2Command);
+    const fork = yield* thread("thread:fork-editor", PROJECT, {
+      parent: source,
+      relationship: "fork",
+    });
+    yield* sql`
+      UPDATE orchestration_v2_projection_threads
+      SET payload_json = json_set(payload_json, '$.forkedFrom',
+        json_object('type', 'run', 'threadId', ${source}, 'runId', ${`run:${command.messageId}`}))
+      WHERE thread_id = ${fork}
+    `;
+    // Sam knows Priya through a thread they both hold, but not Alice, who holds only the source.
+    const together = yield* thread("thread:fork-editor-together");
+    yield* (yield* Access).setLevel({
+      personId: priya,
+      scope: { kind: "thread", threadId: together },
+      level: "collaborator",
+    });
+    const sam = yield* personWith("Sam", [...onThread(fork, "viewer"), ...onThread(together)]);
+    const people = yield* PersonAccess;
+    assert.isTrue(yield* people.participantVisible(sam, { participantId: priya, threadId: null }));
+    assert.isFalse(yield* people.participantVisible(sam, { participantId: alice, threadId: null }));
+
+    const read = yield* authors(fork, sam);
+    // The command carries no line naming Alice, so the fork does not name her either.
+    assert.deepStrictEqual(
+      read.authors.map((entry) => [entry.name, entry.editedBy, entry.storedPrefix]),
+      [["Priya", null, ""]],
+    );
+    // Read for the server itself, with no reader, the record is told as it is in the source.
+    const ownerRead = yield* authors(fork);
+    assert.strictEqual(ownerRead.authors[0]!.editedBy, "Alice");
+  }).pipe(Effect.provide(conversationLayer)),
+);
+
 it.effect("a thread started in a project already shared is shared from its first message", () =>
   Effect.gen(function* () {
     const owner = yield* jackson;
