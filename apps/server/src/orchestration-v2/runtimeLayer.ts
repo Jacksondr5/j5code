@@ -1,3 +1,4 @@
+import * as CrewTurnContext from "../j5/a2a/CrewTurnContext.ts";
 import * as CrewDeliveryContext from "../j5/a2a/CrewDeliveryContext.ts";
 import * as UsageLimitRecoveryWorker from "./UsageLimitRecoveryWorker.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
@@ -171,6 +172,7 @@ const layerRunExecutionServiceProvided = RunExecutionService.layer.pipe(
 );
 
 const layerProviderTurnStartServiceProvided = ProviderTurnStartService.layer.pipe(
+  Layer.provide(CrewTurnContext.layer),
   Layer.provide(
     Layer.mergeAll(
       layerContextHandoffServiceProvided,

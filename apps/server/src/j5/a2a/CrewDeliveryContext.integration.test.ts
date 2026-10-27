@@ -1,3 +1,4 @@
+import * as CrewTurnContext from "./CrewTurnContext.ts";
 import { assert, it } from "@effect/vitest";
 import { CommandId, EventId, MessageId, ThreadId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
@@ -42,6 +43,7 @@ it.effect(
         harness.layer,
         Crews.layer.pipe(Layer.provide(harness.layer)),
         ledgerLayer.pipe(Layer.provide(harness.layer)),
+        CrewTurnContext.layer.pipe(Layer.provide(harness.layer)),
       );
       const layer = Preparation.layer.pipe(
         Layer.provideMerge(services),
@@ -122,9 +124,9 @@ it.effect(
         yield* Deferred.await(checkoutStarted);
         const preparing = yield* threads.getThreadProjection(threadId);
         assert.equal(preparing.runs[0]!.status, "preparing");
-        assert.include(preparing.messages[0]!.text, "Shared goal");
+        assert.notInclude(preparing.messages[0]!.text, "Shared goal");
         assert.isTrue(preparing.messages[0]!.text.endsWith("Review the code now."));
-        assert.isFalse((yield* crews.read("crew:integration"))!.members[0]!.notStarted);
+        assert.isTrue((yield* crews.read("crew:integration"))!.members[0]!.notStarted);
         yield* threads.sendToThread({
           projectId,
           threadId,
@@ -159,7 +161,108 @@ it.effect(
         assert.equal(ready.thread.worktreePath, "/repo-worktrees/crew-reviewer");
         assert.equal(harness.createWorktree.mock.calls[0]?.[0]?.baseRefName, "main");
         assert.lengthOf(harness.createWorktree.mock.calls, 1);
+        const crewContext = yield* CrewTurnContext.CrewTurnContext;
+        assert.include(
+          yield* crewContext.deliver(threadId, ready.messages[0]!.text, Effect.succeed),
+          "Shared goal",
+        );
+        yield* crews.addMembers("crew:integration", [
+          {
+            seatName: "tester",
+            agentId: null,
+            threadId: ThreadId.make("thread:tester"),
+            participantId: participantIdForThread(ThreadId.make("thread:tester")),
+            reason: "Test the fix",
+          },
+        ]);
+        const reordered = yield* threads.sendToThread({
+          projectId,
+          threadId,
+          commandId: CommandId.make("command:queued-second"),
+          messageId: MessageId.make("message:queued-second"),
+          text: "Original second assignment",
+          attachments: [],
+          mode: "queue",
+          createdBy: "user",
+          creationSource: "web",
+        });
+        const canceled = yield* threads.sendToThread({
+          projectId,
+          threadId,
+          commandId: CommandId.make("command:queued-cancel"),
+          messageId: MessageId.make("message:queued-cancel"),
+          text: "Cancel this assignment",
+          attachments: [],
+          mode: "queue",
+          createdBy: "user",
+          creationSource: "web",
+        });
+        yield* threads.dispatch({
+          type: "queued-run.edit",
+          commandId: CommandId.make("command:edit-second"),
+          threadId,
+          runId: reordered.run.id,
+          text: "Edited second assignment",
+        });
+        const firstQueued = ready.runs.find((run) => run.status === "queued")!;
+        yield* threads.dispatch({
+          type: "queued-run.reorder",
+          commandId: CommandId.make("command:reorder-second"),
+          threadId,
+          runId: reordered.run.id,
+          beforeRunId: firstQueued.id,
+        });
+        yield* threads.dispatch({
+          type: "queued-run.cancel",
+          commandId: CommandId.make("command:cancel-third"),
+          threadId,
+          runId: canceled.run.id,
+        });
+        const queuedAfterEdits = yield* threads.getThreadProjection(threadId);
+        assert.equal(
+          queuedAfterEdits.runs.find((run) => run.id === canceled.run.id)?.status,
+          "cancelled",
+        );
+        assert.equal(
+          queuedAfterEdits.messages.find((message) => message.id === reordered.message.id)?.text,
+          "Edited second assignment",
+        );
         const now = yield* DateTime.now;
+        yield* (yield* EventSinkV2).write({
+          events: ready.runs
+            .filter((run) => run.status !== "queued")
+            .map((run) => ({
+              id: EventId.make(`event:finish-active:${run.id}`),
+              type: "run.updated" as const,
+              threadId,
+              runId: run.id,
+              providerInstanceId: run.providerInstanceId,
+              occurredAt: now,
+              payload: {
+                ...run,
+                status: "completed" as const,
+                completedAt: now,
+                queuePosition: null,
+              },
+            })),
+        });
+        yield* threads.dispatch({
+          type: "queue.resume",
+          commandId: CommandId.make("command:resume-reordered"),
+          threadId,
+        });
+        const selected = yield* threads.getThreadProjection(threadId);
+        assert.equal(selected.runs.find((run) => run.id === reordered.run.id)?.status, "starting");
+        const nextText = selected.messages.find(
+          (message) => message.id === reordered.message.id,
+        )!.text;
+        const prompt = yield* crewContext.deliver(threadId, nextText, Effect.succeed);
+        assert.include(prompt, "joined: tester:");
+        assert.isTrue(prompt.endsWith("Edited second assignment"));
+        assert.equal(
+          yield* crewContext.deliver(threadId, "Next assignment", Effect.succeed),
+          "Next assignment",
+        );
         yield* (yield* EventSinkV2).write({
           events: ready.runs.map((run) => ({
             id: EventId.make(`event:finished:${run.id}`),
@@ -190,7 +293,7 @@ it.effect(
         assert.equal(reused.message.text, "Review the revision.");
         assert.equal(reused.run.threadId, threadId);
         assert.equal(reused.projection.thread.worktreePath, ready.thread.worktreePath);
-        assert.lengthOf((yield* crews.read("crew:integration"))!.members, 1);
+        assert.lengthOf((yield* crews.read("crew:integration"))!.members, 2);
         assert.lengthOf(harness.createWorktree.mock.calls, 1);
       }).pipe(Effect.provide(layer));
     }).pipe(Effect.scoped),

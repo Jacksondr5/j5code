@@ -1,3 +1,4 @@
+import * as CrewTurnContext from "./CrewTurnContext.ts";
 import { assert, it } from "@effect/vitest";
 import {
   CommandId,
@@ -116,170 +117,160 @@ const fixture = Effect.gen(function* () {
     Effect.gen(function* () {
       return yield* (yield* Orchestrator.OrchestratorV2).dispatch(command);
     });
-  return { sql, crews, commands, receipts, rejected, layer, send };
+  const deliveryLayer = CrewTurnContext.layer;
+  const deliver = (text: string, fail = false) =>
+    Effect.gen(function* () {
+      return yield* (yield* CrewTurnContext.CrewTurnContext).deliver(seatId, text, (prompt) =>
+        fail ? Effect.fail("provider refused") : Effect.succeed(prompt),
+      );
+    }).pipe(Effect.provide(deliveryLayer));
+  return { sql, crews, commands, receipts, rejected, layer, send, deliver };
 });
 
 it.effect(
-  "a direct user message starts a seat with its approved brief, current roster and intact envelope",
+  "acceptance leaves context owed; provider delivery includes the current roster and original assignment",
   () =>
     Effect.gen(function* () {
       const f = yield* fixture;
-      yield* f.crews.addMembers("crew:test", [member("security")]);
-      yield* f.crews.removeMembers("crew:test", ["builder"]);
       const command = assignment("direct", "user");
       yield* f.send(command).pipe(Effect.provide(f.layer));
-      const [delivered] = yield* Ref.get(f.commands);
-      assert.equal(delivered?.type, "message.dispatch");
-      if (delivered?.type !== "message.dispatch") return;
-      assert.include(delivered.text, "<spawner_brief>\nShared goal\n</spawner_brief>");
-      assert.include(delivered.text, "Review carefully.");
-      assert.include(
-        delivered.text,
-        `- security: participant_id=${member("security").participantId} persona=custom responsibility=Responsibility of security`,
-      );
-      assert.notInclude(delivered.text, "- builder:");
-      assert.notInclude(delivered.text, "<j5_crew_roster_changed>");
-      assert.isTrue(delivered.text.endsWith(command.text));
-      assert.equal(delivered.messageId, command.messageId);
-      assert.equal(delivered.senderThreadId, command.senderThreadId);
-      assert.equal(delivered.createdBy, "user");
+      assert.isTrue((yield* f.crews.read("crew:test"))!.members[0]!.notStarted);
+      assert.deepStrictEqual((yield* Ref.get(f.commands))[0], command);
+      yield* f.crews.addMembers("crew:test", [member("security")]);
+      yield* f.crews.removeMembers("crew:test", ["builder"]);
+      const prompt = yield* f.deliver(command.text);
+      assert.include(prompt, "<spawner_brief>\nShared goal\n</spawner_brief>");
+      assert.include(prompt, "Review carefully.");
+      assert.include(prompt, "- security:");
+      assert.notInclude(prompt, "- builder:");
+      assert.isTrue(prompt.endsWith(command.text));
       assert.isFalse((yield* f.crews.read("crew:test"))!.members[0]!.notStarted);
     }).pipe(Effect.provide(base)),
 );
 
-it.effect("playbook deliveries activate a new-worktree seat through durable preparation", () =>
-  Effect.gen(function* () {
-    const f = yield* fixture;
-    yield* f.sql`UPDATE j5_crew_seat_context SET workspace = '{"type":"worktree","baseRef":"j5/main"}'`;
-    yield* f
-      .send({ ...assignment("playbook", "system"), text: "<j5_playbook_step>\nDo the review" })
-      .pipe(Effect.provide(f.layer));
-    const [delivered] = yield* Ref.get(f.commands);
-    if (delivered?.type !== "message.dispatch") return assert.fail("missing assignment");
-    assert.deepStrictEqual(delivered.dispatchMode, {
-      type: "defer_start",
-      workspaceStrategy: { type: "worktree", baseRef: "j5/main" },
-    });
-    assert.include(delivered.text, "Shared goal");
-    assert.isTrue(delivered.text.endsWith("<j5_playbook_step>\nDo the review"));
-  }).pipe(Effect.provide(base)),
+it.effect(
+  "worktree assignments use durable preparation without storing context in editable text",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      yield* f.sql`UPDATE j5_crew_seat_context SET workspace = '{"type":"worktree","baseRef":"j5/main"}'`;
+      const command = assignment("playbook", "system");
+      yield* f.send(command).pipe(Effect.provide(f.layer));
+      const [delivered] = yield* Ref.get(f.commands);
+      if (delivered?.type !== "message.dispatch") return assert.fail("missing assignment");
+      assert.deepStrictEqual(delivered.dispatchMode, {
+        type: "defer_start",
+        workspaceStrategy: { type: "worktree", baseRef: "j5/main" },
+      });
+      assert.equal(delivered.text, command.text);
+    }).pipe(Effect.provide(base)),
 );
 
-it.effect("finished members get only their next assignment and net roster changes, once", () =>
+it.effect("provider refusal keeps the introduction and roster changes owed", () =>
   Effect.gen(function* () {
     const f = yield* fixture;
-    yield* Effect.gen(function* () {
-      yield* f.send(assignment("first"));
-      yield* f.crews.addMembers("crew:test", [member("temporary")]);
-      yield* f.crews.removeMembers("crew:test", ["temporary", "builder"]);
-      yield* f.crews.addMembers("crew:test", [member("security")]);
-      assert.lengthOf(yield* Ref.get(f.commands), 1);
-      yield* f.send(assignment("second"));
-      yield* f.send(assignment("third"));
-      yield* f.send(assignment("third"));
-    }).pipe(Effect.provide(f.layer));
-    const delivered = (yield* Ref.get(f.commands)).filter(
-      (command) => command.type === "message.dispatch",
-    );
-    assert.lengthOf(delivered, 3);
-    assert.isTrue(
-      delivered[1]!.text.startsWith("<j5_crew_delivery_context>\n<j5_crew_roster_changed>"),
-    );
-    assert.include(delivered[1]!.text, "joined: security:");
-    assert.include(delivered[1]!.text, "left: builder:");
-    assert.notInclude(delivered[1]!.text, "temporary");
-    assert.notInclude(delivered[1]!.text, "spawner_brief");
-    assert.equal(delivered[2]!.text, assignment("third").text);
-  }).pipe(Effect.provide(base)),
-);
-
-it.effect("concurrent first assignments introduce a seat only once", () =>
-  Effect.gen(function* () {
-    const f = yield* fixture;
-    yield* Effect.all([f.send(assignment("one")), f.send(assignment("two"))], {
-      concurrency: "unbounded",
-    }).pipe(Effect.provide(f.layer));
-    const commands = (yield* Ref.get(f.commands)).filter(
-      (command) => command.type === "message.dispatch",
-    );
-    assert.lengthOf(
-      commands.filter((command) => command.text.includes("<j5_spawn_context>")),
-      1,
-    );
-    assert.lengthOf(commands, 2);
-  }).pipe(Effect.provide(base)),
-);
-
-it.effect("a rejected assignment leaves the introduction owed to the next assignment", () =>
-  Effect.gen(function* () {
-    const f = yield* fixture;
-    f.rejected.add("command:refused");
-    yield* Effect.gen(function* () {
-      yield* f.send(assignment("refused")).pipe(Effect.result);
-      yield* f.crews.addMembers("crew:test", [member("security")]);
-      yield* f.send(assignment("accepted"));
-    }).pipe(Effect.provide(f.layer));
-    const [delivered] = yield* Ref.get(f.commands);
-    if (delivered?.type !== "message.dispatch") return assert.fail("missing assignment");
-    assert.include(delivered.text, "<j5_spawn_context>");
-    assert.include(delivered.text, "- security:");
+    assert.equal((yield* f.deliver("first", true).pipe(Effect.result))._tag, "Failure");
+    assert.include(yield* f.deliver("retry"), "<j5_spawn_context>");
+    yield* f.crews.addMembers("crew:test", [member("security")]);
+    yield* f.crews.removeMembers("crew:test", ["builder"]);
+    yield* f.deliver("refused update", true).pipe(Effect.result);
+    const prompt = yield* f.deliver("accepted update");
+    assert.include(prompt, "joined: security:");
+    assert.include(prompt, "left: builder:");
+    assert.notInclude(prompt, "spawner_brief");
+    assert.equal(yield* f.deliver("later"), "later");
   }).pipe(Effect.provide(base)),
 );
 
 it.effect(
-  "a committed first assignment is recovered after a crash without repeating its introduction",
+  "queued edits, cancellation and reordering cannot consume or reorder roster changes",
   () =>
     Effect.gen(function* () {
       const f = yield* fixture;
-      // Simulate the cut between the orchestration commit and J5's delivered-roster write.
-      yield* f.sql`UPDATE j5_crew_seat_context SET pending_command_id = 'command:first', pending_roster = '[]'`;
-      f.receipts.set("command:first", { status: "accepted" } as CommandReceiptV2);
-      yield* f.send(assignment("later")).pipe(Effect.provide(f.layer));
-      const [delivered] = yield* Ref.get(f.commands);
-      if (delivered?.type !== "message.dispatch") return assert.fail("missing assignment");
-      assert.notInclude(delivered.text, "<j5_spawn_context>");
-      assert.include(delivered.text, "<j5_crew_roster_changed>");
+      yield* f.deliver("first");
+      yield* f.crews.addMembers("crew:test", [member("temporary")]);
+      yield* f.send(assignment("queued-first")).pipe(Effect.provide(f.layer));
+      yield* f.crews.removeMembers("crew:test", ["temporary", "builder"]);
+      yield* f.crews.addMembers("crew:test", [member("security")]);
+      yield* f.send(assignment("queued-second")).pipe(Effect.provide(f.layer));
+      // The provider sees whichever editable message upstream selects, not acceptance order.
+      const prompt = yield* f.deliver("edited second assignment promoted first");
+      assert.include(prompt, "joined: security:");
+      assert.include(prompt, "left: builder:");
+      assert.notInclude(prompt, "temporary");
+      assert.isTrue(prompt.endsWith("edited second assignment promoted first"));
+      assert.equal(yield* f.deliver("remaining assignment"), "remaining assignment");
     }).pipe(Effect.provide(base)),
 );
 
 it.effect(
-  "follow-up work is refused after a worktree preparation failed instead of running in the project root",
+  "an archived waiting seat cannot bypass workspace preparation when independently reopened",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      yield* f.sql`UPDATE j5_crew_seat_context SET workspace = '{"type":"worktree","baseRef":"main"}'`;
+      yield* f.crews.markArchived("crew:test", "2026-10-27T13:00:00Z");
+      const result = yield* f
+        .send(assignment("after-archive"))
+        .pipe(Effect.result, Effect.provide(f.layer));
+      assert.equal(result._tag, "Failure");
+      assert.lengthOf(yield* Ref.get(f.commands), 0);
+      assert.equal((yield* f.deliver("bypass", false).pipe(Effect.result))._tag, "Failure");
+    }).pipe(Effect.provide(base)),
+);
+
+it.effect(
+  "a retired started seat still cannot run in the project root after worktree failure",
   () =>
     Effect.gen(function* () {
       const f = yield* fixture;
       yield* f.sql`UPDATE j5_crew_seat_context SET delivered_roster = '[]', workspace = '{"type":"worktree","baseRef":"main"}'`;
+      yield* f.crews.markArchived("crew:test", "2026-10-27T13:00:00Z");
       const result = yield* f
         .send(assignment("after-failed-preparation"))
         .pipe(Effect.result, Effect.provide(f.layer));
       assert.equal(result._tag, "Failure");
-      if (result._tag === "Failure")
-        assert.include(result.failure.message, "Retry workspace preparation");
       assert.lengthOf(yield* Ref.get(f.commands), 0);
     }).pipe(Effect.provide(base)),
 );
 
 it.effect(
-  "direct human assignments keep their author attribution and displayed words after activation and replay",
+  "direct human assignments preserve author prefixes without any author write or subscription invalidation",
   () =>
     Effect.gen(function* () {
       const f = yield* fixture;
       const authorPrefix = "[Message from Bryant (owner)]\n\n";
       const command = { ...assignment("authored", "user"), text: authorPrefix + "Review the fix." };
-      yield* f.sql`INSERT INTO j5_a2a_message_author
-      (thread_id, message_id, person_id, display_name, level, stored_prefix, created_at)
+      yield* f.sql`INSERT INTO j5_a2a_message_author (thread_id, message_id, person_id, display_name, level, stored_prefix, created_at)
       VALUES (${seatId}, ${command.messageId}, 'human:owner', 'Bryant', 'owner', ${authorPrefix}, '2026-10-27T12:00:00Z')`;
-      yield* Effect.gen(function* () {
-        yield* f.send(command);
-        yield* f.send(command);
-      }).pipe(Effect.provide(f.layer));
-      const [author] = yield* f.sql<{ readonly stored_prefix: string; readonly person_id: string }>`
-      SELECT stored_prefix, person_id FROM j5_a2a_message_author WHERE message_id = ${command.messageId}
-    `;
-      const [delivered] = yield* Ref.get(f.commands);
-      if (delivered?.type !== "message.dispatch") return assert.fail("missing assignment");
-      assert.equal(author!.person_id, "human:owner");
-      assert.isTrue(delivered.text.startsWith(author!.stored_prefix));
-      assert.equal(delivered.text.slice(author!.stored_prefix.length), "Review the fix.");
-      assert.lengthOf(yield* Ref.get(f.commands), 1);
+      yield* f.send(command).pipe(Effect.provide(f.layer));
+      const prompt = yield* f.deliver(command.text);
+      const [author] = yield* f.sql<{
+        readonly stored_prefix: string;
+      }>`SELECT stored_prefix FROM j5_a2a_message_author WHERE message_id = ${command.messageId}`;
+      assert.equal(author!.stored_prefix, authorPrefix);
+      assert.isTrue(prompt.endsWith(command.text));
+      assert.deepStrictEqual((yield* Ref.get(f.commands))[0], command);
     }).pipe(Effect.provide(base)),
+);
+
+it.effect("an accepted command still replays after its waiting Crew retires", () =>
+  Effect.gen(function* () {
+    const f = yield* fixture;
+    const command = assignment("replay");
+    yield* f.send(command).pipe(Effect.provide(f.layer));
+    yield* f.crews.markArchived("crew:test", "2026-10-27T13:00:00Z");
+    yield* f.send(command).pipe(Effect.provide(f.layer));
+    assert.lengthOf(yield* Ref.get(f.commands), 1);
+  }).pipe(Effect.provide(base)),
+);
+
+it.effect("a retired member that already started continues as a plain agent", () =>
+  Effect.gen(function* () {
+    const f = yield* fixture;
+    yield* f.deliver("first");
+    yield* f.crews.markArchived("crew:test", "2026-10-27T13:00:00Z");
+    yield* f.send(assignment("after-retirement")).pipe(Effect.provide(f.layer));
+    assert.equal(yield* f.deliver("new assignment"), "new assignment");
+  }).pipe(Effect.provide(base)),
 );

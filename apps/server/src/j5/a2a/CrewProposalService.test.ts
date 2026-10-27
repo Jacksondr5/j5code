@@ -21,7 +21,6 @@ import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Schema from "effect/Schema";
-import * as SqlClient from "effect/sql/SqlClient";
 import { SqlError, UnknownError } from "effect/sql/SqlError";
 import { stringify } from "yaml";
 

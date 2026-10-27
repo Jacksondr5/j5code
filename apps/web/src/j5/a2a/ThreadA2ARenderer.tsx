@@ -452,7 +452,7 @@ export function formatThreadA2AQueuedDelivery(
   text: string,
   participantLabels: ReadonlyMap<string, string>,
 ): { readonly label: string; readonly tooltipParticipantId: string | null } | null {
-  const peer = parseAgentAuthoredEnvelope(text);
+  const peer = parseAgentAuthoredEnvelope(crewDeliveryAssignment(text));
   if (peer === null) return null;
   const sender = presentParticipantIdentity({ participantId: peer.senderId, participantLabels });
   const firstLine = peer.body.split("\n")[0]?.trim() ?? "";
@@ -463,7 +463,7 @@ export function formatThreadA2AQueuedDelivery(
 }
 
 export function participantIdsForThreadA2AEnvelope(text: string): ReadonlyArray<string> {
-  const peer = parseAgentAuthoredEnvelope(text);
+  const peer = parseAgentAuthoredEnvelope(crewDeliveryAssignment(text));
   return peer === null ? [] : [peer.senderId];
 }
 

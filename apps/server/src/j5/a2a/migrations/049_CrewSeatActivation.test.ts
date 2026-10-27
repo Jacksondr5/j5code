@@ -15,7 +15,7 @@ it.effect(
   "existing members retain their observed roster and are not introduced again after migration",
   () =>
     Effect.gen(function* () {
-      yield* runJ5A2AMigrations({ toMigrationInclusive: 47 });
+      yield* runJ5A2AMigrations({ toMigrationInclusive: 48 });
       const sql = yield* SqlClient.SqlClient;
       yield* sql`INSERT INTO j5_a2a_project_ledger (project_id, created_at) VALUES ('project:test', '2026-10-27')`;
       yield* sql`INSERT INTO j5_agent_crew_instance

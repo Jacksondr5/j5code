@@ -1,3 +1,4 @@
+import * as CrewTurnContext from "../j5/a2a/CrewTurnContext.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it, vi } from "vite-plus/test";
 import { it as effectIt } from "@effect/vitest";
@@ -1096,6 +1097,8 @@ const makeCodexResumeSchemaFailure = Effect.fn("makeCodexResumeSchemaFailure")(f
  * start writes is applied to one projection, as the store would.
  */
 function makeNativeResumeHarness(input: {
+  readonly crewDelivery?: CrewTurnContext.CrewTurnContext["Service"];
+  readonly keepNativeThread?: boolean;
   readonly text?: string;
   readonly resumeThread: (
     ids: NativeResumeIds,
@@ -1141,7 +1144,10 @@ function makeNativeResumeHarness(input: {
       projection = ProjectionStore.applyToProjection(projection, event);
     }
   };
-  const resumeThread = vi.fn(() => input.resumeThread(ids));
+  const resumeThread = vi.fn(() =>
+    input.keepNativeThread === true ? Effect.succeed(providerThread) : input.resumeThread(ids),
+  );
+  const nativeStartTurn = vi.fn((_turn: ProviderAdapter.ProviderAdapterV2TurnInput) => Effect.void);
   const ensureThread = vi.fn(
     (_load: { readonly existingProviderThread?: { readonly nativeThreadRef: unknown } }) =>
       Effect.succeed({
@@ -1149,7 +1155,9 @@ function makeNativeResumeHarness(input: {
         nativeThreadRef: { ...nativeThreadRef, nativeId: "native-replacement" },
       }),
   );
-  const startRootRun = vi.fn(() => Effect.void);
+  const startRootRun = vi.fn<
+    (input: RunExecutionService.RunExecutionServiceV2StartRootRunInput) => Effect.Effect<void>
+  >(() => Effect.void);
   const projectionRead = () =>
     Effect.sync(() => ({
       ...projection,
@@ -1160,6 +1168,11 @@ function makeNativeResumeHarness(input: {
       ),
     }));
   const layer = ProviderTurnStart.layer.pipe(
+    Layer.provide(
+      input.crewDelivery === undefined
+        ? Layer.empty
+        : Layer.succeed(CrewTurnContext.CrewTurnContext, input.crewDelivery),
+    ),
     Layer.provide(
       Layer.mergeAll(
         Layer.mock(ContextHandoffService.ContextHandoffServiceV2)({
@@ -1223,6 +1236,7 @@ function makeNativeResumeHarness(input: {
               },
               resumeThread,
               ensureThread,
+              startTurn: nativeStartTurn,
             } as never),
         }),
         Layer.mock(ProviderAuthService.ProviderAuthService)({
@@ -1242,6 +1256,7 @@ function makeNativeResumeHarness(input: {
     resumeThread,
     ensureThread,
     startRootRun,
+    nativeStartTurn,
     events,
     projection: () => projection,
     start: (options?: { readonly willRetry: boolean }) =>
@@ -1495,4 +1510,41 @@ effectIt.effect("reports a start failure to the run watchdog without replacing i
       expect.objectContaining({ phase: "start", cause: error }),
     );
   }),
+);
+
+effectIt.effect(
+  "delivers Crew context without a history handoff and acknowledges after provider acceptance",
+  () =>
+    Effect.gen(function* () {
+      const order: string[] = [];
+      const harness = makeNativeResumeHarness({
+        text: "Review the code.",
+        keepNativeThread: true,
+        resumeThread: () => Effect.die("retained native conversation"),
+        crewDelivery: {
+          deliver: (_threadId, text, send) =>
+            Effect.gen(function* () {
+              order.push("context");
+              const result = yield* send(`Crew introduction\n\n${text}`);
+              order.push("accepted");
+              return result;
+            }),
+        },
+      });
+      harness.nativeStartTurn.mockImplementation(() =>
+        Effect.sync(() => {
+          order.push("provider");
+        }),
+      );
+      yield* harness.start();
+      expect(harness.projection().contextHandoffs).toEqual([]);
+      const requested = harness.startRootRun.mock.calls[0]![0];
+      yield* requested.session.startTurn({
+        message: { text: "Review the code.", attachments: [] },
+      } as never);
+      expect(harness.nativeStartTurn.mock.calls[0]![0].message.text).toBe(
+        "Crew introduction\n\nReview the code.",
+      );
+      expect(order).toEqual(["context", "provider", "accepted"]);
+    }),
 );
