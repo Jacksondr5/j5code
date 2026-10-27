@@ -363,3 +363,96 @@ it.effect("an edit upstream refuses leaves its message's record as it was", () =
     );
   }).pipe(Effect.provide(layerFor(harness)));
 });
+
+it.effect("an edit's record is written only while the stored text is the edit's own", () => {
+  const harness = makeHarness();
+  const on = ThreadId.make("thread:shared-edit-race");
+  return Effect.gen(function* () {
+    const people = yield* PersonAccess.PersonAccess;
+    const conversation = yield* SharedConversation.SharedConversation;
+    const threads = yield* ThreadManagementService;
+    yield* threads.dispatch({
+      type: "thread.create",
+      createdBy: "user",
+      creationSource: "web",
+      commandId: CommandId.make("command:edit-race:create"),
+      threadId: on,
+      projectId,
+      title: "Shared",
+      modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+    });
+    const owner = (yield* people.firstOwner).personId;
+    yield* people.setName({ personId: owner, displayName: "Jackson" });
+    const scope = { kind: "thread" as const, threadId: on };
+    const priya = (yield* people.createPerson({ displayName: "Priya" })).personId;
+    const sam = (yield* people.createPerson({ displayName: "Sam" })).personId;
+    yield* people.setLevel({ personId: priya, scope, level: "collaborator" });
+    yield* people.setLevel({ personId: sam, scope, level: "collaborator" });
+    yield* send(owner, message("Let us review the plan.", on));
+    const replayed = message("Ship Friday.", on);
+    const raced = message("Keep the migration step.", on);
+    yield* send(priya, replayed);
+    yield* send(priya, raced);
+    const runOf = (messageId: string) =>
+      threads
+        .getThreadProjection(on)
+        .pipe(
+          Effect.map(
+            (projection) => projection.runs.find((run) => run.userMessageId === messageId)!.id,
+          ),
+        );
+    const edit = (commandId: string, messageId: string, text: string) =>
+      runOf(messageId).pipe(
+        Effect.map(
+          (runId) =>
+            ({
+              type: "queued-run.edit",
+              commandId: CommandId.make(commandId),
+              threadId: on,
+              runId,
+              text,
+            }) as const satisfies OrchestrationV2Command,
+        ),
+      );
+    const recordOf = (messageId: string) =>
+      conversation
+        .threadAuthors(owner, on)
+        .pipe(
+          Effect.map((authors) => authors.authors.find((entry) => entry.messageId === messageId)!),
+        );
+
+    // Jackson edits, Sam edits after him, and Jackson's client retries his command: upstream
+    // replays its receipt and leaves Sam's text, so the record stays Sam's.
+    const jacksons = yield* edit("command:edit-race:jackson", replayed.messageId, "Ship Monday.");
+    yield* send(owner, jacksons);
+    yield* send(sam, yield* edit("command:edit-race:sam", replayed.messageId, "Ship Tuesday."));
+    const samsRecord = yield* recordOf(replayed.messageId);
+    assert.strictEqual(samsRecord.editedBy, "Sam");
+    yield* send(owner, jacksons);
+    assert.deepStrictEqual(yield* recordOf(replayed.messageId), samsRecord);
+    assert.strictEqual(
+      yield* storedText(on, replayed.messageId),
+      `${samsRecord.storedPrefix}Ship Tuesday.`,
+    );
+
+    // Sam's edit is taken and recorded after Jackson's commits and before Jackson's is recorded:
+    // the record stays Sam's, which the stored text carries.
+    const samsEdit = yield* edit("command:edit-race:sam-2", raced.messageId, "Drop it.");
+    yield* conversation.dispatch(
+      owner,
+      yield* edit("command:edit-race:jackson-2", raced.messageId, "Keep it."),
+      (admitted) =>
+        threads.dispatch(admitted).pipe(Effect.andThen(send(sam, samsEdit)), Effect.as(admitted)),
+    );
+    const raceRecord = yield* recordOf(raced.messageId);
+    assert.strictEqual(raceRecord.editedBy, "Sam");
+    assert.strictEqual(
+      yield* storedText(on, raced.messageId),
+      `${raceRecord.storedPrefix}Drop it.`,
+    );
+  }).pipe(Effect.provide(layerFor(harness)));
+});

@@ -327,8 +327,10 @@ const make = Effect.gen(function* () {
    * typed and carries nothing; edited out of one, it is stamped as a new message would be. A
    * message no person is recorded for is stamped too, so an edit never reaches the agent with no
    * line: under the first owner when they typed it before the thread was shared, else as the
-   * editor's own words. The record is written only once upstream takes the edit: upstream refuses
-   * one whose run has started, and the message then keeps the record its stored text carries.
+   * editor's own words. The record is written only once upstream takes the edit, and only while the
+   * stored text is still the text this edit wrote: upstream refuses an edit whose run has started,
+   * replays a retried command's receipt without writing again, and may take another edit between
+   * this one's commit and its record. In each case the message keeps the record its text carries.
    */
   const stampEdit = Effect.fn("j5.sharing.sharedConversation.stampEdit")(function* (
     command: Extract<OrchestrationV2Command, { readonly type: "queued-run.edit" }>,
@@ -372,22 +374,26 @@ const make = Effect.gen(function* () {
       recorded !== null && (yield* isScheduledRun(messageId)) ? scheduledLine : authorLine;
     const prefix = beginsWithSlash(typed) ? "" : prefixOf(carried.note, line(author, editedBy));
     const createdAt = DateTime.formatIso(yield* DateTime.now);
+    const text = `${prefix}${typed}`;
+    // Checked in the same statement as the write, so no edit can land between the check and it.
     const record = sql`
       INSERT INTO j5_a2a_message_author (
         thread_id, message_id, person_id, display_name, level, edited_by, note, told_json,
         stored_prefix, created_at
-      ) VALUES (
-        ${command.threadId}, ${messageId}, ${author.personId}, ${author.displayName},
+      )
+      SELECT ${command.threadId}, ${messageId}, ${author.personId}, ${author.displayName},
         ${author.level}, ${editedBy === null ? null : editorName(editedBy)}, ${carried.note},
         ${carried.told}, ${prefix}, ${createdAt}
-      )
+      FROM orchestration_v2_projection_messages
+      WHERE message_id = ${messageId} AND thread_id = ${command.threadId}
+        AND json_extract(payload_json, '$.text') = ${text}
       ON CONFLICT (thread_id, message_id) DO UPDATE SET
         stored_prefix = excluded.stored_prefix,
         note = excluded.note,
         told_json = excluded.told_json,
         edited_by = excluded.edited_by
     `.pipe(Effect.andThen(touch(command.threadId)), Effect.asVoid);
-    return { command: { ...command, text: `${prefix}${typed}` }, accepted: record };
+    return { command: { ...command, text }, accepted: record };
   });
 
   /**

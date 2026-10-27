@@ -68,16 +68,32 @@ const message = (threadId: ThreadId, text: string, extra: Record<string, unknown
   } as unknown as OrchestrationV2Command & { readonly type: "message.dispatch" };
 };
 
+/** Upstream taking a command; an edit leaves the queued run's message holding its text. */
+const upstreamTakes = Effect.fn("test.upstreamTakes")(function* (command: OrchestrationV2Command) {
+  if (command.type !== "queued-run.edit") return command;
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`
+    UPDATE orchestration_v2_projection_messages
+    SET payload_json = json_set(payload_json, '$.text', ${command.text})
+    WHERE message_id = (
+      SELECT json_extract(payload_json, '$.userMessageId') FROM orchestration_v2_projection_runs
+      WHERE run_id = ${command.runId}
+    )
+  `;
+  return command as OrchestrationV2Command;
+});
+
 /**
  * A person's command as upstream would be handed it. A message is then taken in the way
- * upstream records it, with a run in the state given; `null` records no run.
+ * upstream records it, with a run in the state given; `null` records no run. An edit is taken
+ * as upstream takes one of a queued run.
  */
 const send = Effect.fn("test.send")(function* (
   personId: ParticipantId,
   command: OrchestrationV2Command,
   run: "completed" | "queued" | null = "completed",
 ) {
-  const admitted = yield* (yield* SharedConversation).dispatch(personId, command, Effect.succeed);
+  const admitted = yield* (yield* SharedConversation).dispatch(personId, command, upstreamTakes);
   if (admitted.type === "message.dispatch") {
     yield* taken(admitted.threadId, admitted.messageId, run, admitted.text);
   }
@@ -408,19 +424,18 @@ it.effect(
       const command = message(source, "/goal ship the migration");
       yield* say(priya, command, "queued");
       yield* edit(command.messageId, "/goal ship it");
-      // Recorded as Alice's edit while the stored text stays Priya's: a record its text doesn't carry.
-      const refused = message(source, "Keep the migration step.");
-      yield* say(priya, refused, "queued");
-      yield* edit(refused.messageId, "Drop the migration step.");
+      // Its stored text no longer begins with the prefix Priya's record names.
+      const rewritten = message(source, "Keep the migration step.");
+      yield* say(priya, rewritten, "queued");
+      yield* sql`
+      UPDATE orchestration_v2_projection_messages
+      SET payload_json = json_set(payload_json, '$.text', 'Drop the migration step.')
+      WHERE message_id = ${rewritten.messageId}
+    `;
       // Edited while still queued, so the stored text names Alice.
       const accepted = message(source, "Ship Friday.");
       yield* say(priya, accepted, "queued");
       const stored = yield* edit(accepted.messageId, "Ship Monday.");
-      yield* sql`
-      UPDATE orchestration_v2_projection_messages
-      SET payload_json = json_set(payload_json, '$.text', ${stored})
-      WHERE message_id = ${accepted.messageId}
-    `;
       const fork = yield* thread("thread:fork-editor", PROJECT, {
         parent: source,
         relationship: "fork",
@@ -465,7 +480,7 @@ it.effect(
         serverRead.authors.map((entry) => [entry.messageId, entry.editedBy]),
         [
           [command.messageId, "Alice"],
-          [refused.messageId, "Alice"],
+          [rewritten.messageId, null],
           [accepted.messageId, "Alice"],
         ],
       );
