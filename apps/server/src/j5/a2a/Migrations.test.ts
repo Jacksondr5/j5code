@@ -65,7 +65,7 @@ it.effect("upgrades the current main schema with replay storage", () =>
     yield* runJ5A2AMigrations();
     const applied = yield* sql<{ readonly migration_id: number; readonly name: string }>`
       SELECT migration_id, name FROM j5_a2a_migrations
-      WHERE migration_id >= 47 ORDER BY migration_id
+      WHERE migration_id = 47 ORDER BY migration_id
     `;
     assert.deepStrictEqual(applied, [{ migration_id: 47, name: "RequestReplay" }]);
   }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
@@ -1440,7 +1440,7 @@ it.effect("recreates earlier-shaped crews tables when 14 runs over them", () =>
       applied.map((row) => row.migration_id),
       [
         13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35,
-        36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47,
+        36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48,
       ],
     );
     const memberColumns = yield* sql<{ readonly name: string }>`

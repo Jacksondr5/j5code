@@ -481,7 +481,7 @@ migrations after upstream migrations.
 
 87. A Crew notice with nothing for the person takes no timeline row ([#741](https://github.com/Jacksondr5/j5code/issues/741), Bryant 2026-10-27). `apps/web/src/components/chat/MessagesTimeline.tsx` carries one J5 import and one changed line in `ConversationTimeline`: `const rows = withoutHiddenCrewNotices(useStableRows(rawRows, listIdentityKey))`, J5-owned in `apps/web/src/j5/crew/crewNotices.logic.ts`. It drops the message rows of platform Crew notices (`createdBy === "system"`) whose `crewNoticeLines` are empty, a clean launch report or a clean finish, after upstream has derived the rows, so each notice still bounds the Captain turn it started (`deriveActiveVisualResponseRunIds`, terminal assistant messages and rollback all read user messages as turn boundaries), and returns the same array when nothing is hidden, cached per input array, because `useStableRows` compares its source by identity. Upstream's minimap reads the filtered rows, so an ask's reply preview can run past a hidden notice; that is accepted. Proof: `apps/web/src/j5/crew/crewNotices.logic.test.ts`, "keeps the rows a hidden notice bounded". On a pin advance: if upstream stops deriving rows through `useStableRows`, apply the filter to whatever the list renders, after turn boundaries are computed, never to the entries before them.
 
-88. Agent Setup and Crew approval settings ([#743](https://github.com/Jacksondr5/j5code/issues/743)): `packages/contracts/src/settings.ts` registers J5's `crewAutoApprove` boolean (default off) in server settings, patches, and project overrides. `apps/web/src/components/settings/settingsSearch.ts` renames the existing `/settings/personas` destination to Agent Setup and adds search terms and the scoped Crew setting target. `apps/mobile/src/features/settings/SettingsRouteScreen.tsx` and `apps/mobile/src/Stack.tsx` rename the existing Personas navigation entry and title to Agent Setup. Runtime behavior and the web sections stay in J5-owned files; mobile still exposes only the persona library.
+88. Agent Setup and Crew approval settings ([#743](https://github.com/Jacksondr5/j5code/issues/743)): `packages/contracts/src/settings.ts` registers J5's `crewAutoApprove` boolean (default off) in server settings, patches, and project overrides. `apps/web/src/components/settings/settingsSearch.ts` renames the existing `/settings/personas` destination to Agent Setup and adds search terms and the scoped Crew setting target. `apps/mobile/src/features/settings/SettingsRouteScreen.tsx` and `apps/mobile/src/Stack.tsx` rename the existing Personas navigation entry and title to Agent Setup. Runtime behavior and the web sections stay in J5-owned files; mobile still exposes only the persona library. The stacked CI repair in `apps/server/src/storageCleanup.test.ts` asserts that invalid worktree Git metadata preserves the directory, allowing Git-version-dependent kept or failed reporting without changing cleanup behavior.
 
 ## Pin and upstream advance runbook
 
@@ -755,10 +755,13 @@ explicitly marked.
 | `apps/server/src/serverSettings.test.ts`                              | N       | 42                                                 |
 | `apps/server/src/serverSettings.ts`                                   | N       | 42                                                 |
 | `apps/server/src/serviceLauncher.test.ts`                             | N       | 50                                                 |
+| `apps/mobile/src/Stack.tsx`                                           | N       | 88                                                 |
+| `apps/mobile/src/features/settings/SettingsRouteScreen.tsx`           | N       | 88                                                 |
+| `apps/server/src/storageCleanup.test.ts`                              | N       | 88                                                 |
 | `apps/web/src/components/settings/settingsSearch.test.ts`             | N       | 43                                                 |
 | `apps/web/src/threadNotifications.ts`                                 | N       | 82, completion burst patch                         |
 | `apps/web/src/components/settings/SettingsPanels.tsx`                 | N       | 82                                                 |
-| `apps/web/src/components/settings/settingsSearch.ts`                  | N       | 42–44, 72, 77, 82                                  |
+| `apps/web/src/components/settings/settingsSearch.ts`                  | N       | 42–44, 72, 77, 82, 88                              |
 | `apps/web/src/components/settings/SettingsSidebarNav.tsx`             | N       | 42, 72, 73                                         |
 | `docs/README.md`                                                      | N       | 42, 45, 48                                         |
 | `packages/client-runtime/src/state/runtime.test.ts`                   | N       | 42                                                 |
@@ -878,7 +881,7 @@ explicitly marked.
 | `packages/contracts/src/server.test.ts`                               | N       | 43                                                 |
 | `packages/contracts/src/server.ts`                                    | N       | 42, 43                                             |
 | `packages/contracts/src/settings.test.ts`                             | N       | 42                                                 |
-| `packages/contracts/src/settings.ts`                                  | N       | 42, B                                              |
+| `packages/contracts/src/settings.ts`                                  | N       | 42, B, 88                                          |
 | `packages/shared/package.json`                                        | N       | 43, 46, 49, 52                                     |
 | `packages/shared/src/devHome.test.ts`                                 | R       | H                                                  |
 | `packages/shared/src/devHome.ts`                                      | R       | H                                                  |

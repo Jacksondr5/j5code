@@ -14,7 +14,6 @@ import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
-import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
@@ -485,7 +484,6 @@ const fixtureWithSettings = (settings: Parameters<typeof ServerSettings.layerTes
   fixtureWithDatabase(":memory:", { settings });
 
 const fixture = fixtureWithSettings();
-
 
 it.effect("reports what the person decided about a roster, and what they changed first", () =>
   Effect.gen(function* () {
@@ -2561,7 +2559,7 @@ it.effect.each(["approve", "decline"] as const)(
 );
 
 it.effect.each(["approve", "decline"] as const)(
-  "replays an addition after %s with the original crew and omitted brief",
+  "replays a pending addition after %s with the original crew and omitted brief",
   (decision) =>
     Effect.gen(function* () {
       const { layer, notices } = yield* fixture;
@@ -2576,7 +2574,7 @@ it.effect.each(["approve", "decline"] as const)(
           brief: null,
           seat: custom("writer"),
         };
-        const original = yield* gate.requestMember(input);
+        const original = yield* legacyAddition(input);
         assert.equal(original.proposal.brief, firstCrew.brief);
         for (const change of [
           { crewInstanceId: secondCrew.id },
@@ -2605,6 +2603,48 @@ it.effect.each(["approve", "decline"] as const)(
         assert.lengthOf(yield* (yield* AgentCrewProposalService).listForCaptain(captainId), 3);
       }).pipe(Effect.provide(layer));
     }),
+);
+
+it.effect("replays an automatic addition with the original crew and omitted brief", () =>
+  Effect.gen(function* () {
+    const { layer, notices } = yield* fixture;
+    yield* Effect.gen(function* () {
+      const gate = withPreview(yield* CrewProposalService);
+      const firstCrew = yield* seedCrew(gate, "first-crew", 1);
+      const secondCrew = yield* seedCrew(gate, "second-crew", 1);
+      const input = {
+        requestKey: "addition-replay",
+        captain,
+        crewInstanceId: firstCrew.id,
+        brief: null,
+        seat: custom("writer"),
+      };
+      const original = yield* gate.requestMember(input);
+      assert.equal(original.proposal.status, "approved");
+      assert.equal(original.proposal.brief, firstCrew.brief);
+      for (const change of [
+        { crewInstanceId: secondCrew.id },
+        { brief: "Changed" },
+        { seat: { ...input.seat, reason: "Changed" } },
+        { seat: { ...input.seat, instructions: "Changed" } },
+        { seat: { ...input.seat, workspace: { type: "worktree" as const, baseRef: "main" } } },
+      ]) {
+        const refused = yield* gate.requestMember({ ...input, ...change }).pipe(Effect.flip);
+        assert.equal(refused._tag, "CrewProposalRequestError");
+        assert.include(refused.message, original.proposal.id);
+        assert.include(refused.message, firstCrew.id);
+        assert.include(refused.message, "fresh client_request_id");
+      }
+      const noticesBefore = yield* Ref.get(notices);
+      const replay = yield* gate.requestMember(input);
+      assert.equal(replay.proposal.id, original.proposal.id);
+      assert.equal(replay.proposal.status, "approved");
+      assert.equal(replay.instance?.id, firstCrew.id);
+      assert.lengthOf(replay.instance!.members, 2);
+      assert.deepStrictEqual(yield* Ref.get(notices), noticesBefore);
+      assert.lengthOf(yield* (yield* AgentCrewProposalService).listForCaptain(captainId), 3);
+    }).pipe(Effect.provide(layer));
+  }),
 );
 
 it.effect(
@@ -2688,17 +2728,7 @@ it.effect.each([
   "concurrent $kind requests (different=$different) retain one proposal and compare the winning row",
   ({ kind, different }) =>
     Effect.gen(function* () {
-      const entered = yield* Ref.make(0);
-      const both = yield* Deferred.make<void>();
-      const release = yield* Deferred.make<void>();
-      const barrier = Ref.updateAndGet(entered, (count) => count + 1).pipe(
-        Effect.tap((count) => (count === 2 ? Deferred.succeed(both, undefined) : Effect.void)),
-        Effect.andThen(Deferred.await(release)),
-      );
-      const { layer } = yield* fixtureWithDatabase(
-        ":memory:",
-        kind === "roster" ? { beforeCreate: barrier } : { beforeAdmit: barrier },
-      );
+      const { layer } = yield* fixtureWithDatabase(":memory:");
       yield* Effect.gen(function* () {
         const gate = withPreview(yield* CrewProposalService);
         const crew = kind === "addition" ? yield* seedCrew(gate, "nearly-full", 11) : null;
@@ -2718,23 +2748,14 @@ it.effect.each([
                 brief,
                 seat: custom("writer"),
               });
-        const calls = yield* Effect.all(
+        // The proposal's lock serializes same-key requests; the second reads the first's stored row.
+        const results = yield* Effect.all(
           [
             call("Original").pipe(Effect.result),
             call(different ? "Changed" : "Original").pipe(Effect.result),
           ],
           { concurrency: "unbounded" },
-        ).pipe(Effect.forkChild({ startImmediately: true }));
-        yield* Effect.raceFirst(
-          Deferred.await(both),
-          Fiber.join(calls).pipe(
-            Effect.flatMap(() =>
-              Effect.die(new Error("Requests completed before reaching both writes")),
-            ),
-          ),
         );
-        yield* Deferred.succeed(release, undefined);
-        const results = yield* Fiber.join(calls);
         const successes = results.filter(Result.isSuccess);
         const failures = results.filter(Result.isFailure);
         assert.lengthOf(successes, different ? 1 : 2);
@@ -2770,7 +2791,7 @@ it.effect.each([
               });
         assert.equal(replay.proposal.id, original.id);
         if (crew !== null)
-          assert.lengthOf((yield* (yield* AgentCrewInstanceService).read(crew.id))!.members, 11);
+          assert.lengthOf((yield* (yield* AgentCrewInstanceService).read(crew.id))!.members, 12);
       }).pipe(Effect.provide(layer));
     }),
 );
