@@ -1,6 +1,6 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { EnvironmentId, type ScopedThreadRef, ThreadId } from "@t3tools/contracts";
-import type { PreArchiveFacts } from "@t3tools/contracts/j5";
+import type { CrewArchiveWorktreeEstimate, PreArchiveFacts } from "@t3tools/contracts/j5";
 import * as Cause from "effect/Cause";
 
 import { appAtomRegistry } from "../../rpc/atomRegistry";
@@ -45,6 +45,23 @@ export async function readParticipantLabels(
 export interface ArchivePreflight {
   readonly facts: PreArchiveFacts | null;
   readonly participantLabels: ReadonlyMap<string, string>;
+  /**
+   * What archiving the Crews the thread commands would do with their seats' worktrees; null when
+   * that couldn't be read. Absent when the thread commands no Crew.
+   */
+  readonly worktrees?: ReadonlyArray<CrewArchiveWorktreeEstimate> | null;
+}
+
+/** The worktree estimate for these Crews, or null when the read failed: "couldn't check". */
+export async function readCrewArchiveWorktrees(
+  environmentId: EnvironmentId,
+  crewInstanceIds: ReadonlyArray<string>,
+): Promise<ReadonlyArray<CrewArchiveWorktreeEstimate> | null> {
+  const result = await j5Environment.readCrewArchiveWorktrees.run(appAtomRegistry, {
+    environmentId,
+    input: { crewInstanceIds },
+  });
+  return result._tag === "Failure" ? null : result.value.worktrees;
 }
 
 /** Facts remain useful without identity labels; literal participant ids are the honest fallback. */
@@ -63,5 +80,10 @@ export async function readArchivePreflight(threadRef: ScopedThreadRef): Promise<
       ...(facts.liveCrews ?? []).flatMap((crew) => crew.seats.map((seat) => seat.participantId)),
     ]),
   );
-  return { facts, participantLabels: await readParticipantLabels(threadRef.environmentId, ids) };
+  const crewIds = (facts.liveCrews ?? []).map((crew) => crew.crewInstanceId);
+  const [participantLabels, worktrees] = await Promise.all([
+    readParticipantLabels(threadRef.environmentId, ids),
+    crewIds.length === 0 ? undefined : readCrewArchiveWorktrees(threadRef.environmentId, crewIds),
+  ]);
+  return { facts, participantLabels, ...(worktrees === undefined ? {} : { worktrees }) };
 }

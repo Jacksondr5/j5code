@@ -1,8 +1,15 @@
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../../components/ui/tooltip";
 import { InboxIcon, SendIcon } from "lucide-react";
 
+import type { CrewArchiveWorktreeEstimate } from "@t3tools/contracts/j5";
+
 import { formatElapsedDurationLabel } from "../../timestampFormat";
 import { Badge } from "../../components/ui/badge";
+import {
+  groupWorktreeEstimates,
+  worktreeReasonLabel,
+  worktreeShortPath,
+} from "./archiveWorktrees.logic";
 
 export type ArchiveWarningUrgency = "blocking" | "soon" | "fyi" | null;
 
@@ -50,6 +57,82 @@ export interface ArchiveWarningPayload {
   readonly openAsks: ReadonlyArray<ArchiveWarningRow>;
   /** Live Crews the agent commands; absent when the caller has no Crew facts to show. */
   readonly crews?: ArchiveWarningCrews;
+  /**
+   * What archiving the Crews would do with their seats' worktrees: null when it couldn't be
+   * read, absent when there are no Crews to read it for.
+   */
+  readonly worktrees?: ArchiveWarningWorktrees;
+}
+
+export type ArchiveWarningWorktrees = ReadonlyArray<CrewArchiveWorktreeEstimate> | null;
+
+function ArchiveWarningWorktreeList({
+  worktrees,
+  heading,
+}: {
+  readonly worktrees: ReadonlyArray<CrewArchiveWorktreeEstimate>;
+  readonly heading: string;
+}) {
+  if (worktrees.length === 0) return null;
+  return (
+    <div>
+      <p className="text-sm font-medium text-foreground">{heading}</p>
+      <ul className="mt-1 space-y-1">
+        {worktrees.map((worktree) => (
+          <li key={`${worktree.crewInstanceId}:${worktree.seat}`} className="flex gap-2 text-sm">
+            <span className="shrink-0 text-xs uppercase tracking-wide text-muted-foreground">
+              {worktree.seat}
+            </span>
+            <Tooltip>
+              <TooltipTrigger render={<span className="min-w-0 truncate font-mono text-xs" />}>
+                {worktreeShortPath(worktree.path)}
+              </TooltipTrigger>
+              <TooltipPopup className="max-w-96 break-words">{worktree.path}</TooltipPopup>
+            </Tooltip>
+            {worktree.reason === null ? null : (
+              <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+                {worktreeReasonLabel[worktree.reason]}
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/**
+ * Which worktrees J5 created for the Crews' seats archiving would remove, and which stay. It is
+ * an estimate: the archive checks each one again, and a worktree that is still clean and merged
+ * then is the only kind it removes. Shared by the Captain's dialog and the Fleet page's.
+ */
+export function ArchiveWarningWorktreeSection({
+  worktrees,
+}: {
+  readonly worktrees: ArchiveWarningWorktrees;
+}) {
+  if (worktrees === null)
+    return (
+      <p className="border-t border-border/60 pt-3 text-muted-foreground">
+        Worktrees: couldn't check. Branches and pull requests remain.
+      </p>
+    );
+  const { removed, kept } = groupWorktreeEstimates(worktrees);
+  return (
+    <section aria-label="Worktrees" className="space-y-2 border-t border-border/60 pt-3">
+      <ArchiveWarningWorktreeList
+        worktrees={removed}
+        heading="Worktrees removed, if still clean and merged at archive time:"
+      />
+      <ArchiveWarningWorktreeList worktrees={kept} heading="Worktrees kept:" />
+      <p className="text-muted-foreground">
+        {worktrees.length === 0
+          ? "No worktrees were created for these seats. "
+          : "This is an estimate; each is checked again when you archive. "}
+        Branches and pull requests remain.
+      </p>
+    </section>
+  );
 }
 
 const seatConsequences = (seat: ArchiveWarningCrewSeat) =>
@@ -209,9 +292,13 @@ export function ArchiveWarningContent({ payload }: { readonly payload: ArchiveWa
           </ol>
         </section>
       ) : null}
-      <p className="border-t border-border/60 pt-3 text-muted-foreground">
-        Worktrees, branches, and pull requests remain. Cleanup is a separate action.
-      </p>
+      {payload.worktrees === undefined ? (
+        <p className="border-t border-border/60 pt-3 text-muted-foreground">
+          Worktrees, branches, and pull requests remain. Cleanup is a separate action.
+        </p>
+      ) : (
+        <ArchiveWarningWorktreeSection worktrees={payload.worktrees} />
+      )}
     </div>
   );
 }
