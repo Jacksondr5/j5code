@@ -12,6 +12,13 @@ type ModelKey = Pick<CrewMemberModel, "instanceId" | "model">;
 const sameModel = (left: ModelKey, right: ModelKey) =>
   left.instanceId === right.instanceId && left.model === right.model;
 
+/**
+ * A model's chip label. The Claude card is already named Claude, so its models drop the prefix; the
+ * same models under Cursor keep it, since that is what tells them apart there.
+ */
+export const crewMemberModelLabel = (provider: ServerProvider, name: string): string =>
+  provider.driver === "claudeAgent" ? name.replace(/^Claude\s+/u, "") : name;
+
 /** Every model of every provider a person can choose from, as checked pairs. */
 const catalogEntries = (providers: ReadonlyArray<ServerProvider>): ReadonlyArray<CrewMemberModel> =>
   providers

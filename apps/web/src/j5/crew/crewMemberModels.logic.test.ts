@@ -6,6 +6,7 @@ import {
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  crewMemberModelLabel,
   crewMemberModelsSummary,
   personasOffCrewMemberModels,
   setCrewMemberModelChecked,
@@ -34,6 +35,16 @@ const providers = [provider(codex, ["a", "b", "c"]), provider(claude, ["x"])];
 const pair = (instanceId: ProviderInstanceId, model: string) => ({ instanceId, model });
 
 describe("crew member models settings logic", () => {
+  it("drops the Claude prefix on the Claude provider only", () => {
+    const stock = provider(claude, [], { driver: "claudeAgent" } as Partial<ServerProvider>);
+    const viaCursor = provider(ProviderInstanceId.make("cursor"), [], {
+      driver: "cursor",
+    } as Partial<ServerProvider>);
+    expect(crewMemberModelLabel(stock, "Claude Opus 5.5")).toBe("Opus 5.5");
+    expect(crewMemberModelLabel(stock, "Haiku 5.5")).toBe("Haiku 5.5");
+    expect(crewMemberModelLabel(viaCursor, "Claude Opus 5.5")).toBe("Claude Opus 5.5");
+  });
+
   it("starts from the whole catalog when the first box is unchecked", () => {
     const next = setCrewMemberModelChecked(null, providers, pair(codex, "b"), false);
     expect(next).toEqual([pair(codex, "a"), pair(codex, "c"), pair(claude, "x")]);

@@ -26,6 +26,7 @@ import { serverEnvironment } from "../../state/server";
 import { useEnvironmentQuery } from "../../state/query";
 import { agentPersonaEnvironment } from "../agents/agentPersonaAtoms";
 import {
+  crewMemberModelLabel,
   crewMemberModelsSummary,
   personasOffCrewMemberModels,
   setCrewMemberModelChecked,
@@ -104,7 +105,7 @@ function ProviderModels(props: {
               return (
                 <li key={model.slug}>
                   <ModelChip
-                    name={model.name}
+                    name={crewMemberModelLabel(provider, model.name)}
                     checked={isCrewMemberModelChecked(list, pair)}
                     onChange={(next) =>
                       props.onChange(setCrewMemberModelChecked(list, props.providers, pair, next))
