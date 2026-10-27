@@ -118,6 +118,18 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Decided:** Jackson, 2026-10-13. Recorded in FORK.md case 74.
 
+#### D39. A plain delegated task runs only on a model the project allows
+
+**Upstream:** `delegate_task` runs the child on the model it resolves from the call's `target`, or on the parent's own model when none is given, and J5's persona-aware wrapper only sees `target`.
+
+**J5:** upstream's `delegateTask` takes an optional `authorizeTarget` hook that it calls with the child's project and resolved model, after resolving the target and before creating anything. J5's wrapper passes one for a call without a persona, which refuses a model that is off the project's list under Settings → Agent Setup → Crews → Models for custom members, an inherited model included, and lists the eligible models so the agent can retry with `target`. A call that names a persona, and a retry of a delegation already accepted, are not checked.
+
+**Why:** the list is one decision that custom Crew seats, `j5_spawn_agent` and `delegate_task` all follow ([Crews](features/crews.md), AC27). The wrapper cannot see the model a child inherits, so the check needs the one place that resolves it.
+
+**Consequences:** one optional input and four lines in `OrchestratorMcpService.ts` (FORK.md case 90), with no change to upstream's behavior when no hook is passed. Check at each advance that the call still sits after the target resolves and before the command is dispatched. `t3_thread_launch` and `create_threads`, which J5 hides from agents, are not checked.
+
+**Decided:** Bryant, 2026-10-27 ([#744](https://github.com/Jacksondr5/j5code/issues/744)). Recorded in FORK.md case 90.
+
 ### New threads
 
 #### D12. Multi-model send is refused from a persona draft
@@ -604,6 +616,7 @@ J5 kept a run from resuming after a usage-limit reset when the person had presse
 - 2026-10-19 — D33: T3 Connect's sessions are the first owner's, as they were full access before levels (review of [#638](https://github.com/Jacksondr5/j5code/pull/638)).
 - 2026-10-19 — D37 added: a connection that keeps failing can be retried at once on web and desktop (Jackson).
 - 2026-10-24 — D38 added: a completion sound can be a local MP3 on web and desktop (proposed by Abraham, accepted by Jackson).
+- 2026-10-27 — D39 added: a plain `delegate_task` is held to the project's models for custom members through one hook in upstream's `delegateTask` (Bryant; [#744](https://github.com/Jacksondr5/j5code/issues/744)).
 - 2026-10-20 — D2 clarifies that native-question answers retain upstream access and attribution behavior, and placed-agent notices replace raw thread waiting ([#674](https://github.com/Jacksondr5/j5code/pull/674), [#281](https://github.com/Jacksondr5/j5code/issues/281), [existing access decision](https://github.com/Jacksondr5/j5code/issues/345#issuecomment-6092125478)).
 - 2026-10-24 — D2: agents get upstream's queue tools, with edit held to an agent's own messages and the ledger following every edit; D4: the platform delivers in send order and a person or an agent may reorder by hand (Jackson, [#136](https://github.com/Jacksondr5/j5code/issues/136)).
 - 2026-10-24 — D33: lowering or removing an Owner ends the MCP clients that Owner approved, and only those (Jackson; [#639](https://github.com/Jacksondr5/j5code/issues/639)).
