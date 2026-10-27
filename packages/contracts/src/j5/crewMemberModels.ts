@@ -20,7 +20,7 @@ export type CrewMemberModel = typeof CrewMemberModel.Type;
 export const CrewMemberModels = Schema.NullOr(Schema.Array(CrewMemberModel));
 export type CrewMemberModels = typeof CrewMemberModels.Type;
 
-export const CREW_MEMBER_MODELS_SETTING_LABEL = "Models for custom members in Agent Setup";
+const CREW_MEMBER_MODELS_SETTING_LABEL = "Models for custom members in Agent Setup";
 
 type ModelKey = Pick<CrewMemberModel, "instanceId" | "model">;
 
