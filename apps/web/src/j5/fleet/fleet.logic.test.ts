@@ -10,6 +10,7 @@ import {
 } from "../crew/crewState";
 import {
   buildFleetTree,
+  countFleetAlerts,
   countFleetProjects,
   createFleetRowRefresher,
   fleetInvolvedThreadRefs,
@@ -87,13 +88,14 @@ describe("fleet tree", () => {
     ]);
   });
 
-  it("never loops on a cyclic placement", () => {
+  it("never loops on a cyclic placement and counts alerts from owed asks only", () => {
     const cyclic: FleetLedgerProject = {
       ...project,
       agents: [agent("a", { placementParentId: "b" }), agent("b", { placementParentId: "a" })],
     };
     const roots = buildFleetTree(cyclic);
     expect(roots.map((node) => node.row.agent.participantId).length).toBeGreaterThan(0);
+    expect(countFleetAlerts([project])).toBe(1);
     expect(originLabel({ origin: "unknown" })).toBe("?");
   });
 });

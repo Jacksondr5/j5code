@@ -142,49 +142,6 @@ export interface FleetDerivedFacts {
   readonly problemsIncomplete: boolean;
 }
 
-export interface FleetProblemSummary {
-  readonly agentsWithProblems: number;
-  readonly unmeasuredAgents: number;
-  readonly incompleteSources: boolean;
-  readonly hasReadableSource: boolean;
-}
-
-/** Keys identify environment + participant, so repeated project placements count once. */
-export const summarizeFleetProblems = (
-  facts: ReadonlyMap<string, FleetDerivedFacts>,
-  liveRows: ReadonlyMap<string, boolean>,
-  sourceCoverage: "complete" | "partial" | "unavailable",
-): FleetProblemSummary => {
-  let agentsWithProblems = 0;
-  let unmeasuredAgents = 0;
-  let incompleteSources = sourceCoverage !== "complete";
-  for (const [key, live] of liveRows) {
-    if (!live) {
-      incompleteSources = true;
-      continue;
-    }
-    const row = facts.get(key);
-    if (row?.asks === undefined || row.problemsIncomplete) incompleteSources = true;
-    if (row === undefined || row.runtime.state === "unknown" || row.asks === undefined)
-      unmeasuredAgents++;
-    if (
-      row?.problems.some(
-        (problem) =>
-          problem.kind === "failed-run" ||
-          problem.kind === "dispatch-overdue" ||
-          (problem.kind === "delivery-failed" && problem.exchangeOpen),
-      )
-    )
-      agentsWithProblems++;
-  }
-  return {
-    agentsWithProblems,
-    unmeasuredAgents,
-    incompleteSources,
-    hasReadableSource: sourceCoverage !== "unavailable",
-  };
-};
-
 export const deriveFleetFacts = (input: {
   readonly shell: OrchestrationV2ThreadShell | undefined;
   readonly ledger: FleetAgentFacts | undefined;
@@ -342,37 +299,6 @@ export interface FleetFactRow {
   readonly problemsIncomplete?: boolean | undefined;
 }
 
-const uniqueFacts = <A>(values: ReadonlyArray<A>, key: (value: A) => string): ReadonlyArray<A> => [
-  ...new Map(values.map((value) => [key(value), value])).values(),
-];
-
-const mergeAgentFacts = (left: FleetDerivedFacts, right: FleetDerivedFacts): FleetDerivedFacts => ({
-  problemsIncomplete: left.problemsIncomplete || right.problemsIncomplete,
-  runtime: left.runtime.state === "known" ? left.runtime : right.runtime,
-  lastActivity:
-    left.lastActivity.state === "known" &&
-    (right.lastActivity.state === "unknown" ||
-      Date.parse(left.lastActivity.at) >= Date.parse(right.lastActivity.at))
-      ? left.lastActivity
-      : right.lastActivity,
-  asks:
-    left.asks === undefined || right.asks === undefined
-      ? undefined
-      : {
-          owed: uniqueFacts([...left.asks.owed, ...right.asks.owed], (ask) => ask.exchangeId),
-          awaited: uniqueFacts(
-            [...left.asks.awaited, ...right.asks.awaited],
-            (ask) => ask.exchangeId,
-          ),
-        },
-  problems: uniqueFacts([...left.problems, ...right.problems], (problem) =>
-    JSON.stringify([
-      problem.kind,
-      problem.kind === "delivery-failed" ? problem.messageId : problem.runId,
-    ]),
-  ),
-});
-
 /** Shared by every consumer in one registry. Only a future dispatch boundary schedules work. */
 export const createFleetFactsAtom = (rows: Atom.Atom<ReadonlyArray<FleetFactRow>>) =>
   Atom.make((get) => {
@@ -392,18 +318,19 @@ export const createFleetFactsAtom = (rows: Atom.Atom<ReadonlyArray<FleetFactRow>
           state: "unknown" as const,
           reason: "This environment is unavailable; runtime and activity are not current.",
         };
-        const stale = frozen ?? {
-          ...deriveFleetFacts({
-            shell: undefined,
-            ledger: row.ledger,
-            problemsIncomplete: true,
-            now,
-          }).facts,
-          runtime: unknown,
-          lastActivity: unknown,
-        };
-        const existing = facts.get(row.key);
-        facts.set(row.key, existing === undefined ? stale : mergeAgentFacts(existing, stale));
+        facts.set(
+          row.key,
+          frozen ?? {
+            ...deriveFleetFacts({
+              shell: undefined,
+              ledger: row.ledger,
+              problemsIncomplete: true,
+              now,
+            }).facts,
+            runtime: unknown,
+            lastActivity: unknown,
+          },
+        );
         continue;
       }
       const result = deriveFleetFacts({
@@ -413,18 +340,14 @@ export const createFleetFactsAtom = (rows: Atom.Atom<ReadonlyArray<FleetFactRow>
         problemsIncomplete: row.problemsIncomplete,
         now,
       });
-      const existing = facts.get(row.key);
+      const cached = previous?.get(row.key);
       facts.set(
         row.key,
-        existing === undefined ? result.facts : mergeAgentFacts(existing, result.facts),
+        cached !== undefined && Equal.equals(cached, result.facts) ? cached : result.facts,
       );
       if (result.nextDeadline !== undefined) {
         nextDeadline = Math.min(nextDeadline ?? result.nextDeadline, result.nextDeadline);
       }
-    }
-    for (const [key, value] of facts) {
-      const cached = previous?.get(key);
-      if (cached !== undefined && Equal.equals(cached, value)) facts.set(key, cached);
     }
     if (nextDeadline !== undefined) {
       // @effect-diagnostics-next-line globalTimers:off - Atom lifecycle owns this one deadline, outside an Effect runtime.

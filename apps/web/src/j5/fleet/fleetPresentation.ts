@@ -1,4 +1,4 @@
-import type { FleetDerivedFacts, FleetProblemSummary } from "@t3tools/client-runtime/j5/fleetFacts";
+import type { FleetDerivedFacts } from "@t3tools/client-runtime/j5/fleetFacts";
 import type { J5ReadSource } from "@t3tools/client-runtime/j5/readSources";
 import type { FleetProblem, FleetRuntimeFact } from "@t3tools/contracts/j5";
 import type { TimestampFormat } from "@t3tools/contracts/settings";
@@ -6,29 +6,6 @@ import { formatChatTimestampTooltip, formatElapsedDurationLabel } from "../../ti
 import type { CrewSeatState } from "../crew/crewState";
 
 export { fleetAgentKey } from "@t3tools/client-runtime/j5/fleetFacts";
-
-export const fleetProblemNotices = (summary: FleetProblemSummary): ReadonlyArray<string> => [
-  ...(summary.incompleteSources
-    ? [
-        "Problem coverage is incomplete: some environments are unavailable or do not report Fleet facts.",
-      ]
-    : []),
-  ...(summary.unmeasuredAgents > 0
-    ? [
-        `${summary.unmeasuredAgents} ${summary.unmeasuredAgents === 1 ? "agent" : "agents"} unmeasured.`,
-      ]
-    : []),
-  ...(summary.incompleteSources || summary.unmeasuredAgents > 0
-    ? ["Counts include current measured problems only."]
-    : []),
-];
-
-export const fleetBadgeLabel = (summary: FleetProblemSummary) =>
-  `${
-    summary.hasReadableSource
-      ? `Open fleet, ${summary.agentsWithProblems} ${summary.agentsWithProblems === 1 ? "agent has" : "agents have"} measured problems.`
-      : "Open fleet, problem count unavailable."
-  } ${fleetProblemNotices(summary).join(" ")}`.trim();
 
 export const fleetSourceIsLive = (
   source: Pick<J5ReadSource<unknown>, "connected" | "status">,
