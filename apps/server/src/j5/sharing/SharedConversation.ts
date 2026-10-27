@@ -545,7 +545,9 @@ const make = Effect.gen(function* () {
     // and that thread's own source's before them, as upstream's `buildVisibleTurnItems` does from
     // the thread's `forkedFrom` and its runs' ordinals; those messages keep their authors here
     // (#612). Only the messages a fork shows are read, so nothing after its fork point is named.
-    const authors = yield* sql<AuthorRow & { readonly created_at: string }>`
+    const authors = yield* sql<
+      AuthorRow & { readonly created_at: string; readonly inherited: 0 | 1 }
+    >`
       WITH RECURSIVE source (thread_id, run_id) AS (
         SELECT json_extract(payload_json, '$.forkedFrom.threadId'),
           json_extract(payload_json, '$.forkedFrom.runId')
@@ -559,12 +561,13 @@ const make = Effect.gen(function* () {
         WHERE json_extract(thread.payload_json, '$.forkedFrom.type') = 'run'
       )
       SELECT message_id, person_id, display_name, level, edited_by, note, told_json,
-        stored_prefix, created_at
+        stored_prefix, created_at, 0 AS inherited
       FROM j5_a2a_message_author
       WHERE thread_id = ${threadId}
       UNION ALL
       SELECT author.message_id, author.person_id, author.display_name, author.level,
-        author.edited_by, author.note, author.told_json, author.stored_prefix, author.created_at
+        author.edited_by, author.note, author.told_json, author.stored_prefix, author.created_at,
+        1 AS inherited
       FROM source
       JOIN orchestration_v2_projection_runs AS forked_at ON forked_at.run_id = source.run_id
       JOIN j5_a2a_message_author AS author ON author.thread_id = source.thread_id
@@ -587,17 +590,44 @@ const make = Effect.gen(function* () {
       WHERE answer.thread_id = ${threadId} AND ${settledItsPrompt}
       ORDER BY answer.answered_at, answer.request_id
     `;
+    // A fork's reader need not reach the thread it was forked from, so an inherited message is
+    // told only as far as they could know it otherwise. Its writer is named when the reader may
+    // know them (`participantVisible`, AC26). Otherwise a message whose stored text begins with the
+    // platform's lines is told with only those lines, to take them off, and one that carries none,
+    // such as a slash command, is not told at all.
+    const known = new Map<string, boolean>();
+    const mayKnow = Effect.fn("j5.sharing.sharedConversation.mayKnowWriter")(function* (
+      personId: string,
+    ) {
+      if (viewer === null) return true;
+      const cached = known.get(personId);
+      if (cached !== undefined) return cached;
+      const visible = yield* people.participantVisible(viewer, {
+        participantId: personId,
+        threadId: null,
+      });
+      known.set(personId, visible);
+      return visible;
+    });
+    const told = yield* Effect.forEach(authors, (row) =>
+      Effect.gen(function* () {
+        const author: MessageAuthor = {
+          messageId: row.message_id,
+          name: row.display_name,
+          level: row.level,
+          editedBy: row.edited_by,
+          you: row.person_id === viewer,
+          note: row.note,
+          storedPrefix: row.stored_prefix,
+        };
+        if (row.inherited === 0 || (yield* mayKnow(row.person_id))) return [author];
+        if (row.stored_prefix === "") return [];
+        return [{ ...author, name: null, editedBy: null, note: null }];
+      }),
+    );
     return {
       shared: recorded.length > 0,
-      authors: authors.map((row): MessageAuthor => ({
-        messageId: row.message_id,
-        name: row.display_name,
-        level: row.level,
-        editedBy: row.edited_by,
-        you: row.person_id === viewer,
-        note: row.note,
-        storedPrefix: row.stored_prefix,
-      })),
+      authors: told.flat(),
       answers: answers.map((row): PromptAnswer => ({
         requestId: row.request_id,
         name: row.display_name,

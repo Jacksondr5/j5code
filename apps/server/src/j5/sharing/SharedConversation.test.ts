@@ -335,6 +335,56 @@ it.effect("a fork names who wrote the messages it shows, and none after its fork
   }).pipe(Effect.provide(conversationLayer)),
 );
 
+it.effect("a fork tells its reader only what they could know of who wrote before it", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const owner = yield* jackson;
+    const source = yield* thread("thread:fork-hidden-source");
+    const priya = yield* personWith("Priya", onThread(source));
+    const command = message(source, "/goal ship the migration");
+    const words = message(source, "Drop it.");
+    yield* say(priya, command);
+    const stored = yield* say(priya, words);
+    const fork = yield* thread("thread:fork-hidden", PROJECT, {
+      parent: source,
+      relationship: "fork",
+    });
+    yield* sql`
+      UPDATE orchestration_v2_projection_threads
+      SET payload_json = json_set(payload_json, '$.forkedFrom',
+        json_object('type', 'run', 'threadId', ${source}, 'runId', ${`run:${words.messageId}`}))
+      WHERE thread_id = ${fork}
+    `;
+    // Sam reads only the fork, so Priya, who holds only its source, is not someone Sam may know.
+    const sam = yield* personWith("Sam", onThread(fork, "viewer"));
+
+    const read = yield* authors(fork, sam);
+    // The slash command carries no line, so nothing of it is told; the message carries the note
+    // and Priya's line, so those lines alone are told, to be taken off.
+    assert.deepStrictEqual(read.authors, [
+      {
+        messageId: words.messageId,
+        name: null,
+        level: "collaborator",
+        editedBy: null,
+        you: false,
+        note: null,
+        storedPrefix: stored.slice(0, -"Drop it.".length),
+      },
+    ]);
+    assert.isTrue(stored.endsWith("[Message from Priya (collaborator)]\n\nDrop it."));
+    // The owner reaches both, so is told both as they are in the source.
+    const ownerRead = yield* authors(fork, owner);
+    assert.deepStrictEqual(
+      ownerRead.authors.map((entry) => [entry.name, entry.storedPrefix === ""]),
+      [
+        ["Priya", true],
+        ["Priya", false],
+      ],
+    );
+  }).pipe(Effect.provide(conversationLayer)),
+);
+
 it.effect("a thread started in a project already shared is shared from its first message", () =>
   Effect.gen(function* () {
     const owner = yield* jackson;

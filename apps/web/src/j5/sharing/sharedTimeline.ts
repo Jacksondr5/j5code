@@ -13,6 +13,8 @@ import {
 import {
   answersWithoutPrefix,
   readAnswersFor,
+  recallableMessages,
+  type SharedMessageView,
   sharedMessageView,
   typedText,
 } from "./sharedTimeline.logic";
@@ -40,6 +42,10 @@ const notes = new WeakSet<object>();
 
 /** Whether the timeline's message is the notice J5 put before a message that carried a note. */
 export const isSharedNote = (message: object) => notes.has(message);
+
+// How the timeline last showed each person's message, by the message object it holds, which is
+// the one the composer is handed for recall.
+const views = new WeakMap<object, SharedMessageView>();
 
 /**
  * Who sent a message of a shared conversation, when it was someone other than the reader:
@@ -86,20 +92,15 @@ export function sharedMessageTypedText(
 }
 
 /**
- * A thread's messages for the composer's up-arrow recall, each as its author typed it (#612), read
- * as the key is pressed; see `sharedMessageTypedText`. `null` for a draft, which holds only what
- * was typed here.
+ * A thread's messages for the composer's up-arrow recall, as its timeline shows them (#612), read
+ * as the key is pressed; see `recallableMessages`. `null` for a draft, which holds only what was
+ * typed here.
  */
 export function sharedPromptHistoryMessages<
-  Message extends { readonly id: string; readonly text: string },
+  Message extends { readonly role: string; readonly text: string },
 >(thread: ScopedThreadRef | null, messages: ReadonlyArray<Message>): ReadonlyArray<Message> {
   if (thread === null) return messages;
-  const { authors } = readThreadAuthors(thread);
-  if (authors.size === 0) return messages;
-  return messages.map((message) => {
-    const author = authors.get(message.id);
-    return author === undefined ? message : { ...message, text: typedText(message.text, author) };
-  });
+  return recallableMessages(messages, (message) => views.get(message));
 }
 
 /**
@@ -205,6 +206,7 @@ export function useSharedConversationEntries<Entry extends MessageEntry>(
         mayBeShared,
         typedHere: typedHere.current.get(message.id) ?? null,
       });
+      views.set(message, view);
       if (view.kind === "plain") return [entry];
       if (view.kind === "pending") {
         pending.push(message.id);

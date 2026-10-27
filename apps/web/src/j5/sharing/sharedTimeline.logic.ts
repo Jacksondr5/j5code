@@ -50,6 +50,29 @@ export function sharedMessageView(input: {
 }
 
 /**
+ * A thread's messages for the composer's up-arrow recall (#612), each as the timeline shows it
+ * (`viewOf`, `undefined` for one it has not drawn): an authored message by the words its author
+ * typed, a message no one is recorded for as stored, and a message the timeline holds back while
+ * its author is unknown by what this client's person typed, or not at all. A line meant for the
+ * agent is never recalled, since a draft is not cleaned again.
+ */
+export function recallableMessages<
+  Message extends { readonly role: string; readonly text: string },
+>(
+  messages: ReadonlyArray<Message>,
+  viewOf: (message: Message) => SharedMessageView | undefined,
+): ReadonlyArray<Message> {
+  return messages.flatMap((message) => {
+    if (message.role !== "user") return [message];
+    const view = viewOf(message);
+    if (view === undefined) return [];
+    if (view.kind === "plain") return [message];
+    if (view.kind === "authored") return [{ ...message, text: view.typed }];
+    return view.typed === null ? [] : [{ ...message, text: view.typed }];
+  });
+}
+
+/**
  * Whether a read answers for a message: it came back after this client first saw the message.
  * The server records a message's author before the message is committed, and one socket carries
  * both in order, so a read answered before the commit arrives before the message does.
