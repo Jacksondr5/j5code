@@ -56,8 +56,8 @@ export const J5_PREAPPROVED_TOOLS: ReadonlyArray<string> = [
 ];
 
 /**
- * Interactive modes pre-approve routine communication, owner-thread playbook progress, and filing
- * roster requests; the latter still require human approval in the app before any member launches.
+ * Interactive modes pre-approve routine communication, owner-thread playbook progress, and Crew
+ * staffing. Initial rosters use the project approval setting; additions launch directly.
  * Lifecycle and spawning tools keep the harness's prompting in those modes.
  */
 export const J5_COORDINATION_TOOLS: ReadonlyArray<string> = [

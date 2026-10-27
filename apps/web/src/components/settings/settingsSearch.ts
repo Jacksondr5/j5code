@@ -81,7 +81,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/appearance": "Appearance",
   "/settings/keybindings": "Keybindings",
   "/settings/snap-shot": "SnapShots",
-  "/settings/personas": "Personas",
+  "/settings/personas": "Agent Setup",
   "/settings/skills": "Skills",
   "/settings/providers": "Providers",
   "/settings/integrations": "Integrations",
@@ -640,10 +640,19 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "personas",
-    title: "Personas",
+    title: "Agent Setup",
     to: "/settings/personas",
     // "agents" stays a search hit: the library was called Agents until 2026-09-17.
-    searchTerms: ["agents saved agent library yaml definitions instructions runtime policy"],
+    searchTerms: [
+      "personas crews playbooks agents saved agent library yaml definitions instructions runtime policy",
+    ],
+  },
+  {
+    id: "crew-auto-approve",
+    title: "Auto-approve new Crews",
+    to: "/settings/personas",
+    targetId: "crew-auto-approve",
+    searchTerms: ["crew approval automatic roster captain"],
   },
   {
     id: "skills",

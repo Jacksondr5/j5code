@@ -295,7 +295,7 @@ const SettingsContentStack = createV5SheetStackNavigator({
       screen: SettingsAgentsRouteScreen,
       linking: "personas",
       options: {
-        title: "Personas",
+        title: "Agent Setup",
       },
     }),
     SettingsProjectGrouping: createNativeStackScreen({

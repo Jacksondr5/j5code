@@ -139,6 +139,7 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
       { migration_id: 45, name: "McpClientApprovers" },
       { migration_id: 46, name: "LocalDeliveryOrder" },
       { migration_id: 47, name: "RequestReplay" },
+      { migration_id: 48, name: "CrewApprovalMode" },
     ]);
     assert.deepStrictEqual(
       migrationEntries.map(([id, name]) => [id, name]),
@@ -190,6 +191,7 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
         [45, "McpClientApprovers"],
         [46, "LocalDeliveryOrder"],
         [47, "RequestReplay"],
+        [48, "CrewApprovalMode"],
       ],
     );
   }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),

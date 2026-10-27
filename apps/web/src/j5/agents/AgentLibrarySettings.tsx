@@ -42,6 +42,9 @@ import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environmen
 import { useSettingsScopeEnvironments } from "../settingsScopeEnvironment";
 import { LIBRARY_FOR_OWNERS, useIsOwnerSomewhere, useOwnedEnvironmentIds } from "../sharing/access";
 import { agentPersonaEnvironment } from "./agentPersonaAtoms";
+import { SettingsScopeNotice } from "../../components/settings/SettingsScopeNotice";
+import { AgentSetupLinks } from "./AgentSetupLinks";
+import { CrewApprovalSettings } from "../crew/CrewApprovalSettings";
 import { PlaybookLibrarySettings } from "../playbooks/PlaybookLibrarySettings";
 import { useEnvironmentQuery } from "../../state/query";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
@@ -60,13 +63,6 @@ import { Button } from "../../components/ui/button";
 import { Switch } from "../../components/ui/switch";
 import { Badge } from "../../components/ui/badge";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip";
-import {
-  Select,
-  SelectItem,
-  SelectPopup,
-  SelectTrigger,
-  SelectValue,
-} from "../../components/ui/select";
 import {
   SettingsPageContainer,
   SettingsRow,
@@ -104,19 +100,16 @@ function MemberAgentLibrarySettings() {
       }),
     [environments, primaryEnvironmentId],
   );
-  const {
-    candidates: pickerEnvironments,
-    pinnedEnvironmentId,
-    initialEnvironmentId,
-  } = useSettingsScopeEnvironments(orderedEnvironments, primaryEnvironmentId);
-  const [selectedEnvironmentId, setSelectedEnvironmentId] = useState<EnvironmentId | null>(
-    initialEnvironmentId,
+  const { candidates: libraryEnvironments, initialEnvironmentId } = useSettingsScopeEnvironments(
+    orderedEnvironments,
+    primaryEnvironmentId,
   );
   const effectiveEnvironmentId =
-    pinnedEnvironmentId ??
-    (pickerEnvironments.some((environment) => environment.environmentId === selectedEnvironmentId)
-      ? selectedEnvironmentId
-      : (pickerEnvironments[0]?.environmentId ?? null));
+    libraryEnvironments.length > 1
+      ? null
+      : orderedEnvironments.some((entry) => entry.environmentId === initialEnvironmentId)
+        ? initialEnvironmentId
+        : null;
   const selectedEnvironment = orderedEnvironments.find(
     (environment) => environment.environmentId === effectiveEnvironmentId,
   );
@@ -419,45 +412,37 @@ function MemberAgentLibrarySettings() {
       ? []
       : presentAgentPersonaCatalog(catalog.data);
 
+  if (libraryEnvironments.length > 1)
+    return (
+      <SettingsPageContainer>
+        <AgentSetupLinks />
+        <div id="personas" className="space-y-3">
+          <SettingsSection title="Personas">
+            <SettingsRow
+              title="Choose an environment"
+              description="Persona libraries and Playbooks are stored separately on each environment."
+            />
+          </SettingsSection>
+          <SettingsScopeNotice
+            target="environment"
+            eligibleEnvironmentIds={libraryEnvironments.map((entry) => entry.environmentId)}
+          >
+            Choose an environment to manage its Personas and Playbooks.
+          </SettingsScopeNotice>
+        </div>
+        <CrewApprovalSettings />
+        <SettingsSection title="Playbooks" id="playbooks">
+          <SettingsRow title="Choose an environment above" />
+        </SettingsSection>
+      </SettingsPageContainer>
+    );
+
   return (
     <SettingsPageContainer>
-      {pinnedEnvironmentId === null && pickerEnvironments.length > 1 ? (
-        <SettingsSection title="Environment">
-          <SettingsRow
-            title="Environment"
-            description="Availability and model routing are resolved by the selected environment."
-            control={
-              <Select
-                disabled={busy}
-                value={effectiveEnvironmentId ?? undefined}
-                onValueChange={(value) => {
-                  const environment = pickerEnvironments.find(
-                    (candidate) => candidate.environmentId === value,
-                  );
-                  if (environment) setSelectedEnvironmentId(environment.environmentId);
-                }}
-              >
-                <SelectTrigger
-                  size="sm"
-                  className="w-full sm:w-56"
-                  aria-label="Persona environment"
-                >
-                  <SelectValue>{selectedEnvironment?.label}</SelectValue>
-                </SelectTrigger>
-                <SelectPopup align="end" alignItemWithTrigger={false}>
-                  {pickerEnvironments.map((environment) => (
-                    <SelectItem key={environment.environmentId} value={environment.environmentId}>
-                      {environment.label}
-                    </SelectItem>
-                  ))}
-                </SelectPopup>
-              </Select>
-            }
-          />
-        </SettingsSection>
-      ) : null}
+      <AgentSetupLinks />
 
       <SettingsSection
+        id="personas"
         title="Personas"
         headerAction={
           <div className="flex items-center gap-1">
@@ -838,6 +823,7 @@ function MemberAgentLibrarySettings() {
           }}
         />
       ) : null}
+      <CrewApprovalSettings />
       <PlaybookLibrarySettings environmentId={effectiveEnvironmentId} />
     </SettingsPageContainer>
   );

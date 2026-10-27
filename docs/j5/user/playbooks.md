@@ -6,7 +6,7 @@ chat box shows the current stage and whether the run is active, completed, or
 cancelled. A checked stage means the agent moved past it, not that its work was
 verified.
 
-Open **Settings → Personas** to manage playbooks. Playbooks in the environment
+Open **Settings → Agent Setup** to manage playbooks. Playbooks in the environment
 library are available across all projects and worktrees on its environment. Choose
 **Create playbook** to work with Playbook Author, or **Import YAML** to add a finished
 definition without a project. A project chosen for an authoring or playbook
@@ -71,7 +71,7 @@ steps:
 ```
 
 A step can name the persona that should do it with `persona:`, using a persona id
-from Settings → Personas. A step without one is done by whoever runs the playbook.
+from Settings → Agent Setup. A step without one is done by whoever runs the playbook.
 A persona that is missing or turned off shows as a warning in Settings and does not
 stop the playbook from starting.
 
