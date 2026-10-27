@@ -20,12 +20,16 @@ const state = vi.hoisted(() => ({ permitted: true, preview: vi.fn(), read: vi.fn
 vi.mock("@effect/atom-react", () => ({ useAtomValue: (atom: unknown) => atom }));
 vi.mock("../state", () => ({
   j5Environment: { resolveCrewProposal: { permissionAtom: () => state.permitted } },
+  crewProposalsQueryAtom: () => "crew-proposals",
 }));
 vi.mock("../a2a/ParticipantIdentitiesClient", () => ({
   useParticipantLabels: () => new Map([["captain", "Release Captain"]]),
 }));
 vi.mock("../sharing/access", () => ({ useCanOperateThread: () => state.permitted }));
-vi.mock("../../state/query", () => ({ useEnvironmentQuery: () => ({ data: {} }) }));
+vi.mock("../../state/query", () => ({
+  useEnvironmentQuery: (query: unknown) => ({ data: query === "crew-proposals" ? [proposal] : {} }),
+}));
+vi.mock("../a2a/humanInboxRefresh", () => ({ notifyHumanInboxChanged: vi.fn() }));
 vi.mock("@t3tools/client-runtime/j5/agent-personas", () => ({
   presentAgentPersonaCatalog: () => [
     { personaId: "sentry", displayName: "Sentry", availability: "available" },
@@ -37,6 +41,9 @@ vi.mock("../agents/agentPersonaAtoms", () => ({
 }));
 vi.mock("./crewProposalsClient", () => ({
   previewCrewProposal: (...args: unknown[]) => state.preview(...args),
+  useCrewProposalsRefresh: () => undefined,
+  refreshCrewProposals: vi.fn(),
+  resolveCrewProposal: vi.fn(),
 }));
 vi.mock("../../state/server", () => ({
   serverEnvironment: { providersValueAtom: () => providers },
@@ -85,6 +92,8 @@ vi.mock("../../components/chat/ProviderModelPicker", () => ({
 vi.mock("../../state/use-atom-command", () => ({ useAtomCommand: () => state.read }));
 
 import { CrewProposalCard } from "./CrewProposalCard";
+import { CrewRosterGate } from "./CrewRosterGate";
+import { ThreadId } from "@t3tools/contracts";
 
 const providers: ReadonlyArray<ServerProvider> = [
   {
@@ -453,4 +462,53 @@ it("Escape discards modal edits and returns focus to the member's edit control",
   expect(document.activeElement).toBe(button("Edit seat builder"));
   await click(approve());
   expect(resolve.mock.calls[0]?.[1]).toEqual(proposal.requestedSeats);
+});
+
+it("starts as a compact strip and keeps member edits when collapsed and reopened", async () => {
+  await act(async () =>
+    root.render(
+      <CrewRosterGate
+        environmentId={EnvironmentId.make("collapse-test")}
+        threadId={ThreadId.make("captain-thread")}
+      />,
+    ),
+  );
+  const region = () => container.querySelector<HTMLElement>('[aria-label="Crew proposal roster"]')!;
+  expect(button("Expand Crew proposal").getAttribute("aria-expanded")).toBe("false");
+  expect(region().hidden).toBe(true);
+  expect(button("Expand Crew proposal").getAttribute("aria-controls")).toBe(region().id);
+  await click(button("Expand Crew proposal"));
+  expect(region().hidden).toBe(false);
+  await click(button("Edit seat builder"));
+  await input("Member instructions", "Keep this draft when folded");
+  await click(button("Save changes"));
+  await click(button("Collapse Crew proposal"));
+  expect(region().hidden).toBe(true);
+  await click(button("Expand Crew proposal"));
+  await click(button("Edit seat builder"));
+  expect(
+    document.querySelector<HTMLTextAreaElement>('[aria-label="Member instructions"]')?.value,
+  ).toBe("Keep this draft when folded");
+});
+
+it("remembers disclosure for each environment and thread when the composer remounts", async () => {
+  const gate = (environment: string) => (
+    <CrewRosterGate
+      key={environment}
+      environmentId={EnvironmentId.make(environment)}
+      threadId={ThreadId.make("captain-thread")}
+    />
+  );
+  await act(async () => root.render(gate("remember-test")));
+  await click(button("Expand Crew proposal"));
+  await act(async () => root.render(null));
+  await act(async () => root.render(gate("remember-test")));
+  expect(button("Collapse Crew proposal").getAttribute("aria-expanded")).toBe("true");
+  await act(async () => root.render(gate("different-environment")));
+  expect(button("Expand Crew proposal").getAttribute("aria-expanded")).toBe("false");
+  await act(async () => root.render(gate("remember-test")));
+  await click(button("Collapse Crew proposal"));
+  await act(async () => root.render(null));
+  await act(async () => root.render(gate("remember-test")));
+  expect(button("Expand Crew proposal").getAttribute("aria-expanded")).toBe("false");
 });

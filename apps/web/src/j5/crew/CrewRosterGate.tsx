@@ -1,5 +1,5 @@
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
-import { useCallback, useState } from "react";
+import { useCallback, useId, useState } from "react";
 
 import { UsersIcon } from "lucide-react";
 import { ComposerBanner } from "../../components/chat/ComposerBanner";
@@ -16,6 +16,8 @@ import {
   type CrewProposalSeat,
 } from "./crewProposalsClient";
 
+const proposalViews = new Map<string, boolean>();
+
 export function CrewRosterGate(props: {
   readonly environmentId: EnvironmentId | undefined;
   readonly threadId: ThreadId | null | undefined;
@@ -25,7 +27,9 @@ export function CrewRosterGate(props: {
     environmentId !== undefined && threadId != null ? crewProposalsQueryAtom(environmentId) : null,
   );
   useCrewProposalsRefresh();
-  const [expanded, setExpanded] = useState(true);
+  const viewKey = JSON.stringify([environmentId, threadId]);
+  const [expanded, setExpanded] = useState(() => proposalViews.get(viewKey) ?? false);
+  const contentId = useId();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -68,7 +72,12 @@ export function CrewRosterGate(props: {
           render={<button type="button" />}
           aria-label={expanded ? "Collapse Crew proposal" : "Expand Crew proposal"}
           aria-expanded={expanded}
-          onClick={() => setExpanded((value) => !value)}
+          aria-controls={contentId}
+          onClick={() => {
+            const next = !expanded;
+            proposalViews.set(viewKey, next);
+            setExpanded(next);
+          }}
           onPointerDown={(event) => event.preventDefault()}
         >
           <ComposerBanner.Icon>
@@ -82,7 +91,7 @@ export function CrewRosterGate(props: {
             <ComposerBanner.ToggleIcon expanded={expanded} />
           </ComposerBanner.Actions>
         </ComposerBanner.Row>
-        <div hidden={!expanded}>
+        <div id={contentId} role="region" aria-label="Crew proposal roster" hidden={!expanded}>
           <ComposerBanner.Scroll>
             {error ? (
               <p className="mb-2 text-sm text-destructive" role="alert">
