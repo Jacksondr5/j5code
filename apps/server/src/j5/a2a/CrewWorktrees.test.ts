@@ -257,8 +257,7 @@ const run = <A, E>(
   >,
 ) =>
   effect.pipe(
-    Effect.provide(gitLayer),
-    Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" })),
+    Effect.provide(Layer.mergeAll(gitLayer, NodeSqliteClient.layer({ filename: ":memory:" }))),
     Effect.scoped,
   );
 
