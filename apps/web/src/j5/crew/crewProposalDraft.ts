@@ -1,5 +1,5 @@
 import type { CrewProposalSeat } from "@t3tools/contracts/j5";
-import type { CrewSeatDraft } from "./crewSeatRuntime";
+import { applyCrewSeatDraft, crewSeatDraft, type CrewSeatDraft } from "./crewSeatRuntime";
 
 /** The persona choice for a seat that runs without a persona: named and briefed on the card. */
 export const CUSTOM_AGENT = "__custom__";
@@ -42,7 +42,7 @@ export const addSeat = (
   };
 };
 
-/** Validate a modal edit without mutating the current roster or the Captain's reason. */
+/** Validate an edit without mutating the current roster or the Captain's reason. */
 export const saveSeat = (
   seats: ReadonlyArray<CrewProposalSeat>,
   seatName: string,
@@ -59,6 +59,7 @@ export const saveSeat = (
     ...edited,
     ...(draft.workspace === undefined ? {} : { workspace: draft.workspace }),
     reason: current.reason,
+    ...(current.personaSwaps === undefined ? {} : { personaSwaps: current.personaSwaps }),
     ...(current.steps === undefined ? {} : { steps: current.steps }),
   };
   return {
@@ -79,3 +80,76 @@ export const describeSeatAgent = (
   const row = rows.find((candidate) => candidate.personaId === agentId);
   return row?.displayName ?? agentId;
 };
+
+export interface CrewProposalRow {
+  readonly id: string;
+  readonly original: CrewProposalSeat | null;
+  readonly value: CrewSeatDraft;
+}
+
+export const crewProposalRows = (
+  seats: ReadonlyArray<CrewProposalSeat>,
+): ReadonlyArray<CrewProposalRow> =>
+  seats.map((seat) => ({ id: seat.seat, original: seat, value: crewSeatDraft(seat) }));
+
+export const newCrewProposalRow = (id: string): CrewProposalRow => ({
+  id,
+  original: null,
+  value: { seat: "", agentId: CUSTOM_AGENT, instructions: "", workspace: { type: "shared" } },
+});
+
+/** Incomplete rows stay in the draft, but never authorize a preview or a launch. */
+export const crewProposalRoster = (rows: ReadonlyArray<CrewProposalRow>) => {
+  const errors = new Map<string, string>();
+  const seats = rows.map((row) => {
+    const result =
+      row.original === null
+        ? addSeat([], row.value)
+        : saveSeat([row.original], row.original.seat, row.value);
+    if (result.error !== null) errors.set(row.id, result.error);
+    return result.error === null
+      ? result.seats[0]!
+      : applyCrewSeatDraft(
+          row.original ?? { seat: row.value.seat, agentId: null, reason: "Added by the user" },
+          row.value,
+        );
+  });
+  for (let i = 0; i < seats.length; i++) {
+    if (
+      !errors.has(rows[i]!.id) &&
+      seats[i]!.seat.length > 0 &&
+      seats.some((seat, j) => i !== j && seat.seat === seats[i]!.seat)
+    )
+      errors.set(rows[i]!.id, `Seat ${seats[i]!.seat} already exists.`);
+  }
+  return { seats, errors };
+};
+
+const comparableDraft = (draft: CrewSeatDraft) =>
+  JSON.stringify([
+    draft.seat,
+    draft.agentId,
+    draft.instructions.trim(),
+    draft.modelSelection === undefined
+      ? null
+      : [
+          draft.modelSelection.instanceId,
+          draft.modelSelection.model,
+          [...(draft.modelSelection.options ?? [])].sort((a, b) => a.id.localeCompare(b.id)),
+        ],
+    draft.runtimeMode ?? null,
+    draft.workspace === undefined
+      ? null
+      : draft.workspace.type === "shared"
+        ? ["shared"]
+        : draft.workspace.type === "worktree"
+          ? ["worktree", draft.workspace.baseRef, draft.workspace.startFromOrigin ?? false]
+          : ["existing_worktree", draft.workspace.worktreePath],
+  ]);
+
+export const crewProposalRowChange = (row: CrewProposalRow): "Added" | "Edited" | null =>
+  row.original === null
+    ? "Added"
+    : comparableDraft(row.value) === comparableDraft(crewSeatDraft(row.original))
+      ? null
+      : "Edited";

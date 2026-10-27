@@ -2,6 +2,10 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   CUSTOM_AGENT,
+  crewProposalRows,
+  crewProposalRoster,
+  crewProposalRowChange,
+  newCrewProposalRow,
   addSeat,
   describeSeatAgent,
   removeSeat,
@@ -74,7 +78,7 @@ describe("crew proposal roster edits", () => {
   });
 });
 
-describe("crew member modal saves", () => {
+describe("crew member edits", () => {
   const original = {
     seat: "reviewer",
     agentId: null,
@@ -128,4 +132,62 @@ describe("crew member modal saves", () => {
       steps: ["plan"],
     });
   });
+});
+
+describe("inline roster drafts", () => {
+  const original = {
+    seat: "builder",
+    agentId: null,
+    reason: "Build",
+    instructions: "Implement",
+    steps: ["build"],
+  };
+  it("marks actual edits and clears the tag when the original values return", () => {
+    const row = crewProposalRows([original])[0]!;
+    expect(crewProposalRowChange(row)).toBeNull();
+    const edited = { ...row, value: { ...row.value, instructions: "Implement carefully" } };
+    expect(crewProposalRowChange(edited)).toBe("Edited");
+    expect(crewProposalRowChange({ ...edited, value: row.value })).toBeNull();
+    expect(crewProposalRoster([edited]).seats[0]).toEqual({
+      ...original,
+      instructions: "Implement carefully",
+    });
+  });
+  it("retains an unfinished custom addition, validates it, and restores the roster when removed", () => {
+    const rows = crewProposalRows([original]);
+    const added = newCrewProposalRow("added:0");
+    expect(crewProposalRowChange(added)).toBe("Added");
+    expect(crewProposalRoster([...rows, added]).errors.has(added.id)).toBe(true);
+    const named = { ...added, value: { ...added.value, seat: "Reviewer" } };
+    expect(crewProposalRoster([...rows, named]).errors.get(added.id)).toContain("instructions");
+    const complete = { ...named, value: { ...named.value, instructions: "Review" } };
+    expect(crewProposalRoster([...rows, complete]).errors.size).toBe(0);
+    expect(crewProposalRoster([...rows, complete]).seats[1]).toEqual({
+      seat: "reviewer",
+      agentId: null,
+      reason: "Added by the user",
+      instructions: "Review",
+      workspace: { type: "shared" },
+    });
+    expect(
+      crewProposalRoster([...rows, complete].filter((row) => row.id !== added.id)).seats,
+    ).toEqual([original]);
+  });
+  it("flags duplicate normalized names on both rows", () => {
+    const added = newCrewProposalRow("added:0");
+    const duplicate = {
+      ...added,
+      value: { ...added.value, seat: "Builder", instructions: "Help" },
+    };
+    const roster = crewProposalRoster([...crewProposalRows([original]), duplicate]);
+    expect([...roster.errors.keys()]).toEqual(["builder", "added:0"]);
+  });
+});
+
+it("keeps useful validation for multiple unnamed additions", () => {
+  const result = crewProposalRoster([newCrewProposalRow("new:1"), newCrewProposalRow("new:2")]);
+  expect([...result.errors.values()]).toEqual([
+    "Seat names are lowercase words joined by hyphens.",
+    "Seat names are lowercase words joined by hyphens.",
+  ]);
 });

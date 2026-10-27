@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  crewApprovalSummary,
   crewGateTitle,
   crewNoticeLines,
   isHiddenCrewNotice,
@@ -25,7 +26,7 @@ const approvedGate = [
 ].join("\n");
 
 describe("crew notices in the Captain's thread", () => {
-  it("presents an approved roster with its seats, hidden when every seat started", () => {
+  it("presents an approved roster with its compact approval summary", () => {
     const message = { role: "user", createdBy: "system", text: approvedGate };
     const notice = presentCrewNotice(message);
     expect(notice).toEqual({
@@ -61,8 +62,8 @@ describe("crew notices in the Captain's thread", () => {
       pendingSeats: [],
       notCreated: [],
     });
-    // Every seat started: nothing for the person to act on, so the notice takes no row.
-    expect(isHiddenCrewNotice(message)).toBe(true);
+    expect(notice !== null && crewApprovalSummary(notice)).toBe("Crew approved · 2 members");
+    expect(isHiddenCrewNotice(message)).toBe(false);
     // Only the platform posts gate notices; the same text from a person is not one.
     expect(presentCrewNotice({ role: "user", createdBy: "user", text: approvedGate })).toBeNull();
     // A roster line the parser does not understand leaves the whole message raw, rather than an
@@ -289,7 +290,11 @@ describe("crew notices in the Captain's thread", () => {
     expect(withoutHiddenCrewNotices(visible)).toBe(visible);
     const rows = [
       ...visible,
-      row("launch", { role: "user", createdBy: "system", text: approvedGate }),
+      row("launch", {
+        role: "user",
+        createdBy: "system",
+        text: "<j5_seat_finished>\nseat: builder\nparticipant_id: agent:b\nthread_id: thread:b\nrun_status: completed\nhandoff: none declared\n</j5_seat_finished>",
+      }),
       row("reply", { role: "assistant", createdBy: "agent", text: "Crew is running." }),
     ];
     const shown = withoutHiddenCrewNotices(rows);
@@ -576,4 +581,20 @@ roster:
   expect(notice?.kind).toBe("gate");
   if (notice?.kind === "gate")
     expect(notice.roster.map((seat) => seat.agentId)).toEqual(["", "custom"]);
+});
+
+it("counts all approved members from old gate notices while retaining launch failures", () => {
+  const message = {
+    role: "user",
+    createdBy: "system",
+    text: approvedGate.replace(
+      "roster:",
+      "seat_not_created: tester | could not create thread\nseat_failed: builder | failed | signed out\nroster:",
+    ),
+  };
+  const notice = presentCrewNotice(message);
+  expect(notice).not.toBeNull();
+  expect(crewApprovalSummary(notice!)).toBe("Crew approved · 3 members");
+  expect(crewNoticeLines(notice!).map((line) => line.seat)).toEqual(["builder", "tester"]);
+  expect(isHiddenCrewNotice(message)).toBe(false);
 });
