@@ -57,8 +57,8 @@ import {
   type ScopedFleetLedgerProject,
 } from "./fleetClient";
 
-import { fleetSeatStatesAtom } from "./fleetState";
-import { fleetAgentKey } from "./fleetPresentation";
+import { fleetSeatStatesAtom, fleetProblemSummaryAtom } from "./fleetState";
+import { fleetAgentKey, fleetProblemNotices } from "./fleetPresentation";
 import {
   FleetFactCells,
   FleetFactDetails,
@@ -111,18 +111,20 @@ export function FleetPage() {
   const threads = useThreadShells();
   const sources = useAtomValue(fleetDetailSourcesAtom);
   const seatStates = useAtomValue(fleetSeatStatesAtom);
+  const problemSummary = useAtomValue(fleetProblemSummaryAtom);
   useFleetDetailRefresh();
   const [refreshing, setRefreshing] = useState(false);
   const projects = useMemo(() => mergeFleetSources(sources), [sources]);
   const showEnvironment = spansMultipleEnvironments(projects);
   const loading = !sources.isReady || sources.sources.some((source) => source.status === "loading");
   const notices = [
-    ...new Set(
-      sources.sources.flatMap((source) => {
+    ...new Set([
+      ...fleetProblemNotices(problemSummary),
+      ...sources.sources.flatMap((source) => {
         const notice = j5SourceNotice(source);
         return notice === null ? [] : [notice];
       }),
-    ),
+    ]),
   ];
 
   const refresh = useCallback(async () => {

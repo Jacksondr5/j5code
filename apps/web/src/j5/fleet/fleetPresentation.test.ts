@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vite-plus/test";
-import type { FleetDerivedFacts } from "@t3tools/client-runtime/j5/fleetFacts";
+import {
+  summarizeFleetProblems,
+  type FleetDerivedFacts,
+} from "@t3tools/client-runtime/j5/fleetFacts";
 import type { FleetRuntimeFact } from "@t3tools/contracts/j5";
 import {
   fleetCrewSummary,
@@ -8,6 +11,8 @@ import {
   fleetTime,
   fleetAgo,
   fleetProblemLabel,
+  fleetBadgeLabel,
+  fleetProblemNotices,
   fleetSeatState,
   fleetSourceIsLive,
   fleetStatusLabel,
@@ -27,6 +32,56 @@ const facts = (value: FleetRuntimeFact): FleetDerivedFacts => ({
 });
 
 describe("Fleet presentation", () => {
+  it("qualifies zero and positive badge counts when source or agent measurements are missing", () => {
+    const complete = {
+      agentsWithProblems: 0,
+      unmeasuredAgents: 0,
+      incompleteSources: false,
+      hasReadableSource: true,
+    };
+    expect(fleetBadgeLabel(complete)).toBe("Open fleet, 0 agents have measured problems.");
+    expect(fleetProblemNotices(complete)).toEqual([]);
+    const unmeasured = { ...complete, unmeasuredAgents: 1 };
+    expect(fleetBadgeLabel(unmeasured)).toContain("1 agent unmeasured.");
+    expect(fleetBadgeLabel(unmeasured)).toContain("Counts include current measured problems only.");
+    expect(fleetBadgeLabel(unmeasured)).not.toContain("coverage is incomplete");
+    const partial = { ...unmeasured, agentsWithProblems: 1, incompleteSources: true };
+    expect(fleetBadgeLabel(partial)).toContain("1 agent has measured problems.");
+    expect(fleetBadgeLabel(partial)).toContain("Problem coverage is incomplete");
+    expect(fleetProblemNotices(partial)).toContain(
+      "Counts include current measured problems only.",
+    );
+  });
+  it("distinguishes an unavailable count from a measured zero, including an empty live source", () => {
+    const measured = new Map([
+      [
+        "env:agent",
+        {
+          ...facts(runtime("failed")),
+          asks: { owed: [], awaited: [] },
+          problems: [{ kind: "failed-run" as const, runId: "run", at }],
+        },
+      ],
+    ]);
+    for (const sourceFacts of [new Map(), measured]) {
+      const unavailable = summarizeFleetProblems(
+        sourceFacts,
+        new Map([["env:agent", false]]),
+        "unavailable",
+      );
+      expect(fleetBadgeLabel(unavailable)).toContain("problem count unavailable");
+      expect(fleetBadgeLabel(unavailable)).not.toMatch(/\d/);
+      expect(fleetBadgeLabel(unavailable)).toContain("coverage is incomplete");
+    }
+    const emptyLive = summarizeFleetProblems(new Map(), new Map(), "complete");
+    expect(fleetBadgeLabel(emptyLive)).toBe("Open fleet, 0 agents have measured problems.");
+    const partialZero = summarizeFleetProblems(new Map(), new Map(), "partial");
+    expect(fleetBadgeLabel(partialZero)).toContain("0 agents have measured problems");
+    expect(fleetBadgeLabel(partialZero)).toContain("coverage is incomplete");
+    const restored = summarizeFleetProblems(measured, new Map([["env:agent", true]]), "partial");
+    expect(fleetBadgeLabel(restored)).toContain("1 agent has measured problems");
+    expect(fleetBadgeLabel(restored)).toContain("coverage is incomplete");
+  });
   it("uses runtime vocabulary and makes old or unavailable measurements explicit", () => {
     for (const [status, label] of [
       ["working", "Working"],
