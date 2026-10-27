@@ -294,6 +294,47 @@ it.effect("a thread stays shared after its second writer is gone, even unwritten
   }).pipe(Effect.provide(conversationLayer)),
 );
 
+it.effect("a fork names who wrote the messages it shows, and none after its fork point", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const owner = yield* jackson;
+    const source = yield* thread("thread:fork-source");
+    const priya = yield* personWith("Priya", onThread(source));
+    const first = message(source, "Keep the migration step.");
+    const second = message(source, "Drop it.");
+    const later = message(source, "After the fork.");
+    yield* say(owner, first);
+    yield* say(priya, second);
+    yield* say(owner, later);
+    const forkFrom = (id: string, from: ThreadId, runId: string) =>
+      Effect.gen(function* () {
+        const forked = yield* thread(id, PROJECT, { parent: from, relationship: "fork" });
+        yield* sql`
+          UPDATE orchestration_v2_projection_threads
+          SET payload_json = json_set(payload_json, '$.forkedFrom',
+            json_object('type', 'run', 'threadId', ${from}, 'runId', ${runId}))
+          WHERE thread_id = ${forked}
+        `;
+        return forked;
+      });
+    const fork = yield* forkFrom("thread:fork", source, `run:${second.messageId}`);
+    // The fork's own message, from a thread only one person writes to, names no one.
+    yield* taken(fork, "message:fork-own", "completed");
+    const forkOfFork = yield* forkFrom("thread:fork-of-fork", fork, "run:message:fork-own");
+
+    const sourceRead = yield* authors(source, priya);
+    for (const threadId of [fork, forkOfFork]) {
+      const read = yield* authors(threadId, priya);
+      assert.isFalse(read.shared);
+      assert.deepStrictEqual(read.authors, sourceRead.authors.slice(0, 2));
+    }
+    assert.deepStrictEqual(
+      sourceRead.authors.map((entry) => entry.messageId),
+      [first.messageId, second.messageId, later.messageId],
+    );
+  }).pipe(Effect.provide(conversationLayer)),
+);
+
 it.effect("a thread started in a project already shared is shared from its first message", () =>
   Effect.gen(function* () {
     const owner = yield* jackson;

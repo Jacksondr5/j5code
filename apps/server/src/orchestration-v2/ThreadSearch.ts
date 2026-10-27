@@ -14,6 +14,8 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as SqlSchema from "effect/sql/SqlSchema";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 
+import { messageAuthorJoinSql, typedMessageTextSql } from "../j5/sharing/typedMessageText.ts";
+
 export class ThreadSearchError extends Schema.TaggedError<ThreadSearchError>()(
   "ThreadSearchError",
   {
@@ -81,7 +83,8 @@ export const make = Effect.gen(function* () {
           threads.thread_id,
           threads.project_id,
           messages.role,
-          json_extract(messages.payload_json, '$.text') AS match_text,
+          -- J5: a person's words, without a shared conversation's lines (FORK.md case 86).
+          ${sql.literal(typedMessageTextSql("messages"))} AS match_text,
           messages.created_at AS message_created_at,
           messages.message_id,
           threads.updated_at AS thread_updated_at
@@ -90,12 +93,14 @@ export const make = Effect.gen(function* () {
           ON threads.thread_id = messages.thread_id
         INNER JOIN projection_projects AS projects
           ON projects.project_id = threads.project_id
+        ${sql.literal(messageAuthorJoinSql("messages"))}
         WHERE threads.deleted_at IS NULL
           AND threads.archived_at IS NULL
           AND projects.deleted_at IS NULL
           AND messages.streaming = 0
           AND messages.role IN ('user', 'assistant')
           AND json_extract(messages.payload_json, '$.text') LIKE ${pattern} ESCAPE '!'
+          AND ${sql.literal(typedMessageTextSql("messages"))} LIKE ${pattern} ESCAPE '!'
       ),
       ranked AS (
         SELECT

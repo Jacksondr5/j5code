@@ -541,11 +541,37 @@ const make = Effect.gen(function* () {
     const recorded = yield* sql<{ readonly found: number }>`
       SELECT 1 AS found FROM j5_a2a_shared_thread WHERE thread_id = ${threadId}
     `;
+    // A fork shows the messages of the thread it was forked from up to the run it was forked at,
+    // and that thread's own source's before them, as upstream's `buildVisibleTurnItems` does from
+    // the thread's `forkedFrom` and its runs' ordinals; those messages keep their authors here
+    // (#612). Only the messages a fork shows are read, so nothing after its fork point is named.
     const authors = yield* sql<AuthorRow & { readonly created_at: string }>`
+      WITH RECURSIVE source (thread_id, run_id) AS (
+        SELECT json_extract(payload_json, '$.forkedFrom.threadId'),
+          json_extract(payload_json, '$.forkedFrom.runId')
+        FROM orchestration_v2_projection_threads
+        WHERE thread_id = ${threadId} AND json_extract(payload_json, '$.forkedFrom.type') = 'run'
+        UNION
+        SELECT json_extract(thread.payload_json, '$.forkedFrom.threadId'),
+          json_extract(thread.payload_json, '$.forkedFrom.runId')
+        FROM source
+        JOIN orchestration_v2_projection_threads AS thread ON thread.thread_id = source.thread_id
+        WHERE json_extract(thread.payload_json, '$.forkedFrom.type') = 'run'
+      )
       SELECT message_id, person_id, display_name, level, edited_by, note, told_json,
         stored_prefix, created_at
       FROM j5_a2a_message_author
       WHERE thread_id = ${threadId}
+      UNION ALL
+      SELECT author.message_id, author.person_id, author.display_name, author.level,
+        author.edited_by, author.note, author.told_json, author.stored_prefix, author.created_at
+      FROM source
+      JOIN orchestration_v2_projection_runs AS forked_at ON forked_at.run_id = source.run_id
+      JOIN j5_a2a_message_author AS author ON author.thread_id = source.thread_id
+      JOIN orchestration_v2_projection_messages AS message
+        ON message.message_id = author.message_id
+      JOIN orchestration_v2_projection_runs AS run
+        ON run.run_id = message.run_id AND run.ordinal <= forked_at.ordinal
       ORDER BY created_at, message_id
     `;
     const answers = yield* sql<{

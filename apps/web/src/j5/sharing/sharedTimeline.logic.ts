@@ -1,16 +1,6 @@
-import type { MessageAuthor } from "@t3tools/contracts/j5";
+import { type MessageAuthor, typedText } from "@t3tools/contracts/j5";
 
-/**
- * A message's words as its author typed them: the stored text without the platform's lines at its
- * start (the note, the author's line and any edited-by line), which the server names exactly in
- * `storedPrefix` so that nothing here reads their format. Text that does not begin with them is
- * returned as it is.
- */
-export function typedText(text: string, author: Pick<MessageAuthor, "storedPrefix">): string {
-  return author.storedPrefix !== "" && text.startsWith(author.storedPrefix)
-    ? text.slice(author.storedPrefix.length)
-    : text;
-}
+export { typedText };
 
 /**
  * How one person's message in a thread is shown:
