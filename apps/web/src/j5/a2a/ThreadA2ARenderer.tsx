@@ -1,4 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
+import { crewDeliveryAssignment } from "@t3tools/contracts/j5";
 import { renderSharedConversationNote } from "../sharing/SharedConversationCards";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../../components/ui/tooltip";
 import { observeResize } from "~/lib/observeResize";
@@ -362,8 +363,9 @@ export function presentThreadA2ADelivery(
   const { message } = input;
   if (!isThreadA2ADeliveryMessage(message)) return null;
 
+  const assignment = crewDeliveryAssignment(message.text);
   if (message.createdBy === "agent") {
-    const peer = parseAgentAuthoredEnvelope(message.text);
+    const peer = parseAgentAuthoredEnvelope(assignment);
     if (peer) {
       const sender = presentParticipantIdentity({
         participantId: peer.senderId,
@@ -384,7 +386,7 @@ export function presentThreadA2ADelivery(
       };
     }
   } else if (message.createdBy === "user") {
-    const human = parseHumanEnvelope(message.text);
+    const human = parseHumanEnvelope(assignment);
     if (human) {
       return {
         kind: "human",
@@ -396,7 +398,7 @@ export function presentThreadA2ADelivery(
       };
     }
   } else if (message.createdBy === "system") {
-    const silence = parseSilenceEnvelope(message.text);
+    const silence = parseSilenceEnvelope(assignment);
     if (silence) {
       return {
         kind: "silence",

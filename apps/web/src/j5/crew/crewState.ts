@@ -5,6 +5,7 @@ import {
 
 /** The seat facts a Crew summary reads; every field is something the client already holds. */
 export interface CrewSeatThread {
+  readonly notStarted?: boolean;
   readonly runtime?: Pick<ThreadRuntimeSummary, "status"> | null;
   readonly hasPendingApprovals: boolean;
   readonly hasPendingUserInput: boolean;
@@ -19,6 +20,7 @@ export type CrewSeatState =
   | "failed"
   | "needs-you"
   | "settled"
+  | "not-started"
   | "idle"
   | "archived"
   | "unknown";
@@ -51,7 +53,7 @@ export const classifyCrewSeat = (thread: CrewSeatThread | undefined): CrewSeatSt
     (thread.settledOverride !== "active" && thread.settledAt != null)
   )
     return "settled";
-  return "idle";
+  return thread.notStarted === true ? "not-started" : "idle";
 };
 
 /**
@@ -77,6 +79,7 @@ export const summarizeCrewState = (
     failed: 0,
     "needs-you": 0,
     settled: 0,
+    "not-started": 0,
     idle: 0,
     archived: 0,
     unknown: 0,
@@ -98,6 +101,7 @@ const LABELS: ReadonlyArray<readonly [CrewSeatState, string]> = [
   ["failed", "failed"],
   ["needs-you", "needs you"],
   ["settled", "settled"],
+  ["not-started", "not started"],
   ["unknown", "unknown"],
 ];
 

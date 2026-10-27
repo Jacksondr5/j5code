@@ -749,7 +749,11 @@ export function FleetRowItem(
         </span>
         {/* A placement tree lives in one project, so only its root names it. */}
         {props.row.depth === 0 ? <ProjectLabel {...props} agent={agent} /> : <span />}
-        <FleetFactCells environmentId={environmentId} agent={agent} />
+        <FleetFactCells
+          environmentId={environmentId}
+          agent={agent}
+          notStarted={thread?.notStarted === true}
+        />
       </button>
       <FleetFactDetails environmentId={environmentId} agent={agent} title={title} />
     </li>

@@ -76,6 +76,7 @@ export interface CrewBriefContext {
     readonly seat: string;
     readonly participantId: string;
     readonly agentDisplayName: string;
+    readonly reason?: string | null;
   }>;
   /** The playbook the Crew follows and the steps this seat owns, with live titles. */
   readonly playbook?:
@@ -89,6 +90,17 @@ export interface CrewBriefContext {
 
 /** A title on one line that cannot close the block it is written into. */
 const briefLine = (text: string) => text.replace(/\s+/g, " ").trim().replace(/<\//g, "<\\/");
+
+export const crewContextText = (crew: CrewBriefContext) => {
+  // Roster and identity are measured platform facts; wiring text is the user's content, verbatim.
+  const roster = crew.roster
+    .map(
+      (member) =>
+        `- ${member.seat}${member.seat === crew.seatName ? " (you)" : ""}: participant_id=${member.participantId} persona=${briefLine(member.agentDisplayName)} responsibility=${briefLine(member.reason ?? "")}`,
+    )
+    .join("\n");
+  return `<j5_crew_context>\nPlatform-provided crew facts:\ncrew: ${crew.displayName}\ncrew_instance_id: ${crew.instanceId}\nyour_seat: ${crew.seatName}\ncaptain_participant_id: ${crew.captainParticipantId}\nroster:\n${roster}\n</j5_crew_context>`;
+};
 
 // The web timeline parses the identity block and the trailing brief
 // (apps/web/src/j5/a2a/SpawnBrief.tsx) to attribute the message to its spawner;
@@ -114,14 +126,7 @@ export const spawnFirstTurnText = (input: {
   const brief = `<spawner_brief>\n${input.brief}\n</spawner_brief>`;
   if (input.crew === undefined) return `${identity}\n\n${brief}`;
   const crew = input.crew;
-  // Roster and identity are measured platform facts; wiring text is the user's content, verbatim.
-  const roster = crew.roster
-    .map(
-      (member) =>
-        `- ${member.seat}${member.seat === crew.seatName ? " (you)" : ""}: participant_id=${member.participantId} persona=${member.agentDisplayName}`,
-    )
-    .join("\n");
-  const crewContext = `<j5_crew_context>\nPlatform-provided crew facts:\ncrew: ${crew.displayName}\ncrew_instance_id: ${crew.instanceId}\nyour_seat: ${crew.seatName}\ncaptain_participant_id: ${crew.captainParticipantId}\nroster:\n${roster}\n</j5_crew_context>`;
+  const crewContext = crewContextText(crew);
   const seatInstructions =
     crew.seatInstructions === undefined
       ? []

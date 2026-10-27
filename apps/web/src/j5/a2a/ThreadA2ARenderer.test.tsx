@@ -1,3 +1,4 @@
+import { crewDeliveryContextPrefix } from "@t3tools/contracts/j5";
 import { EnvironmentId, MessageId, ThreadId } from "@t3tools/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
@@ -830,5 +831,14 @@ describe("history recorded before the j5_ prefix", () => {
         }),
       }),
     ).toMatchObject({ kind: "human", exchange: "expects-reply" });
+  });
+});
+
+it("preserves an activating assignment's sender and reply obligation beneath Crew context", () => {
+  const original = presentThreadA2ADelivery({ message: message({ text: peerRaw }) });
+  const text = crewDeliveryContextPrefix("Approved Crew context") + peerRaw;
+  expect(presentThreadA2ADelivery({ message: message({ text }) })).toEqual({
+    ...original,
+    rawEnvelope: text,
   });
 });

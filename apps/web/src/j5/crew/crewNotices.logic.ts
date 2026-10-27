@@ -14,7 +14,7 @@ export interface CrewNoticeMessage {
   readonly createdBy?: unknown;
 }
 
-export type SeatStart = "started" | "failed" | "pending";
+export type SeatStart = "waiting" | "started" | "failed" | "pending";
 
 export interface CrewRosterSeat {
   readonly seat: string;
@@ -88,7 +88,7 @@ export type CrewNoticePresentation =
 
 const GATE_BLOCK = /^<j5_crew_gate>\n([\s\S]*?)\n<\/j5_crew_gate>/;
 const ROSTER_LINE =
-  /^- ([^:]+): participant_id=(\S+) persona=(\S*) thread_id=(\S+)(?: start=(started|failed|pending))?( \(new\))?$/;
+  /^- ([^:]+): participant_id=(\S+) persona=(\S*) thread_id=(\S+)(?: start=(started|failed|pending|waiting))?( \(new\))?$/;
 
 // Decode after parsing: provider diagnostics cannot create fields or terminate tagged blocks.
 const decodeFailureField = (value: string) =>
@@ -102,7 +102,9 @@ const field = (block: string, name: string) =>
 const fields = (block: string, name: string) =>
   [...block.matchAll(new RegExp(`^${name}: (.*)$`, "gm"))].map((match) => match[1]!.trim());
 const seatStart = (value: string | undefined): SeatStart | null =>
-  value === "started" || value === "failed" || value === "pending" ? value : null;
+  value === "waiting" || value === "started" || value === "failed" || value === "pending"
+    ? value
+    : null;
 
 const parseGate = (text: string): CrewNoticePresentation | null => {
   const match = GATE_BLOCK.exec(text);

@@ -283,8 +283,10 @@ function SpawnedChildGroupRows(
                 <span className="flex items-center gap-1.5 text-2xs text-muted-foreground">
                   {status === null ? (
                     <span>
-                      {(child.seat === null ? null : seatRunLabel(thread.runtime?.status)) ??
-                        "Idle"}
+                      {child.seat?.notStarted
+                        ? "Not started"
+                        : ((child.seat === null ? null : seatRunLabel(thread.runtime?.status)) ??
+                          "Idle")}
                     </span>
                   ) : (
                     <>
