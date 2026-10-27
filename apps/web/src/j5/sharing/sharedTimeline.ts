@@ -20,6 +20,7 @@ import {
   sharedMessageView,
   typedText,
 } from "./sharedTimeline.logic";
+import { isHiddenCrewNotice } from "../crew/crewNotices.logic";
 import { useScopePeople } from "./scopeAccess";
 
 interface MessageEntry {
@@ -192,6 +193,8 @@ export function useSharedConversationEntries<Entry extends MessageEntry>(
       }
       const message = entry.message;
       if (message === undefined || message.role !== "user") return [entry];
+      // A Crew notice with nothing for the person to act on takes no row (Crews AC22).
+      if (isHiddenCrewNotice(message)) return [];
       const fromServer = message.createdBy !== undefined;
       const view = sharedMessageView({
         text: message.text,

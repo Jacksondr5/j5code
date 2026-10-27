@@ -23,6 +23,7 @@ import { useThreadShells } from "../../state/entities";
 import { environmentServerConfigsAtom } from "../../state/server";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { formatElapsedDurationLabel } from "../../timestampFormat";
+import { seatRunLabel } from "../crew/crewState";
 import { stopCrew } from "../crew/crewStopClient";
 import { j5Environment } from "../state";
 import { useSpawnedChildren, type SpawnedChild } from "./SpawnedChildrenClient";
@@ -281,7 +282,7 @@ function SpawnedChildGroupRows(
                 </span>
                 <span className="flex items-center gap-1.5 text-2xs text-muted-foreground">
                   {status === null ? (
-                    <span>Idle</span>
+                    <span>{seatRunLabel(thread.runtime?.status) ?? "Idle"}</span>
                   ) : (
                     <>
                       <span aria-hidden className={cn("size-1.5 rounded-full", status.dotClass)} />

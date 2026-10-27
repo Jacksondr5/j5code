@@ -54,6 +54,19 @@ export const classifyCrewSeat = (thread: CrewSeatThread | undefined): CrewSeatSt
   return "idle";
 };
 
+/**
+ * How a seat's last run ended, for its row when upstream's status pill has nothing to say: that pill
+ * shows only live states and an unseen completion, so a seat read "Idle" once its end was seen.
+ */
+export const seatRunLabel = (status: ThreadRuntimeSummary["status"] | undefined) =>
+  status === "failed"
+    ? "Failed"
+    : status === "interrupted" || status === "cancelled"
+      ? "Interrupted"
+      : status === "completed"
+        ? "Completed"
+        : null;
+
 /** "What is the state of this Crew?" answered from its seats, no Playbook required. */
 export const summarizeCrewState = (
   threads: ReadonlyArray<CrewSeatThread | undefined>,

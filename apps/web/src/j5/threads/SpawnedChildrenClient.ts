@@ -79,9 +79,9 @@ export const refreshSpawnedChildrenRows = (refs: ReadonlyArray<ScopedThreadRef>)
 
 const EMPTY: ReadonlyArray<SpawnedChild> = [];
 
-export function useSpawnedChildren(ref: ScopedThreadRef): ReadonlyArray<SpawnedChild> {
+export function useSpawnedChildren(ref: ScopedThreadRef | null): ReadonlyArray<SpawnedChild> {
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
-  return snapshot.get(scopedThreadKey(ref))?.children ?? EMPTY;
+  return ref === null ? EMPTY : (snapshot.get(scopedThreadKey(ref))?.children ?? EMPTY);
 }
 
 /** The scoped keys of the rows an agent spawned, for the sidebar's membership rule. */
