@@ -83,8 +83,7 @@ for the work in the brief — see orchestrator_capabilities for what's available
 from j5_list_personas, set `persona` to its id: the spawn gets that persona's instructions and
 runtime policy, and provider, model, and reasoning must be one of that persona's declared routes.
 Without a persona it runs in your permission and interaction modes, or in narrower ones you set with
-runtime_mode and interaction_mode. Without a persona its model must be one the project's Models for
-custom members list allows; an ineligible one is refused with the eligible models. Attach files to
+runtime_mode and interaction_mode. Without a persona its model and reasoning level must be ones the project's Models for custom members lists allow; an ineligible one is refused with the eligible ones. Attach files to
 the brief with attachments. Choose its workspace every time (see the workspace field). A new worktree is prepared after this returns, and the agent
 begins once it is bound, possibly while the project's setup script is still running; if preparing it
 fails, the agent's thread shows why, and it is not retried. Reuse client_request_id to retry the
@@ -202,9 +201,7 @@ custom seats in the same roster: call j5_list_personas when choosing a saved per
 persona unset for a custom seat with its own instructions (required) and the brief. Custom seats
 inherit your harness, model, and reasoning by default and run with full-access unless you set
 runtime_mode; to choose different ones, set model_selection (instanceId, model, options) and/or
-runtime_mode using orchestrator_capabilities. A custom seat's model, yours included, must be one
-the project's Models for custom members list allows; an ineligible one is refused with the eligible
-models. Saved personas are proposed with their own configuration; only the human may override their runtime before approval. To have the crew follow
+runtime_mode using orchestrator_capabilities. A custom seat's model and reasoning level, yours included, must be ones the project's Models for custom members lists allow; an ineligible one is refused with the eligible ones. Saved personas are proposed with their own configuration; only the human may override their runtime before approval. To have the crew follow
 a playbook, set playbook to a name from j5_playbook_list and give seats the step ids they own
 (steps, from j5_playbook_read); a step has one owner, steps no seat owns are yours as Captain, and
 the result reports unowned steps and any step whose persona differs from its seat's. For a crew
@@ -258,7 +255,7 @@ caller, persona-backed where a seat names one, records the Crew snapshot with ea
 a `<j5_crew_gate>` launch report into the caller's thread immediately after creation: the roster, what the user changed against the proposal, and per seat `start=waiting|started|failed|pending`, with a `seat_failed` line carrying the run's error (`not_started` when the seat's thread exists but registration failed) and a `seat_not_created` line for an approved seat whose thread was never created, which is left off the roster. A proposal resolves once: a seat that fails does not stop the others or reopen the gate. Declines post the decline at once.
 Every seat names its workspace, with the same three choices as `j5_spawn_agent`, so there is no Captain-aware default (Jackson, 2026-10-03). Each seat's workspace resolves at preview against the Captain's repository, and the approval token binds it, as it binds the Captain's branch and worktree. Every preview also carries the Captain's current branch, the directory its branch picker searches, and its worktrees, for the roster card's editor; the branches themselves are searched live, so no list is capped. A seat the person adds starts in the Captain's checkout. A seat recorded before workspaces were required stays readable but is refused at preview and approval until one is chosen. New and added seats wait for their first assignment. A direct chat message, participant message, or playbook handoff activates the seat with its approved instructions and shared brief, the current roster with responsibilities and participant ids, and the assignment with its envelope and reply obligation intact. A new-worktree seat prepares its workspace before running that assignment; failed preparation is reported as a seat failure.
 New Crews require human approval by default. **Settings → Agent Setup → Crews → Auto-approve new Crews** skips that gate, off by default and overridable per project. The server reads the Captain's project setting only for a new request; changing it leaves existing Crews and open proposals alone. Automatic approval launches the proposed configuration through the same provider, workspace, capacity, and persona checks. Tool approvals still follow each seat's access. The persisted proposal and launch report distinguish automatic approval from a human decision.
-**Models for custom members** is a project setting holding the checked provider models; until one is saved every model is eligible. A custom seat, including one that inherits the Captain's model, must run on an eligible model, checked at preview, at approval, and for an automatic launch, so a roster naming another is refused whole before anything spawns, with an error naming the seat, the model, the project and the setting and listing the eligible models. A saved persona seat that keeps the persona's model skips the check; one whose model the person changed on the card is checked like a custom seat. An accepted proposal is not checked again.
+**Models for custom members** is a pair of project settings holding the checked provider models and the checked reasoning levels; until a list is saved everything it covers is eligible. A custom seat, including one that inherits the Captain's selection, must run on an eligible model at an eligible level (its explicit one, or the model's default), checked at preview, at approval, and for an automatic launch, so a roster naming another is refused whole before anything spawns, with an error naming the seat, the model or level, the project and the setting and listing the eligible ones. A model with no reasoning option has no level to check. A saved persona seat that keeps the persona's model and level skips the check; one where the person changed either on the card is checked like a custom seat. An accepted proposal is not checked again.
 
 ### `j5_request_crew_member`
 
@@ -267,8 +264,7 @@ lacks. No human approval is needed, regardless of Auto-approve new Crews. Give a
 persona id from j5_list_personas or required instructions for a custom seat, a reason identifying
 the missing expertise, and its workspace (the same choices as j5_propose_crew). Custom seats
 inherit your model selection and run with full-access unless you set model_selection or
-runtime_mode; a custom seat's model must be one the project's Models for custom members list
-allows, and saved personas use their own configuration. Optionally give a brief; otherwise the
+runtime_mode; a custom seat's model and reasoning level must be ones the project's Models for custom members lists allow, and saved personas use their own configuration. Optionally give a brief; otherwise the
 seat gets the Crew's brief. On a playbook Crew, steps may claim only unowned step ids from
 j5_playbook_read. The result returns the updated roster or refuses the seat with its name and
 reason; creation is reported separately here. The new member waits for its first assignment; send
