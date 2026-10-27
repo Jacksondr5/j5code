@@ -8,7 +8,7 @@ import {
   type CrewMemberModels,
 } from "@t3tools/contracts/j5";
 import { Link } from "@tanstack/react-router";
-import { AlertTriangleIcon, ChevronDownIcon, ChevronRightIcon } from "lucide-react";
+import { AlertTriangleIcon, CheckIcon, ChevronDownIcon, ChevronRightIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { ProviderInstanceIcon } from "../../components/chat/ProviderInstanceIcon";
@@ -20,7 +20,8 @@ import {
   useUpdateScopedSettings,
 } from "../../components/settings/useScopedSettings";
 import { Button } from "../../components/ui/button";
-import { Checkbox } from "../../components/ui/checkbox";
+import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../../components/ui/collapsible";
+import { Toggle } from "../../components/ui/toggle";
 import { deriveProviderInstanceEntries } from "../../providerInstances";
 import { serverEnvironment } from "../../state/server";
 import { useEnvironmentQuery } from "../../state/query";
@@ -54,63 +55,67 @@ function ProviderModels(props: {
   readonly providers: ReadonlyArray<ServerProvider>;
   readonly entry: ReturnType<typeof deriveProviderInstanceEntries>[number];
   readonly list: CrewMemberModels;
+  readonly open: boolean;
+  readonly onOpenChange: (open: boolean) => void;
   readonly onChange: (next: ReadonlyArray<CrewMemberModel>) => void;
 }) {
   const { provider, entry, list } = props;
   const { checked, total } = crewMemberModelCounts(list, [provider]);
+  const Chevron = props.open ? ChevronDownIcon : ChevronRightIcon;
   return (
-    <div className="space-y-1.5">
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2 text-xs font-medium text-foreground">
-          <ProviderInstanceIcon
-            driverKind={entry.driverKind}
-            displayName={entry.displayName}
-            acpRegistryIconUrl={entry.acpRegistryIconUrl}
-            iconClassName="size-3.5"
-          />
-          <span className="truncate">{entry.displayName}</span>
-          <span className="font-normal text-muted-foreground">
+    <div className="rounded-lg border bg-card">
+      <Collapsible open={props.open} onOpenChange={props.onOpenChange}>
+        <div className="flex items-center justify-between gap-2 px-3 py-2 text-xs">
+          <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-2 text-left">
+            <Chevron aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
+            <ProviderInstanceIcon
+              driverKind={entry.driverKind}
+              displayName={entry.displayName}
+              acpRegistryIconUrl={entry.acpRegistryIconUrl}
+              iconClassName="size-3.5"
+            />
+            <span className="truncate font-medium text-foreground">{entry.displayName}</span>
+          </CollapsibleTrigger>
+          <span className="shrink-0 text-muted-foreground">
             {checked} of {total}
           </span>
+          <Button
+            size="micro"
+            variant="ghost-muted"
+            onClick={() =>
+              props.onChange(
+                setCrewMemberProviderChecked(list, props.providers, provider, checked < total),
+              )
+            }
+          >
+            {checked < total ? "Check all" : "Uncheck all"}
+          </Button>
         </div>
-        <Button
-          size="micro"
-          variant="ghost-muted"
-          onClick={() =>
-            props.onChange(
-              setCrewMemberProviderChecked(list, props.providers, provider, checked < total),
-            )
-          }
-        >
-          {checked < total ? "Check all" : "Uncheck all"}
-        </Button>
-      </div>
-      <ul className="space-y-1">
-        {provider.models.map((model) => (
-          <li key={model.slug}>
-            <label className="flex cursor-pointer items-center gap-2 text-xs">
-              <Checkbox
-                checked={isCrewMemberModelChecked(list, {
-                  instanceId: provider.instanceId,
-                  model: model.slug,
-                })}
-                onCheckedChange={(next) =>
-                  props.onChange(
-                    setCrewMemberModelChecked(
-                      list,
-                      props.providers,
-                      { instanceId: provider.instanceId, model: model.slug },
-                      next,
-                    ),
-                  )
-                }
-              />
-              <span className="min-w-0 truncate">{model.name}</span>
-              {model.badge === "new" ? <NewTag /> : null}
-            </label>
-          </li>
-        ))}
-      </ul>
+        <CollapsiblePanel>
+          <ul className="flex flex-wrap gap-1.5 px-3 pb-3">
+            {provider.models.map((model) => {
+              const pair = { instanceId: provider.instanceId, model: model.slug };
+              const isChecked = isCrewMemberModelChecked(list, pair);
+              return (
+                <li key={model.slug}>
+                  <Toggle
+                    variant="outline"
+                    size="compact"
+                    pressed={isChecked}
+                    onPressedChange={(next) =>
+                      props.onChange(setCrewMemberModelChecked(list, props.providers, pair, next))
+                    }
+                  >
+                    {isChecked ? <CheckIcon aria-hidden="true" /> : null}
+                    <span className="min-w-0 truncate">{model.name}</span>
+                    {model.badge === "new" ? <NewTag /> : null}
+                  </Toggle>
+                </li>
+              );
+            })}
+          </ul>
+        </CollapsiblePanel>
+      </Collapsible>
     </div>
   );
 }
@@ -128,6 +133,7 @@ export function CrewMemberModelsSettings() {
   const environmentId = target?.environmentId ?? null;
   const list = settings.crewMemberModels;
   const [open, setOpen] = useState(false);
+  const [openProvider, setOpenProvider] = useState<string | null>(null);
   const providers = useAtomValue(
     serverEnvironment.providersValueAtom(environmentId ?? NO_ENVIRONMENT),
   );
@@ -136,6 +142,8 @@ export function CrewMemberModelsSettings() {
   );
   const entries = useMemo(() => deriveProviderInstanceEntries(providers ?? []), [providers]);
   const known = providers ?? [];
+  const setUp = entries.filter((entry) => isCrewMemberProviderSetUp(entry.snapshot));
+  const notSetUp = entries.filter((entry) => !isCrewMemberProviderSetUp(entry.snapshot));
   const summary = crewMemberModelsSummary(list, known);
   const offList = personasOffCrewMemberModels(catalog.data, list);
   const save = (next: ReadonlyArray<CrewMemberModel>) => updateSettings({ crewMemberModels: next });
@@ -173,7 +181,10 @@ export function CrewMemberModelsSettings() {
           aria-expanded={open}
           aria-controls="crew-member-models-panel"
           disabled={environmentId === null}
-          onClick={() => setOpen((value) => !value)}
+          onClick={() => {
+            setOpen((value) => !value);
+            setOpenProvider((current) => current ?? setUp[0]?.instanceId ?? null);
+          }}
         >
           {mixed ? "Mixed" : summary.label}
           <Chevron aria-hidden="true" />
@@ -181,32 +192,33 @@ export function CrewMemberModelsSettings() {
       }
     >
       {open && environmentId !== null ? (
-        <div id="crew-member-models-panel" className="space-y-4 pb-3 pt-1">
+        <div id="crew-member-models-panel" className="space-y-2 pb-3 pt-1">
           {mixed ? (
             <p className="text-xs text-muted-foreground">
               The selected environments differ. Changing a model sets this list on all of them.
             </p>
           ) : null}
-          {entries.map((entry) =>
-            isCrewMemberProviderSetUp(entry.snapshot) ? (
-              <ProviderModels
-                key={entry.instanceId}
-                provider={entry.snapshot}
-                providers={known}
-                entry={entry}
-                list={list}
-                onChange={save}
-              />
-            ) : (
-              <p key={entry.instanceId} className="text-xs text-muted-foreground">
-                {entry.displayName} isn't set up.{" "}
-                <Link to="/settings/providers" className="underline underline-offset-2">
-                  Set it up in Providers
-                </Link>
-                .
-              </p>
-            ),
-          )}
+          {setUp.map((entry) => (
+            <ProviderModels
+              key={entry.instanceId}
+              provider={entry.snapshot}
+              providers={known}
+              entry={entry}
+              list={list}
+              open={openProvider === entry.instanceId}
+              onOpenChange={(next) => setOpenProvider(next ? entry.instanceId : null)}
+              onChange={save}
+            />
+          ))}
+          {notSetUp.length > 0 ? (
+            <p className="text-xs text-muted-foreground">
+              Not set up: {notSetUp.map((entry) => entry.displayName).join(", ")}.{" "}
+              <Link to="/settings/providers" className="underline underline-offset-2">
+                Set them up in Providers
+              </Link>
+              .
+            </p>
+          ) : null}
           <p className="text-xs text-muted-foreground">
             Personas always run on their own model, even one that isn't checked.
             {offList.length > 0
