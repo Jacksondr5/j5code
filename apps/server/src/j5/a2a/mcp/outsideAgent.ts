@@ -17,6 +17,7 @@ import { exceededDispatchModeLimit } from "../../../orchestration-v2/DispatchMod
 import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
 import { type CommCommandId, outsideAgentParticipantId } from "../contracts.ts";
 import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
+import { withDeliveryOutcome } from "../receiverBacklog.ts";
 import { A2ASendService } from "../SendService.ts";
 import { sendClaimingAttachments } from "./attachments.ts";
 import type { J5SendMessageInput } from "./tools.ts";
@@ -201,7 +202,7 @@ export const sendAsOutsideAgent = Effect.fn("j5.a2a.mcp.sendAsOutsideAgent")(fun
       ? yield* send()
       : yield* sendClaimingAttachments(receiver.threadId, attachments, send);
   yield* (yield* A2ADeliveryWorker).notify;
-  // No backlog notice: it counts the caller's own waiting messages by its thread, and an outside
-  // agent has none.
-  return result;
+  // The outcome only: the backlog notice counts the caller's own waiting messages by its thread,
+  // and an outside agent has none.
+  return yield* withDeliveryOutcome(result, { receiverId: input.to, mode });
 });
