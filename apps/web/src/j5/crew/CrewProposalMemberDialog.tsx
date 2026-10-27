@@ -1,3 +1,5 @@
+import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
+import { XIcon } from "lucide-react";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId } from "@t3tools/contracts";
 import type { CrewWorkspaceOptions } from "@t3tools/contracts/j5";
@@ -6,12 +8,10 @@ import { useEffect, useEffectEvent, useMemo, useState, type RefObject } from "re
 import { Button } from "../../components/ui/button";
 import {
   Dialog,
-  DialogDescription,
+  DialogClose,
   DialogFooter,
-  DialogHeader,
   DialogPanel,
   DialogPopup,
-  DialogTitle,
 } from "../../components/ui/dialog";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { agentPersonaEnvironment } from "../agents/agentPersonaAtoms";
@@ -118,13 +118,22 @@ export function CrewProposalMemberDialog(props: {
         if (!open) props.onClose();
       }}
     >
-      <DialogPopup finalFocus={props.returnFocus}>
-        <DialogHeader>
-          <DialogTitle>{props.row.original === null ? "Add member" : "Edit member"}</DialogTitle>
-          <DialogDescription>
-            Changes apply to the proposal. Nobody starts until you approve the Crew.
-          </DialogDescription>
-        </DialogHeader>
+      <DialogPopup finalFocus={props.returnFocus} className="sm:max-w-xl" showCloseButton={false}>
+        <div className="flex items-start justify-between gap-3 border-b border-border px-6 py-5">
+          <div>
+            <DialogPrimitive.Title className="text-base font-medium">
+              {props.row.original === null ? "Add member" : "Edit member"}
+            </DialogPrimitive.Title>
+            <DialogPrimitive.Description className="mt-1 text-xs text-muted-foreground">
+              {props.row.original === null
+                ? "Define a new member for the proposed Crew."
+                : "Update this member in the proposed Crew."}
+            </DialogPrimitive.Description>
+          </div>
+          <DialogClose aria-label="Close" render={<Button size="icon-xs" variant="ghost" />}>
+            <XIcon />
+          </DialogClose>
+        </div>
         <DialogPanel>
           <CrewSeatEditor
             value={value}
@@ -180,15 +189,20 @@ export function CrewProposalMemberDialog(props: {
           ) : null}
         </DialogPanel>
         <DialogFooter>
-          <Button variant="outline" onClick={props.onClose}>
+          <p className="mr-auto text-xs text-muted-foreground">
+            Changes apply to the proposal. Nobody starts yet.
+          </p>
+          <Button size="lg" variant="outline" onClick={props.onClose}>
             Cancel
           </Button>
-          <Button
+          <button
+            type="button"
+            className="inline-flex h-9 shrink-0 items-center justify-center rounded-md border border-foreground bg-foreground px-3 text-xs font-medium text-background hover:bg-foreground/90 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50"
             disabled={blocked || error !== undefined || runtime === undefined}
             onClick={() => props.onSave(saved)}
           >
             {props.row.original === null ? "Add member" : "Save changes"}
-          </Button>
+          </button>
         </DialogFooter>
       </DialogPopup>
     </Dialog>

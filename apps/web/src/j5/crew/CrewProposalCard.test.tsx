@@ -11,8 +11,7 @@ import type {
   CrewProposalPreviewRequest,
   CrewProposalPreviewResponse,
 } from "@t3tools/contracts/j5";
-import { act, useState } from "react";
-import { createPortal } from "react-dom";
+import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
 
@@ -51,66 +50,35 @@ vi.mock("../../state/server", () => ({
 vi.mock("../../components/WorktreeBaseBranchPicker", () => ({
   WorktreeBaseBranchPicker: () => null,
 }));
-vi.mock("../../components/chat/ProviderModelPicker", () => ({
-  ProviderModelPicker: (props: {
-    onOpenChange: (open: boolean) => void;
-    onInstanceModelChange: (instanceId: ProviderInstanceId, model: string) => void;
-  }) => {
-    const [open, setOpen] = useState(false);
-    return (
-      <>
-        <button
-          type="button"
-          onClick={() => {
-            setOpen(true);
-            props.onOpenChange(true);
-          }}
-        >
-          Pick model
-        </button>
-        {open
-          ? createPortal(
-              <button
-                type="button"
-                data-testid="portalled-model"
-                onClick={() => {
-                  props.onInstanceModelChange(ProviderInstanceId.make("codex"), "other-model");
-                  props.onOpenChange(false);
-                  setOpen(false);
-                }}
-              >
-                Other model
-              </button>,
-              document.body,
-            )
-          : null}
-      </>
-    );
-  },
-}));
-
 vi.mock("../../state/use-atom-command", () => ({ useAtomCommand: () => state.read }));
 
 import { CrewProposalCard } from "./CrewProposalCard";
 import { CrewRosterGate } from "./CrewRosterGate";
 import { ThreadId } from "@t3tools/contracts";
 
+const codexProvider: ServerProvider = {
+  instanceId: ProviderInstanceId.make("codex"),
+  driver: ProviderDriverKind.make("codex"),
+  enabled: true,
+  installed: true,
+  version: null,
+  status: "ready",
+  auth: { status: "authenticated" },
+  checkedAt: "2026-10-27T00:00:00Z",
+  slashCommands: [],
+  skills: [],
+  models: [
+    { slug: "gpt-6", name: "GPT-6", isCustom: false, capabilities: null },
+    { slug: "other-model", name: "Other model", isCustom: false, capabilities: null },
+  ],
+};
 const providers: ReadonlyArray<ServerProvider> = [
+  codexProvider,
   {
-    instanceId: ProviderInstanceId.make("codex"),
-    driver: ProviderDriverKind.make("codex"),
-    enabled: true,
-    installed: true,
-    version: null,
-    status: "ready",
-    auth: { status: "authenticated" },
-    checkedAt: "2026-10-27T00:00:00Z",
-    slashCommands: [],
-    skills: [],
-    models: [
-      { slug: "gpt-6", name: "GPT-6", isCustom: false, capabilities: null },
-      { slug: "other-model", name: "Other model", isCustom: false, capabilities: null },
-    ],
+    ...codexProvider,
+    instanceId: ProviderInstanceId.make("claude"),
+    driver: ProviderDriverKind.make("claudeAgent"),
+    models: [{ slug: "haiku", name: "Claude Haiku 5.5", isCustom: false, capabilities: null }],
   },
 ];
 const proposal: CrewProposal = {
@@ -279,14 +247,16 @@ it("adds only a complete member and Cancel does not add an empty row", async () 
   await input("Member name", "tester");
   expect(button("Add member").disabled).toBe(true);
   await click(button("Cancel"));
-  expect(approve().textContent).toBe("Approve 2 members");
+  expect(approve().textContent).toBe("Approve Crew");
   await click(button("Add crew member"));
   await input("Member name", "tester");
   await input("Member instructions", "Test the filters");
   await click(button("Add member"));
-  expect(approve().textContent).toBe("Approve 3 members");
+  expect(container.querySelectorAll('[data-testid^="crew-member-"]')).toHaveLength(3);
+  expect(approve().textContent).toBe("Approve Crew");
   await click(button("Remove seat tester"));
-  expect(approve().textContent).toBe("Approve 2 members");
+  expect(container.querySelectorAll('[data-testid^="crew-member-"]')).toHaveLength(2);
+  expect(approve().textContent).toBe("Approve Crew");
 });
 
 it("populates persona name and instructions and uses the persona runtime defaults", async () => {
@@ -410,8 +380,8 @@ it("uses only a fresh full-roster token after saving a member", async () => {
 it("keeps a portalled picker inside the modal and saves its chosen model", async () => {
   await render();
   await click(button("Edit seat builder"));
-  await click(button("Pick model"));
-  await click(document.querySelector<HTMLButtonElement>('[data-testid="portalled-model"]')!);
+  await click(button("builder model"));
+  await click(option("builder model", "Other model"));
   expect(button("Save changes")).toBeDefined();
   await click(button("Save changes"));
   await click(approve());
@@ -475,6 +445,7 @@ it("starts as a compact strip and keeps member edits when collapsed and reopened
   );
   const region = () => container.querySelector<HTMLElement>('[aria-label="Crew proposal roster"]')!;
   expect(button("Expand Crew proposal").getAttribute("aria-expanded")).toBe("false");
+  expect(button("Expand Crew proposal").textContent).toContain("2 members");
   expect(region().hidden).toBe(true);
   expect(button("Expand Crew proposal").getAttribute("aria-controls")).toBe(region().id);
   await click(button("Expand Crew proposal"));
@@ -511,4 +482,23 @@ it("remembers disclosure for each environment and thread when the composer remou
   await act(async () => root.render(null));
   await act(async () => root.render(gate("remember-test")));
   expect(button("Expand Crew proposal").getAttribute("aria-expanded")).toBe("false");
+});
+
+it("switches provider with its model defaults and keeps the model menu scoped to that provider", async () => {
+  await render();
+  await click(button("Edit seat builder"));
+  await click(button("builder provider"));
+  await click(option("builder provider", "Claude"));
+  expect(button("builder model").textContent).toContain("Haiku 5.5");
+  await click(button("builder model"));
+  expect(option("builder model", "Other model")).toBeUndefined();
+  await click(option("builder model", "Haiku 5.5"));
+  await click(button("Save changes"));
+  await click(approve());
+  expect(resolve.mock.calls[0]?.[1][0].modelSelection).toEqual(
+    expect.objectContaining({
+      instanceId: "claude",
+      model: "haiku",
+    }),
+  );
 });

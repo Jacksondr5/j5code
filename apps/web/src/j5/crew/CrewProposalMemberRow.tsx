@@ -37,13 +37,13 @@ function MemberProvider(props: {
           displayName={entry.displayName}
           accentColor={entry.accentColor}
           acpRegistryIconUrl={entry.acpRegistryIconUrl}
-          iconClassName="size-4"
+          iconClassName="size-6"
         />
       </TooltipTrigger>
       <TooltipPopup>{entry.displayName}</TooltipPopup>
     </Tooltip>
   ) : (
-    <span className="size-4 shrink-0" aria-hidden />
+    <span className="size-6 shrink-0" aria-hidden />
   );
 }
 
@@ -74,10 +74,16 @@ export function CrewProposalMemberRow(props: {
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-x-2">
-          <h3 className="break-words text-sm font-medium">{row.value.seat || "New member"}</h3>
+          <h3 className="break-words text-sm font-medium">
+            {row.value.seat
+              ? row.value.seat[0]!.toUpperCase() + row.value.seat.slice(1)
+              : "New member"}
+          </h3>
           <span className="text-xs text-muted-foreground">
             {runtime
-              ? [runtime.model, runtime.reasoning, runtime.access].join(" · ")
+              ? [runtime.model.replace(/^Claude\s+/u, ""), runtime.reasoning, runtime.access].join(
+                  " · ",
+                )
               : props.runtimeLoading
                 ? "Resolving runtime…"
                 : "Runtime unavailable"}

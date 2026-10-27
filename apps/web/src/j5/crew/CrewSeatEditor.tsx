@@ -14,7 +14,7 @@ import {
   SelectValue,
 } from "../../components/ui/select";
 import { Textarea } from "../../components/ui/textarea";
-import { ProviderModelPicker } from "../../components/chat/ProviderModelPicker";
+import { ProviderInstanceIcon } from "../../components/chat/ProviderInstanceIcon";
 import { deriveProviderInstanceEntries } from "../../providerInstances";
 import { serverEnvironment } from "../../state/server";
 import { CUSTOM_AGENT, describeSeatAgent } from "./crewProposalDraft";
@@ -52,11 +52,12 @@ export function CrewSeatEditor(props: CrewSeatEditorProps) {
   const custom = value.agentId === CUSTOM_AGENT;
   return (
     <div className="grid min-w-0 gap-4">
-      <div className="grid grid-cols-2 gap-3">
-        <label className="grid min-w-0 gap-1 text-xs text-muted-foreground">
+      <div className="grid grid-cols-1 min-[400px]:grid-cols-2 gap-3">
+        <label className="grid min-w-0 gap-1.5 text-xs text-muted-foreground">
           Name
           <Input
             aria-label="Member name"
+            size="lg"
             autoFocus
             value={value.seat}
             disabled={disabled}
@@ -64,7 +65,7 @@ export function CrewSeatEditor(props: CrewSeatEditorProps) {
             onChange={(event) => props.onChange({ ...value, seat: event.currentTarget.value })}
           />
         </label>
-        <div className="grid min-w-0 gap-1 text-xs text-muted-foreground">
+        <div className="grid min-w-0 gap-1.5 text-xs text-muted-foreground">
           <span>Persona</span>
           <Select
             value={value.agentId || null}
@@ -74,7 +75,7 @@ export function CrewSeatEditor(props: CrewSeatEditorProps) {
               if (personaId) props.onPersonaChange(personaId);
             }}
           >
-            <SelectTrigger aria-label="Member persona">
+            <SelectTrigger size="lg" aria-label="Member persona">
               <SelectValue>
                 {custom ? "Custom member" : describeSeatAgent(props.agents, value.agentId)}
               </SelectValue>
@@ -90,11 +91,13 @@ export function CrewSeatEditor(props: CrewSeatEditorProps) {
           </Select>
         </div>
       </div>
-      <label className="grid gap-1 text-xs text-muted-foreground">
+      <label className="grid gap-1.5 text-xs text-muted-foreground">
         Instructions
         <Textarea
           aria-label="Member instructions"
           value={value.instructions}
+          rows={5}
+          style={{ fieldSizing: "fixed", minHeight: "7.5rem" }}
           disabled={disabled || props.loadingInstructions}
           placeholder="What should this member do?"
           onChange={(event) =>
@@ -102,11 +105,6 @@ export function CrewSeatEditor(props: CrewSeatEditorProps) {
           }
         />
       </label>
-      {!custom ? (
-        <p className="text-xs text-muted-foreground">
-          The saved persona remains active. Changes here add guidance for this member only.
-        </p>
-      ) : null}
       {props.environmentId === null ? (
         <p className="text-xs text-muted-foreground">
           Connect to the crew’s environment to choose its runtime.
@@ -129,8 +127,8 @@ function CrewSeatWorkspaceField(props: CrewSeatEditorProps) {
   if (options === undefined) return null;
   const label = props.value.seat || "New seat";
   return (
-    <div className="flex flex-wrap items-end gap-2">
-      <div className="grid min-w-0 gap-1 text-xs text-muted-foreground">
+    <div className="grid min-w-0 gap-3">
+      <div className="grid min-w-0 gap-1.5 text-xs text-muted-foreground">
         <span>Workspace</span>
         <Select
           value={workspace?.type ?? null}
@@ -141,7 +139,7 @@ function CrewSeatWorkspaceField(props: CrewSeatEditorProps) {
             if (option) props.onChange(chooseCrewSeatWorkspace(props.value, option.value, options));
           }}
         >
-          <SelectTrigger aria-label={`${label} workspace`}>
+          <SelectTrigger size="lg" aria-label={`${label} workspace`}>
             <SelectValue>
               {CREW_WORKSPACE_OPTIONS.find(({ value }) => value === workspace?.type)?.label ??
                 "Choose workspace"}
@@ -160,8 +158,9 @@ function CrewSeatWorkspaceField(props: CrewSeatEditorProps) {
           </SelectPopup>
         </Select>
       </div>
+      <p className="text-xs text-muted-foreground">Where this member will work.</p>
       {workspace?.type === "worktree" ? (
-        <div className="grid min-w-0 gap-1 text-xs text-muted-foreground">
+        <div className="grid min-w-0 gap-1.5 text-xs text-muted-foreground">
           <span>Base branch</span>
           {props.environmentId === null ? null : (
             <WorktreeBaseBranchPicker
@@ -180,7 +179,7 @@ function CrewSeatWorkspaceField(props: CrewSeatEditorProps) {
         </div>
       ) : null}
       {workspace?.type === "existing_worktree" ? (
-        <div className="grid min-w-0 gap-1 text-xs text-muted-foreground">
+        <div className="grid min-w-0 gap-1.5 text-xs text-muted-foreground">
           <span>Worktree</span>
           <Select
             value={workspace.worktreePath || null}
@@ -190,7 +189,7 @@ function CrewSeatWorkspaceField(props: CrewSeatEditorProps) {
               if (next) props.onChange(setCrewSeatWorktree(props.value, next));
             }}
           >
-            <SelectTrigger aria-label={`${label} worktree`}>
+            <SelectTrigger size="lg" aria-label={`${label} worktree`}>
               <SelectValue>
                 {options?.worktrees.find(({ path }) => path === workspace.worktreePath)?.branch ??
                   (workspace.worktreePath || "Choose worktree")}
@@ -228,10 +227,6 @@ function CrewSeatRuntimeFields(props: CrewSeatEditorProps & { environmentId: Env
     [providers],
   );
   const entries = useMemo(() => deriveProviderInstanceEntries(choices), [choices]);
-  const modelOptions = useMemo(
-    () => new Map(entries.map((entry) => [entry.instanceId, entry.models])),
-    [entries],
-  );
   const value = resolvedCrewSeatDraft(props.value, props.runtime);
   const selection = value.modelSelection;
   const provider = providers.find(({ instanceId }) => instanceId === selection?.instanceId);
@@ -258,35 +253,93 @@ function CrewSeatRuntimeFields(props: CrewSeatEditorProps & { environmentId: Env
       : CREW_ACCESS_OPTIONS;
   const label = props.value.seat || "New seat";
   const activeProvider = selection?.instanceId ?? choices[0]?.instanceId;
+  const providerEntry = entries.find((entry) => entry.instanceId === activeProvider);
   return (
-    <div className="flex flex-wrap items-end gap-2">
-      {activeProvider ? (
-        <div className="grid min-w-0 gap-1 text-xs text-muted-foreground">
-          <span>Model and harness</span>
-          <ProviderModelPicker
-            environmentId={props.environmentId}
-            activeInstanceId={activeProvider}
-            model={selection?.model ?? ""}
-            lockedProvider={null}
-            instanceEntries={entries}
-            modelOptionsByInstance={modelOptions}
-            isComposerOwned={false}
-            disabled={props.disabled || choices.length === 0}
-            {...(selection ? {} : { triggerLabel: "Choose model" })}
-            triggerAriaLabel={`${label} model and harness`}
-            onOpenChange={props.onMenuOpenChange}
-            onInstanceModelChange={(instanceId, slug) => {
-              const nextProvider = choices.find((candidate) => candidate.instanceId === instanceId);
-              const nextModel = nextProvider?.models.find((candidate) => candidate.slug === slug);
-              if (nextProvider && nextModel)
-                props.onChange(chooseCrewHarness(value, nextProvider, nextModel));
-            }}
-          />
-        </div>
-      ) : (
-        <p className="text-xs text-muted-foreground">No available harnesses</p>
-      )}
-      <div className="grid min-w-0 gap-1 text-xs text-muted-foreground">
+    <div className="grid grid-cols-1 min-[400px]:grid-cols-2 gap-x-3 gap-y-4">
+      <div className="grid min-w-0 gap-1.5 text-xs text-muted-foreground">
+        <span>Provider</span>
+        <Select
+          value={activeProvider ?? null}
+          onOpenChange={props.onMenuOpenChange}
+          disabled={props.disabled || choices.length === 0}
+          onValueChange={(instanceId) => {
+            const nextProvider = choices.find((candidate) => candidate.instanceId === instanceId);
+            const nextModel =
+              nextProvider?.models.find((candidate) => candidate.slug === selection?.model) ??
+              nextProvider?.models[0];
+            if (nextProvider && nextModel)
+              props.onChange(chooseCrewHarness(value, nextProvider, nextModel));
+          }}
+        >
+          <SelectTrigger size="lg" aria-label={`${label} provider`}>
+            <SelectValue>
+              <span className="flex min-w-0 items-center gap-2">
+                {providerEntry ? (
+                  <ProviderInstanceIcon
+                    driverKind={providerEntry.driverKind}
+                    displayName={providerEntry.displayName}
+                    acpRegistryIconUrl={providerEntry.acpRegistryIconUrl}
+                    iconClassName="size-4"
+                  />
+                ) : null}
+                {providerEntry?.displayName ?? "Choose provider"}
+              </span>
+            </SelectValue>
+          </SelectTrigger>
+          <SelectPopup alignItemWithTrigger={false}>
+            {entries.map((entry) => (
+              <SelectItem key={entry.instanceId} value={entry.instanceId}>
+                <span className="flex min-w-0 items-center gap-2">
+                  <ProviderInstanceIcon
+                    driverKind={entry.driverKind}
+                    displayName={entry.displayName}
+                    acpRegistryIconUrl={entry.acpRegistryIconUrl}
+                    iconClassName="size-4"
+                  />
+                  <span className="truncate">{entry.displayName}</span>
+                </span>
+              </SelectItem>
+            ))}
+          </SelectPopup>
+        </Select>
+      </div>
+      <div className="grid min-w-0 gap-1.5 text-xs text-muted-foreground">
+        <span>Model</span>
+        <Select
+          value={selection?.model ?? null}
+          onOpenChange={props.onMenuOpenChange}
+          disabled={
+            props.disabled || !choices.some((candidate) => candidate.instanceId === activeProvider)
+          }
+          onValueChange={(slug) => {
+            const nextModel = provider?.models.find((candidate) => candidate.slug === slug);
+            if (provider && nextModel)
+              props.onChange(chooseCrewHarness(value, provider, nextModel));
+          }}
+        >
+          <SelectTrigger size="lg" aria-label={`${label} model`}>
+            <SelectValue>
+              {model?.name.replace(/^Claude\s+/u, "") ?? selection?.model ?? "Choose model"}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectPopup alignItemWithTrigger={false}>
+            {(provider?.models ?? []).map((entry) => (
+              <SelectItem key={entry.slug} value={entry.slug}>
+                {entry.name.replace(/^Claude\s+/u, "")}
+              </SelectItem>
+            ))}
+          </SelectPopup>
+        </Select>
+      </div>
+      {props.value.agentId !== CUSTOM_AGENT ? (
+        <p className="col-span-full text-xs text-muted-foreground">
+          {props.value.modelSelection === undefined && props.value.runtimeMode === undefined
+            ? "Using defaults from "
+            : "Based on "}
+          {describeSeatAgent(props.agents, props.value.agentId)}.
+        </p>
+      ) : null}
+      <div className="grid min-w-0 gap-1.5 text-xs text-muted-foreground">
         <span>Reasoning</span>
         <Select
           value={reasoningValue === undefined ? null : String(reasoningValue)}
@@ -304,7 +357,7 @@ function CrewSeatRuntimeFields(props: CrewSeatEditorProps & { environmentId: Env
               });
           }}
         >
-          <SelectTrigger aria-label={`${label} reasoning`}>
+          <SelectTrigger size="lg" aria-label={`${label} reasoning`}>
             <SelectValue>
               {reasoningChoices.find(({ id }) => id === String(reasoningValue))?.label ??
                 (selection?.model === props.runtime?.modelSelection.model
@@ -322,7 +375,7 @@ function CrewSeatRuntimeFields(props: CrewSeatEditorProps & { environmentId: Env
           </SelectPopup>
         </Select>
       </div>
-      <div className="grid min-w-0 gap-1 text-xs text-muted-foreground">
+      <div className="grid min-w-0 gap-1.5 text-xs text-muted-foreground">
         <span>Access</span>
         <Select
           value={value.runtimeMode ?? (value.agentId === CUSTOM_AGENT ? null : "persona-default")}
@@ -338,7 +391,7 @@ function CrewSeatRuntimeFields(props: CrewSeatEditorProps & { environmentId: Env
             if (option) props.onChange({ ...props.value, runtimeMode: option.value });
           }}
         >
-          <SelectTrigger aria-label={`${label} access`}>
+          <SelectTrigger size="lg" aria-label={`${label} access`}>
             <SelectValue>
               {value.agentId !== CUSTOM_AGENT && props.value.runtimeMode === undefined
                 ? (props.runtime?.access ?? "Persona default")

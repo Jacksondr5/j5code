@@ -1,8 +1,8 @@
 import { useAtomValue } from "@effect/atom-react";
 import { presentAgentPersonaCatalog } from "@t3tools/client-runtime/j5/agent-personas";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
-import { PlusIcon } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { PlusIcon, UsersIcon } from "lucide-react";
+import { useId, useMemo, useRef, useState } from "react";
 
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../../components/ui/tooltip";
 import { useParticipantLabels } from "../a2a/ParticipantIdentitiesClient";
@@ -17,6 +17,7 @@ import { CrewProposalMemberDialog } from "./CrewProposalMemberDialog";
 import type { CrewProposalRow } from "./crewProposalDraft";
 import { CrewProposalMemberRow } from "./CrewProposalMemberRow";
 import { useCrewProposalPreview } from "./useCrewProposalPreview";
+import { ComposerBanner } from "../../components/chat/ComposerBanner";
 import { useCanOperateThread } from "../sharing/access";
 
 function CaptainLabel(props: { environmentId: EnvironmentId; participantId: string }) {
@@ -35,6 +36,11 @@ export function CrewProposalCard(props: {
   readonly proposal: CrewProposal;
   readonly environmentId: EnvironmentId | null;
   readonly busy: boolean;
+  readonly disclosure?: {
+    readonly expanded: boolean;
+    readonly contentId: string;
+    readonly onToggle: () => void;
+  };
   readonly onResolve: (
     decision: "approve" | "decline",
     seats: ReadonlyArray<CrewProposalSeat>,
@@ -53,10 +59,11 @@ export function CrewProposalCard(props: {
   const canResolve = permitted && writesToCaptain;
   const [rows, setRows] = useState(() => crewProposalRows(proposal.requestedSeats));
   const [editing, setEditing] = useState<CrewProposalRow | null>(null);
+  const [fullBrief, setFullBrief] = useState(false);
+  const briefId = useId();
   const nextRow = useRef(0);
   const addButton = useRef<HTMLButtonElement>(null);
   const editorTrigger = useRef<HTMLButtonElement | null>(null);
-  const [fullBrief, setFullBrief] = useState(false);
   const catalog = useEnvironmentQuery(
     props.environmentId === null
       ? null
@@ -95,176 +102,209 @@ export function CrewProposalCard(props: {
 
   return (
     <li
-      className={props.onOpenCaptain ? "rounded-lg border border-border p-4" : "p-3"}
+      className={props.onOpenCaptain ? "rounded-lg border border-border p-4" : undefined}
       data-testid={`crew-proposal-${proposal.id}`}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-xs text-muted-foreground">
-            {proposal.kind === "roster"
-              ? "Crew proposal · waiting for you"
-              : "Add member · waiting for you"}
-          </p>
-          <h2 className="mt-1 text-base font-semibold leading-snug">{proposal.displayName}</h2>
-          {props.onOpenCaptain && props.environmentId !== null ? (
-            <div className="mt-1 text-xs text-muted-foreground">
-              <CaptainLabel
-                environmentId={props.environmentId}
-                participantId={proposal.captainParticipantId}
-              />
-            </div>
+      {props.disclosure ? (
+        <ComposerBanner.Row
+          render={<button type="button" />}
+          aria-label={props.disclosure.expanded ? "Collapse Crew proposal" : "Expand Crew proposal"}
+          aria-expanded={props.disclosure.expanded}
+          aria-controls={props.disclosure.contentId}
+          onClick={props.disclosure.onToggle}
+          onPointerDown={(event) => event.preventDefault()}
+        >
+          <ComposerBanner.Icon>
+            <UsersIcon />
+          </ComposerBanner.Icon>
+          <ComposerBanner.Content>Crew proposal</ComposerBanner.Content>
+          <ComposerBanner.Actions>
+            <ComposerBanner.Count>
+              {rows.length} {rows.length === 1 ? "member" : "members"}
+            </ComposerBanner.Count>
+            <ComposerBanner.ToggleIcon expanded={props.disclosure.expanded} />
+          </ComposerBanner.Actions>
+        </ComposerBanner.Row>
+      ) : (
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="text-base font-semibold leading-snug">{proposal.displayName}</h2>
+            {props.onOpenCaptain && props.environmentId !== null ? (
+              <div className="mt-1 text-xs text-muted-foreground">
+                <CaptainLabel
+                  environmentId={props.environmentId}
+                  participantId={proposal.captainParticipantId}
+                />
+              </div>
+            ) : null}
+          </div>
+          {props.onOpenCaptain ? (
+            <Button size="sm" variant="ghost" onClick={props.onOpenCaptain}>
+              Open Captain
+            </Button>
           ) : null}
         </div>
-        {props.onOpenCaptain ? (
-          <Button size="sm" type="button" variant="ghost" onClick={props.onOpenCaptain}>
-            Open Captain
-          </Button>
-        ) : null}
-      </div>
-      <div className="mt-2 max-w-[72ch] text-sm">
-        <p
-          className={
-            fullBrief
-              ? "whitespace-pre-wrap break-words"
-              : "line-clamp-2 whitespace-pre-wrap break-words"
-          }
-        >
-          {proposal.brief}
-        </p>
-        <Button
-          type="button"
-          size="xs"
-          variant="link"
-          aria-expanded={fullBrief}
-          onClick={() => setFullBrief((full) => !full)}
-        >
-          {fullBrief ? "Show less" : "Show full brief"}
-        </Button>
-      </div>
-      {playbook === null ? null : (
-        <div className="mt-2 text-xs text-muted-foreground">
-          <p>
-            Follows playbook: <span className="text-foreground">{playbook.title}</span>
-          </p>
-          {playbook.issue === null ? null : (
-            <p className="text-destructive" role="alert">
-              {playbook.issue}
-            </p>
-          )}
-        </div>
       )}
-      <ul className="mt-2 divide-y divide-border/70">
-        {rows.map((row, index) => {
-          const seat = seats[index]!;
-          const runtime = preview.runtimeSeats?.find((candidate) => candidate.seat === seat.seat);
-          return (
-            <CrewProposalMemberRow
-              key={row.id}
-              row={row}
-              environmentId={props.environmentId}
-              runtime={runtime}
-              disabled={props.busy || !canResolve}
-              canRemove={rows.length > 1}
-              runtimeLoading={preview.loading}
-              error={errors.get(row.id)}
-              onOpen={(trigger) => {
-                editorTrigger.current = trigger;
-                setEditing(row);
-              }}
-              onRemove={() => {
-                addButton.current?.focus();
-                setRows((current) => current.filter((candidate) => candidate.id !== row.id));
-              }}
+      <div
+        id={props.disclosure?.contentId}
+        role={props.disclosure ? "region" : undefined}
+        aria-label={props.disclosure ? "Crew proposal roster" : undefined}
+        hidden={props.disclosure?.expanded === false}
+        className={props.disclosure ? "px-3 pb-3 pt-1" : undefined}
+      >
+        <ComposerBanner.Scroll className={props.disclosure ? undefined : "max-h-none"}>
+          <div className="mb-3 text-sm text-muted-foreground">
+            <p
+              id={briefId}
+              className={
+                fullBrief
+                  ? "whitespace-pre-wrap break-words"
+                  : "line-clamp-2 whitespace-pre-wrap break-words"
+              }
             >
-              {seat.steps?.length ? (
-                <p className="mt-1 break-words text-xs text-muted-foreground">
-                  Steps: {titles(seat.steps)}
+              {proposal.brief}
+            </p>
+            <Button
+              type="button"
+              size="xs"
+              variant="link"
+              aria-expanded={fullBrief}
+              aria-controls={briefId}
+              onClick={() => setFullBrief((full) => !full)}
+            >
+              {fullBrief ? "View less" : "View more"}
+            </Button>
+          </div>
+          {playbook === null ? null : (
+            <div className="mt-2 text-xs text-muted-foreground">
+              <p>
+                Follows playbook: <span className="text-foreground">{playbook.title}</span>
+              </p>
+              {playbook.issue === null ? null : (
+                <p className="text-destructive" role="alert">
+                  {playbook.issue}
                 </p>
-              ) : null}
-              {(runtime !== undefined
-                ? (runtime.personaSwaps ?? [])
-                : seat.agentId === row.original?.agentId
-                  ? (seat.personaSwaps ?? [])
-                  : []
-              ).map((swap) => (
-                <p key={swap.stepId} className="mt-1 break-words text-xs text-warning">
-                  {stepTitle(playbook, swap.stepId)} {describePersonaSwap(swap, seat.seat)}
+              )}
+            </div>
+          )}
+          <ul className="divide-y divide-border border-y border-border/70">
+            {rows.map((row, index) => {
+              const seat = seats[index]!;
+              const runtime = preview.runtimeSeats?.find(
+                (candidate) => candidate.seat === seat.seat,
+              );
+              return (
+                <CrewProposalMemberRow
+                  key={row.id}
+                  row={row}
+                  environmentId={props.environmentId}
+                  runtime={runtime}
+                  disabled={props.busy || !canResolve}
+                  canRemove={rows.length > 1}
+                  runtimeLoading={preview.loading}
+                  error={errors.get(row.id)}
+                  onOpen={(trigger) => {
+                    editorTrigger.current = trigger;
+                    setEditing(row);
+                  }}
+                  onRemove={() => {
+                    addButton.current?.focus();
+                    setRows((current) => current.filter((candidate) => candidate.id !== row.id));
+                  }}
+                >
+                  {seat.steps?.length ? (
+                    <p className="mt-1 break-words text-xs text-muted-foreground">
+                      Steps: {titles(seat.steps)}
+                    </p>
+                  ) : null}
+                  {(runtime !== undefined
+                    ? (runtime.personaSwaps ?? [])
+                    : seat.agentId === row.original?.agentId
+                      ? (seat.personaSwaps ?? [])
+                      : []
+                  ).map((swap) => (
+                    <p key={swap.stepId} className="mt-1 break-words text-xs text-warning">
+                      {stepTitle(playbook, swap.stepId)} {describePersonaSwap(swap, seat.seat)}
+                    </p>
+                  ))}
+                </CrewProposalMemberRow>
+              );
+            })}
+          </ul>
+          {playbook === null ? null : (
+            <div className="mt-2 space-y-0.5 text-xs text-muted-foreground">
+              {removedSeatSteps(proposal.requestedSeats, seats).map(({ seat, steps }) => (
+                <p key={seat} role="status">
+                  Removing {seat} leaves {titles(steps)} unowned.
                 </p>
               ))}
-            </CrewProposalMemberRow>
-          );
-        })}
-      </ul>
-      {playbook === null ? null : (
-        <div className="mt-2 space-y-0.5 text-xs text-muted-foreground">
-          {removedSeatSteps(proposal.requestedSeats, seats).map(({ seat, steps }) => (
-            <p key={seat} role="status">
-              Removing {seat} leaves {titles(steps)} unowned.
-            </p>
-          ))}
-          {unowned.length ? (
-            <p className="break-words">Unowned steps, done by the Captain: {titles(unowned)}</p>
+              {unowned.length ? (
+                <p className="break-words">Unowned steps, done by the Captain: {titles(unowned)}</p>
+              ) : null}
+            </div>
+          )}
+          {preview.error ? (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <p className="text-xs text-destructive" role="alert">
+                {preview.error}
+              </p>
+              <Button
+                disabled={props.busy || props.environmentId === null || errors.size > 0}
+                size="sm"
+                type="button"
+                variant="outline"
+                onClick={preview.refresh}
+              >
+                Refresh runtime
+              </Button>
+            </div>
           ) : null}
-        </div>
-      )}
-      {preview.error ? (
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <p className="text-xs text-destructive" role="alert">
-            {preview.error}
-          </p>
+        </ComposerBanner.Scroll>
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
           <Button
-            disabled={props.busy || props.environmentId === null || errors.size > 0}
-            size="sm"
-            type="button"
-            variant="outline"
-            onClick={preview.refresh}
-          >
-            Refresh runtime
-          </Button>
-        </div>
-      ) : null}
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-        <Button
-          ref={addButton}
-          aria-label="Add crew member"
-          disabled={props.busy || !canResolve}
-          size="sm"
-          type="button"
-          variant="ghost"
-          onClick={(event) => {
-            editorTrigger.current = event.currentTarget;
-            const row = newCrewProposalRow(`added:${nextRow.current++}`);
-            setEditing(row);
-          }}
-        >
-          <PlusIcon className="size-4" />
-          Add member
-        </Button>
-        <div className="flex items-center gap-2">
-          <Button
+            ref={addButton}
+            aria-label="Add crew member"
             disabled={props.busy || !canResolve}
             size="sm"
             type="button"
-            variant="outline"
-            onClick={() => props.onResolve("decline", seats)}
-          >
-            Decline
-          </Button>
-          <Button
-            disabled={!canApprove}
-            size="sm"
-            type="button"
-            onClick={() => {
-              if (!canApprove || preview.data === null) return;
-              const approvalToken = preview.data.approvalToken;
-              preview.refresh();
-              props.onResolve("approve", seats, approvalToken);
+            variant="ghost"
+            onClick={(event) => {
+              editorTrigger.current = event.currentTarget;
+              const row = newCrewProposalRow(`added:${nextRow.current++}`);
+              setEditing(row);
             }}
           >
-            {props.busy
-              ? "Working…"
-              : `Approve ${rows.length} ${rows.length === 1 ? "member" : "members"}`}
+            <PlusIcon className="size-4" />
+            Add member
           </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              disabled={props.busy || !canResolve}
+              size="sm"
+              type="button"
+              variant="outline"
+              onClick={() => props.onResolve("decline", seats)}
+            >
+              Decline
+            </Button>
+            <button
+              disabled={!canApprove}
+              type="button"
+              className="inline-flex h-9 shrink-0 items-center justify-center rounded-md border border-foreground bg-foreground px-3 text-xs font-medium text-background hover:bg-foreground/90 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50"
+              onClick={() => {
+                if (!canApprove || preview.data === null) return;
+                const approvalToken = preview.data.approvalToken;
+                preview.refresh();
+                props.onResolve("approve", seats, approvalToken);
+              }}
+            >
+              {props.busy
+                ? "Working…"
+                : proposal.kind === "roster"
+                  ? "Approve Crew"
+                  : "Approve member"}
+            </button>
+          </div>
         </div>
       </div>
       {editing && canResolve ? (

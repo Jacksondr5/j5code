@@ -1,7 +1,6 @@
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { useCallback, useId, useState } from "react";
 
-import { UsersIcon } from "lucide-react";
 import { ComposerBanner } from "../../components/chat/ComposerBanner";
 import { useEnvironmentQuery } from "../../state/query";
 import { notifyHumanInboxChanged } from "../a2a/humanInboxRefresh";
@@ -68,51 +67,33 @@ export function CrewRosterGate(props: {
   return (
     <ComposerBanner.Attachment>
       <ComposerBanner.Root density="comfortable" data-testid="crew-roster-gate">
-        <ComposerBanner.Row
-          render={<button type="button" />}
-          aria-label={expanded ? "Collapse Crew proposal" : "Expand Crew proposal"}
-          aria-expanded={expanded}
-          aria-controls={contentId}
-          onClick={() => {
-            const next = !expanded;
-            proposalViews.set(viewKey, next);
-            setExpanded(next);
-          }}
-          onPointerDown={(event) => event.preventDefault()}
-        >
-          <ComposerBanner.Icon>
-            <UsersIcon />
-          </ComposerBanner.Icon>
-          <ComposerBanner.Content>Crew proposal</ComposerBanner.Content>
-          <ComposerBanner.Actions>
-            <ComposerBanner.Count>
-              {gates.length === 1 ? "Review" : `${gates.length} proposals`}
-            </ComposerBanner.Count>
-            <ComposerBanner.ToggleIcon expanded={expanded} />
-          </ComposerBanner.Actions>
-        </ComposerBanner.Row>
-        <div id={contentId} role="region" aria-label="Crew proposal roster" hidden={!expanded}>
-          <ComposerBanner.Scroll>
-            {error ? (
-              <p className="mb-2 text-sm text-destructive" role="alert">
-                {error}
-              </p>
-            ) : null}
-            <ul className="divide-y divide-border">
-              {gates.map((proposal) => (
-                <CrewProposalCard
-                  key={proposal.id}
-                  proposal={proposal}
-                  environmentId={environmentId}
-                  busy={busyId === proposal.id}
-                  onResolve={(decision, seats, approvalToken) =>
-                    void resolve(proposal, decision, seats, approvalToken)
-                  }
-                />
-              ))}
-            </ul>
-          </ComposerBanner.Scroll>
-        </div>
+        {error ? (
+          <p className="mb-2 text-sm text-destructive" role="alert">
+            {error}
+          </p>
+        ) : null}
+        <ul className="divide-y divide-border">
+          {gates.map((proposal) => (
+            <CrewProposalCard
+              key={proposal.id}
+              proposal={proposal}
+              environmentId={environmentId}
+              busy={busyId === proposal.id}
+              disclosure={{
+                expanded,
+                contentId: `${contentId}-${proposal.id}`,
+                onToggle: () => {
+                  const next = !expanded;
+                  proposalViews.set(viewKey, next);
+                  setExpanded(next);
+                },
+              }}
+              onResolve={(decision, seats, approvalToken) =>
+                void resolve(proposal, decision, seats, approvalToken)
+              }
+            />
+          ))}
+        </ul>
       </ComposerBanner.Root>
     </ComposerBanner.Attachment>
   );
