@@ -13,6 +13,7 @@ import { OrchestratorMcpService } from "../../mcp/OrchestratorMcpService.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import * as ProviderRegistry from "../../provider/ProviderRegistry.ts";
 import { invokeAgent } from "./agentInvocation.ts";
+import { CrewMemberModels } from "./crewMemberModels.ts";
 
 /**
  * Upstream's delegate_task input plus an optional persona. With `persona`, the server applies
@@ -51,6 +52,8 @@ export const J5DelegateTaskTool = Tool.make("delegate_task", {
     OrchestratorMcpService,
     ThreadManagementService,
     ProviderRegistry.ProviderRegistry,
+    // A plain child's model is held to the project's list of models for custom members.
+    CrewMemberModels,
   ],
 })
   .annotate(Tool.Title, "Delegate a child task")
@@ -62,7 +65,22 @@ export const delegateTask = Effect.fn("j5.delegateTask")(function* (input: J5Del
   if (personaId === undefined) {
     const scope = yield* McpInvocationContext;
     const service = yield* OrchestratorMcpService;
-    return yield* service.delegateTask(scope, delegate);
+    const memberModels = yield* CrewMemberModels;
+    // A persona runs on its own model; a plain child, even one that inherits its parent's model,
+    // runs on one the project's list allows. Upstream calls this with the model it resolved.
+    return yield* service.delegateTask(scope, {
+      ...delegate,
+      authorizeTarget: ({ projectId, modelSelection }) =>
+        memberModels.assertEligible({ projectId, selection: modelSelection }).pipe(
+          Effect.mapError(
+            (error) =>
+              new OrchestratorMcpFailure({
+                code: "model_unavailable",
+                message: `${error.message} Retry with target set to one of them as providerInstanceId and model.`,
+              }),
+          ),
+        ),
+    });
   }
   if (delegate.target !== undefined || delegate.runtimeMode !== undefined) {
     return yield* new OrchestratorMcpFailure({

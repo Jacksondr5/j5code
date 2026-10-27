@@ -25,6 +25,7 @@ import { A2AHomeRegistrar } from "../../../j5/a2a/HomeRegistrar.ts";
 import { AgentCrewInstanceService } from "../../../j5/a2a/AgentCrewInstanceService.ts";
 import { ArchiveCrewService } from "../../../j5/a2a/ArchiveCrewService.ts";
 import { CrewProposalService } from "../../../j5/a2a/CrewProposalService.ts";
+import { CrewMemberModels } from "../../../j5/agents/crewMemberModels.ts";
 import { CrewStopService } from "../../../j5/a2a/CrewStopService.ts";
 import { PeerRegistryService } from "../../../j5/a2a/PeerRegistryService.ts";
 import { PlaybookCrewRelay } from "../../../j5/playbooks/PlaybookCrewRelay.ts";
@@ -96,6 +97,7 @@ const layerStubServices = Layer.mergeAll(
   Layer.mock(AgentCrewInstanceService)({}),
   Layer.mock(ArchiveCrewService)({}),
   Layer.mock(CrewProposalService)({}),
+  Layer.mock(CrewMemberModels)({}),
   Layer.mock(CrewStopService)({}),
   Layer.mock(PeerRegistryService)({}),
   Layer.mock(PlaybookCrewRelay)({}),

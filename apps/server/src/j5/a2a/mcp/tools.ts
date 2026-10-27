@@ -29,6 +29,7 @@ import { OrchestratorMcpService } from "../../../mcp/OrchestratorMcpService.ts";
 import { OrchestratorV2 } from "../../../orchestration-v2/Orchestrator.ts";
 import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
 import { ProviderRegistry } from "../../../provider/ProviderRegistry.ts";
+import { CrewMemberModels } from "../../agents/crewMemberModels.ts";
 import { AgentCrewInstanceService } from "../AgentCrewInstanceService.ts";
 import { ArchiveCrewService } from "../ArchiveCrewService.ts";
 import {
@@ -640,6 +641,8 @@ const spawnDependencies = [
   // A Crew member is refused before anything is created (members never spawn Peer Agents).
   AgentCrewInstanceService,
   ProviderRegistry,
+  // A plain agent's model is held to the project's list of models for custom members.
+  CrewMemberModels,
   // Another project, the "No project" project and its per-thread folder, and brief attachments.
   ProjectService,
   ManagedProjectFolders,
