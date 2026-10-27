@@ -50,7 +50,7 @@ export const saveSeat = (
 ): { readonly seats: ReadonlyArray<CrewProposalSeat>; readonly error: string | null } => {
   const current = seats.find((seat) => seat.seat === seatName);
   if (!current) return { seats, error: "This seat is no longer in the roster." };
-  const validated = addSeat(removeSeat(seats, seatName), { ...draft, seat: seatName });
+  const validated = addSeat(removeSeat(seats, seatName), draft);
   if (validated.error !== null) return { seats, error: validated.error };
   // The card cannot reassign playbook steps, so an edited seat keeps the ones it owns.
   // An edit keeps the seat's own workspace, or its lack of one; only a new seat defaults.
@@ -153,3 +153,14 @@ export const crewProposalRowChange = (row: CrewProposalRow): "Added" | "Edited" 
     : comparableDraft(row.value) === comparableDraft(crewSeatDraft(row.original))
       ? null
       : "Edited";
+
+/** Persona text is supplied at launch; only member-specific guidance needs sending again. */
+export const crewMemberInstructions = (
+  instructions: string,
+  personaInstructions: string | null,
+) => {
+  if (personaInstructions === null) return instructions;
+  if (instructions === personaInstructions) return "";
+  const prefix = `${personaInstructions}\n\n`;
+  return instructions.startsWith(prefix) ? instructions.slice(prefix.length).trim() : instructions;
+};

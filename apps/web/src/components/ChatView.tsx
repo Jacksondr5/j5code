@@ -8327,10 +8327,6 @@ export default function ChatView(props: ChatViewProps) {
                               }
                             />
                           ) : null}
-                          <CrewRosterGate
-                            environmentId={environmentId}
-                            threadId={isServerThread ? activeThreadId : null}
-                          />
                           {!composerMounted ? null : (
                             <ChatComposer
                               canOperateThread={canOperateThread}
@@ -8397,11 +8393,18 @@ export default function ChatView(props: ChatViewProps) {
                               queuedRunsControl={queuedRunsControl}
                               threadProgressControl={
                                 isServerThread ? (
-                                  <PlaybookComposerControl
-                                    key={`${activeThread.environmentId}:${activeThread.id}`}
-                                    environmentId={activeThread.environmentId}
-                                    threadId={activeThread.id}
-                                  />
+                                  <>
+                                    <CrewRosterGate
+                                      key={`crew:${activeThread.environmentId}:${activeThread.id}`}
+                                      environmentId={activeThread.environmentId}
+                                      threadId={activeThread.id}
+                                    />
+                                    <PlaybookComposerControl
+                                      key={`${activeThread.environmentId}:${activeThread.id}`}
+                                      environmentId={activeThread.environmentId}
+                                      threadId={activeThread.id}
+                                    />
+                                  </>
                                 ) : null
                               }
                               bannerItems={composerBannerItems}

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   CUSTOM_AGENT,
+  crewMemberInstructions,
   crewProposalRows,
   crewProposalRoster,
   crewProposalRowChange,
@@ -98,7 +99,7 @@ describe("crew member edits", () => {
     expect(original.instructions).toBe("Review the patch");
   });
 
-  it("saves a validated edit in place and preserves the Captain's reason and seat identity", () => {
+  it("saves a validated edit in place and preserves the Captain's reason when renaming", () => {
     const result = saveSeat(seats, "reviewer", {
       seat: "renamed",
       agentId: CUSTOM_AGENT,
@@ -107,7 +108,12 @@ describe("crew member edits", () => {
     });
     expect(result.error).toBeNull();
     expect(result.seats).toEqual([
-      { ...original, instructions: "Review authentication only", runtimeMode: "approval-required" },
+      {
+        ...original,
+        seat: "renamed",
+        instructions: "Review authentication only",
+        runtimeMode: "approval-required",
+      },
       seats[1],
     ]);
     expect(result.seats[1]).toBe(seats[1]);
@@ -190,4 +196,12 @@ it("keeps useful validation for multiple unnamed additions", () => {
     "Seat names are lowercase words joined by hyphens.",
     "Seat names are lowercase words joined by hyphens.",
   ]);
+});
+
+it("does not duplicate saved persona instructions or strip an edited prefix", () => {
+  const base = "Review independently.";
+  expect(crewMemberInstructions(base, base)).toBe("");
+  expect(crewMemberInstructions(`${base}\n\nCheck auth.`, base)).toBe("Check auth.");
+  expect(crewMemberInstructions(`${base} Also test.`, base)).toBe(`${base} Also test.`);
+  expect(crewMemberInstructions("Custom instructions", null)).toBe("Custom instructions");
 });

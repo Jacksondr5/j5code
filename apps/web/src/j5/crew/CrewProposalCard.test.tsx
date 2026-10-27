@@ -16,7 +16,7 @@ import { createPortal } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
 
-const state = vi.hoisted(() => ({ permitted: true, preview: vi.fn() }));
+const state = vi.hoisted(() => ({ permitted: true, preview: vi.fn(), read: vi.fn() }));
 vi.mock("@effect/atom-react", () => ({ useAtomValue: (atom: unknown) => atom }));
 vi.mock("../state", () => ({
   j5Environment: { resolveCrewProposal: { permissionAtom: () => state.permitted } },
@@ -33,7 +33,7 @@ vi.mock("@t3tools/client-runtime/j5/agent-personas", () => ({
   ],
 }));
 vi.mock("../agents/agentPersonaAtoms", () => ({
-  agentPersonaEnvironment: { catalog: () => null },
+  agentPersonaEnvironment: { catalog: () => null, readAgentPersona: {} },
 }));
 vi.mock("./crewProposalsClient", () => ({
   previewCrewProposal: (...args: unknown[]) => state.preview(...args),
@@ -81,6 +81,8 @@ vi.mock("../../components/chat/ProviderModelPicker", () => ({
     );
   },
 }));
+
+vi.mock("../../state/use-atom-command", () => ({ useAtomCommand: () => state.read }));
 
 import { CrewProposalCard } from "./CrewProposalCard";
 
@@ -162,6 +164,12 @@ beforeEach(() => {
   );
   state.permitted = true;
   state.preview.mockReset().mockImplementation(preview);
+  state.read.mockReset().mockImplementation(({ input }: { input: { personaId: string } }) =>
+    Promise.resolve({
+      _tag: "Success",
+      value: { definition: { instructions: `${input.personaId} default instructions` } },
+    }),
+  );
   resolve.mockReset();
   container = document.createElement("div");
   document.body.append(container);
@@ -190,7 +198,7 @@ async function render(overrides: Partial<React.ComponentProps<typeof CrewProposa
   );
 }
 const button = (label: string) =>
-  [...container.querySelectorAll<HTMLButtonElement>("button")].find(
+  [...document.querySelectorAll<HTMLButtonElement>("button")].findLast(
     (item) => item.getAttribute("aria-label") === label || item.textContent === label,
   )!;
 const option = (trigger: string, text: string) => {
@@ -200,7 +208,7 @@ const option = (trigger: string, text: string) => {
   )!;
 };
 const approve = () =>
-  [...container.querySelectorAll<HTMLButtonElement>("button")].find((item) =>
+  [...document.querySelectorAll<HTMLButtonElement>("button")].find((item) =>
     item.textContent?.startsWith("Approve "),
   )!;
 async function click(element: HTMLElement) {
@@ -211,7 +219,7 @@ async function click(element: HTMLElement) {
   });
 }
 async function input(label: string, value: string) {
-  const element = container.querySelector<HTMLInputElement | HTMLTextAreaElement>(
+  const element = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(
     `[aria-label="${label}"]`,
   )!;
   await act(async () => {
@@ -224,26 +232,16 @@ async function input(label: string, value: string) {
   });
 }
 
-it("applies edits immediately, retains them across rows, and approves only after closing", async () => {
+it("saves modal edits atomically and preserves the Captain's reason", async () => {
   await render();
-  expect(approve().disabled).toBe(false);
   await click(button("Edit seat builder"));
   expect(approve().disabled).toBe(true);
-  await input("builder instructions", "Implement carefully");
-  expect(container.textContent).toContain("Edited");
-  await click(button("Edit seat reviewer"));
-  expect(container.querySelector('[aria-label="builder instructions"]')).toBeNull();
-  await click(button("Done"));
-  expect(state.preview).toHaveBeenLastCalledWith(
-    "test",
-    expect.objectContaining({
-      seats: [
-        expect.objectContaining({ instructions: "Implement carefully" }),
-        proposal.requestedSeats[1],
-      ],
-    }),
+  await input("Member instructions", "Implement carefully");
+  expect(state.preview.mock.calls.at(-1)?.[1].seats[0].instructions).not.toBe(
+    "Implement carefully",
   );
-  expect(approve().disabled).toBe(false);
+  await click(button("Save changes"));
+  expect(container.textContent).toContain("Edited");
   await click(approve());
   expect(resolve).toHaveBeenCalledWith(
     "approve",
@@ -255,72 +253,121 @@ it("applies edits immediately, retains them across rows, and approves only after
   );
 });
 
-it("retains invalid instructions on outside click and clears Edited after restoration", async () => {
+it("Cancel discards edits without changing the approval roster", async () => {
   await render();
   await click(button("Edit seat builder"));
-  await input("builder instructions", "");
-  await act(async () => document.body.dispatchEvent(new Event("pointerdown", { bubbles: true })));
-  expect(button("Done")).toBeUndefined();
-  expect(container.textContent).toContain("Give the custom crew member its instructions");
-  expect(approve().disabled).toBe(true);
-  await click(button("Edit seat builder"));
-  await input("builder instructions", "Implement");
+  await input("Member instructions", "Discard this edit");
+  await click(button("Cancel"));
   expect(container.textContent).not.toContain("Edited");
-  await click(button("Done"));
-  expect(approve().disabled).toBe(false);
+  await click(approve());
+  expect(resolve.mock.calls[0]?.[1]).toEqual(proposal.requestedSeats);
 });
 
-it("focuses a custom addition, blocks approval until complete, and can remove it", async () => {
+it("adds only a complete member and Cancel does not add an empty row", async () => {
   await render();
   await click(button("Add crew member"));
-  expect(document.activeElement?.getAttribute("aria-label")).toBe("New seat name");
-  expect(container.querySelector('[aria-label="New seat instructions"]')).not.toBeNull();
+  expect(button("Add member").disabled).toBe(true);
+  await input("Member name", "tester");
+  expect(button("Add member").disabled).toBe(true);
+  await click(button("Cancel"));
+  expect(approve().textContent).toBe("Approve 2 members");
+  await click(button("Add crew member"));
+  await input("Member name", "tester");
+  await input("Member instructions", "Test the filters");
+  await click(button("Add member"));
   expect(approve().textContent).toBe("Approve 3 members");
-  await input("New seat name", "tester");
-  await click(button("Done"));
-  expect(approve().disabled).toBe(true);
-  await click(button("Edit seat tester"));
-  await input("tester instructions", "Test the change");
-  await click(button("Done"));
-  expect(approve().disabled).toBe(false);
   await click(button("Remove seat tester"));
   expect(approve().textContent).toBe("Approve 2 members");
-  await click(button("Remove seat reviewer"));
-  expect(button("Remove seat builder").disabled).toBe(true);
 });
 
-it("keeps a row open when picking through a portal and closes on Escape", async () => {
+it("populates persona name and instructions and uses the persona runtime defaults", async () => {
   await render();
   await click(button("Edit seat builder"));
-  await click(button("Pick model"));
-  const option = document.querySelector<HTMLButtonElement>('[data-testid="portalled-model"]')!;
-  await act(async () => option.dispatchEvent(new Event("pointerdown", { bubbles: true })));
-  await click(option);
-  expect(button("Done")).toBeDefined();
-  expect(approve().disabled).toBe(true);
-  await act(async () =>
-    button("Done").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })),
+  await click(button("Member persona"));
+  await click(option("Member persona", "Sentry"));
+  expect(document.querySelector<HTMLInputElement>('[aria-label="Member name"]')?.value).toBe(
+    "Sentry",
   );
-  expect(button("Done")).toBeUndefined();
-  expect(document.activeElement).toBe(button("Edit seat builder"));
+  expect(
+    document.querySelector<HTMLTextAreaElement>('[aria-label="Member instructions"]')?.value,
+  ).toBe("sentry default instructions");
+  await click(button("Save changes"));
   await click(approve());
-  expect(resolve.mock.calls[0]?.[1][0].modelSelection.model).toBe("other-model");
-});
-
-it("opening and closing a saved persona does not pin runtime defaults", async () => {
-  await render();
-  await click(button("Edit seat reviewer"));
-  await click(button("Instructions"));
-  await input("reviewer instructions", "Review authentication");
-  await click(button("Done"));
-  await click(approve());
-  expect(resolve.mock.calls[0]?.[1][1]).toEqual({
-    ...proposal.requestedSeats[1],
-    instructions: "Review authentication",
+  expect(resolve.mock.calls[0]?.[1][0]).toEqual({
+    seat: "sentry",
+    agentId: "sentry",
+    reason: "Build the fix",
   });
 });
 
-it("keeps editing and approval unavailable without permission", async () => {
+it("opening a persona member preserves its name and additional instructions without duplicating defaults", async () => {
+  await render({
+    proposal: {
+      ...proposal,
+      requestedSeats: [{ ...proposal.requestedSeats[1]!, instructions: "Check auth" }],
+    },
+  });
+  await click(button("Edit seat reviewer"));
+  expect(document.querySelector<HTMLInputElement>('[aria-label="Member name"]')?.value).toBe(
+    "reviewer",
+  );
+  expect(
+    document.querySelector<HTMLTextAreaElement>('[aria-label="Member instructions"]')?.value,
+  ).toBe("sentry default instructions\n\nCheck auth");
+  await click(button("Save changes"));
+  await click(approve());
+  expect(resolve.mock.calls[0]?.[1][0]).toEqual({
+    ...proposal.requestedSeats[1],
+    instructions: "Check auth",
+  });
+});
+
+it("ignores a late persona read after switching back to a custom member", async () => {
+  let finish!: (value: unknown) => void;
+  state.read.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  await render();
+  await click(button("Edit seat builder"));
+  await click(button("Member persona"));
+  await click(option("Member persona", "Sentry"));
+  expect(button("Save changes").disabled).toBe(true);
+  await click(button("Member persona"));
+  await click(option("Member persona", "Custom member"));
+  await input("Member name", "custom-review");
+  await input("Member instructions", "Keep this custom brief");
+  await act(async () =>
+    finish({ _tag: "Success", value: { definition: { instructions: "Late persona text" } } }),
+  );
+  expect(
+    document.querySelector<HTMLTextAreaElement>('[aria-label="Member instructions"]')?.value,
+  ).toBe("Keep this custom brief");
+  await click(button("Save changes"));
+  await click(approve());
+  expect(resolve.mock.calls[0]?.[1][0]).toEqual(
+    expect.objectContaining({ agentId: null, instructions: "Keep this custom brief" }),
+  );
+});
+
+it("blocks saving a duplicate name and offers recovery after a persona read fails", async () => {
+  await render();
+  await click(button("Edit seat builder"));
+  await input("Member name", "reviewer");
+  expect(button("Save changes").disabled).toBe(true);
+  expect(document.body.textContent).toContain("already exists");
+  state.read.mockRejectedValueOnce(new Error("Persona unavailable"));
+  await click(button("Member persona"));
+  await click(option("Member persona", "Sentry"));
+  expect(document.body.textContent).toContain("Persona unavailable");
+  expect(button("Save changes").disabled).toBe(true);
+  await click(button("Retry persona"));
+  expect(button("Save changes").disabled).toBe(false);
+});
+
+it("keeps edits and approval disabled without permission", async () => {
   state.permitted = false;
   await render();
   expect(approve().disabled).toBe(true);
@@ -328,138 +375,46 @@ it("keeps editing and approval unavailable without permission", async () => {
   expect(button("Add crew member").disabled).toBe(true);
 });
 
-it("opens persona selection from its label and resets only runtime overrides on a switch", async () => {
-  await render();
-  await click(button("Change persona for builder"));
-  const sentry = option("builder member", "Sentry");
-  expect(sentry).toBeDefined();
-  await click(sentry);
-  await click(button("Done"));
-  await click(approve());
-  expect(resolve.mock.calls[0]?.[1][0]).toEqual({
-    ...proposal.requestedSeats[0],
-    agentId: "sentry",
-  });
-});
-
-it("allows clearing an access override back to Persona default", async () => {
-  await render();
-  await click(button("Edit seat reviewer"));
-  await click(button("reviewer access"));
-  const supervised = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find((item) =>
-    item.textContent?.startsWith("Supervised"),
-  )!;
-  await click(supervised);
-  await click(button("Done"));
-  expect(container.textContent).toContain("Asks for approvals");
-  await click(button("Edit seat reviewer"));
-  await click(button("reviewer access"));
-  const inherited = option("reviewer access", "Persona default");
-  await click(inherited);
-  await click(button("Done"));
-  expect(container.textContent).not.toContain("Edited");
-  expect(container.textContent).not.toContain("Asks for approvals");
-  await click(approve());
-  expect(resolve.mock.calls[0]?.[1][1]).toEqual(proposal.requestedSeats[1]);
-});
-
-it("clears an original playbook swap once a fresh preview resolves the matching persona", async () => {
-  const swap = { stepId: "review", wanted: "critic", seatPersona: "sentry", wantedProblem: null };
-  state.preview.mockImplementation(
-    async (environment: EnvironmentId, request: CrewProposalPreviewRequest) => {
-      const result = await preview(environment, request);
-      return {
-        ...result,
-        seats: result.seats.map((runtime) =>
-          runtime.seat === "reviewer" &&
-          request.seats?.find((seat) => seat.seat === "reviewer")?.agentId !== "critic"
-            ? { ...runtime, personaSwaps: [swap] }
-            : runtime,
-        ),
-      };
-    },
-  );
-  await render({
-    proposal: {
-      ...proposal,
-      requestedSeats: [
-        proposal.requestedSeats[0]!,
-        { ...proposal.requestedSeats[1]!, steps: ["review"], personaSwaps: [swap] },
-      ],
-    },
-  });
-  expect(container.textContent).toContain("wants critic; reviewer is sentry");
-  await click(button("Change persona for reviewer"));
-  const critic = option("reviewer member", "Critic");
-  await click(critic);
-  expect(container.textContent).not.toContain("wants critic");
-  await click(button("Done"));
-  expect(container.textContent).not.toContain("wants critic");
-});
-
-it("coalesces typing previews, applies runtime picks immediately, and flushes text on Done", async () => {
-  vi.useFakeTimers();
+it("uses only a fresh full-roster token after saving a member", async () => {
   await render();
   await click(button("Edit seat builder"));
-  const calls = state.preview.mock.calls.length;
-  await input("builder instructions", "One");
-  await input("builder instructions", "Two");
-  expect(state.preview).toHaveBeenCalledTimes(calls);
-  expect(container.textContent).toContain("Edited");
-  await act(async () => vi.advanceTimersByTime(299));
-  expect(state.preview).toHaveBeenCalledTimes(calls);
-  await act(async () => vi.advanceTimersByTime(1));
-  expect(state.preview).toHaveBeenCalledTimes(calls + 1);
-  await click(button("Pick model"));
-  await click(document.querySelector<HTMLButtonElement>('[data-testid="portalled-model"]')!);
-  expect(state.preview).toHaveBeenCalledTimes(calls + 2);
-  await input("builder instructions", "Final instructions");
-  await click(button("Done"));
-  expect(state.preview).toHaveBeenCalledTimes(calls + 3);
-  await act(async () => vi.advanceTimersByTime(300));
-  expect(state.preview).toHaveBeenCalledTimes(calls + 3);
-  await click(approve());
-  expect(resolve.mock.calls[0]?.[1][0].instructions).toBe("Final instructions");
-});
-
-it("keeps approval disabled after Done until the edited roster preview resolves", async () => {
-  await render();
-  let finish!: (result: CrewProposalPreviewResponse) => void;
+  await input("Member instructions", "Changed brief");
+  let finish!: () => void;
   state.preview.mockImplementation(
-    () =>
+    (_environment: EnvironmentId, request: CrewProposalPreviewRequest) =>
       new Promise<CrewProposalPreviewResponse>((resolve) => {
-        finish = resolve;
+        finish = () => {
+          void preview(EnvironmentId.make("test"), request).then(resolve);
+        };
       }),
   );
-  await click(button("Edit seat builder"));
-  await input("builder instructions", "Updated");
-  await click(button("Done"));
+  await click(button("Save changes"));
   expect(approve().disabled).toBe(true);
-  const request = state.preview.mock.lastCall![1] as CrewProposalPreviewRequest;
-  await act(async () => finish(await preview(EnvironmentId.make("test"), request)));
+  await act(async () => finish());
   expect(approve().disabled).toBe(false);
+  await click(approve());
+  const [decision, seats, token] = resolve.mock.calls[0]!;
+  expect(decision).toBe("approve");
+  expect(token).toBe("token:" + JSON.stringify(seats));
 });
 
-it("shows unavailable runtime after a failed preview rather than an endless resolving label", async () => {
-  state.preview.mockRejectedValue(new Error("Provider unavailable"));
+it("keeps a portalled picker inside the modal and saves its chosen model", async () => {
   await render();
-  expect(container.textContent).toContain("Runtime unavailable");
-  expect(container.textContent).not.toContain("Resolving runtime");
-  expect(approve().disabled).toBe(true);
+  await click(button("Edit seat builder"));
+  await click(button("Pick model"));
+  await click(document.querySelector<HTMLButtonElement>('[data-testid="portalled-model"]')!);
+  expect(button("Save changes")).toBeDefined();
+  await click(button("Save changes"));
+  await click(approve());
+  expect(resolve.mock.calls[0]?.[1][0].modelSelection.model).toBe("other-model");
 });
 
-it("uses the resolved existing-worktree branch instead of its path", async () => {
+it("allows workspace repair in the modal when the full-roster preview fails", async () => {
   state.preview.mockImplementation(
-    async (environment: EnvironmentId, request: CrewProposalPreviewRequest) => {
-      const result = await preview(environment, request);
-      return {
-        ...result,
-        seats: result.seats.map((runtime) =>
-          runtime.workspace?.type === "existing_worktree"
-            ? { ...runtime, workspace: { ...runtime.workspace, branch: "fix/payments" } }
-            : runtime,
-        ),
-      };
+    (environment: EnvironmentId, request: CrewProposalPreviewRequest) => {
+      if (request.seats?.some((seat) => seat.workspace?.type === "existing_worktree"))
+        return Promise.reject(new Error("Worktree no longer exists"));
+      return preview(environment, request);
     },
   );
   await render({
@@ -468,140 +423,34 @@ it("uses the resolved existing-worktree branch instead of its path", async () =>
       requestedSeats: [
         {
           ...proposal.requestedSeats[0]!,
-          workspace: { type: "existing_worktree", worktreePath: "/repo/worktrees/payments" },
+          workspace: { type: "existing_worktree", worktreePath: "/gone" },
         },
         proposal.requestedSeats[1]!,
       ],
     },
   });
-  expect(container.textContent).toContain("Existing worktree on fix/payments");
-  expect(container.textContent).not.toContain("/repo/worktrees/payments");
-});
-
-it("retains the Captain label in the Inbox while omitting it from the Captain's own gate", async () => {
-  await render();
-  expect(container.textContent).not.toContain("Release Captain");
-  await render({ onOpenCaptain: () => {} });
-  expect(container.textContent).toContain("Captain: Release Captain");
-});
-
-it("prevents changes and approval while busy", async () => {
-  await render({ busy: true });
-  expect(button("Working…").disabled).toBe(true);
-  expect(button("Edit seat builder").disabled).toBe(true);
-  expect(button("Add crew member").disabled).toBe(true);
-});
-
-it("ignores an old row-default preview and approves only with the eventual full-roster token", async () => {
-  await render();
-  const pending: Array<{
-    request: CrewProposalPreviewRequest;
-    resolve: (value: CrewProposalPreviewResponse) => void;
-  }> = [];
-  state.preview.mockImplementation(
-    (_environment: EnvironmentId, request: CrewProposalPreviewRequest) =>
-      new Promise<CrewProposalPreviewResponse>((resolve) => pending.push({ request, resolve })),
-  );
-  await click(button("Add crew member"));
-  await click(button("New seat member"));
-  const sentry = option("New seat member", "Sentry");
-  await click(sentry);
-  expect(pending).toHaveLength(2);
-  const old = await preview(EnvironmentId.make("test"), pending[0]!.request);
-  await act(async () =>
-    pending[0]!.resolve({
-      ...old,
-      seats: old.seats.map((runtime) => ({ ...runtime, reasoning: "Old custom reasoning" })),
-    }),
-  );
-  expect(container.textContent).not.toContain("Old custom reasoning");
-  const latest = await preview(EnvironmentId.make("test"), pending[1]!.request);
-  await act(async () =>
-    pending[1]!.resolve({
-      ...latest,
-      approvalToken: "row-only-token",
-      seats: latest.seats.map((runtime) => ({ ...runtime, reasoning: "New persona reasoning" })),
-    }),
-  );
-  expect(container.textContent).toContain("New persona reasoning");
-  await input("New seat name", "manual");
-  await click(button("Done"));
   expect(approve().disabled).toBe(true);
-  expect(resolve).not.toHaveBeenCalled();
-  const full = pending.at(-1)!;
-  expect(full.request.seats).toHaveLength(3);
-  await act(async () =>
-    full.resolve({
-      ...(await preview(EnvironmentId.make("test"), full.request)),
-      approvalToken: "full-roster-token",
-    }),
-  );
-  await click(approve());
-  expect(resolve).toHaveBeenCalledWith(
-    "approve",
-    expect.arrayContaining([expect.objectContaining({ seat: "manual", agentId: "sentry" })]),
-    "full-roster-token",
-  );
-});
-
-it.each([
-  { type: "worktree" as const, baseRef: "" },
-  { type: "existing_worktree" as const, worktreePath: "/repo/deleted-worktree" },
-])(
-  "keeps the last member's workspace repairable after the first preview rejects $type",
-  async (workspace) => {
-    state.preview.mockImplementation(
-      async (environment: EnvironmentId, request: CrewProposalPreviewRequest) => {
-        if (request.seats?.some((seat) => seat.workspace?.type !== "shared"))
-          throw new Error("Workspace no longer available");
-        return {
-          ...(await preview(environment, request)),
-          workspaceOptions: { cwd: "/repo", currentBranch: null, worktrees: [] },
-        };
-      },
-    );
-    await render({
-      proposal: { ...proposal, requestedSeats: [{ ...proposal.requestedSeats[0]!, workspace }] },
-    });
-    expect(approve().disabled).toBe(true);
-    expect(button("Remove seat builder").disabled).toBe(true);
-    await click(button("Edit seat builder"));
-    expect(button("builder workspace")).toBeDefined();
-    await click(button("builder workspace"));
-    await click(option("builder workspace", "Captain's checkout"));
-    await click(button("Done"));
-    expect(approve().disabled).toBe(false);
-    await click(approve());
-    expect(resolve).toHaveBeenCalledWith(
-      "approve",
-      [expect.objectContaining({ seat: "builder", workspace: { type: "shared" } })],
-      expect.stringContaining("token:"),
-    );
-  },
-);
-
-it("keeps the workspace controls mounted when a loaded selection fails its next preview", async () => {
-  state.preview.mockImplementation(
-    async (environment: EnvironmentId, request: CrewProposalPreviewRequest) => {
-      if (request.seats?.some((seat) => seat.workspace?.type === "worktree"))
-        throw new Error("Invalid base branch");
-      return {
-        ...(await preview(environment, request)),
-        workspaceOptions: { cwd: "/repo", currentBranch: null, worktrees: [] },
-      };
-    },
-  );
-  await render();
   await click(button("Edit seat builder"));
-  const trigger = button("builder workspace");
-  await click(trigger);
-  await click(option("builder workspace", "New worktree"));
-  expect(container.textContent).toContain("Invalid base branch");
-  expect(button("builder workspace")).toBe(trigger);
-  expect(trigger.isConnected).toBe(true);
-  expect(state.preview).toHaveBeenCalledTimes(2);
   await click(button("builder workspace"));
   await click(option("builder workspace", "Captain's checkout"));
-  await click(button("Done"));
+  await click(button("Save changes"));
   expect(approve().disabled).toBe(false);
+  await click(approve());
+  expect(resolve.mock.calls[0]?.[1][0].workspace).toEqual({ type: "shared" });
+});
+
+it("Escape discards modal edits and returns focus to the member's edit control", async () => {
+  await render();
+  await click(button("Edit seat builder"));
+  await input("Member instructions", "Discard on escape");
+  const field = document.querySelector<HTMLTextAreaElement>('[aria-label="Member instructions"]')!;
+  await act(async () => {
+    field.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true }),
+    );
+  });
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
+  expect(document.activeElement).toBe(button("Edit seat builder"));
+  await click(approve());
+  expect(resolve.mock.calls[0]?.[1]).toEqual(proposal.requestedSeats);
 });

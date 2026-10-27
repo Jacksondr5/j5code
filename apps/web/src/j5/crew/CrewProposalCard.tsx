@@ -13,6 +13,8 @@ import { agentPersonaEnvironment } from "../agents/agentPersonaAtoms";
 import type { CrewProposal, CrewProposalSeat } from "./crewProposalsClient";
 import { crewProposalRows, crewProposalRoster, newCrewProposalRow } from "./crewProposalDraft";
 import { describePersonaSwap, removedSeatSteps, stepTitle, unownedSteps } from "./crewPlaybookPlan";
+import { CrewProposalMemberDialog } from "./CrewProposalMemberDialog";
+import type { CrewProposalRow } from "./crewProposalDraft";
 import { CrewProposalMemberRow } from "./CrewProposalMemberRow";
 import { useCrewProposalPreview } from "./useCrewProposalPreview";
 import { useCanOperateThread } from "../sharing/access";
@@ -50,10 +52,10 @@ export function CrewProposalCard(props: {
   );
   const canResolve = permitted && writesToCaptain;
   const [rows, setRows] = useState(() => crewProposalRows(proposal.requestedSeats));
-  const [editingText, setEditingText] = useState(false);
-  const [openRow, setOpenRow] = useState<string | null>(null);
+  const [editing, setEditing] = useState<CrewProposalRow | null>(null);
   const nextRow = useRef(0);
   const addButton = useRef<HTMLButtonElement>(null);
+  const editorTrigger = useRef<HTMLButtonElement | null>(null);
   const [fullBrief, setFullBrief] = useState(false);
   const catalog = useEnvironmentQuery(
     props.environmentId === null
@@ -77,7 +79,6 @@ export function CrewProposalCard(props: {
     seats,
     props.busy,
     errors.size === 0,
-    openRow !== null && editingText ? 300 : 0,
   );
   const playbook = preview.data?.playbook ?? proposal.playbook ?? null;
   const unowned =
@@ -87,14 +88,14 @@ export function CrewProposalCard(props: {
   const canApprove =
     !props.busy &&
     canResolve &&
-    openRow === null &&
+    editing === null &&
     rows.length > 0 &&
     errors.size === 0 &&
     preview.data !== null;
 
   return (
     <li
-      className="rounded-lg border border-border p-4"
+      className={props.onOpenCaptain ? "rounded-lg border border-border p-4" : "p-3"}
       data-testid={`crew-proposal-${proposal.id}`}
     >
       <div className="flex items-start justify-between gap-3">
@@ -160,37 +161,19 @@ export function CrewProposalCard(props: {
             <CrewProposalMemberRow
               key={row.id}
               row={row}
-              proposalId={proposal.id}
-              previewSeatName={row.original?.seat ?? proposal.requestedSeats[0]!.seat}
               environmentId={props.environmentId}
               runtime={runtime}
-              workspaceOptions={preview.workspaceOptions}
-              agents={agents}
-              open={openRow === row.id && canResolve}
               disabled={props.busy || !canResolve}
               canRemove={rows.length > 1}
-              needsRuntimePreview={errors.size > 0}
               runtimeLoading={preview.loading}
               error={errors.get(row.id)}
-              onOpen={() => setOpenRow(row.id)}
-              onClose={() => setOpenRow((current) => (current === row.id ? null : current))}
+              onOpen={(trigger) => {
+                editorTrigger.current = trigger;
+                setEditing(row);
+              }}
               onRemove={() => {
                 addButton.current?.focus();
                 setRows((current) => current.filter((candidate) => candidate.id !== row.id));
-                setOpenRow((current) => (current === row.id ? null : current));
-              }}
-              onChange={(value) => {
-                setEditingText(
-                  value.agentId === row.value.agentId &&
-                    value.modelSelection === row.value.modelSelection &&
-                    value.runtimeMode === row.value.runtimeMode &&
-                    value.workspace === row.value.workspace,
-                );
-                setRows((current) =>
-                  current.map((candidate) =>
-                    candidate.id === row.id ? { ...candidate, value } : candidate,
-                  ),
-                );
               }}
             >
               {seat.steps?.length ? (
@@ -248,10 +231,10 @@ export function CrewProposalCard(props: {
           size="sm"
           type="button"
           variant="ghost"
-          onClick={() => {
+          onClick={(event) => {
+            editorTrigger.current = event.currentTarget;
             const row = newCrewProposalRow(`added:${nextRow.current++}`);
-            setRows((current) => [...current, row]);
-            setOpenRow(row.id);
+            setEditing(row);
           }}
         >
           <PlusIcon className="size-4" />
@@ -284,6 +267,29 @@ export function CrewProposalCard(props: {
           </Button>
         </div>
       </div>
+      {editing && canResolve ? (
+        <CrewProposalMemberDialog
+          key={editing.id}
+          row={editing}
+          returnFocus={editorTrigger}
+          rows={rows}
+          proposalId={proposal.id}
+          previewSeatName={editing.original?.seat ?? proposal.requestedSeats[0]!.seat}
+          environmentId={props.environmentId}
+          workspaceOptions={preview.workspaceOptions}
+          agents={agents}
+          disabled={props.busy}
+          onClose={() => setEditing(null)}
+          onSave={(value) => {
+            setRows((current) =>
+              editing.original === null
+                ? [...current, { ...editing, value }]
+                : current.map((row) => (row.id === editing.id ? { ...row, value } : row)),
+            );
+            setEditing(null);
+          }}
+        />
+      ) : null}
     </li>
   );
 }

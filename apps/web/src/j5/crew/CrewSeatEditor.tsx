@@ -1,7 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId } from "@t3tools/contracts";
 import type { CrewProposalSeatRuntime, CrewWorkspaceOptions } from "@t3tools/contracts/j5";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { getProviderOptionCurrentValue } from "@t3tools/shared/model";
 
 import { Input } from "../../components/ui/input";
@@ -14,7 +14,6 @@ import {
   SelectValue,
 } from "../../components/ui/select";
 import { Textarea } from "../../components/ui/textarea";
-import { Button } from "../../components/ui/button";
 import { ProviderModelPicker } from "../../components/chat/ProviderModelPicker";
 import { deriveProviderInstanceEntries } from "../../providerInstances";
 import { serverEnvironment } from "../../state/server";
@@ -22,7 +21,6 @@ import { CUSTOM_AGENT, describeSeatAgent } from "./crewProposalDraft";
 import {
   CREW_ACCESS_OPTIONS,
   CREW_WORKSPACE_OPTIONS,
-  chooseCrewSeatPersona,
   chooseCrewSeatWorkspace,
   setCrewSeatBaseRef,
   setCrewSeatStartFromOrigin,
@@ -42,8 +40,8 @@ interface CrewSeatEditorProps {
   /** What the Captain's repository offers a seat's workspace, from the latest preview. */
   readonly workspaceOptions?: CrewWorkspaceOptions | undefined;
   readonly disabled: boolean;
-  readonly existing?: boolean;
-  readonly initialPersonaOpen?: boolean;
+  readonly loadingInstructions?: boolean;
+  readonly onPersonaChange: (personaId: string) => void;
   readonly onMenuOpenChange: (open: boolean) => void;
   readonly onChange: (value: CrewSeatDraft) => void;
 }
@@ -52,50 +50,37 @@ interface CrewSeatEditorProps {
 export function CrewSeatEditor(props: CrewSeatEditorProps) {
   const { value, disabled } = props;
   const custom = value.agentId === CUSTOM_AGENT;
-  const [showInstructions, setShowInstructions] = useState(custom);
-  const changeInstructions = (instructions: string) =>
-    props.onChange({
-      ...value,
-      instructions,
-    });
   return (
-    <div className="grid min-w-0 gap-2">
-      <div className="flex flex-wrap items-center gap-2">
-        {props.existing ? (
-          <h3 className="break-words text-sm font-medium">{value.seat}</h3>
-        ) : (
-          <label className="grid min-w-0 gap-1 text-xs text-muted-foreground">
-            Name
-            <Input
-              aria-label="New seat name"
-              autoFocus
-              value={value.seat}
-              disabled={disabled}
-              placeholder="reviewer"
-              onChange={(event) => props.onChange({ ...value, seat: event.currentTarget.value })}
-            />
-          </label>
-        )}
+    <div className="grid min-w-0 gap-4">
+      <div className="grid grid-cols-2 gap-3">
+        <label className="grid min-w-0 gap-1 text-xs text-muted-foreground">
+          Name
+          <Input
+            aria-label="Member name"
+            autoFocus
+            value={value.seat}
+            disabled={disabled}
+            placeholder="reviewer"
+            onChange={(event) => props.onChange({ ...value, seat: event.currentTarget.value })}
+          />
+        </label>
         <div className="grid min-w-0 gap-1 text-xs text-muted-foreground">
+          <span>Persona</span>
           <Select
             value={value.agentId || null}
-            defaultOpen={props.initialPersonaOpen ?? false}
             onOpenChange={props.onMenuOpenChange}
             disabled={disabled}
-            onValueChange={(agentId) => {
-              if (agentId) {
-                if (agentId === CUSTOM_AGENT) setShowInstructions(true);
-                props.onChange(chooseCrewSeatPersona(value, agentId));
-              }
+            onValueChange={(personaId) => {
+              if (personaId) props.onPersonaChange(personaId);
             }}
           >
-            <SelectTrigger aria-label={`${value.seat || "New seat"} member`}>
+            <SelectTrigger aria-label="Member persona">
               <SelectValue>
-                {custom ? "Custom crew member" : describeSeatAgent(props.agents, value.agentId)}
+                {custom ? "Custom member" : describeSeatAgent(props.agents, value.agentId)}
               </SelectValue>
             </SelectTrigger>
             <SelectPopup align="start" alignItemWithTrigger={false}>
-              <SelectItem value={CUSTOM_AGENT}>Custom crew member</SelectItem>
+              <SelectItem value={CUSTOM_AGENT}>Custom member</SelectItem>
               {props.agents.map((agent) => (
                 <SelectItem key={agent.personaId} value={agent.personaId}>
                   {agent.displayName}
@@ -105,6 +90,23 @@ export function CrewSeatEditor(props: CrewSeatEditorProps) {
           </Select>
         </div>
       </div>
+      <label className="grid gap-1 text-xs text-muted-foreground">
+        Instructions
+        <Textarea
+          aria-label="Member instructions"
+          value={value.instructions}
+          disabled={disabled || props.loadingInstructions}
+          placeholder="What should this member do?"
+          onChange={(event) =>
+            props.onChange({ ...value, instructions: event.currentTarget.value })
+          }
+        />
+      </label>
+      {!custom ? (
+        <p className="text-xs text-muted-foreground">
+          The saved persona remains active. Changes here add guidance for this member only.
+        </p>
+      ) : null}
       {props.environmentId === null ? (
         <p className="text-xs text-muted-foreground">
           Connect to the crew’s environment to choose its runtime.
@@ -113,32 +115,6 @@ export function CrewSeatEditor(props: CrewSeatEditorProps) {
         <CrewSeatRuntimeFields {...props} environmentId={props.environmentId} />
       )}
       <CrewSeatWorkspaceField {...props} />
-      <div>
-        <Button
-          type="button"
-          size="xs"
-          variant="ghost"
-          disabled={disabled}
-          aria-expanded={showInstructions}
-          onClick={() => setShowInstructions((show) => !show)}
-        >
-          Instructions{custom ? " (required)" : ""}
-        </Button>
-        {showInstructions ? (
-          <label className="mt-1 grid gap-1 text-xs text-muted-foreground">
-            {custom ? "What this member should do" : "Additional instructions"}
-            <Textarea
-              aria-label={`${value.seat || "New seat"} instructions`}
-              value={value.instructions}
-              disabled={disabled}
-              placeholder={
-                custom ? "What this crew member should do" : "Additional instructions (optional)"
-              }
-              onChange={(event) => changeInstructions(event.currentTarget.value)}
-            />
-          </label>
-        ) : null}
-      </div>
     </div>
   );
 }
@@ -365,7 +341,7 @@ function CrewSeatRuntimeFields(props: CrewSeatEditorProps & { environmentId: Env
           <SelectTrigger aria-label={`${label} access`}>
             <SelectValue>
               {value.agentId !== CUSTOM_AGENT && props.value.runtimeMode === undefined
-                ? "Persona default"
+                ? (props.runtime?.access ?? "Persona default")
                 : (mode?.label ?? props.runtime?.access ?? "Choose access")}
             </SelectValue>
           </SelectTrigger>
