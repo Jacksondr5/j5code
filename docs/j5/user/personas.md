@@ -42,7 +42,7 @@ An agent can also start a persona as a peer with its own top-level task by namin
 
 ## Crews
 
-A crew is a group of agents that one agent, the Captain, runs as a unit for one piece of work. Ask the agent in your current conversation to put a crew together, using ordinary chat. For example:
+A crew is a group of agents that one agent, the Captain, runs as a unit for one piece of work. Ask the agent in your current conversation to put a crew together, using ordinary chat. The agent decides from the work whether a crew fits: it uses one when the workers must respond to each other, such as a builder and reviewers going back and forth on a change, and hands independent pieces to subagents instead, so the word "crew" in your message doesn't force one. For example:
 
 > Put together a crew to follow @docs/runbooks/release.md for the 2.4 release and report back when the PR is green.
 
