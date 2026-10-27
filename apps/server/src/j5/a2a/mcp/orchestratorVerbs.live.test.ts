@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { GitVcsDriver } from "../../../vcs/GitVcsDriver.ts";
+import { GitManager } from "../../../git/GitManager.ts";
 import * as ProviderLatestVersions from "@t3tools/provider-core/server/ProviderLatestVersions";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import { assert, it } from "@effect/vitest";
@@ -252,6 +253,7 @@ const liveLayer = Layer.mergeAll(
   ),
   Layer.provide(mcpSessionRegistryTestLayer),
   Layer.provide(Layer.mock(GitVcsDriver)({})),
+  Layer.provide(Layer.mock(GitManager)({})),
   Layer.provide(SqlitePersistence.layerMemory),
   Layer.provide(checkpointStoreLayer),
   Layer.provide(serverConfigLayer),

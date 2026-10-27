@@ -1009,6 +1009,7 @@ const handlers = {
             participant_id: member.participantId,
             result: member.result,
           })),
+          worktrees: outcome.worktrees,
         };
       }).pipe(Effect.mapError(archiveCrewFailure)),
   ),
