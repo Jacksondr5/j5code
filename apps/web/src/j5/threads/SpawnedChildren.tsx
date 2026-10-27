@@ -282,7 +282,10 @@ function SpawnedChildGroupRows(
                 </span>
                 <span className="flex items-center gap-1.5 text-2xs text-muted-foreground">
                   {status === null ? (
-                    <span>{seatRunLabel(thread.runtime?.status) ?? "Idle"}</span>
+                    <span>
+                      {(child.seat === null ? null : seatRunLabel(thread.runtime?.status)) ??
+                        "Idle"}
+                    </span>
                   ) : (
                     <>
                       <span aria-hidden className={cn("size-1.5 rounded-full", status.dotClass)} />

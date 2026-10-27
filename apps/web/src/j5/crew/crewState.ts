@@ -55,8 +55,9 @@ export const classifyCrewSeat = (thread: CrewSeatThread | undefined): CrewSeatSt
 };
 
 /**
- * How a seat's last run ended, for its row when upstream's status pill has nothing to say: that pill
- * shows only live states and an unseen completion, so a seat read "Idle" once its end was seen.
+ * How a Crew seat's last run ended, for its row when upstream's status pill has nothing to say: that
+ * pill shows only live states and an unseen completion, so a seat read "Idle" once its end was seen.
+ * Only Crew seats get it; a solo agent's row keeps upstream's quiet "Idle".
  */
 export const seatRunLabel = (status: ThreadRuntimeSummary["status"] | undefined) =>
   status === "failed"

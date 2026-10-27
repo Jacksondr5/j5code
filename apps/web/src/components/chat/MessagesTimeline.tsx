@@ -129,6 +129,7 @@ import {
   useSharedMessageAuthor,
 } from "../../j5/sharing/sharedTimeline";
 import { useCanForkThread } from "../../j5/sharing/access";
+import { withoutHiddenCrewNotices } from "../../j5/crew/crewNotices.logic";
 import { ThreadContextChip } from "../ThreadContextChip";
 import {
   participantIdsForThreadA2ADelivery,
@@ -900,7 +901,9 @@ const ConversationTimeline = memo(function ConversationTimeline({
     supportsConversationRollback,
     worktreeSetup,
   });
-  const rows = useStableRows(rawRows, listIdentityKey);
+  // J5 (case 87): a Crew notice with nothing for the person takes no row, dropped after the rows
+  // are derived so it still bounds the Captain turn it started.
+  const rows = withoutHiddenCrewNotices(useStableRows(rawRows, listIdentityKey));
   // Run status/timestamps churn on every stream event; the shared row context
   // must not change with them or every timeline row re-renders per event.
   const runs = useStableHandoffRuns(runsProp);

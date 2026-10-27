@@ -19,7 +19,7 @@ import { useThreadShell } from "../../state/entities";
 import { environmentServerConfigsAtom } from "../../state/server";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { useConnectionAccess } from "../sharing/access";
-import { useSpawnedChildren } from "../threads/SpawnedChildrenClient";
+import { useIsLiveCrewSeat } from "../threads/SpawnedChildrenClient";
 import {
   presentParticipantIdentity,
   type ParticipantIdentityPresentation,
@@ -600,6 +600,35 @@ function A2ABodyClamp({
   );
 }
 
+/** A Crew seat's provider logo; only compact rows mount it, so only they read the server configs. */
+function SenderProviderIcon(props: {
+  readonly senderThread: ReturnType<typeof useThreadShell>;
+  readonly senderThreadRef: ScopedThreadRef | null;
+}) {
+  const serverConfigs = useAtomValue(environmentServerConfigsAtom);
+  const instanceId =
+    props.senderThread?.runtime?.providerInstanceId ??
+    props.senderThread?.modelSelection.instanceId;
+  const entry =
+    props.senderThreadRef === null || instanceId === undefined
+      ? null
+      : (deriveProviderInstanceEntries(
+          serverConfigs.get(props.senderThreadRef.environmentId)?.providers ?? [],
+        ).find((candidate) => candidate.instanceId === instanceId) ?? null);
+  if (entry === null) return null;
+  return (
+    <ProviderInstanceIcon
+      driverKind={entry.driverKind}
+      displayName={entry.displayName}
+      accentColor={entry.accentColor}
+      acpRegistryAgentId={entry.acpRegistryAgentId}
+      acpRegistryIconUrl={entry.acpRegistryIconUrl}
+      showBadge={false}
+      iconClassName="size-3.5"
+    />
+  );
+}
+
 function PeerDeliveryCard({
   automated = false,
   body,
@@ -636,19 +665,8 @@ function PeerDeliveryCard({
   const isOpen = exchange === "expects-reply";
   const isClosed = exchange === "closed";
   // A message from a seat of a live Crew under this thread is a compact row led by its provider;
-  // a peer outside a Crew, or a seat whose Crew retired, keeps the card.
-  const isCrewSeat = useSpawnedChildren(threadRef).some(
-    (child) => child.participantId === senderId && child.seat !== null,
-  );
-  const serverConfigs = useAtomValue(environmentServerConfigsAtom);
-  const senderInstanceId =
-    senderThread?.runtime?.providerInstanceId ?? senderThread?.modelSelection.instanceId;
-  const providerEntry =
-    isCrewSeat && senderThreadRef !== null && senderInstanceId !== undefined
-      ? (deriveProviderInstanceEntries(
-          serverConfigs.get(senderThreadRef.environmentId)?.providers ?? [],
-        ).find((entry) => entry.instanceId === senderInstanceId) ?? null)
-      : null;
+  // a peer outside a Crew, or a seat whose Crew retired, keeps the card (accepted, #741).
+  const isCrewSeat = useIsLiveCrewSeat(threadRef, senderId);
   return (
     <section
       className={
@@ -661,17 +679,7 @@ function PeerDeliveryCard({
     >
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
         {isCrewSeat ? (
-          providerEntry === null ? null : (
-            <ProviderInstanceIcon
-              driverKind={providerEntry.driverKind}
-              displayName={providerEntry.displayName}
-              accentColor={providerEntry.accentColor}
-              acpRegistryAgentId={providerEntry.acpRegistryAgentId}
-              acpRegistryIconUrl={providerEntry.acpRegistryIconUrl}
-              showBadge={false}
-              iconClassName="size-3.5"
-            />
-          )
+          <SenderProviderIcon senderThread={senderThread} senderThreadRef={senderThreadRef} />
         ) : (
           <span className="inline-flex items-center gap-1 text-muted-foreground">
             <InboxIcon className="size-3.5 shrink-0" aria-hidden />

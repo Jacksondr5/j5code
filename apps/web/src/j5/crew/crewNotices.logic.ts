@@ -1,7 +1,12 @@
 /**
  * The platform's Crew notices as they appear in a Captain's thread, recognized from their tags so
- * the timeline can show a card instead of the raw block. Recognition is strict: a block the
+ * the timeline can show lines instead of the raw block. Recognition is strict: a block the
  * parser does not understand stays raw, and prose is never guessed at.
+ *
+ * The parser reads every field the notices carry, including ones the timeline no longer draws
+ * (crew version, roster changes, a seat's `start`, the handoff path and body). That is deliberate:
+ * the strict parse is what keeps an unreadable block raw, and #742's approval line reads the
+ * decision fields again (#741 review).
  */
 export interface CrewNoticeMessage {
   readonly role: string;
@@ -137,6 +142,8 @@ const parseGate = (text: string): CrewNoticePresentation | null => {
     });
   }
   // `seat_failed: <seat> | <run status> | <error>`; the error may itself contain the separator.
+  // The server always writes an error ("no error detail was recorded" when there is none,
+  // `formatRunFailure`), so a failed seat is never dropped here for an empty one.
   const failures = fields(block, "seat_failed").flatMap((entry) => {
     const [seat, runStatus, ...rest] = entry.split(" | ");
     return seat === undefined || runStatus === undefined || rest.length === 0
@@ -246,17 +253,20 @@ export const presentCrewNotice = (message: CrewNoticeMessage): CrewNoticePresent
 
 export interface CrewNoticeLine {
   readonly seat: string;
+  /** Named only when one notice speaks for several Crews, where a seat name alone is ambiguous. */
+  readonly crewName: string | null;
   /** Null when the seat's thread was never created: the line names it and doesn't link. */
   readonly threadId: string | null;
   readonly reason: string;
   readonly tone: "bad" | "warn";
 }
 
-const handoffLine = (seat: FinishedSeat): CrewNoticeLine | null => {
+const handoffLine = (seat: FinishedSeat, crewName: string | null): CrewNoticeLine | null => {
   const handoff = seat.handoff;
   if (handoff.status === "missing")
     return {
       seat: seat.seat,
+      crewName,
       threadId: seat.threadId,
       reason: `finished · ${handoff.kind} missing`,
       tone: "warn",
@@ -264,6 +274,7 @@ const handoffLine = (seat: FinishedSeat): CrewNoticeLine | null => {
   if (handoff.status === "unavailable")
     return {
       seat: seat.seat,
+      crewName,
       threadId: seat.threadId,
       reason: `finished · ${handoff.kind} can't be read${handoff.reason === null ? "" : `: ${handoff.reason}`}`,
       tone: "warn",
@@ -284,27 +295,33 @@ export const crewNoticeLines = (notice: CrewNoticePresentation): ReadonlyArray<C
     return [
       ...notice.failures.map((failure) => ({
         seat: failure.seat,
+        crewName: null,
         threadId: threadOf(failure.seat),
         reason: `couldn't start · ${failure.detail}`,
         tone: "bad" as const,
       })),
       ...notice.notCreated.map((seat) => ({
         seat: seat.seat,
+        crewName: null,
         threadId: null,
         reason: `was never created · ${seat.detail}`,
         tone: "bad" as const,
       })),
       ...notice.pendingSeats.map((seat) => ({
         seat,
+        crewName: null,
         threadId: threadOf(seat),
         reason: "hasn't confirmed it started",
         tone: "warn" as const,
       })),
     ];
   }
+  // Finishes from several Crews fold into one notice when the Captain commands more than one.
+  const severalCrews = new Set(notice.seats.map((seat) => seat.crewName)).size > 1;
   return notice.seats.flatMap((seat): ReadonlyArray<CrewNoticeLine> => {
+    const crewName = severalCrews ? seat.crewName : null;
     if (seat.runStatus === "completed") {
-      const line = handoffLine(seat);
+      const line = handoffLine(seat, crewName);
       return line === null ? [] : [line];
     }
     const ended =
@@ -314,6 +331,7 @@ export const crewNoticeLines = (notice: CrewNoticePresentation): ReadonlyArray<C
     return [
       {
         seat: seat.seat,
+        crewName,
         threadId: seat.threadId,
         reason: seat.failure === null ? ended : `${ended} · ${seat.failure}`,
         tone: "bad",
@@ -327,6 +345,28 @@ export const isHiddenCrewNotice = (message: CrewNoticeMessage): boolean => {
   const notice = presentCrewNotice(message);
   if (notice === null || (notice.kind === "gate" && notice.decision === "declined")) return false;
   return crewNoticeLines(notice).length === 0;
+};
+
+const visibleRows = new WeakMap<object, ReadonlyArray<object>>();
+
+/**
+ * The timeline's rows without the hidden Crew notices (FORK.md case 87). It runs on rows already
+ * derived, because upstream reads every user message as a turn boundary: dropping a notice before
+ * that would merge the Captain turn it started into the one before. The result is the input when
+ * nothing is hidden and is cached per input, since the list compares its rows by identity.
+ */
+export const withoutHiddenCrewNotices = <Row extends { readonly kind: string }>(
+  rows: Array<Row>,
+): Array<Row> => {
+  const cached = visibleRows.get(rows);
+  if (cached !== undefined) return cached as Array<Row>;
+  const hidden = (row: Row) =>
+    row.kind === "message" &&
+    "message" in row &&
+    isHiddenCrewNotice(row.message as CrewNoticeMessage);
+  const visible = rows.some(hidden) ? rows.filter((row) => !hidden(row)) : rows;
+  visibleRows.set(rows, visible);
+  return visible;
 };
 
 /** A declined gate's card title. */

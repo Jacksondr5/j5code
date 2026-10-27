@@ -96,6 +96,7 @@ function CrewNoticeLines(props: {
                 line.tone === "bad" ? "bg-destructive" : "bg-warning",
               )}
             />
+            {line.crewName === null ? null : <span className="shrink-0">{line.crewName}</span>}
             <span className="shrink-0 font-medium">{line.seat}</span>
             <span className="min-w-0 break-words">{line.reason}</span>
           </>
@@ -105,8 +106,9 @@ function CrewNoticeLines(props: {
           line.tone === "bad" ? "text-destructive-foreground" : "text-warning-foreground",
         );
         const threadId = line.threadId;
+        // A folded notice can carry one seat twice (it failed, was messaged, failed again).
         return (
-          <li key={line.threadId ?? `${line.seat}:${index}`}>
+          <li key={`${line.threadId ?? line.seat}:${index}`}>
             {threadId === null || environmentId === undefined ? (
               <div className={className}>{content}</div>
             ) : (
