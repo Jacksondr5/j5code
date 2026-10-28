@@ -2,6 +2,7 @@ import { expect, it } from "vite-plus/test";
 
 import {
   adjudicationAsks,
+  commandsACrew,
   hasMoreThanExcerpt,
   isAskAlreadyClosed,
   pickShownAsk,
@@ -79,4 +80,12 @@ it("reads the server's closed-ask refusals as already answered and nothing else"
   expect(isAskAlreadyClosed({ code: "A2AAskNotYoursError" })).toBe(false);
   expect(isAskAlreadyClosed(new Error("offline"))).toBe(false);
   expect(isAskAlreadyClosed(null)).toBe(false);
+});
+
+it("pins asks only in a Captain's thread, not a Crew member's or a plain agent's", () => {
+  const crew = { crewInstanceId: "crew-1", crewName: "Steer" };
+  expect(commandsACrew({ kind: "captain", crews: [crew] })).toBe(true);
+  expect(commandsACrew({ kind: "captain", crews: [] })).toBe(false);
+  expect(commandsACrew({ kind: "member", seat: "Builder", crew })).toBe(false);
+  expect(commandsACrew(undefined)).toBe(false);
 });

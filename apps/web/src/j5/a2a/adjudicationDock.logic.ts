@@ -1,3 +1,5 @@
+import type { ThreadCrewMembership } from "@t3tools/contracts/j5";
+
 interface AskLike {
   readonly exchangeId: string;
   readonly senderThreadId: string | null;
@@ -64,3 +66,7 @@ export const isAskAlreadyClosed = (error: unknown): boolean =>
   "code" in error &&
   typeof error.code === "string" &&
   CLOSED_ASK_CODES.has(error.code);
+
+/** Only a Captain's asks are pinned in its thread; every other agent's ask stays in the Inbox. */
+export const commandsACrew = (membership: ThreadCrewMembership | undefined): boolean =>
+  membership?.kind === "captain" && membership.crews.length > 0;
