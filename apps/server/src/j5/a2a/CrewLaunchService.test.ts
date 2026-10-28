@@ -2468,3 +2468,42 @@ it.effect("a persona keeps its own model off the list, until its model is overri
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.scoped),
 );
+
+it.effect(
+  "a persona seat frozen on its fallback route is unchanged while the primary is back",
+  () =>
+    Effect.gen(function* () {
+      const claudeModels = provider("claudeAgent", "claudeAgent", [
+        { slug: "claude-opus-5", options: ["high"] },
+        { slug: "claude-sonnet-5", options: ["high"] },
+      ]);
+      const { layer, captain } = yield* eligibilityFixture({
+        providers: [codexModels("gpt-5.6-sol"), claudeModels],
+        settings: { crewMemberModels: [] },
+      });
+      yield* Effect.gen(function* () {
+        const launcher = yield* CrewLaunchService;
+        const persona = {
+          workspace: { type: "shared" as const },
+          name: "builder",
+          agentId: "builder",
+          reason: "Builds",
+          runtimeMode: "approval-required" as const,
+        };
+        const claude = (model: string) => ({
+          instanceId: ProviderInstanceId.make("claudeAgent"),
+          model,
+          options: [{ id: "effort", value: "high" }],
+        });
+        // The primary (Codex) resolves again, but the card froze the fallback (Claude) route.
+        const [fallback] = yield* launcher.resolveSeats(captain, [
+          { ...persona, modelSelection: claude("claude-opus-5") },
+        ]);
+        assert.equal(fallback!.modelSelection.model, "claude-opus-5");
+        const refused = yield* launcher
+          .resolveSeats(captain, [{ ...persona, modelSelection: claude("claude-sonnet-5") }])
+          .pipe(Effect.flip);
+        assert.equal(refused._tag, "CrewLaunchModelNotEligibleError");
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
+);

@@ -426,26 +426,25 @@ export const layer = Layer.effect(
               ...(seat.runtimeMode === undefined ? {} : { runtimeModeOverride: seat.runtimeMode }),
             };
           }
-          // Editing any field on the roster card freezes the persona's model into the seat, so a
-          // seat counts as keeping the persona's model by comparing it, never by its absence.
-          const personaModel = yield* prepareAgentPersonaLaunch(
-            { personaId: agentId },
-            providers,
-            agents,
-          ).pipe(
-            Effect.map(({ resolvedModelSelection }) => resolvedModelSelection),
-            Effect.orElseSucceed(() => null),
-          );
+          const catalog = yield* agents.catalog();
+          const definition = catalog.definitions.find(({ id }) => id === agentId);
+          // Editing any field on the roster card freezes the model it showed into the seat, and
+          // that is the fallback route when the primary's provider was signed out at proposal
+          // time. A seat counts as keeping the persona's model by matching either route, never by
+          // its absence.
+          const frozen = seat.modelSelection;
+          const frozenDriver = providers.find(
+            (candidate) => candidate.instanceId === frozen.instanceId,
+          )?.driver;
           const keepsPersonaModel =
-            personaModel?.instanceId === seat.modelSelection.instanceId &&
-            personaModel.model === seat.modelSelection.model;
+            definition?.modelRoute.some(
+              (target) => target.driver === frozenDriver && target.model === frozen.model,
+            ) ?? false;
           const { modelSelection, provider } = yield* resolveSelection(
             seat,
             seat.modelSelection,
             !keepsPersonaModel,
           );
-          const catalog = yield* agents.catalog();
-          const definition = catalog.definitions.find(({ id }) => id === agentId);
           if (definition === undefined || catalog.disabledIds.includes(agentId))
             return yield* new CrewLaunchSeatUnavailableError({
               seatName: seat.name,
