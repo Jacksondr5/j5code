@@ -90,6 +90,17 @@ describe("crew notices in the Captain's thread", () => {
     expect(read(approvedGate)).toBeNull();
   });
 
+  it("names the approver in the approval summary only when the notice carries one", () => {
+    const summary = (text: string) => {
+      const notice = presentCrewNotice({ role: "user", createdBy: "system", text });
+      return notice === null ? null : crewApprovalSummary(notice);
+    };
+    expect(
+      summary(approvedGate.replace("decision: approved", "decision: approved\ndecided_by: Priya")),
+    ).toBe("Crew approved · 2 members · by Priya");
+    expect(summary(approvedGate)).toBe("Crew approved · 2 members");
+  });
+
   it("still presents a launch notice that names the playbook its Crew follows", () => {
     const text = approvedGate.replace("roster:", "playbook: review | Review a change\nroster:");
     expect(presentCrewNotice({ role: "user", createdBy: "system", text })).toEqual(

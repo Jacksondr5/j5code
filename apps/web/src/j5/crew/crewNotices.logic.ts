@@ -340,12 +340,16 @@ export const crewNoticeLines = (notice: CrewNoticePresentation): ReadonlyArray<C
   });
 };
 
-/** The stored launch report records the approved members, including ones never created. */
+/**
+ * The stored launch report records the approved members, including ones never created. The
+ * approver is named when the notice carries one, which only a shared conversation's does.
+ */
 export const crewApprovalSummary = (notice: CrewNoticePresentation): string | null => {
   if (notice.kind !== "gate" || notice.decision !== "approved" || notice.requestKind !== "roster")
     return null;
   const count = notice.roster.length + notice.notCreated.length;
-  return `Crew approved · ${count} ${count === 1 ? "member" : "members"}`;
+  const by = notice.decidedBy ? ` · by ${notice.decidedBy}` : "";
+  return `Crew approved · ${count} ${count === 1 ? "member" : "members"}${by}`;
 };
 
 /** Completed finishes and successful additions take no row in the timeline. */

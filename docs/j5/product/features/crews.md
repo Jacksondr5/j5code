@@ -88,7 +88,7 @@ The platform ships the machinery — propose, gate, spawn, render, remind, notif
 
 ### State
 
-22. A Crew's row on the Fleet page and its Captain's expander in the sidebar summarize the seats' states from measured facts (running, failed, needing a person, settled, unknown); a seat's own row reads Failed, Interrupted, or Completed from its last run rather than Idle; idle seats are the unspoken default, and no state is inferred from silence. In the Captain's timeline, a roster approval shows “Crew approved · N members”; launch reports and finish notices otherwise show a line only for a seat that needs attention. A clean finish adds no line.
+22. A Crew's row on the Fleet page and its Captain's expander in the sidebar summarize the seats' states from measured facts (running, failed, needing a person, settled, unknown); a seat's own row reads Failed, Interrupted, or Completed from its last run rather than Idle; idle seats are the unspoken default, and no state is inferred from silence. In the Captain's timeline, a roster approval shows “Crew approved · N members”, plus “· by <name>” in a shared conversation, where more than one person could have approved it; launch reports and finish notices otherwise show a line only for a seat that needs attention. A clean finish adds no line.
 
 ### Several people
 
