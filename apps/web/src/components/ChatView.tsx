@@ -48,6 +48,7 @@ import {
   TYPE_TO_FOCUS_EDITABLE_SELECTOR,
   TYPE_TO_FOCUS_FLOATING_LAYER_SELECTOR,
 } from "./chat/composerFocusRedirect";
+import { AdjudicationDock } from "../j5/a2a/AdjudicationDock";
 import { CrewRosterGate } from "../j5/crew/CrewRosterGate";
 import { useCanOperateThread } from "../j5/sharing/access";
 import { sharedMessageTypedText } from "../j5/sharing/sharedTimeline";
@@ -8396,6 +8397,11 @@ export default function ChatView(props: ChatViewProps) {
                                   <>
                                     <CrewRosterGate
                                       key={`crew:${activeThread.environmentId}:${activeThread.id}`}
+                                      environmentId={activeThread.environmentId}
+                                      threadId={activeThread.id}
+                                    />
+                                    <AdjudicationDock
+                                      key={`ask:${activeThread.environmentId}:${activeThread.id}`}
                                       environmentId={activeThread.environmentId}
                                       threadId={activeThread.id}
                                     />
