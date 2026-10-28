@@ -2522,6 +2522,39 @@ it.effect(
     }).pipe(Effect.scoped),
 );
 
+it.effect("a persona seat on either route's level is unchanged; another level is checked", () =>
+  Effect.gen(function* () {
+    const { layer, captain } = yield* eligibilityFixture({
+      providers: [
+        codexModels("gpt-5.6-sol"),
+        provider("claudeAgent", "claudeAgent", [
+          { slug: "claude-opus-5", options: ["high", "low"] },
+        ]),
+      ],
+      settings: { crewMemberReasoning: [] },
+    });
+    yield* Effect.gen(function* () {
+      const launcher = yield* CrewLaunchService;
+      const seat = (level: string) => ({
+        workspace: { type: "shared" as const },
+        name: "builder",
+        agentId: "builder",
+        reason: "Builds",
+        runtimeMode: "approval-required" as const,
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("claudeAgent"),
+          model: "claude-opus-5",
+          options: [{ id: "effort", value: level }],
+        },
+      });
+      yield* launcher.resolveSeats(captain, [seat("high")]);
+      const refused = yield* launcher.resolveSeats(captain, [seat("low")]).pipe(Effect.flip);
+      assert.equal(refused._tag, "CrewLaunchModelNotEligibleError");
+      assert.include(refused.message, "Reasoning level low");
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
 const codexLevel = (level: string) => ({ instanceId: ProviderInstanceId.make("codex"), level });
 const solAt = (value: string) => ({ ...sol, options: [{ id: "reasoningEffort", value }] });
 const terraAt = (value: string) => ({ ...terra, options: [{ id: "reasoningEffort", value }] });
