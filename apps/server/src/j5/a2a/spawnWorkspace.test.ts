@@ -77,6 +77,7 @@ const checkout = (
   worktrees: [{ path: "/repo-worktrees/feature", branch: "fix/login" }],
   localBranchNames: ["j5/main", "taken"],
   missingBaseRefs: [],
+  baseCommits: [],
   ...overrides,
 });
 
@@ -1629,6 +1630,7 @@ it.effect("refuses a base ref git can't resolve before anything is created", () 
         isRepo: true,
         refName: "j5/main",
         missingRefs: ["no-such-ref", "only-on-origin"],
+        origin: { "only-on-origin": "0".repeat(40) },
       },
     });
     yield* Effect.gen(function* () {
