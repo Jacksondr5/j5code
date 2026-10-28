@@ -2,7 +2,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { presentAgentPersonaCatalog } from "@t3tools/client-runtime/j5/agent-personas";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { PlusIcon, UsersIcon } from "lucide-react";
-import { useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../../components/ui/tooltip";
 import { useParticipantLabels } from "../a2a/ParticipantIdentitiesClient";
@@ -11,6 +11,7 @@ import { j5Environment } from "../state";
 import { useEnvironmentQuery } from "../../state/query";
 import { agentPersonaEnvironment } from "../agents/agentPersonaAtoms";
 import type { CrewProposal, CrewProposalSeat } from "./crewProposalsClient";
+import { readCrewProposalDraft, saveCrewProposalDraft } from "./crewProposalDraftStore";
 import { crewProposalRows, crewProposalRoster, newCrewProposalRow } from "./crewProposalDraft";
 import { describePersonaSwap, removedSeatSteps, stepTitle, unownedSteps } from "./crewPlaybookPlan";
 import { CrewProposalMemberDialog } from "./CrewProposalMemberDialog";
@@ -57,11 +58,25 @@ export function CrewProposalCard(props: {
     proposal.captainThreadId as ThreadId,
   );
   const canResolve = permitted && writesToCaptain;
-  const [rows, setRows] = useState(() => crewProposalRows(proposal.requestedSeats));
+  const [rows, setRows] = useState(
+    () =>
+      readCrewProposalDraft(props.environmentId, proposal.id) ??
+      crewProposalRows(proposal.requestedSeats),
+  );
+  useEffect(
+    () => saveCrewProposalDraft(props.environmentId, proposal.id, rows),
+    [props.environmentId, proposal.id, rows],
+  );
   const [editing, setEditing] = useState<CrewProposalRow | null>(null);
   const [fullBrief, setFullBrief] = useState(false);
   const briefId = useId();
-  const nextRow = useRef(0);
+  const nextRow = useRef(
+    rows.reduce(
+      (next, row) =>
+        row.id.startsWith("added:") ? Math.max(next, Number(row.id.slice(6)) + 1) : next,
+      0,
+    ),
+  );
   const addButton = useRef<HTMLButtonElement>(null);
   const editorTrigger = useRef<HTMLButtonElement | null>(null);
   const catalog = useEnvironmentQuery(

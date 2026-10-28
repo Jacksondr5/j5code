@@ -54,6 +54,8 @@ vi.mock("../../state/use-atom-command", () => ({ useAtomCommand: () => state.rea
 
 import { CrewProposalCard } from "./CrewProposalCard";
 import { CrewRosterGate } from "./CrewRosterGate";
+import { clearCrewProposalDraft } from "./crewProposalDraftStore";
+import { resolveCrewProposal } from "./crewProposalsClient";
 import { ThreadId } from "@t3tools/contracts";
 
 const codexProvider: ServerProvider = {
@@ -148,6 +150,7 @@ beforeEach(() => {
     }),
   );
   resolve.mockReset();
+  clearCrewProposalDraft(EnvironmentId.make("test"), proposal.id);
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -501,4 +504,63 @@ it("switches provider with its model defaults and keeps the model menu scoped to
       model: "haiku",
     }),
   );
+});
+
+it("restores saved roster edits when the card returns, for that proposal only", async () => {
+  const environmentId = EnvironmentId.make("draft-restore");
+  await render({ environmentId });
+  await click(button("Edit seat builder"));
+  await input("Member instructions", "Edited before the composer asked a question");
+  await click(button("Save changes"));
+  await click(button("Remove seat reviewer"));
+  await act(async () => root.render(null));
+
+  await render({ environmentId });
+  expect(container.querySelectorAll('[data-testid^="crew-member-"]')).toHaveLength(1);
+  await click(approve());
+  expect(resolve.mock.calls[0]?.[1]).toEqual([
+    expect.objectContaining({ instructions: "Edited before the composer asked a question" }),
+  ]);
+
+  await act(async () => root.render(null));
+  await render({ environmentId, proposal: { ...proposal, id: "proposal:2" } });
+  expect(container.querySelectorAll('[data-testid^="crew-member-"]')).toHaveLength(2);
+  await act(async () => root.render(null));
+  await render({ environmentId: EnvironmentId.make("other-draft-environment") });
+  expect(container.querySelectorAll('[data-testid^="crew-member-"]')).toHaveLength(2);
+});
+
+it("a new member added after a restore does not reuse an earlier added row", async () => {
+  const environmentId = EnvironmentId.make("draft-added-rows");
+  const addMember = async (name: string) => {
+    await click(button("Add crew member"));
+    await input("Member name", name);
+    await input("Member instructions", `${name} instructions`);
+    await click(button("Add member"));
+  };
+  await render({ environmentId });
+  await addMember("first");
+  await act(async () => root.render(null));
+  await render({ environmentId });
+  await addMember("second");
+  expect(container.querySelectorAll('[data-testid^="crew-member-"]')).toHaveLength(4);
+});
+
+it("drops a proposal's saved edits once it is approved or declined", async () => {
+  const environmentId = EnvironmentId.make("draft-resolved");
+  const gate = (
+    <CrewRosterGate environmentId={environmentId} threadId={ThreadId.make("captain-thread")} />
+  );
+  await act(async () => root.render(gate));
+  await click(button("Expand Crew proposal"));
+  await click(button("Remove seat reviewer"));
+  await act(async () => root.render(null));
+  await act(async () => root.render(gate));
+  expect(container.querySelectorAll('[data-testid^="crew-member-"]')).toHaveLength(1);
+
+  await click(approve());
+  expect(resolveCrewProposal).toHaveBeenCalledTimes(1);
+  await act(async () => root.render(null));
+  await act(async () => root.render(gate));
+  expect(container.querySelectorAll('[data-testid^="crew-member-"]')).toHaveLength(2);
 });

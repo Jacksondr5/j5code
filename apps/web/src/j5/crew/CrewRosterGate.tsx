@@ -6,6 +6,7 @@ import { useEnvironmentQuery } from "../../state/query";
 import { notifyHumanInboxChanged } from "../a2a/humanInboxRefresh";
 import { crewProposalsQueryAtom } from "../state";
 import { CrewProposalCard } from "./CrewProposalCard";
+import { clearCrewProposalDraft } from "./crewProposalDraftStore";
 import { rosterGatesForThread } from "./crewProposals.logic";
 import {
   refreshCrewProposals,
@@ -51,6 +52,7 @@ export function CrewRosterGate(props: {
             ? { proposalId: proposal.id, decision, seats, approvalToken: approvalToken! }
             : { proposalId: proposal.id, decision },
         );
+        clearCrewProposalDraft(environmentId, proposal.id);
         notifyHumanInboxChanged(environmentId);
         await refreshCrewProposals(environmentId).catch(() => undefined);
       } catch (cause) {
