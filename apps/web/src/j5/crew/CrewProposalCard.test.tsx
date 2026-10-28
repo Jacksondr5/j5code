@@ -564,3 +564,43 @@ it("drops a proposal's saved edits once it is approved or declined", async () =>
   await act(async () => root.render(gate));
   expect(container.querySelectorAll('[data-testid^="crew-member-"]')).toHaveLength(2);
 });
+
+const instructionsBox = () =>
+  document.querySelector<HTMLTextAreaElement>('[aria-label="Member instructions"]')!.value;
+
+it("an edited persona text replaces the persona's and returns when the member is reopened", async () => {
+  const environmentId = EnvironmentId.make("persona-replace");
+  await render({ environmentId });
+  await click(button("Edit seat reviewer"));
+  expect(instructionsBox()).toBe("sentry default instructions");
+  await input("Member instructions", "Only review the auth code.");
+  await click(button("Save changes"));
+  expect(container.textContent).toContain("Edited");
+  await act(async () => root.render(null));
+
+  await render({ environmentId });
+  await click(button("Edit seat reviewer"));
+  expect(instructionsBox()).toBe("Only review the auth code.");
+  await click(button("Cancel"));
+  await click(approve());
+  const seat = resolve.mock.calls[0]?.[1][1];
+  expect(seat).toEqual({
+    ...proposal.requestedSeats[1],
+    personaInstructions: "Only review the auth code.",
+  });
+  expect(seat).not.toHaveProperty("instructions");
+});
+
+it("Reset to persona text restores the persona's own and sends no replacement", async () => {
+  await render();
+  await click(button("Edit seat reviewer"));
+  expect(button("Reset to persona text")).toBeUndefined();
+  await input("Member instructions", "Something else entirely.");
+  await click(button("Reset to persona text"));
+  expect(instructionsBox()).toBe("sentry default instructions");
+  expect(button("Reset to persona text")).toBeUndefined();
+  await click(button("Save changes"));
+  expect(container.textContent).not.toContain("Edited");
+  await click(approve());
+  expect(resolve.mock.calls[0]?.[1][1]).toEqual(proposal.requestedSeats[1]);
+});

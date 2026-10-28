@@ -21,6 +21,7 @@ export const addSeat = (
     return { seats, error: "Pick a persona for the seat, or Custom crew member." };
   const custom = draft.agentId === CUSTOM_AGENT;
   const instructions = draft.instructions.trim();
+  const personaInstructions = draft.personaInstructions?.trim();
   // A custom seat has no persona; its instructions are all it will know beyond the brief.
   if (custom && instructions.length === 0)
     return { seats, error: "Give the custom crew member its instructions." };
@@ -32,6 +33,7 @@ export const addSeat = (
         agentId: custom ? null : draft.agentId,
         reason: "Added by the user",
         ...(instructions ? { instructions } : {}),
+        ...(!custom && personaInstructions ? { personaInstructions } : {}),
         ...(draft.modelSelection ? { modelSelection: draft.modelSelection } : {}),
         ...(draft.runtimeMode ? { runtimeMode: draft.runtimeMode } : {}),
         // A seat the person adds starts in the Captain's checkout until they choose otherwise.
@@ -130,6 +132,7 @@ const comparableDraft = (draft: CrewSeatDraft) =>
     draft.seat,
     draft.agentId,
     draft.instructions.trim(),
+    draft.personaInstructions?.trim() ?? null,
     draft.modelSelection === undefined
       ? null
       : [
@@ -154,13 +157,30 @@ export const crewProposalRowChange = (row: CrewProposalRow): "Added" | "Edited" 
       ? null
       : "Edited";
 
-/** Persona text is supplied at launch; only member-specific guidance needs sending again. */
+/**
+ * What the instructions box saves as. A persona member's box holds the persona's whole text, so an
+ * edit replaces the persona's instructions and drops the extra ones the box already contained;
+ * a box left as seeded keeps exactly what the seat had, and a box reset to the persona's text
+ * sends nothing.
+ */
 export const crewMemberInstructions = (
-  instructions: string,
-  personaInstructions: string | null,
-) => {
-  if (personaInstructions === null) return instructions;
-  if (instructions === personaInstructions) return "";
-  const prefix = `${personaInstructions}\n\n`;
-  return instructions.startsWith(prefix) ? instructions.slice(prefix.length).trim() : instructions;
+  box: string,
+  persona: string | null,
+  seed: {
+    readonly text: string;
+    readonly instructions: string;
+    readonly personaInstructions?: string | undefined;
+  } | null,
+): { readonly instructions: string; readonly personaInstructions?: string } => {
+  if (persona === null) return { instructions: box };
+  const text = box.trim();
+  if (text === persona.trim()) return { instructions: "" };
+  if (seed !== null && text === seed.text.trim())
+    return {
+      instructions: seed.instructions,
+      ...(seed.personaInstructions === undefined
+        ? {}
+        : { personaInstructions: seed.personaInstructions }),
+    };
+  return { instructions: "", personaInstructions: text };
 };

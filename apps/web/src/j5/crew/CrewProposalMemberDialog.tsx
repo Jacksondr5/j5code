@@ -40,18 +40,19 @@ export function CrewProposalMemberDialog(props: {
 }) {
   const [value, setValue] = useState(props.row.value);
   const [personaInstructions, setPersonaInstructions] = useState<string | null>(null);
+  const [seed, setSeed] = useState<Parameters<typeof crewMemberInstructions>[2]>(null);
   const [loadedPersona, setLoadedPersona] = useState<string | null>(null);
   const [personaError, setPersonaError] = useState<string | null>(null);
   const read = useAtomCommand(agentPersonaEnvironment.readAgentPersona, { reportFailure: false });
   const personaId = value.agentId;
   const custom = personaId === CUSTOM_AGENT;
   const loadingPersona = !custom && loadedPersona !== personaId;
-  const initialInstructions = useEffectEvent(() => value.instructions);
+  const currentDraft = useEffectEvent(() => value);
 
   useEffect(() => {
     if (custom || props.environmentId === null || personaError !== null) return;
     let current = true;
-    const extra = initialInstructions();
+    const { instructions: extra, personaInstructions: edited } = currentDraft();
     void read({ environmentId: props.environmentId, input: { personaId } }).then(
       (result) => {
         if (!current) return;
@@ -61,11 +62,10 @@ export function CrewProposalMemberDialog(props: {
           return;
         }
         const instructions = result.value.definition.instructions;
+        const text = edited ?? (extra ? `${instructions}\n\n${extra}` : instructions);
         setPersonaInstructions(instructions);
-        setValue((draft) => ({
-          ...draft,
-          instructions: extra ? `${instructions}\n\n${extra}` : instructions,
-        }));
+        setSeed({ text, instructions: extra, personaInstructions: edited });
+        setValue((draft) => ({ ...draft, instructions: text }));
         setLoadedPersona(personaId);
         setPersonaError(null);
       },
@@ -79,8 +79,11 @@ export function CrewProposalMemberDialog(props: {
     };
   }, [custom, personaId, props.environmentId, read, personaError]);
 
-  const instructions = crewMemberInstructions(value.instructions, personaInstructions);
-  const saved = { ...value, instructions };
+  const { personaInstructions: _edited, ...rest } = value;
+  const saved: CrewSeatDraft = {
+    ...rest,
+    ...crewMemberInstructions(value.instructions, personaInstructions, seed),
+  };
   const roster = crewProposalRoster([
     ...props.rows.filter((row) => row.id !== props.row.id),
     { ...props.row, value: saved },
@@ -147,6 +150,7 @@ export function CrewProposalMemberDialog(props: {
             onMenuOpenChange={() => undefined}
             onPersonaChange={(agentId) => {
               setPersonaInstructions(null);
+              setSeed(null);
               setLoadedPersona(null);
               setPersonaError(null);
               const agent = props.agents.find((agent) => agent.personaId === agentId);
@@ -156,6 +160,19 @@ export function CrewProposalMemberDialog(props: {
               }));
             }}
           />
+          {personaInstructions !== null &&
+          value.instructions.trim() !== personaInstructions.trim() ? (
+            <Button
+              className="mt-2"
+              size="xs"
+              type="button"
+              variant="link"
+              disabled={props.disabled}
+              onClick={() => setValue((draft) => ({ ...draft, instructions: personaInstructions }))}
+            >
+              Reset to persona text
+            </Button>
+          ) : null}
           {loadingPersona && !personaError ? (
             <p className="mt-3 text-xs text-muted-foreground" role="status">
               Loading persona instructions…

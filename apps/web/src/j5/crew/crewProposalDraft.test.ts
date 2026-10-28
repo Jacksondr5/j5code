@@ -198,10 +198,25 @@ it("keeps useful validation for multiple unnamed additions", () => {
   ]);
 });
 
-it("does not duplicate saved persona instructions or strip an edited prefix", () => {
-  const base = "Review independently.";
-  expect(crewMemberInstructions(base, base)).toBe("");
-  expect(crewMemberInstructions(`${base}\n\nCheck auth.`, base)).toBe("Check auth.");
-  expect(crewMemberInstructions(`${base} Also test.`, base)).toBe(`${base} Also test.`);
-  expect(crewMemberInstructions("Custom instructions", null)).toBe("Custom instructions");
+it("saves a persona member's box as a replacement only when it was edited", () => {
+  const persona = "Review independently.";
+  const seeded = { text: `${persona}\n\nCheck auth.`, instructions: "Check auth." };
+  // Left as seeded, the seat keeps exactly what it had.
+  expect(crewMemberInstructions(seeded.text, persona, seeded)).toEqual({
+    instructions: "Check auth.",
+  });
+  // Back at the persona's own text, nothing is sent.
+  expect(crewMemberInstructions(persona, persona, seeded)).toEqual({ instructions: "" });
+  // Any other text replaces the persona's instructions; the extra ones it held are not sent twice.
+  expect(crewMemberInstructions(`${persona} Also test.`, persona, seeded)).toEqual({
+    instructions: "",
+    personaInstructions: `${persona} Also test.`,
+  });
+  expect(crewMemberInstructions("Only read the docs.", persona, seeded)).toEqual({
+    instructions: "",
+    personaInstructions: "Only read the docs.",
+  });
+  expect(crewMemberInstructions("Custom instructions", null, null)).toEqual({
+    instructions: "Custom instructions",
+  });
 });
