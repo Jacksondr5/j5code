@@ -11,7 +11,7 @@ Archiving an agent is where obligations get stranded: the agent that was owed a 
 
 ## Definition
 
-Archiving sets an agent aside, and a person can bring it back. It **never destroys work**: branches and pull requests survive, and so does every worktree that holds unfinished work. Archiving one agent removes nothing; archiving a Crew removes only the clean, merged worktrees J5 created for its seats ([Crews](crews.md) AC19), and cleaning up any other is a separate act. It is **loud**: every open Exchange the agent holds ends with a notice to the waiter, and every fact that archiving will change is shown before it happens.
+Archiving sets an agent aside, and a person can bring it back. It **never destroys work**: branches and pull requests survive, and so does every worktree that holds unfinished work until a person approves its removal. Archiving one agent removes nothing; archiving a Crew removes only the clean, merged worktrees J5 created for its seats ([Crews](crews.md) AC19), and files one Inbox item for the ones it kept with uncommitted or unmerged work, which the person answers ([Inbox](inbox.md) AC18–AC22). It is **loud**: every open Exchange the agent holds ends with a notice to the waiter, and every fact that archiving will change is shown before it happens.
 
 Before the dialog appears, the platform reads the facts: the agent's open asks in both directions, and the agents placed beneath it. A fact it could not read is shown as "couldn't check" — never as an empty, reassuring list.
 
@@ -45,7 +45,7 @@ Archiving is **not** deleting, **not** a way to archive a single Crew member, an
 6. Every waiter on an ended Exchange receives a platform notice rendered as a muted notice line in its thread.
 7. The person's inbox items from the archived agent leave immediately, with no terminal row.
 8. The archived agent leaves the active sidebar and the Fleet page, is hidden from the agents' address book unless archived agents are asked for, and cannot receive a message or an ask; its ledger and conversation remain readable.
-9. Archiving an agent deletes no worktree, branch, or pull request. Archiving a Crew, including through its Captain, deletes no branch or pull request, and removes a worktree only as [Crews](crews.md) AC19 allows, after the Captain's own archive, which upstream's sidebar performs, has committed; that archive itself removes nothing. Before a Captain's archive or Archive crew, the dialog lists the seat worktrees it would remove and those it would keep with the reason, labeled as an estimate, or says it couldn't check.
+9. Archiving an agent deletes no worktree, branch, or pull request. Archiving a Crew, including through its Captain, deletes no branch or pull request, and removes a worktree only as [Crews](crews.md) AC19 allows, or after the person approves it in the Inbox item the archive files for worktrees kept with unfinished work ([Inbox](inbox.md) AC18–AC22), after the Captain's own archive, which upstream's sidebar performs, has committed; that archive itself removes nothing. Before a Captain's archive or Archive crew, the dialog lists the seat worktrees it would remove and those it would keep with the reason, labeled as an estimate, or says it couldn't check.
 
 ### Boundaries
 
@@ -74,3 +74,4 @@ Archiving is **not** deleting, **not** a way to archive a single Crew member, an
 - 2026-09-22 — an archive touches one agent: the dialog names the agents beneath it as ones that keep running, not as ones it archives (#254, option A; Bryant).
 - 2026-10-07 — Squadrons retired: an agent's project is upstream's and never changes, so unarchiving has no home to restore, and there is no Squadron to archive (Jackson, 2026-10-05; [#412](https://github.com/Jacksondr5/j5code/issues/412)).
 - 2026-10-27 — archiving a Crew removes the clean, merged worktrees J5 created for its seats; the dialog lists what would go and what would stay; AC9 and the definition rewritten ([#748](https://github.com/Jacksondr5/j5code/issues/748); Crews proposal v2).
+- 2026-10-27 — the worktrees a Crew archive keeps with unfinished work are filed as one Inbox approval; AC9 and the definition rewritten ([#749](https://github.com/Jacksondr5/j5code/issues/749)).
