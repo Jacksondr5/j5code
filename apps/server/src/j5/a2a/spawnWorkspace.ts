@@ -19,6 +19,7 @@ import * as Schema from "effect/Schema";
 
 import type { CrewWorkspaceOptions } from "@t3tools/contracts/j5";
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
+import * as GitVcsDriver from "../../vcs/GitVcsDriver.ts";
 import {
   CommandReceiptStoreV2,
   type CommandReceiptStoreV2Error,
@@ -50,6 +51,9 @@ export const GitRefName = Schema.String.check(
   Schema.isPattern(GIT_REF_PATTERN, { message: GIT_REF_MESSAGE }),
 );
 
+/** A full commit id as it is printed. */
+const COMMIT_SHA_PATTERN = /^[0-9a-f]{40,64}$/;
+
 /** A worktree path with its trailing separators dropped, so `/repo/wt/` matches git's `/repo/wt`. */
 export const worktreePathKey = (path: string) => path.replace(/[\\/]+$/, "");
 
@@ -67,6 +71,7 @@ export const SpawnWorkspaceChoice = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("worktree"),
     baseRef: GitRefName,
+    baseCommit: Schema.optionalKey(Schema.String.check(Schema.isPattern(COMMIT_SHA_PATTERN))),
     branch: Schema.optionalKey(GitRefName),
     startFromOrigin: Schema.optionalKey(Schema.Boolean),
   }),
@@ -79,15 +84,21 @@ export type ResolvedSpawnWorkspace =
   | {
       readonly type: "worktree";
       readonly baseRef: string;
+      /** The commit the worktree starts from; always set when a Crew seat resolves. */
+      readonly baseCommit?: string;
       readonly branch?: string;
       readonly startFromOrigin: boolean;
     }
   | { readonly type: "existing_worktree"; readonly worktreePath: string; readonly branch: string };
 
-/** A base ref as a caller named it; from origin, its fetched remote-tracking copy also counts. */
+/**
+ * A base ref as a caller named it; from origin, its fetched remote-tracking copy also counts.
+ * `commit` is the pin an earlier acceptance saved, which is checked instead of the ref.
+ */
 export interface SpawnBaseRef {
   readonly ref: string;
   readonly startFromOrigin: boolean;
+  readonly commit?: string | undefined;
 }
 
 /** The existing worktrees a set of choices name, for `inspect` to read live. */
@@ -102,7 +113,13 @@ export const namedBaseRefs = (
 ): ReadonlyArray<SpawnBaseRef> =>
   choices.flatMap((choice) =>
     choice.type === "worktree"
-      ? [{ ref: choice.baseRef, startFromOrigin: choice.startFromOrigin ?? false }]
+      ? [
+          {
+            ref: choice.baseRef,
+            startFromOrigin: choice.startFromOrigin ?? false,
+            commit: choice.baseCommit,
+          },
+        ]
       : [],
   );
 
@@ -127,6 +144,8 @@ export type SpawnCheckout =
       readonly localBranchNames: ReadonlyArray<string>;
       /** Base refs a caller named that git can't resolve to a commit, as they were asked for. */
       readonly missingBaseRefs: ReadonlyArray<SpawnBaseRef>;
+      /** The commit each base ref that resolved means now, or the saved pin that still exists. */
+      readonly baseCommits: ReadonlyArray<SpawnBaseRef & { readonly sha: string }>;
     }
   | { readonly readable: false; readonly problem: string };
 
@@ -160,6 +179,17 @@ export const resolveSpawnWorkspace = (
           (ref) => ref !== undefined && (ref.length > 255 || !GIT_REF_PATTERN.test(ref)),
         )
       : undefined;
+  if (
+    choice.type === "worktree" &&
+    choice.baseCommit !== undefined &&
+    !COMMIT_SHA_PATTERN.test(choice.baseCommit)
+  )
+    return Result.fail(
+      new SpawnWorkspaceError({
+        detail: `The saved base commit ${JSON.stringify(choice.baseCommit)} is not a full commit id.`,
+        nextStep: "Edit the member's base to a branch, tag, or commit that exists.",
+      }),
+    );
   if (badRef !== undefined)
     return Result.fail(
       new SpawnWorkspaceError({
@@ -199,18 +229,22 @@ export const resolveSpawnWorkspace = (
       branch: found.branch,
     });
   }
-  if (
-    checkout.missingBaseRefs.some(
-      (missing) =>
-        missing.ref === choice.baseRef &&
-        missing.startFromOrigin === (choice.startFromOrigin ?? false),
-    )
-  )
+  const startFromOrigin = choice.startFromOrigin ?? false;
+  const sameBase = (base: SpawnBaseRef) =>
+    base.ref === choice.baseRef &&
+    base.startFromOrigin === startFromOrigin &&
+    base.commit === choice.baseCommit;
+  if (checkout.missingBaseRefs.some(sameBase))
     return Result.fail(
-      new SpawnWorkspaceError({
-        detail: `Base ref '${choice.baseRef}' doesn't resolve to a commit in this repository${choice.startFromOrigin === true ? ", locally or as a fetched origin branch" : ""}.`,
-        nextStep: "Name an existing branch, tag, or commit for workspace.base_ref.",
-      }),
+      choice.baseCommit === undefined
+        ? new SpawnWorkspaceError({
+            detail: `Base ref '${choice.baseRef}' doesn't resolve to a commit in this repository${startFromOrigin ? ", locally or as a fetched origin branch" : ""}.`,
+            nextStep: "Name an existing branch, tag, or commit for workspace.base_ref.",
+          })
+        : new SpawnWorkspaceError({
+            detail: `Base commit ${choice.baseCommit.slice(0, 8)} (from '${choice.baseRef}') is no longer in this repository.`,
+            nextStep: "Edit the member's base to a commit that exists, or decline.",
+          }),
     );
   if (choice.branch !== undefined && checkout.localBranchNames.includes(choice.branch))
     return Result.fail(
@@ -220,11 +254,13 @@ export const resolveSpawnWorkspace = (
           "Choose a different workspace.branch, or omit it and let the server name the branch.",
       }),
     );
+  const baseCommit = checkout.baseCommits.find(sameBase)?.sha;
   return Result.succeed({
     type: "worktree",
     baseRef: choice.baseRef,
+    ...(baseCommit === undefined ? {} : { baseCommit }),
     ...(choice.branch === undefined ? {} : { branch: choice.branch }),
-    startFromOrigin: choice.startFromOrigin ?? false,
+    startFromOrigin,
   });
 };
 
@@ -369,6 +405,7 @@ const BRANCH_PAGE = 100;
 const make = Effect.gen(function* () {
   const projects = yield* ProjectService;
   const git = yield* GitWorkflowService;
+  const driver = yield* GitVcsDriver.GitVcsDriver;
   const receipts = yield* CommandReceiptStoreV2;
   const launcher = yield* ThreadLaunchService;
   const threads = yield* ThreadManagementService;
@@ -420,6 +457,31 @@ const make = Effect.gen(function* () {
     };
   });
 
+  /**
+   * The commit a base means, from where the caller works: its saved pin while that commit exists,
+   * else the ref now. From origin, the commit is origin's, fetched now as preparation would, so
+   * the pin is what a later preparation would have started from; with no such origin branch it is
+   * the local ref. Null when nothing resolves; no other revision is tried.
+   */
+  const resolveBase = (cwd: string, base: SpawnBaseRef) =>
+    Effect.gen(function* () {
+      if (base.commit !== undefined)
+        return (yield* git.hasCommit({ cwd, refName: base.commit })) ? base.commit : null;
+      if (base.startFromOrigin && (yield* git.remoteExists({ cwd, remoteName: "origin" }))) {
+        yield* git.fetchRemote({ cwd, remoteName: "origin", refName: base.ref });
+        if (yield* git.remoteBranchExists({ cwd, remoteName: "origin", refName: base.ref }))
+          return (yield* git.resolveRemoteTrackingCommit({
+            cwd,
+            refName: base.ref,
+            fallbackRemoteName: "origin",
+          })).commitSha;
+      }
+      return yield* driver.resolveCommit({ cwd, revision: base.ref }).pipe(
+        Effect.map(({ commitSha }) => commitSha),
+        Effect.catch(() => Effect.succeed(null)),
+      );
+    });
+
   const inspect: SpawnWorkspaceServiceShape["inspect"] = (caller) =>
     Effect.gen(function* () {
       const workspaceRoot = yield* projectRoot(caller.projectId);
@@ -441,21 +503,19 @@ const make = Effect.gen(function* () {
             )
           : Effect.succeed(worktree),
       );
-      const missingBaseRefs = yield* Effect.filter(caller.baseRefs, (base) =>
-        git.hasCommit({ cwd, refName: base.ref }).pipe(
-          Effect.flatMap((found) =>
-            found || !base.startFromOrigin
-              ? Effect.succeed(found)
-              : git.hasCommit({ cwd, refName: `refs/remotes/origin/${base.ref}` }),
-          ),
-          Effect.map((found) => !found),
-        ),
+      const bases = yield* Effect.forEach(caller.baseRefs, (base) =>
+        resolveBase(cwd, base).pipe(Effect.map((sha) => ({ base, sha }))),
+      );
+      const missingBaseRefs = bases.flatMap(({ base, sha }) => (sha === null ? [base] : []));
+      const baseCommits = bases.flatMap(({ base, sha }) =>
+        sha === null ? [] : [{ ...base, sha }],
       );
       return {
         readable: true,
         worktrees,
         localBranchNames: caller.checkBranches ? yield* git.listLocalBranchNames(cwd) : [],
         missingBaseRefs,
+        baseCommits,
       } satisfies SpawnCheckout;
     }).pipe(
       Effect.catch((cause) =>
