@@ -13,6 +13,7 @@ import {
   ThreadId,
   type OrchestrationV2StoredEvent,
   type OrchestrationV2ThreadProjection,
+  type TerminalSummary,
 } from "@t3tools/contracts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as DateTime from "effect/DateTime";
@@ -43,6 +44,7 @@ import * as ProviderTurnStart from "../../orchestration-v2/ProviderTurnStartServ
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { runMigrations } from "../../persistence/Migrations.ts";
 import { ProjectService } from "../../project/ProjectService.ts";
+import * as TerminalManager from "../../terminal/Manager.ts";
 import * as GitVcsDriver from "../../vcs/GitVcsDriver.ts";
 import { CrewWorktrees, manualLayer } from "./CrewWorktrees.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
@@ -62,7 +64,8 @@ interface SeatThread {
 /**
  * A real repository with a real default branch fetched from a real remote, real worktrees, and
  * the real git driver. Only what J5 reads from elsewhere is given: the threads, the other threads
- * bound to a path, the open provider sessions, and what the host says about pull requests.
+ * bound to a path, the registered projects, the open terminals and provider sessions, and what
+ * the host says about pull requests.
  */
 const fixture = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
@@ -93,6 +96,8 @@ const fixture = Effect.gen(function* () {
   const threads = new Map<ThreadId, SeatThread>();
   let otherBoundPaths: Array<{ threadId: ThreadId; worktreePath: string }> = [];
   let sessionLive = true;
+  let otherProjectRoots: Array<string> = [];
+  let openTerminals: Array<Pick<TerminalSummary, "cwd" | "worktreePath" | "status">> = [];
   let pullRequest: unknown = null;
   let pullRequestFails = false;
   const pullRequestLookups: Array<string> = [];
@@ -112,6 +117,17 @@ const fixture = Effect.gen(function* () {
         }),
         Layer.mock(ProjectService)({
           getById: () => Effect.succeed(Option.some({ workspaceRoot: repo } as never)),
+          listShells: () =>
+            Effect.succeed(
+              [repo, ...otherProjectRoots].map((workspaceRoot) => ({ workspaceRoot }) as never),
+            ),
+        }),
+        Layer.mock(TerminalManager.TerminalManager)({
+          subscribeMetadata: (listener) =>
+            listener({
+              type: "snapshot",
+              terminals: openTerminals.map((terminal) => ({ ...terminal }) as TerminalSummary),
+            }).pipe(Effect.as(() => {})),
         }),
         Layer.mock(ProjectionStoreV2)({
           getThreadWorktreePaths: () =>
@@ -208,6 +224,9 @@ const fixture = Effect.gen(function* () {
     metadataUpdated,
     invalidated,
     pullRequestLookups,
+    bound,
+    setProjectRoots: (roots: typeof otherProjectRoots) => (otherProjectRoots = roots),
+    setTerminals: (terminals: typeof openTerminals) => (openTerminals = terminals),
     setOtherBoundPaths: (paths: typeof otherBoundPaths) => (otherBoundPaths = paths),
     setSession: (cwd: string | null, live = true) => {
       sessionLive = live;
@@ -386,28 +405,78 @@ it.effect("keeps a worktree whose pull request merged a different commit", () =>
   ),
 );
 
-it.effect(
-  "keeps a worktree another unarchived thread is bound to, and ignores the Crew's own seats",
-  () =>
-    run(
-      Effect.gen(function* () {
-        const f = yield* fixture;
-        const shared = yield* f.seat("shared");
-        const alone = yield* f.seat("alone");
-        f.setOtherBoundPaths([
-          { threadId: ThreadId.make("thread:crew-worktrees:other"), worktreePath: shared.worktree },
-        ]);
-        const result = yield* cleanup(f, [shared, alone]);
-        assert.deepStrictEqual(
-          result.map((entry) => [entry.outcome, entry.reason]),
-          [
-            ["kept", "shared"],
-            ["removed", null],
-          ],
-        );
-        assert.isTrue(yield* f.fs.exists(shared.worktree));
-      }),
-    ),
+it.effect("keeps a worktree another unarchived thread is bound to", () =>
+  run(
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      const shared = yield* f.seat("shared");
+      const alone = yield* f.seat("alone");
+      f.setOtherBoundPaths([
+        { threadId: ThreadId.make("thread:crew-worktrees:other"), worktreePath: shared.worktree },
+      ]);
+      const result = yield* cleanup(f, [shared, alone]);
+      assert.deepStrictEqual(
+        result.map((entry) => [entry.outcome, entry.reason]),
+        [
+          ["kept", "shared"],
+          ["removed", null],
+        ],
+      );
+      assert.isTrue(yield* f.fs.exists(shared.worktree));
+    }),
+  ),
+);
+
+it.effect("keeps a worktree that is a project's root, or holds one", () =>
+  run(
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      const opened = yield* f.seat("opened");
+      const holder = yield* f.seat("holder");
+      const free = yield* f.seat("free");
+      f.setProjectRoots([opened.worktree, f.path.join(holder.worktree, "packages", "app")]);
+      const result = yield* cleanup(f, [opened, holder, free]);
+      assert.deepStrictEqual(
+        result.map((entry) => [entry.outcome, entry.reason]),
+        [
+          ["kept", "shared"],
+          ["kept", "shared"],
+          ["removed", null],
+        ],
+      );
+      assert.isTrue(yield* f.fs.exists(opened.worktree));
+      assert.isTrue(yield* f.fs.exists(holder.worktree));
+      assert.isFalse(yield* f.fs.exists(free.worktree));
+    }),
+  ),
+);
+
+it.effect("keeps a worktree a terminal is open in, but not one that has exited", () =>
+  run(
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      const bound = yield* f.seat("bound-terminal");
+      const nested = yield* f.seat("nested-terminal");
+      const exited = yield* f.seat("exited-terminal");
+      const elsewhere = yield* f.seat("elsewhere-terminal");
+      f.setTerminals([
+        { cwd: f.root, worktreePath: bound.worktree, status: "running" },
+        { cwd: f.path.join(nested.worktree, "packages"), worktreePath: null, status: "starting" },
+        { cwd: exited.worktree, worktreePath: exited.worktree, status: "exited" },
+        { cwd: f.root, worktreePath: null, status: "running" },
+      ]);
+      const result = yield* cleanup(f, [bound, nested, exited, elsewhere]);
+      assert.deepStrictEqual(
+        result.map((entry) => [entry.outcome, entry.reason]),
+        [
+          ["kept", "in_use"],
+          ["kept", "in_use"],
+          ["removed", null],
+          ["removed", null],
+        ],
+      );
+    }),
+  ),
 );
 
 it.effect("keeps a worktree a live provider session is open in, or in a folder of it", () =>
@@ -522,6 +591,28 @@ it.effect("estimates what the archive would do without changing anything", () =>
       );
       assert.isTrue(yield* f.fs.exists(clean.worktree));
       assert.deepStrictEqual(f.invalidated, []);
+    }),
+  ),
+);
+
+it.effect("estimates the same keeps the removal would make for a project root or a terminal", () =>
+  run(
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      const opened = yield* f.seat("opened", { archived: false });
+      const typing = yield* f.seat("typing", { archived: false });
+      f.setProjectRoots([opened.worktree]);
+      f.setTerminals([{ cwd: typing.worktree, worktreePath: null, status: "running" }]);
+      const estimate = yield* f.service.estimate({
+        crews: [{ crewInstanceId: "crew:one", seats: [opened, typing] }],
+      });
+      assert.deepStrictEqual(
+        estimate.map((entry) => [entry.seat, entry.verdict, entry.reason]),
+        [
+          ["opened", "keep", "shared"],
+          ["typing", "keep", "in_use"],
+        ],
+      );
     }),
   ),
 );

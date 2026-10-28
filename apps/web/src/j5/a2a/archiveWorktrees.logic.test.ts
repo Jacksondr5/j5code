@@ -33,7 +33,7 @@ describe("archive worktree estimate", () => {
       ]),
     ).toEqual([
       ["critic", "has commits that aren't merged"],
-      ["tester", "a session is open in it"],
+      ["tester", "a session or terminal is open in it"],
     ]);
   });
 

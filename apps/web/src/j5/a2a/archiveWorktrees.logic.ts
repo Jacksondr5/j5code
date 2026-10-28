@@ -4,8 +4,8 @@ import type { CrewArchiveWorktreeEstimate, CrewWorktreeReason } from "@t3tools/c
 export const worktreeReasonLabel: Record<CrewWorktreeReason, string> = {
   uncommitted_changes: "has uncommitted changes",
   unmerged_commits: "has commits that aren't merged",
-  shared: "another thread uses it",
-  in_use: "a session is open in it",
+  shared: "another thread or project uses it",
+  in_use: "a session or terminal is open in it",
   unverified: "couldn't be checked",
   failed: "couldn't be removed",
 };

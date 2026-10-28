@@ -22,6 +22,7 @@ import * as PreviewBrowser from "../../preview/PreviewBrowser.ts";
 import { GitVcsDriver } from "../../vcs/GitVcsDriver.ts";
 import { GitManager } from "../../git/GitManager.ts";
 import { ProviderSessionManagerV2 } from "../../orchestration-v2/ProviderSessionManager.ts";
+import { TerminalManager } from "../../terminal/Manager.ts";
 import { ManagedProjectFolders } from "../../project/ManagedProjectFolders.ts";
 import { PreviewManager } from "../../preview/Manager.ts";
 import { PullRequestReviewGuideService } from "../../pullRequest/PullRequestReviewGuideService.ts";
@@ -130,6 +131,7 @@ const measureNestedRuntimeBuilds = (nested: "http" | "mcp") =>
           Layer.provide(Layer.mock(GitVcsDriver)({})),
           Layer.provide(Layer.mock(GitManager)({})),
           Layer.provide(Layer.mock(ProviderSessionManagerV2)({})),
+          Layer.provide(Layer.mock(TerminalManager)({})),
           Layer.provide(Layer.mock(EnvironmentAuth)({})),
           Layer.provide(
             Layer.mock(ServerEnvironment)({
@@ -274,6 +276,7 @@ it.effect("shares one runtime and outbox across the production HTTP and MCP regi
                 Layer.mock(GitVcsDriver)({}),
                 Layer.mock(GitManager)({}),
                 Layer.mock(ProviderSessionManagerV2)({}),
+                Layer.mock(TerminalManager)({}),
                 Layer.mock(ManagedProjectFolders)({ namedProjectsRoot: "/unused" }),
                 Layer.mock(PreviewManager)({}),
                 Layer.mock(PullRequestReviewGuideService)({}),

@@ -335,7 +335,8 @@ participant, so no Captain check applies to it (Bryant, 2026-09-14).
 members are never retired one by one. A clean archive completes immediately; otherwise the call
 refuses with the facts and a confirmation_token. Before retrying with that token, check with the
 user. Archiving removes the worktrees J5 created for the Crew's seats when they are clean, merged,
-unshared and unused, keeps every branch and pull request, and lists the rest with their reasons.
+unshared (no other thread or project uses it) and unused (no session or terminal is open in it),
+keeps every branch and pull request, and lists the rest with their reasons.
 Reuse client_request_id to retry safely."
 
 | Input                | Type              | Required | Meaning                                              |
@@ -350,7 +351,7 @@ seat on a new worktree, with its `path`, `branch`, an `outcome` of `removed`, `k
 a `reason` (`uncommitted_changes`, `unmerged_commits`, `shared`, `in_use`, `unverified`, or
 `failed`) unless removed. The removal runs after every seat is archived and the Crew is marked
 archived, never fails the archive, and runs again when an archived Crew is archived again, so a
-worktree kept because a session was still open can be retried once it closes. Semantics: only the Captain — the participant that launched the
+worktree kept because a session or terminal was still open can be retried once it closes. Semantics: only the Captain — the participant that launched the
 Crew — may archive it (R19); anyone else is refused and pointed at asking the Captain. Facts are
 read for every member before anything happens. If any member has an open Exchange or a running
 turn, the call refuses with a per-seat list (`members[].open_exchanges`, `members[].running_turn`,

@@ -1,6 +1,7 @@
 import {
   OrchestrationV2ProviderSessionJson,
   type OrchestrationV2StoredEvent,
+  type TerminalSummary,
   type ThreadId,
 } from "@t3tools/contracts";
 import {
@@ -19,6 +20,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import * as GitManager from "../../git/GitManager.ts";
@@ -27,6 +29,7 @@ import * as ProviderSessionManager from "../../orchestration-v2/ProviderSessionM
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { ProjectService } from "../../project/ProjectService.ts";
 import { storageCleanupPullRequestMerged } from "../../storageCleanup.ts";
+import * as TerminalManager from "../../terminal/Manager.ts";
 import * as GitVcsDriver from "../../vcs/GitVcsDriver.ts";
 import { withWorkspaceLease } from "../../workspace/workspaceLease.ts";
 import { readEventStoreHighWater } from "./eventStoreHighWater.ts";
@@ -67,7 +70,8 @@ export interface CrewWorktreesShape {
   readonly handleStoredEvent: (event: OrchestrationV2StoredEvent) => Effect.Effect<boolean>;
   /**
    * The cleanup after a Crew's archive commits: each recorded worktree of an archived seat is
-   * removed when it is clean, merged, unshared and unused, and kept with its reason otherwise.
+   * removed when it is clean, merged, unshared (no other thread or project uses it) and unused (no
+   * session or terminal is open in it), and kept with its reason otherwise.
    * Never fails: a problem checking or removing one worktree is that worktree's outcome, and a
    * problem reading the records leaves the whole pass empty and logged.
    */
@@ -101,8 +105,10 @@ const makeLayer = (daemon: boolean) =>
       const providerSessions = yield* ProviderSessionManager.ProviderSessionManagerV2;
       const git = yield* GitVcsDriver.GitVcsDriver;
       const gitManager = yield* GitManager.GitManager;
+      const terminals = yield* TerminalManager.TerminalManager;
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
+      const isWindows = yield* HostProcess.isWindows;
 
       const handleStoredEvent: CrewWorktreesShape["handleStoredEvent"] = (stored) =>
         Effect.gen(function* () {
@@ -145,7 +151,7 @@ const makeLayer = (daemon: boolean) =>
           ),
         );
 
-      /** Another unarchived thread bound to this path; the Crew's own seats are being archived. */
+      /** Another unarchived thread bound to this path; `own` are seats about to be archived, which only the estimate has. */
       const sharedWithOthers = (worktreePath: string, own: ReadonlySet<ThreadId>) =>
         projections
           .getThreadWorktreePaths()
@@ -157,6 +163,60 @@ const makeLayer = (daemon: boolean) =>
               ),
             ),
           );
+
+      const pathKey = (target: string) => {
+        const resolved = path.resolve(target);
+        return isWindows ? resolved.toLowerCase() : resolved;
+      };
+
+      /**
+       * Some project's root is this worktree or a folder of it. A project opened at a seat's
+       * worktree has threads with no worktree path, so the thread bindings cannot see it. This is
+       * storage cleanup's own guard, which keeps its helper private.
+       */
+      const containsProjectRoot = Effect.fnUntraced(function* (worktreePath: string) {
+        const key = pathKey(worktreePath);
+        const within = (target: string) => {
+          const relative = path.relative(key, pathKey(target));
+          return (
+            relative === "" ||
+            (relative !== ".." &&
+              !relative.startsWith(`..${path.sep}`) &&
+              !path.isAbsolute(relative))
+          );
+        };
+        for (const project of yield* projects.listShells()) {
+          const root = path.resolve(project.workspaceRoot);
+          if (within(root)) return true;
+          const real = yield* fs.realPath(root).pipe(Effect.orElseSucceed(() => root));
+          if (within(real)) return true;
+        }
+        return false;
+      });
+
+      /**
+       * A terminal still starting or running in the worktree or a folder of it. The terminal
+       * manager has no list call, so this takes the snapshot a subscription opens with and lets go.
+       */
+      const terminalOpenIn = Effect.fnUntraced(function* (worktreePath: string) {
+        let open: ReadonlyArray<TerminalSummary> = [];
+        const unsubscribe = yield* terminals.subscribeMetadata((event) =>
+          Effect.sync(() => {
+            if (event.type === "snapshot") open = event.terminals;
+          }),
+        );
+        unsubscribe();
+        return open.some((terminal) => {
+          if (terminal.status !== "starting" && terminal.status !== "running") return false;
+          const cwd = path.resolve(terminal.cwd);
+          return (
+            (terminal.worktreePath !== null &&
+              path.resolve(terminal.worktreePath) === worktreePath) ||
+            cwd === worktreePath ||
+            cwd.startsWith(`${worktreePath}${path.sep}`)
+          );
+        });
+      });
 
       /** A provider session still open in the worktree or a folder of it. */
       const sessionOpenIn = Effect.fnUntraced(function* (worktreePath: string) {
@@ -268,9 +328,12 @@ const makeLayer = (daemon: boolean) =>
         // A linked worktree's `.git` is a file; a directory is a whole checkout, never ours to remove.
         if ((yield* fs.stat(path.join(worktreePath, ".git"))).type !== "File")
           return { kind: "keep", reason: "unverified" } satisfies Verdict;
-        if (yield* sharedWithOthers(worktreePath, context.own))
+        if (
+          (yield* sharedWithOthers(worktreePath, context.own)) ||
+          (yield* containsProjectRoot(worktreePath))
+        )
           return { kind: "keep", reason: "shared" } satisfies Verdict;
-        if (yield* sessionOpenIn(worktreePath))
+        if ((yield* sessionOpenIn(worktreePath)) || (yield* terminalOpenIn(worktreePath)))
           return { kind: "keep", reason: "in_use" } satisfies Verdict;
         if (yield* hasBlockingChanges(worktreePath))
           return { kind: "keep", reason: "uncommitted_changes" } satisfies Verdict;
