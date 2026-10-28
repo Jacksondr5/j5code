@@ -11,7 +11,7 @@ Archiving an agent is where obligations get stranded: the agent that was owed a 
 
 ## Definition
 
-Archiving sets an agent aside, and a person can bring it back. It **never destroys work**: branches and pull requests survive, and so does every worktree that holds unfinished work until a person approves its removal. Archiving one agent removes nothing; archiving a Crew removes only the clean, merged worktrees J5 created for its seats ([Crews](crews.md) AC19), and files one Inbox item for the ones it kept with uncommitted or unmerged work, which the person answers ([Inbox](inbox.md) AC18–AC22). It is **loud**: every open Exchange the agent holds ends with a notice to the waiter, and every fact that archiving will change is shown before it happens.
+Archiving sets an agent aside, and a person can bring it back. It **never destroys work**: branches and pull requests survive, and so does every worktree that holds unfinished work until a person approves its removal. Archiving one agent removes nothing; archiving a Crew removes only the clean, merged worktrees J5 created for its seats ([Crews](crews.md) AC19), and files one Inbox item for the ones it kept with uncommitted or unmerged work, where the person removes all, the ones they pick, or none ([Inbox](inbox.md) AC18–AC22). It is **loud**: every open Exchange the agent holds ends with a notice to the waiter, and every fact that archiving will change is shown before it happens.
 
 Before the dialog appears, the platform reads the facts: the agent's open asks in both directions, and the agents placed beneath it. A fact it could not read is shown as "couldn't check" — never as an empty, reassuring list.
 
