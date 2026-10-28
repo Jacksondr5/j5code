@@ -76,7 +76,7 @@ it("has members run their own review loops and reach the Captain only for a pass
   );
   assert.include(
     text,
-    "Message your Captain only for: a review pass, which names the commit or change you reviewed so the Captain can tell it refers to the current code; a blocker, which names what you need; or a disagreement you could not settle with the teammate. Send no acknowledgments and no progress updates.",
+    "Message your Captain only for: a review pass, which names the commit or change you reviewed so the Captain can tell it refers to the current code; a blocker, which names what you need; a disagreement you could not settle with the teammate; or your final result or step report. Send no acknowledgments and no progress updates.",
   );
 });
 

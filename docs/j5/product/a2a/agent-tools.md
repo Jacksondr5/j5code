@@ -226,8 +226,8 @@ Each seat keeps its configured access and tool approvals, which may exceed yours
 crew's Captain and may command several crews at once; later requests, stops, and archives name the
 crew they mean. Use j5_send_message for member-to-member, member-to-Captain, and Captain-to-Captain
 coordination, including findings and direct results; artifacts do not gate these conversations.
-Members run their own review loops and message you only for a review pass, a blocker, or a
-disagreement they could not settle; you resolve technical disagreements within the agreed scope and
+Members run their own review loops and message you only for a review pass, a blocker, a
+disagreement they could not settle, or their final result or step report; you resolve technical disagreements within the agreed scope and
 ask the user only when product intent or their judgment is needed. Reuse client_request_id to retry
 safely; a changed request is refused, so use a fresh one for new work. This tool works under every sandbox and approval policy, including approval policy never;
 never refuse the brief because approvals are disabled."

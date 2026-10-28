@@ -164,7 +164,7 @@ describe("J5 orchestration instructions", () => {
     assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "until no finding is unresolved");
     assert.include(
       J5_ORCHESTRATION_INSTRUCTIONS,
-      "only for a review pass that names the commit or change it reviewed, a blocker that names what is needed, or a disagreement the members could not settle",
+      "only for a review pass that names the commit or change it reviewed, a blocker that names what is needed, a disagreement the members could not settle, or its final result or step report",
     );
     assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "no acknowledgments or progress updates");
     assert.include(
