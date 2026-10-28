@@ -1,10 +1,19 @@
 import * as CrewTurnContext from "../j5/a2a/CrewTurnContext.ts";
+import * as Crews from "../j5/a2a/AgentCrewInstanceService.ts";
+import { participantIdForThread } from "../j5/a2a/HomeRegistrar.ts";
+import { A2ALedger, layer as ledgerLayer } from "../j5/a2a/LedgerService.ts";
+import { runJ5A2AMigrations } from "../j5/a2a/Migrations.ts";
+import { LedgerProjectId } from "../j5/a2a/contracts.ts";
+import { spawnFirstTurnText } from "../j5/a2a/spawnIds.ts";
+import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it, vi } from "vite-plus/test";
 import { it as effectIt } from "@effect/vitest";
 import {
   CheckpointScopeId,
   ContextHandoffId,
+  EventId,
   MessageId,
   NodeId,
   ProviderSessionId,
@@ -1099,6 +1108,8 @@ const makeCodexResumeSchemaFailure = Effect.fn("makeCodexResumeSchemaFailure")(f
 function makeNativeResumeHarness(input: {
   readonly crewDelivery?: CrewTurnContext.CrewTurnContext["Service"];
   readonly keepNativeThread?: boolean;
+  /** Builds history handoffs with the real service instead of a canned summary. */
+  readonly realHandoffs?: boolean;
   readonly text?: string;
   readonly resumeThread: (
     ids: NativeResumeIds,
@@ -1175,24 +1186,26 @@ function makeNativeResumeHarness(input: {
     ),
     Layer.provide(
       Layer.mergeAll(
-        Layer.mock(ContextHandoffService.ContextHandoffServiceV2)({
-          prepareProviderHandoff: (handoff) =>
-            Effect.succeed({
-              id: ContextHandoffId.make("handoff-native-resume-fallback"),
-              transferId: handoff.transferId,
-              threadId: handoff.threadId,
-              targetRunId: handoff.targetRunId,
-              fromProviderThreadIds: handoff.fromProviderThreadIds,
-              toProviderThreadId: handoff.toProviderThreadId,
-              coveredRunOrdinals: handoff.coveredRunOrdinals,
-              strategy: handoff.strategy,
-              status: "ready",
-              summaryMessageId: null,
-              summaryText: "summary",
-              createdByProviderInstanceId: handoff.toProviderInstanceId,
-              createdAt: handoff.createdAt,
-            } as never),
-        }),
+        input.realHandoffs === true
+          ? ContextHandoffService.layer.pipe(Layer.provide(IdAllocator.layer))
+          : Layer.mock(ContextHandoffService.ContextHandoffServiceV2)({
+              prepareProviderHandoff: (handoff) =>
+                Effect.succeed({
+                  id: ContextHandoffId.make("handoff-native-resume-fallback"),
+                  transferId: handoff.transferId,
+                  threadId: handoff.threadId,
+                  targetRunId: handoff.targetRunId,
+                  fromProviderThreadIds: handoff.fromProviderThreadIds,
+                  toProviderThreadId: handoff.toProviderThreadId,
+                  coveredRunOrdinals: handoff.coveredRunOrdinals,
+                  strategy: handoff.strategy,
+                  status: "ready",
+                  summaryMessageId: null,
+                  summaryText: "summary",
+                  createdByProviderInstanceId: handoff.toProviderInstanceId,
+                  createdAt: handoff.createdAt,
+                } as never),
+            }),
         Layer.mock(EventSink.EventSinkV2)({
           write: ({ events: incoming }) =>
             Effect.sync(() => {
@@ -1258,6 +1271,21 @@ function makeNativeResumeHarness(input: {
     startRootRun,
     nativeStartTurn,
     events,
+    /** The person pressed Stop: the run is no longer the attempt that may reach the provider. */
+    stop: () => {
+      const stopped = projection.runs.find((candidate) => candidate.id === run.id)!;
+      commit([
+        {
+          id: EventId.make("event:stop-before-send"),
+          type: "run.updated",
+          threadId: projection.thread.id,
+          runId: run.id,
+          providerInstanceId: run.providerInstanceId,
+          occurredAt: projection.thread.updatedAt,
+          payload: { ...stopped, status: "interrupted" },
+        } as OrchestrationV2DomainEvent,
+      ]);
+    },
     projection: () => projection,
     start: (options?: { readonly willRetry: boolean }) =>
       Effect.gen(function* () {
@@ -1522,10 +1550,12 @@ effectIt.effect(
         keepNativeThread: true,
         resumeThread: () => Effect.die("retained native conversation"),
         crewDelivery: {
-          deliver: (_threadId, text, send) =>
+          isSeat: () => Effect.succeed(true),
+          steering: (session) => session as never,
+          deliver: (delivery, send) =>
             Effect.gen(function* () {
               order.push("context");
-              const result = yield* send(`Crew introduction\n\n${text}`);
+              const result = yield* send(`Crew introduction\n\n${delivery.text}`);
               order.push("accepted");
               return result;
             }),
@@ -1547,4 +1577,151 @@ effectIt.effect(
       );
       expect(order).toEqual(["context", "provider", "accepted"]);
     }),
+);
+
+// The Crew seat context is real here: SQLite, the Crew service, and the real history handoff service.
+const crewDatabase = NodeSqliteClient.layer({ filename: ":memory:" });
+const crewServices = Layer.mergeAll(
+  crewDatabase,
+  Crews.layer.pipe(Layer.provide(crewDatabase)),
+  ledgerLayer.pipe(Layer.provide(crewDatabase)),
+);
+
+const recordSeat = (seatThreadId: ThreadId, options: { readonly seat?: boolean } = {}) =>
+  Effect.gen(function* () {
+    yield* runJ5A2AMigrations();
+    const sql = yield* SqlClient.SqlClient;
+    if (options.seat === false) return;
+    const projectId = LedgerProjectId.make("project:crew-start");
+    const captainThreadId = ThreadId.make("thread:captain");
+    yield* (yield* A2ALedger).ensureProject({
+      projectId,
+      createdAt: "2026-10-27T12:00:00.000Z",
+    });
+    yield* (yield* Crews.AgentCrewInstanceService).record({
+      id: "crew:start",
+      projectId,
+      captainThreadId,
+      captainParticipantId: participantIdForThread(captainThreadId),
+      displayName: "Start crew",
+      brief: "Shared goal",
+      createdAt: "2026-10-27T12:00:00.000Z",
+      members: [
+        {
+          seatName: "builder",
+          agentId: null,
+          threadId: seatThreadId,
+          participantId: participantIdForThread(seatThreadId),
+          reason: "Build the fix",
+        },
+      ],
+    });
+    const text = spawnFirstTurnText({
+      brief: "Shared goal",
+      participantId: participantIdForThread(seatThreadId),
+      projectId,
+      projectTitle: "Project",
+      spawnedByParticipantId: participantIdForThread(captainThreadId),
+      crew: {
+        displayName: "Start crew",
+        instanceId: "crew:start",
+        seatName: "builder",
+        captainParticipantId: participantIdForThread(captainThreadId),
+        roster: [],
+      },
+    });
+    yield* sql`INSERT INTO j5_crew_seat_context (thread_id, first_turn_text, workspace)
+      VALUES (${seatThreadId}, ${text}, '{"type":"shared"}')`;
+  });
+
+/** Starts one turn through the real seat context and sends the text the start requests. */
+const startCrewTurn = (input: {
+  readonly crewDelivery: CrewTurnContext.CrewTurnContext["Service"];
+  readonly resumeGone?: boolean;
+  readonly stopBeforeSend?: boolean;
+}) =>
+  Effect.gen(function* () {
+    const harness = makeNativeResumeHarness({
+      text: "Build the fix.",
+      crewDelivery: input.crewDelivery,
+      realHandoffs: true,
+      ...(input.resumeGone === true
+        ? { resumeThread: nativeThreadGone }
+        : {
+            keepNativeThread: true,
+            resumeThread: () => Effect.die("retained native conversation"),
+          }),
+    });
+    yield* harness.start();
+    if (input.stopBeforeSend === true) harness.stop();
+    const requested = harness.startRootRun.mock.calls[0]![0];
+    yield* requested.session.startTurn({
+      message: { text: "Build the fix.", attachments: [] },
+    } as never);
+    return { harness, requested, sent: harness.nativeStartTurn.mock.calls[0]?.[0].message.text };
+  });
+
+const seatThread = harnessThreadId();
+function harnessThreadId() {
+  return makeLocalCommandHarness({ text: "x", previousMessages: [] }).projection().thread.id;
+}
+
+effectIt.effect("a Stop before the provider send leaves the Crew introduction owed", () =>
+  Effect.gen(function* () {
+    yield* recordSeat(seatThread);
+    const crewDelivery = yield* CrewTurnContext.CrewTurnContext;
+    const stopped = yield* startCrewTurn({ crewDelivery, stopBeforeSend: true });
+    expect(stopped.harness.nativeStartTurn).not.toHaveBeenCalled();
+    const sql = yield* SqlClient.SqlClient;
+    const owed = yield* sql<{
+      readonly delivered_roster: string | null;
+    }>`SELECT delivered_roster FROM j5_crew_seat_context WHERE thread_id = ${seatThread}`;
+    expect(owed[0]!.delivered_roster).toBeNull();
+    const retry = yield* startCrewTurn({ crewDelivery });
+    expect(retry.sent).toContain("<spawner_brief>\nShared goal\n</spawner_brief>");
+    expect(retry.sent).toMatch(/Build the fix\.$/);
+  }).pipe(
+    Effect.provide(
+      Layer.mergeAll(crewServices, CrewTurnContext.layer.pipe(Layer.provide(crewServices))),
+    ),
+  ),
+);
+
+effectIt.effect(
+  "the Crew introduction is sent again on a replaced provider conversation, not on an unchanged one",
+  () =>
+    Effect.gen(function* () {
+      yield* recordSeat(seatThread);
+      const crewDelivery = yield* CrewTurnContext.CrewTurnContext;
+      const first = yield* startCrewTurn({ crewDelivery });
+      expect(first.sent).toContain("<spawner_brief>");
+      const unchanged = yield* startCrewTurn({ crewDelivery });
+      expect(unchanged.sent).toBe("Build the fix.");
+      const replaced = yield* startCrewTurn({ crewDelivery, resumeGone: true });
+      expect(replaced.harness.projection().contextHandoffs).toHaveLength(1);
+      expect(replaced.sent).toContain("<spawner_brief>\nShared goal\n</spawner_brief>");
+      expect(replaced.sent).toMatch(/Build the fix\.$/);
+      const afterReplacement = yield* startCrewTurn({ crewDelivery, resumeGone: true });
+      expect(afterReplacement.sent).not.toContain("<spawner_brief>");
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(crewServices, CrewTurnContext.layer.pipe(Layer.provide(crewServices))),
+      ),
+    ),
+);
+
+effectIt.effect(
+  "an ordinary thread skips the Crew path and starts on the provider session as is",
+  () =>
+    Effect.gen(function* () {
+      yield* recordSeat(seatThread, { seat: false });
+      const crewDelivery = yield* CrewTurnContext.CrewTurnContext;
+      const ordinary = yield* startCrewTurn({ crewDelivery });
+      expect(ordinary.requested.session.startTurn).toBe(ordinary.harness.nativeStartTurn);
+      expect(ordinary.sent).toBe("Build the fix.");
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(crewServices, CrewTurnContext.layer.pipe(Layer.provide(crewServices))),
+      ),
+    ),
 );

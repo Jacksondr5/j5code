@@ -46,9 +46,11 @@ export const layer = Layer.effect(
     const receipts = yield* CommandReceiptStoreV2;
     const crews = yield* Crews.AgentCrewInstanceService;
     const locks = yield* KeyedLock.make<string>();
-    const dispatch: Orchestrator.OrchestratorV2["Service"]["dispatch"] = (command) => {
-      if (command.type !== "message.dispatch") return inner.dispatch(command);
-      return locks.withLock(
+    type Dispatch = Orchestrator.OrchestratorV2["Service"]["dispatch"];
+    const dispatchToSeat = (
+      command: Extract<Parameters<Dispatch>[0], { type: "message.dispatch" }>,
+    ) =>
+      locks.withLock(
         command.threadId,
         Effect.gen(function* () {
           if (Option.isSome(yield* receipts.getByCommandId(command.commandId)))
@@ -98,6 +100,23 @@ export const layer = Layer.effect(
                   cause,
                 }),
           ),
+        ),
+      );
+    const dispatch: Dispatch = (command) => {
+      if (command.type !== "message.dispatch") return inner.dispatch(command);
+      // Seat contexts are written when a Crew launches, before any message reaches the seat, so
+      // an ordinary thread skips the lock and the receipt read.
+      return sql`SELECT 1 AS present FROM j5_crew_seat_context WHERE thread_id = ${command.threadId}`.pipe(
+        Effect.mapError(
+          (cause) =>
+            new Orchestrator.OrchestratorDispatchError({
+              commandId: command.commandId,
+              commandType: command.type,
+              cause,
+            }),
+        ),
+        Effect.flatMap((seat) =>
+          seat.length === 0 ? inner.dispatch(command) : dispatchToSeat(command),
         ),
       );
     };

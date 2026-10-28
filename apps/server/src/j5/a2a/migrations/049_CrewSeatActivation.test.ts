@@ -32,12 +32,14 @@ it.effect(
       const contexts = yield* sql<{
         readonly delivered_roster: string;
         readonly first_turn_text: string;
+        readonly delivered_conversation: string | null;
       }>`
-      SELECT delivered_roster, first_turn_text FROM j5_crew_seat_context
+      SELECT delivered_roster, first_turn_text, delivered_conversation FROM j5_crew_seat_context
     `;
       assert.lengthOf(contexts, 2);
       for (const row of contexts) {
         assert.equal(row.first_turn_text, "");
+        assert.isNull(row.delivered_conversation);
         const roster = yield* decodeRoster(row.delivered_roster);
         assert.sameMembers(
           roster.map((member) => member.seat),
@@ -48,5 +50,12 @@ it.effect(
           "Responsibility of builder",
         );
       }
+      const columns = yield* sql<{ readonly name: string }>`
+      SELECT name FROM pragma_table_info('j5_crew_seat_context') ORDER BY cid
+    `;
+      assert.deepStrictEqual(
+        columns.map((column) => column.name),
+        ["thread_id", "first_turn_text", "workspace", "delivered_roster", "delivered_conversation"],
+      );
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );

@@ -162,10 +162,27 @@ it.effect(
         assert.equal(harness.createWorktree.mock.calls[0]?.[0]?.baseRefName, "main");
         assert.lengthOf(harness.createWorktree.mock.calls, 1);
         const crewContext = yield* CrewTurnContext.CrewTurnContext;
-        assert.include(
-          yield* crewContext.deliver(threadId, ready.messages[0]!.text, Effect.succeed),
-          "Shared goal",
-        );
+        const promptFor = (text: string) =>
+          Effect.gen(function* () {
+            let prompt = "";
+            yield* crewContext.deliver(
+              {
+                threadId,
+                providerThread: {
+                  id: "provider-thread:crew-reviewer",
+                  nativeThreadRef: null,
+                } as never,
+                text,
+              },
+              (sent) =>
+                Effect.sync(() => {
+                  prompt = sent;
+                  return true;
+                }),
+            );
+            return prompt;
+          });
+        assert.include(yield* promptFor(ready.messages[0]!.text), "Shared goal");
         yield* crews.addMembers("crew:integration", [
           {
             seatName: "tester",
@@ -256,13 +273,10 @@ it.effect(
         const nextText = selected.messages.find(
           (message) => message.id === reordered.message.id,
         )!.text;
-        const prompt = yield* crewContext.deliver(threadId, nextText, Effect.succeed);
+        const prompt = yield* promptFor(nextText);
         assert.include(prompt, "joined: tester:");
         assert.isTrue(prompt.endsWith("Edited second assignment"));
-        assert.equal(
-          yield* crewContext.deliver(threadId, "Next assignment", Effect.succeed),
-          "Next assignment",
-        );
+        assert.equal(yield* promptFor("Next assignment"), "Next assignment");
         yield* (yield* EventSinkV2).write({
           events: ready.runs.map((run) => ({
             id: EventId.make(`event:finished:${run.id}`),

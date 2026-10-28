@@ -9,10 +9,7 @@ export default Effect.gen(function* () {
       first_turn_text TEXT NOT NULL,
       workspace TEXT NOT NULL,
       delivered_roster TEXT,
-      pending_command_id TEXT,
-      pending_message_id TEXT,
-      pending_prefix TEXT,
-      pending_roster TEXT
+      delivered_conversation TEXT
     )
   `;
   yield* sql`

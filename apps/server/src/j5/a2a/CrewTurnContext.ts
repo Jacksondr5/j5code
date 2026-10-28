@@ -1,5 +1,5 @@
-import { ThreadId } from "@t3tools/contracts";
-import { crewDeliveryAssignment, crewDeliveryContextPrefix } from "@t3tools/contracts/j5";
+import { type OrchestrationV2ProviderThread, ThreadId } from "@t3tools/contracts";
+import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -25,16 +25,48 @@ class CrewTurnContextError extends Schema.TaggedError<CrewTurnContextError>()(
 
 const isCrewTurnContextError = Schema.is(CrewTurnContextError);
 
+export interface CrewDelivery {
+  readonly threadId: ThreadId;
+  /** The provider conversation about to receive the text; a new one needs the introduction again. */
+  readonly providerThread: Pick<OrchestrationV2ProviderThread, "id" | "nativeThreadRef">;
+  readonly text: string;
+}
+
 export class CrewTurnContext extends Context.Service<
   CrewTurnContext,
   {
-    readonly deliver: <A, E, R>(
-      threadId: ThreadId,
-      text: string,
-      send: (text: string) => Effect.Effect<A, E, R>,
-    ) => Effect.Effect<A, E | CrewTurnContextError, R>;
+    /** Whether the thread is a Crew seat. Every other thread skips this service. */
+    readonly isSeat: (threadId: ThreadId) => Effect.Effect<boolean, CrewTurnContextError>;
+    /**
+     * Sends the text with the seat's current Crew context in front. `send` answers whether the
+     * provider took the text; only then is the context recorded as delivered, so a send that
+     * never happened (stopped, superseded) leaves it owed for the next one.
+     */
+    readonly deliver: <E, R>(
+      delivery: CrewDelivery,
+      send: (text: string) => Effect.Effect<boolean, E, R>,
+    ) => Effect.Effect<boolean, E | CrewTurnContextError, R>;
+    /** A steered message reaches a busy seat with the same context a fresh turn would carry. */
+    readonly steering: (session: {
+      readonly steerTurn: ProviderAdapter.ProviderAdapterV2SessionRuntime["steerTurn"];
+    }) => {
+      readonly steerTurn: (
+        input: ProviderAdapter.ProviderAdapterV2SteerInput,
+      ) => Effect.Effect<void, ProviderAdapter.ProviderAdapterV2Error | CrewTurnContextError>;
+    };
   }
 >()("t3/j5/a2a/CrewTurnContext") {}
+
+const DELIVERY_OPEN = "<j5_crew_delivery_context>\n";
+const DELIVERY_CLOSE = "\n</j5_crew_delivery_context>\n\n";
+/** Keeps the platform's context apart from the assignment that follows it. */
+const deliveryContext = (context: string) =>
+  context === ""
+    ? ""
+    : `${DELIVERY_OPEN}${context.replaceAll("</j5_crew_delivery_context>", "<\\/j5_crew_delivery_context>")}${DELIVERY_CLOSE}`;
+
+const conversationOf = (providerThread: CrewDelivery["providerThread"]) =>
+  `${providerThread.id}:${providerThread.nativeThreadRef?.nativeId ?? ""}`;
 
 const Roster = Schema.fromJsonString(
   Schema.Array(
@@ -54,13 +86,17 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const crews = yield* Crews.AgentCrewInstanceService;
   const changes = yield* ReadChanges.ReadChanges;
-  const prepare = Effect.fn("j5.crewTurnContext.prepare")(function* (threadId: ThreadId) {
+  const prepare = Effect.fn("j5.crewTurnContext.prepare")(function* (delivery: CrewDelivery) {
+    const { threadId } = delivery;
+    const conversation = conversationOf(delivery.providerThread);
     return yield* Effect.gen(function* () {
       const [context] = yield* sql<{
         readonly first_turn_text: string;
         readonly delivered_roster: string | null;
+        readonly delivered_conversation: string | null;
       }>`
-        SELECT first_turn_text, delivered_roster FROM j5_crew_seat_context WHERE thread_id = ${threadId}
+        SELECT first_turn_text, delivered_roster, delivered_conversation
+        FROM j5_crew_seat_context WHERE thread_id = ${threadId}
       `;
       if (context === undefined) return null;
       const membership = yield* crews.findMembership(participantIdForThread(threadId));
@@ -78,7 +114,14 @@ const make = Effect.gen(function* () {
       }));
       const rosterJson = encodeRoster(roster);
       let prefix = "";
-      if (context.delivered_roster === null) {
+      // A conversation the introduction never reached (first turn, or the provider rebuilt it
+      // from history after a model switch or lost session) gets it whole. A seat from before
+      // conversations were recorded has none stored and is not introduced again.
+      const introduce =
+        context.delivered_roster === null ||
+        (context.delivered_conversation !== null &&
+          context.delivered_conversation !== conversation);
+      if (introduce) {
         prefix = context.first_turn_text.replace(
           /<j5_crew_context>[\s\S]*?<\/j5_crew_context>/,
           () =>
@@ -110,10 +153,10 @@ const make = Effect.gen(function* () {
       }
 
       return {
-        prefix: crewDeliveryContextPrefix(prefix),
+        prefix: deliveryContext(prefix),
         delivered: sql`
-          UPDATE j5_crew_seat_context SET delivered_roster = ${rosterJson},
-            pending_command_id = NULL, pending_roster = NULL, pending_message_id = NULL, pending_prefix = NULL
+          UPDATE j5_crew_seat_context
+          SET delivered_roster = ${rosterJson}, delivered_conversation = ${conversation}
           WHERE thread_id = ${threadId}
         `.pipe(
           Effect.andThen(changes.notify("crew", "fleet")),
@@ -127,24 +170,46 @@ const make = Effect.gen(function* () {
       ),
     );
   });
-  const deliver = <A, E, R>(
-    threadId: ThreadId,
-    text: string,
-    send: (text: string) => Effect.Effect<A, E, R>,
+  const isSeat = (threadId: ThreadId) =>
+    sql`SELECT 1 AS present FROM j5_crew_seat_context WHERE thread_id = ${threadId}`.pipe(
+      Effect.map((rows) => rows.length > 0),
+      Effect.mapError((cause) => new CrewTurnContextError({ threadId, cause })),
+    );
+  const deliver = <E, R>(
+    delivery: CrewDelivery,
+    send: (text: string) => Effect.Effect<boolean, E, R>,
   ) =>
     Effect.gen(function* () {
-      const context = yield* prepare(threadId);
-      if (context === null) return yield* send(text);
-      const result = yield* send(`${context.prefix}${crewDeliveryAssignment(text)}`);
+      const context = yield* prepare(delivery);
+      if (context === null) return yield* send(delivery.text);
+      const sent = yield* send(`${context.prefix}${delivery.text}`);
+      if (!sent) return false;
       // The provider accepted the prompt; bookkeeping failure must not fail its running turn.
       yield* context.delivered.pipe(
         Effect.catch((cause) =>
-          Effect.logWarning("Failed to record delivered Crew context", { threadId, cause }),
+          Effect.logWarning("Failed to record delivered Crew context", {
+            threadId: delivery.threadId,
+            cause,
+          }),
         ),
       );
-      return result;
+      return true;
     });
-  return CrewTurnContext.of({ deliver });
+  const steering: CrewTurnContext["Service"]["steering"] = (session) => ({
+    steerTurn: (input) =>
+      deliver(
+        {
+          threadId: input.threadId,
+          providerThread: input.providerThread,
+          text: input.message.text,
+        },
+        (text) =>
+          session
+            .steerTurn({ ...input, message: { ...input.message, text } })
+            .pipe(Effect.as(true)),
+      ).pipe(Effect.asVoid),
+  });
+  return CrewTurnContext.of({ isSeat, deliver, steering });
 });
 
 export const layer = Layer.effect(CrewTurnContext, make).pipe(

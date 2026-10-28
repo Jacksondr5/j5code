@@ -1209,7 +1209,7 @@ export const layer: Layer.Layer<
                 });
               }),
           });
-          if (!(yield* isCurrentAttemptInStatus("running"))) return;
+          if (!(yield* isCurrentAttemptInStatus("running"))) return false;
           const start = compact ? session.compactThread! : session.startTurn;
           const context = [delivery.context, restartNote]
             .filter((part) => part !== "")
@@ -1246,17 +1246,27 @@ export const layer: Layer.Layer<
               }),
             ),
           );
+          return true;
         });
+      const crewSeat =
+        Option.isSome(crewTurnContext) &&
+        (yield* crewTurnContext.value.isSeat(projection.thread.id));
       const startWithHandoffs = (
         turnInput: Parameters<typeof session.startTurn>[0],
         compact = false,
       ) =>
-        (Option.isSome(crewTurnContext)
-          ? crewTurnContext.value.deliver(projection.thread.id, userText, (assignment) =>
-              startAssignmentWithHandoffs(turnInput, compact, assignment),
+        (crewSeat
+          ? crewTurnContext.value.deliver(
+              {
+                threadId: projection.thread.id,
+                providerThread: runningProviderThread,
+                text: userText,
+              },
+              (assignment) => startAssignmentWithHandoffs(turnInput, compact, assignment),
             )
           : startAssignmentWithHandoffs(turnInput, compact, userText)
         ).pipe(
+          Effect.asVoid,
           Effect.mapError((cause) =>
             cause._tag === "ProviderAdapterTurnStartError"
               ? cause
@@ -1274,7 +1284,7 @@ export const layer: Layer.Layer<
         missedItems.length === 0 &&
         restartNote === "" &&
         !noteContinuation &&
-        Option.isNone(crewTurnContext)
+        !crewSeat
           ? session
           : makeDeliverySession(session, startWithHandoffs);
       return runExecution.startRootRun({

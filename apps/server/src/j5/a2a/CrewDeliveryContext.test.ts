@@ -91,6 +91,7 @@ const fixture = Effect.gen(function* () {
   const commands = yield* Ref.make<ReadonlyArray<OrchestrationV2ServerCommand>>([]);
   const receipts = new Map<string, CommandReceiptV2>();
   const rejected = new Set<string>();
+  let receiptReads = 0;
   const dependencies = Layer.mergeAll(
     Layer.mock(Orchestrator.OrchestratorV2)({
       getThreadShell: () => Effect.succeed({ worktreePath: null } as never),
@@ -109,7 +110,11 @@ const fixture = Effect.gen(function* () {
         }),
     }),
     Layer.mock(CommandReceiptStoreV2)({
-      getByCommandId: (id) => Effect.succeed(Option.fromNullishOr(receipts.get(id))),
+      getByCommandId: (id) =>
+        Effect.sync(() => {
+          receiptReads += 1;
+          return Option.fromNullishOr(receipts.get(id));
+        }),
     }),
   );
   const layer = DeliveryContext.layer.pipe(Layer.provide(dependencies));
@@ -118,13 +123,58 @@ const fixture = Effect.gen(function* () {
       return yield* (yield* Orchestrator.OrchestratorV2).dispatch(command);
     });
   const deliveryLayer = CrewTurnContext.layer;
-  const deliver = (text: string, fail = false) =>
+  const providerThread = (native: string) =>
+    ({
+      id: "provider-thread:reviewer",
+      nativeThreadRef: { driver: "codex", nativeId: native, strength: "strong" },
+    }) as never;
+  /** The prompt the provider received, or null when the send reported it never happened. */
+  const deliver = (
+    text: string,
+    options: { readonly fail?: boolean; readonly sent?: boolean; readonly native?: string } = {},
+  ) =>
     Effect.gen(function* () {
-      return yield* (yield* CrewTurnContext.CrewTurnContext).deliver(seatId, text, (prompt) =>
-        fail ? Effect.fail("provider refused") : Effect.succeed(prompt),
+      let prompt: string | null = null;
+      yield* (yield* CrewTurnContext.CrewTurnContext).deliver(
+        { threadId: seatId, providerThread: providerThread(options.native ?? "native-1"), text },
+        (sent) =>
+          options.fail === true
+            ? Effect.fail("provider refused")
+            : Effect.sync(() => {
+                if (options.sent !== false) prompt = sent;
+                return options.sent !== false;
+              }),
       );
+      return prompt as string | null;
     }).pipe(Effect.provide(deliveryLayer));
-  return { sql, crews, commands, receipts, rejected, layer, send, deliver };
+  const steer = (text: string, options: { readonly fail?: boolean } = {}) =>
+    Effect.gen(function* () {
+      const steered: string[] = [];
+      const session = (yield* CrewTurnContext.CrewTurnContext).steering({
+        steerTurn: (input) =>
+          options.fail === true
+            ? Effect.die("provider refused")
+            : Effect.sync(() => void steered.push(input.message.text)),
+      });
+      yield* session.steerTurn({
+        threadId: seatId,
+        providerThread: providerThread("native-1"),
+        message: { text },
+      } as never);
+      return steered[0] ?? null;
+    }).pipe(Effect.provide(deliveryLayer));
+  return {
+    sql,
+    crews,
+    commands,
+    receipts,
+    receiptReads: () => receiptReads,
+    rejected,
+    layer,
+    send,
+    deliver,
+    steer,
+  };
 });
 
 it.effect(
@@ -138,7 +188,7 @@ it.effect(
       assert.deepStrictEqual((yield* Ref.get(f.commands))[0], command);
       yield* f.crews.addMembers("crew:test", [member("security")]);
       yield* f.crews.removeMembers("crew:test", ["builder"]);
-      const prompt = yield* f.deliver(command.text);
+      const prompt = (yield* f.deliver(command.text))!;
       assert.include(prompt, "<spawner_brief>\nShared goal\n</spawner_brief>");
       assert.include(prompt, "Review carefully.");
       assert.include(prompt, "- security:");
@@ -169,12 +219,12 @@ it.effect(
 it.effect("provider refusal keeps the introduction and roster changes owed", () =>
   Effect.gen(function* () {
     const f = yield* fixture;
-    assert.equal((yield* f.deliver("first", true).pipe(Effect.result))._tag, "Failure");
-    assert.include(yield* f.deliver("retry"), "<j5_spawn_context>");
+    assert.equal((yield* f.deliver("first", { fail: true }).pipe(Effect.result))._tag, "Failure");
+    assert.include((yield* f.deliver("retry"))!, "<j5_spawn_context>");
     yield* f.crews.addMembers("crew:test", [member("security")]);
     yield* f.crews.removeMembers("crew:test", ["builder"]);
-    yield* f.deliver("refused update", true).pipe(Effect.result);
-    const prompt = yield* f.deliver("accepted update");
+    yield* f.deliver("refused update", { fail: true }).pipe(Effect.result);
+    const prompt = (yield* f.deliver("accepted update"))!;
     assert.include(prompt, "joined: security:");
     assert.include(prompt, "left: builder:");
     assert.notInclude(prompt, "spawner_brief");
@@ -194,7 +244,7 @@ it.effect(
       yield* f.crews.addMembers("crew:test", [member("security")]);
       yield* f.send(assignment("queued-second")).pipe(Effect.provide(f.layer));
       // The provider sees whichever editable message upstream selects, not acceptance order.
-      const prompt = yield* f.deliver("edited second assignment promoted first");
+      const prompt = (yield* f.deliver("edited second assignment promoted first"))!;
       assert.include(prompt, "joined: security:");
       assert.include(prompt, "left: builder:");
       assert.notInclude(prompt, "temporary");
@@ -215,7 +265,7 @@ it.effect(
         .pipe(Effect.result, Effect.provide(f.layer));
       assert.equal(result._tag, "Failure");
       assert.lengthOf(yield* Ref.get(f.commands), 0);
-      assert.equal((yield* f.deliver("bypass", false).pipe(Effect.result))._tag, "Failure");
+      assert.equal((yield* f.deliver("bypass").pipe(Effect.result))._tag, "Failure");
     }).pipe(Effect.provide(base)),
 );
 
@@ -244,7 +294,7 @@ it.effect(
       yield* f.sql`INSERT INTO j5_a2a_message_author (thread_id, message_id, person_id, display_name, level, stored_prefix, created_at)
       VALUES (${seatId}, ${command.messageId}, 'human:owner', 'Bryant', 'owner', ${authorPrefix}, '2026-10-27T12:00:00Z')`;
       yield* f.send(command).pipe(Effect.provide(f.layer));
-      const prompt = yield* f.deliver(command.text);
+      const prompt = (yield* f.deliver(command.text))!;
       const [author] = yield* f.sql<{
         readonly stored_prefix: string;
       }>`SELECT stored_prefix FROM j5_a2a_message_author WHERE message_id = ${command.messageId}`;
@@ -272,5 +322,86 @@ it.effect("a retired member that already started continues as a plain agent", ()
     yield* f.crews.markArchived("crew:test", "2026-10-27T13:00:00Z");
     yield* f.send(assignment("after-retirement")).pipe(Effect.provide(f.layer));
     assert.equal(yield* f.deliver("new assignment"), "new assignment");
+  }).pipe(Effect.provide(base)),
+);
+
+it.effect("a send that never happened leaves the introduction and roster changes owed", () =>
+  Effect.gen(function* () {
+    const f = yield* fixture;
+    assert.isNull(yield* f.deliver("stopped before the provider", { sent: false }));
+    const [owed] = yield* f.sql<{
+      readonly delivered_roster: string | null;
+    }>`SELECT delivered_roster FROM j5_crew_seat_context WHERE thread_id = ${seatId}`;
+    assert.isNull(owed!.delivered_roster);
+    assert.include((yield* f.deliver("retry"))!, "<spawner_brief>");
+    yield* f.crews.addMembers("crew:test", [member("security")]);
+    assert.isNull(yield* f.deliver("superseded", { sent: false }));
+    assert.include((yield* f.deliver("retry"))!, "joined: security:");
+  }).pipe(Effect.provide(base)),
+);
+
+it.effect("the introduction is sent again only when the provider conversation changes", () =>
+  Effect.gen(function* () {
+    const f = yield* fixture;
+    assert.include((yield* f.deliver("first", { native: "native-1" }))!, "<spawner_brief>");
+    assert.equal(
+      yield* f.deliver("same conversation", { native: "native-1" }),
+      "same conversation",
+    );
+    yield* f.crews.addMembers("crew:test", [member("security")]);
+    const replaced = (yield* f.deliver("after fallback", { native: "native-2" }))!;
+    assert.include(replaced, "<spawner_brief>\nShared goal\n</spawner_brief>");
+    assert.include(replaced, "Review carefully.");
+    assert.include(replaced, "- security:");
+    assert.notInclude(replaced, "joined:");
+    assert.equal(
+      yield* f.deliver("replaced conversation", { native: "native-2" }),
+      "replaced conversation",
+    );
+  }).pipe(Effect.provide(base)),
+);
+
+it.effect("a migrated seat has no introduction to send again", () =>
+  Effect.gen(function* () {
+    const f = yield* fixture;
+    yield* f.deliver("first", { native: "native-1" });
+    yield* f.sql`UPDATE j5_crew_seat_context SET delivered_conversation = NULL, first_turn_text = ''`;
+    assert.equal(yield* f.deliver("one", { native: "native-1" }), "one");
+    assert.equal(yield* f.deliver("two", { native: "native-2" }), "two");
+  }).pipe(Effect.provide(base)),
+);
+
+it.effect("steering a busy seat carries the roster change and records it only once accepted", () =>
+  Effect.gen(function* () {
+    const f = yield* fixture;
+    yield* f.deliver("first");
+    yield* f.crews.addMembers("crew:test", [member("security")]);
+    yield* f.steer("refused", { fail: true }).pipe(Effect.exit);
+    const steered = (yield* f.steer("steer the builder"))!;
+    assert.include(steered, "joined: security:");
+    assert.isTrue(steered.endsWith("steer the builder"));
+    assert.equal(yield* f.steer("again"), "again");
+  }).pipe(Effect.provide(base)),
+);
+
+it.effect(
+  "authored text is delivered byte for byte, even when it begins with the context marker",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      const authored =
+        "<j5_crew_delivery_context>\nmine\n</j5_crew_delivery_context>\n\nPlease review.";
+      assert.isTrue((yield* f.deliver(authored))!.endsWith(authored));
+      assert.equal(yield* f.deliver(authored), authored);
+    }).pipe(Effect.provide(base)),
+);
+
+it.effect("a thread that is not a Crew seat is dispatched untouched, without a receipt read", () =>
+  Effect.gen(function* () {
+    const f = yield* fixture;
+    const command = { ...assignment("plain"), threadId: ThreadId.make("thread:plain") };
+    yield* f.send(command).pipe(Effect.provide(f.layer));
+    assert.deepStrictEqual((yield* Ref.get(f.commands))[0], command);
+    assert.equal(f.receiptReads(), 0);
   }).pipe(Effect.provide(base)),
 );
