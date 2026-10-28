@@ -596,6 +596,7 @@ function AddForm({
                 placeholder="Their name on this server"
                 disabled={busy}
                 maxLength={80}
+                required
               />
               {matches.length > 0 ? (
                 <AutocompletePopup>
