@@ -21,7 +21,6 @@ export function useCrewProposalPreview(
   seats: ReadonlyArray<CrewProposalSeat>,
   busy: boolean,
   enabled = true,
-  debounceMs = 0,
 ) {
   const [revision, setRevision] = useState(0);
   const [state, setState] = useState<PreviewState | null>(null);
@@ -39,52 +38,47 @@ export function useCrewProposalPreview(
     if (request.complete) return;
     const seats = request.seats;
     let current = true;
-    const run = () => {
-      void previewCrewProposal(environmentId, { proposalId, seats }).then(
-        (data) => {
-          if (!current) return;
-          // Refuse incomplete previews instead of approving seats with undisclosed settings.
-          const complete =
-            data.proposalId === proposalId &&
-            data.approvalToken.length > 0 &&
-            data.seats.length === seats.length &&
-            seats.every((seat) => data.seats.filter((row) => row.seat === seat.seat).length === 1);
-          setState((previous) => ({
-            scopeKey,
-            proposalKey,
-            seats,
-            requestKey,
-            data: complete ? data : null,
-            workspaceOptions: complete
-              ? data.workspaceOptions
-              : previous?.proposalKey === proposalKey
-                ? previous.workspaceOptions
-                : undefined,
-            error: complete ? null : "Runtime preview is incomplete. Refresh it before approving.",
-          }));
-        },
-        (cause: unknown) => {
-          if (!current) return;
-          setState((previous) => ({
-            scopeKey,
-            proposalKey,
-            seats,
-            requestKey,
-            data: null,
-            workspaceOptions:
-              previous?.proposalKey === proposalKey ? previous.workspaceOptions : undefined,
-            error: cause instanceof Error ? cause.message : "Could not load the runtime preview.",
-          }));
-        },
-      );
-    };
-    const timer = debounceMs > 0 ? setTimeout(run, debounceMs) : null;
-    if (timer === null) run();
+    void previewCrewProposal(environmentId, { proposalId, seats }).then(
+      (data) => {
+        if (!current) return;
+        // Refuse incomplete previews instead of approving seats with undisclosed settings.
+        const complete =
+          data.proposalId === proposalId &&
+          data.approvalToken.length > 0 &&
+          data.seats.length === seats.length &&
+          seats.every((seat) => data.seats.filter((row) => row.seat === seat.seat).length === 1);
+        setState((previous) => ({
+          scopeKey,
+          proposalKey,
+          seats,
+          requestKey,
+          data: complete ? data : null,
+          workspaceOptions: complete
+            ? data.workspaceOptions
+            : previous?.proposalKey === proposalKey
+              ? previous.workspaceOptions
+              : undefined,
+          error: complete ? null : "Runtime preview is incomplete. Refresh it before approving.",
+        }));
+      },
+      (cause: unknown) => {
+        if (!current) return;
+        setState((previous) => ({
+          scopeKey,
+          proposalKey,
+          seats,
+          requestKey,
+          data: null,
+          workspaceOptions:
+            previous?.proposalKey === proposalKey ? previous.workspaceOptions : undefined,
+          error: cause instanceof Error ? cause.message : "Could not load the runtime preview.",
+        }));
+      },
+    );
     return () => {
       current = false;
-      if (timer !== null) clearTimeout(timer);
     };
-  }, [environmentId, proposalId, busy, enabled, requestKey, scopeKey, proposalKey, debounceMs]);
+  }, [environmentId, proposalId, busy, enabled, requestKey, scopeKey, proposalKey]);
 
   const active = state?.requestKey === requestKey ? state : null;
   // A previous preview may explain an unchanged runtime, but carries no approval authority.
