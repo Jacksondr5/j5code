@@ -130,8 +130,12 @@ const measureNestedRuntimeBuilds = (nested: "http" | "mcp") =>
           Layer.provide(Layer.mock(GitWorkflowService)({})),
           Layer.provide(Layer.mock(GitVcsDriver)({})),
           Layer.provide(Layer.mock(GitManager)({})),
-          Layer.provide(Layer.mock(ProviderSessionManagerV2)({})),
-          Layer.provide(Layer.mock(TerminalManager)({})),
+          Layer.provide(
+            Layer.mergeAll(
+              Layer.mock(ProviderSessionManagerV2)({}),
+              Layer.mock(TerminalManager)({}),
+            ),
+          ),
           Layer.provide(Layer.mock(EnvironmentAuth)({})),
           Layer.provide(
             Layer.mock(ServerEnvironment)({
