@@ -406,9 +406,10 @@ const makeLayer = (daemon: boolean) =>
 
       const cleanup: CrewWorktreesShape["cleanup"] = ({ seats }) =>
         Effect.gen(function* () {
-          const own = new Set(seats.map((seat) => seat.threadId));
+          // No seat is exempt: a seat that was unarchived since the archive committed is bound to
+          // its worktree again, and that is what must keep the worktree.
           const context: CheckContext = {
-            own,
+            own: new Set(),
             refresh: true,
             fetched: new Set(),
             checkMerged: true,

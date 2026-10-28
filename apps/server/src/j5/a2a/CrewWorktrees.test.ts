@@ -427,6 +427,23 @@ it.effect("keeps a worktree another unarchived thread is bound to", () =>
   ),
 );
 
+it.effect("keeps a worktree a seat was unarchived into after the archive committed", () =>
+  run(
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      const archived = yield* f.seat("archived");
+      const returned = yield* f.seat("returned", { archived: false });
+      f.bound.set(returned.threadId, archived.worktree);
+      const result = yield* cleanup(f, [archived, returned]);
+      assert.deepStrictEqual(
+        result.map((entry) => [entry.outcome, entry.reason]),
+        [["kept", "shared"]],
+      );
+      assert.isTrue(yield* f.fs.exists(archived.worktree));
+    }),
+  ),
+);
+
 it.effect("keeps a worktree that is a project's root, or holds one", () =>
   run(
     Effect.gen(function* () {
