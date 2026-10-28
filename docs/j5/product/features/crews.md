@@ -51,15 +51,15 @@ The platform ships the machinery — propose, gate, spawn, render, remind, notif
 
 A message to a member or Captain with a running turn lands one of three ways, set by its provider and by whether the sender asked for `mode: "steer"`: it **steers directly** into the running turn, it **steers by interrupt-restart** (upstream stops the turn and restarts it on the message, which only an explicit `steer` asks for), or it **queues** until the next turn boundary. An idle member, and a member that has not started, takes the message as a new turn.
 
-| Provider                          | Peer update, no `mode`                              | `mode: "steer"`                                                    | Live test                                                                                   |
-| --------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
-| Codex, GPT 6 models               | steers directly                                     | steers directly                                                    | steered a busy run (GPT 6 Luna); Stop interrupted it cleanly                                |
-| Codex, other models               | queues                                              | steers directly                                                    | pending live test                                                                           |
-| Claude                            | steers directly, once its running tool calls finish | steers directly                                                    | steered a busy run (Haiku 5.5); Stop raced the steer and the message was lost with the turn |
-| Cursor                            | queues                                              | steers by interrupt-restart                                        | not live-tested; Cursor isn't set up on the test host                                       |
-| OpenCode, Pi and Muse; ACP agents | queues                                              | directly (OpenCode, Pi, Muse) or by interrupt-restart (ACP agents) | not live-tested                                                                             |
+| Provider                          | Peer update, no `mode`                              | `mode: "steer"`                                                    |
+| --------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------ |
+| Codex, GPT 6 models               | steers directly                                     | steers directly                                                    |
+| Codex, other models               | queues                                              | steers directly                                                    |
+| Claude                            | steers directly, once its running tool calls finish | steers directly                                                    |
+| Cursor                            | queues                                              | steers by interrupt-restart                                        |
+| OpenCode, Pi and Muse; ACP agents | queues                                              | directly (OpenCode, Pi, Muse) or by interrupt-restart (ACP agents) |
 
-The live test covers a message to a busy run, a Stop during a steered turn, and a message that arrives after the run has ended. The first two ran on Codex (GPT 6 Luna) and Claude; the third ran on Claude, where the member started a new turn. Codex models other than GPT 6 were not run. A steer that races a Stop is a known case ([FORK.md](../../../FORK.md) case 26), and Claude showed it.
+A steer that races a Stop is a known case ([FORK.md](../../../FORK.md) case 26).
 
 ## Acceptance criteria
 
