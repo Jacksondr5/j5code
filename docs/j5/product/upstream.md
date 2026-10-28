@@ -126,7 +126,7 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Why:** the list is one decision that custom Crew seats, `j5_spawn_agent` and `delegate_task` all follow ([Crews](features/crews.md), AC27). The wrapper cannot see the model a child inherits, so the check needs the one place that resolves it.
 
-**Consequences:** one optional input and four lines in `OrchestratorMcpService.ts` (FORK.md case 90), with no change to upstream's behavior when no hook is passed. Check at each advance that the call still sits after the target resolves and before the command is dispatched. `t3_thread_launch` and `create_threads`, which J5 hides from agents, are not checked.
+**Consequences:** one optional input and four lines in `OrchestratorMcpService.ts` (FORK.md case 90), with no change to upstream's behavior when no hook is passed. Check at each advance that the call still sits after the target resolves and before the command is dispatched. `t3_thread_launch` and `create_threads`, which J5 hides from agents, are not checked. The list holds when an agent is created and not afterwards: `t3_thread_configure` sets any thread's model with only a thread-write check, so a later model change is not limited.
 
 **Decided:** Bryant, 2026-10-27 ([#744](https://github.com/Jacksondr5/j5code/issues/744)). Recorded in FORK.md case 90.
 
@@ -616,10 +616,10 @@ J5 kept a run from resuming after a usage-limit reset when the person had presse
 - 2026-10-19 — D33: T3 Connect's sessions are the first owner's, as they were full access before levels (review of [#638](https://github.com/Jacksondr5/j5code/pull/638)).
 - 2026-10-19 — D37 added: a connection that keeps failing can be retried at once on web and desktop (Jackson).
 - 2026-10-24 — D38 added: a completion sound can be a local MP3 on web and desktop (proposed by Abraham, accepted by Jackson).
-- 2026-10-27 — D39 added: a plain `delegate_task` is held to the project's models for custom members through one hook in upstream's `delegateTask` (Bryant; [#744](https://github.com/Jacksondr5/j5code/issues/744)).
 - 2026-10-20 — D2 clarifies that native-question answers retain upstream access and attribution behavior, and placed-agent notices replace raw thread waiting ([#674](https://github.com/Jacksondr5/j5code/pull/674), [#281](https://github.com/Jacksondr5/j5code/issues/281), [existing access decision](https://github.com/Jacksondr5/j5code/issues/345#issuecomment-6092125478)).
 - 2026-10-24 — D2: agents get upstream's queue tools, with edit held to an agent's own messages and the ledger following every edit; D4: the platform delivers in send order and a person or an agent may reorder by hand (Jackson, [#136](https://github.com/Jacksondr5/j5code/issues/136)).
 - 2026-10-24 — D33: lowering or removing an Owner ends the MCP clients that Owner approved, and only those (Jackson; [#639](https://github.com/Jacksondr5/j5code/issues/639)).
 - 2026-10-25 — D19: a copied prompt link points at j5.codes/new, which opens it in J5's apps or on the person's own server (Jackson's 2026-10-24 decision; [#633](https://github.com/Jacksondr5/j5code/issues/633)).
 - 2026-10-25 — D4: a delivery to an agent stopped on a usage limit waits unsent until the agent continues, whether or not its queue is held, where it used to be handed over unless messages were held there; deliveries waiting unsent go together, in send order, when a run starts on the agent, where each used to wait for its own recheck (Jackson, 2026-10-24, [#718](https://github.com/Jacksondr5/j5code/issues/718)).
 - 2026-10-26 — D33: a Viewer, or a Collaborator on one thread, isn't offered a new thread, a fork or a new project where their level refuses it (Jackson's 2026-10-25 approval; [#640](https://github.com/Jacksondr5/j5code/issues/640), [#641](https://github.com/Jacksondr5/j5code/issues/641)).
+- 2026-10-27 — D39 added: a plain `delegate_task` is held to the project's models for custom members through one hook in upstream's `delegateTask` (Bryant; [#744](https://github.com/Jacksondr5/j5code/issues/744)).
