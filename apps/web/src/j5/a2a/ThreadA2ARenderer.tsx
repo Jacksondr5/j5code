@@ -1,5 +1,4 @@
 import { useAtomValue } from "@effect/atom-react";
-import { crewDeliveryAssignment } from "@t3tools/contracts/j5";
 import { renderSharedConversationNote } from "../sharing/SharedConversationCards";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../../components/ui/tooltip";
 import { observeResize } from "~/lib/observeResize";
@@ -363,9 +362,8 @@ export function presentThreadA2ADelivery(
   const { message } = input;
   if (!isThreadA2ADeliveryMessage(message)) return null;
 
-  const assignment = crewDeliveryAssignment(message.text);
   if (message.createdBy === "agent") {
-    const peer = parseAgentAuthoredEnvelope(assignment);
+    const peer = parseAgentAuthoredEnvelope(message.text);
     if (peer) {
       const sender = presentParticipantIdentity({
         participantId: peer.senderId,
@@ -386,7 +384,7 @@ export function presentThreadA2ADelivery(
       };
     }
   } else if (message.createdBy === "user") {
-    const human = parseHumanEnvelope(assignment);
+    const human = parseHumanEnvelope(message.text);
     if (human) {
       return {
         kind: "human",
@@ -398,7 +396,7 @@ export function presentThreadA2ADelivery(
       };
     }
   } else if (message.createdBy === "system") {
-    const silence = parseSilenceEnvelope(assignment);
+    const silence = parseSilenceEnvelope(message.text);
     if (silence) {
       return {
         kind: "silence",
@@ -452,7 +450,7 @@ export function formatThreadA2AQueuedDelivery(
   text: string,
   participantLabels: ReadonlyMap<string, string>,
 ): { readonly label: string; readonly tooltipParticipantId: string | null } | null {
-  const peer = parseAgentAuthoredEnvelope(crewDeliveryAssignment(text));
+  const peer = parseAgentAuthoredEnvelope(text);
   if (peer === null) return null;
   const sender = presentParticipantIdentity({ participantId: peer.senderId, participantLabels });
   const firstLine = peer.body.split("\n")[0]?.trim() ?? "";
@@ -463,7 +461,7 @@ export function formatThreadA2AQueuedDelivery(
 }
 
 export function participantIdsForThreadA2AEnvelope(text: string): ReadonlyArray<string> {
-  const peer = parseAgentAuthoredEnvelope(crewDeliveryAssignment(text));
+  const peer = parseAgentAuthoredEnvelope(text);
   return peer === null ? [] : [peer.senderId];
 }
 

@@ -1,4 +1,3 @@
-import { crewDeliveryContextPrefix } from "@t3tools/contracts/j5";
 import { EnvironmentId, MessageId, ThreadId } from "@t3tools/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
@@ -834,24 +833,11 @@ describe("history recorded before the j5_ prefix", () => {
   });
 });
 
-it("preserves an activating assignment's sender and reply obligation beneath Crew context", () => {
-  const original = presentThreadA2ADelivery({ message: message({ text: peerRaw }) });
-  const text = crewDeliveryContextPrefix("Approved Crew context") + peerRaw;
-  expect(presentThreadA2ADelivery({ message: message({ text }) })).toEqual({
-    ...original,
-    rawEnvelope: text,
+it("shows authored text exactly as written, even when it begins with the Crew context marker", () => {
+  const authored = `<j5_crew_delivery_context>\nmine\n</j5_crew_delivery_context>\n\n${peerRaw}`;
+  expect(presentThreadA2ADelivery({ message: message({ text: authored }) })).toEqual({
+    kind: "raw",
+    rawEnvelope: authored,
   });
-});
-
-describe("Crew context in queued envelopes", () => {
-  it("keeps the sender and preview body when an older delivery carries Crew context", () => {
-    const wrapped = crewDeliveryContextPrefix("private Crew context") + peerRaw;
-    expect(
-      formatThreadA2AQueuedDelivery(wrapped, new Map([["agent:delivery-sender", "Alice"]])),
-    ).toEqual({
-      label: "From Alice — Please verify the worker.",
-      tooltipParticipantId: null,
-    });
-    expect(participantIdsForThreadA2AEnvelope(wrapped)).toEqual(["agent:delivery-sender"]);
-  });
+  expect(participantIdsForThreadA2AEnvelope(authored)).toEqual([]);
 });
