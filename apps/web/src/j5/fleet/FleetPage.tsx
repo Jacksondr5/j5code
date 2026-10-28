@@ -33,7 +33,12 @@ import { useLogicalProjects } from "../logicalProjects";
 import { requestConfirmDialog } from "../../confirmDialog";
 import { ArchiveWarningCrewSeats, type ArchiveWarningCrew } from "../a2a/ArchiveWarningContent";
 import { archiveCrew } from "../crew/crewArchiveClient";
-import { crewHasRunningSeat, summarizeCrewState } from "../crew/crewState";
+import {
+  classifyCrewSeat,
+  crewHasRunningSeat,
+  seatQuietLabel,
+  summarizeCrewState,
+} from "../crew/crewState";
 import { stopCrew } from "../crew/crewStopClient";
 import {
   countFleetProjects,
@@ -752,7 +757,11 @@ export function FleetRowItem(
         <FleetFactCells
           environmentId={environmentId}
           agent={agent}
-          notStarted={thread?.notStarted === true}
+          notStarted={
+            thread !== undefined &&
+            classifyCrewSeat(thread) !== "settled" &&
+            seatQuietLabel(thread) === "Not started"
+          }
         />
       </button>
       <FleetFactDetails environmentId={environmentId} agent={agent} title={title} />

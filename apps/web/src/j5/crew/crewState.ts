@@ -70,6 +70,16 @@ export const seatRunLabel = (status: ThreadRuntimeSummary["status"] | undefined)
         ? "Completed"
         : null;
 
+/**
+ * The row label for a Crew seat the status pill is quiet about. A seat whose first start failed
+ * ran and ended, so how that run ended outranks "Not started", which is only for a seat still
+ * waiting for its first assignment.
+ */
+export const seatQuietLabel = (seat: {
+  readonly notStarted?: boolean | undefined;
+  readonly runtime?: Pick<ThreadRuntimeSummary, "status"> | null | undefined;
+}) => seatRunLabel(seat.runtime?.status) ?? (seat.notStarted === true ? "Not started" : "Idle");
+
 /** "What is the state of this Crew?" answered from its seats, no Playbook required. */
 export const summarizeCrewState = (
   threads: ReadonlyArray<CrewSeatThread | undefined>,
