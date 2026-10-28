@@ -188,6 +188,19 @@ export function peopleMatching(
 // Names are compared without case and surrounding or repeated whitespace (AC44).
 const nameKey = (name: string) => name.trim().replace(/\s+/gu, " ").toLowerCase();
 
+export function filterPeople(
+  people: ReadonlyArray<PeopleEntry>,
+  query: string,
+): ReadonlyArray<PeopleEntry> {
+  const key = nameKey(query);
+  if (key === "") return people;
+  return people.filter(
+    (person) =>
+      nameKey(person.name ?? "Someone without a name yet").includes(key) ||
+      person.personId.toLowerCase().includes(key),
+  );
+}
+
 /** One part of a person's summary: a level and where it is held. */
 export type SummaryPart =
   | { readonly kind: "server"; readonly level: PersonLevel }
@@ -352,4 +365,30 @@ export function peopleServerState(input: {
 }): "ready" | "starting" | "none" {
   if (input.listed > 0) return "ready";
   return input.catalogReady && !input.hasOwnServer ? "none" : "starting";
+}
+
+/**
+ * Where an Owner can widen a person from their row, at the person's highest level, which their
+ * devices already hold: the whole server, and each listed project they do not already reach at
+ * that level, in the server's order. `null` when they hold nothing yet, or already hold the server
+ * at their highest level and so reach everything at it. Owner is
+ * held only at server scope, so an Owner is never offered anything. A narrower level the new one
+ * covers is left in place for the Owner to remove.
+ */
+export function widenTargets(
+  levels: ReadonlyArray<HeldPersonLevel>,
+  listedProjectIds: ReadonlyArray<string>,
+): { readonly level: PersonLevel; readonly projectIds: ReadonlyArray<string> } | null {
+  const level = levels
+    .map((held) => held.level)
+    .toSorted((left, right) => RANK[left] - RANK[right])[0];
+  if (level === undefined) return null;
+  const reachedAt = (scope: (held: HeldPersonLevel) => boolean) =>
+    levels.some((held) => scope(held) && levelReaches(held.level, level));
+  if (reachedAt((held) => held.scope.kind === "server")) return null;
+  const projectIds = listedProjectIds.filter(
+    (projectId) =>
+      !reachedAt((held) => held.scope.kind === "project" && held.scope.projectId === projectId),
+  );
+  return { level, projectIds };
 }

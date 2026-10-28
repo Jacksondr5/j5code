@@ -8,6 +8,7 @@ import {
   accessRowsFromScope,
   accessRowView,
   deviceCeiling,
+  filterPeople,
   peopleServerState,
   placeLinks,
   rosterProjectIds,
@@ -15,6 +16,7 @@ import {
   personNamed,
   raisesToWriting,
   summaryParts,
+  widenTargets,
   widerLabel,
 } from "./people.logic";
 
@@ -146,6 +148,67 @@ describe("a typed name that is already someone's", () => {
   it("matches without case and surrounding or repeated whitespace", () => {
     expect(personNamed(people, "  priya k. ")?.personId).toBe("p1");
     expect(personNamed(people, "Priya")).toBeNull();
+  });
+});
+
+describe("searching the People list", () => {
+  const people: ReadonlyArray<PeopleEntry> = [
+    {
+      personId: "owner-1",
+      name: "Jackson",
+      firstOwner: true,
+      you: true,
+      levels: [],
+      devices: [],
+      unusedLinks: [],
+    },
+    {
+      personId: "person-Priya",
+      name: "Priya  K.",
+      firstOwner: false,
+      you: false,
+      levels: [],
+      devices: [],
+      unusedLinks: [],
+    },
+    {
+      personId: "unnamed-3",
+      name: null,
+      firstOwner: false,
+      you: false,
+      levels: [],
+      devices: [],
+      unusedLinks: [],
+    },
+    {
+      personId: "other-4",
+      name: "Priya S.",
+      firstOwner: false,
+      you: false,
+      levels: [],
+      devices: [],
+      unusedLinks: [],
+    },
+  ];
+
+  it("shows everyone in the original order when cleared or only whitespace", () => {
+    expect(filterPeople(people, "")).toBe(people);
+    expect(filterPeople(people, "  \t ")).toBe(people);
+  });
+
+  it("finds partial names without case or surrounding and repeated whitespace", () => {
+    expect(filterPeople(people, "  PRIYA   k.  ")).toEqual([people[1]]);
+    expect(filterPeople(people, "priya")).toEqual([people[1], people[3]]);
+  });
+
+  it("finds a person by identifier or the displayed unnamed label", () => {
+    expect(filterPeople(people, "PERSON-priya")).toEqual([people[1]]);
+    expect(filterPeople(people, "without a name")).toEqual([people[2]]);
+  });
+
+  it("returns no rows for an unmatched or literal punctuation query", () => {
+    expect(filterPeople(people, "missing")).toEqual([]);
+    expect(filterPeople(people, ".*")).toEqual([]);
   });
 });
 
@@ -284,6 +347,56 @@ describe("the projects whose people a non-Owner is shown", () => {
     expect(
       rosterProjectIds([{ scope: { kind: "thread", threadId: THREAD }, level: "viewer" }], listed),
     ).toEqual([]);
+  });
+});
+
+describe("where an Owner can widen a person from their row", () => {
+  const listed = ["project:a", "project:b", "project:c"];
+  const onProject = (projectId: string, level: "viewer" | "collaborator") => ({
+    scope: { kind: "project" as const, projectId: ProjectId.make(projectId) },
+    level,
+  });
+
+  it("is the server and every project, at the level of a thread they hold", () => {
+    expect(
+      widenTargets([{ scope: { kind: "thread", threadId: THREAD }, level: "viewer" }], listed),
+    ).toEqual({ level: "viewer", projectIds: listed });
+  });
+
+  it("is at their highest level, leaving out projects they already reach at it", () => {
+    expect(
+      widenTargets(
+        [
+          onProject("project:a", "viewer"),
+          onProject("project:b", "collaborator"),
+          { scope: { kind: "thread", threadId: THREAD }, level: "collaborator" },
+        ],
+        listed,
+      ),
+    ).toEqual({ level: "collaborator", projectIds: ["project:a", "project:c"] });
+  });
+
+  it("still offers projects and the server above a lower server level", () => {
+    expect(
+      widenTargets(
+        [{ scope: { kind: "server" }, level: "viewer" }, onProject("project:a", "collaborator")],
+        listed,
+      ),
+    ).toEqual({ level: "collaborator", projectIds: ["project:b", "project:c"] });
+  });
+
+  it("is nothing for someone who holds nothing, or the server at their highest level", () => {
+    expect(widenTargets([], listed)).toBeNull();
+    expect(widenTargets([{ scope: { kind: "server" }, level: "owner" }], listed)).toBeNull();
+    expect(
+      widenTargets(
+        [
+          { scope: { kind: "server" }, level: "viewer" },
+          { scope: { kind: "thread", threadId: THREAD }, level: "viewer" },
+        ],
+        listed,
+      ),
+    ).toBeNull();
   });
 });
 

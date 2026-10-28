@@ -8,6 +8,7 @@ import type {
   PeopleLink,
   PersonDevice,
   PersonLevel,
+  PersonScope,
 } from "@t3tools/contracts/j5";
 import {
   ChevronDownIcon,
@@ -15,10 +16,11 @@ import {
   EllipsisIcon,
   LogOutIcon,
   PenLineIcon,
+  SearchIcon,
   UserPlusIcon,
   XIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { ConnectionStatusDot } from "../../components/ConnectionStatusDot";
 import { ProjectFavicon } from "../../components/ProjectFavicon";
@@ -26,7 +28,17 @@ import { ITEM_ROW_CLASSNAME } from "../../components/settings/itemRows";
 import { SettingsPageContainer, SettingsSection } from "../../components/settings/settingsLayout";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
-import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../../components/ui/menu";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "../../components/ui/input-group";
+import {
+  Menu,
+  MenuItem,
+  MenuPopup,
+  MenuSeparator,
+  MenuSub,
+  MenuSubPopup,
+  MenuSubTrigger,
+  MenuTrigger,
+} from "../../components/ui/menu";
 import {
   Select,
   SelectItem,
@@ -50,6 +62,8 @@ import {
   deviceCeiling,
   deviceLabel,
   devicesLabel,
+  filterPeople,
+  historyNote,
   levelLabel,
   levelsAt,
   linkInForce,
@@ -58,9 +72,11 @@ import {
   peopleServerState,
   removePersonWarning,
   rosterProjectIds,
+  sameScope,
   type SummaryPart,
   summaryParts,
   threadsLabel,
+  widenTargets,
 } from "./people.logic";
 import { IconAction } from "./IconAction";
 import { AccessRowLine, LinkLine, WritingWarning } from "./ShareDialog";
@@ -211,10 +227,13 @@ function OwnedServerPeople({
   const canManage = useAtomValue(sharingManage.setLevel.permissionAtom(environmentId));
   const people = useEnvironmentQuery(peopleQuery(environmentId));
   const links = useEnvironmentQuery(linksQuery(environmentId));
+  const [query, setQuery] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
   // People join, leave and pair devices without this client doing anything.
   useEffect(() => refreshSharing(environmentId), [environmentId]);
   const nowMs = Date.parse(useNowMinute());
   const everyone = (people.data?.people ?? []).toSorted(byStanding);
+  const shown = filterPeople(everyone, query);
   const inForce = (links.data?.links ?? []).filter((link) => linkInForce(link, nowMs));
 
   return (
@@ -225,7 +244,8 @@ function OwnedServerPeople({
           <span className="flex items-center gap-2">
             {picker}
             {people.data === null ? null : (
-              <span className="text-xs whitespace-nowrap text-muted-foreground">
+              <span role="status" className="text-xs whitespace-nowrap text-muted-foreground">
+                {query.trim() ? `${shown.length} of ` : ""}
                 {everyone.length} {everyone.length === 1 ? "person" : "people"}
               </span>
             )}
@@ -242,10 +262,49 @@ function OwnedServerPeople({
           </Button>
         }
       >
+        <div className="flex items-center gap-2 px-3 py-3 sm:px-4">
+          <InputGroup>
+            <InputGroupAddon>
+              <SearchIcon aria-hidden className="size-3.5" />
+            </InputGroupAddon>
+            <InputGroupInput
+              ref={searchRef}
+              type="search"
+              size="sm"
+              placeholder="Search people"
+              aria-label="Search people"
+              disabled={people.data === null}
+              value={query}
+              onChange={(event) => setQuery(event.currentTarget.value)}
+              onKeyDown={(event) => {
+                if (event.key !== "Escape") return;
+                event.preventDefault();
+                if (query.length > 0) setQuery("");
+                else event.currentTarget.blur();
+              }}
+            />
+          </InputGroup>
+          {query.length > 0 ? (
+            <Button
+              size="xs"
+              variant="ghost"
+              onClick={() => {
+                setQuery("");
+                searchRef.current?.focus();
+              }}
+            >
+              Clear
+            </Button>
+          ) : null}
+        </div>
         {people.data === null ? (
           <p className={ROW_NOTE_CLASSNAME}>{people.error ?? "Reading who is on this server…"}</p>
+        ) : shown.length === 0 ? (
+          <p className={ROW_NOTE_CLASSNAME}>
+            {query.trim() ? "No people match your search." : "No people on this server."}
+          </p>
         ) : (
-          everyone.map((person) => (
+          shown.map((person) => (
             <PersonRow
               key={person.personId}
               environmentId={environmentId}
@@ -388,7 +447,8 @@ function SummaryItem({
 /**
  * One person on a server the asker owns. Expanded, each level they hold with its control and
  * remove, and their devices with Revoke. The first owner has no level control or removal, and
- * keeps rename and devices (AC51).
+ * keeps rename and devices (AC51). The menu widens them to a project or the whole server at their
+ * highest level, as the Share dialog would for someone already on the server (AC35).
  */
 function PersonRow({
   environmentId,
@@ -404,7 +464,38 @@ function PersonRow({
   const [expanded, setExpanded] = useState(false);
   const change = useChange(environmentId);
   const removePerson = useAtomCommand(sharingManage.removePerson, { reportFailure: false });
+  const setLevel = useAtomCommand(sharingManage.setLevel, { reportFailure: false });
   const name = person.name ?? "Someone without a name yet";
+  const projects = useProjects().filter(
+    (project) => project.environmentId === environmentId && project.isScratch !== true,
+  );
+  const widen = widenTargets(
+    person.levels,
+    projects.map((project) => project.id),
+  );
+  const widenProjects =
+    widen === null ? [] : projects.filter((project) => widen.projectIds.includes(project.id));
+
+  const widenTo = async (level: PersonLevel, scope: PersonScope, title: string) => {
+    const held = person.levels.find((entry) => sameScope(entry.scope, scope))?.level ?? null;
+    const confirmed = await requestConfirmDialog(
+      `Make ${person.name ?? "this person"} ${levelLabel(level)} on ${title}?`,
+      undefined,
+      {
+        content: (
+          <div className="flex flex-col gap-2">
+            <p className="text-sm text-muted-foreground">{historyNote(scope)}</p>
+            {raisesToWriting(held, level) ? <WritingWarning name={person.name} /> : null}
+          </div>
+        ),
+        confirmLabel: `Make ${levelLabel(level)}`,
+      },
+    );
+    if (confirmed !== true) return;
+    await change("Could not change the level", () =>
+      setLevel({ environmentId, input: { personId: person.personId, scope, level } }),
+    );
+  };
 
   const remove = async () => {
     const confirmed = await requestConfirmDialog(
@@ -476,6 +567,39 @@ function PersonRow({
             >
               Rename…
             </MenuItem>
+            {widen === null ? null : (
+              <>
+                <MenuSeparator />
+                <MenuSub>
+                  <MenuSubTrigger disabled={!canManage || widenProjects.length === 0}>
+                    Make {levelLabel(widen.level)} on project
+                  </MenuSubTrigger>
+                  <MenuSubPopup>
+                    {widenProjects.map((project) => (
+                      <MenuItem
+                        key={project.id}
+                        onClick={() =>
+                          void widenTo(
+                            widen.level,
+                            { kind: "project", projectId: project.id },
+                            project.title,
+                          )
+                        }
+                      >
+                        <ProjectFavicon project={project} />
+                        {project.title}
+                      </MenuItem>
+                    ))}
+                  </MenuSubPopup>
+                </MenuSub>
+                <MenuItem
+                  disabled={!canManage}
+                  onClick={() => void widenTo(widen.level, { kind: "server" }, "the whole server")}
+                >
+                  Make {levelLabel(widen.level)} on whole server…
+                </MenuItem>
+              </>
+            )}
             {person.firstOwner ? null : (
               <>
                 <MenuSeparator />
