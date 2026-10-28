@@ -170,6 +170,20 @@ const clientFor = (scopes: ReadonlyArray<AuthEnvironmentScope>) =>
                 },
               })
             : Effect.fail(new A2AExchangeNotOpenError({ exchangeId: input.exchangeId })),
+        answerCrewWorktreeCleanup: ({ itemId }) =>
+          reached("cleanup", {
+            item: {
+              id: itemId,
+              crewInstanceId: "crew:1",
+              crewName: "Login Fix Crew",
+              projectId: "project:gate",
+              captainThreadId: ThreadId.make("thread:captain"),
+              filedAt: "2026-10-27T12:00:00.000Z",
+              status: "decided" as const,
+              decidedAt: "2026-10-27T12:05:00.000Z",
+              entries: [],
+            },
+          }),
       }),
       Layer.mock(PeerAdminService)({
         issueCredential: (input) =>
@@ -302,6 +316,9 @@ const callEach = (client: Effect.Success<ReturnType<typeof clientFor>>["client"]
         ...answer,
         exchangeId: "ask:1",
       }),
+    ),
+    [ACTIONS.answerCrewWorktreeCleanup]: outcome(
+      client[ACTIONS.answerCrewWorktreeCleanup]({ itemId: "cleanup:1", removePaths: [] }),
     ),
     [ACTIONS.issuePeerCredential]: outcome(
       client[ACTIONS.issuePeerCredential]({
@@ -461,6 +478,11 @@ describe("J5 client action RPC handlers", () => {
         (yield* client[ACTIONS.archiveCrew]({ crewInstanceId: "crew:1" })).status,
         "archived",
       );
+      assert.equal(
+        (yield* client[ACTIONS.answerCrewWorktreeCleanup]({ itemId: "cleanup:1", removePaths: [] }))
+          .item.status,
+        "decided",
+      );
       assert.deepStrictEqual(
         yield* client[ACTIONS.respondCrewRuntimeRequest]({
           threadId,
@@ -482,6 +504,7 @@ describe("J5 client action RPC handlers", () => {
         "resolve",
         "stop",
         "archive",
+        "cleanup",
         "respond",
         "answer",
         "delete artifact",
