@@ -456,7 +456,7 @@ export const layer = Layer.effect(
                           message: "Persona snapshot storage is unavailable.",
                         }),
                       )
-                    : Effect.succeed({ ...prepared, definitionDigest }),
+                    : Effect.succeed({ ...prepared, definitionDigest, instructionsEdited: true }),
                 ),
                 Effect.mapError(
                   (error) =>

@@ -1220,6 +1220,8 @@ it.effect("a persona seat's edited instructions replace the persona's own at lau
       assert.include(replaced, "Only read the README.");
       assert.notInclude(replaced, original);
       assert.equal(edited[0]!.assignment!.personaId, plain[0]!.assignment!.personaId);
+      assert.equal(edited[0]!.assignment!.instructionsEdited, true);
+      assert.notProperty(plain[0]!.assignment!, "instructionsEdited");
       assert.notEqual(
         edited[0]!.assignment!.definitionDigest,
         plain[0]!.assignment!.definitionDigest,
