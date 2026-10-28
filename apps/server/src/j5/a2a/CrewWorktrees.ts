@@ -135,7 +135,7 @@ export interface CrewWorktreesShape {
     readonly seats: ReadonlyArray<CrewWorktreeSeat>;
     /**
      * Given, the worktrees kept for unfinished work (uncommitted changes, unmerged commits) are
-     * also filed as one Inbox approval for this Crew, unless it already has an open one.
+     * also filed as one Inbox approval for this Crew, unless it already has one.
      */
     readonly crew?: {
       readonly crewInstanceId: string;
@@ -337,6 +337,38 @@ const makeLayer = (daemon: boolean) =>
       const digestOf = (text: string) => NodeCrypto.createHash("sha256").update(text).digest("hex");
 
       /**
+       * What the worktree holds uncommitted, by content: the status lists names and codes, so an
+       * edit to a file that was already dirty would not show. Status git cut off, or a folder it
+       * lists whole (a nested repository), cannot be compared, so it never matches again and the
+       * worktree is kept.
+       */
+      const snapshotOf = Effect.fnUntraced(function* (worktreePath: string) {
+        const status = yield* localChanges(worktreePath);
+        const unmatched = () => `unverifiable:${NodeCrypto.randomUUID()}`;
+        if (status.stdoutTruncated) return { status, digest: unmatched() };
+        // A deleted file has no content to read; its status code already says so.
+        const paths = status.stdout
+          .split("\0")
+          .filter((record) => /^[ MTADRCU?!]{2} /.test(record) && !record.slice(0, 2).includes("D"))
+          .map((record) => record.slice(3));
+        if (paths.some((changed) => changed.endsWith("/"))) return { status, digest: unmatched() };
+        if (paths.length === 0) return { status, digest: digestOf(status.stdout) };
+        const hashed = yield* git.execute({
+          operation: "CrewWorktrees.contents",
+          cwd: worktreePath,
+          args: ["hash-object", "--", ...paths],
+          allowNonZeroExit: true,
+        });
+        return {
+          status,
+          digest:
+            hashed.exitCode === 0 && !hashed.stdoutTruncated
+              ? digestOf(`${status.stdout}\n${hashed.stdout}`)
+              : unmatched(),
+        };
+      });
+
+      /**
        * Merged into the project's default branch as last fetched, or named by a merged pull
        * request as exactly this commit, which is how a squash or rebase merge shows.
        */
@@ -423,12 +455,12 @@ const makeLayer = (daemon: boolean) =>
         if ((yield* sessionOpenIn(worktreePath)) || (yield* terminalOpenIn(worktreePath)))
           return { kind: "keep", reason: "in_use" } satisfies Verdict;
         if (context.baseline !== undefined) {
-          const [head, status] = yield* Effect.all([
+          const [head, snapshot] = yield* Effect.all([
             git.resolveCommit({ cwd: worktreePath, revision: "HEAD" }),
-            localChanges(worktreePath),
+            snapshotOf(worktreePath),
           ]);
           return head.commitSha === context.baseline.headSha &&
-            digestOf(status.stdout) === context.baseline.statusDigest
+            snapshot.digest === context.baseline.statusDigest
             ? ({ kind: "remove", headSha: head.commitSha } satisfies Verdict)
             : ({ kind: "changed" } satisfies Verdict);
         }
@@ -517,8 +549,8 @@ const makeLayer = (daemon: boolean) =>
       /** Measured once, as the archive keeps the worktree; the recheck compares against the commit and status taken here. */
       const measure = Effect.fnUntraced(function* (worktree: UnfinishedWorktree) {
         const worktreePath = path.resolve(worktree.path);
-        const [status, head] = yield* Effect.all([
-          localChanges(worktreePath),
+        const [{ status, digest }, head] = yield* Effect.all([
+          snapshotOf(worktreePath),
           git.resolveCommit({ cwd: worktreePath, revision: "HEAD" }),
         ]);
         const commitsAhead = yield* Effect.gen(function* () {
@@ -558,11 +590,11 @@ const makeLayer = (daemon: boolean) =>
           reason: null,
           detail: null,
           headSha: head.commitSha,
-          statusDigest: digestOf(status.stdout),
+          statusDigest: digest,
         } satisfies StoredCleanupEntry;
       });
 
-      /** One approval per archive: a Crew with an open one keeps it, so an archive that runs again files nothing. */
+      /** One approval per Crew, answered or not, so an archive that runs again files nothing. */
       const fileCleanup = Effect.fnUntraced(function* (
         crew: NonNullable<Parameters<CrewWorktreesShape["cleanup"]>[0]["crew"]>,
         unfinished: ReadonlyArray<UnfinishedWorktree>,

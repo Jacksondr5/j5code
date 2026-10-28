@@ -945,6 +945,73 @@ it.effect("keeping all clears the item and changes nothing", () =>
   ),
 );
 
+it.effect("an archive that runs again after keeping all files nothing more", () =>
+  run(
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      const { edited, ahead, item } = yield* archiveKeepingTwo(f);
+      yield* f.service.answerCleanup({ itemId: item.id, removePaths: [] });
+
+      yield* f.service.cleanup({ seats: [edited, ahead], crew });
+      assert.lengthOf(yield* f.service.listCleanups("open"), 0);
+      assert.lengthOf(yield* f.service.listCleanups("decided"), 1);
+    }),
+  ),
+);
+
+it.effect("skips a worktree whose files were already changed when they change again", () =>
+  run(
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      const { edited, item } = yield* archiveKeepingTwo(f);
+      // Same files, same status codes: only what is in them differs from what was filed.
+      yield* f.fs.writeFileString(f.path.join(edited.worktree, "tracked.txt"), "edited again\n");
+      yield* f.fs.writeFileString(f.path.join(edited.worktree, "new.txt"), "new again\n");
+
+      const decided = yield* f.service.answerCleanup({
+        itemId: item.id,
+        removePaths: [edited.worktree],
+      });
+      assert.deepStrictEqual(
+        decided.entries.map((entry) => [entry.outcome, entry.reason]),
+        [
+          ["skipped", "changed"],
+          ["kept", null],
+        ],
+      );
+      assert.strictEqual(
+        yield* f.fs.readFileString(f.path.join(edited.worktree, "tracked.txt")),
+        "edited again\n",
+      );
+    }),
+  ),
+);
+
+it.effect("skips a worktree with a nested repository, which cannot be compared by content", () =>
+  run(
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      const nested = yield* f.seat("nested");
+      const inner = f.path.join(nested.worktree, "inner");
+      yield* f.fs.makeDirectory(inner);
+      yield* f.run(inner, ["init"]);
+      yield* f.fs.writeFileString(f.path.join(inner, "file.txt"), "x\n");
+      yield* f.service.cleanup({ seats: [nested], crew });
+      const [item] = yield* f.service.listCleanups("open");
+
+      const decided = yield* f.service.answerCleanup({
+        itemId: item!.id,
+        removePaths: [nested.worktree],
+      });
+      assert.deepStrictEqual(
+        decided.entries.map((entry) => [entry.outcome, entry.reason]),
+        [["skipped", "changed"]],
+      );
+      assert.isTrue(yield* f.fs.exists(nested.worktree));
+    }),
+  ),
+);
+
 it.effect("skips and reports a worktree that changed, is shared, is in use or came back", () =>
   run(
     Effect.gen(function* () {

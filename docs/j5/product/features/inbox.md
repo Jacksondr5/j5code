@@ -41,7 +41,7 @@ The inbox is **not** a backlog (a non-blocking note an agent wants to keep is a 
 
 ### Contents
 
-1. The Inbox lists open asks addressed to the person, live Crew-seat provider approvals, and actionable pending native questions from J5-spawned Peer Agents and live Crew seats across connected environments. Native questions open the original thread form and disappear when resolved; they are not answered as Exchanges. No plain messages or inferred stalls are added.
+1. The Inbox lists open asks addressed to the person, live Crew-seat provider approvals, worktree cleanup items, and actionable pending native questions from J5-spawned Peer Agents and live Crew seats across connected environments. Native questions open the original thread form and disappear when resolved; they are not answered as Exchanges. No plain messages or inferred stalls are added.
 2. A plain message from an agent to a person is refused at the tool; the person's row in the address book says it cannot receive one.
 3. Several open asks from the same agent to the same person appear as separate items; a follow-up that references an open ask by its Exchange id appears beneath that ask's original text in the same item.
 4. The bell's count equals the number of open items.
@@ -73,10 +73,10 @@ The inbox is **not** a backlog (a non-blocking note an agent wants to keep is a 
 
 ### Worktree cleanup
 
-18. An archive of a Crew that keeps J5-created worktrees for uncommitted changes or unmerged commits files exactly one item for that Crew, however many seats and worktrees; archiving again while it is open files nothing more. The item has no sender, is not an Exchange, reads "J5" with urgency FYI, and counts on the bell.
+18. An archive of a Crew that keeps J5-created worktrees for uncommitted changes or unmerged commits files exactly one item for that Crew, however many seats and worktrees; archiving again files nothing more, whether the item is open or answered. The item has no sender, is not an Exchange, reads "J5" with urgency FYI, and counts on the bell.
 19. Each worktree in the item shows its thread and branch, the number of its uncommitted files, the number of its commits not on the default branch, and its pull request link when it has one; the item says that removing discards uncommitted changes and keeps the branch. Worktrees with uncommitted work come first, and a list longer than five shows five rows and "Show N more".
 20. No worktree is picked at first. The person can keep all, which clears the item and changes nothing, pick worktrees and remove them (Remove selected is disabled while none is picked), or select all (disabled once every worktree is picked). Only an Owner answers it, from the app, and anyone else sees it read-only; no agent tool answers it.
-21. Before removing an approved worktree, J5 checks it again and skips and reports it when its commit or its list of changed files differs from when the archive kept it, another unarchived thread now uses it, its thread was unarchived, or a provider session is open in it. A worktree already removed some other way is skipped without error, and a removal that fails is reported with its reason without stopping the others.
+21. Before removing an approved worktree, J5 checks it again and skips and reports it when its commit, its list of changed files or what is in those files differs from when the archive kept it (a nested repository or a very long list of changes can't be compared, so it is skipped), another unarchived thread now uses it, its thread was unarchived, or a provider session is open in it. A worktree already removed some other way is skipped without error, and a removal that fails is reported with its reason without stopping the others.
 22. The item resolves once: a second answer is refused with "This worktree cleanup was already answered." and the item shows its decided state, and it clears on the person's other devices. Afterwards it stays in place showing each worktree as removed, kept ("Not picked"), skipped (changed since it was filed, another thread uses it, a session is open in it, already gone, or couldn't be checked) or failed (git's own error text), and then moves to the Answered shelf as a one-line count of each. Nothing is offered to retry a skipped or failed worktree.
 
 ## Scenarios

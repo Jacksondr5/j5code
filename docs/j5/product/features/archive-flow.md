@@ -36,7 +36,7 @@ Archiving is **not** deleting, **not** a way to archive a single Crew member, an
 ### The dialog
 
 2. An agent with no open Exchanges and no agents beneath it archives immediately, with no dialog.
-3. Otherwise the dialog names the agent in its title, lists the agents beneath it, lists every live Crew the agent commands with each seat's running turn and open asks, lists every open ask with its urgency, direction, counterpart, time open, and verbatim intent, states the count of asks that will be terminated, and reassures that the workspace survives.
+3. Otherwise the dialog names the agent in its title, lists the agents beneath it, lists every live Crew the agent commands with each seat's running turn and open asks, lists every open ask with its urgency, direction, counterpart, time open, and verbatim intent, states the count of asks that will be terminated, and reassures that the workspace survives (archiving a Crew removes only the clean, merged worktrees J5 created for its seats).
 4. An ask row names its counterpart by display name — an agent's thread title, a person's name with "(inbox)" — and never shows a raw id; an unnamed counterpart reads "Unnamed participant".
 5. The dialog has one confirm and no type-to-confirm.
 
