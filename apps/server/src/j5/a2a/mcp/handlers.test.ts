@@ -1,3 +1,5 @@
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 import { stringify as toYaml } from "yaml";
 import { makeAgentPersonaLibrary } from "../../agents/agentPersonaLibrary.ts";
 import { resolveAgentPersonaRuntime } from "../../agents/agentPersonaRuntime.ts";
@@ -2117,6 +2119,12 @@ it.effect("lists saved agents with purpose, policy, availability, and route", ()
       Layer.provideMerge(dependencies),
     );
     yield* Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const config = yield* ServerConfig;
+      const folder = path.join(config.stateDir, "personas");
+      yield* fs.makeDirectory(folder, { recursive: true });
+      yield* fs.writeFileString(path.join(folder, "broken.yaml"), "id: [");
       const toolkit = yield* J5Toolkit;
       const response = yield* toolkit
         .handle("j5_list_personas", {})
@@ -2127,6 +2135,14 @@ it.effect("lists saved agents with purpose, policy, availability, and route", ()
           Effect.provideService(McpInvocationContext, scope),
         );
       assert.isFalse(response.isFailure);
+      const diagnostics = (
+        response.result as {
+          readonly diagnostics: ReadonlyArray<{ readonly path: string; readonly message: string }>;
+        }
+      ).diagnostics;
+      assert.lengthOf(diagnostics, 1);
+      assert.include(diagnostics[0]!.path, "broken.yaml");
+      assert.include(diagnostics[0]!.message, "YAMLParseError");
       const { personas } = response.result as {
         readonly personas: ReadonlyArray<{
           readonly id: string;

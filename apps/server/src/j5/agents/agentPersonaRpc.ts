@@ -101,6 +101,7 @@ export const makeAgentPersonaRpcHandlers = Effect.fn("j5.makeAgentPersonaRpcHand
           };
           const removed = buildAgentPersonaCatalog(yield* deps.providers, current.removedSources);
           return {
+            diagnostics: current.diagnostics,
             personas: [
               ...catalog.personas.map((persona) => ({
                 ...persona,

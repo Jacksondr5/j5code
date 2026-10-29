@@ -344,6 +344,7 @@ export const J5SpawnAgentResult = Schema.Struct({
 });
 
 export const J5ListAgentsResult = Schema.Struct({
+  diagnostics: Schema.Array(Schema.Struct({ path: Schema.String, message: Schema.String })),
   personas: Schema.Array(
     Schema.Struct({
       id: AgentPersonaId,

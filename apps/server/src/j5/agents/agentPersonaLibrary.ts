@@ -46,13 +46,19 @@ const decodeSnapshot = Effect.fn("AgentPersonaLibrary.decodeSnapshot")(function*
 const decodeDefinition = Effect.fn("AgentPersonaLibrary.decodeDefinition")(function* (
   text: string,
 ) {
-  const definition = yield* Effect.try((): unknown => {
-    const document = parseDocument(text, { version: "1.2", uniqueKeys: true });
-    const issue = document.errors[0] ?? document.warnings[0];
-    if (issue) throw issue;
-    return document.toJS({ maxAliasCount: 0 });
+  const definition = yield* Effect.try({
+    try: (): unknown => {
+      const document = parseDocument(text, { version: "1.2", uniqueKeys: true });
+      const issue = document.errors[0] ?? document.warnings[0];
+      if (issue) throw issue;
+      return document.toJS({ maxAliasCount: 0 });
+    },
+    catch: (cause) => new AgentPersonaLibraryError({ message: String(cause) }),
   });
-  return yield* Effect.try(() => decodeAgentPersonaDefinition(definition));
+  return yield* Effect.try({
+    try: () => decodeAgentPersonaDefinition(definition),
+    catch: (cause) => new AgentPersonaLibraryError({ message: String(cause) }),
+  });
 });
 const ImportedDefinition = Schema.Struct({
   ...AgentPersonaDefinition.fields,
@@ -228,11 +234,13 @@ export function createAgentPersonaLibrary(storage?: {
   });
 
   const loadSources = Effect.fn("AgentPersonaLibrary.loadSources")(function* () {
-    if (storage === undefined) return { definitions: [], paths: new Map<string, string>() };
+    if (storage === undefined)
+      return { definitions: [], paths: new Map<string, string>(), diagnostics: [] };
     const { fs } = storage;
     const { configured, folders } = yield* resolveFolders();
     const definitions = new Map<string, AgentPersonaDefinition>();
     const paths = new Map<string, string>();
+    const diagnostics: Array<{ path: string; message: string }> = [];
     for (const folder of folders.map(({ path }) => path)) {
       const files = yield* listDefinitionFiles(folder).pipe(
         Effect.catch((error) =>
@@ -249,18 +257,17 @@ export function createAgentPersonaLibrary(storage?: {
         continue;
       }
       for (const file of files) {
-        const stat = yield* fs.stat(file);
-        if (Number(stat.size) > 65536)
-          return yield* new AgentPersonaLibraryError({
-            message: `Persona file exceeds 64 KiB: ${file}`,
-          });
-        const text = yield* fs.readFileString(file);
-        const definition = yield* decodeDefinition(text).pipe(
-          Effect.mapError(
-            (cause) =>
-              new AgentPersonaLibraryError({ message: `Invalid persona file ${file}`, cause }),
-          ),
-        );
+        const result = yield* Effect.gen(function* () {
+          const stat = yield* fs.stat(file);
+          if (Number(stat.size) > 65536)
+            return yield* new AgentPersonaLibraryError({ message: "Persona file exceeds 64 KiB" });
+          return yield* decodeDefinition(yield* fs.readFileString(file));
+        }).pipe(Effect.result);
+        if (result._tag === "Failure") {
+          diagnostics.push({ path: file, message: String(result.failure) });
+          continue;
+        }
+        const definition = result.success;
         if (definitions.has(definition.id))
           return yield* new AgentPersonaLibraryError({
             message: `Duplicate persona id: ${definition.id}`,
@@ -269,7 +276,7 @@ export function createAgentPersonaLibrary(storage?: {
         paths.set(definition.id, file);
       }
     }
-    return { definitions: [...definitions.values()], paths };
+    return { definitions: [...definitions.values()], paths, diagnostics };
   });
 
   /** Folder inventory for Settings; counts YAML files in the folder tree without decoding them. */
@@ -426,6 +433,7 @@ export function createAgentPersonaLibrary(storage?: {
     const importedIds = new Set(imported.map(({ id }) => id));
     return {
       definitions: [...definitions.values()],
+      diagnostics: loaded.diagnostics,
       importedIds: [...importedIds],
       disabledIds: [
         ...imported.filter(({ enabled }) => enabled === false).map(({ id }) => id),

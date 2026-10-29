@@ -383,6 +383,12 @@ function MemberAgentLibrarySettingsScreen() {
         contentContainerClassName="gap-6 px-5 pt-4"
         contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 18) + 18 }}
       >
+        {catalog.data?.diagnostics?.map((diagnostic) => (
+          <AgentMessage
+            key={diagnostic.path}
+            title={`Invalid persona file: ${diagnostic.path}: ${diagnostic.message}`}
+          />
+        ))}
         <SettingsSection title="Persona library">
           <View className="rounded-2xl bg-card px-4 py-3">
             <Text className="text-base text-foreground">

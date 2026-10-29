@@ -137,11 +137,40 @@ describe("folder-backed persona library", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("reports oversized sources while keeping valid definitions", () =>
+    Effect.gen(function* () {
+      const { library, write, fs, path, folder } = yield* fixture;
+      yield* write("valid.yaml", custom);
+      yield* fs.writeFileString(path.join(folder, "oversized.yaml"), "a".repeat(65537));
+      const catalog = yield* library.catalog();
+      assert.deepEqual(
+        catalog.definitions.map(({ id }) => id),
+        [custom.id],
+      );
+      assert.lengthOf(catalog.diagnostics, 1);
+      assert.include(catalog.diagnostics[0]!.path, "oversized.yaml");
+      assert.include(catalog.diagnostics[0]!.message, "exceeds 64 KiB");
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("reports invalid files, invalid configuration, and missing configured folders", () =>
     Effect.gen(function* () {
       const { library, write, fs, path, stateDir } = yield* fixture;
       yield* write("invalid.yaml", { ...custom, outputArtifact: "UndefinedArtifact" });
-      assert.include(String(yield* library.load().pipe(Effect.flip)), "Invalid persona file");
+      yield* write("valid.yaml", custom);
+      yield* fs.writeFileString(path.join(stateDir, "personas", "syntax.yaml"), "id: [");
+      const catalog = yield* library.catalog();
+      assert.deepEqual(
+        (yield* library.load()).map(({ id }) => id),
+        [custom.id],
+      );
+      assert.lengthOf(catalog.diagnostics, 2);
+      assert.include(catalog.diagnostics[0]!.path, "invalid.yaml");
+      assert.include(catalog.diagnostics[0]!.message, "UndefinedArtifact");
+      assert.include(catalog.diagnostics[1]!.path, "syntax.yaml");
+      yield* fs.remove(path.join(stateDir, "personas", "invalid.yaml"));
+      yield* fs.remove(path.join(stateDir, "personas", "syntax.yaml"));
+      assert.deepEqual((yield* library.catalog()).diagnostics, []);
       yield* fs.writeFileString(path.join(stateDir, "agent-personas.json"), "not json");
       assert.isDefined(yield* library.load().pipe(Effect.flip));
       yield* fs.writeFileString(
