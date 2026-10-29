@@ -83,12 +83,17 @@ const threadFor = (
   threadsByKey: ThreadLookup,
   environmentId: EnvironmentId,
   agent: FleetAgent,
-): EnvironmentThreadShell | undefined =>
-  agent.threadId === null
-    ? undefined
-    : threadsByKey.get(
-        scopedThreadKey(scopeThreadRef(environmentId, ThreadId.make(agent.threadId))),
-      );
+): (EnvironmentThreadShell & { readonly notStarted?: boolean }) | undefined => {
+  const thread =
+    agent.threadId === null
+      ? undefined
+      : threadsByKey.get(
+          scopedThreadKey(scopeThreadRef(environmentId, ThreadId.make(agent.threadId))),
+        );
+  return thread === undefined || agent.crew?.notStarted === undefined
+    ? thread
+    : { ...thread, notStarted: agent.crew.notStarted };
+};
 
 const projectKey = (ledgerProject: ScopedFleetLedgerProject) =>
   `${ledgerProject.environmentId}:${ledgerProject.id}`;

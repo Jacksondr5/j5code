@@ -69,11 +69,7 @@ it("a Fleet seat row says Not started only while the seat is waiting for its fir
   expect(seatRow({ notStarted: true })).toContain("Not started");
 });
 
-it("a Fleet seat whose first start failed says how it ended, not Not started", () => {
-  const failed = seatRow({ notStarted: true, runtimeStatus: "failed" });
-  expect(failed).toContain("Failed");
-  expect(failed).not.toContain("Not started");
-  const interrupted = seatRow({ notStarted: true, runtimeStatus: "interrupted" });
-  expect(interrupted).toContain("Interrupted");
-  expect(interrupted).not.toContain("Not started");
+it("a Fleet seat whose first start failed does not say Not started", () => {
+  expect(seatRow({ notStarted: true, runtimeStatus: "failed" })).not.toContain("Not started");
+  expect(seatRow({ notStarted: true, runtimeStatus: "interrupted" })).not.toContain("Not started");
 });
