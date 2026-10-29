@@ -8,6 +8,15 @@ import * as Schema from "effect/Schema";
 import { Tool } from "effect/ai";
 
 import { A2A_SEND_TOOL_DESCRIPTION } from "../EnvelopeFormatter.ts";
+import { J5AttachmentUploadToolkit } from "./attachments.ts";
+import { J5AdaptedThreadToolkit } from "./threadTools.ts";
+import {
+  J5ArtifactToolkit,
+  J5EnvironmentToolkit,
+  J5ProjectToolkit,
+  J5OrchestratorToolkit,
+  J5ThreadToolkit,
+} from "./upstreamCatalog.ts";
 import { J5OrchestratorSurface } from "./orchestratorSurface.ts";
 import { J5_CLAUDE_MCP_ALLOWED_TOOLS } from "./claudeAllowedTools.ts";
 import {
@@ -140,6 +149,39 @@ it("publishes the ratified single-target lifecycle contracts fail-closed", () =>
   );
   assert.isFalse(Context.get(J5SpawnAgentTool.annotations, Tool.Idempotent));
   assert.isFalse(Context.get(J5StopAgentTool.annotations, Tool.Idempotent));
+});
+
+// These are provider-facing safety hints, independent of J5's pre-approval list. This
+// checks the advertised contract; actual Codex policy acceptance needs a live provider run.
+it("publishes closed-world, non-destructive hints for every read-only J5 tool", () => {
+  const tools = [
+    ...Object.values(J5Toolkit.tools),
+    ...Object.values(J5ArtifactToolkit.tools),
+    ...Object.values(J5OrchestratorSurface.tools),
+    ...Object.values(J5EnvironmentToolkit.tools),
+    ...Object.values(J5ProjectToolkit.tools),
+    ...Object.values(J5OrchestratorToolkit.tools),
+    ...Object.values(J5ThreadToolkit.tools),
+    ...Object.values(J5AdaptedThreadToolkit.tools),
+    ...Object.values(J5AttachmentUploadToolkit.tools),
+  ];
+  const reads = tools.filter((tool) => Context.get(tool.annotations, Tool.Readonly));
+  assert.includeMembers(
+    reads.map((tool) => tool.name),
+    [
+      "j5_playbook_list",
+      "j5_playbook_read",
+      "j5_playbook_current",
+      "orchestrator_capabilities",
+      "t3_environment_read",
+      "t3_project_read",
+      "t3_queue_read",
+    ],
+  );
+  for (const tool of reads) {
+    assert.isFalse(Context.get(tool.annotations, Tool.Destructive), tool.name);
+    assert.isFalse(Context.get(tool.annotations, Tool.OpenWorld), tool.name);
+  }
 });
 
 // Claude Code drops EVERY tool of an MCP server when one tool's input schema has no top-level

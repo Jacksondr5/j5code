@@ -80,6 +80,7 @@ export const J5OrchestratorCapabilitiesTool = Tool.make("orchestrator_capabiliti
 })
   .annotate(Tool.Title, "Get orchestration capabilities")
   .annotate(Tool.Readonly, true)
+  .annotate(Tool.OpenWorld, false)
   .annotate(Tool.Destructive, false)
   .annotate(Tool.Idempotent, true);
 

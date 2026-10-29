@@ -1,6 +1,7 @@
-import { type Tool, Toolkit } from "effect/ai";
+import { Tool, Toolkit } from "effect/ai";
 
 import type { HandlersLayer } from "../../../mcp/McpToolAccess.ts";
+import { ArtifactToolkit } from "../../../mcp/toolkits/artifacts/tools.ts";
 import { EnvironmentToolkit } from "../../../mcp/toolkits/environment/tools.ts";
 import { OrchestratorToolkit } from "../../../mcp/toolkits/orchestrator/tools.ts";
 import { ProjectToolkit } from "../../../mcp/toolkits/project/tools.ts";
@@ -22,7 +23,9 @@ export const handlersFor = <Part extends Record<string, Tool.Any>, Tools extends
 ) => handlers as unknown as HandlersLayer<Part, EX, RX>;
 
 export const J5EnvironmentToolkit = Toolkit.make(
-  EnvironmentToolkit.tools.t3_environment_read,
+  EnvironmentToolkit.tools.t3_environment_read
+    .annotate(Tool.Destructive, false)
+    .annotate(Tool.OpenWorld, false),
   EnvironmentToolkit.tools.t3_environment_preferences_update,
 );
 
@@ -32,8 +35,12 @@ export const J5EnvironmentToolkit = Toolkit.make(
  * the door for it.
  */
 export const J5ProjectToolkit = Toolkit.make(
-  ProjectToolkit.tools.t3_project_list,
-  ProjectToolkit.tools.t3_project_read,
+  ProjectToolkit.tools.t3_project_list
+    .annotate(Tool.Destructive, false)
+    .annotate(Tool.OpenWorld, false),
+  ProjectToolkit.tools.t3_project_read
+    .annotate(Tool.Destructive, false)
+    .annotate(Tool.OpenWorld, false),
   ProjectToolkit.tools.t3_project_create,
   ProjectToolkit.tools.t3_project_update,
   ProjectToolkit.tools.t3_project_clone,
@@ -52,11 +59,15 @@ export const J5OrchestratorToolkit = Toolkit.make(
   OrchestratorToolkit.tools.task_status,
   OrchestratorToolkit.tools.task_cancel,
   OrchestratorToolkit.tools.schedule_task,
-  OrchestratorToolkit.tools.list_scheduled_tasks,
+  OrchestratorToolkit.tools.list_scheduled_tasks
+    .annotate(Tool.Destructive, false)
+    .annotate(Tool.OpenWorld, false),
   OrchestratorToolkit.tools.update_scheduled_task,
   OrchestratorToolkit.tools.delete_scheduled_task,
   OrchestratorToolkit.tools.request_secret,
-  OrchestratorToolkit.tools.t3_thread_list,
+  OrchestratorToolkit.tools.t3_thread_list
+    .annotate(Tool.Destructive, false)
+    .annotate(Tool.OpenWorld, false),
   OrchestratorToolkit.tools.t3_thread_read,
   OrchestratorToolkit.tools.t3_thread_update,
   OrchestratorToolkit.tools.t3_workflow_stop,
@@ -64,18 +75,43 @@ export const J5OrchestratorToolkit = Toolkit.make(
 
 // `t3_thread_fork`, `t3_thread_organize` and `t3_queue_edit` are J5's own (see threadTools.ts).
 export const J5ThreadToolkit = Toolkit.make(
-  ThreadToolkit.tools.t3_queue_list,
-  ThreadToolkit.tools.t3_queue_read,
+  ThreadToolkit.tools.t3_queue_list
+    .annotate(Tool.Destructive, false)
+    .annotate(Tool.OpenWorld, false),
+  ThreadToolkit.tools.t3_queue_read
+    .annotate(Tool.Destructive, false)
+    .annotate(Tool.OpenWorld, false),
   ThreadToolkit.tools.t3_queue_cancel,
   ThreadToolkit.tools.t3_queue_reorder,
   ThreadToolkit.tools.t3_queue_promote_to_steer,
-  ThreadToolkit.tools.t3_pending_request_list,
-  ThreadToolkit.tools.t3_pending_request_read,
+  ThreadToolkit.tools.t3_pending_request_list
+    .annotate(Tool.Destructive, false)
+    .annotate(Tool.OpenWorld, false),
+  ThreadToolkit.tools.t3_pending_request_read
+    .annotate(Tool.Destructive, false)
+    .annotate(Tool.OpenWorld, false),
   ThreadToolkit.tools.t3_pending_request_respond,
-  ThreadToolkit.tools.t3_thread_configuration,
+  ThreadToolkit.tools.t3_thread_configuration
+    .annotate(Tool.Destructive, false)
+    .annotate(Tool.OpenWorld, false),
   ThreadToolkit.tools.t3_thread_configure,
-  ThreadToolkit.tools.t3_thread_transfers,
+  ThreadToolkit.tools.t3_thread_transfers
+    .annotate(Tool.Destructive, false)
+    .annotate(Tool.OpenWorld, false),
   ThreadToolkit.tools.t3_thread_merge_back,
-  ThreadToolkit.tools.t3_thread_search,
+  ThreadToolkit.tools.t3_thread_search
+    .annotate(Tool.Destructive, false)
+    .annotate(Tool.OpenWorld, false),
   ThreadToolkit.tools.run_scheduled_task_now,
+);
+
+// Artifact verbs are J5-owned even though their original toolkit lives in the MCP tree.
+export const J5ArtifactToolkit = Toolkit.make(
+  ArtifactToolkit.tools.j5_list_artifacts
+    .annotate(Tool.Destructive, false)
+    .annotate(Tool.OpenWorld, false),
+  ArtifactToolkit.tools.j5_read_artifact
+    .annotate(Tool.Destructive, false)
+    .annotate(Tool.OpenWorld, false),
+  ArtifactToolkit.tools.j5_write_artifact,
 );

@@ -7,7 +7,6 @@ import * as OrchestratorMcpService from "../../../mcp/OrchestratorMcpService.ts"
 import * as ThreadMetadataMcpService from "../../../mcp/ThreadMetadataMcpService.ts";
 import * as ThreadCommandExecutor from "../../../orchestration-v2/ThreadCommandExecutor.ts";
 import * as ArtifactHandlers from "../../../mcp/toolkits/artifacts/handlers.ts";
-import { ArtifactToolkit } from "../../../mcp/toolkits/artifacts/tools.ts";
 import * as AttachmentHandlers from "../../../mcp/toolkits/attachment/handlers.ts";
 import * as EnvironmentHandlers from "../../../mcp/toolkits/environment/handlers.ts";
 import * as OrchestratorHandlers from "../../../mcp/toolkits/orchestrator/handlers.ts";
@@ -20,6 +19,7 @@ import * as J5OrchestratorSurfaceHandlers from "./orchestratorSurfaceHandlers.ts
 import * as J5AdaptedThread from "./threadTools.ts";
 import { J5Toolkit } from "./tools.ts";
 import {
+  J5ArtifactToolkit,
   J5EnvironmentToolkit,
   J5OrchestratorToolkit,
   J5ProjectToolkit,
@@ -58,7 +58,7 @@ export const layerJ5Toolkits = (register: typeof toolkitRegistration) =>
       J5EnvironmentToolkit,
       handlersFor(J5EnvironmentToolkit, EnvironmentHandlers.layer),
     ).pipe(Layer.provide(ThreadCommandExecutor.layer)),
-    register(ArtifactToolkit, ArtifactHandlers.layer).pipe(
+    register(J5ArtifactToolkit, ArtifactHandlers.layer).pipe(
       Layer.provide(ArtifactMcpService.layer.pipe(Layer.provide(ArtifactWorkspaceLive))),
     ),
   );
