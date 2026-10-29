@@ -25,6 +25,13 @@ export const addSeat = (
   // A custom seat has no persona; its instructions are all it will know beyond the brief.
   if (custom && instructions.length === 0)
     return { seats, error: "Give the custom crew member its instructions." };
+  // A replacement is stored as non-empty text, so a cleared box would silently fall back to the persona's own.
+  if (!custom && personaInstructions === "")
+    return {
+      seats,
+      error:
+        "Member instructions can't be empty. Use Reset to persona text to go back to the persona's own.",
+    };
   return {
     seats: [
       ...seats,

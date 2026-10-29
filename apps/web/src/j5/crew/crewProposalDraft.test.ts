@@ -99,6 +99,17 @@ describe("crew member edits", () => {
     expect(original.instructions).toBe("Review the patch");
   });
 
+  it("rejects a persona member whose replacement text was cleared", () => {
+    const result = saveSeat(seats, "builder", {
+      seat: "builder",
+      agentId: "builder",
+      instructions: "",
+      personaInstructions: "  ",
+    });
+    expect(result.error).toContain("can't be empty");
+    expect(result.seats).toBe(seats);
+  });
+
   it("saves a validated edit in place and preserves the Captain's reason when renaming", () => {
     const result = saveSeat(seats, "reviewer", {
       seat: "renamed",

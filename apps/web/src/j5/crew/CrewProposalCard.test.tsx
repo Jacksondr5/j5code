@@ -591,6 +591,19 @@ it("an edited persona text replaces the persona's and returns when the member is
   expect(seat).not.toHaveProperty("instructions");
 });
 
+it("a cleared persona text blocks Save until it is reset", async () => {
+  await render();
+  await click(button("Edit seat reviewer"));
+  await input("Member instructions", "");
+  expect(document.body.textContent).toContain("Member instructions can't be empty");
+  expect(button("Save changes")?.disabled).toBe(true);
+  await click(button("Reset to persona text"));
+  expect(document.body.textContent).not.toContain("Member instructions can't be empty");
+  await click(button("Save changes"));
+  await click(approve());
+  expect(resolve.mock.calls[0]?.[1][1]).toEqual(proposal.requestedSeats[1]);
+});
+
 it("Reset to persona text restores the persona's own and sends no replacement", async () => {
   await render();
   await click(button("Edit seat reviewer"));
