@@ -39,21 +39,21 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
 
-      - uses: pnpm/action-setup@v6
+      # A global vp, as upstream's release-desktop.yml sets up. build-cli-archive.ts
+      # runs `vp install` in its staging directory, and through pnpm's vp shim
+      # that failed on Windows with "The system cannot find the path specified".
+      # No cache: upstream measured restoring one on Windows as slower than a
+      # plain install.
+      - uses: voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb # v1
         with:
-          version: 11.10.0
-          run_install: false
+          node-version-file: package.json
+          cache: false
+          run-install: false
 
-      # No pnpm cache: upstream measured restoring it on Windows as slower than
-      # a plain install (release-desktop.yml, "Setup Vite+").
-      - uses: actions/setup-node@v6
-        with:
-          node-version-file: .nvmrc
-
-      - run: pnpm install --frozen-lockfile
+      - run: vp install
 
       - name: Stamp the release version
-        run: pnpm exec node scripts/update-release-package-versions.ts "$RELEASE_VERSION"
+        run: node scripts/update-release-package-versions.ts "$RELEASE_VERSION"
 
       # The desktop build reuses it in place of a cargo build, and the CLI
       # archive takes it from its own directory.
@@ -70,31 +70,24 @@ jobs:
 
       # Server, web client and Electron main, as upstream's "Build JS bundle".
       - name: Build server, web client and desktop main
-        run: pnpm exec vp run build:desktop
+        run: vp run build:desktop
 
       # The build above stamps the development icons into dist/client, which
       # the archive serves. The desktop build below applies its own channel's
       # icons afterwards.
       - name: Apply production web brand assets to the bundled client
-        run: pnpm exec node scripts/apply-web-brand-assets.ts production apps/server/dist/client
+        run: node scripts/apply-web-brand-assets.ts production apps/server/dist/client
 
-      # Keep in step with the Node in J5 Release's CLI archive job.
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 26.8.2
-
+      # vp's node runs the Node this names, downloading it first. Keep in step
+      # with the Node in J5 Release's CLI archive job.
       - name: Build CLI single-executable
         env:
           VP_NODE_VERSION: 26.8.2
-        run: pnpm exec node apps/server/scripts/cli.ts build-exe --verbose
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version-file: .nvmrc
+        run: node apps/server/scripts/cli.ts build-exe --verbose
 
       - name: Build CLI archive
         run: >-
-          pnpm exec node scripts/build-cli-archive.ts
+          node scripts/build-cli-archive.ts
           --platform win
           --arch x64
           --version "$RELEASE_VERSION"
@@ -102,7 +95,7 @@ jobs:
           --output-dir release-cli
 
       - name: Smoke-test CLI archive
-        run: pnpm exec node scripts/smoke-cli-archive.ts --archive "release-cli/t3-$RELEASE_VERSION-win32-x64.zip" --expect-version "$RELEASE_VERSION"
+        run: node scripts/smoke-cli-archive.ts --archive "release-cli/t3-$RELEASE_VERSION-win32-x64.zip" --expect-version "$RELEASE_VERSION"
 
       - uses: actions/upload-artifact@v7
         with:
@@ -121,7 +114,7 @@ jobs:
           T3CODE_DESKTOP_UPDATE_REPOSITORY: Jacksondr5/j5code
           T3CODE_DESKTOP_REUSE_RESOURCE_MONITOR: "true"
         run: >-
-          pnpm exec node scripts/build-desktop-artifact.ts
+          node scripts/build-desktop-artifact.ts
           --platform win
           --target nsis
           --arch x64
