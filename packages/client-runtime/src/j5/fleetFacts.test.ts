@@ -20,6 +20,7 @@ import type { J5ReadSource } from "./readSources.ts";
 import {
   createFleetFactsAtom,
   deriveFleetFacts,
+  summarizeFleetProblems,
   fleetAgentKey,
   mergeFleetDeliveryFacts,
   type FleetFactRow,
@@ -30,7 +31,11 @@ const decodeFleet = Schema.decodeUnknownSync(FleetResponse);
 const at = "2026-10-19T10:00:00.000Z";
 const now = Date.parse(at);
 const date = DateTime.makeUnsafe(at);
-const ledger: FleetAgentFacts = { asks: { owed: [], awaited: [] }, problems: [] };
+const ledger: FleetAgentFacts = {
+  asks: { owed: [], awaited: [] },
+  problems: [],
+  deliveryEnvironmentIds: [],
+};
 const shell = (changes: Partial<OrchestrationV2ThreadShell> = {}): OrchestrationV2ThreadShell => ({
   ...v2ThreadShell,
   latestRunId: RunId.make("r"),
@@ -46,6 +51,198 @@ const derive = (source: OrchestrationV2ThreadShell | undefined, clock = now) =>
   deriveFleetFacts({ shell: source, ledger, now: clock });
 
 afterEach(() => vi.useRealTimers());
+
+const deliveryProblem = (exchangeOpen: boolean) => ({
+  kind: "delivery-failed" as const,
+  messageId: "message",
+  receiverId: "receiver",
+  receiverName: null,
+  at,
+  reason: "transport unavailable",
+  exchangeOpen,
+});
+
+describe("Fleet problem badge", () => {
+  it("keeps alarms from every project placement without duplicating shared asks or badge agents", () => {
+    const ask = {
+      exchangeId: "shared",
+      counterpartyId: "other",
+      counterpartyName: null,
+      intent: "help",
+      openedAt: at,
+    };
+    const source = shell({
+      status: "completed",
+      activityRunStatus: null,
+      latestRunStartedAt: date,
+      latestRunCompletedAt: date,
+    });
+    const rows = Atom.make<ReadonlyArray<FleetFactRow>>([
+      {
+        key: "env:sender",
+        shell: source,
+        ledger: { asks: { owed: [], awaited: [ask] }, problems: [deliveryProblem(true)] },
+        live: true,
+      },
+      {
+        key: "env:sender",
+        shell: source,
+        ledger: { asks: { owed: [], awaited: [ask] }, problems: [] },
+        live: true,
+      },
+    ]);
+    const facts = createFleetFactsAtom(rows);
+    const registry = AtomRegistry.make({ defaultIdleTTL: 0 });
+    const stop = registry.subscribe(facts, () => {}, { immediate: true });
+    expect(registry.get(facts).size).toBe(1);
+    expect(registry.get(facts).get("env:sender")?.asks?.awaited).toEqual([ask]);
+    expect(registry.get(facts).get("env:sender")?.problems).toEqual([deliveryProblem(true)]);
+    expect(
+      summarizeFleetProblems(registry.get(facts), new Map([["env:sender", true]]), "complete")
+        .agentsWithProblems,
+    ).toBe(1);
+    stop();
+    registry.dispose();
+  });
+  it("counts each live environment+participant once regardless of how many problems it has", () => {
+    const failed = derive(shell({ status: "failed", activityRunStatus: null })).facts;
+    const mixed = { ...failed, problems: [...failed.problems, deliveryProblem(true)] };
+    const facts = new Map([
+      ["env-a:sender", mixed],
+      ["env-b:sender", failed],
+      ["offline:sender", mixed],
+      ["plain", { ...failed, problems: [deliveryProblem(false)] }],
+      ["closed-exchange", { ...failed, problems: [deliveryProblem(false)] }],
+      [
+        "open-asks",
+        {
+          ...derive(shell()).facts,
+          asks: {
+            owed: [
+              {
+                exchangeId: "ask",
+                counterpartyId: "other",
+                counterpartyName: null,
+                intent: "help",
+                openedAt: at,
+              },
+            ],
+            awaited: [],
+          },
+        },
+      ],
+    ]);
+    const live = new Map([...facts.keys()].map((key) => [key, key !== "offline:sender"]));
+    expect(summarizeFleetProblems(facts, live, "partial")).toEqual({
+      agentsWithProblems: 2,
+      unmeasuredAgents: 0,
+      incompleteSources: true,
+      hasReadableSource: true,
+    });
+    // Silence and platform notices have no problem fact; absence must not manufacture one.
+    expect(
+      summarizeFleetProblems(
+        new Map([["notice", derive(shell()).facts]]),
+        new Map([["notice", true]]),
+        "complete",
+      ).agentsWithProblems,
+    ).toBe(0);
+  });
+
+  it("separates an unrecorded seat's missing runtime from missing source coverage", () => {
+    const unrecordedSeat = deriveFleetFacts({ shell: undefined, ledger, now }).facts;
+    const facts = new Map([["seat-without-thread", unrecordedSeat]]);
+    const live = new Map([["seat-without-thread", true]]);
+    expect(summarizeFleetProblems(facts, live, "complete")).toEqual({
+      agentsWithProblems: 0,
+      unmeasuredAgents: 1,
+      incompleteSources: false,
+      hasReadableSource: true,
+    });
+    facts.set("seat-without-thread", { ...unrecordedSeat, problems: [deliveryProblem(true)] });
+    expect(summarizeFleetProblems(facts, live, "complete").agentsWithProblems).toBe(1);
+    facts.set("seat-without-thread", { ...unrecordedSeat, asks: undefined });
+    expect(summarizeFleetProblems(facts, live, "complete")).toEqual({
+      agentsWithProblems: 0,
+      unmeasuredAgents: 1,
+      incompleteSources: true,
+      hasReadableSource: true,
+    });
+    expect(summarizeFleetProblems(new Map(), new Map(), "unavailable").incompleteSources).toBe(
+      true,
+    );
+    live.set("seat-without-thread", false);
+    expect(summarizeFleetProblems(facts, live, "partial").unmeasuredAgents).toBe(0);
+  });
+
+  it("updates the badge at the shared deadline, then clears on dispatch, healthy run and Exchange close", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    const rows = Atom.make<ReadonlyArray<FleetFactRow>>([
+      { key: "env:sender", shell: shell(), ledger, live: true },
+    ]);
+    const facts = createFleetFactsAtom(rows);
+    const badge = Atom.make((get) =>
+      summarizeFleetProblems(
+        get(facts),
+        new Map(get(rows).map((row) => [row.key, row.live])),
+        get(rows).some((row) => row.live) ? "complete" : "unavailable",
+      ),
+    );
+    const registry = AtomRegistry.make({ defaultIdleTTL: 0 });
+    const rail = registry.subscribe(badge, () => {}, { immediate: true });
+    const page = registry.subscribe(facts, () => {}, { immediate: true });
+    const count = () => registry.get(badge).agentsWithProblems;
+    const update = (source: OrchestrationV2ThreadShell, measured = ledger) =>
+      registry.set(rows, [{ key: "env:sender", shell: source, ledger: measured, live: true }]);
+    vi.advanceTimersByTime(0);
+    expect(vi.getTimerCount()).toBe(1);
+    vi.advanceTimersByTime(FLEET_DISPATCH_THRESHOLD_MS - 1);
+    expect(count()).toBe(0);
+    vi.advanceTimersByTime(1);
+    expect(count()).toBe(1);
+    vi.advanceTimersByTime(0);
+    expect(vi.getTimerCount()).toBe(0);
+    const started = shell({
+      status: "running",
+      activityRunStatus: "running",
+      latestRunStartedAt: date,
+    });
+    update(started);
+    expect(count()).toBe(0);
+    update({ ...started, status: "failed", activityRunStatus: null, latestRunCompletedAt: date });
+    expect(count()).toBe(1);
+    const healthy = {
+      ...started,
+      status: "completed" as const,
+      activityRunStatus: null,
+      latestRunCompletedAt: date,
+    };
+    update(healthy);
+    expect(count()).toBe(0);
+    update(healthy, { ...ledger, problems: [deliveryProblem(true)] });
+    expect(count()).toBe(1);
+    registry.set(
+      rows,
+      registry.get(rows).map((row) => ({ ...row, live: false })),
+    );
+    expect(registry.get(facts).get("env:sender")?.problems).toEqual([deliveryProblem(true)]);
+    expect(registry.get(badge)).toEqual({
+      agentsWithProblems: 0,
+      unmeasuredAgents: 0,
+      incompleteSources: true,
+      hasReadableSource: false,
+    });
+    update(healthy, { ...ledger, problems: [deliveryProblem(true)] });
+    expect(count()).toBe(1);
+    update(healthy, { ...ledger, problems: [deliveryProblem(false)] });
+    expect(count()).toBe(0);
+    expect(registry.get(facts).get("env:sender")?.problems).toEqual([deliveryProblem(false)]);
+    rail();
+    page();
+    registry.dispose();
+  });
+});
 
 describe("Fleet runtime measurements", () => {
   it("crosses the exact dispatch boundary once and recovers immediately when dispatched", () => {
@@ -181,6 +378,22 @@ describe("Fleet runtime measurements", () => {
     }
   });
 
+  it("preserves native child approval and input measurements on the parent row", () => {
+    const source = shell({
+      status: "running",
+      activityRunStatus: "running",
+      latestRunStartedAt: date,
+    });
+    expect(
+      deriveFleetFacts({ shell: source, ledger, pendingSubagentRequest: "approval", now }).facts
+        .runtime,
+    ).toMatchObject({ status: "approval" });
+    expect(
+      deriveFleetFacts({ shell: source, ledger, pendingSubagentRequest: "user_input", now }).facts
+        .runtime,
+    ).toMatchObject({ status: "input" });
+  });
+
   it("clears failed-latest-run when a healthy latest run replaces it", () => {
     const failed = shell({
       status: "failed",
@@ -188,6 +401,10 @@ describe("Fleet runtime measurements", () => {
       latestRunStartedAt: date,
       latestRunCompletedAt: date,
     });
+    expect(
+      derive({ ...failed, pendingBackgroundTasks: [{ kind: "monitor", taskId: "watch" }] }).facts
+        .runtime,
+    ).toMatchObject({ status: "failed" });
     expect(derive(failed).facts.problems).toEqual([{ kind: "failed-run", runId: "r", at }]);
     expect(derive({ ...failed, latestRunCompletedAt: null }).facts.problems).toEqual([
       { kind: "failed-run", runId: "r", at: null },
@@ -581,7 +798,10 @@ describe("receiving-environment delivery alarm merge", () => {
       merge(origin({ ...ledger, deliveryEnvironmentIds: [] }), ...unavailable).get(key)
         ?.problemsIncomplete,
     ).toBe(false);
-    expect(merge(origin(ledger), receiver()).get(key)?.problemsIncomplete).toBe(true);
+    expect(
+      merge(origin({ asks: ledger.asks, problems: ledger.problems }), receiver()).get(key)
+        ?.problemsIncomplete,
+    ).toBe(true);
     const staleOrigin = { ...origin(), connected: false, status: "offline" as const };
     expect(merge(staleOrigin, receiver()).get(key)).toMatchObject({
       ledger: { problems: [] },
