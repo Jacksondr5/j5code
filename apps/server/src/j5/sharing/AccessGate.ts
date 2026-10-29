@@ -416,6 +416,12 @@ const PREVIEW_STREAM_PATHS = new Set(
   ["ws", "download", "upload"].map((route) => `/api/preview-stream/${route}`),
 );
 
+const isThreadId = Schema.is(ThreadId);
+
+// An id that is not a thread's, such as a blank one, is refused here rather than thrown from the gate.
+const onThreadRoute = (threadId: string | null | undefined, level: PersonLevel): AccessHttpRule =>
+  isThreadId(threadId) ? { kind: "thread", threadId, level } : { kind: "refuse" };
+
 const decodeSegment = (segment: string) => {
   try {
     return decodeURIComponent(segment);
@@ -443,18 +449,15 @@ export const accessHttpRule = (method: string, target: string): AccessHttpRule =
     PREVIEW_STREAM_PATHS.has(pathname) &&
     method === (pathname.endsWith("/upload") ? "POST" : "GET")
   ) {
-    const threadId = searchParams.get("threadId") ?? "";
-    return threadId.length === 0
-      ? { kind: "refuse" }
-      : { kind: "thread", threadId: ThreadId.make(threadId), level: "collaborator" };
+    return onThreadRoute(searchParams.get("threadId"), "collaborator");
   }
   if (method !== "GET") return { kind: "refuse" };
   if (pathname === "/ws") return { kind: "open" };
   const threadLoad = THREAD_LOAD.exec(pathname);
-  const threadId = threadLoad?.[1] === undefined ? undefined : decodeSegment(threadLoad[1]);
-  return threadId === undefined || threadId.length === 0
-    ? { kind: "refuse" }
-    : { kind: "thread", threadId: ThreadId.make(threadId), level: "viewer" };
+  return onThreadRoute(
+    threadLoad?.[1] === undefined ? undefined : decodeSegment(threadLoad[1]),
+    "viewer",
+  );
 };
 
 const isServerAuthInternalError = Schema.is(EnvironmentAuth.ServerAuthInternalError);
@@ -463,7 +466,7 @@ const isServerAuthInternalError = Schema.is(EnvironmentAuth.ServerAuthInternalEr
  * Wraps upstream's `EnvironmentAuth`, through which every HTTP route and WebSocket upgrade signs a
  * request in, and through which every session is ended. A narrowed session comes back with its
  * permissions only on a route `accessHttpRule` allows, for a thread route only when the person
- * reaches that thread, and for an artifact read only when they reach the project its body names;
+ * holds the route's level on that thread, and for an artifact read only when they reach the project its body names;
  * anywhere else it comes back with none, so the route's own permission check refuses it the way it
  * refuses any connection that lacks the permission. If what the person reaches cannot be read, they
  * get none.
@@ -498,8 +501,8 @@ export const layerGatedEnvironmentAuth = Layer.effect(
         return { ...session, scopes: [] };
       }
       const personId = reach.person.personId;
-      // The body is read once and kept, so the route reads the same bytes this check did.
       const needed = rule.kind === "thread" ? rule.level : "viewer";
+      // The body is read once and kept, so the route reads the same bytes this check did.
       const held =
         rule.kind === "thread"
           ? access.threadLevel(personId, rule.threadId)
