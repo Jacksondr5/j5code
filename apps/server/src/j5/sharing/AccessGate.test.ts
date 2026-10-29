@@ -53,6 +53,10 @@ it("names the few routes a narrowed connection keeps permissions on", () => {
     ["GET", "/api/orchestration/threads/t1/anything-else"],
     ["POST", "/api/orchestration/threads/t1"],
     ["POST", "/ws"],
+    ["GET", "/api/preview-stream/ws"],
+    ["GET", "/api/preview-stream/upload?threadId=t1"],
+    ["POST", "/api/preview-stream/ws?threadId=t1"],
+    ["GET", "/api/preview-stream/other?threadId=t1"],
   ] as const) {
     assert.strictEqual(AccessGate.accessHttpRule(method, path).kind, "refuse", path);
   }
@@ -210,6 +214,42 @@ it.layer(testLayer)("access gate", (it) => {
         });
         assert.deepStrictEqual(yield* scopesFor("Thread viewer", "GET", own), []);
       }),
+  );
+
+  it.effect("lets a Collaborator watch and drive only their own thread's preview tabs", () =>
+    Effect.gen(function* () {
+      const mine = yield* thread("thread:preview-mine");
+      yield* thread("thread:preview-other");
+      const stream = (route: string, threadId: string) =>
+        `/api/preview-stream/${route}?threadId=${encodeURIComponent(threadId)}&tabId=tab-1`;
+      const routes = [
+        ["GET", "ws"],
+        ["GET", "download"],
+        ["POST", "upload"],
+      ] as const;
+      const { session } = yield* signed("Preview driver", [
+        { scope: { kind: "thread", threadId: mine }, level: "collaborator" },
+      ]);
+      const { session: projectWide } = yield* signed("Preview project driver", [
+        { scope: { kind: "project", projectId: PROJECT }, level: "collaborator" },
+      ]);
+      yield* signed(
+        "Preview watcher",
+        [{ scope: { kind: "thread", threadId: mine }, level: "viewer" }],
+        LEVEL_PERMISSIONS.viewer,
+      );
+      for (const [method, route] of routes) {
+        const own = stream(route, mine);
+        assert.deepStrictEqual(yield* scopesFor("Preview driver", method, own), session.scopes);
+        assert.deepStrictEqual(
+          yield* scopesFor("Preview project driver", method, own),
+          projectWide.scopes,
+        );
+        assert.deepStrictEqual(yield* scopesFor("Preview watcher", method, own), [], own);
+        const other = stream(route, "thread:preview-other");
+        assert.deepStrictEqual(yield* scopesFor("Preview driver", method, other), [], other);
+      }
+    }),
   );
 
   it.effect("holds a Viewer to reading their scope and refuses them every folder", () =>
