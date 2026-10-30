@@ -164,7 +164,7 @@ function SettingsIndexSections() {
 
       <SettingsSection title="Automations">
         <SettingsRow icon="clock" label="Scheduled tasks" target="SettingsScheduledTasks" />
-        <SettingsRow icon="person.2" label="Personas" target="SettingsAgents" />
+        <SettingsRow icon="person.2" label="Agent Setup" target="SettingsAgents" />
       </SettingsSection>
 
       <SettingsSection title="Projects & threads">

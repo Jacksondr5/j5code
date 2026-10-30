@@ -373,7 +373,7 @@ function MemberAgentLibrarySettingsScreen() {
       {Platform.OS === "android" ? (
         <>
           <NativeStackScreenOptions options={{ headerShown: false }} />
-          <AndroidScreenHeader title="Personas" onBack={() => navigation.goBack()} />
+          <AndroidScreenHeader title="Agent Setup" onBack={() => navigation.goBack()} />
         </>
       ) : null}
       <ScrollView
@@ -443,7 +443,7 @@ function MemberAgentLibrarySettingsScreen() {
             </Pressable>
             {Platform.OS === "web" ? (
               <Text className="text-sm text-foreground-muted">
-                Use Settings → Personas in the web app to import files.
+                Use Settings → Agent Setup in the web app to import files.
               </Text>
             ) : (
               <View className="self-start" pointerEvents={locked ? "none" : "auto"}>

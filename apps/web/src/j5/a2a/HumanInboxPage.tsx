@@ -39,8 +39,6 @@ import { formatElapsedDurationLabel } from "../../timestampFormat";
 import { answerHumanExchange } from "./humanInboxClient";
 import { useScopedParticipantLabels } from "./ParticipantIdentitiesClient";
 import { presentParticipantIdentity } from "./ParticipantIdentity";
-import { CrewProposalCard } from "../crew/CrewProposalCard";
-import { clearCrewProposalDraft } from "../crew/crewProposalDraftStore";
 import { CrewRuntimeRequestsSection } from "../crew/CrewRuntimeRequestsSection";
 import type { ScopedCrewRuntimeRequest } from "../crew/crewRuntimeRequests.logic";
 import {
@@ -49,19 +47,9 @@ import {
   useNativeQuestionInbox,
 } from "../crew/crewRuntimeRequestsClient";
 import { NativeQuestionInboxSection } from "./NativeQuestionInboxSection";
-import { inboxCrewRequests } from "../crew/crewProposals.logic";
-import {
-  mergeCrewProposalSources,
-  refreshCrewProposals,
-  resolveCrewProposal,
-  useCrewProposalsRefresh,
-  type CrewProposalSeat,
-  type ScopedCrewProposal,
-} from "../crew/crewProposalsClient";
 import {
   answeredInboxQueryAtom,
   answeredInboxSourcesAtom,
-  crewProposalSourcesAtom,
   crewRuntimeRequestSourcesAtom,
   j5Environment,
   openInboxQueryAtom,
@@ -532,13 +520,6 @@ export function HumanInboxPage() {
   const [error, setError] = useState<string | null>(null);
   const answerAttempts = useRef(new Map<string, HumanInboxAnswerAttempt>());
   useInboxRefresh();
-  const crewSources = useAtomValue(crewProposalSourcesAtom);
-  const proposals = useMemo(
-    () => inboxCrewRequests(mergeCrewProposalSources(crewSources)),
-    [crewSources],
-  );
-  const [resolvingProposalId, setResolvingProposalId] = useState<string | null>(null);
-  useCrewProposalsRefresh();
   const runtimeRequests = useCrewRuntimeRequests();
   const runtimeSources = useAtomValue(crewRuntimeRequestSourcesAtom);
   const nativeQuestions = useNativeQuestionInbox();
@@ -639,44 +620,6 @@ export function HumanInboxPage() {
     });
   };
 
-  const resolveProposal = async (
-    proposal: ScopedCrewProposal,
-    decision: "approve" | "decline",
-    seats: ReadonlyArray<CrewProposalSeat>,
-    approvalToken?: string,
-  ) => {
-    setResolvingProposalId(proposal.id);
-    setError(null);
-    try {
-      if (decision === "approve" && approvalToken === undefined)
-        throw new Error("Refresh the runtime preview before approving.");
-      await resolveCrewProposal(
-        proposal.environmentId,
-        decision === "approve"
-          ? { proposalId: proposal.id, decision, seats, approvalToken: approvalToken! }
-          : { proposalId: proposal.id, decision },
-      );
-      clearCrewProposalDraft(proposal.environmentId, proposal.id);
-      notifyHumanInboxChanged(proposal.environmentId);
-      await refreshCrewProposals(proposal.environmentId).catch(() => undefined);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not resolve the crew request.");
-    } finally {
-      setResolvingProposalId(null);
-    }
-  };
-  const openCaptain = useCallback(
-    (proposal: ScopedCrewProposal) => {
-      void navigate({
-        to: "/$environmentId/$threadId",
-        params: buildThreadRouteParams(
-          scopeThreadRef(proposal.environmentId, ThreadId.make(proposal.captainThreadId)),
-        ),
-      });
-    },
-    [navigate],
-  );
-
   const openCrewThread = useCallback(
     (request: Pick<ScopedCrewRuntimeRequest, "environmentId" | "threadId">) => {
       void navigate({
@@ -717,10 +660,6 @@ export function HumanInboxPage() {
                   {loading && items.length === 0
                     ? "Loading questions waiting on you…"
                     : `${items.length} ${complete ? "open" : "loaded"} ${items.length === 1 ? "question" : "questions"}${
-                        proposals.length === 0
-                          ? ""
-                          : ` · ${proposals.length} crew ${proposals.length === 1 ? "request" : "requests"}`
-                      }${
                         runtimeRequests.length + nativeQuestions.length === 0
                           ? ""
                           : ` · ${runtimeRequests.length + nativeQuestions.length} agent ${runtimeRequests.length + nativeQuestions.length === 1 ? "request" : "requests"}`
@@ -765,28 +704,6 @@ export function HumanInboxPage() {
               </div>
             ) : null}
 
-            {proposals.length > 0 ? (
-              <section aria-label="Crew requests" className="mt-6">
-                <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                  Crew requests
-                </h2>
-                <ul className="space-y-4">
-                  {proposals.map((proposal) => (
-                    <CrewProposalCard
-                      key={`${proposal.environmentId}:${proposal.id}`}
-                      proposal={proposal}
-                      environmentId={proposal.environmentId}
-                      busy={resolvingProposalId === proposal.id}
-                      onResolve={(decision, seats, approvalToken) =>
-                        void resolveProposal(proposal, decision, seats, approvalToken)
-                      }
-                      onOpenCaptain={() => openCaptain(proposal)}
-                    />
-                  ))}
-                </ul>
-              </section>
-            ) : null}
-
             <CrewRuntimeRequestsSection requests={runtimeRequests} onOpenThread={openCrewThread} />
             <NativeQuestionInboxSection questions={nativeQuestions} onOpenThread={openCrewThread} />
 
@@ -794,7 +711,6 @@ export function HumanInboxPage() {
             !loading &&
             error === null &&
             shownItems.length === 0 &&
-            proposals.length === 0 &&
             runtimeRequests.length === 0 &&
             nativeQuestions.length === 0 ? (
               <div className="flex min-h-56 flex-col items-center justify-center px-6 py-12 text-center">

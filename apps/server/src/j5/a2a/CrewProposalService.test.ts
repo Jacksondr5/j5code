@@ -14,7 +14,6 @@ import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
-import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
@@ -76,7 +75,9 @@ import {
   CrewProposalService,
   layer as crewProposalLayer,
   type ResolveCrewProposalInput,
+  type RequestCrewMemberInput,
 } from "./CrewProposalService.ts";
+import * as ServerSettings from "../../serverSettings.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
 import { runMigrations } from "../../persistence/Migrations.ts";
@@ -275,6 +276,32 @@ const withPreview = (gate: CrewProposalService["Service"]): CrewProposalService[
     }),
 });
 
+// Seed a pre-upgrade pending addition to exercise the legacy preview and human-resolution path.
+const legacyAddition = (input: RequestCrewMemberInput) =>
+  Effect.gen(function* () {
+    const crews = yield* AgentCrewInstanceService;
+    const instance = (yield* crews.read(input.crewInstanceId!))!;
+    const proposal = yield* (yield* AgentCrewProposalService).create({
+      id: lifecycleId({
+        kind: "crew",
+        operation: "proposal",
+        providerSessionId: "j5-crew-proposal",
+        requestKey: input.requestKey,
+      }),
+      projectId: input.captain.projectId,
+      captainParticipantId: input.captain.participantId,
+      captainThreadId: input.captain.thread.id,
+      crewInstanceId: instance.id,
+      kind: "addition",
+      brief: input.brief ?? instance.brief,
+      displayName: instance.displayName,
+      requestedSeats: [input.seat],
+      createdAt: DateTime.formatIso(createdAt),
+      playbook: instance.playbook,
+    });
+    return { proposal, instance };
+  });
+
 /** A live Crew of `size` scout seats, approved through the gate; the seat names are s0, s1, ... */
 const seedCrew = (gate: CrewProposalService["Service"], requestKey: string, size: number) =>
   Effect.gen(function* () {
@@ -301,157 +328,162 @@ const assertCrewFull = (error: { readonly _tag: string; readonly message: string
   assert.include(error.message, "propose a new crew");
 };
 
-const fixtureWithDatabase = Effect.fn("test.crewProposal.fixture")(function* (
+const fixtureWithDatabase = (
   filename: string,
   options: {
     readonly beforeCreate?: Effect.Effect<void>;
     readonly beforeAdmit?: Effect.Effect<void>;
     readonly afterCreate?: Effect.Effect<void, SqlError>;
     readonly afterAdmit?: Effect.Effect<void, SqlError>;
+    readonly settings?: Parameters<typeof ServerSettings.layerTest>[0];
   } = {},
-) {
-  const database = NodeSqliteClient.layer({ filename });
-  const storage = Layer.mergeAll(crewInstanceLayer, proposalStoreLayer, ledgerLayer).pipe(
-    Layer.provideMerge(database),
-  );
-  const context = yield* Layer.build(storage);
-  const crews = Context.get(context, AgentCrewInstanceService);
-  yield* runMigrations().pipe(Effect.provide(context));
-  yield* runJ5A2AMigrations().pipe(Effect.provide(context));
-  yield* Effect.provide(
-    Effect.gen(function* () {
-      yield* (yield* A2ALedger).ensureProject({
-        projectId: projectId,
-        createdAt: DateTime.formatIso(createdAt),
-      });
-    }),
-    context,
-  );
-  const captainModel = yield* Ref.make("gpt-5.6-sol");
-  const notices = yield* Ref.make<ReadonlyArray<OrchestrationV2ServerCommand>>([]);
-  // Seat threads whose archive the store refuses, to prove a decline whose cleanup fails stays open.
-  const noticeFailure = yield* Ref.make(false);
-  const archiveFailures = yield* Ref.make<ReadonlySet<string>>(new Set());
-  // Seat threads that never came to exist (a not-found), and ones whose read the store cannot answer.
-  const missingThreads = yield* Ref.make<ReadonlySet<string>>(new Set());
-  const unreadableThreads = yield* Ref.make<ReadonlySet<string>>(new Set());
-  // Threads the person archived, and ones they deleted (the store keeps the row, stamped).
-  const archivedThreads = yield* Ref.make<ReadonlySet<string>>(new Set());
-  const deletedThreads = yield* Ref.make<ReadonlySet<string>>(new Set());
-  // An approval is told to the Captain by the launch report, once its seats have started; here the
-  // reporter records which proposals it was handed.
-  const watched = yield* Ref.make<ReadonlyArray<string>>([]);
-  // While set, a resolution lands nothing: the store answers as if the row were no longer open.
-  const resolveFailure = yield* Ref.make(false);
-  // While set, the proposal-to-Crew link write fails with a database error.
-  const attachFailure = yield* Ref.make(false);
-  const store = Context.get(context, AgentCrewProposalService);
-  const flakyStore = Layer.succeed(AgentCrewProposalService, {
-    ...store,
-    create: (input) =>
-      (options.beforeCreate ?? Effect.void).pipe(
-        Effect.andThen(store.create(input)),
-        Effect.tap(() => options.afterCreate ?? Effect.void),
-      ),
-    admit: (input, limits) =>
-      (options.beforeAdmit ?? Effect.void).pipe(
-        Effect.andThen(store.admit(input, limits)),
-        Effect.tap(() => options.afterAdmit ?? Effect.void),
-      ),
-    resolve: (input) =>
-      Ref.get(resolveFailure).pipe(
-        Effect.flatMap((failing) => (failing ? Effect.succeed(null) : store.resolve(input))),
-      ),
-    attachInstance: (id, crewInstanceId) =>
-      Ref.get(attachFailure).pipe(
-        Effect.flatMap((failing) =>
-          failing
-            ? Effect.fail(
-                new SqlError({
-                  reason: new UnknownError({ cause: new Error("disk I/O error") }),
-                }),
-              )
-            : store.attachInstance(id, crewInstanceId),
+) =>
+  Effect.gen(function* () {
+    const database = NodeSqliteClient.layer({ filename });
+    const storage = Layer.mergeAll(crewInstanceLayer, proposalStoreLayer, ledgerLayer).pipe(
+      Layer.provideMerge(database),
+    );
+    const context = yield* Layer.build(storage);
+    const crews = Context.get(context, AgentCrewInstanceService);
+    yield* runMigrations().pipe(Effect.provide(context));
+    yield* runJ5A2AMigrations().pipe(Effect.provide(context));
+    yield* Effect.provide(
+      Effect.gen(function* () {
+        yield* (yield* A2ALedger).ensureProject({
+          projectId: projectId,
+          createdAt: DateTime.formatIso(createdAt),
+        });
+      }),
+      context,
+    );
+    const captainModel = yield* Ref.make("gpt-5.6-sol");
+    const notices = yield* Ref.make<ReadonlyArray<OrchestrationV2ServerCommand>>([]);
+    // Seat threads whose archive the store refuses, to prove a decline whose cleanup fails stays open.
+    const noticeFailure = yield* Ref.make(false);
+    const archiveFailures = yield* Ref.make<ReadonlySet<string>>(new Set());
+    // Seat threads that never came to exist (a not-found), and ones whose read the store cannot answer.
+    const missingThreads = yield* Ref.make<ReadonlySet<string>>(new Set());
+    const unreadableThreads = yield* Ref.make<ReadonlySet<string>>(new Set());
+    // Threads the person archived, and ones they deleted (the store keeps the row, stamped).
+    const archivedThreads = yield* Ref.make<ReadonlySet<string>>(new Set());
+    const deletedThreads = yield* Ref.make<ReadonlySet<string>>(new Set());
+    // An approval is told to the Captain by the launch report, once its seats have started; here the
+    // reporter records which proposals it was handed.
+    const watched = yield* Ref.make<ReadonlyArray<string>>([]);
+    // While set, a resolution lands nothing: the store answers as if the row were no longer open.
+    const resolveFailure = yield* Ref.make(false);
+    // While set, the proposal-to-Crew link write fails with a database error.
+    const attachFailure = yield* Ref.make(false);
+    const store = Context.get(context, AgentCrewProposalService);
+    const flakyStore = Layer.succeed(AgentCrewProposalService, {
+      ...store,
+      create: (input) =>
+        (options.beforeCreate ?? Effect.void).pipe(
+          Effect.andThen(store.create(input)),
+          Effect.tap(() => options.afterCreate ?? Effect.void),
         ),
+      admit: (input, limits) =>
+        (options.beforeAdmit ?? Effect.void).pipe(
+          Effect.andThen(store.admit(input, limits)),
+          Effect.tap(() => options.afterAdmit ?? Effect.void),
+        ),
+      resolve: (input) =>
+        Ref.get(resolveFailure).pipe(
+          Effect.flatMap((failing) => (failing ? Effect.succeed(null) : store.resolve(input))),
+        ),
+      attachInstance: (id, crewInstanceId) =>
+        Ref.get(attachFailure).pipe(
+          Effect.flatMap((failing) =>
+            failing
+              ? Effect.fail(
+                  new SqlError({
+                    reason: new UnknownError({ cause: new Error("disk I/O error") }),
+                  }),
+                )
+              : store.attachInstance(id, crewInstanceId),
+          ),
+        ),
+    });
+    const layer = crewProposalLayer.pipe(
+      Layer.provideMerge(ServerSettings.layerTest(options.settings)),
+      Layer.provideMerge(flakyStore),
+      Layer.provideMerge(fakeLauncher(crews)),
+      Layer.provideMerge(
+        Layer.mock(CrewLaunchReporter)({
+          watch: (proposalId) => Ref.update(watched, (items) => [...items, proposalId]),
+        }),
       ),
-  });
-  const layer = crewProposalLayer.pipe(
-    Layer.provideMerge(flakyStore),
-    Layer.provideMerge(fakeLauncher(crews)),
-    Layer.provideMerge(
-      Layer.mock(CrewLaunchReporter)({
-        watch: (proposalId) => Ref.update(watched, (items) => [...items, proposalId]),
-      }),
-    ),
-    Layer.provideMerge(
-      Layer.mock(ThreadManagementService)({
-        getThreadProjection: (threadId) =>
-          Effect.gen(function* () {
-            // The orchestrator wraps the store's failure either way; the cause tells them apart.
-            if ((yield* Ref.get(missingThreads)).has(threadId))
-              return yield* new OrchestratorProjectionError({
-                threadId,
-                cause: new ProjectionStoreThreadNotFoundError({ threadId }),
-              });
-            if ((yield* Ref.get(unreadableThreads)).has(threadId))
-              return yield* new OrchestratorProjectionError({
-                threadId,
-                cause: new ProjectionStoreReadError({ threadId }),
-              });
-            return {
-              thread: {
-                ...thread(threadId),
-                archivedAt: (yield* Ref.get(archivedThreads)).has(threadId) ? createdAt : null,
-                deletedAt: (yield* Ref.get(deletedThreads)).has(threadId) ? createdAt : null,
-                modelSelection: {
-                  ...thread(threadId).modelSelection,
-                  model: yield* Ref.get(captainModel),
+      Layer.provideMerge(
+        Layer.mock(ThreadManagementService)({
+          getThreadProjection: (threadId) =>
+            Effect.gen(function* () {
+              // The orchestrator wraps the store's failure either way; the cause tells them apart.
+              if ((yield* Ref.get(missingThreads)).has(threadId))
+                return yield* new OrchestratorProjectionError({
+                  threadId,
+                  cause: new ProjectionStoreThreadNotFoundError({ threadId }),
+                });
+              if ((yield* Ref.get(unreadableThreads)).has(threadId))
+                return yield* new OrchestratorProjectionError({
+                  threadId,
+                  cause: new ProjectionStoreReadError({ threadId }),
+                });
+              return {
+                thread: {
+                  ...thread(threadId),
+                  archivedAt: (yield* Ref.get(archivedThreads)).has(threadId) ? createdAt : null,
+                  deletedAt: (yield* Ref.get(deletedThreads)).has(threadId) ? createdAt : null,
+                  modelSelection: {
+                    ...thread(threadId).modelSelection,
+                    model: yield* Ref.get(captainModel),
+                  },
                 },
-              },
-            } as unknown as OrchestrationV2ThreadProjection;
-          }),
-        dispatch: (command) =>
-          Effect.gen(function* () {
-            if (
-              (command.type === "thread.archive" &&
-                (yield* Ref.get(archiveFailures)).has(command.threadId)) ||
-              (command.type === "message.dispatch" && (yield* Ref.get(noticeFailure)))
-            )
-              return yield* Effect.fail(
-                new OrchestratorDispatchError({
-                  commandId: command.commandId,
-                  commandType: command.type,
-                }),
-              );
-            yield* Ref.update(notices, (items) => [...items, command]);
-            return { events: [], effects: [] } as never;
-          }),
-      }),
-    ),
-    Layer.provideMerge(playbookStoreLayer),
-    Layer.provideMerge(Layer.succeedContext(context)),
-    Layer.provideMerge(
-      personaLibraryLayer("j5-crew-proposal-", Object.values(BUILT_IN_AGENT_PERSONAS)),
-    ),
-    Layer.provideMerge(NodeServices.layer),
-  );
-  return {
-    layer,
-    notices,
-    watched,
-    archiveFailures,
-    missingThreads,
-    unreadableThreads,
-    archivedThreads,
-    deletedThreads,
-    noticeFailure,
-    resolveFailure,
-    attachFailure,
-    captainModel,
-  };
-});
+              } as unknown as OrchestrationV2ThreadProjection;
+            }),
+          dispatch: (command) =>
+            Effect.gen(function* () {
+              if (
+                (command.type === "thread.archive" &&
+                  (yield* Ref.get(archiveFailures)).has(command.threadId)) ||
+                (command.type === "message.dispatch" && (yield* Ref.get(noticeFailure)))
+              )
+                return yield* Effect.fail(
+                  new OrchestratorDispatchError({
+                    commandId: command.commandId,
+                    commandType: command.type,
+                  }),
+                );
+              yield* Ref.update(notices, (items) => [...items, command]);
+              return { events: [], effects: [] } as never;
+            }),
+        }),
+      ),
+      Layer.provideMerge(playbookStoreLayer),
+      Layer.provideMerge(Layer.succeedContext(context)),
+      Layer.provideMerge(
+        personaLibraryLayer("j5-crew-proposal-", Object.values(BUILT_IN_AGENT_PERSONAS)),
+      ),
+      Layer.provideMerge(NodeServices.layer),
+    );
+    return {
+      layer,
+      notices,
+      watched,
+      archiveFailures,
+      missingThreads,
+      unreadableThreads,
+      archivedThreads,
+      deletedThreads,
+      noticeFailure,
+      resolveFailure,
+      attachFailure,
+      captainModel,
+    };
+  });
+const fixtureWithSettings = (settings: Parameters<typeof ServerSettings.layerTest>[0] = {}) =>
+  fixtureWithDatabase(":memory:", { settings });
 
-const fixture = fixtureWithDatabase(":memory:");
+const fixture = fixtureWithSettings();
 
 it.effect("reports what the person decided about a roster, and what they changed first", () =>
   Effect.gen(function* () {
@@ -594,9 +626,9 @@ it.effect(
     }).pipe(Effect.scoped),
 );
 
-it.effect("gates every roster on the human and gates additions with the seat cap", () =>
+it.effect("gates new rosters on the human and adds members directly with the seat cap", () =>
   Effect.gen(function* () {
-    const { layer, notices } = yield* fixture;
+    const { layer } = yield* fixture;
     yield* Effect.gen(function* () {
       const gate = withPreview(yield* CrewProposalService);
       const opened = yield* gate.propose({
@@ -634,7 +666,9 @@ it.effect("gates every roster on the human and gates additions with the seat cap
         },
         brief: null,
       });
-      assert.equal(request.proposal.status, "open");
+      assert.equal(request.proposal.status, "approved");
+      assert.equal(request.proposal.approvalMode, "automatic");
+      assert.lengthOf(request.instance!.members, 2);
       assert.equal(request.proposal.kind, "addition");
       assert.equal(request.proposal.crewInstanceId, instance.id);
       assert.equal(request.proposal.brief, "Follow the release runbook.");
@@ -719,18 +753,19 @@ it.effect("gates every roster on the human and gates additions with the seat cap
         },
         brief: null,
       });
-      assert.equal(custom.proposal.status, "open");
+      assert.equal(custom.proposal.status, "approved");
       assert.isNull(custom.proposal.requestedSeats[0]?.agentId);
-      yield* gate.resolve({ proposalId: custom.proposal.id, decision: "decline" });
-
-      const declined = yield* gate.resolve({
-        proposalId: request.proposal.id,
-        decision: "decline",
+      assert.lengthOf(custom.instance!.members, 3);
+      const replay = yield* gate.requestMember({
+        requestKey: "add-1",
+        captain,
+        crewInstanceId: instance.id,
+        seat: request.proposal.requestedSeats[0]!,
+        brief: null,
       });
-      assert.equal(declined.proposal.status, "declined");
-      assert.isNull(declined.instance);
-      const last = (yield* Ref.get(notices)).at(-1);
-      if (last?.type === "message.dispatch") assert.include(last.text, "decision: declined");
+      assert.equal(replay.proposal.id, request.proposal.id);
+      assert.lengthOf(replay.instance!.members, 3);
+      assert.lengthOf(yield* (yield* AgentCrewProposalService).listOpen(), 0);
 
       const tooMany = yield* gate
         .propose({
@@ -825,7 +860,7 @@ it.effect(
         assert.equal(again._tag, "CrewProposalNotOpenError");
 
         // The human edits an addition on the card into a seat name the crew already has.
-        const addition = yield* gate.requestMember({
+        const addition = yield* legacyAddition({
           requestKey: "claim-add-1",
           captain,
           crewInstanceId: approved.instance!.id,
@@ -860,7 +895,7 @@ it.effect(
 
         // An addition whose approval cannot be recorded after its seat is reserved releases the
         // reservation and stays open, so approving it again is not refused as a name clash.
-        const flaky = yield* gate.requestMember({
+        const flaky = yield* legacyAddition({
           requestKey: "flaky-add-1",
           captain,
           crewInstanceId: approved.instance!.id,
@@ -966,7 +1001,7 @@ it.effect("holds every door to the same seat shape and seats nobody into a retir
       assert.equal(tooLong._tag, "CrewProposalRequestError");
 
       const approved = yield* gate.resolve({ proposalId: opened.proposal.id, decision: "approve" });
-      const addition = yield* gate.requestMember({
+      const addition = yield* legacyAddition({
         requestKey: "shape-add-1",
         captain,
         crewInstanceId: approved.instance!.id,
@@ -1213,7 +1248,7 @@ it.effect(
           approvalToken: refreshed.approvalToken,
         });
         assert.equal(approved.proposal.status, "approved");
-        const addition = yield* gate.requestMember({
+        const addition = yield* legacyAddition({
           requestKey: "preview-addition",
           captain,
           crewInstanceId: approved.instance!.id,
@@ -1442,14 +1477,14 @@ it.effect(
         const refused = outcomes.filter(Result.isFailure).map((result) => result.failure);
         assert.lengthOf(admitted, 1);
         assert.lengthOf(refused, 1);
-        assert.equal(admitted[0]!.proposal.status, "open");
+        assert.equal(admitted[0]!.proposal.status, "approved");
         assertCrewFull(refused[0]!);
         assert.include(refused[0]!.message, `holds 12 of ${CREW_SEAT_CAP} seats`);
         const openAdditions = (yield* proposals.listForCaptain(captainId)).filter(
           (proposal) => proposal.crewInstanceId === instance.id && proposal.status === "open",
         );
-        assert.lengthOf(openAdditions, 1);
-        assert.lengthOf((yield* crews.read(instance.id))!.members, 11);
+        assert.lengthOf(openAdditions, 0);
+        assert.lengthOf((yield* crews.read(instance.id))!.members, 12);
 
         // The request holding seat twelve is found by its key before anything is counted, so a
         // retry is the same request, not a thirteenth seat.
@@ -1457,14 +1492,14 @@ it.effect(
         const winnerKey = winner.requestedSeats[0]!.seat === "left" ? "race-a" : "race-b";
         const replay = yield* request(winnerKey, winner.requestedSeats[0]!.seat);
         assert.equal(replay.proposal.id, winner.id);
-        assert.equal(replay.proposal.status, "open");
+        assert.equal(replay.proposal.status, "approved");
         assert.lengthOf(
           (yield* proposals.listForCaptain(captainId)).filter(
             (proposal) => proposal.crewInstanceId === instance.id && proposal.status === "open",
           ),
-          1,
+          0,
         );
-        const approved = yield* gate.resolve({ proposalId: winner.id, decision: "approve" });
+        const approved = admitted[0]!;
         assert.equal(approved.proposal.status, "approved");
         assert.lengthOf(approved.instance!.members, 12);
         // Replayed after its seat launched: the seat name is now a member, and the retry still
@@ -1582,7 +1617,7 @@ it.effect(
             },
           ],
         });
-        const addition = yield* gate.requestMember({
+        const addition = yield* legacyAddition({
           requestKey: "deleted-captain-add",
           captain,
           crewInstanceId: instance.id,
@@ -1684,94 +1719,100 @@ const playbookStartTool = playbookTools.find(
 )!;
 const decodePlaybookStart = Schema.decodeUnknownEffect(playbookStartTool.parametersSchema);
 
-const playbookFixture = Effect.gen(function* () {
-  const fs = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
-  const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "j5-crew-playbook-" });
-  yield* fs.makeDirectory(path.join(workspaceRoot, ".j5/playbooks"), { recursive: true });
-  const writePlaybook = (name: string, text: string) =>
-    fs.writeFileString(path.join(workspaceRoot, ".j5/playbooks", `${name}.yaml`), text);
-  yield* writePlaybook("release", stringify(release()));
-  const database = NodeSqliteClient.layer({ filename: ":memory:" });
-  const storage = Layer.mergeAll(crewInstanceLayer, proposalStoreLayer, ledgerLayer).pipe(
-    Layer.provideMerge(database),
-  );
-  const context = yield* Layer.build(storage);
-  yield* Effect.provide(
-    Effect.gen(function* () {
-      yield* runJ5A2AMigrations();
-      yield* seedPlaybookOwners([captainThread]);
-      yield* (yield* A2ALedger).ensureProject({
-        projectId: projectId,
-        createdAt: DateTime.formatIso(createdAt),
-      });
-    }),
-    context,
-  );
-  const commands = yield* Ref.make<ReadonlyArray<OrchestrationV2ServerCommand>>([]);
-  // Armed, provider reads wait until two approvals have both passed validation, so they race
-  // for the member store rather than one refusing in the other's wake.
-  const barrier = yield* Ref.make<Deferred.Deferred<void> | null>(null);
-  const arrivals = yield* Ref.make(0);
-  const layer = crewProposalLayer.pipe(
-    Layer.provideMerge(crewLaunchLayer),
-    Layer.provideMerge(Layer.mock(CrewLaunchReporter)({ watch: () => Effect.void })),
-    Layer.provideMerge(playbookStoreLayer),
-    Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: noRepository })),
-    Layer.provideMerge(
-      Layer.mock(ThreadManagementService)({
-        getThreadProjection: (threadId) =>
-          Effect.succeed({
-            thread: thread(threadId),
-            messages: [],
-          } as unknown as OrchestrationV2ThreadProjection),
-        dispatch: (command) =>
-          Ref.update(commands, (items) => [...items, command]).pipe(
-            Effect.as({ events: [], effects: [] } as never),
-          ),
+const playbookFixtureWithSettings = (
+  overrides: Parameters<typeof ServerSettings.layerTest>[0] = {},
+) =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "j5-crew-playbook-" });
+    yield* fs.makeDirectory(path.join(workspaceRoot, ".j5/playbooks"), { recursive: true });
+    const writePlaybook = (name: string, text: string) =>
+      fs.writeFileString(path.join(workspaceRoot, ".j5/playbooks", `${name}.yaml`), text);
+    yield* writePlaybook("release", stringify(release()));
+    const database = NodeSqliteClient.layer({ filename: ":memory:" });
+    const storage = Layer.mergeAll(crewInstanceLayer, proposalStoreLayer, ledgerLayer).pipe(
+      Layer.provideMerge(database),
+    );
+    const context = yield* Layer.build(storage);
+    yield* Effect.provide(
+      Effect.gen(function* () {
+        yield* runJ5A2AMigrations();
+        yield* seedPlaybookOwners([captainThread]);
+        yield* (yield* A2ALedger).ensureProject({
+          projectId: projectId,
+          createdAt: DateTime.formatIso(createdAt),
+        });
       }),
-    ),
-    Layer.provideMerge(
-      Layer.mock(SpawnCompositionService)({
-        recordFacts: (input) =>
-          Effect.succeed({
-            home: { projectId, participantId: participantIdForThread(input.threadId) },
-            placement: {
-              projectId,
-              participantId: participantIdForThread(input.threadId),
-              provenance: input.provenance,
-              placementParentId: captainId,
-              createdEventSeq: 1,
-              updatedEventSeq: 1,
-            },
-          }),
-      }),
-    ),
-    Layer.provideMerge(
-      Layer.mock(ProviderRegistry)({
-        getProviders: Effect.gen(function* () {
-          const gate = yield* Ref.get(barrier);
-          if (gate !== null) {
-            if ((yield* Ref.updateAndGet(arrivals, (count) => count + 1)) === 2)
-              yield* Deferred.succeed(gate, undefined);
-            yield* Deferred.await(gate);
-          }
-          return [codex];
+      context,
+    );
+    const commands = yield* Ref.make<ReadonlyArray<OrchestrationV2ServerCommand>>([]);
+    // Armed, provider reads wait until two approvals have both passed validation, so they race
+    // for the member store rather than one refusing in the other's wake.
+    const barrier = yield* Ref.make<Deferred.Deferred<void> | null>(null);
+    const arrivals = yield* Ref.make(0);
+    const providers = yield* Ref.make<ReadonlyArray<ServerProvider>>([codex]);
+    const layer = crewProposalLayer.pipe(
+      Layer.provideMerge(ServerSettings.layerTest(overrides)),
+      Layer.provideMerge(crewLaunchLayer),
+      Layer.provideMerge(Layer.mock(CrewLaunchReporter)({ watch: () => Effect.void })),
+      Layer.provideMerge(playbookStoreLayer),
+      Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: noRepository })),
+      Layer.provideMerge(
+        Layer.mock(ThreadManagementService)({
+          getThreadProjection: (threadId) =>
+            Effect.succeed({
+              thread: thread(threadId),
+              messages: [],
+            } as unknown as OrchestrationV2ThreadProjection),
+          dispatch: (command) =>
+            Ref.update(commands, (items) => [...items, command]).pipe(
+              Effect.as({ events: [], effects: [] } as never),
+            ),
         }),
-      }),
-    ),
-    Layer.provideMerge(Layer.succeedContext(context)),
-    Layer.provideMerge(
-      ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-playbook-state-" }),
-    ),
-    Layer.provideMerge(NodeServices.layer),
-  );
-  const armBarrier = Effect.gen(function* () {
-    yield* Ref.set(arrivals, 0);
-    yield* Ref.set(barrier, yield* Deferred.make<void>());
-  });
-  return { layer, workspaceRoot, writePlaybook, commands, armBarrier };
-}).pipe(Effect.provide(NodeServices.layer));
+      ),
+      Layer.provideMerge(
+        Layer.mock(SpawnCompositionService)({
+          recordFacts: (input) =>
+            Effect.succeed({
+              home: { projectId, participantId: participantIdForThread(input.threadId) },
+              placement: {
+                projectId,
+                participantId: participantIdForThread(input.threadId),
+                provenance: input.provenance,
+                placementParentId: captainId,
+                createdEventSeq: 1,
+                updatedEventSeq: 1,
+              },
+            }),
+        }),
+      ),
+      Layer.provideMerge(
+        Layer.mock(ProviderRegistry)({
+          getProviders: Effect.gen(function* () {
+            const gate = yield* Ref.get(barrier);
+            if (gate !== null) {
+              if ((yield* Ref.updateAndGet(arrivals, (count) => count + 1)) === 2)
+                yield* Deferred.succeed(gate, undefined);
+              yield* Deferred.await(gate);
+            }
+            return yield* Ref.get(providers);
+          }),
+        }),
+      ),
+      Layer.provideMerge(Layer.succeedContext(context)),
+      Layer.provideMerge(
+        ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-playbook-state-" }),
+      ),
+      Layer.provideMerge(NodeServices.layer),
+    );
+    const armBarrier = Effect.gen(function* () {
+      yield* Ref.set(arrivals, 0);
+      yield* Ref.set(barrier, yield* Deferred.make<void>());
+    });
+    return { layer, workspaceRoot, writePlaybook, commands, armBarrier, providers };
+  }).pipe(Effect.provide(NodeServices.layer));
+const playbookFixture = playbookFixtureWithSettings();
 
 /** Proposes the release Crew: planner owns plan, builder owns build, review is left unowned. */
 const proposeRelease = (
@@ -1922,7 +1963,7 @@ it.effect("refuses a playbook Crew it cannot follow, each with a next step", () 
 );
 
 it.effect(
-  "two additions racing for one step: the first approval wins, the second is refused and stays open",
+  "two legacy additions racing for one step: the first approval wins, the second is refused and stays open",
   () =>
     Effect.gen(function* () {
       const { layer, workspaceRoot, armBarrier } = yield* playbookFixture;
@@ -1937,7 +1978,7 @@ it.effect(
           decision: "approve",
         })).instance!.id;
         const request = (seat: string) =>
-          raw.requestMember({
+          legacyAddition({
             requestKey: seat,
             captain,
             crewInstanceId: crewId,
@@ -2156,7 +2197,7 @@ it.effect("a Crew whose playbook file is gone still takes a seat that claims no 
         seat: custom("helper"),
         brief: null,
       });
-      const approved = yield* gate.resolve({ proposalId: filed.proposal.id, decision: "approve" });
+      const approved = filed;
       assert.equal(approved.proposal.status, "approved");
       const members = (yield* crews.read(crewId))!.members;
       assert.deepStrictEqual(
@@ -2518,7 +2559,7 @@ it.effect.each(["approve", "decline"] as const)(
 );
 
 it.effect.each(["approve", "decline"] as const)(
-  "replays an addition after %s with the original crew and omitted brief",
+  "replays a pending addition after %s with the original crew and omitted brief",
   (decision) =>
     Effect.gen(function* () {
       const { layer, notices } = yield* fixture;
@@ -2533,7 +2574,7 @@ it.effect.each(["approve", "decline"] as const)(
           brief: null,
           seat: custom("writer"),
         };
-        const original = yield* gate.requestMember(input);
+        const original = yield* legacyAddition(input);
         assert.equal(original.proposal.brief, firstCrew.brief);
         for (const change of [
           { crewInstanceId: secondCrew.id },
@@ -2562,6 +2603,48 @@ it.effect.each(["approve", "decline"] as const)(
         assert.lengthOf(yield* (yield* AgentCrewProposalService).listForCaptain(captainId), 3);
       }).pipe(Effect.provide(layer));
     }),
+);
+
+it.effect("replays an automatic addition with the original crew and omitted brief", () =>
+  Effect.gen(function* () {
+    const { layer, notices } = yield* fixture;
+    yield* Effect.gen(function* () {
+      const gate = withPreview(yield* CrewProposalService);
+      const firstCrew = yield* seedCrew(gate, "first-crew", 1);
+      const secondCrew = yield* seedCrew(gate, "second-crew", 1);
+      const input = {
+        requestKey: "addition-replay",
+        captain,
+        crewInstanceId: firstCrew.id,
+        brief: null,
+        seat: custom("writer"),
+      };
+      const original = yield* gate.requestMember(input);
+      assert.equal(original.proposal.status, "approved");
+      assert.equal(original.proposal.brief, firstCrew.brief);
+      for (const change of [
+        { crewInstanceId: secondCrew.id },
+        { brief: "Changed" },
+        { seat: { ...input.seat, reason: "Changed" } },
+        { seat: { ...input.seat, instructions: "Changed" } },
+        { seat: { ...input.seat, workspace: { type: "worktree" as const, baseRef: "main" } } },
+      ]) {
+        const refused = yield* gate.requestMember({ ...input, ...change }).pipe(Effect.flip);
+        assert.equal(refused._tag, "CrewProposalRequestError");
+        assert.include(refused.message, original.proposal.id);
+        assert.include(refused.message, firstCrew.id);
+        assert.include(refused.message, "fresh client_request_id");
+      }
+      const noticesBefore = yield* Ref.get(notices);
+      const replay = yield* gate.requestMember(input);
+      assert.equal(replay.proposal.id, original.proposal.id);
+      assert.equal(replay.proposal.status, "approved");
+      assert.equal(replay.instance?.id, firstCrew.id);
+      assert.lengthOf(replay.instance!.members, 2);
+      assert.deepStrictEqual(yield* Ref.get(notices), noticesBefore);
+      assert.lengthOf(yield* (yield* AgentCrewProposalService).listForCaptain(captainId), 3);
+    }).pipe(Effect.provide(layer));
+  }),
 );
 
 it.effect(
@@ -2645,17 +2728,7 @@ it.effect.each([
   "concurrent $kind requests (different=$different) retain one proposal and compare the winning row",
   ({ kind, different }) =>
     Effect.gen(function* () {
-      const entered = yield* Ref.make(0);
-      const both = yield* Deferred.make<void>();
-      const release = yield* Deferred.make<void>();
-      const barrier = Ref.updateAndGet(entered, (count) => count + 1).pipe(
-        Effect.tap((count) => (count === 2 ? Deferred.succeed(both, undefined) : Effect.void)),
-        Effect.andThen(Deferred.await(release)),
-      );
-      const { layer } = yield* fixtureWithDatabase(
-        ":memory:",
-        kind === "roster" ? { beforeCreate: barrier } : { beforeAdmit: barrier },
-      );
+      const { layer } = yield* fixtureWithDatabase(":memory:");
       yield* Effect.gen(function* () {
         const gate = withPreview(yield* CrewProposalService);
         const crew = kind === "addition" ? yield* seedCrew(gate, "nearly-full", 11) : null;
@@ -2675,23 +2748,14 @@ it.effect.each([
                 brief,
                 seat: custom("writer"),
               });
-        const calls = yield* Effect.all(
+        // The proposal's lock serializes same-key requests; the second reads the first's stored row.
+        const results = yield* Effect.all(
           [
             call("Original").pipe(Effect.result),
             call(different ? "Changed" : "Original").pipe(Effect.result),
           ],
           { concurrency: "unbounded" },
-        ).pipe(Effect.forkChild({ startImmediately: true }));
-        yield* Effect.raceFirst(
-          Deferred.await(both),
-          Fiber.join(calls).pipe(
-            Effect.flatMap(() =>
-              Effect.die(new Error("Requests completed before reaching both writes")),
-            ),
-          ),
         );
-        yield* Deferred.succeed(release, undefined);
-        const results = yield* Fiber.join(calls);
         const successes = results.filter(Result.isSuccess);
         const failures = results.filter(Result.isFailure);
         assert.lengthOf(successes, different ? 1 : 2);
@@ -2727,7 +2791,7 @@ it.effect.each([
               });
         assert.equal(replay.proposal.id, original.id);
         if (crew !== null)
-          assert.lengthOf((yield* (yield* AgentCrewInstanceService).read(crew.id))!.members, 11);
+          assert.lengthOf((yield* (yield* AgentCrewInstanceService).read(crew.id))!.members, 12);
       }).pipe(Effect.provide(layer));
     }),
 );
@@ -3148,6 +3212,251 @@ it.effect.each(["roster", "addition"] as const)(
         }
       }).pipe(Effect.provide(layer));
     }),
+);
+
+it.effect("auto-approves a roster once and keeps each seat's requested access", () =>
+  Effect.gen(function* () {
+    const { layer, watched } = yield* fixtureWithSettings({ crewAutoApprove: true });
+    yield* Effect.gen(function* () {
+      const gate = yield* CrewProposalService;
+      const settings = yield* ServerSettings.ServerSettingsService;
+      const input = {
+        requestKey: "automatic-roster",
+        captain,
+        displayName: "Automatic",
+        brief: "Review",
+        seats: [
+          {
+            workspace: { type: "shared" as const },
+            seat: "reviewer",
+            agentId: null,
+            reason: "Review",
+            instructions: "Review the change",
+            runtimeMode: "approval-required" as const,
+          },
+        ],
+      };
+      const [first, duplicate] = yield* Effect.all([gate.propose(input), gate.propose(input)], {
+        concurrency: "unbounded",
+      });
+      assert.equal(first.proposal.status, "approved");
+      assert.equal(first.proposal.approvalMode, "automatic");
+      assert.equal(first.proposal.approvedSeats![0]!.runtimeMode, "approval-required");
+      assert.equal(first.instance!.id, duplicate.instance!.id);
+      assert.lengthOf(yield* (yield* AgentCrewProposalService).listOpen(), 0);
+      yield* settings.updateSettings({ crewAutoApprove: false });
+      const replay = yield* gate.propose(input);
+      assert.equal(replay.proposal.status, "approved");
+      assert.equal(replay.instance!.id, first.instance!.id);
+      assert.deepStrictEqual(yield* Ref.get(watched), [first.proposal.id]);
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
+it.effect("project approval overrides beat the environment setting in both directions", () =>
+  Effect.gen(function* () {
+    for (const global of [false, true]) {
+      const { layer } = yield* fixtureWithSettings({
+        crewAutoApprove: global,
+        projectSettingsOverrides: { [captain.thread.projectId]: { crewAutoApprove: !global } },
+      });
+      yield* Effect.gen(function* () {
+        const gate = yield* CrewProposalService;
+        const outcome = yield* gate.propose({
+          requestKey: `override-${global}`,
+          captain,
+          displayName: "Override",
+          brief: "Review",
+          seats: [
+            {
+              workspace: { type: "shared" as const },
+              seat: "scout",
+              agentId: "scout",
+              reason: "Inspect",
+            },
+          ],
+        });
+        assert.equal(outcome.proposal.status, global ? "open" : "approved");
+      }).pipe(Effect.provide(layer));
+    }
+  }).pipe(Effect.scoped),
+);
+
+it.effect("turning on auto-approval leaves an existing human proposal open on retry", () =>
+  Effect.gen(function* () {
+    const { layer } = yield* fixture;
+    yield* Effect.gen(function* () {
+      const gate = yield* CrewProposalService;
+      const input = {
+        requestKey: "existing-human",
+        captain,
+        displayName: "Human",
+        brief: "Inspect",
+        seats: [
+          {
+            workspace: { type: "shared" as const },
+            seat: "scout",
+            agentId: "scout",
+            reason: "Inspect",
+          },
+        ],
+      };
+      const first = yield* gate.propose(input);
+      yield* (yield* ServerSettings.ServerSettingsService).updateSettings({
+        crewAutoApprove: true,
+      });
+      const replay = yield* gate.propose(input);
+      assert.equal(replay.proposal.id, first.proposal.id);
+      assert.equal(replay.proposal.status, "open");
+      assert.isNull(replay.instance);
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
+it.effect("refuses a signed-out provider before recording an automatic launch or addition", () =>
+  Effect.gen(function* () {
+    const { layer, providers, commands } = yield* playbookFixtureWithSettings({
+      crewAutoApprove: true,
+    });
+    yield* Effect.gen(function* () {
+      const gate = yield* CrewProposalService;
+      const store = yield* AgentCrewProposalService;
+      const input = {
+        requestKey: "sign-in-roster",
+        captain,
+        displayName: "Sign in",
+        brief: "Inspect",
+        seats: [custom("scout")],
+      };
+      yield* Ref.set(providers, [{ ...codex, auth: { status: "unauthenticated" } }]);
+      const refused = yield* gate.propose(input).pipe(Effect.flip);
+      assert.equal(refused._tag, "CrewLaunchSeatUnavailableError");
+      assert.include(refused.message, "scout");
+      assert.include(refused.message, "signed out");
+      assert.lengthOf(yield* store.listForCaptain(captainId), 0);
+      yield* Ref.set(providers, [codex]);
+      const launched = yield* gate.propose(input);
+      yield* (yield* ServerSettings.ServerSettingsService).updateSettings({
+        crewAutoApprove: false,
+      });
+      const commandsBefore = (yield* Ref.get(commands)).length;
+      yield* Ref.set(providers, [{ ...codex, auth: { status: "unauthenticated" } }]);
+      const addition = yield* gate
+        .requestMember({
+          requestKey: "sign-in-addition",
+          captain,
+          crewInstanceId: launched.instance!.id,
+          seat: custom("reviewer"),
+          brief: null,
+        })
+        .pipe(Effect.flip);
+      assert.include(addition.message, "reviewer");
+      assert.include(addition.message, "signed out");
+      assert.lengthOf(yield* store.listForCaptain(captainId), 1);
+      assert.lengthOf(
+        (yield* (yield* AgentCrewInstanceService).read(launched.instance!.id))!.members,
+        1,
+      );
+      assert.lengthOf(yield* Ref.get(commands), commandsBefore);
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "direct additions preserve supervised access and launch only once on concurrent retries",
+  () =>
+    Effect.gen(function* () {
+      const { layer, commands } = yield* playbookFixture;
+      yield* Effect.gen(function* () {
+        const gate = withPreview(yield* CrewProposalService);
+        const opened = yield* gate.propose({
+          requestKey: "supervised-crew",
+          captain,
+          displayName: "Supervised",
+          brief: "Inspect",
+          seats: [custom("builder")],
+        });
+        const crew = (yield* gate.resolve({ proposalId: opened.proposal.id, decision: "approve" }))
+          .instance!;
+        const input = {
+          requestKey: "supervised-addition",
+          captain,
+          crewInstanceId: crew.id,
+          seat: { ...custom("reviewer"), runtimeMode: "approval-required" as const },
+          brief: null,
+        };
+        const outcomes = yield* Effect.all([gate.requestMember(input), gate.requestMember(input)], {
+          concurrency: "unbounded",
+        });
+        assert.equal(outcomes[0]!.proposal.status, "approved");
+        assert.equal(outcomes[0]!.proposal.id, outcomes[1]!.proposal.id);
+        assert.lengthOf(outcomes[1]!.instance!.members, 2);
+        const starts = (yield* Ref.get(commands)).filter(
+          (command) => command.type === "thread.create" && command.title === "reviewer",
+        );
+        assert.lengthOf(starts, 1);
+        assert.equal(
+          starts[0]?.type === "thread.create" ? starts[0].runtimeMode : null,
+          "approval-required",
+        );
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
+);
+
+it.effect("refused concurrent additions release capacity and replay their original refusal", () =>
+  Effect.gen(function* () {
+    const { layer, workspaceRoot, armBarrier } = yield* playbookFixture;
+    yield* Effect.gen(function* () {
+      const gate = withPreview(yield* CrewProposalService);
+      const opened = yield* proposeRelease(gate, workspaceRoot);
+      const launched = yield* gate.resolve({ proposalId: opened.proposal.id, decision: "approve" });
+      yield* armBarrier;
+      const outcomes = yield* Effect.forEach(
+        ["review-a", "review-b"],
+        (name) =>
+          Effect.result(
+            gate.requestMember({
+              requestKey: name,
+              captain,
+              crewInstanceId: launched.instance!.id,
+              seat: custom(name, ["review"]),
+              brief: null,
+            }),
+          ),
+        { concurrency: "unbounded" },
+      );
+      assert.lengthOf(outcomes.filter(Result.isSuccess), 1);
+      const refused = outcomes.filter(Result.isFailure);
+      assert.lengthOf(refused, 1);
+      assert.include(refused[0]!.failure.message, "already owned");
+      assert.equal(refused[0]!.failure._tag, "CrewProposalRequestError");
+      assert.include(refused[0]!.failure.message, "new client_request_id");
+      assert.notInclude(refused[0]!.failure.message, "Ask the Captain");
+      const store = yield* AgentCrewProposalService;
+      const declined = (yield* store.listForCaptain(captainId)).find(
+        (proposal) => proposal.status === "declined",
+      )!;
+      assert.include(declined.refusalDetail!, "already owned");
+      const rejectedSeat = declined.requestedSeats[0]!.seat;
+      const replay = yield* gate
+        .requestMember({
+          requestKey: rejectedSeat,
+          captain,
+          crewInstanceId: launched.instance!.id,
+          seat: custom(rejectedSeat, ["review"]),
+          brief: null,
+        })
+        .pipe(Effect.flip);
+      assert.equal(replay.message, refused[0]!.failure.message);
+      assert.include(replay.message, rejectedSeat);
+      assert.lengthOf(yield* store.listForCaptain(captainId), 3);
+      assert.lengthOf(yield* (yield* AgentCrewProposalService).listOpen(), 0);
+      assert.lengthOf(
+        (yield* (yield* AgentCrewInstanceService).read(launched.instance!.id))!.members,
+        3,
+      );
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
 );
 
 it.effect(
