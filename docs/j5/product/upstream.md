@@ -398,7 +398,7 @@ Each advance checks for new upstream reads of `T3CODE_HOME` or `.t3` paths and n
 
   Renewing a session adds a call in web's sign-in gate, and J5's renewal in web's connection runtime for a saved server's token. Leaving non-Owner servers out of Settings adds one filter in each of the three places Settings resolves its servers; Settings' navigation and search keep to the same list of pages, and a page off the list sends the person to one on it.
 
-- **A lowered level reaches an open socket at once,** because upstream closes a session's sockets when it is revoked, replaced or expires.
+- **A lowered level reaches an open socket at once.** The RPC socket and preview stream race their scoped lifecycles against session invalidation, so revocation, replacement or expiry closes them. The preview stream needs the explicit upstream-file fix requested in [#798](https://github.com/Jacksondr5/j5code/issues/798), following the existing RPC behavior; offer that shared authorization fix upstream separately.
 - **A change of level makes the person's devices reconnect once.**
 - **A device offline past its session's lifetime is paired again by hand** after a change of level. An MCP client holds no person's level, so a change of level does not touch it, except that lowering or removing an Owner ends the MCP clients they approved.
 - **Each advance checks four things:**

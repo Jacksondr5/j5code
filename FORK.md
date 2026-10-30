@@ -773,6 +773,8 @@ explicitly marked.
 | `apps/server/src/mcp/McpHttpServer.ts`                                      | R       | 2                                                  |
 | `apps/server/src/mcp/OrchestratorMcpService.ts`                             | A       | Saved-agent mentions                               |
 | `packages/contracts/src/previewAutomation.ts`                               | N       | 74                                                 |
+| `apps/server/src/preview/ServerBrowserStream.ts`                            | N       | Preview stream session invalidation (#798)         |
+| `apps/server/src/preview/ServerBrowserStream.test.ts`                       | N       | Preview stream session invalidation (#798)         |
 | `apps/server/src/preview/ServerBrowser.test.ts`                             | N       | 74                                                 |
 | `apps/server/src/preview/ServerBrowser.ts`                                  | N       | 74, B                                              |
 | `apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts`         | A       | 8, 47, Saved-agent mentions                        |
