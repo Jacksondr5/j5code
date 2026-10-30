@@ -110,9 +110,10 @@ export function createAgentPersonaLibrary(storage?: {
     if (storage === undefined) return { configured: false, folders: [] };
     const { stateDir, fs, path } = storage;
     const configText = yield* fs.readFileString(path.join(stateDir, "agent-personas.json")).pipe(
-      Effect.map(Option.some),
-      Effect.catch((error) =>
-        error.reason._tag === "NotFound" ? Effect.succeed(Option.none()) : Effect.fail(error),
+      Effect.asSome,
+      Effect.catchIf(
+        (error) => error.reason._tag === "NotFound",
+        () => Effect.succeedNone,
       ),
     );
     const configuredPaths = Option.isSome(configText)
@@ -128,12 +129,10 @@ export function createAgentPersonaLibrary(storage?: {
   });
 
   /**
-   * Every definition file under a folder, walking subfolders in sorted order like the
-   * import picker does. Dot-directories such as .git and `node_modules` are skipped, and so is
-   * an entry that vanished or is a dangling link; depth is capped so a symlink cycle cannot spin
-   * forever. With a `limit`, the walk stops once it has found more files than that, so a caller
-   * refusing an oversized selection need not scan the rest of the tree. Returns null when the
-   * root does not exist.
+   * Every definition file under a folder, in the import picker's sorted order, skipping
+   * dot-directories, `node_modules` and vanished or dangling entries; depth is capped against
+   * symlink cycles. With a `limit`, stops past it so an oversized selection is refused without
+   * scanning the rest. Null when the root does not exist.
    */
   const listDefinitionFiles = Effect.fn("AgentPersonaLibrary.listDefinitionFiles")(function* (
     root: string,
@@ -150,9 +149,10 @@ export function createAgentPersonaLibrary(storage?: {
         if (files.length > limit) return;
         const entry = path.join(folder, name);
         const stat = yield* fs.stat(entry).pipe(
-          Effect.map(Option.some),
-          Effect.catch((error) =>
-            error.reason._tag === "NotFound" ? Effect.succeed(Option.none()) : Effect.fail(error),
+          Effect.asSome,
+          Effect.catchIf(
+            (error) => error.reason._tag === "NotFound",
+            () => Effect.succeedNone,
           ),
         );
         if (Option.isNone(stat)) continue;
@@ -243,10 +243,9 @@ export function createAgentPersonaLibrary(storage?: {
     const diagnostics: Array<{ path: string; message: string }> = [];
     for (const folder of folders.map(({ path }) => path)) {
       const files = yield* listDefinitionFiles(folder).pipe(
-        Effect.catch((error) =>
-          !configured && error.reason._tag === "NotFound"
-            ? Effect.succeed(null)
-            : Effect.fail(error),
+        Effect.catchIf(
+          (error) => !configured && error.reason._tag === "NotFound",
+          () => Effect.succeed(null),
         ),
       );
       if (files === null) {
@@ -289,9 +288,7 @@ export function createAgentPersonaLibrary(storage?: {
     const { configured, folders } = yield* resolveFolders();
     const inventory = [];
     for (const folder of folders) {
-      const files = yield* listDefinitionFiles(folder.path).pipe(
-        Effect.catch(() => Effect.succeed(null)),
-      );
+      const files = yield* listDefinitionFiles(folder.path).pipe(Effect.orElseSucceed(() => null));
       inventory.push({
         ...folder,
         exists: files !== null,
@@ -327,9 +324,10 @@ export function createAgentPersonaLibrary(storage?: {
       resolved.add(absolute);
       const insideStateDir = !path.relative(stateDir, absolute).startsWith("..");
       const stat = yield* fs.stat(absolute).pipe(
-        Effect.map(Option.some),
-        Effect.catch((error) =>
-          error.reason._tag === "NotFound" ? Effect.succeed(Option.none()) : Effect.fail(error),
+        Effect.asSome,
+        Effect.catchIf(
+          (error) => error.reason._tag === "NotFound",
+          () => Effect.succeedNone,
         ),
       );
       if (Option.isNone(stat)) {
@@ -359,8 +357,9 @@ export function createAgentPersonaLibrary(storage?: {
     const text = yield* storage.fs
       .readFileString(storage.path.join(storage.stateDir, "imported-agent-personas.json"))
       .pipe(
-        Effect.catch((error) =>
-          error.reason._tag === "NotFound" ? Effect.succeed("[]") : Effect.fail(error),
+        Effect.catchIf(
+          (error) => error.reason._tag === "NotFound",
+          () => Effect.succeed("[]"),
         ),
       );
     const definitions = yield* decodeImports(text);
@@ -381,8 +380,9 @@ export function createAgentPersonaLibrary(storage?: {
     const text = yield* storage.fs
       .readFileString(storage.path.join(storage.stateDir, "removed-source-agent-personas.json"))
       .pipe(
-        Effect.catch((error) =>
-          error.reason._tag === "NotFound" ? Effect.succeed("[]") : Effect.fail(error),
+        Effect.catchIf(
+          (error) => error.reason._tag === "NotFound",
+          () => Effect.succeed("[]"),
         ),
       );
     return yield* decodeRemovedSourceIds(text);
@@ -394,8 +394,9 @@ export function createAgentPersonaLibrary(storage?: {
       const text = yield* storage.fs
         .readFileString(storage.path.join(storage.stateDir, DISABLED_SOURCES_FILE))
         .pipe(
-          Effect.catch((error) =>
-            error.reason._tag === "NotFound" ? Effect.succeed("[]") : Effect.fail(error),
+          Effect.catchIf(
+            (error) => error.reason._tag === "NotFound",
+            () => Effect.succeed("[]"),
           ),
         );
       return yield* decodeRemovedSourceIds(text);
