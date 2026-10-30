@@ -954,7 +954,7 @@ it.effect(
         };
         const waiting = yield* vmServer.send.send(note);
         assert.equal(waiting.receiverServer, laptop.label);
-        assert.equal(waiting.delivery, "waiting_for_recipient");
+        assert.equal(waiting.deliveryOutcome, "waiting_for_recipient");
         assert.isString(waiting.recipientLastAvailableAt);
         assert.equal(
           waiting.note,
@@ -985,7 +985,7 @@ it.effect(
         for (const retry of [note, ended]) {
           const retried = yield* vmServer.send.send(retry);
           assert.equal(retried.receiverServer, laptop.label, retry.commandId);
-          assert.isUndefined(retried.delivery, retry.commandId);
+          assert.isUndefined(retried.deliveryOutcome, retry.commandId);
           assert.isUndefined(retried.note, retry.commandId);
         }
       }),

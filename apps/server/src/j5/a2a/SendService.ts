@@ -1265,7 +1265,7 @@ const rawLayer: Layer.Layer<
         return {
           ...result,
           receiverServer: server.name,
-          delivery: "waiting_for_recipient",
+          deliveryOutcome: "waiting_for_recipient",
           ...(server.lastAvailableAt === null
             ? {}
             : { recipientLastAvailableAt: server.lastAvailableAt }),

@@ -21,7 +21,7 @@ An agent learns what it can do from its tools, and it reads a tool's description
 
 ### `j5_send_message`
 
-**Description:** "Send one durable message. To another agent, three uses: a **plain send** when you don't need a reply; an **ask** — set expect_reply=true with a one-line intent, opening an exchange the receiver owes a reply to; a **reply** — include the exchange_id from the ask you are answering, which closes that exchange. To the human, only an ask: a plain send to a person is refused — if nobody needs to act, say it in your own thread instead. Set urgency only when asking the human. Use this tool only for participants already returned by j5_list_participants; when creating a Peer Agent, put any reply expectation in j5_spawn_agent's brief instead of sending a follow-up ask. Returns once the message is committed; delivery continues asynchronously — carry on with your work, and the reply arrives later as an incoming message. An agent that is busy may handle each message as its own turn after its current one ends, so put related updates in one message rather than sending them one by one; the result's deliveryNotice says when your message will wait behind the receiver's current turn. To interrupt an agent that is busy, set mode: mode=steer puts your message into the turn it is running now, and mode=restart stops that turn and starts it again on your message. Without mode the message is delivered the ordinary way, whatever its text or its intent says: Claude and Codex GPT 6 agents take it into the turn they are running, and other agents take it after their current turn ends. intent only labels an ask. Leave mode out for updates and replies. A Claude agent takes a steer once its running tool calls finish, and on other agents a steer can cancel the tool calls in flight, so keep it for a correction the receiver must see now, not for an update. An idle receiver starts a turn on your message whichever mode you set. Attach files for an agent on this server with attachments: pending uploads from t3_attachment_prepare_upload, or files its thread already holds. A provider Subagent is not a participant and is refused. Reuse client_request_id to retry the same send safely."
+**Description:** "Send one durable message. To another agent, three uses: a **plain send** when you don't need a reply; an **ask** — set expect_reply=true with a one-line intent, opening an exchange the receiver owes a reply to; a **reply** — include the exchange_id from the ask you are answering, which closes that exchange. To the human, only an ask: a plain send to a person is refused — if nobody needs to act, say it in your own thread instead. Set urgency only when asking the human. Use this tool only for participants already returned by j5_list_participants; when creating a Peer Agent, put any reply expectation in j5_spawn_agent's brief instead of sending a follow-up ask. Returns once the message is committed; delivery continues asynchronously — carry on with your work, and the reply arrives later as an incoming message. An agent that is busy may handle each message as its own turn after its current one ends, so put related updates in one message rather than sending them one by one. The result's deliveryOutcome says what will happen to your message: steered (it joins the turn the receiver is running now), queued (it waits for the receiver's current turn to end, or for a held queue or usage limit to lift; deliveryNotice says what it waits behind), starting (it begins a turn for an idle receiver, a Crew member that has not started, or a restart), or waiting_for_recipient (the receiver's server is offline and receives it when next available). The outcome is predicted as the message is sent, and you are told separately if it later fails to arrive. A refused message is an error with its reason, not an outcome. To interrupt an agent that is busy, set mode: mode=steer puts your message into the turn it is running now, and mode=restart stops that turn and starts it again on your message. Without mode the message is delivered the ordinary way, whatever its text or its intent says: Claude and Codex GPT 6 agents take it into the turn they are running, and other agents take it after their current turn ends. intent only labels an ask. Leave mode out for updates and replies. A Claude agent takes a steer once its running tool calls finish, and on other agents a steer can cancel the tool calls in flight, so keep it for a correction the receiver must see now, not for an update. An idle receiver starts a turn on your message whichever mode you set. Attach files for an agent on this server with attachments: pending uploads from t3_attachment_prepare_upload, or files its thread already holds. A provider Subagent is not a participant and is refused. Reuse client_request_id to retry the same send safely."
 
 | Input               | Type              | Required                             | Meaning                                                                         |
 | ------------------- | ----------------- | ------------------------------------ | ------------------------------------------------------------------------------- |
@@ -42,9 +42,9 @@ An agent learns what it can do from its tools, and it reads a tool's description
 
 **Attachments.** Each is a pending upload from `t3_attachment_prepare_upload`, or an attachment the receiver's thread already holds. They are claimed into the receiver's thread before the message is committed, and released if the send is refused before anything is committed (an unacceptable sender, receiver or request). A storage failure leaves the claims in place, because nobody knows then whether the message was committed. A person and an agent on a peer server take no attachments. This replaces J5's own version of `t3_thread_send_attachments`, which sent a thinner message through the same ledger: no ask or reply, no retry key, no landing choice.
 
-**Result:** the message id and the Exchange's state. When the receiver is an agent on this server and the message will wait, the result also carries a `deliveryNotice`. Behind a turn the receiver will not take it into, the notice states how many messages are waiting for it, how many of them are the caller's, and that each will run as its own turn. A message to an agent stopped on a usage limit always waits until the agent continues. When the message waits on that limit, or on the receiver's held queue or failed worktree setup, the notice says it runs, in the order it was sent, once a person resumes or continues the receiver, or at the reset time when upstream continues it automatically, and that it should not be sent again. The notice is measured as the message is sent; a sender is not told when a receiver's queue is held later. When the recipient lives on a peer server, the result also names that server. When that server is offline, the result says the message is waiting for the recipient and when the server was last available, and its wording names the server: "Recorded. <B> is on Laptop, which is offline, last available 3 h ago; it receives this when Laptop is next available." A recipient on this server adds nothing; one on an online peer server adds only that server's name.
+**Result:** the message id, the Exchange's state, and a `deliveryOutcome`, one per call because the tool takes one recipient: `steered`, the message joins the turn the receiver is running now (directly on Claude and Codex GPT 6, or by interrupting and restarting that turn when the sender set `mode=steer` on a provider that does it that way, as Cursor does); `queued`, it waits for the receiver's current turn to end or for a held queue or usage limit to lift; `starting`, it begins a turn now, for an idle receiver, a Crew member that has not started (its first assignment), or a `restart`; `waiting_for_recipient`, the receiver's server is offline. The outcome is predicted as the message is sent, by the same rule the delivery worker applies (`peerSteeringRun` and `requestedSteeringRun` in `DeliveryTransport.ts`), and never waits on the worker. It is a prediction: a turn that ends before delivery turns a `steered` into a start, and the existing late-failure alarm is how a sender learns a message did not arrive. It is absent when nothing can be said: the receiver is a person or an agent on an available peer server, which decides on arrival, or the message has already run or was cancelled. A refusal is not an outcome. It stays a tool error with its reason (see Errors). When the message will wait, the result also carries a `deliveryNotice`, advice about what it waits behind. Behind a turn the receiver will not take it into, the notice states how many messages are waiting for it, how many of them are the caller's, and that each will run as its own turn. A message to an agent stopped on a usage limit always waits until the agent continues. When the message waits on that limit, or on the receiver's held queue or failed worktree setup, the notice says it runs, in the order it was sent, once a person resumes or continues the receiver, or at the reset time when upstream continues it automatically, and that it should not be sent again. The notice is measured as the message is sent; a sender is not told when a receiver's queue is held later. When the recipient lives on a peer server, the result also names that server. When that server is offline, the outcome is `waiting_for_recipient`, and the result gives when the server was last available, and its wording names the server: "Recorded. <B> is on Laptop, which is offline, last available 3 h ago; it receives this when Laptop is next available." A recipient on this server adds no server name; one on an online peer server adds only that server's name.
 
-**Rules.** A message to the caller itself is refused. A message addressed to an [outside agent](index.md#participants) is refused for every sender, because nothing can be delivered to one. A send to a person that is not an ask is refused; a person never opens an Exchange, so there is nothing for an agent to reply to. Between agents, a further ask to a peer that already holds an open Exchange from the caller joins it as a follow-up. To a person, a further ask opens a new Exchange and a new inbox item unless it names an open one in `regarding`, in which case it joins that Exchange and is shown beneath the original ask. An ask to a person without an urgency is refused. An outside agent sends a plain message only, so `expect_reply`, `exchange_id`, `intent` and `urgency` are refused from it, and so is a person, who takes only asks. It reaches agents on this server only: an agent on a peer server and an id the server does not know are refused. A thread caller's receiver is held to the caller's permission modes only for `steer` and `restart`. An outside agent's receiver is held to the level the sign-in was approved at on every send, one that asks for no steer or restart included. The level is checked when the message is sent, not when it lands. An outside agent's message is recorded in the receiver's project, and its result carries no `deliveryNotice`. Attachments work the same for every sender.
+**Rules.** A message to the caller itself is refused. A message addressed to an [outside agent](index.md#participants) is refused for every sender, because nothing can be delivered to one. A send to a person that is not an ask is refused; a person never opens an Exchange, so there is nothing for an agent to reply to. Between agents, a further ask to a peer that already holds an open Exchange from the caller joins it as a follow-up. To a person, a further ask opens a new Exchange and a new inbox item unless it names an open one in `regarding`, in which case it joins that Exchange and is shown beneath the original ask. An ask to a person without an urgency is refused. An outside agent sends a plain message only, so `expect_reply`, `exchange_id`, `intent` and `urgency` are refused from it, and so is a person, who takes only asks. It reaches agents on this server only: an agent on a peer server and an id the server does not know are refused. A thread caller's receiver is held to the caller's permission modes only for `steer` and `restart`. An outside agent's receiver is held to the level the sign-in was approved at on every send, one that asks for no steer or restart included. The level is checked when the message is sent, not when it lands. An outside agent's message is recorded in the receiver's project, and its result carries the `deliveryOutcome` but no `deliveryNotice`. Attachments work the same for every sender.
 
 **Errors**, each naming the actual state and the next command: the caller is not a participant (a provider Subagent or a deleted thread); the recipient is not addressable (pointing at `j5_list_participants`); the recipient is the caller (naming the caller's own id, and `schedule_task` for a future trigger to oneself); an ask without an intent; a send to a person that is not an ask (naming the legal move and the own-thread alternative); an ask to a person without urgency; an `exchange_id` or `regarding` that is unknown, already closed, or not the caller's (naming the Exchange's actual state); a first message to a participant on a peer server whose address book cannot be read, or that has not polled yet (naming that reason). For an outside agent: anything but a plain message (naming a retry without those fields); a person, a peer server's agent or an unknown id (naming the legal move); a receiver that runs above the approved level (naming the level). For every sender: a message addressed to an outside agent (saying nothing can be delivered to it).
 
@@ -74,20 +74,25 @@ Read-only; no events.
 
 ### `j5_spawn_agent`
 
-**Description (contract):** "Spawn a Peer Agent: a full-citizen teammate with its own top-level
-thread, starting on your brief as its first turn. It joins your project unless you name another with
-project_id or set scratch for none, and records you as its immutable spawner; in your own project it
-is placed under you. It is addressable the moment this returns. In your brief, tell the new agent
-what it should do first and whether it should reply to you. Choose provider, model, and reasoning
-for the work in the brief — see orchestrator_capabilities for what's available. To run a persona
-from j5_list_personas, set `persona` to its id: the spawn gets that persona's instructions and
-runtime policy, and provider, model, and reasoning must be one of that persona's declared routes.
-Without a persona it runs in your permission and interaction modes, or in narrower ones you set with
-runtime_mode and interaction_mode. Without a persona its model and reasoning level must be ones the project's Models for custom members lists allow; an ineligible one is refused with the eligible ones. Attach files to
-the brief with attachments. Choose its workspace every time (see the workspace field). A new worktree is prepared after this returns, and the agent
-begins once it is bound, possibly while the project's setup script is still running; if preparing it
-fails, the agent's thread shows why, and it is not retried. Reuse client_request_id to retry the
-same spawn safely; reusing it with any change to the request is refused, so use a fresh one for new
+Agents have two ways to get help: a subagent (their provider's own, or `delegate_task`) or members on a Crew (`j5_propose_crew`, `j5_request_crew_member`). `j5_spawn_agent` serves neither. Its description limits it to a user's explicit request for a standalone agent they will talk to, and to callers that name it, such as an outside agent or a skill. Nothing a caller depends on was removed.
+
+**Description (contract):** "Not a way to get help with your own work: use this only when the user
+explicitly asks for a standalone agent they will talk to, or when an outside agent or a skill you
+are following names it. For help, create a subagent (your native Subagent tool, or delegate_task) or
+put members on a Crew (j5_propose_crew). Spawn a Peer Agent: a full-citizen teammate with its own
+top-level thread, starting on your brief as its first turn. It joins your project unless you name
+another with project_id or set scratch for none, and records you as its immutable spawner; in your
+own project it is placed under you. It is addressable the moment this returns. In your brief, tell
+the new agent what it should do first and whether it should reply to you. Choose provider, model,
+and reasoning for the work in the brief — see orchestrator_capabilities for what's available. To run
+a persona from j5_list_personas, set `persona` to its id: the spawn gets that persona's instructions
+and runtime policy, and provider, model, and reasoning must be one of that persona's declared
+routes. Without a persona it runs in your permission and interaction modes, or in narrower ones you
+set with runtime_mode and interaction_mode. Without a persona its model and reasoning level must be ones the project's Models for custom members lists allow; an ineligible one is refused with the eligible ones. Attach files to the brief with attachments. Choose its
+workspace every time (see the workspace field). A new worktree is prepared after this returns, and
+the agent begins once it is bound, possibly while the project's setup script is still running; if
+preparing it fails, the agent's thread shows why, and it is not retried. Reuse client_request_id to
+retry the same spawn safely; reusing it with any change to the request is refused, so use a fresh one for new
 work."
 
 | Input               | Type                                  | Required | Meaning                                           |
@@ -183,9 +188,9 @@ Use `action: "unarchive"` to restore the same identity. Old Exchanges remain clo
 ### `j5_list_personas`
 
 **Description (contract):** "List the personas in this environment: id, purpose, runtime policy,
-whether each can start now, and the provider, model, and reasoning it would run on. Read this
-before choosing a persona for j5_spawn_agent or a crew roster so the choice fits the task and the
-user's budget. Read-only."
+whether each can start now, and the provider, model, and reasoning it would run on. Read this before
+choosing a persona for delegate_task, a crew roster, or j5_spawn_agent so the choice fits the task
+and the user's budget. Read-only."
 
 Named `list_agents` until 2026-09-17. No inputs. Result: `personas[]` with `id`, `display_name`, `description`, `runtime_policy`,
 `availability` (`available`, `blocked`, `disabled`) and `route` (driver · model · reasoning, or
@@ -195,18 +200,21 @@ asked for.
 
 ### `j5_propose_crew`
 
-**Description (contract):** "Propose the crew you need for the brief you were given. Use it when the user asks for a crew or
-the work splits into distinct responsibilities that should run at once. Mix saved personas and
-custom seats in the same roster: call j5_list_personas when choosing a saved persona, or leave
-persona unset for a custom seat with its own instructions (required) and the brief. Custom seats
-inherit your harness, model, and reasoning by default and run with full-access unless you set
-runtime_mode; to choose different ones, set model_selection (instanceId, model, options) and/or
-runtime_mode using orchestrator_capabilities. A custom seat's model and reasoning level, yours included, must be ones the project's Models for custom members lists allow; an ineligible one is refused with the eligible ones. Saved personas are proposed with their own configuration; only the human may override their runtime before approval. To have the crew follow
-a playbook, set playbook to a name from j5_playbook_list and give seats the step ids they own
-(steps, from j5_playbook_read); a step has one owner, steps no seat owns are yours as Captain, and
-the result reports unowned steps and any step whose persona differs from its seat's. For a crew
-built from a playbook, staff one seat per distinct persona its steps name, each owning that
-persona's steps, and propose a custom seat, noted in its reason, where a named persona isn't
+**Description (contract):** "Put members on a Crew, the second of the two ways to get help (the
+first is a subagent). Propose the crew you need for the brief you were given. Use it when the work
+needs workers who must respond to each other, such as a builder and reviewers iterating on a change;
+independent assignments go to subagents instead, and the word 'crew' in the user's message does not
+decide it. Mix saved personas and custom seats in the same roster: call j5_list_personas when
+choosing a saved persona, or leave persona unset for a custom seat with its own instructions
+(required) and the brief. Custom seats inherit your harness, model, and reasoning by default and run
+with full-access unless you set runtime_mode; to choose different ones, set model_selection
+(instanceId, model, options) and/or runtime_mode using orchestrator_capabilities. A custom seat's model and reasoning level, yours included, must be ones the project's Models for custom members lists allow; an ineligible one is refused with the eligible ones. Saved personas are
+proposed with their own configuration; only the human may override their runtime before approval. To
+have the crew follow a playbook, set playbook to a name from j5_playbook_list and give seats the
+step ids they own (steps, from j5_playbook_read); a step has one owner, steps no seat owns are yours
+as Captain, and the result reports unowned steps and any step whose persona differs from its seat's.
+For a crew built from a playbook, staff one seat per distinct persona its steps name, each owning
+that persona's steps, and propose a custom seat, noted in its reason, where a named persona isn't
 available. Every seat names its workspace, with the same three choices as j5_spawn_agent. Name the
 crew for what it is for and give each seat a short lowercase-hyphen name like code-reviewer. By
 default the user reviews and edits the roster in this thread, then approves or declines. If
@@ -216,11 +224,13 @@ creation finishes or fails. Approval creates seats without starting turns. Send 
 first assignment when it has work; reuse finished members for follow-up work in the same thread.
 Each seat keeps its configured access and tool approvals, which may exceed yours. You become the
 crew's Captain and may command several crews at once; later requests, stops, and archives name the
-crew they mean. Use j5_send_message for member-to-member, member-to-Captain, and
-Captain-to-Captain coordination, including findings and direct results; artifacts do not gate
-these conversations. Reuse client_request_id to retry safely; a changed request is refused, so use
-a fresh one for new work. This tool works under every sandbox and approval policy, including
-approval policy never; never refuse the brief because approvals are disabled."
+crew they mean. Use j5_send_message for member-to-member, member-to-Captain, and Captain-to-Captain
+coordination, including findings and direct results; artifacts do not gate these conversations.
+Members run their own review loops and message you only for a review pass, a blocker, a
+disagreement they could not settle, or their final result or step report; you resolve technical disagreements within the agreed scope and
+ask the user only when product intent or their judgment is needed. Reuse client_request_id to retry
+safely; a changed request is refused, so use a fresh one for new work. This tool works under every sandbox and approval policy, including approval policy never;
+never refuse the brief because approvals are disabled."
 
 Published with `destructiveHint: true`: depending on the project setting, this call can launch agents immediately.
 
@@ -259,18 +269,17 @@ New Crews require human approval by default. **Settings → Agent Setup → Crew
 
 ### `j5_request_crew_member`
 
-**Description (contract):** "Add one seat directly to a running crew you command when the work needs expertise the roster
-lacks. No human approval is needed, regardless of Auto-approve new Crews. Give a seat name, a
-persona id from j5_list_personas or required instructions for a custom seat, a reason identifying
-the missing expertise, and its workspace (the same choices as j5_propose_crew). Custom seats
-inherit your model selection and run with full-access unless you set model_selection or
-runtime_mode; a custom seat's model and reasoning level must be ones the project's Models for custom members lists allow, and saved personas use their own configuration. Optionally give a brief; otherwise the
-seat gets the Crew's brief. On a playbook Crew, steps may claim only unowned step ids from
-j5_playbook_read. The result returns the updated roster or refuses the seat with its name and
-reason; creation is reported separately here. The new member waits for its first assignment; send
-it with j5_send_message when the work is ready. Each member's configured access still controls
-tool approvals. Captain-only: a member sends the concern to its Captain with j5_send_message.
-Reuse client_request_id to retry safely; a changed request is refused, so use a fresh one for new
+**Description (contract):** "Put one more member on a Crew, the second of the two ways to get help:
+add one seat directly to a running crew you command when the work needs expertise the roster lacks.
+No human approval is needed, regardless of Auto-approve new Crews. Give a seat name, a persona id
+from j5_list_personas or required instructions for a custom seat, a reason identifying the missing
+expertise, and its workspace (the same choices as j5_propose_crew). Custom seats inherit your model
+selection and run with full-access unless you set model_selection or runtime_mode; a custom seat's model and reasoning level must be ones the project's Models for custom members lists allow, and saved personas use their own configuration. Optionally give a brief; otherwise the seat gets the Crew's brief. On a
+playbook Crew, steps may claim only unowned step ids from j5_playbook_read. The result returns the
+updated roster or refuses the seat with its name and reason; creation is reported separately here.
+The new member waits for its first assignment; send it with j5_send_message when the work is ready.
+Each member's configured access still controls tool approvals. Captain-only: a member sends the
+concern to its Captain with j5_send_message. Reuse client_request_id to retry safely; a changed request is refused, so use a fresh one for new
 work. Works under every approval policy, including approval policy never."
 
 | Input                             | Type           | Required | Meaning                                                                     |
@@ -390,7 +399,7 @@ run; `j5_stop_crew` doesn't, and unarchiving doesn't restart it.
 ### Kept upstream tools
 
 - `orchestrator_capabilities` — providers and models (ids, labels, option descriptors) for spawn targeting, plus runtime and interaction-mode facts. It deliberately stays silent about delegation even though `delegate_task` is back on the surface: that tool's own description carries its persona use, and J5 verbs are advertised by their own descriptions.
-- `delegate_task`, `task_status`, `task_cancel` — upstream's provider-owned child delegation. J5 re-declares `delegate_task` with its own description, which leads with the optional `persona` (a persona id from an `@persona:ID` mention or the Settings → Agent Setup library) and presents the plain child as the fallback for cross-provider or T3-tracked work rather than the default for any subagent request. With `persona`, the server pins that persona's instructions, model route, reasoning, and runtime policy and refuses `target` and `runtimeMode`; without it, the child is upstream's plain subagent, and the model it will run on, one inherited from its parent included, must be one the project's [Models for custom members](../features/crews.md) list allows. J5's wrapper hands upstream's `delegateTask` a hook that is called with that resolved model before anything is created, so the check sees what the child will really run on; a retry of a delegation already accepted is not checked again. A refusal is a `model_unavailable` error naming the model, the project and the setting and listing the eligible models, which the agent passes in `target`; a persona's own model is never checked. Upstream's `isolation: "worktree"` gives a child a checkout of its own, started from the parent's local commit, and the description says so in upstream's words. The child is backing storage under the calling thread, not a Peer Agent; use `j5_spawn_agent` for a participant. Its wait mode is safe where `t3_thread_wait` was not: a child that messages its parent ends its own turn, so the wait returns and the parent reads the message on its next turn (latency, never starvation).
+- `delegate_task`, `task_status`, `task_cancel` — upstream's provider-owned child delegation. J5 re-declares `delegate_task` with its own description, which names the way to get help it serves and leads with the optional `persona` (a persona id from an `@persona:ID` mention or the Settings → Agent Setup library) and presents the plain child as the fallback for cross-provider or T3-tracked work rather than the default for any subagent request. With `persona`, the server pins that persona's instructions, model route, reasoning, and runtime policy and refuses `target` and `runtimeMode`; without it, the child is upstream's plain subagent, and the model it will run on, one inherited from its parent included, must be one the project's [Models for custom members](../features/crews.md) list allows. J5's wrapper hands upstream's `delegateTask` a hook that is called with that resolved model before anything is created, so the check sees what the child will really run on; a retry of a delegation already accepted is not checked again. A refusal is a `model_unavailable` error naming the model, the project and the setting and listing the eligible models, which the agent passes in `target`; a persona's own model is never checked. Upstream's `isolation: "worktree"` gives a child a checkout of its own, started from the parent's local commit, and the description says so in upstream's words. J5's description says it is the first of the two ways to get help (a subagent; the second is a Crew member). The child is backing storage under the calling thread, not a Peer Agent; `j5_spawn_agent` is the tool for a participant the user asked for. Its wait mode is safe where `t3_thread_wait` was not: a child that messages its parent ends its own turn, so the wait returns and the parent reads the message on its next turn (latency, never starvation).
 - `schedule_task`, `list_scheduled_tasks`, `update_scheduled_task`, `delete_scheduled_task` — consumed as-is.
 - `t3_thread_list`, `t3_thread_read` — consumed as-is; if an upstream description mentions delegation, J5 re-declares that tool with corrected prose.
 - `html_preview`, `html_render`, `request_secret`, `preview_dialog`, `preview_hover`, `preview_select`, `preview_drag`, `preview_upload`, `watch_pull_request`, `unwatch_pull_request` — consumed as-is.

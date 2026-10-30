@@ -447,6 +447,22 @@ export const SendAsOutsideAgentInput = Schema.Struct({
 });
 export type SendAsOutsideAgentInput = typeof SendAsOutsideAgentInput.Type;
 
+/**
+ * What a sent message will do, predicted when it is sent by the rule the delivery worker applies:
+ * `steered` lands in the turn the recipient is running now (directly, or by interrupting and
+ * restarting that turn when the sender asked for a `steer`); `queued` waits for a turn boundary or
+ * for a held queue or usage limit to lift; `starting` begins a turn for an idle recipient, a Crew
+ * seat that has not started, or a `restart`; `waiting_for_recipient` is an offline peer server.
+ * A refusal is not an outcome: it is the tool's error, with its reason.
+ */
+export const SendDeliveryOutcome = Schema.Literals([
+  "steered",
+  "queued",
+  "starting",
+  "waiting_for_recipient",
+]);
+export type SendDeliveryOutcome = typeof SendDeliveryOutcome.Type;
+
 export const SendMessageResult = Schema.Struct({
   messageId: LedgerMessageId,
   exchangeId: Schema.NullOr(ExchangeId),
@@ -457,8 +473,11 @@ export const SendMessageResult = Schema.Struct({
   deliveryNotice: Schema.optional(Schema.String),
   /** The name of the peer server the receiver lives on; absent for a receiver on this server. */
   receiverServer: Schema.optionalKey(Schema.String),
-  /** Present when the receiver's server polls this one and is offline: the message waits for it. */
-  delivery: Schema.optionalKey(Schema.Literal("waiting_for_recipient")),
+  /**
+   * Absent when nothing can be said: the receiver is a person or an agent on a peer server that is
+   * available (its server decides on arrival), or the message already ran or was cancelled.
+   */
+  deliveryOutcome: Schema.optionalKey(SendDeliveryOutcome),
   /** When that server was last available: its last poll. */
   recipientLastAvailableAt: Schema.optionalKey(Schema.String),
   /** The same facts in one sentence an agent reads at a glance. */
