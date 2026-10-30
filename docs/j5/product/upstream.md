@@ -118,15 +118,15 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Decided:** Jackson, 2026-10-13. Recorded in FORK.md case 74.
 
-#### D39. A plain delegated task runs only on a model the project allows
+#### D39. A plain delegated task runs only on a model and reasoning level the project allows
 
 **Upstream:** `delegate_task` runs the child on the model it resolves from the call's `target`, or on the parent's own model when none is given, and J5's persona-aware wrapper only sees `target`.
 
-**J5:** upstream's `delegateTask` takes an optional `authorizeTarget` hook that it calls with the child's project and resolved model, after resolving the target and before creating anything. J5's wrapper passes one for a call without a persona, which refuses a model that is off the project's list under Settings → Agent Setup → Crews → Models for custom members, an inherited model included, and lists the eligible models so the agent can retry with `target`. A call that names a persona, and a retry of a delegation already accepted, are not checked.
+**J5:** upstream's `delegateTask` takes an optional `authorizeTarget` hook that it calls with the child's project and resolved model, after resolving the target and before creating anything. J5's wrapper passes one for a call without a persona, which refuses a model or reasoning level that is off the project's lists under Settings → Agent Setup → Crews → Models for custom members, inherited ones included, and lists the eligible ones so the agent can retry with `target`. A call that names a persona, and a retry of a delegation already accepted, are not checked.
 
-**Why:** the list is one decision that custom Crew seats, `j5_spawn_agent` and `delegate_task` all follow ([Crews](features/crews.md), AC27). The wrapper cannot see the model a child inherits, so the check needs the one place that resolves it.
+**Why:** the lists are one decision that custom Crew seats, `j5_spawn_agent` and `delegate_task` all follow ([Crews](features/crews.md), AC27, AC30). The wrapper cannot see the model or level a child inherits, so the check needs the one place that resolves it.
 
-**Consequences:** one optional input and four lines in `OrchestratorMcpService.ts` (FORK.md case 90), with no change to upstream's behavior when no hook is passed. Check at each advance that the call still sits after the target resolves and before the command is dispatched. `t3_thread_launch` and `create_threads`, which J5 hides from agents, are not checked. The list holds when an agent is created and not afterwards: `t3_thread_configure` sets any thread's model with only a thread-write check, so a later model change is not limited.
+**Consequences:** one optional input and four lines in `OrchestratorMcpService.ts` (FORK.md case 90), with no change to upstream's behavior when no hook is passed. The reasoning levels are a second setting key beside the models one in `packages/contracts/src/settings.ts`, in the same five places, and need no further upstream edit. Check at each advance that the call still sits after the target resolves and before the command is dispatched. `t3_thread_launch` and `create_threads`, which J5 hides from agents, are not checked. The lists hold when an agent is created and not afterwards: `t3_thread_configure` sets any thread's model and options with only a thread-write check, so a later model or reasoning change is not limited.
 
 **Decided:** Bryant, 2026-10-27 ([#744](https://github.com/Jacksondr5/j5code/issues/744)). Recorded in FORK.md case 90.
 
@@ -622,4 +622,4 @@ J5 kept a run from resuming after a usage-limit reset when the person had presse
 - 2026-10-25 — D19: a copied prompt link points at j5.codes/new, which opens it in J5's apps or on the person's own server (Jackson's 2026-10-24 decision; [#633](https://github.com/Jacksondr5/j5code/issues/633)).
 - 2026-10-25 — D4: a delivery to an agent stopped on a usage limit waits unsent until the agent continues, whether or not its queue is held, where it used to be handed over unless messages were held there; deliveries waiting unsent go together, in send order, when a run starts on the agent, where each used to wait for its own recheck (Jackson, 2026-10-24, [#718](https://github.com/Jacksondr5/j5code/issues/718)).
 - 2026-10-26 — D33: a Viewer, or a Collaborator on one thread, isn't offered a new thread, a fork or a new project where their level refuses it (Jackson's 2026-10-25 approval; [#640](https://github.com/Jacksondr5/j5code/issues/640), [#641](https://github.com/Jacksondr5/j5code/issues/641)).
-- 2026-10-27 — D39 added: a plain `delegate_task` is held to the project's models for custom members through one hook in upstream's `delegateTask` (Bryant; [#744](https://github.com/Jacksondr5/j5code/issues/744)).
+- 2026-10-27 — D39 added: a plain `delegate_task` is held to the project's models and reasoning levels for custom members through one hook in upstream's `delegateTask` (Bryant; [#744](https://github.com/Jacksondr5/j5code/issues/744)).

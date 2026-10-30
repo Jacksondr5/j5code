@@ -99,6 +99,31 @@ describe("resolveProjectSettings", () => {
     expect(resolveProjectSettings(settings, null).settings.crewMemberModels).toEqual([entry("a")]);
   });
 
+  it("replaces the reasoning levels for custom members whole, and lets a project hold null or its own list", () => {
+    const entry = (level: string) => ({ instanceId: ProviderInstanceId.make("codex"), level });
+    expect(DEFAULT_SERVER_SETTINGS.crewMemberReasoning).toBeNull();
+    const three = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
+      crewMemberReasoning: [entry("low"), entry("medium"), entry("high")],
+    });
+    const one = applyServerSettingsPatch(three, { crewMemberReasoning: [entry("low")] });
+    expect(one.crewMemberReasoning).toEqual([entry("low")]);
+    const settings = applyServerSettingsPatch(one, {
+      projectSettingsOverrides: {
+        [projectId]: { crewMemberReasoning: null },
+        [otherProjectId]: { crewMemberReasoning: [entry("xhigh")] },
+      },
+    });
+    const everything = resolveProjectSettings(settings, projectId);
+    expect(everything.settings.crewMemberReasoning).toBeNull();
+    expect(everything.sources.crewMemberReasoning).toBe("project");
+    expect(resolveProjectSettings(settings, otherProjectId).settings.crewMemberReasoning).toEqual([
+      entry("xhigh"),
+    ]);
+    expect(resolveProjectSettings(settings, null).settings.crewMemberReasoning).toEqual([
+      entry("low"),
+    ]);
+  });
+
   it("keeps the environment text generation model when the override's provider is disabled", () => {
     const disabledSelection = createModelSelection(ProviderInstanceId.make("claudeAgent"), "opus");
     const settings = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
