@@ -403,7 +403,10 @@ const replayFixture = Effect.fn("liveTestHome.replayFixture")(function* <
   return threadId;
 });
 
-function writeSettingsAndPersonas(home: string): void {
+function writeSettingsAndPersonas(
+  home: string,
+  skills: Effect.Success<ReturnType<typeof seedLiveTestSkills>>,
+): void {
   const stateDir = NodePath.join(home, "userdata");
   NodeFS.writeFileSync(
     NodePath.join(stateDir, "settings.json"),
@@ -413,7 +416,7 @@ function writeSettingsAndPersonas(home: string): void {
         // A provider found behind its latest release raises a toast that covers the top-right
         // controls of every page until dismissed, and tests click those controls.
         enableProviderUpdateChecks: false,
-        ...seedLiveTestSkills(home),
+        ...skills,
       },
       null,
       2,
@@ -533,7 +536,10 @@ export const buildLiveTestHome = Effect.fn("buildLiveTestHome")(function* (input
     project: { id: projectId, workspaceRoot: testRepo },
   });
   yield* nameOwner(databasePath, ownerName);
-  writeSettingsAndPersonas(home);
+  writeSettingsAndPersonas(
+    home,
+    yield* seedLiveTestSkills(home).pipe(Effect.provide(NodeServices.layer)),
+  );
 
   const manifest: LiveTestHomeManifest = {
     version: 1,

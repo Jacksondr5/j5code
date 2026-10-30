@@ -1,8 +1,6 @@
-// @effect-diagnostics nodeBuiltinImport:off - verifies disposable fixture paths.
 import { assert, it } from "@effect/vitest";
-import * as NodeFS from "node:fs";
-import * as NodeOS from "node:os";
-import * as NodePath from "node:path";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { ProviderInstanceConfig } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -14,34 +12,31 @@ const decodeInstance = Schema.decodeEffect(ProviderInstanceConfig);
 
 it.effect("resolves both Skills write roots inside disposable homes", () =>
   Effect.gen(function* () {
-    const home = NodeFS.realpathSync(
-      NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "j5-test-skills-")),
-    );
-    try {
-      const settings = seedLiveTestSkills(home);
-      assert.deepEqual(Object.keys(settings.providerInstances), [
-        "codex-test-skills",
-        "claudeAgent-test-skills",
-      ]);
-      for (const raw of Object.values(settings.providerInstances)) {
-        const instance = yield* decodeInstance(raw);
-        const root = yield* resolveSkillRoot(instance, "user");
-        assert.equal(
-          root,
-          NodePath.join(
-            home,
-            "test-skills",
-            instance.driver,
-            instance.driver === "codex" ? ".agents" : ".claude",
-            "skills",
-          ),
-        );
-        assert.equal(NodeFS.realpathSync(root), root);
-        assert.ok(NodeFS.existsSync(NodePath.join(root, "live-test-sample", "SKILL.md")));
-      }
-      assert.ok(NodeFS.existsSync(NodePath.join(settings.skillCatalogSource, "catalog.yaml")));
-    } finally {
-      NodeFS.rmSync(home, { recursive: true, force: true });
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const temporary = yield* fs.makeTempDirectoryScoped({ prefix: "j5-test-skills-" });
+    const home = yield* fs.realPath(temporary);
+    const settings = yield* seedLiveTestSkills(home);
+    assert.deepEqual(Object.keys(settings.providerInstances), [
+      "codex-test-skills",
+      "claudeAgent-test-skills",
+    ]);
+    for (const raw of Object.values(settings.providerInstances)) {
+      const instance = yield* decodeInstance(raw);
+      const root = yield* resolveSkillRoot(instance, "user");
+      assert.equal(
+        root,
+        path.join(
+          home,
+          "test-skills",
+          instance.driver,
+          instance.driver === "codex" ? ".agents" : ".claude",
+          "skills",
+        ),
+      );
+      assert.equal(yield* fs.realPath(root), root);
+      assert.ok(yield* fs.exists(path.join(root, "live-test-sample", "SKILL.md")));
     }
-  }).pipe(Effect.provide(NodeServices.layer)),
+    assert.ok(yield* fs.exists(path.join(settings.skillCatalogSource, "catalog.yaml")));
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );
