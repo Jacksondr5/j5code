@@ -1013,3 +1013,7 @@ The 2026-09-10 observability and portability pass adds three methods to the same
 Agent action feedback no longer occupies the Import agents section. Web/desktop use the existing toast manager; mobile renders a dismissible, automatically expiring toast over the library screen. Import/removal results and action errors use toasts, successful toggles remain silent, and pending operations retain disabled controls without adding status text to the import section.
 
 The agent library places the Import menu beside the Scoped agents heading and removes the separate import section and description. Web/desktop use the existing section header action; the mobile library screen renders its own wrapping header row, leaving the shared `SettingsSection` untouched. Import processing, replacement choices, and toast feedback are unchanged.
+
+## Preview stream session invalidation (#798)
+
+Upstream-owned `apps/server/src/preview/ServerBrowserStream.ts` races the scoped viewer lifecycle against `SessionStore.awaitInvalidation`, following `ws.ts`. Revocation or expiry interrupts streaming, input fibers, and viewer attachment cleanup; existing frame backpressure and scope checks remain in place. `apps/server/src/preview/ServerBrowserStream.test.ts` provides the SessionStore dependency and verifies established read/control sockets close and viewer/input resources release. This shared upstream authorization fix is explicitly requested by #798 and should be offered upstream separately; connection initialization (#799) is outside this change.
