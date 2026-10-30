@@ -66,6 +66,8 @@ export function formatArchiveWarning(input: {
           placement: { state: "unknown" },
           openAsks: [],
           crews: { state: "unknown" },
+          // Unknown Crews may hold worktrees the archive would remove.
+          worktrees: null,
         },
       }),
     };
@@ -131,6 +133,13 @@ export function formatArchiveWarning(input: {
     placement,
     openAsks,
     crews,
+    // Only a Captain with live Crews has seats whose worktrees archiving removes; Crews that
+    // couldn't be read may have some.
+    ...(crews.state === "unknown"
+      ? { worktrees: null }
+      : preflight.worktrees === undefined
+        ? {}
+        : { worktrees: preflight.worktrees }),
   };
   return {
     message: title,

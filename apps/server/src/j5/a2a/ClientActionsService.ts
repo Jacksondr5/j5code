@@ -187,7 +187,12 @@ const make = Effect.gen(function* () {
             }),
           }),
         });
-        return { crewInstanceId, status: result.status, members: createdSeats(result.members) };
+        return {
+          crewInstanceId,
+          status: result.status,
+          members: createdSeats(result.members),
+          worktrees: result.worktrees,
+        };
       }),
     respondCrewRuntimeRequest: ({ threadId, requestId, decision }, claim) =>
       freshId.pipe(
