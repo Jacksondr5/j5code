@@ -15,8 +15,6 @@ import * as NodeUtil from "node:util";
 const COMMANDS = ["start", "status", "restart", "stop", "rebuild", "upgrade"] as const;
 type LiveTestCommand = (typeof COMMANDS)[number];
 
-/** The live install's port. A test server must never end up on it. */
-const LIVE_SERVER_PORT = 5773;
 /**
  * How long one start may take, builds, waits and peering included. Printing the pairing URLs
  * takes some seconds more, so the command still returns inside the two minutes a shell call
@@ -357,10 +355,7 @@ export function startRefusal(input: {
   if (facts.baseDir !== undefined && canonicalPath(facts.baseDir) !== canonicalPath(input.home)) {
     return `The dev server chose ${facts.baseDir}, not the test home ${input.home}.`;
   }
-  if (
-    facts.serverPort !== undefined &&
-    (facts.serverPort === LIVE_SERVER_PORT || String(facts.serverPort) === input.inheritedPort)
-  ) {
+  if (facts.serverPort !== undefined && String(facts.serverPort) === input.inheritedPort) {
     return `The dev server chose the live server's port ${facts.serverPort}.`;
   }
   return undefined;
@@ -954,8 +949,6 @@ Commands:
 `;
 }
 
-/** The live install's tailnet port. A `--for-dev` server must never share on it. */
-const LIVE_TAILNET_PORT = 8444;
 /** The dev runner's server port is its web port plus this (scripts/dev-runner.ts base ports). */
 const SERVER_PORT_ABOVE_WEB = 8040;
 
@@ -967,8 +960,8 @@ export interface TailnetMapping {
 
 /**
  * The mappings in `tailscale serve status` output, which prints each as
- *   https://host.ts.net:8444 (tailnet only)
- *   |-- / proxy http://127.0.0.1:5773
+ *   https://host.ts.net:7594 (tailnet only)
+ *   |-- / proxy http://127.0.0.1:7594
  */
 export function tailnetMappings(serveStatus: string): ReadonlyArray<TailnetMapping> {
   const mappings: Array<{ port: number; targets: Array<string> }> = [];
@@ -996,8 +989,8 @@ export function isOwnMapping(mapping: TailnetMapping, webPort: number): boolean 
 
 /**
  * Why this server must not be shared on `webPort`, or undefined when it may.
- * `--share` replaces whatever is mapped on the port, so the port must not be
- * the live install's and must not carry a mapping this server did not make.
+ * `--share` replaces whatever is mapped on the port, so the port must not
+ * carry any pre-existing mapping, even one pointing to the same loopback port.
  */
 export function shareRefusal(
   webPort: number,
@@ -1008,12 +1001,7 @@ export function shareRefusal(
   if (!isBrowserAllowedPort(webPort)) {
     return `This worktree's web port is ${webPort}, which browsers refuse to open, so a shared URL on it would be useless. Use a different worktree for --for-dev.`;
   }
-  if (webPort === LIVE_TAILNET_PORT) {
-    return `This worktree's web port is ${LIVE_TAILNET_PORT}, the live install's tailnet port. Sharing would replace the live mapping. Use a different worktree for --for-dev.`;
-  }
-  const foreign = mappings.find(
-    (mapping) => mapping.port === webPort && !isOwnMapping(mapping, webPort),
-  );
+  const foreign = mappings.find((mapping) => mapping.port === webPort);
   return foreign === undefined
     ? undefined
     : `Tailnet port ${webPort} is already mapped to ${foreign.targets.join(", ") || "something else"}, which this server did not set up. Sharing would replace it. Use a different worktree for --for-dev.`;
@@ -2089,7 +2077,7 @@ export function upgradeTarget(input: {
       `The base's log says its server ran on ${baseDir}, not on its home ${input.baseHome}. Replace the build: ${input.rebuildCommand}`,
     );
   }
-  if (serverPort === LIVE_SERVER_PORT || String(serverPort) === input.inheritedPort) {
+  if (String(serverPort) === input.inheritedPort) {
     throw new LiveTestRefusal(`The base's log reports the live server's port ${serverPort}.`);
   }
   return { serverPort, webPort };

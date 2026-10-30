@@ -233,13 +233,20 @@ describe("startRefusal", () => {
     );
   });
 
-  it("abandons a server on the live port or the port the shell inherited", () => {
-    assert.include(
-      startRefusal({ ...input, inheritedPort: undefined, facts: { ...facts, serverPort: 5773 } }) ??
-        "",
-      "live server's port",
+  it("abandons a server on the inherited configured live port", () => {
+    for (const inheritedPort of ["4773", "4790", "15634"]) {
+      assert.include(
+        startRefusal({
+          ...input,
+          inheritedPort,
+          facts: { ...facts, serverPort: Number(inheritedPort) },
+        }) ?? "",
+        "live server's port",
+      );
+    }
+    assert.isUndefined(
+      startRefusal({ ...input, inheritedPort: undefined, facts: { ...facts, serverPort: 5773 } }),
     );
-    assert.include(startRefusal({ ...input, inheritedPort: "15634" }) ?? "", "live server's port");
   });
 
   it("abandons a server that had to be shared and was not", () => {
@@ -302,14 +309,16 @@ describe("tailnet mappings", () => {
     assert.isUndefined(shareRefusal(7594, [], runner.isBrowserAllowedPort));
   });
 
-  it("never shares on the live install's tailnet port", () => {
-    assert.include(shareRefusal(8444, [], allowed) ?? "", "live install's tailnet port");
-    assert.include(shareRefusal(8444, mappings, allowed) ?? "", "live install's tailnet port");
-  });
-
-  it("never shares over a mapping this server did not make", () => {
-    const foreign = [{ port: 7000, targets: ["http://127.0.0.1:3000"] }];
-    assert.include(shareRefusal(7000, foreign, allowed) ?? "", "this server did not set up");
+  it("protects every existing mapping regardless of port or target", () => {
+    for (const port of [7000, 8444, 9444, 9445]) {
+      for (const targets of [["http://127.0.0.1:4773"], [`http://localhost:${port}`], []]) {
+        assert.include(
+          shareRefusal(port, [{ port, targets }], allowed) ?? "",
+          "this server did not set up",
+        );
+      }
+      assert.isUndefined(shareRefusal(port, [], allowed));
+    }
   });
 
   it("treats a failed status read as an error, not as nothing mapped", () => {
@@ -334,7 +343,17 @@ describe("tailnet mappings", () => {
       sharedUrl: "https://host.ts.net:7594/",
       shareFailure: undefined,
     };
-    assert.deepEqual(mappingCleanup(shared, mappings), { kind: "remove", port: 7594 });
+    const cleanup = mappingCleanup(shared, mappings);
+    assert.deepEqual(cleanup, { kind: "remove", port: 7594 });
+    if (cleanup.kind === "remove") {
+      assert.isUndefined(
+        shareRefusal(
+          7594,
+          mappings.filter((mapping) => mapping.port !== cleanup.port),
+          allowed,
+        ),
+      );
+    }
     // Already removed by the dev runner on its way out.
     assert.deepEqual(mappingCleanup(shared, [mappings[0]!]), { kind: "nothing" });
     // This run's log never recorded a share: whatever is on the port is not ours to touch.
@@ -349,9 +368,9 @@ describe("tailnet mappings", () => {
     });
   });
 
-  it("shares on a free port, and over its own leftover mapping", () => {
+  it("shares on a free port but refuses an untracked leftover mapping", () => {
     assert.isUndefined(shareRefusal(7000, mappings, allowed));
-    assert.isUndefined(shareRefusal(7594, mappings, allowed));
+    assert.include(shareRefusal(7594, mappings, allowed) ?? "", "this server did not set up");
   });
 });
 
@@ -1173,7 +1192,7 @@ describe("upgradeTarget", () => {
       /not on its home/,
     );
     for (const other of [
-      { baseFacts: { ...baseFacts, serverPort: 5773 }, inheritedPort: undefined },
+      { baseFacts: { ...baseFacts, serverPort: 4773 }, inheritedPort: "4773" },
       { inheritedPort: "14100" },
     ]) {
       assert.throws(() => upgradeTarget({ ...input, ...other }), /live server's port/);
