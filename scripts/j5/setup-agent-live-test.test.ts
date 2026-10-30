@@ -7,6 +7,7 @@ import * as NodePath from "node:path";
 import {
   PAIRING_SCOPES,
   classifyServer,
+  configuredLivePort,
   formatGuest,
   formatInstructions,
   formatUpgrade,
@@ -258,6 +259,23 @@ describe("startRefusal", () => {
     // A test server that nobody asked to share carries on.
     assert.isUndefined(startRefusal({ ...input, facts: unshared }));
   });
+
+  it("abandons a live port configured only in a repository env file", () => {
+    const layout = makeLayout();
+    try {
+      NodeFS.writeFileSync(NodePath.join(layout.worktree, ".env"), "T3CODE_PORT=5773\n");
+      assert.include(
+        startRefusal({
+          ...input,
+          inheritedPort: configuredLivePort(layout.worktree, {}),
+          facts: { ...facts, serverPort: 5773 },
+        }) ?? "",
+        "live server's port",
+      );
+    } finally {
+      NodeFS.rmSync(layout.base, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("tailnet mappings", () => {
@@ -276,6 +294,38 @@ describe("tailnet mappings", () => {
       { port: 7594, targets: ["http://localhost:7594"] },
     ]);
     assert.deepEqual(tailnetMappings("No serve config\n"), []);
+  });
+
+  it("refuses HTTP mappings before sharing, including the formerly fixed live port", () => {
+    for (const port of [8444, 9444]) {
+      const existing = mappingsFromStatus({
+        status: 0,
+        stdout: `http://host.ts.net:${port} (tailnet only)\n|-- / proxy http://127.0.0.1:4773\n`,
+        stderr: "",
+      });
+      assert.include(shareRefusal(port, existing, () => true) ?? "", "this server did not set up");
+    }
+  });
+
+  it("keeps HTTP and HTTPS targets on their own mappings", () => {
+    assert.deepEqual(
+      tailnetMappings(
+        `${status}\nhttp://host.ts.net:9445 (tailnet only)\n|-- / proxy http://127.0.0.1:4790\n`,
+      ),
+      [...mappings, { port: 9445, targets: ["http://127.0.0.1:4790"] }],
+    );
+  });
+
+  it("protects HTTP and HTTPS default ports when status omits the port", () => {
+    for (const [scheme, port] of [
+      ["http", 80],
+      ["https", 443],
+    ] as const) {
+      const existing = tailnetMappings(
+        `${scheme}://host.ts.net (tailnet only)\n|-- / proxy http://localhost:3000\n`,
+      );
+      assert.include(shareRefusal(port, existing, () => true) ?? "", "this server did not set up");
+    }
   });
 
   it("calls a mapping ours only when it proxies to our own web port on loopback", () => {
@@ -401,6 +451,24 @@ describe("liveTestEnvironment", () => {
       liveTestEnvironment({ NODE_OPTIONS: "--max-old-space-size=4096" }, "/w").NODE_OPTIONS,
       "--max-old-space-size=4096 --disable-warning=ExperimentalWarning",
     );
+  });
+});
+
+describe("configuredLivePort", () => {
+  it("uses shell then local env then root env precedence without exporting file values", () => {
+    const layout = makeLayout();
+    const environment = {};
+    try {
+      assert.isUndefined(configuredLivePort(layout.worktree, environment));
+      NodeFS.writeFileSync(NodePath.join(layout.worktree, ".env"), "T3CODE_PORT=5773\n");
+      assert.equal(configuredLivePort(layout.worktree, environment), "5773");
+      NodeFS.writeFileSync(NodePath.join(layout.worktree, ".env.local"), "T3CODE_PORT=4773\n");
+      assert.equal(configuredLivePort(layout.worktree, environment), "4773");
+      assert.equal(configuredLivePort(layout.worktree, { T3CODE_PORT: "4790" }), "4790");
+      assert.deepEqual(environment, {});
+    } finally {
+      NodeFS.rmSync(layout.base, { recursive: true, force: true });
+    }
   });
 });
 
@@ -1196,6 +1264,24 @@ describe("upgradeTarget", () => {
       { inheritedPort: "14100" },
     ]) {
       assert.throws(() => upgradeTarget({ ...input, ...other }), /live server's port/);
+    }
+  });
+
+  it("refuses the live port when only the repository env file configured it", () => {
+    const layout = makeLayout();
+    try {
+      NodeFS.writeFileSync(NodePath.join(layout.worktree, ".env.local"), "T3CODE_PORT=4773\n");
+      assert.throws(
+        () =>
+          upgradeTarget({
+            ...input,
+            inheritedPort: configuredLivePort(layout.worktree, {}),
+            baseFacts: { ...baseFacts, serverPort: 4773 },
+          }),
+        /live server's port/,
+      );
+    } finally {
+      NodeFS.rmSync(layout.base, { recursive: true, force: true });
     }
   });
 });

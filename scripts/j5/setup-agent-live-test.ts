@@ -12,6 +12,8 @@ import * as NodePath from "node:path";
 import * as NodeTimersPromises from "node:timers/promises";
 import * as NodeUtil from "node:util";
 
+import { loadRepoEnv } from "../lib/public-config.ts";
+
 const COMMANDS = ["start", "status", "restart", "stop", "rebuild", "upgrade"] as const;
 type LiveTestCommand = (typeof COMMANDS)[number];
 
@@ -290,6 +292,13 @@ export function liveTestEnvironment(
       NodePath.delimiter,
     ),
   };
+}
+
+export function configuredLivePort(
+  worktree: string,
+  environment: NodeJS.ProcessEnv,
+): string | undefined {
+  return loadRepoEnv({ repoRoot: worktree, baseEnv: environment }).T3CODE_PORT;
 }
 
 export interface ServerLogFacts {
@@ -966,9 +975,11 @@ export interface TailnetMapping {
 export function tailnetMappings(serveStatus: string): ReadonlyArray<TailnetMapping> {
   const mappings: Array<{ port: number; targets: Array<string> }> = [];
   for (const line of serveStatus.split("\n")) {
-    const mapping = /^https:\/\/\S+?:(\d+)\b/.exec(line);
-    if (mapping !== null) {
-      mappings.push({ port: Number(mapping[1]), targets: [] });
+    const address = /^https?:\/\/\S+/.exec(line)?.[0];
+    if (address !== undefined) {
+      const url = new URL(address);
+      const port = Number(url.port || (url.protocol === "https:" ? "443" : "80"));
+      mappings.push({ port, targets: [] });
       continue;
     }
     const target = /^\|--.*\bproxy\s+(\S+)/.exec(line);
@@ -1195,6 +1206,7 @@ async function waitUntilReady(
   deadline: number,
   requireShare: boolean,
 ): Promise<ServerLogFacts> {
+  const inheritedPort = configuredLivePort(paths.worktree, process.env);
   for (;;) {
     const log = NodeFS.readFileSync(paths.log, "utf8");
     const facts = readServerLog(log);
@@ -1229,7 +1241,7 @@ async function waitUntilReady(
     const refusal = startRefusal({
       facts,
       home: paths.home,
-      inheritedPort: process.env.T3CODE_PORT,
+      inheritedPort,
       requireShare,
     });
     if (refusal !== undefined) {
@@ -2240,7 +2252,7 @@ async function upgrade(paths: LiveTestPaths): Promise<void> {
     ),
     baseHome: paths.upgrade.home,
     baseHomeExists: NodeFS.existsSync(paths.upgrade.home),
-    inheritedPort: process.env.T3CODE_PORT,
+    inheritedPort: configuredLivePort(paths.worktree, process.env),
     rebuildCommand: selfCommand(paths, `rebuild ${modeFlags("base", baseRef)}`),
     startCommand: selfCommand(paths, modeFlags("base", baseRef)),
   });
