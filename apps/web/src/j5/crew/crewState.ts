@@ -5,6 +5,7 @@ import {
 
 /** The seat facts a Crew summary reads; every field is something the client already holds. */
 export interface CrewSeatThread {
+  readonly notStarted?: boolean;
   readonly runtime?: Pick<ThreadRuntimeSummary, "status"> | null;
   readonly hasPendingApprovals: boolean;
   readonly hasPendingUserInput: boolean;
@@ -19,6 +20,7 @@ export type CrewSeatState =
   | "failed"
   | "needs-you"
   | "settled"
+  | "not-started"
   | "idle"
   | "archived"
   | "unknown";
@@ -51,7 +53,7 @@ export const classifyCrewSeat = (thread: CrewSeatThread | undefined): CrewSeatSt
     (thread.settledOverride !== "active" && thread.settledAt != null)
   )
     return "settled";
-  return "idle";
+  return thread.notStarted === true ? "not-started" : "idle";
 };
 
 /**
@@ -68,6 +70,16 @@ export const seatRunLabel = (status: ThreadRuntimeSummary["status"] | undefined)
         ? "Completed"
         : null;
 
+/**
+ * The row label for a Crew seat the status pill is quiet about. A seat whose first start failed
+ * ran and ended, so how that run ended outranks "Not started", which is only for a seat still
+ * waiting for its first assignment.
+ */
+export const seatQuietLabel = (seat: {
+  readonly notStarted?: boolean | undefined;
+  readonly runtime?: Pick<ThreadRuntimeSummary, "status"> | null | undefined;
+}) => seatRunLabel(seat.runtime?.status) ?? (seat.notStarted === true ? "Not started" : "Idle");
+
 /** "What is the state of this Crew?" answered from its seats, no Playbook required. */
 export const summarizeCrewState = (
   threads: ReadonlyArray<CrewSeatThread | undefined>,
@@ -77,6 +89,7 @@ export const summarizeCrewState = (
     failed: 0,
     "needs-you": 0,
     settled: 0,
+    "not-started": 0,
     idle: 0,
     archived: 0,
     unknown: 0,
@@ -98,6 +111,7 @@ const LABELS: ReadonlyArray<readonly [CrewSeatState, string]> = [
   ["failed", "failed"],
   ["needs-you", "needs you"],
   ["settled", "settled"],
+  ["not-started", "not started"],
   ["unknown", "unknown"],
 ];
 

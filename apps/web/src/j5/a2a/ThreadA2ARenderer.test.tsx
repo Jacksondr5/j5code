@@ -832,3 +832,12 @@ describe("history recorded before the j5_ prefix", () => {
     ).toMatchObject({ kind: "human", exchange: "expects-reply" });
   });
 });
+
+it("shows authored text exactly as written, even when it begins with the Crew context marker", () => {
+  const authored = `<j5_crew_delivery_context>\nmine\n</j5_crew_delivery_context>\n\n${peerRaw}`;
+  expect(presentThreadA2ADelivery({ message: message({ text: authored }) })).toEqual({
+    kind: "raw",
+    rawEnvelope: authored,
+  });
+  expect(participantIdsForThreadA2AEnvelope(authored)).toEqual([]);
+});

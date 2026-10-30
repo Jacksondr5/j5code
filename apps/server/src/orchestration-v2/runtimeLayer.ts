@@ -1,3 +1,5 @@
+import * as CrewTurnContext from "../j5/a2a/CrewTurnContext.ts";
+import * as CrewDeliveryContext from "../j5/a2a/CrewDeliveryContext.ts";
 import * as UsageLimitRecoveryWorker from "./UsageLimitRecoveryWorker.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import { layer as j5ThreadLineageLayer } from "../j5/a2a/ThreadLineage.ts";
@@ -170,6 +172,7 @@ const layerRunExecutionServiceProvided = RunExecutionService.layer.pipe(
 );
 
 const layerProviderTurnStartServiceProvided = ProviderTurnStartService.layer.pipe(
+  Layer.provide(CrewTurnContext.layer),
   Layer.provide(
     Layer.mergeAll(
       layerContextHandoffServiceProvided,
@@ -186,6 +189,7 @@ const layerProviderTurnStartServiceProvided = ProviderTurnStartService.layer.pip
 );
 
 const layerProviderTurnControlServiceProvided = ProviderTurnControlService.layer.pipe(
+  Layer.provide(CrewTurnContext.layer),
   Layer.provide(Layer.merge(ProjectionStore.layer, layerProviderSessionManagerProvided)),
 );
 const layerRuntimeRequestServiceProvided = RuntimeRequestService.layer.pipe(
@@ -225,7 +229,7 @@ const layerRunFinalizationServiceProvided = RunFinalizationService.layer.pipe(
   ),
 );
 
-const layerOrchestratorProvided = Orchestrator.layer.pipe(
+const layerCrewOrchestratorBase = Orchestrator.layer.pipe(
   Layer.provide(
     Layer.mergeAll(
       layerCheckpointServiceProvided,
@@ -248,6 +252,11 @@ const layerOrchestratorProvided = Orchestrator.layer.pipe(
       ThreadForkService.layer,
     ),
   ),
+);
+
+const layerOrchestratorProvided = CrewDeliveryContext.layer.pipe(
+  Layer.provide(layerCrewOrchestratorBase),
+  Layer.provide(layerCommandReceiptStoreProvided),
 );
 
 const layerAgentSessionImporterProvided = AgentSessionImporter.layer.pipe(

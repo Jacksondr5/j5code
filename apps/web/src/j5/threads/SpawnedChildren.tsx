@@ -23,7 +23,7 @@ import { useThreadShells } from "../../state/entities";
 import { environmentServerConfigsAtom } from "../../state/server";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { formatElapsedDurationLabel } from "../../timestampFormat";
-import { seatRunLabel } from "../crew/crewState";
+import { seatQuietLabel } from "../crew/crewState";
 import { stopCrew } from "../crew/crewStopClient";
 import { j5Environment } from "../state";
 import { useSpawnedChildren, type SpawnedChild } from "./SpawnedChildrenClient";
@@ -166,7 +166,7 @@ function SpawnedChildrenRows(
 const childRowClassName =
   "flex w-full min-w-0 flex-col gap-0.5 rounded-md px-1.5 py-1 text-left outline-hidden hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring";
 
-function SpawnedChildGroupRows(
+export function SpawnedChildGroupRows(
   props: SpawnedChildActions & {
     readonly environmentId: EnvironmentId;
     readonly group: SpawnedChildGroup<EnvironmentThreadShell>;
@@ -283,8 +283,12 @@ function SpawnedChildGroupRows(
                 <span className="flex items-center gap-1.5 text-2xs text-muted-foreground">
                   {status === null ? (
                     <span>
-                      {(child.seat === null ? null : seatRunLabel(thread.runtime?.status)) ??
-                        "Idle"}
+                      {child.seat === null
+                        ? "Idle"
+                        : seatQuietLabel({
+                            notStarted: child.seat.notStarted,
+                            runtime: thread.runtime,
+                          })}
                     </span>
                   ) : (
                     <>

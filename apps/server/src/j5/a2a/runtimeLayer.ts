@@ -1,3 +1,4 @@
+import * as CrewSeatPreparation from "./CrewSeatPreparation.ts";
 import * as SpawnAgentService from "./SpawnAgentService.ts";
 import * as Layer from "effect/Layer";
 import { layerEventSink as OrchestrationV2EventSinkLayerLive } from "../../orchestration-v2/runtimeLayer.ts";
@@ -211,6 +212,7 @@ export const makeJ5A2AAuxiliaryLayer = (
     Layer.provide(artifactWorkspaceLayer),
   );
   const runtimeWithoutClientReads = Layer.mergeAll(
+    CrewSeatPreparation.layer,
     playbookStoreLayer,
     playbookCrewRelayProvided,
     agentHandoffNudgeWorkerProvided,

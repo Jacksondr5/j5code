@@ -1,3 +1,4 @@
+import * as CrewTurnContext from "../j5/a2a/CrewTurnContext.ts";
 import { modelSelectionsEqual } from "@t3tools/shared/model";
 import { projectComposerContextForProvider } from "@t3tools/shared/composerContextReferences";
 import {
@@ -116,6 +117,7 @@ export const layer: Layer.Layer<
   ProviderTurnStartServiceV2,
   Effect.gen(function* () {
     const eventSink = yield* EventSink.EventSinkV2;
+    const crewTurnContext = yield* Effect.serviceOption(CrewTurnContext.CrewTurnContext);
     const queuedRunWatchdog = yield* QueuedRunWatchdog;
     const contextHandoffService = yield* ContextHandoffService.ContextHandoffServiceV2;
     const idAllocator = yield* IdAllocator.IdAllocatorV2;
@@ -1132,9 +1134,10 @@ export const layer: Layer.Layer<
                 !coveredItemIds.has(item.id) &&
                 historicalMessage(item) !== null,
             );
-      const startWithHandoffs = (
+      const startAssignmentWithHandoffs = (
         turnInput: Parameters<typeof session.startTurn>[0],
-        compact = false,
+        compact: boolean,
+        assignment: string,
       ) =>
         Effect.gen(function* () {
           const retryHandoff =
@@ -1167,7 +1170,7 @@ export const layer: Layer.Layer<
               return handoffBudget({
                 tokenCap,
                 modelContextWindow,
-                userText: restartNote === "" ? userText : `${restartNote}\n\n${userText}`,
+                userText: restartNote === "" ? assignment : `${restartNote}\n\n${assignment}`,
                 attachments: message.attachments,
                 providerThread: budgetProviderThread,
                 nativeContextEstimate:
@@ -1206,7 +1209,7 @@ export const layer: Layer.Layer<
                 });
               }),
           });
-          if (!(yield* isCurrentAttemptInStatus("running"))) return;
+          if (!(yield* isCurrentAttemptInStatus("running"))) return false;
           const start = compact ? session.compactThread! : session.startTurn;
           const context = [delivery.context, restartNote]
             .filter((part) => part !== "")
@@ -1216,7 +1219,7 @@ export const layer: Layer.Layer<
             ...(noteContinuation ? promptedInput : turnInput),
             message: {
               ...turnInput.message,
-              text: context === "" ? userText : `${context}\n\nUser message:\n${userText}`,
+              text: context === "" ? assignment : `${context}\n\nUser message:\n${assignment}`,
             },
           }).pipe(
             // A pending marker would make the next turn abandon this native
@@ -1243,7 +1246,27 @@ export const layer: Layer.Layer<
               }),
             ),
           );
-        }).pipe(
+          return true;
+        });
+      const crewSeat =
+        Option.isSome(crewTurnContext) &&
+        (yield* crewTurnContext.value.isSeat(projection.thread.id));
+      const startWithHandoffs = (
+        turnInput: Parameters<typeof session.startTurn>[0],
+        compact = false,
+      ) =>
+        (crewSeat
+          ? crewTurnContext.value.deliver(
+              {
+                threadId: projection.thread.id,
+                providerThread: runningProviderThread,
+                text: userText,
+              },
+              (assignment) => startAssignmentWithHandoffs(turnInput, compact, assignment),
+            )
+          : startAssignmentWithHandoffs(turnInput, compact, userText)
+        ).pipe(
+          Effect.asVoid,
           Effect.mapError((cause) =>
             cause._tag === "ProviderAdapterTurnStartError"
               ? cause
@@ -1260,7 +1283,8 @@ export const layer: Layer.Layer<
         effectiveHandoffs.length === 0 &&
         missedItems.length === 0 &&
         restartNote === "" &&
-        !noteContinuation
+        !noteContinuation &&
+        !crewSeat
           ? session
           : makeDeliverySession(session, startWithHandoffs);
       return runExecution.startRootRun({

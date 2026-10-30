@@ -483,6 +483,8 @@ migrations after upstream migrations.
 
 88. Agent Setup and Crew approval settings ([#743](https://github.com/Jacksondr5/j5code/issues/743)): `packages/contracts/src/settings.ts` registers J5's `crewAutoApprove` boolean (default off) in server settings, patches, and project overrides. `apps/web/src/components/settings/settingsSearch.ts` renames the existing `/settings/personas` destination to Agent Setup and adds search terms and the scoped Crew setting target. `apps/mobile/src/features/settings/SettingsRouteScreen.tsx` and `apps/mobile/src/Stack.tsx` rename the existing Personas navigation entry and title to Agent Setup. Runtime behavior and the web sections stay in J5-owned files; mobile still exposes only the persona library.
 
+89. Deferred Crew assignments ([#745](https://github.com/Jacksondr5/j5code/issues/745)): `orchestration-v2/runtimeLayer.ts` wraps the shared orchestrator with J5-owned `CrewDeliveryContext.ts` for first-assignment workspace preparation and guards, and supplies J5-owned `CrewTurnContext.ts` to provider turn start and provider turn control. `orchestration-v2/ProviderTurnStartService.ts` asks that service whether the thread is a Crew seat (one indexed read) and delegates only a seat's selected assignment text to it immediately around provider delivery; every other thread keeps upstream's fast path and delivery unchanged, and `CrewDeliveryContext.ts` likewise passes any non-seat thread's dispatch straight through. `orchestration-v2/ProviderTurnControlService.ts` wraps the live session with the service's `steering`, one hook beside upstream's `steerTurn` call, so a message steered into a busy seat carries the current context too. The service builds the approved introduction or net roster changes from the current roster, sends the full introduction again when the provider conversation it reached is replaced (a model or provider switch, or a missing native session rebuilt from history), and records what it sent only after the provider accepts the prompt; a send that never happens (the run was stopped or superseded before `startTurn`) leaves it owed. Editable messages and shared author prefixes stay unchanged, so queued edits, cancellations and reordering cannot consume context. Waiting seats whose Crew is retired fail visibly; a retained worktree guard applies even after retirement. J5 migration 49 owns the context, and `CrewSeatPreparation.ts` uses upstream's persisted preparation path. `orchestration-v2/ProviderTurnStartService.test.ts` and `ProviderTurnControlService.test.ts` exercise the hooks against the real seat context, including a retained and a replaced native conversation and a Stop before the provider send. On an advance, retain the hooks at actual delivery and steering after queue selection, shared by every provider and transport.
+
 ## Pin and upstream advance runbook
 
 Current pin: `70d60e03a7a35c6fa131825bbfa05ec893e69912`, upstream's nightly tag `v0.1.1-nightly.20261017.3238` on `main` (frozen 2026-10-17). The previous pin was `29980a31409234b676f97bd477c4e46fdb61a929`, from upstream `main`.
@@ -787,14 +789,15 @@ explicitly marked.
 | `packages/provider-core/src/server/orchestrationInstructions.test.ts` | N       | 8, B                                               |
 | `packages/provider-core/src/server/orchestrationInstructions.ts`      | N       | 8, B                                               |
 | `packages/provider-pi/src/server/mcpExtensionSource.test.ts`          | N       | 8                                                  |
-| `apps/server/src/orchestration-v2/ProviderTurnControlService.ts`      | R       | 26                                                 |
-| `apps/server/src/orchestration-v2/ProviderTurnStartService.test.ts`   | A       | N                                                  |
-| `apps/server/src/orchestration-v2/ProviderTurnStartService.ts`        | A       | 30, N                                              |
+| `apps/server/src/orchestration-v2/ProviderTurnControlService.test.ts` | N       | 89                                                 |
+| `apps/server/src/orchestration-v2/ProviderTurnControlService.ts`      | R       | 26, 89                                             |
+| `apps/server/src/orchestration-v2/ProviderTurnStartService.test.ts`   | A       | N, 89                                              |
+| `apps/server/src/orchestration-v2/ProviderTurnStartService.ts`        | A       | 30, N, 89                                          |
 | `apps/server/src/orchestration-v2/RunFinalizationService.ts`          | R       | 30                                                 |
 | `apps/server/src/orchestration-v2/ThreadLaunchService.ts`             | R       | Saved-agent launch                                 |
 | `apps/server/src/orchestration-v2/ThreadSearch.ts`                    | N       | 86                                                 |
 | `apps/server/src/orchestration-v2/runtimeLayer.test.ts`               | R       | 3                                                  |
-| `apps/server/src/orchestration-v2/runtimeLayer.ts`                    | R       | 5, 21, 26, 30, 38, 86                              |
+| `apps/server/src/orchestration-v2/runtimeLayer.ts`                    | R       | 5, 21, 26, 30, 38, 86, 89                          |
 | `apps/server/src/os-jank.ts`                                          | R       | H                                                  |
 | `apps/server/src/persistence/Sqlite.test.ts`                          | R       | 1                                                  |
 | `apps/server/src/persistence/Sqlite.ts`                               | A       | 1, 31                                              |
