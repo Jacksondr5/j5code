@@ -72,8 +72,9 @@ steps:
 
 A step can name the persona that should do it with `persona:`, using a persona id
 from Settings → Personas. A step without one is done by whoever runs the playbook.
-A persona that is missing or turned off shows as a warning in Settings and does not
-stop the playbook from starting.
+Missing, turned-off, or unverified personas show as warnings in Settings and do not
+stop the playbook from starting. Invalid persona files leave absent personas unverified;
+fix the files reported in Settings → Personas before treating them as missing.
 
 Type `/playbook ` to choose a registered playbook, then send the command to start it.
 Send `/playbook review` to start directly, or `/playbook` to ask what is available.

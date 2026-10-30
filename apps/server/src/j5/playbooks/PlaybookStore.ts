@@ -62,21 +62,29 @@ const namedSteps = (steps: ReadonlyArray<PlaybookStep>) =>
 const stepSummary = ({ id, title, persona }: PlaybookStep) =>
   persona === undefined ? { id, title } : { id, title, persona };
 
-/** Warnings for steps whose persona the catalog lacks or has turned off, in step order. */
+/** Warnings retain uncertainty about absent personas when source files are invalid. */
 export const stepPersonaWarnings = (
   steps: ReadonlyArray<PlaybookStep>,
-  catalog: Parameters<typeof personaCatalogProblem>[0],
+  catalog: Parameters<typeof personaCatalogProblem>[0] & {
+    readonly diagnostics: ReadonlyArray<unknown>;
+  },
 ): Array<PlaybookWarning> =>
   namedSteps(steps).flatMap((step): Array<PlaybookWarning> => {
     const problem = personaCatalogProblem(catalog, step.persona);
     if (problem === null) return [];
+    const unverified = problem === "missing" && catalog.diagnostics.length > 0;
     return [
       {
-        code: problem === "missing" ? "persona_missing" : "persona_disabled",
+        code: unverified
+          ? "persona_unverified"
+          : problem === "missing"
+            ? "persona_missing"
+            : "persona_disabled",
         stepId: step.id,
         persona: step.persona,
-        message:
-          problem === "missing"
+        message: unverified
+          ? `Step "${step.id}" names persona "${step.persona}", which could not be checked because some persona files are invalid. Check Settings → Personas.`
+          : problem === "missing"
             ? `Step "${step.id}" names persona "${step.persona}", which is not in this environment's library.`
             : `Step "${step.id}" names persona "${step.persona}", which is turned off.`,
       },
