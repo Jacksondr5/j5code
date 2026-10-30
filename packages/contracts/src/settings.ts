@@ -27,6 +27,7 @@ import {
   DEFAULT_TEXT_GENERATION_REASONING_EFFORT,
   ProviderOptionSelections,
 } from "./model.ts";
+import { CrewMemberModels } from "./j5/crewMemberModels.ts";
 import { ModelSelection } from "./modelSelection.ts";
 import { ProjectScript, type ProjectMutation } from "./project.ts";
 import { DEFAULT_RUNTIME_MODE, RuntimeMode } from "./providerPolicy.ts";
@@ -892,6 +893,7 @@ export const PROJECT_SCOPED_SERVER_SETTING_KEYS = [
   "newWorktreesStartFromOrigin",
   "worktreeSubmodules",
   "crewAutoApprove",
+  "crewMemberModels",
   "defaultAutoPull",
   "defaultProjectScripts",
   "enableAgentBrowserAccess",
@@ -936,6 +938,7 @@ export const ProjectSettingsOverrides = Schema.Struct({
   newWorktreesStartFromOrigin: Schema.optionalKey(Schema.Boolean),
   worktreeSubmodules: ForwardCompatibleOptional(WorktreeSubmodules),
   crewAutoApprove: Schema.optionalKey(Schema.Boolean),
+  crewMemberModels: Schema.optionalKey(CrewMemberModels),
   defaultAutoPull: Schema.optionalKey(Schema.Boolean),
   defaultProjectScripts: Schema.optionalKey(Schema.Array(ProjectScript)),
   enableAgentBrowserAccess: Schema.optionalKey(Schema.Boolean),
@@ -980,6 +983,7 @@ const NULLABLE_PROJECT_SETTINGS_OVERRIDES: ReadonlySet<ProjectScopedServerSettin
   "reviewGuideModelSelection",
   "pullRequestMergeMethod",
   "sidebarAutoSettleAfterDays",
+  "crewMemberModels",
 ]);
 
 /** Reclaimable bytes from which the offline `t3 doctor` repair is worth suggesting. */
@@ -1078,6 +1082,7 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
   crewAutoApprove: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  crewMemberModels: CrewMemberModels.pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   defaultAutoPull: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   defaultProjectScripts: Schema.Array(ProjectScript).pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
@@ -1404,6 +1409,7 @@ export const ServerSettingsPatch = Schema.Struct({
     Schema.Record(ProjectId, Schema.NullOr(Schema.Boolean)),
   ),
   crewAutoApprove: Schema.optionalKey(Schema.Boolean),
+  crewMemberModels: Schema.optionalKey(CrewMemberModels),
   defaultAutoPull: Schema.optionalKey(Schema.Boolean),
   defaultProjectScripts: Schema.optionalKey(Schema.Array(ProjectScript)),
   projectScriptOverrides: Schema.optionalKey(

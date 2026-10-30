@@ -75,6 +75,30 @@ describe("resolveProjectSettings", () => {
     expect(resolveProjectSettings(settings, otherProjectId).settings.defaultAutoPull).toBe(true);
   });
 
+  it("replaces the models for custom members whole, and lets a project hold null or its own list", () => {
+    const entry = (model: string) => ({ instanceId: ProviderInstanceId.make("codex"), model });
+    expect(DEFAULT_SERVER_SETTINGS.crewMemberModels).toBeNull();
+    const three = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
+      crewMemberModels: [entry("a"), entry("b"), entry("c")],
+    });
+    // A shorter list is the whole list, never merged into the longer one by position.
+    const one = applyServerSettingsPatch(three, { crewMemberModels: [entry("a")] });
+    expect(one.crewMemberModels).toEqual([entry("a")]);
+    const settings = applyServerSettingsPatch(one, {
+      projectSettingsOverrides: {
+        [projectId]: { crewMemberModels: null },
+        [otherProjectId]: { crewMemberModels: [entry("z")] },
+      },
+    });
+    const everything = resolveProjectSettings(settings, projectId);
+    expect(everything.settings.crewMemberModels).toBeNull();
+    expect(everything.sources.crewMemberModels).toBe("project");
+    expect(resolveProjectSettings(settings, otherProjectId).settings.crewMemberModels).toEqual([
+      entry("z"),
+    ]);
+    expect(resolveProjectSettings(settings, null).settings.crewMemberModels).toEqual([entry("a")]);
+  });
+
   it("keeps the environment text generation model when the override's provider is disabled", () => {
     const disabledSelection = createModelSelection(ProviderInstanceId.make("claudeAgent"), "opus");
     const settings = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
