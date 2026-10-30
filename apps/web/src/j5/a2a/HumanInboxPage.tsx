@@ -40,6 +40,7 @@ import { answerHumanExchange } from "./humanInboxClient";
 import { useScopedParticipantLabels } from "./ParticipantIdentitiesClient";
 import { presentParticipantIdentity } from "./ParticipantIdentity";
 import { CrewProposalCard } from "../crew/CrewProposalCard";
+import { clearCrewProposalDraft } from "../crew/crewProposalDraftStore";
 import { CrewRuntimeRequestsSection } from "../crew/CrewRuntimeRequestsSection";
 import type { ScopedCrewRuntimeRequest } from "../crew/crewRuntimeRequests.logic";
 import {
@@ -655,6 +656,7 @@ export function HumanInboxPage() {
           ? { proposalId: proposal.id, decision, seats, approvalToken: approvalToken! }
           : { proposalId: proposal.id, decision },
       );
+      clearCrewProposalDraft(proposal.environmentId, proposal.id);
       notifyHumanInboxChanged(proposal.environmentId);
       await refreshCrewProposals(proposal.environmentId).catch(() => undefined);
     } catch (cause) {

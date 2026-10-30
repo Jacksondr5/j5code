@@ -97,6 +97,8 @@ export const OrchestrationV2AgentPersonaAssignment = Schema.Struct({
   resolvedModelSelection: ModelSelection,
   /** Human-approved crew access, independent of the persona behavior instructions. */
   runtimeModeOverride: Schema.optional(RuntimeMode),
+  /** The snapshot carries instructions the person edited at launch, so it never matches the library's. */
+  instructionsEdited: Schema.optional(Schema.Boolean),
 });
 export type OrchestrationV2AgentPersonaAssignment =
   typeof OrchestrationV2AgentPersonaAssignment.Type;

@@ -7,6 +7,7 @@ import type { ReactNode } from "react";
 import { cn } from "../../lib/utils";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import {
+  crewApprovalSummary,
   crewGateTitle,
   crewNoticeLines,
   presentCrewNotice,
@@ -139,12 +140,24 @@ function CrewNoticeLines(props: {
 
 /**
  * Null for anything that is not a Crew notice; the caller then falls through to its own rendering.
- * A notice with no lines never reaches here: the timeline's entries leave it out.
+ * Approval summaries remain visible; completed finishes without a warning take no timeline row.
  */
 export function renderCrewNotice(input: CrewNoticeRenderInput): ReactNode {
   const notice = presentCrewNotice(input.message);
   if (notice === null) return null;
   if (notice.kind === "gate" && notice.decision === "declined")
     return <CrewDeclinedCard notice={notice} input={input} />;
-  return <CrewNoticeLines lines={crewNoticeLines(notice)} input={input} />;
+  const summary = crewApprovalSummary(notice);
+  return (
+    <>
+      {summary === null ? null : (
+        <p className="text-xs text-muted-foreground" data-j5-crew-renderer="approved">
+          {summary}
+        </p>
+      )}
+      {crewNoticeLines(notice).length === 0 ? null : (
+        <CrewNoticeLines lines={crewNoticeLines(notice)} input={input} />
+      )}
+    </>
+  );
 }
