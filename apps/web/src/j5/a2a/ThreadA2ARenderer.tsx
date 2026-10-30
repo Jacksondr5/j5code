@@ -1,3 +1,4 @@
+import { useAtomValue } from "@effect/atom-react";
 import { renderSharedConversationNote } from "../sharing/SharedConversationCards";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../../components/ui/tooltip";
 import { observeResize } from "~/lib/observeResize";
@@ -10,12 +11,15 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { shouldPreserveAssistantLineBreaks } from "@t3tools/shared/markdownPipeline";
 
 import ChatMarkdown from "../../components/ChatMarkdown";
+import { ProviderInstanceIcon } from "../../components/chat/ProviderInstanceIcon";
 import { useFindRevealRef } from "../../components/chat/markdownFindContext";
 import { renderCrewNotice } from "../crew/CrewNoticeRenderer";
-import { participantIdsForCrewNotice } from "../crew/crewNotices.logic";
+import { deriveProviderInstanceEntries } from "../../providerInstances";
 import { useThreadShell } from "../../state/entities";
+import { environmentServerConfigsAtom } from "../../state/server";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { useConnectionAccess } from "../sharing/access";
+import { useIsLiveCrewSeat } from "../threads/SpawnedChildrenClient";
 import {
   presentParticipantIdentity,
   type ParticipantIdentityPresentation,
@@ -412,7 +416,7 @@ export function participantIdsForThreadA2ADelivery(message: ChatMessage): Readon
   if (presentation?.kind === "human") {
     return presentation.senderLabel === null ? [presentation.senderId] : [];
   }
-  return participantIdsForCrewNotice(message);
+  return [];
 }
 
 /**
@@ -596,6 +600,35 @@ function A2ABodyClamp({
   );
 }
 
+/** A Crew seat's provider logo; only compact rows mount it, so only they read the server configs. */
+function SenderProviderIcon(props: {
+  readonly senderThread: ReturnType<typeof useThreadShell>;
+  readonly senderThreadRef: ScopedThreadRef | null;
+}) {
+  const serverConfigs = useAtomValue(environmentServerConfigsAtom);
+  const instanceId =
+    props.senderThread?.runtime?.providerInstanceId ??
+    props.senderThread?.modelSelection.instanceId;
+  const entry =
+    props.senderThreadRef === null || instanceId === undefined
+      ? null
+      : (deriveProviderInstanceEntries(
+          serverConfigs.get(props.senderThreadRef.environmentId)?.providers ?? [],
+        ).find((candidate) => candidate.instanceId === instanceId) ?? null);
+  if (entry === null) return null;
+  return (
+    <ProviderInstanceIcon
+      driverKind={entry.driverKind}
+      displayName={entry.displayName}
+      accentColor={entry.accentColor}
+      acpRegistryAgentId={entry.acpRegistryAgentId}
+      acpRegistryIconUrl={entry.acpRegistryIconUrl}
+      showBadge={false}
+      iconClassName="size-3.5"
+    />
+  );
+}
+
 function PeerDeliveryCard({
   automated = false,
   body,
@@ -603,10 +636,12 @@ function PeerDeliveryCard({
   markdown,
   now,
   outsideAgent = false,
+  senderId,
   senderLabel,
   senderThreadRef,
   senderTooltipParticipantId,
   sentAt,
+  threadRef,
 }: {
   readonly automated?: boolean | undefined;
   readonly body: string;
@@ -614,10 +649,13 @@ function PeerDeliveryCard({
   readonly markdown: A2AMarkdownContext;
   readonly now?: number | undefined;
   readonly outsideAgent?: boolean | undefined;
+  readonly senderId: string;
   readonly senderLabel: string;
   readonly senderThreadRef: ScopedThreadRef | null;
   readonly senderTooltipParticipantId: string | null;
   readonly sentAt: string;
+  /** The thread the timeline shows, whose live Crew seats get the compact row. */
+  readonly threadRef: ScopedThreadRef | null;
 }) {
   const nowMinute = useNowMinute();
   const currentNow = now ?? Date.parse(`${nowMinute}:00.000Z`);
@@ -626,16 +664,28 @@ function PeerDeliveryCard({
   const senderThread = useThreadShell(senderThreadRef);
   const isOpen = exchange === "expects-reply";
   const isClosed = exchange === "closed";
+  // A message from a seat of a live Crew under this thread is a compact row led by its provider;
+  // a peer outside a Crew, or a seat whose Crew retired, keeps the card (accepted, #741).
+  const isCrewSeat = useIsLiveCrewSeat(threadRef, senderId);
   return (
     <section
-      className="max-w-[88%] rounded-lg border border-border/70 bg-muted/25 px-3.5 py-2.5"
+      className={
+        isCrewSeat
+          ? "max-w-[88%] px-1.5 py-1"
+          : "max-w-[88%] rounded-lg border border-border/70 bg-muted/25 px-3.5 py-2.5"
+      }
       data-j5-a2a-renderer="peer"
+      data-j5-a2a-compact={isCrewSeat ? "" : undefined}
     >
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-        <span className="inline-flex items-center gap-1 text-muted-foreground">
-          <InboxIcon className="size-3.5 shrink-0" aria-hidden />
-          From
-        </span>
+        {isCrewSeat ? (
+          <SenderProviderIcon senderThread={senderThread} senderThreadRef={senderThreadRef} />
+        ) : (
+          <span className="inline-flex items-center gap-1 text-muted-foreground">
+            <InboxIcon className="size-3.5 shrink-0" aria-hidden />
+            From
+          </span>
+        )}
         {senderThreadRef !== null && senderThread !== null ? (
           <Link
             className="font-medium text-foreground hover:underline"
@@ -768,10 +818,12 @@ export function renderThreadA2ADelivery(props: ThreadA2ADeliveryCompositionInput
         markdown={markdown}
         now={props.now}
         outsideAgent={presentation.outsideAgent}
+        senderId={presentation.senderId}
         senderLabel={presentation.senderLabel}
         senderThreadRef={presentation.senderThreadRef}
         senderTooltipParticipantId={presentation.senderTooltipParticipantId}
         sentAt={props.message.createdAt}
+        threadRef={props.threadRef ?? null}
       />
     );
   }
