@@ -328,6 +328,27 @@ describe("tailnet mappings", () => {
     }
   });
 
+  it("refuses TCP listeners without treating their forwarding destinations as occupied ports", () => {
+    for (const header of [
+      "|-- tcp://host.ts.net:9445 (tailnet only)",
+      "|-- tcp://host.ts.net:9445 (TLS-terminated TCP, tailnet only)",
+      "tcp://service.ts.net:9445 (tailnet only) (svc:service)",
+    ]) {
+      const existing = mappingsFromStatus({
+        status: 0,
+        stdout: `${header}\n|-- tcp://100.100.100.100:9445\n|-- tcp://[fd7a:115c:a1e0::1]:9445\n|--> tcp://127.0.0.1:4773\n\n${status}`,
+        stderr: "",
+      });
+      for (const port of [9445, 8444, 7594]) {
+        assert.include(
+          shareRefusal(port, existing, () => true) ?? "",
+          "this server did not set up",
+        );
+      }
+      assert.isUndefined(shareRefusal(4773, existing, () => true));
+    }
+  });
+
   it("calls a mapping ours only when it proxies to our own web port on loopback", () => {
     for (const target of ["http://localhost:7594", "http://127.0.0.1:7594", "http://[::1]:7594"]) {
       assert.isTrue(isOwnMapping({ port: 7594, targets: [target] }, 7594));
@@ -1233,6 +1254,18 @@ describe("upgradeTarget", () => {
     assert.deepEqual(
       upgradeTarget({ ...input, recorded, baseFacts: { ...baseFacts, serverPort: undefined } }),
       recorded,
+    );
+  });
+
+  it("refuses a recorded upgrade port that is now the configured live port", () => {
+    assert.throws(
+      () =>
+        upgradeTarget({
+          ...input,
+          recorded: { serverPort: 14000, webPort: 5960 },
+          inheritedPort: "14000",
+        }),
+      /live server's port/,
     );
   });
 

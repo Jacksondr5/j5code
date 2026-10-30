@@ -975,6 +975,12 @@ export interface TailnetMapping {
 export function tailnetMappings(serveStatus: string): ReadonlyArray<TailnetMapping> {
   const mappings: Array<{ port: number; targets: Array<string> }> = [];
   for (const line of serveStatus.split("\n")) {
+    // TCP status uses |-- for listeners and |--> for the forwarding destination.
+    const tcpPort = /^(?:\|-- )?tcp:\/\/\S+:(\d+)(?:\s|$)/.exec(line)?.[1];
+    if (tcpPort !== undefined) {
+      mappings.push({ port: Number(tcpPort), targets: [] });
+      continue;
+    }
     const address = /^https?:\/\/\S+/.exec(line)?.[0];
     if (address !== undefined) {
       const url = new URL(address);
@@ -2077,6 +2083,12 @@ export function upgradeTarget(input: {
       `\`upgrade\` runs only in a --base build: it starts this worktree's build on the base server's home. Build one with: ${input.rebuildCommand}`,
     );
   }
+  const selectedServerPort = input.recorded?.serverPort ?? input.baseFacts.serverPort;
+  if (selectedServerPort !== undefined && String(selectedServerPort) === input.inheritedPort) {
+    throw new LiveTestRefusal(
+      `The upgrade target uses the live server's port ${selectedServerPort}.`,
+    );
+  }
   if (input.recorded !== undefined) return input.recorded;
   const { serverPort, webPort, baseDir } = input.baseFacts;
   if (!input.baseHomeExists || serverPort === undefined || webPort === undefined) {
@@ -2088,9 +2100,6 @@ export function upgradeTarget(input: {
     throw new LiveTestRefusal(
       `The base's log says its server ran on ${baseDir}, not on its home ${input.baseHome}. Replace the build: ${input.rebuildCommand}`,
     );
-  }
-  if (String(serverPort) === input.inheritedPort) {
-    throw new LiveTestRefusal(`The base's log reports the live server's port ${serverPort}.`);
   }
   return { serverPort, webPort };
 }
