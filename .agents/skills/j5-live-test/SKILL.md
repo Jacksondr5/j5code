@@ -60,6 +60,18 @@ tested as a whole, each layer names the run that covers its head.
 
 ## Run a test
 
+### Skills writes
+
+Use the default seeded mode for Skills tests. Select only **Codex (test skills)**
+or **Claude (test skills)** for user-scope link, unlink, install, or source-folder
+delete actions. Their sample skills and local catalog live under the test home
+in `test-skills/`. Default provider instances retain real credentials for agent
+turns and may read real skill folders; never use them for Skills writes.
+Before a write, verify the selected instance and resolved root are under this
+test home. Fresh, copied developer, and older base homes may lack these instances;
+use a newly built default home for Skills writes. Project writes use only the
+isolated test repository.
+
 ### Set up
 
 From your worktree, run:

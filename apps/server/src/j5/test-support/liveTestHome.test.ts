@@ -107,7 +107,15 @@ it.live("builds a home whose only project is the test repository", () =>
     }
 
     const stateDir = NodePath.join(manifest.home, "userdata");
-    assert.deepEqual(JSON.parse(NodeFS.readFileSync(`${stateDir}/settings.json`, "utf8")), {
+    const { providerInstances, skillCatalogSource, ...settings } = JSON.parse(
+      NodeFS.readFileSync(`${stateDir}/settings.json`, "utf8"),
+    );
+    assert.deepEqual(Object.keys(providerInstances), [
+      "codex-test-skills",
+      "claudeAgent-test-skills",
+    ]);
+    assert.equal(skillCatalogSource, NodePath.join(manifest.home, "test-skills", "catalog"));
+    assert.deepEqual(settings, {
       defaultModelSelection: {
         instanceId: "claudeAgent",
         model: "claude-haiku-5-5",

@@ -5,6 +5,7 @@
  * Writes `test-repo`, a `home` with replayed (view-only) threads, and `<root>/manifest.json` for
  * `scripts/j5/setup-agent-live-test.ts`. Nothing in the home points outside `<root>`.
  */
+import { seedLiveTestSkills } from "./liveTestSkills.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   ChatAttachmentId,
@@ -412,6 +413,7 @@ function writeSettingsAndPersonas(home: string): void {
         // A provider found behind its latest release raises a toast that covers the top-right
         // controls of every page until dismissed, and tests click those controls.
         enableProviderUpdateChecks: false,
+        ...seedLiveTestSkills(home),
       },
       null,
       2,

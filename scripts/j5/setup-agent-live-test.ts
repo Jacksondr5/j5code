@@ -628,6 +628,10 @@ Project to add when the wizard or a test asks for one: a small TODO app (\`pnpm 
   It is the only project in this home. Do not add another project: that is how
   a test reaches a real repository.
 
+Skills writes: use only "Codex (test skills)" or "Claude (test skills)".
+Their disposable homes and sample catalog are inside ${paths.home}/test-skills.
+Default instances retain real credentials; never use them for Skills writes.
+
 New threads default to ${manifest.defaultModel}.
 Personas: ${manifest.personas
         .map(
