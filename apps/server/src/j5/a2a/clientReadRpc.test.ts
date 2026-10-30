@@ -205,6 +205,7 @@ it.effect("keeps identity requests exact, ordered, and total, and drops an id th
           return Effect.succeed({ entries });
         },
         openInboxCount: (personId) => Effect.succeed({ personId: personId ?? alpha, count: 3 }),
+        crewWorktreeCleanups: () => Effect.succeed([]),
       }),
     );
     const identities = handlers[METHODS.readParticipantIdentities];
@@ -223,6 +224,32 @@ it.effect("keeps identity requests exact, ordered, and total, and drops an id th
       personId: LOCAL_PERSON,
       count: 3,
     });
+  }),
+);
+
+it.effect("counts an open worktree cleanup the person reaches in the open Inbox count", () =>
+  Effect.gen(function* () {
+    const handlers = yield* handlersOver(
+      Layer.mock(ClientReadsService)({
+        openInboxCount: (personId) =>
+          Effect.succeed({ personId: personId ?? ParticipantId.make("agent:none"), count: 3 }),
+        crewWorktreeCleanups: () =>
+          Effect.succeed([
+            {
+              id: "cleanup:1",
+              crewInstanceId: "crew:1",
+              crewName: "Crew One",
+              projectId: "project:gate",
+              captainThreadId: ThreadId.make("thread:captain"),
+              filedAt: "2026-10-27T12:00:00.000Z",
+              status: "open" as const,
+              decidedAt: null,
+              entries: [],
+            },
+          ]),
+      }),
+    );
+    assert.strictEqual((yield* handlers[METHODS.readOpenInboxCount]({})).count, 4);
   }),
 );
 

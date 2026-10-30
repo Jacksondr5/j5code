@@ -217,6 +217,14 @@ const createdSeats = (facts: ArchiveCrewConsequenceFacts) =>
     .filter((member) => !member.neverCreated)
     .map((member) => ({ seatName: member.seatName, threadId: member.threadId }));
 
+/** Who the worktree approval is filed for. */
+const approvalCrew = (instance: AgentCrewInstance) => ({
+  crewInstanceId: instance.id,
+  crewName: instance.displayName,
+  projectId: instance.projectId,
+  captainThreadId: instance.captainThreadId,
+});
+
 const hasConsequences = (facts: ArchiveCrewConsequenceFacts) =>
   facts.members.some(
     (member) => member.facts.openExchanges.length > 0 || member.facts.runningTurn !== null,
@@ -409,6 +417,7 @@ export const layer = Layer.effect(
                 : ("already_archived" as const),
             })),
             seats: createdSeats(facts),
+            crew: approvalCrew(instance),
           };
         }
 
@@ -483,7 +492,12 @@ export const layer = Layer.effect(
         yield* crews
           .markArchived(instance.id, input.archivedAt, { withCaptain: input.withCaptain === true })
           .pipe(Effect.orDie);
-        return { status: "archived" as const, members: results, seats: createdSeats(facts) };
+        return {
+          status: "archived" as const,
+          members: results,
+          seats: createdSeats(facts),
+          crew: approvalCrew(instance),
+        };
       }).pipe((unit) => crews.serialize(input.crewInstanceId, unit));
 
     // After the unit's step commits and its lock is released, so a slow check or removal holds
@@ -491,9 +505,9 @@ export const layer = Layer.effect(
     // open, or because a check failed, gets another look when the archive is asked for again.
     const archive: ArchiveCrewServiceShape["archive"] = (input) =>
       archiveUnit(input).pipe(
-        Effect.flatMap(({ seats, ...outcome }) =>
+        Effect.flatMap(({ seats, crew, ...outcome }) =>
           worktrees
-            .cleanup({ seats })
+            .cleanup({ seats, crew })
             .pipe(Effect.map((removed) => ({ ...outcome, worktrees: removed }))),
         ),
       );

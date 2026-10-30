@@ -2,6 +2,7 @@ import { AuthAccessReadScope, AuthOrchestrationReadScope, ThreadId } from "@t3to
 import {
   J5_CLIENT_READ_WS_METHODS,
   type CrewArchiveWorktreesRequest,
+  type CrewWorktreeCleanupListRequest,
   type FleetReadRequest,
   type HumanInboxListRequest,
   type OpenInboxCountRequest,
@@ -38,6 +39,7 @@ export const CLIENT_READ_RPC_SCOPES = {
   [METHODS.listSpawnedChildren]: AuthOrchestrationReadScope,
   [METHODS.readPreArchiveFacts]: AuthOrchestrationReadScope,
   [METHODS.readCrewArchiveWorktrees]: AuthOrchestrationReadScope,
+  [METHODS.listCrewWorktreeCleanups]: AuthOrchestrationReadScope,
   [METHODS.readParticipantIdentities]: AuthOrchestrationReadScope,
   [METHODS.listPeers]: AuthAccessReadScope,
   [METHODS.subscribeReadChanges]: AuthOrchestrationReadScope,
@@ -78,6 +80,17 @@ export const makeClientReadRpcHandlers = Effect.fn("j5.makeClientReadRpcHandlers
     Effect.provideService(PersonAccess, people),
     Effect.provideService(SharedThreads, shared),
   );
+  // Listed to whoever reaches the Crew's Captain, like its archive's worktrees.
+  const cleanupsReached = (status: CrewWorktreeCleanupListRequest["status"]) =>
+    Effect.gen(function* () {
+      const listed = yield* clientReads
+        .crewWorktreeCleanups(status)
+        .pipe(Effect.catch(failed("Reading worktree cleanups failed.")));
+      const reachesCaptain = yield* reaches;
+      return yield* Effect.filter(listed, (item) =>
+        reachesCaptain(Effect.succeed(item.captainThreadId)),
+      );
+    });
   return {
     [METHODS.listHumanInbox]: (input: HumanInboxListRequest) =>
       personOf.pipe(
@@ -92,7 +105,15 @@ export const makeClientReadRpcHandlers = Effect.fn("j5.makeClientReadRpcHandlers
         Effect.flatMap((personId) =>
           clientReads.openInboxCount(personId).pipe(Effect.catch(inboxFailure)),
         ),
+        // An open worktree cleanup waits on a person like an ask does.
+        Effect.flatMap((counted) =>
+          cleanupsReached("open").pipe(
+            Effect.map((open) => ({ ...counted, count: counted.count + open.length })),
+          ),
+        ),
       ),
+    [METHODS.listCrewWorktreeCleanups]: (input: CrewWorktreeCleanupListRequest) =>
+      cleanupsReached(input.status).pipe(Effect.map((items) => ({ items }))),
     [METHODS.listCrewProposals]: () =>
       Effect.gen(function* () {
         const listed = yield* clientReads.crewProposals.pipe(

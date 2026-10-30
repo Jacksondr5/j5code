@@ -53,6 +53,7 @@ export const J5_CLIENT_GUARDED_RPC_SCOPES = {
   [J5_CLIENT_ACTION_WS_METHODS.archiveCrew]: AuthOrchestrationOperateScope,
   [J5_CLIENT_ACTION_WS_METHODS.respondCrewRuntimeRequest]: AuthOrchestrationOperateScope,
   [J5_CLIENT_ACTION_WS_METHODS.answerHumanExchange]: AuthOrchestrationOperateScope,
+  [J5_CLIENT_ACTION_WS_METHODS.answerCrewWorktreeCleanup]: AuthOrchestrationOperateScope,
 
   [J5_CLIENT_ACTION_WS_METHODS.issuePeerCredential]: AuthAccessWriteScope,
   [J5_CLIENT_ACTION_WS_METHODS.addPeer]: AuthAccessWriteScope,
