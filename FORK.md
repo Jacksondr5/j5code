@@ -1017,7 +1017,7 @@ The agent library places the Import menu beside the Scoped agents heading and re
 ### Live-test Skills isolation (#666)
 
 J5-owned `apps/server/src/j5/test-support/liveTestSkills.ts` seeds disposable
-provider homes and a local catalog; `liveTestHome.ts` includes those instances
-in generated settings. `scripts/j5/setup-agent-live-test.ts` and the
+provider homes and a local catalog for the explicit `--skills` mode; `liveTestHome.ts` includes those instances
+in generated settings. Ordinary mode retains credential access and has no sample catalog. `scripts/j5/setup-agent-live-test.ts` and the
 `j5-live-test` skill identify the safe write targets. No upstream-owned file
 is changed for this issue.

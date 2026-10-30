@@ -62,15 +62,19 @@ tested as a whole, each layer names the run that covers its head.
 
 ### Skills writes
 
-Use the default seeded mode for Skills tests. Select only **Codex (test skills)**
-or **Claude (test skills)** for user-scope link, unlink, install, or source-folder
-delete actions. Their sample skills and local catalog live under the test home
-in `test-skills/`. Default provider instances retain real credentials for agent
-turns and may read real skill folders; never use them for Skills writes.
-Before a write, verify the selected instance and resolved root are under this
-test home. Fresh, copied developer, and older base homes may lack these instances;
-use a newly built default home for Skills writes. Project writes use only the
-isolated test repository.
+Build a dedicated Skills-only home with `node scripts/j5/setup-agent-live-test.ts --skills`.
+Use a separate worktree from an ordinary agent-turn test; a built home retains
+its mode, and switching requires `rebuild --skills`. Both default provider IDs
+are bound to disposable homes, so catalog Apply targets only those two roots.
+The sample catalog and user skills live under the test home's `test-skills/`.
+Verify Catalog details lists only roots below that directory before Apply.
+
+Skills-only instances use sample configuration and loopback-only endpoints for
+inventory. They cannot run real model turns. Ordinary mode keeps the machine's
+credentials for agent turns, has no sample catalog, and is outside the Skills
+write workflow. Fresh, copied developer, and older base homes are outside it too.
+Project writes use only the isolated test repository. Never copy credentials
+into a Skills-only home or enable another provider instance there.
 
 ### Set up
 

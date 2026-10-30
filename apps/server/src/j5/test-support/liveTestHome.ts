@@ -405,7 +405,7 @@ const replayFixture = Effect.fn("liveTestHome.replayFixture")(function* <
 
 function writeSettingsAndPersonas(
   home: string,
-  skills: Effect.Success<ReturnType<typeof seedLiveTestSkills>>,
+  skills: Partial<Effect.Success<ReturnType<typeof seedLiveTestSkills>>>,
 ): void {
   const stateDir = NodePath.join(home, "userdata");
   NodeFS.writeFileSync(
@@ -483,6 +483,7 @@ export const buildLiveTestHome = Effect.fn("buildLiveTestHome")(function* (input
   readonly root: string;
   readonly ownerName: string;
   readonly replays?: ReadonlyArray<LiveTestReplay>;
+  readonly skillsOnly?: boolean;
 }) {
   const ownerName = yield* checkedPersonName(input.ownerName);
   const paths = liveTestHomePaths(input.root);
@@ -538,7 +539,9 @@ export const buildLiveTestHome = Effect.fn("buildLiveTestHome")(function* (input
   yield* nameOwner(databasePath, ownerName);
   writeSettingsAndPersonas(
     home,
-    yield* seedLiveTestSkills(home).pipe(Effect.provide(NodeServices.layer)),
+    input.skillsOnly
+      ? yield* seedLiveTestSkills(home).pipe(Effect.provide(NodeServices.layer))
+      : { skillCatalogSource: "" },
   );
 
   const manifest: LiveTestHomeManifest = {
@@ -572,7 +575,7 @@ if (import.meta.main) {
   const root = args[1];
   const ownerName = args[3];
   if (
-    args.length !== 4 ||
+    (args.length !== 4 && !(args.length === 5 && args[4] === "--skills")) ||
     args[0] !== "--root" ||
     args[2] !== "--owner-name" ||
     root === undefined ||
@@ -580,12 +583,12 @@ if (import.meta.main) {
     !NodePath.isAbsolute(root)
   ) {
     process.stderr.write(
-      "Usage: liveTestHome.ts --root <absolute directory> --owner-name <name>\n",
+      "Usage: liveTestHome.ts --root <absolute directory> --owner-name <name> [--skills]\n",
     );
     process.exit(64);
   }
   Effect.runPromise(
-    buildLiveTestHome({ root, ownerName }).pipe(
+    buildLiveTestHome({ root, ownerName, skillsOnly: args[4] === "--skills" }).pipe(
       Effect.provide(Logger.layer([], { mergeWithExisting: false })),
     ),
   ).then(

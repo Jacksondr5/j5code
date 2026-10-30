@@ -536,6 +536,8 @@ describe("parseCommand", () => {
   });
 
   it("takes a mode flag on a start and on rebuild, in either position", () => {
+    assert.deepEqual(parseCommand(["--skills"]), { command: "start", mode: "skills" });
+    assert.deepEqual(parseCommand(["rebuild", "--skills"]), { command: "rebuild", mode: "skills" });
     assert.deepEqual(parseCommand(["--fresh"]), { command: "start", mode: "fresh" });
     assert.deepEqual(parseCommand(["rebuild", "--fresh"]), { command: "rebuild", mode: "fresh" });
     assert.deepEqual(parseCommand(["--fresh", "rebuild"]), { command: "rebuild", mode: "fresh" });
@@ -906,6 +908,20 @@ describe("formatInstructions", () => {
     });
     assert.deepEqual(ownerLines(output), ["  Owner         Test owner"]);
     assert.include(output, 'guest "<name>"');
+  });
+
+  it("distinguishes Skills-only inventory from credential-backed agent testing", () => {
+    const ordinary = formatInstructions({ paths, manifest: built, facts, pairingUrl: undefined });
+    assert.include(ordinary, "Skills writes are prohibited");
+    const skills = formatInstructions({
+      paths,
+      manifest: { ...built, mode: "skills" },
+      facts,
+      pairingUrl: undefined,
+    });
+    assert.include(skills, "Skills-only mode");
+    assert.include(skills, "cannot run real agent turns");
+    assert.notInclude(skills, "Skills writes are prohibited");
   });
 
   it("names each server's owner in a peer build", () => {

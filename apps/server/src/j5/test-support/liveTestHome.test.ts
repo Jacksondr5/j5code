@@ -110,11 +110,8 @@ it.live("builds a home whose only project is the test repository", () =>
     const { providerInstances, skillCatalogSource, ...settings } = JSON.parse(
       NodeFS.readFileSync(`${stateDir}/settings.json`, "utf8"),
     );
-    assert.deepEqual(Object.keys(providerInstances), [
-      "codex-test-skills",
-      "claudeAgent-test-skills",
-    ]);
-    assert.equal(skillCatalogSource, NodePath.join(manifest.home, "test-skills", "catalog"));
+    assert.equal(providerInstances, undefined);
+    assert.equal(skillCatalogSource, "");
     assert.deepEqual(settings, {
       defaultModelSelection: {
         instanceId: "claudeAgent",
@@ -273,6 +270,38 @@ it.live("leaves a message with an image and a question waiting for an answer", (
       assert.include(JSON.stringify(items[1]), "Which colour should the banner be?");
     } finally {
       database.close();
+    }
+  }).pipe(Effect.scoped),
+);
+
+it.live("builds a Skills-only home with no implicit real default provider roots", () =>
+  Effect.gen(function* () {
+    const root = NodeFS.realpathSync(
+      NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "j5-live-skills-home-")),
+    );
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => NodeFS.rmSync(root, { recursive: true, force: true })),
+    );
+    const manifest = yield* buildLiveTestHome({
+      root,
+      ownerName: "Skills tester",
+      replays: [],
+      skillsOnly: true,
+    }).pipe(Effect.provide(Logger.layer([], { mergeWithExisting: false })));
+    const settings = JSON.parse(
+      NodeFS.readFileSync(NodePath.join(manifest.home, "userdata", "settings.json"), "utf8"),
+    );
+    assert.deepEqual(Object.keys(settings.providerInstances), ["codex", "claudeAgent"]);
+    assert.equal(
+      settings.skillCatalogSource,
+      NodePath.join(manifest.home, "test-skills", "catalog"),
+    );
+    for (const driver of ["codex", "claudeAgent"]) {
+      const instance = settings.providerInstances[driver];
+      assert.equal(
+        instance.environment.find((entry: { name: string }) => entry.name === "HOME").value,
+        NodePath.join(manifest.home, "test-skills", driver),
+      );
     }
   }).pipe(Effect.scoped),
 );
