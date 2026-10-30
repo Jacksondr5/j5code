@@ -175,20 +175,26 @@ it("publishes closed-world, non-destructive hints for every read-only J5 tool", 
       "orchestrator_capabilities",
       "t3_environment_read",
       "t3_project_read",
-      "t3_queue_read",
+      "t3_thread_search",
+      "j5_list_personas",
+      "j5_list_participants",
     ],
   );
   for (const tool of reads) {
     assert.isFalse(Context.get(tool.annotations, Tool.Destructive), tool.name);
     assert.isFalse(Context.get(tool.annotations, Tool.OpenWorld), tool.name);
   }
+  for (const tool of [
+    J5OrchestratorToolkit.tools.t3_thread_read,
+    J5OrchestratorToolkit.tools.task_status,
+  ]) {
+    assert.isFalse(Context.get(tool.annotations, Tool.Readonly), tool.name);
+  }
 });
 
-// Claude Code drops EVERY tool of an MCP server when one tool's input schema has no top-level
-// `type: "object"` (verified 2026-09-10 with a probe server: a single top-level `anyOf` tool made
-// the whole server's inventory vanish while it still reported "connected"). `Schema.Struct({})`
-// encodes as exactly that anyOf, which is how `j5_list_personas` silently took the whole t3-code
-// toolkit away from every Claude thread. No-input tools must omit `parameters` instead.
+// Claude Code drops EVERY tool of an MCP server when one tool's input schema lacks a top-level
+// `type: "object"` (verified 2026-09-10), while still reporting "connected". `Schema.Struct({})`
+// encodes as a top-level anyOf, so no-input tools must omit `parameters`.
 it("publishes every tool with a top-level object input schema", () => {
   for (const tool of [
     ...Object.values(J5Toolkit.tools),
