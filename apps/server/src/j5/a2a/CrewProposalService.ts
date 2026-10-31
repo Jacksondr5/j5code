@@ -252,8 +252,7 @@ const sameWorkspace = (a: CrewProposalSeat["workspace"], b: CrewProposalSeat["wo
     case "existing_worktree":
       return (
         b.type === "existing_worktree" &&
-        worktreePathKey(a.worktreePath) === worktreePathKey(b.worktreePath) &&
-        a.branch === b.branch
+        worktreePathKey(a.worktreePath) === worktreePathKey(b.worktreePath)
       );
   }
 };
