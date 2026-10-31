@@ -148,6 +148,7 @@ A worktree holds one setup at a time. Pass a flag to the first start, or to
 | The same, with Remote polling Local             | `--peer --poll`                      |
 | A base and a head server for before/after shots | `--base <ref>`                       |
 | The head build opening a home Base wrote        | `upgrade`, in a `--base <ref>` build |
+| The native app on a device                      | `--mobile android` or `--mobile ios` |
 
 - **After any `rebuild`**, a tab that was open before it can stay on the
   pairing form. Press "Reload app" there.
@@ -172,6 +173,62 @@ A worktree holds one setup at a time. Pass a flag to the first start, or to
   with `preview_evaluate`: `indexedDB.deleteDatabase("t3code:connection-runtime")`.
   After `upgrade`, `guest` adds people to the upgraded server; do not run the
   base checkout's own script.
+
+### Mobile
+
+To test the native app, add `--mobile android` or `--mobile ios` to the first
+start, or to `rebuild`. It starts the usual test server and Metro, claims a
+test device for you, and prints which device to open. Android runs on this
+machine. iOS runs on the MacBook, which the script reaches as `ssh macbook`
+(set `J5_MOBILE_IOS_SSH_HOST` for another host).
+
+1. `node scripts/j5/setup-agent-live-test.ts --mobile android` (or `ios`).
+2. When setup has finished and printed the Mobile block, call `device_open`
+   with the host and device it names. On Android the script has already booted
+   the emulator; on iOS `device_open` boots the Simulator. If setup says the
+   emulator is still booting, run it again before calling `device_open`.
+3. Run `node scripts/j5/setup-agent-live-test.ts mobile-open`. It installs the
+   dev client for this checkout, opens it against your Metro, and pairs it as
+   the test owner, so the app lists the test project's threads. Run it again
+   whenever the app needs reloading or pairing again.
+4. Drive the app with the `agent-device` command that `device_open` returned,
+   as [test-t3-mobile](../test-t3-mobile/SKILL.md) describes, and look with
+   `device_screenshot`.
+5. When you finish, run `agent-device close` with the flags `device_open`
+   returned (without `--shutdown`), then call `device_close`, then run `stop`.
+   `device_close` does not end the agent-device session, and a session left
+   open holds the device against the next tester. `stop` resets the device (a
+   Simulator is erased, an Android AVD deleted) and releases it.
+
+- One iOS tester at a time; Android is the parallel path, with three slots.
+  When the devices are taken, setup refuses and names who holds each; it does
+  not wait. Use only the device you claimed: `stop` erases it.
+- On Android, open the emulator by the `emulator-<port>` serial the script
+  prints, never by its AVD name: asked to boot an AVD, the Device panel opens
+  whichever emulator already runs, which can be another tester's.
+- When the MacBook is asleep or off, setup says "iOS host offline; Android is
+  available".
+- When `mobile-open` says there is no dev client for this checkout's native
+  fingerprint, a native dependency changed. Build it with
+  `node scripts/j5/setup-agent-live-test.ts mobile-build android` (or `ios`),
+  in the background: Android takes about 15 minutes the first time, and iOS
+  takes 6 to 15 minutes. Then run `mobile-open` again. The iOS build runs on
+  the MacBook from your last commit, so commit native changes first. One iOS
+  build runs at a time.
+- The MacBook is reached as `ssh macbook` and needs Xcode, git, CocoaPods
+  (Homebrew), vite-plus (`~/.config/vite-plus/env`) and the pool's
+  Simulators. Its build checkout is `~/j5-mobile-rig/checkout`; leave it to
+  the script.
+- The first `device_open` on a Simulator can take a couple of minutes while
+  agent-device builds its test runner.
+- If commands on the MacBook print "Install Failed: Authorization is
+  required", Xcode's Simulator component is out of date, and agent-device
+  cannot build its runner, so taps and snapshots fail. Ask the developer to
+  open Xcode once on the MacBook; you cannot fix it.
+- On Android, the first launch can show "Could not import shared content":
+  press Retry. Right after a tap, `snapshot` can return the previous screen:
+  take another before trusting it.
+- On iOS, tap the composer with `click`, then `type`; `fill` can miss it.
 
 ### Live turns
 

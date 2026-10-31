@@ -7,7 +7,8 @@ description: Test T3 Code's native iOS and Android app through its Device panel 
 
 ## Open the device
 
-Call `device_list`, then `device_open` with the selected host and device IDs.
+In J5, set up first with `--mobile` (see "Use an isolated backend"); it names
+the device to open. Call `device_list`, then `device_open` with the selected host and device IDs.
 T3 boots the device and shows its live stream in the Device panel. Follow its
 returned `quickStart`, using the exact `agentDevice.command` and all `targetArgs`
 on every operation. Use `device_screenshot` to inspect the screen.
@@ -17,16 +18,23 @@ and stop verification. Do not install or switch to another automation system.
 
 ## Use an isolated backend
 
-Reuse this task's healthy backend. Otherwise run `vp run dev` from the
-repository root, retain its terminal session, and read the actual backend port
-from the dev-runner output. Use the worktree's ignored `.j5code` state. Never run
-against `~/.j5code/userdata`. The Browser panel is not required for this workflow.
+In J5, run `node scripts/j5/setup-agent-live-test.ts --mobile <ios|android>`,
+as the Mobile section of [j5-live-test](../j5-live-test/SKILL.md) describes.
+It starts an isolated backend and this worktree's Metro, claims a test device,
+and prints which one to open. Never run against `~/.j5code/userdata`. The
+Browser panel is not required for this workflow.
 
 Test with meaningful project and thread data. Read the shared
 [SQLite fixture reference](../test-t3-app/references/sqlite-fixtures.md) only
 when inspecting or seeding SQLite. Stop the test server before fixture writes.
 
 ## Launch J5 Code Dev
+
+In J5, after `device_open`, run
+`node scripts/j5/setup-agent-live-test.ts mobile-open`. It installs the dev
+client for this checkout from the cache, opens it against this worktree's
+Metro, and pairs it (see "Pair and verify"). The steps below are what it
+replaces.
 
 From the checkout being tested on the selected device host, run:
 
@@ -57,6 +65,10 @@ applies these preferences before the app loads.
 
 ## Pair and verify
 
+In J5, `mobile-open` has already paired the app as the test home's owner. The
+helper below pairs a device that belongs to no person, which J5 shows as an
+empty app, so do not use it in J5.
+
 Use the helper from the repository root, with the returned executable and target
 arguments stored in `agent_device_command` and the Bash array
 `agent_device_target_args`:
@@ -75,4 +87,6 @@ on Android. For a remote backend, use its reachable origin.
 Confirm the intended projects appear, exercise the affected flow, and capture
 evidence. Retain the app and environment while iterating. At teardown, remove
 the disposable connection, close the AgentDevice session, call `device_close`,
-and stop only your backend and Metro processes.
+and stop only your backend and Metro processes. In J5, close the AgentDevice
+session first; then `device_close` and the setup script's `stop` do the rest,
+and reset the device.
