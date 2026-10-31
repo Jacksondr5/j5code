@@ -840,15 +840,31 @@ export async function startMobile(
 
 export function formatMobile(paths: LiveTestPaths, record: MobileRecord): string {
   const host = DEVICE_LOOPBACK[record.platform];
+  const setupAgain = selfCommand(paths, "--mobile android");
+  // The Device panel lists an emulator only once it has booted, so until then nothing says to open it.
+  const emulator =
+    record.platform === "ios"
+      ? "ready"
+      : !isOurs(paths, record.emulator)
+        ? "stopped"
+        : emulatorBooted(androidSdk().adb, record.emulator!.port)
+          ? "ready"
+          : "booting";
   const device =
     record.platform === "ios"
       ? `hostId: the MacBook host in device_list; deviceId "${record.udid}" (${record.slot})`
-      : !isOurs(paths, record.emulator)
-        ? `${record.slot}: its emulator is not running; run ${selfCommand(paths, "--mobile android")}`
-        : // The Device panel lists an emulator only once it has booted.
-          !emulatorBooted(androidSdk().adb, record.emulator!.port)
-          ? `${record.slot}: emulator-${record.emulator!.port} is still booting; do not call device_open yet. ${selfCommand(paths, "--mobile android")} waits for it`
+      : emulator === "stopped"
+        ? `${record.slot}: its emulator is not running`
+        : emulator === "booting"
+          ? `${record.slot}: emulator-${record.emulator!.port} is still booting; do not call device_open yet`
           : `hostId "local"; deviceId "emulator-${record.emulator!.port}" (${record.slot})`;
+  const next =
+    emulator === "ready"
+      ? `  1. device_open with the ids above.${record.platform === "ios" ? " It boots the Simulator." : ""}
+  2. ${selfCommand(paths, "mobile-open")}
+     installs the dev client, opens it against Metro and pairs it as the home's owner.`
+      : `  1. ${setupAgain}
+     ${emulator === "booting" ? "waits for the emulator to boot" : "starts the emulator"}, then prints the device to open.`;
   return `Mobile (${record.platform}), device slot ${record.slot}:
   Device panel  ${device}
   Backend       http://${host}:${record.serverPort} from the device
@@ -859,11 +875,9 @@ export function formatMobile(paths: LiveTestPaths, record: MobileRecord): string
   }
 
 Next:
-  1. device_open with the ids above.${record.platform === "ios" ? " It boots the Simulator." : ""}
-  2. ${selfCommand(paths, "mobile-open")}
-     installs the dev client, opens it against Metro and pairs it as the home's owner.
-When you finish: device_close, then ${selfCommand(paths, "stop")}
-(it ${record.platform === "ios" ? "shuts down and erases the Simulator" : "shuts down and deletes the AVD"} and releases the slot).
+${next}
+When you finish: agent-device close (with device_open's flags, no --shutdown), device_close, then
+${selfCommand(paths, "stop")} (it ${record.platform === "ios" ? "shuts down and erases the Simulator" : "shuts down and deletes the AVD"} and releases the slot).
 `;
 }
 
