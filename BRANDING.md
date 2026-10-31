@@ -65,8 +65,11 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
 - The command's name where the server looks it up or prints it: `apps/server/src/binCli.ts` (the
   root command and its help path), `cli/invocation.ts` (`isCommandAvailable("j5")` and the
   command it renders), `cli/browser.ts` (`j5 browser setup`), `cloud/CloudLink.ts`
-  (`j5 connect link`), and `packages/client-runtime/src/preview/serverBrowserStream.ts`
-  (`sudo j5 browser setup`).
+  (`j5 connect link`), `cli/server.ts` (`j5 --help` and `j5 ./my-project` for an unknown
+  command), `cli/theme.ts` (`j5 theme clear`), and
+  `packages/client-runtime/src/preview/serverBrowserStream.ts` (`sudo j5 browser setup`).
+- Names J5 gives in other services: the EAS simulator session name in
+  `apps/server/src/device/EasDeviceHost.ts` (`J5 Code · <label> · <hex>`), shown in Expo's dashboard.
 - Triage (`j5 triage`): `apps/server/src/cli/triagePrompt.ts` and its byte-identical repo copy
   `.github/triage/PLAYBOOK.md` name J5 Code, clone and search `Jacksondr5/j5code`, refresh the
   playbook from `j5/main`, and file issues there with the `via-triage` template and label
@@ -239,7 +242,8 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
   `scripts/build-desktop-artifact.ts` (maintainer, description, `/usr/share/doc/t3code`) and
   `apps/desktop/resources/linux/com.t3tools.t3code.metainfo.xml`.
 - Upstream's `thread` command (`apps/server/src/cli/thread.ts`), which J5 does not register (FORK.md
-  case 82), so its copy is never shown.
+  case 82), so its copy ("T3 Code", `t3 thread cli`) is never shown. Rebrand it if the command
+  returns ([#695](https://github.com/Jacksondr5/j5code/issues/695)).
 - Upstream's leftovers J5 has no use for: `resolveServerInstallation` in `cli/invocation.ts` still
   looks for an npm-global `t3` package, which never matches a J5 install; the AppArmor profile
   path keeps its `t3-` name (`preview/PreviewBrowserHost.ts`); and
