@@ -606,24 +606,30 @@ const make: Layer.Layer<PersonAccess, never, SqlClient.SqlClient | ReadChanges> 
         if (levels.some((held) => held.scope.kind === "server")) return null;
         if (levels.length === 0) return [];
         // `coveringThread` for every thread at once: each thread's line of ancestors, kept where a
-        // thread on it, or the thread's project, is one the person holds a level on.
+        // thread on it, or the thread's project, is one the person holds a level on. The lines are
+        // walked only for someone who holds a thread.
+        const underThreads = levels.some((held) => held.scope.kind === "thread")
+          ? sql`
+              WITH RECURSIVE chain(origin, thread_id, depth) AS (
+                SELECT thread_id, thread_id, 0
+                FROM orchestration_v2_projection_threads
+                WHERE deleted_at IS NULL
+                UNION ALL
+                SELECT chain.origin, ${parentInChain}, chain.depth + 1
+                FROM chain
+                WHERE chain.thread_id IS NOT NULL AND chain.depth < ${MAX_ANCESTOR_DEPTH}
+              )
+              SELECT DISTINCT chain.origin AS thread_id
+              FROM chain
+              JOIN j5_a2a_person_level AS held
+                ON held.person_id = ${personId}
+               AND held.scope_kind = 'thread'
+               AND held.scope_id = chain.thread_id
+              UNION
+            `
+          : sql``;
         const rows = yield* sql<{ readonly thread_id: string }>`
-          WITH RECURSIVE chain(origin, thread_id, depth) AS (
-            SELECT thread_id, thread_id, 0
-            FROM orchestration_v2_projection_threads
-            WHERE deleted_at IS NULL
-            UNION ALL
-            SELECT chain.origin, ${parentInChain}, chain.depth + 1
-            FROM chain
-            WHERE chain.thread_id IS NOT NULL AND chain.depth < ${MAX_ANCESTOR_DEPTH}
-          )
-          SELECT DISTINCT chain.origin AS thread_id
-          FROM chain
-          JOIN j5_a2a_person_level AS held
-            ON held.person_id = ${personId}
-           AND held.scope_kind = 'thread'
-           AND held.scope_id = chain.thread_id
-          UNION
+          ${underThreads}
           SELECT threads.thread_id
           FROM orchestration_v2_projection_threads AS threads
           JOIN j5_a2a_person_level AS held

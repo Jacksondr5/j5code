@@ -23,7 +23,7 @@ A **shared conversation** is a thread that more than one person can write to: on
 
 **Anyone who can write runs the thread.** A Collaborator, like an Owner, sends, queues and steers messages, interrupts and stops work, and changes or withdraws any queued message. When a person can no longer write to a thread, the messages they still have queued there are withdrawn.
 
-**Thread state is shared, for now.** Whether a thread is archived, settled, snoozed or pinned, and whether it has been read, is one value for everyone on the server, as upstream keeps it. The exception is what ranks a thread in Cmd+K: how often it is opened, and the searches it was opened from. Those are the server's Owners' and wide Collaborators' alone. A person a thread or project is shared with, or a Viewer of the server, doesn't change them by opening a thread, and isn't shown them.
+**Thread state is shared, for now.** Whether a thread is archived, settled, snoozed or pinned, and whether it has been read, is one value for everyone on the server, as upstream keeps it. The exception is what ranks a thread in Cmd+K: how often it is opened, and the searches it was opened from. Those are kept only for the server's Owners and Collaborators at server scope. A person a thread or project is shared with, or a Viewer of the server, doesn't change them by opening a thread, and isn't shown them.
 
 **Search reaches what is shared.** Cmd+K finds messages in the threads a person can open, at either level, and nowhere else: no thread, snippet or count from a thread they can't open. The server limits the search to those threads before it cuts the results, so their matches are never crowded out by threads they can't see. Their results are ranked without anyone's opens. As for an Owner, a word with more than 10,000 matches across the server finds only the newest of them.
 
@@ -86,14 +86,14 @@ Set aside on purpose, each tracked where it is linked. An item leaves this list 
 
 19. For now, archive, settle, snooze, pin and the read marker are one value per thread, shared by everyone on the server.
 
+### Scheduled runs
+
+20. In a shared conversation, a run of a scheduled task reaches the agent beginning with the line `[Scheduled by <name> (<level>)]`, carrying any note due as a person's message does. It names the person who created the task or, when someone else has changed its prompt since, that person, by the name and level they have when it runs. A task whose prompt no person is recorded as writing, because an agent scheduled it or last changed its prompt, or it was made before this criterion, runs with no line. When the person a run would name can no longer write to the thread, the run is not sent: it fails, with the reason shown in the task list, and each later run fails the same way until someone who can write changes the task's prompt, which makes it theirs.
+
 ### Search
 
 21. Cmd+K's message search, for a person a thread or project is shared with or a Viewer of the server, finds messages only in threads they can open, at either level. It returns no thread, snippet or count from any other thread, and other threads' matches never take the places of theirs, apart from upstream's limit of the newest 10,000 matches of a word across the server, which applies to an Owner too.
 22. Opening a thread, from Cmd+K or elsewhere, changes the record that ranks threads in Cmd+K only for an Owner or a Collaborator at server scope. That record is not shown to anyone else, and does not order their results.
-
-### Scheduled runs
-
-20. In a shared conversation, a run of a scheduled task reaches the agent beginning with the line `[Scheduled by <name> (<level>)]`, carrying any note due as a person's message does. It names the person who created the task or, when someone else has changed its prompt since, that person, by the name and level they have when it runs. A task whose prompt no person is recorded as writing, because an agent scheduled it or last changed its prompt, or it was made before this criterion, runs with no line. When the person a run would name can no longer write to the thread, the run is not sent: it fails, with the reason shown in the task list, and each later run fails the same way until someone who can write changes the task's prompt, which makes it theirs.
 
 ## Scenarios
 
