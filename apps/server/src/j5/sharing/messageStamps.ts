@@ -14,6 +14,7 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import type { ParticipantId } from "../a2a/contracts.ts";
+import { isDeliveryMessageId } from "../a2a/DeliveryTransport.ts";
 import { authorLabel } from "./authorLabel.ts";
 import { PersonAccess } from "./PersonAccess.ts";
 import { SharedThreads, type ThreadWriter } from "./SharedThreads.ts";
@@ -50,15 +51,16 @@ export const messageOriginColumns = (alias: string) => `
 `;
 
 /**
- * Whether a message no person is recorded for was typed by one, before its thread was shared: the
- * first owner's then, the only person who could write to it (AC3). An inbox reply is a person's
- * too, but comes as a delivery ("mcp") and carries its header.
+ * Whether a message no person is recorded for was written by one, before its thread was shared:
+ * the first owner's then, the only person who could write to it (AC3). That is one they typed in
+ * the thread, or an Inbox reply, the only delivery a person sends; any other "mcp" message is an
+ * agent's or a session's no person is known for.
  */
-export const typedByFirstOwner = (origin: MessageOrigin) =>
-  origin.created_by === "user" &&
-  origin.creation_source !== "mcp" &&
-  origin.scheduled_task_id === null &&
-  origin.sender_thread_id === null;
+export const typedByFirstOwner = (message: MessageOrigin & { readonly message_id: string }) =>
+  message.created_by === "user" &&
+  (message.creation_source !== "mcp" || isDeliveryMessageId(message.message_id)) &&
+  message.scheduled_task_id === null &&
+  message.sender_thread_id === null;
 
 /** The platform's text a stored message begins with: the note it carries, then the line naming
  * whose it is. */

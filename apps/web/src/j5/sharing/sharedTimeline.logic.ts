@@ -37,7 +37,10 @@ export function sharedMessageView(input: {
   readonly author: MessageAuthor | undefined;
   /** A read of who wrote what has come back since this client first saw the server's copy. */
   readonly answeredFor: boolean;
-  /** The thread can be a shared conversation: more than one person can write to it, or did. */
+  /**
+   * A read may name who wrote a message: more than one person can write to the thread, or did,
+   * or the reader is not the first owner.
+   */
   readonly mayBeShared: boolean;
   /** What this client's person typed, when they sent it from here. */
   readonly typedHere: string | null;

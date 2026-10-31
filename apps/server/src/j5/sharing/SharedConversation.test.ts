@@ -219,6 +219,8 @@ it.effect(
         [
           { name: "Jackson", level: "owner", you: false, hasNote: true },
           { name: "Priya", level: "collaborator", you: true, hasNote: false },
+          // The message from before sharing, which no one is recorded for: the first owner's.
+          { name: "Jackson", level: "owner", you: false, hasNote: false },
         ],
       );
       // The prefix a client strips is exactly what the platform put on the stored text.
@@ -338,7 +340,8 @@ it.effect("a fork names who wrote the messages it shows, and none after its fork
         return forked;
       });
     const fork = yield* forkFrom("thread:fork", source, `run:${second.messageId}`);
-    // The fork's own message, from a thread only one person writes to, names no one.
+    // The fork's own message, from a thread only one person writes to, is recorded for no one:
+    // the first owner's, to its forks too.
     yield* taken(fork, "message:fork-own", "completed");
     const forkOfFork = yield* forkFrom("thread:fork-of-fork", fork, "run:message:fork-own");
 
@@ -346,12 +349,80 @@ it.effect("a fork names who wrote the messages it shows, and none after its fork
     for (const threadId of [fork, forkOfFork]) {
       const read = yield* authors(threadId, priya);
       assert.isFalse(read.shared);
-      assert.deepStrictEqual(read.authors, sourceRead.authors.slice(0, 2));
+      assert.deepStrictEqual(read.authors, [
+        ...sourceRead.authors.slice(0, 2),
+        {
+          messageId: "message:fork-own",
+          name: "Jackson",
+          level: "owner",
+          editedBy: null,
+          you: false,
+          note: null,
+          storedPrefix: "",
+        },
+      ]);
     }
     assert.deepStrictEqual(
       sourceRead.authors.map((entry) => entry.messageId),
       [first.messageId, second.messageId, later.messageId],
     );
+  }).pipe(Effect.provide(conversationLayer)),
+);
+
+it.effect("a message a person wrote before sharing is the first owner's to everyone else", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const owner = yield* jackson;
+    const threadId = yield* thread("thread:before-sharing");
+    const before = Effect.fn("test.before")(function* (
+      messageId: string,
+      origin: Record<string, unknown>,
+    ) {
+      yield* sql`
+        INSERT INTO orchestration_v2_projection_messages (
+          message_id, thread_id, run_id, role, streaming, created_at, updated_at, payload_json
+        ) VALUES (
+          ${messageId}, ${threadId}, NULL, 'user', 0, ${AT}, ${AT},
+          ${JSON.stringify({ text: messageId, ...origin })}
+        )
+      `;
+    });
+    yield* before("message:typed", { createdBy: "user", creationSource: "web" });
+    yield* before("message:j5:a2a:delivery:inbox", { createdBy: "user", creationSource: "mcp" });
+    // None of these was written by a person.
+    yield* before("message:j5:a2a:delivery:agent", { createdBy: "agent", creationSource: "mcp" });
+    yield* before("message:j5:a2a:delivery:notice", { createdBy: "system", creationSource: "mcp" });
+    yield* before("message:session", { createdBy: "user", creationSource: "mcp" });
+    yield* before("message:scheduled", {
+      createdBy: "user",
+      creationSource: "server",
+      scheduledTaskId: "task:nightly",
+    });
+    yield* before("message:sent", {
+      createdBy: "user",
+      creationSource: "web",
+      senderThreadId: "thread:elsewhere",
+    });
+    const priya = yield* personWith("Priya", onThread(threadId));
+    const sam = yield* personWith("Sam", onThread(threadId, "viewer"));
+
+    const asOwner = (messageId: string) => ({
+      messageId,
+      name: "Jackson",
+      level: "owner" as const,
+      editedBy: null,
+      you: false,
+      note: null,
+      storedPrefix: "",
+    });
+    for (const reader of [priya, sam]) {
+      assert.deepStrictEqual((yield* authors(threadId, reader)).authors, [
+        asOwner("message:typed"),
+        asOwner("message:j5:a2a:delivery:inbox"),
+      ]);
+    }
+    // The first owner's own view draws them as theirs already.
+    assert.deepStrictEqual((yield* authors(threadId, owner)).authors, []);
   }).pipe(Effect.provide(conversationLayer)),
 );
 
