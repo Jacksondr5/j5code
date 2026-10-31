@@ -33,6 +33,8 @@ import {
 
 export const MOBILE_PLATFORMS = ["ios", "android"] as const;
 export type MobilePlatform = (typeof MOBILE_PLATFORMS)[number];
+/** A device the rig provides, or the developer's own phone, which reaches this machine over the tailnet. */
+export type MobileTarget = MobilePlatform | "phone";
 
 /** The tailnet ACL's dev range (decision D3), so a phone on the tailnet can reach both ports later. */
 export const MOBILE_PORT_RANGE = { first: 5774, last: 8733 } as const;
@@ -64,7 +66,9 @@ interface ProcessRecord {
 
 /** What `mobile.json` in the live-test root says. Written as soon as a slot is claimed, so `stop` can release it. */
 export interface MobileRecord {
-  readonly platform: MobilePlatform;
+  readonly platform: MobileTarget;
+  /** Phone only: this machine's tailnet address, which the phone reaches the backend and Metro by. */
+  readonly host?: string;
   /** The Simulator's or the AVD's name. */
   readonly slot: string;
   /** iOS only: the claimed Simulator. */
@@ -119,6 +123,10 @@ export function chooseMobilePorts(input: {
     `No free pair of ports is left in ${MOBILE_PORT_RANGE.first}-${MOBILE_PORT_RANGE.last}.`,
   );
 }
+
+/** The address a device reaches this machine by. */
+const deviceHost = (record: MobileRecord) =>
+  record.platform === "phone" ? record.host! : DEVICE_LOOPBACK[record.platform];
 
 /** Where claims live: shared by every worktree on this machine, so it is outside all of them. */
 export const claimsDirectory = (home: string) =>
@@ -228,9 +236,9 @@ export function iosBusy(input: {
 export const shellQuote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`;
 
 /** The URL that opens the dev client against Metro without the launcher's onboarding and overlays. */
-export function devClientUrl(platform: MobilePlatform, metroPort: number): string {
+export function devClientUrl(host: string, metroPort: number): string {
   const query = new URLSearchParams({
-    url: `http://${DEVICE_LOOPBACK[platform]}:${metroPort}`,
+    url: `http://${host}:${metroPort}`,
     disableOnboarding: "1",
     disableAutoLaunch: "1",
     disableFab: "1",
@@ -243,13 +251,13 @@ export function devClientUrl(platform: MobilePlatform, metroPort: number): strin
  * backend origin the device reaches, as `buildPairingUrl` in apps/server/src/startupAccess.ts does.
  */
 export function pairingDeepLink(input: {
-  readonly platform: MobilePlatform;
+  readonly host: string;
   readonly serverPort: number;
   readonly pairingUrl: string;
 }): string {
   const token = new URLSearchParams(new URL(input.pairingUrl).hash.slice(1)).get("token");
   if (token === null) throw new LiveTestRefusal(`No token in the pairing URL ${input.pairingUrl}.`);
-  const pairing = new URL(`http://${DEVICE_LOOPBACK[input.platform]}:${input.serverPort}/pair`);
+  const pairing = new URL(`http://${input.host}:${input.serverPort}/pair`);
   pairing.hash = new URLSearchParams([["token", token]]).toString();
   const query = new URLSearchParams({ pairingUrl: pairing.toString(), autoConnect: "1" });
   return `${J5_BRANDING.mobile.development.scheme}://connections/new?${query}`;
@@ -633,7 +641,7 @@ async function startMetro(
             ...liveTestEnvironment(process.env, paths.worktree),
             APP_VARIANT: "development",
             // The host the manifest's bundle URL names, as the device reaches Metro.
-            REACT_NATIVE_PACKAGER_HOSTNAME: DEVICE_LOOPBACK[record.platform],
+            REACT_NATIVE_PACKAGER_HOSTNAME: deviceHost(record),
             BROWSER: "none",
           },
           log: metroLog,
@@ -800,7 +808,7 @@ function claim(paths: LiveTestPaths, platform: MobilePlatform): MobileRecord {
  */
 export async function startMobile(
   paths: LiveTestPaths,
-  platform: MobilePlatform,
+  platform: MobileTarget,
   deadline: number,
 ): Promise<void> {
   if (readMobileRecord(paths) === undefined && currentServerState(paths).kind !== "stopped") {
@@ -808,6 +816,7 @@ export async function startMobile(
       `A live-test server is already running here without --mobile. Stop it first: ${selfCommand(paths, "stop")}`,
     );
   }
+  if (platform === "phone") return startPhone(paths, deadline);
   if (platform === "ios") assertIosHostOnline();
   else {
     androidSdk();
@@ -839,6 +848,7 @@ export async function startMobile(
 }
 
 export function formatMobile(paths: LiveTestPaths, record: MobileRecord): string {
+  if (record.platform === "phone") return formatPhone(paths, record);
   const host = DEVICE_LOOPBACK[record.platform];
   const setupAgain = selfCommand(paths, "--mobile android");
   // The Device panel lists an emulator only once it has booted, so until then nothing says to open it.
@@ -886,7 +896,7 @@ export async function mobileOpen(paths: LiveTestPaths): Promise<void> {
   const record = readMobileRecord(paths);
   if (record === undefined) {
     throw new LiveTestRefusal(
-      `No mobile live test is set up here. Start one: ${selfCommand(paths, "--mobile ios|android")}`,
+      `No mobile live test is set up here. Start one: ${selfCommand(paths, "--mobile ios|android|phone")}`,
     );
   }
   const server = currentServerState(paths);
@@ -900,6 +910,7 @@ export async function mobileOpen(paths: LiveTestPaths): Promise<void> {
       `The SSH tunnel is down. Start it again with ${selfCommand(paths, "--mobile ios")}`,
     );
   }
+  if (record.platform === "phone") return printPhoneLinks(paths, record);
   const openHint = `Open it first: device_open with the ids \`${selfCommand(paths, "status")}\` prints.`;
 
   const fingerprint = nativeFingerprint(paths, record.platform);
@@ -970,7 +981,7 @@ export async function mobileOpen(paths: LiveTestPaths): Promise<void> {
   const { metroLog } = mobileFiles(paths);
   const before = metroBundles(NodeFS.readFileSync(metroLog, "utf8"));
   console.log("Opening the dev client against Metro (the first bundle takes about 30 seconds)...");
-  openUrl(devClientUrl(record.platform, record.metroPort));
+  openUrl(devClientUrl(deviceHost(record), record.metroPort));
   const until = Date.now() + BUNDLE_TIMEOUT_MS;
   for (;;) {
     const now = metroBundles(NodeFS.readFileSync(metroLog, "utf8"));
@@ -994,7 +1005,7 @@ export async function mobileOpen(paths: LiveTestPaths): Promise<void> {
   const pairingUrl = mintPairingUrl(paths, owner, label);
   if (pairingUrl === undefined) throw new LiveTestRefusal("Minting a pairing link failed.");
   const link = pairingDeepLink({
-    platform: record.platform,
+    host: deviceHost(record),
     serverPort: record.serverPort,
     pairingUrl,
   });
@@ -1039,6 +1050,7 @@ export async function stopMobile(paths: LiveTestPaths): Promise<void> {
     await stopGroup(process_!.pid);
     console.log(`${name}: STOPPED`);
   }
+  if (record.platform === "phone") return NodeFS.rmSync(mobileFiles(paths).record, { force: true });
   if (record.platform === "ios") {
     const udid = record.udid!;
     // Shutting down a Simulator that is already shut down is an error simctl reports; erase is not.
@@ -1113,6 +1125,95 @@ export function mobileStatus(paths: LiveTestPaths): string | undefined {
   Metro: ${state(isOurs(paths, record.metro))}${
     record.platform === "ios"
       ? `   Tunnel: ${state(isOurs(paths, record.tunnel))}`
-      : `   Emulator: ${state(isOurs(paths, record.emulator))}`
+      : record.platform === "android"
+        ? `   Emulator: ${state(isOurs(paths, record.emulator))}`
+        : ""
   }`;
+}
+
+/** This machine's tailnet IPv4 address, which the developer's phone reaches it by. */
+function tailnetAddress(): string {
+  const ip = NodeChildProcess.spawnSync("tailscale", ["ip", "-4"], {
+    encoding: "utf8",
+    timeout: 15_000,
+  });
+  const address = ip.stdout?.split("\n")[0]?.trim();
+  if (ip.status !== 0 || !address) {
+    throw new LiveTestRefusal(
+      `This machine has no tailnet address, so a phone cannot reach it: ${ip.stderr}`,
+    );
+  }
+  return address;
+}
+
+/**
+ * The developer's own phone: the backend listens on every interface (the dev runner binds loopback
+ * or all of them) on a port in the tailnet's dev range, and Metro names the tailnet address.
+ */
+async function startPhone(paths: LiveTestPaths, deadline: number): Promise<void> {
+  const existing = readMobileRecord(paths);
+  if (existing !== undefined && existing.platform !== "phone") {
+    throw new LiveTestRefusal(
+      `This worktree's live test is set up for ${existing.platform}. Stop it first: ${selfCommand(paths, "stop")}`,
+    );
+  }
+  const record: MobileRecord =
+    existing ??
+    (() => {
+      const host = tailnetAddress();
+      const ports = chooseMobilePorts({
+        worktree: paths.worktree,
+        avoid: [devRunnerWebPort(paths)],
+        isFree: (port) => listenerOn(port) === undefined,
+      });
+      const created: MobileRecord = { platform: "phone", slot: "phone", host, ...ports };
+      writeMobileRecord(paths, created);
+      return created;
+    })();
+  console.log("Starting the dev server and Metro for a phone on the tailnet...");
+  const backend = startServer(paths, "dev", {}, deadline, [
+    "--port",
+    String(record.serverPort),
+    "--host",
+    "0.0.0.0",
+  ]);
+  backend.catch(() => undefined);
+  await startMetro(paths, record, deadline);
+  printRunning(paths, await backend, undefined);
+  console.log(formatPhone(paths, record));
+}
+
+function formatPhone(paths: LiveTestPaths, record: MobileRecord): string {
+  return `Mobile (phone), for the developer's own phone on the tailnet:
+  Backend       http://${record.host}:${record.serverPort}
+  Metro         http://${record.host}:${record.metroPort}, log ${mobileFiles(paths).metroLog}
+
+Next:
+  ${selfCommand(paths, "mobile-open")}
+     prints the two links to send the developer: one opens J5 Code Dev against this Metro,
+     the other pairs it with this server as the home's owner.
+When you finish: ${selfCommand(paths, "stop")}
+`;
+}
+
+/** The phone is the developer's, so nothing here can open the links on it: they are printed to send. */
+function printPhoneLinks(paths: LiveTestPaths, record: MobileRecord): void {
+  const manifest = readManifest(paths);
+  const owner = "ownerName" in manifest ? manifest.ownerName : undefined;
+  if (owner === undefined)
+    throw new LiveTestRefusal("The test home's owner has no name to pair as.");
+  // The developer may open it a while after it is sent; `pair` defaults to five minutes.
+  const pairingUrl = mintPairingUrl(paths, owner, `mobile-open phone ${Date.now()}`, "60m");
+  if (pairingUrl === undefined) throw new LiveTestRefusal("Minting a pairing link failed.");
+  const host = record.host!;
+  console.log(`Send the developer these two links, to open on the phone in this order:
+
+1. Open J5 Code Dev against this branch's Metro:
+   ${devClientUrl(host, record.metroPort)}
+
+2. Then pair it with this test server, as ${owner} (works once, within an hour):
+   ${pairingDeepLink({ host, serverPort: record.serverPort, pairingUrl })}
+
+The phone needs J5 Code Dev installed for this checkout's native fingerprint, and Tailscale on.
+If iOS asks to allow "Local Network" for J5 Code Dev, the developer allows it.`);
 }
