@@ -85,7 +85,7 @@ const GENERIC_TEMPLATE: ReadonlyArray<string> = [
   "Open questions, risks, and anything you could not verify.",
 ];
 
-export const AGENT_HANDOFF_ROOT = "handoffs";
+const AGENT_HANDOFF_ROOT = "handoffs";
 
 const LEADING_HEX8 = /^[0-9a-f]{8}/i;
 

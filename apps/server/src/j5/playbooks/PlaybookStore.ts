@@ -63,7 +63,7 @@ const stepSummary = ({ id, title, persona }: PlaybookStep) =>
   persona === undefined ? { id, title } : { id, title, persona };
 
 /** Warnings retain uncertainty about absent personas when source files are invalid. */
-export const stepPersonaWarnings = (
+const stepPersonaWarnings = (
   steps: ReadonlyArray<PlaybookStep>,
   catalog: Parameters<typeof personaCatalogProblem>[0] & {
     readonly diagnostics: ReadonlyArray<unknown>;

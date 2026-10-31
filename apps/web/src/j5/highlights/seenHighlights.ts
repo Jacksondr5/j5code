@@ -12,7 +12,7 @@ import { isElectron } from "../../env";
 // unseenHighlights reads that as "show everything" once first run is finished.
 const KEY = "j5:highlights:seen";
 
-export const highlightClient = isElectron ? "desktop" : "web";
+const highlightClient = isElectron ? "desktop" : "web";
 export const clientHighlights = highlightsForClient(HIGHLIGHTS, highlightClient);
 
 const listeners = new Set<() => void>();

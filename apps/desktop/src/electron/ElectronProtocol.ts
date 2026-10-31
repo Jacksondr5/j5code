@@ -15,8 +15,8 @@ import { J5_BRANDING } from "../../../../scripts/lib/j5-branding.ts";
 import * as Electron from "electron";
 
 export const DESKTOP_HOST = "app";
-export const DESKTOP_PRODUCTION_SCHEME = J5_BRANDING.desktop.productionScheme;
-export const DESKTOP_DEVELOPMENT_SCHEME = J5_BRANDING.desktop.developmentScheme;
+const DESKTOP_PRODUCTION_SCHEME = J5_BRANDING.desktop.productionScheme;
+const DESKTOP_DEVELOPMENT_SCHEME = J5_BRANDING.desktop.developmentScheme;
 
 export function getDesktopScheme(isDevelopment: boolean): string {
   return isDevelopment ? DESKTOP_DEVELOPMENT_SCHEME : DESKTOP_PRODUCTION_SCHEME;

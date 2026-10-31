@@ -7,7 +7,7 @@ import * as DateTime from "effect/DateTime";
  * (`createdBy: "agent"`, `creationSource: "mcp"`): A2A deliveries, briefs, upstream's agent sends.
  * Not server wakes, system notices, or an agent's scheduled task (`scheduledTaskId`).
  */
-export const isSettlementActivityMessage = (
+const isSettlementActivityMessage = (
   message: Pick<
     OrchestrationV2ConversationMessage,
     "role" | "createdBy" | "creationSource" | "scheduledTaskId"

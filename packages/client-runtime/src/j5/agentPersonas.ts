@@ -203,7 +203,7 @@ const ROUTE_FAILURE_TEXT: Readonly<Record<AgentPersonaRouteFailureCode, string>>
 };
 
 /** "Primary · Codex gpt-5.6-terra: model is not offered…" for each rejected route. */
-export function agentPersonaBlockedReasons(
+function agentPersonaBlockedReasons(
   attempts: ReadonlyArray<AgentPersonaRouteAttempt>,
 ): ReadonlyArray<string> {
   return attempts.map((attempt) => {
@@ -358,7 +358,7 @@ export async function importAgentPersonasWithConfirmation(
 export const AGENT_PERSONA_IMPORT_CONFIRMATION_MESSAGE =
   "Turn off agents you don’t want to replace.";
 
-export const AGENT_PERSONA_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
+const AGENT_PERSONA_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 
 /** Suggest a stable ID from a display name: lowercase, hyphenated, starting with a letter. */
 export function agentPersonaIdFromName(name: string): string {

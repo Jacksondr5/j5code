@@ -61,9 +61,9 @@ export const A2A_EXIT_CODES = {
 } as const;
 
 /** Documented ceiling for `--message`; larger payloads belong in a file the agent can read. */
-export const A2A_MAX_MESSAGE_BYTES = 64 * 1024;
+const A2A_MAX_MESSAGE_BYTES = 64 * 1024;
 
-export class A2ACliFailure extends Data.TaggedError("A2ACliFailure")<{
+class A2ACliFailure extends Data.TaggedError("A2ACliFailure")<{
   readonly exitCode: number;
   readonly error: string;
   readonly message: string;

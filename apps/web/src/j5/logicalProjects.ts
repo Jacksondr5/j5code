@@ -21,7 +21,7 @@ export interface LogicalProjectGroup {
  * Returns undefined while the project has not loaded or when it is gone, so the caller can fall
  * back to the title the read carries.
  */
-export function createLogicalProjectLookup<Group extends LogicalProjectGroup>(
+function createLogicalProjectLookup<Group extends LogicalProjectGroup>(
   groups: ReadonlyArray<Group>,
 ) {
   const groupByProject = new Map<string, Group>();

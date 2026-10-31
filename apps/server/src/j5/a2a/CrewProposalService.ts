@@ -37,7 +37,7 @@ import {
 } from "./CrewLaunchService.ts";
 import { planCrewPlaybook, withPersonaSwaps, type CrewPlaybookPlan } from "./crewPlaybookPlan.ts";
 import { crewDeclinedNoticeText, crewRosterChanges } from "./crewGateNotice.ts";
-import { durationMsBetween, j5AnalyticsRecorder } from "../analytics/recorder.ts";
+import { j5AnalyticsRecorder } from "../analytics/recorder.ts";
 import { CrewLaunchReporter } from "./CrewLaunchReporter.ts";
 import { crewSeatShapeProblem } from "./crewLimits.ts";
 import { CREW_PROPOSAL_SESSION } from "./crewSeatIds.ts";
@@ -71,7 +71,7 @@ const launchSeatOf = (seat: CrewProposalSeat): CrewLaunchSeat => {
   };
 };
 
-export class CrewProposalRequestError extends Data.TaggedError("CrewProposalRequestError")<{
+class CrewProposalRequestError extends Data.TaggedError("CrewProposalRequestError")<{
   readonly detail: string;
   readonly nextStep: string;
 }> {
@@ -89,7 +89,7 @@ export class CrewProposalNotOpenError extends Data.TaggedError("CrewProposalNotO
   }
 }
 
-export class CrewProposalNotFoundError extends Data.TaggedError("CrewProposalNotFoundError")<{
+class CrewProposalNotFoundError extends Data.TaggedError("CrewProposalNotFoundError")<{
   readonly proposalId: string;
 }> {
   override get message(): string {
@@ -97,7 +97,7 @@ export class CrewProposalNotFoundError extends Data.TaggedError("CrewProposalNot
   }
 }
 
-export class CrewProposalOperationError extends Data.TaggedError("CrewProposalOperationError")<{
+class CrewProposalOperationError extends Data.TaggedError("CrewProposalOperationError")<{
   readonly phase: string;
   readonly cause: unknown;
 }> {
@@ -236,6 +236,37 @@ const memberSteps = (instance: AgentCrewInstance | null) =>
     playbookStepIds: member.playbookStepIds ?? [],
   }));
 
+/** Whether the person changed a seat's workspace; `crewRosterChanges` leaves workspaces out. */
+const sameWorkspace = (a: CrewProposalSeat["workspace"], b: CrewProposalSeat["workspace"]) => {
+  if (a === undefined || b === undefined) return a === b;
+  switch (a.type) {
+    case "shared":
+      return b.type === "shared";
+    case "worktree":
+      return (
+        b.type === "worktree" &&
+        a.baseRef === b.baseRef &&
+        a.branch === b.branch &&
+        (a.startFromOrigin ?? false) === (b.startFromOrigin ?? false)
+      );
+    case "existing_worktree":
+      return (
+        b.type === "existing_worktree" &&
+        worktreePathKey(a.worktreePath) === worktreePathKey(b.worktreePath)
+      );
+  }
+};
+
+const rosterEdited = (
+  requested: ReadonlyArray<CrewProposalSeat>,
+  approved: ReadonlyArray<CrewProposalSeat>,
+) =>
+  Object.values(crewRosterChanges(requested, approved)).some((changed) => changed.length > 0) ||
+  approved.some((seat) => {
+    const asked = requested.find(({ seat: name }) => name === seat.seat);
+    return asked !== undefined && !sameWorkspace(asked.workspace, seat.workspace);
+  });
+
 type ProposalRequest = Omit<CreateCrewProposalInput, "playbook"> & {
   readonly playbook?: Pick<CrewPlaybookRef, "name"> | null | undefined;
 };
@@ -270,29 +301,22 @@ export const layer = Layer.effect(
     const launcher = yield* CrewLaunchService;
     const reporter = yield* CrewLaunchReporter;
     const recordAnalytics = yield* j5AnalyticsRecorder;
-    /** `j5.crew.proposal.resolved`: what the person decided, and what they changed first. */
+    /**
+     * The person's decision, as `feature.used`. Recorded here, not from the RPC, because only
+     * the proposal tells an edited roster from the one the Captain asked for.
+     */
     const recordResolved = Effect.fn("j5.a2a.crewProposal.recordResolved")(function* (
       proposal: CrewProposal,
       approved: ReadonlyArray<CrewProposalSeat> | null,
     ) {
-      const changes =
-        approved === null ? null : crewRosterChanges(proposal.requestedSeats, approved);
-      yield* recordAnalytics("j5.crew.proposal.resolved", {
-        kind: proposal.kind,
-        decision: approved === null ? "declined" : "approved",
-        requestedSeats: proposal.requestedSeats.length,
-        hasPlaybook: proposal.playbook !== undefined && proposal.playbook !== null,
-        ...durationMsBetween(proposal.createdAt, DateTime.formatIso(yield* DateTime.now)),
-        ...(approved === null || changes === null
-          ? {}
-          : {
-              approvedSeats: approved.length,
-              seatsAdded: changes.added.length,
-              seatsRemoved: changes.removed.length,
-              seatsRenamed: changes.renamed.length,
-              seatsRuntimeChanged: changes.runtimeChanged.length,
-              seatsInstructionsChanged: changes.instructionsChanged.length,
-            }),
+      yield* recordAnalytics("feature.used", {
+        feature: "crew.proposal.resolve",
+        variant:
+          approved === null
+            ? "decline"
+            : rosterEdited(proposal.requestedSeats, approved)
+              ? "edit"
+              : "approve",
       });
     });
     const threadManagement = yield* ThreadManagementService;

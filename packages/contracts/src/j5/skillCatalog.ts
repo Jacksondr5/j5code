@@ -127,16 +127,13 @@ export const J5SkillCatalogRpcSchemas = {
 
 const skillCatalogErrors = Schema.Union([EnvironmentAuthorizationError, SkillCatalogError]);
 
-export const WsJ5GetSkillCatalogStatusRpc = Rpc.make(
-  J5_SKILL_CATALOG_WS_METHODS.getSkillCatalogStatus,
-  {
-    payload: J5SkillCatalogRpcSchemas.getSkillCatalogStatus.input,
-    success: J5SkillCatalogRpcSchemas.getSkillCatalogStatus.output,
-    error: skillCatalogErrors,
-  },
-);
+const WsJ5GetSkillCatalogStatusRpc = Rpc.make(J5_SKILL_CATALOG_WS_METHODS.getSkillCatalogStatus, {
+  payload: J5SkillCatalogRpcSchemas.getSkillCatalogStatus.input,
+  success: J5SkillCatalogRpcSchemas.getSkillCatalogStatus.output,
+  error: skillCatalogErrors,
+});
 
-export const WsJ5ApplySkillCatalogGroupsRpc = Rpc.make(
+const WsJ5ApplySkillCatalogGroupsRpc = Rpc.make(
   J5_SKILL_CATALOG_WS_METHODS.applySkillCatalogGroups,
   {
     payload: J5SkillCatalogRpcSchemas.applySkillCatalogGroups.input,
@@ -145,7 +142,7 @@ export const WsJ5ApplySkillCatalogGroupsRpc = Rpc.make(
   },
 );
 
-export const WsJ5UpdateSkillCatalogRpc = Rpc.make(J5_SKILL_CATALOG_WS_METHODS.updateSkillCatalog, {
+const WsJ5UpdateSkillCatalogRpc = Rpc.make(J5_SKILL_CATALOG_WS_METHODS.updateSkillCatalog, {
   payload: J5SkillCatalogRpcSchemas.updateSkillCatalog.input,
   success: J5SkillCatalogRpcSchemas.updateSkillCatalog.output,
   error: skillCatalogErrors,

@@ -24,8 +24,8 @@ import { defaultAgentPersonaModelRoute } from "./agentPersonas.ts";
 import type { StartThreadTurnInput } from "../operations/commands.ts";
 import type { EnvironmentProject, EnvironmentThreadShell } from "../state/shell.ts";
 
-export const PLAYBOOK_AUTHOR_ID = "playbook-author";
-export const PLAYBOOK_AUTHOR_INSTRUCTIONS = `You are Playbook Author. Help the user turn a repeatable task into a small, clear agent-led playbook shared across this environment.
+const PLAYBOOK_AUTHOR_ID = "playbook-author";
+const PLAYBOOK_AUTHOR_INSTRUCTIONS = `You are Playbook Author. Help the user turn a repeatable task into a small, clear agent-led playbook shared across this environment.
 
 1. Start by asking what the playbook should accomplish. Clarify the desired result, inputs, constraints, and evidence of success one focused question at a time. Use details already provided instead of asking again.
 2. Inspect existing definitions with j5_playbook_list and j5_playbook_read, and relevant workspace guidance. Propose the smallest useful sequence of steps, then write or refine the definition once the user's intent is clear. Ask before replacing an unrelated existing definition; preserve stable step IDs when editing.
@@ -253,7 +253,7 @@ type PlaybookSuggestionInput = { name: string; title: string; issue: { message: 
 type PlaybookTriggerRange = { rangeStart: number; rangeEnd: number };
 
 /** `@playbook:` and `/playbook` share one trigger kind; the text at `rangeStart` tells them apart. */
-export const isPlaybookMention = (text: string, trigger: PlaybookTriggerRange) =>
+const isPlaybookMention = (text: string, trigger: PlaybookTriggerRange) =>
   text.startsWith(PLAYBOOK_MENTION_PREFIX, trigger.rangeStart);
 
 /**

@@ -43,7 +43,7 @@ export const invokeAgent = Effect.fn("j5.invokeAgent")(function* (
   const registry = yield* ProviderRegistry;
   const library = yield* makeAgentPersonaLibrary;
   const parent = yield* threads
-    .getThreadProjection(thread.threadId)
+    .getThreadRecords(thread.threadId, [])
     .pipe(
       Effect.mapError(
         (error) =>

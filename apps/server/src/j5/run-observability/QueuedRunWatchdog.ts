@@ -51,7 +51,7 @@ function waitingMinutes(run: OrchestrationV2Run, now: DateTime.Utc): number {
 }
 
 function hasFact(
-  projection: OrchestrationV2ThreadProjection,
+  projection: Pick<OrchestrationV2ThreadProjection, "turnItems">,
   run: OrchestrationV2Run,
   signal: string,
 ) {
@@ -80,8 +80,18 @@ export const layer = Layer.effect(
     const candidatesStore = yield* QueuedRunCandidates;
     const startingRunCursor = yield* Ref.make<CandidateCursor | undefined>(undefined);
 
+    // The run, and its error items: the signal facts this writes are error items of that run.
+    const readRunFacts = (
+      threadId: OrchestrationV2Run["threadId"],
+      runId: OrchestrationV2Run["id"],
+    ) =>
+      projections.getThreadRecords(threadId, ["runs", "turnItems"], {
+        runIds: [runId],
+        turnItemRunId: runId,
+        turnItemTypes: ["error"],
+      });
     const writeFact = Effect.fn("QueuedRunWatchdog.writeFact")(function* (input: {
-      readonly projection: OrchestrationV2ThreadProjection;
+      readonly projection: Pick<OrchestrationV2ThreadProjection, "turnItems">;
       readonly run: OrchestrationV2Run;
       readonly signal: string;
       readonly title: string;
@@ -157,9 +167,8 @@ export const layer = Layer.effect(
         candidates,
         (candidate) =>
           Effect.gen(function* () {
-            // A full projection is only needed for a bounded candidate, where
-            // it provides deduplication and rechecks current run state.
-            const projection = yield* projections.getThreadProjection(candidate.threadId);
+            // Read per bounded candidate, for deduplication and to recheck current run state.
+            const projection = yield* readRunFacts(candidate.threadId, candidate.id);
             const run = projection.runs.find((current) => current.id === candidate.id);
             if (
               run === undefined ||
@@ -195,7 +204,7 @@ export const layer = Layer.effect(
       }) {
         const vcsError = findVcsError(input.cause);
         if (vcsError === undefined) return;
-        const projection = yield* projections.getThreadProjection(input.threadId);
+        const projection = yield* readRunFacts(input.threadId, input.runId);
         const run = projection.runs.find((candidate) => candidate.id === input.runId);
         if (run === undefined) return;
         // Upstream no longer copies arbitrary cause text; VCS errors format their own redacted message.
