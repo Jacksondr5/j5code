@@ -787,6 +787,8 @@ explicitly marked.
 | `apps/server/src/mcp/McpHttpServer.ts`                                      | R       | 2                                                  |
 | `apps/server/src/mcp/OrchestratorMcpService.ts`                             | A       | Saved-agent mentions                               |
 | `packages/contracts/src/previewAutomation.ts`                               | N       | 74                                                 |
+| `apps/server/src/preview/ServerBrowserStream.ts`                            | N       | Preview stream session invalidation (#798)         |
+| `apps/server/src/preview/ServerBrowserStream.test.ts`                       | N       | Preview stream session invalidation (#798)         |
 | `apps/server/src/preview/ServerBrowser.test.ts`                             | N       | 74                                                 |
 | `apps/server/src/preview/ServerBrowser.ts`                                  | N       | 74, B                                              |
 | `apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts`         | A       | 8, 47, Saved-agent mentions                        |
@@ -1042,3 +1044,7 @@ provider homes and a local catalog for the explicit `--skills` mode; `liveTestHo
 in generated settings. Ordinary mode retains credential access and has no sample catalog. `scripts/j5/setup-agent-live-test.ts` and the
 `j5-live-test` skill identify the safe write targets. No upstream-owned file
 is changed for this issue.
+
+## Preview stream session invalidation (#798)
+
+Upstream-owned `apps/server/src/preview/ServerBrowserStream.ts` races the scoped viewer lifecycle against `SessionStore.awaitInvalidation`, following `ws.ts`. Revocation or expiry interrupts streaming, input fibers, and viewer attachment cleanup; existing frame backpressure and scope checks remain in place. `apps/server/src/preview/ServerBrowserStream.test.ts` provides the SessionStore dependency and verifies established read/control sockets close and viewer/input resources release. Connection initialization (#799) is outside this change.
