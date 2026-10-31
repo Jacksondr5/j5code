@@ -506,6 +506,8 @@ migrations after upstream migrations.
 
 96. J5's person actions count as upstream's `feature.used` ([#766](https://github.com/Jacksondr5/j5code/issues/766), Jackson's 2026-10-24 decision on #510). Upstream records `feature.used` in its RPC authorization middleware after a request succeeds, from the allowlist in `apps/server/src/telemetry/FeatureUsage.ts`. Its `featureUsage` also looks in J5-owned `J5_METHOD_FEATURES` (`apps/server/src/j5/analytics/featureUsage.ts`) when upstream's own table has no entry for the method (one import and the `??` on the lookup line). The J5 table checks every variant against a contract literal schema. It keys one upstream method, `orchestration.launchThread`, counted as `persona.assign` only when the launch carries `agentPersona`. Upstream wins if it ever maps that method itself. Proofs: `apps/server/src/j5/analytics/featureUsage.test.ts`, which goes through upstream's `featureUsage`. On every rebase, keep the fallback in `featureUsage`, and check whether upstream now maps any method J5's table keys.
 
+97. The native testing skill points at J5's mobile rig ([#18 milestone](https://github.com/Jacksondr5/j5code/milestone/18), mirroring case 68). `.agents/skills/test-t3-mobile/SKILL.md` keeps upstream's structure and steps. J5's edits are pointers, one per section: setup runs `scripts/j5/setup-agent-live-test.ts --mobile <ios|android>`, which starts the isolated backend and Metro and claims a test device; "Launch" and "Pair" are done by its `mobile-open`; and teardown is `device_close`, then its `stop`. "Pair and verify" says not to use upstream's `pair-client.sh` in J5: it mints a link for no person, and J5 shows such a device an empty app. J5's mobile testing practice lives in the Mobile section of J5-owned `.agents/skills/j5-live-test/`. On a pin advance, read upstream's changes to this skill and port them, keeping only the J5 pointers.
+
 ## Pin and upstream advance runbook
 
 Current pin: `d2c440312e5f39d59827ed466838a623516454d6`, upstream's stable release tag `v0.1.3` on `main` (frozen 2026-10-27). The previous pin was `70d60e03a7a35c6fa131825bbfa05ec893e69912`, upstream's nightly tag `v0.1.1-nightly.20261017.3238`.
@@ -680,6 +682,7 @@ explicitly marked.
 | Upstream-owned path                                                         | History | Contract                                           |
 | --------------------------------------------------------------------------- | ------- | -------------------------------------------------- |
 | `.agents/skills/test-t3-app/SKILL.md`                                       | N       | 68                                                 |
+| `.agents/skills/test-t3-mobile/SKILL.md`                                    | N       | 97                                                 |
 | `.github/SECURITY.md` (deleted)                                             | N       | B                                                  |
 | `.github/workflows/ci.yml`                                                  | A       | C                                                  |
 | `.github/workflows/mobile-fingerprint-check.yml`                            | R       | C                                                  |
