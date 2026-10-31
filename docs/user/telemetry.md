@@ -5,14 +5,14 @@ associated with a hashed account or installation identifier. To count how many i
 uses, the server also sends hashed account identifiers: your T3 Connect account, your OpenAI and
 Claude accounts when you are signed in, and a random identifier for each device that connects.
 Events include the provider, model, reasoning effort, permission mode, turn result, duration,
-release channel, and main-agent token totals when available. They also name the features you use
-and the tools agents call, without paths, IDs, or text. Each turn that starts is also
+release channel, and main-agent token totals when available. They also name the features you use,
+such as replying in the Inbox, deciding on a Crew roster or sharing a thread, and the tools agents
+call, without paths, IDs, or text. Each turn that starts is also
 reported with who asked for it (you, an agent, or the server itself), whether a scheduled task
 started it, and whether the thread is a seat in a Crew. When an ask between participants ends, the
 event says how it ended, what kind of participant was on each side, its urgency, and how long it
 was open. A playbook run reports its step count when it starts, and the step it reached when it
-completes or is cancelled. A Crew reports the number of seats asked for, approved and changed when
-you decide on its roster, and how many seats started when it launches. Every fifteen minutes the
+completes or is cancelled. A Crew reports how many seats started when it launches. Every fifteen minutes the
 server reports counts of working threads, live Crews and waiting asks.
 
 Events do not include prompts, responses, file contents, authentication tokens, conversation IDs,

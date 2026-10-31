@@ -37,7 +37,7 @@ import {
 } from "./CrewLaunchService.ts";
 import { planCrewPlaybook, withPersonaSwaps, type CrewPlaybookPlan } from "./crewPlaybookPlan.ts";
 import { crewDeclinedNoticeText, crewRosterChanges } from "./crewGateNotice.ts";
-import { durationMsBetween, j5AnalyticsRecorder } from "../analytics/recorder.ts";
+import { j5AnalyticsRecorder } from "../analytics/recorder.ts";
 import { CrewLaunchReporter } from "./CrewLaunchReporter.ts";
 import { crewSeatShapeProblem } from "./crewLimits.ts";
 import { CREW_PROPOSAL_SESSION } from "./crewSeatIds.ts";
@@ -270,29 +270,24 @@ export const layer = Layer.effect(
     const launcher = yield* CrewLaunchService;
     const reporter = yield* CrewLaunchReporter;
     const recordAnalytics = yield* j5AnalyticsRecorder;
-    /** `j5.crew.proposal.resolved`: what the person decided, and what they changed first. */
+    /**
+     * The person's decision, as `feature.used`. Recorded here, not from the RPC, because only
+     * the proposal tells an edited roster from the one the Captain asked for.
+     */
     const recordResolved = Effect.fn("j5.a2a.crewProposal.recordResolved")(function* (
       proposal: CrewProposal,
       approved: ReadonlyArray<CrewProposalSeat> | null,
     ) {
-      const changes =
-        approved === null ? null : crewRosterChanges(proposal.requestedSeats, approved);
-      yield* recordAnalytics("j5.crew.proposal.resolved", {
-        kind: proposal.kind,
-        decision: approved === null ? "declined" : "approved",
-        requestedSeats: proposal.requestedSeats.length,
-        hasPlaybook: proposal.playbook !== undefined && proposal.playbook !== null,
-        ...durationMsBetween(proposal.createdAt, DateTime.formatIso(yield* DateTime.now)),
-        ...(approved === null || changes === null
-          ? {}
-          : {
-              approvedSeats: approved.length,
-              seatsAdded: changes.added.length,
-              seatsRemoved: changes.removed.length,
-              seatsRenamed: changes.renamed.length,
-              seatsRuntimeChanged: changes.runtimeChanged.length,
-              seatsInstructionsChanged: changes.instructionsChanged.length,
-            }),
+      yield* recordAnalytics("feature.used", {
+        feature: "crew.proposal.resolve",
+        variant:
+          approved === null
+            ? "decline"
+            : Object.values(crewRosterChanges(proposal.requestedSeats, approved)).some(
+                  (changed) => changed.length > 0,
+                )
+              ? "edit"
+              : "approve",
       });
     });
     const threadManagement = yield* ThreadManagementService;

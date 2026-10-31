@@ -1,5 +1,7 @@
 import { type OrchestrationV2Command, WS_METHODS } from "@t3tools/contracts";
 
+import { J5_METHOD_FEATURES } from "../j5/analytics/featureUsage.ts";
+
 export interface FeatureUsage {
   readonly feature: string;
   readonly variant?: string;
@@ -86,5 +88,6 @@ export function commandFeatureUsage(command: OrchestrationV2Command): FeatureUsa
 /** The feature a WebSocket request uses, or undefined when it is not a tracked feature. */
 export function featureUsage(method: string, payload: unknown): FeatureUsage | undefined {
   if (typeof payload !== "object" || payload === null) return undefined;
-  return METHOD_FEATURES[method]?.(payload as Payload);
+  // J5: J5's person actions, after upstream's own (FORK.md case 94).
+  return (METHOD_FEATURES[method] ?? J5_METHOD_FEATURES[method])?.(payload as Payload);
 }
