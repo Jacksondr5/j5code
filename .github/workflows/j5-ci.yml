@@ -64,6 +64,9 @@ jobs:
       - name: Typecheck
         run: pnpm exec vp run -r --concurrency-limit 2 --log grouped typecheck
 
+      - name: Check unused code
+        run: pnpm exec vp run knip:check
+
       # These gitlinks belong to vendored manifests, not this repository.
       # Remove them only from the disposable index before checkout's cleanup.
       - name: Exclude vendored gitlinks from checkout cleanup

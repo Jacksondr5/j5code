@@ -126,7 +126,7 @@ const fixture = Effect.gen(function* () {
       Effect.provide(
         Layer.mergeAll(
           Layer.mock(ThreadManagementService)({
-            getThreadProjection: () => Effect.succeed(parent),
+            getThreadRecords: () => Effect.succeed(parent),
           }),
           Layer.mock(ProviderRegistry)({ getProviders: Effect.succeed(available) }),
           Layer.mock(OrchestratorMcpService)({

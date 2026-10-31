@@ -7,7 +7,7 @@ export interface J5RuntimePolicy {
 }
 
 /** Definition writes have their own server-side policy check, unlike progress-only tools. */
-export const J5_DEFINITION_WRITE_TOOLS: ReadonlyArray<string> = ["j5_playbook_save"];
+const J5_DEFINITION_WRITE_TOOLS: ReadonlyArray<string> = ["j5_playbook_save"];
 
 /**
  * The t3-code tools Codex and Claude pre-approve, so the roster gate stays the only human step.

@@ -1719,6 +1719,7 @@ export const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props
                 match={{
                   source: props.searchMatch.source,
                   snippet: props.searchMatch.snippet,
+                  author: props.searchMatch.author,
                   query: props.searchMatchQuery ?? props.searchQuery,
                 }}
               />

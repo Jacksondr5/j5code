@@ -59,7 +59,7 @@ const onParent = (command: { readonly parentThreadId: ThreadId }): CommandScope 
  * Every command a narrowed Collaborator may send, by type, with where its target is. Keyed by
  * type so that a command upstream renames or removes fails to compile here.
  */
-export const NARROWED_COMMAND_SCOPES: {
+const NARROWED_COMMAND_SCOPES: {
   readonly [K in OrchestrationV2Command["type"]]?: (command: CommandOf<K>) => CommandScope;
 } = {
   // Starting a thread needs the project (AC14): a Collaborator on one thread starts none.
@@ -248,6 +248,12 @@ export const makeCommandAdmission = Effect.fn("j5.sharing.commandAdmission.makeC
         | undefined;
       if (scopeOf === undefined) return yield* refused(NOT_SHARED);
       yield* requireLevel(scopeOf(command), "collaborator");
+      if (command.type === "thread.visit") {
+        // The thread's `opens` rank its owner's Cmd+K, so a narrowed person's open and the query
+        // that found it do not count; their visit still moves the read marker.
+        const { opened: _opened, searchQuery: _searchQuery, ...visit } = command;
+        return visit;
+      }
       return command;
     });
 

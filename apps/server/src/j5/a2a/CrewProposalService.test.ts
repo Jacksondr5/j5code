@@ -447,67 +447,85 @@ const fixtureWithDatabase = Effect.fn("test.crewProposal.fixture")(function* (
 
 const fixture = fixtureWithDatabase(":memory:");
 
-it.effect("reports what the person decided about a roster, and what they changed first", () =>
-  Effect.gen(function* () {
-    const { layer } = yield* fixture;
-    const recorded: Array<Readonly<Record<string, unknown>>> = [];
-    const analytics = Layer.succeed(
-      AnalyticsService,
-      AnalyticsService.of({
-        record: (event, properties = {}) =>
-          Effect.sync(() => void recorded.push({ event, ...properties })),
-        flush: Effect.void,
-        recordOwners: () => Effect.void,
-      }),
-    );
-    yield* Effect.gen(function* () {
-      const gate = withPreview(yield* CrewProposalService);
-      const seat = (name: string) => ({
-        workspace: { type: "shared" as const },
-        seat: name,
-        agentId: name,
-        reason: `Does the ${name} work`,
-      });
-      const edited = yield* gate.propose({
-        requestKey: "analytics-edited",
-        captain,
-        displayName: "Edited Crew",
-        brief: "Fix the flaky login test.",
-        seats: [seat("builder"), seat("critic")],
-      });
-      // The person drops the critic and adds a security pass.
-      yield* gate.resolve({
-        proposalId: edited.proposal.id,
-        decision: "approve",
-        seats: [seat("builder"), seat("sentry")],
-      });
-      const refused = yield* gate.propose({
-        requestKey: "analytics-declined",
-        captain,
-        displayName: "Declined Crew",
-        brief: "Rewrite everything.",
-        seats: [seat("builder")],
-      });
-      yield* gate.resolve({ proposalId: refused.proposal.id, decision: "decline" });
-    }).pipe(Effect.provide(layer.pipe(Layer.provide(analytics))));
+it.effect(
+  "counts the person's roster decision, telling an edited roster from an unchanged one",
+  () =>
+    Effect.gen(function* () {
+      const { layer } = yield* fixture;
+      const recorded: Array<Readonly<Record<string, unknown>>> = [];
+      const analytics = Layer.succeed(
+        AnalyticsService,
+        AnalyticsService.of({
+          record: (event, properties = {}) =>
+            Effect.sync(() => void recorded.push({ event, ...properties })),
+          flush: Effect.void,
+          recordOwners: () => Effect.void,
+        }),
+      );
+      yield* Effect.gen(function* () {
+        const gate = withPreview(yield* CrewProposalService);
+        const seat = (name: string) => ({
+          workspace: { type: "shared" as const },
+          seat: name,
+          agentId: name,
+          reason: `Does the ${name} work`,
+        });
+        const asked = yield* gate.propose({
+          requestKey: "analytics-approved",
+          captain,
+          displayName: "Approved Crew",
+          brief: "Fix the flaky login test.",
+          seats: [seat("builder")],
+        });
+        yield* gate.resolve({
+          proposalId: asked.proposal.id,
+          decision: "approve",
+          seats: [seat("builder")],
+        });
+        const edited = yield* gate.propose({
+          requestKey: "analytics-edited",
+          captain,
+          displayName: "Edited Crew",
+          brief: "Fix the flaky login test.",
+          seats: [seat("builder"), seat("critic")],
+        });
+        // The person drops the critic and adds a security pass.
+        yield* gate.resolve({
+          proposalId: edited.proposal.id,
+          decision: "approve",
+          seats: [seat("builder"), seat("sentry")],
+        });
+        const moved = yield* gate.propose({
+          requestKey: "analytics-workspace",
+          captain,
+          displayName: "Moved Crew",
+          brief: "Fix the flaky login test.",
+          seats: [seat("builder")],
+        });
+        // Only the seat's workspace changes, to a worktree of its own.
+        yield* gate.resolve({
+          proposalId: moved.proposal.id,
+          decision: "approve",
+          seats: [{ ...seat("builder"), workspace: { type: "worktree", baseRef: "main" } }],
+        });
+        const refused = yield* gate.propose({
+          requestKey: "analytics-declined",
+          captain,
+          displayName: "Declined Crew",
+          brief: "Rewrite everything.",
+          seats: [seat("builder")],
+        });
+        yield* gate.resolve({ proposalId: refused.proposal.id, decision: "decline" });
+      }).pipe(Effect.provide(layer.pipe(Layer.provide(analytics))));
 
-    const resolved = { event: "j5.crew.proposal.resolved", kind: "roster", hasPlaybook: false };
-    assert.deepStrictEqual(recorded, [
-      {
-        ...resolved,
-        decision: "approved",
-        requestedSeats: 2,
-        durationMs: 0,
-        approvedSeats: 2,
-        seatsAdded: 1,
-        seatsRemoved: 1,
-        seatsRenamed: 0,
-        seatsRuntimeChanged: 0,
-        seatsInstructionsChanged: 0,
-      },
-      { ...resolved, decision: "declined", requestedSeats: 1, durationMs: 0 },
-    ]);
-  }),
+      const resolved = { event: "feature.used", feature: "crew.proposal.resolve" };
+      assert.deepStrictEqual(recorded, [
+        { ...resolved, variant: "approve" },
+        { ...resolved, variant: "edit" },
+        { ...resolved, variant: "edit" },
+        { ...resolved, variant: "decline" },
+      ]);
+    }),
 );
 
 it.effect(
@@ -1720,6 +1738,7 @@ const playbookFixture = Effect.gen(function* () {
             thread: thread(threadId),
             messages: [],
           } as unknown as OrchestrationV2ThreadProjection),
+        getThreadRecords: (threadId) => Effect.succeed({ thread: thread(threadId) } as never),
         dispatch: (command) =>
           Ref.update(commands, (items) => [...items, command]).pipe(
             Effect.as({ events: [], effects: [] } as never),

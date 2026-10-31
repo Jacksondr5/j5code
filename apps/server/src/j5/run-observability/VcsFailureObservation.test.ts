@@ -60,7 +60,7 @@ function fixture() {
     turnItems,
   } as unknown as OrchestrationV2ThreadProjection;
   const projections = Layer.mock(ProjectionStore.ProjectionStoreV2)({
-    getThreadProjection: () => Effect.succeed(projection),
+    getThreadRecords: () => Effect.succeed(projection),
     getCheckpointContext: () => Effect.succeed(projection as never),
   });
   const events = Layer.mock(EventSink.EventSinkV2)({
@@ -163,7 +163,7 @@ it.effect("ignores ordinary and cyclic causes before reading projection state", 
     Layer.provide(
       Layer.mergeAll(
         Layer.mock(ProjectionStore.ProjectionStoreV2)({
-          getThreadProjection: () =>
+          getThreadRecords: () =>
             Effect.sync(() => {
               reads += 1;
               throw new Error("unexpected read");

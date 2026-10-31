@@ -4,7 +4,7 @@
  * runs, so a peer is online while it polled within this window, and offline
  * since its last poll after that.
  */
-export const PEER_ONLINE_WINDOW_MS = 2 * 60_000;
+const PEER_ONLINE_WINDOW_MS = 2 * 60_000;
 
 /** Online, offline since, or never polled, for a peer in poll mode; null for one that sends directly. */
 export const peerPollState = (

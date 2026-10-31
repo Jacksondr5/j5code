@@ -70,7 +70,7 @@ export const resolveAgentPersonaRuntime = Effect.fn("resolveAgentPersonaRuntime"
 });
 
 /** The thread's full runtime policy: persona sandbox and instructions when assigned, the plain mode otherwise. */
-export const resolveAgentPersonaRuntimePolicy = (
+const resolveAgentPersonaRuntimePolicy = (
   input: { readonly thread: OrchestrationV2AppThread; readonly cwd: string | null },
   library: ReturnType<typeof createAgentPersonaLibrary>,
 ) =>

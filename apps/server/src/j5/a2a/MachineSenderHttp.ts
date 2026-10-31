@@ -62,10 +62,7 @@ export const machineSendCommandId = (input: {
     `command:j5:a2a:machine:${stablePart(input.senderParticipantId)}:send:${stablePart(input.clientRequestId)}`,
   );
 
-export const machineRegisterCommandId = (input: {
-  readonly projectId: string;
-  readonly name: string;
-}) =>
+const machineRegisterCommandId = (input: { readonly projectId: string; readonly name: string }) =>
   CommCommandId.make(
     `command:j5:a2a:machine:register:${stablePart(input.projectId)}:${stablePart(input.name)}`,
   );

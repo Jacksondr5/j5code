@@ -415,11 +415,11 @@ const makeTestLayer = (
       const threads = yield* ThreadManagementService;
       return ThreadManagementService.of({
         ...threads,
-        getThreadProjection: (threadId) =>
+        getThreadRecords: (threadId, fields, filter) =>
           Ref.get(harness.staleProjection).pipe(
             Effect.filterOrElse(
               (stale) => stale !== undefined,
-              () => threads.getThreadProjection(threadId),
+              () => threads.getThreadRecords(threadId, fields, filter),
             ),
           ),
         sendToThread: (input) =>

@@ -14,10 +14,10 @@ const repoRoot = NodePath.resolve(desktopDir, "..", "..");
 const devBundleIdSuffix = NodePath.basename(repoRoot)
   .toLowerCase()
   .replaceAll(/[^a-z0-9]+/g, "");
-export const APP_DISPLAY_NAME = isDevelopment
+const APP_DISPLAY_NAME = isDevelopment
   ? J5_BRANDING.desktop.developmentName
   : J5_BRANDING.desktop.baseName;
-export const APP_BUNDLE_ID = isDevelopment
+const APP_BUNDLE_ID = isDevelopment
   ? `${J5_BRANDING.desktop.developmentAppId}.${devBundleIdSuffix || "local"}`
   : J5_BRANDING.desktop.appId;
 const APP_PROTOCOL_SCHEMES = isDevelopment

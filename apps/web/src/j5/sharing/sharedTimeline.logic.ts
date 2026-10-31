@@ -37,7 +37,10 @@ export function sharedMessageView(input: {
   readonly author: MessageAuthor | undefined;
   /** A read of who wrote what has come back since this client first saw the server's copy. */
   readonly answeredFor: boolean;
-  /** The thread can be a shared conversation: more than one person can write to it, or did. */
+  /**
+   * A read may name who wrote a message: more than one person can write to the thread, or did,
+   * or the reader is not the first owner.
+   */
   readonly mayBeShared: boolean;
   /** What this client's person typed, when they sent it from here. */
   readonly typedHere: string | null;
@@ -107,7 +110,7 @@ export function isSettledPrompt(toolData: unknown): toolData is {
  * start of the first of the options someone chose. Any other value, and any value that does not
  * begin with the mark, is returned as it is.
  */
-export function answerWithoutPrefix(answer: unknown, storedPrefix: string): unknown {
+function answerWithoutPrefix(answer: unknown, storedPrefix: string): unknown {
   if (storedPrefix === "") return answer;
   const strip = (text: string) =>
     text.startsWith(storedPrefix) ? text.slice(storedPrefix.length) : text;

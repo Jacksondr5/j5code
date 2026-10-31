@@ -451,7 +451,7 @@ function AnsweredBy({ item }: { readonly item: HumanInboxItem }) {
   return line === null ? null : <> · {line}</>;
 }
 
-export async function refreshHumanInboxes(environmentId?: EnvironmentId, force = false) {
+async function refreshHumanInboxes(environmentId?: EnvironmentId, force = false) {
   const options = { force, ...(environmentId === undefined ? {} : { environmentId }) };
   const results = await Promise.all([
     refreshJ5Sources(openInboxSourcesAtom, openInboxQueryAtom, options),

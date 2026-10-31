@@ -142,7 +142,7 @@ export const participantIdentityRows = (
   `;
 
 /** This exact statement is executed for count reads and compiled by the plan proof below. */
-export const openInboxCountStatement = (sql: SqlClient.SqlClient, personId: ParticipantId) =>
+const openInboxCountStatement = (sql: SqlClient.SqlClient, personId: ParticipantId) =>
   sql<OpenInboxCountRow>`
     SELECT COUNT(*) AS count
     FROM j5_a2a_human_inbox AS inbox
@@ -164,7 +164,7 @@ const decodeLatestPeerDelivery = Schema.decodeUnknownSync(
   Schema.fromJsonString(Schema.Struct({ label: Schema.String, environmentId: Schema.String })),
 );
 
-export const peerSenderLabelStatement = (
+const peerSenderLabelStatement = (
   sql: SqlClient.SqlClient,
   participantIds: ReadonlyArray<string>,
 ) =>

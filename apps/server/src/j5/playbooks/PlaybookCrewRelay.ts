@@ -16,7 +16,7 @@ import {
   type AgentCrewInstance,
 } from "../a2a/AgentCrewInstanceService.ts";
 import { lifecycleCommandId, lifecycleId } from "../a2a/spawnIds.ts";
-import { getThreadProjectionIfPresent } from "../a2a/threadProjectionReads.ts";
+import { getThreadRecordsIfPresent } from "../a2a/threadProjectionReads.ts";
 import { crewStepNoticeText } from "./crewStepNotice.ts";
 import {
   PlaybookStore,
@@ -30,7 +30,7 @@ import {
  * Both layers are wanted: a re-dispatch after a crash replays the command receipt, and the fixed
  * message id keeps a second copy out of the thread even if a receipt were lost.
  */
-export const PLAYBOOK_STEP_SESSION = "j5-playbook-step";
+const PLAYBOOK_STEP_SESSION = "j5-playbook-step";
 
 const isPlaybookError = Schema.is(PlaybookError);
 const operationFailed = (error: unknown) =>
@@ -97,7 +97,7 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
   ) {
     const owner = stepOwner(instance, stepId);
     if (owner === null) return { seat: null, threadId: instance.captainThreadId };
-    const projection = yield* getThreadProjectionIfPresent(threads, owner.threadId);
+    const projection = yield* getThreadRecordsIfPresent(threads, owner.threadId, []);
     const live =
       projection !== null &&
       projection.thread.archivedAt === null &&
@@ -153,7 +153,7 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
       return settled(yield* store.resolveLanding(runId, requestId, "captain"));
     const seatThreadId = ThreadId.make(landing.targetThreadId!);
     const outcome = yield* Effect.gen(function* () {
-      const seat = yield* getThreadProjectionIfPresent(threads, seatThreadId);
+      const seat = yield* getThreadRecordsIfPresent(threads, seatThreadId, []);
       if (seat === null) return "captain" as const;
       yield* threads.dispatch({
         type: "message.dispatch",

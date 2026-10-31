@@ -10,6 +10,7 @@ import {
   type ThreadSearchSubject,
 } from "@t3tools/shared/paletteSearch";
 import { threadSearchSubject } from "@t3tools/client-runtime/state/thread-search";
+import type { ThreadSearchAuthor } from "@t3tools/contracts/j5";
 import type { CommandPaletteLinkedThreads } from "../commandPaletteBus";
 import {
   addProjectRemoteSourceLabel,
@@ -179,6 +180,8 @@ export interface CommandPaletteThreadContentMatch {
   readonly source: "user" | "assistant";
   readonly snippet: string;
   readonly query: string;
+  // J5: who wrote a user-role match (FORK.md case 94).
+  readonly author?: ThreadSearchAuthor | undefined;
 }
 
 export interface CommandPaletteItem {

@@ -313,10 +313,14 @@ it.layer(testLayer)("access gate", (it) => {
         WS_METHODS.filesystemBrowse,
         WS_METHODS.vcsPull,
         J5_CLIENT_READ_WS_METHODS.readFleet,
-        ORCHESTRATION_V2_WS_METHODS.searchThreads,
       ]) {
         assert.match(yield* call(session, method, { threadId: mine }), /^refused/, method);
       }
+      // Cmd+K's message search runs, held to their reach by its handler (`messageSearch.test.ts`).
+      assert.strictEqual(
+        yield* call(session, ORCHESTRATION_V2_WS_METHODS.searchThreads, { query: "plan" }),
+        "ran",
+      );
     }),
   );
 

@@ -14,7 +14,7 @@ export const playbookWorkspaceRoot = Effect.fn("j5.playbooks.workspace.playbookW
   function* (threadId: ThreadId) {
     const threads = yield* ThreadManagementService;
     const projects = yield* ProjectService;
-    const { thread } = yield* threads.getThreadProjection(threadId);
+    const { thread } = yield* threads.getThreadRecords(threadId, []);
     if (thread.deletedAt !== null)
       return yield* playbookError("thread_not_found", "The owner thread was deleted.");
     const project = yield* projects.getById(thread.projectId);
