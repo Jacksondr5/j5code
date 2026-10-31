@@ -2350,7 +2350,12 @@ const serversOf = (
         ]
       : [{ name: "", paths }];
 
-async function stop(paths: LiveTestPaths, replacing = false): Promise<void> {
+async function stop(
+  paths: LiveTestPaths,
+  replacing = false,
+  /** A restart keeps the mobile side (device, claim, Metro, tunnel) and reconnects it. */
+  keepMobile = false,
+): Promise<void> {
   // Classify every server before signalling any, so a refusal leaves both alone.
   const servers = serversOf(paths).map((server) => ({
     ...server,
@@ -2374,7 +2379,7 @@ async function stop(paths: LiveTestPaths, replacing = false): Promise<void> {
   // A device that could not be reset keeps its claim and record; the servers still stop.
   let mobileFailure: unknown;
   try {
-    await (await import("./live-test-mobile.ts")).stopMobile(paths);
+    if (!keepMobile) await (await import("./live-test-mobile.ts")).stopMobile(paths);
   } catch (cause) {
     mobileFailure = cause;
   }
@@ -2831,12 +2836,14 @@ async function main(): Promise<void> {
   if (command === "stop") return stop(paths);
   if (command === "upgrade") return upgrade(paths);
   if (command === "mobile-open") return (await import("./live-test-mobile.ts")).mobileOpen(paths);
-  // A restart sets the same device up again; stop releases it first.
+  // A restart keeps the device set up and reconnects the server to it.
   const mobile =
     command === "restart"
       ? (await import("./live-test-mobile.ts")).readMobileRecord(paths)?.platform
       : parsed.mobile;
-  if (command === "restart" || command === "rebuild") await stop(paths, command === "rebuild");
+  if (command === "restart" || command === "rebuild") {
+    await stop(paths, command === "rebuild", command === "restart");
+  }
   // resolveLiveTestPaths has confirmed this directory is inside the worktree's own .j5code.
   // Refuse an unusable base before a rebuild deletes the build that is there.
   if (command === "rebuild" && baseRef !== undefined) resolveBase(paths, baseRef);

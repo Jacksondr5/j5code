@@ -70,12 +70,15 @@ export interface MobileRecord {
   readonly metroPort: number;
   readonly metro?: ProcessRecord;
   readonly tunnel?: ProcessRecord;
+  /** Android only: the emulator this script booted, and its console port (serial `emulator-<port>`). */
+  readonly emulator?: ProcessRecord & { readonly port: number };
 }
 
 const mobileFiles = (paths: LiveTestPaths) => ({
   record: NodePath.join(paths.root, "mobile.json"),
   metroLog: NodePath.join(paths.root, "metro.log"),
   tunnelLog: NodePath.join(paths.root, "tunnel.log"),
+  emulatorLog: NodePath.join(paths.root, "emulator.log"),
 });
 
 export function readMobileRecord(paths: LiveTestPaths): MobileRecord | undefined {
@@ -196,6 +199,27 @@ export const iosPool = (simulators: ReadonlyArray<Simulator>) =>
   simulators
     .filter((simulator) => IOS_POOL_NAME.test(simulator.name))
     .toSorted((a, b) => a.name.localeCompare(b.name, "en", { numeric: true }));
+
+/**
+ * The Simulators besides `mine` that count against the iOS host's limit: every other pool
+ * Simulator another worktree has claimed, booted or not yet, and any booted one outside the pool.
+ */
+export function iosBusy(input: {
+  readonly simulators: ReadonlyArray<Simulator>;
+  readonly mine: string;
+  readonly claimed: (name: string) => boolean;
+}): ReadonlyArray<string> {
+  const pool = new Set(iosPool(input.simulators).map((simulator) => simulator.udid));
+  return input.simulators
+    .filter(
+      (simulator) =>
+        simulator.udid !== input.mine &&
+        (pool.has(simulator.udid)
+          ? simulator.booted || input.claimed(simulator.name)
+          : simulator.booted),
+    )
+    .map((simulator) => simulator.name);
+}
 
 /** A string as one word for a POSIX shell: the remote login shell over SSH, or `adb shell`. */
 export const shellQuote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`;
@@ -345,8 +369,9 @@ function androidSdk() {
     root,
     adb: NodePath.join(root, "platform-tools", "adb"),
     avdmanager: NodePath.join(root, "cmdline-tools", "latest", "bin", "avdmanager"),
+    emulator: NodePath.join(root, "emulator", "emulator"),
   };
-  for (const tool of [tools.adb, tools.avdmanager]) {
+  for (const tool of [tools.adb, tools.avdmanager, tools.emulator]) {
     if (!NodeFS.existsSync(tool)) throw new LiveTestRefusal(`The Android SDK has no ${tool}.`);
   }
   return tools;
@@ -416,11 +441,35 @@ function avdExists(slot: string): boolean {
   return NodeFS.existsSync(NodePath.join(avdHome, `${slot}.ini`));
 }
 
+/** Emulator serials in `adb devices` output, including ones still booting or gone offline. */
+export const emulatorSerials = (devices: string) =>
+  devices.match(/^emulator-\d+(?=\s+(device|offline)\b)/gm) ?? [];
+
+/**
+ * The pid of whatever runs `avd`, from the lock file the emulator holds while it runs, even
+ * one adb cannot see: a lock left by a killed emulator names a pid that is gone.
+ */
+function avdRunner(avd: string): number | undefined {
+  const avdHome =
+    process.env.ANDROID_AVD_HOME?.trim() || NodePath.join(NodeOS.homedir(), ".android", "avd");
+  try {
+    // The emulator writes its pid with a trailing byte that is not whitespace.
+    const pid = Number(
+      /\d+/.exec(
+        NodeFS.readFileSync(NodePath.join(avdHome, `${avd}.avd`, "hardware-qemu.ini.lock"), "utf8"),
+      )?.[0],
+    );
+    return Number.isInteger(pid) && startTimeOf(pid) !== undefined ? pid : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** The serial of the running emulator whose AVD is `avd`, if any. */
 function emulatorSerial(avd: string): string | undefined {
   const { adb } = androidSdk();
   const devices = NodeChildProcess.spawnSync(adb, ["devices"], { encoding: "utf8" }).stdout ?? "";
-  for (const serial of devices.match(/^emulator-\d+(?=\s+device\b)/gm) ?? []) {
+  for (const serial of emulatorSerials(devices)) {
     const name = NodeChildProcess.spawnSync(adb, ["-s", serial, "emu", "avd", "name"], {
       encoding: "utf8",
       timeout: 10_000,
@@ -428,6 +477,82 @@ function emulatorSerial(avd: string): string | undefined {
     if (name?.split(/\r?\n/)[0]?.trim() === avd) return serial;
   }
   return undefined;
+}
+
+/** Emulator console ports: even, each with its adb port above it. */
+const EMULATOR_PORTS = Array.from({ length: 16 }, (_, index) => 5554 + 2 * index);
+
+/**
+ * Boots the slot's AVD here, on a free console port, headless. The Device panel attaches to a
+ * running emulator by its serial; asked to boot an AVD while another emulator runs, it opens
+ * the running one instead.
+ */
+async function startEmulator(
+  paths: LiveTestPaths,
+  record: MobileRecord,
+  deadline: number,
+): Promise<void> {
+  const sdk = androidSdk();
+  if (isOurs(paths, record.emulator)) return waitForBoot(sdk.adb, record.emulator!, deadline);
+  const port = EMULATOR_PORTS.find(
+    (candidate) => listenerOn(candidate) === undefined && listenerOn(candidate + 1) === undefined,
+  );
+  if (port === undefined) throw new LiveTestRefusal("No emulator console port is free.");
+  const log = mobileFiles(paths).emulatorLog;
+  const emulator = {
+    ...spawnRecorded(
+      sdk.emulator,
+      [
+        "-avd",
+        record.slot,
+        "-port",
+        String(port),
+        "-no-window",
+        "-no-audio",
+        "-no-boot-anim",
+        "-no-snapshot",
+        "-gpu",
+        "auto",
+      ],
+      {
+        cwd: paths.worktree,
+        env: { ...process.env, ANDROID_HOME: sdk.root, ANDROID_SDK_ROOT: sdk.root },
+        log,
+      },
+    ),
+    port,
+  };
+  writeMobileRecord(paths, { ...readMobileRecord(paths)!, emulator });
+  await waitForBoot(sdk.adb, emulator, deadline, log);
+}
+
+/** Waits until Android has booted: the Device panel lists an emulator only after that. */
+async function waitForBoot(
+  adb: string,
+  emulator: ProcessRecord & { readonly port: number },
+  deadline: number,
+  log?: string,
+): Promise<void> {
+  const serial = `emulator-${emulator.port}`;
+  for (;;) {
+    const booted = NodeChildProcess.spawnSync(
+      adb,
+      ["-s", serial, "shell", "getprop", "sys.boot_completed"],
+      { encoding: "utf8", timeout: 10_000 },
+    );
+    if (booted.stdout?.trim() === "1") return;
+    if (startTimeOf(emulator.pid) !== emulator.startTime) {
+      throw new LiveTestRefusal(
+        `The emulator exited while booting.${log === undefined ? "" : `\n${tail(log)}`}`,
+      );
+    }
+    if (Date.now() > deadline) {
+      throw new LiveTestRefusal(
+        `The emulator ${serial} is still booting; it has been left running. Run the same command again to wait for it.`,
+      );
+    }
+    await NodeTimersPromises.setTimeout(1_000);
+  }
 }
 
 function spawnRecorded(
@@ -495,7 +620,7 @@ async function startMetro(
           log: metroLog,
         },
       );
-  writeMobileRecord(paths, { ...record, metro });
+  writeMobileRecord(paths, { ...readMobileRecord(paths)!, metro });
   for (;;) {
     const listener = listenerOn(record.metroPort);
     if (listener !== undefined && processGroupOf(listener) === metro.pid) return metro;
@@ -624,11 +749,15 @@ function claim(paths: LiveTestPaths, platform: MobilePlatform): MobileRecord {
       worktree: paths.worktree,
     });
     const mine = pool.find((simulator) => simulator.name === slot)!;
-    const othersBooted = simulators.filter((s) => s.booted && s.udid !== mine.udid);
-    if (othersBooted.length >= IOS_BOOTED_CAP) {
+    const busy = iosBusy({
+      simulators,
+      mine: mine.udid,
+      claimed: (name) => ownerOf(NodePath.join(directory, `ios-${name}`)) !== undefined,
+    });
+    if (busy.length >= IOS_BOOTED_CAP) {
       releaseSlot({ directory, platform, slot, worktree: paths.worktree });
       throw new LiveTestRefusal(
-        `${othersBooted.length} Simulators are already booted on the iOS host (${othersBooted.map((s) => s.name).join(", ")}), its limit. Try again when one is shut down.`,
+        `The iOS host already runs or has promised ${busy.length} Simulators (${busy.join(", ")}), its limit. Try again when one is free.`,
       );
     }
     udid = mine.udid;
@@ -672,8 +801,10 @@ export async function startMobile(
     const backend = startServer(paths, "dev", {}, deadline, ["--port", String(record.serverPort)]);
     backend.catch(() => undefined);
     const avd =
-      platform === "android" && !avdExists(record.slot)
-        ? createAvd(record.slot)
+      platform === "android"
+        ? (avdExists(record.slot) ? Promise.resolve() : createAvd(record.slot)).then(() =>
+            startEmulator(paths, record, deadline),
+          )
         : Promise.resolve();
     avd.catch(() => undefined);
     await startMetro(paths, record, deadline);
@@ -693,7 +824,7 @@ export function formatMobile(paths: LiveTestPaths, record: MobileRecord): string
   const device =
     record.platform === "ios"
       ? `hostId: the MacBook host in device_list; deviceId "${record.udid}" (${record.slot})`
-      : `hostId "local"; deviceId "${record.slot}" (the AVD; once booted, device_list names it by its emulator-<port> serial)`;
+      : `hostId "local"; deviceId "emulator-${record.emulator?.port}" (${record.slot})`;
   return `Mobile (${record.platform}), device slot ${record.slot}:
   Device panel  ${device}
   Backend       http://${host}:${record.serverPort} from the device
@@ -704,7 +835,7 @@ export function formatMobile(paths: LiveTestPaths, record: MobileRecord): string
   }
 
 Next:
-  1. device_open with the ids above. It boots the device.
+  1. device_open with the ids above.${record.platform === "ios" ? " It boots the Simulator." : ""}
   2. ${selfCommand(paths, "mobile-open")}
      installs the dev client, opens it against Metro and pairs it as the home's owner.
 When you finish: device_close, then ${selfCommand(paths, "stop")}
@@ -732,6 +863,7 @@ export async function mobileOpen(paths: LiveTestPaths): Promise<void> {
     );
   }
   const openHint = `Open it first: device_open with the ids \`${selfCommand(paths, "status")}\` prints.`;
+
   const fingerprint = nativeFingerprint(paths, record.platform);
   const client = cachedClientPath(record.platform, fingerprint);
   let openUrl: (url: string) => void;
@@ -755,9 +887,12 @@ export async function mobileOpen(paths: LiveTestPaths): Promise<void> {
     onIosHost(`xcrun simctl install ${udid} ${remoteClient}`, 120_000);
     openUrl = (url) => void onIosHost(`xcrun simctl openurl ${udid} ${shellQuote(url)}`);
   } else {
-    const serial = emulatorSerial(record.slot);
-    if (serial === undefined)
-      throw new LiveTestRefusal(`${record.slot} is not running. ${openHint}`);
+    if (!isOurs(paths, record.emulator)) {
+      throw new LiveTestRefusal(
+        `The emulator for ${record.slot} is not running. Start it again with ${selfCommand(paths, "--mobile android")}`,
+      );
+    }
+    const serial = `emulator-${record.emulator!.port}`;
     const { adb } = androidSdk();
     const apk = NodePath.join(NodeOS.homedir(), client);
     if (!NodeFS.existsSync(apk)) {
@@ -889,6 +1024,8 @@ export async function stopMobile(paths: LiveTestPaths): Promise<void> {
     console.log(`Simulator ${record.slot}: SHUT DOWN AND ERASED`);
   } else {
     const { adb, avdmanager } = androidSdk();
+    if (isOurs(paths, record.emulator)) await stopGroup(record.emulator!.pid);
+    // One the Device panel booted from this AVD is not ours to signal, but it can be asked to quit.
     const serial = emulatorSerial(record.slot);
     if (serial !== undefined) {
       NodeChildProcess.spawnSync(adb, ["-s", serial, "emu", "kill"], { timeout: 15_000 });
@@ -901,6 +1038,13 @@ export async function stopMobile(paths: LiveTestPaths): Promise<void> {
         }
         await NodeTimersPromises.setTimeout(500);
       }
+    }
+    const runner = avdRunner(record.slot);
+    if (runner !== undefined) {
+      // Kept claimed: deleting an AVD under a running emulator would hand the next tester a broken slot.
+      throw new LiveTestRefusal(
+        `Process ${runner}, which this script did not start, still runs the AVD ${record.slot}, so the slot stays claimed. Close it with device_close, then run stop again.`,
+      );
     }
     const deleted = NodeChildProcess.spawnSync(avdmanager, ["delete", "avd", "-n", record.slot], {
       encoding: "utf8",

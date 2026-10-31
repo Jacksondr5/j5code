@@ -11,6 +11,8 @@ import {
   chooseMobilePorts,
   claimSlot,
   devClientUrl,
+  emulatorSerials,
+  iosBusy,
   iosPool,
   metroBundles,
   pairingDeepLink,
@@ -156,6 +158,34 @@ describe("iosPool", () => {
         ["j5-tester-10", false],
       ],
     );
+  });
+});
+
+describe("iosBusy", () => {
+  const simulators = [
+    { name: "j5-tester-1", udid: "U1", booted: false },
+    { name: "j5-tester-2", udid: "U2", booted: false },
+    { name: "iPhone 17 Pro", udid: "P", booted: true },
+    { name: "iPad", udid: "I", booted: false },
+  ];
+
+  it("counts another worktree's claimed Simulator before it boots, and booted ones outside the pool", () => {
+    assert.deepEqual(
+      iosBusy({ simulators, mine: "U1", claimed: (name) => name === "j5-tester-2" }),
+      ["j5-tester-2", "iPhone 17 Pro"],
+    );
+  });
+
+  it("does not count this worktree's own Simulator or a free, shut down one", () => {
+    assert.deepEqual(iosBusy({ simulators, mine: "U1", claimed: () => false }), ["iPhone 17 Pro"]);
+  });
+});
+
+describe("emulatorSerials", () => {
+  it("includes an emulator that is offline or still booting, so stop does not delete its AVD", () => {
+    const devices =
+      "List of devices attached\nemulator-5554\tdevice\nemulator-5556\toffline\nR58M\tdevice\n";
+    assert.deepEqual(emulatorSerials(devices), ["emulator-5554", "emulator-5556"]);
   });
 });
 
