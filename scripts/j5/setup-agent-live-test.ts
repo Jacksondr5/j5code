@@ -2758,6 +2758,7 @@ function guest(paths: LiveTestPaths, request: GuestRequest): void {
 const USAGE = `Usage: node scripts/j5/setup-agent-live-test.ts [--skills | --fresh | --peer [--poll] | --for-dev | --base <ref> | --mobile ios|android]
        node scripts/j5/setup-agent-live-test.ts rebuild [--skills | --fresh | --peer [--poll] | --for-dev | --base <ref> | --mobile ios|android]
        node scripts/j5/setup-agent-live-test.ts status | restart | stop | upgrade | mobile-open
+       node scripts/j5/setup-agent-live-test.ts mobile-build ios|android
        ${GUEST_USAGE.slice("Usage: ".length)}`;
 
 /**
@@ -2812,9 +2813,8 @@ export function parseCommand(args: ReadonlyArray<string>): {
   };
 }
 
-async function main(): Promise<void> {
-  const args = process.argv.slice(2);
-  const parsed = args[0] === "guest" ? parseGuest(args.slice(1)) : parseCommand(args);
+/** The live-test paths of the checkout this script is in, after checking it can run here. */
+async function liveTestPathsHere(): Promise<LiveTestPaths> {
   // oxlint-disable-next-line t3code/no-global-process-runtime -- a standalone CLI with no Effect runtime.
   if (NodeOS.platform() !== "linux" && !IS_MACOS) {
     throw new LiveTestRefusal("This script runs only on Linux and macOS.");
@@ -2825,11 +2825,22 @@ async function main(): Promise<void> {
       `${checkout} has no node_modules. Install the dependencies first: run \`pnpm install\` there (\`vp i\` is the same thing where \`vp\` is on PATH), then run this again.`,
     );
   }
-  const paths = await resolveLiveTestPaths({
+  return resolveLiveTestPaths({
     checkout,
     homeDirectory: NodeOS.homedir(),
     environment: process.env,
   });
+}
+
+async function main(): Promise<void> {
+  const args = process.argv.slice(2);
+  if (args[0] === "mobile-build") {
+    const build = await import("./live-test-mobile-build.ts");
+    const platform = build.parseMobileBuild(args.slice(1));
+    return build.mobileBuild(await liveTestPathsHere(), platform);
+  }
+  const parsed = args[0] === "guest" ? parseGuest(args.slice(1)) : parseCommand(args);
+  const paths = await liveTestPathsHere();
   if (!("command" in parsed)) return guest(paths, parsed);
   const { command, mode, baseRef } = parsed;
   if (command === "status") return status(paths);
