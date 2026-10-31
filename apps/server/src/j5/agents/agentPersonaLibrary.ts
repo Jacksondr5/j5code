@@ -19,7 +19,7 @@ import * as Path from "effect/Path";
 import type { PlatformError } from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
-import { parseDocument } from "yaml";
+import { parseDocument, YAMLParseError, YAMLWarning } from "yaml";
 
 import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
 import { ServerConfig } from "../../config.ts";
@@ -53,11 +53,27 @@ const decodeDefinition = Effect.fn("AgentPersonaLibrary.decodeDefinition")(funct
       if (issue) throw issue;
       return document.toJS({ maxAliasCount: 0 });
     },
-    catch: (cause) => new AgentPersonaLibraryError({ message: String(cause) }),
+    catch: (cause) => {
+      const issue =
+        cause instanceof YAMLParseError || cause instanceof YAMLWarning ? cause : undefined;
+      const position = issue?.linePos?.[0];
+      return new AgentPersonaLibraryError({
+        message:
+          issue === undefined
+            ? "Invalid YAML document."
+            : `${issue.name} (${issue.code})${position === undefined ? "" : ` at line ${position.line}, column ${position.col}`}.`,
+        cause,
+      });
+    },
   });
   return yield* Effect.try({
     try: () => decodeAgentPersonaDefinition(definition),
-    catch: (cause) => new AgentPersonaLibraryError({ message: String(cause) }),
+    catch: (cause) =>
+      new AgentPersonaLibraryError({
+        message:
+          "Invalid persona definition: check field types, authority policy, and artifact references.",
+        cause,
+      }),
   });
 });
 const ImportedDefinition = Schema.Struct({
@@ -257,13 +273,29 @@ export function createAgentPersonaLibrary(storage?: {
       }
       for (const file of files) {
         const result = yield* Effect.gen(function* () {
-          const stat = yield* fs.stat(file);
+          const stat = yield* fs.stat(file).pipe(
+            Effect.mapError(
+              (cause) =>
+                new AgentPersonaLibraryError({
+                  message: "Could not inspect persona file.",
+                  cause,
+                }),
+            ),
+          );
           if (Number(stat.size) > 65536)
             return yield* new AgentPersonaLibraryError({ message: "Persona file exceeds 64 KiB" });
-          return yield* decodeDefinition(yield* fs.readFileString(file));
+          const text = yield* fs
+            .readFileString(file)
+            .pipe(
+              Effect.mapError(
+                (cause) =>
+                  new AgentPersonaLibraryError({ message: "Could not read persona file.", cause }),
+              ),
+            );
+          return yield* decodeDefinition(text);
         }).pipe(Effect.result);
         if (result._tag === "Failure") {
-          diagnostics.push({ path: file, message: String(result.failure) });
+          diagnostics.push({ path: file, message: result.failure.message });
           continue;
         }
         const definition = result.success;
