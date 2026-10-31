@@ -890,6 +890,12 @@ export async function mobileOpen(paths: LiveTestPaths): Promise<void> {
     }
     console.log(`Installing the dev client on ${record.slot}...`);
     onIosHost(`xcrun simctl install ${udid} ${remoteClient}`, 120_000);
+    // Without this, iOS asks "Open in J5 Code Dev?" for every link simctl opens. The device
+    // hub's serve-sim writes the same approval before it opens a URL.
+    const { scheme, appId } = J5_BRANDING.mobile.development;
+    onIosHost(
+      `xcrun simctl spawn ${udid} defaults write com.apple.launchservices.schemeapproval ${shellQuote(`com.apple.CoreSimulator.CoreSimulatorBridge-->${scheme}`)} -string ${appId}`,
+    );
     openUrl = (url) => void onIosHost(`xcrun simctl openurl ${udid} ${shellQuote(url)}`);
   } else {
     if (!isOurs(paths, record.emulator)) {
