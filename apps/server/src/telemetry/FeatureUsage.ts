@@ -88,6 +88,6 @@ export function commandFeatureUsage(command: OrchestrationV2Command): FeatureUsa
 /** The feature a WebSocket request uses, or undefined when it is not a tracked feature. */
 export function featureUsage(method: string, payload: unknown): FeatureUsage | undefined {
   if (typeof payload !== "object" || payload === null) return undefined;
-  // J5: J5's person actions, after upstream's own (FORK.md case 95).
+  // J5: J5's person actions, after upstream's own (FORK.md case 94).
   return (METHOD_FEATURES[method] ?? J5_METHOD_FEATURES[method])?.(payload as Payload);
 }
