@@ -1720,6 +1720,7 @@ const playbookFixture = Effect.gen(function* () {
             thread: thread(threadId),
             messages: [],
           } as unknown as OrchestrationV2ThreadProjection),
+        getThreadRecords: (threadId) => Effect.succeed({ thread: thread(threadId) } as never),
         dispatch: (command) =>
           Ref.update(commands, (items) => [...items, command]).pipe(
             Effect.as({ events: [], effects: [] } as never),
