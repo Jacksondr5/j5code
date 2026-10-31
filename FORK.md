@@ -506,6 +506,8 @@ migrations after upstream migrations.
 
 96. J5's person actions count as upstream's `feature.used` ([#766](https://github.com/Jacksondr5/j5code/issues/766), Jackson's 2026-10-24 decision on #510). Upstream records `feature.used` in its RPC authorization middleware after a request succeeds, from the allowlist in `apps/server/src/telemetry/FeatureUsage.ts`. Its `featureUsage` also looks in J5-owned `J5_METHOD_FEATURES` (`apps/server/src/j5/analytics/featureUsage.ts`) when upstream's own table has no entry for the method (one import and the `??` on the lookup line). The J5 table checks every variant against a contract literal schema. It keys one upstream method, `orchestration.launchThread`, counted as `persona.assign` only when the launch carries `agentPersona`. Upstream wins if it ever maps that method itself. Proofs: `apps/server/src/j5/analytics/featureUsage.test.ts`, which goes through upstream's `featureUsage`. On every rebase, keep the fallback in `featureUsage`, and check whether upstream now maps any method J5's table keys.
 
+97. Device-local notification volume (register D41, Abraham's approval, 2026-10-30). `apps/web/src/threadNotifications.ts` imports J5-owned `connectNotificationSound` and routes each source through its gain node instead of directly to the destination. `components/settings/SettingsPanels.tsx` mounts `NotificationVolumeSettings` beside completion sound controls; `components/settings/settingsSearch.ts` registers its search entry. Storage, gain routing, live updates and the slider live under `apps/web/src/j5/notifications/`. Existing notification modes, gesture unlock, custom sound selection and burst slots remain authoritative. On an advance, keep the gain hook on both completion and input sources and preserve the settings hooks. Web and Electron share the control; mobile and server contracts are untouched. `threadNotifications.test.ts` extends its fake audio graph with gain nodes, source events and the device-local storage boundary, keeping upstream's burst/cancellation assertions unchanged.
+
 ## Pin and upstream advance runbook
 
 Current pin: `d2c440312e5f39d59827ed466838a623516454d6`, upstream's stable release tag `v0.1.3` on `main` (frozen 2026-10-27). The previous pin was `70d60e03a7a35c6fa131825bbfa05ec893e69912`, upstream's nightly tag `v0.1.1-nightly.20261017.3238`.
@@ -769,9 +771,10 @@ explicitly marked.
 | `apps/server/src/serverSettings.ts`                                         | N       | 42                                                 |
 | `apps/server/src/serviceLauncher.test.ts`                                   | N       | 50, 85                                             |
 | `apps/web/src/components/settings/settingsSearch.test.ts`                   | N       | 43                                                 |
-| `apps/web/src/threadNotifications.ts`                                       | N       | 87                                                 |
-| `apps/web/src/components/settings/SettingsPanels.tsx`                       | N       | 87                                                 |
-| `apps/web/src/components/settings/settingsSearch.ts`                        | N       | 42–44, 72, 77, 87, 92                              |
+| `apps/web/src/threadNotifications.ts`                                       | N       | 87, 97                                             |
+| `apps/web/src/threadNotifications.test.ts`                                  | N       | 97                                                 |
+| `apps/web/src/components/settings/SettingsPanels.tsx`                       | N       | 87, 97                                             |
+| `apps/web/src/components/settings/settingsSearch.ts`                        | N       | 42–44, 72, 77, 87, 92, 97                          |
 | `apps/web/src/components/settings/SettingsSidebarNav.tsx`                   | N       | 42, 72, 73                                         |
 | `docs/README.md`                                                            | N       | 42, 45, 48                                         |
 | `knip.jsonc`                                                                | N       | 95                                                 |

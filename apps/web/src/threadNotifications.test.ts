@@ -16,14 +16,22 @@ class FakeAudioContext {
   decodeAudioData() {
     return Promise.resolve({ duration: SOUND_SECONDS });
   }
-  createBufferSource() {
+  createGain() {
     return {
+      gain: { value: 1 },
+      connect() {},
+      disconnect() {},
+    };
+  }
+  createBufferSource() {
+    return Object.assign(new EventTarget(), {
       buffer: null,
       connect() {},
+      disconnect() {},
       start() {
         audio.started += 1;
       },
-    };
+    });
   }
 }
 
@@ -37,6 +45,12 @@ beforeEach(() => {
   vi.resetModules();
   audio.currentTime = 0;
   audio.started = 0;
+  vi.stubGlobal(
+    "window",
+    Object.assign(new EventTarget(), {
+      localStorage: { getItem: () => null },
+    }),
+  );
   vi.stubGlobal("AudioContext", FakeAudioContext);
   vi.stubGlobal(
     "fetch",
