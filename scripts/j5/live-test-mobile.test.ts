@@ -135,6 +135,24 @@ describe("claimSlot", () => {
     assert.strictEqual(claimSlot({ ...input, worktree: b! }), "j5-tester-1");
   });
 
+  it("keeps each claim one directory inside the claims folder, whatever the names hold", () => {
+    using fixture = claimsFixture();
+    const worktree = fixture.worktree("a");
+    for (const slot of ["QA/iPhone", "../escape"]) {
+      claimSlot({
+        directory: fixture.directory,
+        platform: "ios",
+        host: "user@mac",
+        slots: [slot],
+        worktree,
+      });
+    }
+    assert.deepEqual(NodeFS.readdirSync(fixture.directory).toSorted(), [
+      "ios-user_mac-.._escape",
+      "ios-user_mac-QA_iPhone",
+    ]);
+  });
+
   it("says how to clear a claim whose worktree is gone", () => {
     using fixture = claimsFixture();
     const input = { directory: fixture.directory, platform: "android", slots: ["s"] } as const;

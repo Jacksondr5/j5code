@@ -49,6 +49,11 @@ describe("ensureCheckoutScript", () => {
     assert.isTrue(NodeFS.existsSync(fixture.at("rig dir", "it's checkout", ".j5-mobile-rig")));
     assert.strictEqual(fixture.run(ensureCheckoutScript({ checkout })).status, 0);
 
+    NodeFS.mkdirSync(fixture.at('odd "$name" `x`'));
+    const odd = fixture.run(ensureCheckoutScript({ checkout: '~/odd "$name" `x`' }));
+    assert.strictEqual(odd.status, 76);
+    assert.include(odd.stderr, '~/odd "$name" `x` on the iOS host was not made by the mobile rig');
+
     NodeFS.mkdirSync(fixture.at("someone's clone"));
     const foreign = fixture.run(ensureCheckoutScript({ checkout: "~/someone's clone" }));
     assert.strictEqual(foreign.status, 76);

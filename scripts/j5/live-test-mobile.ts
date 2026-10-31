@@ -174,11 +174,10 @@ const claimName = (
   input: { readonly platform: MobilePlatform; readonly host?: string },
   slot: string,
 ) =>
-  [
-    input.platform,
-    ...(input.host === undefined ? [] : [input.host.replaceAll(/[^\w.-]/g, "_")]),
-    slot,
-  ].join("-");
+  [input.platform, ...(input.host === undefined ? [] : [input.host]), slot]
+    // Hosts and Simulator names come from the settings: one path segment, whatever they hold.
+    .map((part) => part.replaceAll(/[^\w.-]/g, "_"))
+    .join("-");
 
 /** Releases a claim this worktree holds. Someone else's claim is left alone. */
 export function releaseSlot(input: {
@@ -890,6 +889,11 @@ export async function startMobile(
   }
   if (platform === "phone") return startPhone(paths, deadline);
   const recorded = readMobileRecord(paths);
+  if (recorded?.platform === "ios" && recorded.iosHost === undefined) {
+    throw new LiveTestRefusal(
+      `This mobile setup was made before the rig recorded its iOS host. Stop it with the build that made it, or reset ${recorded.slot} by hand and delete ${mobileFiles(paths).record}, then set up again.`,
+    );
+  }
   let iosHost: IosHost | undefined;
   if (platform === "ios") iosHost = recorded?.iosHost ?? reachableIosHost();
   else {
@@ -1204,7 +1208,7 @@ export function mobileStatus(paths: LiveTestPaths): string | undefined {
   const state = (running: boolean) => (running ? "RUNNING" : "STOPPED");
   return `${formatMobile(paths, record)}
   Metro: ${state(isOurs(paths, record.metro))}${
-    record.platform === "ios"
+    record.iosHost?.kind === "ssh"
       ? `   Tunnel: ${state(isOurs(paths, record.tunnel))}`
       : record.platform === "android"
         ? `   Emulator: ${state(isOurs(paths, record.emulator))}`

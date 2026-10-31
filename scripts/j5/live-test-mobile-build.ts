@@ -64,7 +64,7 @@ export function ensureCheckoutScript(input: { readonly checkout: string }): stri
   return `if [ ! -e ${checkout} ]; then
   mkdir -p ${checkout} && git init -q ${checkout} && touch ${checkout}/${RIG_MARKER} && echo ${RIG_MARKER} >> ${checkout}/.git/info/exclude
 elif [ ! -e ${checkout}/${RIG_MARKER} ]; then
-  echo "${input.checkout} on the iOS host was not made by the mobile rig, so the rig will not check out over it. Point ios.host.checkout at a new path, or add ${RIG_MARKER} there if it is the rig's." >&2
+  echo ${shellWord(`${input.checkout} on the iOS host was not made by the mobile rig, so the rig will not check out over it. Point ios.host.checkout at a new path, or add ${RIG_MARKER} there if it is the rig's.`)} >&2
   exit ${NOT_RIG_CHECKOUT_EXIT}
 fi
 `;
@@ -86,8 +86,8 @@ export function iosBuildScript(input: {
   return `set -e
 lock=${lock}
 if ! mkdir "$lock" 2>/dev/null; then
-  echo "Another iOS build is running on this host: $(cat "$lock/owner" 2>/dev/null)" >&2
-  echo "Wait for it. If none is running, remove ${input.checkout}.build-lock on the iOS host." >&2
+  printf '%s %s\\n' 'Another iOS build is running on this host:' "$(cat "$lock/owner" 2>/dev/null)" >&2
+  echo ${shellWord(`Wait for it. If none is running, remove ${input.checkout}.build-lock on the iOS host.`)} >&2
   exit ${LOCKED_EXIT}
 fi
 trap 'rm -rf "$lock"' EXIT
@@ -96,12 +96,12 @@ trap 'exit 1' HUP INT TERM
 printf '%s since %s\\n' ${shellWord(input.owner)} "$(date)" > "$lock/owner"
 cd ${checkout}
 if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
-  echo "${input.checkout} on the iOS host has changes to tracked files; the rig will not overwrite them." >&2
+  echo ${shellWord(`${input.checkout} on the iOS host has changes to tracked files; the rig will not overwrite them. Discard them there with \`git checkout -- .\` in that directory, or point ios.host.checkout at a new path.`)} >&2
   exit 1
 fi
 git checkout -q -f --detach ${input.commit}
 ${input.envFile === undefined ? "" : `. ${remotePath(input.envFile)}\n`}if ! command -v vp >/dev/null 2>&1; then
-  echo "vp is not on the iOS host's PATH in a login shell. Set ios.host.envFile in ${input.configPath} to the file that puts it there." >&2
+  echo ${shellWord(`vp is not on the iOS host's PATH in a login shell. Set ios.host.envFile in ${input.configPath} to the file that puts it there.`)} >&2
   exit 1
 fi
 vp i
