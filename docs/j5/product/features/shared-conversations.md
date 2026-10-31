@@ -75,7 +75,7 @@ Set aside on purpose, each tracked where it is linked. An item leaves this list 
 
 ### Reading
 
-16. A person's own messages render as they do in a thread that is not shared; another person's message, a command included, renders in the same bubble on the left, with that person's name above it and initials on a coloured circle beside it, and no level. A message a person wrote while the first Owner was the only person who could write to the thread, typed in it or sent as an Inbox reply, is the first Owner's, and renders so to everyone else.
+16. A person's own messages render as they do in a thread that is not shared; another person's message, a command included, renders in the same bubble on the left, with that person's name above it and initials on a coloured circle beside it, and no level. A message a person wrote while the first Owner was the only person who could write to the thread, typed in it or sent as an Inbox reply, is the first Owner's, and renders so to everyone else. The feedback a person gives with their answer to an approval, and their answer to a question when it reaches the agent as a message, are that person's, as a message they typed is.
 
 ### History
 
@@ -129,3 +129,4 @@ Set aside on purpose, each tracked where it is linked. An item leaves this list 
 - 2026-10-31 — AC21, AC22: people a thread or project is shared with search its messages, held to what they can open before the results are cut, and their opens don't rank anyone's Cmd+K (Jackson's decision on [#696](https://github.com/Jacksondr5/j5code/issues/696)).
 - 2026-10-31 — AC23: a Cmd+K match in another person's message names them instead of reading "You" ([#809](https://github.com/Jacksondr5/j5code/issues/809)).
 - 2026-10-31 — AC16, AC23: a message from while the first Owner was the only person who could write, an Inbox reply included, is the first Owner's in the timeline and in Cmd+K alike ([#817](https://github.com/Jacksondr5/j5code/issues/817), [#818](https://github.com/Jacksondr5/j5code/issues/818)).
+- 2026-10-31 — AC16: an approval's feedback and a question's answer sent on as a message are the answering person's ([#822](https://github.com/Jacksondr5/j5code/issues/822)). The usage-limit "Continue where you left off." the server sends at a reset names no one, even when a person turned the resume on (Captain's call: it would tie J5 to upstream's internal message key).

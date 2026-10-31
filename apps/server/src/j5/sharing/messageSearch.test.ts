@@ -365,8 +365,8 @@ it.layer(layer)("Who wrote a message search hit", (it) => {
         message(conversation, "thread-send", "plover thread", 6, {
           senderThreadId: ThreadId.make("thread:plover-sender"),
         }),
-        // An approval's feedback, written by the server after a second person could write.
-        message(conversation, "approval-feedback:plover", "plover feedback", 8, {
+        // A usage-limit resume, written by the server after a second person could write.
+        message(conversation, "limit-resume:plover", "plover resume", 8, {
           creationSource: "server",
         }),
       ]);
@@ -393,7 +393,7 @@ it.layer(layer)("Who wrote a message search hit", (it) => {
       assert.deepEqual(yield* label(collaborator, "inbox"), { _tag: "person", name: "Morgan" });
       assert.deepEqual(yield* label(OWNER, "inbox"), { _tag: "you" });
       // No other message search finds here was written by a person: each keeps upstream's label.
-      for (const word of ["service", "scheduled", "thread", "feedback"]) {
+      for (const word of ["service", "scheduled", "thread", "resume"]) {
         assert.strictEqual(yield* label(collaborator, word), null, word);
       }
     }),

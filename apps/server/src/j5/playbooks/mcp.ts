@@ -66,7 +66,10 @@ export const playbookTools = [
     failure: Failure,
     failureMode: "return",
     dependencies: workspaceDependencies,
-  }).annotate(Tool.Readonly, true),
+  })
+    .annotate(Tool.Readonly, true)
+    .annotate(Tool.Destructive, false)
+    .annotate(Tool.OpenWorld, false),
   Tool.make("j5_playbook_read", {
     description:
       "Read a playbook's live definition, with every step's prompt and persona, its source, and the digest an edit through j5_playbook_save needs, without starting a run. Pass the same name as j5_playbook_start. warnings name steps whose persona is missing or turned off; they never block starting.",
@@ -75,7 +78,10 @@ export const playbookTools = [
     failure: Failure,
     failureMode: "return",
     dependencies: workspaceDependencies,
-  }).annotate(Tool.Readonly, true),
+  })
+    .annotate(Tool.Readonly, true)
+    .annotate(Tool.Destructive, false)
+    .annotate(Tool.OpenWorld, false),
   Tool.make("j5_playbook_start", {
     ...common,
     dependencies: workspaceDependencies,
@@ -89,7 +95,10 @@ export const playbookTools = [
     parameters: Current,
     description:
       "Retrieve your run's live prompt, purpose and progress without moving. Omit runId to recover your active (or latest) run after compaction or restart. If a current step was deleted, use j5_playbook_reselect.",
-  }).annotate(Tool.Readonly, true),
+  })
+    .annotate(Tool.Readonly, true)
+    .annotate(Tool.Destructive, false)
+    .annotate(Tool.OpenWorld, false),
   Tool.make("j5_playbook_next", {
     ...common,
     parameters: Movement,

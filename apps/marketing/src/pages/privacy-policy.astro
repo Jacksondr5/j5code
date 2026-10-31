@@ -100,7 +100,12 @@ import { CONTACT_EMAIL } from "../lib/site";
     signed in to those providers, and a random ID that each web, desktop, or mobile client creates
     for its device when it connects. Clients send the server only these hashes.
   </p>
-  <p>The original IDs are never sent. IP addresses are not stored.</p>
+  <p>
+    The original IDs are never sent. When an event arrives, PostHog looks up an approximate location
+    from the IP address of the machine running the J5 Code server, which is often your own
+    computer: country, region, city, postcode, and coordinates. That location is stored with the
+    event. The IP address itself is not stored.
+  </p>
   <p>
     Events never include prompts, responses, file contents, file or project names, authentication
     tokens, or conversation IDs.
