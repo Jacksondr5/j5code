@@ -110,6 +110,72 @@ it.layer(accessLayer)("PersonAccess", (it) => {
     }),
   );
 
+  it.effect("lists the threads a person reaches as threadLevel reads each one", () =>
+    Effect.gen(function* () {
+      const people = yield* PersonAccess.PersonAccess;
+      const sql = yield* SqlClient.SqlClient;
+      const lead = yield* thread("thread:reach-lead");
+      yield* thread("thread:reach-subagent", PROJECT, {
+        parent: "thread:reach-lead",
+        relationship: "subagent",
+      });
+      yield* thread("thread:reach-fork", PROJECT, {
+        parent: "thread:reach-lead",
+        relationship: "fork",
+      });
+      yield* thread("thread:reach-seat", OTHER_PROJECT);
+      yield* thread("thread:reach-seat-child", OTHER_PROJECT);
+      yield* thread("thread:reach-forked-seat", OTHER_PROJECT);
+      yield* thread("thread:reach-elsewhere", OTHER_PROJECT);
+      yield* placed("thread:reach-lead", null);
+      yield* placed("thread:reach-seat", "thread:reach-lead");
+      yield* placed("thread:reach-seat-child", "thread:reach-seat");
+      yield* placed("thread:reach-forked-seat", "thread:reach-lead", "forked-from");
+      const elsewhere = ThreadId.make("thread:reach-elsewhere");
+
+      const onThread = yield* person("Reach Thread", [
+        { scope: { kind: "thread", threadId: lead }, level: "viewer" },
+      ]);
+      const onBoth = yield* person("Reach Both", [
+        { scope: { kind: "thread", threadId: elsewhere }, level: "collaborator" },
+        { scope: { kind: "project", projectId: PROJECT }, level: "viewer" },
+      ]);
+      const nobody = yield* person("Reach Nobody");
+      const all = (yield* sql<{ readonly thread_id: string }>`
+        SELECT thread_id FROM orchestration_v2_projection_threads
+      `).map((row) => ThreadId.make(row.thread_id));
+      for (const someone of [onThread, onBoth, nobody]) {
+        const reached = new Set(yield* people.reachableThreads(someone.personId) ?? []);
+        for (const id of all) {
+          const level = yield* people.threadLevel(someone.personId, id);
+          assert.strictEqual(reached.has(id), level !== null, `${someone.displayName}: ${id}`);
+        }
+      }
+      // The lead, its subagent and the seats beneath it, in another project; not a fork.
+      assert.sameMembers(
+        [...((yield* people.reachableThreads(onThread.personId)) ?? [])],
+        [
+          "thread:reach-lead",
+          "thread:reach-subagent",
+          "thread:reach-seat",
+          "thread:reach-seat-child",
+        ],
+      );
+      assert.deepStrictEqual(yield* people.reachableThreads(nobody.personId), []);
+
+      // A level at server scope covers every thread; taking a share away takes its threads.
+      const everyone = yield* person("Reach Server", [
+        { scope: { kind: "server" }, level: "viewer" },
+      ]);
+      assert.isNull(yield* people.reachableThreads(everyone.personId));
+      yield* people.removeLevel({
+        personId: onThread.personId,
+        scope: { kind: "thread", threadId: lead },
+      });
+      assert.deepStrictEqual(yield* people.reachableThreads(onThread.personId), []);
+    }),
+  );
+
   it.effect("finds a page a tool published by the turn item that names it", () =>
     Effect.gen(function* () {
       const people = yield* PersonAccess.PersonAccess;

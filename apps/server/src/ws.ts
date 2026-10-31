@@ -2019,23 +2019,28 @@ export const layerWsRpc = (
             .searchThreadStream(input)
             .pipe(Stream.mapError((cause) => new OrchestrationV2SearchThreadError({ cause }))),
         [ORCHESTRATION_V2_WS_METHODS.searchThreads]: (input) =>
-          ThreadSearch.searchThreadsWithOlderSettledRows({
-            request: input,
-            search: threadSearch.search,
-            searchOlderSettled: threadSearch.searchOlderSettled,
-            sql,
-            readThreads: (threadIds) =>
-              threadManagement.readShellSnapshot({ location: "active", threadIds }),
-            latestSequence: applicationEvents.latestApplicationSequence,
-          }).pipe(
-            Effect.mapError(
-              (cause) =>
-                new OrchestrationSearchThreadsError({
-                  message: "Failed to search threads",
-                  cause,
-                }),
+          // J5: a narrowed connection searches only what it reaches (FORK.md case 69).
+          j5View
+            .searchThreads(input, (request, narrowed) =>
+              ThreadSearch.searchThreadsWithOlderSettledRows({
+                request,
+                search: (search) => threadSearch.search({ ...search, ...narrowed }),
+                searchOlderSettled: threadSearch.searchOlderSettled,
+                sql,
+                readThreads: (threadIds) =>
+                  threadManagement.readShellSnapshot({ location: "active", threadIds }),
+                latestSequence: applicationEvents.latestApplicationSequence,
+              }),
+            )
+            .pipe(
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationSearchThreadsError({
+                    message: "Failed to search threads",
+                    cause,
+                  }),
+              ),
             ),
-          ),
         [ORCHESTRATION_V2_WS_METHODS.getArchivedShellSnapshot]: (_input) =>
           getOrchestrationV2ArchivedShellSnapshot,
         [ORCHESTRATION_V2_WS_METHODS.getThreadFamily]: (input) =>
