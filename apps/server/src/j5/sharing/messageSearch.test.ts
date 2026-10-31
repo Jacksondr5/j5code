@@ -365,7 +365,15 @@ it.layer(layer)("Who wrote a message search hit", (it) => {
         message(conversation, "thread-send", "plover thread", 6, {
           senderThreadId: ThreadId.make("thread:plover-sender"),
         }),
+        // An approval's feedback, written by the server after a second person could write.
+        message(conversation, "approval-feedback:plover", "plover feedback", 8, {
+          creationSource: "server",
+        }),
       ]);
+      yield* sql`
+        INSERT INTO j5_a2a_shared_thread (thread_id, shared_at)
+        VALUES (${conversation}, ${DateTime.formatIso(at(7))})
+      `;
       yield* sql`
         UPDATE j5_a2a_human_person SET display_name = 'Morgan' WHERE is_local_operator = 1
       `;
@@ -385,7 +393,7 @@ it.layer(layer)("Who wrote a message search hit", (it) => {
       assert.deepEqual(yield* label(collaborator, "inbox"), { _tag: "person", name: "Morgan" });
       assert.deepEqual(yield* label(OWNER, "inbox"), { _tag: "you" });
       // No other message search finds here was written by a person: each keeps upstream's label.
-      for (const word of ["service", "scheduled", "thread"]) {
+      for (const word of ["service", "scheduled", "thread", "feedback"]) {
         assert.strictEqual(yield* label(collaborator, word), null, word);
       }
     }),

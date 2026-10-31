@@ -75,7 +75,7 @@ Set aside on purpose, each tracked where it is linked. An item leaves this list 
 
 ### Reading
 
-16. A person's own messages render as they do in a thread that is not shared; another person's message, a command included, renders in the same bubble on the left, with that person's name above it and initials on a coloured circle beside it, and no level. A message a person wrote before the thread was shared, typed in it or sent as an Inbox reply, is the first Owner's, and renders so to everyone else.
+16. A person's own messages render as they do in a thread that is not shared; another person's message, a command included, renders in the same bubble on the left, with that person's name above it and initials on a coloured circle beside it, and no level. A message a person wrote while the first Owner was the only person who could write to the thread, typed in it or sent as an Inbox reply, is the first Owner's, and renders so to everyone else.
 
 ### History
 
@@ -128,4 +128,4 @@ Set aside on purpose, each tracked where it is linked. An item leaves this list 
 - 2026-10-19 — a scheduled task's run names who wrote its prompt, and fails, not sent, while they can no longer write to the thread; the task is not paused, since that would change upstream's scheduler (AC20, AC3; Jackson, in the review of [#638](https://github.com/Jacksondr5/j5code/pull/638)).
 - 2026-10-31 — AC21, AC22: people a thread or project is shared with search its messages, held to what they can open before the results are cut, and their opens don't rank anyone's Cmd+K (Jackson's decision on [#696](https://github.com/Jacksondr5/j5code/issues/696)).
 - 2026-10-31 — AC23: a Cmd+K match in another person's message names them instead of reading "You" ([#809](https://github.com/Jacksondr5/j5code/issues/809)).
-- 2026-10-31 — AC16, AC23: a message from before the thread was shared, an Inbox reply included, is the first Owner's in the timeline and in Cmd+K alike ([#817](https://github.com/Jacksondr5/j5code/issues/817), [#818](https://github.com/Jacksondr5/j5code/issues/818)).
+- 2026-10-31 — AC16, AC23: a message from while the first Owner was the only person who could write, an Inbox reply included, is the first Owner's in the timeline and in Cmd+K alike ([#817](https://github.com/Jacksondr5/j5code/issues/817), [#818](https://github.com/Jacksondr5/j5code/issues/818)).

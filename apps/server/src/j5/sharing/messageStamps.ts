@@ -40,6 +40,9 @@ export interface MessageOrigin {
   readonly creation_source: string | null;
   readonly scheduled_task_id: string | null;
   readonly sender_thread_id: string | null;
+  readonly created_at: string;
+  /** When a second person could first write to the message's thread; `null` while none can. */
+  readonly shared_at: string | null;
 }
 
 /** `MessageOrigin`'s columns, read from `orchestration_v2_projection_messages` as `alias`. */
@@ -47,20 +50,24 @@ export const messageOriginColumns = (alias: string) => `
   json_extract(${alias}.payload_json, '$.createdBy') AS created_by,
   json_extract(${alias}.payload_json, '$.creationSource') AS creation_source,
   json_extract(${alias}.payload_json, '$.scheduledTaskId') AS scheduled_task_id,
-  json_extract(${alias}.payload_json, '$.senderThreadId') AS sender_thread_id
+  json_extract(${alias}.payload_json, '$.senderThreadId') AS sender_thread_id,
+  ${alias}.created_at AS created_at,
+  (SELECT shared.shared_at FROM j5_a2a_shared_thread AS shared
+    WHERE shared.thread_id = ${alias}.thread_id) AS shared_at
 `;
 
 /**
- * Whether a message no person is recorded for was written by one, before its thread was shared:
- * the first owner's then, the only person who could write to it (AC3). That is one they typed in
- * the thread, or an Inbox reply, the only delivery a person sends; any other "mcp" message is an
- * agent's or a session's no person is known for.
+ * Whether a message no person is recorded for was written by one while the first owner was the
+ * only person who could write to its thread, so was theirs (AC3, AC16): one typed in the thread,
+ * or an Inbox reply, the only delivery a person sends. Any other "mcp" message is an agent's or a
+ * session's; one from after a second writer came is the server's, as every person's is recorded.
  */
 export const typedByFirstOwner = (message: MessageOrigin & { readonly message_id: string }) =>
   message.created_by === "user" &&
   (message.creation_source !== "mcp" || isDeliveryMessageId(message.message_id)) &&
   message.scheduled_task_id === null &&
-  message.sender_thread_id === null;
+  message.sender_thread_id === null &&
+  (message.shared_at === null || message.created_at < message.shared_at);
 
 /** The platform's text a stored message begins with: the note it carries, then the line naming
  * whose it is. */
