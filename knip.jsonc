@@ -5,7 +5,7 @@
   // These executables are supplied by the OS or installed separately from npm.
   "ignoreBinaries": ["eas", "file", "mkfifo", "pkill", "pkg-config", "plutil", "sips"],
   // J5: upstream code whose only callers J5 removed or replaced. Left as upstream wrote it so
-  // advances merge cleanly (FORK.md case 94).
+  // advances merge cleanly (FORK.md case 95).
   "ignoreFiles": [
     "apps/mobile/src/components/T3Wordmark.tsx",
     "apps/web/src/components/T3Wordmark.tsx",
