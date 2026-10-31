@@ -38,8 +38,11 @@ export type MobilePlatform = (typeof MOBILE_PLATFORMS)[number];
 export const MOBILE_PORT_RANGE = { first: 5774, last: 8733 } as const;
 /** Simulators the iOS host's device hub already lists. The hub fixes its list when it starts, so new ones stay invisible until then. */
 const IOS_POOL_NAME = /^j5-tester-\d+$/;
-/** What the 16 GB MacBook holds with a build running beside it. */
-const IOS_BOOTED_CAP = 2;
+/**
+ * Booted Simulators the iOS host takes at once. The 16 GB MacBook is also in daily use, and with
+ * two booted it swapped until agent-device timed out. A dedicated host can raise this.
+ */
+const IOS_BOOTED_CAP = 1;
 /** One AVD per slot: two emulators cannot share an AVD while the Device panel opens it read-write. */
 export const ANDROID_SLOTS = ["j5-tester-1", "j5-tester-2", "j5-tester-3"] as const;
 const ANDROID_DEVICE_PROFILE = "pixel_8";
