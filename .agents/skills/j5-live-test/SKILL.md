@@ -209,7 +209,8 @@ machine. iOS runs on the MacBook, which the script reaches as `ssh macbook`
 - When the MacBook is asleep or off, setup says "iOS host offline; Android is
   available".
 - When `mobile-open` says there is no dev client for this checkout's native
-  fingerprint, a native dependency changed. Build it with
+  fingerprint (a native dependency changed, or that host has not built it
+  yet), build it with
   `node scripts/j5/setup-agent-live-test.ts mobile-build android` (or `ios`),
   in the background: Android takes about 15 minutes the first time, and iOS
   takes 6 to 15 minutes. Then run `mobile-open` again. The iOS build runs on

@@ -8,7 +8,9 @@ description: Test T3 Code's native iOS and Android app through its Device panel 
 ## Open the device
 
 In J5, set up first with `--mobile` (see "Use an isolated backend"); it names
-the device to open. Call `device_list`, then `device_open` with the selected host and device IDs.
+the device to open.
+
+Call `device_list`, then `device_open` with the selected host and device IDs.
 T3 boots the device and shows its live stream in the Device panel. Follow its
 returned `quickStart`, using the exact `agentDevice.command` and all `targetArgs`
 on every operation. Use `device_screenshot` to inspect the screen.
