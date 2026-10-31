@@ -18,7 +18,7 @@ import {
   type ThreadManagementProviderInstanceDisabledError,
 } from "../../orchestration-v2/ThreadManagementService.ts";
 import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewInstanceService.ts";
-import { getThreadProjectionIfPresent } from "./threadProjectionReads.ts";
+import { getThreadRecordsIfPresent } from "./threadProjectionReads.ts";
 import { makeNativeQuestionInboxRead } from "./nativeQuestionInboxRead.ts";
 
 /** A seat's thread, and the Crew that holds the seat. */
@@ -128,7 +128,9 @@ export const layer = Layer.effect(
      * null. Any other store failure propagates, so an outage is an error, not an empty Inbox.
      */
     const liveProjection = (threadId: ThreadId) =>
-      getThreadProjectionIfPresent(threads, threadId).pipe(
+      getThreadRecordsIfPresent(threads, threadId, ["runtimeRequests", "turnItems"], {
+        turnItemTypes: ["approval_request"],
+      }).pipe(
         Effect.map((projection) =>
           projection !== null && projection.thread.archivedAt === null ? projection : null,
         ),

@@ -98,7 +98,7 @@ const fixture = Effect.gen(function* () {
       ),
   });
   const threads = Layer.mock(ThreadManagementService)({
-    getThreadProjection: (threadId) => {
+    getThreadRecords: (threadId) => {
       if (threadId === missingThread || threadId === unavailableThread) {
         return Effect.fail(
           new OrchestratorProjectionError({

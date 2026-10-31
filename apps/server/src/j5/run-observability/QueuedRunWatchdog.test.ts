@@ -1,9 +1,13 @@
 import {
+  EventId,
+  MessageId,
+  ProjectId,
   ProviderInstanceId,
   VcsProcessExitError,
   RunAttemptId,
   RunId,
   ThreadId,
+  type OrchestrationV2Run,
   type OrchestrationV2ThreadProjection,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
@@ -21,6 +25,7 @@ import * as EventSink from "../../orchestration-v2/EventSink.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import { QueuedRunCandidates, type CandidateQuery } from "./QueuedRunCandidates.ts";
 import * as ProjectionStore from "../../orchestration-v2/ProjectionStore.ts";
+import * as SqlitePersistence from "../../persistence/Sqlite.ts";
 import {
   layer,
   QueuedRunWatchdog,
@@ -77,7 +82,7 @@ it("records one durable waiting fact for a promoted run that has not dispatched"
               }),
           }),
           Layer.mock(ProjectionStore.ProjectionStoreV2)({
-            getThreadProjection: (id) =>
+            getThreadRecords: (id) =>
               Effect.sync(() => {
                 projectionReadIds.push(id);
                 return projection;
@@ -128,6 +133,105 @@ it("records one durable waiting fact for a promoted run that has not dispatched"
       status: "completed",
       failure: { code: "queued_run_waiting", message: "Run waiting 5m, not yet dispatched." },
     });
+  }).pipe(Effect.runPromise));
+
+it("dedupes the waiting fact against the store's own error items for the run", async () =>
+  Effect.gen(function* () {
+    const threadId = ThreadId.make("thread_queued_run_watchdog_store");
+    const runId = RunId.make("run_queued_run_watchdog_store");
+    const instanceId = ProviderInstanceId.make("codex");
+    const now = yield* DateTime.now;
+    const run: OrchestrationV2Run = {
+      id: runId,
+      threadId,
+      ordinal: 1,
+      providerInstanceId: instanceId,
+      modelSelection: { instanceId, model: "gpt-5.4" },
+      providerThreadId: null,
+      userMessageId: MessageId.make("message_queued_run_watchdog_store"),
+      rootNodeId: null,
+      activeAttemptId: RunAttemptId.make("attempt_queued_run_watchdog_store"),
+      status: "starting",
+      requestedAt: DateTime.makeUnsafe(DateTime.toEpochMillis(now) - QUEUED_RUN_WATCHDOG_DELAY_MS),
+      startedAt: null,
+      completedAt: null,
+      checkpointId: null,
+      contextHandoffId: null,
+    };
+    const written: Array<unknown> = [];
+    const store = ProjectionStore.layer.pipe(Layer.provide(SqlitePersistence.layerMemory));
+    const testLayer = layer.pipe(
+      Layer.provideMerge(
+        Layer.mergeAll(
+          Layer.mock(QueuedRunCandidates)({ list: () => Effect.succeed([run]) }),
+          Layer.effect(
+            EventSink.EventSinkV2,
+            Effect.map(ProjectionStore.ProjectionStoreV2, (projections) =>
+              EventSink.EventSinkV2.of({
+                writeIfRunCurrent: (
+                  input: Parameters<EventSink.EventSinkV2["Service"]["writeIfRunCurrent"]>[0],
+                ) =>
+                  Effect.forEach(input.events, (event) => projections.apply(event)).pipe(
+                    Effect.tap(() => Effect.sync(() => written.push(input))),
+                    Effect.as({ committed: true, storedEvents: [] } as never),
+                    Effect.orDie,
+                  ),
+              } as never),
+            ),
+          ),
+          IdAllocator.layer,
+        ),
+      ),
+      Layer.provideMerge(store),
+    );
+
+    yield* Effect.gen(function* () {
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      yield* projections.apply({
+        id: EventId.make("event:watchdog-store:thread"),
+        type: "thread.created",
+        threadId,
+        occurredAt: now,
+        payload: {
+          id: threadId,
+          projectId: ProjectId.make("project:watchdog-store"),
+          title: "Watchdog",
+          providerInstanceId: instanceId,
+          modelSelection: { instanceId, model: "gpt-5.4" },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          activeProviderThreadId: null,
+          lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
+          forkedFrom: null,
+          createdBy: "user",
+          creationSource: "web",
+          createdAt: now,
+          updatedAt: now,
+          archivedAt: null,
+          settledOverride: null,
+          settledAt: null,
+          lastVisitedAt: null,
+          deletedAt: null,
+        },
+      });
+      yield* projections.apply({
+        id: EventId.make("event:watchdog-store:run"),
+        type: "run.updated",
+        threadId,
+        runId,
+        occurredAt: now,
+        payload: run,
+      });
+      const watchdog = yield* QueuedRunWatchdog;
+      yield* watchdog.scan();
+      yield* watchdog.scan();
+      const { turnItems } = yield* projections.getThreadRecords(threadId, ["turnItems"]);
+      expect(turnItems.map((item) => item.type)).toEqual(["error"]);
+    }).pipe(Effect.provide(testLayer));
+
+    expect(written).toHaveLength(1);
   }).pipe(Effect.runPromise));
 
 it("fairly observes more than 100 stale runs within bounded watchdog ticks", async () =>
@@ -181,7 +285,7 @@ it("fairly observes more than 100 stale runs within bounded watchdog ticks", asy
               }),
           }),
           Layer.mock(ProjectionStore.ProjectionStoreV2)({
-            getThreadProjection: () => Effect.succeed(projection),
+            getThreadRecords: () => Effect.succeed(projection),
           }),
           Layer.mock(EventSink.EventSinkV2)({
             writeIfRunCurrent: (input) =>
@@ -252,7 +356,7 @@ it("records one sanitized VCS observation fact without changing the run", async 
       Layer.provide(
         Layer.mergeAll(
           Layer.mock(ProjectionStore.ProjectionStoreV2)({
-            getThreadProjection: () => Effect.succeed(projection),
+            getThreadRecords: () => Effect.succeed(projection),
           }),
           Layer.mock(EventSink.EventSinkV2)({
             write: (input) =>

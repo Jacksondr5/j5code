@@ -93,7 +93,7 @@ const sectionParticipant = (section: string) =>
  * (reviewer, builder), so two Crews' reviewers must not replace each other's baseline.
  */
 export const latestSeatNotice = (
-  captain: OrchestrationV2ThreadProjection,
+  captain: Pick<OrchestrationV2ThreadProjection, "messages">,
   participantId: string,
 ): string | null => {
   const newestFirst = captain.messages
@@ -109,7 +109,9 @@ export const latestSeatNotice = (
 };
 
 /** A seat notice still queued behind the Captain's running turn; a new notice folds into it. */
-export const queuedSeatDigest = (captain: OrchestrationV2ThreadProjection) => {
+export const queuedSeatDigest = (
+  captain: Pick<OrchestrationV2ThreadProjection, "runs" | "messages">,
+) => {
   if (ThreadManagement.latestActiveRun(captain) === undefined) return null;
   for (const run of captain.runs) {
     if (run.status !== "queued") continue;
@@ -223,7 +225,7 @@ const makeLayer = (daemon: boolean) =>
        * fails it, for the next finish or the boot sweep.
        */
       const handoffFact = Effect.fn("j5.a2a.crewSeatFinish.handoffFact")(function* (
-        projection: OrchestrationV2ThreadProjection,
+        projection: Pick<OrchestrationV2ThreadProjection, "thread">,
         kind: string | null,
       ): Effect.fn.Return<SeatHandoffFact, ArtifactWorkspaceError, never> {
         const assignment = projection.thread.agentPersonaAssignment;
@@ -271,12 +273,17 @@ const makeLayer = (daemon: boolean) =>
       const notifyCaptain = Effect.fn("j5.a2a.crewSeatFinish.notifyCaptain")(function* (
         instance: AgentCrewInstance,
         seatName: string,
-        projection: OrchestrationV2ThreadProjection,
+        projection: Pick<OrchestrationV2ThreadProjection, "thread" | "turnItems">,
         run: OrchestrationV2Run,
         handoff: SeatHandoffFact,
       ) {
         const threadId = projection.thread.id;
-        const captain = yield* threads.getThreadProjection(instance.captainThreadId);
+        // Seat notices are system-authored user messages; the digest is a queued run's user message.
+        const captain = yield* threads.getThreadRecords(
+          instance.captainThreadId,
+          ["runs", "messages"],
+          { messageRoles: ["user"] },
+        );
         const stable = { providerSessionId: FINISH_SESSION, requestKey: `${threadId}:${run.id}` };
         const text = seatFinishedNoticeText({
           seatName,
@@ -328,7 +335,10 @@ const makeLayer = (daemon: boolean) =>
         if (membership === null) return null;
         const instance = yield* crews.read(membership.crewInstanceId);
         if (instance === null || instance.archivedAt !== null) return null;
-        const projection = yield* threads.getThreadProjection(threadId);
+        const projection = yield* threads.getThreadRecords(threadId, ["runs", "turnItems"], {
+          turnItemRunId: run.id,
+          turnItemTypes: ["error"],
+        });
         if (projection.thread.archivedAt !== null) return null;
         if (ThreadManagement.latestActiveRun(projection) !== undefined) return null;
         if (run.status === "failed")
@@ -360,7 +370,7 @@ const makeLayer = (daemon: boolean) =>
       });
 
       /** Only report the latest run, never an older finish hidden behind a later interruption. */
-      const outstandingFinish = (projection: OrchestrationV2ThreadProjection) => {
+      const outstandingFinish = (projection: Pick<OrchestrationV2ThreadProjection, "runs">) => {
         if (ThreadManagement.latestActiveRun(projection) !== undefined) return undefined;
         const newest = projection.runs.toSorted((a, b) => b.ordinal - a.ordinal)[0];
         return newest?.status === "completed" || newest?.status === "failed" ? newest : undefined;
@@ -372,7 +382,7 @@ const makeLayer = (daemon: boolean) =>
           for (const member of instance.members) {
             // A seat whose thread cannot be read (gone, or the store hiccuped) is skipped this pass.
             const projection = yield* threads
-              .getThreadProjection(member.threadId)
+              .getThreadRecords(member.threadId, ["runs"])
               .pipe(Effect.catchCause(() => Effect.succeed(null)));
             if (projection === null) continue;
             if (projection.thread.archivedAt !== null) continue;
