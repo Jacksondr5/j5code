@@ -131,15 +131,9 @@ interface AuthorRow {
 const PROMPT_SETTLED_EVENT =
   "runtime-request.updated" satisfies OrchestrationV2StoredEvent["event"]["type"];
 
-/**
- * The user messages upstream writes of a person's answer to a prompt: an approval's feedback, and
- * answers it sends on to the agent as a message. The first is pinned by
- * `SharedConversation.integration.test.ts`; upstream's web folds the second into its question.
- */
-const answerMessageIds = (requestId: string) => [
-  `approval-feedback:${requestId}`,
-  `async-answer:${requestId}`,
-];
+/** The event upstream logs when it writes a message, pinned by the integration test. */
+const MESSAGE_WRITTEN_EVENT =
+  "message.updated" satisfies OrchestrationV2StoredEvent["event"]["type"];
 
 const QUEUED = "queued" satisfies OrchestrationV2Run["status"];
 
@@ -435,9 +429,9 @@ const make = Effect.gen(function* () {
 
   /**
    * The person's words upstream writes as a user message of its own when it settles their answer
-   * to a prompt: an approval's feedback, or answers it sends on to the agent as a message. Each is
-   * recorded as written by whoever `recordAnswer` names, the same as a typed message. Upstream's
-   * message replaces any a person sent ahead under its id, so its record replaces theirs too.
+   * to a prompt: an approval's feedback, or answers it sends on to the agent as a message. Each
+   * user message the settling command wrote is recorded as written by whoever `recordAnswer`
+   * names. Upstream's message replaces any a person sent ahead under its id, so its record does too.
    */
   const recordAnswerMessages = Effect.fn("j5.sharing.sharedConversation.recordAnswerMessages")(
     function* (answer: Parameters<SharedConversationShape["claimAnswer"]>[1]) {
@@ -446,12 +440,15 @@ const make = Effect.gen(function* () {
         INSERT INTO j5_a2a_message_author (
           thread_id, message_id, person_id, display_name, level, stored_prefix, created_at
         )
-        SELECT answer.thread_id, message.message_id, answer.person_id, answer.display_name,
-          answer.level, '', ${createdAt}
+        SELECT DISTINCT answer.thread_id, json_extract(written.payload_json, '$.id'),
+          answer.person_id, answer.display_name, answer.level, '', ${createdAt}
         FROM j5_a2a_prompt_answer AS answer
-        JOIN orchestration_v2_projection_messages AS message
-          ON message.thread_id = answer.thread_id
-          AND message.message_id IN ${sql.in(answerMessageIds(answer.requestId))}
+        JOIN orchestration_events AS written
+          ON written.command_id = answer.command_id
+          AND written.aggregate_kind = 'thread'
+          AND written.stream_id = answer.thread_id
+          AND written.event_type = ${MESSAGE_WRITTEN_EVENT}
+          AND json_extract(written.payload_json, '$.role') = 'user'
         WHERE answer.thread_id = ${answer.threadId} AND answer.request_id = ${answer.requestId}
           AND answer.command_id = ${answer.commandId} AND ${settledItsPrompt}
         ON CONFLICT (thread_id, message_id) DO UPDATE SET

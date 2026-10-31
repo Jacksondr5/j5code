@@ -544,6 +544,8 @@ it.effect("a person's approval feedback, written by upstream, is recorded as the
     // Sent again, upstream takes it as before and nothing changes.
     yield* send(priya.personId, decline);
 
+    // Named from upstream's log: the feedback's `message.updated` under the decline's command id,
+    // with its `id` and `role` in the payload.
     const written = (yield* threads.getThreadProjection(on)).messages.find(
       (entry) => entry.text === decline.feedback,
     )!;

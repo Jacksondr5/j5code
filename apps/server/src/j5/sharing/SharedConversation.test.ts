@@ -776,22 +776,19 @@ const upstreamAnswers = (written: "approval-feedback" | "async-answer") =>
         command_id, aggregate_kind, aggregate_id, accepted_at, result_sequence, status
       ) VALUES (${command.commandId}, 'thread', ${command.threadId}, ${AT}, 1, 'accepted')
     `;
-    yield* sql`
+    const log = (eventType: string, payload: Record<string, unknown>) => sql`
       INSERT INTO orchestration_events (
         event_id, aggregate_kind, stream_id, stream_version, event_type, occurred_at, command_id,
         actor_kind, payload_json, metadata_json
       ) SELECT
-        ${`event:${command.commandId}`}, 'thread', ${command.threadId}, COUNT(*),
-        'runtime-request.updated', ${AT}, ${command.commandId}, 'server',
-        ${JSON.stringify({ id: command.requestId })}, '{}'
+        ${`event:${command.commandId}:${eventType}`}, 'thread', ${command.threadId}, COUNT(*),
+        ${eventType}, ${AT}, ${command.commandId}, 'server', ${JSON.stringify(payload)}, '{}'
       FROM orchestration_events WHERE stream_id = ${command.threadId}
     `;
-    yield* unrecorded(
-      command.threadId,
-      `${written}:${command.requestId}`,
-      feedback,
-      iso(AFTER + 60_000),
-    );
+    const messageId = `${written}:${command.requestId}`;
+    yield* unrecorded(command.threadId, messageId, feedback, iso(AFTER + 60_000));
+    yield* log("message.updated", { id: messageId, role: "user" });
+    yield* log("runtime-request.updated", { id: command.requestId });
     return command;
   });
 
@@ -962,6 +959,35 @@ it.effect(
         ["approval-feedback:request:pending", "Jackson", "", null],
       );
     }).pipe(Effect.provide(conversationLayer)),
+);
+
+it.effect("an answer leaves a message sent under its other kind of id to its sender", () =>
+  Effect.gen(function* () {
+    yield* jackson;
+    const threadId = yield* thread("thread:answer-other-id");
+    const priya = yield* personWith("Priya", onThread(threadId));
+    const sam = yield* personWith("Sam", onThread(threadId, "viewer"));
+    const owner = (yield* (yield* PersonAccess).firstOwner).personId;
+    yield* send(
+      priya,
+      message(threadId, "Mine.", { messageId: MessageId.make("async-answer:request:both") }),
+    );
+    // The owner's decline writes the feedback only, never an answer sent on as a message.
+    yield* answering(owner, "approval-feedback", {
+      commandId: CommandId.make("command:owner-decline-both"),
+      threadId,
+      requestId: RuntimeRequestId.make("request:both"),
+      decision: "decline",
+      feedback: "Not like that.",
+    });
+    assert.deepStrictEqual(
+      (yield* authors(threadId, sam)).authors.map((author) => [author.messageId, author.name]),
+      [
+        ["approval-feedback:request:both", "Jackson"],
+        ["async-answer:request:both", "Priya"],
+      ],
+    );
+  }).pipe(Effect.provide(conversationLayer)),
 );
 
 it.effect("feedback on a thread not yet shared is recorded for no one, so the owner's", () =>
