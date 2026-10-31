@@ -132,9 +132,9 @@ it.each(["thread", "Fleet"] as const)(
         <PlaybookRunsSection />
       ),
     );
-    vi.advanceTimersByTime(60_000);
+    // Every pending timer fires, whatever mounted it; none of them may refresh.
+    vi.runOnlyPendingTimers();
     expect(state.refresh).not.toHaveBeenCalled();
-    expect(vi.getTimerCount()).toBe(0);
 
     state.serverRuns = [
       {
@@ -160,9 +160,8 @@ it.each(["thread", "Fleet"] as const)(
     expect(state.refresh).toHaveBeenCalledTimes(1);
     expect(screen.container.textContent).toContain("Live demo");
     // An active run is followed by the server's revision, which a file change moves too.
-    vi.advanceTimersByTime(60_000);
+    vi.runOnlyPendingTimers();
     expect(state.refresh).toHaveBeenCalledTimes(1);
-    expect(vi.getTimerCount()).toBe(0);
 
     // A terminal update arriving during a read must be fetched once that read finishes.
     await act(() => {
@@ -180,8 +179,6 @@ it.each(["thread", "Fleet"] as const)(
       emit();
     });
     expect(state.refresh).toHaveBeenCalledTimes(2);
-    // No timer count here: the Fleet card's real UI components schedule their own once the run
-    // completes. The refresh never holds one, which the counts above already show.
     expect(screen.container.textContent).toContain("Completed");
 
     visibility.set("hidden");
