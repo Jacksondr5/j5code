@@ -896,6 +896,9 @@ export async function mobileOpen(paths: LiveTestPaths): Promise<void> {
     onIosHost(
       `xcrun simctl spawn ${udid} defaults write com.apple.launchservices.schemeapproval ${shellQuote(`com.apple.CoreSimulator.CoreSimulatorBridge-->${scheme}`)} -string ${appId}`,
     );
+    // openurl gives a launch 10 seconds. An app's first launch on a freshly erased Simulator,
+    // with another booted beside it, can take longer; simctl launch waits for it.
+    onIosHost(`xcrun simctl launch ${udid} ${appId}`, 120_000);
     openUrl = (url) => void onIosHost(`xcrun simctl openurl ${udid} ${shellQuote(url)}`);
   } else {
     if (!isOurs(paths, record.emulator)) {
