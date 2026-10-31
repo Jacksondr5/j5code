@@ -6,7 +6,7 @@ uses, the server also sends hashed account identifiers: your T3 Connect account,
 Claude accounts when you are signed in, and a random identifier for each device that connects.
 Events include the provider, model, reasoning effort, permission mode, turn result, duration,
 release channel, and main-agent token totals when available. They also name the features you use,
-such as replying in the Inbox, deciding on a Crew roster or sharing a thread, and the tools agents
+such as replying in the Inbox, deciding on a Crew roster or sharing with someone, and the tools agents
 call, without paths, IDs, or text. Each turn that starts is also
 reported with who asked for it (you, an agent, or the server itself), whether a scheduled task
 started it, and whether the thread is a seat in a Crew. When an ask between participants ends, the
