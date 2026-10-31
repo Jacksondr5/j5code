@@ -117,7 +117,7 @@ function setup() {
 }
 
 it.each(["thread", "Fleet"] as const)(
-  "%s discovers a playbook started in the same running turn, and holds no timer with or without an active run",
+  "%s discovers a playbook started in the same running turn, and no pending timer refreshes with or without an active run",
   async (surface) => {
     setup();
     using _timers = fakeTimers();
@@ -133,7 +133,7 @@ it.each(["thread", "Fleet"] as const)(
       ),
     );
     // Every pending timer fires, whatever mounted it; none of them may refresh.
-    vi.runOnlyPendingTimers();
+    await act(() => void vi.runOnlyPendingTimers());
     expect(state.refresh).not.toHaveBeenCalled();
 
     state.serverRuns = [
@@ -160,7 +160,7 @@ it.each(["thread", "Fleet"] as const)(
     expect(state.refresh).toHaveBeenCalledTimes(1);
     expect(screen.container.textContent).toContain("Live demo");
     // An active run is followed by the server's revision, which a file change moves too.
-    vi.runOnlyPendingTimers();
+    await act(() => void vi.runOnlyPendingTimers());
     expect(state.refresh).toHaveBeenCalledTimes(1);
 
     // A terminal update arriving during a read must be fetched once that read finishes.
