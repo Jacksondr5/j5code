@@ -122,10 +122,16 @@ const message = (
   },
 });
 
-const seed = (events: ReadonlyArray<OrchestrationV2DomainEvent>) =>
-  Effect.flatMap(ProjectionStore.ProjectionStoreV2, (projections) =>
-    Effect.forEach(events, projections.apply, { discard: true }),
-  );
+/** Both projects, once per database, then the events; each test seeds what it reads. */
+const seed = Effect.fn("test.seed")(function* (events: ReadonlyArray<OrchestrationV2DomainEvent>) {
+  const sql = yield* SqlClient.SqlClient;
+  for (const projectId of [SHARED, PRIVATE]) {
+    const found = yield* sql`SELECT 1 FROM projection_projects WHERE project_id = ${projectId}`;
+    if (found.length === 0) yield* createProject(projectId);
+  }
+  const projections = yield* ProjectionStore.ProjectionStoreV2;
+  yield* Effect.forEach(events, projections.apply, { discard: true });
+});
 
 /** A device for someone holding these levels, as the server issues one. */
 const deviceOf = Effect.fn("test.deviceOf")(function* (
@@ -180,8 +186,6 @@ it.layer(layer)("Message search for a narrowed connection", (it) => {
       const inProject = ThreadId.make("thread:search-in-project");
       const sharedThread = ThreadId.make("thread:search-shared-thread");
       const unshared = ThreadId.make("thread:search-unshared");
-      yield* createProject(SHARED);
-      yield* createProject(PRIVATE);
       yield* seed([
         thread(inProject, SHARED),
         message(inProject, "in-project", "amberquartz in the shared project"),
