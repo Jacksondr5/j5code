@@ -540,6 +540,16 @@ async function startEmulator(
   await waitForBoot(sdk.adb, emulator, deadline, log);
 }
 
+const emulatorBooted = (adb: string, port: number) =>
+  NodeChildProcess.spawnSync(
+    adb,
+    ["-s", `emulator-${port}`, "shell", "getprop", "sys.boot_completed"],
+    {
+      encoding: "utf8",
+      timeout: 10_000,
+    },
+  ).stdout?.trim() === "1";
+
 /** Waits until Android has booted: the Device panel lists an emulator only after that. */
 async function waitForBoot(
   adb: string,
@@ -549,12 +559,7 @@ async function waitForBoot(
 ): Promise<void> {
   const serial = `emulator-${emulator.port}`;
   for (;;) {
-    const booted = NodeChildProcess.spawnSync(
-      adb,
-      ["-s", serial, "shell", "getprop", "sys.boot_completed"],
-      { encoding: "utf8", timeout: 10_000 },
-    );
-    if (booted.stdout?.trim() === "1") return;
+    if (emulatorBooted(adb, emulator.port)) return;
     if (startTimeOf(emulator.pid) !== emulator.startTime) {
       throw new LiveTestRefusal(
         `The emulator exited while booting.${log === undefined ? "" : `\n${tail(log)}`}`,
@@ -562,7 +567,7 @@ async function waitForBoot(
     }
     if (Date.now() > deadline) {
       throw new LiveTestRefusal(
-        `The emulator ${serial} is still booting; it has been left running. Run the same command again to wait for it.`,
+        `The emulator ${serial} is still booting; it has been left running. Do not call device_open yet: run the same command again, which waits for it and then prints the device to open.`,
       );
     }
     await NodeTimersPromises.setTimeout(1_000);
@@ -838,9 +843,12 @@ export function formatMobile(paths: LiveTestPaths, record: MobileRecord): string
   const device =
     record.platform === "ios"
       ? `hostId: the MacBook host in device_list; deviceId "${record.udid}" (${record.slot})`
-      : record.emulator === undefined
-        ? `${record.slot}: its emulator has not started; run ${selfCommand(paths, "--mobile android")}`
-        : `hostId "local"; deviceId "emulator-${record.emulator.port}" (${record.slot})`;
+      : !isOurs(paths, record.emulator)
+        ? `${record.slot}: its emulator is not running; run ${selfCommand(paths, "--mobile android")}`
+        : // The Device panel lists an emulator only once it has booted.
+          !emulatorBooted(androidSdk().adb, record.emulator!.port)
+          ? `${record.slot}: emulator-${record.emulator!.port} is still booting; do not call device_open yet. ${selfCommand(paths, "--mobile android")} waits for it`
+          : `hostId "local"; deviceId "emulator-${record.emulator!.port}" (${record.slot})`;
   return `Mobile (${record.platform}), device slot ${record.slot}:
   Device panel  ${device}
   Backend       http://${host}:${record.serverPort} from the device
