@@ -48,7 +48,7 @@ export const ANDROID_SLOTS = ["j5-tester-1", "j5-tester-2", "j5-tester-3"] as co
 const ANDROID_DEVICE_PROFILE = "pixel_8";
 /** How each device reaches this machine's loopback: through the tunnel on iOS, the emulator's alias on Android. */
 const DEVICE_LOOPBACK: Record<MobilePlatform, string> = { ios: "127.0.0.1", android: "10.0.2.2" };
-const IOS_SSH_HOST = process.env.J5_MOBILE_IOS_SSH_HOST?.trim() || "macbook";
+export const IOS_SSH_HOST = process.env.J5_MOBILE_IOS_SSH_HOST?.trim() || "macbook";
 const BUNDLE_TIMEOUT_MS = 120_000;
 const TUNNEL_TIMEOUT_MS = 20_000;
 const EMULATOR_EXIT_TIMEOUT_MS = 30_000;
@@ -284,7 +284,7 @@ export const cachedClientPath = (platform: MobilePlatform, fingerprint: string) 
     ? `.cache/t3code/native-clients/artifacts/ios/development/${fingerprint}/${mobileNativeProjectName(J5_BRANDING.mobile.development.appName)}.app`
     : `.cache/t3code/native-clients/artifacts/android/development-x86_64/${fingerprint}/app-debug.apk`;
 
-function nativeFingerprint(paths: LiveTestPaths, platform: MobilePlatform): string {
+export function nativeFingerprint(paths: LiveTestPaths, platform: MobilePlatform): string {
   const run = NodeChildProcess.spawnSync(process.execPath, ["--eval", FINGERPRINT_EVAL, platform], {
     cwd: NodePath.join(paths.worktree, "apps/mobile"),
     env: { ...process.env, ...FINGERPRINT_ENV },
@@ -324,6 +324,14 @@ function activePairingLabels(paths: LiveTestPaths): ReadonlyArray<string> {
   );
 }
 
+/** Whether a command on the iOS host succeeds. */
+export const iosHostSucceeds = (command: string) =>
+  NodeChildProcess.spawnSync(
+    "ssh",
+    ["-o", "BatchMode=yes", "-o", "ConnectTimeout=5", IOS_SSH_HOST, command],
+    { timeout: 30_000 },
+  ).status === 0;
+
 /** A command over SSH on the iOS host. Its stdout, or a refusal naming what failed. */
 function onIosHost(command: string, timeoutMs = 60_000): string {
   const run = NodeChildProcess.spawnSync(
@@ -339,7 +347,7 @@ function onIosHost(command: string, timeoutMs = 60_000): string {
   return run.stdout;
 }
 
-function assertIosHostOnline(): void {
+export function assertIosHostOnline(): void {
   const probe = NodeChildProcess.spawnSync(
     "ssh",
     ["-o", "BatchMode=yes", "-o", "ConnectTimeout=5", IOS_SSH_HOST, "xcrun simctl help"],
@@ -355,7 +363,7 @@ function assertIosHostOnline(): void {
 const iosSimulators = () => simulatorsFromSimctl(onIosHost("xcrun simctl list devices --json"));
 
 /** The Android SDK's tools, or a refusal naming what is missing. */
-function androidSdk() {
+export function androidSdk() {
   const home = NodeOS.homedir();
   const root = [
     process.env.ANDROID_HOME,
@@ -881,14 +889,9 @@ export async function mobileOpen(paths: LiveTestPaths): Promise<void> {
     if (simulator?.booted !== true)
       throw new LiveTestRefusal(`${record.slot} is not booted. ${openHint}`);
     const remoteClient = `"$HOME"/${shellQuote(client)}`;
-    const cached = NodeChildProcess.spawnSync(
-      "ssh",
-      ["-o", "BatchMode=yes", "-o", "ConnectTimeout=5", IOS_SSH_HOST, `test -d ${remoteClient}`],
-      { timeout: 30_000 },
-    );
-    if (cached.status !== 0) {
+    if (!iosHostSucceeds(`test -d ${remoteClient}`)) {
       throw new LiveTestRefusal(
-        `The iOS host has no dev client for this checkout's native fingerprint ${fingerprint}. Build it there from a checkout of this commit: vp run mobile:install ios --prepare`,
+        `The iOS host has no dev client for this checkout's native fingerprint ${fingerprint}. Build it (6-15 minutes; run it in the background): ${selfCommand(paths, "mobile-build ios")}`,
       );
     }
     console.log(`Installing the dev client on ${record.slot}...`);
@@ -914,7 +917,7 @@ export async function mobileOpen(paths: LiveTestPaths): Promise<void> {
     const apk = NodePath.join(NodeOS.homedir(), client);
     if (!NodeFS.existsSync(apk)) {
       throw new LiveTestRefusal(
-        `There is no Android dev client for this checkout's native fingerprint ${fingerprint}. Build it (about 15 minutes the first time): vp run mobile:install android --prepare`,
+        `There is no Android dev client for this checkout's native fingerprint ${fingerprint}. Build it (about 15 minutes the first time; run it in the background): ${selfCommand(paths, "mobile-build android")}`,
       );
     }
     const adbRun = (args: ReadonlyArray<string>, what: string) => {
