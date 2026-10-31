@@ -495,6 +495,19 @@ it.effect(
           decision: "approve",
           seats: [seat("builder"), seat("sentry")],
         });
+        const moved = yield* gate.propose({
+          requestKey: "analytics-workspace",
+          captain,
+          displayName: "Moved Crew",
+          brief: "Fix the flaky login test.",
+          seats: [seat("builder")],
+        });
+        // Only the seat's workspace changes, to a worktree of its own.
+        yield* gate.resolve({
+          proposalId: moved.proposal.id,
+          decision: "approve",
+          seats: [{ ...seat("builder"), workspace: { type: "worktree", baseRef: "main" } }],
+        });
         const refused = yield* gate.propose({
           requestKey: "analytics-declined",
           captain,
@@ -508,6 +521,7 @@ it.effect(
       const resolved = { event: "feature.used", feature: "crew.proposal.resolve" };
       assert.deepStrictEqual(recorded, [
         { ...resolved, variant: "approve" },
+        { ...resolved, variant: "edit" },
         { ...resolved, variant: "edit" },
         { ...resolved, variant: "decline" },
       ]);

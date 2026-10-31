@@ -236,6 +236,38 @@ const memberSteps = (instance: AgentCrewInstance | null) =>
     playbookStepIds: member.playbookStepIds ?? [],
   }));
 
+/** Whether the person changed a seat's workspace; `crewRosterChanges` leaves workspaces out. */
+const sameWorkspace = (a: CrewProposalSeat["workspace"], b: CrewProposalSeat["workspace"]) => {
+  if (a === undefined || b === undefined) return a === b;
+  switch (a.type) {
+    case "shared":
+      return b.type === "shared";
+    case "worktree":
+      return (
+        b.type === "worktree" &&
+        a.baseRef === b.baseRef &&
+        a.branch === b.branch &&
+        (a.startFromOrigin ?? false) === (b.startFromOrigin ?? false)
+      );
+    case "existing_worktree":
+      return (
+        b.type === "existing_worktree" &&
+        worktreePathKey(a.worktreePath) === worktreePathKey(b.worktreePath) &&
+        a.branch === b.branch
+      );
+  }
+};
+
+const rosterEdited = (
+  requested: ReadonlyArray<CrewProposalSeat>,
+  approved: ReadonlyArray<CrewProposalSeat>,
+) =>
+  Object.values(crewRosterChanges(requested, approved)).some((changed) => changed.length > 0) ||
+  approved.some((seat) => {
+    const asked = requested.find(({ seat: name }) => name === seat.seat);
+    return asked !== undefined && !sameWorkspace(asked.workspace, seat.workspace);
+  });
+
 type ProposalRequest = Omit<CreateCrewProposalInput, "playbook"> & {
   readonly playbook?: Pick<CrewPlaybookRef, "name"> | null | undefined;
 };
@@ -283,9 +315,7 @@ export const layer = Layer.effect(
         variant:
           approved === null
             ? "decline"
-            : Object.values(crewRosterChanges(proposal.requestedSeats, approved)).some(
-                  (changed) => changed.length > 0,
-                )
+            : rosterEdited(proposal.requestedSeats, approved)
               ? "edit"
               : "approve",
       });
