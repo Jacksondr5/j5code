@@ -43,7 +43,15 @@ import {
   layer as personAccessLayer,
 } from "./PersonAccess.ts";
 import { SharedThreads } from "./SharedThreads.ts";
-import { type Author, makeMessageStamps, prefixOf, refused } from "./messageStamps.ts";
+import {
+  type Author,
+  type MessageOrigin,
+  makeMessageStamps,
+  messageOriginColumns,
+  prefixOf,
+  refused,
+  typedByFirstOwner,
+} from "./messageStamps.ts";
 import { scheduledLine } from "./scheduledRuns.ts";
 
 /**
@@ -289,27 +297,12 @@ const make = Effect.gen(function* () {
   const unrecordedAuthor = Effect.fn("j5.sharing.sharedConversation.unrecordedAuthor")(function* (
     messageId: string,
   ) {
-    const rows = yield* sql<{
-      readonly created_by: string | null;
-      readonly creation_source: string | null;
-      readonly scheduled_task_id: string | null;
-      readonly sender_thread_id: string | null;
-    }>`
-      SELECT json_extract(payload_json, '$.createdBy') AS created_by,
-        json_extract(payload_json, '$.creationSource') AS creation_source,
-        json_extract(payload_json, '$.scheduledTaskId') AS scheduled_task_id,
-        json_extract(payload_json, '$.senderThreadId') AS sender_thread_id
-      FROM orchestration_v2_projection_messages WHERE message_id = ${messageId}
+    const rows = yield* sql<MessageOrigin>`
+      SELECT ${sql.literal(messageOriginColumns("message"))}
+      FROM orchestration_v2_projection_messages AS message WHERE message_id = ${messageId}
     `;
     const row = rows[0];
-    // An inbox reply is the person's too, but comes as a delivery ("mcp") and carries its header.
-    const typedByOwner =
-      row !== undefined &&
-      row.created_by === "user" &&
-      row.creation_source !== "mcp" &&
-      row.scheduled_task_id === null &&
-      row.sender_thread_id === null;
-    if (!typedByOwner) return null;
+    if (row === undefined || !typedByFirstOwner(row)) return null;
     const owner = yield* people.firstOwner;
     return { personId: owner.personId, displayName: owner.displayName, level: "owner" } as Author;
   });

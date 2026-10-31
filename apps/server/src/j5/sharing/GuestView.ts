@@ -26,6 +26,7 @@ import * as Effect from "effect/Effect";
 import { identity } from "effect/Function";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
+import type * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
 
 import { guestIconPath } from "./GuestProjectIcons.ts";
@@ -39,6 +40,7 @@ import {
   isWide,
   reachPersonId,
 } from "./PersonAccess.ts";
+import { makeSearchAuthors } from "./searchAuthors.ts";
 
 /**
  * What a narrowed connection is told (AC24, AC25): config, lifecycle welcome and sidebar feed,
@@ -559,7 +561,7 @@ const NO_MATCHES: OrchestrationV2SearchThreadsResult = { matches: [] };
  */
 export const connectionView = Effect.fn("j5.sharing.guestView.connectionView")(function* (
   session: SessionIdentity,
-): Effect.fn.Return<ConnectionView, never, PersonAccess> {
+): Effect.fn.Return<ConnectionView, never, PersonAccess | SqlClient.SqlClient> {
   const access = yield* PersonAccess;
   const reach = yield* access.sessionReach(session).pipe(
     Effect.catch((cause) =>
@@ -568,7 +570,17 @@ export const connectionView = Effect.fn("j5.sharing.guestView.connectionView")(f
       }).pipe(Effect.as({ kind: "unknown" } as SessionReach)),
     ),
   );
-  if (isWide(reach)) return MEMBER_VIEW;
+  // Each message hit names who wrote it, as this session's person may know them.
+  const searchAuthors = yield* makeSearchAuthors;
+  const viewer = reachPersonId(reach);
+  const withAuthors = (view: ConnectionView): ConnectionView => ({
+    ...view,
+    searchThreads: (input, search) =>
+      Effect.flatMap(view.searchThreads(input, search), (result) =>
+        Effect.map(searchAuthors(viewer, result.matches), (matches) => ({ ...result, matches })),
+      ),
+  });
+  if (isWide(reach)) return withAuthors(MEMBER_VIEW);
   // A Viewer at server scope is told every provider's skills; one at a project, the skills in
   // that project's own folders; anyone else, none.
   const roots =
@@ -583,5 +595,5 @@ export const connectionView = Effect.fn("j5.sharing.guestView.connectionView")(f
     roots === null
       ? () => true
       : (skill) => roots.some((root) => skill.path.startsWith(`${root.replace(/\/+$/u, "")}/`));
-  return narrowedView(access, reach, skillsShown);
+  return withAuthors(narrowedView(access, reach, skillsShown));
 });

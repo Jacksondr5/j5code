@@ -298,3 +298,52 @@ it.layer(layer)("Message search for a narrowed connection", (it) => {
     }),
   );
 });
+
+it.layer(layer)("Who wrote a message search hit", (it) => {
+  it.effect("names each person's message as its reader may know them", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const conversation = ThreadId.make("thread:search-authors");
+      yield* seed([
+        thread(conversation, PRIVATE),
+        message(conversation, "author-owner-before", "kestrel before it was shared", 1),
+        message(conversation, "author-collaborator", "kestrel from the collaborator", 2),
+      ]);
+      yield* sql`
+        UPDATE j5_a2a_human_person SET display_name = 'Morgan' WHERE is_local_operator = 1
+      `;
+      const priya = yield* person("Priya", [
+        { scope: { kind: "thread", threadId: conversation }, level: "collaborator" },
+      ]);
+      const collaborator = (yield* device(priya.personId, LEVEL_PERMISSIONS.viewer)).identity;
+      const viewer = yield* deviceOf("Sam", [
+        { scope: { kind: "thread", threadId: conversation }, level: "viewer" },
+      ]);
+      yield* sql`
+        INSERT INTO j5_a2a_message_author (
+          thread_id, message_id, person_id, display_name, level, stored_prefix, created_at
+        ) VALUES (
+          ${conversation}, 'author-collaborator', ${priya.personId}, 'Priya', 'collaborator', '',
+          ${DateTime.formatIso(at(2))}
+        )
+      `;
+      const authors = Effect.fn("test.authors")(function* (
+        session: Parameters<typeof connectionView>[0],
+        query: string,
+      ) {
+        const { matches } = yield* searchAs(session, { query });
+        return matches.map((match) => match.author);
+      });
+
+      assert.deepEqual(yield* authors(OWNER, "collaborator"), [{ _tag: "person", name: "Priya" }]);
+      assert.deepEqual(yield* authors(collaborator, "collaborator"), [{ _tag: "you" }]);
+      assert.deepEqual(yield* authors(viewer, "collaborator"), [{ _tag: "person", name: "Priya" }]);
+      // Typed before the thread was shared, so the first owner's, the only one who could write.
+      assert.deepEqual(yield* authors(OWNER, "before"), [{ _tag: "you" }]);
+      assert.deepEqual(yield* authors(collaborator, "before"), [
+        { _tag: "person", name: "Morgan" },
+      ]);
+      assert.deepEqual(yield* authors(viewer, "before"), [{ _tag: "person", name: "Morgan" }]);
+    }),
+  );
+});
