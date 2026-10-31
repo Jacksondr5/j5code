@@ -17,6 +17,9 @@ server reports counts of working threads, live Crews and waiting asks.
 
 Events do not include prompts, responses, file contents, authentication tokens, conversation IDs,
 raw provider events, or child-agent output. Child-agent token use is excluded from the totals.
+When an event arrives, PostHog looks up an approximate location (country, region, city, postcode
+and coordinates) from the IP address of the machine running the server, which is often your own
+computer, and stores it with the event. The IP address itself is not stored.
 
 Builds that set a relay trace destination also send relay connection traces to Axiom to diagnose
 T3 Connect connectivity. J5 Code's releases set none.
