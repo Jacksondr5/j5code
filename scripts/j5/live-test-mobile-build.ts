@@ -136,9 +136,10 @@ export function mobileBuild(paths: LiveTestPaths, platform: MobilePlatform): voi
   console.log(
     `Building the iOS dev client on the iOS host at ${commit.slice(0, 10)} (6-15 minutes when it is not cached)...`,
   );
+  // A login shell: the cold iOS build runs `pod install`, and CocoaPods is on Homebrew's PATH.
   const build = NodeChildProcess.spawnSync(
     "ssh",
-    ["-o", "BatchMode=yes", "-o", "ServerAliveInterval=30", IOS_SSH_HOST, "/bin/zsh -s"],
+    ["-o", "BatchMode=yes", "-o", "ServerAliveInterval=30", IOS_SSH_HOST, "/bin/zsh -l -s"],
     {
       input: iosBuildScript({ commit, owner: paths.worktree }),
       stdio: ["pipe", "inherit", "inherit"],
