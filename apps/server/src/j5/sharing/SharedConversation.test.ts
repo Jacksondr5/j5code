@@ -795,15 +795,20 @@ const upstreamAnswers = (written: "approval-feedback" | "async-answer") =>
   });
 
 const answering = (
-  personId: ParticipantId,
+  personId: ParticipantId | null,
   written: "approval-feedback" | "async-answer",
   command: Record<string, unknown>,
+  upstream: (
+    command: OrchestrationV2Command,
+  ) => Effect.Effect<OrchestrationV2Command, unknown, SqlClient.SqlClient> = upstreamAnswers(
+    written,
+  ),
 ) =>
   SharedConversation.use((conversation) =>
     conversation.dispatch(
       personId,
       { type: "runtime-request.respond", ...command } as unknown as OrchestrationV2Command,
-      upstreamAnswers(written),
+      upstream,
     ),
   );
 
@@ -876,6 +881,50 @@ it.effect("the words a person answers a prompt with are theirs to every reader",
     assert.lengthOf(
       yield* sql`SELECT 1 FROM j5_a2a_message_author WHERE thread_id = ${threadId}`,
       2,
+    );
+  }).pipe(Effect.provide(conversationLayer)),
+);
+
+it.effect("feedback no person sent, or from an answer that settled nothing, names no one", () =>
+  Effect.gen(function* () {
+    const owner = yield* jackson;
+    const threadId = yield* thread("thread:feedback-no-one");
+    const priya = yield* personWith("Priya", onThread(threadId));
+    const sam = yield* personWith("Sam", onThread(threadId, "viewer"));
+    // A session with no person answers: upstream writes the feedback, and no one is recorded.
+    yield* answering(null, "approval-feedback", {
+      commandId: CommandId.make("command:session-decline"),
+      threadId,
+      requestId: RuntimeRequestId.make("request:session"),
+      decision: "decline",
+      feedback: "Stop.",
+    });
+    assert.deepStrictEqual((yield* authors(threadId, sam)).authors, []);
+
+    // Priya settles a prompt first. The owner's later answer to it settles nothing, even where
+    // upstream takes the command, so her feedback stays hers.
+    yield* answering(priya, "approval-feedback", {
+      commandId: CommandId.make("command:first"),
+      threadId,
+      requestId: RuntimeRequestId.make("request:raced"),
+      decision: "decline",
+      feedback: "Mine.",
+    });
+    yield* answering(
+      owner,
+      "approval-feedback",
+      {
+        commandId: CommandId.make("command:second"),
+        threadId,
+        requestId: RuntimeRequestId.make("request:raced"),
+        decision: "decline",
+        feedback: "Mine instead.",
+      },
+      (command) => Effect.succeed(command),
+    );
+    assert.deepStrictEqual(
+      (yield* authors(threadId, sam)).authors.map((author) => [author.messageId, author.name]),
+      [["approval-feedback:request:raced", "Priya"]],
     );
   }).pipe(Effect.provide(conversationLayer)),
 );
