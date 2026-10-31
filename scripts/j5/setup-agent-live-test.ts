@@ -38,6 +38,7 @@ export class LiveTestRefusal extends Error {}
 /** How the home is built: with the test project and pre-made threads, or empty. */
 const MODE_FLAGS = {
   default: "",
+  skills: "--skills",
   fresh: "--fresh",
   peer: "--peer",
   "peer-poll": "--peer --poll",
@@ -53,7 +54,7 @@ const modeFlags = (mode: LiveTestMode, baseRef: string | undefined) =>
 /** What the generator records about a default build. Paths are never read from it: see LiveTestPaths. */
 interface DefaultManifest {
   /** Absent in the generator's file; the script adds it for the peer and base modes. */
-  readonly mode?: "default" | "peer" | "peer-poll" | "base";
+  readonly mode?: "default" | "skills" | "peer" | "peer-poll" | "base";
   /** In base mode: the ref as it was given, and the commit it named then. */
   readonly baseRef?: string;
   readonly baseCommit?: string;
@@ -632,6 +633,15 @@ Project to add when the wizard or a test asks for one: a small TODO app (\`pnpm 
   It is the only project in this home. Do not add another project: that is how
   a test reaches a real repository.
 
+${
+  manifest.mode === "skills"
+    ? `Skills-only mode: both Codex and Claude instances use disposable homes.
+Sample skills and catalog: ${paths.home}/test-skills.
+Inventory only: sample credentials and loopback endpoints cannot run real agent turns.`
+    : `Agent-turn mode uses real provider credentials and skill folders. Skills writes are prohibited.
+For Skills tests, rebuild a separate test home with --skills; never Apply a catalog here.`
+}
+
 New threads default to ${manifest.defaultModel}.
 Personas: ${manifest.personas
         .map(
@@ -895,6 +905,7 @@ function buildHome(paths: LiveTestPaths, mode: LiveTestMode, base: BaseTarget | 
         root,
         "--owner-name",
         ownerName,
+        ...(mode === "skills" ? ["--skills"] : []),
       ],
       {
         cwd: paths.worktree,
@@ -909,6 +920,12 @@ function buildHome(paths: LiveTestPaths, mode: LiveTestMode, base: BaseTarget | 
   if (!isPeerMode(mode)) {
     console.log("Building the test repository and home (about 30 seconds, no model calls)...");
     generate(paths.root, "Test owner");
+    if (mode === "skills") {
+      NodeFS.writeFileSync(
+        paths.manifest,
+        `${JSON.stringify({ ...readManifest(paths), mode: "skills" }, null, 2)}\n`,
+      );
+    }
     if (base !== undefined) {
       const manifest: Manifest = {
         ...(readManifest(paths) as DefaultManifest),
@@ -2698,8 +2715,8 @@ function guest(paths: LiveTestPaths, request: GuestRequest): void {
   print({ kind: "new", name: request.name, level, scope }, pairingUrl);
 }
 
-const USAGE = `Usage: node scripts/j5/setup-agent-live-test.ts [--fresh | --peer [--poll] | --for-dev | --base <ref>]
-       node scripts/j5/setup-agent-live-test.ts rebuild [--fresh | --peer [--poll] | --for-dev | --base <ref>]
+const USAGE = `Usage: node scripts/j5/setup-agent-live-test.ts [--skills | --fresh | --peer [--poll] | --for-dev | --base <ref>]
+       node scripts/j5/setup-agent-live-test.ts rebuild [--skills | --fresh | --peer [--poll] | --for-dev | --base <ref>]
        node scripts/j5/setup-agent-live-test.ts status | restart | stop | upgrade
        ${GUEST_USAGE.slice("Usage: ".length)}`;
 

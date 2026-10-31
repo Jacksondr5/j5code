@@ -5,6 +5,7 @@
  * Writes `test-repo`, a `home` with replayed (view-only) threads, and `<root>/manifest.json` for
  * `scripts/j5/setup-agent-live-test.ts`. Nothing in the home points outside `<root>`.
  */
+import { seedLiveTestSkills } from "./liveTestSkills.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   ChatAttachmentId,
@@ -402,7 +403,10 @@ const replayFixture = Effect.fn("liveTestHome.replayFixture")(function* <
   return threadId;
 });
 
-function writeSettingsAndPersonas(home: string): void {
+function writeSettingsAndPersonas(
+  home: string,
+  skills: Partial<Effect.Success<ReturnType<typeof seedLiveTestSkills>>>,
+): void {
   const stateDir = NodePath.join(home, "userdata");
   NodeFS.writeFileSync(
     NodePath.join(stateDir, "settings.json"),
@@ -412,6 +416,7 @@ function writeSettingsAndPersonas(home: string): void {
         // A provider found behind its latest release raises a toast that covers the top-right
         // controls of every page until dismissed, and tests click those controls.
         enableProviderUpdateChecks: false,
+        ...skills,
       },
       null,
       2,
@@ -478,6 +483,7 @@ export const buildLiveTestHome = Effect.fn("buildLiveTestHome")(function* (input
   readonly root: string;
   readonly ownerName: string;
   readonly replays?: ReadonlyArray<LiveTestReplay>;
+  readonly skillsOnly?: boolean;
 }) {
   const ownerName = yield* checkedPersonName(input.ownerName);
   const paths = liveTestHomePaths(input.root);
@@ -531,7 +537,12 @@ export const buildLiveTestHome = Effect.fn("buildLiveTestHome")(function* (input
     project: { id: projectId, workspaceRoot: testRepo },
   });
   yield* nameOwner(databasePath, ownerName);
-  writeSettingsAndPersonas(home);
+  writeSettingsAndPersonas(
+    home,
+    input.skillsOnly
+      ? yield* seedLiveTestSkills(home).pipe(Effect.provide(NodeServices.layer))
+      : { skillCatalogSource: "" },
+  );
 
   const manifest: LiveTestHomeManifest = {
     version: 1,
@@ -564,7 +575,7 @@ if (import.meta.main) {
   const root = args[1];
   const ownerName = args[3];
   if (
-    args.length !== 4 ||
+    (args.length !== 4 && !(args.length === 5 && args[4] === "--skills")) ||
     args[0] !== "--root" ||
     args[2] !== "--owner-name" ||
     root === undefined ||
@@ -572,12 +583,12 @@ if (import.meta.main) {
     !NodePath.isAbsolute(root)
   ) {
     process.stderr.write(
-      "Usage: liveTestHome.ts --root <absolute directory> --owner-name <name>\n",
+      "Usage: liveTestHome.ts --root <absolute directory> --owner-name <name> [--skills]\n",
     );
     process.exit(64);
   }
   Effect.runPromise(
-    buildLiveTestHome({ root, ownerName }).pipe(
+    buildLiveTestHome({ root, ownerName, skillsOnly: args[4] === "--skills" }).pipe(
       Effect.provide(Logger.layer([], { mergeWithExisting: false })),
     ),
   ).then(

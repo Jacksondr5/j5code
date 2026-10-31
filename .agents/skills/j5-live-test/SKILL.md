@@ -60,6 +60,22 @@ tested as a whole, each layer names the run that covers its head.
 
 ## Run a test
 
+### Skills writes
+
+Build a dedicated Skills-only home with `node scripts/j5/setup-agent-live-test.ts --skills`.
+Use a separate worktree from an ordinary agent-turn test; a built home retains
+its mode, and switching requires `rebuild --skills`. Both default provider IDs
+are bound to disposable homes, so catalog Apply targets only those two roots.
+The sample catalog and user skills live under the test home's `test-skills/`.
+Verify Catalog details lists only roots below that directory before Apply.
+
+Skills-only instances use sample configuration and loopback-only endpoints for
+inventory. They cannot run real model turns. Ordinary mode keeps the machine's
+credentials for agent turns, has no sample catalog, and is outside the Skills
+write workflow. Fresh, copied developer, and older base homes are outside it too.
+Project writes use only the isolated test repository. Never copy credentials
+into a Skills-only home or enable another provider instance there.
+
 ### Set up
 
 From your worktree, run:

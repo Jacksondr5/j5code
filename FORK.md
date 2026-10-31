@@ -1034,3 +1034,11 @@ The 2026-09-10 observability and portability pass adds three methods to the same
 Agent action feedback no longer occupies the Import agents section. Web/desktop use the existing toast manager; mobile renders a dismissible, automatically expiring toast over the library screen. Import/removal results and action errors use toasts, successful toggles remain silent, and pending operations retain disabled controls without adding status text to the import section.
 
 The agent library places the Import menu beside the Scoped agents heading and removes the separate import section and description. Web/desktop use the existing section header action; the mobile library screen renders its own wrapping header row, leaving the shared `SettingsSection` untouched. Import processing, replacement choices, and toast feedback are unchanged.
+
+### Live-test Skills isolation (#666)
+
+J5-owned `apps/server/src/j5/test-support/liveTestSkills.ts` seeds disposable
+provider homes and a local catalog for the explicit `--skills` mode; `liveTestHome.ts` includes those instances
+in generated settings. Ordinary mode retains credential access and has no sample catalog. `scripts/j5/setup-agent-live-test.ts` and the
+`j5-live-test` skill identify the safe write targets. No upstream-owned file
+is changed for this issue.
