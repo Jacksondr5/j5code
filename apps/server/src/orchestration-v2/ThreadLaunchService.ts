@@ -204,7 +204,7 @@ function failureDetail(error: unknown): string {
   return `Workspace preparation failed: ${error instanceof Error ? error.message : String(error)}`;
 }
 
-export const make = Effect.gen(function* () {
+const make = Effect.gen(function* () {
   const personaLibrary = yield* makeAgentPersonaLibrary;
   const projects = yield* ProjectService.ProjectService;
   const setupTracker = yield* WorktreeSetupTracker.WorktreeSetupTracker;

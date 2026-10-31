@@ -831,7 +831,7 @@ function useChatMarkdownState({
         href={fileLinkMeta.targetPath}
         targetPath={logicalArtifactPath ?? fileLinkMeta.targetPath}
         iconPath={logicalArtifactPath ?? fileLinkMeta.filePath}
-        workspaceRelativePath={fileLinkMeta.workspaceRelativePath}
+        workspaceRelativePath={artifactPath === null ? fileLinkMeta.workspaceRelativePath : null}
         panelPath={panelPath}
         line={fileLinkMeta.line}
         label={fileLinkLabel(
@@ -854,7 +854,9 @@ function useChatMarkdownState({
             : undefined
         }
         resolveCopyPaths={async () =>
-          markdownFileCopyPaths(fileLinkMeta, await resolveHostPath(), cwd)
+          logicalArtifactPath === null
+            ? markdownFileCopyPaths(fileLinkMeta, await resolveHostPath(), cwd)
+            : { fullPath: logicalArtifactPath, relativePath: logicalArtifactPath }
         }
         onOpenInPanel={
           artifactPath === null

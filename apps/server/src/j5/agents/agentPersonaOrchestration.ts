@@ -64,7 +64,7 @@ const immutableRoute = (thread: PersonaThread) =>
   `Persona thread ${thread.id} has an immutable model route.`;
 
 /** Persona threads keep their launch route; explicit model or provider changes are rejected. */
-export const agentPersonaRouteLockedError = (
+const agentPersonaRouteLockedError = (
   thread: PersonaThread,
   commandType: string,
 ): string | undefined =>
@@ -74,7 +74,7 @@ export const agentPersonaRouteLockedError = (
     : undefined;
 
 /** A message carrying a different model selection than the resolved route is rejected too. */
-export const agentPersonaModelMismatchError = (
+const agentPersonaModelMismatchError = (
   thread: PersonaThread,
   modelSelection: ModelSelection | undefined,
 ): string | undefined =>

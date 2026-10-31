@@ -398,7 +398,7 @@ Each advance checks for new upstream reads of `T3CODE_HOME` or `.t3` paths and n
 
   Renewing a session adds a call in web's sign-in gate, and J5's renewal in web's connection runtime for a saved server's token. Leaving non-Owner servers out of Settings adds one filter in each of the three places Settings resolves its servers; Settings' navigation and search keep to the same list of pages, and a page off the list sends the person to one on it.
 
-- **A lowered level reaches an open socket at once,** because upstream closes a session's sockets when it is revoked, replaced or expires.
+- **A lowered level reaches an open socket at once,** because a session's sockets close when it is revoked, replaced or expires. Upstream does this for the RPC socket; J5 does the same for the preview stream.
 - **A change of level makes the person's devices reconnect once.**
 - **A device offline past its session's lifetime is paired again by hand** after a change of level. An MCP client holds no person's level, so a change of level does not touch it, except that lowering or removing an Owner ends the MCP clients they approved.
 - **Each advance checks four things:**
@@ -484,7 +484,7 @@ Recorded in `FORK.md` cases 69 to 73, 78 and 80.
 
 **Why:** Abraham requested a volume control because macOS lacks native per-app volume controls and configuring a third-party mixer for a coding app is unnecessary work. Following upstream or leaving volume unsupported would require changing system volume instead.
 
-**Consequences:** one audio-routing hook plus settings mount and search entries are carried in FORK.md case 93. Check these against upstream audio changes on each advance. No server settings or contract changes; mobile push sounds retain operating-system volume controls. The setting does not sync between devices and clearing local site data restores 100%.
+**Consequences:** one audio-routing hook plus settings mount and search entries are carried in FORK.md case 97. Check these against upstream audio changes on each advance. No server settings or contract changes; mobile push sounds retain operating-system volume controls. The setting does not sync between devices and clearing local site data restores 100%.
 
 **Decided:** Abraham, 2026-10-30, approved implementation and a PR in the notification-volume conversation.
 
@@ -626,3 +626,4 @@ J5 kept a run from resuming after a usage-limit reset when the person had presse
 - 2026-10-26 — D33: a Viewer, or a Collaborator on one thread, isn't offered a new thread, a fork or a new project where their level refuses it (Jackson's 2026-10-25 approval; [#640](https://github.com/Jacksondr5/j5code/issues/640), [#641](https://github.com/Jacksondr5/j5code/issues/641)).
 - 2026-10-27 — `j5/main`'s changes merged into the 2026-10-24 advance: the completion-sound decision, added as D38 on `j5/main`, is D39, because the advance took D38; D4 records that upstream now refuses a steer to a stopping run, so a J5 peer steer to GPT 6 or Claude joins the queue instead.
 - 2026-10-27 — the 2026-10-24 advance moved forward to upstream's stable v0.1.3: D40 added, upstream's guest links hidden because they need T3 Connect (Jackson, 2026-10-25; [#725](https://github.com/Jacksondr5/j5code/issues/725)); D1 takes upstream's shorter instructions and relaxed settings rule; D2 takes upstream's merged action tools (82 tools) and admits `t3_background_wait` (Jackson, 2026-10-27); D4 and D6 re-checked, with upstream's new steer default for a person's follow-ups leaving agent deliveries alone; D27's dev servers follow upstream's opt-in.
+- 2026-10-31 — D33: the preview stream closes when its session is revoked, replaced or expires, as the RPC socket already did, so a lowered level stops a preview at once ([#798](https://github.com/Jacksondr5/j5code/issues/798)).

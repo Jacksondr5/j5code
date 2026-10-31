@@ -4,6 +4,9 @@ import {
   type SearchMatchHint,
   type SearchRange,
 } from "@t3tools/shared/paletteSearch";
+import type { ThreadSearchAuthor } from "@t3tools/contracts/j5";
+
+import { threadSearchMatchLabel } from "../j5/sharing/searchAuthorLabel";
 
 /** `text` with each range in semibold foreground. */
 function HighlightedSearchText(props: { text: string; ranges: ReadonlyArray<SearchRange> }) {
@@ -34,13 +37,15 @@ export function ThreadSearchMatchExcerpt(props: {
     readonly source: "user" | "assistant";
     readonly snippet: string;
     readonly query: string;
+    readonly author?: ThreadSearchAuthor | undefined;
   };
 }) {
   const isUser = props.match.source === "user";
   return (
     <span className="truncate text-xs text-muted-foreground/85">
       <span className={isUser ? "text-info-foreground" : "text-success-foreground"}>
-        {isUser ? "You:" : "Agent:"}
+        {/* J5: another person's message is named, not "You" (FORK.md case 94). */}
+        {threadSearchMatchLabel(props.match)}:
       </span>{" "}
       <HighlightedSearchText
         text={props.match.snippet}

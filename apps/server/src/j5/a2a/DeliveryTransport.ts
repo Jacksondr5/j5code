@@ -191,10 +191,8 @@ export const deliveryCommandId = (messageId: LedgerMessageId) =>
  * and rejects a restart aimed at a turn that has just ended and a steer to a run that Stop has
  * reached, so the plain delivery that follows must keep a command id that nothing has refused.
  */
-export const askedDeliveryCommandId = (
-  messageId: LedgerMessageId,
-  mode: Exclude<SendMode, "queue">,
-) => CommandId.make(`${deliveryCommandId(messageId)}:${mode}`);
+const askedDeliveryCommandId = (messageId: LedgerMessageId, mode: Exclude<SendMode, "queue">) =>
+  CommandId.make(`${deliveryCommandId(messageId)}:${mode}`);
 
 /** Every command one message's delivery may have been dispatched under. */
 const deliveryCommandIds = (messageId: LedgerMessageId) => [
@@ -490,7 +488,11 @@ export const live: Layer.Layer<
             const outcome = yield* settledEffect(steer.id);
             return outcome.status === "succeeded" ? ("delivered" as const) : ("cancelled" as const);
           }
-          const projection = yield* threads.getThreadProjection(participant.threadId);
+          const projection = yield* threads.getThreadRecords(
+            participant.threadId,
+            ["messages", "runs"],
+            { messageIds: [deliveryMessageId(input.messageId)] },
+          );
           const message = projection.messages.find(
             (entry) => entry.id === deliveryMessageId(input.messageId),
           );
@@ -544,7 +546,19 @@ export const live: Layer.Layer<
               state: "participant is not an addressable agent thread",
             });
           }
-          const target = yield* threads.getThreadProjection(participant.threadId);
+          // Error items are all the usage-limit hold reads; the one message is the accepted check.
+          const target = yield* threads.getThreadRecords(
+            participant.threadId,
+            [
+              "runs",
+              "messages",
+              "turnItems",
+              "providerTurns",
+              "providerThreads",
+              "providerSessions",
+            ],
+            { messageIds: [deliveryMessageId(input.messageId)], turnItemTypes: ["error"] },
+          );
           if (target.thread.archivedAt !== null) {
             return yield* new A2ADeliveryTargetError({
               participantId: input.receiverId,
@@ -702,7 +716,11 @@ export const live: Layer.Layer<
             }
             // A restart, and a steer the provider takes by interrupting and restarting, leave
             // no steer effect: the message in the thread is the proof.
-            const accepted = yield* orchestrator.getThreadProjection(participant.threadId);
+            const accepted = yield* orchestrator.getThreadRecords(
+              participant.threadId,
+              ["messages", "runs"],
+              { messageIds: [sendInput.messageId] },
+            );
             if (!accepted.messages.some((message) => message.id === sendInput.messageId)) {
               return false;
             }

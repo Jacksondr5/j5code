@@ -83,6 +83,8 @@ A persona whose definition declares an output artifact (for example `ReviewHando
 
 The task's persona control (web, desktop, and mobile) and, on web and desktop, the persona chip beside a delegated child's Lineage row and subagent card show the handoff artifact's status: the artifact name when written, **pending** after the reminder, or **missing**. On web and desktop the chip opens the file in the Artifacts page. Declared input artifacts are read the same way, so a Builder started after a Navigator finds the `PlanHandoff` under `handoffs/`.
 
+If a source file is invalid, the remaining personas stay available. Settings → Personas reports the file path and reason so you can fix it in your editor. The next catalog read picks up the correction.
+
 The persona library is separate from the Lineage section and subagent cards, which show runtime activity.
 
 For environment setup, see [Configure a persona library](../runbooks/persona-library.md).

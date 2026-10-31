@@ -4,7 +4,7 @@ export const PROMPT_LINK_MAX_PROMPT_LENGTH = 8_000;
 
 // J5: J5 has no hosted app. Its shareable links point at j5.codes/new, a static page that hands
 // the link to J5's app or to the person's own server.
-export const J5_PROMPT_LINK_ORIGIN = "https://j5.codes";
+const J5_PROMPT_LINK_ORIGIN = "https://j5.codes";
 
 export interface PromptLinkRepository {
   readonly owner: string;

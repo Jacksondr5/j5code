@@ -121,7 +121,7 @@ A copy of real data is for a server the developer will use, or for rehearsing a 
 ## Verifying
 
 - Smallest proof that the change works. While you iterate, run `vp test run <files>` for the tests you touched; for big files, add `-t "<name>"`.
-- Before you push, run `vp run check:changed origin/j5/main`. It runs CI's fast checks for changed files: format, lint, knip, typecheck of affected packages and dependents, and tests beside changes. Pass J5's trunk: without it the script compares against `origin/main`, which the fork does not have.
+- Before you push, run `vp run check:changed`. It runs CI's fast checks for changed files (format, lint, knip, typecheck of affected packages and dependents, and tests beside changes) against the merge base with `origin/j5/main`.
 - Use `vp run typecheck` in the package you changed, not `npx tsc`; it caches per package. Both run tsc-rs (`typescript` is the `@tsc-rs/typescript` drop-in).
 - Run `node -e` snippets from `apps/server` or the owning package. `effect` does not resolve from the repo root.
 - Proof for a bug fix depends on the bug. Logic, data, state, and protocol bugs get a failing test first (the fewest that fail on `j5/main` for that reason, in the module's existing test file), then the fix. Purely visual bugs (spacing, colour, alignment, a layout shift) get before/after captures as their proof and no test: do not add UI tests for nitpicks, and do not ask for one in review when a capture already shows it. A server-only fix with no visible surface ships the test plus a short runtime transcript.

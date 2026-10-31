@@ -1,7 +1,9 @@
 import { assert, describe, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { ProviderDriverKind, ProviderInstanceId } from "@t3tools/contracts";
+import { ProviderDriverKind, ProviderInstanceId, ServerSettings } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
+import { seedLiveTestSkills } from "../test-support/liveTestSkills.ts";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
@@ -24,6 +26,8 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
 });
+
+const decodeSettings = Schema.decodeEffect(ServerSettings);
 
 const fixture = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
@@ -187,6 +191,39 @@ describe("skill catalog RPC handlers", () => {
       }
       assert.isFalse(yield* fs.exists(homeDir));
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+  );
+
+  it.effect(
+    "Skills-only fixtures constrain actual catalog status and apply to disposable roots",
+    () =>
+      Effect.gen(function* () {
+        const f = yield* fixture;
+        const seeded = yield* seedLiveTestSkills(f.homeDir);
+        const decoded = yield* decodeSettings(seeded);
+        yield* f.settings.updateSettings({
+          providerInstances: decoded.providerInstances,
+          skillCatalogSource: decoded.skillCatalogSource,
+        });
+        const status = yield* f.handlers["j5.skills.status"]({
+          expectedSource: seeded.skillCatalogSource,
+        });
+        const expected = [
+          yield* f.fs.realPath(f.path.join(f.homeDir, "test-skills", "codex", ".agents", "skills")),
+          yield* f.fs.realPath(
+            f.path.join(f.homeDir, "test-skills", "claudeAgent", ".claude", "skills"),
+          ),
+        ];
+        assert.deepEqual([...status.targets].sort(), expected.sort());
+        for (const target of expected)
+          yield* f.fs.remove(f.path.join(target, "live-test-sample"), { recursive: true });
+        const result = yield* f.handlers["j5.skills.apply"]({
+          expectedSource: seeded.skillCatalogSource,
+          groups: ["test"],
+        });
+        assert.equal(result.installed, 2);
+        for (const target of expected)
+          assert.isTrue(yield* f.fs.exists(f.path.join(target, "live-test-sample", "SKILL.md")));
+      }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
   );
 
   it.effect("reads a content-only catalog outside a Git repository", () =>

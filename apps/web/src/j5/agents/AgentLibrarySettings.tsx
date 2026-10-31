@@ -448,6 +448,13 @@ function MemberAgentLibrarySettings() {
           </div>
         }
       >
+        {catalog.data?.diagnostics?.map((diagnostic) => (
+          <SettingsRow
+            key={diagnostic.path}
+            title={`Invalid persona file: ${diagnostic.path}`}
+            description={diagnostic.message}
+          />
+        ))}
         {effectiveEnvironmentId === null ? (
           <SettingsRow
             title={isReady ? "No connected environments" : "Loading environments"}

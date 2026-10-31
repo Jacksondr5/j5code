@@ -12,11 +12,19 @@ import * as NodePath from "node:path";
 import * as NodeTimersPromises from "node:timers/promises";
 import * as NodeUtil from "node:util";
 
-const COMMANDS = ["start", "status", "restart", "stop", "rebuild", "upgrade"] as const;
+import { loadRepoEnv } from "../lib/public-config.ts";
+
+const COMMANDS = [
+  "start",
+  "status",
+  "restart",
+  "stop",
+  "rebuild",
+  "upgrade",
+  "mobile-open",
+] as const;
 type LiveTestCommand = (typeof COMMANDS)[number];
 
-/** The live install's port. A test server must never end up on it. */
-const LIVE_SERVER_PORT = 5773;
 /**
  * How long one start may take, builds, waits and peering included. Printing the pairing URLs
  * takes some seconds more, so the command still returns inside the two minutes a shell call
@@ -38,6 +46,7 @@ export class LiveTestRefusal extends Error {}
 /** How the home is built: with the test project and pre-made threads, or empty. */
 const MODE_FLAGS = {
   default: "",
+  skills: "--skills",
   fresh: "--fresh",
   peer: "--peer",
   "peer-poll": "--peer --poll",
@@ -53,7 +62,7 @@ const modeFlags = (mode: LiveTestMode, baseRef: string | undefined) =>
 /** What the generator records about a default build. Paths are never read from it: see LiveTestPaths. */
 interface DefaultManifest {
   /** Absent in the generator's file; the script adds it for the peer and base modes. */
-  readonly mode?: "default" | "peer" | "peer-poll" | "base";
+  readonly mode?: "default" | "skills" | "peer" | "peer-poll" | "base";
   /** In base mode: the ref as it was given, and the commit it named then. */
   readonly baseRef?: string;
   readonly baseCommit?: string;
@@ -294,6 +303,13 @@ export function liveTestEnvironment(
   };
 }
 
+export function configuredLivePort(
+  worktree: string,
+  environment: NodeJS.ProcessEnv,
+): string | undefined {
+  return loadRepoEnv({ repoRoot: worktree, baseEnv: environment }).T3CODE_PORT;
+}
+
 export interface ServerLogFacts {
   readonly serverPort: number | undefined;
   readonly webPort: number | undefined;
@@ -357,10 +373,7 @@ export function startRefusal(input: {
   if (facts.baseDir !== undefined && canonicalPath(facts.baseDir) !== canonicalPath(input.home)) {
     return `The dev server chose ${facts.baseDir}, not the test home ${input.home}.`;
   }
-  if (
-    facts.serverPort !== undefined &&
-    (facts.serverPort === LIVE_SERVER_PORT || String(facts.serverPort) === input.inheritedPort)
-  ) {
+  if (facts.serverPort !== undefined && String(facts.serverPort) === input.inheritedPort) {
     return `The dev server chose the live server's port ${facts.serverPort}.`;
   }
   return undefined;
@@ -392,7 +405,7 @@ function statFieldsOf(pid: number): ReadonlyArray<string> | undefined {
 }
 
 /** The process group of `pid`, or undefined when it is gone. */
-function processGroupOf(pid: number): number | undefined {
+export function processGroupOf(pid: number): number | undefined {
   const group = IS_MACOS
     ? probeOutput("ps", ["-o", "pgid=", "-p", String(pid)])?.trim()
     : statFieldsOf(pid)?.[2];
@@ -404,7 +417,7 @@ function processGroupOf(pid: number): number | undefined {
  * second on macOS. Together with the pid it names one process for good: a
  * recycled pid has a later start time.
  */
-function startTimeOf(pid: number): string | undefined {
+export function startTimeOf(pid: number): string | undefined {
   if (!IS_MACOS) return statFieldsOf(pid)?.[19];
   return probeOutput("ps", ["-o", "lstart=", "-p", String(pid)])?.trim() || undefined;
 }
@@ -433,7 +446,7 @@ function membersOfGroup(group: number): ReadonlyArray<number> {
     .filter((pid) => processGroupOf(pid) === group);
 }
 
-function listenerOn(port: number): number | undefined {
+export function listenerOn(port: number): number | undefined {
   if (IS_MACOS) {
     const pid = probeOutput("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"])?.split("\n")[0];
     return pid ? Number(pid) : undefined;
@@ -453,7 +466,7 @@ export function pathFromLsofFields(output: string): string | undefined {
     ?.slice(1);
 }
 
-function cwdOf(pid: number): string | undefined {
+export function cwdOf(pid: number): string | undefined {
   if (IS_MACOS) {
     return pathFromLsofFields(
       probeOutput("lsof", ["-a", "-p", String(pid), "-d", "cwd", "-Fn"]) ?? "",
@@ -531,7 +544,7 @@ export function classifyServer(input: {
     : { kind: "notServing", group, reason: notServing };
 }
 
-function currentServerState(paths: ServerPaths): ServerState {
+export function currentServerState(paths: ServerPaths): ServerState {
   return classifyServer({
     worktree: NodeFS.realpathSync(paths.worktree),
     record: NodeFS.existsSync(paths.record)
@@ -548,7 +561,7 @@ function currentServerState(paths: ServerPaths): ServerState {
   });
 }
 
-const selfCommand = (paths: ServerPaths, command: string) =>
+export const selfCommand = (paths: ServerPaths, command: string) =>
   `node ${NodePath.join(paths.worktree, "scripts/j5/setup-agent-live-test.ts")} ${command}`.trimEnd();
 
 /**
@@ -628,6 +641,15 @@ Project to add when the wizard or a test asks for one: a small TODO app (\`pnpm 
   It is the only project in this home. Do not add another project: that is how
   a test reaches a real repository.
 
+${
+  manifest.mode === "skills"
+    ? `Skills-only mode: both Codex and Claude instances use disposable homes.
+Sample skills and catalog: ${paths.home}/test-skills.
+Inventory only: sample credentials and loopback endpoints cannot run real agent turns.`
+    : `Agent-turn mode uses real provider credentials and skill folders. Skills writes are prohibited.
+For Skills tests, rebuild a separate test home with --skills; never Apply a catalog here.`
+}
+
 New threads default to ${manifest.defaultModel}.
 Personas: ${manifest.personas
         .map(
@@ -695,7 +717,11 @@ export const PAIRING_SCOPES = [
  * person it pairs a device for (register D36): the owner the home was built
  * with, or a person `guest` adds.
  */
-const pairArguments = (paths: ServerPaths, person: string): ReadonlyArray<string> => [
+const pairArguments = (
+  paths: ServerPaths,
+  person: string,
+  label?: string,
+): ReadonlyArray<string> => [
   NodePath.join(paths.worktree, "apps/server/src/bin.ts"),
   "pair",
   "--base-dir",
@@ -703,6 +729,7 @@ const pairArguments = (paths: ServerPaths, person: string): ReadonlyArray<string
   "--person",
   person,
   ...PAIRING_SCOPES.flatMap((scope) => ["--scope", scope]),
+  ...(label === undefined ? [] : ["--label", label]),
 ];
 
 /** `pairArguments` as a command a person can paste. */
@@ -736,12 +763,20 @@ function pairingBaseUrl(paths: ServerPaths): string {
  * the log is the startup URL, which works once and is usually spent by the time
  * anyone asks again.
  */
-function mintPairingUrl(paths: ServerPaths, owner: string): string | undefined {
-  const pair = NodeChildProcess.spawnSync(process.execPath, [...pairArguments(paths, owner)], {
-    cwd: paths.worktree,
-    env: liveTestEnvironment(process.env, paths.worktree),
-    encoding: "utf8",
-  });
+export function mintPairingUrl(
+  paths: ServerPaths,
+  owner: string,
+  label?: string,
+): string | undefined {
+  const pair = NodeChildProcess.spawnSync(
+    process.execPath,
+    [...pairArguments(paths, owner, label)],
+    {
+      cwd: paths.worktree,
+      env: liveTestEnvironment(process.env, paths.worktree),
+      encoding: "utf8",
+    },
+  );
   return /Pairing URL: (\S+)/.exec(pair.stdout ?? "")?.[1];
 }
 
@@ -764,7 +799,7 @@ export function addRemoteUrl(input: {
   return url.toString();
 }
 
-function printRunning(
+export function printRunning(
   paths: LiveTestPaths,
   facts: ServerLogFacts,
   remoteFacts: ServerLogFacts | undefined,
@@ -801,7 +836,7 @@ function printRunning(
   );
 }
 
-function readManifest(paths: LiveTestPaths): Manifest {
+export function readManifest(paths: LiveTestPaths): Manifest {
   return JSON.parse(NodeFS.readFileSync(paths.manifest, "utf8")) as Manifest;
 }
 
@@ -891,6 +926,7 @@ function buildHome(paths: LiveTestPaths, mode: LiveTestMode, base: BaseTarget | 
         root,
         "--owner-name",
         ownerName,
+        ...(mode === "skills" ? ["--skills"] : []),
       ],
       {
         cwd: paths.worktree,
@@ -905,6 +941,12 @@ function buildHome(paths: LiveTestPaths, mode: LiveTestMode, base: BaseTarget | 
   if (!isPeerMode(mode)) {
     console.log("Building the test repository and home (about 30 seconds, no model calls)...");
     generate(paths.root, "Test owner");
+    if (mode === "skills") {
+      NodeFS.writeFileSync(
+        paths.manifest,
+        `${JSON.stringify({ ...readManifest(paths), mode: "skills" }, null, 2)}\n`,
+      );
+    }
     if (base !== undefined) {
       const manifest: Manifest = {
         ...(readManifest(paths) as DefaultManifest),
@@ -954,8 +996,6 @@ Commands:
 `;
 }
 
-/** The live install's tailnet port. A `--for-dev` server must never share on it. */
-const LIVE_TAILNET_PORT = 8444;
 /** The dev runner's server port is its web port plus this (scripts/dev-runner.ts base ports). */
 const SERVER_PORT_ABOVE_WEB = 8040;
 
@@ -967,15 +1007,23 @@ export interface TailnetMapping {
 
 /**
  * The mappings in `tailscale serve status` output, which prints each as
- *   https://host.ts.net:8444 (tailnet only)
- *   |-- / proxy http://127.0.0.1:5773
+ *   https://host.ts.net:7594 (tailnet only)
+ *   |-- / proxy http://127.0.0.1:7594
  */
 export function tailnetMappings(serveStatus: string): ReadonlyArray<TailnetMapping> {
   const mappings: Array<{ port: number; targets: Array<string> }> = [];
   for (const line of serveStatus.split("\n")) {
-    const mapping = /^https:\/\/\S+?:(\d+)\b/.exec(line);
-    if (mapping !== null) {
-      mappings.push({ port: Number(mapping[1]), targets: [] });
+    // TCP status uses |-- for listeners and |--> for the forwarding destination.
+    const tcpPort = /^(?:\|-- )?tcp:\/\/\S+:(\d+)(?:\s|$)/.exec(line)?.[1];
+    if (tcpPort !== undefined) {
+      mappings.push({ port: Number(tcpPort), targets: [] });
+      continue;
+    }
+    const address = /^https?:\/\/\S+/.exec(line)?.[0];
+    if (address !== undefined) {
+      const url = new URL(address);
+      const port = Number(url.port || (url.protocol === "https:" ? "443" : "80"));
+      mappings.push({ port, targets: [] });
       continue;
     }
     const target = /^\|--.*\bproxy\s+(\S+)/.exec(line);
@@ -996,8 +1044,8 @@ export function isOwnMapping(mapping: TailnetMapping, webPort: number): boolean 
 
 /**
  * Why this server must not be shared on `webPort`, or undefined when it may.
- * `--share` replaces whatever is mapped on the port, so the port must not be
- * the live install's and must not carry a mapping this server did not make.
+ * `--share` replaces whatever is mapped on the port, so the port must not
+ * carry any pre-existing mapping, even one pointing to the same loopback port.
  */
 export function shareRefusal(
   webPort: number,
@@ -1008,12 +1056,7 @@ export function shareRefusal(
   if (!isBrowserAllowedPort(webPort)) {
     return `This worktree's web port is ${webPort}, which browsers refuse to open, so a shared URL on it would be useless. Use a different worktree for --for-dev.`;
   }
-  if (webPort === LIVE_TAILNET_PORT) {
-    return `This worktree's web port is ${LIVE_TAILNET_PORT}, the live install's tailnet port. Sharing would replace the live mapping. Use a different worktree for --for-dev.`;
-  }
-  const foreign = mappings.find(
-    (mapping) => mapping.port === webPort && !isOwnMapping(mapping, webPort),
-  );
+  const foreign = mappings.find((mapping) => mapping.port === webPort);
   return foreign === undefined
     ? undefined
     : `Tailnet port ${webPort} is already mapped to ${foreign.targets.join(", ") || "something else"}, which this server did not set up. Sharing would replace it. Use a different worktree for --for-dev.`;
@@ -1177,7 +1220,7 @@ Otherwise read the log, then start it again:
   ${selfCommand(paths, "restart")}`;
 
 /** Signals this script's own process group and waits for every member to exit. */
-async function stopGroup(group: number): Promise<void> {
+export async function stopGroup(group: number): Promise<void> {
   const waitForExit = async (timeoutMs: number) => {
     const deadline = Date.now() + timeoutMs;
     while (membersOfGroup(group).length > 0) {
@@ -1207,6 +1250,7 @@ async function waitUntilReady(
   deadline: number,
   requireShare: boolean,
 ): Promise<ServerLogFacts> {
+  const inheritedPort = configuredLivePort(paths.worktree, process.env);
   for (;;) {
     const log = NodeFS.readFileSync(paths.log, "utf8");
     const facts = readServerLog(log);
@@ -1241,7 +1285,7 @@ async function waitUntilReady(
     const refusal = startRefusal({
       facts,
       home: paths.home,
-      inheritedPort: process.env.T3CODE_PORT,
+      inheritedPort,
       requireShare,
     });
     if (refusal !== undefined) {
@@ -1296,7 +1340,7 @@ function builtMode(paths: LiveTestPaths): LiveTestMode | undefined {
  * Starts one dev server on its home, or joins one that is already starting,
  * and waits until it is ready.
  */
-async function startServer(
+export async function startServer(
   paths: ServerPaths,
   runnerMode: "dev" | "dev:server",
   environment: Readonly<Record<string, string>>,
@@ -1557,6 +1601,7 @@ async function start(
   paths: LiveTestPaths,
   mode: LiveTestMode,
   baseRef: string | undefined,
+  mobile?: "ios" | "android",
 ): Promise<void> {
   const deadline = Date.now() + START_BUDGET_MS;
   const built = builtMode(paths);
@@ -1632,6 +1677,9 @@ async function start(
         ),
       ),
     );
+  }
+  if (mobile !== undefined) {
+    return (await import("./live-test-mobile.ts")).startMobile(paths, mobile, deadline);
   }
   if (!isPeerMode(mode)) {
     console.log("Starting the dev server...");
@@ -2077,6 +2125,12 @@ export function upgradeTarget(input: {
       `\`upgrade\` runs only in a --base build: it starts this worktree's build on the base server's home. Build one with: ${input.rebuildCommand}`,
     );
   }
+  const selectedServerPort = input.recorded?.serverPort ?? input.baseFacts.serverPort;
+  if (selectedServerPort !== undefined && String(selectedServerPort) === input.inheritedPort) {
+    throw new LiveTestRefusal(
+      `The upgrade target uses the live server's port ${selectedServerPort}.`,
+    );
+  }
   if (input.recorded !== undefined) return input.recorded;
   const { serverPort, webPort, baseDir } = input.baseFacts;
   if (!input.baseHomeExists || serverPort === undefined || webPort === undefined) {
@@ -2088,9 +2142,6 @@ export function upgradeTarget(input: {
     throw new LiveTestRefusal(
       `The base's log says its server ran on ${baseDir}, not on its home ${input.baseHome}. Replace the build: ${input.rebuildCommand}`,
     );
-  }
-  if (serverPort === LIVE_SERVER_PORT || String(serverPort) === input.inheritedPort) {
-    throw new LiveTestRefusal(`The base's log reports the live server's port ${serverPort}.`);
   }
   return { serverPort, webPort };
 }
@@ -2252,7 +2303,7 @@ async function upgrade(paths: LiveTestPaths): Promise<void> {
     ),
     baseHome: paths.upgrade.home,
     baseHomeExists: NodeFS.existsSync(paths.upgrade.home),
-    inheritedPort: process.env.T3CODE_PORT,
+    inheritedPort: configuredLivePort(paths.worktree, process.env),
     rebuildCommand: selfCommand(paths, `rebuild ${modeFlags("base", baseRef)}`),
     startCommand: selfCommand(paths, modeFlags("base", baseRef)),
   });
@@ -2299,7 +2350,12 @@ const serversOf = (
         ]
       : [{ name: "", paths }];
 
-async function stop(paths: LiveTestPaths, replacing = false): Promise<void> {
+async function stop(
+  paths: LiveTestPaths,
+  replacing = false,
+  /** A restart keeps the mobile side (device, claim, Metro, tunnel) and reconnects it. */
+  keepMobile = false,
+): Promise<void> {
   // Classify every server before signalling any, so a refusal leaves both alone.
   const servers = serversOf(paths).map((server) => ({
     ...server,
@@ -2319,6 +2375,13 @@ async function stop(paths: LiveTestPaths, replacing = false): Promise<void> {
       removeTailnetMapping();
       throw new LiveTestRefusal(state.reason);
     }
+  }
+  // A device that could not be reset keeps its claim and record; the servers still stop.
+  let mobileFailure: unknown;
+  try {
+    if (!keepMobile) await (await import("./live-test-mobile.ts")).stopMobile(paths);
+  } catch (cause) {
+    mobileFailure = cause;
   }
   for (const { name, paths: server, state } of servers) {
     if (state.kind === "stopped" || state.kind === "unverified") {
@@ -2345,11 +2408,14 @@ async function stop(paths: LiveTestPaths, replacing = false): Promise<void> {
     }
   }
   removeTailnetMapping();
+  if (mobileFailure !== undefined) throw mobileFailure;
 }
 
-function status(paths: LiveTestPaths): void {
+async function status(paths: LiveTestPaths): Promise<void> {
   if (upgradeOf(paths) !== undefined) return statusOfUpgrade(paths);
   statusOfHead(paths);
+  const mobile = (await import("./live-test-mobile.ts")).mobileStatus(paths);
+  if (mobile !== undefined) console.log(`\n${mobile}`);
   if (builtMode(paths) !== "base") return;
   const { progress, serverStatus, failure } = readBaseProgress(paths);
   console.log(`\n${formatBaseProgress(paths, progress)}`);
@@ -2689,9 +2755,10 @@ function guest(paths: LiveTestPaths, request: GuestRequest): void {
   print({ kind: "new", name: request.name, level, scope }, pairingUrl);
 }
 
-const USAGE = `Usage: node scripts/j5/setup-agent-live-test.ts [--fresh | --peer [--poll] | --for-dev | --base <ref>]
-       node scripts/j5/setup-agent-live-test.ts rebuild [--fresh | --peer [--poll] | --for-dev | --base <ref>]
-       node scripts/j5/setup-agent-live-test.ts status | restart | stop | upgrade
+const USAGE = `Usage: node scripts/j5/setup-agent-live-test.ts [--skills | --fresh | --peer [--poll] | --for-dev | --base <ref> | --mobile ios|android]
+       node scripts/j5/setup-agent-live-test.ts rebuild [--skills | --fresh | --peer [--poll] | --for-dev | --base <ref> | --mobile ios|android]
+       node scripts/j5/setup-agent-live-test.ts status | restart | stop | upgrade | mobile-open
+       node scripts/j5/setup-agent-live-test.ts mobile-build ios|android
        ${GUEST_USAGE.slice("Usage: ".length)}`;
 
 /**
@@ -2702,11 +2769,15 @@ export function parseCommand(args: ReadonlyArray<string>): {
   readonly command: LiveTestCommand;
   readonly mode: LiveTestMode;
   readonly baseRef?: string;
+  readonly mobile?: "ios" | "android";
 } {
-  // --base is the one flag with a value; take the pair out before sorting the rest.
-  const baseIndex = args.indexOf(MODE_FLAGS.base);
-  const baseRef = baseIndex === -1 ? undefined : args[baseIndex + 1];
-  const rest = baseIndex === -1 ? args : args.toSpliced(baseIndex, 2);
+  // --mobile and --base are the flags with a value; take each pair out before sorting the rest.
+  const mobileIndex = args.indexOf("--mobile");
+  const mobile = mobileIndex === -1 ? undefined : args[mobileIndex + 1];
+  const withoutMobile = mobileIndex === -1 ? args : args.toSpliced(mobileIndex, 2);
+  const baseIndex = withoutMobile.indexOf(MODE_FLAGS.base);
+  const baseRef = baseIndex === -1 ? undefined : withoutMobile[baseIndex + 1];
+  const rest = baseIndex === -1 ? withoutMobile : withoutMobile.toSpliced(baseIndex, 2);
   const flags = rest
     .filter((argument) => argument.startsWith("--"))
     .toSorted()
@@ -2725,7 +2796,12 @@ export function parseCommand(args: ReadonlyArray<string>): {
     mode === undefined ||
     // The ref is printed inside commands, and git allows shell characters in ref names.
     (mode === "base" && (baseRef === undefined || !/^[\w@+=:,./][\w@+=:,./^~-]*$/.test(baseRef))) ||
-    (mode !== "default" && command !== "start" && command !== "rebuild")
+    (mode !== "default" && command !== "start" && command !== "rebuild") ||
+    // A mobile test runs on the default home, and only a start or rebuild sets one up.
+    (mobileIndex !== -1 &&
+      ((mobile !== "ios" && mobile !== "android") ||
+        mode !== "default" ||
+        (command !== "start" && command !== "rebuild")))
   ) {
     throw new LiveTestRefusal(USAGE);
   }
@@ -2733,12 +2809,12 @@ export function parseCommand(args: ReadonlyArray<string>): {
     command: command as LiveTestCommand,
     mode,
     ...(mode === "base" && baseRef !== undefined ? { baseRef } : {}),
+    ...(mobile === "ios" || mobile === "android" ? { mobile } : {}),
   };
 }
 
-async function main(): Promise<void> {
-  const args = process.argv.slice(2);
-  const parsed = args[0] === "guest" ? parseGuest(args.slice(1)) : parseCommand(args);
+/** The live-test paths of the checkout this script is in, after checking it can run here. */
+async function liveTestPathsHere(): Promise<LiveTestPaths> {
   // oxlint-disable-next-line t3code/no-global-process-runtime -- a standalone CLI with no Effect runtime.
   if (NodeOS.platform() !== "linux" && !IS_MACOS) {
     throw new LiveTestRefusal("This script runs only on Linux and macOS.");
@@ -2749,17 +2825,38 @@ async function main(): Promise<void> {
       `${checkout} has no node_modules. Install the dependencies first: run \`pnpm install\` there (\`vp i\` is the same thing where \`vp\` is on PATH), then run this again.`,
     );
   }
-  const paths = await resolveLiveTestPaths({
+  return resolveLiveTestPaths({
     checkout,
     homeDirectory: NodeOS.homedir(),
     environment: process.env,
   });
+}
+
+async function main(): Promise<void> {
+  const args = process.argv.slice(2);
+  if (args[0] === "mobile-build") {
+    const build = await import("./live-test-mobile-build.ts");
+    const platform = build.parseMobileBuild(args.slice(1));
+    return build.mobileBuild(await liveTestPathsHere(), platform);
+  }
+  const parsed = args[0] === "guest" ? parseGuest(args.slice(1)) : parseCommand(args);
+  const paths = await liveTestPathsHere();
   if (!("command" in parsed)) return guest(paths, parsed);
   const { command, mode, baseRef } = parsed;
   if (command === "status") return status(paths);
   if (command === "stop") return stop(paths);
   if (command === "upgrade") return upgrade(paths);
-  if (command === "restart" || command === "rebuild") await stop(paths, command === "rebuild");
+  if (command === "mobile-open") return (await import("./live-test-mobile.ts")).mobileOpen(paths);
+  // A start or restart without --mobile keeps a recorded device set up and reconnects the
+  // server to it, on the port the device reaches. A rebuild sets up only what it is asked for.
+  const mobile =
+    parsed.mobile ??
+    (command === "rebuild"
+      ? undefined
+      : (await import("./live-test-mobile.ts")).readMobileRecord(paths)?.platform);
+  if (command === "restart" || command === "rebuild") {
+    await stop(paths, command === "rebuild", command === "restart");
+  }
   // resolveLiveTestPaths has confirmed this directory is inside the worktree's own .j5code.
   // Refuse an unusable base before a rebuild deletes the build that is there.
   if (command === "rebuild" && baseRef !== undefined) resolveBase(paths, baseRef);
@@ -2770,9 +2867,9 @@ async function main(): Promise<void> {
   }
   // A restart keeps the mode that is built; only a start or rebuild chooses one.
   if (command === "restart") {
-    return start(paths, builtMode(paths) ?? "default", builtBaseRef(paths));
+    return start(paths, builtMode(paths) ?? "default", builtBaseRef(paths), mobile);
   }
-  await start(paths, mode, baseRef);
+  await start(paths, mode, baseRef, mobile);
 }
 
 if (import.meta.main) {

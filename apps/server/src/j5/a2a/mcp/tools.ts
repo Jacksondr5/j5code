@@ -178,7 +178,7 @@ export const J5ParticipantDirectoryRow = Schema.Struct({
 export type J5ParticipantDirectoryRow = typeof J5ParticipantDirectoryRow.Type;
 
 /** The most rows one listing returns, and how many it returns when `limit` is omitted. */
-export const J5_LIST_PARTICIPANTS_MAX_LIMIT = 100;
+const J5_LIST_PARTICIPANTS_MAX_LIMIT = 100;
 export const J5_LIST_PARTICIPANTS_DEFAULT_LIMIT = 50;
 
 /**
@@ -345,6 +345,7 @@ export const J5SpawnAgentResult = Schema.Struct({
 });
 
 export const J5ListAgentsResult = Schema.Struct({
+  diagnostics: Schema.Array(Schema.Struct({ path: Schema.String, message: Schema.String })),
   personas: Schema.Array(
     Schema.Struct({
       id: AgentPersonaId,
@@ -363,7 +364,6 @@ export const J5ListAgentsResult = Schema.Struct({
  * names stay one line each because the platform writes them into the notices whose fields the
  * Captain's card parses (see `crewLimits.ts`).
  */
-export { CREW_NAME_MAX_CHARS, CREW_REASON_MAX_CHARS, CREW_TEXT_MAX_CHARS };
 const CrewName = NonEmptyString.check(
   Schema.isMaxLength(CREW_NAME_MAX_CHARS),
   Schema.isPattern(CREW_NAME_PATTERN),
@@ -496,7 +496,7 @@ export const J5StopCrewResult = Schema.Struct({
   ),
 });
 
-export const J5_STOP_CREW_DESCRIPTION =
+const J5_STOP_CREW_DESCRIPTION =
   "Stop a Crew you command the way a user Stop does, seat by seat: each seat's running turn is interrupted now, turns already queued behind it, messages you sent it included, are held until a person resumes its queue or the next message reaches it (that message resumes the queue and runs after them, in order), its pull request watches end, and the tasks it delegated stop too. Nothing settles or is retired, and every seat can be messaged again afterwards. Captain-only. Reuse client_request_id to retry safely.";
 
 export const J5ArchiveResult = Schema.Literals(["archived", "already_archived"]);
@@ -557,7 +557,7 @@ export type J5ArchiveCrewFailure = typeof J5ArchiveCrewFailure.Type;
 export const J5_SPAWN_AGENT_DESCRIPTION =
   "Spawn a Peer Agent: a full-citizen teammate with its own top-level thread, starting on your brief as its first turn. It joins your project unless you name another with project_id or set scratch for none, and records you as its immutable spawner; in your own project it is placed under you. It is addressable the moment this returns. In your brief, tell the new agent what it should do first and whether it should reply to you. Choose provider, model, and reasoning for the work in the brief; see orchestrator_capabilities for what's available. To run a persona from j5_list_personas, set `persona` to its id: the spawn gets that persona's instructions and runtime policy, and provider, model, and reasoning must be one of that persona's declared routes. Without a persona it runs in your permission and interaction modes, or in narrower ones you set with runtime_mode and interaction_mode. Attach files to the brief with attachments. Choose its workspace every time (see the workspace field). A new worktree is prepared after this returns, and the agent begins once it is bound, possibly while the project's setup script is still running; if preparing it fails, the agent's thread shows why, and it is not retried. Reuse client_request_id to retry the same spawn safely; reusing it with any change to the request is refused, so use a fresh one for new work.";
 
-export const J5_LIST_AGENTS_DESCRIPTION =
+const J5_LIST_AGENTS_DESCRIPTION =
   "List the personas in this environment: id, purpose, runtime policy, whether each can start now, and the provider, model, and reasoning it would run on. Read this before choosing a persona for j5_spawn_agent or a crew roster so the choice fits the task and the user's budget. Read-only.";
 
 export const J5_PROPOSE_CREW_DESCRIPTION =
@@ -569,7 +569,7 @@ export const J5_REQUEST_CREW_MEMBER_DESCRIPTION =
 export const J5_STOP_AGENT_DESCRIPTION =
   "Stop one Peer Agent the way a user Stop does: its running turn is interrupted now, turns already queued behind it, messages you sent it included, are held until a person resumes its queue or the next message reaches it (that message resumes the queue and runs after them, in order), its pull request watches end, and the tasks it delegated stop too. The agent remains, stays readable, and can be messaged again later: stopping halts work, it retires nothing. It reaches any agent on this server, in any project. Reuse client_request_id to retry safely.";
 
-export const J5_ARCHIVE_CREW_DESCRIPTION =
+const J5_ARCHIVE_CREW_DESCRIPTION =
   "Retire a whole Crew you command. Crews archive only as a unit; members are never retired one by one. A clean archive completes immediately; otherwise the call refuses with the facts and a confirmation_token. Before retrying with that token, check with the user. Nothing is destroyed: worktrees, branches, and ledgers stay readable. Reuse client_request_id to retry safely.";
 
 // McpToolAccess reads the calling thread before any tool that needs one, so each of those
@@ -688,7 +688,7 @@ export const J5SendMessageTool = Tool.make("j5_send_message", {
   .annotate(Tool.Idempotent, false)
   .annotate(Tool.OpenWorld, true);
 
-export const J5ListParticipantsTool = Tool.make("j5_list_participants", {
+const J5ListParticipantsTool = Tool.make("j5_list_participants", {
   description: A2A_LIST_TOOL_DESCRIPTION,
   parameters: J5ListParticipantsInput,
   success: J5ListParticipantsResult,
@@ -745,7 +745,7 @@ export const J5RequestCrewMemberTool = Tool.make("j5_request_crew_member", {
   .annotate(Tool.Idempotent, false)
   .annotate(Tool.OpenWorld, true);
 
-export const J5ListAgentsTool = Tool.make("j5_list_personas", {
+const J5ListAgentsTool = Tool.make("j5_list_personas", {
   description: J5_LIST_AGENTS_DESCRIPTION,
   success: J5ListAgentsResult,
   failure: J5McpFailure,
@@ -772,7 +772,7 @@ export const J5StopAgentTool = Tool.make("j5_stop_agent", {
   .annotate(Tool.Idempotent, false)
   .annotate(Tool.OpenWorld, false);
 
-export const J5StopCrewTool = Tool.make("j5_stop_crew", {
+const J5StopCrewTool = Tool.make("j5_stop_crew", {
   description: J5_STOP_CREW_DESCRIPTION,
   parameters: J5StopCrewInput,
   success: J5StopCrewResult,
@@ -800,7 +800,7 @@ export const J5ArchiveCrewTool = Tool.make("j5_archive_crew", {
   .annotate(Tool.Idempotent, false)
   .annotate(Tool.OpenWorld, false);
 
-export const J5ClearOwnAskTool = Tool.make("j5_clear_own_ask", {
+const J5ClearOwnAskTool = Tool.make("j5_clear_own_ask", {
   description: A2A_CLEAR_OWN_ASK_TOOL_DESCRIPTION,
   parameters: J5ClearOwnAskInput,
   success: ClearOwnAskResult,

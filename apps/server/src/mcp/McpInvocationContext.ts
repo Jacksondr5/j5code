@@ -12,7 +12,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 
-export const ALL_MCP_CAPABILITIES = [
+const ALL_MCP_CAPABILITIES = [
   "preview",
   "orchestration",
   "worktree",

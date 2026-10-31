@@ -2,6 +2,7 @@ import { assert, it } from "@effect/vitest";
 import {
   CommandId,
   MessageId,
+  type OrchestrationThreadSearchMatch,
   type OrchestrationV2Command,
   type OrchestrationV2ThreadLaunchInput,
   ProjectId,
@@ -10,16 +11,21 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import type { PersonLevel, PersonScope } from "@t3tools/contracts/j5";
+import * as Clock from "effect/Clock";
+import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
+import type * as SqlError from "effect/sql/SqlError";
+import * as TestClock from "effect/testing/TestClock";
 
 import type { ParticipantId } from "../a2a/contracts.ts";
 import { Access } from "./Access.ts";
 import { PersonAccess } from "./PersonAccess.ts";
+import { makeSearchAuthors } from "./searchAuthors.ts";
 import { SharedConversation } from "./SharedConversation.ts";
 import { NOTE_OPEN } from "./sharedConversationNotes.ts";
 import { PROJECT, thread } from "./test-support/accessHarness.ts";
@@ -35,11 +41,15 @@ const jackson = Effect.gen(function* () {
   return owner.personId;
 });
 
-/** A person given levels the way an Owner gives them: through the access core. */
+/** Past `AT`, when a thread is shared after the messages these tests write at `AT`. */
+const AFTER = Date.parse(AT) + 60_000;
+
+/** A person given levels the way an Owner gives them: through the access core, after `AT`. */
 const personWith = Effect.fn("test.personWith")(function* (
   name: string,
   levels: ReadonlyArray<{ readonly scope: PersonScope; readonly level: PersonLevel }>,
 ) {
+  if ((yield* Clock.currentTimeMillis) < AFTER) yield* TestClock.setTime(AFTER);
   const people = yield* PersonAccess;
   const access = yield* Access;
   const created = yield* people.createPerson({ displayName: name });
@@ -219,6 +229,8 @@ it.effect(
         [
           { name: "Jackson", level: "owner", you: false, hasNote: true },
           { name: "Priya", level: "collaborator", you: true, hasNote: false },
+          // The message from before sharing, which no one is recorded for: the first owner's.
+          { name: "Jackson", level: "owner", you: false, hasNote: false },
         ],
       );
       // The prefix a client strips is exactly what the platform put on the stored text.
@@ -338,7 +350,8 @@ it.effect("a fork names who wrote the messages it shows, and none after its fork
         return forked;
       });
     const fork = yield* forkFrom("thread:fork", source, `run:${second.messageId}`);
-    // The fork's own message, from a thread only one person writes to, names no one.
+    // The fork's own message, from a thread only one person writes to, is recorded for no one:
+    // the first owner's, to its forks too.
     yield* taken(fork, "message:fork-own", "completed");
     const forkOfFork = yield* forkFrom("thread:fork-of-fork", fork, "run:message:fork-own");
 
@@ -346,12 +359,142 @@ it.effect("a fork names who wrote the messages it shows, and none after its fork
     for (const threadId of [fork, forkOfFork]) {
       const read = yield* authors(threadId, priya);
       assert.isFalse(read.shared);
-      assert.deepStrictEqual(read.authors, sourceRead.authors.slice(0, 2));
+      assert.deepStrictEqual(read.authors, [
+        ...sourceRead.authors.slice(0, 2),
+        {
+          messageId: "message:fork-own",
+          name: "Jackson",
+          level: "owner",
+          editedBy: null,
+          you: false,
+          note: null,
+          storedPrefix: "",
+        },
+      ]);
     }
     assert.deepStrictEqual(
       sourceRead.authors.map((entry) => entry.messageId),
       [first.messageId, second.messageId, later.messageId],
     );
+  }).pipe(Effect.provide(conversationLayer)),
+);
+
+/**
+ * A message upstream holds with no author recorded here, as the origin says, written at
+ * `createdAt` (`AT` by default) with a completed run.
+ */
+const unrecorded = Effect.fn("test.unrecorded")(function* (
+  threadId: ThreadId,
+  messageId: string,
+  origin: Record<string, unknown>,
+  createdAt = AT,
+) {
+  const sql = yield* SqlClient.SqlClient;
+  yield* taken(threadId, messageId, "completed");
+  yield* sql`
+    UPDATE orchestration_v2_projection_messages
+    SET created_at = ${createdAt}, payload_json = ${JSON.stringify({ text: messageId, ...origin })}
+    WHERE message_id = ${messageId}
+  `;
+});
+
+const typed = { createdBy: "user", creationSource: "web" };
+/** A user message upstream writes itself: an approval's feedback, or a usage-limit resume. */
+const feedback = { createdBy: "user", creationSource: "server" };
+const asOwner = (messageId: string) => ({
+  messageId,
+  name: "Jackson",
+  level: "owner" as const,
+  editedBy: null,
+  you: false,
+  note: null,
+  storedPrefix: "",
+});
+const iso = (millis: number) => DateTime.formatIso(DateTime.makeUnsafe(millis));
+
+it.effect("a message a person wrote before sharing is the first owner's to everyone else", () =>
+  Effect.gen(function* () {
+    const owner = yield* jackson;
+    const threadId = yield* thread("thread:before-sharing");
+    yield* unrecorded(threadId, "message:typed", typed);
+    yield* unrecorded(threadId, "message:j5:a2a:delivery:inbox", {
+      createdBy: "user",
+      creationSource: "mcp",
+    });
+    // None of these was written by a person.
+    yield* unrecorded(threadId, "message:j5:a2a:delivery:agent", {
+      createdBy: "agent",
+      creationSource: "mcp",
+    });
+    yield* unrecorded(threadId, "message:j5:a2a:delivery:notice", {
+      createdBy: "system",
+      creationSource: "mcp",
+    });
+    yield* unrecorded(threadId, "message:session", { createdBy: "user", creationSource: "mcp" });
+    yield* unrecorded(threadId, "message:scheduled", {
+      ...typed,
+      scheduledTaskId: "task:nightly",
+    });
+    yield* unrecorded(threadId, "message:sent", { ...typed, senderThreadId: "thread:elsewhere" });
+    const priya = yield* personWith("Priya", onThread(threadId));
+    const sam = yield* personWith("Sam", onThread(threadId, "viewer"));
+    // Once Priya can write, every person's message is recorded: what is not, the server wrote on
+    // its own, such as a usage-limit resume, from the moment she could on.
+    yield* unrecorded(threadId, "limit-resume:at-sharing", feedback, iso(AFTER));
+    yield* unrecorded(threadId, "limit-resume:later", feedback, iso(AFTER + 60_000));
+
+    for (const reader of [priya, sam]) {
+      assert.deepStrictEqual((yield* authors(threadId, reader)).authors, [
+        asOwner("message:typed"),
+        asOwner("message:j5:a2a:delivery:inbox"),
+      ]);
+    }
+    // The first owner's own view draws them as theirs already.
+    assert.deepStrictEqual((yield* authors(threadId, owner)).authors, []);
+  }).pipe(Effect.provide(conversationLayer)),
+);
+
+it.effect("a thread shared only with Viewers keeps the first owner's later messages theirs", () =>
+  Effect.gen(function* () {
+    const threadId = yield* thread("thread:viewers-only");
+    yield* jackson;
+    const sam = yield* personWith("Sam", onThread(threadId, "viewer"));
+    // Sent after Sam could read the thread: a Viewer does not make it shared, so none is recorded.
+    yield* unrecorded(threadId, "message:while-watched", typed, iso(AFTER + 60_000));
+
+    const read = yield* authors(threadId, sam);
+    assert.isFalse(read.shared);
+    assert.deepStrictEqual(read.authors, [asOwner("message:while-watched")]);
+  }).pipe(Effect.provide(conversationLayer)),
+);
+
+it.effect("a fork reads each inherited message against its own thread's sharing", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* jackson;
+    const source = yield* thread("thread:fork-cutoff-source");
+    yield* unrecorded(source, "message:source-before", typed);
+    const priya = yield* personWith("Priya", onThread(source));
+    yield* unrecorded(source, "limit-resume:source", feedback, iso(AFTER + 60_000));
+    const fork = yield* thread("thread:fork-cutoff", PROJECT, {
+      parent: source,
+      relationship: "fork",
+    });
+    yield* sql`
+      UPDATE orchestration_v2_projection_threads
+      SET payload_json = json_set(payload_json, '$.forkedFrom',
+        json_object('type', 'run', 'threadId', ${source}, 'runId', 'run:limit-resume:source'))
+      WHERE thread_id = ${fork}
+    `;
+    const sam = yield* personWith("Sam", onThread(fork, "viewer"));
+
+    // The fork is shared with no writer, but the feedback came after its source was shared.
+    for (const reader of [priya, sam]) {
+      assert.deepStrictEqual(
+        (yield* authors(fork, reader)).authors.map((entry) => entry.messageId),
+        ["message:source-before"],
+      );
+    }
   }).pipe(Effect.provide(conversationLayer)),
 );
 
@@ -612,6 +755,261 @@ it.effect("an answer carries its author, and who answered shows once upstream se
       which: `${answered!.storedPrefix}the audit first`,
       pick: [`${answered!.storedPrefix}A`],
     });
+  }).pipe(Effect.provide(conversationLayer)),
+);
+
+/**
+ * Upstream answering a prompt as `Orchestrator` does: its log settles the prompt under the
+ * command, and it writes the person's words as a user message of its own, `written:<requestId>`.
+ * A command it already took it takes again, writing nothing.
+ */
+const upstreamAnswers = (written: "approval-feedback" | "async-answer") =>
+  Effect.fn("test.upstreamAnswers")(function* (command: OrchestrationV2Command) {
+    if (command.type !== "runtime-request.respond") return command;
+    const sql = yield* SqlClient.SqlClient;
+    const taken = yield* sql`
+      SELECT 1 FROM orchestration_command_receipts WHERE command_id = ${command.commandId}
+    `;
+    if (taken.length > 0) return command;
+    yield* sql`
+      INSERT INTO orchestration_command_receipts (
+        command_id, aggregate_kind, aggregate_id, accepted_at, result_sequence, status
+      ) VALUES (${command.commandId}, 'thread', ${command.threadId}, ${AT}, 1, 'accepted')
+    `;
+    const log = (eventType: string, payload: Record<string, unknown>) => sql`
+      INSERT INTO orchestration_events (
+        event_id, aggregate_kind, stream_id, stream_version, event_type, occurred_at, command_id,
+        actor_kind, payload_json, metadata_json
+      ) SELECT
+        ${`event:${command.commandId}:${eventType}`}, 'thread', ${command.threadId}, COUNT(*),
+        ${eventType}, ${AT}, ${command.commandId}, 'server', ${JSON.stringify(payload)}, '{}'
+      FROM orchestration_events WHERE stream_id = ${command.threadId}
+    `;
+    const messageId = `${written}:${command.requestId}`;
+    yield* unrecorded(command.threadId, messageId, feedback, iso(AFTER + 60_000));
+    yield* log("message.updated", { id: messageId, role: "user" });
+    yield* log("runtime-request.updated", { id: command.requestId });
+    return command;
+  });
+
+const answering = (
+  personId: ParticipantId | null,
+  written: "approval-feedback" | "async-answer",
+  command: Record<string, unknown>,
+  upstream: (
+    command: OrchestrationV2Command,
+  ) => Effect.Effect<
+    OrchestrationV2Command,
+    SqlError.SqlError,
+    SqlClient.SqlClient
+  > = upstreamAnswers(written),
+) =>
+  SharedConversation.use((conversation) =>
+    conversation.dispatch(
+      personId,
+      { type: "runtime-request.respond", ...command } as unknown as OrchestrationV2Command,
+      upstream,
+    ),
+  );
+
+/** How Cmd+K labels a user message it found, for `viewer`. */
+const searchLabel = (viewer: ParticipantId, threadId: ThreadId, messageId: string) =>
+  Effect.gen(function* () {
+    const label = yield* makeSearchAuthors;
+    const [match] = yield* label(viewer, [
+      {
+        threadId,
+        source: "user",
+        messageId: MessageId.make(messageId),
+      } as OrchestrationThreadSearchMatch,
+    ]);
+    return match?.author ?? null;
+  });
+
+it.effect("the words a person answers a prompt with are theirs to every reader", () =>
+  Effect.gen(function* () {
+    const owner = yield* jackson;
+    const sql = yield* SqlClient.SqlClient;
+    const threadId = yield* thread("thread:approval-feedback");
+    const priya = yield* personWith("Priya", onThread(threadId));
+    const sam = yield* personWith("Sam", onThread(threadId, "viewer"));
+    const decline = {
+      commandId: CommandId.make("command:decline"),
+      threadId,
+      requestId: RuntimeRequestId.make("request:approval"),
+      decision: "decline",
+      feedback: "Run the tests first.",
+    };
+    yield* answering(priya, "approval-feedback", decline);
+    yield* answering(priya, "async-answer", {
+      commandId: CommandId.make("command:reply"),
+      threadId,
+      requestId: RuntimeRequestId.make("request:question"),
+      answers: { which: "the audit first" },
+    });
+    // Sent again, the decline is taken as before: it is refused nothing and recorded once.
+    yield* answering(priya, "approval-feedback", decline);
+
+    const hers = (messageId: string, you: boolean) => ({
+      messageId,
+      name: "Priya",
+      level: "collaborator" as const,
+      editedBy: null,
+      you,
+      note: null,
+      storedPrefix: "",
+    });
+    for (const [reader, you] of [
+      [owner, false],
+      [sam, false],
+      [priya, true],
+    ] as const) {
+      assert.deepStrictEqual((yield* authors(threadId, reader)).authors, [
+        hers("approval-feedback:request:approval", you),
+        hers("async-answer:request:question", you),
+      ]);
+      for (const messageId of [
+        "approval-feedback:request:approval",
+        "async-answer:request:question",
+      ]) {
+        assert.deepStrictEqual(
+          yield* searchLabel(reader, threadId, messageId),
+          you ? { _tag: "you" } : { _tag: "person", name: "Priya" },
+        );
+      }
+    }
+    assert.lengthOf(
+      yield* sql`SELECT 1 FROM j5_a2a_message_author WHERE thread_id = ${threadId}`,
+      2,
+    );
+  }).pipe(Effect.provide(conversationLayer)),
+);
+
+it.effect("feedback no person sent, or from an answer that settled nothing, names no one", () =>
+  Effect.gen(function* () {
+    const owner = yield* jackson;
+    const threadId = yield* thread("thread:feedback-no-one");
+    const priya = yield* personWith("Priya", onThread(threadId));
+    const sam = yield* personWith("Sam", onThread(threadId, "viewer"));
+    // A session with no person answers: upstream writes the feedback, and no one is recorded.
+    yield* answering(null, "approval-feedback", {
+      commandId: CommandId.make("command:session-decline"),
+      threadId,
+      requestId: RuntimeRequestId.make("request:session"),
+      decision: "decline",
+      feedback: "Stop.",
+    });
+    assert.deepStrictEqual((yield* authors(threadId, sam)).authors, []);
+
+    // Priya settles a prompt first. The owner's later answer to it settles nothing, even where
+    // upstream takes the command, so her feedback stays hers.
+    yield* answering(priya, "approval-feedback", {
+      commandId: CommandId.make("command:first"),
+      threadId,
+      requestId: RuntimeRequestId.make("request:raced"),
+      decision: "decline",
+      feedback: "Mine.",
+    });
+    yield* answering(
+      owner,
+      "approval-feedback",
+      {
+        commandId: CommandId.make("command:second"),
+        threadId,
+        requestId: RuntimeRequestId.make("request:raced"),
+        decision: "decline",
+        feedback: "Mine instead.",
+      },
+      (command) => Effect.succeed(command),
+    );
+    assert.deepStrictEqual(
+      (yield* authors(threadId, sam)).authors.map((author) => [author.messageId, author.name]),
+      [["approval-feedback:request:raced", "Priya"]],
+    );
+  }).pipe(Effect.provide(conversationLayer)),
+);
+
+it.effect(
+  "a message sent ahead under an answer's id is the answerer's once upstream writes it",
+  () =>
+    Effect.gen(function* () {
+      yield* jackson;
+      const threadId = yield* thread("thread:feedback-id-taken");
+      const priya = yield* personWith("Priya", onThread(threadId));
+      const sam = yield* personWith("Sam", onThread(threadId, "viewer"));
+      const owner = (yield* (yield* PersonAccess).firstOwner).personId;
+      // Priya sends a message under the id upstream will give the feedback on a pending approval.
+      yield* (yield* SharedConversation).dispatch(
+        priya,
+        message(threadId, "Mine.", {
+          messageId: MessageId.make("approval-feedback:request:pending"),
+        }),
+        upstreamTakes,
+      );
+      yield* answering(owner, "approval-feedback", {
+        commandId: CommandId.make("command:owner-feedback"),
+        threadId,
+        requestId: RuntimeRequestId.make("request:pending"),
+        decision: "decline",
+        feedback: "Not like that.",
+      });
+      const [written] = (yield* authors(threadId, sam)).authors;
+      assert.deepStrictEqual(
+        [written?.messageId, written?.name, written?.storedPrefix, written?.note],
+        ["approval-feedback:request:pending", "Jackson", "", null],
+      );
+    }).pipe(Effect.provide(conversationLayer)),
+);
+
+it.effect("an answer leaves a message sent under its other kind of id to its sender", () =>
+  Effect.gen(function* () {
+    yield* jackson;
+    const threadId = yield* thread("thread:answer-other-id");
+    const priya = yield* personWith("Priya", onThread(threadId));
+    const sam = yield* personWith("Sam", onThread(threadId, "viewer"));
+    const owner = (yield* (yield* PersonAccess).firstOwner).personId;
+    yield* send(
+      priya,
+      message(threadId, "Mine.", { messageId: MessageId.make("async-answer:request:both") }),
+    );
+    // The owner's decline writes the feedback only, never an answer sent on as a message.
+    yield* answering(owner, "approval-feedback", {
+      commandId: CommandId.make("command:owner-decline-both"),
+      threadId,
+      requestId: RuntimeRequestId.make("request:both"),
+      decision: "decline",
+      feedback: "Not like that.",
+    });
+    assert.deepStrictEqual(
+      (yield* authors(threadId, sam)).authors.map((author) => [author.messageId, author.name]),
+      [
+        ["approval-feedback:request:both", "Jackson"],
+        ["async-answer:request:both", "Priya"],
+      ],
+    );
+  }).pipe(Effect.provide(conversationLayer)),
+);
+
+it.effect("feedback on a thread not yet shared is recorded for no one, so the owner's", () =>
+  Effect.gen(function* () {
+    const owner = yield* jackson;
+    const threadId = yield* thread("thread:feedback-before-sharing");
+    yield* answering(owner, "approval-feedback", {
+      commandId: CommandId.make("command:owner-decline"),
+      threadId,
+      requestId: RuntimeRequestId.make("request:early"),
+      decision: "decline",
+      feedback: "Not yet.",
+    });
+    // Upstream wrote it before Priya could write here.
+    yield* (yield* SqlClient.SqlClient)`
+      UPDATE orchestration_v2_projection_messages SET created_at = ${AT}
+      WHERE message_id = 'approval-feedback:request:early'
+    `;
+    const priya = yield* personWith("Priya", onThread(threadId));
+    assert.deepStrictEqual((yield* authors(threadId, priya)).authors, [
+      asOwner("approval-feedback:request:early"),
+    ]);
   }).pipe(Effect.provide(conversationLayer)),
 );
 

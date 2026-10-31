@@ -36,7 +36,9 @@ export const layer = Layer.effect(
       readonly threadId: ThreadId;
       readonly runId: RunId;
     }) {
-      const projection = yield* projections.getThreadProjection(input.threadId);
+      const projection = yield* projections.getThreadRecords(input.threadId, ["runs"], {
+        runIds: [input.runId],
+      });
       const assignment = projection.thread.agentPersonaAssignment;
       if (assignment === undefined) return;
       const run = projection.runs.find((candidate) => candidate.id === input.runId);

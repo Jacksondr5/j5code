@@ -112,7 +112,7 @@ const SPAWN_BRIEF_MESSAGE_ID_PATTERN = /^message:j5:a2a:mcp:[^:]+:spawn-brief:/;
 export const isJ5DeliveryMessage = (message: J5UserMessageInput) =>
   message.role === "user" && String(message.id ?? "").startsWith(J5_A2A_DELIVERY_MESSAGE_PREFIX);
 
-export const isJ5SpawnBriefMessage = (message: J5UserMessageInput) =>
+const isJ5SpawnBriefMessage = (message: J5UserMessageInput) =>
   message.role === "user" && SPAWN_BRIEF_MESSAGE_ID_PATTERN.test(String(message.id ?? ""));
 
 // J5's tools gained a `j5_` prefix. Stored deliveries keep the name they were written with, so

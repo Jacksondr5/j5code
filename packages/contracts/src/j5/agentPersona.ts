@@ -190,7 +190,7 @@ export const AgentPersonaEditableDetails = Schema.Struct({
   definitionDigest: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
   modelRoute: Schema.Tuple([AgentPersonaModelTarget, AgentPersonaModelTarget]),
 });
-export const AGENT_PERSONA_INSTRUCTIONS_MAX_LENGTH = 32768;
+const AGENT_PERSONA_INSTRUCTIONS_MAX_LENGTH = 32768;
 const AgentPersonaInstructions = Schema.String.check(
   Schema.isMinLength(1),
   Schema.isMaxLength(AGENT_PERSONA_INSTRUCTIONS_MAX_LENGTH),
@@ -279,6 +279,10 @@ export const AgentPersonaPolicyEnforcement = Schema.Struct({
 export type AgentPersonaPolicyEnforcement = typeof AgentPersonaPolicyEnforcement.Type;
 
 export const OrchestrationV2AgentPersonaCatalog = Schema.Struct({
+  /** Invalid source files excluded from this catalog. Optional for older servers. */
+  diagnostics: Schema.optional(
+    Schema.Array(Schema.Struct({ path: Schema.String, message: Schema.String })),
+  ),
   personas: Schema.Array(OrchestrationV2AgentPersonaCatalogEntry),
   /** Absent from servers that predate it. */
   policyEnforcement: Schema.optional(Schema.Array(AgentPersonaPolicyEnforcement)),
@@ -378,7 +382,7 @@ export const AgentPersonaLibrarySources = Schema.Struct({
   folders: Schema.Array(AgentPersonaLibraryFolder),
 });
 export type AgentPersonaLibrarySources = typeof AgentPersonaLibrarySources.Type;
-export const AGENT_PERSONA_LIBRARY_MAX_FOLDERS = 32;
+const AGENT_PERSONA_LIBRARY_MAX_FOLDERS = 32;
 export const AgentPersonaLibraryFoldersInput = Schema.Struct({
   folders: Schema.Array(TrimmedNonEmptyString.check(Schema.isMaxLength(4096))).check(
     Schema.isMaxLength(AGENT_PERSONA_LIBRARY_MAX_FOLDERS),
@@ -530,27 +534,21 @@ export const J5AgentPersonaRpcSchemas = {
 
 const catalogErrors = Schema.Union([EnvironmentAuthorizationError, AgentPersonaCatalogError]);
 
-export const WsJ5GetAgentPersonaCatalogRpc = Rpc.make(
-  J5_AGENT_PERSONA_WS_METHODS.getAgentPersonaCatalog,
-  {
-    payload: J5AgentPersonaRpcSchemas.getAgentPersonaCatalog.input,
-    success: J5AgentPersonaRpcSchemas.getAgentPersonaCatalog.output,
-    error: catalogErrors,
-  },
-);
-export const WsJ5ImportAgentPersonasRpc = Rpc.make(
-  J5_AGENT_PERSONA_WS_METHODS.importAgentPersonas,
-  {
-    payload: J5AgentPersonaRpcSchemas.importAgentPersonas.input,
-    success: J5AgentPersonaRpcSchemas.importAgentPersonas.output,
-    error: Schema.Union([
-      EnvironmentAuthorizationError,
-      AgentPersonaCatalogError,
-      AgentPersonaImportConflictError,
-    ]),
-  },
-);
-export const WsJ5ListAgentPersonaImportFilesRpc = Rpc.make(
+const WsJ5GetAgentPersonaCatalogRpc = Rpc.make(J5_AGENT_PERSONA_WS_METHODS.getAgentPersonaCatalog, {
+  payload: J5AgentPersonaRpcSchemas.getAgentPersonaCatalog.input,
+  success: J5AgentPersonaRpcSchemas.getAgentPersonaCatalog.output,
+  error: catalogErrors,
+});
+const WsJ5ImportAgentPersonasRpc = Rpc.make(J5_AGENT_PERSONA_WS_METHODS.importAgentPersonas, {
+  payload: J5AgentPersonaRpcSchemas.importAgentPersonas.input,
+  success: J5AgentPersonaRpcSchemas.importAgentPersonas.output,
+  error: Schema.Union([
+    EnvironmentAuthorizationError,
+    AgentPersonaCatalogError,
+    AgentPersonaImportConflictError,
+  ]),
+});
+const WsJ5ListAgentPersonaImportFilesRpc = Rpc.make(
   J5_AGENT_PERSONA_WS_METHODS.listAgentPersonaImportFiles,
   {
     payload: J5AgentPersonaRpcSchemas.listAgentPersonaImportFiles.input,
@@ -558,7 +556,7 @@ export const WsJ5ListAgentPersonaImportFilesRpc = Rpc.make(
     error: catalogErrors,
   },
 );
-export const WsJ5ReadAgentPersonaImportFilesRpc = Rpc.make(
+const WsJ5ReadAgentPersonaImportFilesRpc = Rpc.make(
   J5_AGENT_PERSONA_WS_METHODS.readAgentPersonaImportFiles,
   {
     payload: J5AgentPersonaRpcSchemas.readAgentPersonaImportFiles.input,
@@ -566,7 +564,7 @@ export const WsJ5ReadAgentPersonaImportFilesRpc = Rpc.make(
     error: catalogErrors,
   },
 );
-export const WsJ5EditImportedAgentPersonaRpc = Rpc.make(
+const WsJ5EditImportedAgentPersonaRpc = Rpc.make(
   J5_AGENT_PERSONA_WS_METHODS.editImportedAgentPersona,
   {
     payload: J5AgentPersonaRpcSchemas.editImportedAgentPersona.input,
@@ -574,7 +572,7 @@ export const WsJ5EditImportedAgentPersonaRpc = Rpc.make(
     error: catalogErrors,
   },
 );
-export const WsJ5SetImportedAgentPersonaEnabledRpc = Rpc.make(
+const WsJ5SetImportedAgentPersonaEnabledRpc = Rpc.make(
   J5_AGENT_PERSONA_WS_METHODS.setImportedAgentPersonaEnabled,
   {
     payload: J5AgentPersonaRpcSchemas.setImportedAgentPersonaEnabled.input,
@@ -582,7 +580,7 @@ export const WsJ5SetImportedAgentPersonaEnabledRpc = Rpc.make(
     error: catalogErrors,
   },
 );
-export const WsJ5RemoveImportedAgentPersonaRpc = Rpc.make(
+const WsJ5RemoveImportedAgentPersonaRpc = Rpc.make(
   J5_AGENT_PERSONA_WS_METHODS.removeImportedAgentPersona,
   {
     payload: J5AgentPersonaRpcSchemas.removeImportedAgentPersona.input,
@@ -590,7 +588,7 @@ export const WsJ5RemoveImportedAgentPersonaRpc = Rpc.make(
     error: catalogErrors,
   },
 );
-export const WsJ5RemoveSourceAgentPersonaRpc = Rpc.make(
+const WsJ5RemoveSourceAgentPersonaRpc = Rpc.make(
   J5_AGENT_PERSONA_WS_METHODS.removeSourceAgentPersona,
   {
     payload: J5AgentPersonaRpcSchemas.removeSourceAgentPersona.input,
@@ -598,12 +596,12 @@ export const WsJ5RemoveSourceAgentPersonaRpc = Rpc.make(
     error: catalogErrors,
   },
 );
-export const WsJ5RemoveAgentPersonaRpc = Rpc.make(J5_AGENT_PERSONA_WS_METHODS.removeAgentPersona, {
+const WsJ5RemoveAgentPersonaRpc = Rpc.make(J5_AGENT_PERSONA_WS_METHODS.removeAgentPersona, {
   payload: J5AgentPersonaRpcSchemas.removeAgentPersona.input,
   success: J5AgentPersonaRpcSchemas.removeAgentPersona.output,
   error: catalogErrors,
 });
-export const WsJ5RestoreSourceAgentPersonaRpc = Rpc.make(
+const WsJ5RestoreSourceAgentPersonaRpc = Rpc.make(
   J5_AGENT_PERSONA_WS_METHODS.restoreSourceAgentPersona,
   {
     payload: J5AgentPersonaRpcSchemas.restoreSourceAgentPersona.input,
@@ -612,28 +610,25 @@ export const WsJ5RestoreSourceAgentPersonaRpc = Rpc.make(
   },
 );
 
-export const WsJ5CreateAgentPersonaRpc = Rpc.make(J5_AGENT_PERSONA_WS_METHODS.createAgentPersona, {
+const WsJ5CreateAgentPersonaRpc = Rpc.make(J5_AGENT_PERSONA_WS_METHODS.createAgentPersona, {
   payload: J5AgentPersonaRpcSchemas.createAgentPersona.input,
   success: J5AgentPersonaRpcSchemas.createAgentPersona.output,
   error: catalogErrors,
 });
 
-export const WsJ5ReadAgentPersonaRpc = Rpc.make(J5_AGENT_PERSONA_WS_METHODS.readAgentPersona, {
+const WsJ5ReadAgentPersonaRpc = Rpc.make(J5_AGENT_PERSONA_WS_METHODS.readAgentPersona, {
   payload: J5AgentPersonaRpcSchemas.readAgentPersona.input,
   success: J5AgentPersonaRpcSchemas.readAgentPersona.output,
   error: catalogErrors,
 });
 
-export const WsJ5GetAgentPersonaUsageRpc = Rpc.make(
-  J5_AGENT_PERSONA_WS_METHODS.getAgentPersonaUsage,
-  {
-    payload: J5AgentPersonaRpcSchemas.getAgentPersonaUsage.input,
-    success: J5AgentPersonaRpcSchemas.getAgentPersonaUsage.output,
-    error: catalogErrors,
-  },
-);
+const WsJ5GetAgentPersonaUsageRpc = Rpc.make(J5_AGENT_PERSONA_WS_METHODS.getAgentPersonaUsage, {
+  payload: J5AgentPersonaRpcSchemas.getAgentPersonaUsage.input,
+  success: J5AgentPersonaRpcSchemas.getAgentPersonaUsage.output,
+  error: catalogErrors,
+});
 
-export const WsJ5GetAgentPersonaLibrarySourcesRpc = Rpc.make(
+const WsJ5GetAgentPersonaLibrarySourcesRpc = Rpc.make(
   J5_AGENT_PERSONA_WS_METHODS.getAgentPersonaLibrarySources,
   {
     payload: J5AgentPersonaRpcSchemas.getAgentPersonaLibrarySources.input,
@@ -642,7 +637,7 @@ export const WsJ5GetAgentPersonaLibrarySourcesRpc = Rpc.make(
   },
 );
 
-export const WsJ5SetAgentPersonaLibraryFoldersRpc = Rpc.make(
+const WsJ5SetAgentPersonaLibraryFoldersRpc = Rpc.make(
   J5_AGENT_PERSONA_WS_METHODS.setAgentPersonaLibraryFolders,
   {
     payload: J5AgentPersonaRpcSchemas.setAgentPersonaLibraryFolders.input,
@@ -651,22 +646,19 @@ export const WsJ5SetAgentPersonaLibraryFoldersRpc = Rpc.make(
   },
 );
 
-export const WsJ5SetAgentPersonaEnabledRpc = Rpc.make(
-  J5_AGENT_PERSONA_WS_METHODS.setAgentPersonaEnabled,
-  {
-    payload: J5AgentPersonaRpcSchemas.setAgentPersonaEnabled.input,
-    success: J5AgentPersonaRpcSchemas.setAgentPersonaEnabled.output,
-    error: catalogErrors,
-  },
-);
+const WsJ5SetAgentPersonaEnabledRpc = Rpc.make(J5_AGENT_PERSONA_WS_METHODS.setAgentPersonaEnabled, {
+  payload: J5AgentPersonaRpcSchemas.setAgentPersonaEnabled.input,
+  success: J5AgentPersonaRpcSchemas.setAgentPersonaEnabled.output,
+  error: catalogErrors,
+});
 
-export const WsJ5GetAgentHandoffsRpc = Rpc.make(J5_AGENT_PERSONA_WS_METHODS.getAgentHandoffs, {
+const WsJ5GetAgentHandoffsRpc = Rpc.make(J5_AGENT_PERSONA_WS_METHODS.getAgentHandoffs, {
   payload: J5AgentPersonaRpcSchemas.getAgentHandoffs.input,
   success: J5AgentPersonaRpcSchemas.getAgentHandoffs.output,
   error: catalogErrors,
 });
 
-export const WsJ5SubscribeAgentHandoffRefreshesRpc = Rpc.make(
+const WsJ5SubscribeAgentHandoffRefreshesRpc = Rpc.make(
   J5_AGENT_PERSONA_WS_METHODS.subscribeAgentHandoffRefreshes,
   {
     payload: J5AgentPersonaRpcSchemas.subscribeAgentHandoffRefreshes.input,

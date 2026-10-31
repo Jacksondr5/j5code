@@ -9,8 +9,8 @@ import type { BootServiceStep } from "../bootService.ts";
  * T3 Code. `j5 service install` retires such a unit only when it is provably J5's: it names
  * `J5CODE_HOME` and never `T3CODE_HOME`. A T3 Code unit is never touched.
  */
-export const LEGACY_J5_SYSTEMD_UNIT_FILE = "t3code.service";
-export const LEGACY_J5_LAUNCHD_LABEL = "com.t3tools.t3code.service";
+const LEGACY_J5_SYSTEMD_UNIT_FILE = "t3code.service";
+const LEGACY_J5_LAUNCHD_LABEL = "com.t3tools.t3code.service";
 
 /** Whether a unit or plist at a legacy path was written by a J5 CLI. */
 export function isLegacyJ5BootServiceUnit(contents: string): boolean {
@@ -37,10 +37,7 @@ export function isRenderedJ5BootServiceUnit(contents: string): boolean {
  * denied, bus unreachable, a timeout) is a real failure: the old server may still be running, so
  * the handover must stop before a second writer starts on the same home.
  */
-export function legacyStopMeansNotRunning(
-  kind: "systemd" | "launchd",
-  result: ProcessRunOutput,
-): boolean {
+function legacyStopMeansNotRunning(kind: "systemd" | "launchd", result: ProcessRunOutput): boolean {
   if (result.timedOut) return false;
   const output = `${result.stdout}\n${result.stderr}`;
   if (kind === "systemd") {

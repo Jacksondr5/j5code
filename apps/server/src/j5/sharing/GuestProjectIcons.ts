@@ -151,7 +151,7 @@ export const issueGuestProjectIconUrl = (
   );
 
 /** How long a guest's icon link works for, as long as upstream's own asset links. */
-export const GUEST_PROJECT_ICON_TTL_MS = 60 * 60 * 1000;
+const GUEST_PROJECT_ICON_TTL_MS = 60 * 60 * 1000;
 
 /** The project a link's token was signed for, while it is in date; nothing for any other token. */
 const projectOfToken = Effect.fn("j5.sharing.guestProjectIcons.projectOfToken")(function* (

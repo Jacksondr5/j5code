@@ -883,7 +883,7 @@ export type BackgroundActivityProfile = typeof BackgroundActivityProfile.Type;
 export const DEFAULT_BACKGROUND_ACTIVITY_PROFILE: BackgroundActivityProfile = "balanced";
 
 /** Catalog access is opt-in for each environment. */
-export const DEFAULT_SKILL_CATALOG_SOURCE = "";
+const DEFAULT_SKILL_CATALOG_SOURCE = "";
 export const SkillCatalogSource = TrimmedString.check(
   Schema.makeFilter((source) =>
     /^(?:https?:\/\/[^/?#]*@|(?:ssh|git):\/\/[^/?#@]*:[^/?#@]*@)/i.test(source)

@@ -269,7 +269,7 @@ it.effect("tells the Captain how each finished seat ended, and settles nothing",
       ),
       Layer.provideMerge(
         Layer.mock(ThreadManagementService)({
-          getThreadProjection: (threadId) => Effect.succeed(projection(threadId)),
+          getThreadRecords: (threadId) => Effect.succeed(projection(threadId)),
           dispatch: (command) =>
             Ref.update(dispatched, (items) => [...items, command]).pipe(
               Effect.as({ events: [], effects: [] } as never),
@@ -490,7 +490,7 @@ it.effect(
         ),
         Layer.provideMerge(
           Layer.mock(ThreadManagementService)({
-            getThreadProjection: (threadId) =>
+            getThreadRecords: (threadId) =>
               threadId === captainThread ? Ref.get(captain) : Effect.succeed(projection(threadId)),
             dispatch: (command) =>
               Ref.update(dispatched, (items) => [...items, command]).pipe(
@@ -622,7 +622,7 @@ it.effect(
         ),
         Layer.provideMerge(
           Layer.mock(ThreadManagementService)({
-            getThreadProjection: (threadId) => Effect.succeed(projection(threadId)),
+            getThreadRecords: (threadId) => Effect.succeed(projection(threadId)),
             dispatch: (command) =>
               Ref.get(noticesFail).pipe(
                 Effect.flatMap((fail) =>
@@ -739,7 +739,7 @@ it.effect(
         ),
         Layer.provideMerge(
           Layer.mock(ThreadManagementService)({
-            getThreadProjection: (threadId) =>
+            getThreadRecords: (threadId) =>
               threadId === captainThread
                 ? Ref.get(captain)
                 : Effect.succeed(
@@ -885,7 +885,7 @@ it.effect("the boot sweep tells the Captain about a finished seat nothing report
       ),
       Layer.provideMerge(
         Layer.mock(ThreadManagementService)({
-          getThreadProjection: (threadId) =>
+          getThreadRecords: (threadId) =>
             Effect.succeed(
               threadId === scoutThread
                 ? finished(threadId)
@@ -987,7 +987,7 @@ it.effect(
         ),
         Layer.provideMerge(
           Layer.mock(ThreadManagementService)({
-            getThreadProjection: (threadId) => Effect.succeed(projection(threadId)),
+            getThreadRecords: (threadId) => Effect.succeed(projection(threadId)),
             dispatch: (command) =>
               Ref.update(dispatched, (items) => [...items, command]).pipe(
                 Effect.as({ events: [], effects: [] } as never),

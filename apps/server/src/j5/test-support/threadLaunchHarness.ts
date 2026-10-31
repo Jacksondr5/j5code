@@ -42,7 +42,7 @@ export const modelSelection = {
   instanceId: ProviderInstanceId.make("codex"),
   model: "gpt-5.1-codex",
 } as const;
-export const project = {
+const project = {
   id: projectId,
   title: "Project",
   workspaceRoot: "/repo",
