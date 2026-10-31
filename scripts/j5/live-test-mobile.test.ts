@@ -48,6 +48,11 @@ describe("parseCommand --mobile", () => {
       mode: "default",
       mobile: "android",
     });
+    assert.deepEqual(parseCommand(["--mobile", "phone"]), {
+      command: "start",
+      mode: "default",
+      mobile: "phone",
+    });
     assert.deepEqual(parseCommand(["mobile-open"]), { command: "mobile-open", mode: "default" });
   });
 
@@ -190,20 +195,16 @@ describe("emulatorSerials", () => {
 });
 
 describe("links", () => {
-  it("opens the dev client on the address each device reaches this machine by", () => {
-    const ios = new URL(devClientUrl("ios", 7001));
-    assert.strictEqual(ios.protocol, "j5code-dev:");
-    assert.strictEqual(ios.searchParams.get("url"), "http://127.0.0.1:7001");
-    assert.strictEqual(
-      new URL(devClientUrl("android", 7001)).searchParams.get("url"),
-      "http://10.0.2.2:7001",
-    );
+  it("opens the dev client against Metro on the address the device reaches this machine by", () => {
+    const link = new URL(devClientUrl("100.64.0.1", 7001));
+    assert.strictEqual(link.protocol, "j5code-dev:");
+    assert.strictEqual(link.searchParams.get("url"), "http://100.64.0.1:7001");
   });
 
   it("moves the pairing token onto the backend origin the device reaches", () => {
     const link = new URL(
       pairingDeepLink({
-        platform: "android",
+        host: "10.0.2.2",
         serverPort: 7000,
         pairingUrl: "http://localhost:6741/pair#token=ABC123",
       }),

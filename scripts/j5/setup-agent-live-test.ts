@@ -721,6 +721,7 @@ const pairArguments = (
   paths: ServerPaths,
   person: string,
   label?: string,
+  ttl?: string,
 ): ReadonlyArray<string> => [
   NodePath.join(paths.worktree, "apps/server/src/bin.ts"),
   "pair",
@@ -730,6 +731,7 @@ const pairArguments = (
   person,
   ...PAIRING_SCOPES.flatMap((scope) => ["--scope", scope]),
   ...(label === undefined ? [] : ["--label", label]),
+  ...(ttl === undefined ? [] : ["--ttl", ttl]),
 ];
 
 /** `pairArguments` as a command a person can paste. */
@@ -767,10 +769,11 @@ export function mintPairingUrl(
   paths: ServerPaths,
   owner: string,
   label?: string,
+  ttl?: string,
 ): string | undefined {
   const pair = NodeChildProcess.spawnSync(
     process.execPath,
-    [...pairArguments(paths, owner, label)],
+    [...pairArguments(paths, owner, label, ttl)],
     {
       cwd: paths.worktree,
       env: liveTestEnvironment(process.env, paths.worktree),
@@ -1601,7 +1604,7 @@ async function start(
   paths: LiveTestPaths,
   mode: LiveTestMode,
   baseRef: string | undefined,
-  mobile?: "ios" | "android",
+  mobile?: "ios" | "android" | "phone",
 ): Promise<void> {
   const deadline = Date.now() + START_BUDGET_MS;
   const built = builtMode(paths);
@@ -2755,8 +2758,8 @@ function guest(paths: LiveTestPaths, request: GuestRequest): void {
   print({ kind: "new", name: request.name, level, scope }, pairingUrl);
 }
 
-const USAGE = `Usage: node scripts/j5/setup-agent-live-test.ts [--skills | --fresh | --peer [--poll] | --for-dev | --base <ref> | --mobile ios|android]
-       node scripts/j5/setup-agent-live-test.ts rebuild [--skills | --fresh | --peer [--poll] | --for-dev | --base <ref> | --mobile ios|android]
+const USAGE = `Usage: node scripts/j5/setup-agent-live-test.ts [--skills | --fresh | --peer [--poll] | --for-dev | --base <ref> | --mobile ios|android|phone]
+       node scripts/j5/setup-agent-live-test.ts rebuild [--skills | --fresh | --peer [--poll] | --for-dev | --base <ref> | --mobile ios|android|phone]
        node scripts/j5/setup-agent-live-test.ts status | restart | stop | upgrade | mobile-open
        node scripts/j5/setup-agent-live-test.ts mobile-build ios|android
        ${GUEST_USAGE.slice("Usage: ".length)}`;
@@ -2769,7 +2772,7 @@ export function parseCommand(args: ReadonlyArray<string>): {
   readonly command: LiveTestCommand;
   readonly mode: LiveTestMode;
   readonly baseRef?: string;
-  readonly mobile?: "ios" | "android";
+  readonly mobile?: "ios" | "android" | "phone";
 } {
   // --mobile and --base are the flags with a value; take each pair out before sorting the rest.
   const mobileIndex = args.indexOf("--mobile");
@@ -2799,7 +2802,7 @@ export function parseCommand(args: ReadonlyArray<string>): {
     (mode !== "default" && command !== "start" && command !== "rebuild") ||
     // A mobile test runs on the default home, and only a start or rebuild sets one up.
     (mobileIndex !== -1 &&
-      ((mobile !== "ios" && mobile !== "android") ||
+      ((mobile !== "ios" && mobile !== "android" && mobile !== "phone") ||
         mode !== "default" ||
         (command !== "start" && command !== "rebuild")))
   ) {
@@ -2809,7 +2812,7 @@ export function parseCommand(args: ReadonlyArray<string>): {
     command: command as LiveTestCommand,
     mode,
     ...(mode === "base" && baseRef !== undefined ? { baseRef } : {}),
-    ...(mobile === "ios" || mobile === "android" ? { mobile } : {}),
+    ...(mobile === "ios" || mobile === "android" || mobile === "phone" ? { mobile } : {}),
   };
 }
 
