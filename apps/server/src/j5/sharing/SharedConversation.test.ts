@@ -19,6 +19,7 @@ import * as Fiber from "effect/Fiber";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
+import type * as SqlError from "effect/sql/SqlError";
 import * as TestClock from "effect/testing/TestClock";
 
 import type { ParticipantId } from "../a2a/contracts.ts";
@@ -800,9 +801,11 @@ const answering = (
   command: Record<string, unknown>,
   upstream: (
     command: OrchestrationV2Command,
-  ) => Effect.Effect<OrchestrationV2Command, unknown, SqlClient.SqlClient> = upstreamAnswers(
-    written,
-  ),
+  ) => Effect.Effect<
+    OrchestrationV2Command,
+    SqlError.SqlError,
+    SqlClient.SqlClient
+  > = upstreamAnswers(written),
 ) =>
   SharedConversation.use((conversation) =>
     conversation.dispatch(
