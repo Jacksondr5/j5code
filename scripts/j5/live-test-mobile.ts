@@ -479,8 +479,11 @@ function emulatorSerial(avd: string): string | undefined {
   return undefined;
 }
 
-/** Emulator console ports: even, each with its adb port above it. */
-const EMULATOR_PORTS = Array.from({ length: 16 }, (_, index) => 5554 + 2 * index);
+/**
+ * Emulator console ports: even, each with its adb port above it. 5554 is left out: the Device
+ * panel boots every AVD there, so an AVD it boots can never land on a rig emulator's port.
+ */
+const EMULATOR_PORTS = Array.from({ length: 15 }, (_, index) => 5556 + 2 * index);
 
 /**
  * Boots the slot's AVD here, on a free console port, headless. The Device panel attaches to a
@@ -824,7 +827,9 @@ export function formatMobile(paths: LiveTestPaths, record: MobileRecord): string
   const device =
     record.platform === "ios"
       ? `hostId: the MacBook host in device_list; deviceId "${record.udid}" (${record.slot})`
-      : `hostId "local"; deviceId "emulator-${record.emulator?.port}" (${record.slot})`;
+      : record.emulator === undefined
+        ? `${record.slot}: its emulator has not started; run ${selfCommand(paths, "--mobile android")}`
+        : `hostId "local"; deviceId "emulator-${record.emulator.port}" (${record.slot})`;
   return `Mobile (${record.platform}), device slot ${record.slot}:
   Device panel  ${device}
   Backend       http://${host}:${record.serverPort} from the device
@@ -1069,6 +1074,8 @@ export function mobileStatus(paths: LiveTestPaths): string | undefined {
   const state = (running: boolean) => (running ? "RUNNING" : "STOPPED");
   return `${formatMobile(paths, record)}
   Metro: ${state(isOurs(paths, record.metro))}${
-    record.platform === "ios" ? `   Tunnel: ${state(isOurs(paths, record.tunnel))}` : ""
+    record.platform === "ios"
+      ? `   Tunnel: ${state(isOurs(paths, record.tunnel))}`
+      : `   Emulator: ${state(isOurs(paths, record.emulator))}`
   }`;
 }
