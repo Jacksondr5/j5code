@@ -96,7 +96,7 @@ it.effect("stops every live seat, for the Captain or a person, and nobody else",
     const layer = crewStopLayer.pipe(
       Layer.provideMerge(
         Layer.mock(ThreadManagementService)({
-          getThreadProjection: (threadId) => Effect.succeed(projection(threadId)),
+          getThreadRecords: (threadId) => Effect.succeed(projection(threadId)),
           dispatch: (command) =>
             Ref.update(interrupts, (items) => [
               ...items,
@@ -223,7 +223,7 @@ const ghostFixture = (ghost: "missing" | "unreadable" | "homed") =>
     const layer = crewStopLayer.pipe(
       Layer.provideMerge(
         Layer.mock(ThreadManagementService)({
-          getThreadProjection: (threadId) =>
+          getThreadRecords: (threadId) =>
             threadId !== ghostThread
               ? Effect.succeed(projection(threadId))
               : Effect.fail(

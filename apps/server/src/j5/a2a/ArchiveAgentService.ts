@@ -1,10 +1,4 @@
-import {
-  CommandId,
-  OrchestrationV2RunStatus,
-  RunId,
-  ThreadId,
-  type OrchestrationV2ThreadProjection,
-} from "@t3tools/contracts";
+import { CommandId, OrchestrationV2RunStatus, RunId, ThreadId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
@@ -20,6 +14,7 @@ import {
   signPayload,
   timingSafeEqualBase64Url,
 } from "../../auth/utils.ts";
+import type { ProjectionRecords } from "../../orchestration-v2/ProjectionStore.ts";
 import { ThreadLifecycleService } from "../../orchestration-v2/ThreadLifecycleService.ts";
 import {
   ThreadManagementService,
@@ -33,7 +28,7 @@ import {
 import { A2ALedger } from "./LedgerService.ts";
 import { A2ALifecycleService } from "./LifecycleService.ts";
 import { stopThread } from "./stopThread.ts";
-import { getThreadProjectionIfPresent } from "./threadProjectionReads.ts";
+import { getThreadRecordsIfPresent } from "./threadProjectionReads.ts";
 import {
   ExchangeDroppedPayload,
   ExchangeId,
@@ -217,7 +212,7 @@ const decodeExchangeDroppedOption = Schema.decodeUnknownOption(ExchangeDroppedPa
 const decodeMessageSentOption = Schema.decodeUnknownOption(MessageSentPayload);
 
 interface ReadState {
-  readonly projection: OrchestrationV2ThreadProjection;
+  readonly projection: ProjectionRecords<"runs">;
   readonly retired: boolean;
   readonly archived: boolean;
   readonly facts: ArchiveAgentConsequenceFacts;
@@ -367,7 +362,7 @@ export const layer = Layer.effect(
       facts: ThreadPreArchiveFacts,
     ) {
       const projection = yield* threadManagement
-        .getThreadProjection(target.threadId)
+        .getThreadRecords(target.threadId, ["runs"])
         .pipe(Effect.mapError(operationError("reading the target thread projection")));
       if (
         facts.state !== "registered" ||
@@ -651,9 +646,10 @@ export const layer = Layer.effect(
     )(function* (target) {
       const facts = yield* readArchiveFacts(target);
       if (facts.state === "not-an-a2a-participant") {
-        const projection = yield* getThreadProjectionIfPresent(
+        const projection = yield* getThreadRecordsIfPresent(
           threadManagement,
           target.threadId,
+          [],
         ).pipe(Effect.mapError(operationError("reading the target thread projection")));
         if (projection === null) return null;
       }

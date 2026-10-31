@@ -47,7 +47,7 @@ export const layer = Layer.effect(
       const result = yield* inner.dispatch(command);
       if (source === null) return result;
       yield* Effect.gen(function* () {
-        const target = yield* inner.getThreadProjection(command.targetThreadId);
+        const target = yield* inner.getThreadRecords(command.targetThreadId, []);
         yield* composition.recordFacts({
           homeCommandId: registrationCommandId(command.targetThreadId),
           placementCommandId: PlacementCommandId.make(

@@ -10,7 +10,7 @@ import type {
  * answer is nullable and callers say "no detail" rather than inventing one.
  */
 export const runFailureDetail = (
-  projection: OrchestrationV2ThreadProjection,
+  projection: Pick<OrchestrationV2ThreadProjection, "turnItems">,
   runId: RunId,
 ): OrchestrationV2ProviderFailure | null => {
   const item = projection.turnItems.findLast(

@@ -12,7 +12,7 @@ import { AgentCrewInstanceService, type AgentCrewMember } from "./AgentCrewInsta
 import { A2AArchiveFacts } from "./ArchiveFactsService.ts";
 import type { ParticipantId, LedgerProjectId } from "./contracts.ts";
 import { AGENT_STOP_REASON, stopThread } from "./stopThread.ts";
-import { getThreadProjectionIfPresent } from "./threadProjectionReads.ts";
+import { getThreadRecordsIfPresent } from "./threadProjectionReads.ts";
 
 /** `never_created`: the seat's row was recorded but its thread never came to exist. */
 export type CrewSeatStopResult =
@@ -99,7 +99,7 @@ export const layer = Layer.effect(
      * with no thread behind it, fails the stop rather than skipping a seat that may be live.
      */
     const readSeat = Effect.fn("j5.a2a.crewStop.readSeat")(function* (member: AgentCrewMember) {
-      const projection = yield* getThreadProjectionIfPresent(threads, member.threadId).pipe(
+      const projection = yield* getThreadRecordsIfPresent(threads, member.threadId, ["runs"]).pipe(
         Effect.mapError(seatError("reading a seat", member.seatName)),
       );
       if (projection !== null) return projection;
