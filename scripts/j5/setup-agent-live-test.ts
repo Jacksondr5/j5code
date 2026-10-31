@@ -2836,11 +2836,13 @@ async function main(): Promise<void> {
   if (command === "stop") return stop(paths);
   if (command === "upgrade") return upgrade(paths);
   if (command === "mobile-open") return (await import("./live-test-mobile.ts")).mobileOpen(paths);
-  // A restart keeps the device set up and reconnects the server to it.
+  // A start or restart without --mobile keeps a recorded device set up and reconnects the
+  // server to it, on the port the device reaches. A rebuild sets up only what it is asked for.
   const mobile =
-    command === "restart"
-      ? (await import("./live-test-mobile.ts")).readMobileRecord(paths)?.platform
-      : parsed.mobile;
+    parsed.mobile ??
+    (command === "rebuild"
+      ? undefined
+      : (await import("./live-test-mobile.ts")).readMobileRecord(paths)?.platform);
   if (command === "restart" || command === "rebuild") {
     await stop(paths, command === "rebuild", command === "restart");
   }
