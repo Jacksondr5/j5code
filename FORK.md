@@ -733,11 +733,14 @@ explicitly marked.
 | `apps/server/src/cli/pair.test.ts`                                          | R       | H, 79                                              |
 | `apps/server/src/cli/auth.ts`                                               | N       | 79                                                 |
 | `apps/server/src/cli/pair.ts`                                               | R       | H, 79                                              |
+| `apps/server/src/cli/server.ts`                                             | N       | B                                                  |
 | `apps/server/src/cli/theme.test.ts`                                         | N       | H                                                  |
-| `apps/server/src/cli/theme.ts`                                              | N       | H                                                  |
+| `apps/server/src/cli/theme.ts`                                              | N       | H, B                                               |
 | `apps/server/src/cli/triage.ts`                                             | N       | H                                                  |
 | `apps/server/src/cli/uninstall.ts`                                          | N       | 40, 52                                             |
 | `apps/server/src/cli/update.ts`                                             | N       | 40, 53                                             |
+| `apps/server/src/device/EasDeviceHost.test.ts`                              | N       | B                                                  |
+| `apps/server/src/device/EasDeviceHost.ts`                                   | N       | B                                                  |
 | `apps/server/src/cloud/pinnedRuntime.test.ts`                               | N       | 50                                                 |
 | `apps/server/src/cloud/pinnedRuntime.ts`                                    | N       | 50                                                 |
 | `apps/server/src/cloud/selfUpdate.test.ts`                                  | N       | 50                                                 |
