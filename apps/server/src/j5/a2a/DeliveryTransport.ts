@@ -191,10 +191,8 @@ export const deliveryCommandId = (messageId: LedgerMessageId) =>
  * and rejects a restart aimed at a turn that has just ended and a steer to a run that Stop has
  * reached, so the plain delivery that follows must keep a command id that nothing has refused.
  */
-export const askedDeliveryCommandId = (
-  messageId: LedgerMessageId,
-  mode: Exclude<SendMode, "queue">,
-) => CommandId.make(`${deliveryCommandId(messageId)}:${mode}`);
+const askedDeliveryCommandId = (messageId: LedgerMessageId, mode: Exclude<SendMode, "queue">) =>
+  CommandId.make(`${deliveryCommandId(messageId)}:${mode}`);
 
 /** Every command one message's delivery may have been dispatched under. */
 const deliveryCommandIds = (messageId: LedgerMessageId) => [

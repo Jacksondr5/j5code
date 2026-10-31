@@ -98,9 +98,7 @@ export class ArchiveCrewNotCaptainError extends Data.TaggedError("ArchiveCrewNot
   }
 }
 
-export class ArchiveCrewProjectMismatchError extends Data.TaggedError(
-  "ArchiveCrewProjectMismatchError",
-)<{
+class ArchiveCrewProjectMismatchError extends Data.TaggedError("ArchiveCrewProjectMismatchError")<{
   readonly crewInstanceId: string;
   readonly projectId: LedgerProjectId;
   readonly expected: LedgerProjectId;
@@ -133,7 +131,7 @@ export class ArchiveCrewConfirmationStaleError extends Data.TaggedError(
   }
 }
 
-export class ArchiveCrewConfirmationTokenError extends Data.TaggedError(
+class ArchiveCrewConfirmationTokenError extends Data.TaggedError(
   "ArchiveCrewConfirmationTokenError",
 )<{ readonly reason: "malformed" | "unsupported-version" }> {
   override get message(): string {

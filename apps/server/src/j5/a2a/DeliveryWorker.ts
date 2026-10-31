@@ -56,10 +56,7 @@ import {
 } from "./deliveryNotices.ts";
 import { buildPeerDeliveryBody } from "./peerDeliveryBody.ts";
 
-export const A2A_DELIVERY_CONFIG_VERSION = config.version;
-
 /** One poll hands out at most this many deliveries, or about this many bytes of message text. */
-export { PEER_POLL_BATCH_COUNT };
 export const PEER_POLL_BATCH_BYTES = 1_000_000;
 
 const decodeSentPayload = Schema.decodeUnknownEffect(Schema.fromJsonString(MessageSentPayload));
@@ -124,7 +121,7 @@ export class A2ADeliveryHooks extends Context.Service<A2ADeliveryHooks, A2ADeliv
   "t3/j5/a2a/DeliveryWorker/A2ADeliveryHooks",
 ) {}
 
-export const noopHooks = Layer.succeed(
+const noopHooks = Layer.succeed(
   A2ADeliveryHooks,
   A2ADeliveryHooks.of({
     afterTransportSuccess: Effect.fn("A2ADeliveryHooks.afterTransportSuccess")(function () {

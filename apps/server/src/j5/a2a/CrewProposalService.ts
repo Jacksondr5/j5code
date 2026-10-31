@@ -71,7 +71,7 @@ const launchSeatOf = (seat: CrewProposalSeat): CrewLaunchSeat => {
   };
 };
 
-export class CrewProposalRequestError extends Data.TaggedError("CrewProposalRequestError")<{
+class CrewProposalRequestError extends Data.TaggedError("CrewProposalRequestError")<{
   readonly detail: string;
   readonly nextStep: string;
 }> {
@@ -89,7 +89,7 @@ export class CrewProposalNotOpenError extends Data.TaggedError("CrewProposalNotO
   }
 }
 
-export class CrewProposalNotFoundError extends Data.TaggedError("CrewProposalNotFoundError")<{
+class CrewProposalNotFoundError extends Data.TaggedError("CrewProposalNotFoundError")<{
   readonly proposalId: string;
 }> {
   override get message(): string {
@@ -97,7 +97,7 @@ export class CrewProposalNotFoundError extends Data.TaggedError("CrewProposalNot
   }
 }
 
-export class CrewProposalOperationError extends Data.TaggedError("CrewProposalOperationError")<{
+class CrewProposalOperationError extends Data.TaggedError("CrewProposalOperationError")<{
   readonly phase: string;
   readonly cause: unknown;
 }> {

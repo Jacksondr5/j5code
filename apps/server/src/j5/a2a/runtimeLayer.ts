@@ -76,9 +76,7 @@ const agentCrewProposalLayer = agentCrewProposalNotifyingLayer.pipe(
  * production provides it once to the V2 runtime (which `ThreadLineage` decorates) and the
  * authenticated route graph reuses it.
  */
-export const makeJ5ThreadRegistrationLayer = (
-  options: { readonly ledger?: typeof ledgerLayer } = {},
-) => {
+const makeJ5ThreadRegistrationLayer = (options: { readonly ledger?: typeof ledgerLayer } = {}) => {
   const ledgerProvided = options.ledger ?? ledgerLayer;
   return Layer.merge(
     threadRegistrationLayer,
@@ -112,7 +110,7 @@ const deliveryTransportWithPeers = deliveryTransportLayer.pipe(
   Layer.provide(peerHttpClient),
 );
 
-export const makeJ5A2AAuxiliaryLayer = (
+const makeJ5A2AAuxiliaryLayer = (
   options: {
     readonly deliveryTransport?: typeof deliveryTransportWithPeers;
     readonly spawnWorkspace?: typeof spawnWorkspaceLayer;

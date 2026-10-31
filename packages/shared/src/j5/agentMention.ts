@@ -2,7 +2,7 @@ import { detectPlaybookMention } from "./playbookMention.ts";
 
 export { PLAYBOOK_MENTION_PREFIX, playbookMentionReplacement } from "./playbookMention.ts";
 
-export const PERSONA_MENTION_PREFIX = "@persona:";
+const PERSONA_MENTION_PREFIX = "@persona:";
 
 /** The text a picker inserts for a chosen persona; the trailing space closes the mention. */
 export const agentMentionReplacement = (personaId: string) =>

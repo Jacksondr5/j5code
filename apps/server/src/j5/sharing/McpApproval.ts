@@ -32,7 +32,7 @@ const KEPT_MS = 10 * 60_000;
  * The approver is read before upstream spends a pairing code: the person the code was made for,
  * or the person whose browser approves.
  */
-export const layerGatedMcpOAuth = Layer.effect(
+const layerGatedMcpOAuth = Layer.effect(
   McpOAuth.McpOAuth,
   Effect.gen(function* () {
     const inner = yield* McpOAuth.McpOAuth;

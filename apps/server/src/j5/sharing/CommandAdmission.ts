@@ -59,7 +59,7 @@ const onParent = (command: { readonly parentThreadId: ThreadId }): CommandScope 
  * Every command a narrowed Collaborator may send, by type, with where its target is. Keyed by
  * type so that a command upstream renames or removes fails to compile here.
  */
-export const NARROWED_COMMAND_SCOPES: {
+const NARROWED_COMMAND_SCOPES: {
   readonly [K in OrchestrationV2Command["type"]]?: (command: CommandOf<K>) => CommandScope;
 } = {
   // Starting a thread needs the project (AC14): a Collaborator on one thread starts none.

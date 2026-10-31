@@ -176,7 +176,7 @@ export interface FleetSections<S extends FleetLedgerProject = FleetLedgerProject
 }
 
 /** Every agent in a subtree: the node itself, its plain children, and every Crew seat beneath it. */
-export function* fleetNodeAgents(node: FleetNode): Generator<FleetAgent> {
+function* fleetNodeAgents(node: FleetNode): Generator<FleetAgent> {
   yield node.row.agent;
   for (const crew of node.crews) for (const member of crew.members) yield* fleetNodeAgents(member);
   for (const child of node.children) yield* fleetNodeAgents(child);
@@ -188,7 +188,7 @@ export function* fleetNodeAgents(node: FleetNode): Generator<FleetAgent> {
  * and an agent the client cannot see is not assumed done. Idle is not settled; nothing is inferred
  * from silence.
  */
-export const isSettledFleetNode = (
+const isSettledFleetNode = (
   node: FleetNode,
   classify: (agent: FleetAgent) => CrewSeatState,
 ): boolean => {

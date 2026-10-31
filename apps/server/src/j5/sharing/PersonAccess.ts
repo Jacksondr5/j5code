@@ -35,7 +35,7 @@ import { ReadChanges, layer as readChangesLayer } from "../a2a/ReadChanges.ts";
  * permissions upstream issued it for its purpose. MCP clients are approved only by an Owner, and
  * lowering or removing an Owner refuses an approval still waiting (`Access.issueMcpClient`).
  */
-export const isServiceSubject = (subject: string) =>
+const isServiceSubject = (subject: string) =>
   subject.startsWith("peer:") ||
   subject.startsWith("machine:") ||
   subject === "mcp-client" ||

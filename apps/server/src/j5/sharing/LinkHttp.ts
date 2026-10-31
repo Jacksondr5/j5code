@@ -18,7 +18,7 @@ import { Links } from "./Links.ts";
 import { PAIRED_AS_SOMEONE_ELSE_REFUSAL } from "./PairingIntents.ts";
 
 /** What someone joining is told when the name they typed is someone else's (AC42, AC44). */
-export const LINK_NAME_TAKEN =
+const LINK_NAME_TAKEN =
   "Someone on this server already has that name. If it is yours, open the link on the device you paired before, or ask for a link for this device.";
 
 const decodeDescribe = Schema.decodeUnknownEffect(LinkTokenRequest);

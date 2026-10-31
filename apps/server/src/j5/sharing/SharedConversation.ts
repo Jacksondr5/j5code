@@ -66,7 +66,7 @@ import { scheduledLine } from "./scheduledRuns.ts";
  * first line of the person's own, and their text always follows it, so text a person types to
  * look like this line, or like a note, sits below their real one.
  */
-export const authorLine = (author: Author, editedBy: Author | null = null) =>
+const authorLine = (author: Author, editedBy: Author | null = null) =>
   editedBy === null
     ? `[Message from ${authorLabel(author)}]`
     : `[Message from ${authorLabel(author)}, edited by ${authorLabel(editedBy)}]`;
@@ -77,7 +77,7 @@ export const authorLine = (author: Author, editedBy: Author | null = null) =>
  * it into a message, on others it goes back as the result of the agent's tool call. Either way
  * the agent reads the answer's words, so its author goes on the words.
  */
-export const answerLine = (author: Author) => `[Answer from ${authorLabel(author)}]`;
+const answerLine = (author: Author) => `[Answer from ${authorLabel(author)}]`;
 
 /**
  * A question's answers with their author on each: at the start of the text, or of the first
@@ -127,7 +127,7 @@ interface AuthorRow {
  * The event upstream logs when a prompt is answered. Typed against upstream's own event union, so
  * a rename there fails to compile here.
  */
-export const PROMPT_SETTLED_EVENT =
+const PROMPT_SETTLED_EVENT =
   "runtime-request.updated" satisfies OrchestrationV2StoredEvent["event"]["type"];
 
 const QUEUED = "queued" satisfies OrchestrationV2Run["status"];

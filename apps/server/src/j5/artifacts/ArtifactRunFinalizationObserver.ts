@@ -6,7 +6,7 @@ import * as ProjectionStore from "../../orchestration-v2/ProjectionStore.ts";
 import * as RunFinalization from "../../orchestration-v2/RunFinalizationService.ts";
 import { ArtifactWorkspace } from "./ArtifactWorkspace.ts";
 
-export function selectCurrentProposedPlan(
+function selectCurrentProposedPlan(
   projection: Pick<OrchestrationV2ThreadProjection, "plans" | "turnItems">,
   runId: RunId,
 ): Extract<OrchestrationV2ThreadProjection["plans"][number], { kind: "proposed_plan" }> | null {

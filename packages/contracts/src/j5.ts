@@ -1157,7 +1157,7 @@ export const OpenInboxCountRequest = Schema.Struct({});
 export type OpenInboxCountRequest = typeof OpenInboxCountRequest.Type;
 
 /** The sidebar asks about the rows it shows, in batches no larger than this. */
-export const THREAD_HOME_READ_MAX_THREADS = 500;
+const THREAD_HOME_READ_MAX_THREADS = 500;
 export const ThreadHomesRequest = Schema.Struct({
   threadIds: Schema.Array(ThreadId).check(Schema.isMaxLength(THREAD_HOME_READ_MAX_THREADS)),
 });

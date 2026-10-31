@@ -7,7 +7,7 @@ const SWATCHES = PROJECT_ICON_COLORS.filter((color) => color.value !== "gray").m
 );
 
 /** The same name is always the same colour, on every client. */
-export function avatarSwatch(name: string): string {
+function avatarSwatch(name: string): string {
   let hash = 0;
   for (const char of name.trim().toLowerCase()) hash = (hash * 31 + char.codePointAt(0)!) | 0;
   return SWATCHES[Math.abs(hash) % SWATCHES.length]!;

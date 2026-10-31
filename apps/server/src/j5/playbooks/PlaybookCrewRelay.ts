@@ -30,7 +30,7 @@ import {
  * Both layers are wanted: a re-dispatch after a crash replays the command receipt, and the fixed
  * message id keeps a second copy out of the thread even if a receipt were lost.
  */
-export const PLAYBOOK_STEP_SESSION = "j5-playbook-step";
+const PLAYBOOK_STEP_SESSION = "j5-playbook-step";
 
 const isPlaybookError = Schema.is(PlaybookError);
 const operationFailed = (error: unknown) =>

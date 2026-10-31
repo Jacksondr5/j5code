@@ -151,7 +151,7 @@ const reduceProviders = (providers: ServerConfig["providers"], skillsShown: Skil
  * The configuration a Viewer's client is given. Built field by field, so a field upstream adds
  * later is left out until it is listed here.
  */
-export const reduceServerConfig = (
+const reduceServerConfig = (
   config: ServerConfig,
   skillsShown: SkillsShown = NO_SKILLS,
 ): ServerConfig => ({
