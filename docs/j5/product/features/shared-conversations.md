@@ -92,7 +92,7 @@ Set aside on purpose, each tracked where it is linked. An item leaves this list 
 
 ### Search
 
-21. Cmd+K's message search, for a person a thread or project is shared with or a Viewer of the server, finds messages only in threads they can open, at either level. It returns no thread, snippet or count from any other thread, and other threads' matches never take the places of theirs, apart from upstream's limit of the newest 10,000 matches of a word across the server, which applies to an Owner too.
+21. Cmd+K's message search, for a person a thread or project is shared with or a Viewer of the server, finds messages only in threads they can open, at either level. It returns no thread, snippet or count from any other thread, and other threads' matches never take the places of theirs, apart from upstream's limit of the newest 10,000 matches of a word across the server, which applies to an Owner too. A match in a person's message reads "You" only for the reader's own; anyone else's names the person who wrote it, and a message from before the thread was shared is the Owner's.
 22. Opening a thread, from Cmd+K or elsewhere, changes the record that ranks threads in Cmd+K only for an Owner or a Collaborator at server scope. That record is not shown to anyone else, and does not order their results.
 
 ## Scenarios

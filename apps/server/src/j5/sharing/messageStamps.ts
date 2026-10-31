@@ -33,6 +33,33 @@ export interface Author {
   readonly level: WriterLevel;
 }
 
+/** How upstream's record of a message says it came to be. */
+export interface MessageOrigin {
+  readonly created_by: string | null;
+  readonly creation_source: string | null;
+  readonly scheduled_task_id: string | null;
+  readonly sender_thread_id: string | null;
+}
+
+/** `MessageOrigin`'s columns, read from `orchestration_v2_projection_messages` as `alias`. */
+export const messageOriginColumns = (alias: string) => `
+  json_extract(${alias}.payload_json, '$.createdBy') AS created_by,
+  json_extract(${alias}.payload_json, '$.creationSource') AS creation_source,
+  json_extract(${alias}.payload_json, '$.scheduledTaskId') AS scheduled_task_id,
+  json_extract(${alias}.payload_json, '$.senderThreadId') AS sender_thread_id
+`;
+
+/**
+ * Whether a message no person is recorded for was typed by one, before its thread was shared: the
+ * first owner's then, the only person who could write to it (AC3). An inbox reply is a person's
+ * too, but comes as a delivery ("mcp") and carries its header.
+ */
+export const typedByFirstOwner = (origin: MessageOrigin) =>
+  origin.created_by === "user" &&
+  origin.creation_source !== "mcp" &&
+  origin.scheduled_task_id === null &&
+  origin.sender_thread_id === null;
+
 /** The platform's text a stored message begins with: the note it carries, then the line naming
  * whose it is. */
 export const prefixOf = (note: string | null, line: string) =>

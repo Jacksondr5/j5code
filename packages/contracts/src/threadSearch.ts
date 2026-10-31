@@ -8,6 +8,7 @@ import {
   TrimmedNonEmptyString,
   TrimmedString,
 } from "./baseSchemas.ts";
+import { ThreadSearchAuthor } from "./j5/sharedConversation.ts";
 
 export const OrchestrationThreadSearchSource = Schema.Literals(["user", "assistant"]);
 export type OrchestrationThreadSearchSource = typeof OrchestrationThreadSearchSource.Type;
@@ -43,6 +44,8 @@ export const OrchestrationThreadSearchMatch = Schema.Struct({
   hits: Schema.optionalKey(Schema.Int),
   /** The message the snippet is from. Older servers omit it. */
   messageId: Schema.optionalKey(MessageId),
+  // J5: who wrote a user-role hit, for the label (FORK.md case 94).
+  author: Schema.optionalKey(ThreadSearchAuthor),
 });
 export type OrchestrationThreadSearchMatch = typeof OrchestrationThreadSearchMatch.Type;
 
