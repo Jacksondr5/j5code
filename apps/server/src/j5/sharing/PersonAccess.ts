@@ -222,6 +222,13 @@ export interface PersonAccessShape {
     personId: ParticipantId,
     threadId: ThreadId,
   ) => Effect.Effect<PersonLevel | null, PersonAccessStorageError>;
+  /**
+   * Every thread a person holds a level over, as `threadLevel` reads one; `null` for a level at
+   * server scope, which covers every thread.
+   */
+  readonly reachableThreads: (
+    personId: ParticipantId,
+  ) => Effect.Effect<ReadonlyArray<ThreadId> | null, PersonAccessStorageError>;
   /** The highest level a person holds over a project as a whole: at the server or the project. */
   readonly projectLevel: (
     personId: ParticipantId,
@@ -526,35 +533,38 @@ const make: Layer.Layer<PersonAccess, never, SqlClient.SqlClient | ReadChanges> 
       Effect.mapError(storage("read whose a session is")),
     );
 
-    // Every thread from the one asked about up to the root of its tree. A Subagent's parent is
-    // its upstream lineage parent; a Peer Agent's is its placement parent, unless it is a fork.
+    // The thread above `chain.thread_id`. A Subagent's parent is its upstream lineage parent; a
+    // Peer Agent's is its placement parent, unless it is a fork.
+    const parentInChain = sql`
+      COALESCE(
+        (
+          SELECT json_extract(thread.payload_json, '$.lineage.parentThreadId')
+          FROM orchestration_v2_projection_threads AS thread
+          WHERE thread.thread_id = chain.thread_id
+            AND json_extract(thread.payload_json, '$.lineage.relationshipToParent') = 'subagent'
+        ),
+        (
+          SELECT parent.thread_id
+          FROM j5_a2a_membership AS child
+          JOIN j5_a2a_participant_placement AS placement
+            ON placement.project_id = child.project_id
+           AND placement.participant_id = child.participant_id
+          JOIN j5_a2a_membership AS parent
+            ON parent.project_id = placement.project_id
+           AND parent.participant_id = placement.placement_parent_id
+          WHERE child.thread_id = chain.thread_id
+            AND placement.provenance_kind <> 'forked-from'
+          LIMIT 1
+        )
+      )
+    `;
+
+    // Every thread from the one asked about up to the root of its tree.
     const chain = (threadId: ThreadId) => sql`
       WITH RECURSIVE chain(thread_id, depth) AS (
         SELECT ${threadId}, 0
         UNION ALL
-        SELECT
-          COALESCE(
-            (
-              SELECT json_extract(thread.payload_json, '$.lineage.parentThreadId')
-              FROM orchestration_v2_projection_threads AS thread
-              WHERE thread.thread_id = chain.thread_id
-                AND json_extract(thread.payload_json, '$.lineage.relationshipToParent') = 'subagent'
-            ),
-            (
-              SELECT parent.thread_id
-              FROM j5_a2a_membership AS child
-              JOIN j5_a2a_participant_placement AS placement
-                ON placement.project_id = child.project_id
-               AND placement.participant_id = child.participant_id
-              JOIN j5_a2a_membership AS parent
-                ON parent.project_id = placement.project_id
-               AND parent.participant_id = placement.placement_parent_id
-              WHERE child.thread_id = chain.thread_id
-                AND placement.provenance_kind <> 'forked-from'
-              LIMIT 1
-            )
-          ),
-          chain.depth + 1
+        SELECT ${parentInChain}, chain.depth + 1
         FROM chain
         WHERE chain.thread_id IS NOT NULL AND chain.depth < ${MAX_ANCESTOR_DEPTH}
       )
@@ -586,6 +596,51 @@ const make: Layer.Layer<PersonAccess, never, SqlClient.SqlClient | ReadChanges> 
         return highestLevel(rows.map((row) => row.level));
       },
       Effect.mapError(storage("read a person's level on a thread")),
+    );
+
+    const reachableThreads: PersonAccessShape["reachableThreads"] = Effect.fn(
+      "j5.sharing.personAccess.reachableThreads",
+    )(
+      function* (personId) {
+        const levels = yield* levelsOf(personId);
+        if (levels.some((held) => held.scope.kind === "server")) return null;
+        if (levels.length === 0) return [];
+        // `coveringThread` for every thread at once: each thread's line of ancestors, kept where a
+        // thread on it, or the thread's project, is one the person holds a level on. The lines are
+        // walked only for someone who holds a thread.
+        const underThreads = levels.some((held) => held.scope.kind === "thread")
+          ? sql`
+              WITH RECURSIVE chain(origin, thread_id, depth) AS (
+                SELECT thread_id, thread_id, 0
+                FROM orchestration_v2_projection_threads
+                WHERE deleted_at IS NULL
+                UNION ALL
+                SELECT chain.origin, ${parentInChain}, chain.depth + 1
+                FROM chain
+                WHERE chain.thread_id IS NOT NULL AND chain.depth < ${MAX_ANCESTOR_DEPTH}
+              )
+              SELECT DISTINCT chain.origin AS thread_id
+              FROM chain
+              JOIN j5_a2a_person_level AS held
+                ON held.person_id = ${personId}
+               AND held.scope_kind = 'thread'
+               AND held.scope_id = chain.thread_id
+              UNION
+            `
+          : sql``;
+        const rows = yield* sql<{ readonly thread_id: string }>`
+          ${underThreads}
+          SELECT threads.thread_id
+          FROM orchestration_v2_projection_threads AS threads
+          JOIN j5_a2a_person_level AS held
+            ON held.person_id = ${personId}
+           AND held.scope_kind = 'project'
+           AND held.scope_id = threads.project_id
+          WHERE threads.deleted_at IS NULL
+        `;
+        return rows.map((row) => row.thread_id as ThreadId);
+      },
+      Effect.mapError(storage("read the threads a person reaches")),
     );
 
     const projectInFeed: PersonAccessShape["projectInFeed"] = Effect.fn(
@@ -696,6 +751,8 @@ const make: Layer.Layer<PersonAccess, never, SqlClient.SqlClient | ReadChanges> 
       sessionReach,
 
       threadLevel,
+
+      reachableThreads,
 
       projectLevel: Effect.fn("j5.sharing.personAccess.projectLevel")(
         function* (personId, projectId) {

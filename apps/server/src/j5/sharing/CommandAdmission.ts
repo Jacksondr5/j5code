@@ -248,6 +248,12 @@ export const makeCommandAdmission = Effect.fn("j5.sharing.commandAdmission.makeC
         | undefined;
       if (scopeOf === undefined) return yield* refused(NOT_SHARED);
       yield* requireLevel(scopeOf(command), "collaborator");
+      if (command.type === "thread.visit") {
+        // The thread's `opens` rank its owner's Cmd+K, so a narrowed person's open and the query
+        // that found it do not count; their visit still moves the read marker.
+        const { opened: _opened, searchQuery: _searchQuery, ...visit } = command;
+        return visit;
+      }
       return command;
     });
 

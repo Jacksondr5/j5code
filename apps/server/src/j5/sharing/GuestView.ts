@@ -6,6 +6,8 @@ import {
   OrchestrationV2DomainEvent,
   OrchestrationV2GetShellSnapshotError,
   type OrchestrationV2ShellSnapshot,
+  type OrchestrationV2SearchThreadsInput,
+  type OrchestrationV2SearchThreadsResult,
   type OrchestrationV2ShellStreamItem,
   type OrchestrationV2ThreadProjection,
   type OrchestrationV2ThreadShell,
@@ -31,6 +33,7 @@ import { levelReaches } from "@t3tools/contracts/j5";
 
 import {
   PersonAccess,
+  type PersonAccessStorageError,
   type SessionIdentity,
   type SessionReach,
   isWide,
@@ -284,7 +287,21 @@ export interface ConnectionView {
   readonly threadProjection: <E, R>(
     load: Effect.Effect<OrchestrationV2ThreadProjection, E, R>,
   ) => Effect.Effect<OrchestrationV2ThreadProjection, E, R>;
+  /**
+   * Upstream's Cmd+K message search. `search` runs it; a narrowed connection's is held to the
+   * threads its person reaches and ranked without `opens`.
+   */
+  readonly searchThreads: <E, R>(
+    input: OrchestrationV2SearchThreadsInput,
+    search: NarrowedSearch<E, R>,
+  ) => Effect.Effect<OrchestrationV2SearchThreadsResult, E | PersonAccessStorageError, R>;
 }
+
+/** Upstream's search, given a narrowed connection's reach (all threads when absent). */
+type NarrowedSearch<E, R> = (
+  input: OrchestrationV2SearchThreadsInput,
+  narrowed?: { readonly threadIds?: ReadonlyArray<ThreadId>; readonly withoutOpens: true },
+) => Effect.Effect<OrchestrationV2SearchThreadsResult, E, R>;
 
 const MEMBER_VIEW: ConnectionView = {
   scheduledTasks: identity,
@@ -295,6 +312,7 @@ const MEMBER_VIEW: ConnectionView = {
   shellStream: (input, subscribe) => subscribe(input),
   threadStream: identity,
   threadProjection: identity,
+  searchThreads: (input, search) => search(input),
 };
 
 /**
@@ -508,8 +526,31 @@ const narrowedView = (
       ).pipe(Stream.mapError(shellFailure)),
     threadStream: (stream) => stream.pipe(Stream.map(narrowThreadItem)),
     threadProjection: (load) => load.pipe(Effect.map(narrowProjection)),
+    // Reach is read on each search, so a share taken away ends with the next one. A narrowed
+    // sidebar has no older-settled cut, so the older-settled rows, read from every settled
+    // thread, are never asked for.
+    searchThreads: Effect.fn("j5.sharing.guestView.searchThreads")(function* <E, R>(
+      input: OrchestrationV2SearchThreadsInput,
+      search: NarrowedSearch<E, R>,
+    ) {
+      if (personId === null) return NO_MATCHES;
+      const threadIds = yield* access.reachableThreads(personId);
+      if (threadIds !== null && threadIds.length === 0) return NO_MATCHES;
+      const {
+        olderSettledBefore: _olderSettledBefore,
+        projectIds: _projectIds,
+        environmentLabel: _environmentLabel,
+        ...request
+      } = input;
+      return yield* search(
+        request,
+        threadIds === null ? { withoutOpens: true } : { threadIds, withoutOpens: true },
+      );
+    }),
   };
 };
+
+const NO_MATCHES: OrchestrationV2SearchThreadsResult = { matches: [] };
 
 /**
  * The view for one WebSocket connection: upstream's own for a wide session, the narrowed one for

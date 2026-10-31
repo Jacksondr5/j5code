@@ -186,7 +186,7 @@ const narrowedForAll: AccessRpcRule = { kind: "narrowed", unknownToo: true };
 /**
  * Every WebSocket request a narrowed connection may make, keyed by method so an upstream rename
  * fails to compile; absent means refused. Upstream's permission check still runs on each. Left
- * out on purpose: whole-server lists and changes (projects, archive, search, usage, diagnostics,
+ * out on purpose: whole-server lists and changes (projects, archive, usage, diagnostics,
  * PR lists, peers, relay) and Persona and skill writes.
  */
 export const ACCESS_RPC_RULES: Partial<Record<WsRpcMethod, AccessRpcRule>> = {
@@ -213,6 +213,8 @@ export const ACCESS_RPC_RULES: Partial<Record<WsRpcMethod, AccessRpcRule>> = {
   [ORCHESTRATION_V2_WS_METHODS.getTurnItem]: onThread("viewer"),
   [ORCHESTRATION_V2_WS_METHODS.searchThread]: onThread("viewer"),
   [ORCHESTRATION_V2_WS_METHODS.searchThreadStream]: onThread("viewer"),
+  // Cmd+K's message search, held to the threads the person reaches (`GuestView`).
+  [ORCHESTRATION_V2_WS_METHODS.searchThreads]: narrowed,
   [ORCHESTRATION_V2_WS_METHODS.subscribeCommandOutput]: onThread("viewer"),
   [ORCHESTRATION_V2_WS_METHODS.getWorkflowScript]: onThread("viewer"),
   [ORCHESTRATION_V2_WS_METHODS.stopWorkflow]: onThread("collaborator"),
