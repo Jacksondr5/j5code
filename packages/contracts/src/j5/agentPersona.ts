@@ -279,6 +279,10 @@ export const AgentPersonaPolicyEnforcement = Schema.Struct({
 export type AgentPersonaPolicyEnforcement = typeof AgentPersonaPolicyEnforcement.Type;
 
 export const OrchestrationV2AgentPersonaCatalog = Schema.Struct({
+  /** Invalid source files excluded from this catalog. Optional for older servers. */
+  diagnostics: Schema.optional(
+    Schema.Array(Schema.Struct({ path: Schema.String, message: Schema.String })),
+  ),
   personas: Schema.Array(OrchestrationV2AgentPersonaCatalogEntry),
   /** Absent from servers that predate it. */
   policyEnforcement: Schema.optional(Schema.Array(AgentPersonaPolicyEnforcement)),

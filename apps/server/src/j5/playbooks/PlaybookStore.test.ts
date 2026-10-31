@@ -1283,7 +1283,7 @@ it.effect("reports personas as unverified when the catalog cannot be read", () =
   Effect.gen(function* () {
     const { store, workspaceRoot, write, fs, path } = yield* makeFixture;
     const { stateDir } = yield* ServerConfig;
-    // An invalid file in the default persona folder fails every catalog read.
+    // Invalid source files can hide the named personas from the partial catalog.
     yield* fs.makeDirectory(path.join(stateDir, "personas"));
     yield* fs.writeFileString(path.join(stateDir, "personas/broken.yaml"), "id: [");
     yield* write("demo", staffed());
@@ -1298,6 +1298,67 @@ it.effect("reports personas as unverified when the catalog cannot be read", () =
     );
     assert.include(entry?.warnings?.[0]?.message, "could not be checked");
     assert.lengthOf((yield* store.read(workspaceRoot, "demo")).warnings, 2);
+  }).pipe(Effect.scoped, Effect.provide(CatalogLayer)),
+);
+
+it.effect(
+  "keeps known personas verified while invalid sources leave absent personas unverified",
+  () =>
+    Effect.gen(function* () {
+      const { store, workspaceRoot, write, fs, path } = yield* makeFixture;
+      yield* seedPersonas([
+        { id: "planner", enabled: true },
+        { id: "builder-bot", enabled: false },
+      ]);
+      const { stateDir } = yield* ServerConfig;
+      const folder = path.join(stateDir, "personas");
+      yield* fs.makeDirectory(folder, { recursive: true });
+      const broken = path.join(folder, "broken.yaml");
+      yield* fs.writeFileString(broken, "id: [");
+      yield* write("demo", {
+        ...staffed(),
+        steps: staffed().steps.map((step) =>
+          step.id === "review" ? { ...step, persona: "reviewer" } : step,
+        ),
+      });
+      const [entry] = (yield* store.discover(workspaceRoot)).playbooks;
+      assert.isNull(entry?.issue);
+      assert.deepStrictEqual(
+        entry?.warnings?.map(({ code, stepId }) => [code, stepId]),
+        [
+          ["persona_disabled", "implement"],
+          ["persona_unverified", "review"],
+        ],
+      );
+      assert.deepStrictEqual((yield* store.read(workspaceRoot, "demo")).warnings, entry?.warnings);
+      assert.equal((yield* store.start(owner, workspaceRoot, "demo", "start")).status, "active");
+      yield* fs.remove(broken);
+      const repaired = yield* store.read(workspaceRoot, "demo");
+      assert.deepStrictEqual(
+        repaired.warnings.map(({ code, stepId }) => [code, stepId]),
+        [
+          ["persona_disabled", "implement"],
+          ["persona_missing", "review"],
+        ],
+      );
+    }).pipe(Effect.scoped, Effect.provide(CatalogLayer)),
+);
+
+it.effect("reports personas as unverified when persona configuration cannot be read", () =>
+  Effect.gen(function* () {
+    const { store, workspaceRoot, write, fs, path } = yield* makeFixture;
+    const { stateDir } = yield* ServerConfig;
+    yield* fs.writeFileString(path.join(stateDir, "agent-personas.json"), "not json");
+    yield* write("demo", staffed());
+    const read = yield* store.read(workspaceRoot, "demo");
+    assert.deepStrictEqual(
+      read.warnings.map(({ code, stepId }) => [code, stepId]),
+      [
+        ["persona_unverified", "research"],
+        ["persona_unverified", "implement"],
+      ],
+    );
+    assert.include(read.warnings[0]?.message ?? "", "could not be checked");
   }).pipe(Effect.scoped, Effect.provide(CatalogLayer)),
 );
 

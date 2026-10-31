@@ -803,6 +803,7 @@ const handlers = {
       const disabled = new Set(current.disabledIds);
       const catalog = buildAgentPersonaCatalog(providers, current.definitions);
       return {
+        diagnostics: current.diagnostics,
         personas: catalog.personas.map((persona) => {
           const isDisabled = disabled.has(persona.personaId);
           const available = !isDisabled && persona.availability.status === "available";
