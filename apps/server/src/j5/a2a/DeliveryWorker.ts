@@ -56,7 +56,7 @@ import {
 } from "./deliveryNotices.ts";
 import { buildPeerDeliveryBody } from "./peerDeliveryBody.ts";
 
-/** One poll hands out at most this many deliveries, or about this many bytes of message text. */
+/** One poll hands out at most `PEER_POLL_BATCH_COUNT` deliveries, or about this many bytes of message text. */
 export const PEER_POLL_BATCH_BYTES = 1_000_000;
 
 const decodeSentPayload = Schema.decodeUnknownEffect(Schema.fromJsonString(MessageSentPayload));
