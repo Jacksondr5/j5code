@@ -1,16 +1,24 @@
 import { assert, it } from "@effect/vitest";
 import {
   CommandId,
+  EventId,
   MessageId,
+  NodeId,
   type OrchestrationV2Command,
   type OrchestrationV2ThreadLaunchInput,
+  ProviderDriverKind,
+  ProviderSessionId,
+  RuntimeRequestId,
   ThreadId,
 } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import { CodexProviderCapabilitiesV2 } from "../../orchestration-v2/Adapters/CodexAdapterV2.ts";
 import { isNativeMaintenanceCommand } from "../../orchestration-v2/CommandPolicy.ts";
+import * as ProjectionStore from "../../orchestration-v2/ProjectionStore.ts";
 import * as ThreadLaunch from "../../orchestration-v2/ThreadLaunchService.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import type { ParticipantId } from "../a2a/contracts.ts";
@@ -453,4 +461,102 @@ it.effect("an edit's record is written only while the stored text is the edit's 
       `${raceRecord.storedPrefix}Drop it.`,
     );
   }).pipe(Effect.provide(layerFor(harness)));
+});
+
+it.effect("a person's approval feedback, written by upstream, is recorded as theirs", () => {
+  const harness = makeHarness();
+  const on = ThreadId.make("thread:shared-feedback");
+  return Effect.gen(function* () {
+    const people = yield* PersonAccess.PersonAccess;
+    const conversation = yield* SharedConversation.SharedConversation;
+    const threads = yield* ThreadManagementService;
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    yield* threads.dispatch({
+      type: "thread.create",
+      createdBy: "user",
+      creationSource: "web",
+      commandId: CommandId.make("command:feedback:create"),
+      threadId: on,
+      projectId,
+      title: "Shared",
+      modelSelection,
+      runtimeMode: "approval-required",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+    });
+    const owner = (yield* people.firstOwner).personId;
+    const priya = yield* people.createPerson({ displayName: "Priya" });
+    yield* people.setLevel({
+      personId: priya.personId,
+      scope: { kind: "thread", threadId: on },
+      level: "collaborator",
+    });
+    // An approval the agent asked for, as upstream records one from a live provider session.
+    const now = yield* DateTime.now;
+    const sessionId = ProviderSessionId.make("session:shared-feedback");
+    yield* projections.apply({
+      id: EventId.make("event:feedback:session"),
+      type: "provider-session.attached",
+      threadId: on,
+      occurredAt: now,
+      payload: {
+        id: sessionId,
+        driver: ProviderDriverKind.make("codex"),
+        providerInstanceId: modelSelection.instanceId,
+        status: "ready",
+        cwd: "/repo",
+        model: modelSelection.model,
+        capabilities: CodexProviderCapabilitiesV2,
+        createdAt: now,
+        updatedAt: now,
+        lastError: null,
+      },
+    });
+    const requestId = RuntimeRequestId.make("request:shared-feedback");
+    yield* projections.apply({
+      id: EventId.make("event:feedback:request"),
+      type: "runtime-request.updated",
+      threadId: on,
+      occurredAt: now,
+      payload: {
+        id: requestId,
+        nodeId: NodeId.make("node:shared-feedback"),
+        providerTurnId: null,
+        nativeRequestRef: null,
+        kind: "command",
+        status: "pending",
+        responseCapability: { type: "live", providerSessionId: sessionId, supportsFeedback: true },
+        createdAt: now,
+        resolvedAt: null,
+      },
+    });
+
+    const decline = {
+      type: "runtime-request.respond",
+      commandId: CommandId.make("command:feedback:decline"),
+      threadId: on,
+      requestId,
+      decision: "decline",
+      feedback: "Run the tests first.",
+    } as const satisfies OrchestrationV2Command;
+    yield* send(priya.personId, decline);
+    // Sent again, upstream takes it as before and nothing changes.
+    yield* send(priya.personId, decline);
+
+    const written = (yield* threads.getThreadProjection(on)).messages.find(
+      (entry) => entry.text === decline.feedback,
+    )!;
+    assert.strictEqual(written.id, `approval-feedback:${requestId}`);
+    const named = (viewer: ParticipantId) =>
+      conversation
+        .threadAuthors(viewer, on)
+        .pipe(
+          Effect.map((read) =>
+            read.authors.map((author) => [author.messageId, author.name, author.you]),
+          ),
+        );
+    assert.deepStrictEqual(yield* named(owner), [[written.id, "Priya", false]]);
+    assert.deepStrictEqual(yield* named(priya.personId), [[written.id, "Priya", true]]);
+  }).pipe(Effect.provide(Layer.provideMerge(ProjectionStore.layer, layerFor(harness))));
 });

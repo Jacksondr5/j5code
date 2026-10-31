@@ -131,6 +131,16 @@ interface AuthorRow {
 const PROMPT_SETTLED_EVENT =
   "runtime-request.updated" satisfies OrchestrationV2StoredEvent["event"]["type"];
 
+/**
+ * The user messages upstream writes of a person's answer to a prompt: an approval's feedback, and
+ * answers it sends on to the agent as a message. The first is pinned by
+ * `SharedConversation.integration.test.ts`; upstream's web folds the second into its question.
+ */
+const answerMessageIds = (requestId: string) => [
+  `approval-feedback:${requestId}`,
+  `async-answer:${requestId}`,
+];
+
 const QUEUED = "queued" satisfies OrchestrationV2Run["status"];
 
 /** A command as it goes on to upstream, and what is written once upstream takes it. */
@@ -423,6 +433,39 @@ const make = Effect.gen(function* () {
     ),
   );
 
+  /**
+   * The person's words upstream writes as a user message of its own when it settles their answer
+   * to a prompt: an approval's feedback, or answers it sends on to the agent as a message. Each is
+   * recorded as written by whoever `recordAnswer` names, the same as a typed message.
+   */
+  const recordAnswerMessages = Effect.fn("j5.sharing.sharedConversation.recordAnswerMessages")(
+    function* (answer: Parameters<SharedConversationShape["claimAnswer"]>[1]) {
+      const createdAt = DateTime.formatIso(yield* DateTime.now);
+      const recorded = yield* sql`
+        INSERT INTO j5_a2a_message_author (
+          thread_id, message_id, person_id, display_name, level, stored_prefix, created_at
+        )
+        SELECT answer.thread_id, message.message_id, answer.person_id, answer.display_name,
+          answer.level, '', ${createdAt}
+        FROM j5_a2a_prompt_answer AS answer
+        JOIN orchestration_v2_projection_messages AS message
+          ON message.thread_id = answer.thread_id
+          AND message.message_id IN ${sql.in(answerMessageIds(answer.requestId))}
+        WHERE answer.thread_id = ${answer.threadId} AND answer.request_id = ${answer.requestId}
+          AND answer.command_id = ${answer.commandId} AND ${settledItsPrompt}
+        ON CONFLICT (thread_id, message_id) DO NOTHING
+        RETURNING message_id
+      `;
+      if (recorded.length > 0) yield* touch(answer.threadId);
+    },
+    // Upstream has already taken the answer, so a failure to record it is logged and undoes nothing.
+    Effect.catch((cause) =>
+      Effect.logError("J5 shared conversation could not record who wrote an answer's message", {
+        cause,
+      }),
+    ),
+  );
+
   const stampCommand = Effect.fn("j5.sharing.sharedConversation.stampCommand")(function* (
     personId: ParticipantId,
     command: OrchestrationV2Command,
@@ -503,6 +546,12 @@ const make = Effect.gen(function* () {
     }
     const result = yield* dispatchUpstream(stamped);
     yield* stamp.accepted.pipe(Effect.catch(notRecorded));
+    if (
+      stamped.type === "runtime-request.respond" &&
+      (stamped.feedback !== undefined || stamped.answers !== undefined)
+    ) {
+      yield* recordAnswerMessages(stamped);
+    }
     return result;
   });
 
