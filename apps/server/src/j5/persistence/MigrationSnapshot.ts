@@ -19,7 +19,7 @@ import { J5_A2A_MIGRATIONS_TABLE, migrationEntries } from "../a2a/Migrations.ts"
  * is small: three lets a person go back across the last three builds that migrated, at three
  * times the database's size on disk.
  */
-export const MIGRATION_SNAPSHOTS_KEPT = 3;
+const MIGRATION_SNAPSHOTS_KEPT = 3;
 
 const UPSTREAM_MIGRATIONS_TABLE = "effect_sql_migrations";
 

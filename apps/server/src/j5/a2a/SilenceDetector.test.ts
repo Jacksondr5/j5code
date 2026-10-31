@@ -7,7 +7,6 @@ import {
   type OrchestrationV2ProviderFailure,
   type OrchestrationV2Run,
   type OrchestrationV2StoredEvent,
-  type OrchestrationV2ThreadProjection,
   ProviderInstanceId,
   RunId,
   ThreadId,
@@ -147,17 +146,21 @@ const makeTestLayer = () => {
     Layer.provide(database),
   );
   const threads = threadMock({
-    getThreadProjection: () =>
-      Effect.succeed({
-        turnItems: [
-          {
-            runId: RunId.make("run:silence:test"),
-            type: "error",
-            status: "failed",
-            failure: failureDetail,
-          },
-        ],
-      } as unknown as OrchestrationV2ThreadProjection),
+    getThreadRecords: ((_threadId: ThreadId, fields: ReadonlyArray<string>) =>
+      Effect.succeed(
+        fields.includes("turnItems")
+          ? {
+              turnItems: [
+                {
+                  runId: RunId.make("run:silence:test"),
+                  type: "error",
+                  status: "failed",
+                  failure: failureDetail,
+                },
+              ],
+            }
+          : thread,
+      )) as never,
   });
   const transport = Layer.succeed(
     A2ADeliveryTransport,

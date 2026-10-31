@@ -6,8 +6,8 @@ import * as ProjectionStore from "../../orchestration-v2/ProjectionStore.ts";
 import * as RunFinalization from "../../orchestration-v2/RunFinalizationService.ts";
 import { ArtifactWorkspace } from "./ArtifactWorkspace.ts";
 
-export function selectCurrentProposedPlan(
-  projection: OrchestrationV2ThreadProjection,
+function selectCurrentProposedPlan(
+  projection: Pick<OrchestrationV2ThreadProjection, "plans" | "turnItems">,
   runId: RunId,
 ): Extract<OrchestrationV2ThreadProjection["plans"][number], { kind: "proposed_plan" }> | null {
   type ProposedPlan = Extract<
@@ -42,7 +42,11 @@ export const layer = Layer.effect(
         return upstream.refresh(input).pipe(
           Effect.andThen(
             Effect.gen(function* () {
-              const projection = yield* projections.getThreadProjection(input.threadId);
+              const projection = yield* projections.getThreadRecords(
+                input.threadId,
+                ["plans", "turnItems"],
+                { turnItemRunId: input.runId, turnItemTypes: ["proposed_plan"] },
+              );
               const plan = selectCurrentProposedPlan(projection, input.runId);
               if (plan === null) return;
               yield* artifacts.exportPlan({

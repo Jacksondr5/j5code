@@ -29,6 +29,7 @@ import * as PubSub from "effect/PubSub";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
+import type * as Statement from "effect/sql/Statement";
 import type * as SqlError from "effect/sql/SqlError";
 
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
@@ -43,7 +44,15 @@ import {
   layer as personAccessLayer,
 } from "./PersonAccess.ts";
 import { SharedThreads } from "./SharedThreads.ts";
-import { type Author, makeMessageStamps, prefixOf, refused } from "./messageStamps.ts";
+import {
+  type Author,
+  type MessageOrigin,
+  makeMessageStamps,
+  messageOriginColumns,
+  prefixOf,
+  refused,
+  typedByFirstOwner,
+} from "./messageStamps.ts";
 import { scheduledLine } from "./scheduledRuns.ts";
 
 /**
@@ -58,7 +67,7 @@ import { scheduledLine } from "./scheduledRuns.ts";
  * first line of the person's own, and their text always follows it, so text a person types to
  * look like this line, or like a note, sits below their real one.
  */
-export const authorLine = (author: Author, editedBy: Author | null = null) =>
+const authorLine = (author: Author, editedBy: Author | null = null) =>
   editedBy === null
     ? `[Message from ${authorLabel(author)}]`
     : `[Message from ${authorLabel(author)}, edited by ${authorLabel(editedBy)}]`;
@@ -69,7 +78,7 @@ export const authorLine = (author: Author, editedBy: Author | null = null) =>
  * it into a message, on others it goes back as the result of the agent's tool call. Either way
  * the agent reads the answer's words, so its author goes on the words.
  */
-export const answerLine = (author: Author) => `[Answer from ${authorLabel(author)}]`;
+const answerLine = (author: Author) => `[Answer from ${authorLabel(author)}]`;
 
 /**
  * A question's answers with their author on each: at the start of the text, or of the first
@@ -119,7 +128,7 @@ interface AuthorRow {
  * The event upstream logs when a prompt is answered. Typed against upstream's own event union, so
  * a rename there fails to compile here.
  */
-export const PROMPT_SETTLED_EVENT =
+const PROMPT_SETTLED_EVENT =
   "runtime-request.updated" satisfies OrchestrationV2StoredEvent["event"]["type"];
 
 const QUEUED = "queued" satisfies OrchestrationV2Run["status"];
@@ -289,27 +298,12 @@ const make = Effect.gen(function* () {
   const unrecordedAuthor = Effect.fn("j5.sharing.sharedConversation.unrecordedAuthor")(function* (
     messageId: string,
   ) {
-    const rows = yield* sql<{
-      readonly created_by: string | null;
-      readonly creation_source: string | null;
-      readonly scheduled_task_id: string | null;
-      readonly sender_thread_id: string | null;
-    }>`
-      SELECT json_extract(payload_json, '$.createdBy') AS created_by,
-        json_extract(payload_json, '$.creationSource') AS creation_source,
-        json_extract(payload_json, '$.scheduledTaskId') AS scheduled_task_id,
-        json_extract(payload_json, '$.senderThreadId') AS sender_thread_id
-      FROM orchestration_v2_projection_messages WHERE message_id = ${messageId}
+    const rows = yield* sql<MessageOrigin & { readonly message_id: string }>`
+      SELECT message.message_id, ${sql.literal(messageOriginColumns("message"))}
+      FROM orchestration_v2_projection_messages AS message WHERE message_id = ${messageId}
     `;
     const row = rows[0];
-    // An inbox reply is the person's too, but comes as a delivery ("mcp") and carries its header.
-    const typedByOwner =
-      row !== undefined &&
-      row.created_by === "user" &&
-      row.creation_source !== "mcp" &&
-      row.scheduled_task_id === null &&
-      row.sender_thread_id === null;
-    if (!typedByOwner) return null;
+    if (row === undefined || !typedByFirstOwner(row)) return null;
     const owner = yield* people.firstOwner;
     return { personId: owner.personId, displayName: owner.displayName, level: "owner" } as Author;
   });
@@ -549,6 +543,57 @@ const make = Effect.gen(function* () {
     }).pipe(Effect.catch(failClosed));
   });
 
+  /**
+   * A thread's messages, its own and those a fork shows, that no person is recorded for but a
+   * person wrote: the first owner's, as search names them (`typedByFirstOwner`). Their own view
+   * draws them as theirs already, so they are read only for anyone else.
+   */
+  const firstOwnersUnrecorded = Effect.fn("j5.sharing.sharedConversation.firstOwnersUnrecorded")(
+    function* (
+      viewer: ParticipantId | null,
+      threadId: ThreadId,
+      forkSources: Statement.Fragment,
+      mayKnow: (personId: string) => Effect.Effect<boolean, PersonAccessStorageError>,
+    ) {
+      const owner = yield* people.firstOwner;
+      if (owner.personId === viewer) return [];
+      const rows = yield* sql<MessageOrigin & { readonly message_id: string }>`
+        ${forkSources}
+        SELECT message.message_id, ${sql.literal(messageOriginColumns("message"))}
+        FROM orchestration_v2_projection_messages AS message
+        WHERE message.thread_id = ${threadId} AND message.role = 'user'
+          AND NOT EXISTS (
+            SELECT 1 FROM j5_a2a_message_author AS author
+            WHERE author.thread_id = message.thread_id AND author.message_id = message.message_id
+          )
+        UNION ALL
+        SELECT message.message_id, ${sql.literal(messageOriginColumns("message"))}
+        FROM source
+        JOIN orchestration_v2_projection_runs AS forked_at ON forked_at.run_id = source.run_id
+        JOIN orchestration_v2_projection_messages AS message
+          ON message.thread_id = source.thread_id AND message.role = 'user'
+        JOIN orchestration_v2_projection_runs AS run
+          ON run.run_id = message.run_id AND run.ordinal <= forked_at.ordinal
+        WHERE NOT EXISTS (
+          SELECT 1 FROM j5_a2a_message_author AS author
+          WHERE author.thread_id = message.thread_id AND author.message_id = message.message_id
+        )
+      `;
+      const written = rows.filter(typedByFirstOwner);
+      if (written.length === 0) return [];
+      const name = (yield* mayKnow(owner.personId)) ? owner.displayName : null;
+      return written.map((row): MessageAuthor => ({
+        messageId: row.message_id,
+        name,
+        level: "owner",
+        editedBy: null,
+        you: false,
+        note: null,
+        storedPrefix: "",
+      }));
+    },
+  );
+
   const threadAuthors: SharedConversationShape["threadAuthors"] = Effect.fn(
     "j5.sharing.sharedConversation.threadAuthors",
   )(function* (viewer, threadId) {
@@ -559,9 +604,7 @@ const make = Effect.gen(function* () {
     // upstream's `buildVisibleTurnItems` does; those keep their authors, and nothing past the fork
     // point is named. A reader need not reach the source, so an inherited record applies only where
     // the shown text begins with its prefix, restating what they already receive.
-    const authors = yield* sql<
-      AuthorRow & { readonly created_at: string; readonly inherited: 0 | 1 }
-    >`
+    const forkSources = sql`
       WITH RECURSIVE source (thread_id, run_id) AS (
         SELECT json_extract(payload_json, '$.forkedFrom.threadId'),
           json_extract(payload_json, '$.forkedFrom.runId')
@@ -574,6 +617,11 @@ const make = Effect.gen(function* () {
         JOIN orchestration_v2_projection_threads AS thread ON thread.thread_id = source.thread_id
         WHERE json_extract(thread.payload_json, '$.forkedFrom.type') = 'run'
       )
+    `;
+    const authors = yield* sql<
+      AuthorRow & { readonly created_at: string; readonly inherited: 0 | 1 }
+    >`
+      ${forkSources}
       SELECT message_id, person_id, display_name, level, edited_by, note, told_json,
         stored_prefix, created_at, 0 AS inherited
       FROM j5_a2a_message_author
@@ -625,6 +673,7 @@ const make = Effect.gen(function* () {
       known.set(personId, visible);
       return visible;
     });
+    const unrecorded = yield* firstOwnersUnrecorded(viewer, threadId, forkSources, mayKnow);
     const told = yield* Effect.forEach(authors, (row) =>
       Effect.gen(function* () {
         const author: MessageAuthor = {
@@ -642,7 +691,7 @@ const make = Effect.gen(function* () {
     );
     return {
       shared: recorded.length > 0,
-      authors: told,
+      authors: [...told, ...unrecorded],
       answers: answers.map((row): PromptAnswer => ({
         requestId: row.request_id,
         name: row.display_name,

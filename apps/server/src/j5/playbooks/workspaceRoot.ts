@@ -17,7 +17,7 @@ export const resolvePlaybookWorkspaceRoot = Effect.fn(
   "j5.playbooks.workspaceRoot.resolvePlaybookWorkspaceRoot",
 )(function* (
   projects: Pick<ProjectService["Service"], "getById">,
-  threads: Pick<ThreadManagementService["Service"], "getThreadProjection">,
+  threads: Pick<ThreadManagementService["Service"], "getThreadRecords">,
   input: PlaybookLibraryRequest,
 ) {
   if (input.projectId === undefined) return input.threadId === undefined ? "" : null;
@@ -25,7 +25,7 @@ export const resolvePlaybookWorkspaceRoot = Effect.fn(
   if (Option.isNone(project) || project.value.deletedAt !== null) return null;
   let root = project.value.workspaceRoot;
   if (input.threadId !== undefined) {
-    const projection = yield* threads.getThreadProjection(input.threadId).pipe(
+    const projection = yield* threads.getThreadRecords(input.threadId, []).pipe(
       Effect.catchTags({
         OrchestratorProjectionError: (error) =>
           isMissingThread(error.cause) ? Effect.succeed(null) : Effect.fail(error),

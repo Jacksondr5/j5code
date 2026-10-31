@@ -215,6 +215,7 @@ export function useCommandPaletteThreadItems(input: {
           source: match.source,
           snippet: match.snippet,
           query: messageSearch.query,
+          author: match.author,
         },
         // Opens the thread with find on the word at the matched message, so it is in view.
         run: async () => {

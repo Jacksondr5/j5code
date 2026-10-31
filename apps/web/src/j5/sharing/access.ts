@@ -71,7 +71,7 @@ export function useSettledConnectionAccess(environmentId: EnvironmentId | null):
 const NO_LEVEL = Atom.make<PersonLevel | null>(null);
 
 /** The level this connection's person holds over a thread; `null` for none or not yet known. */
-export function useThreadLevel(
+function useThreadLevel(
   environmentId: EnvironmentId | null,
   threadId: ThreadId | null,
 ): PersonLevel | null {
@@ -319,11 +319,6 @@ export function useOwnerSomewhere(): boolean | "loading" {
  */
 export function useIsOwnerSomewhere(): boolean {
   return useOwnerSomewhere() !== false;
-}
-
-/** Whether the person owns this server; see `useOwnedEnvironmentIds`. */
-export function useIsOwner(environmentId: EnvironmentId | null): boolean {
-  return isOwnerAccess(useConnectionAccess(environmentId)) && environmentId !== null;
 }
 
 /** What J5's Skills page says to someone who owns no connected server. */

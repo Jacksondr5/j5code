@@ -17,7 +17,10 @@ import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewIns
 import { ArchiveCrewService } from "./ArchiveCrewService.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
 import { crewSeatRequestKey, lifecycleCommandId } from "./spawnIds.ts";
-import { getThreadProjectionIfPresent } from "./threadProjectionReads.ts";
+import {
+  getThreadProjectionIfPresent,
+  getThreadRecordsIfPresent,
+} from "./threadProjectionReads.ts";
 
 const CASCADE_SESSION = "j5-captain-archive-cascade";
 
@@ -194,7 +197,7 @@ export const layer = Layer.effect(
         instance.id,
         Effect.gen(function* () {
           for (const member of instance.members) {
-            const seat = yield* getThreadProjectionIfPresent(threads, member.threadId);
+            const seat = yield* getThreadRecordsIfPresent(threads, member.threadId, []);
             if (seat === null || seat.thread.archivedAt === null) continue;
             yield* threads.dispatch({
               type: "thread.unarchive",
@@ -287,7 +290,7 @@ export const layer = Layer.effect(
     const captainGoneAt = Effect.fn("j5.a2a.captainArchiveCascade.captainGoneAt")(function* (
       instance: AgentCrewInstance,
     ) {
-      const read = yield* Effect.result(threads.getThreadProjection(instance.captainThreadId));
+      const read = yield* Effect.result(threads.getThreadRecords(instance.captainThreadId, []));
       if (Result.isFailure(read)) {
         yield* Effect.logWarning("J5 Captain archive sweep could not read a Captain thread", {
           captainThreadId: instance.captainThreadId,

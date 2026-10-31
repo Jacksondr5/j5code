@@ -163,7 +163,7 @@ const projectProvenance = (provenance: ParticipantProvenanceView) => {
  * registered name: it keeps the value these ids were written with before the tools gained their
  * `j5_` prefix, so a retry with the same client_request_id still finds its first command.
  */
-export const commandIdForRequest = (input: {
+const commandIdForRequest = (input: {
   readonly toolName: "send_message" | "clear_own_ask";
   readonly providerSessionId: string;
   readonly requestKey: string;

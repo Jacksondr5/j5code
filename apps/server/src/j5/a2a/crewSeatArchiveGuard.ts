@@ -11,7 +11,7 @@ import { participantIdForThread } from "./HomeRegistrar.ts";
  * so this check on that handler covers every door, and the organize MCP tool applies it too. The
  * unit paths archive seats through the lifecycle service, not this handler.
  */
-export class CrewSeatArchivedAloneError extends Data.TaggedError("CrewSeatArchivedAloneError")<{
+class CrewSeatArchivedAloneError extends Data.TaggedError("CrewSeatArchivedAloneError")<{
   readonly threadId: string;
   readonly action: "archive" | "delete";
   readonly seatName: string;

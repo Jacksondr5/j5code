@@ -389,8 +389,9 @@ const make: Layer.Layer<PairingIntents, never, SqlClient.SqlClient | ReadChanges
 
 // `readChangesLayer` is the one the rest of the server provides, so it is the same instance
 // (see `a2a/runtimeLayer.ts`).
-export const layer: Layer.Layer<PairingIntents, never, SqlClient.SqlClient | PersonAccess> =
-  make.pipe(Layer.provide(readChangesLayer));
+const layer: Layer.Layer<PairingIntents, never, SqlClient.SqlClient | PersonAccess> = make.pipe(
+  Layer.provide(readChangesLayer),
+);
 
 /**
  * People and the record of whose each device is, for upstream's auth layer to be built over:

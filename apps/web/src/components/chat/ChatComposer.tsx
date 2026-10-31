@@ -3,7 +3,10 @@ import { applyAgentMentionSelection } from "@t3tools/client-runtime/j5/agent-men
 import { playbookSelectionText } from "@t3tools/client-runtime/j5/playbooks";
 import { AgentPersonaAssignmentControl } from "../../j5/agents/AgentPersonaAssignmentControl";
 import { AgentDraftPicker } from "../../j5/agents/AgentDraftPicker";
-import { composerModelSelectionForThread } from "../../j5/agents/personaComposerSelection";
+import {
+  composerModelSelectionForThread,
+  composerProviderCandidates,
+} from "../../j5/agents/personaComposerSelection";
 import { useDraftAgentAssignment } from "../../j5/agents/useDraftAgentAssignment";
 import { useComposerTypingGuard } from "./useComposerTypingGuard";
 import { insertAttachmentReferencesForDraft } from "./composerAttachmentReferences";
@@ -925,6 +928,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     uploadsByImageId,
   ]);
 
+  const draftAgent = useDraftAgentAssignment(
+    props.routeThreadRef,
+    environmentId,
+    props.isLocalDraftThread,
+  );
+  const effectiveAgentAssignment = agentPersonaAssignment ?? draftAgent.assignment ?? undefined;
   const {
     providerInstanceEntries,
     selectedProviderEntry,
@@ -944,12 +953,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     threadModelSelection: activeThreadModelSelection,
     projectModelSelection: activeProjectDefaultModelSelection,
     promptInjectionState: getComposerPromptInjectionState(prompt),
-    candidateInstanceIds: [
+    // J5: a saved agent's route picks the provider (see personaComposerSelection).
+    candidateInstanceIds: composerProviderCandidates(effectiveAgentAssignment, [
       composerDraft.activeProvider ?? null,
       activeThread?.runtime?.providerInstanceId,
       activeThreadModelSelection?.instanceId,
       activeProjectDefaultModelSelection?.instanceId,
-    ],
+    ]),
     lockedProvider,
     lockedInstanceId:
       activeThread?.runtime?.providerInstanceId ?? activeThreadModelSelection?.instanceId,
@@ -1203,12 +1213,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     playbookProjectId: activeProjectId,
     isServerThread,
   });
-  const draftAgent = useDraftAgentAssignment(
-    props.routeThreadRef,
-    environmentId,
-    props.isLocalDraftThread,
-  );
-  const effectiveAgentAssignment = agentPersonaAssignment ?? draftAgent.assignment ?? undefined;
 
   const composerMenuOpen = Boolean(composerTrigger);
   const composerMenuSearchKey = composerTrigger

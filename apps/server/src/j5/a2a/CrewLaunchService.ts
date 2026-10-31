@@ -169,16 +169,18 @@ export interface CrewLaunchResult {
   readonly seats: ReadonlyArray<CrewSeatLaunchOutcome>;
 }
 
-export class CrewLaunchSeatUnavailableError extends Data.TaggedError(
-  "CrewLaunchSeatUnavailableError",
-)<{ readonly seatName: string; readonly agentId: string; readonly detail: string }> {
+class CrewLaunchSeatUnavailableError extends Data.TaggedError("CrewLaunchSeatUnavailableError")<{
+  readonly seatName: string;
+  readonly agentId: string;
+  readonly detail: string;
+}> {
   override get message(): string {
     return `Seat ${this.seatName} (agent ${this.agentId}) is unavailable: ${this.detail} Nothing was spawned.`;
   }
 }
 
 /** The Crew is full; the seats it holds already reach the cap once the request is counted. */
-export class CrewLaunchCapError extends Data.TaggedError("CrewLaunchCapError")<{
+class CrewLaunchCapError extends Data.TaggedError("CrewLaunchCapError")<{
   readonly crewInstanceId: string;
   readonly held: number;
   readonly adding: number;
@@ -190,7 +192,7 @@ export class CrewLaunchCapError extends Data.TaggedError("CrewLaunchCapError")<{
 }
 
 /** A seat name the reservation could not take: another participant already holds it. */
-export class CrewLaunchSeatConflictError extends Data.TaggedError("CrewLaunchSeatConflictError")<{
+class CrewLaunchSeatConflictError extends Data.TaggedError("CrewLaunchSeatConflictError")<{
   readonly crewInstanceId: string;
   readonly seatNames: ReadonlyArray<string>;
 }> {

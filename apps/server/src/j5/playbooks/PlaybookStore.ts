@@ -63,7 +63,7 @@ const stepSummary = ({ id, title, persona }: PlaybookStep) =>
   persona === undefined ? { id, title } : { id, title, persona };
 
 /** Warnings for steps whose persona the catalog lacks or has turned off, in step order. */
-export const stepPersonaWarnings = (
+const stepPersonaWarnings = (
   steps: ReadonlyArray<PlaybookStep>,
   catalog: Parameters<typeof personaCatalogProblem>[0],
 ): Array<PlaybookWarning> =>

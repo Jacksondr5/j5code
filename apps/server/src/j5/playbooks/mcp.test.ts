@@ -114,7 +114,7 @@ const makeFixture = (
       Layer.mock(ThreadManagementService)({
         // The access gate reads the calling thread before each tool.
         getThreadShell: (threadId) => Effect.succeed(shell(threadId)),
-        getThreadProjection: (threadId) =>
+        getThreadRecords: (threadId) =>
           Effect.succeed(
             emptyProjection({
               id: EventId.make(`created:${threadId}`),

@@ -18,7 +18,7 @@ import {
   type ThreadManagementProviderInstanceDisabledError,
 } from "../../orchestration-v2/ThreadManagementService.ts";
 import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewInstanceService.ts";
-import { getThreadProjectionIfPresent } from "./threadProjectionReads.ts";
+import { getThreadRecordsIfPresent } from "./threadProjectionReads.ts";
 import { makeNativeQuestionInboxRead } from "./nativeQuestionInboxRead.ts";
 
 /** A seat's thread, and the Crew that holds the seat. */
@@ -30,9 +30,10 @@ interface CrewSeatThread {
 
 export { inboxAnswerableApprovals } from "@t3tools/shared/j5/crewRuntimeRequests";
 
-export class CrewRuntimeRequestNotFoundError extends Data.TaggedError(
-  "CrewRuntimeRequestNotFoundError",
-)<{ readonly threadId: ThreadId; readonly requestId: RuntimeRequestId }> {
+class CrewRuntimeRequestNotFoundError extends Data.TaggedError("CrewRuntimeRequestNotFoundError")<{
+  readonly threadId: ThreadId;
+  readonly requestId: RuntimeRequestId;
+}> {
   override get message() {
     return `No pending approval ${this.requestId} on a live Crew seat's thread ${this.threadId}.`;
   }
@@ -48,9 +49,9 @@ export class CrewRuntimeRequestConflictError extends Data.TaggedError(
 }
 
 /** The answer could not be sent for a reason other than the request's state; the route logs it. */
-export class CrewRuntimeRequestDispatchError extends Data.TaggedError(
-  "CrewRuntimeRequestDispatchError",
-)<{ readonly cause: OrchestratorV2Error | ThreadManagementProviderInstanceDisabledError }> {
+class CrewRuntimeRequestDispatchError extends Data.TaggedError("CrewRuntimeRequestDispatchError")<{
+  readonly cause: OrchestratorV2Error | ThreadManagementProviderInstanceDisabledError;
+}> {
   override get message() {
     return "The answer could not be sent.";
   }
@@ -128,7 +129,9 @@ export const layer = Layer.effect(
      * null. Any other store failure propagates, so an outage is an error, not an empty Inbox.
      */
     const liveProjection = (threadId: ThreadId) =>
-      getThreadProjectionIfPresent(threads, threadId).pipe(
+      getThreadRecordsIfPresent(threads, threadId, ["runtimeRequests", "turnItems"], {
+        turnItemTypes: ["approval_request"],
+      }).pipe(
         Effect.map((projection) =>
           projection !== null && projection.thread.archivedAt === null ? projection : null,
         ),

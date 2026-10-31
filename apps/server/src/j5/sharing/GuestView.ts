@@ -6,6 +6,8 @@ import {
   OrchestrationV2DomainEvent,
   OrchestrationV2GetShellSnapshotError,
   type OrchestrationV2ShellSnapshot,
+  type OrchestrationV2SearchThreadsInput,
+  type OrchestrationV2SearchThreadsResult,
   type OrchestrationV2ShellStreamItem,
   type OrchestrationV2ThreadProjection,
   type OrchestrationV2ThreadShell,
@@ -24,6 +26,7 @@ import * as Effect from "effect/Effect";
 import { identity } from "effect/Function";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
+import type * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
 
 import { guestIconPath } from "./GuestProjectIcons.ts";
@@ -31,11 +34,13 @@ import { levelReaches } from "@t3tools/contracts/j5";
 
 import {
   PersonAccess,
+  type PersonAccessStorageError,
   type SessionIdentity,
   type SessionReach,
   isWide,
   reachPersonId,
 } from "./PersonAccess.ts";
+import { makeSearchAuthors } from "./searchAuthors.ts";
 
 /**
  * What a narrowed connection is told (AC24, AC25): config, lifecycle welcome and sidebar feed,
@@ -146,7 +151,7 @@ const reduceProviders = (providers: ServerConfig["providers"], skillsShown: Skil
  * The configuration a Viewer's client is given. Built field by field, so a field upstream adds
  * later is left out until it is listed here.
  */
-export const reduceServerConfig = (
+const reduceServerConfig = (
   config: ServerConfig,
   skillsShown: SkillsShown = NO_SKILLS,
 ): ServerConfig => ({
@@ -284,7 +289,21 @@ export interface ConnectionView {
   readonly threadProjection: <E, R>(
     load: Effect.Effect<OrchestrationV2ThreadProjection, E, R>,
   ) => Effect.Effect<OrchestrationV2ThreadProjection, E, R>;
+  /**
+   * Upstream's Cmd+K message search. `search` runs it; a narrowed connection's is held to the
+   * threads its person reaches and ranked without `opens`.
+   */
+  readonly searchThreads: <E, R>(
+    input: OrchestrationV2SearchThreadsInput,
+    search: NarrowedSearch<E, R>,
+  ) => Effect.Effect<OrchestrationV2SearchThreadsResult, E | PersonAccessStorageError, R>;
 }
+
+/** Upstream's search, given a narrowed connection's reach (all threads when absent). */
+type NarrowedSearch<E, R> = (
+  input: OrchestrationV2SearchThreadsInput,
+  narrowed?: { readonly threadIds?: ReadonlyArray<ThreadId>; readonly withoutOpens: true },
+) => Effect.Effect<OrchestrationV2SearchThreadsResult, E, R>;
 
 const MEMBER_VIEW: ConnectionView = {
   scheduledTasks: identity,
@@ -295,6 +314,7 @@ const MEMBER_VIEW: ConnectionView = {
   shellStream: (input, subscribe) => subscribe(input),
   threadStream: identity,
   threadProjection: identity,
+  searchThreads: (input, search) => search(input),
 };
 
 /**
@@ -508,8 +528,31 @@ const narrowedView = (
       ).pipe(Stream.mapError(shellFailure)),
     threadStream: (stream) => stream.pipe(Stream.map(narrowThreadItem)),
     threadProjection: (load) => load.pipe(Effect.map(narrowProjection)),
+    // Reach is read on each search, so a share taken away ends with the next one. A narrowed
+    // sidebar has no older-settled cut, so the older-settled rows, read from every settled
+    // thread, are never asked for.
+    searchThreads: Effect.fn("j5.sharing.guestView.searchThreads")(function* <E, R>(
+      input: OrchestrationV2SearchThreadsInput,
+      search: NarrowedSearch<E, R>,
+    ) {
+      if (personId === null) return NO_MATCHES;
+      const threadIds = yield* access.reachableThreads(personId);
+      if (threadIds !== null && threadIds.length === 0) return NO_MATCHES;
+      const {
+        olderSettledBefore: _olderSettledBefore,
+        projectIds: _projectIds,
+        environmentLabel: _environmentLabel,
+        ...request
+      } = input;
+      return yield* search(
+        request,
+        threadIds === null ? { withoutOpens: true } : { threadIds, withoutOpens: true },
+      );
+    }),
   };
 };
+
+const NO_MATCHES: OrchestrationV2SearchThreadsResult = { matches: [] };
 
 /**
  * The view for one WebSocket connection: upstream's own for a wide session, the narrowed one for
@@ -518,7 +561,7 @@ const narrowedView = (
  */
 export const connectionView = Effect.fn("j5.sharing.guestView.connectionView")(function* (
   session: SessionIdentity,
-): Effect.fn.Return<ConnectionView, never, PersonAccess> {
+): Effect.fn.Return<ConnectionView, never, PersonAccess | SqlClient.SqlClient> {
   const access = yield* PersonAccess;
   const reach = yield* access.sessionReach(session).pipe(
     Effect.catch((cause) =>
@@ -527,7 +570,17 @@ export const connectionView = Effect.fn("j5.sharing.guestView.connectionView")(f
       }).pipe(Effect.as({ kind: "unknown" } as SessionReach)),
     ),
   );
-  if (isWide(reach)) return MEMBER_VIEW;
+  // Each message hit names who wrote it, as this session's person may know them.
+  const searchAuthors = yield* makeSearchAuthors;
+  const viewer = reachPersonId(reach);
+  const withAuthors = (view: ConnectionView): ConnectionView => ({
+    ...view,
+    searchThreads: (input, search) =>
+      Effect.flatMap(view.searchThreads(input, search), (result) =>
+        Effect.map(searchAuthors(viewer, result.matches), (matches) => ({ ...result, matches })),
+      ),
+  });
+  if (isWide(reach)) return withAuthors(MEMBER_VIEW);
   // A Viewer at server scope is told every provider's skills; one at a project, the skills in
   // that project's own folders; anyone else, none.
   const roots =
@@ -542,5 +595,5 @@ export const connectionView = Effect.fn("j5.sharing.guestView.connectionView")(f
     roots === null
       ? () => true
       : (skill) => roots.some((root) => skill.path.startsWith(`${root.replace(/\/+$/u, "")}/`));
-  return narrowedView(access, reach, skillsShown);
+  return withAuthors(narrowedView(access, reach, skillsShown));
 });

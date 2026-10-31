@@ -357,6 +357,8 @@ import { ThreadVisitWatermark } from "./chat/ThreadVisitWatermark";
 import { ChatTerminalDrawers } from "./chat/ChatTerminalDrawers";
 import { ChatRightPanel } from "./chat/ChatRightPanel";
 import { CrewRosterGate } from "../j5/crew/CrewRosterGate";
+import { composerProviderCandidates } from "../j5/agents/personaComposerSelection";
+import { useDraftAgentAssignment } from "../j5/agents/useDraftAgentAssignment";
 import { useCanOperateThread } from "../j5/sharing/access";
 import { PlaybookComposerControl } from "../j5/playbooks/PlaybookComposerControl";
 import { useDraftEnvironmentRouting } from "./chat/useDraftEnvironmentRouting";
@@ -1211,14 +1213,19 @@ export default function ChatView(props: ChatViewProps) {
     ),
   );
   const activeThreadModelInstanceId = activeThread?.modelSelection.instanceId;
+  const draftAgent = useDraftAgentAssignment(routeThreadRef, environmentId, isLocalDraftThread);
   const { selectedProviderEntry, requestedDriverKind } = resolveComposerProviderSelection({
     entries: providerInstanceEntries,
-    candidateInstanceIds: [
-      selectedProviderByThreadId,
-      activeRuntime?.providerInstanceId,
-      activeThreadModelInstanceId,
-      activeProjectDefaultModelSelection?.instanceId,
-    ],
+    // J5: a saved agent's route picks the provider, as in ChatComposer (personaComposerSelection).
+    candidateInstanceIds: composerProviderCandidates(
+      serverProjection?.thread.agentPersonaAssignment ?? draftAgent.assignment ?? undefined,
+      [
+        selectedProviderByThreadId,
+        activeRuntime?.providerInstanceId,
+        activeThreadModelInstanceId,
+        activeProjectDefaultModelSelection?.instanceId,
+      ],
+    ),
     lockedProvider,
     lockedInstanceId: activeRuntime?.providerInstanceId ?? activeThreadModelInstanceId,
   });

@@ -8,9 +8,10 @@ import "../../index.css";
 import { filesystemEnvironment } from "../../state/filesystem";
 import { useRightPanelStore } from "../../rightPanelStore";
 
-const { workspaceSearch, filesystemMetadata } = vi.hoisted(() => ({
+const { workspaceSearch, filesystemMetadata, chooseMenuItem } = vi.hoisted(() => ({
   workspaceSearch: vi.fn(),
   filesystemMetadata: vi.fn(),
+  chooseMenuItem: vi.fn(),
 }));
 vi.mock(import("../../state/use-atom-query-runner"), async (original) => ({
   ...(await original()),
@@ -44,6 +45,11 @@ vi.mock(import("../../remoteOpen"), async (original) => ({
   useRemoteOpenResolution: () => ({ state: { mode: "local-exec" }, isResolved: true }) as never,
 }));
 
+vi.mock(import("../../localApi"), async (original) => ({
+  ...(await original()),
+  readLocalApi: () => ({ contextMenu: { show: chooseMenuItem } }) as never,
+}));
+
 import ChatMarkdown from "../../components/ChatMarkdown";
 
 // FORK.md case 33: a chat link to `artifacts/…` is an artifact, not a workspace file.
@@ -74,5 +80,37 @@ describe("ChatMarkdown artifact references", () => {
 
     expect(openArtifact).toHaveBeenCalledExactlyOnceWith(threadRef, "plan.md");
     expect(openFile).not.toHaveBeenCalled();
+  });
+
+  it("copies an artifact reference as its logical path, not a workspace path", async () => {
+    workspaceSearch.mockReset().mockResolvedValue(AsyncResult.success({ entries: [] }));
+    filesystemMetadata.mockReset().mockResolvedValue(AsyncResult.success({ entries: [null] }));
+    chooseMenuItem.mockReset().mockResolvedValue("copy-full");
+    const copied = vi.fn<(text: string) => void>();
+    using _writeText = vi
+      .spyOn(navigator.clipboard, "writeText")
+      .mockImplementation(async (text) => copied(text));
+    using _write = vi.spyOn(navigator.clipboard, "write").mockImplementation(async (items) => {
+      copied(await (await items[0]!.getType("text/plain")).text());
+    });
+    await using screen = await render(
+      <ChatMarkdown cwd="/tmp/project" text="[Plan](artifacts/plan.md)" threadRef={threadRef} />,
+    );
+    const link = screen.container.querySelector<HTMLAnchorElement>("a[data-artifact]")!;
+
+    await act(async () => {
+      link.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: 10,
+          clientY: 10,
+        }),
+      );
+    });
+
+    const offered = chooseMenuItem.mock.lastCall![0].map((item: { id: string }) => item.id);
+    expect(offered).toEqual(["copy-full"]);
+    await vi.waitFor(() => expect(copied).toHaveBeenCalledWith("artifacts/plan.md"));
   });
 });

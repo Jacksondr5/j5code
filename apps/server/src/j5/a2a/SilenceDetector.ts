@@ -295,7 +295,10 @@ const makeLayer = (daemon: boolean) =>
         threadId: ThreadId,
         runId: RunId,
       ) {
-        const projection = yield* threads.getThreadProjection(threadId);
+        const projection = yield* threads.getThreadRecords(threadId, ["turnItems"], {
+          turnItemRunId: runId,
+          turnItemTypes: ["error"],
+        });
         const item = projection.turnItems.findLast(
           (candidate) =>
             candidate.runId === runId &&
