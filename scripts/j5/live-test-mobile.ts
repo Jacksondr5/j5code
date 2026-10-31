@@ -1187,6 +1187,8 @@ function formatPhone(paths: LiveTestPaths, record: MobileRecord): string {
   return `Mobile (phone), for the developer's own phone on the tailnet:
   Backend       http://${record.host}:${record.serverPort}
   Metro         http://${record.host}:${record.metroPort}, log ${mobileFiles(paths).metroLog}
+  Both listen on every interface of this machine, its LAN and Docker networks included, not
+  only the tailnet. The test server is isolated and admits only a device with a pairing link.
 
 Next:
   ${selfCommand(paths, "mobile-open")}
@@ -1206,6 +1208,7 @@ function printPhoneLinks(paths: LiveTestPaths, record: MobileRecord): void {
   const pairingUrl = mintPairingUrl(paths, owner, `mobile-open phone ${Date.now()}`, "60m");
   if (pairingUrl === undefined) throw new LiveTestRefusal("Minting a pairing link failed.");
   const host = record.host!;
+  const fingerprint = nativeFingerprint(paths, "ios");
   console.log(`Send the developer these two links, to open on the phone in this order:
 
 1. Open J5 Code Dev against this branch's Metro:
@@ -1214,6 +1217,9 @@ function printPhoneLinks(paths: LiveTestPaths, record: MobileRecord): void {
 2. Then pair it with this test server, as ${owner} (works once, within an hour):
    ${pairingDeepLink({ host, serverPort: record.serverPort, pairingUrl })}
 
-The phone needs J5 Code Dev installed for this checkout's native fingerprint, and Tailscale on.
+The phone needs Tailscale on, and J5 Code Dev built for this checkout's iOS native fingerprint:
+   ${fingerprint}
+If the app on the phone was built for another fingerprint, rebuild it first: a mismatched client
+can fail in ways that look like a bug in the branch.
 If iOS asks to allow "Local Network" for J5 Code Dev, the developer allows it.`);
 }
