@@ -14,7 +14,15 @@ import * as NodeUtil from "node:util";
 
 import { loadRepoEnv } from "../lib/public-config.ts";
 
-const COMMANDS = ["start", "status", "restart", "stop", "rebuild", "upgrade"] as const;
+const COMMANDS = [
+  "start",
+  "status",
+  "restart",
+  "stop",
+  "rebuild",
+  "upgrade",
+  "mobile-open",
+] as const;
 type LiveTestCommand = (typeof COMMANDS)[number];
 
 /**
@@ -397,7 +405,7 @@ function statFieldsOf(pid: number): ReadonlyArray<string> | undefined {
 }
 
 /** The process group of `pid`, or undefined when it is gone. */
-function processGroupOf(pid: number): number | undefined {
+export function processGroupOf(pid: number): number | undefined {
   const group = IS_MACOS
     ? probeOutput("ps", ["-o", "pgid=", "-p", String(pid)])?.trim()
     : statFieldsOf(pid)?.[2];
@@ -409,7 +417,7 @@ function processGroupOf(pid: number): number | undefined {
  * second on macOS. Together with the pid it names one process for good: a
  * recycled pid has a later start time.
  */
-function startTimeOf(pid: number): string | undefined {
+export function startTimeOf(pid: number): string | undefined {
   if (!IS_MACOS) return statFieldsOf(pid)?.[19];
   return probeOutput("ps", ["-o", "lstart=", "-p", String(pid)])?.trim() || undefined;
 }
@@ -438,7 +446,7 @@ function membersOfGroup(group: number): ReadonlyArray<number> {
     .filter((pid) => processGroupOf(pid) === group);
 }
 
-function listenerOn(port: number): number | undefined {
+export function listenerOn(port: number): number | undefined {
   if (IS_MACOS) {
     const pid = probeOutput("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"])?.split("\n")[0];
     return pid ? Number(pid) : undefined;
@@ -458,7 +466,7 @@ export function pathFromLsofFields(output: string): string | undefined {
     ?.slice(1);
 }
 
-function cwdOf(pid: number): string | undefined {
+export function cwdOf(pid: number): string | undefined {
   if (IS_MACOS) {
     return pathFromLsofFields(
       probeOutput("lsof", ["-a", "-p", String(pid), "-d", "cwd", "-Fn"]) ?? "",
@@ -536,7 +544,7 @@ export function classifyServer(input: {
     : { kind: "notServing", group, reason: notServing };
 }
 
-function currentServerState(paths: ServerPaths): ServerState {
+export function currentServerState(paths: ServerPaths): ServerState {
   return classifyServer({
     worktree: NodeFS.realpathSync(paths.worktree),
     record: NodeFS.existsSync(paths.record)
@@ -553,7 +561,7 @@ function currentServerState(paths: ServerPaths): ServerState {
   });
 }
 
-const selfCommand = (paths: ServerPaths, command: string) =>
+export const selfCommand = (paths: ServerPaths, command: string) =>
   `node ${NodePath.join(paths.worktree, "scripts/j5/setup-agent-live-test.ts")} ${command}`.trimEnd();
 
 /**
@@ -709,7 +717,11 @@ export const PAIRING_SCOPES = [
  * person it pairs a device for (register D36): the owner the home was built
  * with, or a person `guest` adds.
  */
-const pairArguments = (paths: ServerPaths, person: string): ReadonlyArray<string> => [
+const pairArguments = (
+  paths: ServerPaths,
+  person: string,
+  label?: string,
+): ReadonlyArray<string> => [
   NodePath.join(paths.worktree, "apps/server/src/bin.ts"),
   "pair",
   "--base-dir",
@@ -717,6 +729,7 @@ const pairArguments = (paths: ServerPaths, person: string): ReadonlyArray<string
   "--person",
   person,
   ...PAIRING_SCOPES.flatMap((scope) => ["--scope", scope]),
+  ...(label === undefined ? [] : ["--label", label]),
 ];
 
 /** `pairArguments` as a command a person can paste. */
@@ -750,12 +763,20 @@ function pairingBaseUrl(paths: ServerPaths): string {
  * the log is the startup URL, which works once and is usually spent by the time
  * anyone asks again.
  */
-function mintPairingUrl(paths: ServerPaths, owner: string): string | undefined {
-  const pair = NodeChildProcess.spawnSync(process.execPath, [...pairArguments(paths, owner)], {
-    cwd: paths.worktree,
-    env: liveTestEnvironment(process.env, paths.worktree),
-    encoding: "utf8",
-  });
+export function mintPairingUrl(
+  paths: ServerPaths,
+  owner: string,
+  label?: string,
+): string | undefined {
+  const pair = NodeChildProcess.spawnSync(
+    process.execPath,
+    [...pairArguments(paths, owner, label)],
+    {
+      cwd: paths.worktree,
+      env: liveTestEnvironment(process.env, paths.worktree),
+      encoding: "utf8",
+    },
+  );
   return /Pairing URL: (\S+)/.exec(pair.stdout ?? "")?.[1];
 }
 
@@ -778,7 +799,7 @@ export function addRemoteUrl(input: {
   return url.toString();
 }
 
-function printRunning(
+export function printRunning(
   paths: LiveTestPaths,
   facts: ServerLogFacts,
   remoteFacts: ServerLogFacts | undefined,
@@ -815,7 +836,7 @@ function printRunning(
   );
 }
 
-function readManifest(paths: LiveTestPaths): Manifest {
+export function readManifest(paths: LiveTestPaths): Manifest {
   return JSON.parse(NodeFS.readFileSync(paths.manifest, "utf8")) as Manifest;
 }
 
@@ -1199,7 +1220,7 @@ Otherwise read the log, then start it again:
   ${selfCommand(paths, "restart")}`;
 
 /** Signals this script's own process group and waits for every member to exit. */
-async function stopGroup(group: number): Promise<void> {
+export async function stopGroup(group: number): Promise<void> {
   const waitForExit = async (timeoutMs: number) => {
     const deadline = Date.now() + timeoutMs;
     while (membersOfGroup(group).length > 0) {
@@ -1319,7 +1340,7 @@ function builtMode(paths: LiveTestPaths): LiveTestMode | undefined {
  * Starts one dev server on its home, or joins one that is already starting,
  * and waits until it is ready.
  */
-async function startServer(
+export async function startServer(
   paths: ServerPaths,
   runnerMode: "dev" | "dev:server",
   environment: Readonly<Record<string, string>>,
@@ -1580,6 +1601,7 @@ async function start(
   paths: LiveTestPaths,
   mode: LiveTestMode,
   baseRef: string | undefined,
+  mobile?: "ios" | "android",
 ): Promise<void> {
   const deadline = Date.now() + START_BUDGET_MS;
   const built = builtMode(paths);
@@ -1655,6 +1677,9 @@ async function start(
         ),
       ),
     );
+  }
+  if (mobile !== undefined) {
+    return (await import("./live-test-mobile.ts")).startMobile(paths, mobile, deadline);
   }
   if (!isPeerMode(mode)) {
     console.log("Starting the dev server...");
@@ -2325,7 +2350,12 @@ const serversOf = (
         ]
       : [{ name: "", paths }];
 
-async function stop(paths: LiveTestPaths, replacing = false): Promise<void> {
+async function stop(
+  paths: LiveTestPaths,
+  replacing = false,
+  /** A restart keeps the mobile side (device, claim, Metro, tunnel) and reconnects it. */
+  keepMobile = false,
+): Promise<void> {
   // Classify every server before signalling any, so a refusal leaves both alone.
   const servers = serversOf(paths).map((server) => ({
     ...server,
@@ -2345,6 +2375,13 @@ async function stop(paths: LiveTestPaths, replacing = false): Promise<void> {
       removeTailnetMapping();
       throw new LiveTestRefusal(state.reason);
     }
+  }
+  // A device that could not be reset keeps its claim and record; the servers still stop.
+  let mobileFailure: unknown;
+  try {
+    if (!keepMobile) await (await import("./live-test-mobile.ts")).stopMobile(paths);
+  } catch (cause) {
+    mobileFailure = cause;
   }
   for (const { name, paths: server, state } of servers) {
     if (state.kind === "stopped" || state.kind === "unverified") {
@@ -2371,11 +2408,14 @@ async function stop(paths: LiveTestPaths, replacing = false): Promise<void> {
     }
   }
   removeTailnetMapping();
+  if (mobileFailure !== undefined) throw mobileFailure;
 }
 
-function status(paths: LiveTestPaths): void {
+async function status(paths: LiveTestPaths): Promise<void> {
   if (upgradeOf(paths) !== undefined) return statusOfUpgrade(paths);
   statusOfHead(paths);
+  const mobile = (await import("./live-test-mobile.ts")).mobileStatus(paths);
+  if (mobile !== undefined) console.log(`\n${mobile}`);
   if (builtMode(paths) !== "base") return;
   const { progress, serverStatus, failure } = readBaseProgress(paths);
   console.log(`\n${formatBaseProgress(paths, progress)}`);
@@ -2715,9 +2755,9 @@ function guest(paths: LiveTestPaths, request: GuestRequest): void {
   print({ kind: "new", name: request.name, level, scope }, pairingUrl);
 }
 
-const USAGE = `Usage: node scripts/j5/setup-agent-live-test.ts [--skills | --fresh | --peer [--poll] | --for-dev | --base <ref>]
-       node scripts/j5/setup-agent-live-test.ts rebuild [--skills | --fresh | --peer [--poll] | --for-dev | --base <ref>]
-       node scripts/j5/setup-agent-live-test.ts status | restart | stop | upgrade
+const USAGE = `Usage: node scripts/j5/setup-agent-live-test.ts [--skills | --fresh | --peer [--poll] | --for-dev | --base <ref> | --mobile ios|android]
+       node scripts/j5/setup-agent-live-test.ts rebuild [--skills | --fresh | --peer [--poll] | --for-dev | --base <ref> | --mobile ios|android]
+       node scripts/j5/setup-agent-live-test.ts status | restart | stop | upgrade | mobile-open
        ${GUEST_USAGE.slice("Usage: ".length)}`;
 
 /**
@@ -2728,11 +2768,15 @@ export function parseCommand(args: ReadonlyArray<string>): {
   readonly command: LiveTestCommand;
   readonly mode: LiveTestMode;
   readonly baseRef?: string;
+  readonly mobile?: "ios" | "android";
 } {
-  // --base is the one flag with a value; take the pair out before sorting the rest.
-  const baseIndex = args.indexOf(MODE_FLAGS.base);
-  const baseRef = baseIndex === -1 ? undefined : args[baseIndex + 1];
-  const rest = baseIndex === -1 ? args : args.toSpliced(baseIndex, 2);
+  // --mobile and --base are the flags with a value; take each pair out before sorting the rest.
+  const mobileIndex = args.indexOf("--mobile");
+  const mobile = mobileIndex === -1 ? undefined : args[mobileIndex + 1];
+  const withoutMobile = mobileIndex === -1 ? args : args.toSpliced(mobileIndex, 2);
+  const baseIndex = withoutMobile.indexOf(MODE_FLAGS.base);
+  const baseRef = baseIndex === -1 ? undefined : withoutMobile[baseIndex + 1];
+  const rest = baseIndex === -1 ? withoutMobile : withoutMobile.toSpliced(baseIndex, 2);
   const flags = rest
     .filter((argument) => argument.startsWith("--"))
     .toSorted()
@@ -2751,7 +2795,12 @@ export function parseCommand(args: ReadonlyArray<string>): {
     mode === undefined ||
     // The ref is printed inside commands, and git allows shell characters in ref names.
     (mode === "base" && (baseRef === undefined || !/^[\w@+=:,./][\w@+=:,./^~-]*$/.test(baseRef))) ||
-    (mode !== "default" && command !== "start" && command !== "rebuild")
+    (mode !== "default" && command !== "start" && command !== "rebuild") ||
+    // A mobile test runs on the default home, and only a start or rebuild sets one up.
+    (mobileIndex !== -1 &&
+      ((mobile !== "ios" && mobile !== "android") ||
+        mode !== "default" ||
+        (command !== "start" && command !== "rebuild")))
   ) {
     throw new LiveTestRefusal(USAGE);
   }
@@ -2759,6 +2808,7 @@ export function parseCommand(args: ReadonlyArray<string>): {
     command: command as LiveTestCommand,
     mode,
     ...(mode === "base" && baseRef !== undefined ? { baseRef } : {}),
+    ...(mobile === "ios" || mobile === "android" ? { mobile } : {}),
   };
 }
 
@@ -2785,7 +2835,17 @@ async function main(): Promise<void> {
   if (command === "status") return status(paths);
   if (command === "stop") return stop(paths);
   if (command === "upgrade") return upgrade(paths);
-  if (command === "restart" || command === "rebuild") await stop(paths, command === "rebuild");
+  if (command === "mobile-open") return (await import("./live-test-mobile.ts")).mobileOpen(paths);
+  // A start or restart without --mobile keeps a recorded device set up and reconnects the
+  // server to it, on the port the device reaches. A rebuild sets up only what it is asked for.
+  const mobile =
+    parsed.mobile ??
+    (command === "rebuild"
+      ? undefined
+      : (await import("./live-test-mobile.ts")).readMobileRecord(paths)?.platform);
+  if (command === "restart" || command === "rebuild") {
+    await stop(paths, command === "rebuild", command === "restart");
+  }
   // resolveLiveTestPaths has confirmed this directory is inside the worktree's own .j5code.
   // Refuse an unusable base before a rebuild deletes the build that is there.
   if (command === "rebuild" && baseRef !== undefined) resolveBase(paths, baseRef);
@@ -2796,9 +2856,9 @@ async function main(): Promise<void> {
   }
   // A restart keeps the mode that is built; only a start or rebuild chooses one.
   if (command === "restart") {
-    return start(paths, builtMode(paths) ?? "default", builtBaseRef(paths));
+    return start(paths, builtMode(paths) ?? "default", builtBaseRef(paths), mobile);
   }
-  await start(paths, mode, baseRef);
+  await start(paths, mode, baseRef, mobile);
 }
 
 if (import.meta.main) {
