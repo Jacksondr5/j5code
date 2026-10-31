@@ -100,6 +100,7 @@ const message = (
   id: string,
   text: string,
   minute = 1,
+  origin: Partial<Extract<OrchestrationV2DomainEvent, { type: "message.updated" }>["payload"]> = {},
 ): OrchestrationV2DomainEvent => ({
   id: EventId.make(`message:${id}`),
   type: "message.updated",
@@ -119,6 +120,7 @@ const message = (
     streaming: false,
     createdAt: at(minute),
     updatedAt: at(minute),
+    ...origin,
   },
 });
 
@@ -344,6 +346,56 @@ it.layer(layer)("Who wrote a message search hit", (it) => {
         { _tag: "person", name: "Morgan" },
       ]);
       assert.deepEqual(yield* authors(viewer, "before"), [{ _tag: "person", name: "Morgan" }]);
+    }),
+  );
+
+  it.effect("names an Inbox reply from before sharing as the first owner's", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const conversation = ThreadId.make("thread:search-inbox-reply");
+      const mcp = { createdBy: "user", creationSource: "mcp" } as const;
+      yield* seed([
+        thread(conversation, PRIVATE),
+        message(conversation, "message:j5:a2a:delivery:reply", "plover inbox", 1, mcp),
+        message(conversation, "service-send", "plover service", 4, mcp),
+        message(conversation, "scheduled-run", "plover scheduled", 5, {
+          creationSource: "server",
+          scheduledTaskId: "task:plover" as never,
+        }),
+        message(conversation, "thread-send", "plover thread", 6, {
+          senderThreadId: ThreadId.make("thread:plover-sender"),
+        }),
+        // An approval's feedback, written by the server after a second person could write.
+        message(conversation, "approval-feedback:plover", "plover feedback", 8, {
+          creationSource: "server",
+        }),
+      ]);
+      yield* sql`
+        INSERT INTO j5_a2a_shared_thread (thread_id, shared_at)
+        VALUES (${conversation}, ${DateTime.formatIso(at(7))})
+      `;
+      yield* sql`
+        UPDATE j5_a2a_human_person SET display_name = 'Morgan' WHERE is_local_operator = 1
+      `;
+      const collaborator = yield* deviceOf("Rowan", [
+        { scope: { kind: "thread", threadId: conversation }, level: "collaborator" },
+      ]);
+      // Search shows one hit a thread, so each message has a word of its own.
+      const label = Effect.fn("test.label")(function* (
+        session: Parameters<typeof connectionView>[0],
+        word: string,
+      ) {
+        const { matches } = yield* searchAs(session, { query: word });
+        assert.lengthOf(matches, 1, word);
+        return matches[0]!.author ?? null;
+      });
+
+      assert.deepEqual(yield* label(collaborator, "inbox"), { _tag: "person", name: "Morgan" });
+      assert.deepEqual(yield* label(OWNER, "inbox"), { _tag: "you" });
+      // No other message search finds here was written by a person: each keeps upstream's label.
+      for (const word of ["service", "scheduled", "thread", "feedback"]) {
+        assert.strictEqual(yield* label(collaborator, word), null, word);
+      }
     }),
   );
 });
