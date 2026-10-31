@@ -7,6 +7,7 @@ import * as NodePath from "node:path";
 import {
   PAIRING_SCOPES,
   classifyServer,
+  configuredLivePort,
   formatGuest,
   formatInstructions,
   formatUpgrade,
@@ -233,13 +234,20 @@ describe("startRefusal", () => {
     );
   });
 
-  it("abandons a server on the live port or the port the shell inherited", () => {
-    assert.include(
-      startRefusal({ ...input, inheritedPort: undefined, facts: { ...facts, serverPort: 5773 } }) ??
-        "",
-      "live server's port",
+  it("abandons a server on the inherited configured live port", () => {
+    for (const inheritedPort of ["4773", "4790", "15634"]) {
+      assert.include(
+        startRefusal({
+          ...input,
+          inheritedPort,
+          facts: { ...facts, serverPort: Number(inheritedPort) },
+        }) ?? "",
+        "live server's port",
+      );
+    }
+    assert.isUndefined(
+      startRefusal({ ...input, inheritedPort: undefined, facts: { ...facts, serverPort: 5773 } }),
     );
-    assert.include(startRefusal({ ...input, inheritedPort: "15634" }) ?? "", "live server's port");
   });
 
   it("abandons a server that had to be shared and was not", () => {
@@ -250,6 +258,23 @@ describe("startRefusal", () => {
     );
     // A test server that nobody asked to share carries on.
     assert.isUndefined(startRefusal({ ...input, facts: unshared }));
+  });
+
+  it("abandons a live port configured only in a repository env file", () => {
+    const layout = makeLayout();
+    try {
+      NodeFS.writeFileSync(NodePath.join(layout.worktree, ".env"), "T3CODE_PORT=5773\n");
+      assert.include(
+        startRefusal({
+          ...input,
+          inheritedPort: configuredLivePort(layout.worktree, {}),
+          facts: { ...facts, serverPort: 5773 },
+        }) ?? "",
+        "live server's port",
+      );
+    } finally {
+      NodeFS.rmSync(layout.base, { recursive: true, force: true });
+    }
   });
 });
 
@@ -269,6 +294,59 @@ describe("tailnet mappings", () => {
       { port: 7594, targets: ["http://localhost:7594"] },
     ]);
     assert.deepEqual(tailnetMappings("No serve config\n"), []);
+  });
+
+  it("refuses HTTP mappings before sharing, including the formerly fixed live port", () => {
+    for (const port of [8444, 9444]) {
+      const existing = mappingsFromStatus({
+        status: 0,
+        stdout: `http://host.ts.net:${port} (tailnet only)\n|-- / proxy http://127.0.0.1:4773\n`,
+        stderr: "",
+      });
+      assert.include(shareRefusal(port, existing, () => true) ?? "", "this server did not set up");
+    }
+  });
+
+  it("keeps HTTP and HTTPS targets on their own mappings", () => {
+    assert.deepEqual(
+      tailnetMappings(
+        `${status}\nhttp://host.ts.net:9445 (tailnet only)\n|-- / proxy http://127.0.0.1:4790\n`,
+      ),
+      [...mappings, { port: 9445, targets: ["http://127.0.0.1:4790"] }],
+    );
+  });
+
+  it("protects HTTP and HTTPS default ports when status omits the port", () => {
+    for (const [scheme, port] of [
+      ["http", 80],
+      ["https", 443],
+    ] as const) {
+      const existing = tailnetMappings(
+        `${scheme}://host.ts.net (tailnet only)\n|-- / proxy http://localhost:3000\n`,
+      );
+      assert.include(shareRefusal(port, existing, () => true) ?? "", "this server did not set up");
+    }
+  });
+
+  it("refuses TCP listeners without treating their forwarding destinations as occupied ports", () => {
+    for (const header of [
+      "|-- tcp://host.ts.net:9445 (tailnet only)",
+      "|-- tcp://host.ts.net:9445 (TLS-terminated TCP, tailnet only)",
+      "tcp://service.ts.net:9445 (tailnet only) (svc:service)",
+    ]) {
+      const existing = mappingsFromStatus({
+        status: 0,
+        stdout: `${header}\n|-- tcp://100.100.100.100:9445\n|-- tcp://[fd7a:115c:a1e0::1]:9445\n|--> tcp://127.0.0.1:4773\n\n${status}`,
+        stderr: "",
+      });
+      for (const port of [9445, 8444, 7594]) {
+        assert.include(
+          shareRefusal(port, existing, () => true) ?? "",
+          "this server did not set up",
+        );
+      }
+      assert.isUndefined(shareRefusal(4773, existing, () => true));
+    }
   });
 
   it("calls a mapping ours only when it proxies to our own web port on loopback", () => {
@@ -302,14 +380,16 @@ describe("tailnet mappings", () => {
     assert.isUndefined(shareRefusal(7594, [], runner.isBrowserAllowedPort));
   });
 
-  it("never shares on the live install's tailnet port", () => {
-    assert.include(shareRefusal(8444, [], allowed) ?? "", "live install's tailnet port");
-    assert.include(shareRefusal(8444, mappings, allowed) ?? "", "live install's tailnet port");
-  });
-
-  it("never shares over a mapping this server did not make", () => {
-    const foreign = [{ port: 7000, targets: ["http://127.0.0.1:3000"] }];
-    assert.include(shareRefusal(7000, foreign, allowed) ?? "", "this server did not set up");
+  it("protects every existing mapping regardless of port or target", () => {
+    for (const port of [7000, 8444, 9444, 9445]) {
+      for (const targets of [["http://127.0.0.1:4773"], [`http://localhost:${port}`], []]) {
+        assert.include(
+          shareRefusal(port, [{ port, targets }], allowed) ?? "",
+          "this server did not set up",
+        );
+      }
+      assert.isUndefined(shareRefusal(port, [], allowed));
+    }
   });
 
   it("treats a failed status read as an error, not as nothing mapped", () => {
@@ -334,7 +414,17 @@ describe("tailnet mappings", () => {
       sharedUrl: "https://host.ts.net:7594/",
       shareFailure: undefined,
     };
-    assert.deepEqual(mappingCleanup(shared, mappings), { kind: "remove", port: 7594 });
+    const cleanup = mappingCleanup(shared, mappings);
+    assert.deepEqual(cleanup, { kind: "remove", port: 7594 });
+    if (cleanup.kind === "remove") {
+      assert.isUndefined(
+        shareRefusal(
+          7594,
+          mappings.filter((mapping) => mapping.port !== cleanup.port),
+          allowed,
+        ),
+      );
+    }
     // Already removed by the dev runner on its way out.
     assert.deepEqual(mappingCleanup(shared, [mappings[0]!]), { kind: "nothing" });
     // This run's log never recorded a share: whatever is on the port is not ours to touch.
@@ -349,9 +439,9 @@ describe("tailnet mappings", () => {
     });
   });
 
-  it("shares on a free port, and over its own leftover mapping", () => {
+  it("shares on a free port but refuses an untracked leftover mapping", () => {
     assert.isUndefined(shareRefusal(7000, mappings, allowed));
-    assert.isUndefined(shareRefusal(7594, mappings, allowed));
+    assert.include(shareRefusal(7594, mappings, allowed) ?? "", "this server did not set up");
   });
 });
 
@@ -382,6 +472,24 @@ describe("liveTestEnvironment", () => {
       liveTestEnvironment({ NODE_OPTIONS: "--max-old-space-size=4096" }, "/w").NODE_OPTIONS,
       "--max-old-space-size=4096 --disable-warning=ExperimentalWarning",
     );
+  });
+});
+
+describe("configuredLivePort", () => {
+  it("uses shell then local env then root env precedence without exporting file values", () => {
+    const layout = makeLayout();
+    const environment = {};
+    try {
+      assert.isUndefined(configuredLivePort(layout.worktree, environment));
+      NodeFS.writeFileSync(NodePath.join(layout.worktree, ".env"), "T3CODE_PORT=5773\n");
+      assert.equal(configuredLivePort(layout.worktree, environment), "5773");
+      NodeFS.writeFileSync(NodePath.join(layout.worktree, ".env.local"), "T3CODE_PORT=4773\n");
+      assert.equal(configuredLivePort(layout.worktree, environment), "4773");
+      assert.equal(configuredLivePort(layout.worktree, { T3CODE_PORT: "4790" }), "4790");
+      assert.deepEqual(environment, {});
+    } finally {
+      NodeFS.rmSync(layout.base, { recursive: true, force: true });
+    }
   });
 });
 
@@ -1149,6 +1257,18 @@ describe("upgradeTarget", () => {
     );
   });
 
+  it("refuses a recorded upgrade port that is now the configured live port", () => {
+    assert.throws(
+      () =>
+        upgradeTarget({
+          ...input,
+          recorded: { serverPort: 14000, webPort: 5960 },
+          inheritedPort: "14000",
+        }),
+      /live server's port/,
+    );
+  });
+
   it("refuses a build that is not a --base build, and says how to make one", () => {
     for (const built of ["default", "fresh", "peer", "for-dev", undefined] as const) {
       assert.throws(() => upgradeTarget({ ...input, built }), /rebuild --base <ref>/);
@@ -1173,10 +1293,28 @@ describe("upgradeTarget", () => {
       /not on its home/,
     );
     for (const other of [
-      { baseFacts: { ...baseFacts, serverPort: 5773 }, inheritedPort: undefined },
+      { baseFacts: { ...baseFacts, serverPort: 4773 }, inheritedPort: "4773" },
       { inheritedPort: "14100" },
     ]) {
       assert.throws(() => upgradeTarget({ ...input, ...other }), /live server's port/);
+    }
+  });
+
+  it("refuses the live port when only the repository env file configured it", () => {
+    const layout = makeLayout();
+    try {
+      NodeFS.writeFileSync(NodePath.join(layout.worktree, ".env.local"), "T3CODE_PORT=4773\n");
+      assert.throws(
+        () =>
+          upgradeTarget({
+            ...input,
+            inheritedPort: configuredLivePort(layout.worktree, {}),
+            baseFacts: { ...baseFacts, serverPort: 4773 },
+          }),
+        /live server's port/,
+      );
+    } finally {
+      NodeFS.rmSync(layout.base, { recursive: true, force: true });
     }
   });
 });

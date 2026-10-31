@@ -12,11 +12,11 @@ import * as NodePath from "node:path";
 import * as NodeTimersPromises from "node:timers/promises";
 import * as NodeUtil from "node:util";
 
+import { loadRepoEnv } from "../lib/public-config.ts";
+
 const COMMANDS = ["start", "status", "restart", "stop", "rebuild", "upgrade"] as const;
 type LiveTestCommand = (typeof COMMANDS)[number];
 
-/** The live install's port. A test server must never end up on it. */
-const LIVE_SERVER_PORT = 5773;
 /**
  * How long one start may take, builds, waits and peering included. Printing the pairing URLs
  * takes some seconds more, so the command still returns inside the two minutes a shell call
@@ -294,6 +294,13 @@ export function liveTestEnvironment(
   };
 }
 
+export function configuredLivePort(
+  worktree: string,
+  environment: NodeJS.ProcessEnv,
+): string | undefined {
+  return loadRepoEnv({ repoRoot: worktree, baseEnv: environment }).T3CODE_PORT;
+}
+
 export interface ServerLogFacts {
   readonly serverPort: number | undefined;
   readonly webPort: number | undefined;
@@ -357,10 +364,7 @@ export function startRefusal(input: {
   if (facts.baseDir !== undefined && canonicalPath(facts.baseDir) !== canonicalPath(input.home)) {
     return `The dev server chose ${facts.baseDir}, not the test home ${input.home}.`;
   }
-  if (
-    facts.serverPort !== undefined &&
-    (facts.serverPort === LIVE_SERVER_PORT || String(facts.serverPort) === input.inheritedPort)
-  ) {
+  if (facts.serverPort !== undefined && String(facts.serverPort) === input.inheritedPort) {
     return `The dev server chose the live server's port ${facts.serverPort}.`;
   }
   return undefined;
@@ -954,8 +958,6 @@ Commands:
 `;
 }
 
-/** The live install's tailnet port. A `--for-dev` server must never share on it. */
-const LIVE_TAILNET_PORT = 8444;
 /** The dev runner's server port is its web port plus this (scripts/dev-runner.ts base ports). */
 const SERVER_PORT_ABOVE_WEB = 8040;
 
@@ -967,15 +969,23 @@ export interface TailnetMapping {
 
 /**
  * The mappings in `tailscale serve status` output, which prints each as
- *   https://host.ts.net:8444 (tailnet only)
- *   |-- / proxy http://127.0.0.1:5773
+ *   https://host.ts.net:7594 (tailnet only)
+ *   |-- / proxy http://127.0.0.1:7594
  */
 export function tailnetMappings(serveStatus: string): ReadonlyArray<TailnetMapping> {
   const mappings: Array<{ port: number; targets: Array<string> }> = [];
   for (const line of serveStatus.split("\n")) {
-    const mapping = /^https:\/\/\S+?:(\d+)\b/.exec(line);
-    if (mapping !== null) {
-      mappings.push({ port: Number(mapping[1]), targets: [] });
+    // TCP status uses |-- for listeners and |--> for the forwarding destination.
+    const tcpPort = /^(?:\|-- )?tcp:\/\/\S+:(\d+)(?:\s|$)/.exec(line)?.[1];
+    if (tcpPort !== undefined) {
+      mappings.push({ port: Number(tcpPort), targets: [] });
+      continue;
+    }
+    const address = /^https?:\/\/\S+/.exec(line)?.[0];
+    if (address !== undefined) {
+      const url = new URL(address);
+      const port = Number(url.port || (url.protocol === "https:" ? "443" : "80"));
+      mappings.push({ port, targets: [] });
       continue;
     }
     const target = /^\|--.*\bproxy\s+(\S+)/.exec(line);
@@ -996,8 +1006,8 @@ export function isOwnMapping(mapping: TailnetMapping, webPort: number): boolean 
 
 /**
  * Why this server must not be shared on `webPort`, or undefined when it may.
- * `--share` replaces whatever is mapped on the port, so the port must not be
- * the live install's and must not carry a mapping this server did not make.
+ * `--share` replaces whatever is mapped on the port, so the port must not
+ * carry any pre-existing mapping, even one pointing to the same loopback port.
  */
 export function shareRefusal(
   webPort: number,
@@ -1008,12 +1018,7 @@ export function shareRefusal(
   if (!isBrowserAllowedPort(webPort)) {
     return `This worktree's web port is ${webPort}, which browsers refuse to open, so a shared URL on it would be useless. Use a different worktree for --for-dev.`;
   }
-  if (webPort === LIVE_TAILNET_PORT) {
-    return `This worktree's web port is ${LIVE_TAILNET_PORT}, the live install's tailnet port. Sharing would replace the live mapping. Use a different worktree for --for-dev.`;
-  }
-  const foreign = mappings.find(
-    (mapping) => mapping.port === webPort && !isOwnMapping(mapping, webPort),
-  );
+  const foreign = mappings.find((mapping) => mapping.port === webPort);
   return foreign === undefined
     ? undefined
     : `Tailnet port ${webPort} is already mapped to ${foreign.targets.join(", ") || "something else"}, which this server did not set up. Sharing would replace it. Use a different worktree for --for-dev.`;
@@ -1207,6 +1212,7 @@ async function waitUntilReady(
   deadline: number,
   requireShare: boolean,
 ): Promise<ServerLogFacts> {
+  const inheritedPort = configuredLivePort(paths.worktree, process.env);
   for (;;) {
     const log = NodeFS.readFileSync(paths.log, "utf8");
     const facts = readServerLog(log);
@@ -1241,7 +1247,7 @@ async function waitUntilReady(
     const refusal = startRefusal({
       facts,
       home: paths.home,
-      inheritedPort: process.env.T3CODE_PORT,
+      inheritedPort,
       requireShare,
     });
     if (refusal !== undefined) {
@@ -2077,6 +2083,12 @@ export function upgradeTarget(input: {
       `\`upgrade\` runs only in a --base build: it starts this worktree's build on the base server's home. Build one with: ${input.rebuildCommand}`,
     );
   }
+  const selectedServerPort = input.recorded?.serverPort ?? input.baseFacts.serverPort;
+  if (selectedServerPort !== undefined && String(selectedServerPort) === input.inheritedPort) {
+    throw new LiveTestRefusal(
+      `The upgrade target uses the live server's port ${selectedServerPort}.`,
+    );
+  }
   if (input.recorded !== undefined) return input.recorded;
   const { serverPort, webPort, baseDir } = input.baseFacts;
   if (!input.baseHomeExists || serverPort === undefined || webPort === undefined) {
@@ -2088,9 +2100,6 @@ export function upgradeTarget(input: {
     throw new LiveTestRefusal(
       `The base's log says its server ran on ${baseDir}, not on its home ${input.baseHome}. Replace the build: ${input.rebuildCommand}`,
     );
-  }
-  if (serverPort === LIVE_SERVER_PORT || String(serverPort) === input.inheritedPort) {
-    throw new LiveTestRefusal(`The base's log reports the live server's port ${serverPort}.`);
   }
   return { serverPort, webPort };
 }
@@ -2252,7 +2261,7 @@ async function upgrade(paths: LiveTestPaths): Promise<void> {
     ),
     baseHome: paths.upgrade.home,
     baseHomeExists: NodeFS.existsSync(paths.upgrade.home),
-    inheritedPort: process.env.T3CODE_PORT,
+    inheritedPort: configuredLivePort(paths.worktree, process.env),
     rebuildCommand: selfCommand(paths, `rebuild ${modeFlags("base", baseRef)}`),
     startCommand: selfCommand(paths, modeFlags("base", baseRef)),
   });
