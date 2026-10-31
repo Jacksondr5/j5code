@@ -436,7 +436,8 @@ const make = Effect.gen(function* () {
   /**
    * The person's words upstream writes as a user message of its own when it settles their answer
    * to a prompt: an approval's feedback, or answers it sends on to the agent as a message. Each is
-   * recorded as written by whoever `recordAnswer` names, the same as a typed message.
+   * recorded as written by whoever `recordAnswer` names, the same as a typed message. Upstream's
+   * message replaces any a person sent ahead under its id, so its record replaces theirs too.
    */
   const recordAnswerMessages = Effect.fn("j5.sharing.sharedConversation.recordAnswerMessages")(
     function* (answer: Parameters<SharedConversationShape["claimAnswer"]>[1]) {
@@ -453,7 +454,14 @@ const make = Effect.gen(function* () {
           AND message.message_id IN ${sql.in(answerMessageIds(answer.requestId))}
         WHERE answer.thread_id = ${answer.threadId} AND answer.request_id = ${answer.requestId}
           AND answer.command_id = ${answer.commandId} AND ${settledItsPrompt}
-        ON CONFLICT (thread_id, message_id) DO NOTHING
+        ON CONFLICT (thread_id, message_id) DO UPDATE SET
+          person_id = excluded.person_id,
+          display_name = excluded.display_name,
+          level = excluded.level,
+          edited_by = NULL,
+          note = NULL,
+          told_json = NULL,
+          stored_prefix = ''
         RETURNING message_id
       `;
       if (recorded.length > 0) yield* touch(answer.threadId);

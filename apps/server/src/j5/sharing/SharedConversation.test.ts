@@ -932,6 +932,38 @@ it.effect("feedback no person sent, or from an answer that settled nothing, name
   }).pipe(Effect.provide(conversationLayer)),
 );
 
+it.effect(
+  "a message sent ahead under an answer's id is the answerer's once upstream writes it",
+  () =>
+    Effect.gen(function* () {
+      yield* jackson;
+      const threadId = yield* thread("thread:feedback-id-taken");
+      const priya = yield* personWith("Priya", onThread(threadId));
+      const sam = yield* personWith("Sam", onThread(threadId, "viewer"));
+      const owner = (yield* (yield* PersonAccess).firstOwner).personId;
+      // Priya sends a message under the id upstream will give the feedback on a pending approval.
+      yield* (yield* SharedConversation).dispatch(
+        priya,
+        message(threadId, "Mine.", {
+          messageId: MessageId.make("approval-feedback:request:pending"),
+        }),
+        upstreamTakes,
+      );
+      yield* answering(owner, "approval-feedback", {
+        commandId: CommandId.make("command:owner-feedback"),
+        threadId,
+        requestId: RuntimeRequestId.make("request:pending"),
+        decision: "decline",
+        feedback: "Not like that.",
+      });
+      const [written] = (yield* authors(threadId, sam)).authors;
+      assert.deepStrictEqual(
+        [written?.messageId, written?.name, written?.storedPrefix, written?.note],
+        ["approval-feedback:request:pending", "Jackson", "", null],
+      );
+    }).pipe(Effect.provide(conversationLayer)),
+);
+
 it.effect("feedback on a thread not yet shared is recorded for no one, so the owner's", () =>
   Effect.gen(function* () {
     const owner = yield* jackson;
