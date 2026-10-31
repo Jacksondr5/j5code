@@ -16,7 +16,7 @@ interface EnvironmentReads {
 }
 
 /** Every J5 per-thread read caps a request at 500 ids; batches stay well under it. */
-export const THREAD_READ_BATCH_SIZE = 200;
+const THREAD_READ_BATCH_SIZE = 200;
 
 /**
  * A per-thread read model filled by batched reads per environment; a read from a replaced

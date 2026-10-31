@@ -30,9 +30,10 @@ interface CrewSeatThread {
 
 export { inboxAnswerableApprovals } from "@t3tools/shared/j5/crewRuntimeRequests";
 
-export class CrewRuntimeRequestNotFoundError extends Data.TaggedError(
-  "CrewRuntimeRequestNotFoundError",
-)<{ readonly threadId: ThreadId; readonly requestId: RuntimeRequestId }> {
+class CrewRuntimeRequestNotFoundError extends Data.TaggedError("CrewRuntimeRequestNotFoundError")<{
+  readonly threadId: ThreadId;
+  readonly requestId: RuntimeRequestId;
+}> {
   override get message() {
     return `No pending approval ${this.requestId} on a live Crew seat's thread ${this.threadId}.`;
   }
@@ -48,9 +49,9 @@ export class CrewRuntimeRequestConflictError extends Data.TaggedError(
 }
 
 /** The answer could not be sent for a reason other than the request's state; the route logs it. */
-export class CrewRuntimeRequestDispatchError extends Data.TaggedError(
-  "CrewRuntimeRequestDispatchError",
-)<{ readonly cause: OrchestratorV2Error | ThreadManagementProviderInstanceDisabledError }> {
+class CrewRuntimeRequestDispatchError extends Data.TaggedError("CrewRuntimeRequestDispatchError")<{
+  readonly cause: OrchestratorV2Error | ThreadManagementProviderInstanceDisabledError;
+}> {
   override get message() {
     return "The answer could not be sent.";
   }

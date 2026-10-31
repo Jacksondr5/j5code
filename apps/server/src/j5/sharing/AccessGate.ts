@@ -189,7 +189,7 @@ const narrowedForAll: AccessRpcRule = { kind: "narrowed", unknownToo: true };
  * out on purpose: whole-server lists and changes (projects, archive, usage, diagnostics,
  * PR lists, peers, relay) and Persona and skill writes.
  */
-export const ACCESS_RPC_RULES: Partial<Record<WsRpcMethod, AccessRpcRule>> = {
+const ACCESS_RPC_RULES: Partial<Record<WsRpcMethod, AccessRpcRule>> = {
   // A connection cannot start without these; each answers in a reduced form (`GuestView`).
   [WS_METHODS.serverGetConfig]: narrowedForAll,
   [WS_METHODS.subscribeServerConfig]: narrowedForAll,

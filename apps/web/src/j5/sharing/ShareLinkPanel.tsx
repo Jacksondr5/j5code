@@ -34,7 +34,7 @@ import {
  * server advertises; any other client knows only the one it reached the server at. Nothing is
  * opened to make a link work (People and access AC38).
  */
-export function useLinkRoutes(environmentId: EnvironmentId): ReadonlyArray<LinkRoute> {
+function useLinkRoutes(environmentId: EnvironmentId): ReadonlyArray<LinkRoute> {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const advertised = useEnvironmentQuery(
     isElectron && environmentId === primaryEnvironmentId ? desktopNetworkAccessStateAtom : null,

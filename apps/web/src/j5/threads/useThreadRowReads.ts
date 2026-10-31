@@ -17,7 +17,7 @@ import { requestSpawnedChildren } from "./SpawnedChildrenClient";
  * known: these reads are the server's own (People and access AC23), and the server refuses them.
  * Nothing waits for that answer, so everyone else's rows are read at once.
  */
-export const threadReadConnectionsAtom = Atom.make((get) => {
+const threadReadConnectionsAtom = Atom.make((get) => {
   const connections = new Map<EnvironmentId, PreparedConnection | null>();
   for (const id of get(environmentCatalog.catalogValueAtom).entries.keys()) {
     const state = Option.getOrNull(AsyncResult.value(get(environmentCatalog.stateAtom(id))));

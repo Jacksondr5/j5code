@@ -206,7 +206,7 @@ export function SkillLinksPanel(props: Props) {
   );
 }
 
-export function LinkSkillDialog(
+function LinkSkillDialog(
   props: Props & {
     readonly selection: SkillLinkSelection;
     readonly onLinked: (message: string) => void;

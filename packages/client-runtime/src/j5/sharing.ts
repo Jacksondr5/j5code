@@ -29,7 +29,7 @@ import {
 export type KnownConnectionAccess = ConnectionAccess | null;
 
 /** The level the person holds at server scope, if any. */
-export const serverLevelOf = (access: KnownConnectionAccess): PersonLevel | null =>
+const serverLevelOf = (access: KnownConnectionAccess): PersonLevel | null =>
   access?.kind === "person"
     ? highestLevel(
         access.levels.flatMap((held) => (held.scope.kind === "server" ? [held.level] : [])),

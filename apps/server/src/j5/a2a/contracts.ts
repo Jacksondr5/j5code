@@ -71,7 +71,7 @@ export const isDurableHumanParticipantId = (id: ParticipantId): boolean =>
  */
 export const EVERYONE_HERE_PERSON_ID = ParticipantId.make("human:everyone-here");
 
-export const MACHINE_PARTICIPANT_ID_PREFIX = "machine:";
+const MACHINE_PARTICIPANT_ID_PREFIX = "machine:";
 export const isMachineParticipantId = (id: ParticipantId): boolean =>
   id.startsWith(MACHINE_PARTICIPANT_ID_PREFIX) && id.length > MACHINE_PARTICIPANT_ID_PREFIX.length;
 export const isPlatformParticipantId = (id: string): boolean => id.startsWith("platform:");

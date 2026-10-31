@@ -468,7 +468,7 @@ const withdrawalMessageIdFor = (commandId: CommCommandId) =>
   LedgerMessageId.make(`message:j5:a2a:withdraw:${encodeURIComponent(commandId)}`);
 
 /** Platform-authored, like the retirement notice: the asker cleared its own ask, nothing is owed. */
-export const formatWithdrawalNotice = (input: {
+const formatWithdrawalNotice = (input: {
   readonly exchangeId: ExchangeId;
   readonly askerId: ParticipantId;
 }): string =>

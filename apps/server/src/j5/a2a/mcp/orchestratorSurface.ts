@@ -80,7 +80,7 @@ export const mapJ5OrchestratorCapabilities = (
 export const J5_ORCHESTRATOR_CAPABILITIES_DESCRIPTION =
   "List providers, models, options, and runtime modes for `delegate_task` and `j5_spawn_agent`, and the provider, model and options this thread runs with. Short list. `search` finds others. Any catalog model works.";
 
-export const J5OrchestratorCapabilitiesTool = Tool.make("orchestrator_capabilities", {
+const J5OrchestratorCapabilitiesTool = Tool.make("orchestrator_capabilities", {
   description: J5_ORCHESTRATOR_CAPABILITIES_DESCRIPTION,
   parameters: OrchestratorMcpCapabilitiesInput,
   success: J5OrchestratorCapabilitiesResult,

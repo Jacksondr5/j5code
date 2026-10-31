@@ -107,7 +107,7 @@ export function isSettledPrompt(toolData: unknown): toolData is {
  * start of the first of the options someone chose. Any other value, and any value that does not
  * begin with the mark, is returned as it is.
  */
-export function answerWithoutPrefix(answer: unknown, storedPrefix: string): unknown {
+function answerWithoutPrefix(answer: unknown, storedPrefix: string): unknown {
   if (storedPrefix === "") return answer;
   const strip = (text: string) =>
     text.startsWith(storedPrefix) ? text.slice(storedPrefix.length) : text;

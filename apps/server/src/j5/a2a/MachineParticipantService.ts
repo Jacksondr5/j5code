@@ -21,7 +21,7 @@ import {
  */
 
 /** Server-unique, shell-friendly: the part after `machine:`. */
-export const MACHINE_PARTICIPANT_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
+const MACHINE_PARTICIPANT_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 export interface MachineParticipantRecord {
   readonly participantId: ParticipantId;

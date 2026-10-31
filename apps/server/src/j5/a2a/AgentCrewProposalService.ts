@@ -65,11 +65,7 @@ export type CrewProposalKind = "roster" | "addition";
  */
 export type CrewProposalStatus = "open" | "approved" | "declined";
 export type CrewProposalDecision = "approve" | "decline";
-export const CREW_PROPOSAL_STATUSES: ReadonlyArray<CrewProposalStatus> = [
-  "open",
-  "approved",
-  "declined",
-];
+const CREW_PROPOSAL_STATUSES: ReadonlyArray<CrewProposalStatus> = ["open", "approved", "declined"];
 const finalStatus = (decision: CrewProposalDecision) =>
   decision === "approve" ? ("approved" as const) : ("declined" as const);
 

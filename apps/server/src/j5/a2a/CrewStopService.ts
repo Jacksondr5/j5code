@@ -48,7 +48,7 @@ export class CrewStopNotFoundError extends Data.TaggedError("CrewStopNotFoundErr
   }
 }
 
-export class CrewStopRequestError extends Data.TaggedError("CrewStopRequestError")<{
+class CrewStopRequestError extends Data.TaggedError("CrewStopRequestError")<{
   readonly detail: string;
   readonly nextStep: string;
 }> {

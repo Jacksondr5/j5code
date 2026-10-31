@@ -60,7 +60,7 @@ export class CrewSeatFinishNotifier extends Context.Service<
 
 const FINISH_SESSION = "j5-crew-seat-finish";
 /** Bodies up to this size ride inline in the Captain's notice; longer ones are read on demand. */
-export const INLINE_HANDOFF_MAX_CHARS = 4_000;
+const INLINE_HANDOFF_MAX_CHARS = 4_000;
 
 /**
  * A seat has finished only when its run completed or failed. Interrupted, cancelled and rolled back

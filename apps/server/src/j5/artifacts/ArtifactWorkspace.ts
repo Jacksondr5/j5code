@@ -137,7 +137,7 @@ export interface ArtifactVersion {
   readonly content: string;
 }
 
-export const artifactVersionedMarker = (
+const artifactVersionedMarker = (
   relativePath: string,
   versions: ReadonlyArray<Pick<ArtifactVersion, "number" | "timestamp">>,
 ) =>
@@ -218,7 +218,7 @@ const firstHeading = (content: string) =>
     .find((title): title is string => title !== undefined);
 
 /** Render the file from its versions, newest first. */
-export function renderArtifactVersions(input: {
+function renderArtifactVersions(input: {
   readonly relativePath: string;
   readonly versions: ReadonlyArray<ArtifactVersion>;
   readonly dropped: number;
