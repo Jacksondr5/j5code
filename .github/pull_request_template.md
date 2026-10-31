@@ -9,6 +9,9 @@
 ## UI changes
 
 <!-- If this PR changes UI, include clear before/after screenshots.
+     scripts/j5/pr-evidence.ts uploads them and prints the table. In a table you write
+     yourself, each image's alt text names its state and side, as the script's do:
+     ![Viewer search with no matches, after](...), not ![After](...).
      If the change involves motion or interaction, include a short video.
      Delete this section if not applicable. -->
 
