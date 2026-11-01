@@ -118,7 +118,7 @@ export function ThreadListToolbar(props: {
         filter={
           <>
             {filterButton}
-            {connectionState.hasConnections ? <InboxBell variant="header" /> : null}
+            {connectionState.hasConnections ? <InboxBell /> : null}
           </>
         }
       />

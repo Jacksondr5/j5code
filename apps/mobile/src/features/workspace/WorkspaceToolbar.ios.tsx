@@ -193,7 +193,7 @@ export function WorkspaceToolbar(props: {
           {/* J5: the Inbox bell on the thread list, iPhone and iPad alike (case 102). */}
           {selectedTab === "threads" ? (
             <Toolbar.Custom>
-              <InboxBell variant="header" />
+              <InboxBell />
             </Toolbar.Custom>
           ) : null}
           {nativeToolbarCompose && foldedSearch ? <Toolbar.Spacer width={8} /> : null}

@@ -203,19 +203,13 @@ const SEAMS: ReadonlyArray<Seam> = [
     file: "features/home/ThreadListToolbar.tsx",
     record: "case 102: the Inbox bell",
     from: "../../j5/inbox/InboxBell",
-    reaches: ['<InboxBell variant="header" />'],
+    reaches: ["<InboxBell />"],
   },
   {
     file: "features/workspace/WorkspaceToolbar.ios.tsx",
     record: "case 102: the Inbox bell",
     from: "../../j5/inbox/InboxBell",
-    reaches: ['<InboxBell variant="header" />'],
-  },
-  {
-    file: "features/threads/ThreadNavigationSidebar.tsx",
-    record: "case 102: the Inbox bell",
-    from: "../../j5/inbox/InboxBell",
-    reaches: ['<InboxBell variant="sidebar" />'],
+    reaches: ["<InboxBell />"],
   },
   {
     file: "App.tsx",
