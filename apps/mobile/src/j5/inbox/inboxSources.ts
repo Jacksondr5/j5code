@@ -44,6 +44,11 @@ export const answeredInboxSourcesAtom = createJ5ReadSourcesAtom({
   label: "mobile-j5:inbox-answered-sources",
   queryAtom: answeredInboxQueryAtom,
 });
+export const inboxCountSourcesAtom = createJ5ReadSourcesAtom({
+  ...sourcesInput,
+  label: "mobile-j5:inbox-count-sources",
+  queryAtom: inboxCountQueryAtom,
+});
 
 /**
  * Reads each connected server's source again, as the Inbox screen does when it comes into view.
