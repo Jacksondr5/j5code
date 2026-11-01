@@ -9,18 +9,29 @@ export function useHomeRouteVisible(): boolean {
   const navigation =
     useNavigation<NativeStackNavigationProp<ReactNavigation.RootParamList, "Home">>();
   // A cold deep link mounts Home under its Thread without ever showing it.
-  const [visible, setVisible] = useState(() => navigation.isFocused());
+  const [visible, setVisible] = useState(() => {
+    console.log("HOME842 mount focused=", navigation.isFocused());
+    return navigation.isFocused();
+  });
+  console.log("HOME842 render visible=", visible, "focused=", navigation.isFocused());
   useEffect(() => {
     const show = () => setVisible(true);
     const removeTransitionStart = navigation.addListener("transitionStart", ({ data }) => {
+      console.log("HOME842 transitionStart closing=", data.closing);
       if (!data.closing) show();
     });
     const removeTransitionEnd = navigation.addListener("transitionEnd", ({ data }) => {
+      console.log("HOME842 transitionEnd closing=", data.closing);
       if (data.closing) setVisible(false);
     });
     // Popping a sheet or a deep-linked route above Home has no appear event.
-    const removeFocus = navigation.addListener("focus", show);
+    const removeFocus = navigation.addListener("focus", () => {
+      console.log("HOME842 focus");
+      show();
+    });
+    const removeBlur = navigation.addListener("blur", () => console.log("HOME842 blur"));
     return () => {
+      removeBlur();
       removeTransitionStart();
       removeTransitionEnd();
       removeFocus();

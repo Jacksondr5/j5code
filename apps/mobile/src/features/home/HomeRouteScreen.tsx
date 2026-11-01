@@ -28,6 +28,7 @@ import { HomeScreen } from "./HomeScreen";
 import { HomeHeader } from "./HomeHeader";
 import { useHomeListOptions } from "./home-list-options";
 import { useAtomValueWhileVisible, useHomeRouteVisible } from "./home-route-visibility";
+import { appAtomRegistry } from "../../state/atom-registry";
 import { buildHomeProjectScopes } from "./homeThreadList";
 import { usePendingTaskListActions } from "./usePendingTaskListActions";
 import { useThreadListActions } from "./useThreadListActions";
@@ -52,6 +53,14 @@ export function HomeRouteScreen() {
   const threads = useAtomValueWhileVisible(
     environmentThreadShells.navigationThreadShellsAtom,
     visible,
+  );
+  console.log(
+    "HOME842 list visible=",
+    visible,
+    "shown=",
+    threads.length,
+    "live=",
+    appAtomRegistry.get(environmentThreadShells.navigationThreadShellsAtom).length,
   );
   const { environments: workspaceEnvironments, state: catalogState } = useWorkspaceState();
   const { savedConnectionsById } = useSavedRemoteConnections();
