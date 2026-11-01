@@ -38,6 +38,7 @@ import { pickAgentDefinitions } from "./pickAgentDefinitions";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { AndroidScreenHeader } from "../../components/ui/AndroidScreenHeader";
 import { AppText as Text } from "../../components/ui/AppText";
+import { ScreenScrollView } from "../../components/ui/ScreenScrollView";
 import { cn } from "../../lib/cn";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { agentPersonaEnvironment } from "./agentPersonaAtoms";
@@ -49,9 +50,13 @@ import { PlaybookLibrarySettingsSection } from "../playbooks/PlaybookLibrarySett
 export function AgentLibrarySettingsScreen() {
   // Personas and Playbooks are managed by a server's Owners (People and access AC27).
   return useOwnerSomewhere() === false ? (
-    <View className="p-4">
+    <ScreenScrollView
+      contentInsetAdjustmentBehavior="automatic"
+      className="flex-1 bg-sheet"
+      contentContainerClassName="p-4"
+    >
       <AgentMessage title={LIBRARY_FOR_OWNERS} />
-    </View>
+    </ScreenScrollView>
   ) : (
     <OwnerAgentLibrarySettingsScreen />
   );
@@ -325,10 +330,10 @@ function OwnerAgentLibrarySettingsScreen() {
           <AndroidScreenHeader title="Personas" onBack={() => navigation.goBack()} />
         </>
       ) : null}
-      <ScrollView
+      <ScreenScrollView
         contentInsetAdjustmentBehavior="automatic"
         showsVerticalScrollIndicator={false}
-        className="flex-1"
+        className="flex-1 bg-sheet"
         contentContainerClassName="gap-6 px-5 pt-4"
         contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 18) + 18 }}
       >
@@ -771,7 +776,7 @@ function OwnerAgentLibrarySettingsScreen() {
         <SettingsSection title="Playbooks">
           <PlaybookLibrarySettingsSection environmentId={effectiveEnvironmentId} />
         </SettingsSection>
-      </ScrollView>
+      </ScreenScrollView>
       {notification ? (
         <AgentLibraryToast notification={notification} onDismiss={dismissNotification} />
       ) : null}
