@@ -64,6 +64,10 @@ describe("native agent definition selection", () => {
 
   it("names a chosen Android document by its file name, not the id in its URI", async () => {
     // A Downloads pick's URI is content://…/document/msf%3A28; only the picker knows the name.
+    pickers.File.pickFileAsync.mockResolvedValue({
+      canceled: false,
+      result: new pickers.File("msf%3A28"),
+    });
     documents.getDocumentAsync.mockResolvedValue({
       canceled: false,
       assets: [{ name: "scout.yaml", size: 2, uri: "file:///cache/DocumentPicker/msf%3A28" }],
