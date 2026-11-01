@@ -196,20 +196,27 @@ yet run: iOS on the same Mac as the server (#857), and Android on macOS.
   in Xcode.
 - Put the SDK at `ANDROID_HOME` or its usual place, then restart J5 Code: the
   server behind the Device panel looks for the SDK only when it starts, so
-  until then `device_list` shows no Android.
+  until then `device_list` shows no Android. `adb` need not be on `PATH`.
 
 #### A mobile test
 
+Steps 2 and 5 use J5 Code's device tools (`device_open`, `device_close`,
+`device_screenshot`), the ones `test-t3-mobile` drives. They exist only for an
+agent running inside J5 Code; without them, stop and report.
+
 1. `node scripts/j5/setup-agent-live-test.ts --mobile android` (or `ios`).
-2. When setup has finished and printed the Mobile block, call `device_open`
+2. When setup has finished and printed the Mobile block (the last part of its
+   output), call `device_open`
    with the host and device it names. On Android the script has already booted
    the emulator; on iOS `device_open` boots the Simulator. If setup says the
    emulator is still booting, run the setup command from step 1 again (not
    `rebuild`, which deletes the emulator) before calling `device_open`.
 3. Run `node scripts/j5/setup-agent-live-test.ts mobile-open`. It installs the
    dev client for this checkout, opens it against your Metro, and pairs it as
-   the test owner, so the app lists the test project's threads. Run it again
-   whenever the app needs reloading or pairing again. Do not pair with
+   the test owner, so the app lists the test project's threads. The first list
+   can take about 20 seconds: "Loading threads..." with "No threads yet" means
+   it is still loading, so take another screenshot before running it again.
+   Run it again whenever the app needs reloading or pairing again. Do not pair with
    `test-t3-mobile`'s `pair-client.sh`: it pairs a device that belongs to no
    one, which J5 shows as an empty app.
 4. Drive the app with the `agent-device` command that `device_open` returned,
@@ -218,14 +225,19 @@ yet run: iOS on the same Mac as the server (#857), and Android on macOS.
 5. When you finish, run `agent-device close` with the flags `device_open`
    returned (without `--shutdown`), then call `device_close`, then run `stop`.
    `device_close` does not end the agent-device session, and a session left
-   open holds the device against the next tester. `stop` resets the device (a
-   Simulator is erased, an Android AVD deleted) and releases it.
+   open holds the device against the next tester. If you never ran
+   `agent-device` yourself, `agent-device close` prints `SESSION_NOT_FOUND`,
+   which is fine. `stop` resets the device (a Simulator is erased, an Android
+   AVD deleted) and releases it; it can take about 25 seconds and print
+   "killing the group".
 
 Machine settings live in `$XDG_CONFIG_HOME/j5code/mobile-rig.json` (normally
 `~/.config/j5code/mobile-rig.json`), or the file `J5_MOBILE_RIG_CONFIG` names,
 never in the repository. Without the file, the
 defaults serve one machine. Setup names the setting to change when a default
-does not fit.
+does not fit. To see the defaults on a machine that has a config, point
+`XDG_CONFIG_HOME` at an empty directory; `J5_MOBILE_RIG_CONFIG` must name a
+file that exists.
 
 | Setting          | What it sets                                     | Default                                                  |
 | ---------------- | ------------------------------------------------ | -------------------------------------------------------- |
@@ -240,7 +252,8 @@ does not fit.
 - Devices come from a pool. When it is taken, setup refuses and names who
   holds each device; it does not wait. Use only the device you claimed: `stop`
   erases it. Create the pool's Simulators in Xcode (by default, any name
-  starting `j5-test-`); the rig makes and deletes its own AVDs. A Simulator
+  starting `j5-test-`); the rig makes and deletes its own AVDs, named
+  `j5-tester-1`, `j5-tester-2`, ... and shared by the machine's worktrees. A Simulator
   booted outside the pool counts against `ios.maxBooted`. Claims coordinate
   the worktrees on one machine, not two machines sharing an iOS host.
 - On Android, open the emulator by the `emulator-<port>` serial the script
