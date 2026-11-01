@@ -245,6 +245,59 @@ const SEAMS: ReadonlyArray<Seam> = [
     reaches: ["useOwnedSettingsTargets(connectedSettingsTargets(environments))"],
   },
   {
+    file: "features/threads/new-task-flow-provider.tsx",
+    record: "case 90: starting follows the person's level",
+    from: "../../j5/sharing/startAccess",
+    reaches: [
+      "useStartableProjects(projects)",
+      "projects: startableProjects",
+      "startableProjects.find((project) => project.environmentId === selectedEnvironmentId)",
+    ],
+  },
+  {
+    file: "features/threads/NewTaskRouteScreen.tsx",
+    record: "case 90: starting follows the person's level",
+    from: "../../j5/sharing/startAccess",
+    reaches: ["noStartableProjectState({"],
+  },
+  {
+    file: "features/threads/NewTaskDraftScreen.tsx",
+    record: "case 90: starting follows the person's level",
+    from: "../../j5/sharing/startAccess",
+    reaches: [
+      "useCanStartTaskIn(",
+      "readCanStartTaskIn(selectedProject.environmentId, selectedProject.id)",
+    ],
+  },
+  {
+    file: "features/threads/ThreadFeed.tsx",
+    record: "case 90: starting follows the person's level",
+    from: "../../j5/sharing/startAccess",
+    reaches: ["useCanForkThread(props.environmentId, props.projectedItem.sourceThreadId)"],
+  },
+  {
+    file: "features/projects/AddProjectScreen.tsx",
+    record: "case 90: starting follows the person's level",
+    from: "../../j5/sharing/startAccess",
+    reaches: [
+      "useCanAddProject(selectedEnvironment?.environmentId ?? null)",
+      "disabled={!isConnected || !canCreateProject}",
+      "disabled={isSubmitting || !canCreateProject || trimmedName.length === 0}",
+    ],
+  },
+  {
+    file: "features/layout/AdaptiveWorkspaceLayout.tsx",
+    record: "case 90: starting follows the person's level",
+    from: "../../j5/sharing/startAccess",
+    reaches: ["const projects = useStartableProjects(useProjects());"],
+  },
+  {
+    file: "features/threads/ThreadRouteScreen.tsx",
+    record: "case 90: starting follows the person's level",
+    from: "../../j5/sharing/startAccess",
+    reaches: ["const projects = useStartableProjects(useProjects());"],
+  },
+  {
     file: "App.tsx",
     record: "BRANDING.md: mobile OS identity and links",
     from: "../../../scripts/lib/j5-branding.ts",

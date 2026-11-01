@@ -54,6 +54,7 @@ import { uuidv4 } from "../../lib/uuid";
 import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
 import { useCanOperateThread } from "../../j5/sharing/guestAccess";
 import { useSharedConversationFeed } from "../../j5/sharing/sharedConversation";
+import { useStartableProjects } from "../../j5/sharing/startAccess";
 import { useSelectedThreadDetailState } from "../../state/use-thread-detail";
 import { useThreadSelection } from "../../state/use-thread-selection";
 import { GitActionProgressOverlay } from "./GitActionProgressOverlay";
@@ -199,7 +200,8 @@ function ThreadUnavailableScreen(props: {
 /** A thread that can't load opens a new task in its environment instead of a dead end. */
 function UnavailableThreadDraftRedirect(props: { readonly environmentId: EnvironmentId }) {
   const navigation = useNavigation();
-  const projects = useProjects();
+  // J5: only a project the person may start a thread in (FORK.md case 90).
+  const projects = useStartableProjects(useProjects());
   const { layout } = useAdaptiveWorkspaceLayout();
   const openDraft = useEffectEvent(() => {
     const project = projects.find((candidate) => candidate.environmentId === props.environmentId);
