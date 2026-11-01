@@ -9,7 +9,8 @@ import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime"
 import type { EnvironmentId } from "@t3tools/contracts";
 import { isPersonName } from "@t3tools/contracts/j5";
 import { useState } from "react";
-import { KeyboardAvoidingView, Modal, Platform, ScrollView, View } from "react-native";
+import { Modal, ScrollView, View } from "react-native";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { AppText as Text, AppTextInput as TextInput } from "../../components/ui/AppText";
@@ -121,11 +122,9 @@ function NameQuestion({
   return (
     // Full screen, so it can't be swiped away: the question can't be put off.
     <Modal visible animationType="slide" presentationStyle="fullScreen" onRequestClose={() => {}}>
-      <SafeAreaView className="flex-1 bg-screen">
-        <KeyboardAvoidingView
-          className="flex-1"
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-        >
+      {/* Inline flex: on Android a `flex-1` class left this Modal's content zero-height. */}
+      <SafeAreaView className="bg-screen" style={{ flex: 1 }}>
+        <KeyboardAvoidingView automaticOffset behavior="padding" style={{ flex: 1 }}>
           <ScrollView keyboardShouldPersistTaps="handled" contentContainerClassName="gap-5 p-5">
             <View className="gap-2">
               <Text accessibilityRole="header" className="text-2xl font-t3-semibold">
