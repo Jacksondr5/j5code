@@ -6,11 +6,11 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { J5_ACCESS_WS_METHODS, J5_PEOPLE_WS_METHODS } from "@t3tools/contracts/j5";
+import { NAME_IN_USE, nameIsInUse } from "@t3tools/client-runtime/j5/sharing";
 
 import { connectionAtomRuntime } from "../../connection/runtime";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { j5Environment, j5Sharing } from "../state";
-import { NAME_IN_USE } from "./shareLink.logic";
 
 const command = <Tag extends Parameters<typeof createEnvironmentRpcCommand>[1]["tag"]>(tag: Tag) =>
   createEnvironmentRpcCommand(connectionAtomRuntime, { label: `environment-data:${tag}`, tag });
@@ -90,11 +90,3 @@ export function refusalMessage(result: Parameters<typeof squashAtomCommandFailur
     ? error.message
     : "The server did not say why.";
 }
-
-const refusalCode = (error: unknown) => {
-  const code = (error as { readonly code?: unknown } | null)?.code;
-  return typeof code === "string" ? code : null;
-};
-
-/** Whether a refusal is the server's "that name is someone else's", by the refusal's stable name. */
-export const nameIsInUse = (error: unknown) => refusalCode(error) === "PersonNameTakenError";

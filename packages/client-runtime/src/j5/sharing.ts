@@ -1,6 +1,7 @@
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import {
   type ConnectionAccess,
+  type HeldPersonLevel,
   J5_ACCESS_WS_METHODS,
   type PersonLevel,
   higherLevel,
@@ -126,6 +127,63 @@ export const sharingAllowsStart = (
           ? "owner"
           : serverLevelOf(access),
   });
+
+/**
+ * Which server, if any, is asked "What should people and agents on <server> call you?" now:
+ * a device the server cannot place (People and access AC5), or the first owner with no name yet
+ * (AC6). One server at a time, in the order they are listed. Neither can be put off: each is
+ * asked before the device uses that server.
+ */
+export function serverToAskNameFor<Id>(
+  servers: ReadonlyArray<{ readonly id: Id; readonly access: KnownConnectionAccess }>,
+): { readonly id: Id; readonly kind: "claim" | "first-owner" } | null {
+  for (const server of servers) {
+    if (server.access?.kind === "unknown") return { id: server.id, kind: "claim" };
+    if (
+      server.access?.kind === "person" &&
+      server.access.firstOwner &&
+      server.access.name === null
+    ) {
+      return { id: server.id, kind: "first-owner" };
+    }
+  }
+  return null;
+}
+
+/** The level a person is offered by, in the list of people a device could be: their highest. */
+export const offeredLevel = (levels: ReadonlyArray<HeldPersonLevel>): PersonLevel | null =>
+  highestLevel(levels.map((held) => held.level));
+
+const LEVEL_LABELS: Record<PersonLevel, string> = {
+  viewer: "Viewer",
+  collaborator: "Collaborator",
+  owner: "Owner",
+};
+export const levelLabel = (level: PersonLevel) => LEVEL_LABELS[level];
+
+/** What a person is told when a name is not one the server will take, before it is sent. */
+export const NAME_NOT_USABLE =
+  "Use a name of one line, up to 80 characters, with no invisible characters, no square or angle brackets, and no level in parentheses such as (owner).";
+/** What a person is told when the name they chose is someone else's on this server. */
+export const NAME_IN_USE = "That name is already in use on this server. Choose another.";
+
+/** Whether a refusal is the server's "that name is someone else's", by the refusal's stable name. */
+export const nameIsInUse = (error: unknown) =>
+  (error as { readonly code?: unknown } | null)?.code === "PersonNameTakenError";
+
+/**
+ * Whether upstream's "Permissions have changed / pair again" notice is for a connection. One J5
+ * places as a person, or as a device it will ask about, has its permissions renewed when that
+ * person's level changes, so pairing again never applies to it. The notice is held back until the
+ * server answers; a server that cannot answer (from before people) keeps upstream's notice.
+ */
+export function permissionNoticeApplies(
+  answer: AsyncResult.AsyncResult<KnownConnectionAccess, unknown>,
+): boolean {
+  if (answer._tag === "Initial") return false;
+  const access = Option.getOrNull(AsyncResult.value(answer));
+  return access?.kind !== "person" && access?.kind !== "unknown";
+}
 
 const asksThreadLevel = (access: KnownConnectionAccess) =>
   access?.kind === "person" && !access.wide;
