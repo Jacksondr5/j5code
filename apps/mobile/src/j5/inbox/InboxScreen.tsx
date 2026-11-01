@@ -100,8 +100,9 @@ export function InboxScreen() {
   ];
   const list = (
     <KeyboardAwareScrollView
-      // Scrolls the answer being typed, and its Answer button below it, clear of the keyboard.
-      bottomOffset={72}
+      // The offset is measured from the caret, which starts on the answer box's first line: it
+      // covers the rest of the 96-point box, the gap and the Answer button below it.
+      bottomOffset={160}
       className="flex-1 bg-sheet"
       contentInsetAdjustmentBehavior="automatic"
       contentContainerClassName="gap-4 px-4 py-4"
