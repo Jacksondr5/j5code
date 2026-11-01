@@ -122,6 +122,12 @@ const SEAMS: ReadonlyArray<Seam> = [
     reaches: ['page("SettingsAgents", "person.2", "Personas")'],
   },
   {
+    file: "features/home/useThreadListActions.ts",
+    record: "case 21: archive preflight",
+    from: "../../j5/archive/confirmArchive",
+    reaches: ['action === "archive" && !(await confirmJ5Archive(thread))'],
+  },
+  {
     file: "App.tsx",
     record: "BRANDING.md: mobile OS identity and links",
     from: "../../../scripts/lib/j5-branding.ts",

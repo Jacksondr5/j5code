@@ -25,7 +25,7 @@ import {
   renderSharedConversationNote,
   SharedMessageAuthorLine,
 } from "../sharing/SharedConversationCards";
-import { presentParticipantIdentity } from "./ParticipantIdentity";
+import { presentParticipantIdentity } from "@t3tools/client-runtime/j5/participant-identity";
 
 export { J5_A2A_DELIVERY_MESSAGE_PREFIX } from "@t3tools/client-runtime/j5/user-message";
 

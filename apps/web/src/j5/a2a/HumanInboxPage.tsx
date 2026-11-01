@@ -39,7 +39,7 @@ import { RelativeTime } from "../../components/RelativeTime";
 import { RelativeAge } from "../RelativeAge";
 import { answerHumanExchange } from "./humanInboxClient";
 import { useScopedParticipantLabels } from "./ParticipantIdentitiesClient";
-import { presentParticipantIdentity } from "./ParticipantIdentity";
+import { presentParticipantIdentity } from "@t3tools/client-runtime/j5/participant-identity";
 import { CrewProposalCard } from "../crew/CrewProposalCard";
 import { CrewRuntimeRequestsSection } from "../crew/CrewRuntimeRequestsSection";
 import type { ScopedCrewRuntimeRequest } from "../crew/crewRuntimeRequests.logic";

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { sentenceEnd } from "./ArchiveWarningContent";
+import { sentenceEnd } from "./archiveFlow.ts";
 
 describe("sentenceEnd", () => {
   it("closes a sentence after a plain name", () => {
