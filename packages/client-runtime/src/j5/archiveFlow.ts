@@ -1,10 +1,13 @@
-import { EnvironmentId, type ScopedThreadRef, ThreadId } from "@t3tools/contracts";
+import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
 import type { PreArchiveCrewSeat, PreArchiveFacts } from "@t3tools/contracts/j5";
 import * as Cause from "effect/Cause";
 import type { AtomRegistry } from "effect/reactivity";
 
-import { scopeThreadRef } from "../environment/scoped.ts";
-import { presentParticipantIdentity } from "./participantIdentity.ts";
+import {
+  participantIdentitiesFromResponse,
+  presentParticipantIdentity,
+  type ParticipantIdentities,
+} from "./participantIdentity.ts";
 import type { createJ5EnvironmentAtoms } from "./state.ts";
 
 export type { PreArchiveFacts, PreArchiveLiveCrew as LiveCrew } from "@t3tools/contracts/j5";
@@ -20,27 +23,15 @@ export async function readParticipantIdentities(
   registry: AtomRegistry.AtomRegistry,
   environmentId: EnvironmentId,
   participantIds: ReadonlyArray<string>,
-) {
-  const labels = new Map<string, string>();
-  const threads = new Map<string, ScopedThreadRef>();
-  if (participantIds.length === 0) return { labels, threads };
+): Promise<ParticipantIdentities> {
+  if (participantIds.length === 0) return { labels: new Map(), threads: new Map() };
   const result = await j5.readParticipantIdentities.run(registry, {
     environmentId,
     input: { participantIds },
   });
-  if (result._tag === "Failure") return { labels, threads };
-  for (const entry of result.value.entries) {
-    const identity = entry.identity;
-    if (identity.kind !== "known") continue;
-    labels.set(entry.participantId, identity.displayName);
-    if (identity.threadId === undefined) continue;
-    const home =
-      identity.threadEnvironmentId === undefined
-        ? environmentId
-        : EnvironmentId.make(identity.threadEnvironmentId);
-    threads.set(entry.participantId, scopeThreadRef(home, ThreadId.make(identity.threadId)));
-  }
-  return { labels, threads };
+  return result._tag === "Failure"
+    ? { labels: new Map(), threads: new Map() }
+    : participantIdentitiesFromResponse(environmentId, result.value);
 }
 
 export interface ArchivePreflight {
