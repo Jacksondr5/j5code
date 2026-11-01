@@ -670,35 +670,46 @@ function MemberAgentLibrarySettingsScreen() {
                         className="gap-2 rounded-2xl bg-card px-4 py-3"
                       >
                         <View className="flex-row items-center gap-3">
-                          <View className="min-w-0 flex-1 gap-1">
-                            <Text className="text-base font-t3-medium text-foreground">
+                          {/* Paths get the row's full width and truncate in the middle, keeping the folder name. */}
+                          <View className="min-w-0 flex-1 items-start gap-1">
+                            <Text
+                              className="self-stretch text-base font-t3-medium text-foreground"
+                              numberOfLines={1}
+                              ellipsizeMode="middle"
+                            >
                               {folder.configuredPath}
                             </Text>
                             {folder.path !== folder.configuredPath ? (
-                              <Text className="text-xs text-foreground-muted">{folder.path}</Text>
+                              <Text
+                                className="self-stretch text-xs text-foreground-muted"
+                                numberOfLines={1}
+                                ellipsizeMode="middle"
+                              >
+                                {folder.path}
+                              </Text>
                             ) : null}
-                          </View>
-                          <View
-                            className={cn(
-                              "rounded-full border px-2 py-0.5",
-                              folder.exists || !librarySources.data?.configured
-                                ? "border-border"
-                                : "border-danger-foreground/30",
-                            )}
-                          >
-                            <Text
+                            <View
                               className={cn(
-                                "text-xs font-t3-medium",
+                                "rounded-full border px-2 py-0.5",
                                 folder.exists || !librarySources.data?.configured
-                                  ? "text-foreground-muted"
-                                  : "text-danger-foreground",
+                                  ? "border-border"
+                                  : "border-danger-foreground/30",
                               )}
                             >
-                              {agentPersonaFolderStatusLabel(
-                                folder,
-                                librarySources.data?.configured,
-                              )}
-                            </Text>
+                              <Text
+                                className={cn(
+                                  "text-xs font-t3-medium",
+                                  folder.exists || !librarySources.data?.configured
+                                    ? "text-foreground-muted"
+                                    : "text-danger-foreground",
+                                )}
+                              >
+                                {agentPersonaFolderStatusLabel(
+                                  folder,
+                                  librarySources.data?.configured,
+                                )}
+                              </Text>
+                            </View>
                           </View>
                           <Pressable
                             accessibilityRole="button"
