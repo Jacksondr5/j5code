@@ -11,7 +11,7 @@ import { executeAtomQuery } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { type HumanInboxResponse, scopedInboxItemKey } from "@t3tools/contracts/j5";
 import * as Cause from "effect/Cause";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { uuidv4 } from "../../lib/uuid";
 import { appAtomRegistry } from "../../state/atom-registry";
@@ -119,8 +119,38 @@ export function useInboxAnswers(input: {
     };
   };
 
+  // An ask that leaves the open list rereads that server's answered list, so a kept item learns
+  // who answered, or that the agent withdrew it, as web's Inbox does.
+  const previousOpenKeys = useRef(new Map<EnvironmentId, ReadonlySet<string>>());
+  // oxlint-disable-next-line t3code/react-effect-budget -- an ask leaving the open list rereads the answered list; it reacts to data arriving, not to a handler here.
+  useEffect(() => {
+    const next = new Map<EnvironmentId, ReadonlySet<string>>();
+    for (const source of openSources.sources) {
+      if (source.data === null) continue;
+      const keys = new Set(
+        source.data.items.map((item) =>
+          scopedInboxItemKey({ ...item, environmentId: source.environmentId }),
+        ),
+      );
+      const previous = previousOpenKeys.current.get(source.environmentId);
+      if (
+        source.status === "ready" &&
+        previous !== undefined &&
+        [...previous].some((key) => !keys.has(key))
+      ) {
+        appAtomRegistry.refresh(answeredInboxQueryAtom(source.environmentId));
+      }
+      next.set(source.environmentId, keys);
+    }
+    previousOpenKeys.current = next;
+  }, [openSources]);
+
   const [pendingKey, setPendingKey] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // An error belongs to the ask that was being answered: on a phone it is shown by that ask's
+  // answer box, which is where the person is looking.
+  const [error, setError] = useState<{ readonly key: string; readonly message: string } | null>(
+    null,
+  );
   const attempts = useRef(new Map<string, HumanInboxAnswerAttempt>());
 
   const answer = async (item: PresentedHumanInboxItem) => {
@@ -144,7 +174,7 @@ export function useInboxAnswers(input: {
           return next;
         }),
       setPendingExchangeId: setPendingKey,
-      setError,
+      setError: (message) => setError(message === null ? null : { key: itemKey, message }),
     });
   };
 
@@ -156,6 +186,7 @@ export function useInboxAnswers(input: {
       setAnswers((current) => ({ ...current, [scopedInboxItemKey(item)]: text })),
     answer,
     pendingKey,
-    error,
+    errorFor: (item: PresentedHumanInboxItem) =>
+      error !== null && error.key === scopedInboxItemKey(item) ? error.message : null,
   };
 }

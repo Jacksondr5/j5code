@@ -113,11 +113,6 @@ export function InboxScreen() {
             {notice}
           </Text>
         ))}
-        {answers.error === null ? null : (
-          <Text accessibilityRole="alert" className="text-sm text-danger-foreground">
-            {answers.error}
-          </Text>
-        )}
         {answers.shownItems.length === 0 ? (
           loading ? (
             <Text className="text-foreground-muted">Loading your inbox…</Text>
@@ -143,6 +138,7 @@ export function InboxScreen() {
                   onChangeAnswer={(text) => answers.setAnswerText(item, text)}
                   onAnswer={() => void answers.answer(item)}
                   delivering={answers.pendingKey === key}
+                  error={answers.errorFor(item)}
                   anyDelivering={answers.pendingKey !== null}
                 />
               );
@@ -189,6 +185,8 @@ function InboxItem(props: {
   readonly onAnswer: () => void;
   readonly delivering: boolean;
   readonly anyDelivering: boolean;
+  /** Why this ask's last answer was not delivered, or a stale list after it was. */
+  readonly error: string | null;
 }) {
   const { item } = props;
   const [expanded, setExpanded] = useState(false);
@@ -238,6 +236,11 @@ function InboxItem(props: {
             onChangeText={props.onChangeAnswer}
             style={{ minHeight: 96, textAlignVertical: "top" }}
           />
+          {props.error === null ? null : (
+            <Text accessibilityRole="alert" className="text-sm text-danger-foreground">
+              {props.error}
+            </Text>
+          )}
           <View className="flex-row flex-wrap items-center justify-between gap-2">
             <OpenSenderThread item={item} />
             {closedText !== null ? (
