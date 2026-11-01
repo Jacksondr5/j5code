@@ -146,57 +146,62 @@ export function PlaybookConversationModal({
         if (!busy) onClose();
       }}
     >
-      <SafeAreaView className="flex-1 bg-background">
-        <View className="gap-4 p-4">
-          <Text className="text-xl font-semibold text-foreground">
-            {name === null ? "Create playbook" : "Prepare chat"}
-          </Text>
-          <Text className="text-muted-foreground">
-            {name === null
-              ? "Choose a project for the conversation. New playbooks are saved to the environment library."
-              : "Choose the project to run the playbook in."}
-          </Text>
-          {workspace ? (
-            <Menu
-              actions={workspaces.map((entry) => ({
-                id: entry.key,
-                title: entry.title,
-                state: entry.key === workspace.key ? "on" : "off",
-              }))}
-              onPressAction={({ nativeEvent }) => setSelected(nativeEvent.event)}
-            >
+      {/* SafeAreaView takes no className, so the theme surface and flex go on a View. */}
+      <View className="flex-1 bg-sheet">
+        <SafeAreaView style={{ flex: 1 }}>
+          <View className="gap-4 p-4">
+            <Text className="text-xl font-semibold text-foreground">
+              {name === null ? "Create playbook" : "Prepare chat"}
+            </Text>
+            <Text className="text-foreground-muted">
+              {name === null
+                ? "Choose a project for the conversation. New playbooks are saved to the environment library."
+                : "Choose the project to run the playbook in."}
+            </Text>
+            {workspace ? (
+              <Menu
+                actions={workspaces.map((entry) => ({
+                  id: entry.key,
+                  title: entry.title,
+                  state: entry.key === workspace.key ? "on" : "off",
+                }))}
+                onPressAction={({ nativeEvent }) => setSelected(nativeEvent.event)}
+              >
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={busy}
+                  className="rounded-lg border border-border p-3"
+                >
+                  <Text>{workspace.title}</Text>
+                </Pressable>
+              </Menu>
+            ) : (
+              <Text>
+                Add a project to open a conversation. You can import playbooks without one.
+              </Text>
+            )}
+            {error ? (
+              <Text accessibilityRole="alert" className="text-danger-foreground">
+                {error}
+              </Text>
+            ) : null}
+            <View className="flex-row justify-end gap-4">
+              <Pressable accessibilityRole="button" disabled={busy} onPress={onClose}>
+                <Text>Cancel</Text>
+              </Pressable>
               <Pressable
                 accessibilityRole="button"
-                disabled={busy}
-                className="rounded-lg border border-border p-3"
+                disabled={busy || !workspace}
+                onPress={() => void submit()}
               >
-                <Text>{workspace.title}</Text>
+                <Text className="text-primary">
+                  {name === null ? "Open Playbook Author" : "Prepare chat"}
+                </Text>
               </Pressable>
-            </Menu>
-          ) : (
-            <Text>Add a project to open a conversation. You can import playbooks without one.</Text>
-          )}
-          {error ? (
-            <Text accessibilityRole="alert" className="text-destructive">
-              {error}
-            </Text>
-          ) : null}
-          <View className="flex-row justify-end gap-4">
-            <Pressable accessibilityRole="button" disabled={busy} onPress={onClose}>
-              <Text>Cancel</Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              disabled={busy || !workspace}
-              onPress={() => void submit()}
-            >
-              <Text className="text-primary">
-                {name === null ? "Open Playbook Author" : "Prepare chat"}
-              </Text>
-            </Pressable>
+            </View>
           </View>
-        </View>
-      </SafeAreaView>
+        </SafeAreaView>
+      </View>
     </Modal>
   );
 }

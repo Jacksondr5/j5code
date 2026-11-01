@@ -77,100 +77,102 @@ export function AgentEditorModal(props: {
         if (!saving) props.onClose();
       }}
     >
-      {/* Inline flex: on Android a `flex-1` class left this Modal's content zero-height. */}
-      <SafeAreaView className="bg-sheet" style={{ flex: 1 }}>
-        <KeyboardAvoidingView
-          style={{ flex: 1 }}
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-        >
-          <View className="flex-row items-center justify-between px-5 py-3">
-            <Text className="text-xl font-t3-semibold">Edit persona</Text>
-            <Pressable
-              accessibilityRole="button"
-              disabled={saving}
-              onPress={props.onClose}
-              className="px-3 py-2"
-            >
-              <Text>Cancel</Text>
-            </Pressable>
-          </View>
-          <ScrollView
-            keyboardShouldPersistTaps="handled"
-            contentContainerClassName="gap-4 px-5 pb-6"
+      {/* SafeAreaView takes no className, so the theme surface and flex go on a View. */}
+      <View className="flex-1 bg-sheet">
+        <SafeAreaView style={{ flex: 1 }}>
+          <KeyboardAvoidingView
+            style={{ flex: 1 }}
+            behavior={Platform.OS === "ios" ? "padding" : undefined}
           >
-            <Text className="text-sm text-foreground-muted">
-              Changes apply to this imported copy and future launches. The original file and
-              existing tasks stay unchanged.
-            </Text>
-            <View className="gap-2">
-              <Text>Name</Text>
-              <TextInput
-                accessibilityLabel="Name"
-                value={draft.displayName}
-                editable={!saving}
-                onChangeText={(displayName) => setDraft({ ...draft, displayName })}
-              />
+            <View className="flex-row items-center justify-between px-5 py-3">
+              <Text className="text-xl font-t3-semibold">Edit persona</Text>
+              <Pressable
+                accessibilityRole="button"
+                disabled={saving}
+                onPress={props.onClose}
+                className="px-3 py-2"
+              >
+                <Text>Cancel</Text>
+              </Pressable>
             </View>
-            <View className="gap-2">
-              <Text>Description</Text>
-              <TextInput
-                accessibilityLabel="Description"
-                multiline
-                value={draft.description}
-                editable={!saving}
-                onChangeText={(description) => setDraft({ ...draft, description })}
-              />
-            </View>
-            <View className="gap-2">
-              <Text>Instructions</Text>
-              <TextInput
-                accessibilityLabel="Instructions"
-                multiline
-                autoCapitalize="none"
-                autoCorrect={false}
-                style={{ minHeight: 160 }}
-                placeholder={instructions === null ? "Loading…" : undefined}
-                value={instructions ?? ""}
-                editable={!saving && instructions !== null}
-                onChangeText={setInstructions}
-              />
-              <Text className="text-xs text-foreground-muted">
-                Markdown. Instructions describe behavior; the runtime policy below is what is
-                enforced.
-              </Text>
-            </View>
-            <AgentRoutePolicyFields
-              environmentId={props.environmentId}
-              value={draft}
-              retainRoute={props.initial.modelRoute}
-              disabled={saving}
-              onChange={(next) => setDraft({ ...draft, ...next })}
-            />
-            {error ? (
-              <Text accessibilityRole="alert" className="text-sm text-danger-foreground">
-                {error}
-              </Text>
-            ) : null}
-            <Pressable
-              accessibilityRole="button"
-              disabled={
-                saving ||
-                !canSave ||
-                instructions === null ||
-                !instructions.trim() ||
-                !draft.displayName.trim() ||
-                !draft.description.trim()
-              }
-              className="items-center rounded-xl bg-primary px-4 py-3 disabled:opacity-40"
-              onPress={() => void submit()}
+            <ScrollView
+              keyboardShouldPersistTaps="handled"
+              contentContainerClassName="gap-4 px-5 pb-6"
             >
-              <Text className="font-t3-semibold text-primary-foreground">
-                {saving ? "Saving…" : "Save changes"}
+              <Text className="text-sm text-foreground-muted">
+                Changes apply to this imported copy and future launches. The original file and
+                existing tasks stay unchanged.
               </Text>
-            </Pressable>
-          </ScrollView>
-        </KeyboardAvoidingView>
-      </SafeAreaView>
+              <View className="gap-2">
+                <Text>Name</Text>
+                <TextInput
+                  accessibilityLabel="Name"
+                  value={draft.displayName}
+                  editable={!saving}
+                  onChangeText={(displayName) => setDraft({ ...draft, displayName })}
+                />
+              </View>
+              <View className="gap-2">
+                <Text>Description</Text>
+                <TextInput
+                  accessibilityLabel="Description"
+                  multiline
+                  value={draft.description}
+                  editable={!saving}
+                  onChangeText={(description) => setDraft({ ...draft, description })}
+                />
+              </View>
+              <View className="gap-2">
+                <Text>Instructions</Text>
+                <TextInput
+                  accessibilityLabel="Instructions"
+                  multiline
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  style={{ minHeight: 160 }}
+                  placeholder={instructions === null ? "Loading…" : undefined}
+                  value={instructions ?? ""}
+                  editable={!saving && instructions !== null}
+                  onChangeText={setInstructions}
+                />
+                <Text className="text-xs text-foreground-muted">
+                  Markdown. Instructions describe behavior; the runtime policy below is what is
+                  enforced.
+                </Text>
+              </View>
+              <AgentRoutePolicyFields
+                environmentId={props.environmentId}
+                value={draft}
+                retainRoute={props.initial.modelRoute}
+                disabled={saving}
+                onChange={(next) => setDraft({ ...draft, ...next })}
+              />
+              {error ? (
+                <Text accessibilityRole="alert" className="text-sm text-danger-foreground">
+                  {error}
+                </Text>
+              ) : null}
+              <Pressable
+                accessibilityRole="button"
+                disabled={
+                  saving ||
+                  !canSave ||
+                  instructions === null ||
+                  !instructions.trim() ||
+                  !draft.displayName.trim() ||
+                  !draft.description.trim()
+                }
+                className="items-center rounded-xl bg-primary px-4 py-3 disabled:opacity-40"
+                onPress={() => void submit()}
+              >
+                <Text className="font-t3-semibold text-primary-foreground">
+                  {saving ? "Saving…" : "Save changes"}
+                </Text>
+              </Pressable>
+            </ScrollView>
+          </KeyboardAvoidingView>
+        </SafeAreaView>
+      </View>
     </Modal>
   );
 }

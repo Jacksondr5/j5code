@@ -112,124 +112,126 @@ export function AgentCreateModal(props: {
         if (!saving) props.onClose();
       }}
     >
-      {/* Inline flex: on Android a `flex-1` class left this Modal's content zero-height. */}
-      <SafeAreaView className="bg-sheet" style={{ flex: 1 }}>
-        <KeyboardAvoidingView
-          style={{ flex: 1 }}
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-        >
-          <View className="flex-row items-center justify-between px-5 py-3">
-            <Text className="text-xl font-t3-semibold">
-              {props.initial ? "Duplicate persona" : "Create persona"}
-            </Text>
-            <Pressable
-              accessibilityRole="button"
-              disabled={saving}
-              onPress={props.onClose}
-              className="px-3 py-2"
-            >
-              <Text>Cancel</Text>
-            </Pressable>
-          </View>
-          <ScrollView
-            keyboardShouldPersistTaps="handled"
-            contentContainerClassName="gap-4 px-5 pb-6"
+      {/* SafeAreaView takes no className, so the theme surface and flex go on a View. */}
+      <View className="flex-1 bg-sheet">
+        <SafeAreaView style={{ flex: 1 }}>
+          <KeyboardAvoidingView
+            style={{ flex: 1 }}
+            behavior={Platform.OS === "ios" ? "padding" : undefined}
           >
-            <Text className="text-sm text-foreground-muted">
-              A personal persona for this environment. It joins the library like an import, so you
-              can edit, switch off, or remove it later.
-            </Text>
-            <View className="gap-2">
-              <Text>Name</Text>
-              <TextInput
-                accessibilityLabel="Name"
-                value={draft.displayName}
-                editable={!saving}
-                onChangeText={(displayName) =>
-                  setDraft({
-                    ...draft,
-                    displayName,
-                    id: draft.idEdited ? draft.id : agentPersonaIdFromName(displayName),
-                  })
-                }
-              />
-            </View>
-            <View className="gap-2">
-              <Text>ID</Text>
-              <TextInput
-                accessibilityLabel="ID"
-                autoCapitalize="none"
-                autoCorrect={false}
-                value={draft.id}
-                editable={!saving}
-                onChangeText={(id) => setDraft({ ...draft, id: id.trim(), idEdited: true })}
-              />
-              <Text className="text-xs text-foreground-muted">
-                {draft.id !== "" && idError !== null
-                  ? idError
-                  : "Stable identifier used in @persona: mentions. Lowercase letters, digits, hyphens."}
+            <View className="flex-row items-center justify-between px-5 py-3">
+              <Text className="text-xl font-t3-semibold">
+                {props.initial ? "Duplicate persona" : "Create persona"}
               </Text>
-            </View>
-            <View className="gap-2">
-              <Text>Description</Text>
-              <TextInput
-                accessibilityLabel="Description"
-                multiline
-                placeholder="One sentence on what this persona is for."
-                value={draft.description}
-                editable={!saving}
-                onChangeText={(description) => setDraft({ ...draft, description })}
-              />
-            </View>
-            <View className="gap-2">
-              <Text>Instructions</Text>
-              <TextInput
-                accessibilityLabel="Instructions"
-                multiline
-                autoCapitalize="none"
-                autoCorrect={false}
-                style={{ minHeight: 160 }}
-                placeholder="# Who this persona is"
-                value={draft.instructions}
-                editable={!saving}
-                onChangeText={(instructions) => setDraft({ ...draft, instructions })}
-              />
-              <Text className="text-xs text-foreground-muted">
-                Markdown. Instructions describe behavior; the runtime policy below is what is
-                enforced.
-              </Text>
-            </View>
-            {modelRoute === null ? (
-              <Text className="text-sm text-foreground-muted">
-                Sign in to Codex or Claude on this environment to choose the persona's models.
-              </Text>
-            ) : (
-              <AgentRoutePolicyFields
-                environmentId={props.environmentId}
-                value={{ authorityPolicy: draft.authorityPolicy, modelRoute }}
+              <Pressable
+                accessibilityRole="button"
                 disabled={saving}
-                onChange={(next) => setDraft({ ...draft, ...next })}
-              />
-            )}
-            {error ? (
-              <Text accessibilityRole="alert" className="text-sm text-danger-foreground">
-                {error}
-              </Text>
-            ) : null}
-            <Pressable
-              accessibilityRole="button"
-              accessibilityState={{ disabled: !ready }}
-              disabled={!ready}
-              className="items-center rounded-xl bg-primary px-4 py-3 disabled:opacity-40"
-              onPress={() => void submit()}
+                onPress={props.onClose}
+                className="px-3 py-2"
+              >
+                <Text>Cancel</Text>
+              </Pressable>
+            </View>
+            <ScrollView
+              keyboardShouldPersistTaps="handled"
+              contentContainerClassName="gap-4 px-5 pb-6"
             >
-              <Text className="font-t3-semibold text-primary-foreground">
-                {saving ? "Creating…" : "Create persona"}
+              <Text className="text-sm text-foreground-muted">
+                A personal persona for this environment. It joins the library like an import, so you
+                can edit, switch off, or remove it later.
               </Text>
-            </Pressable>
-          </ScrollView>
-        </KeyboardAvoidingView>
-      </SafeAreaView>
+              <View className="gap-2">
+                <Text>Name</Text>
+                <TextInput
+                  accessibilityLabel="Name"
+                  value={draft.displayName}
+                  editable={!saving}
+                  onChangeText={(displayName) =>
+                    setDraft({
+                      ...draft,
+                      displayName,
+                      id: draft.idEdited ? draft.id : agentPersonaIdFromName(displayName),
+                    })
+                  }
+                />
+              </View>
+              <View className="gap-2">
+                <Text>ID</Text>
+                <TextInput
+                  accessibilityLabel="ID"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  value={draft.id}
+                  editable={!saving}
+                  onChangeText={(id) => setDraft({ ...draft, id: id.trim(), idEdited: true })}
+                />
+                <Text className="text-xs text-foreground-muted">
+                  {draft.id !== "" && idError !== null
+                    ? idError
+                    : "Stable identifier used in @persona: mentions. Lowercase letters, digits, hyphens."}
+                </Text>
+              </View>
+              <View className="gap-2">
+                <Text>Description</Text>
+                <TextInput
+                  accessibilityLabel="Description"
+                  multiline
+                  placeholder="One sentence on what this persona is for."
+                  value={draft.description}
+                  editable={!saving}
+                  onChangeText={(description) => setDraft({ ...draft, description })}
+                />
+              </View>
+              <View className="gap-2">
+                <Text>Instructions</Text>
+                <TextInput
+                  accessibilityLabel="Instructions"
+                  multiline
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  style={{ minHeight: 160 }}
+                  placeholder="# Who this persona is"
+                  value={draft.instructions}
+                  editable={!saving}
+                  onChangeText={(instructions) => setDraft({ ...draft, instructions })}
+                />
+                <Text className="text-xs text-foreground-muted">
+                  Markdown. Instructions describe behavior; the runtime policy below is what is
+                  enforced.
+                </Text>
+              </View>
+              {modelRoute === null ? (
+                <Text className="text-sm text-foreground-muted">
+                  Sign in to Codex or Claude on this environment to choose the persona's models.
+                </Text>
+              ) : (
+                <AgentRoutePolicyFields
+                  environmentId={props.environmentId}
+                  value={{ authorityPolicy: draft.authorityPolicy, modelRoute }}
+                  disabled={saving}
+                  onChange={(next) => setDraft({ ...draft, ...next })}
+                />
+              )}
+              {error ? (
+                <Text accessibilityRole="alert" className="text-sm text-danger-foreground">
+                  {error}
+                </Text>
+              ) : null}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ disabled: !ready }}
+                disabled={!ready}
+                className="items-center rounded-xl bg-primary px-4 py-3 disabled:opacity-40"
+                onPress={() => void submit()}
+              >
+                <Text className="font-t3-semibold text-primary-foreground">
+                  {saving ? "Creating…" : "Create persona"}
+                </Text>
+              </Pressable>
+            </ScrollView>
+          </KeyboardAvoidingView>
+        </SafeAreaView>
+      </View>
     </Modal>
   );
 }

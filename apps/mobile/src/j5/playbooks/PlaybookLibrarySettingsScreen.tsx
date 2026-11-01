@@ -397,18 +397,21 @@ function PlaybookLibrary({
           presentationStyle="pageSheet"
           onRequestClose={() => setDetails(null)}
         >
-          <SafeAreaView className="flex-1 bg-background">
-            <ScrollView contentContainerClassName="gap-3 p-4">
-              <Text className="text-xl font-semibold text-foreground">{detail.title}</Text>
-              <Text className="text-muted-foreground">{detail.description}</Text>
-              {detail.steps.map((step, index) => (
-                <Text key={step.id}>{playbookStepLabel(step, index)}</Text>
-              ))}
-              <Pressable accessibilityRole="button" onPress={() => setDetails(null)}>
-                <Text className="text-primary">Close</Text>
-              </Pressable>
-            </ScrollView>
-          </SafeAreaView>
+          {/* SafeAreaView takes no className, so the theme surface and flex go on a View. */}
+          <View className="flex-1 bg-sheet">
+            <SafeAreaView style={{ flex: 1 }}>
+              <ScrollView contentContainerClassName="gap-3 p-4">
+                <Text className="text-xl font-semibold text-foreground">{detail.title}</Text>
+                <Text className="text-foreground-muted">{detail.description}</Text>
+                {detail.steps.map((step, index) => (
+                  <Text key={step.id}>{playbookStepLabel(step, index)}</Text>
+                ))}
+                <Pressable accessibilityRole="button" onPress={() => setDetails(null)}>
+                  <Text className="text-primary">Close</Text>
+                </Pressable>
+              </ScrollView>
+            </SafeAreaView>
+          </View>
         </Modal>
       ) : null}
       {importing || copyTarget || renameTarget ? (
@@ -418,97 +421,102 @@ function PlaybookLibrary({
           presentationStyle="pageSheet"
           onRequestClose={closeEditor}
         >
-          <SafeAreaView className="flex-1 bg-background">
-            <ScrollView keyboardShouldPersistTaps="handled" contentContainerClassName="gap-4 p-4">
-              <Text className="text-xl font-semibold text-foreground">
-                {renameTarget
-                  ? "Rename playbook"
-                  : copyTarget
-                    ? "Copy playbook"
-                    : "Import playbook"}
-              </Text>
-              <Text className="text-muted-foreground">
-                Available in every project on the environment.
-              </Text>
-              <TextInput
-                accessibilityLabel={renameTarget ? "Playbook title" : "Playbook name"}
-                placeholder={renameTarget ? "Title" : "release-review"}
-                value={renameTarget ? renameTarget.title : name}
-                onChangeText={(value) =>
-                  renameTarget ? setRenameTarget({ ...renameTarget, title: value }) : setName(value)
-                }
-                editable={!busy}
-                autoCapitalize="none"
-                className="rounded-lg border border-border p-3 text-foreground"
-              />
-              {importing ? (
-                <TextInput
-                  accessibilityLabel="Playbook YAML"
-                  placeholder="Paste YAML"
-                  value={yaml}
-                  onChangeText={setYaml}
-                  editable={!busy}
-                  multiline
-                  className="min-h-48 rounded-lg border border-border p-3 text-foreground"
-                />
-              ) : null}
-              {error ? (
-                <Text accessibilityRole="alert" className="text-destructive">
-                  {error}
+          {/* SafeAreaView takes no className, so the theme surface and flex go on a View. */}
+          <View className="flex-1 bg-sheet">
+            <SafeAreaView style={{ flex: 1 }}>
+              <ScrollView keyboardShouldPersistTaps="handled" contentContainerClassName="gap-4 p-4">
+                <Text className="text-xl font-semibold text-foreground">
+                  {renameTarget
+                    ? "Rename playbook"
+                    : copyTarget
+                      ? "Copy playbook"
+                      : "Import playbook"}
                 </Text>
-              ) : null}
-              <View className="flex-row justify-end gap-4">
-                <Pressable accessibilityRole="button" disabled={busy} onPress={closeEditor}>
-                  <Text>Cancel</Text>
-                </Pressable>
-                <Pressable
-                  accessibilityRole="button"
-                  disabled={
-                    busy ||
-                    !canSaveDestination ||
-                    (renameTarget
-                      ? !renameTarget.title.trim()
-                      : !name.trim() || (importing && !yaml.trim()))
+                <Text className="text-foreground-muted">
+                  Available in every project on the environment.
+                </Text>
+                <TextInput
+                  accessibilityLabel={renameTarget ? "Playbook title" : "Playbook name"}
+                  placeholder={renameTarget ? "Title" : "release-review"}
+                  value={renameTarget ? renameTarget.title : name}
+                  onChangeText={(value) =>
+                    renameTarget
+                      ? setRenameTarget({ ...renameTarget, title: value })
+                      : setName(value)
                   }
-                  onPress={() =>
-                    void act(async () => {
-                      if (renameTarget) {
-                        const result = await rename({
-                          environmentId,
-                          input: { ...scope, ...renameTarget, title: renameTarget.title.trim() },
-                        });
-                        if (result._tag === "Failure") throw squashAtomCommandFailure(result);
-                        setRenameTarget(null);
-                      } else {
-                        let text = yaml;
-                        if (copyTarget) {
-                          const result = await exportDefinition({
+                  editable={!busy}
+                  autoCapitalize="none"
+                  className="rounded-lg border border-border p-3 text-foreground"
+                />
+                {importing ? (
+                  <TextInput
+                    accessibilityLabel="Playbook YAML"
+                    placeholder="Paste YAML"
+                    value={yaml}
+                    onChangeText={setYaml}
+                    editable={!busy}
+                    multiline
+                    className="min-h-48 rounded-lg border border-border p-3 text-foreground"
+                  />
+                ) : null}
+                {error ? (
+                  <Text accessibilityRole="alert" className="text-danger-foreground">
+                    {error}
+                  </Text>
+                ) : null}
+                <View className="flex-row justify-end gap-4">
+                  <Pressable accessibilityRole="button" disabled={busy} onPress={closeEditor}>
+                    <Text>Cancel</Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    disabled={
+                      busy ||
+                      !canSaveDestination ||
+                      (renameTarget
+                        ? !renameTarget.title.trim()
+                        : !name.trim() || (importing && !yaml.trim()))
+                    }
+                    onPress={() =>
+                      void act(async () => {
+                        if (renameTarget) {
+                          const result = await rename({
                             environmentId,
-                            input: { ...scope, name: copyTarget.name, source: copyTarget.source },
+                            input: { ...scope, ...renameTarget, title: renameTarget.title.trim() },
                           });
                           if (result._tag === "Failure") throw squashAtomCommandFailure(result);
-                          text = result.value.yaml;
+                          setRenameTarget(null);
+                        } else {
+                          let text = yaml;
+                          if (copyTarget) {
+                            const result = await exportDefinition({
+                              environmentId,
+                              input: { ...scope, name: copyTarget.name, source: copyTarget.source },
+                            });
+                            if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+                            text = result.value.yaml;
+                          }
+                          const result = await save({
+                            environmentId: copyTarget?.destination ?? environmentId,
+                            input: { name, yaml: text },
+                          });
+                          if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+                          setImporting(false);
+                          setCopyTarget(null);
+                          setName("");
+                          setYaml("");
                         }
-                        const result = await save({
-                          environmentId: copyTarget?.destination ?? environmentId,
-                          input: { name, yaml: text },
-                        });
-                        if (result._tag === "Failure") throw squashAtomCommandFailure(result);
-                        setImporting(false);
-                        setCopyTarget(null);
-                        setName("");
-                        setYaml("");
-                      }
-                    })
-                  }
-                >
-                  <Text className="text-primary">
-                    {renameTarget ? "Save" : copyTarget ? "Copy" : "Import"}
-                  </Text>
-                </Pressable>
-              </View>
-            </ScrollView>
-          </SafeAreaView>
+                      })
+                    }
+                  >
+                    <Text className="text-primary">
+                      {renameTarget ? "Save" : copyTarget ? "Copy" : "Import"}
+                    </Text>
+                  </Pressable>
+                </View>
+              </ScrollView>
+            </SafeAreaView>
+          </View>
         </Modal>
       ) : null}
     </>
