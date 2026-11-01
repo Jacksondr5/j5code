@@ -40,9 +40,9 @@ export function NameQuestionHost() {
 
 /**
  * "What should people and agents on <server> call you?", asked before a device uses the server
- * (People and access AC5, AC6), as web's `NameDialog` asks it. "Not now" puts it off until the app
- * next starts, and "Remove this server" forgets the server; both touch only this server. Until it
- * is answered, the device reaches nothing on that server.
+ * (People and access AC5, AC6), as web's `NameDialog` asks it. A device the server cannot place may
+ * put it off with "Not now" until the app next starts, and anyone may forget the server with
+ * "Remove this server"; both touch only this server.
  */
 function NameQuestion({
   environmentId,
@@ -208,15 +208,19 @@ function NameQuestion({
               disabled={naming && name.trim() === ""}
               onPress={() => void save()}
             />
-            {/* A way out that touches only this server: put it off, or forget it on this device. */}
-            <Button
-              label="Not now"
-              tone="secondary"
-              fullWidth
-              disabled={busy}
-              accessibilityHint={`Asks again the next time the app opens. Until then, ${serverName} shows nothing.`}
-              onPress={putOff}
-            />
+            {/* Ways out that touch only this server. A device the server cannot place reaches nothing
+                there until it says whose it is, so it may put the question off; the first owner
+                already holds the server, so only naming or removing it ends their question (AC6). */}
+            {kind === "claim" ? (
+              <Button
+                label="Not now"
+                tone="secondary"
+                fullWidth
+                disabled={busy}
+                accessibilityHint={`Asks again the next time the app opens. Until then, ${serverName} shows nothing.`}
+                onPress={putOff}
+              />
+            ) : null}
             <Button
               label="Remove this server"
               tone="text"
