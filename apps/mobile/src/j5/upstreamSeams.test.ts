@@ -96,6 +96,25 @@ const SEAMS: ReadonlyArray<Seam> = [
     ],
   },
   {
+    file: "features/threads/ThreadFeed.tsx",
+    record: "case 97: Timeline delegate",
+    from: "../../j5/a2a/timeline",
+    reaches: [
+      "resolveJ5FeedMessage(message, props.j5Timeline)",
+      "renderJ5TimelineNotice({ message, timestampLabel })",
+      "<J5MessageAuthorLine",
+      "<J5OpenSenderThread",
+      "useJ5Timeline(",
+      "resolveJ5FeedMessage(entry.message, j5Timeline)",
+    ],
+  },
+  {
+    file: "features/threads/ThreadQueueControl.tsx",
+    record: "case 97: Queue-row formatter",
+    from: "../../j5/a2a/queuedDelivery",
+    reaches: ["useJ5QueuedDeliveryLabel(", "queuedDeliveryLabel(text) ??"],
+  },
+  {
     file: "features/threads/thread-list-v2-items.tsx",
     record: "Saved-agent mentions: agent identity",
     from: "../../j5/agents/AgentIdentityChip",

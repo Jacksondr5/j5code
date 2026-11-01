@@ -30,10 +30,7 @@ import { KeyboardAwareLegendList } from "@legendapp/list/keyboard";
 import { useViewabilityAmount, type LegendListRef } from "@legendapp/list/react-native";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { HandoffEndpoints } from "@t3tools/client-runtime/handoff";
-import {
-  IDLE_COMPACTING_LABELS,
-  resolveUserMessagePresentation,
-} from "@t3tools/client-runtime/user-message";
+import { IDLE_COMPACTING_LABELS } from "@t3tools/client-runtime/user-message";
 import { canForkProjectedAssistantItem } from "@t3tools/client-runtime/state/thread-workflows";
 import type { ThreadCheckpointSummary } from "@t3tools/client-runtime/state/thread-checkpoints";
 import { formatDiffCount } from "@t3tools/client-runtime/diff-count";
@@ -269,6 +266,14 @@ import {
   ThreadMarkdownImageView,
 } from "./ThreadMarkdownImage";
 import { openSettings } from "../settings/settings-navigation";
+import {
+  J5MessageAuthorLine,
+  J5OpenSenderThread,
+  renderJ5TimelineNotice,
+  resolveJ5FeedMessage,
+  useJ5Timeline,
+  type J5Timeline,
+} from "../../j5/a2a/timeline";
 import { useSelectWorkspaceDetail } from "../workspace/useSelectWorkspaceDetail";
 
 const WIDE_MARKDOWN_BLOCK_OPTIONS = {
@@ -1042,6 +1047,8 @@ function useMarkdownStyles(): MarkdownStyleSets {
 function AgentMessageFoldHeader(props: {
   readonly environmentId: EnvironmentId;
   readonly senderThreadId?: ThreadId;
+  /** J5 names the sender in the line above the row instead. */
+  readonly label?: string;
   readonly summary: string;
   readonly expanded: boolean;
   readonly onToggle: () => void;
@@ -1050,11 +1057,11 @@ function AgentMessageFoldHeader(props: {
   const senderShell = useQuietThreadShell(
     props.senderThreadId ? scopeThreadRef(props.environmentId, props.senderThreadId) : null,
   );
-  const label = senderShell?.title.trim() || "Agent";
+  const label = props.label ?? (senderShell?.title.trim() || "Agent");
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${label}: ${props.summary}`}
+      accessibilityLabel={label ? `${label}: ${props.summary}` : props.summary}
       accessibilityHint={`Double tap to ${props.expanded ? "hide" : "show"} the message.`}
       accessibilityState={{ expanded: props.expanded }}
       hitSlop={4}
@@ -1071,12 +1078,14 @@ function AgentMessageFoldHeader(props: {
         tintColorClassName="accent-user-bubble-foreground-muted"
         type="monochrome"
       />
-      <Text
-        numberOfLines={1}
-        className="max-w-[50%] shrink-0 font-t3-medium text-sm text-user-bubble-foreground-muted"
-      >
-        {label}
-      </Text>
+      {label ? (
+        <Text
+          numberOfLines={1}
+          className="max-w-[50%] shrink-0 font-t3-medium text-sm text-user-bubble-foreground-muted"
+        >
+          {label}
+        </Text>
+      ) : null}
       <Text numberOfLines={1} className="min-w-0 shrink text-sm text-user-bubble-foreground">
         {props.summary}
       </Text>
@@ -1276,6 +1285,7 @@ function renderFeedEntry(
     readonly contentWidth: number;
     readonly threadTitle: string;
     readonly workflowOpening: WorkflowOpening | null;
+    readonly j5Timeline: J5Timeline;
   },
 ) {
   const entry = info.item;
@@ -1451,7 +1461,8 @@ function renderFeedEntry(
   if (entry.type === "message") {
     const { message } = entry;
     const isUser = message.role === "user";
-    const presentation = resolveUserMessagePresentation(message);
+    // J5 (case 97): who is speaking, and their words without J5's envelope.
+    const presentation = resolveJ5FeedMessage(message, props.j5Timeline);
     const renderedText = renderAssistantCitationsAsText(presentation.text);
     const styles = isUser ? markdownStyles.user : markdownStyles.assistant;
     const timestampLabel = formatMessageTime(isUser ? message.createdAt : message.updatedAt);
@@ -1497,6 +1508,9 @@ function renderFeedEntry(
         />
       );
     }
+    // J5 (case 97): J5's platform notices draw in place of the row.
+    const j5Notice = renderJ5TimelineNotice({ message, timestampLabel });
+    if (j5Notice !== null) return j5Notice;
     if (isUser && presentation.attribution === "automation") {
       const rowId = `automation:${message.id}`;
       return (
@@ -1541,9 +1555,14 @@ function renderFeedEntry(
       );
       return (
         <Animated.View
-          className="mb-5 items-end"
+          className={cn("mb-5", presentation.side === "left" ? "items-start" : "items-end")}
           {...(enterAnimated ? { entering: FadeInUp.duration(220) } : {})}
         >
+          <J5MessageAuthorLine
+            message={message}
+            presentation={presentation}
+            timeline={props.j5Timeline}
+          />
           {presentation.attribution === "t3code" ? (
             <Text className="mb-1 pr-1 font-t3-medium text-2xs text-foreground-muted opacity-60">
               Sent by J5 Code
@@ -1571,11 +1590,14 @@ function renderFeedEntry(
               <AgentMessageFoldHeader
                 environmentId={props.environmentId}
                 senderThreadId={message.senderThreadId}
+                {...(presentation.j5 ? { label: "" } : {})}
                 summary={
+                  presentation.preview ??
                   replaceComposerContextReferences(presentation.text, (ref) => ref.label)
                     .split(/\r?\n/)
                     .find((line) => line.trim().length > 0)
-                    ?.trim() ?? ""
+                    ?.trim() ??
+                  ""
                 }
                 expanded={foldExpanded}
                 onToggle={() => props.onToggleWorkRow(foldRowId, entry.id)}
@@ -1671,7 +1693,13 @@ function renderFeedEntry(
           </View>
           {bubbleBodyVisible ? (
             <View className="mt-1 flex-row items-center justify-end gap-1 pr-0.5">
-              {foldRowId !== null && message.senderThreadId ? (
+              {foldRowId !== null && presentation.j5 ? (
+                <J5OpenSenderThread
+                  message={message}
+                  presentation={presentation}
+                  timeline={props.j5Timeline}
+                />
+              ) : foldRowId !== null && message.senderThreadId ? (
                 <OpenSenderThreadButton
                   environmentId={props.environmentId}
                   senderThreadId={message.senderThreadId}
@@ -1725,7 +1753,7 @@ function renderFeedEntry(
                 <UserMessageCopyButton
                   text={presentation.text}
                   onCopy={
-                    message.context && presentation.attribution !== "guest"
+                    message.context && presentation.attribution !== "guest" && !presentation.j5
                       ? () =>
                           writeComposerContextClipboard(message.text, {
                             version: 1,
@@ -2628,10 +2656,15 @@ export const ThreadFeed = memo(function ThreadFeed({
     () => threadFeedCompactionLabels(props.feed),
     [props.feed],
   );
+  const j5Timeline = useJ5Timeline(
+    props.environmentId,
+    props.feed.flatMap((entry) => (entry.type === "message" ? [entry.message] : [])),
+  );
   // LegendList does not invalidate visible rows when only the renderItem closure changes.
   // Include turn completion so unchanged message rows reveal their footer and spacing
   // even when the final message update arrives before the turn settles.
   const listAppearanceData = {
+    j5Timeline,
     worktreeSetup: props.worktreeSetup,
     setupWorkingStartedAt: props.setupWorkingStartedAt,
     dispatchingMessageId: props.dispatchingMessageId,
@@ -3113,6 +3146,7 @@ export const ThreadFeed = memo(function ThreadFeed({
             skills: props.skills,
             workspaceRoot: props.workspaceRoot,
             workflowOpening,
+            j5Timeline,
           })}
           {props.worktreeSetup && info.index === setupAnchorIndex ? (
             <WorktreeSetupCard key={props.threadId} {...props.worktreeSetup} />
@@ -3204,7 +3238,7 @@ export const ThreadFeed = memo(function ThreadFeed({
             getItemType={(entry) => {
               if (entry.type !== "message") return entry.type;
               if (isCompactionCommandFeedEntry(entry)) return "message:compaction";
-              const { attribution } = resolveUserMessagePresentation(entry.message);
+              const { attribution } = resolveJ5FeedMessage(entry.message, j5Timeline);
               return attribution === "automation" || attribution === "agent"
                 ? `message:${attribution}`
                 : `message:${entry.message.role}`;
