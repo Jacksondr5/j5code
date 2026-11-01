@@ -181,6 +181,25 @@ or to `rebuild`. It starts the usual test server and Metro, claims a test
 device for you, and prints which device to open. iOS runs on this Mac, or on a
 Mac reached over SSH; Android runs on this machine.
 
+Verified live so far: Android on Linux, and iOS on a Mac reached over SSH. Not
+yet run: iOS on the same Mac as the server (#857), and Android on macOS.
+
+#### First-time setup
+
+- **Android on Linux:** the Android SDK with `emulator`, `platform-tools` and
+  `cmdline-tools`, one system image for the machine's ABI (x86_64), Java for
+  `avdmanager`, and your user in the `kvm` group.
+- **Android on macOS:** the same SDK, with an image for the Mac's ABI (arm64 on
+  Apple silicon, x86_64 on Intel); no KVM.
+- **iOS (a Mac):** Xcode, opened once so it installs its Simulator component,
+  CocoaPods, and the pool's Simulators (`j5-test-1`, `j5-test-2`, ...) created
+  in Xcode.
+- Put the SDK at `ANDROID_HOME` or its usual place, then restart J5 Code: the
+  server behind the Device panel looks for the SDK only when it starts, so
+  until then `device_list` shows no Android.
+
+#### A mobile test
+
 1. `node scripts/j5/setup-agent-live-test.ts --mobile android` (or `ios`).
 2. When setup has finished and printed the Mobile block, call `device_open`
    with the host and device it names. On Android the script has already booted
